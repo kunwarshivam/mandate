@@ -1,0 +1,4 @@
+# The staging workspace's tier, values for the workspace chart. Promotion sets its images here,
+# each pinned by digest (DEC-2016); until then no process renders, and the release holds the
+# namespace's policies and the tunnel.
+deploymentTier: staging

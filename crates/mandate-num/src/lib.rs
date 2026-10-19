@@ -325,6 +325,16 @@ impl Price {
         parse(text, QTY_SCALE).and_then(positive).map(Self)
     }
 
+    /// `self − other`, exact at the 9 places a price holds: a price less a cash dividend per share
+    /// (DEC-2253 item 2). `not_positive` when it reaches zero or below.
+    pub fn checked_sub(self, other: Self) -> Result<Self, NumError> {
+        self.exact()
+            .sub(other.exact())?
+            .to_decimal(QTY_SCALE)
+            .and_then(positive)
+            .map(Self)
+    }
+
     /// A backtest fill price after slippage (spec §6.4 rules 4 to 7): `self + ceil(self × bps ÷
     /// 10000, 9)` for [`Adverse::Up`], a buy, and `self − ceil(self × bps ÷ 10000, 9)` for
     /// [`Adverse::Down`], a sell. Rounding the slippage amount up, once, at the 9 places a price
@@ -486,6 +496,23 @@ impl SplitRatio {
             before: qty,
             after: SignedQty(after),
         })
+    }
+
+    /// `price × old ÷ new` on `tick`'s grid, rounded once in the direction `adverse` names, as
+    /// [`Price::on_tick`] reads it: [`Adverse::Down`] rounds up, which keeps a sell stop at least as
+    /// protective as the exact value, and [`Adverse::Up`] rounds down, which keeps a protective
+    /// sell limit at least as fillable (DEC-2245 item 3). `not_positive` when it rounds to zero.
+    pub fn price(self, price: Price, tick: TickRule, adverse: Adverse) -> Result<Price, NumError> {
+        let scaled = price.exact().mul(Exact::integer(self.old))?;
+        let on_places = match adverse {
+            Adverse::Down => scaled.div(Exact::integer(self.new), QTY_SCALE, Rounding::Ceiling)?,
+            Adverse::Up => scaled.div_toward_zero(Exact::integer(self.new), QTY_SCALE)?,
+        };
+        on_places
+            .to_decimal(QTY_SCALE)
+            .and_then(positive)
+            .map(Price)?
+            .on_tick(tick, adverse)
     }
 
     /// `round(mark × old ÷ new, scale, mode)`: one rounding; `not_positive` if it rounds to zero,

@@ -28,6 +28,8 @@
 //!   until E9-4 binds it; [`objects`] is the content-addressed store those routes add records to.
 //! - [`challenges`]: the step-up challenge route and the store of the challenges it issues, each
 //!   issued under the context `authorize` returned for its action's row (DEC-2103).
+//! - [`confirm`]: the code the web app shows for a challenge, and the port that verifies a paper
+//!   grant's `cli_confirm` evidence against the owner's `StepUpConfirmed` (DEC-2104).
 //! - [`writes`] also records resume, Stop, and an owner exit as the CLI records them, with step-up
 //!   forwarded only once the port verifies it, and [`status`] reports a command's phase from the
 //!   owning streams' direct causation (DEC-2102).
@@ -41,6 +43,7 @@ pub mod challenges;
 pub mod clock;
 pub mod commands;
 pub mod config;
+pub mod confirm;
 pub mod documents;
 pub mod http;
 pub mod journal;

@@ -18,6 +18,7 @@
 //! `gitops secrets <environment>` writes the workload secrets alone, to set or rotate them.
 
 use std::env;
+use std::ffi::OsString;
 use std::fs;
 use std::io::{self, BufRead as _, IsTerminal as _, Write as _};
 use std::path::Path;
@@ -80,6 +81,8 @@ const WORKSPACE_NAMESPACE: &str = "ws-ws1";
 struct WorkloadSecret {
     name: &'static str,
     keys: &'static [(&'static str, &'static str)],
+    /// What the cluster cannot do while this Secret is missing, for a failed write's error.
+    without: &'static str,
 }
 
 /// The archive's access key, which `journal-db`'s `archive.keyFrom` names, and the tunnel's token,
@@ -91,10 +94,12 @@ const WORKLOAD_SECRETS: [WorkloadSecret; 2] = [
             ("ACCESS_KEY_ID", "JOURNAL_ARCHIVE_ACCESS_KEY_ID"),
             ("ACCESS_SECRET_KEY", "JOURNAL_ARCHIVE_SECRET_KEY"),
         ],
+        without: "the journal cannot archive WAL or base backups to R2",
     },
     WorkloadSecret {
         name: "cloudflared-tunnel",
         keys: &[("token", "CLOUDFLARED_TUNNEL_TOKEN")],
+        without: "the workspace's tunnel cannot connect, so nothing reaches it",
     },
 ];
 
@@ -120,6 +125,54 @@ impl std::fmt::Debug for Secret {
     }
 }
 
+/// The ConfigMap the journal's HelmRelease reads its archive endpoint from (DEC-2017 item 6): the
+/// endpoint names the founder's Cloudflare account, so git never holds it.
+const ARCHIVE_ENDPOINT_CONFIGMAP: &str = "journal-archive-endpoint";
+
+/// The namespace Flux's HelmReleases, and so that ConfigMap, live in.
+const FLUX_NAMESPACE: &str = "flux-system";
+
+/// Whether `endpoint` is R2's S3 endpoint for one account in the default jurisdiction, exactly:
+/// `https://<32 lowercase hex>.r2.cloudflarestorage.com`.
+fn is_r2_endpoint(endpoint: &str) -> bool {
+    endpoint
+        .strip_prefix("https://")
+        .and_then(|rest| rest.strip_suffix(".r2.cloudflarestorage.com"))
+        .is_some_and(|account| {
+            account.len() == 32
+                && account
+                    .bytes()
+                    .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+        })
+}
+
+/// The ConfigMap holding the journal's archive endpoint and nothing else, never a credential.
+fn endpoint_manifest(endpoint: &str) -> Result<String> {
+    ensure!(
+        is_r2_endpoint(endpoint),
+        "the archive endpoint is not https://<account>.r2.cloudflarestorage.com (DEC-2017 item 6)"
+    );
+    let config_map = serde_json::json!({
+        "apiVersion": "v1",
+        "kind": "ConfigMap",
+        "metadata": {
+            "name": ARCHIVE_ENDPOINT_CONFIGMAP,
+            "namespace": FLUX_NAMESPACE,
+            "labels": {"app.kubernetes.io/managed-by": "mandate-gitops-bootstrap"},
+        },
+        "data": {"values.yaml": format!("archive:\n  endpointURL: {endpoint}\n")},
+    });
+    Ok(config_map.to_string())
+}
+
+/// One object the bootstrap writes beside Flux: what it is, what the cluster cannot do without it,
+/// and its manifest.
+struct Write {
+    what: String,
+    without: &'static str,
+    manifest: String,
+}
+
 /// The workload secrets' values, held in memory only and never printed.
 #[derive(Debug)]
 pub(crate) struct WorkloadSecrets {
@@ -129,6 +182,9 @@ pub(crate) struct WorkloadSecrets {
     pub(crate) archive_secret_access_key: Secret,
     /// The tunnel's token.
     pub(crate) tunnel_token: Secret,
+    /// The archive's R2 endpoint, `https://<account>.r2.cloudflarestorage.com`: not a credential,
+    /// but it names the founder's account, so it is masked and kept out of git (DEC-2017 item 6).
+    pub(crate) archive_endpoint: Secret,
 }
 
 impl WorkloadSecrets {
@@ -140,11 +196,13 @@ impl WorkloadSecrets {
             archive_access_key_id: Secret::new(read("JOURNAL_ARCHIVE_ACCESS_KEY_ID")?),
             archive_secret_access_key: Secret::new(read("JOURNAL_ARCHIVE_SECRET_KEY")?),
             tunnel_token: Secret::new(read("CLOUDFLARED_TUNNEL_TOKEN")?),
+            archive_endpoint: Secret::new(read("JOURNAL_ARCHIVE_ENDPOINT")?),
         })
     }
 
-    /// Each Secret's manifest, in [`WORKLOAD_SECRETS`]' order.
-    fn manifests(&self) -> Result<Vec<(&'static str, String)>> {
+    /// Each Secret's manifest, in [`WORKLOAD_SECRETS`]' order, then the archive endpoint's
+    /// ConfigMap.
+    fn manifests(&self) -> Result<Vec<Write>> {
         let mut manifests = Vec::new();
         for secret in WORKLOAD_SECRETS {
             let mut values = Vec::new();
@@ -157,8 +215,17 @@ impl WorkloadSecrets {
                 };
                 values.push((*key, value.expose().to_owned()));
             }
-            manifests.push((secret.name, secret_manifest(secret.name, &values)?));
+            manifests.push(Write {
+                what: format!("the Secret {WORKSPACE_NAMESPACE}/{}", secret.name),
+                without: secret.without,
+                manifest: secret_manifest(secret.name, &values)?,
+            });
         }
+        manifests.push(Write {
+            what: format!("the ConfigMap {FLUX_NAMESPACE}/{ARCHIVE_ENDPOINT_CONFIGMAP}"),
+            without: "the journal and the workspace stay uninstalled",
+            manifest: endpoint_manifest(self.archive_endpoint.expose())?,
+        });
         Ok(manifests)
     }
 }
@@ -210,6 +277,48 @@ fn infra_refusal(run: &Run<'_>) -> Option<&'static str> {
 
 /// The `flux` the pins in [`FLUX_IMAGES`] belong to.
 const FLUX_VERSION: &str = "2.9.6";
+
+/// The only variables `kubectl` and `flux` inherit (the review of #1771): where to find programs,
+/// their home and kubeconfig, temporary files, locale, and the proxy and TLS settings a runner or
+/// the founder's machine may need. Everything else, every secret `infra.yml` hands the step
+/// included, and any added later, is left out.
+const TOOL_ENVS: [&str; 18] = [
+    "PATH",
+    "HOME",
+    "USER",
+    "KUBECONFIG",
+    "TMPDIR",
+    "LANG",
+    "LC_ALL",
+    "XDG_CONFIG_HOME",
+    "XDG_CACHE_HOME",
+    "HTTPS_PROXY",
+    "HTTP_PROXY",
+    "NO_PROXY",
+    "https_proxy",
+    "http_proxy",
+    "no_proxy",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "NODE_EXTRA_CA_CERTS",
+];
+
+/// `program`, `kubectl` or `flux`, with an environment of [`TOOL_ENVS`] alone.
+pub(crate) fn tool(program: &str) -> Command {
+    tool_with(program, |name| env::var_os(name))
+}
+
+/// [`tool`] over `read`, the environment it copies from.
+fn tool_with(program: &str, read: impl Fn(&str) -> Option<OsString>) -> Command {
+    let mut command = Command::new(program);
+    command.env_clear();
+    for name in TOOL_ENVS {
+        if let Some(value) = read(name) {
+            command.env(name, value);
+        }
+    }
+    command
+}
 
 /// `manifest`, from `flux install --export`, with every image pinned by digest. It refuses an image
 /// that [`FLUX_IMAGES`] does not name, and a pinned image the manifest never uses, since either
@@ -269,6 +378,84 @@ fn secret_manifest(name: &str, values: &[(&str, String)]) -> Result<String> {
     Ok(secret.to_string())
 }
 
+/// The Secret staging's vault unseals itself from (DEC-2021 item 3, DEC-2051), and its one entry.
+const SEAL_KEY_SECRET: &str = "vault-seal-key";
+const SEAL_KEY_ENTRY: &str = "key";
+/// How the founder makes a seal key OpenBao's static seal reads unambiguously: 64 hex characters,
+/// one AES-256 key.
+const SEAL_KEY_HINT: &str = "expected 64 hex characters (openssl rand -hex 32)";
+
+/// What the bootstrap did with staging's seal key.
+#[derive(Debug, PartialEq, Eq)]
+enum SealKey {
+    /// It existed and was left alone: a re-run never rotates it.
+    Kept,
+    /// The founder typed it and it was created.
+    Created,
+}
+
+/// The seal key the founder typed, with one trailing line break dropped, if it is 64 hex
+/// characters; a refusal never repeats what was typed.
+fn seal_key(typed: &str) -> Result<String> {
+    let key = typed
+        .strip_suffix("\r\n")
+        .or_else(|| typed.strip_suffix('\n'))
+        .unwrap_or(typed);
+    ensure!(
+        key.len() == 64 && key.chars().all(|c| c.is_ascii_hexdigit()),
+        "staging's vault seal key was refused: {SEAL_KEY_HINT}"
+    );
+    Ok(key.to_owned())
+}
+
+/// Staging's seal key, created from what the founder types only when `exists` says there is none,
+/// with `create` given the Secret's manifest; an existing key is kept and nothing is read.
+fn ensure_seal_key(
+    exists: impl FnOnce() -> Result<bool>,
+    typed: impl FnOnce() -> Result<String>,
+    create: impl FnOnce(&str) -> Result<()>,
+) -> Result<SealKey> {
+    if exists()? {
+        return Ok(SealKey::Kept);
+    }
+    let key = seal_key(&typed()?)?;
+    create(&secret_manifest(SEAL_KEY_SECRET, &[(SEAL_KEY_ENTRY, key)])?)?;
+    Ok(SealKey::Created)
+}
+
+/// Restores the terminal's echo when dropped, however the read it guards ends.
+struct Echo;
+
+impl Drop for Echo {
+    fn drop(&mut self) {
+        if let Ok(tty) = fs::File::open("/dev/tty") {
+            tool("stty").arg("echo").stdin(tty).status().ok();
+        }
+    }
+}
+
+/// One line typed at the founder's terminal with its echo off, as `read -rs` reads it: the line
+/// never reaches an argument, a file, the environment or a log.
+fn read_hidden(prompt: &str) -> Result<String> {
+    let tty = || fs::File::open("/dev/tty").context("opening the terminal");
+    eprint!("{prompt}");
+    let silenced = tool("stty")
+        .arg("-echo")
+        .stdin(tty()?)
+        .status()
+        .context("starting stty")?;
+    ensure!(
+        silenced.success(),
+        "the terminal's echo could not be turned off"
+    );
+    let echo = Echo;
+    let mut line = String::new();
+    io::BufReader::new(tty()?).read_line(&mut line)?;
+    drop(echo);
+    eprintln!();
+    Ok(line)
+}
+
 /// Why a run in this environment must not touch a cluster, if it must not: in CI, or with no
 /// terminal to confirm on, as an agent's shell has none (DEC-2015 item 5).
 fn refusal(ci: bool, terminal: bool) -> Option<&'static str> {
@@ -311,7 +498,7 @@ fn founder_confirms(environment: Environment, action: &str) -> Result<String> {
 
 /// The kubeconfig's current context.
 fn current_context() -> Result<String> {
-    let out = Command::new("kubectl")
+    let out = tool("kubectl")
         .args(["config", "current-context"])
         .output()
         .context("starting kubectl (deploy/gitops/BOOTSTRAP.md)")?;
@@ -349,7 +536,7 @@ fn confirm(
 
 /// Runs `kubectl` against `cluster` with `stdin` as its input.
 fn kubectl(cluster: &Cluster<'_>, args: &[&str], stdin: Option<&str>) -> Result<()> {
-    let mut command = Command::new("kubectl");
+    let mut command = tool("kubectl");
     if let Some(kubeconfig) = cluster.kubeconfig {
         command.arg("--kubeconfig").arg(kubeconfig);
     }
@@ -378,7 +565,7 @@ fn kubectl(cluster: &Cluster<'_>, args: &[&str], stdin: Option<&str>) -> Result<
 
 /// Writes `manifests`, after the workspace namespace, which Flux would otherwise create only on
 /// its first reconcile.
-fn write_secrets(cluster: &Cluster<'_>, manifests: &[(&str, String)]) -> Result<()> {
+fn write_secrets(cluster: &Cluster<'_>, manifests: &[Write]) -> Result<()> {
     let namespace = serde_json::json!({
         "apiVersion": "v1",
         "kind": "Namespace",
@@ -389,15 +576,25 @@ fn write_secrets(cluster: &Cluster<'_>, manifests: &[(&str, String)]) -> Result<
         &["apply", "--server-side", "-f", "-"],
         Some(&namespace.to_string()),
     )?;
-    for (name, manifest) in manifests {
+    for write in manifests {
         kubectl(
             cluster,
             &["apply", "--server-side", "-f", "-"],
-            Some(manifest),
-        )?;
-        eprintln!("    gitops: wrote the Secret {WORKSPACE_NAMESPACE}/{name}");
+            Some(&write.manifest),
+        )
+        .with_context(|| failed_write(write))?;
+        eprintln!("    gitops: wrote {}", write.what);
     }
     Ok(())
+}
+
+/// The error for a write that failed: what it was, and what the cluster cannot do without it.
+fn failed_write(write: &Write) -> String {
+    format!(
+        "writing {} failed: until it exists, {}; fix the cause and run the bootstrap again \
+         (BOOTSTRAP.md)",
+        write.what, write.without
+    )
 }
 
 /// `cargo xtask gitops secrets <environment>`: the workload secrets alone.
@@ -421,7 +618,7 @@ fn prepare(root: &Path, environment: Environment) -> Result<(String, String)> {
         .join(environment.name())
         .join("sync.yaml");
     let sync = fs::read_to_string(&sync).with_context(|| format!("reading {}", sync.display()))?;
-    let version = Command::new("flux")
+    let version = tool("flux")
         .args(["version", "--client"])
         .output()
         .context("starting flux (deploy/gitops/BOOTSTRAP.md)")?;
@@ -431,7 +628,7 @@ fn prepare(root: &Path, environment: Environment) -> Result<(String, String)> {
         "flux {} is not the pinned v{FLUX_VERSION}",
         printed.trim()
     );
-    let exported = Command::new("flux")
+    let exported = tool("flux")
         .args(["install", "--export", "--components", FLUX_COMPONENTS])
         .output()
         .context("starting flux")?;
@@ -447,7 +644,7 @@ fn apply(
     cluster: &Cluster<'_>,
     environment: Environment,
     manifest: &str,
-    secrets: &[(&str, String)],
+    secrets: &[Write],
     sync: &str,
 ) -> Result<()> {
     kubectl(
@@ -494,7 +691,35 @@ pub(crate) fn bootstrap(root: &Path, environment: Environment) -> Result<()> {
         kubeconfig: None,
         context,
     };
-    apply(&cluster, environment, &manifest, &secrets, &sync)
+    apply(&cluster, environment, &manifest, &secrets, &sync)?;
+    if environment == Environment::Staging {
+        let found = || -> Result<bool> {
+            let out = tool("kubectl")
+                .args(["--v=0", "--context", &cluster.context, "get", "secret"])
+                .args([SEAL_KEY_SECRET, "--namespace", WORKSPACE_NAMESPACE])
+                .args(["--ignore-not-found", "-o", "name"])
+                .output()
+                .context("starting kubectl")?;
+            ensure!(
+                out.status.success(),
+                "reading staging's vault seal key failed"
+            );
+            Ok(!out.stdout.trim_ascii().is_empty())
+        };
+        let seal = ensure_seal_key(
+            found,
+            || read_hidden("    gitops: staging's vault seal key, 64 hex characters (not shown): "),
+            |manifest| kubectl(&cluster, &["create", "-f", "-"], Some(manifest)),
+        )?;
+        match seal {
+            SealKey::Kept => eprintln!("    gitops: kept staging's vault seal key (DEC-2051)"),
+            SealKey::Created => eprintln!(
+                "    gitops: created staging's vault seal key; initialize the vault once \
+                 (BOOTSTRAP.md, DEC-2051)"
+            ),
+        }
+    }
+    Ok(())
 }
 
 /// The bootstrap from CI (DEC-2018 item 7): lane IAC's `cargo xtask infra apply` calls this in
@@ -502,13 +727,6 @@ pub(crate) fn bootstrap(root: &Path, environment: Environment) -> Result<()> {
 /// the short-lived kubeconfig it fetched and the secrets from its sensitive outputs, all in memory.
 /// It refuses unless this is `infra.yml` on `main` in GitHub Actions, and unless the kubeconfig's
 /// current context is `expected_context`; then it applies exactly what the founder's path applies.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "lane IAC's `cargo xtask infra apply` calls it (E21-56 F2)"
-    )
-)]
 pub(crate) fn bootstrap_from_infra(
     root: &Path,
     environment: Environment,
@@ -533,7 +751,7 @@ pub(crate) fn bootstrap_from_infra(
     }) {
         bail!("{reason} (DEC-2018)");
     }
-    let out = Command::new("kubectl")
+    let out = tool("kubectl")
         .args(["--v=0", "--kubeconfig"])
         .arg(kubeconfig)
         .args(["config", "current-context"])
@@ -563,6 +781,150 @@ pub(crate) fn bootstrap_from_infra(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const TYPED: &str = "0123456789abcdefABCDEF0123456789abcdef0123456789abcdef0123456789";
+
+    /// The seal key is 64 hex characters, one trailing line break aside, and a refusal names the
+    /// form without repeating what was typed (DEC-2051).
+    #[test]
+    fn the_seal_key_is_sixty_four_hex_characters() -> Result<()> {
+        assert_eq!(seal_key(TYPED)?, TYPED);
+        assert_eq!(seal_key(&format!("{TYPED}\n"))?, TYPED);
+        assert_eq!(seal_key(&format!("{TYPED}\r\n"))?, TYPED);
+        for bad in [
+            String::new(),
+            TYPED[..63].to_owned(),
+            format!("{TYPED}0"),
+            format!("{}g", &TYPED[..63]),
+            format!(" {}", &TYPED[1..]),
+            format!("{TYPED}\n\n"),
+            "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=".to_owned(),
+        ] {
+            let refused = seal_key(&bad)
+                .err()
+                .map(|e| format!("{e:#}"))
+                .unwrap_or_default();
+            assert!(refused.contains(SEAL_KEY_HINT), "{bad:?}: {refused}");
+            assert!(bad.len() < 8 || !refused.contains(&bad[..8]), "{refused}");
+        }
+        Ok(())
+    }
+
+    /// Only the founder's bootstrap at a terminal writes the seal key; the one from CI never
+    /// does, so the key never reaches a CI job (DEC-2021 item 3, DEC-2051).
+    #[test]
+    fn only_the_founders_bootstrap_writes_the_seal_key() {
+        let source = include_str!("gitops.rs");
+        let body = |start: &str| {
+            let from = source.find(start).unwrap_or_default();
+            let to = source[from..].find("\n}\n").map_or(from, |end| from + end);
+            &source[from..to]
+        };
+        assert!(body("pub(crate) fn bootstrap(root").contains("ensure_seal_key("));
+        assert!(!body("pub(crate) fn bootstrap_from_infra(").contains("seal"));
+        assert!(!body("\nfn apply(").contains("seal"));
+    }
+
+    /// An existing seal key is kept without reading a key; a missing one is created once, from
+    /// the typed key, as the Secret the vault mounts; a bad key creates nothing.
+    #[test]
+    fn the_seal_key_is_created_only_when_absent() -> Result<()> {
+        let read = std::cell::Cell::new(false);
+        let kept = ensure_seal_key(
+            || Ok(true),
+            || {
+                read.set(true);
+                Ok(TYPED.to_owned())
+            },
+            |_| bail!("an existing seal key is never written"),
+        )?;
+        assert_eq!(kept, SealKey::Kept);
+        assert!(!read.get(), "no key is read when one exists");
+
+        let created = std::cell::RefCell::new(None);
+        let made = ensure_seal_key(
+            || Ok(false),
+            || Ok(format!("{TYPED}\n")),
+            |manifest| {
+                created.replace(Some(manifest.to_owned()));
+                Ok(())
+            },
+        )?;
+        assert_eq!(made, SealKey::Created);
+        let manifest = created.borrow().clone().context("no Secret was created")?;
+        let secret: serde_json::Value = serde_json::from_str(&manifest)?;
+        assert_eq!(secret["metadata"]["name"], SEAL_KEY_SECRET);
+        assert_eq!(secret["metadata"]["namespace"], WORKSPACE_NAMESPACE);
+        assert_eq!(
+            secret["data"],
+            serde_json::json!({SEAL_KEY_ENTRY: image::base64(TYPED.as_bytes())})
+        );
+
+        let wrote = std::cell::Cell::new(false);
+        assert!(
+            ensure_seal_key(
+                || Ok(false),
+                || Ok("too short".to_owned()),
+                |_| {
+                    wrote.set(true);
+                    Ok(())
+                },
+            )
+            .is_err()
+        );
+        assert!(!wrote.get(), "a bad key creates nothing");
+        Ok(())
+    }
+
+    /// `kubectl` and `flux` start with an environment of [`TOOL_ENVS`] alone, so no secret, token
+    /// or step output `infra.yml` hands the step reaches them, and only they are started.
+    #[test]
+    fn the_tools_inherit_no_infra_secret() -> Result<()> {
+        let workflow = include_str!("../../.github/workflows/infra.yml");
+        let handed: Vec<&str> = workflow
+            .lines()
+            .filter(|line| {
+                ["${{ secrets.", "${{ github.token", "${{ steps."]
+                    .iter()
+                    .any(|source| line.contains(source))
+            })
+            .filter_map(|line| line.trim().split(':').next())
+            .collect();
+        assert!(
+            !handed.is_empty(),
+            "the workflow hands secrets to its steps"
+        );
+        for name in handed {
+            assert!(
+                !TOOL_ENVS.contains(&name),
+                "{name} reaches kubectl and flux"
+            );
+        }
+        let fake = |name: &str| {
+            ["PATH", "DIGITALOCEAN_TOKEN", "TF_VAR_state_passphrase"]
+                .contains(&name)
+                .then(|| env::var_os("PATH").unwrap_or_default())
+        };
+        let out = tool_with("env", fake).output()?;
+        assert!(out.status.success(), "`env` runs");
+        let names: Vec<String> = String::from_utf8(out.stdout)?
+            .lines()
+            .filter_map(|line| line.split('=').next())
+            .map(str::to_owned)
+            .collect();
+        assert_eq!(
+            names,
+            ["PATH"],
+            "only listed variables are passed, and nothing inherited"
+        );
+        let source = include_str!("gitops.rs");
+        assert_eq!(
+            source.matches(concat!("Command", "::new(")).count(),
+            1,
+            "every child gitops starts goes through `tool`"
+        );
+        Ok(())
+    }
 
     /// An excerpt of `flux install --export` for v2.9.6, its image lines as the CLI prints them.
     fn exported() -> String {
@@ -752,6 +1114,7 @@ mod tests {
             archive_access_key_id: Secret::new("id".to_owned()),
             archive_secret_access_key: Secret::new("secret".to_owned()),
             tunnel_token: Secret::new("token".to_owned()),
+            archive_endpoint: Secret::new("endpoint".to_owned()),
         };
         let refused = bootstrap_from_infra(
             Path::new("/nonexistent"),
@@ -766,30 +1129,121 @@ mod tests {
     /// The secrets' `Debug` never shows a value, and each value lands in its chart's key.
     #[test]
     fn the_secrets_are_redacted_and_land_in_their_keys() -> Result<()> {
+        let endpoint = format!("https://{}.r2.cloudflarestorage.com", "ab12".repeat(8));
         let secrets = WorkloadSecrets {
             archive_access_key_id: Secret::new("key-id-1".to_owned()),
             archive_secret_access_key: Secret::new("secret-2".to_owned()),
             tunnel_token: Secret::new("token-3".to_owned()),
+            archive_endpoint: Secret::new(endpoint.clone()),
         };
         let shown = format!("{secrets:?}");
-        for value in ["key-id-1", "secret-2", "token-3"] {
+        for value in ["key-id-1", "secret-2", "token-3", "ab12ab12"] {
             assert!(!shown.contains(value), "{shown}");
         }
         let manifests = secrets.manifests()?;
-        let data = |name: &str| -> Result<serde_json::Value> {
-            let (_, text) = manifests
-                .iter()
-                .find(|(n, _)| *n == name)
-                .context("missing")?;
-            Ok(serde_json::from_str::<serde_json::Value>(text)?["data"].clone())
-        };
-        let archive = data("journal-archive-key")?;
-        assert_eq!(archive["ACCESS_KEY_ID"], image::base64(b"key-id-1"));
-        assert_eq!(archive["ACCESS_SECRET_KEY"], image::base64(b"secret-2"));
+        let whats: Vec<&str> = manifests.iter().map(|write| write.what.as_str()).collect();
         assert_eq!(
-            data("cloudflared-tunnel")?["token"],
-            image::base64(b"token-3")
+            whats,
+            [
+                "the Secret ws-ws1/journal-archive-key",
+                "the Secret ws-ws1/cloudflared-tunnel",
+                "the ConfigMap flux-system/journal-archive-endpoint",
+            ]
         );
+        let doc = |index: usize| -> Result<serde_json::Value> {
+            Ok(serde_json::from_str(&manifests[index].manifest)?)
+        };
+        assert_eq!(doc(0)?["data"]["ACCESS_KEY_ID"], image::base64(b"key-id-1"));
+        assert_eq!(
+            doc(0)?["data"]["ACCESS_SECRET_KEY"],
+            image::base64(b"secret-2")
+        );
+        assert_eq!(doc(1)?["data"]["token"], image::base64(b"token-3"));
+        let config_map = doc(2)?;
+        assert_eq!(config_map["kind"], "ConfigMap");
+        assert_eq!(config_map["metadata"]["namespace"], "flux-system");
+        assert_eq!(
+            config_map["data"],
+            serde_json::json!({"values.yaml": format!("archive:\n  endpointURL: {endpoint}\n")})
+        );
+        Ok(())
+    }
+
+    /// A failed write's error names that object and what the cluster cannot do without it.
+    #[test]
+    fn a_failed_write_says_what_is_missing() -> Result<()> {
+        let secrets = WorkloadSecrets {
+            archive_access_key_id: Secret::new("value-1".to_owned()),
+            archive_secret_access_key: Secret::new("value-2".to_owned()),
+            tunnel_token: Secret::new("value-3".to_owned()),
+            archive_endpoint: Secret::new(format!(
+                "https://{}.r2.cloudflarestorage.com",
+                "cd34".repeat(8)
+            )),
+        };
+        let writes = secrets.manifests()?;
+        let errors: Vec<String> = writes.iter().map(failed_write).collect();
+        assert!(
+            errors[0].contains("ws-ws1/journal-archive-key")
+                && errors[0].contains("cannot archive")
+        );
+        assert!(
+            errors[1].contains("ws-ws1/cloudflared-tunnel")
+                && errors[1].contains("tunnel cannot connect")
+        );
+        assert!(
+            errors[2].contains("flux-system/journal-archive-endpoint")
+                && errors[2].contains("journal and the workspace stay uninstalled")
+        );
+        assert!(!errors[0].contains("uninstalled") && !errors[1].contains("uninstalled"));
+        let endpoint = format!("https://{}.r2.cloudflarestorage.com", "cd34".repeat(8));
+        let values = ["value-1", "value-2", "value-3", endpoint.as_str()];
+        for error in &errors {
+            for value in values {
+                assert!(!error.contains(value), "{error}");
+                assert!(!error.contains(&image::base64(value.as_bytes())), "{error}");
+            }
+            assert!(!error.contains("cd34"), "{error}");
+            for write in &writes {
+                assert!(!error.contains(&write.manifest), "{error}");
+                assert!(!error.contains("\"data\""), "{error}");
+            }
+        }
+        Ok(())
+    }
+
+    /// Only R2's endpoint for one account is written, and the endpoint never appears in a refusal.
+    #[test]
+    fn only_an_r2_account_endpoint_is_written() -> Result<()> {
+        let account = "0123456789abcdef".repeat(2);
+        assert!(is_r2_endpoint(&format!(
+            "https://{account}.r2.cloudflarestorage.com"
+        )));
+        for bad in [
+            format!("http://{account}.r2.cloudflarestorage.com"),
+            format!("https://{account}.eu.r2.cloudflarestorage.com"),
+            format!("https://{}.r2.cloudflarestorage.com", &account[1..]),
+            format!(
+                "https://{}.r2.cloudflarestorage.com",
+                account.to_uppercase()
+            ),
+            format!("https://{account}.r2.cloudflarestorage.com/"),
+            format!("https://{account}.r2.cloudflarestorage.com\nkind: Secret"),
+            format!("https://{account}.r2.cloudflarestorage.com:443"),
+            format!("https://user@{account}.r2.cloudflarestorage.com"),
+            format!("https://{account}.r2.cloudflarestorage.com?x=1"),
+            format!("https://{account}.r2.cloudflarestorage.com."),
+            "https://nyc3.digitaloceanspaces.com".to_owned(),
+            String::new(),
+        ] {
+            assert!(!is_r2_endpoint(&bad), "{bad}");
+            let refused = endpoint_manifest(&bad)
+                .err()
+                .map(|error| format!("{error:#}"))
+                .unwrap_or_default();
+            assert!(refused.contains("DEC-2017"), "{bad}");
+            assert!(bad.is_empty() || !refused.contains(&bad), "{refused}");
+        }
         Ok(())
     }
 

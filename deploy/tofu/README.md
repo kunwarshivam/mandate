@@ -23,8 +23,8 @@ and never dispatch the workflow (AGENTS.md rules 7 and 8).
 
 ## Runbook: what the founder creates
 
-All of it is two tokens, one passphrase, two console steps and an approval per run
-([DEC-2030](../../docs/project/decisions/DEC-2030.md)). Nothing below goes in the repository, a
+All of it is two tokens, one passphrase, three console steps and an approval per run
+([DEC-2030](../../docs/project/decisions/DEC-2030.md), [DEC-2044](../../docs/project/decisions/DEC-2044.md)). Nothing below goes in the repository, a
 chat or an issue. Each value goes straight into the GitHub environment as a secret. Do it once per
 environment; production can wait until staging is up. **Actions → infra → Run workflow** with
 action `preflight` checks all of it and prints a checklist of what is still missing, by name,
@@ -41,7 +41,7 @@ never a value.
    | VPC | create, read, update, delete | `modules/network`'s VPC |
    | Firewall | create, read, update, delete | the node firewall |
    | Tag | create, read, delete | the node tag the firewall applies to |
-   | Kubernetes | create, read, update, delete | the cluster and its node pool; read also lists the offered versions |
+   | Kubernetes | create, read, update, delete, access_cluster | the cluster and its node pool; read also lists the offered versions; update closes staging's window; access_cluster fetches the bootstrap's 900-second credentials |
    | Sizes | read | the budget's node price |
    | Regions | read | the cluster's region |
    | Spaces Keys | create, read, delete | each run mints its own Spaces key, makes the state bucket if it is missing, and deletes the key (DEC-2030 item 4; DEC-2605 row 13) |
@@ -62,7 +62,10 @@ never a value.
 
 1. **Console: R2 enabled on the account.** In **R2 Object Storage**, subscribe to R2 once (it asks
    for a payment method even on the free tier). The preflight says whether it is.
-2. **An API token, `CF_INFRA_API_TOKEN`.** In **My Profile → API Tokens → Create Token → Custom
+2. **Console: Cloudflare Access enabled.** In **Zero Trust**, set up a team once: choose a team
+   name and the free plan. Until then Cloudflare refuses every Access policy, as staging's first
+   apply found (DEC-2044 item 1). The preflight says whether it is.
+3. **An API token, `CF_INFRA_API_TOKEN`.** In **My Profile → API Tokens → Create Token → Custom
    token**, named `mandate-tofu`, with only these permissions:
 
    | Scope | Permission | Level | Why |
@@ -81,10 +84,10 @@ never a value.
    the archive's lock rule: R2's lock is governance-equivalent (DEC-973 item 5). Account API
    Tokens Edit makes the token admin-level: it can mint any token, which you accepted for the
    automation (DEC-2029; DEC-2605 row 12). Keep it in the environment alone.
-3. **Nothing else to copy.** The account id is read from the token's one account. Access admits
+4. **Nothing else to copy.** The account id is read from the token's one account. Access admits
    the members of your Cloudflare account, so no email is configured. Barman's R2 token is
    minted by OpenTofu (DEC-2029).
-4. **Before production only:** `api.owlhead.ai` already has DEC-822's hand-made record. The
+5. **Before production only:** `api.owlhead.ai` already has DEC-822's hand-made record. The
    production apply refuses to create a second one, so delete that record (or tell lane IAC to
    adopt it) when production is to take the name. Staging uses `api-staging.owlhead.ai`, which
    is free.
@@ -121,15 +124,18 @@ No repository-level secret or variable is used, so no other workflow can read th
 
 ### 4. The first run
 
-Every dispatch takes `sha`: paste the full commit of `main` you read (the repository's commit
-page has a copy button). The run refuses unless it is the commit `main` was at
-when you dispatched, which the run checks out. It lists what changed under `deploy/tofu/`,
-`infra.yml`, `xtask/` and the Rust build inputs since the last apply, so you approve a commit you
-have seen. The log never shows a value: only addresses and actions.
+`apply` takes `sha`: paste the full commit of `main` you read (the repository's commit page has a
+copy button). The run refuses unless it is the commit `main` was at when you dispatched, which the
+run checks out. `preflight` and `plan` may leave `sha` empty: they then run at the commit `main`
+was at when they started and print it first (`==> infra plan of staging at commit …`), so you can
+dispatch `apply` with exactly that commit (DEC-2042). If `main` moved since, plan again. It
+lists what changed under `deploy/tofu/`, `infra.yml`, `xtask/` and the Rust build inputs since the
+last apply, so you approve a commit you have seen. The log never shows a value: only addresses
+and actions.
 
 1. **Actions → infra → Run workflow**, branch `main`, environment `staging`, action `preflight`,
-   and `sha`. Approve the job. Every line should read `[ok]`; each `[MISSING]` line names the step
-   above that is still to do.
+   and `sha` empty. Approve the job. Every line should read `[ok]`; each `[MISSING]` line names the
+   step above that is still to do.
 2. Dispatch again with action `plan`. Read the plan's list of changes:
    - one VPC, a tag, a firewall and a cluster;
    - the state bucket, imported;
@@ -139,20 +145,46 @@ have seen. The log never shows a value: only addresses and actions.
    - a `terraform_data` for the budget.
 
    Nothing is destroyed.
-   - If it fails with "DOKS does not offer 1.35.1-do.0; it offers: …", tell lane IAC the list.
+   - If it fails with "DOKS does not offer 1.35.9-do.1; it offers: …", tell lane IAC the list.
      The pin changes in a one-line pull request.
-3. Dispatch again with action `apply` on the same commit, and approve it. The job plans again after
-   your approval, prints that plan, and applies exactly it, so the apply reflects the commit and
-   the cloud as they are when the job runs. Dispatch `apply` only at a commit you have read, and
-   read the apply job's printed plan afterwards. A first cluster takes about ten minutes.
+   - If `apply` fails with "region has insufficient capacity", or the plan says DigitalOcean does
+     not offer the node size in the region, tell lane IAC: staging's region is one line
+     (DEC-2044 item 2, DEC-2047). Both clusters run in `sfo2`, the US West, which you require;
+     the state buckets stay in `nyc3` until they move.
+   - The buckets the move to the US West leaves behind are listed under
+     [Deleted by hand, later](#5-deleted-by-hand-later).
+3. Dispatch again with action `apply` and `sha` set to the commit the plan printed, and approve
+   it. The job plans again after your approval, prints that plan, and applies exactly it, so the
+   apply reflects the commit and the cloud as they are when the job runs. Dispatch `apply` only at
+   a commit you have read, and read the apply job's printed plan afterwards. A first cluster takes
+   about ten minutes. After lane GO's bootstrap the job verifies staging for up to eight minutes and
+   prints `infra verify (staging):`; each `[MISSING]` line names what is not up yet, and the run
+   fails until none is left. Until the API's tunnel connector lands, the tunnel's and Access's
+   lines may read `[pending #1539]`, which fails nothing (DEC-2050).
 4. **Handing over to lane GO (E21-58):** the outputs GO needs are the root outputs
    `archive_access_key_id`, `archive_secret_access_key` and `tunnel_token` (sensitive, never
    printed), and `archive_bucket`, `archive_endpoint`, `archive_destination_path`,
-   `archive_jurisdiction` and `cloudflare_account_id`. Once the automated bootstrap lands
-   (DEC-2028, lane GO's #1695), `infra.yml`'s apply writes the Secrets `ws-ws1/cloudflared-tunnel`
-   and `ws-ws1/journal-archive-key` itself, through kubectl's stdin, and Flux pulls from then on.
-   Until then, lane GO's `deploy/gitops/BOOTSTRAP.md` is the by-hand route, run from an address in
+   `archive_jurisdiction` and `cloudflare_account_id`. Staging's `apply` bootstraps the cluster
+   itself (DEC-2028): it opens the control plane to the run's own runner in the plan you approve,
+   writes the Secrets `ws-ws1/cloudflared-tunnel` and `ws-ws1/journal-archive-key` through lane
+   GO's code, and closes the window again, reading the cluster back to confirm it. If the close
+   cannot be confirmed the run fails and says the window may be open; the workflow's last step and
+   the next run close it, and a runner that dies before both is DEC-2028 item 3's residual. Flux
+   pulls from then on.
+   Production's bootstrap is lane GO's `deploy/gitops/BOOTSTRAP.md`, run from an address in
    `KUBE_API_ALLOWED_CIDRS`.
+
+### 5. Deleted by hand, later
+
+The move to the US West (DEC-2047) forgets these, never destroys them, so each is yours to delete
+once staging runs in `sfo2`. Delete each only if it exists; none holds anything you need.
+
+| Where | Exact name | Why it is left | When |
+|---|---|---|---|
+| Cloudflare R2 | `mandate-journal-archive-staging`, with its lock rule (deleting the empty bucket removes the rule) | staging's first apply may have made it in eastern North America; the archive is now `mandate-journal-archive-west-staging` | after staging's first apply in `sfo2` |
+| DigitalOcean VPC, `nyc3` | `mandate-staging` (range `10.110.0.0/20`) | staging's first VPC, which became `nyc3`'s default VPC, so DigitalOcean refuses to delete it; staging's VPC is now `mandate-staging-sfo2` (DEC-2054). It is free and holds nothing | whenever you like, after making another `nyc3` VPC the default or deleting it from the console once DigitalOcean allows; it may simply stay |
+| DigitalOcean Spaces, `nyc3` | `mandate-tofu-state-staging` | the old state bucket, kept as the rollback when the state moves to `sfo2` | after the state move lands and a plan reads the new bucket |
+| DigitalOcean Spaces, `nyc3` | `mandate-tofu-state-production` | the same, if a production run made it before the move | after the state move lands |
 
 ## What this does not guard, said plainly
 

@@ -80,6 +80,7 @@ pub use output::{
 };
 pub use plan::{RetrievalPlan, Scope};
 pub use ports::{
-    BarReader, FilingReader, InstrumentReader, NewsReader, ReadError, Readers, TextQuery,
+    BarReader, FilingEntry, FilingReader, FilingText, InstrumentReader, NewsReader, NewsText,
+    ReadError, Readers, TextQuery,
 };
 pub use retrieve::{Drop, DropReason, Retrieval, RetrievedItem, retrieve};

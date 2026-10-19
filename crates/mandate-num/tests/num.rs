@@ -2021,3 +2021,131 @@ fn the_builder_arithmetic_is_exact_or_an_error() {
         "beyond 256 bits the answer is `overflow`, never a wrapped number"
     );
 }
+
+/// A protective price carried across a split (DEC-2245 item 3): `price × old ÷ new` on the cent,
+/// up for a stop and down for a limit, so neither is loosened. 95.01 ÷ 2 = 47.505 goes up to 47.51
+/// as a stop and down to 47.50 as a limit; a price already on the grid is unchanged; a sub-dollar
+/// result takes Reg NMS's 0.0001 tick.
+#[test]
+fn a_protective_price_crosses_a_split_without_loosening() {
+    let two_for_one = SplitRatio::new(2, 1).unwrap();
+    let one_for_three = SplitRatio::new(1, 3).unwrap();
+    let cases = [
+        (two_for_one, "95.01", Adverse::Down, "47.51"),
+        (two_for_one, "95.01", Adverse::Up, "47.5"),
+        (two_for_one, "110.02", Adverse::Up, "55.01"),
+        (one_for_three, "95.01", Adverse::Down, "285.03"),
+        (
+            SplitRatio::new(3, 1).unwrap(),
+            "100",
+            Adverse::Down,
+            "33.34",
+        ),
+        (SplitRatio::new(3, 1).unwrap(), "100", Adverse::Up, "33.33"),
+        (
+            SplitRatio::new(10, 1).unwrap(),
+            "9.99",
+            Adverse::Down,
+            "0.999",
+        ),
+    ];
+    for (ratio, before, adverse, after) in cases {
+        assert_eq!(
+            ratio
+                .price(p(before), TickRule::RegNmsEquity, adverse)
+                .unwrap()
+                .to_string(),
+            after,
+            "{before} across {}:{} rounded {adverse:?}",
+            ratio.new_shares(),
+            ratio.old_shares()
+        );
+    }
+    assert_eq!(
+        SplitRatio::new(1_000_000_000, 1).unwrap().price(
+            p("0.0001"),
+            TickRule::RegNmsEquity,
+            Adverse::Up
+        ),
+        Err(NumError::NotPositive),
+        "a limit that rounds to nothing is refused, never placed at zero"
+    );
+}
+
+proptest! {
+    /// The carried price is the exact price × old ÷ new moved at most one cent the protective way,
+    /// against an `i128` oracle in cents that shares nothing with the library: a stop never falls
+    /// below the exact value, a limit never rises above it.
+    #[test]
+    fn a_carried_price_is_within_one_tick_on_its_protective_side(
+        cents in 100_i128..=1_000_000,
+        new in 1_u64..=20,
+        old in 1_u64..=20,
+        stop in any::<bool>(),
+    ) {
+        let (n, o) = (i128::from(new), i128::from(old));
+        let numerator = cents * o;
+        let floor = numerator / n;
+        let exact_on_cent = numerator % n == 0;
+        let expected = if stop && !exact_on_cent { floor + 1 } else { floor };
+        prop_assume!(expected >= 100);
+        let text = cents_text(cents);
+        let adverse = if stop { Adverse::Down } else { Adverse::Up };
+        let carried = SplitRatio::new(new, old)
+            .unwrap()
+            .price(p(&text), TickRule::RegNmsEquity, adverse)
+            .unwrap();
+        prop_assert_eq!(carried, p(&cents_text(expected)));
+    }
+}
+
+fn p(text: &str) -> Price {
+    Price::parse(text).unwrap()
+}
+
+/// `cents` hundredths in canonical decimal text: no trailing zeros, no bare point.
+fn cents_text(cents: i128) -> String {
+    format!("{}.{:02}", cents / 100, cents % 100)
+        .trim_end_matches('0')
+        .trim_end_matches('.')
+        .to_owned()
+}
+
+/// A price less a dividend per share is exact at 9 places, and refuses `not_positive` at zero or
+/// below (DEC-2253 item 2).
+#[test]
+fn a_price_less_another_is_exact_and_stays_positive() {
+    assert_eq!(p("100").checked_sub(p("0.25")), Ok(p("99.75")));
+    assert_eq!(
+        p("10.000000001").checked_sub(p("0.000000002")),
+        Ok(p("9.999999999"))
+    );
+    assert_eq!(
+        p("0.000000002").checked_sub(p("0.000000001")),
+        Ok(p("0.000000001"))
+    );
+    assert_eq!(p("5").checked_sub(p("5")), Err(NumError::NotPositive));
+    assert_eq!(p("5").checked_sub(p("6")), Err(NumError::NotPositive));
+}
+
+proptest! {
+    /// The difference of two prices in billionths is the difference of their billionths, whenever
+    /// it is positive; the oracle is integer arithmetic.
+    #[test]
+    fn a_price_less_another_matches_integer_billionths(
+        a in 1_i64..=1_000_000_000_000,
+        b in 1_i64..=1_000_000_000_000,
+    ) {
+        let text = |n: i64| {
+            let whole = n / 1_000_000_000;
+            let fraction = n % 1_000_000_000;
+            format!("{whole}.{fraction:09}").trim_end_matches('0').trim_end_matches('.').to_owned()
+        };
+        let got = p(&text(a)).checked_sub(p(&text(b)));
+        if a > b {
+            prop_assert_eq!(got, Ok(p(&text(a - b))));
+        } else {
+            prop_assert_eq!(got, Err(NumError::NotPositive));
+        }
+    }
+}

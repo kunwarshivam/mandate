@@ -18,12 +18,14 @@
 mod common;
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
+use std::path::Path;
 
 use common::{ASSET_A, arr, obj, s, with, with_all};
 use mandate_canon::Value;
 use mandate_domain::{AgentMode, AssetClass, AssetId, Environment, MarketSession, Side};
 use mandate_num::{Price, Qty, Ratio, ShareIncrement, SplitRatio, Usd};
-use mandate_spec::document::ProvenanceMap;
+use mandate_spec::document::{LadderAction, ProvenanceMap};
 use mandate_spec::risk::{
     ApplyResult, Confirmation, Input, InstrumentRestriction, Latch, LimitKey, Opening, Outcome,
     RemovalReason, Restriction, RiskEvent, RiskState, SessionClock, Snapshot, Step, StopReason,
@@ -4279,5 +4281,674 @@ fn a_split_at_the_daily_loss_or_floor_boundary_keeps_the_breach_it_is_confirming
             "{limit:?}: the tick 65 s after the boundary mark confirms the limit, so the comparison is not vacuous"
         );
     }
+    Ok(())
+}
+
+/// The breach time journal spec §9.27 gives a `RiskLimitTriggered` (DEC-2301 item 1), recomputed the
+/// other way round from [`Confirmation`], as [`first_confirmation`] does: at the input `upto`
+/// (one-based), the sum of every interval since the last whole window out of breach that began in
+/// breach (§5.6). Each input is the condition there and the seconds since the input before it; the
+/// opening's condition is false.
+fn breach_time_at(inputs: &[(bool, u64)], need: u64, upto: usize) -> u64 {
+    let mut condition = vec![false];
+    let mut gap = vec![0_u64];
+    for (breached, seconds) in inputs.iter().take(upto) {
+        condition.push(*breached);
+        gap.push(*seconds);
+    }
+    let mut last_reset = 0_usize;
+    for i in 1..gap.len() {
+        let mut false_run = 0_u64;
+        let mut j = i;
+        while j >= 1 && !condition[j - 1] {
+            false_run += gap[j];
+            j -= 1;
+        }
+        if !condition[i - 1] && false_run >= need {
+            last_reset = i;
+        }
+    }
+    ((last_reset + 1)..gap.len())
+        .filter(|k| condition[k - 1])
+        .map(|k| gap[k])
+        .sum()
+}
+
+/// A plain decimal as an integer count of 10⁻¹², parsed here rather than by `mandate-num`.
+fn picos(text: &str) -> Result<i128, String> {
+    let (whole, fraction) = text.split_once('.').unwrap_or((text, ""));
+    format!("{whole}{fraction:0<12}")
+        .parse::<i128>()
+        .map_err(|e| format!("`{text}` is not a plain decimal: {e}"))
+}
+
+fn member<'a>(value: &'a Value, key: &str) -> Result<&'a Value, String> {
+    value.get(key).ok_or_else(|| format!("no `{key}`"))
+}
+
+fn text_of<'a>(value: &'a Value, key: &str) -> Result<&'a str, String> {
+    member(value, key)?
+        .as_str()
+        .ok_or_else(|| format!("`{key}` is not text"))
+}
+
+fn items<'a>(value: &'a Value, key: &str) -> Result<&'a [Value], String> {
+    member(value, key)?
+        .as_array()
+        .ok_or_else(|| format!("`{key}` is not a list"))
+}
+
+/// The fixture's spelling of a trigger, written here so a mismatch is this file's reading.
+fn spelled(limit: LimitKey, reason: Option<TriggerReason>) -> String {
+    let limit = match limit {
+        LimitKey::DrawdownRung(index) => format!("drawdown_ladder[{index}]"),
+        LimitKey::MaxDailyLoss => "max_daily_loss".to_owned(),
+        LimitKey::LifetimeFloor => "lifetime_floor".to_owned(),
+        LimitKey::ProfitStop => "profit_stop".to_owned(),
+    };
+    match reason {
+        None => limit,
+        Some(TriggerReason::HardTrigger) => format!("{limit} hard_trigger"),
+        Some(TriggerReason::HardBreachPending) => format!("{limit} hard_breach_pending"),
+        Some(TriggerReason::AfterReset) => format!("{limit} after_reset"),
+        Some(other) => format!("{limit} {other:?}"),
+    }
+}
+
+/// The fixture's cases that the canonical parser reads, each parsed alone. The file as a whole holds
+/// keys outside the canonical key grammar (asset ids and model names keying maps), so the `cases`
+/// array is split here at its top-level objects; a case such a key is in is left out, and the
+/// caller's assertion on which cases it checked catches one it needed.
+fn readable_cases(bytes: &[u8]) -> Result<Vec<Value>, String> {
+    let marker = b"\"cases\": [";
+    let start = bytes
+        .windows(marker.len())
+        .position(|window| window == marker)
+        .ok_or("mandate.json has a `cases` array")?
+        + marker.len();
+    let (mut depth, mut in_string, mut escaped, mut from) = (0_usize, false, false, 0_usize);
+    let mut cases = Vec::new();
+    for (offset, byte) in bytes.iter().enumerate().skip(start) {
+        match (in_string, escaped, byte) {
+            (true, true, _) => escaped = false,
+            (true, false, b'\\') => escaped = true,
+            (true, false, b'"') | (false, _, b'"') => in_string = !in_string,
+            (false, _, b'{' | b'[') => {
+                if depth == 0 {
+                    from = offset;
+                }
+                depth += 1;
+            }
+            (false, _, b']') if depth == 0 => return Ok(cases),
+            (false, _, b'}' | b']') => {
+                depth -= 1;
+                if depth == 0
+                    && let Ok(case) = mandate_canon::parse(&bytes[from..=offset])
+                {
+                    cases.push(case);
+                }
+            }
+            _ => {}
+        }
+    }
+    Err("the `cases` array is not closed".to_owned())
+}
+
+/// Every MC-R case on `two_stock_swing` whose patch only replaces members and whose steps are all
+/// marks: MC-R01 to MC-R04, MC-R18, and MC-R19, between them every reason a rung's trigger carries on
+/// marks. The fixture states no breach time, so each step's is derived from the case's own timeline:
+/// the condition H − E ≥ `at` × H from the E and H the step expects, the gaps from its `at`s, and the
+/// window from the patched document, through [`breach_time_at`]. A `scale_sizes` rung has no
+/// confirmation, so 0 (§5.6). The walk's triggers must be the fixture's, so a base that drifted from
+/// the fixture's cannot pass for a breach time.
+#[test]
+fn every_mark_only_rung_case_journals_the_breach_time_its_timeline_gives() -> Result<(), String> {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/refcases/mandate.json");
+    let bytes = fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let clock = RegularSessionClock::new();
+    let mut checked = Vec::new();
+    for case in &readable_cases(&bytes)? {
+        if text_of(case, "kind")? != "risk_state" || text_of(case, "base")? != "two_stock_swing" {
+            continue;
+        }
+        let patch = items(case, "patch")?;
+        let steps = items(case, "steps")?;
+        if patch.iter().any(|op| text_of(op, "op") != Ok("replace"))
+            || steps
+                .iter()
+                .any(|step| text_of(step, "event") != Ok("mark"))
+        {
+            continue;
+        }
+        let id = text_of(case, "id")?;
+        let mut changes = Vec::new();
+        for op in patch {
+            changes.push((text_of(op, "path")?, Some(member(op, "value")?.clone())));
+        }
+        let document = with_all(&changes);
+        let risk = member(&document, "risk")?;
+        let need = member(risk, "breach_confirm_s")?
+            .as_int()
+            .ok_or("`breach_confirm_s` is an integer")?;
+        let mut rungs = Vec::new();
+        for rung in items(risk, "drawdown_ladder")? {
+            rungs.push((
+                picos(text_of(rung, "at")?)?,
+                text_of(rung, "action")? == "scale_sizes",
+            ));
+        }
+        let initial = member(case, "initial")?;
+        let mut previous = at(text_of(initial, "at")?);
+        let mut timelines: Vec<Vec<(bool, u64)>> = vec![Vec::new(); rungs.len()];
+        let mut inputs = Vec::new();
+        for step in steps {
+            let when = at(text_of(step, "at")?);
+            let gap = seconds_between(previous, when).map_err(|e| e.to_string())?;
+            previous = when;
+            let expect = member(step, "expect")?;
+            let equity = picos(text_of(expect, "agent_equity")?)?;
+            let high_water = picos(text_of(expect, "high_water_mark")?)?;
+            for ((level, _), timeline) in rungs.iter().zip(timelines.iter_mut()) {
+                let held = (high_water - equity) * 1_000_000_000_000 >= level * high_water;
+                timeline.push((held, gap));
+            }
+            let sane = member(step, "sane")? == &Value::Bool(true);
+            inputs.push(quote(
+                text_of(step, "at")?,
+                text_of(step, "bid")?,
+                MarketSession::Regular,
+                sane,
+            ));
+        }
+        let outcomes = walk(
+            &swing(&changes)?,
+            &opening(
+                text_of(initial, "at")?,
+                text_of(initial, "position_qty")?,
+                text_of(initial, "avg_cost")?,
+                text_of(initial, "inherited_loss_usd")?,
+            ),
+            &clock,
+            &inputs,
+        )?;
+        for (index, (step, outcome)) in steps.iter().zip(&outcomes).enumerate() {
+            let number = index + 1;
+            let mut stated = Vec::new();
+            for event in items(member(step, "expect")?, "journal")? {
+                if text_of(event, "type")? == "RiskLimitTriggered" {
+                    let limit = text_of(event, "limit")?;
+                    stated.push(match event.get("reason").and_then(Value::as_str) {
+                        Some(reason) => format!("{limit} {reason}"),
+                        None => limit.to_owned(),
+                    });
+                }
+            }
+            let mut walked = Vec::new();
+            for (position, event) in outcome.journal.iter().enumerate() {
+                let RiskEvent::RiskLimitTriggered { limit, reason, .. } = event else {
+                    continue;
+                };
+                walked.push(spelled(*limit, *reason));
+                let LimitKey::DrawdownRung(rung) = *limit else {
+                    return Err(format!(
+                        "{id} step {number}: only a rung triggers on marks here"
+                    ));
+                };
+                let rung = usize::from(rung);
+                let (Some(timeline), Some((_, scale))) = (timelines.get(rung), rungs.get(rung))
+                else {
+                    return Err(format!("{id} step {number}: a rung the ladder lacks"));
+                };
+                let expected = if *scale {
+                    0
+                } else {
+                    breach_time_at(timeline, need, number)
+                };
+                let actual = outcome
+                    .breach_time_s(position)
+                    .map_err(|e| format!("{id} step {number}: {e} ({})", e.code()))?;
+                assert_eq!(
+                    actual,
+                    Some(expected),
+                    "{id} step {number}: {limit:?} {reason:?}"
+                );
+                checked.push((id.to_owned(), number, expected));
+            }
+            assert_eq!(walked, stated, "{id} step {number}: the fixture's triggers");
+        }
+    }
+    let cases: BTreeSet<&str> = checked.iter().map(|(id, _, _)| id.as_str()).collect();
+    assert_eq!(
+        cases,
+        BTreeSet::from(["MC-R01", "MC-R02", "MC-R03", "MC-R04", "MC-R18", "MC-R19"]),
+        "the mark-only rung cases with a trigger: {checked:?}"
+    );
+    assert!(
+        checked.iter().any(|(_, _, seconds)| *seconds > 0),
+        "a breach time above 0 is checked, so a fold that reports 0 everywhere fails: {checked:?}"
+    );
+    Ok(())
+}
+
+/// The steps of a [`bid_walk`] with one more [`ANCHOR_BID`] mark 60 s after the anchor, and each
+/// step's seconds since the one before. The 0.06 rung's hard level holds at both anchors, so the
+/// second latches it if nothing did earlier, with breach time above 0.
+fn anchored_twice(bids: &[(i64, u64)]) -> (Vec<Step>, Vec<u64>) {
+    let mut steps = bid_steps(bids);
+    let last = steps.last().map_or(0, |step| step.at.secs());
+    steps.push(Step {
+        at: UtcNanos::from_parts(last + 60, 0).expect("an instant"),
+        session: MarketSession::Regular,
+        input: Input::Mark {
+            bid: price(&ANCHOR_BID.to_string()),
+            sane: true,
+        },
+    });
+    let gaps = bids.iter().map(|(_, gap)| *gap).chain([300, 60]).collect();
+    (steps, gaps)
+}
+
+/// For every `RiskLimitTriggered` a random walk emits, the breach time is what [`breach_time_at`]
+/// derives from the bids alone (DEC-2301 item 1, §5.6): 100 shares make E exactly 100 × the bid, the
+/// rungs at 0.06 and 0.08 hold while (H − E) × 100 ≥ 6H or 8H, the floor while E ≤ 9000, and the 0.03
+/// `scale_sizes` rung carries 0. Hard triggers and `hard_breach_pending` are included, since both
+/// carry whatever had accumulated.
+fn breach_time_matches_the_bids(bids: &[(i64, u64)], need: u32) -> Result<(), TestCaseError> {
+    let window = Some(common::i(u64::from(need)));
+    let mandate = ok(ladder_only(&[("/risk/breach_confirm_s", window)]))?;
+    let (steps, gaps) = anchored_twice(bids);
+    let outcomes = ok(walk(
+        &mandate,
+        &patient_opening("2026-09-21T14:00:00.000000000Z", "100", "100", "0"),
+        &RegularSessionClock::new(),
+        &steps,
+    ))?;
+    let equities = bid_equities(bids)
+        .into_iter()
+        .chain([i128::from(ANCHOR_BID) * 100]);
+    let mut high_water: i128 = 10_000;
+    let mut timelines: BTreeMap<LimitKey, Vec<(bool, u64)>> = BTreeMap::new();
+    for (equity, gap) in equities.zip(&gaps) {
+        high_water = high_water.max(equity);
+        let below = high_water - equity;
+        for (limit, held) in [
+            (LimitKey::DrawdownRung(1), below * 100 >= 6 * high_water),
+            (LimitKey::DrawdownRung(2), below * 100 >= 8 * high_water),
+            (LimitKey::LifetimeFloor, equity <= 9_000),
+        ] {
+            timelines.entry(limit).or_default().push((held, *gap));
+        }
+    }
+    let mut above_zero = false;
+    for (index, outcome) in outcomes.iter().enumerate() {
+        for (position, event) in outcome.journal.iter().enumerate() {
+            let RiskEvent::RiskLimitTriggered { limit, reason, .. } = event else {
+                continue;
+            };
+            let expected = match timelines.get(limit) {
+                Some(timeline) => breach_time_at(timeline, u64::from(need), index + 1),
+                None if *limit == LimitKey::DrawdownRung(0) => 0,
+                None => {
+                    return Err(TestCaseError::fail(format!(
+                        "{limit:?} cannot trigger here"
+                    )));
+                }
+            };
+            above_zero |= expected > 0;
+            let actual = outcome
+                .breach_time_s(position)
+                .map_err(|e| TestCaseError::fail(format!("{e} ({})", e.code())))?;
+            prop_assert_eq!(
+                actual,
+                Some(expected),
+                "step {}: {:?} {:?} over {:?} with a {} s window",
+                index + 1,
+                limit,
+                reason,
+                bids,
+                need
+            );
+        }
+    }
+    prop_assert!(
+        above_zero,
+        "the second anchor latches the 0.06 rung with breach time above 0"
+    );
+    Ok(())
+}
+
+#[test]
+fn breach_time_on_every_trigger_matches_an_independent_interval_accumulator() {
+    let mut runner = TestRunner::new(ProptestConfig {
+        cases: 256,
+        failure_persistence: None,
+        ..ProptestConfig::default()
+    });
+    let strategy = (bid_walk(), prop::sample::select(vec![30_u32, 60, 300]));
+    if let Err(failure) = runner.run(&strategy, |(bids, need)| {
+        breach_time_matches_the_bids(&bids, need)
+    }) {
+        panic!("DEC-2301 item 1: {failure}");
+    }
+}
+
+/// A `scale_sizes` rung has no confirmation, so its trigger carries 0, whether at once on its level
+/// or set active by the owner's reset (`after_reset`), while the `exits_only` rung beside it carries
+/// the 60 s it confirmed in (DEC-2301 item 1, §5.6, §5.8). With H = 10500 the 0.03 rung triggers at
+/// 98.5 (H − E = 650 ≥ 315), the 0.06 rung confirms 60 s later (650 ≥ 630), 104 lifts the 0.03 rung
+/// (100 < 210 with `scale_lift_after_s` 0), and the acknowledgment sets it active again.
+#[test]
+fn a_scale_rung_carries_no_breach_time_at_once_or_after_the_reset() -> Result<(), String> {
+    let mandate = swing(&[
+        ("/risk/max_daily_loss", Some(s("0.5"))),
+        ("/risk/scale_lift_after_s", Some(common::i(0))),
+    ])?;
+    let outcomes = walk(
+        &mandate,
+        &patient_opening("2026-09-21T14:00:00.000000000Z", "100", "100", "0"),
+        &RegularSessionClock::new(),
+        &[
+            mark("2026-09-21T14:01:00.000000000Z", "105"),
+            mark("2026-09-21T14:02:00.000000000Z", "98.5"),
+            mark("2026-09-21T14:03:00.000000000Z", "98.5"),
+            mark("2026-09-21T14:04:00.000000000Z", "104"),
+            acknowledge("2026-09-21T14:05:00.000000000Z", Latch::DrawdownLadder),
+        ],
+    )?;
+    let mut seen = Vec::new();
+    for (number, expected) in [(2, 0), (3, 60), (5, 0)] {
+        let outcome = step_of(&outcomes, number)?;
+        for (position, event) in outcome.journal.iter().enumerate() {
+            if let RiskEvent::RiskLimitTriggered { limit, reason, .. } = event {
+                seen.push(spelled(*limit, *reason));
+                let actual = outcome
+                    .breach_time_s(position)
+                    .map_err(|e| format!("step {number}: {e} ({})", e.code()))?;
+                assert_eq!(
+                    actual,
+                    Some(expected),
+                    "step {number}: {limit:?} {reason:?}"
+                );
+            }
+        }
+    }
+    assert_eq!(
+        seen,
+        vec![
+            "drawdown_ladder[0]",
+            "drawdown_ladder[1]",
+            "drawdown_ladder[0] after_reset"
+        ],
+        "the walk reaches both kinds of scale trigger"
+    );
+    Ok(())
+}
+
+/// The step that confirms the 0.06 rung 60 s after 98.5 breached it, and the positions of its
+/// `RiskLimitTriggered` and of its `AgentModeApplied`.
+fn confirmed_rung_step() -> Result<(Outcome, usize, usize), String> {
+    let mandate = swing(&[
+        ("/risk/max_daily_loss", Some(s("0.5"))),
+        ("/risk/scale_lift_after_s", Some(common::i(0))),
+    ])?;
+    let outcomes = walk(
+        &mandate,
+        &patient_opening("2026-09-21T14:00:00.000000000Z", "100", "100", "0"),
+        &RegularSessionClock::new(),
+        &[
+            mark("2026-09-21T14:01:00.000000000Z", "105"),
+            mark("2026-09-21T14:02:00.000000000Z", "98.5"),
+            mark("2026-09-21T14:03:00.000000000Z", "98.5"),
+        ],
+    )?;
+    let outcome = step_of(&outcomes, 3)?.clone();
+    let trigger = outcome
+        .journal
+        .iter()
+        .position(|event| matches!(event, RiskEvent::RiskLimitTriggered { .. }))
+        .ok_or("the 0.06 rung confirms at step 3")?;
+    let mode = outcome
+        .journal
+        .iter()
+        .position(|event| matches!(event, RiskEvent::AgentModeApplied { .. }))
+        .ok_or("the confirmed rung moves the mode at step 3")?;
+    Ok((outcome, trigger, mode))
+}
+
+/// A journal that no longer matches the breach times the step recorded is refused as
+/// `invalid_input`, never answered: a writer must not put one record's breach time on another.
+fn assert_refused(outcome: &Outcome, event: usize, edit: &str) {
+    match outcome.breach_time_s(event) {
+        Err(error) => assert_eq!(error.code(), "invalid_input", "{edit}: {error}"),
+        Ok(answer) => {
+            panic!("{edit}: answered {answer:?} instead of refusing")
+        }
+    }
+}
+
+/// An event that is not a `RiskLimitTriggered` has no breach time, which is `Ok(None)` and not a
+/// refusal (journal spec §9.27): the writer leaves the member out of every other record.
+#[test]
+fn an_event_that_is_not_a_trigger_has_no_breach_time() -> Result<(), String> {
+    let (outcome, trigger, mode) = confirmed_rung_step()?;
+    assert_eq!(
+        outcome.breach_time_s(mode).map_err(|e| e.to_string())?,
+        None
+    );
+    assert_eq!(
+        outcome.breach_time_s(trigger).map_err(|e| e.to_string())?,
+        Some(60),
+        "the trigger beside it has its 60 s, so the None is the event's and not the step's"
+    );
+    Ok(())
+}
+
+/// A trigger replaced by another event after the step leaves its recorded time with nothing to
+/// belong to: refused (`journal` is a public field a caller can edit).
+#[test]
+fn a_trigger_replaced_after_the_step_is_refused() -> Result<(), String> {
+    let (mut outcome, trigger, mode) = confirmed_rung_step()?;
+    let other = outcome.journal[mode].clone();
+    outcome.journal[trigger] = other;
+    assert_refused(&outcome, trigger, "the trigger replaced by the mode change");
+    Ok(())
+}
+
+/// A trigger whose limit was changed after the step is not the record the time was read for.
+#[test]
+fn a_trigger_whose_limit_was_changed_is_refused() -> Result<(), String> {
+    let (mut outcome, trigger, _) = confirmed_rung_step()?;
+    if let Some(RiskEvent::RiskLimitTriggered { limit, .. }) = outcome.journal.get_mut(trigger) {
+        *limit = LimitKey::LifetimeFloor;
+    }
+    assert_refused(
+        &outcome,
+        trigger,
+        "the 0.06 rung's trigger relabelled as the floor's",
+    );
+    Ok(())
+}
+
+/// The guard compares a trigger's limit and nothing else of it: a trigger whose action and reason
+/// were changed after the step, with its limit kept, still answers the 60 s it was recorded with.
+#[test]
+fn a_trigger_whose_action_and_reason_were_changed_keeps_its_breach_time() -> Result<(), String> {
+    let (mut outcome, trigger, _) = confirmed_rung_step()?;
+    let Some(RiskEvent::RiskLimitTriggered { action, reason, .. }) =
+        outcome.journal.get_mut(trigger)
+    else {
+        return Err("the 0.06 rung's trigger is at its position".to_owned());
+    };
+    *action = LadderAction::FlattenAndPause;
+    *reason = Some(TriggerReason::HardTrigger);
+    assert_eq!(
+        outcome.breach_time_s(trigger).map_err(|e| e.to_string())?,
+        Some(60)
+    );
+    Ok(())
+}
+
+/// A trigger put where the step journalled another event has no time recorded for it, which is not
+/// the same answer as 0.
+#[test]
+fn a_trigger_put_in_place_of_another_event_is_refused() -> Result<(), String> {
+    let (mut outcome, trigger, mode) = confirmed_rung_step()?;
+    let other = outcome.journal[trigger].clone();
+    outcome.journal[mode] = other;
+    assert_refused(&outcome, mode, "the mode change replaced by a trigger");
+    Ok(())
+}
+
+/// A position past the end of the journal names no record at all.
+#[test]
+fn a_position_past_the_journal_is_refused() -> Result<(), String> {
+    let (outcome, _, _) = confirmed_rung_step()?;
+    assert_refused(&outcome, outcome.journal.len(), "one past the last event");
+    Ok(())
+}
+
+/// One walk input: a mark at a whole-dollar bid, a clock tick, or an allocation change, each after
+/// a gap of whole seconds.
+#[derive(Debug, Clone)]
+enum GuardInput {
+    Mark(i64),
+    Tick,
+    Allocate(i64),
+}
+
+fn guard_input() -> impl Strategy<Value = (GuardInput, u32)> {
+    (
+        prop_oneof![
+            (60_i64..140).prop_map(GuardInput::Mark),
+            Just(GuardInput::Tick),
+            (-2_000_i64..2_000).prop_map(GuardInput::Allocate),
+        ],
+        1_u32..120,
+    )
+}
+
+/// No `Outcome` holds two `RiskLimitTriggered` for one limit, so a breach time is never ambiguous
+/// between two records of the same limit. The one batch that merges two evaluations is an
+/// allocation change's settling tick followed by the change itself, with no time between them
+/// (§5.1), and the same limit cannot trigger in both:
+/// - a confirming limit the tick triggers is latched, and a latched limit is not evaluated again;
+/// - a daily loss the tick latches waits for a new risk day;
+/// - a scale rung the tick triggers stays active, so it does not trigger again;
+/// - a condition that was false at the tick and true after the change is the change's own
+///   `would_trigger_limit` refusal, which moves nothing;
+/// - neither input is a quote, so neither starts a hard breach.
+///
+/// Fuzzed over marks, ticks, and allocation changes, which settle a tick first, with windows of
+/// 0, 30, and 60 s.
+#[test]
+fn no_outcome_triggers_one_limit_twice() {
+    let mut runner = TestRunner::new(ProptestConfig {
+        cases: 256,
+        failure_persistence: None,
+        ..ProptestConfig::default()
+    });
+    let strategy = (
+        prop::collection::vec(guard_input(), 1..16),
+        prop::sample::select(vec![0_u64, 30, 60]),
+    );
+    let result = runner.run(&strategy, |(inputs, need)| {
+        let mandate = ok(ladder_only(&[(
+            "/risk/breach_confirm_s",
+            Some(common::i(need)),
+        )]))?;
+        let mut when = at("2026-09-21T14:00:00.000000000Z").secs();
+        let mut steps = Vec::new();
+        for (input, gap) in &inputs {
+            when += i64::from(*gap);
+            let instant = UtcNanos::from_parts(when, 0).expect("an instant");
+            steps.push(match input {
+                GuardInput::Mark(bid) => {
+                    quote_at(instant, &bid.to_string(), MarketSession::Regular, true)
+                }
+                GuardInput::Tick => tick_utc(instant, MarketSession::Regular),
+                GuardInput::Allocate(delta) => Step {
+                    at: instant,
+                    session: MarketSession::Regular,
+                    input: Input::AllocationChange {
+                        delta_usd: usd(&delta.to_string()),
+                    },
+                },
+            });
+        }
+        let outcomes = ok(walk(
+            &mandate,
+            &patient_opening("2026-09-21T14:00:00.000000000Z", "100", "100", "0"),
+            &RegularSessionClock::new(),
+            &steps,
+        ))?;
+        for (index, outcome) in outcomes.iter().enumerate() {
+            let mut seen = BTreeSet::new();
+            for event in &outcome.journal {
+                if let RiskEvent::RiskLimitTriggered { limit, .. } = event {
+                    prop_assert!(
+                        seen.insert(*limit),
+                        "step {}: {:?} triggered twice in {:?}",
+                        index + 1,
+                        limit,
+                        outcome.journal
+                    );
+                }
+            }
+        }
+        Ok(())
+    });
+    if let Err(failure) = result {
+        panic!("one trigger a limit an outcome: {failure}");
+    }
+}
+
+/// The merged batch the property relies on is reached: an allocation change whose settling tick
+/// confirms the 0.06 rung journals that trigger once, with its breach time at its own position,
+/// ahead of the change's refusal (a decrease below the 9850 held is refused).
+#[test]
+fn an_allocation_changes_settling_trigger_keeps_its_own_position() -> Result<(), String> {
+    let mandate = swing(&[
+        ("/risk/max_daily_loss", Some(s("0.5"))),
+        ("/risk/scale_lift_after_s", Some(common::i(0))),
+    ])?;
+    let outcomes = walk(
+        &mandate,
+        &patient_opening("2026-09-21T14:00:00.000000000Z", "100", "100", "0"),
+        &RegularSessionClock::new(),
+        &[
+            mark("2026-09-21T14:01:00.000000000Z", "105"),
+            mark("2026-09-21T14:02:00.000000000Z", "98.5"),
+            allocate("2026-09-21T14:03:00.000000000Z", "-100"),
+        ],
+    )?;
+    let merged = step_of(&outcomes, 3)?;
+    let triggers: Vec<usize> = merged
+        .journal
+        .iter()
+        .enumerate()
+        .filter(|(_, event)| matches!(event, RiskEvent::RiskLimitTriggered { .. }))
+        .map(|(position, _)| position)
+        .collect();
+    assert_eq!(triggers.len(), 1, "{:?}", merged.journal);
+    let refused = merged
+        .journal
+        .iter()
+        .position(|event| matches!(event, RiskEvent::MandateVersionApplied { .. }))
+        .ok_or("the change journals its result")?;
+    assert!(
+        triggers[0] < refused,
+        "the settling tick's events come first"
+    );
+    assert_eq!(rejection_code(merged), Some("equity_below_exposure"));
+    assert_eq!(
+        merged
+            .breach_time_s(triggers[0])
+            .map_err(|e| e.to_string())?,
+        Some(60)
+    );
+    assert_eq!(
+        merged.breach_time_s(refused).map_err(|e| e.to_string())?,
+        None
+    );
     Ok(())
 }

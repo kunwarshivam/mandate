@@ -26,8 +26,8 @@
 //! `--research <bundle-dir>` asks for research over that recorded bundle (DEC-2210 item 5,
 //! DEC-2215), for a paper deployment read from the journal only; anything else refuses the start,
 //! and without it the process runs deny-all ([`cell`]). The flag with no bundle after it, an empty
-//! one, or another flag in its place refuses `research_bundle_missing`, so asking for research is
-//! never read as not asking.
+//! one, another flag in its place, or written `--research=`, which the process does not read,
+//! refuses `research_bundle_missing`, so asking for research is never read as not asking.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -98,11 +98,16 @@ fn main() -> ExitCode {
                     return ExitCode::from(2);
                 }
             };
+            if let Err(code) = launch::fixture_permitted(fixture, &var) {
+                eprintln!("{code}");
+                return ExitCode::from(2);
+            }
             let deployment = (named.workspace, named.agent);
-            let asked = args.iter().any(|a| a == "--research");
+            let joined = args.iter().any(|a| a.starts_with("--research="));
+            let asked = joined || args.iter().any(|a| a == "--research");
             let research =
                 flag("--research").filter(|dir| !dir.is_empty() && !dir.starts_with("--"));
-            if asked && research.is_none() {
+            if asked && (joined || research.is_none()) {
                 eprintln!("research_bundle_missing");
                 return ExitCode::from(2);
             }

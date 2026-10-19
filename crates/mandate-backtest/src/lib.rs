@@ -82,6 +82,14 @@ pub enum BacktestError {
     /// (DEC-2245 item 2).
     #[error("an order is still working when the split with ex-date {0} applies")]
     OrderWorkingAcrossSplit(Date),
+    /// The corporate actions are not in ex-date order: the walk takes them in the order given, so
+    /// it would skip one (DEC-2245 item 7).
+    #[error("the corporate actions are not in ex-date order")]
+    CorporateActionsUnordered,
+    /// A corporate action names another instrument than the run's, whose position the run does
+    /// not hold (DEC-2245 item 7).
+    #[error("the corporate action with ex-date {0} is for another instrument than the run's")]
+    CorporateActionOtherInstrument(Date),
     #[error(transparent)]
     Sim(#[from] SimError),
     #[error(transparent)]
@@ -102,6 +110,8 @@ impl BacktestError {
             Self::StrategyWindowsCrossed => "strategy_windows_crossed",
             Self::PeriodsPerYearNotPositive => "periods_per_year_not_positive",
             Self::OrderWorkingAcrossSplit(_) => "order_working_across_split",
+            Self::CorporateActionsUnordered => "corporate_actions_unordered",
+            Self::CorporateActionOtherInstrument(_) => "corporate_action_other_instrument",
             Self::Sim(e) => e.code(),
             Self::Accounting(e) => e.code(),
             Self::Num(e) => e.code(),
@@ -406,6 +416,32 @@ fn ex_date(action: &CorporateAction) -> Date {
     }
 }
 
+fn action_instrument(action: &CorporateAction) -> &InstrumentId {
+    match action {
+        CorporateAction::Split(split) => &split.instrument,
+        CorporateAction::CashDividend(dividend) => dividend.instrument(),
+    }
+}
+
+/// Refuses actions the walk cannot apply as given (DEC-2245 item 7): it takes them in the order
+/// given, so a slice out of ex-date order would skip an action, and one for another instrument
+/// than the run's would act on a position the run does not hold.
+fn check_actions(input: &BacktestInput<'_>) -> Result<(), BacktestError> {
+    let actions = input.corporate_actions;
+    if let Some(foreign) = actions
+        .iter()
+        .find(|action| action_instrument(action) != &input.config.instrument_id)
+    {
+        return Err(BacktestError::CorporateActionOtherInstrument(ex_date(
+            foreign,
+        )));
+    }
+    if !actions.is_sorted_by_key(ex_date) {
+        return Err(BacktestError::CorporateActionsUnordered);
+    }
+    Ok(())
+}
+
 /// Walks the bars once, in index order, doing at each bar what DEC-127 item 2 fixes: the cash
 /// movements `Account::due` makes due, the bar's fills, the bar-close mark, the fee charges spec §6.2
 /// and §6.3 date, the period observation when this bar closes a period, and last the decision.
@@ -420,6 +456,7 @@ pub fn walk(input: &BacktestInput<'_>, strategy: Strategy) -> Result<Walk, Backt
     let mut dates: BTreeSet<Date> = BTreeSet::new();
     let mut charged: BTreeSet<Date> = BTreeSet::new();
     let mut period: u32 = 0;
+    check_actions(input)?;
     let mut actions = input.corporate_actions.iter().peekable();
     for ((index, bar), closes_period) in input.bars.iter().enumerate().zip(closing_bars(input.bars))
     {

@@ -1,0 +1,25 @@
+# The staging journal's settings. It archives WAL and base backups to the journal archive bucket,
+# Cloudflare R2 with bucket lock (DEC-2605 row 4), from lane IAC (E21-56). The key is the Secret
+# `journal-archive-key` the founder creates at bootstrap, never a value (DEC-2015 item 4,
+# DEC-2018). The archive's clients reach exactly R2's two addresses on 443, which fails closed if
+# they change (DEC-2017 items 1 and 2).
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: journal
+  namespace: flux-system
+spec:
+  values:
+    storage:
+      size: 10Gi
+      storageClass: do-block-storage
+    resources:
+      cpu: 500m
+      memory: 1Gi
+    archive:
+      destinationPath: s3://mandate-journal-archive-west-staging/journal-db
+      keyFrom: journal-archive-key
+      retention: 30d
+      egress:
+        cidrs: ["172.64.190.1/32", "172.64.66.1/32"]
+        port: 443

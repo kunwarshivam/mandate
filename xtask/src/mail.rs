@@ -29,6 +29,7 @@ pub(crate) struct Guard {
     founder_transport_crate: String,
     trait_file: String,
     transport: Vec<Allowed>,
+    literals: Literals,
     denied: Denied,
 }
 
@@ -39,6 +40,13 @@ struct Allowed {
     #[serde(rename = "type")]
     ty: String,
     file: String,
+}
+
+#[derive(Deserialize)]
+struct Literals {
+    exempt_crates: Vec<String>,
+    substrings: Vec<String>,
+    ports: Vec<u16>,
 }
 
 #[derive(Deserialize)]
@@ -93,6 +101,7 @@ pub(crate) fn guard_in(root: &Path) -> Result<()> {
         .context("parsing Cargo.lock")?;
     let locked: Vec<String> = lock.package.into_iter().map(|p| p.name).collect();
     let mut problems = transport_problems(&guard, &sources);
+    problems.extend(literal_problems(&guard, &sources));
     problems.extend(crate_problems(&guard, &meta, &locked));
     report(problems, "mail-guard")
 }
@@ -111,6 +120,7 @@ fn transport_problems(guard: &Guard, sources: &[(String, String, String)]) -> Ve
     for (krate, path, src) in sources {
         let toks = tokens(src);
         let in_macro = macro_arguments(&toks);
+        let depth = brace_depths(&toks);
         for (i, (tok, line)) in toks.iter().enumerate() {
             let Token::Ident(word) = tok else {
                 continue;
@@ -120,8 +130,15 @@ fn transport_problems(guard: &Guard, sources: &[(String, String, String)]) -> Ve
             let next = at(i + 1);
             for allowed in guard.transport.iter().filter(|a| a.krate == *krate) {
                 let declares = matches!(next, Some(Token::Ident(n)) if *n == allowed.ty);
-                if declares && word == "struct" && *path == allowed.file {
+                let top = depth.get(i).copied() == Some(0);
+                if declares && word == "struct" && *path == allowed.file && top {
                     declared.push((allowed.ty.as_str(), path.as_str()));
+                } else if *word == allowed.ty && *path == allowed.file && in_use(&toks, i) {
+                    problems.push(format!(
+                        "{path}:{line}: `{}` is imported into its own file; it is declared there, \
+                         once, by `struct` at the top level ({GUARD})",
+                        allowed.ty
+                    ));
                 } else if declares
                     && ["struct", "enum", "union", "type", "as"].contains(&word.as_str())
                 {
@@ -181,16 +198,85 @@ fn transport_problems(guard: &Guard, sources: &[(String, String, String)]) -> Ve
             }
         }
     }
-    for allowed in &guard.transport {
+    let present: BTreeSet<&str> = sources.iter().map(|(krate, _, _)| krate.as_str()).collect();
+    for allowed in guard
+        .transport
+        .iter()
+        .filter(|a| present.contains(a.krate.as_str()))
+    {
         let count = declared.iter().filter(|(ty, _)| *ty == allowed.ty).count();
-        if count > 1 {
+        if count != 1 {
             problems.push(format!(
-                "{}: `struct {}` is declared {count} times; once is allowed ({GUARD})",
+                "{}: `struct {}` is declared {count} times at its top level; exactly once is required \
+                 ({GUARD})",
                 allowed.file, allowed.ty
             ));
         }
     }
     problems
+}
+
+/// Every string literal in `sources` outside the exempt crates that names a mail endpoint: an SMTP
+/// URL, `sendmail`, a mail provider's API host, or a host on a mail submission port.
+fn literal_problems(guard: &Guard, sources: &[(String, String, String)]) -> Vec<String> {
+    let rules = &guard.literals;
+    let mut problems = Vec::new();
+    for (krate, path, src) in sources {
+        if rules.exempt_crates.contains(krate) {
+            continue;
+        }
+        for (tok, line) in tokens(src) {
+            let Token::Str(text) = tok else {
+                continue;
+            };
+            let lower = text.to_ascii_lowercase();
+            let named = rules.substrings.iter().find(|s| lower.contains(s.as_str()));
+            let port = submission_port(&lower, &rules.ports);
+            if let Some(why) = named.map(|s| format!("names `{s}`")).or(port) {
+                problems.push(format!(
+                    "{path}:{line}: a string literal in `{krate}` {why}; only `{}` may name a mail \
+                     endpoint ({GUARD})",
+                    guard.founder_transport_crate
+                ));
+            }
+        }
+    }
+    problems
+}
+
+/// Why `text` names a host on a mail submission port, if it does: the whole literal is
+/// `host:port`, the host holds a letter or a dot, and the port is one of `ports`. A clock time
+/// (`12:25`, `12:25:00`) is no host, so it never matches.
+fn submission_port(text: &str, ports: &[u16]) -> Option<String> {
+    let (host, port) = text.trim_end_matches('/').rsplit_once(':')?;
+    let host = host.rsplit_once("://").map_or(host, |(_, h)| h);
+    let hostlike = !host.is_empty()
+        && host.contains(|c: char| c.is_ascii_alphabetic() || c == '.')
+        && host
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-');
+    let port: u16 = port.parse().ok()?;
+    (hostlike && ports.contains(&port)).then(|| format!("names a host on port {port}"))
+}
+
+/// The brace depth at each token: 0 at a file's top level, so a declaration inside a `mod`, a fn,
+/// or an `impl` never counts as an allowed type's one declaration.
+fn brace_depths(toks: &[(Token, usize)]) -> Vec<usize> {
+    let mut depth = 0usize;
+    toks.iter()
+        .map(|(tok, _)| match tok {
+            Token::Punct('{') => {
+                let here = depth;
+                depth = depth.saturating_add(1);
+                here
+            }
+            Token::Punct('}') => {
+                depth = depth.saturating_sub(1);
+                depth
+            }
+            _ => depth,
+        })
+        .collect()
 }
 
 /// Whether each token lies inside a macro invocation's delimited arguments (`name!(...)`,
@@ -479,6 +565,96 @@ mod tests {
             "mandate-mail-smtp",
             "pub type FounderSmtpTransport = lettre::SmtpTransport;",
         )]);
+    }
+
+    #[test]
+    fn an_allowed_type_declared_other_than_once_at_the_top_of_its_file_fails() {
+        let trait_def = "pub trait MailTransport { }\n";
+        for (what, body) in [
+            (
+                "a foreign type imported under the allowed name",
+                "pub struct Recorded;\nuse mandate_gateway::RecordedTransport;\nimpl MailTransport for RecordedTransport { }",
+            ),
+            (
+                "no declaration at all",
+                "impl MailTransport for RecordedTransport { }",
+            ),
+            (
+                "a declaration inside a nested module",
+                "mod shadow { pub struct RecordedTransport; }\nuse shadow::RecordedTransport;\nimpl MailTransport for RecordedTransport { }",
+            ),
+            (
+                "a declaration inside a function",
+                "fn f() { struct RecordedTransport; }\nimpl MailTransport for RecordedTransport { }",
+            ),
+            (
+                "an import naming the allowed type beside its declaration",
+                "pub struct RecordedTransport;\nuse self::RecordedTransport as _;\nuse crate::RecordedTransport;\nimpl MailTransport for RecordedTransport { }",
+            ),
+        ] {
+            let problems = transport_problems(
+                &guard(),
+                &[source("mandate-dispatcher", &format!("{trait_def}{body}"))],
+            );
+            assert!(!problems.is_empty(), "{what} passes");
+        }
+    }
+
+    #[test]
+    fn an_absent_crate_owes_no_declaration() {
+        let only_dispatcher = [source(
+            "mandate-dispatcher",
+            "pub trait MailTransport { }\npub struct RecordedTransport;\nimpl MailTransport for RecordedTransport { }",
+        )];
+        assert_eq!(
+            transport_problems(&guard(), &only_dispatcher),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn a_mail_endpoint_literal_outside_the_founder_transport_fails() {
+        for literal in [
+            "smtp://mail.example:587",
+            "SMTPS://mail.example",
+            "sendmail",
+            "/usr/sbin/sendmail",
+            "https://api.sendgrid.com/v3/mail/send",
+            "api.mailgun.net",
+            "mail.example:25",
+            "127.0.0.1:465",
+            "mail.example:2525",
+        ] {
+            let src = format!("const X: &str = {literal:?};");
+            assert!(
+                !literal_problems(&guard(), &[elsewhere("mandate-dispatcher", &src)]).is_empty(),
+                "{literal} passes"
+            );
+            assert_eq!(
+                literal_problems(&guard(), &[source("mandate-mail-smtp", &src)]),
+                Vec::<String>::new(),
+                "{literal} in the founder transport"
+            );
+        }
+        for harmless in [
+            "12:25:00",
+            "2026-10-17T12:25:00Z",
+            "port 25",
+            "mail.example:443",
+            "sentmail",
+        ] {
+            let src = format!("const X: &str = {harmless:?};");
+            assert_eq!(
+                literal_problems(&guard(), &[elsewhere("mandate-dispatcher", &src)]),
+                Vec::<String>::new(),
+                "{harmless}"
+            );
+        }
+        let in_xtask = elsewhere("xtask", "const X: &str = \"smtp://mail.example:587\";");
+        assert_eq!(
+            literal_problems(&guard(), &[in_xtask]),
+            Vec::<String>::new()
+        );
     }
 
     #[test]

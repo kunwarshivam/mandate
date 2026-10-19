@@ -48,3 +48,14 @@ run "refuses_a_public_vpc_range" {
 
   expect_failures = [var.ip_range]
 }
+
+# DEC-2054: the VPC is named for its region, so it never takes the name of a VPC the account
+# already holds elsewhere.
+run "the_vpc_is_named_for_its_region" {
+  command = plan
+
+  assert {
+    condition     = digitalocean_vpc.west.name == "mandate-staging-nyc3" && digitalocean_vpc.west.region == "nyc3"
+    error_message = "The VPC is named for its environment and region."
+  }
+}

@@ -929,6 +929,49 @@ pub(crate) fn publish_index(root: &Path, out: &Path) -> Result<()> {
     Ok(())
 }
 
+/// `cargo xtask release publish-signed <dist> <signatures> <out>` (E21-35, DEC-2026): only on a
+/// dispatch from `main`, where CI's per-arch `release-signing-publish` job runs it after
+/// `release-signing-check`, holding no release secret. [`signed_images`] checks every signature
+/// against the committed public half before anything is built, and only then does it sign in,
+/// push each image as `signed-<commit>-<arch>`, sign its digest keyless, attest its SBOM and write
+/// `<out>/PUBLISHED`.
+pub(crate) fn publish_signed(
+    root: &Path,
+    dist: &Path,
+    signatures: &Path,
+    out: &Path,
+) -> Result<()> {
+    let paths = Paths::from_env(root)?;
+    let tools = tools(&paths.cargo_home)?;
+    let revision = git(root, &["rev-parse", "HEAD"])?;
+    let images = signed_images(
+        &tools,
+        &root.join(RELEASE_PUBLIC_KEY),
+        dist,
+        signatures,
+        Arch::host()?,
+        &revision,
+    )?;
+    let _ = (images, out);
+    bail!("pushing release-signed images is not implemented yet (E21-35)")
+}
+
+/// The release-signed image of every binary `dist/SHA256SUMS` lists, for `arch`, built from commit
+/// `revision`, each with its `<name>.sig` layer. Every binary must match its line, and every binary
+/// and `SHA256SUMS` itself must carry a signature in `signatures` that verifies against `key`,
+/// before any image is built, so a release the key did not sign is never pushed (DEC-2026).
+pub(crate) fn signed_images(
+    tools: &Path,
+    key: &Path,
+    dist: &Path,
+    signatures: &Path,
+    arch: Arch,
+    revision: &str,
+) -> Result<Vec<(String, image::Layout)>> {
+    let _ = (tools, key, dist, signatures, arch, revision);
+    bail!("building release-signed images is not implemented yet (E21-35)")
+}
+
 /// The charts a hosted cluster installs from `deploy/cell/charts/` (E21-58, DEC-2015 item 3).
 /// `archive-store` is the local cell's test stand-in and is never published (DEC-1050 item 5).
 pub(crate) const HOSTED_CHARTS: [&str; 4] =
@@ -1862,16 +1905,27 @@ mod tests {
         let script = fs::read_to_string(
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github/scripts/release-sign.sh"),
         )?;
+        assert!(
+            script.starts_with("#!/bin/bash --posix\n")
+                && script.contains(
+                    "\nset +x +v\nunset -f compgen\ncase \"$(compgen -A function)\" in\n"
+                ),
+            "release-sign.sh must start in POSIX mode, turn tracing off and refuse functions first"
+        );
         let ordered = [
             "grep -Evq '^[0-9a-f]{64}  [A-Za-z0-9._-]+$' \"$sums\"",
-            "if [ \"${names[*]}\" != \"${present[*]}\" ]; then",
-            "(cd dist/bin && sha256sum --check --strict ../SHA256SUMS)",
-            "echo \"${DIGEST}  dist/SHA256SUMS\" | sha256sum --check --strict",
-            "trap 'rm -rf \"$key_dir\"' EXIT",
+            "echo \"SHA256SUMS lists $name twice; nothing is signed\" >&2",
+            "echo \"dist/bin holds $name, which SHA256SUMS does not list; nothing is signed\" >&2",
+            "if [ \"${#present[@]}\" -ne \"${#names[@]}\" ]; then",
+            "trap 'rm -rf \"$key_dir\" \"$verified\"' EXIT",
+            "cp -- \"dist/bin/$name\" \"$verified/bin/$name\"",
+            "(cd \"$verified/bin\" && sha256sum --check --strict ../SHA256SUMS)",
+            "(cd \"$verified\" && sha256sum --check --strict DIGEST)",
             "sha256sum --check --strict \"$tools/cosign.sha256\"",
             "base64 --decode \"$key_dir/cosign.key.base64\" > \"$key_dir/cosign.key\"",
             "unset RELEASE_SIGNING_KEY",
-            "env -i HOME=\"$key_dir/home\" PATH=\"$tools:/usr/bin:/bin\" COSIGN_PASSWORD=\"$COSIGN_PASSWORD\"",
+            "env -i \"$(dirname \"$0\")/release-sign-cosign.sh\" \"$key_dir/home\" \"$tools\"",
+            "<<<\"$COSIGN_PASSWORD\"",
         ];
         let mut from = 0;
         for line in ordered {
@@ -1883,12 +1937,46 @@ mod tests {
                 })?;
             from = from.saturating_add(at).saturating_add(line.len());
         }
-        for absent in ["set -x", "cargo", "xtask", "dist/bin/*"] {
+        let cosign = fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github/scripts/release-sign-cosign.sh"),
+        )?;
+        let mut from = 0;
+        for line in [
+            "\nset +x +v\nset -euo pipefail\n",
+            "export HOME=\"$1\" PATH=\"$2:/usr/bin:/bin\"",
+            "IFS= read -r COSIGN_PASSWORD",
+            "export COSIGN_PASSWORD",
+            "exec env -u SHLVL -u PWD -u OLDPWD -u _ cosign sign-blob",
+        ] {
+            let at = cosign
+                .get(from..)
+                .and_then(|rest| rest.find(line))
+                .with_context(|| {
+                    format!("release-sign-cosign.sh lacks {line:?}, or out of order")
+                })?;
+            from = from.saturating_add(at).saturating_add(line.len());
+        }
+        for absent in ["set -x", "cargo", "xtask", "COSIGN_PASSWORD="] {
+            assert!(
+                !cosign.contains(absent),
+                "release-sign-cosign.sh holds {absent:?}"
+            );
+        }
+        for absent in [
+            "set -x",
+            "cargo",
+            "xtask",
+            "dist/bin/*",
+            "compgen -e",
+            "COSIGN_PASSWORD=",
+        ] {
             assert!(!script.contains(absent), "release-sign.sh holds {absent:?}");
         }
         assert!(
-            script.contains("for file in \"${names[@]/#/dist/bin/}\" \"$sums\"; do"),
-            "release-sign.sh must sign exactly the names SHA256SUMS lists"
+            script.contains(
+                "for file in \"${names[@]/#/$verified/bin/}\" \"$verified/SHA256SUMS\"; do"
+            ),
+            "release-sign.sh must sign exactly the verified copies of the names SHA256SUMS lists"
         );
         let check = jobs
             .get("release-signing-check")
@@ -1898,98 +1986,329 @@ mod tests {
         Ok(())
     }
 
-    /// One case of [`the_signer_signs_only_what_sha256sums_lists`]: its name, the files in
-    /// `dist/bin` with their text (`->target` makes a symlink), the text of `SHA256SUMS`, and what
-    /// the signer prints as it stops.
-    type SignerCase<'a> = (&'a str, &'a [(&'a str, &'a str)], &'a str, &'a str);
+    /// cosign runs with exactly `COSIGN_PASSWORD`, `HOME` and `PATH` in its environment, whatever
+    /// else the job held (a name that is no identifier, a variable bash keeps read-only, a trace
+    /// switch), with the password nowhere in its command line and neither secret in the signer's
+    /// stderr (DEC-2024 item 4, `AGENTS.md` rule 7). A stand-in cosign, served to the signer by a
+    /// `file://` URL and pinned by its SHA-256 as the real one is, records the names its process
+    /// received and its arguments.
+    #[test]
+    fn cosign_sees_only_the_password_home_and_path() -> Result<()> {
+        let script =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github/scripts/release-sign.sh");
+        let dir = env::temp_dir().join(format!("mandate-xtask-signer-env-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("dist/bin"))?;
+        fs::write(dir.join("dist/bin/a"), "a")?;
+        fs::write(dir.join("dist/bin/b"), "b")?;
+        write_sums(&dir, SIGNER_SUMS)?;
+        let stand_in = dir.join("stand-in-cosign");
+        fs::write(
+            &stand_in,
+            concat!(
+                "#!/bin/sh\n",
+                "tr '\\000' '\\n' < /proc/$$/environ | cut -d= -f1 | LC_ALL=C sort > names\n",
+                "tr '\\000' ' ' < /proc/$$/cmdline > arguments\n",
+            ),
+        )?;
+        let password = "the-password-is-not-an-argument";
+        let key = image::base64(b"stand-in key");
+        let output = Command::new(&script)
+            .current_dir(&dir)
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin")
+            .env("DIGEST", sha256(&dir.join("dist/SHA256SUMS"))?)
+            .env("COSIGN_URL", format!("file://{}", stand_in.display()))
+            .env("COSIGN_SHA256", sha256(&stand_in)?)
+            .env("RELEASE_SIGNING_KEY", &key)
+            .env("COSIGN_PASSWORD", password)
+            .env("RUNNER_TEMP", dir.join("runner"))
+            .env("LD_PRELOAD", "planted.so")
+            .env("SIGSTORE_REKOR_URL", "https://planted.invalid")
+            .env("HTTPS_PROXY", "http://planted.invalid")
+            .env("a b", "planted")
+            .env("EUID", "0")
+            .env("SHELLOPTS", "xtrace")
+            .output()?;
+        assert!(
+            output.status.success(),
+            "the signer stopped: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            fs::read_to_string(dir.join("names"))?,
+            "COSIGN_PASSWORD\nHOME\nPATH\n"
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        for secret in [password, key.as_str(), "stand-in key"] {
+            assert!(
+                !stderr.contains(secret),
+                "stderr shows {secret:?}: {stderr}"
+            );
+        }
+        let arguments = fs::read_to_string(dir.join("arguments"))?;
+        assert!(arguments.contains("sign-blob"), "{arguments}");
+        assert!(!arguments.contains(password), "{arguments}");
+        assert!(
+            !dir.join("runner/release-key").exists(),
+            "the key was left behind"
+        );
+        Ok(())
+    }
 
-    /// `release-sign.sh` signs only a `dist/bin` that holds exactly the names `SHA256SUMS` lists,
-    /// as regular files: a planted extra file or dotfile, a subdirectory, a symlink, a missing
-    /// binary, a duplicate line, or a line with a space or a carriage return stops it before
-    /// the key is decoded or cosign is fetched, so the key job is no signing oracle. The control,
-    /// an exact `dist`, passes that check and stops only at the wrong digest it is handed.
+    /// The signer runs in POSIX mode, where bash refuses to start when an exported function shadows
+    /// a special builtin such as `set`, and it refuses any other exported function before it reads
+    /// anything, so a planted `BASH_FUNC_echo%%` or `BASH_FUNC_set%%` can neither silence its
+    /// `set +x +v` nor stand in for a check, and a planted `compgen` that lists nothing cannot hide
+    /// another, even beside a planted `unset` that would keep it (DEC-2024 item 4). Every run is
+    /// handed what a signing needs, a stand-in cosign, a key and a password, and the control, with
+    /// nothing planted, signs all three files; each planted run stops with its own refusal on
+    /// stderr, never runs cosign and never reaches `RUNNER_TEMP` (DEC-2049 item 1).
+    #[test]
+    fn the_signer_refuses_exported_functions() -> Result<()> {
+        let script =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github/scripts/release-sign.sh");
+        let root = env::temp_dir().join(format!(
+            "mandate-xtask-signer-functions-{}",
+            std::process::id()
+        ));
+        let refused = "the environment defines shell functions; nothing is signed";
+        let echo = ("BASH_FUNC_echo%%", "() { builtin echo planted; }");
+        let compgen = ("BASH_FUNC_compgen%%", "() { :; }");
+        let cases: [(&[(&str, &str)], &str); 5] = [
+            (&[], ""),
+            (&[echo], refused),
+            (
+                &[("BASH_FUNC_set%%", "() { builtin echo planted; }")],
+                "`set': is a special builtin",
+            ),
+            (&[compgen, echo], refused),
+            (
+                &[("BASH_FUNC_unset%%", "() { :; }"), compgen, echo],
+                "`unset': is a special builtin",
+            ),
+        ];
+        for (planted, refusal) in cases {
+            let name = planted
+                .iter()
+                .map(|(n, _)| n.replace('%', ""))
+                .collect::<Vec<_>>()
+                .join("+");
+            let name = if name.is_empty() {
+                "control".to_owned()
+            } else {
+                name
+            };
+            let dir = root.join(&name);
+            let _ = fs::remove_dir_all(&dir);
+            fs::create_dir_all(dir.join("dist/bin"))?;
+            fs::write(dir.join("dist/bin/a"), "a")?;
+            fs::write(dir.join("dist/bin/b"), "b")?;
+            write_sums(&dir, SIGNER_SUMS)?;
+            let stand_in = dir.join("stand-in-cosign");
+            fs::write(&stand_in, "#!/bin/sh\necho signed >> cosign-runs\n")?;
+            let output = Command::new(&script)
+                .current_dir(&dir)
+                .env_clear()
+                .env("PATH", "/usr/bin:/bin")
+                .env("DIGEST", sha256(&dir.join("dist/SHA256SUMS"))?)
+                .env("COSIGN_URL", format!("file://{}", stand_in.display()))
+                .env("COSIGN_SHA256", sha256(&stand_in)?)
+                .env("RELEASE_SIGNING_KEY", image::base64(b"stand-in key"))
+                .env("COSIGN_PASSWORD", "stand-in password")
+                .env("RUNNER_TEMP", dir.join("runner"))
+                .envs(planted.iter().copied())
+                .output()?;
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let runs = fs::read_to_string(dir.join("cosign-runs")).unwrap_or_default();
+            if planted.is_empty() {
+                assert!(
+                    output.status.success(),
+                    "control: the signer stopped: {stderr}"
+                );
+                assert_eq!(runs, "signed\n".repeat(3), "control: cosign runs");
+                continue;
+            }
+            assert!(!output.status.success(), "{name}: the signer went on");
+            assert!(stderr.contains(refusal), "{name}: stderr is {stderr:?}");
+            assert!(
+                !stdout.contains("planted") && !stderr.contains("planted"),
+                "{name}: a planted function ran"
+            );
+            assert!(runs.is_empty(), "{name}: cosign ran");
+            assert!(
+                !stdout.contains("OK"),
+                "{name}: the signer checked the copies"
+            );
+            assert!(
+                !dir.join("runner").exists(),
+                "{name}: the signer reached RUNNER_TEMP"
+            );
+        }
+        Ok(())
+    }
+
+    /// The `SHA256SUMS` of the exact `dist` every signer case starts from: `a` and `b`, holding
+    /// the text `a` and `b`.
+    const SIGNER_SUMS: &str = concat!(
+        "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb  a\n",
+        "3e23e8160039594a33894f6564e1b1348bbd7a0088d42c4acb73eeaed59c009d  b\n",
+    );
+
+    /// One case of [`the_signer_signs_only_what_sha256sums_lists`]: its name, what it changes in
+    /// the exact `dist` under the directory it is handed, and what the signer prints as it stops.
+    type SignerCase = (&'static str, fn(&Path) -> io::Result<()>, &'static str);
+
+    fn write_sums(dir: &Path, text: &str) -> io::Result<()> {
+        fs::write(dir.join("dist/SHA256SUMS"), text)
+    }
+
+    /// `release-sign.sh` signs only a `dist` that is a real directory holding a regular
+    /// `SHA256SUMS` and a real `dist/bin` of regular files, exactly the names it lists, once
+    /// each. Every other shape stops it, with its own message, before the key is decoded or
+    /// cosign is fetched, so the key job is no signing oracle; the control, an exact `dist`,
+    /// passes every check and stops only at the wrong digest it is handed. Each stop leaves
+    /// nothing under `RUNNER_TEMP`: the verified copies it signs from are removed on exit.
     #[test]
     fn the_signer_signs_only_what_sha256sums_lists() -> Result<()> {
         let script =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github/scripts/release-sign.sh");
         let root =
             env::temp_dir().join(format!("mandate-xtask-release-sign-{}", std::process::id()));
-        let line = "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb  a\n";
-        let cases: [SignerCase<'_>; 11] = [
-            ("exact", &[("a", "a")], line, "FAILED"),
+        let not_regular = "not a regular file";
+        let malformed = "is not '<sha256>  <name>'";
+        let cases: Vec<SignerCase> = vec![
+            ("exact", |_| Ok(()), "b: OK\nSHA256SUMS: FAILED"),
+            (
+                "exact with a spaced RUNNER_TEMP",
+                |_| Ok(()),
+                "b: OK\nSHA256SUMS: FAILED",
+            ),
+            (
+                "tampered",
+                |d| fs::write(d.join("dist/bin/a"), "x"),
+                "a: FAILED",
+            ),
             (
                 "extra",
-                &[("a", "a"), ("b", "b")],
-                line,
-                "nothing is signed",
-            ),
-            ("missing", &[], line, "nothing is signed"),
-            (
-                "nested",
-                &[("a", "a"), ("sub/c", "c")],
-                line,
-                "not a regular file",
-            ),
-            (
-                "symlink",
-                &[("a", "->../SHA256SUMS")],
-                line,
-                "not a regular file",
+                |d| fs::write(d.join("dist/bin/c"), "c"),
+                "dist/bin holds c, which",
             ),
             (
                 "dotfile",
-                &[("a", "a"), (".hidden", "h")],
-                line,
-                "nothing is signed",
+                |d| fs::write(d.join("dist/bin/.h"), "h"),
+                "dist/bin holds .h, which",
+            ),
+            (
+                "missing",
+                |d| fs::remove_file(d.join("dist/bin/b")),
+                "SHA256SUMS lists a binary dist/bin does not hold",
             ),
             (
                 "duplicate",
-                &[("a", "a")],
-                &line.repeat(2),
-                "nothing is signed",
+                |d| write_sums(d, &format!("{SIGNER_SUMS}{}", &SIGNER_SUMS[..67])),
+                "SHA256SUMS lists a twice",
+            ),
+            (
+                "nested",
+                |d| {
+                    fs::create_dir(d.join("dist/bin/sub"))?;
+                    fs::write(d.join("dist/bin/sub/c"), "c")
+                },
+                not_regular,
+            ),
+            (
+                "empty-dir",
+                |d| fs::create_dir(d.join("dist/bin/sub")),
+                not_regular,
+            ),
+            (
+                "fifo",
+                |d| {
+                    let made = Command::new("mkfifo").arg(d.join("dist/bin/f")).status()?;
+                    made.success()
+                        .then_some(())
+                        .ok_or_else(|| io::Error::other("mkfifo"))
+                },
+                not_regular,
+            ),
+            (
+                "symlink-to-listed",
+                |d| {
+                    fs::remove_file(d.join("dist/bin/b"))?;
+                    symlink("a", d.join("dist/bin/b"))
+                },
+                not_regular,
+            ),
+            (
+                "symlink-outside",
+                |d| {
+                    fs::remove_file(d.join("dist/bin/b"))?;
+                    symlink("../SHA256SUMS", d.join("dist/bin/b"))
+                },
+                not_regular,
+            ),
+            (
+                "symlinked-bin",
+                |d| {
+                    fs::rename(d.join("dist/bin"), d.join("dist/real"))?;
+                    symlink("real", d.join("dist/bin"))
+                },
+                "dist/bin must be a real directory, not a symlink",
+            ),
+            (
+                "symlinked-sums",
+                |d| {
+                    fs::rename(d.join("dist/SHA256SUMS"), d.join("dist/sums"))?;
+                    symlink("sums", d.join("dist/SHA256SUMS"))
+                },
+                "dist/SHA256SUMS must be a regular file, not a symlink",
+            ),
+            (
+                "symlinked-dist",
+                |d| {
+                    fs::rename(d.join("dist"), d.join("real"))?;
+                    symlink("real", d.join("dist"))
+                },
+                "dist must be a real directory, not a symlink",
             ),
             (
                 "crlf",
-                &[("a", "a")],
-                &line.replace('\n', "\r\n"),
-                "is not '<sha256>  <name>'",
+                |d| write_sums(d, &SIGNER_SUMS.replace('\n', "\r\n")),
+                malformed,
             ),
             (
                 "space",
-                &[("a b", "a")],
-                &line.replace("  a", "  a b"),
-                "is not '<sha256>  <name>'",
+                |d| write_sums(d, &SIGNER_SUMS.replace("  b", "  b c")),
+                malformed,
             ),
             (
                 "malformed",
-                &[("a", "a")],
-                &line.replace("  a", "  a extra"),
-                "is not '<sha256>  <name>'",
+                |d| write_sums(d, &SIGNER_SUMS.replace("  a", "  a x")),
+                malformed,
             ),
-            ("empty", &[], "", "is not '<sha256>  <name>'"),
+            ("empty", |d| write_sums(d, ""), malformed),
         ];
-        for (name, files, sums, expected) in cases {
+        for (name, change, expected) in cases {
             let dir = root.join(name);
             let _ = fs::remove_dir_all(&dir);
             fs::create_dir_all(dir.join("dist/bin"))?;
-            for (path, text) in files {
-                let file = dir.join("dist/bin").join(path);
-                if let Some(parent) = file.parent() {
-                    fs::create_dir_all(parent)?;
-                }
-                match text.strip_prefix("->") {
-                    Some(target) => symlink(target, &file)?,
-                    None => fs::write(file, text)?,
-                }
-            }
-            fs::write(dir.join("dist/SHA256SUMS"), sums)?;
-            let output = Command::new("bash")
-                .arg(&script)
+            fs::write(dir.join("dist/bin/a"), "a")?;
+            fs::write(dir.join("dist/bin/b"), "b")?;
+            write_sums(&dir, SIGNER_SUMS)?;
+            change(&dir)?;
+            let runner = dir.join(if name.contains("spaced") {
+                "run ner"
+            } else {
+                "runner"
+            });
+            let output = Command::new(&script)
                 .current_dir(&dir)
                 .env_clear()
                 .env("PATH", "/usr/bin:/bin")
                 .env("DIGEST", "0".repeat(64))
-                .env("RUNNER_TEMP", dir.join("runner"))
+                .env("RUNNER_TEMP", &runner)
                 .output()?;
             let stderr = String::from_utf8_lossy(&output.stderr);
             let stdout = String::from_utf8_lossy(&output.stdout);
@@ -1998,10 +2317,12 @@ mod tests {
                 stderr.contains(expected) || stdout.contains(expected),
                 "{name}: expected {expected:?}, got {stdout:?} {stderr:?}"
             );
-            assert!(
-                !dir.join("runner").exists(),
-                "{name}: the signer reached the key"
-            );
+            for left in ["release-key", "release-tools", "release-verified"] {
+                assert!(
+                    !runner.join(left).exists(),
+                    "{name}: {left} is left or was reached"
+                );
+            }
             assert!(
                 !dir.join("signatures").exists(),
                 "{name}: the signer reached signing"
@@ -2148,6 +2469,160 @@ mod tests {
                 .find(|line| line.starts_with(&format!("| `{}` |", tool.name)))
                 .with_context(|| format!("no registry row for {}", tool.name))?;
             assert!(row.contains(tool.version), "{}: {row}", tool.name);
+        }
+        Ok(())
+    }
+
+    /// One case of [`the_signed_images_refuse_a_release_the_key_did_not_sign`]: its name, what it
+    /// changes in the release [`signed_release`] wrote under the directory it is handed, and what
+    /// the refusal must name.
+    type SignedCase = (&'static str, fn(&Path) -> io::Result<()>, &'static str);
+
+    /// Writes under `dir` a release `signed_images` accepts: `dist` holding `a` and `b` with their
+    /// `SHA256SUMS`, a signature for each and for `SHA256SUMS` in `signatures`, the public half in
+    /// `release.pub`, and in `tools` a stand-in cosign that records each call and verifies a
+    /// signature only when it starts `good` and the key holds `release key`. Returns the tools
+    /// directory and the key.
+    fn signed_release(dir: &Path) -> Result<(PathBuf, PathBuf)> {
+        let _ = fs::remove_dir_all(dir);
+        fs::create_dir_all(dir.join("dist/bin"))?;
+        fs::create_dir_all(dir.join("signatures"))?;
+        fs::create_dir_all(dir.join("tools"))?;
+        fs::write(dir.join("dist/bin/a"), "a")?;
+        fs::write(dir.join("dist/bin/b"), "b")?;
+        write_sums(dir, SIGNER_SUMS)?;
+        fs::write(dir.join("signatures/a.sig"), "good signature over a")?;
+        fs::write(dir.join("signatures/b.sig"), "good signature over b")?;
+        fs::write(
+            dir.join("signatures/SHA256SUMS.sig"),
+            "good signature over the sums",
+        )?;
+        let key = dir.join("release.pub");
+        fs::write(&key, "release key\n")?;
+        let cosign = dir.join("tools/cosign");
+        fs::write(
+            &cosign,
+            concat!(
+                "#!/bin/sh\n",
+                "printf '%s\\n' \"$*\" >> \"$(dirname \"$0\")/calls\"\n",
+                "[ \"$1\" = verify-blob ] && grep -qx 'release key' \"$4\" && grep -q '^good' \"$6\"\n",
+            ),
+        )?;
+        fs::set_permissions(&cosign, fs::Permissions::from_mode(0o755))?;
+        Ok((dir.join("tools"), key))
+    }
+
+    /// Each release-signed image holds exactly its binary and that binary's release signature,
+    /// byte for byte, as a runtime unpacks it, and every binary and `SHA256SUMS` was verified
+    /// against the committed key first (DEC-2026).
+    #[test]
+    #[ignore = "pending E21-35"]
+    fn the_signed_images_carry_each_binary_and_its_release_signature() -> Result<()> {
+        let dir = env::temp_dir().join(format!("mandate-xtask-signed-{}", std::process::id()));
+        let (tools, key) = signed_release(&dir)?;
+        let arch = Arch::host()?;
+        let images = signed_images(
+            &tools,
+            &key,
+            &dir.join("dist"),
+            &dir.join("signatures"),
+            arch,
+            "release",
+        )?;
+        let names: Vec<&str> = images.iter().map(|(name, _)| name.as_str()).collect();
+        assert_eq!(names, ["a", "b"]);
+        for (name, layout) in &images {
+            let unpacked = dir.join("unpacked").join(name);
+            image::write(layout, &unpacked.join("layout"))?;
+            image::unpack(layout, &unpacked.join("layout"), &unpacked.join("rootfs"))?;
+            let mut files: Vec<String> = fs::read_dir(unpacked.join("rootfs"))?
+                .map(|entry| Ok(entry?.file_name().to_string_lossy().into_owned()))
+                .collect::<io::Result<_>>()?;
+            files.sort();
+            assert_eq!(files, [name.clone(), format!("{name}.sig")], "{name}");
+            assert_eq!(
+                fs::read(unpacked.join("rootfs").join(name))?,
+                fs::read(dir.join("dist/bin").join(name))?,
+                "{name}: the binary"
+            );
+            assert_eq!(
+                fs::read(unpacked.join("rootfs").join(format!("{name}.sig")))?,
+                fs::read(dir.join("signatures").join(format!("{name}.sig")))?,
+                "{name}: the signature"
+            );
+        }
+        let calls = fs::read_to_string(tools.join("calls"))?;
+        let mut verified: Vec<&str> = calls
+            .lines()
+            .map(|call| {
+                assert!(
+                    call.starts_with("verify-blob ")
+                        && call.contains(&format!("--key {} ", key.display())),
+                    "{call}"
+                );
+                call.rsplit('/').next().unwrap_or_default()
+            })
+            .collect();
+        verified.sort_unstable();
+        assert_eq!(verified, ["SHA256SUMS", "a", "b"]);
+        Ok(())
+    }
+
+    /// A release the key did not sign builds no image: a signature by another key, a missing one,
+    /// one over `SHA256SUMS` that does not verify, or a binary `SHA256SUMS` does not list each
+    /// stops `signed_images` with a refusal naming it, so `publish-signed` never signs in to the
+    /// registry or pushes (DEC-2026).
+    #[test]
+    #[ignore = "pending E21-35"]
+    fn the_signed_images_refuse_a_release_the_key_did_not_sign() -> Result<()> {
+        let root = env::temp_dir().join(format!(
+            "mandate-xtask-signed-refusals-{}",
+            std::process::id()
+        ));
+        let cases: Vec<SignedCase> = vec![
+            (
+                "a's signature is not the key's",
+                |d| fs::write(d.join("signatures/a.sig"), "bad"),
+                "a.sig",
+            ),
+            (
+                "b has no signature",
+                |d| fs::remove_file(d.join("signatures/b.sig")),
+                "b.sig",
+            ),
+            (
+                "the sums' signature is not the key's",
+                |d| fs::write(d.join("signatures/SHA256SUMS.sig"), "bad"),
+                "SHA256SUMS.sig",
+            ),
+            (
+                "b is not the binary SHA256SUMS lists",
+                |d| fs::write(d.join("dist/bin/b"), "x"),
+                "b is not the binary SHA256SUMS lists",
+            ),
+            (
+                "another key",
+                |d| fs::write(d.join("release.pub"), "another key\n"),
+                "verify-blob",
+            ),
+        ];
+        for (name, change, refusal) in cases {
+            let dir = root.join(name.replace(' ', "-"));
+            let (tools, key) = signed_release(&dir)?;
+            change(&dir)?;
+            let result = signed_images(
+                &tools,
+                &key,
+                &dir.join("dist"),
+                &dir.join("signatures"),
+                Arch::host()?,
+                "release",
+            );
+            let Err(err) = result else {
+                panic!("{name}: images were built");
+            };
+            let err = format!("{err:#}");
+            assert!(err.contains(refusal), "{name}: refused with {err:?}");
         }
         Ok(())
     }

@@ -10,17 +10,21 @@ use std::process::{Command, ExitCode, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, bail, ensure};
 use serde::Deserialize;
 
+mod admission_drill;
 mod cell;
 mod gitops;
 mod image;
 mod infra_preflight;
+mod infra_verify;
+mod infra_window;
 mod leak;
 mod mail;
 mod mask;
 mod mutant_costs;
+mod promote;
 mod release;
 mod tofu_audit;
 
@@ -79,6 +83,10 @@ commands:
   release publish-index <out>
                         push and sign the multi-arch index over every arch's published images
                         (main only, from CI, after each arch's publish)
+  release publish-signed <dist> <signatures> <out>
+                        verify every release signature against the committed key, then push this
+                        arch's images with them as signed-<commit>-<arch> (dispatch from main,
+                        from CI; DEC-2026)
   release publish-charts <out>
                         package the hosted clusters' charts, push them to GHCR and sign each
                         digest keyless (main only, from CI; E21-58)
@@ -87,9 +95,14 @@ commands:
                         sync.yaml (the founder's terminal only; deploy/gitops/BOOTSTRAP.md, E21-58)
   gitops secrets <staging|production>
                         write the workload secrets alone (the founder's terminal only)
+  gitops promote staging <dir>
+                        rewrite staging's chart digests and images from a main release run's
+                        CHARTS and PUBLISHED in <dir> (E21-58, DEC-2016)
+  gitops promote production
+                        copy staging's chart digests and images into production (DEC-2016)
   cell up               build this change's images, bring up the local k3d cell, install the
                         workspace chart (deploy/cell/README.md)
-  cell drill [--seeded] [boot|journal|egress|compose|restart|kill-switch|standby-down|archive]...
+  cell drill [--seeded] [boot|journal|egress|compose|restart|kill-switch|admission|standby-down|archive]...
                         run the cell's drills; --seeded plants each drill's bug and fails if a
                         drill still holds
   cell demo [--no-web]  the full local cell for a laptop: up, the demo workspace verified, what is
@@ -319,11 +332,25 @@ fn run() -> Result<()> {
             release::publish(&root, Path::new(dist), Path::new(out))
         }
         ["release", "publish-index", out] => release::publish_index(&root, Path::new(out)),
+        ["release", "publish-signed", dist, signatures, out] => release::publish_signed(
+            &root,
+            Path::new(dist),
+            Path::new(signatures),
+            Path::new(out),
+        ),
         ["infra"] => infra(),
         ["infra", "close"] => infra_close(),
         ["release", "publish-charts", out] => release::publish_charts(&root, Path::new(out)),
         ["gitops", "bootstrap", environment] => {
             gitops::bootstrap(&root, gitops::Environment::parse(environment)?)
+        }
+        ["gitops", "promote", "staging", published] => promote::promote(
+            &root,
+            gitops::Environment::Staging,
+            Some(Path::new(published)),
+        ),
+        ["gitops", "promote", "production"] => {
+            promote::promote(&root, gitops::Environment::Production, None)
         }
         ["gitops", "secrets", environment] => {
             gitops::secrets(gitops::Environment::parse(environment)?)
@@ -353,6 +380,7 @@ fn run() -> Result<()> {
                     .chain(cell::JOURNAL_DRILLS)
                     .chain(cell::FAILOVER_DRILLS)
                     .chain(cell::KILL_SWITCH_DRILLS)
+                    .chain(cell::VAULT_DRILLS)
                     .collect()
             } else {
                 names
@@ -392,7 +420,10 @@ fn ci(job: &str) -> Result<()> {
         "cell-demo" => cell::scenario::ci(),
         "cell-journal" => cell::ci_drills(job, &cell::JOURNAL_DRILLS),
         "cell-failover" => cell::ci_drills(job, &cell::FAILOVER_DRILLS),
-        "cell-kill-switch" => cell::ci_drills(job, &cell::KILL_SWITCH_DRILLS),
+        "cell-kill-switch" => cell::ci_drills(
+            job,
+            &[&cell::KILL_SWITCH_DRILLS[..], &cell::VAULT_DRILLS[..]].concat(),
+        ),
         "refcases" => refcases(false),
         "reference" => {
             reference(&["mandate/generate.py"])?;
@@ -1284,8 +1315,9 @@ const INFRA_CLOSE_IF: &str = "      - if: always() && steps.build.outcome == 'su
 /// through cargo: [`INFRA_RUN`]'s and [`INFRA_CLOSE`]'s, which an earlier step of the same job
 /// built from the checkout with `cargo build --locked --package xtask`.
 const INFRA_BINARY_ARGS: [&[&str]; 2] = [&["infra"], &["infra", "close"]];
-/// The one secret [`INFRA_CLOSE`]'s step may read.
-const INFRA_CLOSE_SECRET: &str = "DIGITAL_OCEAN_API_KEY";
+/// The only secrets [`INFRA_CLOSE`]'s step may read: the DigitalOcean token, to delete the run's
+/// Spaces key and close the window, and the founder's CIDRs, which the closed window keeps.
+const INFRA_CLOSE_SECRETS: [&str; 2] = ["DIGITAL_OCEAN_API_KEY", "KUBE_API_ALLOWED_CIDRS"];
 /// The secrets that step reads, each from the environment `infra-<environment>` the founder
 /// approves; no other workflow, job or step may name one (ES-12, DEC-2014). The Spaces key is
 /// minted per run, never stored (DEC-2030 item 4). The Cloudflare token goes to OpenTofu as a
@@ -1389,12 +1421,20 @@ fn infra() -> Result<()> {
     if run.is_empty() || !run.chars().all(|c| c.is_ascii_digit()) {
         bail!("GITHUB_RUN_ID must be the run's number, which names its Spaces key");
     }
-    let sha = env::var(INFRA_SHA_ENV).unwrap_or_default();
-    reviewed_commit(
-        &sha,
+    let named = env::var(INFRA_SHA_ENV).unwrap_or_default();
+    let sha = run_commit(
+        &action,
+        &named,
         &env::var("GITHUB_SHA").unwrap_or_default(),
         &head_commit()?,
     )?;
+    eprintln!("==> infra {action} of {environment} at commit {sha}");
+    if named.is_empty() {
+        eprintln!(
+            "    no sha was given, so this run uses the commit main was at when it started; to \
+             apply this plan, dispatch apply with sha={sha} (DEC-2042)"
+        );
+    }
     let work = repo_root()?.join("target").join("tofu");
     fs::create_dir_all(&work).with_context(|| format!("creating {}", work.display()))?;
     let plan_file = work.join(format!("{environment}.tfplan"));
@@ -1407,21 +1447,92 @@ fn infra() -> Result<()> {
     let read = |name: &str| env::var(name).ok();
     let preflight = infra_preflight::preflight(&environment, &run, !commands.is_empty(), &read)?;
     eprint!("{}", preflight.checklist.render(&environment));
+    let mut window = None;
     let outcome = if preflight.checklist.complete() {
-        run_tofu(&commands, preflight.key.key(), &sha, &plan_file)
+        match opens_window(&environment, &action)
+            .then(|| infra_window::open_window(&infra_window::Curl))
+            .transpose()
+        {
+            Ok(opened) => {
+                window = opened;
+                run_tofu(
+                    &commands,
+                    preflight.key.key(),
+                    &sha,
+                    &plan_file,
+                    window.as_deref(),
+                    &run,
+                )
+            }
+            Err(error) => Err(error),
+        }
     } else {
         Err(anyhow::anyhow!(
             "infra preflight: each MISSING line above is a step in deploy/tofu/README.md; nothing \
              was planned"
         ))
     };
-    if !preflight.key.release()? {
-        bail!(
+    let closed = window.is_some().then(|| {
+        let token = env::var("DIGITALOCEAN_TOKEN").unwrap_or_default();
+        let founder = env::var(infra_preflight::KUBE_CIDRS_ENV).ok();
+        infra_window::close_window(
+            &infra_window::Curl,
+            &token,
+            &environment,
+            founder.as_deref(),
+        )
+    });
+    let applied = outcome.is_ok();
+    let keys = match preflight.key.release() {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(anyhow::anyhow!(
             "this run's Spaces key was not deleted; `infra close` and the next run of \
              {environment} delete it (DEC-2030 item 4)"
-        );
+        )),
+        Err(error) => Err(error),
+    };
+    settle(outcome, closed, applied, keys)
+}
+
+/// How a run that may have opened a window ends (the review of #1771, B1 and B2): the window's
+/// close and the Spaces key's deletion are each attempted and reported, whatever came before, and
+/// the first error is returned. A close reports the window closed only when the cluster was read
+/// back admitting exactly the closed addresses, or had no such cluster when none was expected;
+/// `cluster_expected` makes a missing cluster an error, as after a successful apply.
+fn settle(
+    outcome: Result<()>,
+    closed: Option<Result<infra_window::Window>>,
+    cluster_expected: bool,
+    keys: Result<()>,
+) -> Result<()> {
+    let window = match closed {
+        None => Ok(()),
+        Some(Ok(infra_window::Window::Closed | infra_window::Window::AlreadyClosed)) => {
+            eprintln!("    the control plane's window is closed (DEC-2028 item 3)");
+            Ok(())
+        }
+        Some(Ok(infra_window::Window::NoCluster)) if !cluster_expected => {
+            eprintln!("    no cluster exists, so no window is open (DEC-2028 item 3)");
+            Ok(())
+        }
+        Some(Ok(infra_window::Window::NoCluster)) => Err(anyhow::anyhow!(
+            "the apply succeeded but DigitalOcean lists no such cluster, so the window's close \
+             could not be confirmed"
+        )),
+        Some(Err(error)) => Err(error),
     }
-    outcome
+    .context("the control plane's window may be open; `infra close` and the next run close it");
+    let mut first = None;
+    for result in [outcome, window, keys] {
+        if let Err(error) = result {
+            if first.is_some() {
+                eprintln!("    also: {error:#}");
+            } else {
+                first = Some(error);
+            }
+        }
+    }
+    first.map_or(Ok(()), Err)
 }
 
 /// The dispatch's `sha` input, which the founder approves the run for (the audit's item 5).
@@ -1460,6 +1571,32 @@ fn reviewed_commit(sha: &str, run_sha: &str, head: &str) -> Result<()> {
     Ok(())
 }
 
+/// The commit a run proceeds at (DEC-2042). With `sha` given, [`reviewed_commit`] holds: it must
+/// be the run's commit and the checkout. With `sha` empty, `preflight` and `plan` proceed at the
+/// checkout, once it is the run's commit and a full commit, since main moves between the founder
+/// reading a commit and dispatching; `apply` never does, so an apply still binds to the commit the
+/// founder named. An action other than those three is refused first, whatever `sha` is.
+fn run_commit(action: &str, sha: &str, run_sha: &str, head: &str) -> Result<String> {
+    if !matches!(action, "preflight" | "plan" | "apply") {
+        bail!("no infra action {action:?} (DEC-2042)");
+    }
+    if !sha.is_empty() {
+        reviewed_commit(sha, run_sha, head)?;
+        return Ok(sha.to_owned());
+    }
+    if action == "apply" {
+        bail!(
+            "apply needs {INFRA_SHA_ENV}, the full commit you reviewed, so the approval binds to \
+             it; plan first and dispatch apply naming the commit the plan printed (DEC-2042)"
+        );
+    }
+    reviewed_commit(head, run_sha, head).context(
+        "no sha was given, so the run proceeds at the checkout, which must be the run's full \
+         commit (DEC-2042)",
+    )?;
+    Ok(head.to_owned())
+}
+
 /// The paths a change to which changes what `infra.yml` does: the OpenTofu tree, the workflow, and
 /// everything the secret-holding binary is built from.
 const INFRA_PATHS: [&str; 7] = [
@@ -1472,10 +1609,11 @@ const INFRA_PATHS: [&str; 7] = [
     ".cargo/",
 ];
 
-/// `cargo xtask infra close` (DEC-2030 item 4): `infra.yml`'s last step, which runs `if:
-/// always()` with only the DigitalOcean token, deletes every Spaces key this environment's runs
-/// minted, so a run killed before its own guard ran leaves none. Like `infra`, it runs only in
-/// that job on `main`.
+/// `cargo xtask infra close` (DEC-2030 item 4, DEC-2028 item 3): `infra.yml`'s last step, which
+/// runs `if: always()` with only the DigitalOcean token and the founder's CIDRs, closes staging's
+/// window first and then deletes every Spaces key this environment's runs minted, each attempted
+/// whatever the other did, so a run killed before its own guard ran leaves neither. Like `infra`,
+/// it runs only in that job on `main`.
 fn infra_close() -> Result<()> {
     let actions = env::var("GITHUB_ACTIONS").unwrap_or_default();
     let reference = env::var("GITHUB_REF").unwrap_or_default();
@@ -1488,8 +1626,113 @@ fn infra_close() -> Result<()> {
         eprintln!("    infra close: DIGITAL_OCEAN_API_KEY is not set, so no key was minted");
         return Ok(());
     }
-    let deleted = infra_preflight::close(&environment, &token)?;
-    eprintln!("    infra close: deleted {deleted} Spaces key(s) this environment's runs minted");
+    let closed = opens_window(&environment, "apply").then(|| {
+        let founder = env::var(infra_preflight::KUBE_CIDRS_ENV).ok();
+        for value in tofu_audit::list_items(founder.as_deref().unwrap_or_default()) {
+            mask::add_mask(&value);
+        }
+        infra_window::close_window(
+            &infra_window::Curl,
+            &token,
+            &environment,
+            founder.as_deref(),
+        )
+    });
+    let keys = infra_preflight::close(&environment, &token).map(|deleted| {
+        eprintln!(
+            "    infra close: deleted {deleted} Spaces key(s) this environment's runs minted"
+        );
+    });
+    settle(Ok(()), closed, false, keys)
+}
+
+/// Whether `action` on `environment` opens the control plane to its own runner and bootstraps
+/// the cluster (DEC-2028): an `apply` on staging, the one environment lane GO's bootstrap runs in
+/// from CI today.
+fn opens_window(environment: &str, action: &str) -> bool {
+    environment == "staging" && action == "apply"
+}
+
+/// Lane GO's bootstrap after staging's apply (DEC-2018 item 7, DEC-2028), then its verify
+/// (DEC-2050), which reads staging until it is up and fails the run if it never is: the workload secrets
+/// from OpenTofu's outputs, each wrapped in a [`gitops::Secret`], which masks it, the moment it is
+/// read; a kubeconfig that expires in 900 seconds, at mode 0600 in `$RUNNER_TEMP` and deleted
+/// however the bootstrap ends; and the bootstrap itself, which confirms the context first.
+fn bootstrap_staging(tofu: &dyn Fn(&[String]) -> Command, chdir: &str, run: &str) -> Result<()> {
+    let output = |name: &str| -> Result<String> {
+        let out = tofu(&[
+            chdir.to_owned(),
+            "output".to_owned(),
+            "-no-color".to_owned(),
+            "-raw".to_owned(),
+            name.to_owned(),
+        ])
+        .output()
+        .context("starting `tofu`")?;
+        if !out.status.success() {
+            bail!("`tofu output {name}` failed");
+        }
+        String::from_utf8(out.stdout)
+            .ok()
+            .with_context(|| format!("`tofu output {name}` is not UTF-8"))
+    };
+    let secrets = gitops::WorkloadSecrets {
+        archive_access_key_id: gitops::Secret::new(output("archive_access_key_id")?),
+        archive_secret_access_key: gitops::Secret::new(output("archive_secret_access_key")?),
+        tunnel_token: gitops::Secret::new(output("tunnel_token")?),
+        archive_endpoint: gitops::Secret::new(output("archive_endpoint")?),
+    };
+    let cluster_id = output("cluster_id")?;
+    let token = env::var("DIGITALOCEAN_TOKEN").unwrap_or_default();
+    let temp = env::var("RUNNER_TEMP").context("RUNNER_TEMP is not set")?;
+    let (_, context) = infra_window::cluster_names("staging");
+    let kubeconfig = infra_window::fetch_kubeconfig(
+        &infra_window::Curl,
+        &token,
+        cluster_id.trim(),
+        &context,
+        Path::new(&temp),
+        run,
+    )?;
+    gitops::bootstrap_from_infra(
+        &repo_root()?,
+        gitops::Environment::Staging,
+        kubeconfig.path(),
+        &context,
+        &secrets,
+    )?;
+    let account = output("cloudflare_account_id")?;
+    mask::add_mask(account.trim());
+    let (tunnel_id, api_hostname) = (output("tunnel_id")?, output("api_hostname")?);
+    mask::add_mask(tunnel_id.trim());
+    let get = |args: &[&str]| -> Result<String> {
+        let out = gitops::tool("kubectl")
+            .args(["--v=0", "--kubeconfig"])
+            .arg(kubeconfig.path())
+            .args(["--context", &context, "--request-timeout=30s", "get"])
+            .args(args)
+            .output()
+            .context("starting kubectl")?;
+        ensure!(out.status.success(), "kubectl get failed");
+        String::from_utf8(out.stdout).context("kubectl printed non-UTF-8")
+    };
+    let cloudflare_token = env::var("TF_VAR_cloudflare_api_token").unwrap_or_default();
+    let checklist = infra_verify::verify(
+        &get,
+        &infra_window::Curl,
+        &infra_verify::Edge {
+            cloudflare_token: &cloudflare_token,
+            account: account.trim(),
+            tunnel_id: tunnel_id.trim(),
+            api_hostname: api_hostname.trim(),
+        },
+    )?;
+    eprint!("{}", checklist.render_titled("infra verify (staging)"));
+    ensure!(
+        checklist.complete(),
+        "staging is not up after {} seconds: each MISSING line above names what is not (DEC-2050)",
+        infra_verify::SECONDS
+    );
     Ok(())
 }
 
@@ -1506,6 +1749,8 @@ fn run_tofu(
     key: Option<&infra_preflight::SpacesKey>,
     sha: &str,
     plan_file: &Path,
+    window: Option<&str>,
+    run: &str,
 ) -> Result<()> {
     let tofu = |args: &[String]| {
         let mut command = Command::new("tofu");
@@ -1513,6 +1758,9 @@ fn run_tofu(
             .args(args)
             .env("TF_IN_AUTOMATION", "1")
             .env("TF_VAR_commit_sha", sha);
+        if let Some(window) = window {
+            command.env("TF_VAR_bootstrap_runner_cidr", window);
+        }
         if let Some(key) = key {
             for name in ["SPACES_ACCESS_KEY_ID", "AWS_ACCESS_KEY_ID"] {
                 command.env(name, &key.access_key);
@@ -1557,7 +1805,13 @@ fn run_tofu(
                     eprintln!("      {line}");
                 }
             }
-            Some("apply") => eprintln!("    applied exactly the plan above"),
+            Some("apply") => {
+                eprintln!("    applied exactly the plan above");
+                if window.is_some() {
+                    bootstrap_staging(&tofu, &chdir, run)?;
+                    eprintln!("    the cluster is bootstrapped (lane GO, DEC-2018)");
+                }
+            }
             _ => {}
         }
     }
@@ -1801,6 +2055,10 @@ const BACKSLASH_WORKFLOW_LINES: &[(&str, &str)] = &[
         r##"if printf '%s\n' "$out" | grep -q '^merged as '; then"##,
     ),
     (
+        ".github/workflows/ci.yml",
+        r##"run: grep -rls 'packages\.microsoft\.com' /etc/apt/sources.list /etc/apt/sources.list.d/ | tee /dev/stderr | xargs -r sudo rm -f"##,
+    ),
+    (
         ".github/workflows/web-e2e.yml",
         r##"run: grep -rls 'packages\.microsoft\.com' /etc/apt/sources.list /etc/apt/sources.list.d/ | tee /dev/stderr | xargs -r sudo rm -f"##,
     ),
@@ -2030,7 +2288,7 @@ fn infra_workflow_problems(files: &[CiFile]) -> Vec<String> {
         let allowed: &[&str] = if running == [at] {
             &INFRA_SECRETS
         } else if closing == [at] {
-            &[INFRA_CLOSE_SECRET]
+            &INFRA_CLOSE_SECRETS
         } else {
             &[]
         };
@@ -2040,8 +2298,9 @@ fn infra_workflow_problems(files: &[CiFile]) -> Vec<String> {
         {
             fail(&format!(
                 "only the step that runs `{INFRA_RUN}` may read a secret, and only {}; the \
-                 closing step reads {INFRA_CLOSE_SECRET} alone",
-                INFRA_SECRETS.join(", ")
+                 closing step reads {} alone",
+                INFRA_SECRETS.join(", "),
+                INFRA_CLOSE_SECRETS.join(" and ")
             ));
         }
     }
@@ -2392,6 +2651,9 @@ struct Selection {
     /// selection holds a crate the cell's images hold ([`cell::IMAGE_PACKAGES`]), which it does
     /// whenever any crate those are built on changed.
     cell: bool,
+    /// Whether `cell-demo-web` runs: the cell jobs do, or a path under `web/` other than its
+    /// Markdown changed, since the job drives `web/` against the cell (DEC-2609 item 5).
+    cell_web: bool,
 }
 
 impl Selection {
@@ -2405,6 +2667,7 @@ impl Selection {
             schema_mutants: true,
             tofu: true,
             cell: true,
+            cell_web: true,
         }
     }
 
@@ -2441,8 +2704,8 @@ impl Selection {
         };
         format!(
             "{scope}; tests {}; python {}; portable and rh-sim-live {}; full-checks {} \
-             (tofu {}); schema-mutants {}; cell {}; lint, the spec guard and mutants run as always \
-             (DEC-1190)",
+             (tofu {}); schema-mutants {}; cell {}; cell-demo-web {}; lint, the spec guard and \
+             mutants run as always (DEC-1190)",
             yes(self.tests()),
             yes(self.python),
             yes(self.runner()),
@@ -2450,6 +2713,7 @@ impl Selection {
             yes(self.tofu),
             yes(self.schema_mutants),
             yes(self.cell),
+            yes(self.cell_web),
         )
     }
 
@@ -2458,7 +2722,7 @@ impl Selection {
     fn outputs(&self) -> String {
         format!(
             "tests={}\npython={}\nportable={}\nrh_sim_live={}\nfull_checks={}\nschema_mutants={}\n\
-             cell={}\nreasons={}\n",
+             cell={}\ncell_web={}\nreasons={}\n",
             self.tests(),
             self.python,
             self.runner(),
@@ -2466,6 +2730,7 @@ impl Selection {
             self.full_checks,
             self.schema_mutants,
             self.cell,
+            self.cell_web,
             self.reasons(),
         )
     }
@@ -2497,6 +2762,7 @@ fn select(
     let mut schema_mutants = false;
     let mut tofu = false;
     let mut cell = false;
+    let mut web_changed = false;
     for path in changed {
         if selects_everything(path) {
             return Selection::everything(graph, format!("{path} changed"));
@@ -2530,6 +2796,7 @@ fn select(
             .any(|entry| path_under(path, entry));
         tofu |= path_under(path, TOFU_DIR) && !docs;
         cell |= CELL_INPUTS.iter().any(|entry| path_under(path, entry));
+        web_changed |= web && !path.ends_with(".md");
     }
     let mut crates = dependents_closure(graph, &seeds);
     loop {
@@ -2562,6 +2829,7 @@ fn select(
         schema_mutants,
         tofu,
         cell,
+        cell_web: cell || web_changed,
     }
 }
 
@@ -2828,6 +3096,8 @@ struct Finding {
 /// "Amazon's documented SigV4 example key ID" exception: that exact value, in that file alone. The
 /// ULID rows prove the API server's process-test exception: a workspace or organization ULID is
 /// allowed in that test file alone, and any other value under the same setting there is reported.
+/// The build-output rows prove the `target/` exception: a key under the workspace root's `target/`
+/// is allowed, and the same key under a crate's own `target` or under `targets/` is reported.
 fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
     let page = concat!(
         "U1BZfDIwMjYtMDktMjRUMTQ6MDA6",
@@ -2879,7 +3149,19 @@ fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
         "  \"webauthn_challenge\": \"{}\",",
         concat!("zz3vEjRWeJCrze8SNFZ4kKvN7xI0", "VniQq83vEjRWeJA")
     );
+    let built = format!("  \"api-key\": \"{page}\",");
     vec![
+        (
+            "target/debug/deps/planted.rmeta".to_owned(),
+            built.clone(),
+            None,
+        ),
+        (
+            "crates/planted/target/notes.txt".to_owned(),
+            built.clone(),
+            generic,
+        ),
+        ("targets/notes.txt".to_owned(), built, generic),
         (signer.to_owned(), example.clone(), None),
         (signer.to_owned(), near_example, Some("alpaca-key-id")),
         (
@@ -5063,6 +5345,23 @@ const READ_LINES: &[(&str, &str)] = &[
         ".github/workflows/web-deploy.yml",
         "node_modules/.bin/wrangler deploy",
     ),
+    (".github/workflows/ci.yml", "npm ci --ignore-scripts"),
+    (
+        ".github/workflows/ci.yml",
+        r##"echo "version=$(node -p 'require("@playwright/test/package.json").version')" | tee -a "$GITHUB_OUTPUT""##,
+    ),
+    (
+        ".github/workflows/ci.yml",
+        r##"grep -rls 'packages\.microsoft\.com' /etc/apt/sources.list /etc/apt/sources.list.d/ | tee /dev/stderr | xargs -r sudo rm -f"##,
+    ),
+    (
+        ".github/workflows/ci.yml",
+        "npx playwright install --with-deps --only-shell chromium",
+    ),
+    (
+        ".github/workflows/ci.yml",
+        "npx playwright install-deps chromium",
+    ),
 ];
 
 /// The repository scripts a workflow may run, by the exact command word that runs them, each only
@@ -5122,6 +5421,8 @@ const READ_ENV_NAMES: &[&str] = &[
     "DO_NOT_TRACK",
     "EVENT",
     "FAST_RESULT",
+    "FLUX_SHA256",
+    "FLUX_VERSION",
     "FULL_CHECKS_RESULT",
     "FULL_CHECKS_SELECTED",
     "FULL_RESULT",
@@ -5130,6 +5431,10 @@ const READ_ENV_NAMES: &[&str] = &[
     "GITLEAKS_VERSION",
     "HELM_SHA256",
     "HELM_VERSION",
+    "FLUX_SHA256",
+    "FLUX_VERSION",
+    "KUBECTL_SHA256",
+    "KUBECTL_VERSION",
     "IMPECCABLE_NO_TELEMETRY",
     "K3D_SHA256",
     "K3D_VERSION",
@@ -5141,6 +5446,8 @@ const READ_ENV_NAMES: &[&str] = &[
     "MANDATE_MUTANTS_PLANNED",
     "MANDATE_CELL_HELM_REQUIRED",
     "MANDATE_CELL_REQUIRED",
+    "MANDATE_DEMO_WEB_REQUIRED",
+    "MANDATE_GITOPS_REQUIRED",
     "MANDATE_MUTANT_SHARD",
     "MANDATE_OPENBAO_ADDR",
     "MANDATE_OPENBAO_CA",
@@ -15379,6 +15686,49 @@ mod tests {
         Ok(())
     }
 
+    /// DEC-2611 (amending DEC-2606): CodeQL's pushes to `main` share one group in which a started
+    /// analysis finishes and a newer push replaces only the one waiting, so the latest commit,
+    /// which holds every earlier one, is always analysed; a pull request's runs cancel the older
+    /// run of their ref; the weekly schedule has a group of its own.
+    #[test]
+    fn codeql_runs_one_analysis_of_main_at_a_time_and_skips_documentation_pull_requests()
+    -> Result<()> {
+        let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/codeql.yml"))?;
+        assert!(
+            workflow.contains(
+                "concurrency:\n  group: codeql-${{ github.event_name == 'schedule' && \
+                 github.run_id || github.ref }}\n  cancel-in-progress: ${{ github.event_name == \
+                 'pull_request' }}\n"
+            ),
+            "pushes to main share codeql-refs/heads/main and are never cancelled once started, a \
+             pull request's runs cancel their older run, and the schedule has its own group \
+             (DEC-2611)"
+        );
+        assert!(
+            workflow.contains("  push:\n    branches: [ \"main\" ]\n  pull_request:\n"),
+            "every push to main is still analysed, whatever it changes (DEC-2606 item 3, DEC-2613)"
+        );
+        assert!(
+            workflow.contains(
+                "  pull_request:\n    branches: [ \"main\" ]\n    types: [opened, synchronize, \
+                 reopened, ready_for_review]\n    paths-ignore:\n      - \"docs/**\"\n      - \
+                 \"**/*.md\"\n"
+            ),
+            "a pull request is analysed unless every path it changes is documentation (DEC-2613)"
+        );
+        assert_eq!(
+            workflow.matches("paths-ignore:").count(),
+            1,
+            "only the pull request trigger skips documentation; push and the schedule never do \
+             (DEC-2613)"
+        );
+        assert!(
+            workflow.contains("  schedule:\n    - cron: '42 2 * * 1'\n"),
+            "the weekly analysis stays (DEC-2606 item 3)"
+        );
+        Ok(())
+    }
+
     /// DEC-610: a draft runs no `ci` job. `select`, `fast-lint` and the mutation plan are skipped
     /// while the pull request is a draft, the scoped jobs follow `select` (DEC-1190) and the matrix
     /// its plan, `fast` and `full` are skipped too rather than judging skipped jobs, the failure
@@ -15984,7 +16334,7 @@ mod tests {
     }
 
     /// The jobs `select` scopes, each with the output that starts it (DEC-1190 item 2).
-    const SELECT_GATES: [(&str, &str); 12] = [
+    const SELECT_GATES: [(&str, &str); 13] = [
         ("fast-test", "tests"),
         ("fast-pending", "tests"),
         ("fast-python", "python"),
@@ -15994,6 +16344,7 @@ mod tests {
         ("schema-mutants", "schema_mutants"),
         ("cell", "cell"),
         ("cell-demo", "cell"),
+        ("cell-demo-web", "cell_web"),
         ("cell-journal", "cell"),
         ("cell-failover", "cell"),
         ("cell-kill-switch", "cell"),
@@ -16528,6 +16879,170 @@ mod tests {
         Ok(())
     }
 
+    /// DEC-2028 (F2): staging's apply opens the window only after its address is masked, opens
+    /// it in the plan the founder approved, bootstraps only after that plan is applied, wraps every
+    /// workload secret before anything else holds it, and closes the window after `tofu` however
+    /// it ended; `infra close` closes it again. Read from the source, since all of it runs only in
+    /// `infra.yml`'s job.
+    #[test]
+    fn the_window_opens_masked_and_always_closes() {
+        let source = include_str!("main.rs");
+        let body = |head: &str| {
+            source
+                .split(head)
+                .nth(1)
+                .and_then(|rest| rest.split("\n}\n").next())
+                .unwrap_or_default()
+                .to_owned()
+        };
+        let infra = body("\nfn infra() -> Result<()> {");
+        let at = |text: &str, needle: &str| text.find(needle);
+        let open = at(&infra, "infra_window::open_window");
+        let run = at(&infra, "window = opened;\n                run_tofu(");
+        let close = at(&infra, "infra_window::close_window(");
+        assert!(
+            open.is_some() && open < run,
+            "the window is opened, and masked, before tofu runs"
+        );
+        assert!(
+            run.is_some() && run < close,
+            "the window is closed after tofu, however it ended"
+        );
+        assert!(
+            at(&infra, "opens_window(&environment, &action)").is_some(),
+            "only staging's apply opens a window"
+        );
+        let tofu = body("\nfn run_tofu(");
+        assert!(
+            at(
+                &tofu,
+                "command.env(\"TF_VAR_bootstrap_runner_cidr\", window);"
+            )
+            .is_some(),
+            "the window reaches tofu as the variable the doks module validates"
+        );
+        let apply = at(&tofu, "applied exactly the plan above");
+        let bootstrap = at(&tofu, "bootstrap_staging(&tofu, &chdir, run)?;");
+        assert!(
+            apply.is_some() && apply < bootstrap,
+            "the bootstrap follows the applied plan"
+        );
+        let staging = body("\nfn bootstrap_staging(");
+        let wrapped = staging.matches("gitops::Secret::new(output(").count();
+        assert_eq!(
+            wrapped, 4,
+            "each workload secret, and the archive endpoint, is wrapped as it is read"
+        );
+        let kubeconfig = at(&staging, "infra_window::fetch_kubeconfig(");
+        let last_secret = staging.rfind("gitops::Secret::new(output(");
+        assert!(
+            last_secret < kubeconfig && kubeconfig < at(&staging, "gitops::bootstrap_from_infra("),
+            "the kubeconfig is fetched after the secrets are wrapped and before the bootstrap"
+        );
+        let account = at(&staging, "mask::add_mask(account.trim());");
+        let verify = at(&staging, "infra_verify::verify(");
+        assert!(
+            at(&staging, "gitops::bootstrap_from_infra(") < account
+                && account < verify
+                && verify < at(&staging, "ensure!(\n        checklist.complete()"),
+            "staging is verified after its bootstrap, with the account masked first, and an \
+             incomplete verify fails the run (DEC-2050)"
+        );
+        let close_step = body("\nfn infra_close() -> Result<()> {");
+        let masks = at(&close_step, "mask::add_mask(&value);");
+        let closes = at(&close_step, "infra_window::close_window(");
+        assert!(
+            masks.is_some() && masks < closes,
+            "`infra close` masks the CIDRs, then closes"
+        );
+        let keys = at(&close_step, "infra_preflight::close(");
+        assert!(
+            keys.is_some()
+                && closes < keys
+                && !close_step[closes.unwrap_or_default()..].contains(")?;"),
+            "`infra close` closes the window before the keys, and no error skips either"
+        );
+        assert!(super::opens_window("staging", "apply"));
+        for (environment, action) in [
+            ("staging", "plan"),
+            ("staging", "preflight"),
+            ("production", "apply"),
+        ] {
+            assert!(
+                !super::opens_window(environment, action),
+                "{environment} {action} opens nothing"
+            );
+        }
+    }
+
+    /// The review of #1771, B1 and B2: every close is attempted and the first error is returned; a
+    /// window is reported closed only when it was, and a missing cluster after an apply is an
+    /// error.
+    #[test]
+    fn a_run_settles_every_close_and_keeps_the_first_error() {
+        fn fail<T>(text: &str) -> Result<T> {
+            Err(anyhow::anyhow!("{text}"))
+        }
+        let message = |result: Result<()>| result.err().map(|error| format!("{error:#}"));
+        assert!(super::settle(Ok(()), None, true, Ok(())).is_ok());
+        for closed in [
+            super::infra_window::Window::Closed,
+            super::infra_window::Window::AlreadyClosed,
+        ] {
+            assert!(super::settle(Ok(()), Some(Ok(closed)), true, Ok(())).is_ok());
+        }
+        assert!(
+            super::settle(
+                Ok(()),
+                Some(Ok(super::infra_window::Window::NoCluster)),
+                false,
+                Ok(())
+            )
+            .is_ok()
+        );
+        let missing = message(super::settle(
+            Ok(()),
+            Some(Ok(super::infra_window::Window::NoCluster)),
+            true,
+            Ok(()),
+        ));
+        assert!(
+            missing.is_some_and(|text| text.contains("lists no such cluster")),
+            "a missing cluster after an apply is an error"
+        );
+        let open = message(super::settle(
+            Ok(()),
+            Some(fail("still open")),
+            false,
+            Ok(()),
+        ));
+        assert!(
+            open.is_some_and(|text| text.contains("may be open") && text.contains("still open"))
+        );
+        assert_eq!(
+            message(super::settle(Ok(()), None, false, fail("key kept"))).as_deref(),
+            Some("key kept")
+        );
+        assert_eq!(
+            message(super::settle(
+                fail("apply failed"),
+                Some(fail("still open")),
+                false,
+                fail("key kept")
+            ))
+            .as_deref(),
+            Some("apply failed"),
+            "the first error is returned"
+        );
+        let window_first = message(super::settle(
+            Ok(()),
+            Some(fail("still open")),
+            false,
+            fail("key kept"),
+        ));
+        assert!(window_first.is_some_and(|text| text.contains("still open")));
+    }
+
     /// The review's major (2): `infra` masks every item of the CIDR and email list secrets, each
     /// CIDR's bare address included, before the preflight or any `tofu` call can print one. Read
     /// from the source, since `infra` itself runs only in `infra.yml`'s job.
@@ -16588,6 +17103,68 @@ mod tests {
                 "{named:?} at {run} / {head} is refused"
             );
         }
+    }
+
+    /// DEC-2042: `preflight` and `plan` may run at the checkout when no commit is named, and say
+    /// so; `apply` always needs the named commit, and a named commit is checked as before.
+    #[test]
+    fn only_apply_needs_the_commit_named() -> Result<()> {
+        let sha = "0123456789abcdef0123456789abcdef01234567";
+        let other = "1123456789abcdef0123456789abcdef01234567";
+        for action in ["preflight", "plan"] {
+            assert_eq!(crate::run_commit(action, "", sha, sha)?, sha);
+            assert_eq!(crate::run_commit(action, sha, sha, sha)?, sha);
+            assert!(
+                crate::run_commit(action, "", sha, other).is_err(),
+                "{action}: run and checkout differ"
+            );
+            assert!(
+                crate::run_commit(action, "", "", "").is_err(),
+                "{action}: no commit at all"
+            );
+            assert!(
+                crate::run_commit(action, "", "abc", "abc").is_err(),
+                "{action}: not a full commit"
+            );
+            assert!(
+                crate::run_commit(action, other, sha, sha).is_err(),
+                "{action}: a named commit is checked"
+            );
+        }
+        assert_eq!(crate::run_commit("apply", sha, sha, sha)?, sha);
+        let refused = crate::run_commit("apply", "", sha, sha)
+            .err()
+            .map(|error| error.to_string())
+            .unwrap_or_default();
+        assert!(
+            refused.contains("apply") && refused.contains("DEC-2042"),
+            "{refused}"
+        );
+        assert!(crate::run_commit("apply", other, sha, sha).is_err());
+        for (named, why) in [
+            (" ", "a blank sha"),
+            (" 0123456789abcdef0123456789abcdef01234567", "a padded sha"),
+            (
+                "0123456789ABCDEF0123456789ABCDEF01234567",
+                "an uppercase sha",
+            ),
+        ] {
+            assert!(
+                crate::run_commit("apply", named, sha, sha).is_err(),
+                "apply: {why}"
+            );
+        }
+        for named in ["", sha] {
+            let refused = crate::run_commit("destroy", named, sha, sha)
+                .err()
+                .map(|error| error.to_string())
+                .unwrap_or_default();
+            assert!(
+                refused.contains("no infra action"),
+                "an unknown action is refused, with sha {named:?}: {refused}"
+            );
+        }
+        Ok(())
     }
 
     /// E21-56 (DEC-2014): the committed `infra.yml` passes its guard, and each way of loosening
@@ -17091,7 +17668,7 @@ mod tests {
         let outputs = selected.outputs();
         let lines: Vec<&str> = outputs.lines().collect();
         assert_eq!(
-            lines.get(..7),
+            lines.get(..8),
             Some(
                 [
                     "tests=true",
@@ -17101,18 +17678,40 @@ mod tests {
                     "full_checks=true",
                     "schema_mutants=false",
                     "cell=false",
+                    "cell_web=false",
                 ]
                 .as_slice()
             )
         );
-        let reasons = lines.get(7).copied().unwrap_or_default();
+        let reasons = lines.get(8).copied().unwrap_or_default();
         assert!(
             reasons.starts_with(
                 "reasons=3 crate(s) affected: mandate-executor, mandate-paper, mandate-risk;"
             ),
             "{reasons}"
         );
-        assert_eq!(lines.len(), 8, "{outputs}");
+        assert_eq!(lines.len(), 9, "{outputs}");
+    }
+
+    /// DEC-2609 item 5: `cell-demo-web` starts whenever the cell jobs do, and also for a change
+    /// under `web/` other than its Markdown, which the cell jobs skip; never for the
+    /// documentation alone; always with no base.
+    #[test]
+    fn the_web_demo_runs_for_the_cell_or_for_web() {
+        let graph = sample_graph();
+        let both = |paths: &[&str]| {
+            let changed: Vec<String> = paths.iter().map(|p| (*p).to_owned()).collect();
+            let selected = select(Some(&changed), &graph, &BTreeMap::new());
+            (selected.cell, selected.cell_web)
+        };
+        assert_eq!(both(&["web/src/app/page.tsx"]), (false, true));
+        assert_eq!(both(&["web/package-lock.json"]), (false, true));
+        assert_eq!(both(&["deploy/cell/values.yaml"]), (true, true));
+        assert_eq!(both(&["web/README.md"]), (false, false));
+        assert_eq!(both(&["docs/HLD.md"]), (false, false));
+        assert_eq!(both(&["crates/mandate-num/src/lib.rs"]), (false, false));
+        let everything = select(None, &graph, &BTreeMap::new());
+        assert!(everything.cell && everything.cell_web, "no base runs both");
     }
 
     /// DEC-2609: the cell jobs start for a change to a crate any image package is built on, the
@@ -17890,12 +18489,13 @@ mod tests {
             .collect();
         assert_eq!(
             checkouts.len(),
-            18,
+            19,
             "one checkout in each source-reading job: `select` (DEC-1190), `fast-lint`, \
              `fast-test`, `fast-pending`, `fast-python`, `fast-portable`, `fast-rh-sim-live`, \
              `full-checks`, the mutation plan, the mutants matrix, `mutants-costs` (DEC-2607), \
-             `schema-mutants`, `cell`, `cell-demo` (DEC-2002), `cell-journal`, `cell-failover`, \
-             `cell-kill-switch` (DEC-2602), and `hosted-k3d` (E21-51)"
+             `schema-mutants`, `cell`, `cell-demo` (DEC-2002), `cell-demo-web` (DEC-2609), \
+             `cell-journal`, `cell-failover`, `cell-kill-switch` (DEC-2602), and `hosted-k3d` \
+             (E21-51)"
         );
         for checkout in checkouts {
             assert!(
@@ -20430,7 +21030,7 @@ jq -r "$filter" "$src"
             unreadable(&host_problems(&[flow(&run)])?, &["web-e2e"]);
         }
         let elsewhere = ci_file(
-            ".github/workflows/ci.yml",
+            ".github/workflows/nightly.yml",
             &format!("on: push\njobs:\n  web-e2e:\n    steps:\n      - run: {probe}\n"),
         );
         unreadable(&host_problems(&[elsewhere])?, &["web-e2e"]);
@@ -20960,7 +21560,7 @@ jq -r "$filter" "$src"
             &line.replace("rm -f", "rm -rf"),
         );
         unreadable(&host_problems(&[changed])?, &["web-e2e"]);
-        let elsewhere = flow(".github/workflows/ci.yml", line);
+        let elsewhere = flow(".github/workflows/nightly.yml", line);
         unreadable(&host_problems(&[elsewhere])?, &["web-e2e"]);
         Ok(())
     }
