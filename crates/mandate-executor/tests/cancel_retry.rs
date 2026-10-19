@@ -15,15 +15,15 @@
 mod common;
 
 use common::{
-    ACCOUNT_STREAM, FixedInstruments, FixedMandate, Ran, Shell, TestIds, agent, broker_order,
-    clock, config, event, handoff, opening, ports, quote, risk_exit, stream_opened, text,
-    with_clock,
+    ACCOUNT_STREAM, ALLOWING_BINDING_GATE, FixedInstruments, FixedMandate, Ran, Shell, TestIds,
+    agent, broker_order, clock, config, event, handoff, opening, ports, quote, risk_exit,
+    stream_opened, text, with_clock,
 };
 use mandate_accounting::Side;
 use mandate_canon::Value;
 use mandate_executor::{
     BrokerOutcome, BrokerRequest, BrokerUnknown, ClientOrderId, Command, Effect, ExecutorConfig,
-    Initiator, Input, KillScope, OrderState, Ports,
+    Initiator, Input, KillScope, OrderState, Ports, handle,
 };
 
 const AAPL: &str = FixedInstruments::LIQUID_EQUITY;
@@ -669,4 +669,130 @@ fn a_switched_order_an_ignored_ask_left_working_is_cancelled_again() {
     );
     assert_eq!((sent, alerted), (cap, 1));
     assert_eq!(state_of(&shell, id), Some(OrderState::PendingCancel));
+}
+
+/// The order a switch named and cancelled at `at`, as the fold reads it from `seq` on: submitted,
+/// accepted, and asked `PendingCancel`.
+fn seeded(shell: &mut Shell, seq: u64, id: &str) {
+    for (offset, event_type, fields) in [
+        (
+            0,
+            "OrderSubmitted",
+            vec![
+                ("client_order_id", text(id)),
+                ("agent", text(common::AGENT)),
+                ("instrument", text(AAPL)),
+                ("side", text("buy")),
+                ("qty", text("10")),
+                ("limit", text("150")),
+            ],
+        ),
+        (
+            1,
+            "OrderStateChanged",
+            vec![("client_order_id", text(id)), ("state", text("accepted"))],
+        ),
+    ] {
+        shell
+            .fold_one(&event(
+                ACCOUNT_STREAM,
+                seq + offset,
+                event_type,
+                with_clock(&fields, SWITCHED_AT),
+            ))
+            .expect("the seeded order folds");
+    }
+}
+
+fn asked(shell: &mut Shell, seq: u64, id: &str, at: i64) {
+    shell
+        .fold_one(&event(
+            ACCOUNT_STREAM,
+            seq,
+            "OrderStateChanged",
+            with_clock(
+                &[
+                    ("client_order_id", text(id)),
+                    ("state", text("pending_cancel")),
+                    ("cancel_requested", Value::Bool(true)),
+                ],
+                at,
+            ),
+        ))
+        .expect("the ask folds");
+}
+
+/// The alert survives a tick handed again after its append was left in doubt: two orders one
+/// switch named, asked a window apart, put one order's last re-send on the tick where the other's
+/// alert falls, so that tick's batch journals. Handed again unfolded, as the shell does with an
+/// append in doubt, it still raises the alert, since it is judged against the same earlier tick.
+#[test]
+fn the_alert_survives_a_tick_handed_again_after_an_append_in_doubt() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let configuration = config();
+    let ports = ports(&ids, &mandates, &instruments, &configuration);
+    let window = configuration.unknown_absent_window_s;
+    let cap = i64::from(configuration.unknown_absent_lookups);
+    let (first, second) = ("md-switched-a", "md-switched-b");
+    let mut shell = Shell::new(1);
+    shell.fold_one(&stream_opened()).expect("folds");
+    seeded(&mut shell, 2, first);
+    seeded(&mut shell, 4, second);
+    shell
+        .fold_one(&event(
+            ACCOUNT_STREAM,
+            6,
+            "KillSwitchActivated",
+            with_clock(
+                &[
+                    ("scope", text("agent")),
+                    ("subject", text(common::AGENT)),
+                    ("initiator", text("risk_limit")),
+                    ("purpose", text("risk_exit")),
+                    ("cancels", Value::Array(vec![text(first), text(second)])),
+                    ("closes", Value::Array(Vec::new())),
+                    ("deferred", Value::Array(Vec::new())),
+                ],
+                SWITCHED_AT,
+            ),
+        ))
+        .expect("the switch folds");
+    asked(&mut shell, 7, first, SWITCHED_AT);
+    asked(&mut shell, 8, second, SWITCHED_AT + window);
+    let mut shell = shell.restart_ready(&ports);
+    let alerted = |effects: &[Effect]| {
+        effects.iter().any(
+            |effect| matches!(effect, Effect::Notify(notice) if notice.message_key == RETRIES_EXHAUSTED),
+        )
+    };
+    let drafted = |effects: &[Effect]| {
+        effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::Journal(_)))
+    };
+    for at in SWITCHED_AT + window..=SWITCHED_AT + (cap + 3) * window {
+        let mut probe = shell.state.clone();
+        let handed = handle(
+            &mut probe,
+            Input::Tick(clock(at)),
+            &ports,
+            &ALLOWING_BINDING_GATE,
+        )
+        .expect("the tick is handed");
+        if alerted(&handed) && drafted(&handed) {
+            let again = handle(
+                &mut probe,
+                Input::Tick(clock(at)),
+                &ports,
+                &ALLOWING_BINDING_GATE,
+            )
+            .expect("the same tick is handed again while its append is in doubt");
+            assert!(alerted(&again), "tick {at}: {again:?}");
+            return;
+        }
+        shell.run(Input::Tick(clock(at)), &ports);
+    }
+    panic!("no tick raised the alert beside a journaled re-send");
 }

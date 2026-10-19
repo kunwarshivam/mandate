@@ -9838,8 +9838,9 @@ mod sequence_tests {
     }
 
     /// `executor`'s journal folded afresh, with what is process-local (quotes, the watchdog's clock,
-    /// the clock and the tick before it, and the writer's epoch) carried over: the state a restart resumes from. The modes
-    /// are carried over too, though the scripts' journaled pauses already fold to them.
+    /// the clock and the tick before it, and the writer's epoch) carried over: the state a restart
+    /// resumes from. The modes are carried over too, though the scripts' journaled pauses already
+    /// fold to them.
     fn refolded(executor: &Executor) -> Result<ExecutorState, String> {
         let mut restarted = ExecutorState::new(executor.state.scope.clone());
         for event in &executor.journal {
