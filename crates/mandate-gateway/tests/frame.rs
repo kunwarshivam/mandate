@@ -250,7 +250,7 @@ fn a_reply_that_does_not_come_in_time_reads_as_timed_out() {
     let address = listener.local_addr().unwrap();
     let (release, released) = mpsc::channel::<()>();
     let service = thread::spawn(move || {
-        let (mut connection, _) = listener.accept().unwrap();
+        let mut connection = bounded(listener.accept().unwrap().0);
         let _request = read_frame(&mut connection, MAX_REQUEST_FRAME);
         released.recv().unwrap();
     });
