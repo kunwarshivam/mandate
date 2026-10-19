@@ -1975,6 +1975,35 @@ mod tests {
         }
     }
 
+    /// Pull requests cancel their own stale runs; pushes to `main` share one group that cancels
+    /// nothing, so a burst of merges releases once, at its tip; a manual dispatch, which can wait
+    /// on the founder's approval, has its own group so it never holds the pushes' releases
+    /// (DEC-2025).
+    #[test]
+    fn main_releases_once_per_burst_and_a_dispatch_never_holds_it() -> Result<()> {
+        let text = fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github/workflows/release.yml"),
+        )?;
+        let block = concat!(
+            "\nconcurrency:\n",
+            "  group: release-${{ github.event_name == 'pull_request' && github.ref || ",
+            "github.event_name == 'workflow_dispatch' && format('dispatch-{0}', github.ref) || ",
+            "github.ref }}\n",
+            "  cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n",
+        );
+        assert!(
+            text.contains(block),
+            "release.yml's concurrency is not DEC-2025's"
+        );
+        assert_eq!(
+            text.matches("concurrency:").count(),
+            1,
+            "a job sets its own concurrency"
+        );
+        assert!(!text.contains("github.sha }}\n  cancel-in-progress"));
+        Ok(())
+    }
+
     /// Every arch is built twice, on two runners of its own arch, and compared; nothing is built
     /// for one arch on another's runner (DEC-1060).
     #[test]

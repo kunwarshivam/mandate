@@ -5,8 +5,11 @@
 - **Code:** `mandate-vault`: `crates/mandate-vault/src/source.rs` (`SecretSource`, `Grant`),
   `src/policy.rs` (the identity-by-path table and the OpenBao policies it generates),
   `src/lease.rs` (`Lease`, `LeaseKeeper`), `src/local.rs` (over `mandate-vault-local`),
-  `src/openbao.rs` (the OpenBao client and `provision`), `src/error.rs` (`SourceError`).
-- **Tests:** `crates/mandate-vault/src/tests/` (the policy matrix against a hand-written oracle,
+  `src/openbao.rs` (the OpenBao client and `provision`), `src/credentials.rs` (owner-only
+  credential files and the operator's token file, DEC-2022), `src/error.rs` (`SourceError`);
+  `mandate vault provision` in `crates/mandate-cli/src/vault.rs`.
+- **Tests:** `crates/mandate-cli/tests/vault_provision.rs` (the command, its server case run by
+  `cargo xtask ci openbao`), and `crates/mandate-vault/src/tests/` (the policy matrix against a hand-written oracle,
   the generated policies, the lease rule as a property test, the seal check), and there
   `conformance.rs` (one suite), run by `local_vault.rs` and `openbao_server.rs` (skipped unless an
   OpenBao server is configured; unit tests, since only `cfg(test)` may reach a dev server).

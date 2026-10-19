@@ -1,11 +1,11 @@
-//! What the manager reads from the workspace control stream: the deployments, the stops, the kill
-//! switches, and its own records (journal spec §9.2, §9.21).
+//! What the manager reads from the workspace control stream: the deployments, the connections
+//! they run on, the stops, the kill switches, and its own records (journal spec §9.2, §9.21,
+//! §9.24). Every fact is read from the journal alone: no store outside it stands between a
+//! deployment, or a kill switch, and its processes (DEC-1171 item 4).
 
 use mandate_canon::{Value, parse};
 use mandate_journal::StoredEvent;
 use mandate_time::UtcNanos;
-
-use crate::orchestrator::Unavailable;
 
 /// The two processes of an agent deployment the manager runs (infrastructure design §3.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -108,9 +108,20 @@ pub enum Fact {
         connection: String,
         account: String,
     },
+    /// A connection's `ConnectionRevoked`: a deployment on it after this starts nothing until it is
+    /// established again (rule 201); one deployed before keeps running (§9.24).
+    Revoked {
+        connection: String,
+    },
+    /// A version-2 `AgentDeployed`, which names its connection (§9.24).
     Deployed {
         agent: String,
-        account: String,
+        connection: String,
+    },
+    /// A version-1 `AgentDeployed`, which names no connection, so no account: nothing starts for it
+    /// (DEC-1171 item 4), and the manager reports it (DEC-1173 item 3).
+    DeployedUnread {
+        agent: String,
     },
     Stopped {
         agent: String,
@@ -134,50 +145,8 @@ pub enum Fact {
     },
 }
 
-/// Where the manager learns a deployed agent's account: the connection the stored mandate version
-/// names, and that connection's `account_ref` (journal spec §9.2, §9.8). `Ok(None)` is a version
-/// with no account; `Err` is a store that cannot answer now, after which the row is read again.
-pub trait Resolver {
-    /// The `account_ref` of the connection the stored mandate `version` names: exactly the
-    /// `account_ref` that connection's `ConnectionEstablished` records, the subject the executor
-    /// slot and a connection kill switch's scope are compared by.
-    ///
-    /// # Errors
-    /// [`Unavailable`] when the store cannot answer.
-    fn account_of_version(&self, version: &str) -> Result<Option<String>, Unavailable>;
-}
-
-/// The fact `row` records, or `None` for a row the manager does not act on. A deployment whose
-/// account does not exist is not read, so nothing starts for it. Only a deployment asks the
-/// resolver; every other row, kill switches included, is read from the journal alone.
-///
-/// # Errors
-/// [`Unavailable`] when the resolver cannot answer a deployment, which is then read again.
-pub fn fact(row: &StoredEvent, resolver: &dyn Resolver) -> Result<Option<Fact>, Unavailable> {
-    match row.event_type.as_str() {
-        "AgentDeployed" => {
-            let Some(version) = member(row, "mandate_version") else {
-                return Ok(None);
-            };
-            let account = resolver.account_of_version(&version)?;
-            Ok(account.and_then(|account| {
-                Some(Fact::Deployed {
-                    agent: member(row, "agent_id")?,
-                    account,
-                })
-            }))
-        }
-        _ => Ok(read(row)),
-    }
-}
-
-fn member(row: &StoredEvent, name: &str) -> Option<String> {
-    let body = parse(&row.body).ok()?;
-    Some(body.get("payload")?.get(name)?.as_str()?.to_owned())
-}
-
-/// Every fact that needs no resolver.
-fn read(row: &StoredEvent) -> Option<Fact> {
+/// The fact `row` records, or `None` for a row the manager does not act on.
+pub fn fact(row: &StoredEvent) -> Option<Fact> {
     let body = parse(&row.body).ok()?;
     let payload = body.get("payload")?;
     let text = |member: &str| payload.get(member).and_then(Value::as_str);
@@ -195,6 +164,16 @@ fn read(row: &StoredEvent) -> Option<Fact> {
         "ConnectionEstablished" => Some(Fact::Connected {
             connection: text("connection_id")?.to_owned(),
             account: text("account_ref")?.to_owned(),
+        }),
+        "ConnectionRevoked" => Some(Fact::Revoked {
+            connection: text("connection_id")?.to_owned(),
+        }),
+        "AgentDeployed" if row.schema_version == 2 => Some(Fact::Deployed {
+            agent: text("agent_id")?.to_owned(),
+            connection: text("connection_id")?.to_owned(),
+        }),
+        "AgentDeployed" => Some(Fact::DeployedUnread {
+            agent: text("agent_id")?.to_owned(),
         }),
         "AgentStopped" => Some(Fact::Stopped {
             agent: text("agent_id")?.to_owned(),

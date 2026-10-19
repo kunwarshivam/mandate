@@ -23,7 +23,7 @@ variable "node_count" {
 }
 
 variable "spaces_monthly_usd" {
-  description = "The Spaces subscription, counted in one environment only since it is per account."
+  description = "The Spaces subscription; it is per account, but each environment counts it so neither undercounts."
   type        = number
 }
 
