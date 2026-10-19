@@ -8,6 +8,7 @@ use serde_json::json;
 
 use crate::openbao::{
     OpenBaoConfig, provision, provisioned_identities, refusal, role_settings, seal_verdict,
+    secret_id_identities,
 };
 use crate::policy::{Identity, Mounts};
 use secrecy::SecretString;
@@ -142,6 +143,27 @@ fn provisioning_covers_every_process_type_and_each_connections_two_roles() {
         ]
     );
     assert_eq!(provisioned_identities(&[]).len(), 6);
+}
+
+/// A secret id is issued, and its files written, for each process type and each connection's
+/// executor, in that order, and never for a token exchange, whose secret ids are grants.
+#[test]
+fn a_secret_id_is_issued_to_every_identity_but_the_token_exchanges() {
+    let c = |id: &str| ConnectionId::new(id).unwrap();
+    assert_eq!(
+        secret_id_identities(&[c("c1"), c("c2")]),
+        vec![
+            Identity::Api,
+            Identity::ConnectionManager,
+            Identity::Runtime,
+            Identity::SecretImport,
+            Identity::ModelGateway,
+            Identity::EmailSender,
+            Identity::Executor(c("c1")),
+            Identity::Executor(c("c2")),
+        ]
+    );
+    assert_eq!(secret_id_identities(&[]).len(), 6);
 }
 
 /// Provisioning a vault nobody answers for is an outage, never an empty success that would leave

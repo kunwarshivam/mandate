@@ -12,7 +12,7 @@ use mandate_connections::record::ConnectionId;
 use secrecy::{ExposeSecret, SecretString};
 
 use crate::SourceError;
-use crate::openbao::{RoleCredentials, issues_secret_id, provisioned_identities};
+use crate::openbao::{RoleCredentials, secret_id_identities};
 use crate::policy::{Identity, role_name};
 
 /// The suffix of the file that holds an identity's role id, after its role name.
@@ -78,11 +78,7 @@ pub fn write_credentials(
 /// `dir`, `dir` itself when it exists, and each output name in it, by the same rules. An absent
 /// `dir` passes and is not made. A refusal here leaves no secret id issued and unwritten.
 pub fn check_credential_dir(dir: &Path, connections: &[ConnectionId]) -> Result<(), SourceError> {
-    let identities: Vec<Identity> = provisioned_identities(connections)
-        .into_iter()
-        .filter(issues_secret_id)
-        .collect();
-    check_for(dir, &identities).map(|_| ())
+    check_for(dir, &secret_id_identities(connections)).map(|_| ())
 }
 
 /// Checks `dir` for `identities`' files by [`write_credentials`]'s rules and answers whether `dir`

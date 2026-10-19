@@ -486,11 +486,14 @@ pub(crate) fn role_settings(identity: &Identity) -> Value {
     }
 }
 
-/// Whether [`provision`] issues `identity` a secret id, and so whether
-/// [`crate::credentials::write_credentials`] writes its files: every identity but a token exchange,
-/// whose secret ids are grants.
-pub(crate) fn issues_secret_id(identity: &Identity) -> bool {
-    !matches!(identity, Identity::TokenExchange(_))
+/// The identities [`provision`] issues a secret id for, whose files
+/// [`crate::credentials::write_credentials`] writes: every provisioned identity but the token
+/// exchanges, whose secret ids are grants, in [`provisioned_identities`]' order.
+pub(crate) fn secret_id_identities(connections: &[ConnectionId]) -> Vec<Identity> {
+    provisioned_identities(connections)
+        .into_iter()
+        .filter(|identity| !matches!(identity, Identity::TokenExchange(_)))
+        .collect()
 }
 
 /// Every identity [`provision`] makes a policy and a role for: each process type's, then each
@@ -577,9 +580,9 @@ pub async fn provision(
         }
         http.call(Method::POST, &role, token, Some(&settings))
             .await?;
-        if !issues_secret_id(&identity) {
-            continue;
-        }
+    }
+    for identity in secret_id_identities(connections) {
+        let role = format!("auth/{}/role/{}", mounts.auth, role_name(&identity));
         let role_id = http
             .call(Method::GET, &format!("{role}/role-id"), token, None)
             .await?;
