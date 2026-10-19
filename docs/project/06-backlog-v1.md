@@ -3262,6 +3262,15 @@ fully on-prem control plane; shared data plane; strategy marketplace.
   check that alerts before the expiry. Until then the founder can rotate it by tainting
   `module.cloudflare.cloudflare_account_token.journal_archive` in a reviewed apply.
 
+- **`infra.yml` hardening left from E21-56's review of #1711** ([DEC-2030](decisions/DEC-2030.md)
+  item 6). Each tightens what already holds:
+  1. `terraform_data.applied_commit` depends on every module, so a partial apply never records its
+     commit, and it changes only on an apply, not on every plan.
+  2. The `MANDATE_INFRA_SHA` guard line is bound to the secret step, not only to the file.
+  3. The `cloudflare` module's `access_allowed_emails` variable is `sensitive` itself, not only
+     through production's root.
+  4. The CIDR masks also cover each IPv6 range's normalised forms (compressed and expanded).
+
 ## Enterprise harness (proposed, DEC-149)
 
 Epic **E18**, from the [harness engineering research](../product/11-harness-engineering.md#7-recommendations)

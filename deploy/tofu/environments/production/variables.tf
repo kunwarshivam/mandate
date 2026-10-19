@@ -1,5 +1,5 @@
-# Every value here comes from the GitHub environment (infra.yml sets TF_VAR_*), never a committed
-# file: the runbook names each one.
+# Every value here comes from the GitHub environment (infra.yml sets TF_VAR_*), never from
+# anything committed: the runbook names each one.
 
 variable "state_passphrase" {
   description = "TOFU_STATE_PASSPHRASE: encrypts this environment's state and plans."

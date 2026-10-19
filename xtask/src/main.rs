@@ -1029,9 +1029,10 @@ fn provider_schemas_mask(
     Ok(used_here)
 }
 
-/// OpenTofu's functions that read a file from disk: refused in `deploy/tofu/` when called, since
-/// what they load (a template, a script, a key) would reach OpenTofu and not the raw scan
-/// (DEC-2014 item 6).
+/// OpenTofu's functions that read a file from disk: refused in `deploy/tofu/` as whole words,
+/// anywhere, since what they load (a template, a script, a key) would reach OpenTofu and not the
+/// raw scan, and HCL calls a function across a line break or a comment before its `(`
+/// (DEC-2014 item 6). A prose use of the word is reworded.
 const TOFU_FILE_FUNCTIONS: [&str; 12] = [
     "file",
     "fileexists",
@@ -1128,16 +1129,13 @@ fn tofu_forbidden_blocks(files: &[(String, String)]) -> Vec<String> {
                     "names `http` other than in a URL, the data source deploy/tofu never may use",
                 );
             }
-            let called = |name: &str| {
-                whole_words(&line, name).any(|at| {
-                    line.get(at.saturating_add(name.len())..)
-                        .is_some_and(|rest| rest.trim_start().starts_with('('))
-                })
-            };
-            if TOFU_FILE_FUNCTIONS.iter().any(|name| called(name)) {
+            if TOFU_FILE_FUNCTIONS
+                .iter()
+                .any(|name| whole_words(&line, name).next().is_some())
+            {
                 refuse(
-                    "calls a function that reads a file, which could load configuration the scan \
-                     never sees",
+                    "names a function that reads a file, as a whole word wherever it appears, \
+                     since a line break or a comment between the name and its `(` still calls it",
                 );
             }
             if whole_words(&line, "terraform_remote_state")
@@ -1455,14 +1453,24 @@ fn reviewed_commit(sha: &str, run_sha: &str, head: &str) -> Result<()> {
     if sha != run_sha || sha != head {
         bail!(
             "the dispatch names commit {sha}, but the run is at {run_sha} with {head} checked \
-             out: dispatch again with the commit you reviewed, once main is at it"
+             out: GitHub fixes a run's commit when it is dispatched, so dispatch again naming \
+             the commit main is at"
         );
     }
     Ok(())
 }
 
-/// The paths a change to which changes what `infra.yml` does.
-const INFRA_PATHS: [&str; 3] = [TOFU_DIR, INFRA_WORKFLOW, "xtask/"];
+/// The paths a change to which changes what `infra.yml` does: the OpenTofu tree, the workflow, and
+/// everything the secret-holding binary is built from.
+const INFRA_PATHS: [&str; 7] = [
+    TOFU_DIR,
+    INFRA_WORKFLOW,
+    "xtask/",
+    "Cargo.lock",
+    "Cargo.toml",
+    "rust-toolchain.toml",
+    ".cargo/",
+];
 
 /// `cargo xtask infra close` (DEC-2030 item 4): `infra.yml`'s last step, which runs `if:
 /// always()` with only the DigitalOcean token, deletes every Spaces key this environment's runs
@@ -16297,16 +16305,22 @@ mod tests {
             "x = file(\"secret.pem\")\n",
             "x = templatefile (\"a.tftpl\", {})\n",
             "x = FILEBASE64(\"k\")\n",
+            "x = [file\n(\"/etc/hostname\")]\n",
+            "x = [file /* x */ (\"/etc/hostname\")]\n",
+            "x = [file # x\n(\"/etc/hostname\")]\n",
+            "x = [file // x\n(\"/etc/hostname\")]\n",
             "data \"terraform_remote_state\" \"other\" {}\n",
+            "# the state file stays encrypted\n",
         ] {
             assert!(
                 !one("m/a.tf", text).is_empty(),
-                "{text:?}: a file read or another state is refused"
+                "{text:?}: a file read, however it is split, or another state is refused"
             );
         }
         for text in [
-            "# the state file stays encrypted\n",
             "description = \"a profile name\"\n",
+            "# the state stays encrypted\n",
+            "x = filename\n",
         ] {
             assert!(one("m/a.tf", text).is_empty(), "{text:?} is allowed");
         }
@@ -16509,6 +16523,47 @@ mod tests {
         Ok(())
     }
 
+    /// The review's major (2): `infra` masks every item of the CIDR and email list secrets, each
+    /// CIDR's bare address included, before the preflight or any `tofu` call can print one. Read
+    /// from the source, since `infra` itself runs only in `infra.yml`'s job.
+    #[test]
+    fn infra_masks_the_list_secrets_before_anything_runs() {
+        let source = include_str!("main.rs");
+        let body = source
+            .split("\nfn infra() -> Result<()> {")
+            .nth(1)
+            .and_then(|rest| rest.split("\n}\n").next())
+            .unwrap_or_default();
+        let at = |needle: &str| body.find(needle);
+        let masks =
+            at("for name in [infra_preflight::KUBE_CIDRS_ENV, infra_preflight::EMAILS_ENV]");
+        let items = at("tofu_audit::list_items(");
+        let add = at("mask::add_mask(&value);");
+        let preflight = at("infra_preflight::preflight(");
+        let tofu = at("run_tofu(");
+        assert!(
+            masks.is_some() && items.is_some() && add.is_some(),
+            "infra masks each item of both list secrets"
+        );
+        assert!(
+            masks < items && items < add,
+            "the masks come from tofu_audit::list_items"
+        );
+        assert!(
+            preflight.is_some() && add < preflight,
+            "the masks run before the preflight"
+        );
+        assert!(
+            tofu.is_some() && add < tofu,
+            "the masks run before any tofu call"
+        );
+        assert_eq!(
+            crate::tofu_audit::list_items("[\"203.0.113.7/32\"]"),
+            ["203.0.113.7/32", "203.0.113.7"],
+            "a CIDR's bare address is masked too"
+        );
+    }
+
     /// The audit's item 5: a run proceeds only at the full commit the founder named, which must be
     /// both the run's commit and the checkout.
     #[test]
@@ -16620,6 +16675,10 @@ mod tests {
             (
                 "step after",
                 format!("{text}      - run: cargo xtask markers\n"),
+            ),
+            (
+                "no reviewed commit",
+                edited("          MANDATE_INFRA_SHA: ${{ inputs.sha }}\n", ""),
             ),
             (
                 "close not always",

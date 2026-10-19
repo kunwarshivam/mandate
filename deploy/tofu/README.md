@@ -122,8 +122,9 @@ No repository-level secret or variable is used, so no other workflow can read th
 ### 4. The first run
 
 Every dispatch takes `sha`: paste the full commit of `main` you read (the repository's commit
-page has a copy button). The run refuses unless `main` is still at it, and lists what changed
-under `deploy/tofu/`, `infra.yml` and `xtask/` since the last apply, so you approve a commit you
+page has a copy button). The run refuses unless it is the commit `main` was at
+when you dispatched, which the run checks out. It lists what changed under `deploy/tofu/`,
+`infra.yml`, `xtask/` and the Rust build inputs since the last apply, so you approve a commit you
 have seen. The log never shows a value: only addresses and actions.
 
 1. **Actions → infra → Run workflow**, branch `main`, environment `staging`, action `preflight`,

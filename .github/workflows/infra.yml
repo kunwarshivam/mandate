@@ -28,7 +28,7 @@ on:
         default: preflight
         options: [preflight, plan, apply]
       sha:
-        description: The full commit you reviewed; the run refuses unless main is at it
+        description: The full commit you reviewed; the run refuses unless it is the commit main was at when you dispatched
         required: true
         type: string
 
