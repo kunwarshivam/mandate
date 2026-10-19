@@ -276,7 +276,7 @@ pub fn drill(seeded: bool) -> Result<Verdict> {
         let check = render(
             &[
                 format!("run.id=\"{id}c\""),
-                "run.process=connect-check".into(),
+                "run.process=\"connect-check\"".into(),
                 format!("run.args={}", json!(check_args(&workspace, &account))),
             ],
             Some("templates/run.yaml"),

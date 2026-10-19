@@ -22,6 +22,7 @@ use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 use sha2::Digest;
 
+use crate::admission_drill;
 use crate::{output, sh};
 use web::web_run;
 
@@ -30,7 +31,7 @@ pub mod scenario;
 pub mod web;
 
 pub const CLUSTER: &str = "mandate-cell";
-const NODE: &str = "k3d-mandate-cell-server-0";
+pub(crate) const NODE: &str = "k3d-mandate-cell-server-0";
 /// The workspace the drills deploy, and its namespace: one release per workspace (§3.2).
 const WORKSPACE: &str = "ws1";
 const NAMESPACE: &str = "ws-ws1";
@@ -156,6 +157,11 @@ pub enum Drill {
     /// exports and verifies by journal spec §11. The stream owners' `KillSwitchActivated` is
     /// named as skipped until the runtime and executor run in the cell (DEC-2000 item 6).
     KillSwitch,
+    /// The hosted clusters' kill-switch admission policies on the cell's API server, with the
+    /// signature webhook down and failing closed (DEC-2045, DEC-2046): the founder's kill-switch
+    /// Job is admitted and its pod made, every other way to a pod labelled `mandate.dev/process:
+    /// control` is refused, and so is any change to such a pod or to a person's control Job.
+    Admission,
     /// With the synchronous standby fenced, an append waits: nothing commits on the primary alone,
     /// and once the standby is back the cluster takes appends again and every stream it holds
     /// verifies (OPS-2, E21-41).
@@ -167,6 +173,11 @@ pub enum Drill {
     /// An agent deployed on a recorded paper connection, and the deployment manager starting that
     /// account's executor until its `readyz` passes (E21-30, DEC-2035); see [`executor`].
     Executor,
+    /// `mandate vault provision` sets the cell's vault up, then each AppRole logs in from a pod
+    /// labelled as the executor and reads only what DEC-977 item 2's table gives it: a runtime
+    /// nothing, an executor exactly its own connection's token, the model gateway its key; and
+    /// no policy of the cell's holds a wildcard (E21-32, DEC-2022 item 3).
+    Vault,
 }
 
 pub const DRILLS: [Drill; 4] = [Drill::Boot, Drill::Journal, Drill::Egress, Drill::Compose];
@@ -179,10 +190,14 @@ pub const JOURNAL_DRILLS: [Drill; 2] = [Drill::StandbyDown, Drill::Archive];
 /// the old primary's rejoin; `cargo xtask ci cell-failover` runs it in a job of its own (DEC-464).
 pub const FAILOVER_DRILLS: [Drill; 1] = [Drill::Restart];
 
-/// The kill-switch drill (OPS-4, E21-34) and the executor drill (E21-30), which `cargo xtask ci
-/// cell-kill-switch` runs on a cell of its own so `ci cell` stays within its ten minutes (DEC-464,
-/// DEC-2602, DEC-2035).
-pub const KILL_SWITCH_DRILLS: [Drill; 2] = [Drill::KillSwitch, Drill::Executor];
+/// The kill-switch drill (OPS-4, E21-34), the admission drill, and the executor drill (E21-30),
+/// which `cargo xtask ci cell-kill-switch` runs on a cell of its own so `ci cell` stays within its
+/// ten minutes (DEC-464, DEC-2602, DEC-2035).
+pub const KILL_SWITCH_DRILLS: [Drill; 3] = [Drill::KillSwitch, Drill::Admission, Drill::Executor];
+
+/// The vault's drill (E21-32, DEC-2022), which `cargo xtask ci cell-kill-switch` runs after the
+/// kill switch's, on that job's cell, so `ci cell` stays within its ten minutes (DEC-464).
+pub const VAULT_DRILLS: [Drill; 1] = [Drill::Vault];
 
 impl Drill {
     pub fn name(self) -> &'static str {
@@ -193,9 +208,11 @@ impl Drill {
             Self::Compose => "compose",
             Self::Restart => "restart",
             Self::KillSwitch => "kill-switch",
+            Self::Admission => "admission",
             Self::StandbyDown => "standby-down",
             Self::Archive => "archive",
             Self::Executor => "executor",
+            Self::Vault => "vault",
         }
     }
 
@@ -205,6 +222,7 @@ impl Drill {
             .chain(JOURNAL_DRILLS)
             .chain(FAILOVER_DRILLS)
             .chain(KILL_SWITCH_DRILLS)
+            .chain(VAULT_DRILLS)
             .find(|d| d.name() == name)
             .with_context(|| format!("no drill named `{name}`"))
     }
@@ -226,6 +244,9 @@ impl Drill {
                 "the stream lost across the restart: a stream id the restart did not keep"
             }
             Self::KillSwitch => "the connection-scope kill switch never committed",
+            Self::Admission => {
+                "on update the Job policy fires only on a newly control label, so a service account can change a person's control Job"
+            }
             Self::StandbyDown => {
                 "the cluster's durability set to `preferred`, so the primary commits alone"
             }
@@ -233,6 +254,9 @@ impl Drill {
             Self::Executor => {
                 "the connect check skipped, so the connection is never recorded and the agent \
                  deploys at version 1"
+            }
+            Self::Vault => {
+                "the runtime's policy rewritten to read every connection's token through a wildcard"
             }
         }
     }
@@ -249,9 +273,11 @@ impl Drill {
             Self::Egress => "reached the live trading host",
             Self::Restart => "export_stream_empty",
             Self::KillSwitch => "no kill_switch of scope connection",
+            Self::Admission => "admitted a service account's change to a person's control Job",
             Self::StandbyDown => "committed with the standby fenced",
             Self::Archive => "is not in the archive",
             Self::Executor => "no executor pod",
+            Self::Vault => "wildcard in mandate-runtime",
         }
     }
 }
@@ -1460,6 +1486,287 @@ fn vault() -> Result<()> {
     Ok(())
 }
 
+/// The connections the vault drill provisions: the cell's demo connection and one other, so an
+/// executor's reach to a connection not its own is tried.
+const VAULT_DRILL_CONNECTIONS: [&str; 2] = ["demo-paper", "drill-other"];
+
+/// The vault drill's checks, `<role> <path>`, each with whether DEC-977 item 2's table (and
+/// DEC-2020's rows) lets that role read that KV path. Written out here, not read from the crate.
+const VAULT_DRILL_READS: [(&str, &str, bool); 13] = [
+    ("runtime", "connections/demo-paper/token", false),
+    ("runtime", "connections/drill-other/token", false),
+    ("runtime", "platform/alpaca-oauth-client-secret", false),
+    ("executor-demo-paper", "connections/demo-paper/token", true),
+    (
+        "executor-demo-paper",
+        "connections/drill-other/token",
+        false,
+    ),
+    (
+        "executor-demo-paper",
+        "platform/alpaca-oauth-client-secret",
+        false,
+    ),
+    (
+        "executor-drill-other",
+        "connections/drill-other/token",
+        true,
+    ),
+    (
+        "executor-drill-other",
+        "connections/demo-paper/token",
+        false,
+    ),
+    ("model-gateway", "platform/model-provider-key", true),
+    ("model-gateway", "connections/demo-paper/token", false),
+    (
+        "model-gateway",
+        "platform/alpaca-oauth-client-secret",
+        false,
+    ),
+    ("model-gateway", "platform/email-credential", false),
+    ("executor-demo-paper", "connections/demo-paper/code", false),
+];
+
+/// How many `mandate-*` policies the drill's scan must have read: one per process type (the API,
+/// the connection manager, the runtime, the secret import, the model gateway and the email
+/// sender) and two per connection (its executor and its token exchange), for
+/// [`VAULT_DRILL_CONNECTIONS`]. A scan that reads fewer, as one whose `bao policy list` failed,
+/// has proved nothing about wildcards.
+const VAULT_DRILL_POLICIES: usize = 10;
+
+/// The container of the vault drill's Job that logs in and reads; only its lines are judged, as
+/// `kubectl logs --prefix` writes them (see [`scenario::lines_of`]).
+const VAULT_DRILL_PROBE: &str = "probe";
+
+/// What a vault drill's check lines must say: exactly one `<role> <path> allowed` or `denied`
+/// line for each of [`VAULT_DRILL_READS`], as the table has it, no `wildcard in` line, and exactly
+/// one `checked <n> mandate policies` line with [`VAULT_DRILL_POLICIES`]. A missing line, a second
+/// line for the same read, and a scan of fewer policies are problems too.
+fn vault_drill_problems(logs: &str) -> Vec<String> {
+    let said = scenario::lines_of(logs, VAULT_DRILL_PROBE);
+    let mut problems: Vec<String> = said
+        .iter()
+        .filter(|l| l.starts_with("wildcard in "))
+        .map(|l| l.to_string())
+        .collect();
+    for (role, path, allowed) in VAULT_DRILL_READS {
+        let want = format!(
+            "{role} {path} {}",
+            if allowed { "allowed" } else { "denied" }
+        );
+        let answers: Vec<&str> = said
+            .iter()
+            .filter(|l| l.starts_with(&format!("{role} {path} ")))
+            .copied()
+            .collect();
+        if answers != [want.as_str()] {
+            let got = if answers.is_empty() {
+                "no answer".to_owned()
+            } else {
+                answers.join("` and `")
+            };
+            problems.push(format!("want `{want}`, got `{got}`"));
+        }
+    }
+    let scanned: Vec<&str> = said
+        .iter()
+        .filter(|l| l.starts_with("checked "))
+        .copied()
+        .collect();
+    let want = format!("checked {VAULT_DRILL_POLICIES} mandate policies");
+    if scanned != [want.as_str()] {
+        problems.push(format!(
+            "want `{want}`, got `{}`",
+            if scanned.is_empty() {
+                "no scan".to_owned()
+            } else {
+                scanned.join("` and `")
+            }
+        ));
+    }
+    problems
+}
+
+/// The drill's script, run by the vault's own image: it puts a fake value at each path tried,
+/// as the operator, then logs in as each role from the files `mandate vault provision` wrote and
+/// prints one line per read, and one per policy of the cell's that holds `*` or `+`. Seeded, it
+/// first rewrites the runtime's policy to read every connection's token through `+`, and puts the
+/// policy it read back when the script exits. Each read first looks its token up, so a token the
+/// vault does not honour is an `error`, never a denial. The scan counts the `mandate-*` policies it
+/// reads, and a failed read ends the script. Each read is
+/// `bao read` of the KV v2 data path, not `bao kv get`, whose preflight on the mount fails without
+/// `permission denied` for a role granted nothing under it, as the runtime is.
+fn vault_drill_script(seeded: bool) -> String {
+    let mut reads = String::new();
+    for (role, path, _) in VAULT_DRILL_READS {
+        reads.push_str(&format!("check {role} {path}\n"));
+    }
+    let mut puts = String::new();
+    for path in [
+        "connections/demo-paper/token",
+        "connections/drill-other/token",
+        "connections/demo-paper/code",
+        "platform/alpaca-oauth-client-secret",
+        "platform/model-provider-key",
+        "platform/email-credential",
+    ] {
+        puts.push_str(&format!(
+            "BAO_TOKEN=\"$op\" bao kv put -mount=mandate {path} value=ZHJpbGwtZmFrZQ== >/dev/null\n"
+        ));
+    }
+    let plant = if seeded {
+        "orig=$(BAO_TOKEN=\"$op\" bao policy read mandate-runtime)\n\
+         trap 'printf \"%s\\n\" \"$orig\" | BAO_TOKEN=\"$op\" bao policy write mandate-runtime - >/dev/null' EXIT\n\
+         printf 'path \"mandate/data/connections/+/token\" {\\n  capabilities = [\"read\"]\\n}\\n' \
+         | BAO_TOKEN=\"$op\" bao policy write mandate-runtime - >/dev/null\n"
+    } else {
+        ""
+    };
+    format!(
+        "set -eu\n\
+         op=$(cat /work/token)\n\
+         {puts}{plant}\
+         check() {{\n\
+           t=$(bao write -field=token auth/approle/login role_id=@/work/private/creds/$1.role-id secret_id=@/work/private/creds/$1.secret-id)\n\
+           if ! BAO_TOKEN=\"$t\" bao token lookup >/dev/null 2>&1; then echo \"$1 $2 error\"; return 0; fi\n\
+           if out=$(BAO_TOKEN=\"$t\" bao read -field=data \"mandate/data/$2\" 2>&1 >/dev/null); then echo \"$1 $2 allowed\"\n\
+           elif echo \"$out\" | grep -q 'permission denied'; then echo \"$1 $2 denied\"\n\
+           else echo \"$1 $2 error\"; fi\n\
+         }}\n\
+         {reads}\
+         n=0\n\
+         for p in $(BAO_TOKEN=\"$op\" bao policy list); do\n\
+           case \"$p\" in mandate-*)\n\
+             body=$(BAO_TOKEN=\"$op\" bao policy read \"$p\")\n\
+             n=$((n + 1))\n\
+             case \"$body\" in *'*'*|*'+'*) echo \"wildcard in $p\";; esac;;\n\
+           esac\n\
+         done\n\
+         echo \"checked $n mandate policies\"\n"
+    )
+}
+
+/// The vault drill (E21-32, DEC-2022 item 3). A Job labelled as the executor, so its egress
+/// reaches the vault and the vault admits it: the vault's image copies the cell's fake operator
+/// token into a file only the pod's user reads and makes `/work/private` owner-only, since an
+/// emptyDir is 0777 without the sticky bit and `--out`'s parent must not be; the cell's `mandate`
+/// image, the one `images.mandate` names, runs `mandate vault provision`, which writes every role's
+/// credentials, and the vault's image then logs in as each and reads (see
+/// [`vault_drill_script`]). The operator token is the local cell's fake root token, put in a
+/// Secret for the drill and deleted after it.
+fn vault_drill(seeded: bool) -> Result<Verdict> {
+    let init = fs::read_to_string(state()?.join(VAULT_INIT))
+        .context("the vault drill needs the cell's vault-init.json; run `cargo xtask cell up`")?;
+    let init: Value = serde_json::from_str(&init).context("reading the vault's init")?;
+    let root = init["root_token"]
+        .as_str()
+        .context("the vault's init holds no root token")?;
+    let secret = json!({
+        "apiVersion": "v1", "kind": "Secret",
+        "metadata": {"name": "vault-drill-operator"},
+        "type": "Opaque",
+        "stringData": {"token": root}
+    });
+    let mandate = image_tag()?;
+    let bao = kubectl(&[
+        "get",
+        "statefulset",
+        "vault",
+        "--namespace",
+        NAMESPACE,
+        "-o",
+        "jsonpath={.spec.template.spec.containers[0].image}",
+    ])?;
+    let executor = processes()?
+        .into_iter()
+        .find(|p| p["name"] == "executor")
+        .context("processes.json has no executor")?;
+    let id = run_id()?;
+    let mut pod = probe_pod(&executor, &id, bao.trim(), &vault_drill_script(seeded))?;
+    let hardened = pod["spec"]["containers"][0]["securityContext"].clone();
+    let env = json!([
+        {"name": "BAO_ADDR", "value": format!("https://vault.{NAMESPACE}.svc:8200")},
+        {"name": "BAO_CACERT", "value": "/ca/ca.crt"},
+        {"name": "HOME", "value": "/tmp"}
+    ]);
+    let mounts = json!([
+        {"name": "work", "mountPath": "/work"},
+        {"name": "ca", "mountPath": "/ca", "readOnly": true},
+        {"name": "tmp", "mountPath": "/tmp"}
+    ]);
+    let small = json!({"limits": {"cpu": "100m", "memory": "64Mi"}, "requests": {"cpu": "50m", "memory": "32Mi"}});
+    let mut provision = vec![
+        "vault".to_owned(),
+        "provision".to_owned(),
+        "--address".to_owned(),
+        format!("https://vault.{NAMESPACE}.svc:8200"),
+        "--ca".to_owned(),
+        "/ca/ca.crt".to_owned(),
+        "--operator-token-file".to_owned(),
+        "/work/token".to_owned(),
+        "--out".to_owned(),
+        "/work/private/creds".to_owned(),
+    ];
+    for c in VAULT_DRILL_CONNECTIONS {
+        provision.extend(["--connection".to_owned(), c.to_owned()]);
+    }
+    let spec = &mut pod["spec"];
+    spec["securityContext"]["fsGroup"] = json!(65532);
+    spec["initContainers"] = json!([
+        {
+            "name": "operator-token",
+            "image": bao.trim(),
+            "command": ["sh", "-c", "umask 077 && mkdir /work/private && cp /operator/token /work/token"],
+            "securityContext": hardened, "resources": small,
+            "volumeMounts": [{"name": "work", "mountPath": "/work"}, {"name": "operator", "mountPath": "/operator", "readOnly": true}]
+        },
+        {
+            "name": "provision",
+            "image": mandate,
+            "args": provision,
+            "securityContext": hardened, "resources": small,
+            "volumeMounts": mounts
+        }
+    ]);
+    spec["containers"][0]["env"] = env;
+    spec["containers"][0]["command"] = json!(["sh", "-c", vault_drill_script(seeded)]);
+    spec["containers"][0]["volumeMounts"] = mounts;
+    spec["volumes"] = json!([
+        {"name": "work", "emptyDir": {}},
+        {"name": "tmp", "emptyDir": {}},
+        {"name": "ca", "configMap": {"name": "vault-ca"}},
+        {"name": "operator", "secret": {"secretName": "vault-drill-operator", "defaultMode": 0o440}}
+    ]);
+    let template = json!({"metadata": {"labels": pod["metadata"]["labels"].clone()}, "spec": pod["spec"].clone()});
+    let job = json!({
+        "apiVersion": "batch/v1", "kind": "Job",
+        "metadata": {"name": format!("vault-drill-{id}")},
+        "spec": {"backoffLimit": 0, "template": template}
+    });
+    let ran = run_job(vec![secret, job]);
+    let _ = kubectl(&[
+        "delete",
+        "secret",
+        "vault-drill-operator",
+        "--namespace",
+        NAMESPACE,
+        "--ignore-not-found",
+    ]);
+    let (finished, logs) = ran?;
+    if !finished {
+        return Ok(Verdict::Broken(format!(
+            "the vault drill's Job failed:\n{logs}"
+        )));
+    }
+    let problems = vault_drill_problems(&logs);
+    if problems.is_empty() {
+        Ok(Verdict::Held)
+    } else {
+        Ok(Verdict::Broken(problems.join("\n")))
+    }
+}
+
 fn sha256(file: &str) -> Result<String> {
     let out = output("sha256sum", &[file]).or_else(|_| output("shasum", &["-a", "256", file]))?;
     out.split_whitespace()
@@ -1568,9 +1875,11 @@ pub fn drill(drills: &[Drill], seeded: bool) -> Result<()> {
             Drill::Compose => compose_drill(seeded),
             Drill::Restart => restart(seeded),
             Drill::KillSwitch => kill_switch(seeded),
+            Drill::Admission => admission_drill::drill(seeded),
             Drill::StandbyDown => standby_down(seeded),
             Drill::Archive => archive(seeded),
             Drill::Executor => executor::drill(seeded),
+            Drill::Vault => vault_drill(seeded),
         };
         if seeded && matches!(d, Drill::Boot | Drill::Journal | Drill::Egress) {
             restore()?;
@@ -4108,7 +4417,7 @@ pub fn demo_parts(processes: &[Value], cli_help: &str, stub_ready: bool) -> Vec<
                 Some(
                     "the executor runs on the fixture paper broker (DEC-2031), but the runtime \
                      proposes no order on the deny-all wiring until the post-R0 hook (DEC-1013), \
-                     and the executor takes no order before slice X1b (E21-30)"
+                     and the executor fills no paper order before slice X1b-3 (E21-30)"
                         .to_string(),
                 )
             } else {
@@ -4610,6 +4919,113 @@ mod tests {
 
     use super::*;
 
+    /// The vault drill passes only these answers, written out here rather than built from
+    /// [`VAULT_DRILL_READS`]: one line per read, every read as written, no wildcard, and a scan of
+    /// every `mandate-*` policy. A second line for a read, a missing or failed scan, an error, or a
+    /// line from another container fails it; the seeded symptom is the runtime policy's wildcard.
+    #[test]
+    fn the_vault_drill_judges_each_read_and_every_wildcard() {
+        let expected = [
+            "runtime connections/demo-paper/token denied",
+            "runtime connections/drill-other/token denied",
+            "runtime platform/alpaca-oauth-client-secret denied",
+            "executor-demo-paper connections/demo-paper/token allowed",
+            "executor-demo-paper connections/drill-other/token denied",
+            "executor-demo-paper platform/alpaca-oauth-client-secret denied",
+            "executor-drill-other connections/drill-other/token allowed",
+            "executor-drill-other connections/demo-paper/token denied",
+            "model-gateway platform/model-provider-key allowed",
+            "model-gateway connections/demo-paper/token denied",
+            "model-gateway platform/alpaca-oauth-client-secret denied",
+            "model-gateway platform/email-credential denied",
+            "executor-demo-paper connections/demo-paper/code denied",
+            "checked 10 mandate policies",
+        ];
+        let probe = |lines: &[&str]| -> String {
+            lines
+                .iter()
+                .map(|l| format!("[pod/vault-drill-1-x/probe] {l}\n"))
+                .collect()
+        };
+        let held = probe(&expected);
+        assert_eq!(vault_drill_problems(&held), Vec::<String>::new());
+        let unprefixed = held.replace("[pod/vault-drill-1-x/probe] ", "");
+        assert_eq!(
+            vault_drill_problems(&unprefixed).len(),
+            expected.len(),
+            "only the probe's lines, as kubectl prefixes them, are judged"
+        );
+        let elsewhere = held.replace("/probe] ", "/provision] ");
+        assert_eq!(vault_drill_problems(&elsewhere).len(), expected.len());
+        let leaked = held.replace(
+            "runtime connections/demo-paper/token denied",
+            "runtime connections/demo-paper/token allowed",
+        );
+        let wildcard = format!("{leaked}{}", probe(&["wildcard in mandate-runtime"]));
+        let found = vault_drill_problems(&wildcard).join("\n");
+        assert!(found.contains(Drill::Vault.seeded_symptom()), "{found}");
+        assert!(
+            found.contains("want `runtime connections/demo-paper/token denied`"),
+            "{found}"
+        );
+        let twice = format!(
+            "{held}{}",
+            probe(&["runtime connections/demo-paper/token allowed"])
+        );
+        assert_eq!(
+            vault_drill_problems(&twice),
+            ["want `runtime connections/demo-paper/token denied`, got \
+                 `runtime connections/demo-paper/token denied` and \
+                 `runtime connections/demo-paper/token allowed`"]
+        );
+        let missing = probe(
+            &expected
+                .iter()
+                .copied()
+                .filter(|l| *l != "model-gateway platform/model-provider-key allowed")
+                .collect::<Vec<_>>(),
+        );
+        assert_eq!(
+            vault_drill_problems(&missing),
+            ["want `model-gateway platform/model-provider-key allowed`, got `no answer`"]
+        );
+        let unscanned = held.replace("checked 10 mandate policies", "checked 0 mandate policies");
+        assert_eq!(
+            vault_drill_problems(&unscanned),
+            ["want `checked 10 mandate policies`, got `checked 0 mandate policies`"]
+        );
+        let no_scan = probe(&expected[..expected.len() - 1]);
+        assert_eq!(
+            vault_drill_problems(&no_scan),
+            ["want `checked 10 mandate policies`, got `no scan`"]
+        );
+        let errored = held.replace(
+            "executor-demo-paper connections/demo-paper/token allowed",
+            "executor-demo-paper connections/demo-paper/token error",
+        );
+        assert_eq!(vault_drill_problems(&errored).len(), 1);
+        let plain = vault_drill_script(false);
+        let seeded = vault_drill_script(true);
+        assert!(!plain.contains("policy write"), "{plain}");
+        assert!(seeded.contains("trap ") && seeded.contains("bao policy read mandate-runtime"));
+        assert!(
+            seeded.find("trap ") < seeded.find("connections/+/token"),
+            "the restore is armed before the wildcard is planted: {seeded}"
+        );
+        for script in [&plain, &seeded] {
+            assert!(
+                script.contains("bao read -field=data \"mandate/data/$2\"")
+                    && !script.contains("kv get"),
+                "reads skip kv get's mount preflight: {script}"
+            );
+            assert!(
+                script.contains("bao token lookup")
+                    && script.contains("checked $n mandate policies"),
+                "{script}"
+            );
+        }
+    }
+
     /// The cell judges the vault's status as the client judges `sys/seal-status`: uninitialized,
     /// sealed or unsealed on raft, and a dev server's in-memory storage refused whatever its seal.
     #[test]
@@ -4961,7 +5377,7 @@ mod tests {
             gaps.len(),
             2,
             "every lane on main, the paper agent and research still wait on the post-R0 hook and \
-             X1b (DEC-2031): {gaps:?}"
+             X1b-3 (DEC-2031): {gaps:?}"
         );
         assert!(gaps.contains(&RESEARCH_GATEWAY), "{gaps:?}");
         let no_stub = demo_parts(
@@ -5156,8 +5572,8 @@ mod tests {
     }
 
     /// Both images built still run no paper agent and no research: the runtime proposes nothing on
-    /// the deny-all wiring and the executor takes no order before X1b, so neither part is called
-    /// ready, and the paper fill stays a named gap rather than a faked one (DEC-2031).
+    /// the deny-all wiring and the executor fills no paper order before X1b-3, so neither part is
+    /// called ready, and the paper fill stays a named gap rather than a faked one (DEC-2031).
     #[test]
     fn both_images_built_still_call_no_paper_agent_or_research_ready() {
         let list = [process("runtime", true), process("executor", true)];
@@ -5169,7 +5585,7 @@ mod tests {
                 .and_then(|p| p.skipped.clone())
         };
         assert!(
-            skipped("a paper agent").is_some_and(|why| why.contains("X1b")),
+            skipped("a paper agent").is_some_and(|why| why.contains("X1b-3")),
             "{:?}",
             skipped("a paper agent")
         );

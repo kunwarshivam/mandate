@@ -23,6 +23,7 @@ use mandate_research_run::{
 use mandate_runtime::{ResearchInput, ResearchRequest, RetrievedObservation, RiskClock};
 use mandate_time::UtcNanos;
 
+use crate::meter::CellMeter;
 use crate::recorded::{Bundle, BundleError, RecordedPlane, RecordedReply};
 use crate::runtime::{ArtifactSink, ResearchParts, ResearchWorker};
 
@@ -94,6 +95,27 @@ pub struct RecordedWorker {
 }
 
 impl RecordedWorker {
+    /// As [`RecordedWorker::new`], with the gateway reserving and settling through `meter`, the
+    /// store the research source reads the agent's spend from (DEC-2249 item 3): while `meter` is
+    /// held, every call is refused `meter_unavailable` and nothing is sent.
+    ///
+    /// # Errors
+    /// As [`RecordedWorker::new`].
+    #[expect(
+        clippy::todo,
+        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+    )]
+    pub fn metered(
+        bundle: &Bundle,
+        who: WorkerFor,
+        sink: Box<dyn ArtifactSink>,
+        now: Box<dyn FnMut() -> UtcNanos>,
+        meter: CellMeter,
+    ) -> Result<Self, WorkerError> {
+        let _ = (bundle, who, sink, now, meter);
+        todo!()
+    }
+
     /// The worker over `bundle`, storing through `sink`, its gateway's clock moved to `now()`
     /// before each call.
     ///

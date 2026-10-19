@@ -97,6 +97,9 @@ pub(super) struct Fold {
     /// Set by an acknowledgment of the ladder: until no scale rung is active, only the highest
     /// active one counts towards its lift, so sizes return one rung at a time (§5.8).
     stepping: bool,
+    /// The breach time of each `RiskLimitTriggered` the input being folded has journalled, by its
+    /// position: empty between inputs, since [`Fold::evaluate`] hands it to its [`Outcome`].
+    breach_times: BTreeMap<usize, (LimitKey, u64)>,
 }
 
 /// A `scale_sizes` rung's timers (§5.5), in session seconds.
@@ -218,6 +221,7 @@ impl Fold {
             on_complete: document.goal.on_complete(),
             disarmed: false,
             stepping: false,
+            breach_times: BTreeMap::new(),
         })
     }
 
@@ -252,10 +256,16 @@ impl Fold {
             session: step.session,
             input: Input::Clock,
         };
-        let mut journal = self.evaluate(clock, &settle, None)?.journal;
+        let settled = self.evaluate(clock, &settle, None)?;
+        let mut journal = settled.journal;
+        let mut breach_times = settled.breach_times;
         let mut outcome = self.evaluate(clock, step, tripwire)?;
         outcome.tripwire_journal_index =
             outcome.tripwire_journal_index.saturating_add(journal.len());
+        for (position, recorded) in &outcome.breach_times {
+            breach_times.insert(position.saturating_add(journal.len()), *recorded);
+        }
+        outcome.breach_times = breach_times;
         journal.append(&mut outcome.journal);
         outcome.journal = journal;
         Ok(outcome)
@@ -281,6 +291,7 @@ impl Fold {
         };
         self.at = step.at;
         let before = self.instrument_restrictions.clone();
+        self.breach_times.clear();
         let mut journal = Vec::new();
         self.age_mark(session_s)?;
         let (read, rejection) = self.apply(step, wall_s, &mut journal)?;
@@ -314,6 +325,7 @@ impl Fold {
             tripwire_journal_index,
             pending: self.pending(),
             rejection,
+            breach_times: std::mem::take(&mut self.breach_times),
         })
     }
 
@@ -677,6 +689,7 @@ impl Fold {
         if hit {
             if rung.active_s.is_none() {
                 rung.active_s = Some(0);
+                self.breach_times.insert(journal.len(), (key, 0));
                 journal.push(RiskEvent::RiskLimitTriggered {
                     limit: key,
                     action: LadderAction::ScaleSizes,
@@ -716,14 +729,24 @@ impl Fold {
             return Ok(());
         };
         self.latched.insert(limit.key);
-        self.latch(limit, trigger.reason(), journal);
+        let breach_s = self.breach_s(limit.key);
+        self.latch(limit, trigger.reason(), breach_s, journal);
         Ok(())
     }
 
     /// Applies a limit that has just triggered: its restriction, its event, and for a flatten the
-    /// agent's kill switch (§5.4, §5.5, §5.7). Its breach time is spent.
-    fn latch(&mut self, limit: Limit, reason: Option<TriggerReason>, journal: &mut Vec<RiskEvent>) {
+    /// agent's kill switch (§5.4, §5.5, §5.7). Its breach time is spent, so the caller reads it
+    /// first as `breach_s`, which the event carries (DEC-2301 item 1).
+    fn latch(
+        &mut self,
+        limit: Limit,
+        reason: Option<TriggerReason>,
+        breach_s: u64,
+        journal: &mut Vec<RiskEvent>,
+    ) {
         self.confirmations.remove(&limit.key);
+        self.breach_times
+            .insert(journal.len(), (limit.key, breach_s));
         self.restrictions.insert(limit.restriction);
         journal.push(RiskEvent::RiskLimitTriggered {
             limit: limit.key,
@@ -846,6 +869,8 @@ impl Fold {
         let Some(since) = self.hard_since.get(&key).copied() else {
             self.hard_since.insert(key, self.at);
             self.restrictions.insert(Restriction::HardBreach);
+            self.breach_times
+                .insert(journal.len(), (key, self.breach_s(key)));
             journal.push(RiskEvent::RiskLimitTriggered {
                 limit: key,
                 action: LadderAction::ExitsOnly,
@@ -858,6 +883,13 @@ impl Fold {
         }
         self.clear_hard(key);
         Ok(Some(Trigger::Hard))
+    }
+
+    /// The breach time `key`'s confirmation holds now: 0 where it has none (DEC-2301 item 1).
+    fn breach_s(&self, key: LimitKey) -> u64 {
+        self.confirmations
+            .get(&key)
+            .map_or(0, Confirmation::accumulated_s)
     }
 
     /// Ends `key`'s hard wait, and lifts `hard_breach` once no limit is waiting. Whether it had one.

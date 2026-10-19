@@ -1862,6 +1862,13 @@ mod tests {
         let script = fs::read_to_string(
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github/scripts/release-sign.sh"),
         )?;
+        assert!(
+            script.starts_with("#!/bin/bash --posix\n")
+                && script.contains(
+                    "\nset +x +v\nunset -f compgen\ncase \"$(compgen -A function)\" in\n"
+                ),
+            "release-sign.sh must start in POSIX mode, turn tracing off and refuse functions first"
+        );
         let ordered = [
             "grep -Evq '^[0-9a-f]{64}  [A-Za-z0-9._-]+$' \"$sums\"",
             "echo \"SHA256SUMS lists $name twice; nothing is signed\" >&2",
@@ -1870,11 +1877,12 @@ mod tests {
             "trap 'rm -rf \"$key_dir\" \"$verified\"' EXIT",
             "cp -- \"dist/bin/$name\" \"$verified/bin/$name\"",
             "(cd \"$verified/bin\" && sha256sum --check --strict ../SHA256SUMS)",
-            "sha256sum --check --strict \"$verified/DIGEST\"",
+            "(cd \"$verified\" && sha256sum --check --strict DIGEST)",
             "sha256sum --check --strict \"$tools/cosign.sha256\"",
             "base64 --decode \"$key_dir/cosign.key.base64\" > \"$key_dir/cosign.key\"",
             "unset RELEASE_SIGNING_KEY",
-            "env -i HOME=\"$key_dir/home\" PATH=\"$tools:/usr/bin:/bin\" COSIGN_PASSWORD=\"$COSIGN_PASSWORD\"",
+            "env -i \"$(dirname \"$0\")/release-sign-cosign.sh\" \"$key_dir/home\" \"$tools\"",
+            "<<<\"$COSIGN_PASSWORD\"",
         ];
         let mut from = 0;
         for line in ordered {
@@ -1886,7 +1894,39 @@ mod tests {
                 })?;
             from = from.saturating_add(at).saturating_add(line.len());
         }
-        for absent in ["set -x", "cargo", "xtask", "dist/bin/*"] {
+        let cosign = fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github/scripts/release-sign-cosign.sh"),
+        )?;
+        let mut from = 0;
+        for line in [
+            "\nset +x +v\nset -euo pipefail\n",
+            "export HOME=\"$1\" PATH=\"$2:/usr/bin:/bin\"",
+            "IFS= read -r COSIGN_PASSWORD",
+            "export COSIGN_PASSWORD",
+            "exec env -u SHLVL -u PWD -u OLDPWD -u _ cosign sign-blob",
+        ] {
+            let at = cosign
+                .get(from..)
+                .and_then(|rest| rest.find(line))
+                .with_context(|| {
+                    format!("release-sign-cosign.sh lacks {line:?}, or out of order")
+                })?;
+            from = from.saturating_add(at).saturating_add(line.len());
+        }
+        for absent in ["set -x", "cargo", "xtask", "COSIGN_PASSWORD="] {
+            assert!(
+                !cosign.contains(absent),
+                "release-sign-cosign.sh holds {absent:?}"
+            );
+        }
+        for absent in [
+            "set -x",
+            "cargo",
+            "xtask",
+            "dist/bin/*",
+            "compgen -e",
+            "COSIGN_PASSWORD=",
+        ] {
             assert!(!script.contains(absent), "release-sign.sh holds {absent:?}");
         }
         assert!(
@@ -1900,6 +1940,131 @@ mod tests {
             .context("no release-signing-check")?;
         assert!(check.contains("    needs: [release-signing]\n"));
         assert!(check.contains("cargo xtask release check-signed dist signed/signatures"));
+        Ok(())
+    }
+
+    /// cosign runs with exactly `COSIGN_PASSWORD`, `HOME` and `PATH` in its environment, whatever
+    /// else the job held (a name that is no identifier, a variable bash keeps read-only, a trace
+    /// switch), with the password nowhere in its command line and neither secret in the signer's
+    /// stderr (DEC-2024 item 4, `AGENTS.md` rule 7). A stand-in cosign, served to the signer by a
+    /// `file://` URL and pinned by its SHA-256 as the real one is, records the names its process
+    /// received and its arguments.
+    #[test]
+    fn cosign_sees_only_the_password_home_and_path() -> Result<()> {
+        let script =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github/scripts/release-sign.sh");
+        let dir = env::temp_dir().join(format!("mandate-xtask-signer-env-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("dist/bin"))?;
+        fs::write(dir.join("dist/bin/a"), "a")?;
+        fs::write(dir.join("dist/bin/b"), "b")?;
+        write_sums(&dir, SIGNER_SUMS)?;
+        let stand_in = dir.join("stand-in-cosign");
+        fs::write(
+            &stand_in,
+            concat!(
+                "#!/bin/sh\n",
+                "tr '\\000' '\\n' < /proc/$$/environ | cut -d= -f1 | LC_ALL=C sort > names\n",
+                "tr '\\000' ' ' < /proc/$$/cmdline > arguments\n",
+            ),
+        )?;
+        let password = "the-password-is-not-an-argument";
+        let output = Command::new(&script)
+            .current_dir(&dir)
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin")
+            .env("DIGEST", sha256(&dir.join("dist/SHA256SUMS"))?)
+            .env("COSIGN_URL", format!("file://{}", stand_in.display()))
+            .env("COSIGN_SHA256", sha256(&stand_in)?)
+            .env("RELEASE_SIGNING_KEY", "c3RhbmQtaW4ga2V5")
+            .env("COSIGN_PASSWORD", password)
+            .env("RUNNER_TEMP", dir.join("runner"))
+            .env("LD_PRELOAD", "planted.so")
+            .env("SIGSTORE_REKOR_URL", "https://planted.invalid")
+            .env("HTTPS_PROXY", "http://planted.invalid")
+            .env("a b", "planted")
+            .env("EUID", "0")
+            .env("SHELLOPTS", "xtrace")
+            .output()?;
+        assert!(
+            output.status.success(),
+            "the signer stopped: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            fs::read_to_string(dir.join("names"))?,
+            "COSIGN_PASSWORD\nHOME\nPATH\n"
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        for secret in [password, "c3RhbmQtaW4ga2V5", "stand-in key"] {
+            assert!(
+                !stderr.contains(secret),
+                "stderr shows {secret:?}: {stderr}"
+            );
+        }
+        let arguments = fs::read_to_string(dir.join("arguments"))?;
+        assert!(arguments.contains("sign-blob"), "{arguments}");
+        assert!(!arguments.contains(password), "{arguments}");
+        assert!(
+            !dir.join("runner/release-key").exists(),
+            "the key was left behind"
+        );
+        Ok(())
+    }
+
+    /// The signer runs in POSIX mode, where bash refuses to start when an exported function shadows
+    /// a special builtin such as `set`, and it refuses any other exported function before it reads
+    /// anything, so a planted `BASH_FUNC_echo%%` or `BASH_FUNC_set%%` can neither silence its
+    /// `set +x +v` nor stand in for a check, and a planted `compgen` that lists nothing cannot hide
+    /// another, even beside a planted `unset` that would keep it (DEC-2024 item 4). No run reaches
+    /// the key.
+    #[test]
+    fn the_signer_refuses_exported_functions() -> Result<()> {
+        let script =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github/scripts/release-sign.sh");
+        let root = env::temp_dir().join(format!(
+            "mandate-xtask-signer-functions-{}",
+            std::process::id()
+        ));
+        let echo = ("BASH_FUNC_echo%%", "() { builtin echo planted; }");
+        let compgen = ("BASH_FUNC_compgen%%", "() { :; }");
+        let cases: [&[(&str, &str)]; 4] = [
+            &[echo],
+            &[("BASH_FUNC_set%%", "() { builtin echo planted; }")],
+            &[compgen, echo],
+            &[("BASH_FUNC_unset%%", "() { :; }"), compgen, echo],
+        ];
+        for planted in cases {
+            let name = planted
+                .iter()
+                .map(|(n, _)| n.replace('%', ""))
+                .collect::<Vec<_>>()
+                .join("+");
+            let dir = root.join(&name);
+            let _ = fs::remove_dir_all(&dir);
+            fs::create_dir_all(dir.join("dist/bin"))?;
+            fs::write(dir.join("dist/bin/a"), "a")?;
+            fs::write(dir.join("dist/bin/b"), "b")?;
+            write_sums(&dir, SIGNER_SUMS)?;
+            let output = Command::new(&script)
+                .current_dir(&dir)
+                .env_clear()
+                .env("PATH", "/usr/bin:/bin")
+                .env("DIGEST", sha256(&dir.join("dist/SHA256SUMS"))?)
+                .env("RUNNER_TEMP", dir.join("runner"))
+                .envs(planted.iter().copied())
+                .output()?;
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert!(!output.status.success(), "{name}: the signer went on");
+            assert!(
+                !stdout.contains("OK"),
+                "{name}: the signer checked the copies"
+            );
+            assert!(
+                !dir.join("runner").exists(),
+                "{name}: the signer reached RUNNER_TEMP"
+            );
+        }
         Ok(())
     }
 
@@ -1930,15 +2095,19 @@ mod tests {
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github/scripts/release-sign.sh");
         let root =
             env::temp_dir().join(format!("mandate-xtask-release-sign-{}", std::process::id()));
-        let refused = "none a symlink";
         let not_regular = "not a regular file";
         let malformed = "is not '<sha256>  <name>'";
         let cases: Vec<SignerCase> = vec![
-            ("exact", |_| Ok(()), "FAILED"),
+            ("exact", |_| Ok(()), "b: OK\nSHA256SUMS: FAILED"),
+            (
+                "exact with a spaced RUNNER_TEMP",
+                |_| Ok(()),
+                "b: OK\nSHA256SUMS: FAILED",
+            ),
             (
                 "tampered",
                 |d| fs::write(d.join("dist/bin/a"), "x"),
-                "FAILED",
+                "a: FAILED",
             ),
             (
                 "extra",
@@ -2005,7 +2174,7 @@ mod tests {
                     fs::rename(d.join("dist/bin"), d.join("dist/real"))?;
                     symlink("real", d.join("dist/bin"))
                 },
-                refused,
+                "dist/bin must be a real directory, not a symlink",
             ),
             (
                 "symlinked-sums",
@@ -2013,7 +2182,7 @@ mod tests {
                     fs::rename(d.join("dist/SHA256SUMS"), d.join("dist/sums"))?;
                     symlink("sums", d.join("dist/SHA256SUMS"))
                 },
-                refused,
+                "dist/SHA256SUMS must be a regular file, not a symlink",
             ),
             (
                 "symlinked-dist",
@@ -2021,7 +2190,7 @@ mod tests {
                     fs::rename(d.join("dist"), d.join("real"))?;
                     symlink("real", d.join("dist"))
                 },
-                refused,
+                "dist must be a real directory, not a symlink",
             ),
             (
                 "crlf",
@@ -2048,9 +2217,12 @@ mod tests {
             fs::write(dir.join("dist/bin/b"), "b")?;
             write_sums(&dir, SIGNER_SUMS)?;
             change(&dir)?;
-            let runner = dir.join("runner");
-            let output = Command::new("bash")
-                .arg(&script)
+            let runner = dir.join(if name.contains("spaced") {
+                "run ner"
+            } else {
+                "runner"
+            });
+            let output = Command::new(&script)
                 .current_dir(&dir)
                 .env_clear()
                 .env("PATH", "/usr/bin:/bin")
