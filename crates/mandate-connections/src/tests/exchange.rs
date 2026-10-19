@@ -12,7 +12,7 @@ use crate::ConnectError;
 use crate::exchange::{ClientSecret, ExchangedGrant, PendingConnect, exchange_code};
 use crate::grant::GrantedScopes;
 use crate::hosts::LiveTokenRequest;
-use crate::start::{Environment, REDIRECT_URI};
+use crate::start::{ClientId, Environment, OAuthClient, RedirectUri};
 
 fn pending(environment: Environment) -> PendingConnect {
     PendingConnect {
@@ -59,7 +59,7 @@ fn a_paper_exchange_sends_the_one_live_token_request_and_stores_only_the_token()
             code_verifier: VERIFIER.to_owned(),
             client_id: "client-1".to_owned(),
             client_secret: SECRET.to_owned(),
-            redirect_uri: REDIRECT_URI.to_owned(),
+            redirect_uri: RedirectUri::production().as_str().to_owned(),
         }]
     );
     assert_eq!(
@@ -163,4 +163,32 @@ fn no_secret_reaches_the_grant_or_an_error() {
     for canary in CANARIES {
         assert!(!printed.contains(canary), "{printed}");
     }
+}
+
+#[test]
+fn the_exchange_sends_the_redirect_uri_the_deployment_registered() {
+    let staging = OAuthClient {
+        client_id: ClientId("client-1".to_owned()),
+        redirect_uri: RedirectUri::parse("https://api-staging.owlhead.ai/v1/oauth/alpaca/callback")
+            .unwrap(),
+    };
+    let mut vault = FixtureVault::with_code();
+    let mut provider = FixtureProvider::granting("bearer", "trading data");
+    exchange_code(
+        &pending(Environment::Paper),
+        &staging,
+        &secret(),
+        &mut vault,
+        &mut provider,
+    )
+    .unwrap();
+    let sent: Vec<&str> = provider
+        .calls
+        .iter()
+        .map(|call| call.redirect_uri.as_str())
+        .collect();
+    assert_eq!(
+        sent,
+        vec!["https://api-staging.owlhead.ai/v1/oauth/alpaca/callback"]
+    );
 }

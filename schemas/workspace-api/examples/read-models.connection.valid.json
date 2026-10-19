@@ -1,0 +1,40 @@
+[
+  {
+    "label": "connecting, nothing granted yet",
+    "set": {
+      "/connection/state": "connecting",
+      "/connection/scopes": null,
+      "/connection/agents": []
+    }
+  },
+  {
+    "label": "revoked by the owner",
+    "set": {
+      "/connection/state": "revoked",
+      "/connection/revoked_reason": "owner",
+      "/connection/agents": []
+    }
+  },
+  {
+    "label": "revoked at version 1, reason not reported",
+    "set": {
+      "/connection/state": "revoked"
+    }
+  },
+  {
+    "label": "refused by a teardown no check caused",
+    "set": {
+      "/connection/state": "refused",
+      "/connection/refusal": {
+        "check": null,
+        "reason": "timeout"
+      }
+    }
+  },
+  {
+    "label": "a live connection",
+    "set": {
+      "/connection/environment": "live"
+    }
+  }
+]
