@@ -338,6 +338,10 @@ async fn wait_for(mut stop: watch::Receiver<bool>) {
 }
 
 fn main() -> ExitCode {
+    if let Err(refused) = mandate_release::startup::check_running() {
+        eprintln!("{}", refused.code());
+        return ExitCode::from(2);
+    }
     let (args, start) = match checked() {
         Ok(checked) => checked,
         Err(refusal) => {

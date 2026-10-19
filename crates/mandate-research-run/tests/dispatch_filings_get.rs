@@ -73,7 +73,6 @@ fn read_nothing(result: &Dispatched, leaked: &str, why: &str) {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn filings_get_reads_the_range_asked_and_shows_it_under_untrusted() {
     let record = filing("f-1", "AAPL", CUT_OFF - 60);
     let fixture = answering(Ok(range(record.clone(), 100, "The range.")));
@@ -135,7 +134,6 @@ fn filings_get_reads_the_range_asked_and_shows_it_under_untrusted() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn a_range_is_at_most_the_length_asked_and_never_cut_to_it() {
     let record = filing("f-1", "AAPL", CUT_OFF - 60);
     let ask = r#"{"item":"f-1","length":10,"offset":0}"#;
@@ -152,7 +150,6 @@ fn a_range_is_at_most_the_length_asked_and_never_cut_to_it() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn the_readers_two_answers_are_kept_apart() {
     let result = run(answering(Err(ReadError::OutOfRange)).readers(), ASK);
     assert_eq!(
@@ -184,7 +181,6 @@ fn the_readers_two_answers_are_kept_apart() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn a_filings_get_answer_that_leaks_reads_nothing() {
     let mut licensed = filing("f-1", "AAPL", CUT_OFF - 60);
     licensed.licensed = true;
@@ -217,7 +213,6 @@ fn a_filings_get_answer_that_leaks_reads_nothing() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn filings_get_arguments_outside_the_pinned_schema_ask_no_reader() {
     let record = filing("f-1", "AAPL", CUT_OFF - 60);
     let widest = answering(Ok(range(record, 4_000_000_000, "far in")));
@@ -255,7 +250,6 @@ fn filings_get_arguments_outside_the_pinned_schema_ask_no_reader() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn a_reader_with_no_stored_filing_text_reads_nothing() {
     let fixture = Fixture::default();
     let readers = Readers {
