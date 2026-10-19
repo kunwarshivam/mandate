@@ -495,3 +495,151 @@ fn pages_concatenate_to_the_stream_and_chain_from_zeros() {
         panic!("{failure}");
     }
 }
+
+fn one(f: &Fixture, cookie: &str, event_id: &str) -> Reply {
+    let path = format!("/v1/workspaces/{WORKSPACE}/journal/events/{event_id}");
+    let header = format!("{COOKIE_NAME}={cookie}");
+    send(
+        f.addr,
+        "GET",
+        &path,
+        &[("Origin", APP), ("Cookie", &header)],
+        b"",
+    )
+}
+
+/// `stream`'s row at `seq` (after `prev`), its envelope naming `artifacts` and `config` as stored.
+fn with_refs(stream: &str, seq: u64, prev: Digest, artifacts: &str, config: &str) -> StoredEvent {
+    let event_id = format!("01JBH3BTZ8K2M4N6P8R0T{seq:05}");
+    let text = format!(
+        r#"{{"artifact_refs":{artifacts},"config_refs":{config},"environment":"paper","event_id":"{event_id}","event_type":"Noted","payload":{{}},"prev_hash":"{prev}","seq":{seq},"stream_id":"{stream}"}}"#
+    );
+    let body = to_canonical(&parse(text.as_bytes()).expect("JSON"));
+    StoredEvent {
+        stream_id: stream.to_owned(),
+        seq,
+        event_id,
+        event_type: "Noted".to_owned(),
+        schema_version: 1,
+        environment: "paper".to_owned(),
+        recorded_at: format!("2026-10-19T11:00:{seq:02}.000000000Z"),
+        prev_hash: prev,
+        hash: Digest::of(&body),
+        body,
+    }
+}
+
+const ARTIFACTS: &str =
+    r#"["sha256:1111111111111111111111111111111111111111111111111111111111111111"]"#;
+const CONFIG: &str = r#"{"mandate_version":"sha256:2222222222222222222222222222222222222222222222222222222222222222"}"#;
+
+#[test]
+#[ignore = "pending E12-6"]
+fn one_event_is_served_with_its_stream_and_its_refs_as_stored() {
+    let f = fixture();
+    let agent = format!("agent:{WORKSPACE}:agt_a");
+    let first = chain(&agent, 1).remove(0);
+    let second = with_refs(&agent, 2, first.hash, ARTIFACTS, CONFIG);
+    seed(&f, vec![first.clone(), second.clone()]);
+    let cookie = auditor(&f);
+    let reply = one(&f, &cookie, &second.event_id);
+    assert_eq!(
+        reply.status,
+        200,
+        "{}",
+        String::from_utf8_lossy(&reply.body)
+    );
+    let served = json(&reply);
+    let event = member_of(&served, &["event"]);
+    assert_eq!(text(event, &["stream_id"]), agent);
+    assert_eq!(int(event, &["seq"]), Some(2));
+    assert_eq!(text(event, &["event_id"]), second.event_id);
+    assert_eq!(text(event, &["event_type"]), "Noted");
+    assert_eq!(text(event, &["recorded_at"]), second.recorded_at);
+    assert_eq!(text(event, &["prev_hash"]), first.hash.to_string());
+    assert_eq!(text(event, &["hash"]), second.hash.to_string());
+    assert_eq!(text(event, &["body"]), base64(&second.body));
+    assert_eq!(
+        member_of(event, &["artifact_refs"]),
+        &parse(ARTIFACTS.as_bytes()).expect("JSON")
+    );
+    assert_eq!(
+        member_of(event, &["config_refs"]),
+        &parse(CONFIG.as_bytes()).expect("JSON")
+    );
+    let as_of = member_of(&served, &["as_of"])
+        .as_array()
+        .map(<[Value]>::to_vec)
+        .unwrap_or_default();
+    assert_eq!(as_of.len(), 1, "one watermark, the event's stream");
+    assert_eq!(text(&as_of[0], &["stream_id"]), agent);
+    assert_eq!(int(&as_of[0], &["seq"]), Some(2));
+    let bare = json(&one(&f, &cookie, &first.event_id));
+    let event = member_of(&bare, &["event"]);
+    assert_eq!(int(event, &["seq"]), Some(1));
+    assert_eq!(
+        member_of(event, &["artifact_refs"]),
+        &Value::Null,
+        "none stored"
+    );
+    assert_eq!(
+        member_of(event, &["config_refs"]),
+        &Value::Null,
+        "none stored"
+    );
+}
+
+#[test]
+#[ignore = "pending E12-6"]
+fn an_event_outside_the_workspaces_streams_is_the_same_not_found() {
+    let f = fixture();
+    let ours = chain(&ctl(WORKSPACE), 1).remove(0);
+    let theirs = with_refs(&ctl(OTHER_WORKSPACE), 1, Digest::ZERO, ARTIFACTS, CONFIG);
+    let prefixed = with_refs(&format!("ctl:{WORKSPACE}x"), 1, Digest::ZERO, "[]", "{}");
+    seed(&f, vec![ours]);
+    seed(&f, vec![theirs.clone()]);
+    seed(&f, vec![prefixed.clone()]);
+    let cookie = auditor(&f);
+    let ids = [
+        theirs.event_id,
+        prefixed.event_id,
+        "01JBH3BTZ8K2M4N6P8R0Z99999".to_owned(),
+        "not-an-id".to_owned(),
+    ];
+    let bodies: Vec<Vec<u8>> = ids
+        .iter()
+        .map(|id| {
+            let reply = one(&f, &cookie, id);
+            assert_eq!(reply.status, 404, "{id}");
+            reply.body
+        })
+        .collect();
+    assert!(
+        bodies.windows(2).all(|w| w[0] == w[1]),
+        "one body, byte for byte (AU-1)"
+    );
+    assert_eq!(
+        text(&parse(&bodies[0]).expect("a problem"), &["code"]),
+        "not_found"
+    );
+}
+
+#[test]
+#[ignore = "pending E12-6"]
+fn only_the_records_roles_read_one_event_whatever_the_id() {
+    let f = fixture();
+    let ours = chain(&ctl(WORKSPACE), 1).remove(0);
+    seed(&f, vec![ours.clone()]);
+    for (n, role) in [(2, Role::Viewer), (3, Role::Operator), (4, Role::Approver)] {
+        let cookie = member(&f, n, Some(&[role]));
+        for id in [ours.event_id.as_str(), "not-an-id"] {
+            let reply = one(&f, &cookie, id);
+            assert_eq!(reply.status, 403, "{role:?} reading {id}");
+            assert_eq!(text(&json(&reply), &["code"]), "forbidden");
+        }
+    }
+    let admin = member(&f, 5, Some(&[Role::WorkspaceAdmin]));
+    assert_eq!(one(&f, &admin, &ours.event_id).status, 200);
+    let stranger = member(&f, 6, None);
+    assert_eq!(one(&f, &stranger, &ours.event_id).status, 404, "API-9");
+}

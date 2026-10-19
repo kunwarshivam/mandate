@@ -127,6 +127,10 @@ pub fn api(app: App, drain: Arc<Drain>) -> Router {
             get(routes::one_approval).fallback(otherwise.clone()),
         )
         .route(
+            "/v1/workspaces/{workspace}/journal/events/{event}",
+            get(journal_reads::one_event).fallback(otherwise.clone()),
+        )
+        .route(
             "/v1/workspaces/{workspace}/journal/streams/{stream}/events",
             get(journal_reads::events).fallback(otherwise.clone()),
         )
