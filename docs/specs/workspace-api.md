@@ -990,7 +990,8 @@ the connection the deployed document names (`account_ref` `null`, and the lists 
 not found). An order is the agent's when its `OrderRequestRecorded` names the agent: its request as
 first submitted, and `state` and `filled_qty` from the last `OrderStateChanged` (`null` before any;
 `unknown` served as unknown). `positions` is the net `filled_qty` of the agent's own fills per
-instrument, not the ledger's fold; `cost_basis`, `risk_mark`, and `protection` are present and
+instrument, not the ledger's fold (an own fill that cannot be read is `journal_unavailable`, never
+skipped); `cost_basis`, `risk_mark`, and `protection` are present and
 `null` until those folds are served. `account_positions` is the account's, as on the single agent
 read. Limit usage (the ladder's rung, the day-trade count, headroom) is not
 journaled yet and is not served; it joins with E6-4's risk records. The rest of D2 (restrictions,
