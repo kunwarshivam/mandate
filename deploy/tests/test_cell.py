@@ -1335,7 +1335,14 @@ def owner_workload(docs: list[dict]) -> dict:
 
 
 def without_ingress(docs: list[dict]) -> list[dict]:
-    return [d for d in docs if d["metadata"]["name"] not in ("cloudflared", "egress-cloudflared")]
+    """`docs` without the tunnel: its Deployment and policy, and its container and token volume in
+    the API's pod (DEC-2056)."""
+    docs = copy.deepcopy([d for d in docs if d["metadata"]["name"] not in ("cloudflared", "egress-cloudflared")])
+    for w in workloads(docs):
+        spec = pod_spec(w)
+        spec["containers"] = [c for c in spec["containers"] if c["name"] != "cloudflared"]
+        spec["volumes"] = [v for v in spec.get("volumes", []) if v["name"] != "tunnel"]
+    return docs
 
 
 def test_portable_across_k3d_k3s_and_managed():
@@ -1506,7 +1513,7 @@ def tiers(docs: list[dict]) -> set[str]:
             names = [e["name"] for e in c.get("env", [])]
             assert len(names) == len(set(names)), f"{w['metadata']['name']} sets an env var twice: {names}"
             env = {e["name"]: e.get("value") for e in c.get("env", [])}
-            if "HOME" in env and w["metadata"]["name"] != "cloudflared":
+            if "HOME" in env and c["name"] != "cloudflared":
                 found.add(env.get("MANDATE_DEPLOYMENT_TIER", "unset"))
     return found
 

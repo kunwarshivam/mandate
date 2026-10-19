@@ -41,10 +41,11 @@ const SIGNATURE_WEBHOOK: &str = "policy.sigstore.dev";
 /// takes.
 pub(crate) const SECONDS: i64 = 480;
 
-/// The change the edge's lines wait on: until the API pod's tunnel connector lands, an unhealthy
-/// tunnel or an API Access cannot reach is a pending note, not a failure (DEC-2050 item 4). The PR
-/// that lands the connector sets this to `None`. An API that answers without Access fails always.
-const EDGE_PENDING: Option<&str> = Some("#1539");
+/// The change the edge's lines wait on, if any: while one is named, an unhealthy tunnel or an API
+/// Access cannot reach is a pending note, not a failure (DEC-2050 item 3). The tunnel's connector
+/// now runs beside the API (DEC-2056), so nothing is pending and both fail. An API that answers
+/// without Access fails always.
+const EDGE_PENDING: Option<&str> = None;
 
 /// `kubectl` against the cluster, its arguments, answering what it printed: the check runs only
 /// `get` and `logs`.
