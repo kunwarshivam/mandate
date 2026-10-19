@@ -4,5 +4,6 @@
   "served_at": "2026-10-08T14:30:00.000000000Z",
   "as_of": [],
   "authorization_url": "https://broker.example/oauth/authorize?state=s1",
-  "expires_at": "2026-10-08T14:30:00.000000000Z"
+  "expires_at": "2026-10-08T14:30:00.000000000Z",
+  "connection_id": "conn_01JB3K6F0C9R2V7N4M8Q1T5W50"
 }

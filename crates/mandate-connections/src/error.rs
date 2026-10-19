@@ -16,6 +16,8 @@ pub enum ConnectError {
     StateUserMismatch,
     #[error("the state is already issued")]
     StateReused,
+    #[error("the redirect URI is not one a deployment may register")]
+    RedirectUriInvalid,
     #[error("the vault's token entry is not in its format")]
     TokenEntryInvalid,
     #[error("the request may not leave the process")]
@@ -66,6 +68,7 @@ impl ConnectError {
             Self::StateExpired => "state_expired",
             Self::StateUserMismatch => "state_user_mismatch",
             Self::StateReused => "state_reused",
+            Self::RedirectUriInvalid => "redirect_uri_invalid",
             Self::TokenEntryInvalid => "token_entry_invalid",
             Self::RequestRefused => "request_refused",
             Self::ScopeMismatch => "scope_mismatch",
