@@ -1668,7 +1668,7 @@ impl Sink for ExecutorSink {
                     instrument: instrument.clone(),
                     side: *side,
                     qty: *qty,
-                    limit: *limit,
+                    limit: Some(*limit),
                     purpose: executor_purpose(*purpose),
                     protection: execution.protection.map(|prices| {
                         mandate_executor::ProtectionPrices {

@@ -638,7 +638,7 @@ pub fn opening(name: &str, quantity: &str, limit: &str) -> mandate_executor::Int
         instrument: instrument(name),
         side: Side::Buy,
         qty: qty(quantity),
-        limit: price(limit),
+        limit: Some(price(limit)),
         purpose: mandate_executor::Purpose::Open,
         protection: None,
     }
@@ -658,7 +658,7 @@ pub fn protected_opening(
         instrument: instrument(name),
         side: Side::Buy,
         qty: qty(quantity),
-        limit: price(limit),
+        limit: Some(price(limit)),
         purpose: mandate_executor::Purpose::Open,
         protection: Some(mandate_executor::ProtectionPrices {
             stop: price(stop),
@@ -701,7 +701,7 @@ pub fn risk_exit(name: &str, quantity: &str, limit: &str) -> mandate_executor::I
         instrument: instrument(name),
         side: Side::Sell,
         qty: qty(quantity),
-        limit: price(limit),
+        limit: Some(price(limit)),
         purpose: mandate_executor::Purpose::RiskExit,
         protection: None,
     }
@@ -713,7 +713,7 @@ pub fn discretionary_exit(name: &str, quantity: &str, limit: &str) -> mandate_ex
         instrument: instrument(name),
         side: Side::Sell,
         qty: qty(quantity),
-        limit: price(limit),
+        limit: Some(price(limit)),
         purpose: mandate_executor::Purpose::DiscretionaryExit,
         protection: None,
     }
