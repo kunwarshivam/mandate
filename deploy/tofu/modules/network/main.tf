@@ -1,6 +1,6 @@
 # One VPC per environment and the cloud firewall on the cluster's node tag (DEC-2012 item 4).
 # DigitalOcean firewalls add up, so this one cannot close what DOKS's own worker firewall opens;
-# what it guarantees is that nothing here admits a public source.
+# what it guarantees is that nothing here admits a public address.
 
 terraform {
   required_version = "1.13.1"

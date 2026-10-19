@@ -1,0 +1,35 @@
+# The mail guard's configuration (notifications spec §4.4, rung 2; DEC-700 item 4, DEC-2511).
+# While the spec still holds the general footer's placeholder, `cargo xtask mail-guard` refuses
+# any `MailTransport` implementor not listed here, and any crate below anywhere in the build but
+# as a direct dependency of the founder-only transport's crate. The change that supplies counsel's
+# general footer removes the check (spec §4.4).
+
+spec = "docs/specs/notifications.md"
+placeholder = "[[EMAIL-FOOTER]]"
+founder_transport_crate = "mandate-mail-smtp"
+
+# The only implementors §4.4 allows: the recorded fixture and the founder-only SMTP transport.
+[[transport]]
+crate = "mandate-dispatcher"
+type = "RecordedTransport"
+
+[[transport]]
+crate = "mandate-mail-smtp"
+type = "FounderSmtpTransport"
+
+# Mail-sending crates: SMTP clients, message builders that submit, and mail-provider SDKs.
+[denied]
+crates = [
+  "async-smtp",
+  "aws-sdk-ses",
+  "aws-sdk-sesv2",
+  "lettre",
+  "mail-send",
+  "mailgun-rs",
+  "postmark",
+  "resend-rs",
+  "rusoto_ses",
+  "samotop",
+  "sendgrid",
+  "smtp-client",
+]

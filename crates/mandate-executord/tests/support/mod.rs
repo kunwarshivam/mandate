@@ -1090,6 +1090,18 @@ pub fn propose_owner_market_exit(
     id: &str,
     cause: &str,
 ) -> Result<(), Error> {
+    propose_market_exit(journal, agent, id, "owner_exit", cause)
+}
+
+/// The runtime's `IntentProposed` of an exit of 10 AAPL at the market, of `purpose`, following
+/// from `cause`.
+pub fn propose_market_exit(
+    journal: &Journal,
+    agent: &str,
+    id: &str,
+    purpose: &str,
+    cause: &str,
+) -> Result<(), Error> {
     journal.write(
         &agent_stream(agent),
         id,
@@ -1099,7 +1111,7 @@ pub fn propose_owner_market_exit(
         object(vec![
             ("instrument_id", text(AAPL)),
             ("limit_price", Value::Null),
-            ("purpose", text("owner_exit")),
+            ("purpose", text(purpose)),
             ("qty", text("10")),
             ("side", text("sell")),
             ("tif", text("day")),

@@ -4,6 +4,10 @@ This directory has the runbook, scripts, and systemd units for the one VM that s
 workspace API ([DEC-822](../docs/project/decisions/DEC-822.md), pending on PR #762). That VM is a
 Hetzner CX22 with Ubuntu 24.04 x86_64, behind a Cloudflare Tunnel, serving `api.owlhead.ai`.
 
+The hosted staging and production environments (DigitalOcean Kubernetes, Spaces, Cloudflare
+Tunnel and Access) are OpenTofu under [tofu/](tofu/README.md) instead (E21-56, DEC-2011), whose
+runbook lists what the founder creates for them.
+
 The founder runs everything here; agents never get host access. The order of the steps is in
 [FOUNDER-STEPS.md](FOUNDER-STEPS.md).
 

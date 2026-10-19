@@ -1,11 +1,12 @@
 //! The in-process fixture is the only broker the executor can reach (E21-30, DEC-2033 item 7,
-//! `AGENTS.md` rule 8). `xtask/layers.toml` holds it: no external crate but `tokio`, so no HTTP
-//! client; none of the crates that carry a transport to a host or a simulator; and no `live`
-//! feature, which only the paper runner may declare. This test pins that entry, so loosening it
-//! fails here as well as in review.
+//! `AGENTS.md` rule 8). `xtask/layers.toml` holds it: no external crate of its own but `tokio`;
+//! none of the crates that carry a transport to a host or a simulator; and no `live` feature, which
+//! only the paper runner may declare. `mandate-alpaca` links `reqwest` for its paper HTTPS
+//! transport, so the second test pins that no source of the executor names that transport or the
+//! HTTP client. Loosening either fails here as well as in review.
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 type Error = Box<dyn std::error::Error>;
 
@@ -49,6 +50,34 @@ fn the_executor_reaches_no_broker_but_its_in_process_fixture() -> Result<(), Err
             forbidden.contains(&format!("\"{transport}\"")),
             "{transport} is reachable"
         );
+    }
+    Ok(())
+}
+
+/// Every `.rs` file under `dir`.
+fn sources(dir: &Path) -> Result<Vec<PathBuf>, Error> {
+    let mut found = Vec::new();
+    for entry in fs::read_dir(dir)? {
+        let path = entry?.path();
+        if path.is_dir() {
+            found.extend(sources(&path)?);
+        } else if path.extension().is_some_and(|e| e == "rs") {
+            found.push(path);
+        }
+    }
+    Ok(found)
+}
+
+#[test]
+fn the_executor_names_no_http_transport() -> Result<(), Error> {
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let files = sources(&src)?;
+    assert!(!files.is_empty(), "no sources under {}", src.display());
+    for file in files {
+        let text = fs::read_to_string(&file)?;
+        for name in ["AlpacaPaperHttp", "reqwest", "DataClient", "Credentials"] {
+            assert!(!text.contains(name), "{} names {name}", file.display());
+        }
     }
     Ok(())
 }

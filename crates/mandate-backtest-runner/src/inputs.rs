@@ -18,7 +18,7 @@ use mandate_domain::{
 };
 use mandate_num::{
     Bps, Conviction, FeeCap, FeePerShare, FeeRate, Fraction, Price, Qty, Ratio, ShareIncrement,
-    TickRule, Unit, Usd,
+    SplitRatio, TickRule, Unit, Usd,
 };
 use mandate_risk::{DayTradeRegime, EtpClass, Exchange, GateConfig};
 use mandate_sim::{FirstBarVolumes, Instrument, Nanos, Session, SimBar, SimConfig, Slippage};
@@ -234,8 +234,50 @@ fn words<T: Copy + Ord>(
 /// cash_in_lieu_price}` or `{kind: cash_dividend, ex_date, pay_date, per_share}`; any other kind
 /// refuses, naming its `kind`.
 fn corporate_action(value: &Value, path: &str) -> Result<RecordedAction, RunnerError> {
-    let _ = (value, path);
-    Err(RunnerError::Unimplemented { story: "E4-4" })
+    let at = |name: &str| format!("{path}/{name}");
+    let kind = value
+        .as_object()
+        .ok_or_else(|| invalid(path))?
+        .get("kind")
+        .ok_or_else(|| invalid(&at("kind")))?;
+    match text(kind, &at("kind"))? {
+        "split" => {
+            let [_, ex_date, ratio, price] = fields(
+                value,
+                path,
+                ["kind", "ex_date", "ratio", "cash_in_lieu_price"],
+            )?;
+            let ratio_path = at("ratio");
+            let [new, old] = fields(ratio, &ratio_path, ["new", "old"])?;
+            let new = count(new, &format!("{ratio_path}/new"))?;
+            let old = count(old, &format!("{ratio_path}/old"))?;
+            let cash_in_lieu_price = match price {
+                Value::Null => None,
+                price => Some(parsed(price, &at("cash_in_lieu_price"), Price::parse)?),
+            };
+            Ok(RecordedAction::Split {
+                ex_date: date(ex_date, &at("ex_date"))?,
+                ratio: SplitRatio::new(u64::from(new), u64::from(old))
+                    .map_err(|_| invalid(&ratio_path))?,
+                cash_in_lieu_price,
+            })
+        }
+        "cash_dividend" => {
+            let [_, ex_date, pay_date, per_share] =
+                fields(value, path, ["kind", "ex_date", "pay_date", "per_share"])?;
+            let ex_date = date(ex_date, &at("ex_date"))?;
+            let pay_date = date(pay_date, &at("pay_date"))?;
+            if pay_date < ex_date {
+                return Err(invalid(&at("pay_date")));
+            }
+            Ok(RecordedAction::CashDividend {
+                ex_date,
+                pay_date,
+                per_share: parsed(per_share, &at("per_share"), Price::parse)?,
+            })
+        }
+        _ => Err(invalid(&at("kind"))),
+    }
 }
 
 fn bar(value: &Value, path: &str) -> Result<(SimBar, Option<Qty>), RunnerError> {
