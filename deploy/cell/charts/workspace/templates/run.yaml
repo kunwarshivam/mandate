@@ -16,7 +16,35 @@ spec:
   template:
     {{- $mounts := "- {name: work, mountPath: /work}" }}
     {{- $container := include "mandate.container" (dict "root" .root "p" .p "name" .p.name "args" .root.Values.run.args "mounts" $mounts) }}
-    {{- include "mandate.pod" (dict "root" .root "p" .p "restartPolicy" "Never" "containers" $container) | nindent 4 }}
+    {{- $files := include "mandate.runFiles" . }}
+    {{- include "mandate.pod" (dict "root" .root "p" .p "restartPolicy" "Never" "initContainers" $files "containers" $container) | nindent 4 }}
+{{- end -}}
+{{- /* The run's `files`, written into its /work before it starts (DEC-2035): each content is an
+environment variable the shell only expands inside double quotes, never a word of the command, and
+each name is a plain file name the schema allows. Empty when the run names no file. */ -}}
+{{- define "mandate.runFiles" -}}
+{{- $files := .root.Values.run.files | default dict -}}
+{{- if $files }}
+{{- $writes := list -}}
+{{- $env := list -}}
+{{- range $i, $name := keys $files | sortAlpha }}
+{{- $writes = append $writes (printf "printf '%%s' \"$FILE_%d\" > /work/%s" $i $name) -}}
+{{- $env = append $env (dict "name" (printf "FILE_%d" $i) "value" (index $files $name)) -}}
+{{- end }}
+- name: files
+  image: {{ .root.Values.images.postgres | quote }}
+  imagePullPolicy: IfNotPresent
+  command: ["bash", "-c", {{ join " && " $writes | quote }}]
+  env: {{ $env | toJson }}
+  securityContext:
+    {{- include "mandate.containerSecurity" . | nindent 4 }}
+  resources:
+    limits: {cpu: "50m", memory: "32Mi"}
+    requests: {cpu: "50m", memory: "32Mi"}
+  volumeMounts:
+    - name: work
+      mountPath: /work
+{{- end }}
 {{- end -}}
 {{- define "mandate.verify" -}}
 {{- $ctx := . -}}
@@ -42,7 +70,13 @@ spec:
 {{- end -}}
 {{- $root := . }}
 {{- if .Values.run.id }}
+{{- $named := .Values.run.process | default "control" }}
+{{- $runs := list }}
 {{- range (include "mandate.rendered" (dict "root" . "kind" "run") | fromJsonArray) }}
+{{- if eq .name $named }}{{ $runs = append $runs . }}{{ end }}
+{{- end }}
+{{- if not $runs }}{{ fail (printf "run.process %q is no run process this release renders" $named) }}{{ end }}
+{{- range $runs }}
 ---
 {{ include "mandate.emit" (include "mandate.run" (dict "root" $root "p" .)) }}
 {{- end }}
