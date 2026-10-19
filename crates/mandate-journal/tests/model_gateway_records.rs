@@ -400,7 +400,6 @@ fn parsed_on_deployment_stream(
 /// Journal spec v0.53 §2 (DEC-2207): `dmeter:{deployment_id}` is a stream type of its own, one
 /// identifier segment, never a workspace's meter stream.
 #[test]
-#[ignore = "pending E21-61"]
 fn the_deployment_meter_stream_is_its_own_stream_type() {
     let stream = StreamId::parse("dmeter:dep_01J8Z2").unwrap();
     assert_eq!(stream.stream_type(), StreamType::DeploymentMeter);
@@ -418,7 +417,6 @@ fn the_deployment_meter_stream_is_its_own_stream_type() {
 /// The catalogue closes the deployment meter stream's `StreamOpened`, `MeterReserved` and
 /// `MeterSettled` at version 1, and nothing else there.
 #[test]
-#[ignore = "pending E21-61"]
 fn the_catalogue_closes_the_deployment_meter_stream_s_records_at_version_1() {
     use mandate_journal::closes;
     for record in ["StreamOpened", "MeterReserved", "MeterSettled"] {
@@ -440,7 +438,6 @@ fn the_catalogue_closes_the_deployment_meter_stream_s_records_at_version_1() {
 /// copies keep rules 155 to 158 as the workspace's stream does, and the workspace stream's
 /// `StreamOpened` is not its own.
 #[test]
-#[ignore = "pending E21-61"]
 fn the_deployment_meter_stream_opens_naming_itself_and_keeps_rule_158() {
     let section = section();
     let opened = on_deployment_stream(&section, "opened", DEPLOYMENT);

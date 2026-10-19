@@ -82,9 +82,12 @@ fn segment(tenant: &impl Tenant) -> Result<String, AuditError> {
 }
 
 /// Whether `stream` is one of the workspace's streams: its workspace segment, the second of every
-/// stream id (journal spec §2), equals `segment` whole, never by prefix (DEC-770 item 1).
+/// stream id (journal spec §2), equals `segment` whole, never by prefix (DEC-770 item 1). The
+/// deployment meter stream is the platform operator's, never a workspace's, whatever its deployment
+/// id (journal spec v0.53 §2).
 fn owns(segment: &str, stream: &StreamId) -> bool {
-    stream.as_str().split(':').nth(1) == Some(segment)
+    stream.stream_type() != mandate_journal::StreamType::DeploymentMeter
+        && stream.as_str().split(':').nth(1) == Some(segment)
 }
 
 /// How many events or streams one page may hold: `1..=1000`, and 100 when the caller names none
@@ -253,16 +256,16 @@ fn head(last: &StoredEvent) -> Head {
     }
 }
 
-fn stream_type(stream: &StreamId) -> StreamType {
+/// A workspace stream's type; `None` for the deployment meter stream, no workspace's.
+fn stream_type(stream: &StreamId) -> Option<StreamType> {
     match stream.stream_type() {
-        mandate_journal::StreamType::Account => StreamType::Account,
-        mandate_journal::StreamType::Agent => StreamType::Agent,
-        mandate_journal::StreamType::Control => StreamType::Control,
-        mandate_journal::StreamType::Scheduler => StreamType::Scheduler,
-        mandate_journal::StreamType::Notice => StreamType::Notice,
-        mandate_journal::StreamType::Meter | mandate_journal::StreamType::DeploymentMeter => {
-            StreamType::Meter
-        }
+        mandate_journal::StreamType::Account => Some(StreamType::Account),
+        mandate_journal::StreamType::Agent => Some(StreamType::Agent),
+        mandate_journal::StreamType::Control => Some(StreamType::Control),
+        mandate_journal::StreamType::Scheduler => Some(StreamType::Scheduler),
+        mandate_journal::StreamType::Notice => Some(StreamType::Notice),
+        mandate_journal::StreamType::Meter => Some(StreamType::Meter),
+        mandate_journal::StreamType::DeploymentMeter => None,
     }
 }
 
@@ -297,7 +300,7 @@ impl JournalRead for MemoryRead<'_> {
                 let last = self.journal.rows(&stream).last()?;
                 Some(StreamEntry {
                     stream_id: last.stream_id.clone(),
-                    stream_type: stream_type(&stream),
+                    stream_type: stream_type(&stream)?,
                     head: head(last),
                 })
             })

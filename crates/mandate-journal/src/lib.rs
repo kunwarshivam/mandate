@@ -94,7 +94,10 @@ pub fn reads_stream(batch: &[Draft]) -> bool {
                     | "RunSummaryRecorded"
                     | "RunEnded",
                 StreamType::Agent
-            ) | ("MeterReserved" | "MeterSettled", StreamType::Meter)
+            ) | (
+                "MeterReserved" | "MeterSettled",
+                StreamType::Meter | StreamType::DeploymentMeter
+            )
         )
     })
 }
@@ -214,13 +217,13 @@ pub enum StreamType {
     Meter,
     /// `dmeter:{deployment_id}`, whose single writer is the deployment's model gateway meter writer,
     /// a copy of every workspace's meter records for the deployment's cap (journal spec v0.53 §2,
-    /// §9.19, DEC-2207). Not yet parsed: E21-61 pair C registers it.
+    /// §9.19, DEC-2207).
     DeploymentMeter,
 }
 
 /// `acct:{workspace_id}:{account_ref}`, `agent:{workspace_id}:{agent_id}`, `ctl:{workspace_id}`,
-/// `clock:{workspace_id}`, `ntf:{workspace_id}`, or `meter:{workspace_id}`, each segment
-/// `[A-Za-z0-9_-]+` (journal spec §2).
+/// `clock:{workspace_id}`, `ntf:{workspace_id}`, `meter:{workspace_id}`, or
+/// `dmeter:{deployment_id}`, each segment `[A-Za-z0-9_-]+` (journal spec §2).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct StreamId {
     text: String,
@@ -237,6 +240,7 @@ impl StreamId {
             ["clock", _] => StreamType::Scheduler,
             ["ntf", _] => StreamType::Notice,
             ["meter", _] => StreamType::Meter,
+            ["dmeter", _] => StreamType::DeploymentMeter,
             _ => return None,
         };
         parts

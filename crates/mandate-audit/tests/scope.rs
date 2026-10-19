@@ -249,7 +249,6 @@ proptest! {
 /// member reads it. A deployment whose id is a workspace's own segment still names no stream of
 /// that workspace: it is in no list and its pages are not found.
 #[test]
-#[ignore = "pending E21-61"]
 fn a_deployment_meter_stream_is_no_workspace_s() {
     let mut fx = Fixture::new(1);
     let segment = text(WS_A);

@@ -1,7 +1,0 @@
-file = "crates/mandate-audit/tests/scope.rs"
-test = "a_deployment_meter_stream_is_no_workspace_s"
-reason = """
-The journal does not yet parse `dmeter:`, so the fixture cannot open the stream and this test fails
-on that answer, not at a stub. E21-61 pair C's implementation PR registers the stream and makes the
-audit reads refuse it, and deletes this row.
-"""
