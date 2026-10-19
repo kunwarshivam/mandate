@@ -62,6 +62,10 @@ fn main() -> ExitCode {
         Err(std::env::VarError::NotPresent) => None,
     };
     let fixture = args.iter().any(|a| a == "--fixture");
+    if let Err(code) = launch::fixture_permitted(fixture, &var) {
+        eprintln!("{code}");
+        return ExitCode::from(2);
+    }
     match args.first().map(String::as_str) {
         Some("probe") => {
             let (Some(socket), Some(asked)) = (
