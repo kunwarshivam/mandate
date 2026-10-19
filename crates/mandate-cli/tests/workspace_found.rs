@@ -350,7 +350,10 @@ fn open_is_a_flag_off_by_default() {
 /// `control_services`, at the clock's first reading, and founded at seq 2; a re-run opens nothing
 /// and commits nothing.
 #[test]
+<<<<<<< HEAD
 #[ignore = "pending E21-58"]
+=======
+>>>>>>> origin/main
 fn open_opens_an_empty_stream_once_then_founds_it() {
     let mut journal = Journal::default();
     let (got, printed) = run_opening(&mut journal, 1);
