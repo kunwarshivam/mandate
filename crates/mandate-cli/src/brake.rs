@@ -49,6 +49,12 @@ pub enum AgentCommand {
     /// Exit one instrument of one agent at once; never refused. Without the right code it carries
     /// no step-up evidence.
     Exit(owner::ExitArgs),
+    /// Show the code that acknowledges one triggered limit, or acknowledge it with it; with
+    /// `--request`, as the independent user answering another user's request.
+    Acknowledge(owner::AcknowledgeArgs),
+    /// Show the code that asks another user to acknowledge one triggered limit, or record the
+    /// request with it.
+    RequestAck(owner::RequestAckArgs),
 }
 
 /// What a brake reaches: exactly one of `--agent`, `--connection` or `--workspace-wide`.

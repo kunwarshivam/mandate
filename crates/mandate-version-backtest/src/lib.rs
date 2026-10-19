@@ -45,7 +45,8 @@ pub use report::{
 use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_accounting::{
-    Account, AccountType, AssetClass, Execution, FeeFamily, Input, InstrumentId, Side,
+    Account, AccountType, AssetClass, CashDividend, CorporateAction, Execution, FeeFamily, Input,
+    InstrumentId, Side, Split,
 };
 use mandate_builder::{
     Action, BuilderMandate, Market, ModelOutput, RiskContext, autonomy_policy, classify, propose,
@@ -54,8 +55,8 @@ use mandate_canon::Digest;
 use mandate_domain::{AgentMode, AssetId, AutonomyDecision, CapabilityProfile, MarketSession};
 use mandate_executor::{ProtectionPrices, equity_bracket_prices, protective_shape};
 use mandate_num::{
-    Adverse, Fraction, MarkPrice, NumError, Price, Qty, Rounding, Signed, SizeFraction, SplitRatio,
-    TickRule, Unit, Usd,
+    Adverse, Fraction, MarkPrice, NumError, Price, Qty, Rounding, ShareIncrement, Signed,
+    SignedQty, SizeFraction, SplitRatio, TickRule, Unit, Usd,
 };
 use mandate_risk::{
     AccountFill, DayTrade, DayTradeInput, DayTradeRegime, Decision, EtpClass, Exchange,
@@ -82,8 +83,6 @@ pub enum VersionError {
     NoBars,
     #[error("a version backtest runs US equities only in this slice")]
     AssetClassNotSupported,
-    #[error("the data snapshot holds a corporate action on {0} inside the run")]
-    CorporateActionInRange(Date),
     #[error(
         "record {0} was received before its own data cut-off, or invalidated before it was received"
     )]
@@ -98,15 +97,16 @@ pub enum VersionError {
         "the executor offers no protective order for this position under the connection's profile"
     )]
     ProtectionNotPlaceable,
+    /// A split's adjusted protective order cannot be represented: a price rounds to nothing
+    /// (DEC-2245 item 3).
+    #[error("the protection cannot be carried across the split with ex-date {0}")]
+    ProtectionNotAdjustable(Date),
     #[error("bar {0} is not a regular-session bar, which a version backtest's slice 1 requires")]
     BarOutsideRegularSession(usize),
     #[error("the agent-scoped flatten planned no sell for a held position")]
     FlattenWithoutSell,
     #[error("the committed trading calendar could not be read")]
     CalendarUnavailable,
-    /// A step its story has not built yet (DEC-77): the stub's own report.
-    #[error("not implemented until {story}")]
-    Unimplemented { story: &'static str },
     #[error("a liquidity figure could not be computed: {0}")]
     Liquidity(&'static str),
     #[error(transparent)]
@@ -142,16 +142,15 @@ impl VersionError {
         match self {
             Self::NoBars => "no_bars",
             Self::AssetClassNotSupported => "asset_class_not_supported",
-            Self::CorporateActionInRange(_) => "corporate_action_in_range",
             Self::RecordBeforeItsData(_) => "record_before_its_data",
             Self::OutputNotPinned(_) => "output_not_pinned",
             Self::RecordOtherInstrument(_) => "record_other_instrument",
             Self::DuplicateThesis(_) => "duplicate_thesis",
             Self::ProtectionNotPlaceable => "protection_not_placeable",
+            Self::ProtectionNotAdjustable(_) => "protection_not_adjustable",
             Self::BarOutsideRegularSession(_) => "bar_outside_regular_session",
             Self::FlattenWithoutSell => "flatten_without_sell",
             Self::CalendarUnavailable => "calendar_unavailable",
-            Self::Unimplemented { .. } => "unimplemented",
             Self::Liquidity(code) | Self::Gate(code) => code,
             Self::Backtest(e) => e.code(),
             Self::Builder(e) => e.code(),
@@ -307,26 +306,21 @@ pub struct VersionRun {
 /// of the same instrument (DEC-1000, DEC-1001).
 ///
 /// # Errors
-/// The input refusals of DEC-1000 items 3, 6 and 8: `asset_class_not_supported`,
-/// `corporate_action_in_range`, `record_before_its_data`, `output_not_pinned`,
-/// `record_other_instrument`, and `protection_not_placeable`; E4-2's `no_bars` and
+/// The input refusals of DEC-1000 items 3 and 6: `asset_class_not_supported`,
+/// `record_before_its_data`, `output_not_pinned`, `record_other_instrument`, and
+/// `protection_not_placeable`; DEC-2245's `protection_not_adjustable`,
+/// `corporate_actions_unordered` and `corporate_action_other_instrument`; E4-2's `no_bars` and
 /// `bar_trade_date_mismatch`; and the arithmetic, fill-model, accounting, risk-state, gate, and
 /// calendar errors the run wraps. Every error refuses the whole run: no partial report exists.
 pub fn run_version(input: &VersionInput<'_>) -> Result<VersionRun, VersionError> {
     check_inputs(input)?;
-    let first_date = input.bars.first().map(|bar| bar.trade_date);
-    if input.corporate_actions.iter().any(|action| {
-        matches!(action, RecordedAction::Split { .. }) && Some(action.ex_date()) > first_date
-    }) {
-        return Err(VersionError::Unimplemented { story: "E4-4" });
-    }
     let benchmark_config = benchmark_config(input)?;
     let benchmark_input = BacktestInput {
         config: &benchmark_config,
         bars: input.bars,
         coverage_start: input.coverage_start,
         first_bar_volumes: input.first_bar_volumes,
-        corporate_actions: &[],
+        corporate_actions: &ledger_actions(input)?,
     };
     mandate_backtest::check_trade_dates(&benchmark_input)?;
     let benchmark = mandate_backtest::walk(&benchmark_input, benchmark_config.strategy)?;
@@ -384,30 +378,66 @@ fn research_agent(mandate: &ValidatedMandate) -> bool {
     !mandate.mandate().universe.pinned
 }
 
+/// The run's corporate actions as the accounting fold takes them, on the instrument's ledger id
+/// and share increment (DEC-2245 item 2).
+fn ledger_actions(input: &VersionInput<'_>) -> Result<Vec<CorporateAction>, VersionError> {
+    input
+        .corporate_actions
+        .iter()
+        .map(|action| match *action {
+            RecordedAction::Split {
+                ex_date,
+                ratio,
+                cash_in_lieu_price,
+            } => Ok(CorporateAction::Split(Split {
+                instrument: input.instrument.ledger_id.clone(),
+                ex_date,
+                ratio,
+                increment: input.instrument.instrument.increment,
+                cash_in_lieu_price,
+            })),
+            RecordedAction::CashDividend {
+                ex_date,
+                pay_date,
+                per_share,
+            } => Ok(CorporateAction::CashDividend(CashDividend::new(
+                input.instrument.ledger_id.clone(),
+                ex_date,
+                pay_date,
+                per_share,
+            )?)),
+        })
+        .collect()
+}
+
+/// 20:00 New York time on `day`, four hours before the next New York midnight on a trading day,
+/// since clocks change only on Sunday nights: when a split applies (trading spec §8.5).
+fn new_york_eight_pm(day: Date) -> Result<UtcNanos, VersionError> {
+    let midnight = new_york_midnight(day.next()?)?;
+    Ok(UtcNanos::from_parts(
+        midnight
+            .secs()
+            .checked_sub(4 * 3600)
+            .ok_or(NumError::Overflow)?,
+        0,
+    )?)
+}
+
 /// DEC-1000 items 3, 6 and 8, before anything is simulated: every refusal names the input.
 fn check_inputs(input: &VersionInput<'_>) -> Result<(), VersionError> {
     let instrument = input.instrument;
     if instrument.instrument.asset_class != AssetClass::UsEquity {
         return Err(VersionError::AssetClassNotSupported);
     }
-    let (Some(first), Some(last)) = (input.bars.first(), input.bars.last()) else {
+    if input.bars.is_empty() {
         return Err(VersionError::NoBars);
-    };
+    }
     if let Some(index) = input
         .bars
         .iter()
         .position(|bar| !matches!(bar.session, Session::Regular))
     {
         return Err(VersionError::BarOutsideRegularSession(index));
-    }
-    if let Some(date) = input
-        .corporate_actions
-        .iter()
-        .filter(|action| matches!(action, RecordedAction::CashDividend { .. }))
-        .map(RecordedAction::ex_date)
-        .find(|date| first.trade_date <= *date && *date <= last.trade_date)
-    {
-        return Err(VersionError::CorporateActionInRange(date));
     }
     let models = BuilderMandate::try_from(input.mandate)?.models;
     for (index, recorded) in input.outputs.iter().enumerate() {
@@ -607,6 +637,8 @@ struct Run<'a, 'c> {
     most_restrictive: AgentMode,
     charged: BTreeSet<Date>,
     dates: BTreeSet<Date>,
+    actions: Vec<CorporateAction>,
+    actions_applied: usize,
 }
 
 impl<'a, 'c> Run<'a, 'c> {
@@ -667,6 +699,8 @@ impl<'a, 'c> Run<'a, 'c> {
             most_restrictive: AgentMode::Normal,
             charged: BTreeSet::new(),
             dates: BTreeSet::new(),
+            actions: ledger_actions(input)?,
+            actions_applied: 0,
         })
     }
 
@@ -679,6 +713,7 @@ impl<'a, 'c> Run<'a, 'c> {
         let mut decides = false;
         for (index, bar) in bars.iter().enumerate() {
             self.dates.insert(bar.trade_date);
+            self.apply_actions(index, bar)?;
             self.cross_midnights(bar.start)?;
             for due in self.account.due(bar.start)? {
                 self.account = self.account.apply(&due, &self.config.fees)?.account;
@@ -699,6 +734,165 @@ impl<'a, 'c> Run<'a, 'c> {
             )?;
             decides = closing.get(index).copied().unwrap_or(false);
         }
+        Ok(())
+    }
+
+    /// Every corporate action whose ex-date this bar reaches, at 20:00 New York time on the
+    /// previous bar's trade date (DEC-2245 items 2 and 3, DEC-2253): the ledger and the risk state
+    /// take it. At a split the resting protection is canceled and re-placed in the same step on the
+    /// post-split position, and the market the run has seen is rescaled. At a dividend the last
+    /// close is lowered by the dividend; its pay date moves the receivable to cash in the ledger,
+    /// which changes no figure the risk state holds (mandate spec §5.2), so the risk state takes
+    /// nothing then. One whose ex-date is the first bar's date or earlier was taken before the run,
+    /// which held nothing, and changes nothing.
+    fn apply_actions(&mut self, index: usize, bar: &SimBar) -> Result<(), VersionError> {
+        while let Some(action) = self.actions.get(self.actions_applied) {
+            let action = action.clone();
+            let ex_date = match &action {
+                CorporateAction::Split(split) => split.ex_date,
+                CorporateAction::CashDividend(dividend) => dividend.ex_date(),
+            };
+            if ex_date > bar.trade_date {
+                break;
+            }
+            self.actions_applied = self.actions_applied.saturating_add(1);
+            let Some(previous) = index
+                .checked_sub(1)
+                .and_then(|last| self.input.bars.get(last))
+            else {
+                continue;
+            };
+            let at = new_york_eight_pm(previous.trade_date)?;
+            self.account = self
+                .account
+                .apply(&Input::CorporateAction(action.clone()), &self.config.fees)?
+                .account;
+            match action {
+                CorporateAction::Split(split) => self.split_applied(&split, index, at)?,
+                CorporateAction::CashDividend(dividend) => {
+                    self.step(
+                        at,
+                        MarketSession::AfterHours,
+                        risk::Input::CashDividend {
+                            per_share: dividend.per_share(),
+                        },
+                    )?;
+                    self.lower_last_close(dividend.per_share())?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// A split's risk step, rescaled history and carried protection (DEC-2245 items 2 and 3).
+    fn split_applied(
+        &mut self,
+        split: &Split,
+        index: usize,
+        at: UtcNanos,
+    ) -> Result<(), VersionError> {
+        self.step(
+            at,
+            MarketSession::AfterHours,
+            risk::Input::Split {
+                ratio: split.ratio,
+                increment: split.increment,
+                cash_in_lieu_price: split.cash_in_lieu_price,
+            },
+        )?;
+        self.rescale_history(split.ratio, split.increment)?;
+        if let Some(protection) = self.protection.take() {
+            self.canceled(&protection, index)?;
+            self.carry_protection(&protection, split.ratio, split.ex_date, at)?;
+        }
+        Ok(())
+    }
+
+    /// The last close less a dividend of `per_share`, rounded down onto the tick, so the ex-date's
+    /// decision quotes the ex-dividend market (DEC-2253 item 2).
+    fn lower_last_close(&mut self, per_share: Price) -> Result<(), VersionError> {
+        let tick = self.input.instrument.tick;
+        if let Some(last) = self.last_close.as_mut() {
+            last.close = last
+                .close
+                .checked_sub(per_share)?
+                .on_tick(tick, Adverse::Up)?;
+        }
+        Ok(())
+    }
+
+    /// The market the run has seen, in post-split terms, so the ex-date's decision and gate read
+    /// what the bars now show: the last close and every closed period of the liquidity window,
+    /// each price by old ÷ new rounded down onto the tick, which can only lower a buy's limit or
+    /// raise a sell's chance to fill, and each volume by new ÷ old truncated to the share grid
+    /// (DEC-2245 item 2).
+    fn rescale_history(
+        &mut self,
+        ratio: SplitRatio,
+        increment: ShareIncrement,
+    ) -> Result<(), VersionError> {
+        let tick = self.input.instrument.tick;
+        let price = |close: Price| ratio.price(close, tick, Adverse::Up);
+        let volume = |volume: Qty| -> Result<Qty, NumError> {
+            Ok(ratio
+                .split(SignedQty::from(volume), increment)?
+                .after()
+                .abs())
+        };
+        if let Some(last) = self.last_close.as_mut() {
+            last.close = price(last.close)?;
+            last.volume = volume(last.volume)?;
+        }
+        for period in &mut self.periods {
+            period.close = price(period.close)?;
+            period.volume = volume(period.volume)?;
+        }
+        Ok(())
+    }
+
+    /// The protection re-placed at a split on the post-split position, its prices carried by
+    /// old ÷ new toward more protection: a stop up and a limit down (DEC-2245 item 3).
+    fn carry_protection(
+        &mut self,
+        protection: &Working,
+        ratio: SplitRatio,
+        ex_date: Date,
+        at: UtcNanos,
+    ) -> Result<(), VersionError> {
+        let position = self.position()?;
+        if position.is_zero() {
+            return Ok(());
+        }
+        let tick = self.input.instrument.tick;
+        let carry = |price: Price, adverse: Adverse| {
+            ratio
+                .price(price, tick, adverse)
+                .map_err(|error| match error {
+                    NumError::NotPositive => VersionError::ProtectionNotAdjustable(ex_date),
+                    other => VersionError::Num(other),
+                })
+        };
+        let kind = match protection.order.kind {
+            OrderKind::Oco { limit, stop } => OrderKind::Oco {
+                limit: carry(limit, Adverse::Up)?,
+                stop: carry(stop, Adverse::Down)?,
+            },
+            OrderKind::StopLimit { stop, limit } => OrderKind::StopLimit {
+                stop: carry(stop, Adverse::Down)?,
+                limit: carry(limit, Adverse::Up)?,
+            },
+            _ => return Err(VersionError::ProtectionNotAdjustable(ex_date)),
+        };
+        let order = SimOrder {
+            qty: position,
+            kind,
+            eligible_from: Eligibility::DecidedAt {
+                at,
+                approval_required: false,
+            },
+            ..protection.order
+        };
+        self.protection = Some(self.submit(at, order, true)?);
         Ok(())
     }
 

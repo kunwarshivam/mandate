@@ -19,12 +19,18 @@ concurrency:
   group: codeql-${{ github.event_name == 'schedule' && github.run_id || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# DEC-2613: a pull request that changes only documentation (`docs/**`, `**/*.md`) holds no code to
+# analyse, so it starts no analysis. A push to `main` and the schedule have no filter: `main` is
+# always analysed.
 on:
   push:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
     types: [opened, synchronize, reopened, ready_for_review]
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
   schedule:
     - cron: '42 2 * * 1'
 

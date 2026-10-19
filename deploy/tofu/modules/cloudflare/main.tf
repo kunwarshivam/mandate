@@ -71,6 +71,17 @@ variable "archive_bucket" {
   type        = string
 }
 
+variable "archive_location" {
+  description = "The archive's R2 location hint: western North America, where all of the infrastructure lives (DEC-2047)."
+  type        = string
+  default     = "wnam"
+
+  validation {
+    condition     = var.archive_location == "wnam"
+    error_message = "The archive's R2 location is wnam, western North America; the founder put all of the infrastructure in the US West (DEC-2047)."
+  }
+}
+
 variable "archive_retention_days" {
   description = "The journal-db chart's archive.retention, in days; the lock keeps every key at least this long."
   type        = number
@@ -157,10 +168,14 @@ resource "cloudflare_zero_trust_access_application" "api" {
   ]
 }
 
-resource "cloudflare_r2_bucket" "journal_archive" {
+# The archive in western North America (DEC-2047). R2 honours a location only when a name is first
+# created, and changing it would replace the bucket, so the West's archive is a new bucket at new
+# addresses; staging's first apply may have made the eastern one, which is forgotten below, never
+# destroyed, for the founder to delete by hand.
+resource "cloudflare_r2_bucket" "archive" {
   account_id   = var.account_id
   name         = var.archive_bucket
-  location     = "enam"
+  location     = var.archive_location
   jurisdiction = "default"
 
   lifecycle {
@@ -168,10 +183,26 @@ resource "cloudflare_r2_bucket" "journal_archive" {
   }
 }
 
-resource "cloudflare_r2_bucket_lock" "journal_archive" {
+removed {
+  from = cloudflare_r2_bucket.journal_archive
+
+  lifecycle {
+    destroy = false
+  }
+}
+
+removed {
+  from = cloudflare_r2_bucket_lock.journal_archive
+
+  lifecycle {
+    destroy = false
+  }
+}
+
+resource "cloudflare_r2_bucket_lock" "archive" {
   account_id   = var.account_id
-  bucket_name  = cloudflare_r2_bucket.journal_archive.name
-  jurisdiction = cloudflare_r2_bucket.journal_archive.jurisdiction
+  bucket_name  = cloudflare_r2_bucket.archive.name
+  jurisdiction = cloudflare_r2_bucket.archive.jurisdiction
 
   rules = [
     {
@@ -205,7 +236,7 @@ resource "cloudflare_account_token" "journal_archive" {
       effect            = "allow"
       permission_groups = [for group in data.cloudflare_account_api_token_permission_groups_list.r2_object_write.result : { id = group.id }]
       resources = jsonencode({
-        "com.cloudflare.edge.r2.bucket.${var.account_id}_default_${cloudflare_r2_bucket.journal_archive.name}" = "*"
+        "com.cloudflare.edge.r2.bucket.${var.account_id}_default_${cloudflare_r2_bucket.archive.name}" = "*"
       })
     },
   ]
@@ -237,7 +268,7 @@ output "api_hostname" {
 }
 
 output "archive_bucket" {
-  value = cloudflare_r2_bucket.journal_archive.name
+  value = cloudflare_r2_bucket.archive.name
 }
 
 output "archive_endpoint" {
@@ -258,5 +289,5 @@ output "archive_secret_access_key" {
 }
 
 output "archive_jurisdiction" {
-  value = cloudflare_r2_bucket.journal_archive.jurisdiction
+  value = cloudflare_r2_bucket.archive.jurisdiction
 }

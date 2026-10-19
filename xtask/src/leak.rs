@@ -3658,7 +3658,7 @@ mod tests {
     #[test]
     fn a_block_scalar_first_key_hides_none_of_its_steps_keys() {
         let path = ".github/workflows/r2-lockcheck.yml";
-        for header in ["|", ">", "|-", ">+"] {
+        for header in ["|", ">", "|-", ">+", "|2", "> # folded"] {
             for (name, sibling) in [
                 ("capital", "        Working-Directory: /tmp\n"),
                 ("shell", "        shell: python {0}\n"),
@@ -3679,6 +3679,14 @@ mod tests {
                 );
             }
         }
+        let later = format!(
+            "{R2_HEAD}      - name: x\n        run: |\n          target/debug/examples/r2_finding\n        Shell: python {{0}}\n        env:\n          R2_SECRET_ACCESS_KEY: ${{{{ secrets.X }}}}\n"
+        );
+        assert!(
+            whole(path, &later).iter().any(|f| f.rule == "L9"),
+            "a block scalar on a later key: {:?}",
+            whole(path, &later)
+        );
         let quiet = format!(
             "{R2_HEAD}      - name: >\n          x\n        run: target/debug/examples/r2_finding\n        env:\n          R2_SECRET_ACCESS_KEY: ${{{{ secrets.X }}}}\n"
         );

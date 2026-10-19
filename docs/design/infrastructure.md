@@ -159,6 +159,7 @@ journal returns.
 |---|---|---|---|---|---|
 | **Agent runtime** (`mandate-runtime` inside the shell; see `docs/specs/agent-harness.md`) | One per agent deployment (DEC-08) | Its agent stream | No broker credential (rule 12) | Postgres; model gateway; artifact store. No broker, no internet | Reads the workspace's data service |
 | **Account executor** (`mandate-executor` plus a connector) | One per broker account | That account's stream (journal §2) | A vault lease for that one connection. Never the platform's OAuth client secret | Postgres; vault (its one connection's lease, and while `connecting` one write: the broker account id into the personal-data vault under the pending connection's path); that connection's broker hosts only. A paper connection's executor reaches paper hosts only: no executor's egress contains a live host ([DEC-821](../project/decisions/DEC-821.md) item 4) | Reads the workspace's data service |
+| **Executor connect check** (`mandate-executord connect-check`, [DEC-2035](../project/decisions/DEC-2035.md)) | One one-off Job per check of a connection, before it is recorded (connections spec §8.1) | That account's stream (`ConnectionChecked`) | Nothing secret: its broker is the in-process fixture paper broker (DEC-2007) | Postgres | None |
 | **Token-exchange process** (paper Alpaca OAuth only, [DEC-821](../project/decisions/DEC-821.md) item 2) | One per code exchange, started by the connection manager for one `connecting` connection; it stops when the exchange ends | Nothing: no journal stream, no writer epoch | The single-use grant on the platform's OAuth client secret; while it runs, the code, the PKCE verifier, and the token it receives, as `secrecy` values. No order client, no connector, and no token lease | Vault (redeem the grant; read once the code and verifier under the pending connection's path; write the token there and delete the code). One network destination: `api.alpaca.markets` on 443, for the one call `POST /oauth/token` that its dedicated client can make. Residual, disclosed: allow lists work on addresses, not paths, so at the network level it can reach the whole live API; the client type is the only barrier in this process ([DEC-821](../project/decisions/DEC-821.md) item 4; [connections spec](../specs/connections.md) §5.2) | None |
 | **Workspace API server** (`mandate-api-server`, [workspace API spec](../specs/workspace-api.md) §3.11, [DEC-978](../project/decisions/DEC-978.md)) | One replica per workspace deployment, until sessions live in Postgres | The control stream: owner commands and approval answers, exactly as the CLI writes them | Its session signing key, made in its pod's memory at each start; the subject links, a read-only file at `/etc/mandate/subject-links` (DEC-1023) | Postgres; the identity provider's published key set. It listens on its pod's loopback only, until the cell's tunnel routes to it | None |
 | **Scheduler** | One per workspace | The scheduler stream (`clock:`) | Nothing secret | Postgres; time sources | None |
@@ -723,6 +724,7 @@ are authoritative; a few come from metrics.
 | Broker API errors, rate limits, or outage | Connector metrics | SEV-2 | RB-13 |
 | Crash loop; agent left paused | Deployment manager | SEV-2 | RB-14 |
 | A version-1 deployment the manager cannot run (`deployment_unread`) | Deployment manager ([DEC-1173](../project/decisions/DEC-1173.md)) | SEV-3 | RB-14 |
+| A version-2 deployment rule 201 refuses, which the manager cannot run (`deployment_unconnected`) | Deployment manager ([DEC-2038](../project/decisions/DEC-2038.md)) | SEV-3 | RB-14 |
 | Approval not delivered | Approval service | SEV-2 (07) | RB-15 |
 | Backup failed; drill overdue or failed | Backup job metrics; the drill events E21-25 defines | SEV-2 | RB-16 |
 
@@ -761,7 +763,7 @@ are authoritative; a few come from metrics.
 | RB-11 | Clock out of tolerance |
 | RB-12 | Vault outage; credential rotation; connection revoked |
 | RB-13 | Broker API outage or degradation |
-| RB-14 | Crash loop |
+| RB-14 | Crash loop, and deployments the manager cannot run ([RB-14](../runbooks/RB-14-crash-loop.md)) |
 | RB-15 | Approvals not delivered |
 | RB-16 | Backup failure and the restore procedure (§6.3) |
 | RB-17 | Region evacuation |

@@ -60,3 +60,22 @@ spec:
     matchOIDCIdentity:
       - issuer: ^https://token\.actions\.githubusercontent\.com$
         subject: ^https://github\.com/kunwarshivam/mandate/\.github/workflows/release\.yml@refs/heads/main$
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: mandate-vault-server
+  namespace: flux-system
+spec:
+  interval: 1h
+  url: oci://ghcr.io/kunwarshivam/mandate/charts/mandate-vault-server
+  ref:
+    digest: sha256:6f5eac00d66d1a9183289ed15ace15ad739f3cc98a7b6fd37d6805c3f21f4287
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy
+  verify:
+    provider: cosign
+    matchOIDCIdentity:
+      - issuer: ^https://token\.actions\.githubusercontent\.com$
+        subject: ^https://github\.com/kunwarshivam/mandate/\.github/workflows/release\.yml@refs/heads/main$

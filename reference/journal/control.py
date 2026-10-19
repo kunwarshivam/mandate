@@ -1680,6 +1680,20 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
         else:
             positive = Decimal(bid) > 0
         rule("244", positive, "schema", "payload.bid")
+    if event_type == "IntentReceived":
+        openings = ("open",) if "rule.245.increase" in skip else ("open", "increase")
+        known = p["type"] in ("limit", "market") or "rule.245.other_type" in skip
+        exit_only = p["type"] != "market" or p["purpose"] not in openings or "rule.245.market_opening" in skip
+        priced = p["limit_price"] is not None
+        if p["type"] == "limit":
+            price_ok = priced or "rule.245.limit_null" in skip
+        else:
+            price_ok = not priced or "rule.245.market_priced" in skip
+        clauses = [("type", known and exit_only), ("limit_price", price_ok)]
+        if "order.rule_245_price_first" in skip:
+            clauses.reverse()
+        wrong = next((m for m, ok in clauses if not ok), None)
+        rule("245", wrong is None, "schema", f"payload.{wrong}" if wrong else "")
     if event_type == "StepUpConfirmed":
         rule("242.kind", p["action_kind"] == "approve", "schema", "payload.action_kind")
         rule("242.paper", draft["environment"] == "paper", "schema", "environment")

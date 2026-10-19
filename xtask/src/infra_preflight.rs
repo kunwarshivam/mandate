@@ -72,6 +72,11 @@ pub(crate) enum Item {
     Ready(String),
     Missing(String),
     Reminder(String),
+    /// A line that does not hold yet but waits on the change `until` names, so it does not fail.
+    Pending {
+        until: &'static str,
+        what: String,
+    },
 }
 
 /// The checklist the preflight prints, in the order it was checked.
@@ -81,12 +86,27 @@ pub(crate) struct Checklist {
 }
 
 impl Checklist {
-    fn check(&mut self, holds: bool, what: impl Into<String>) {
+    pub(crate) fn check(&mut self, holds: bool, what: impl Into<String>) {
         let what = what.into();
         self.items.push(if holds {
             Item::Ready(what)
         } else {
             Item::Missing(what)
+        });
+    }
+
+    /// A line that holds, or else waits on `until` without failing the checklist.
+    pub(crate) fn check_or_pending(
+        &mut self,
+        holds: bool,
+        until: &'static str,
+        what: impl Into<String>,
+    ) {
+        let what = what.into();
+        self.items.push(if holds {
+            Item::Ready(what)
+        } else {
+            Item::Pending { until, what }
         });
     }
 
@@ -104,15 +124,21 @@ impl Checklist {
 
     /// The checklist as printed: one line each, missing lines marked so a reader finds them.
     pub(crate) fn render(&self, environment: &str) -> String {
-        let mut out = format!("infra preflight ({environment}):\n");
+        self.render_titled(&format!("infra preflight ({environment})"))
+    }
+
+    /// The checklist under `title`, as [`Checklist::render`] prints the preflight's.
+    pub(crate) fn render_titled(&self, title: &str) -> String {
+        let mut out = format!("{title}:\n");
         for item in &self.items {
             let (mark, what) = match item {
-                Item::Ready(what) => ("[ok]      ", what),
-                Item::Missing(what) => ("[MISSING] ", what),
-                Item::Reminder(what) => ("[console] ", what),
+                Item::Ready(what) => ("[ok]      ".to_owned(), what),
+                Item::Missing(what) => ("[MISSING] ".to_owned(), what),
+                Item::Reminder(what) => ("[console] ".to_owned(), what),
+                Item::Pending { until, what } => (format!("[pending {until}] "), what),
             };
             out.push_str("  ");
-            out.push_str(mark);
+            out.push_str(&mark);
             out.push_str(what);
             out.push('\n');
         }
@@ -550,7 +576,8 @@ fn state_bucket(
     Ok(())
 }
 
-/// The Cloudflare half: one account, the token's own permission groups, and R2 enabled.
+/// The Cloudflare half: one account, the token's own permission groups, R2 enabled, and Access set
+/// up.
 fn cloudflare(list: &mut Checklist, token: &str) -> Result<()> {
     #[derive(Deserialize)]
     struct Envelope<T> {
@@ -652,7 +679,39 @@ fn cloudflare(list: &mut Checklist, token: &str) -> Result<()> {
         r2.ok(),
         "R2 is enabled on the Cloudflare account (a one-time console step)",
     );
+    let access = api(
+        "GET",
+        &format!("{CF_API}/accounts/{account}/access/apps?per_page=1"),
+        token,
+        None,
+    )?;
+    let (enabled, line) = access_line(&access);
+    list.check(enabled, line);
     Ok(())
+}
+
+/// The checklist line for Cloudflare Access, from the account's Access application list, which the
+/// token's Access apps permission reads: Cloudflare refuses it with `access.api.error.not_enabled`
+/// until the founder sets up a Zero Trust team, the one-time console step staging's first apply
+/// failed on (DEC-2044 item 1).
+pub(crate) fn access_line(answer: &Answer) -> (bool, String) {
+    let what = "Cloudflare Access is enabled";
+    if answer.ok() {
+        (true, what.to_owned())
+    } else if answer.body.contains("access.api.error.not_enabled") {
+        (
+            false,
+            format!("{what} (one-time console step: Zero Trust → set up a team)"),
+        )
+    } else {
+        (
+            false,
+            format!(
+                "{what} (CF_INFRA_API_TOKEN could not read Access applications, status {})",
+                answer.status
+            ),
+        )
+    }
 }
 
 /// The whole preflight for `environment` (DEC-2030 item 5). The Cloudflare half runs first, so
@@ -845,6 +904,34 @@ mod tests {
 
     /// DEC-2029 item 4: each needed Cloudflare permission is named when no group grants it, by
     /// either of Cloudflare's spellings.
+    /// DEC-2044 item 1: Access not yet set up is named as the console step, before any plan.
+    #[test]
+    fn access_not_enabled_names_the_console_step() {
+        let answer = |status, body: &str| Answer {
+            status,
+            body: body.to_owned(),
+        };
+        assert_eq!(
+            access_line(&answer(200, "{\"result\":[]}")),
+            (true, "Cloudflare Access is enabled".to_owned())
+        );
+        let (enabled, line) = access_line(&answer(
+            403,
+            "{\"errors\":[{\"code\":9999,\"message\":\"access.api.error.not_enabled: Access is not enabled\"}]}",
+        ));
+        assert!(!enabled);
+        assert!(
+            line.contains("one-time console step: Zero Trust → set up a team"),
+            "{line}"
+        );
+        let (enabled, line) = access_line(&answer(403, "{\"errors\":[{\"code\":10000}]}"));
+        assert!(!enabled);
+        assert!(
+            line.contains("could not read Access applications, status 403"),
+            "{line}"
+        );
+    }
+
     #[test]
     fn cloudflare_gaps_name_each_missing_permission() {
         let all: BTreeSet<String> = [
