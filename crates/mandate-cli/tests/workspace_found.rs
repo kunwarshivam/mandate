@@ -424,6 +424,62 @@ fn open_leaves_a_stream_holding_any_event_as_it_is() {
     assert!(kinds(&empty).is_empty(), "without --open nothing is opened");
 }
 
+/// The rows another process's `found --open` for `member(1)` commits on a journal of its own,
+/// with its own later clock: its opening, and its grant when `granted`.
+fn another_openers(granted: bool) -> Vec<Vec<u8>> {
+    let mut theirs = Journal::default();
+    let ulid = member(1);
+    let mut secs = EPOCH + 100;
+    let mut later = move || {
+        secs += 1;
+        UtcNanos::from_parts(secs, 0).unwrap()
+    };
+    let founding = Founding {
+        workspace: "ws1",
+        member: &ulid,
+        method: "oidc",
+        open: true,
+    };
+    found_in(&mut theirs, founding, &mut later, &mut Vec::new()).unwrap();
+    let rows = theirs.rows(&ctl()).unwrap();
+    rows.iter()
+        .take(if granted { 2 } else { 1 })
+        .map(|r| r.body.clone())
+        .collect()
+}
+
+/// Two processes run `--open` on the same empty stream, and the other commits first, between this
+/// one's read and its append. Its opening has this one's id (derived at head 0) but its own
+/// instant, so the journal answers this one's opening as an idempotency conflict: this run fails
+/// closed, committing nothing, and is never a second opening. A rerun, as the founding hook's
+/// retry is, finds the stream opened and founds it, or finds the other's grant and commits nothing
+/// (DEC-2114).
+#[test]
+fn two_processes_opening_at_once_open_the_stream_once() {
+    let theirs_at = UtcNanos::from_parts(EPOCH + 101, 0).unwrap().to_string();
+    for (granted, landed) in [(true, 1), (false, 2)] {
+        let mut journal = Journal::default();
+        journal.land_before_next = another_openers(landed == 2);
+        let (first, printed) = run_opening(&mut journal, 1);
+        assert!(
+            matches!(first, Err(ControlError::Journal(_))),
+            "{landed}: {first:?}"
+        );
+        assert!(!printed.contains("founded"), "{printed}");
+        assert_eq!(
+            kinds(&journal).len(),
+            landed,
+            "nothing of this run's is stored"
+        );
+        let (rerun, _) = run_opening(&mut journal, 1);
+        assert_eq!(rerun, Ok(Founded { seq: 2, granted }), "{landed}");
+        assert_eq!(kinds(&journal), ["StreamOpened", "MemberActivated"]);
+        let rows = journal.rows(&ctl()).unwrap();
+        assert_eq!(get(&body(&rows[0]), "event_time"), &text(&theirs_at));
+        assert_eq!(grants(&journal).len(), 1);
+    }
+}
+
 /// A stream with a record after its opening and no membership is not new.
 #[test]
 fn a_used_workspace_is_refused() {
