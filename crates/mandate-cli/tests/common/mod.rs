@@ -421,6 +421,30 @@ impl ControlJournal for Journal {
 }
 
 impl Journal {
+    /// Stores `bytes` as the next row of `stream_text` as they are, whether or not they parse: a
+    /// row the journal holds but no reader can decode.
+    pub fn push_raw(&mut self, stream_text: &str, event_type: &str, bytes: &[u8]) {
+        let s = stream(stream_text);
+        let head = self.head(&s).unwrap();
+        let row = StoredEvent {
+            stream_id: stream_text.to_owned(),
+            seq: head.seq + 1,
+            event_id: String::new(),
+            event_type: event_type.to_owned(),
+            schema_version: 1,
+            environment: "paper".to_owned(),
+            recorded_at: at(ASKED_AT).at.to_string(),
+            prev_hash: head.hash,
+            hash: Digest::of(bytes),
+            body: bytes.to_vec(),
+        };
+        self.streams
+            .entry(stream_text.to_owned())
+            .or_default()
+            .1
+            .push(row);
+    }
+
     /// Clears `lost_for_good`: the journal answers again.
     pub fn recover(&mut self) {
         self.lost_for_good = false;

@@ -1,6 +1,6 @@
-//! `cargo xtask cell demo --scenario demo` (E21-54, DEC-2002): the demo's story, its six steps in
-//! order, with the owner's exit before the kill switch, on the local cell, with paper and demo data only and no credential. Every gesture whose
-//! pieces are on `main` runs for real, in one Job of the cell's own `control` process, so the
+//! `cargo xtask cell demo --scenario demo` (E21-54, DEC-2002): the demo's story in order, the
+//! story's six steps with the owner's exit as step 6, before the kill switch, on the local cell,
+//! with paper and demo data only and no credential. Every gesture whose pieces are on `main` runs for real, in one Job of the cell's own `control` process, so the
 //! artifact store its gestures share lives as long as they do; every link that is not on `main` is
 //! printed as a gap naming the PR or story that closes it, never faked. The scenario ends, in the
 //! same pod, by exporting the workspace's control stream and verifying it by journal spec §11
@@ -405,7 +405,17 @@ fn exit_code(
     head: u64,
 ) -> String {
     code(&format!(
-        r#"{{"agent":"{agent}","bid":"{bid}","bid_size":"{size}","confirms":"owner_exit","control_head":"{head}","event":null,"floor":"{floor}","instrument":"{instrument}"}}"#
+        concat!(
+            r#"{{"agent":"{agent}","bid":"{bid}","bid_size":"{size}","confirms":"owner_exit","#,
+            r#""control_head":"{head}","event":null,"floor":"{floor}","#,
+            r#""instrument":"{instrument}"}}"#
+        ),
+        agent = agent,
+        bid = bid,
+        size = size,
+        head = head,
+        floor = floor,
+        instrument = instrument,
     ))
 }
 
@@ -1713,8 +1723,9 @@ mod tests {
         assert_eq!(deploy_code(RESEARCH_AGENT, &research), "a45a1728");
     }
 
-    /// The steps run 1 to 7 in order, then the record; a shown code precedes the gesture that types it, and the
-    /// typed code is the one shown; every gesture's container name is unique and a Kubernetes name.
+    /// The steps run 1 to 7 in order, then the record; a shown code precedes the gesture that types
+    /// it, and the typed code is the one shown; every gesture's container name is unique and a
+    /// Kubernetes name.
     #[test]
     fn the_plan_runs_its_steps_and_types_the_codes_it_shows() {
         let steps = planned("demo1");
@@ -2047,11 +2058,24 @@ mod tests {
             pinned["instrument_id"], SPY,
             "the exit names the pinned instrument"
         );
-        let (bid, _, floor) = EXIT_BID;
+        let scaled = |decimal: &str| -> u128 {
+            let (whole, fraction) = decimal.split_once('.').unwrap_or((decimal, ""));
+            assert!(
+                fraction.len() <= 8,
+                "{decimal}: more places than the oracle reads"
+            );
+            format!("{whole}{fraction:0<8}").parse().unwrap()
+        };
+        let (bid, size, floor) = EXIT_BID;
         assert!(
-            floor.parse::<u32>().unwrap() * 100 <= bid.replace('.', "").parse::<u32>().unwrap(),
+            scaled(floor) <= scaled(bid),
             "the floor is at or below the bid"
         );
+        assert!(
+            scaled(size) > 0 && scaled(floor) > 0,
+            "a positive size and floor"
+        );
+        assert!(scaled("500") < scaled("501.25") && scaled("0.5") > scaled("0.25"));
         let steps = planned("demo1");
         let all = gestures(&steps);
         let at = |head: &[&str], last: &str| {

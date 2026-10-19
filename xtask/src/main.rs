@@ -10,7 +10,7 @@ use std::process::{Command, ExitCode, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, bail, ensure};
 use serde::Deserialize;
 
 mod admission_drill;
@@ -18,6 +18,7 @@ mod cell;
 mod gitops;
 mod image;
 mod infra_preflight;
+mod infra_verify;
 mod infra_window;
 mod leak;
 mod mail;
@@ -1564,26 +1565,26 @@ fn reviewed_commit(sha: &str, run_sha: &str, head: &str) -> Result<()> {
 /// be the run's commit and the checkout. With `sha` empty, `preflight` and `plan` proceed at the
 /// checkout, once it is the run's commit and a full commit, since main moves between the founder
 /// reading a commit and dispatching; `apply` never does, so an apply still binds to the commit the
-/// founder named.
+/// founder named. An action other than those three is refused first, whatever `sha` is.
 fn run_commit(action: &str, sha: &str, run_sha: &str, head: &str) -> Result<String> {
+    if !matches!(action, "preflight" | "plan" | "apply") {
+        bail!("no infra action {action:?} (DEC-2042)");
+    }
     if !sha.is_empty() {
         reviewed_commit(sha, run_sha, head)?;
         return Ok(sha.to_owned());
     }
-    match action {
-        "preflight" | "plan" => {
-            reviewed_commit(head, run_sha, head).context(
-                "no sha was given, so the run proceeds at the checkout, which must be the run's \
-                 full commit (DEC-2042)",
-            )?;
-            Ok(head.to_owned())
-        }
-        "apply" => bail!(
+    if action == "apply" {
+        bail!(
             "apply needs {INFRA_SHA_ENV}, the full commit you reviewed, so the approval binds to \
              it; plan first and dispatch apply naming the commit the plan printed (DEC-2042)"
-        ),
-        other => bail!("no infra action {other:?} (DEC-2042)"),
+        );
     }
+    reviewed_commit(head, run_sha, head).context(
+        "no sha was given, so the run proceeds at the checkout, which must be the run's full \
+         commit (DEC-2042)",
+    )?;
+    Ok(head.to_owned())
 }
 
 /// The paths a change to which changes what `infra.yml` does: the OpenTofu tree, the workflow, and
@@ -1642,7 +1643,8 @@ fn opens_window(environment: &str, action: &str) -> bool {
     environment == "staging" && action == "apply"
 }
 
-/// Lane GO's bootstrap after staging's apply (DEC-2018 item 7, DEC-2028): the workload secrets
+/// Lane GO's bootstrap after staging's apply (DEC-2018 item 7, DEC-2028), then its verify
+/// (DEC-2050), which reads staging until it is up and fails the run if it never is: the workload secrets
 /// from OpenTofu's outputs, each wrapped in a [`gitops::Secret`], which masks it, the moment it is
 /// read; a kubeconfig that expires in 900 seconds, at mode 0600 in `$RUNNER_TEMP` and deleted
 /// however the bootstrap ends; and the bootstrap itself, which confirms the context first.
@@ -1688,7 +1690,40 @@ fn bootstrap_staging(tofu: &dyn Fn(&[String]) -> Command, chdir: &str, run: &str
         kubeconfig.path(),
         &context,
         &secrets,
-    )
+    )?;
+    let account = output("cloudflare_account_id")?;
+    mask::add_mask(account.trim());
+    let (tunnel_id, api_hostname) = (output("tunnel_id")?, output("api_hostname")?);
+    mask::add_mask(tunnel_id.trim());
+    let get = |args: &[&str]| -> Result<String> {
+        let out = gitops::tool("kubectl")
+            .args(["--v=0", "--kubeconfig"])
+            .arg(kubeconfig.path())
+            .args(["--context", &context, "get"])
+            .args(args)
+            .output()
+            .context("starting kubectl")?;
+        ensure!(out.status.success(), "kubectl get failed");
+        String::from_utf8(out.stdout).context("kubectl printed non-UTF-8")
+    };
+    let cloudflare_token = env::var("TF_VAR_cloudflare_api_token").unwrap_or_default();
+    let checklist = infra_verify::verify(
+        &get,
+        &infra_window::Curl,
+        &infra_verify::Edge {
+            cloudflare_token: &cloudflare_token,
+            account: account.trim(),
+            tunnel_id: tunnel_id.trim(),
+            api_hostname: api_hostname.trim(),
+        },
+    )?;
+    eprint!("{}", checklist.render_titled("infra verify (staging)"));
+    ensure!(
+        checklist.complete(),
+        "staging is not up after {} seconds: each MISSING line above names what is not (DEC-2050)",
+        infra_verify::SECONDS
+    );
+    Ok(())
 }
 
 /// Runs each `tofu` command in turn, with the run's Spaces key in the child's environment alone,
@@ -3038,6 +3073,8 @@ struct Finding {
 /// "Amazon's documented SigV4 example key ID" exception: that exact value, in that file alone. The
 /// ULID rows prove the API server's process-test exception: a workspace or organization ULID is
 /// allowed in that test file alone, and any other value under the same setting there is reported.
+/// The build-output rows prove the `target/` exception: a key under the workspace root's `target/`
+/// is allowed, and the same key under a crate's own `target` or under `targets/` is reported.
 fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
     let page = concat!(
         "U1BZfDIwMjYtMDktMjRUMTQ6MDA6",
@@ -3089,7 +3126,19 @@ fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
         "  \"webauthn_challenge\": \"{}\",",
         concat!("zz3vEjRWeJCrze8SNFZ4kKvN7xI0", "VniQq83vEjRWeJA")
     );
+    let built = format!("  \"api-key\": \"{page}\",");
     vec![
+        (
+            "target/debug/deps/planted.rmeta".to_owned(),
+            built.clone(),
+            None,
+        ),
+        (
+            "crates/planted/target/notes.txt".to_owned(),
+            built.clone(),
+            generic,
+        ),
+        ("targets/notes.txt".to_owned(), built, generic),
         (signer.to_owned(), example.clone(), None),
         (signer.to_owned(), near_example, Some("alpaca-key-id")),
         (
@@ -16828,6 +16877,15 @@ mod tests {
             last_secret < kubeconfig && kubeconfig < at(&staging, "gitops::bootstrap_from_infra("),
             "the kubeconfig is fetched after the secrets are wrapped and before the bootstrap"
         );
+        let account = at(&staging, "mask::add_mask(account.trim());");
+        let verify = at(&staging, "infra_verify::verify(");
+        assert!(
+            at(&staging, "gitops::bootstrap_from_infra(") < account
+                && account < verify
+                && verify < at(&staging, "ensure!(\n        checklist.complete()"),
+            "staging is verified after its bootstrap, with the account masked first, and an \
+             incomplete verify fails the run (DEC-2050)"
+        );
         let close_step = body("\nfn infra_close() -> Result<()> {");
         let masks = at(&close_step, "mask::add_mask(&value);");
         let closes = at(&close_step, "infra_window::close_window(");
@@ -17021,10 +17079,29 @@ mod tests {
             "{refused}"
         );
         assert!(crate::run_commit("apply", other, sha, sha).is_err());
-        assert!(
-            crate::run_commit("destroy", "", sha, sha).is_err(),
-            "an unknown action never defaults"
-        );
+        for (named, why) in [
+            (" ", "a blank sha"),
+            (" 0123456789abcdef0123456789abcdef01234567", "a padded sha"),
+            (
+                "0123456789ABCDEF0123456789ABCDEF01234567",
+                "an uppercase sha",
+            ),
+        ] {
+            assert!(
+                crate::run_commit("apply", named, sha, sha).is_err(),
+                "apply: {why}"
+            );
+        }
+        for named in ["", sha] {
+            let refused = crate::run_commit("destroy", named, sha, sha)
+                .err()
+                .map(|error| error.to_string())
+                .unwrap_or_default();
+            assert!(
+                refused.contains("no infra action"),
+                "an unknown action is refused, with sha {named:?}: {refused}"
+            );
+        }
         Ok(())
     }
 
