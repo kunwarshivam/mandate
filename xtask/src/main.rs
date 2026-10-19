@@ -1409,12 +1409,20 @@ fn infra() -> Result<()> {
     if run.is_empty() || !run.chars().all(|c| c.is_ascii_digit()) {
         bail!("GITHUB_RUN_ID must be the run's number, which names its Spaces key");
     }
-    let sha = env::var(INFRA_SHA_ENV).unwrap_or_default();
-    reviewed_commit(
-        &sha,
+    let named = env::var(INFRA_SHA_ENV).unwrap_or_default();
+    let sha = run_commit(
+        &action,
+        &named,
         &env::var("GITHUB_SHA").unwrap_or_default(),
         &head_commit()?,
     )?;
+    eprintln!("==> infra {action} of {environment} at commit {sha}");
+    if named.is_empty() {
+        eprintln!(
+            "    no sha was given, so this run uses the commit main was at when it started; to \
+             apply this plan, dispatch apply with sha={sha} (DEC-2042)"
+        );
+    }
     let work = repo_root()?.join("target").join("tofu");
     fs::create_dir_all(&work).with_context(|| format!("creating {}", work.display()))?;
     let plan_file = work.join(format!("{environment}.tfplan"));
@@ -1549,6 +1557,32 @@ fn reviewed_commit(sha: &str, run_sha: &str, head: &str) -> Result<()> {
         );
     }
     Ok(())
+}
+
+/// The commit a run proceeds at (DEC-2042). With `sha` given, [`reviewed_commit`] holds: it must
+/// be the run's commit and the checkout. With `sha` empty, `preflight` and `plan` proceed at the
+/// checkout, once it is the run's commit and a full commit, since main moves between the founder
+/// reading a commit and dispatching; `apply` never does, so an apply still binds to the commit the
+/// founder named.
+fn run_commit(action: &str, sha: &str, run_sha: &str, head: &str) -> Result<String> {
+    if !sha.is_empty() {
+        reviewed_commit(sha, run_sha, head)?;
+        return Ok(sha.to_owned());
+    }
+    match action {
+        "preflight" | "plan" => {
+            reviewed_commit(head, run_sha, head).context(
+                "no sha was given, so the run proceeds at the checkout, which must be the run's \
+                 full commit (DEC-2042)",
+            )?;
+            Ok(head.to_owned())
+        }
+        "apply" => bail!(
+            "apply needs {INFRA_SHA_ENV}, the full commit you reviewed, so the approval binds to \
+             it; plan first and dispatch apply naming the commit the plan printed (DEC-2042)"
+        ),
+        other => bail!("no infra action {other:?} (DEC-2042)"),
+    }
 }
 
 /// The paths a change to which changes what `infra.yml` does: the OpenTofu tree, the workflow, and
@@ -16948,6 +16982,49 @@ mod tests {
                 "{named:?} at {run} / {head} is refused"
             );
         }
+    }
+
+    /// DEC-2042: `preflight` and `plan` may run at the checkout when no commit is named, and say
+    /// so; `apply` always needs the named commit, and a named commit is checked as before.
+    #[test]
+    fn only_apply_needs_the_commit_named() -> Result<()> {
+        let sha = "0123456789abcdef0123456789abcdef01234567";
+        let other = "1123456789abcdef0123456789abcdef01234567";
+        for action in ["preflight", "plan"] {
+            assert_eq!(crate::run_commit(action, "", sha, sha)?, sha);
+            assert_eq!(crate::run_commit(action, sha, sha, sha)?, sha);
+            assert!(
+                crate::run_commit(action, "", sha, other).is_err(),
+                "{action}: run and checkout differ"
+            );
+            assert!(
+                crate::run_commit(action, "", "", "").is_err(),
+                "{action}: no commit at all"
+            );
+            assert!(
+                crate::run_commit(action, "", "abc", "abc").is_err(),
+                "{action}: not a full commit"
+            );
+            assert!(
+                crate::run_commit(action, other, sha, sha).is_err(),
+                "{action}: a named commit is checked"
+            );
+        }
+        assert_eq!(crate::run_commit("apply", sha, sha, sha)?, sha);
+        let refused = crate::run_commit("apply", "", sha, sha)
+            .err()
+            .map(|error| error.to_string())
+            .unwrap_or_default();
+        assert!(
+            refused.contains("apply") && refused.contains("DEC-2042"),
+            "{refused}"
+        );
+        assert!(crate::run_commit("apply", other, sha, sha).is_err());
+        assert!(
+            crate::run_commit("destroy", "", sha, sha).is_err(),
+            "an unknown action never defaults"
+        );
+        Ok(())
     }
 
     /// E21-56 (DEC-2014): the committed `infra.yml` passes its guard, and each way of loosening
