@@ -702,9 +702,6 @@ fn last_rung_limit(batch: &Batch<'_, '_>, intent: &IntentId, rung: u32) -> Optio
     batch.view.details.get(&id)?.request.as_ref()?.limit_price
 }
 
-/// What §5.6 prices `instrument` from, oldest to newest by when each was observed: the last sane
-/// quote with a trade, the last sane bid, and the latest quote. A trade printed in another session
-/// prices nothing (§8.2: a last trade counts only in-session).
 /// What an intent's exit prices from: outside the regular session, an exit the owner confirmed
 /// prices from the bid they confirmed, not from a quote they never saw (§5.5, DEC-2040 item 3);
 /// every other exit, and a confirmed one in the regular session, from [`observed`].
@@ -732,6 +729,9 @@ fn observed_for(
     }
 }
 
+/// What §5.6 prices `instrument` from, oldest to newest by when each was observed: the last sane
+/// quote with a trade, the last sane bid, and the latest quote. A trade printed in another session
+/// prices nothing (§8.2: a last trade counts only in-session).
 fn observed(batch: &Batch<'_, '_>, instrument: &InstrumentId) -> Vec<MarketObservation> {
     let mut seen: Vec<MarketObservation> = [
         &batch.view.trades,
