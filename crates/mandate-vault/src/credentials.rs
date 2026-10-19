@@ -12,7 +12,7 @@ use mandate_connections::record::ConnectionId;
 use secrecy::{ExposeSecret, SecretString};
 
 use crate::SourceError;
-use crate::openbao::{RoleCredentials, provisioned_identities};
+use crate::openbao::{RoleCredentials, issues_secret_id, provisioned_identities};
 use crate::policy::{Identity, role_name};
 
 /// The suffix of the file that holds an identity's role id, after its role name.
@@ -80,7 +80,7 @@ pub fn write_credentials(
 pub fn check_credential_dir(dir: &Path, connections: &[ConnectionId]) -> Result<(), SourceError> {
     let identities: Vec<Identity> = provisioned_identities(connections)
         .into_iter()
-        .filter(|identity| !matches!(identity, Identity::TokenExchange(_)))
+        .filter(issues_secret_id)
         .collect();
     check_for(dir, &identities).map(|_| ())
 }
