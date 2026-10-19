@@ -106,7 +106,6 @@ fn every_market_intent_base_and_valid_draft_parses() {
 /// Rule 245: `type` is `limit` or `market`, `market` only for an exit, and `limit_price` null
 /// exactly for `market`, refused at the member the rule names first.
 #[test]
-#[ignore = "pending E7-29"]
 fn every_invalid_market_intent_is_refused_at_the_member_rule_245_names() {
     let (count, failed) = refusals("market_intents");
     assert!(failed.is_empty(), "{}", failed.join("\n"));
@@ -116,7 +115,6 @@ fn every_invalid_market_intent_is_refused_at_the_member_rule_245_names() {
 /// The owner exit at the market, its `OwnerConfirmationReceived`, and the confirmations rule 246
 /// might be misread to refuse, parse.
 #[test]
-#[ignore = "pending E7-30"]
 fn every_owner_confirmation_base_and_valid_draft_parses() {
     let failed = parses("owner_confirmations");
     assert!(failed.is_empty(), "{}", failed.join("\n"));
@@ -125,7 +123,6 @@ fn every_owner_confirmation_base_and_valid_draft_parses() {
 /// Rule 246 and the closed schema: a price that is not positive, a null or absent member, or an
 /// extra one, refused at the member named.
 #[test]
-#[ignore = "pending E7-30"]
 fn every_invalid_owner_confirmation_is_refused_with_its_reason_at_its_path() {
     let (count, failed) = refusals("owner_confirmations");
     assert!(failed.is_empty(), "{}", failed.join("\n"));
@@ -135,7 +132,6 @@ fn every_invalid_owner_confirmation_is_refused_with_its_reason_at_its_path() {
 /// Rule 247 over each batch vector: each draft's own rules first, then each confirmation against
 /// the record immediately before it, reported by its index in the batch.
 #[test]
-#[ignore = "pending E7-30"]
 fn every_owner_confirmation_batch_is_judged_as_its_vector_says() {
     let section = section("owner_confirmations");
     let batches = list(&section, "batches");
@@ -179,7 +175,6 @@ fn every_owner_confirmation_batch_is_judged_as_its_vector_says() {
 
 /// The record is closed on the account stream at version 1 and nowhere else.
 #[test]
-#[ignore = "pending E7-30"]
 fn the_catalogue_closes_owner_confirmation_received_on_the_account_stream() {
     assert!(closes("OwnerConfirmationReceived", 1, StreamType::Account));
     assert!(!closes("OwnerConfirmationReceived", 2, StreamType::Account));

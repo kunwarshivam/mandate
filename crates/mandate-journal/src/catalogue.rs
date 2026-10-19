@@ -71,6 +71,7 @@ pub(crate) fn lookup(event_type: &str) -> Option<Entry> {
         | "BrokerExchangeRecorded"
         | "MarkUpdated"
         | "ProtectionChanged"
+        | "OwnerConfirmationReceived"
         | "BrokerPositionObserved"
         | "ReconciliationRun"
         | "CompensatingEvent"
