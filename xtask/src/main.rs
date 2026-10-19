@@ -411,7 +411,7 @@ fn ci(job: &str) -> Result<()> {
         "cell-failover" => cell::ci_drills(job, &cell::FAILOVER_DRILLS),
         "cell-kill-switch" => cell::ci_drills(
             job,
-            &[cell::KILL_SWITCH_DRILLS, cell::VAULT_DRILLS].concat(),
+            &[&cell::KILL_SWITCH_DRILLS[..], &cell::VAULT_DRILLS[..]].concat(),
         ),
         "refcases" => refcases(false),
         "reference" => {
