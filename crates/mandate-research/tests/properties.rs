@@ -1227,6 +1227,43 @@ proptest! {
         );
     }
 
+    /// DEC-2249 item 1: replaying the fold's own recorded decisions, in order, from the lineages it
+    /// started with, rebuilds the lineages it ended with, and each replayed step returns the
+    /// revision and retirement the fold reported for that step. The independent counter (oracle 1)
+    /// agrees with every replayed step, so replay is not checked against the fold alone.
+    #[test]
+    #[ignore = "pending E21-59"]
+    fn replaying_the_recorded_decisions_rebuilds_the_fold_s_lineages(
+        revisions in prop::collection::vec(0_u32..5, 1..8),
+        cap in 0_u32..4,
+    ) {
+        let f = fold_of(&revisions, cap);
+        let fold = fold_theses(&f.input()).expect("the fold decides");
+        prop_assert_eq!(fold.steps.len(), revisions.len(), "one step per proposal");
+        let mut replayed = LineageState::default();
+        let mut counter = oracle::Lineages::default();
+        for (proposal, step) in f.proposals.iter().zip(&fold.steps) {
+            let t = &proposal.thesis;
+            let (after, retired_now) =
+                replayed.replay(&t.lineage_id, t.revision, &t.instrument_id, step.decision);
+            prop_assert_eq!(after.revisions, step.lineage_revisions);
+            prop_assert_eq!(after.retired, step.lineage_retired);
+            let lineage = t.lineage_id.as_str();
+            let retires = if step.decision.admitted() {
+                counter.credit(lineage, t.revision, t.instrument_id.as_str());
+                false
+            } else if step.decision.reason() == Some(RefusalReason::LineageRetired) {
+                counter.retire(lineage)
+            } else {
+                false
+            };
+            prop_assert_eq!(retired_now, retires, "the step retires exactly when the counter does");
+            prop_assert_eq!(after.revisions, counter.revisions_of(lineage));
+            prop_assert_eq!(after.retired, counter.is_retired(lineage));
+        }
+        prop_assert_eq!(&replayed, &fold.lineages, "the replay rebuilds the fold's lineages");
+    }
+
     /// §8.5: the one exception to "a refusal changes nothing" is a refusal that retires a lineage.
     /// Every other refusal leaves the universe byte for byte as it was, and journals no change.
     #[test]
