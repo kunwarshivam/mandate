@@ -595,7 +595,6 @@ fn reservation(id: &str, max: &str) -> MeterRecord {
 /// meter holds for it, its settled cost here, beside the unmetered calls' recorded costs, which
 /// still count as before: 0.25 settled plus 0.5 recorded.
 #[test]
-#[ignore = "pending E21-59"]
 fn a_call_the_meter_holds_counts_at_its_settled_cost_and_research_goes_on() {
     let store = SharedMeter::new();
     let (journal, source) = metered(&bundle(), &researching(), &store);
@@ -636,7 +635,6 @@ fn a_call_the_meter_holds_counts_at_its_settled_cost_and_research_goes_on() {
 /// the risk day: no context, until the risk clock reaches the next risk day, when the earlier call
 /// is another day's and the day's spend starts again from nothing.
 #[test]
-#[ignore = "pending E21-59"]
 fn a_restarted_source_gives_no_context_until_the_next_risk_day() {
     let store = SharedMeter::new();
     let (journal, source) = metered(&bundle(), &researching(), &store);

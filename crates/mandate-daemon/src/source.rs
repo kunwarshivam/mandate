@@ -15,7 +15,7 @@ use mandate_research::{
     PolicyOverlay, ResearchEnvelope, SourceAllowlist, ValidatedMandate, WorkingUniverse,
 };
 use mandate_research_run::{InstrumentFact, Symbol};
-use mandate_runtime::{JournalCatalog, Preconditions, RiskClock, RuntimeState};
+use mandate_runtime::{ActiveThesis, JournalCatalog, Preconditions, RiskClock, RuntimeState};
 use mandate_spec::risk::risk_day;
 use mandate_store::Store;
 use mandate_time::UtcNanos;
@@ -24,6 +24,7 @@ use crate::deployment;
 use crate::meter::CellMeter;
 use crate::recorded::Bundle;
 use crate::runtime::{ResearchParts, ResearchSource};
+use mandate_gateway::meter::SharedMeter;
 
 /// Where the source reads a stream's records: the process's store, or a read connection of its own.
 pub trait Rows {
@@ -73,6 +74,46 @@ const UNFOLDED: [&str; 4] = [
     "UniverseChanged",
 ];
 
+/// What an agent stream's own research records fold to (DEC-2249 items 1 and 2): the working
+/// universe, the lineages, and the active theses the next pass is handed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResearchFold {
+    pub universe: WorkingUniverse,
+    pub lineages: LineageState,
+    pub active: Vec<ActiveThesis>,
+}
+
+/// Why an agent stream's research records do not fold.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FoldError {
+    /// The fold is not implemented yet (E21-59, DEC-2249).
+    Unimplemented,
+    /// A record's member, by name, is missing or not what it must be, or the bundle names no
+    /// symbol for an admitted thesis's instrument (`symbol`).
+    Unreadable { member: &'static str },
+}
+
+/// Folds the agent stream's own research records, in stream order, as the core judged them
+/// (DEC-2249 items 1 and 2). Each `ThesisProposed` and `ThesisRevised` replays its recorded
+/// decision into its lineage through `LineageState::replay`; an admitted one becomes its
+/// instrument's one universe entry, replacing whatever thesis held it; a `ThesisInvalidated` marks
+/// the entry of the thesis it names, when that thesis still holds its instrument. The entries then
+/// go through `expire_theses` at `at`, the core's own expiry, and the survivors are the universe
+/// and the active theses, each with the symbol `instruments` gives its instrument. Nothing is
+/// judged again.
+///
+/// # Errors
+/// [`FoldError::Unreadable`] naming the first member a record cannot give, including an admitted
+/// record with a `reason`, a refused one without one, or a reason that is not a refusal's code.
+pub fn fold_research(
+    agent: &[StoredEvent],
+    at: UtcNanos,
+    instruments: &[InstrumentFact],
+) -> Result<ResearchFold, FoldError> {
+    let _ = (agent, at, instruments);
+    Err(FoldError::Unimplemented)
+}
+
 /// The cell's research source.
 pub struct CellSource {
     who: SourceFor,
@@ -81,18 +122,42 @@ pub struct CellSource {
     /// every pass no context.
     halted: Option<BTreeSet<AssetId>>,
     instruments: Vec<InstrumentFact>,
-    rows: Box<dyn Rows>,
+    rows: Rc<dyn Rows>,
     documents: Box<dyn ArtifactSource>,
+    meter: CellMeter,
 }
 
 impl CellSource {
     /// The source over `bundle`'s recorded facts, reading the streams through `rows` and the
-    /// mandate documents from `documents`.
+    /// mandate documents from `documents`, with a meter of its own that holds no reservation, so
+    /// every reserved call on the risk day gives the pass no context (DEC-2249 item 3).
     pub fn new(
         bundle: &Bundle,
         who: SourceFor,
         rows: Box<dyn Rows>,
         documents: Box<dyn ArtifactSource>,
+    ) -> Self {
+        let rows: Rc<dyn Rows> = Rc::from(rows);
+        let meter = CellMeter::new(
+            SharedMeter::new(),
+            Rc::clone(&rows),
+            who.clone(),
+            Rc::new(|| UtcNanos::EPOCH),
+        );
+        Self::metered(bundle, who, rows, documents, meter)
+    }
+
+    /// The source over `bundle`'s recorded facts, reading the streams through `rows` and the
+    /// mandate documents from `documents`, and the agent's research spend from `meter`, the store
+    /// the worker's gateway reserves through (DEC-2249 item 3). A call the meter reserved then
+    /// counts at its settled cost, or its maximum while open, and gives the pass no context only
+    /// while the meter is held.
+    pub fn metered(
+        bundle: &Bundle,
+        who: SourceFor,
+        rows: Rc<dyn Rows>,
+        documents: Box<dyn ArtifactSource>,
+        meter: CellMeter,
     ) -> Self {
         Self {
             who,
@@ -105,35 +170,19 @@ impl CellSource {
             instruments: bundle.plane.instruments.clone(),
             rows,
             documents,
+            meter,
         }
     }
 
-    /// The source over `bundle`'s recorded facts, reading the streams through `rows` and the
-    /// mandate documents from `documents`, and the agent's research spend from `meter`, the store
-    /// the worker's gateway reserves through (DEC-2249 item 3). A call the meter reserved then
-    /// counts at its settled cost, or its maximum while open, and gives the pass no context only
-    /// while the meter is held.
-    #[expect(
-        clippy::todo,
-        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-    )]
-    pub fn metered(
-        bundle: &Bundle,
-        who: SourceFor,
-        rows: Rc<dyn Rows>,
-        documents: Box<dyn ArtifactSource>,
-        meter: CellMeter,
-    ) -> Self {
-        let _ = (bundle, who, rows, documents, meter);
-        todo!()
-    }
-
-    /// Today's research spend: the recorded costs of the calls the agent stream records since the
-    /// risk day of `clock` began, which counts a record the lagging clock has not reached yet, and
-    /// `None` when the stream holds a record the source cannot fold, or a cost or time it cannot
-    /// read, on any day.
+    /// Today's research spend: the recorded costs of the unreserved calls the agent stream records
+    /// since the risk day of `clock` began, which counts a record the lagging clock has not reached
+    /// yet, plus the meter's research spend for that day, which counts every reserved call at what
+    /// the meter holds for it (DEC-2249 item 3). `None` when the stream holds a record the source
+    /// cannot fold, or an unreserved cost or a time it cannot read, on any day, or while the meter
+    /// is held.
     fn spend(&self, agent: &[StoredEvent], clock: RiskClock) -> Option<Usd> {
-        let day = risk_day(UtcNanos::from_parts(clock.secs(), 0).ok()?).ok()?;
+        let now = UtcNanos::from_parts(clock.secs(), 0).ok()?;
+        let day = risk_day(now).ok()?;
         let mut spend = Usd::parse("0").ok()?;
         for row in agent {
             if UNFOLDED.contains(&row.event_type.as_str()) {
@@ -145,7 +194,7 @@ impl CellSource {
             let body = parse(&row.body).ok()?;
             let payload = body.get("payload")?;
             if !matches!(payload.get("reservation"), Some(Value::Null)) {
-                return None;
+                continue;
             }
             let cost = Usd::parse(payload.get("cost_usd").and_then(Value::as_str)?)
                 .ok()
@@ -158,7 +207,7 @@ impl CellSource {
                 spend = spend.checked_add(cost).ok()?;
             }
         }
-        Some(spend)
+        spend.checked_add(self.meter.research_spend(now)?).ok()
     }
 
     /// Whether an agent other than this one is deployed in this environment, or `None` when a

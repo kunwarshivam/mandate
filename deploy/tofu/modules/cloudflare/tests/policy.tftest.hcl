@@ -27,7 +27,7 @@ variables {
   zone_name      = "example.com"
   api_hostname   = "api-staging.example.com"
   api_origin     = "http://127.0.0.1:8080"
-  archive_bucket = "mandate-journal-archive-staging"
+  archive_bucket = "mandate-journal-archive-west-staging"
 }
 
 run "api_host_is_tunnel_only_and_behind_access" {
@@ -76,23 +76,23 @@ run "the_archive_is_locked_for_its_retention" {
   command = plan
 
   assert {
-    condition     = cloudflare_r2_bucket.journal_archive.name == "mandate-journal-archive-staging" && cloudflare_r2_bucket.journal_archive.location == "enam" && cloudflare_r2_bucket.journal_archive.jurisdiction == "default"
-    error_message = "The archive is the environment's R2 bucket in eastern North America, in R2's default jurisdiction, whose endpoint the cell's egress is pinned to."
+    condition     = cloudflare_r2_bucket.archive.name == "mandate-journal-archive-west-staging" && cloudflare_r2_bucket.archive.location == "wnam" && cloudflare_r2_bucket.archive.jurisdiction == "default"
+    error_message = "The archive is the environment's R2 bucket in western North America, in R2's default jurisdiction, whose endpoint the cell's egress is pinned to."
   }
 
   assert {
     condition = (
-      length(cloudflare_r2_bucket_lock.journal_archive.rules) == 1 &&
-      cloudflare_r2_bucket_lock.journal_archive.rules[0].enabled &&
-      cloudflare_r2_bucket_lock.journal_archive.rules[0].prefix == "" &&
-      cloudflare_r2_bucket_lock.journal_archive.rules[0].condition.type == "Age" &&
-      cloudflare_r2_bucket_lock.journal_archive.rules[0].condition.max_age_seconds >= 30 * 86400
+      length(cloudflare_r2_bucket_lock.archive.rules) == 1 &&
+      cloudflare_r2_bucket_lock.archive.rules[0].enabled &&
+      cloudflare_r2_bucket_lock.archive.rules[0].prefix == "" &&
+      cloudflare_r2_bucket_lock.archive.rules[0].condition.type == "Age" &&
+      cloudflare_r2_bucket_lock.archive.rules[0].condition.max_age_seconds >= 30 * 86400
     )
     error_message = "One enabled lock rule must cover every key for at least the 30-day retention."
   }
 
   assert {
-    condition     = cloudflare_r2_bucket_lock.journal_archive.bucket_name == cloudflare_r2_bucket.journal_archive.name
+    condition     = cloudflare_r2_bucket_lock.archive.bucket_name == cloudflare_r2_bucket.archive.name
     error_message = "The lock is on the archive bucket."
   }
 }
@@ -106,7 +106,7 @@ run "barman_token_reaches_the_archive_bucket_alone" {
       cloudflare_account_token.journal_archive.policies[0].effect == "allow" &&
       length(cloudflare_account_token.journal_archive.policies[0].permission_groups) == 1 &&
       cloudflare_account_token.journal_archive.policies[0].permission_groups[0].id == "c0ffee00c0ffee00c0ffee00c0ffee00" &&
-      jsondecode(cloudflare_account_token.journal_archive.policies[0].resources) == { "com.cloudflare.edge.r2.bucket.fedcba9876543210fedcba9876543210_default_mandate-journal-archive-staging" = "*" }
+      jsondecode(cloudflare_account_token.journal_archive.policies[0].resources) == { "com.cloudflare.edge.r2.bucket.fedcba9876543210fedcba9876543210_default_mandate-journal-archive-west-staging" = "*" }
     )
     error_message = "The minted token holds Object Read and Write on the archive bucket and nothing else."
   }
@@ -169,4 +169,15 @@ run "refuses_a_spaced_email" {
   }
 
   expect_failures = [var.access_allowed_emails]
+}
+
+# DEC-2047: the archive stays in western North America; any other location hint is refused.
+run "refuses_an_archive_outside_the_west" {
+  command = plan
+
+  variables {
+    archive_location = "enam"
+  }
+
+  expect_failures = [var.archive_location]
 }
