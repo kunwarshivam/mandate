@@ -2885,9 +2885,11 @@ enables `live` (ES-23, OPS-5).
   alerts through the cell's alert path, and for an instance stuck `Pending` or `Unknown`; deleting
   exited pods; the demo's runtime, which needs a version-2 deployment and so `connection record`
   for the demo's paper connection, waiting on the executor's connect check (E21-30, lane X). From
-  #1737's review, minors left under the freeze rule: a version-2 deployment rule 201 refuses (its
-  connection revoked or never established) starts nothing silently, where a once-per-process opaque
-  alert like `deployment_unread` would show it; and RB-14 has no page under `docs/runbooks/`. From
+  #1737's review, two minors were left under the freeze rule. *Slice 4* ([DEC-2038](decisions/DEC-2038.md))
+  closes both: a version-2 deployment that rule 201 refuses raises `deployment_unconnected` once per
+  process, and RB-14 has its page. Also *left*: nothing journals `AgentStopped` yet, so a deployment
+  that never ran, or a crash-looped runtime, is never stopped, and its alert repeats on each manager
+  start (DEC-2038 item 3). From
   slice 2's review, minors left under the freeze rule:
   - The manager's egress gate reads any connection failure on port 9153 as filtered, so a dead or
     restarting resolver fails open; a positive control first (TCP 53 on the same address) would
