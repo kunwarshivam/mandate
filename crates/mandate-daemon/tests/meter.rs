@@ -284,13 +284,13 @@ fn a_call_record_or_a_stream_it_cannot_read_holds_the_store() {
 /// store as an unreadable reservation does: the meter cannot tell it was unreserved.
 #[test]
 fn a_call_record_with_no_body_or_no_reservation_member_holds_the_store() {
-    let unparseable =
+    let unparsable =
         |stream: &Stream| stream.raw("not json".to_owned(), "2026-10-16T14:00:00.000000000Z");
     let unreserved = |stream: &Stream| {
         stream.recorded(r#"{"cost_usd":"0.25"}"#, "2026-10-16T14:00:00.000000000Z")
     };
     for (case, record) in [
-        ("no body", &unparseable as &dyn Fn(&Stream)),
+        ("no body", &unparsable as &dyn Fn(&Stream)),
         ("no reservation member", &unreserved),
     ] {
         let (store, stream, clock) = (SharedMeter::new(), Stream::default(), Clock::at(NOW));
