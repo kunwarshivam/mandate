@@ -215,18 +215,6 @@ pub fn code_of(content: &Value) -> String {
     Digest::of(&to_canonical(content)).to_hex()[..8].to_owned()
 }
 
-/// An in-memory journal that runs journal spec §5.1's idempotency, fencing and head check in that
-/// order, but validates no payload: `mandate-journal` registers no payload schema for an agent- or
-/// control-stream event yet, so its own journal refuses every event here as `UnknownSchema`
-/// (DEC-257 item 17). What the CLI commits is read back from the stored bytes.
-///
-/// Three faults are injected on the next appends, each to drive one of the CLI's retry arms:
-/// another writer taking the stream (`Fenced`), another write landing between the CLI's read of the
-/// head and its append (`HeadMismatch`), and an append that commits but whose answer is lost
-/// (`Ambiguous`), after which a retry of the same draft is `AlreadyCommitted`. A fourth,
-/// `lost_for_good`, commits the next control-stream append, answers it `Ambiguous`, and answers
-/// every later one `Unavailable` until cleared, so a command gives up having committed. Every pause
-/// the CLI asks for between attempts is recorded, never slept.
 /// How the next append to an agent stream is answered instead of judged, as a journal that refuses
 /// the owner's claim would answer it; nothing is stored.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -239,6 +227,18 @@ pub enum Refusal {
     Fails,
 }
 
+/// An in-memory journal that runs journal spec §5.1's idempotency, fencing and head check in that
+/// order, but validates no payload: `mandate-journal` registers no payload schema for an agent- or
+/// control-stream event yet, so its own journal refuses every event here as `UnknownSchema`
+/// (DEC-257 item 17). What the CLI commits is read back from the stored bytes.
+///
+/// Three faults are injected on the next appends, each to drive one of the CLI's retry arms:
+/// another writer taking the stream (`Fenced`), another write landing between the CLI's read of the
+/// head and its append (`HeadMismatch`), and an append that commits but whose answer is lost
+/// (`Ambiguous`), after which a retry of the same draft is `AlreadyCommitted`. A fourth,
+/// `lost_for_good`, commits the next control-stream append, answers it `Ambiguous`, and answers
+/// every later one `Unavailable` until cleared, so a command gives up having committed. Every pause
+/// the CLI asks for between attempts is recorded, never slept.
 #[derive(Debug, Default)]
 pub struct Journal {
     streams: BTreeMap<String, (u64, Vec<StoredEvent>)>,
@@ -253,6 +253,9 @@ pub struct Journal {
     pub behind_next: u32,
     /// Appends to commit and then answer `Ambiguous`.
     pub ambiguous_next: u32,
+    /// Control-stream appends to commit and then answer `HeadMismatch`, as a journal whose answer
+    /// reports a head another writer moved after the commit.
+    pub mismatch_after_commit: u32,
     /// Drafts another writer commits just before the next append to the stream each names, after
     /// the command has read the rows it decided on.
     pub land_before_next: Vec<Vec<u8>>,
@@ -454,6 +457,14 @@ impl ControlJournal for Journal {
             });
         }
         let stored = self.store(stream, recorded_at, drafts)?;
+        if stream.as_str() == CONTROL && self.mismatch_after_commit > 0 {
+            self.mismatch_after_commit -= 1;
+            let head = self.head(stream)?;
+            return Ok(AppendOutcome::HeadMismatch {
+                actual_seq: head.seq,
+                actual_hash: head.hash,
+            });
+        }
         if self.lost_for_good && stream.as_str() == CONTROL {
             self.lost = true;
             return Ok(AppendOutcome::Ambiguous);
