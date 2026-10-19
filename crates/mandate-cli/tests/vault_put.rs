@@ -9,12 +9,6 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
-use mandate_time::UtcNanos;
-use mandate_vault::openbao::{OpenBaoConfig, OpenBaoSource};
-use mandate_vault::policy::{Identity, Mounts, PlatformSecret, SecretPath};
-use mandate_vault::source::SecretSource;
-use secrecy::{ExposeSecret, SecretString};
-
 const CANARY: &str = "canary-9d1e7a40-model-key-do-not-print";
 const ROLE: &str = "canary-role-3f0b";
 const SECRET_ID: &str = "canary-secret-id-77c2";
@@ -143,16 +137,14 @@ fn server() -> Option<(String, PathBuf, PathBuf)> {
     Some((address, PathBuf::from(ca), PathBuf::from(token)))
 }
 
-/// The login's moment: the lease rule reads it, and nothing here renews, so a fixed one serves.
-fn now() -> UtcNanos {
-    UtcNanos::from_parts(1_800_000_000, 0).unwrap()
-}
-
-/// Provisions with the existing file mode, puts the model provider's key as secret-import, and
-/// reads it back as the model gateway, the one identity that reads it.
+/// Provisions with the existing file mode, then puts the model provider's key as secret-import
+/// with those credentials: the put reaches the vault, which, being the dev server, the CLI refuses
+/// outside tests (DEC-977 item 6), so the refusal is `dev_server_refused`, never a stdin or
+/// connection refusal, and nothing of stdin is printed. The read back by the model gateway runs on
+/// staging, which is no dev server.
 #[test]
 #[ignore = "pending E21-32"]
-fn a_put_secret_is_read_back_by_its_reader_alone() {
+fn a_put_with_provisioned_credentials_reaches_the_vault() {
     stdin_that_is_not_three_lines_is_refused_before_any_vault_is_reached();
     let Some((address, ca, operator)) = server() else {
         assert!(
@@ -175,47 +167,22 @@ fn a_put_secret_is_read_back_by_its_reader_alone() {
         .unwrap();
     assert!(provisioned.status.success(), "{}", stderr(&provisioned));
     let file = |name: &str| fs::read_to_string(out.join(name)).unwrap();
-    let key = format!("model-key-{}", std::process::id());
+    let (role_id, secret_id) = (
+        file("secret-import.role-id"),
+        file("secret-import.secret-id"),
+    );
+    let _ = fs::remove_dir_all(&out);
     let output = put(
         "model-provider-key",
         &address,
         &ca,
-        &three(
-            &file("secret-import.role-id"),
-            &file("secret-import.secret-id"),
-            &key,
-        ),
+        &three(&role_id, &secret_id, CANARY),
     );
-    assert!(output.status.success(), "{}", stderr(&output));
-    let printed = String::from_utf8_lossy(&output.stdout);
-    assert!(!printed.contains(&key) && !stderr(&output).contains(&key));
-    let config = OpenBaoConfig {
-        address,
-        ca_pem: fs::read(&ca).unwrap(),
-        mounts: Mounts::default(),
-    };
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    let read = runtime.block_on(async {
-        let gateway = OpenBaoSource::login(
-            &config,
-            Identity::ModelGateway,
-            &file("model-gateway.role-id"),
-            &SecretString::from(file("model-gateway.secret-id")),
-            now(),
-        )
-        .await
-        .unwrap();
-        gateway
-            .read(&SecretPath::Platform(PlatformSecret::ModelProviderKey))
-            .await
-            .unwrap()
-    });
-    let _ = fs::remove_dir_all(&out);
-    assert_eq!(
-        read.map(|value| value.expose_secret().to_vec()),
-        Some(key.into_bytes())
-    );
+    refused(&output, "dev_server_refused", "a put to the dev server");
+    for line in [&role_id, &secret_id] {
+        assert!(
+            !stderr(&output).contains(line.as_str()),
+            "printed a credential"
+        );
+    }
 }
