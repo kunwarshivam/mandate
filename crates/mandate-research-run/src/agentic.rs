@@ -29,6 +29,16 @@ pub enum RunKind {
     Monitor,
 }
 
+impl RunKind {
+    /// The kind's spelling in the gateway's request and the run's records (§10.1, DEC-2256 item 2).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Ideate => "ideate",
+            Self::Monitor => "monitor",
+        }
+    }
+}
+
 /// How the run gives its opinion: the pinned `output` (§6.9, inference spec §4.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutputMode {

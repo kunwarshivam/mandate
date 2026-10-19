@@ -11,7 +11,10 @@ use std::rc::Rc;
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Digest, Key, Object, Value};
 use mandate_gateway::meter::SharedMeter;
+use mandate_gateway::money::Usd6;
 use mandate_journal::{Environment, StreamId};
+use mandate_num::Usd;
+use mandate_research::PolicyOverlay;
 use mandate_runtime::{EventDraft, ResearchConfig};
 use mandate_time::UtcNanos;
 
@@ -126,6 +129,31 @@ pub fn opt_in(dir: &Path, deployment: &CellDeployment) -> Result<OptIn, CellErro
     })
 }
 
+/// The agent's daily research cap (DEC-2254 items 1 to 3): the mandate document's
+/// `behavior.research.cost_cap_usd_per_day` tightened by the research profile, the value and overlay
+/// the source hands the core, and zero for a mandate with no `behavior.research`.
+///
+/// # Errors
+/// [`CellError::Mandate`] with `mandate_document_unavailable` when the document gives no cap the
+/// gateway can hold.
+pub fn research_daily_cap(document: &Value) -> Result<Usd6, CellError> {
+    let unavailable = || CellError::Mandate("mandate_document_unavailable");
+    let research = document
+        .get("behavior")
+        .and_then(|behavior| behavior.get("research"))
+        .ok_or_else(unavailable)?;
+    if *research == Value::Null {
+        return Ok(Usd6::ZERO);
+    }
+    let cap = research
+        .get("cost_cap_usd_per_day")
+        .and_then(Value::as_str)
+        .and_then(|text| Usd::parse(text).ok())
+        .ok_or_else(unavailable)?;
+    let cap = PolicyOverlay::internal_research_profile().effective_cost_cap(cap);
+    Usd6::parse(&cap.to_string()).map_err(|_| unavailable())
+}
+
 /// The research `opted` asks for, reading the streams through `rows` and the mandate documents and
 /// artifacts from the store at `artifacts`.
 ///
@@ -183,7 +211,8 @@ pub fn research(
             member: "deadline_ms",
         })
     })?;
-    let worker = RecordedWorker::metered(
+    let daily = research_daily_cap(&document)?;
+    let worker = RecordedWorker::capped(
         &bundle,
         WorkerFor {
             workspace: deployment.workspace.clone(),
@@ -193,6 +222,7 @@ pub fn research(
         Box::new(StoreSink(open()?)),
         Box::new(clock),
         meter.clone(),
+        daily,
     )
     .map_err(CellError::Worker)?;
     let source = CellSource::metered(&bundle, who, rows, Box::new(open()?), meter);
