@@ -12,8 +12,8 @@ use mandate_connections::record::ConnectionId;
 use secrecy::{ExposeSecret, SecretString};
 
 use crate::SourceError;
-use crate::openbao::RoleCredentials;
-use crate::policy::role_name;
+use crate::openbao::{RoleCredentials, provisioned_identities};
+use crate::policy::{Identity, role_name};
 
 /// The suffix of the file that holds an identity's role id, after its role name.
 pub const ROLE_ID_SUFFIX: &str = ".role-id";
@@ -44,27 +44,16 @@ pub fn write_credentials(
     dir: &Path,
     credentials: &[RoleCredentials],
 ) -> Result<Vec<String>, SourceError> {
-    let parent = dir
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-        .unwrap_or(Path::new("."));
-    let parent_mode = fs::metadata(parent)
-        .map_err(|_| SourceError::CredentialFile)?
-        .permissions()
-        .mode();
-    if parent_mode & WRITABLE_BY_OTHERS != 0 && parent_mode & STICKY == 0 {
-        return Err(SourceError::CredentialFile);
-    }
-    match fs::symlink_metadata(dir) {
-        Ok(meta) if meta.is_dir() && meta.permissions().mode() & 0o777 == 0o700 => {}
-        Ok(_) => return Err(SourceError::CredentialFile),
-        Err(_) => {
-            DirBuilder::new()
-                .mode(0o700)
-                .create(dir)
-                .and_then(|()| fs::set_permissions(dir, Permissions::from_mode(0o700)))
-                .map_err(|_| SourceError::CredentialFile)?;
-        }
+    let identities: Vec<Identity> = credentials
+        .iter()
+        .map(|credential| credential.identity.clone())
+        .collect();
+    if !check_for(dir, &identities)? {
+        DirBuilder::new()
+            .mode(0o700)
+            .create(dir)
+            .and_then(|()| fs::set_permissions(dir, Permissions::from_mode(0o700)))
+            .map_err(|_| SourceError::CredentialFile)?;
     }
     let mut files = Vec::new();
     for credential in credentials {
@@ -73,11 +62,7 @@ pub fn write_credentials(
             (ROLE_ID_SUFFIX, credential.role_id.as_str()),
             (SECRET_ID_SUFFIX, credential.secret_id.expose_secret()),
         ] {
-            let name = format!("{role}{suffix}");
-            if fs::symlink_metadata(dir.join(&name)).is_ok_and(|meta| !meta.is_file()) {
-                return Err(SourceError::CredentialFile);
-            }
-            files.push((name, value));
+            files.push((format!("{role}{suffix}"), value));
         }
     }
     for (name, value) in &files {
@@ -92,8 +77,44 @@ pub fn write_credentials(
 /// credentials [`crate::openbao::provision`] issues for `connections`: the directory holding
 /// `dir`, `dir` itself when it exists, and each output name in it, by the same rules. An absent
 /// `dir` passes and is not made. A refusal here leaves no secret id issued and unwritten.
-pub fn check_credential_dir(_dir: &Path, _connections: &[ConnectionId]) -> Result<(), SourceError> {
-    Err(SourceError::Unimplemented { story: "E21-32" })
+pub fn check_credential_dir(dir: &Path, connections: &[ConnectionId]) -> Result<(), SourceError> {
+    let identities: Vec<Identity> = provisioned_identities(connections)
+        .into_iter()
+        .filter(|identity| !matches!(identity, Identity::TokenExchange(_)))
+        .collect();
+    check_for(dir, &identities).map(|_| ())
+}
+
+/// Checks `dir` for `identities`' files by [`write_credentials`]'s rules and answers whether `dir`
+/// exists: its parent lets no one else rename it away, an existing `dir` is a directory of mode
+/// 0700, and each output name in it is a plain file or absent.
+fn check_for(dir: &Path, identities: &[Identity]) -> Result<bool, SourceError> {
+    let parent = dir
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let parent_mode = fs::metadata(parent)
+        .map_err(|_| SourceError::CredentialFile)?
+        .permissions()
+        .mode();
+    if parent_mode & WRITABLE_BY_OTHERS != 0 && parent_mode & STICKY == 0 {
+        return Err(SourceError::CredentialFile);
+    }
+    match fs::symlink_metadata(dir) {
+        Ok(meta) if meta.is_dir() && meta.permissions().mode() & 0o777 == 0o700 => {}
+        Ok(_) => return Err(SourceError::CredentialFile),
+        Err(_) => return Ok(false),
+    }
+    for identity in identities {
+        let role = role_name(identity);
+        for suffix in [ROLE_ID_SUFFIX, SECRET_ID_SUFFIX] {
+            let name = dir.join(format!("{role}{suffix}"));
+            if fs::symlink_metadata(name).is_ok_and(|meta| !meta.is_file()) {
+                return Err(SourceError::CredentialFile);
+            }
+        }
+    }
+    Ok(true)
 }
 
 /// Writes `value` to `dir/name` as a plain file of mode 0600 that replaces whatever is there.
