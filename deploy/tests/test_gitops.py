@@ -346,7 +346,7 @@ def api_settings(values: dict[str, dict]) -> list[str]:
     """No placeholder anywhere in a hosted workspace's values (`placeholder`, as in
     `placeholder.invalid`, or the all-zero ULID); and once the API server's settings
     are written, each is set: its org and workspace as ULIDs, its issuer, key set and app origin
-    over https, and an audience."""
+    over https, the key set under the issuer, and an audience."""
     workspace = values.get("workspace", {})
     problems = [
         f"workspace: {path} is a placeholder"
@@ -365,6 +365,8 @@ def api_settings(values: dict[str, dict]) -> list[str]:
             problems.append(f"workspace: api.{key} is not an https URL")
     if not api.get("audience"):
         problems.append("workspace: api.audience is not set")
+    if not api.get("jwksUrl", "").startswith(api.get("issuer", "") + "/"):
+        problems.append("workspace: api.jwksUrl is not the issuer's own key set")
     return problems
 
 
@@ -756,6 +758,7 @@ def test_api_settings(overlay):
         {"org": "01KDEM0000000000000000000R", "workspace": "ws1"},
         {"issuer": "http://issuer.example"},
         {"appOrigin": "https://app.example", "audience": ""},
+        {"jwksUrl": "https://other.example/jwks.json"},
     ],
 )
 def test_each_api_settings_bug_is_caught(overlay, api):
