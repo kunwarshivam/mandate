@@ -576,6 +576,11 @@ the spec invariants (DP-n) its tests cover.
     "in-session and fresh") needs a `MarkUpdated` version 3 or a new member before any writer uses
     one. Version 2 records a quote's bid only, so until then no last-trade mark updates E, which
     fails closed through staleness.
+  - **Follow-up ([DEC-2305](decisions/DEC-2305.md) item 5, the #1778 review):** the executor's
+    version-2 mark writer, whichever E6-15 or E7 slice builds it, writes `sane: false` for a quote
+    older than the data profile's staleness threshold at `risk_clock`. Version 2 records no quote
+    time, so a replay cannot audit a stale `sane: true`; the obligation is the writer's, and the
+    writer gets a writer-side test of it.
 
   *Accepted when:* every MC-R, MC-T, MC-L, and MC-W case, driven through journaled records, gives the
   harness's snapshot and events. A restart rebuilds the same view. Every fail-closed cause holds
