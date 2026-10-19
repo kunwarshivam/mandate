@@ -73,6 +73,8 @@ pub fn fixture_permitted(
     fixture: bool,
     var: &dyn Fn(&str) -> Option<String>,
 ) -> Result<(), &'static str> {
-    let _ = (fixture, var("MANDATE_PROCESS"));
+    if fixture && var("MANDATE_PROCESS").is_some() {
+        return Err("fixture_under_manager");
+    }
     Ok(())
 }
