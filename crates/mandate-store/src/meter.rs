@@ -52,6 +52,24 @@ impl<S: Store> JournalMeter<S> {
         }
     }
 
+    /// As [`JournalMeter::open`], over the deployment's meter stream `dmeter:{deployment_id}`,
+    /// which holds a copy of every workspace's meter records for the deployment's cap and opens
+    /// with `{stream_type: "deployment_meter", deployment_id}` (journal spec §9.19, DEC-2207).
+    #[expect(
+        clippy::todo,
+        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+    )]
+    pub fn open_deployment(
+        store: S,
+        deployment_id: &str,
+        environment: Environment,
+        now: Rc<dyn Fn() -> UtcNanos>,
+        ids: Box<dyn IdSource>,
+    ) -> Self {
+        let _ = (store, deployment_id, environment, now, ids);
+        todo!()
+    }
+
     /// The stream, this writer's epoch, and the stream's rows, or `Unavailable`.
     fn held(&self) -> Result<(&StreamId, u64, Vec<StoredEvent>), StoreError> {
         let (Some(stream), Some(epoch)) = (self.stream.as_ref(), self.epoch) else {
