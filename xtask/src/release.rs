@@ -695,7 +695,7 @@ pub(crate) fn drill(root: &Path, dist: &Path, out: &Path) -> Result<()> {
         let dir = drill.join(image);
         image::write(&layout, &dir.join("layout"))?;
         image::unpack(&layout, &dir.join("layout"), &dir.join("rootfs"))?;
-        runs.insert(image, dir.join("rootfs").join(DRILLED));
+        runs.insert(image, dir.join("rootfs").join(image::BIN_DIR).join(DRILLED));
     }
     let key = test_key.display().to_string();
     let cases: [DrillCase<'_>; 7] = [
@@ -1293,7 +1293,7 @@ fn drill_release_signed(dist: &Path, signatures: &Path, drill: &Path) -> Result<
     );
     image::write(&layout, &drill.join("layout"))?;
     image::unpack(&layout, &drill.join("layout"), &drill.join("rootfs"))?;
-    let output = Command::new(drill.join("rootfs").join(DRILLED))
+    let output = Command::new(drill.join("rootfs").join(image::BIN_DIR).join(DRILLED))
         .env_clear()
         .env("MANDATE_DEPLOYMENT_TIER", "production")
         .output()
