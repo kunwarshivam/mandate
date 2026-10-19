@@ -202,8 +202,14 @@ const X_EXECUTOR: Wait = Wait {
     lane: "X",
     story: "E21-30",
     pr: None,
-    lands: "the executor as its own process in the cell, reading the runtime through the journal \
-            and applying the kill switch first (DEC-2003, claim #1498)",
+    lands: "slice X1b: the executor takes the runtime's orders; its own process already runs in \
+            the cell on its fixture paper broker (DEC-2031, claim #1498)",
+};
+const P5_HOOK: Wait = Wait {
+    lane: "P5",
+    story: "E21-2",
+    pr: None,
+    lands: "the runtime's production ports, the post-R0 hook (DEC-968 item 6, DEC-1013)",
 };
 
 fn wait(lane: &'static str, story: &'static str, pr: Option<u32>, lands: &'static str) -> Wait {
@@ -584,15 +590,7 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
                     what: "the runtime sizes the opening and the gate and autonomy rules ask",
                     on_main: "the runtime and its image (#1521, #1560), on the deny-all wiring \
                               that proposes nothing (DEC-1013 item 2)",
-                    waits: vec![
-                        D1_RUNTIME,
-                        wait(
-                            "P5",
-                            "E21-2",
-                            None,
-                            "the runtime's production ports, the post-R0 hook (DEC-968 item 6)",
-                        ),
-                    ],
+                    waits: vec![D1_RUNTIME, P5_HOOK],
                 }),
                 gesture(
                     "the owner's inbox, read (empty until the runtime asks)",
@@ -624,9 +622,10 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
                 }),
                 Part::Gap(Gap {
                     what: "the paper fill and the protective stop on a fixture broker",
-                    on_main: "the executor crate beside the runtime and its image (#1521, \
-                              #1560), with the runtime asking nothing yet",
-                    waits: vec![X_EXECUTOR],
+                    on_main: "the executor process (#1596, binary #1694) and its interim image \
+                              in the cell on the fixture paper broker (#1702, DEC-2031), with the \
+                              runtime proposing nothing on the deny-all wiring (DEC-1013)",
+                    waits: vec![X_EXECUTOR, P5_HOOK],
                 }),
             ],
         },
@@ -715,7 +714,8 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
                 ),
                 Part::Gap(Gap {
                     what: "the agent's processes stop on it",
-                    on_main: "the runtime reads the kill switch first (#1521, image #1560)",
+                    on_main: "the runtime reads the kill switch first (#1521, image #1560), and \
+                              the executor process applies it first (#1596, image #1702)",
                     waits: vec![D1_RUNTIME, X_EXECUTOR],
                 }),
             ],

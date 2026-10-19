@@ -218,14 +218,14 @@ for both to roll out, so every step, through the CLI, the API or `web/`, acts on
 `mandate-backtest-runner` on its committed demo inputs and records the payload it stores, in the
 same pod, so the closing verify checks the record's report (DEC-2023).
 
-The run's own report is the up-to-date list; on 2026-10-18, after slice 8, it read:
+The run's own report is the up-to-date list; on 2026-10-19, after slice 9, it read:
 
 | Step | Today | Runs | Waits on |
 |---|---|---|---|
 | 1. Sign in, see the workspace | partial | `workspace open` (paper), `workspace found` for the demo owner; the cell's API refusing a read of the run's workspace with no session (the one 401); the demo owner's sign-in through the stub issuer (204 and its cookie); and the read with that session, whose agents list the demo's agent (200) | W2: the same in `web/` |
 | 2. Deploy under a confirmed envelope | partial | `config register`, `model register`, `version create`, `version confirm` and `agent deploy` of `demo-spy` and of a second agent, `demo-web`, for step 6's web gesture, each code shown then typed | W2 (E11-9): the same from `web/`; D1 (E21-33): the runtime started from `AgentDeployed` (DEC-1171) |
 | 3. Research, through the gateway's recorded fake | skipped | Nothing yet | D1: the runtime started; I2 (E19-2): a deployment's research configured (DEC-2208); AH (E19-13): the agentic loop over its state (#1551, #1561, #1566, #1569 on `main`) |
-| 4. Sized, gated, asked, approved, filled, protected | partial | `approvals list` (empty until the runtime asks) | D1 and P5 (E21-2, the post-R0 hook): the runtime sizes and asks; L1 (E9-4) and W2: step-up for the approval; X (E21-30): the executor's fill and stop (DEC-2003) |
+| 4. Sized, gated, asked, approved, filled, protected | partial | `approvals list` (empty until the runtime asks) | D1 and P5 (E21-2, the post-R0 hook): the runtime sizes and asks; L1 (E9-4) and W2: step-up for the approval; X (E21-30): the executor takes the runtime's orders in slice X1b; its process already runs in the cell on its fixture paper broker (DEC-2031) |
 | 5. A backtest of the same version | partial | `config register --kind rule_set` (the run's settings), `mandate-backtest-runner run` on its committed demo inputs, `backtest record` of the payload it stores, which the closing verify checks, and the owner's signed-in read of it through the API (completed, with the stored report) | W2: web/'s report screen |
 | 6. The kill switch | partial | `demo-web`'s kill switch pressed in `web/` after the gestures' Job (lane W2's `kill_switch_from_web`), its command read back with the owner's session from the run's control stream, accepted (its `KillSwitchActivated` waits on a runtime) (not run on a machine without npm, `web/node_modules`, Playwright's Chromium or openssl, unless `MANDATE_DEMO_WEB_REQUIRED` is set, which makes it fail; that switch alone still reads an unreachable API as not run, so a job that must run the gesture sets it with `MANDATE_CELL_REQUIRED`); `agent kill --agent demo-spy` through the CLI (agent scope), recorded before the closing export and verify (web/'s kill switch comes after them, so the read stands in for the verify) | D1 and X: the processes stop on it |
 
