@@ -157,9 +157,9 @@ pub enum Drill {
     /// named as skipped until the runtime and executor run in the cell (DEC-2000 item 6).
     KillSwitch,
     /// The hosted clusters' kill-switch admission policies on the cell's API server, with the
-    /// signature webhook down and failing closed (DEC-2016 item 2): the founder's kill-switch Job is
-    /// admitted and its pod made, every other way to a pod labelled `mandate.dev/process: control`
-    /// is refused, and so is any change to such a pod or to a person's control Job.
+    /// signature webhook down and failing closed (DEC-2045, DEC-2046): the founder's kill-switch
+    /// Job is admitted and its pod made, every other way to a pod labelled `mandate.dev/process:
+    /// control` is refused, and so is any change to such a pod or to a person's control Job.
     Admission,
     /// With the synchronous standby fenced, an append waits: nothing commits on the primary alone,
     /// and once the standby is back the cluster takes appends again and every stream it holds
