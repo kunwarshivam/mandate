@@ -17,8 +17,8 @@ use common::{
 use mandate_accounting::Side;
 use mandate_canon::Value;
 use mandate_executor::{
-    BindingGateSource, BrokerOutcome, ExecutorError, Input, IntentBody, OrderType, Ports, Purpose,
-    SubmitOrder,
+    BindingGateSource, BrokerOutcome, BrokerUnknown, ExecutorError, Input, IntentBody, OrderType,
+    Ports, Purpose, SubmitOrder,
 };
 use mandate_num::Price;
 
@@ -246,7 +246,72 @@ fn an_exit_at_the_market_whose_gate_read_no_snapshot_goes_by_the_ladder() {
                 (OrderType::Limit, Some(first_rung(BID))),
                 "{purpose:?}, {name}"
             );
+            assert_eq!(
+                member(&ran, "OrderRequestRecorded", "rung").and_then(Value::as_int),
+                Some(0),
+                "{purpose:?}, {name}: the first rung of a ladder that steps, not a limit left alone"
+            );
         }
+    }
+}
+
+/// Trading spec §5.7, DEC-2037 items 3 and 4: an exit sent at the market and lost is resent under
+/// its own id once its absence is confirmed. If the re-check reads no binding snapshot, nothing
+/// checked a market order's caps, so it is resent as a limit at the ladder's first rung; with one,
+/// at the market as before.
+#[test]
+#[ignore = "pending E7-29"]
+fn a_lost_exit_at_the_market_is_resent_at_the_market_only_on_a_binding_recheck() {
+    let (ids, mandates, instruments, config) = (
+        TestIds,
+        FixedMandate::covering(&[AAPL]),
+        FixedInstruments,
+        config(),
+    );
+    let ports = common::ports(&ids, &mandates, &instruments, &config);
+    let sources: [(&str, &dyn BindingGateSource, OrderType, Option<Price>); 2] = [
+        ("binding", &BINDING_EXITS, OrderType::Market, None),
+        (
+            "unbound",
+            &MISSING_BINDING_GATE,
+            OrderType::Limit,
+            Some(first_rung(BID)),
+        ),
+    ];
+    for (name, source, resent_as, resent_at) in sources {
+        let mut shell = held(&ports, 10);
+        shell.run(Input::Market(quote(AAPL, BID, "150.2", 20)), &ports);
+        let first = shell.run_with_binding(
+            handoff(INTENT, AGENT, market_exit(Purpose::RiskExit)),
+            &ports,
+            &BINDING_EXITS,
+        );
+        let sent = only_submission(&first);
+        assert_eq!(sent.order_type, OrderType::Market, "{name}");
+        let id = sent.client_order_id.as_str().to_owned();
+        let absent = || {
+            Input::Broker(Ok(BrokerOutcome::Absent {
+                client_order_id: id.clone(),
+            }))
+        };
+        shell.run_with_binding(Input::Broker(Err(BrokerUnknown::Timeout)), &ports, source);
+        shell.run_with_binding(absent(), &ports, source);
+        shell.run_with_binding(Input::Market(quote(AAPL, BID, "150.2", 22)), &ports, source);
+        shell.run_with_binding(Input::Tick(clock(28)), &ports, source);
+        shell.run_with_binding(absent(), &ports, source);
+        shell.run_with_binding(Input::Market(quote(AAPL, BID, "150.2", 36)), &ports, source);
+        shell.run_with_binding(Input::Tick(clock(36)), &ports, source);
+        let resent = shell.run_with_binding(absent(), &ports, source);
+        let again = only_submission(&resent);
+        assert_eq!(
+            (
+                again.client_order_id.as_str(),
+                again.order_type,
+                again.limit_price
+            ),
+            (id.as_str(), resent_as, resent_at),
+            "{name}"
+        );
     }
 }
 
