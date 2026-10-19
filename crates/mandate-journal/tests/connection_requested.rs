@@ -1,4 +1,4 @@
-//! Journal spec v0.69 (E7-27, DEC-2621): `ConnectionRequested` version 2 and rule 255, through
+//! Journal spec v0.68 (E7-27, DEC-2621): `ConnectionRequested` version 2 and rule 255, through
 //! the journal's own checks against the vectors' `connection_requested` section. Every base and
 //! valid draft parses, at both versions; every invalid draft is refused with its reason at its
 //! path; and rule 255 reports its first failing clause.

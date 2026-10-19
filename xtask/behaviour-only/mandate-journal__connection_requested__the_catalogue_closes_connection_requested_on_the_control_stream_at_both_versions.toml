@@ -1,7 +1,7 @@
 file = "crates/mandate-journal/tests/connection_requested.rs"
 test = "the_catalogue_closes_connection_requested_on_the_control_stream_at_both_versions"
 reason = """
-DEC-2621 (journal spec v0.69 §9.8, rule 255): `ConnectionRequested` gains version 2 with
+DEC-2621 (journal spec v0.68 §9.8, rule 255): `ConnectionRequested` gains version 2 with
 `credential` and `breadth`. The journal does not register version 2 yet, so it answers every
 version-2 draft `unknown_schema` at `payload` and `closes` is false at version 2, answers of
 the journal's own rather than a stub's report. No stub or new API is needed: the change is the
