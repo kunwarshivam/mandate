@@ -195,7 +195,6 @@ fn only_the_two_routes_and_methods_are_served() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn two_authorizations_redirect_with_different_random_codes() {
     let addr = serve_alpaca();
     let codes: Vec<String> = (0..2)

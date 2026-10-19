@@ -506,7 +506,6 @@ fn a_full_store_is_unavailable_and_every_other_refusal_is_a_bad_request() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn codes_and_tokens_from_the_system_random_source_differ_and_are_not_zero() {
     let settings = Settings {
         client_id: "client-1".to_owned(),
@@ -537,7 +536,6 @@ fn codes_and_tokens_from_the_system_random_source_differ_and_are_not_zero() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_redirect_uri_outside_dec_2623s_shape_is_refused_at_start() {
     let file = secret_file(SECRET.as_bytes(), 0o600);
     let file = file.to_str().expect("UTF-8");

@@ -2612,6 +2612,7 @@ dependencies = [
  "base64 0.22.1",
  "mandate-api-server",
  "mandate-authn",
+ "mandate-connections",
  "mandate-identity",
  "mandate-journal",
  "mandate-release",

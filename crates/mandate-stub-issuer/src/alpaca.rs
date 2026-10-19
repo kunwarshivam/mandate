@@ -11,6 +11,7 @@ use std::sync::{Mutex, PoisonError};
 
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use mandate_connections::start::RedirectUri;
 use ring::digest::{SHA256, digest};
 use ring::rand::{SecureRandom, SystemRandom};
 
@@ -354,9 +355,8 @@ pub fn settings(
 ) -> Result<Option<Settings>, Refused> {
     match (client_id, secret_file, redirect_uri) {
         (None, None, None) => Ok(None),
-        (Some(client_id), Some(secret_file), Some(redirect_uri))
-            if !client_id.is_empty() && !redirect_uri.is_empty() =>
-        {
+        (Some(client_id), Some(secret_file), Some(redirect_uri)) if !client_id.is_empty() => {
+            RedirectUri::parse(redirect_uri).map_err(|_| Refused::Alpaca)?;
             let client_secret = read_secret(Path::new(secret_file)).map_err(|_| Refused::Alpaca)?;
             Ok(Some(Settings {
                 client_id: client_id.to_owned(),
