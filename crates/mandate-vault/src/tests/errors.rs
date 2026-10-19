@@ -15,6 +15,7 @@ fn every_error_has_its_code_and_only_outages_are_outages() {
         (SourceError::GrantInvalid, "grant_invalid", false),
         (SourceError::Config, "config", false),
         (SourceError::CredentialFile, "credential_file", false),
+        (SourceError::RoleMissing, "role_missing", false),
         (
             SourceError::Unimplemented { story: "E21-32" },
             "unimplemented",

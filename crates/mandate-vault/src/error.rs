@@ -26,6 +26,8 @@ pub enum SourceError {
         "a credentials file or directory is missing, not a plain file or directory, or open to others"
     )]
     CredentialFile,
+    #[error("the vault has no role for this login yet")]
+    RoleMissing,
     #[error("{story} has not been implemented yet")]
     Unimplemented { story: &'static str },
 }
@@ -44,6 +46,7 @@ impl SourceError {
             Self::GrantInvalid => "grant_invalid",
             Self::Config => "config",
             Self::CredentialFile => "credential_file",
+            Self::RoleMissing => "role_missing",
             Self::Unimplemented { .. } => "unimplemented",
         }
     }

@@ -29,7 +29,7 @@ use secrecy::{ExposeSecret, SecretSlice, SecretString};
 use serde_json::{Value, json};
 
 use crate::SourceError;
-use crate::kubernetes::service_account_name;
+use crate::kubernetes::{KubernetesAuth, service_account_name};
 use crate::lease::{LEASE_SECS, Lease, lease_times};
 use crate::policy::{
     Identity, Mounts, SecretPath, kv_path, openbao_policy, policy_name, role_name,
@@ -152,6 +152,16 @@ pub(crate) fn refusal(status: StatusCode) -> Result<(), SourceError> {
         503 => Err(SourceError::Sealed),
         _ => Err(SourceError::Unavailable),
     }
+}
+
+/// The refusal a Kubernetes login's answer means, its status and its body: [`refusal`]'s, except
+/// that a 400 whose one error is that `role` does not exist is [`SourceError::RoleMissing`], so a
+/// process whose role the provisioner has not made yet can wait for it within its deadline, and
+/// every other refusal stops it (DEC-2060, agreed with lane D1). No part of the body reaches the
+/// error.
+pub fn kubernetes_login_refusal(status: u16, body: &[u8], role: &str) -> Result<(), SourceError> {
+    let _ = (status, body, role);
+    Err(SourceError::Unimplemented { story: "E21-32" })
 }
 
 /// The string at `pointer` in `value`.
@@ -597,14 +607,29 @@ pub(crate) fn provisioned_identities(connections: &[ConnectionId]) -> Vec<Identi
     identities
 }
 
+/// Sets both Kubernetes auth mounts up, as [`kubernetes_mount_requests`] lists, enabling a mount
+/// only where it is not there, and writes each kind's templated policy keyed by its mount's
+/// accessor (DEC-2060 items 4 and 7).
+async fn provision_kubernetes(
+    http: &Http,
+    token: Option<&SecretString>,
+    mounts: &Mounts,
+    auth: &KubernetesAuth,
+) -> Result<(), SourceError> {
+    let _ = (http, token, mounts, auth);
+    Err(SourceError::Unimplemented { story: "E21-32" })
+}
+
 /// Sets a vault up for `connections`, with an operator's token: the KV v2 mount, the AppRole
 /// auth method, one policy and one role per identity, and a secret id for every identity but the
-/// token exchanges, whose secret ids are grants. Running it again rewrites the policies and
-/// roles, so adding a connection is running it with the longer list.
+/// token exchanges, whose secret ids are grants; and, given `kubernetes`, both Kubernetes auth
+/// mounts and their templated policies. Running it again rewrites the policies and roles, so
+/// adding a connection is running it with the longer list.
 pub async fn provision(
     config: &OpenBaoConfig,
     operator_token: &SecretString,
     connections: &[ConnectionId],
+    kubernetes: Option<&KubernetesAuth>,
 ) -> Result<Vec<RoleCredentials>, SourceError> {
     let http = Http::new(config)?;
     let token = Some(operator_token);
@@ -644,6 +669,9 @@ pub async fn provision(
             Some(&body),
         )
         .await?;
+    }
+    if let Some(auth) = kubernetes {
+        provision_kubernetes(&http, token, mounts, auth).await?;
     }
     let mut credentials = Vec::new();
     for identity in provisioned_identities(connections) {

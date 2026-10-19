@@ -239,3 +239,32 @@ pub fn role_request(
         }),
     ))
 }
+
+/// How the vault reaches the cluster's API server for TokenReview (DEC-2060 item 7): its
+/// `https://` address and, outside a pod, the PEM certificate of the CA that signed it. In the
+/// cluster the vault reads its own pod's CA and ServiceAccount token, so `ca_pem` is `None`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KubernetesAuth {
+    pub host: String,
+    pub ca_pem: Option<String>,
+}
+
+/// The requests that set both Kubernetes auth mounts up, executor's first: for each, enabling
+/// the mount (`sys/auth/<mount>`, type `kubernetes`), then its configuration
+/// (`auth/<mount>/config`). Mounts that are not plain path segments, a host that is not
+/// `https://`, or a CA that is not one PEM certificate is [`SourceError::Config`].
+pub fn kubernetes_mount_requests(
+    mounts: &Mounts,
+    auth: &KubernetesAuth,
+) -> Result<Vec<(String, Value)>, SourceError> {
+    let _ = (mounts, auth);
+    Err(SourceError::Unimplemented { story: "E21-32" })
+}
+
+/// The accessor of `mount` in the vault's `sys/auth` answer, the name the templated policies
+/// key the login's alias by. One missing, or one that is not a plain path segment, so that it
+/// could end the template, is [`SourceError::Malformed`].
+pub fn mount_accessor(sys_auth: Option<&Value>, mount: &str) -> Result<String, SourceError> {
+    let _ = (sys_auth, mount);
+    Err(SourceError::Unimplemented { story: "E21-32" })
+}
