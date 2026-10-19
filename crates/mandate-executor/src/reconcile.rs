@@ -883,7 +883,7 @@ pub(crate) mod tests {
                 instrument: aapl()?,
                 side,
                 qty: Qty::parse("5")?,
-                limit: Price::parse("150")?,
+                limit: Some(Price::parse("150")?),
                 purpose,
                 protection: None,
             },
@@ -3038,7 +3038,7 @@ pub(crate) mod tests {
                     instrument: aapl()?,
                     side: Side::Buy,
                     qty: Qty::parse("10")?,
-                    limit: Price::parse("150")?,
+                    limit: Some(Price::parse("150")?),
                     purpose: Purpose::Open,
                     protection: Some(ProtectionPrices {
                         stop: Price::parse("140")?,
@@ -3326,7 +3326,7 @@ pub(crate) mod tests {
                     instrument: aapl()?,
                     side: Side::Buy,
                     qty: Qty::parse("10")?,
-                    limit: Price::parse("150")?,
+                    limit: Some(Price::parse("150")?),
                     purpose: Purpose::Open,
                     protection: Some(ProtectionPrices {
                         stop: Price::parse("140")?,

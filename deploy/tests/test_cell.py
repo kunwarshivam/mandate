@@ -748,6 +748,70 @@ def test_api_contained():
         assert helm(CHART, *args).returncode != 0, refused
 
 
+# The public CA bundle the API server trusts for the identity provider's key set (RS's finding 1):
+# copied from the pinned postgres image by the pod's init container, since the API's own image is
+# a bare binary with none.
+CA_BUNDLE_DIR = "/run/ca-bundle"
+CA_BUNDLE = f"{CA_BUNDLE_DIR}/ca-certificates.crt"
+SYSTEM_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
+
+
+def ca_bundle(docs: list[dict]) -> list[str]:
+    """The API container, and no other container, mounts the CA bundle read-only and names it in
+    SSL_CERT_FILE; one init container of its pod copies it from the system bundle."""
+    problems = []
+    for w in workloads(docs):
+        spec = pod_spec(w)
+        for c in spec.get("containers", []):
+            env = {e["name"]: e.get("value") for e in c.get("env", [])}
+            mounts = {m["mountPath"]: m for m in c.get("volumeMounts", [])}
+            is_api = w["metadata"]["name"] == "api" and c["name"] == "api"
+            if not is_api:
+                if "SSL_CERT_FILE" in env or CA_BUNDLE_DIR in mounts:
+                    problems.append(f"{w['metadata']['name']}/{c['name']} gets the API's CA bundle")
+                continue
+            mount = mounts.get(CA_BUNDLE_DIR)
+            if env.get("SSL_CERT_FILE") != CA_BUNDLE:
+                problems.append(f"api's SSL_CERT_FILE is {env.get('SSL_CERT_FILE')!r}")
+            if not mount or mount.get("readOnly") is not True:
+                problems.append(f"api does not mount the CA bundle read-only: {mount}")
+                continue
+            copiers = [
+                i
+                for i in spec.get("initContainers", [])
+                if any(m["name"] == mount["name"] for m in i.get("volumeMounts", []))
+                and f"cp {SYSTEM_BUNDLE} {CA_BUNDLE}" in " ".join(i.get("command", []))
+            ]
+            if len(copiers) != 1:
+                problems.append("api's CA bundle is not copied by one init container")
+    return problems
+
+
+def test_only_the_api_gets_the_ca_bundle():
+    docs = render_all()
+    assert ca_bundle(docs) == []
+    api = owner_workload(docs)
+    assert CA_BUNDLE_DIR in {m["mountPath"] for m in first_container(api)["volumeMounts"]}
+    for seed in (
+        lambda w: next(m for m in first_container(w)["volumeMounts"] if m["mountPath"] == CA_BUNDLE_DIR).update(
+            readOnly=False
+        ),
+        lambda w: first_container(w).update(
+            env=[e for e in first_container(w)["env"] if e["name"] != "SSL_CERT_FILE"]
+        ),
+        lambda w: pod_spec(w).update(initContainers=[]),
+    ):
+        assert ca_bundle(mutate(docs, "api", "Deployment", seed)), seed
+    other = next(w for w in workloads(docs) if w["kind"] == "Deployment" and w["metadata"]["name"] != "api")
+    leaked = mutate(
+        docs,
+        other["metadata"]["name"],
+        other["kind"],
+        lambda w: first_container(w).setdefault("env", []).append({"name": "SSL_CERT_FILE", "value": CA_BUNDLE}),
+    )
+    assert ca_bundle(leaked)
+
+
 POD_RULE = {"apiGroups": [""], "resources": ["pods"], "verbs": ["create", "delete", "get", "list"]}
 TOKEN_PATH = "/var/run/secrets/kubernetes.io/serviceaccount"
 
