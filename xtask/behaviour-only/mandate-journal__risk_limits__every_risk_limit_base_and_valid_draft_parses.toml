@@ -1,9 +1,0 @@
-file = "crates/mandate-journal/tests/risk_limits.rs"
-test = "every_risk_limit_base_and_valid_draft_parses"
-reason = """
-DEC-2301 (journal spec v0.58 §9.27, rules 230 to 238): the account stream's seven risk-limit
-records are closed at schema version 1. The journal does not register them yet, so it refuses
-this test's drafts as `unknown_schema` at `payload`, an answer of the journal's own rather than
-a stub's report. No stub or new API is needed: the change is the schema registration. E6-15's
-registration (slice A3) deletes this file with the test's `#[ignore]` line.
-"""

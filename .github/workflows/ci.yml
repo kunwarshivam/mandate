@@ -359,7 +359,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 1
     permissions: {}
-    if: ${{ always() && !github.event.pull_request.draft }}
+    # On a pull request it runs even when the run is cancelled, so a cancelled head fails rather
+    # than reading skipped, which a required check counts as passing. Elsewhere a cancelled run
+    # skips it, so the run ends at once and releases `main`'s group (DEC-2610 item 3).
+    if: ${{ ((github.event_name == 'pull_request' && always()) || !cancelled()) && !github.event.pull_request.draft }}
     needs: [select, fast-lint, fast-test, fast-pending, fast-python, fast-portable, fast-rh-sim-live]
     # DEC-871, DEC-1190. The required `fast` verdict: `select` and `fast-lint` must succeed, and
     # each scoped part must have succeeded where `select` selected it and been skipped where it did
@@ -894,7 +897,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 1
     permissions: {}
-    if: ${{ always() && !github.event.pull_request.draft }}
+    # As `fast`: it runs on a cancelled pull request run, and a cancelled run elsewhere skips it.
+    if: ${{ ((github.event_name == 'pull_request' && always()) || !cancelled()) && !github.event.pull_request.draft }}
     needs: [select, full-checks, mutants-plan, mutants, schema-mutants]
     # DEC-538. A plan of zero mutants launches no shard, so `mutants` is skipped, and that skip
     # passes only beside a plan that succeeded and reported zero. A failed or cancelled plan, a
