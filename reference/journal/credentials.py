@@ -111,7 +111,7 @@ MEMBER_CASES = (
 CREDENTIAL_SHAPES = (
     ("short", "AAECAwQFBgcICQoLDA0OD"[:21]),
     ("one_over_a_block", "A" * 25),
-    ("too_long", "A" * 1367),
+    ("too_long", "A" * 1366),
     ("padded", "AAECAwQFBgcICQoLDA0ODw="),
 )
 NULLED = ((FIRST, "member"), (FIRST, "kind"), (FIRST, "credential"), (FIRST, "public_key"), (FIRST, "alg"),
@@ -211,7 +211,7 @@ def invalid_drafts() -> list[dict]:
 
 def valid_drafts() -> list[dict]:
     """The members no rule reads, and the cases a rule might be misread to refuse."""
-    longest = "A" * 1366
+    longest = "A" * 1364
     return [
         valid("eddsa", "§9.31 `passkey_alg`", FIRST, [change("payload.alg", "eddsa")]),
         valid("kept_counter", "§9.31 `sign_count`: the top of 32 bits", FIRST, [change("payload.sign_count", 4294967295)]),
@@ -230,14 +230,15 @@ def valid_drafts() -> list[dict]:
 
 def stream_failure(records: list[dict], skip: frozenset[str] = frozenset()) -> int | None:
     """The index of the first record that breaks rule 251, or None."""
-    ever: set[str] = set()
+    ever: set = set()
     held: dict[str, str] = {}
     for i, record in enumerate(records):
         p = record["payload"]
         if record["event_type"] == "CredentialEnrolled":
-            if p["credential"] in ever and "stream.251.twice" not in skip:
+            key = (p["member"], p["credential"]) if "stream.251.per_member" in skip else p["credential"]
+            if key in ever and "stream.251.twice" not in skip:
                 return i
-            ever.add(p["credential"])
+            ever.add(key)
             held[p["credential"]] = p["member"]
         elif record["event_type"] == "CredentialRemoved":
             ours = held.get(p["credential"]) == p["member"] or "stream.251.removal" in skip
@@ -274,6 +275,18 @@ def stream_cases() -> list[dict]:
             1,
         ),
         case("removed_twice", "rule 251: not removed twice", [enrolled(), removed(LATER), removed(THIRD)], 2),
+        case(
+            "enrolled_by_another_member",
+            "rule 251: a credential is enrolled once on the stream, whoever enrols it",
+            [enrolled(), enrolled(LATER, CREDENTIAL, OTHER_MEMBER)],
+            1,
+        ),
+        case(
+            "second_unstepped_enrolment",
+            "§9.31: enrolment gating is the API's; the journal admits a second enrolment with no step-up",
+            [enrolled(), enrolled(LATER, OTHER_CREDENTIAL)],
+            None,
+        ),
     ]
 
 
@@ -351,7 +364,7 @@ VALIDATOR_MUTANTS = (
     "rule.250.member",
     "rule.250.passkey",
 )
-STREAM_MUTANTS = ("stream.251.twice", "stream.251.removal")
+STREAM_MUTANTS = ("stream.251.twice", "stream.251.removal", "stream.251.per_member")
 
 
 def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:

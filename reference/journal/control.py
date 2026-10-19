@@ -96,7 +96,7 @@ CONFIRM_CODE_FORM = re.compile(r"^[0-9A-HJKMNP-TV-Z]{8}\Z")
 # §9.31 (DEC-2108 item 2): a WebAuthn credential id as unpadded base64url, 16 to 1023 bytes, and the
 # authenticator's 32-bit signature counter.
 CREDENTIAL_ID = T("credential_id")
-CREDENTIAL_ID_FORM = re.compile(r"^[A-Za-z0-9_-]{22,1366}\Z")
+CREDENTIAL_ID_FORM = re.compile(r"^[A-Za-z0-9_-]{22,1364}\Z")
 SIGN_COUNT = T("sign_count")
 SIGN_COUNT_MAX = 4294967295
 STREAM_SEGMENTS = {"acct": 3, "agent": 3, "ctl": 2, "clock": 2, "ntf": 2, "meter": 2}
@@ -525,7 +525,7 @@ SCHEMAS[("ctl", "StepUpConfirmed")] = rec(
     ("confirmed_at", INT),
 )
 
-# §9.31 v0.68 (DEC-2108): a member's passkeys with the workspace's relying party, the fold the API's
+# §9.31 v0.69 (DEC-2108): a member's passkeys with the workspace's relying party, the fold the API's
 # passkey verifier judges an assertion against.
 SCHEMAS[("ctl", "CredentialEnrolled")] = rec(
     ("member", ULID),

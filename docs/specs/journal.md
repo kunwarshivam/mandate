@@ -5843,7 +5843,7 @@ DEC-2108 item 8). The runtime and the executor never read them.
 
 | Type | Values | Refused as |
 |---|---|---|
-| `credential_id` | A WebAuthn credential id as unpadded base64url (`A-Z a-z 0-9 - _`), 22 to 1366 characters: 16 to 1023 bytes | Another JSON kind `schema`; another string `non_canonical` |
+| `credential_id` | A WebAuthn credential id as unpadded base64url (`A-Z a-z 0-9 - _`), 22 to 1364 characters: 16 to 1023 bytes | Another JSON kind `schema`; another string `non_canonical` |
 | `passkey_alg` | `es256` or `eddsa` (DEC-660) | Another JSON kind `schema`; another string `non_canonical` |
 | `sign_count` | An integer from 0 to 4294967295, the authenticator's 32-bit counter | As `integer` |
 
@@ -5891,6 +5891,21 @@ DEC-2108 item 8). The runtime and the executor never read them.
 against its own fold before it appends, and the verifier does not trust it. A member whose records
 break it has no credential that counts. Every passkey step-up of theirs is then
 `step_up_missing` until the stream is repaired, and never passes.
+
+**Enrolment gating is the API's, not the journal's.** DEC-2108 item 5 says which enrolment needs
+step-up: a first one only from a full session opened within 300 s, a later one only with passkey
+step-up from a credential past its cool-off, and none while every credential is still cooling off.
+The API enforces that before it appends; the journal does not. Rules 249 to 251 pin only the
+cool-off's arithmetic and the actor binding, so a second enrolment with no step-up is admitted
+here (the vectors' `second_unstepped_enrolment`). That a session alone never yields a working
+credential early rests on the verifier's fold honouring `cool_off_ends`: a credential whose
+cool-off has not ended never steps up. Removing a member's last credential returns them to a first
+enrolment, which waits its cool-off again.
+
+**Personal data.** Neither record carries `pii_refs`. The credential id is the authenticator's
+random identifier and the public key is an artifact. Neither is one of §6.4's vault-held personal
+data, and both are identity records that §6.4 keeps for the retention period.
+`PersonalDataErased` does not touch them, and an append-only record is never rewritten.
 
 **What binds a credential.** A credential names no workspace. The stream it is on binds it to its
 workspace, and `member` binds it to its member, whom the verifier checks against the session's
