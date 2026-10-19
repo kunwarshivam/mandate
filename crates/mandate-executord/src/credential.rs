@@ -9,13 +9,14 @@
 //! (`AGENTS.md` rules 3 and 7). The token reaches the paper host only as a bearer header.
 //!
 //! The start in `alpaca-paper` runs in this order: [`paper_settings`] from the flags,
-//! [`vault_config`] and [`vault_login`] from the mounted vault credentials (DEC-2022), then
+//! [`vault_config`] with the vault's CA from the mount, [`vault_login`] by Kubernetes auth with
+//! the pod's ServiceAccount token (the coordinator's row 23, V2's option B), then
 //! [`paper_broker`], which takes the lease and builds the broker, all before the process takes the
 //! account stream. Each pass [`RunLease::pass`] ticks the lease, and [`lease_verdict`] says
 //! whether the run goes on: a lost credential, and a rotated one, which the supervisor's restart
 //! leases afresh, drain the process and stop it.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use mandate_alpaca::{AlpacaPaperHttp, Credentials};
 use mandate_canon::{Value, parse};
@@ -28,9 +29,10 @@ use mandate_store::Store;
 use mandate_time::UtcNanos;
 use mandate_vault::SourceError;
 use mandate_vault::lease::{Lease, LeaseKeeper};
-use mandate_vault::openbao::{OpenBaoConfig, OpenBaoSource};
+use mandate_vault::openbao::OpenBaoConfig;
+use mandate_vault::policy::Identity;
 use mandate_vault::source::SecretSource;
-use secrecy::ExposeSecret;
+use secrecy::{ExposeSecret, SecretString};
 
 use crate::alpaca::AlpacaBroker;
 use crate::lease::{Held, Leased};
@@ -137,7 +139,7 @@ pub fn paper_transport(token: AccessToken) -> Result<AlpacaPaperHttp, &'static s
     AlpacaPaperHttp::new(Credentials::bearer(token.0)).map_err(|_| "transport_unavailable")
 }
 
-/// Where the vault is and where its credentials are mounted: `--vault-address` and `--vault-dir`.
+/// Where the vault is and where its CA is mounted: `--vault-address` and `--vault-dir`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VaultMount {
     pub address: String,
@@ -168,19 +170,20 @@ pub fn vault_config(mount: &VaultMount) -> Result<OpenBaoConfig, &'static str> {
     Err(Unimplemented)
 }
 
-/// The vault session of `connection`'s executor, logged in with the AppRole credentials mounted
-/// in `dir`, which are read before anything is dialled.
+/// The vault session of `connection`'s executor: `read_token` reads the pod's ServiceAccount token
+/// first, and only then does `login` dial the vault as [`Identity::Executor`] of `connection`
+/// with it. Both are the caller's: `mandate-vault`'s reader and Kubernetes login in the process,
+/// scripted ones in a test.
 ///
 /// # Errors
-/// `vault_credentials_unreadable` when the mounted credentials cannot be read, and
-/// `vault_login_failed` when the vault cannot be reached or refuses them.
-pub fn vault_login(
-    config: &OpenBaoConfig,
-    dir: &Path,
+/// `vault_credentials_unreadable` when the token cannot be read, and `vault_login_failed` when the
+/// vault cannot be reached or refuses it.
+pub fn vault_login<V>(
+    read_token: impl FnOnce() -> Result<SecretString, SourceError>,
+    login: impl FnOnce(Identity, SecretString) -> Result<V, SourceError>,
     connection: &ConnectionId,
-    now: UtcNanos,
-) -> Result<OpenBaoSource, &'static str> {
-    let _ = (config, dir, connection, now);
+) -> Result<V, &'static str> {
+    let _ = (read_token, login, connection);
     Err(Unimplemented)
 }
 

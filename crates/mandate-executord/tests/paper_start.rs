@@ -1,8 +1,8 @@
-//! The executor's start on Alpaca's paper host (DEC-2306 items 1 to 3; DEC-2022): the flags that
-//! name the run and its vault, the CA and AppRole credentials read from the mounted Secret before
-//! anything is dialled, the lease on the checked connection and the broker over its token, and
-//! what each lease tick means for the run. The vault here is scripted and the mount a temporary
-//! directory, so nothing dials a host (DEC-2306 item 5).
+//! The executor's start on Alpaca's paper host (DEC-2306 items 1 to 3): the flags that name the
+//! run and its vault, the vault's CA read from the mount, the Kubernetes login that reads the
+//! ServiceAccount token before it dials, the lease on the checked connection and the broker over
+//! its token, and what each lease tick means for the run. The vault and the login here are
+//! scripted and the mount a temporary directory, so nothing dials a host (DEC-2306 item 5).
 
 use std::cell::RefCell;
 use std::fs;
@@ -21,7 +21,6 @@ use mandate_executord::lease::Held;
 use mandate_time::UtcNanos;
 use mandate_vault::SourceError;
 use mandate_vault::lease::{Lease, lease_times};
-use mandate_vault::openbao::OpenBaoConfig;
 use mandate_vault::policy::{Identity, Mounts, SecretPath};
 use mandate_vault::source::{Grant, SecretSource};
 use secrecy::{ExposeSecret, SecretSlice, SecretString};
@@ -214,28 +213,48 @@ fn the_vault_ca_is_read_from_the_mount() -> Result<(), Error> {
     Ok(())
 }
 
-/// The login reads `connection`'s mounted AppRole credentials before it dials: none, or only
-/// another connection's, is refused without a dial, and a vault it cannot reach is
+/// The login reads the ServiceAccount token first and dials only with it, as `connection`'s
+/// executor: an unreadable token is refused without a dial, and a login the vault refuses is
 /// `vault_login_failed`.
 #[test]
 #[ignore = "pending E21-30"]
-fn the_login_reads_its_mounted_credentials_before_dialling() -> Result<(), Error> {
-    let dir = mount_dir()?;
-    let config = OpenBaoConfig {
-        address: "http://vault.invalid:8200".to_owned(),
-        ca_pem: CA.to_vec(),
-        mounts: Mounts::default(),
-    };
+fn the_login_reads_the_service_account_token_before_dialling() -> Result<(), Error> {
     let conn1 = ConnectionId::new("conn1")?;
-    let at = now()?;
-    let login = |dir: &Path| vault_login(&config, dir, &conn1, at).err();
-    assert_eq!(login(&dir), Some("vault_credentials_unreadable"));
-    put(&dir, "executor-conn2.role-id", b"role-2\n", 0o400)?;
-    put(&dir, "executor-conn2.secret-id", b"secret-2\n", 0o400)?;
-    assert_eq!(login(&dir), Some("vault_credentials_unreadable"));
-    put(&dir, "executor-conn1.role-id", b"role-1\n", 0o400)?;
-    put(&dir, "executor-conn1.secret-id", b"secret-1\n", 0o400)?;
-    assert_eq!(login(&dir), Some("vault_login_failed"));
+    let dialled: RefCell<Vec<(Identity, String)>> = RefCell::new(Vec::new());
+    let login = |answer: Result<&'static str, SourceError>| {
+        let dialled = &dialled;
+        move |identity: Identity, jwt: SecretString| {
+            dialled
+                .borrow_mut()
+                .push((identity, jwt.expose_secret().to_owned()));
+            answer
+        }
+    };
+    let unreadable = vault_login(
+        || Err(SourceError::CredentialFile),
+        login(Ok("session")),
+        &conn1,
+    );
+    assert_eq!(unreadable, Err("vault_credentials_unreadable"));
+    assert!(
+        dialled.borrow().is_empty(),
+        "nothing is dialled without a token"
+    );
+    let token = || Ok(SecretString::from("sa-jwt"));
+    assert_eq!(
+        vault_login(token, login(Err(SourceError::Denied)), &conn1),
+        Err("vault_login_failed")
+    );
+    assert_eq!(
+        vault_login(token, login(Err(SourceError::Unavailable)), &conn1),
+        Err("vault_login_failed")
+    );
+    assert_eq!(
+        vault_login(token, login(Ok("session")), &conn1),
+        Ok("session")
+    );
+    let executor = (Identity::Executor(conn1.clone()), "sa-jwt".to_owned());
+    assert_eq!(*dialled.borrow(), vec![executor; 3]);
     Ok(())
 }
 
