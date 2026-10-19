@@ -94,9 +94,9 @@ Staging runs the workspace vault; production does not until you decide how it un
 ([DEC-2051](../../docs/project/decisions/DEC-2051.md), DEC-2021 item 6). You chose to keep its
 recovery keys in the cluster ([DEC-2052](../../docs/project/decisions/DEC-2052.md)), so staging's
 apply sets it up with no step of yours: after the bootstrap it makes the seal key if there is none,
-waits for the vault's pod, and initializes it once, storing the whole init answer (three recovery
-keys and the root token) in the Secret `vault-recovery/vault-init`, which no workload can read, and
-revoking that root token before the run ends. Its log reads only `vault-init: seal key:
+waits for the vault's pod, and initializes it once, storing the init answer's three recovery keys
+in the Secret `vault-recovery/vault-init`, which no workload can read, and revoking the root token
+it returned, which it never stores, before the run ends. Its log reads only `vault-init: seal key:
 created|exists`, `vault: initialized|already initialized`, `recovery keys: stored` and `root token:
 revoked`. Every later apply finds it done and changes nothing.
 

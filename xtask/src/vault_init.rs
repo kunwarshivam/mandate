@@ -1,12 +1,12 @@
 //! Staging's vault, set up from CI (E21-58, DEC-2052): the founder chose to keep the vault's
 //! recovery keys in the cluster, so staging's apply, after lane GO's bootstrap and inside the same
 //! window, makes the seal key when there is none, waits for the vault's pod, and initializes the
-//! vault once: the whole of `bao operator init`'s answer goes into the Secret
-//! `vault-recovery/vault-init`, in a namespace no workload is bound to, and the root token it
-//! returns is revoked before the step ends, however it ends. Every key and token is masked the
-//! moment it exists, reaches `kubectl` on its standard input alone, and is never printed or
-//! written to a file; the log carries status words. Each step is skipped when already done, so
-//! every later apply changes nothing.
+//! vault once: `bao operator init`'s recovery keys go into the Secret `vault-recovery/vault-init`,
+//! in a namespace no workload is bound to, and the root token it returns is never stored and is
+//! revoked before the step ends, however it ends. Every key and token is masked the moment it
+//! exists, reaches `kubectl` on its standard input alone, and is never printed or written to a
+//! file; the log carries status words. Each step is skipped when already done, so every later
+//! apply changes nothing.
 
 use anyhow::{Context, Result, bail, ensure};
 use serde_json::{Value, json};
@@ -180,8 +180,8 @@ impl Drop for RootToken<'_, '_> {
     }
 }
 
-/// Initializes the vault, stores its whole answer in the recovery Secret, and revokes the root
-/// token, whether or not the answer was stored.
+/// Initializes the vault, stores its answer, root token aside, in the recovery Secret, and
+/// revokes the root token, whether or not the answer was stored.
 fn init(steps: &Steps<'_>) -> Result<()> {
     let (done, answer) = in_vault(
         steps,
@@ -200,19 +200,22 @@ fn init(steps: &Steps<'_>) -> Result<()> {
         mask_all(parsed);
     }
     ensure!(done, "initializing the vault failed");
-    let parsed = parsed.context("the vault's init answer could not be read")?;
+    let mut parsed = parsed.context("the vault's init answer could not be read")?;
     let root = RootToken {
         steps,
-        token: parsed["root_token"].as_str().map(str::to_owned),
+        token: parsed
+            .as_object_mut()
+            .and_then(|fields| fields.remove("root_token"))
+            .and_then(|token| token.as_str().map(str::to_owned)),
     };
-    let stored = store(steps, &answer);
+    let stored = store(steps, &parsed.to_string());
     let revoked = root.revoke();
     stored?;
     revoked
 }
 
-/// The vault's init answer as the Secret `vault-recovery/vault-init`, created from stdin in a
-/// namespace made for it.
+/// The vault's init answer, its root token taken out, as the Secret `vault-recovery/vault-init`,
+/// created from stdin in a namespace made for it.
 fn store(steps: &Steps<'_>, answer: &str) -> Result<()> {
     let namespace = json!({
         "apiVersion": "v1",
@@ -398,13 +401,14 @@ mod tests {
             serde_json::from_str(&creates[1].1.clone().unwrap_or_default())?;
         assert_eq!(stored["metadata"]["namespace"], RECOVERY_NAMESPACE);
         assert_eq!(stored["metadata"]["name"], RECOVERY_SECRET);
-        let answer = stored["data"]["init.json"]
-            .as_str()
-            .unwrap_or_default()
-            .to_owned();
-        assert!(
-            !answer.is_empty() && !answer.contains(ROOT),
-            "the answer is stored base64-encoded"
+        assert_eq!(
+            stored["data"]["init.json"],
+            image::base64(
+                json!({"recovery_keys_b64": RECOVERY})
+                    .to_string()
+                    .as_bytes()
+            ),
+            "the answer is stored base64-encoded, its recovery keys kept and its root token dropped"
         );
         assert!(fake.revoked());
         assert!(
