@@ -90,6 +90,10 @@ pub enum ModelCommand {
 pub struct ModelArgs {
     pub model_id: String,
     pub model_version: String,
+    /// A recorded research entry (the recorded bundle's `research.json`), for the research agent's
+    /// `llm.` model, which the model host has no content for (DEC-2247).
+    #[arg(long)]
+    pub entry: Option<PathBuf>,
     #[command(flatten)]
     pub owner: OwnerArgs,
     #[command(flatten)]
@@ -113,12 +117,28 @@ pub fn run(args: &RegisterArgs, now: Now, report: &mut impl Write) -> anyhow::Re
 /// Runs `model register`, and prints the event id and `seq` it committed or found.
 ///
 /// # Errors
-/// As [`run`], without the file, then [`crate::config::register_model`]'s.
+/// As [`run`], without the file, then [`crate::config::register_model`]'s; with `--entry`,
+/// `entry_unreadable` for a file that cannot be read, before the journal is opened or the store
+/// created, then [`crate::config::register_research_model`]'s.
 pub fn run_model(args: &ModelArgs, now: Now, report: &mut impl Write) -> anyhow::Result<Submitted> {
     let owner = args.owner.owner()?;
+    let recording = match &args.entry {
+        Some(file) => Some(std::fs::read(file).map_err(|_| refused("entry_unreadable"))?),
+        None => None,
+    };
     let (mut journal, mut store) = open(&args.target)?;
-    let (id, version) = (&args.model_id, &args.model_version);
-    let submitted = config::register_model(&mut journal, &mut store, &owner, id, version, now)?;
+    let (id, version) = (args.model_id.as_str(), args.model_version.as_str());
+    let submitted = match recording {
+        Some(recording) => config::register_research_model(
+            &mut journal,
+            &mut store,
+            &owner,
+            (id, version),
+            &recording,
+            now,
+        )?,
+        None => config::register_model(&mut journal, &mut store, &owner, id, version, now)?,
+    };
     reported(report, submitted)
 }
 

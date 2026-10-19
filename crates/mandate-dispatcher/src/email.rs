@@ -18,7 +18,8 @@
 //! **A transport's failure is a closed code.** [`MailFailure`] holds no provider text, which may
 //! echo the message (§5.2), and [`EmailProvider`] maps each code to its outcome (DEC-2510).
 //!
-//! Every entry point returns a `Result`, so a stub reports `Unimplemented` (DEC-77).
+//! Every entry point returns a `Result`, the shape its DEC-77 stub had; those that cannot fail
+//! always answer `Ok`.
 
 use mandate_notify::email::{FounderAddress, FounderMail, founder_mail};
 use mandate_notify::{
@@ -67,6 +68,10 @@ pub trait MailTransport {
 /// The recorded-fixture transport: it keeps each submitted message's wire form, addressed to the
 /// address it was bound to, and sends nothing. Each submission answers from the script in order,
 /// and once the script is spent it takes the message as `recorded-<n>`, the n-th taken from 1.
+///
+/// It sends nothing, so it ignores the idempotency key: a retried send is captured again. The
+/// founder-only SMTP transport must use the key, so a retry the provider already took is not
+/// mailed twice (spec §5.1, §5.2).
 pub struct RecordedTransport {
     address: FounderAddress,
     script: Vec<MailFailure>,
@@ -77,7 +82,7 @@ impl RecordedTransport {
     /// A fixture transport bound to `address` that takes every message.
     ///
     /// # Errors
-    /// None once implemented. The `Result` is the stub API's shape.
+    /// None: it always answers `Ok`. The `Result` is the shape its DEC-77 stub had.
     pub fn bound_to(address: FounderAddress) -> Result<Self, NotifyError> {
         Self::failing(address, Vec::new())
     }
@@ -85,7 +90,7 @@ impl RecordedTransport {
     /// A fixture transport bound to `address` that answers `script`'s failures first, in order.
     ///
     /// # Errors
-    /// None once implemented. The `Result` is the stub API's shape.
+    /// None: it always answers `Ok`. The `Result` is the shape its DEC-77 stub had.
     pub fn failing(address: FounderAddress, script: Vec<MailFailure>) -> Result<Self, NotifyError> {
         let mut script = script;
         script.reverse();
@@ -99,7 +104,7 @@ impl RecordedTransport {
     /// The wire form of every message taken, in order.
     ///
     /// # Errors
-    /// None once implemented. The `Result` is the stub API's shape.
+    /// None: it always answers `Ok`. The `Result` is the shape its DEC-77 stub had.
     pub fn captured(&self) -> Result<&[Vec<u8>], NotifyError> {
         Ok(&self.captured)
     }
@@ -133,7 +138,7 @@ impl<T: MailTransport> EmailProvider<T> {
     /// The adapter that mails `founder` alone, through `transport`.
     ///
     /// # Errors
-    /// None once implemented. The `Result` is the stub API's shape.
+    /// None: it always answers `Ok`. The `Result` is the shape its DEC-77 stub had.
     pub fn new(founder: Recipient, transport: T) -> Result<Self, NotifyError> {
         Ok(Self { founder, transport })
     }
@@ -141,7 +146,7 @@ impl<T: MailTransport> EmailProvider<T> {
     /// The transport, for a test to read what it captured.
     ///
     /// # Errors
-    /// None once implemented. The `Result` is the stub API's shape.
+    /// None: it always answers `Ok`. The `Result` is the shape its DEC-77 stub had.
     pub fn transport(&self) -> Result<&T, NotifyError> {
         Ok(&self.transport)
     }
