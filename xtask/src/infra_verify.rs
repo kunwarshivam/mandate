@@ -2,7 +2,8 @@
 //! GO's bootstrap, with the same short-lived kubeconfig and inside the same control-plane window
 //! (DEC-2028), so it answers "is staging up?" without an agent touching the cluster. It reads
 //! Flux's objects, the platform's and the workspaces' pods, the kill-switch admission bindings and
-//! the signature webhook, the tunnel's health from Cloudflare, and the API's answer through
+//! the signature webhook, whether Cilium runs the DNS proxy the FQDN egress policies need
+//! (DEC-2058), the tunnel's health from Cloudflare, and the API's answer through
 //! Access, and prints each as an `[ok]` or `[MISSING]` line, as the preflight does. It polls until
 //! every line holds or its rounds run out, and only reads: no `kubectl` verb but `get`, no request
 //! but `GET`.
@@ -359,6 +360,35 @@ fn admission(list: &mut Checklist, kubectl: Kubectl<'_>) {
     }
 }
 
+/// Whether Cilium runs the L7 DNS proxy that staging's FQDN egress policies need (DEC-2058): its
+/// config must not turn `enable-l7-proxy` off. An unset key is Cilium's default, on; a cluster with
+/// no Cilium config enforces no FQDN policy, so it fails.
+fn cilium(list: &mut Checklist, kubectl: Kubectl<'_>) {
+    let Some(items) = listed(
+        list,
+        kubectl,
+        "Cilium's config",
+        &[
+            "configmaps",
+            "-n",
+            "kube-system",
+            "--field-selector",
+            "metadata.name=cilium-config",
+            "-o",
+            "json",
+        ],
+    ) else {
+        return;
+    };
+    let proxied = items
+        .iter()
+        .any(|config| config["data"]["enable-l7-proxy"].as_str() != Some("false"));
+    list.check(
+        proxied,
+        "Cilium runs the L7 DNS proxy the FQDN egress policies need",
+    );
+}
+
 /// A line of the edge's: failing, or pending on `pending` when it names a change.
 fn edge_line(
     list: &mut Checklist,
@@ -440,6 +470,7 @@ fn checks(
     flux(&mut list, kubectl);
     pods(&mut list, kubectl);
     admission(&mut list, kubectl);
+    cilium(&mut list, kubectl);
     edge_checks(&mut list, http, edge, pending);
     Ok(list)
 }
@@ -528,6 +559,7 @@ mod tests {
         bindings: Vec<Value>,
         webhooks: Vec<Value>,
         jobs: Vec<Value>,
+        cilium: Vec<Value>,
         logs: &'static str,
         tunnel: &'static str,
         api: u16,
@@ -564,6 +596,7 @@ mod tests {
                     })
                     .collect(),
                 jobs: vec![job("migrate", "Complete")],
+                cilium: vec![cilium_config(Some("true"))],
                 logs: "",
                 webhooks: vec![json!({
                     "metadata": {"name": SIGNATURE_WEBHOOK},
@@ -619,6 +652,7 @@ mod tests {
                 "validatingadmissionpolicybindings" => self.bindings.clone(),
                 "validatingwebhookconfigurations" => self.webhooks.clone(),
                 "jobs" => self.jobs.clone(),
+                "configmaps" => self.cilium.clone(),
                 kinds if kinds.contains("fluxcd.io") => self.flux.clone(),
                 other => return Err(anyhow!("unexpected kubectl get {other}")),
             };
@@ -657,6 +691,38 @@ mod tests {
                 + 5 * i64::from(self.pauses.get())
                 + self.seconds_per_reading * i64::from(self.reads.get()))
         }
+    }
+
+    fn cilium_config(l7_proxy: Option<&str>) -> Value {
+        let mut config =
+            json!({"metadata": {"name": "cilium-config", "namespace": "kube-system"}, "data": {}});
+        if let Some(value) = l7_proxy {
+            config["data"]["enable-l7-proxy"] = json!(value);
+        }
+        config
+    }
+
+    /// The FQDN egress policies hold only while Cilium runs its DNS proxy (DEC-2058): a cluster
+    /// whose config turns it off, or has no Cilium config, fails; Cilium's default, an unset key,
+    /// holds.
+    #[test]
+    fn fqdn_egress_needs_ciliums_dns_proxy() -> Result<()> {
+        let line = "Cilium runs the L7 DNS proxy the FQDN egress policies need";
+        let mut staging = Staging::up();
+        let text = run(&staging)?;
+        assert!(
+            text.lines()
+                .any(|row| row.trim_start().starts_with("[ok]") && row.ends_with(line)),
+            "{text}"
+        );
+        staging.cilium = vec![cilium_config(None)];
+        assert_eq!(missing(&run(&staging)?), Vec::<&str>::new());
+        for config in [vec![cilium_config(Some("false"))], Vec::new()] {
+            staging.cilium = config;
+            let text = run(&staging)?;
+            assert_eq!(missing(&text), [line], "{text}");
+        }
+        Ok(())
     }
 
     fn run(staging: &Staging) -> Result<String> {

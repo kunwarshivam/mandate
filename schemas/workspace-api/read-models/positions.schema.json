@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/read-models/positions.schema.json",
+  "description": "GET /agents/{id}/positions (§4.7 D3, DEC-2111). positions is the net filled quantity of the agent's own orders per instrument, from the FillApplied and LateFillApplied records of orders whose OrderRequestRecorded names the agent; it is not the accounting ledger's fold, which no read serves yet. account_positions is the account's, not the agent's: the latest BrokerPositionObserved per instrument, as GET /agents/{id} serves it (DEC-1020), null when the account stream is not found. as_of names the control stream and the account stream read.",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../envelope.schema.json#/$defs/Envelope"
+    }
+  ],
+  "required": [
+    "agent_id",
+    "account_ref",
+    "positions",
+    "account_positions"
+  ],
+  "properties": {
+    "agent_id": {
+      "$ref": "../common.schema.json#/$defs/Id"
+    },
+    "account_ref": {
+      "anyOf": [
+        {
+          "$ref": "../common.schema.json#/$defs/Id"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "positions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Position"
+      }
+    },
+    "account_positions": {
+      "anyOf": [
+        {
+          "type": "array",
+          "items": {
+            "$ref": "agent.schema.json#/$defs/Position"
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "as_of": {
+      "$ref": "../common.schema.json#/$defs/AsOf"
+    }
+  },
+  "unevaluatedProperties": false,
+  "$defs": {
+    "Position": {
+      "description": "One instrument the agent's own fills left a non-zero net quantity in, in instrument order. cost_basis, risk_mark and protection are always null until the ledger fold, the risk mark, and the protection fold are served (DEC-2111 item 5): not reported, never zero.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "instrument_id",
+        "filled_qty",
+        "cost_basis",
+        "risk_mark",
+        "protection"
+      ],
+      "properties": {
+        "instrument_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "filled_qty": {
+          "$ref": "../common.schema.json#/$defs/Decimal"
+        },
+        "cost_basis": {
+          "type": "null"
+        },
+        "risk_mark": {
+          "type": "null"
+        },
+        "protection": {
+          "type": "null"
+        }
+      }
+    }
+  }
+}

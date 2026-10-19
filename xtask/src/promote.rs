@@ -471,9 +471,12 @@ mod tests {
                 read_images(&images_yaml(environment, &BTreeMap::new()), environment)?,
                 BTreeMap::new()
             );
-            assert_eq!(
-                read_images(&overlay(environment, "images.yaml")?, environment)?,
-                BTreeMap::new()
+            let pinned = read_images(&overlay(environment, "images.yaml")?, environment)?;
+            assert!(
+                pinned
+                    .values()
+                    .all(|reference| reference.starts_with(PUBLISHED_PREFIX)),
+                "{pinned:?}"
             );
         }
         assert!(

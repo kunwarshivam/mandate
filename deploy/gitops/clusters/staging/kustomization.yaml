@@ -5,6 +5,7 @@ resources:
   - sync.yaml
   - charts.yaml
   - vault.yaml
+  - egress.yaml
   - ../../base
 patches:
   - path: journal.yaml
