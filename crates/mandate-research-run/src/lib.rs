@@ -58,6 +58,7 @@ mod output;
 mod plan;
 mod ports;
 mod retrieve;
+mod turn;
 
 pub use backend::{
     Backend, GatewayParts, NoHostedTransport, RECORDED_KEY, Reason, RecordedKey, ResearchTransport,
@@ -84,3 +85,4 @@ pub use ports::{
     ReadError, Readers, TextQuery,
 };
 pub use retrieve::{Drop, DropReason, Retrieval, RetrievedItem, retrieve};
+pub use turn::{EarlierTurn, TurnCall};
