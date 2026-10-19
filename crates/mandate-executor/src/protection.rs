@@ -4391,6 +4391,64 @@ mod sequence_tests {
         Ok(())
     }
 
+    /// DEC-2037 item 5: an exit at the market has no limit of its own, so a later rung with
+    /// nothing to price from goes at the last rung's limit, journaled `exit_unpriced` with an owner
+    /// alert, and never held. The same clock as the own-limit case below: the bid that priced the
+    /// first rung is more than five minutes old at the step's confirmation.
+    #[test]
+    fn a_later_rung_of_an_exit_at_the_market_goes_at_the_last_rungs_limit()
+    -> Result<(), ExecutorError> {
+        let fees = fees()?;
+        let config = ExecutorConfig {
+            max_unprotected_s: 600,
+            ..executor_config()
+        };
+        let ports = tiered_ports(&config, &fees);
+        for purpose in [Purpose::RiskExit, Purpose::OwnerExit] {
+            let mut executor = protected(&ports)?;
+            executor.run(bid_only("150", 0)?, &ports)?;
+            executor.run(Input::Tick(RiskClock::from_secs(290)), &ports)?;
+            let at_the_market = Input::Intent(IntentHandoff {
+                intent_id: IntentId(EventId(EXIT.to_owned())),
+                agent: AgentId("agent-a".to_owned()),
+                tif: Some(TimeInForce::Day),
+                body: IntentBody::Order {
+                    instrument: aapl()?,
+                    side: Side::Sell,
+                    qty: Qty::parse("5")?,
+                    limit: None,
+                    purpose,
+                    protection: None,
+                },
+            });
+            executor.run(at_the_market, &ports)?;
+            let first = executor.run(cancel_accepted(OCO), &ports)?;
+            let rung = Some(Price::parse("149.25")?);
+            assert_eq!(
+                submissions(&first)
+                    .iter()
+                    .map(|order| (order.client_order_id.as_str(), order.limit_price))
+                    .collect::<Vec<_>>(),
+                vec![(rung_id(0).as_str(), rung)],
+                "{purpose:?}: the first rung prices from the last sane bid"
+            );
+            executor.run(Input::Tick(RiskClock::from_secs(300)), &ports)?;
+            executor.run(Input::Tick(RiskClock::from_secs(301)), &ports)?;
+            let next = executor.run(cancel_accepted(&rung_id(0)), &ports)?;
+            assert_eq!(
+                submissions(&next)
+                    .iter()
+                    .map(|order| (order.client_order_id.as_str(), order.limit_price))
+                    .collect::<Vec<_>>(),
+                vec![(rung_id(1).as_str(), rung)],
+                "{purpose:?}: the later rung goes at the last rung's limit"
+            );
+            assert_eq!(alerts(&next), vec!["exit_unpriced"], "{purpose:?}");
+            assert!(verdicts(&next).is_empty(), "{purpose:?}: never held");
+        }
+        Ok(())
+    }
+
     /// The later-rung reading (#174, comment 5864659765 item 2; DEC-160 (23)): once an exit is
     /// working, a later rung with nothing to price from goes at the intent's own limit for every
     /// purpose, a discretionary exit's included, journaled `exit_unpriced` with an owner alert. It
