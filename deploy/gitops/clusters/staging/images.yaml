@@ -1,4 +1,6 @@
-# The staging workspace's images and tier, values for the workspace chart. Promotion sets every
-# image here, pinned by digest (DEC-2016); until then no process renders, and the release holds
-# the namespace's policies and the tunnel.
+# The staging workspace's tier and images, values for the workspace chart. Each image is a
+# signed index release.yml published from `main`, pinned by digest. Written by `cargo xtask
+# gitops promote` (DEC-2016); change it only through a promotion.
 deploymentTier: staging
+images:
+  mandate: ghcr.io/kunwarshivam/mandate/mandate@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa

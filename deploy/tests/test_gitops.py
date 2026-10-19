@@ -337,6 +337,11 @@ def strings(value, path=""):
         yield path, value
 
 
+# A process image a hosted cluster names: a release binary's index under this repository's GHCR
+# path, by digest alone (DEC-2016, DEC-2026); `promote` writes only these.
+OWN_IMAGE = re.compile(r"ghcr\.io/kunwarshivam/mandate/mandate[a-z-]*@sha256:[0-9a-f]{64}")
+
+
 def values_policy(values: dict[str, dict], environment: str) -> list[str]:
     """No stub tier, no `live`, the paper environment, every image by digest, two journal instances
     on separate nodes."""
@@ -360,6 +365,8 @@ def values_policy(values: dict[str, dict], environment: str) -> list[str]:
             problems.append("workspace: the stub issuer is named")
         elif reference and not PINNED.search(reference):
             problems.append(f"workspace: image {image} not pinned by digest: {reference}")
+        elif reference and image != "postgres" and not OWN_IMAGE.fullmatch(reference):
+            problems.append(f"workspace: image {image} is not this repository's release: {reference}")
     for name in ("cnpg", "barman-cloud"):
         tree = values.get(name, {})
         for key in ("image", "sidecarImage"):
@@ -998,6 +1005,9 @@ def test_each_overlay_seeded_bug_is_caught(check, kind, name, change, tmp_path):
 
 
 VALUE_BUGS = [
+    ("workspace", {"images": {"mandate": "docker.io/library/busybox@sha256:" + "a" * 64}}),
+    ("workspace", {"images": {"api": "ghcr.io/kunwarshivam/mandate/mandate:signed-abc"}}),
+    ("workspace", {"images": {"runtime": "ghcr.io/someone/mandate/mandate@sha256:" + "a" * 64}}),
     ("workspace", {"deploymentTier": "dev"}),
     ("workspace", {"deploymentTier": "ci"}),
     ("workspace", {"environment": "live"}),
