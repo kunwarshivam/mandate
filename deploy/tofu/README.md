@@ -141,7 +141,7 @@ have seen. The log never shows a value: only addresses and actions.
    - a `terraform_data` for the budget.
 
    Nothing is destroyed.
-   - If it fails with "DOKS does not offer 1.35.1-do.0; it offers: …", tell lane IAC the list.
+   - If it fails with "DOKS does not offer 1.35.9-do.1; it offers: …", tell lane IAC the list.
      The pin changes in a one-line pull request.
 3. Dispatch again with action `apply` and `sha` set to the commit the plan printed, and approve it. The job plans again after
    your approval, prints that plan, and applies exactly it, so the apply reflects the commit and

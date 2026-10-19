@@ -4402,7 +4402,6 @@ fn readable_cases(bytes: &[u8]) -> Result<Vec<Value>, String> {
 /// confirmation, so 0 (§5.6). The walk's triggers must be the fixture's, so a base that drifted from
 /// the fixture's cannot pass for a breach time.
 #[test]
-#[ignore = "pending E6-15"]
 fn every_mark_only_rung_case_journals_the_breach_time_its_timeline_gives() -> Result<(), String> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/refcases/mandate.json");
     let bytes = fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -4619,7 +4618,6 @@ fn breach_time_matches_the_bids(bids: &[(i64, u64)], need: u32) -> Result<(), Te
 }
 
 #[test]
-#[ignore = "pending E6-15"]
 fn breach_time_on_every_trigger_matches_an_independent_interval_accumulator() {
     let mut runner = TestRunner::new(ProptestConfig {
         cases: 256,
@@ -4640,7 +4638,6 @@ fn breach_time_on_every_trigger_matches_an_independent_interval_accumulator() {
 /// 98.5 (H − E = 650 ≥ 315), the 0.06 rung confirms 60 s later (650 ≥ 630), 104 lifts the 0.03 rung
 /// (100 < 210 with `scale_lift_after_s` 0), and the acknowledgment sets it active again.
 #[test]
-#[ignore = "pending E6-15"]
 fn a_scale_rung_carries_no_breach_time_at_once_or_after_the_reset() -> Result<(), String> {
     let mandate = swing(&[
         ("/risk/max_daily_loss", Some(s("0.5"))),

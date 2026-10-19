@@ -82,10 +82,14 @@ pub enum BacktestError {
     /// (DEC-2245 item 2).
     #[error("an order is still working when the split with ex-date {0} applies")]
     OrderWorkingAcrossSplit(Date),
-    /// The stubs of this story's tests PR return this, so every pending test fails on them
-    /// (DEC-77); the implementation PR replaces the stub and removes the variant.
-    #[error("not implemented until {story}")]
-    Unimplemented { story: &'static str },
+    /// The corporate actions are not in ex-date order: the walk takes them in the order given, so
+    /// it would skip one (DEC-2245 item 7).
+    #[error("the corporate actions are not in ex-date order")]
+    CorporateActionsUnordered,
+    /// A corporate action names another instrument than the run's, whose position the run does
+    /// not hold (DEC-2245 item 7).
+    #[error("the corporate action with ex-date {0} is for another instrument than the run's")]
+    CorporateActionOtherInstrument(Date),
     #[error(transparent)]
     Sim(#[from] SimError),
     #[error(transparent)]
@@ -106,7 +110,8 @@ impl BacktestError {
             Self::StrategyWindowsCrossed => "strategy_windows_crossed",
             Self::PeriodsPerYearNotPositive => "periods_per_year_not_positive",
             Self::OrderWorkingAcrossSplit(_) => "order_working_across_split",
-            Self::Unimplemented { .. } => "unimplemented",
+            Self::CorporateActionsUnordered => "corporate_actions_unordered",
+            Self::CorporateActionOtherInstrument(_) => "corporate_action_other_instrument",
             Self::Sim(e) => e.code(),
             Self::Accounting(e) => e.code(),
             Self::Num(e) => e.code(),
@@ -423,11 +428,16 @@ fn action_instrument(action: &CorporateAction) -> &InstrumentId {
 /// than the run's would act on a position the run does not hold.
 fn check_actions(input: &BacktestInput<'_>) -> Result<(), BacktestError> {
     let actions = input.corporate_actions;
-    let foreign = actions
+    if let Some(foreign) = actions
         .iter()
-        .any(|action| action_instrument(action) != &input.config.instrument_id);
-    if foreign || !actions.is_sorted_by_key(ex_date) {
-        return Err(BacktestError::Unimplemented { story: "E4-4" });
+        .find(|action| action_instrument(action) != &input.config.instrument_id)
+    {
+        return Err(BacktestError::CorporateActionOtherInstrument(ex_date(
+            foreign,
+        )));
+    }
+    if !actions.is_sorted_by_key(ex_date) {
+        return Err(BacktestError::CorporateActionsUnordered);
     }
     Ok(())
 }
