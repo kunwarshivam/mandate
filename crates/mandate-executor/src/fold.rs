@@ -370,7 +370,7 @@ fn intent_received(
         instrument: instrument(payload)?,
         side: side_of(required_text(payload, "side")?)?,
         qty: qty(payload, "qty")?,
-        limit: limit_of(payload)?.ok_or_else(|| refused("limit_price"))?,
+        limit: received_limit(payload)?,
         purpose: purpose_of(required_text(payload, "purpose")?)?,
         protection: prices_of(payload)?,
     };
@@ -498,6 +498,19 @@ fn gate_decided(
     }
     state.held.remove(&id);
     Ok(())
+}
+
+/// An `IntentReceived`'s limit: its `limit_price`, or none for an exit received at the market,
+/// whose `type` is `market` (journal spec §9.5, DEC-2037 item 2). An opening or an increase with
+/// no limit is refused, as the core never receives one (`AGENTS.md` rule 12).
+fn received_limit(payload: &Value) -> Result<Option<Price>, ExecutorError> {
+    let market = optional_text(payload, "type") == Some("market");
+    let opening = purpose_of(required_text(payload, "purpose")?)?.adds_risk();
+    match limit_of(payload)? {
+        Some(limit) if !market => Ok(Some(limit)),
+        None if market && !opening => Ok(None),
+        _ => Err(refused("limit_price")),
+    }
 }
 
 /// The exact request an `OrderSubmitted` names, rebuilt from its payload, so a resubmission after
@@ -1890,9 +1903,10 @@ mod companion_tests {
 #[cfg(test)]
 mod tests {
     use mandate_accounting::{InstrumentId, Side};
-    use mandate_num::Qty;
+    use mandate_canon::Value;
+    use mandate_num::{Price, Qty};
 
-    use super::{fold, net_unattributed};
+    use super::{fold, net_unattributed, received_limit};
     use crate::error::ExecutorError;
     use crate::ids::{ClientOrderId, IntentId};
     use crate::payload::{clock, object, text};
@@ -1901,6 +1915,56 @@ mod tests {
         AccountRef, AccountScope, AgentId, EventId, FoldedEvent, Order, OrderState, Purpose,
         RiskClock, Seq, WorkspaceId,
     };
+
+    /// Journal spec §9.5 rule 245, DEC-2037 item 2: an `IntentReceived`'s limit reads back as
+    /// written for `type` `limit`, and as none only for an exit received at the market; a limit
+    /// on a market intent, no limit on a limit intent, and a market opening or increase are each a
+    /// non-canonical `limit_price`.
+    #[test]
+    fn a_received_intent_folds_its_limit_by_rule_245() -> Result<(), ExecutorError> {
+        let received = |kind: &str, limit: Option<&str>, purpose: &str| {
+            object(vec![
+                ("type", text(kind)),
+                ("limit_price", limit.map_or(Value::Null, text)),
+                ("purpose", text(purpose)),
+            ])
+        };
+        let refused = || ExecutorError::NonCanonicalPayload {
+            field: "limit_price".to_owned(),
+        };
+        for purpose in ["open", "risk_exit"] {
+            assert_eq!(
+                received_limit(&received("limit", Some("150"), purpose)?),
+                Ok(Some(Price::parse("150")?)),
+                "{purpose}"
+            );
+            assert_eq!(
+                received_limit(&received("limit", None, purpose)?),
+                Err(refused()),
+                "{purpose}"
+            );
+            assert_eq!(
+                received_limit(&received("market", Some("150"), purpose)?),
+                Err(refused()),
+                "{purpose}"
+            );
+        }
+        for purpose in ["risk_exit", "discretionary_exit", "owner_exit"] {
+            assert_eq!(
+                received_limit(&received("market", None, purpose)?),
+                Ok(None),
+                "{purpose}"
+            );
+        }
+        for purpose in ["open", "increase"] {
+            assert_eq!(
+                received_limit(&received("market", None, purpose)?),
+                Err(refused()),
+                "{purpose}"
+            );
+        }
+        Ok(())
+    }
 
     /// DEC-421 item 5: an unattributed sell of 5 AAPL nets only against an ended AAPL sell's
     /// unapplied report, here 3 of `md-3-ended`'s. A live AAPL sell, an ended AAPL buy and an
