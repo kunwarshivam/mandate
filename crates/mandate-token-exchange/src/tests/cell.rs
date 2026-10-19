@@ -6,7 +6,6 @@ use crate::cell::{Refused, parse};
 const FIXTURE: &str = "http://127.0.0.1:8899/alpaca/oauth/token";
 
 #[test]
-#[ignore = "pending E10-13"]
 fn only_a_dev_or_ci_tier_admits_a_token_url() {
     for tier in ["dev", "ci"] {
         assert_eq!(
@@ -28,7 +27,6 @@ fn only_a_dev_or_ci_tier_admits_a_token_url() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_loopback_url_with_a_path_and_nothing_else_is_admitted_as_given() {
     let admitted = [
         FIXTURE,
@@ -49,7 +47,6 @@ fn a_loopback_url_with_a_path_and_nothing_else_is_admitted_as_given() {
 /// No Alpaca host is ever admitted, in any spelling, so the override cannot point a real exchange
 /// anywhere: the only way to Alpaca is the pinned live URL.
 #[test]
-#[ignore = "pending E10-13"]
 fn no_alpaca_host_is_admitted_in_any_tier() {
     let alpaca = [
         "https://api.alpaca.markets/oauth/token",
@@ -69,7 +66,6 @@ fn no_alpaca_host_is_admitted_in_any_tier() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn any_other_url_is_refused() {
     let refused = [
         "",

@@ -10,7 +10,6 @@ const JSON: Option<&str> = Some("application/json");
 const GRANT: &str = r#"{"access_token":"tok-CANARY","scope":"trading data","token_type":"bearer"}"#;
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_200_json_object_yields_its_three_members() {
     for content_type in ["application/json", "application/json; charset=utf-8"] {
         let answer = token_response(200, Some(content_type), GRANT.as_bytes())
@@ -27,7 +26,6 @@ fn a_200_json_object_yields_its_three_members() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn any_other_answer_is_endpoint_failed() {
     for status in [201, 204, 301, 302, 303, 307, 308, 400, 401, 500, 503] {
         assert_eq!(
@@ -72,7 +70,6 @@ fn any_other_answer_is_endpoint_failed() {
 /// A body longer than [`MAX_BODY`] is refused, even a valid grant padded with whitespace; one at
 /// the limit is read.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_body_over_sixteen_kibibytes_is_refused_and_one_at_the_limit_is_read() {
     let at_limit = format!("{GRANT}{}", " ".repeat(MAX_BODY - GRANT.len()));
     assert_eq!(at_limit.len(), 16 * 1024);
@@ -85,7 +82,6 @@ fn a_body_over_sixteen_kibibytes_is_refused_and_one_at_the_limit_is_read() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn no_refusal_carries_the_body() {
     let mut printed = String::new();
     for (status, body) in [(400, GRANT), (200, r#"{"access_token":"tok-CANARY"}"#)] {

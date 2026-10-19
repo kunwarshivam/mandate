@@ -52,7 +52,6 @@ fn decoded(text: &str) -> Option<String> {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn the_body_is_the_six_members_in_order_with_reserved_characters_encoded() {
     let values = Values {
         code: "c0de/+=".to_owned(),
@@ -72,7 +71,6 @@ fn the_body_is_the_six_members_in_order_with_reserved_characters_encoded() {
 /// For any visible-ASCII values, the body is unreserved characters, `%`, `&` and `=` only, and
 /// splitting and decoding it independently gives back the six members, each once, in order.
 #[test]
-#[ignore = "pending E10-13"]
 fn any_values_decode_back_to_exactly_the_six_members() {
     let value = || "[!-~ ]{1,64}";
     let values = (value(), value(), value(), value(), value());

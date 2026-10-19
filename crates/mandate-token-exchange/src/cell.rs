@@ -2,6 +2,12 @@
 //! only with debug assertions: a release build has no code that reads one, so it can send the
 //! token request only to the URL `mandate_connections::hosts::LiveTokenRequest` pins.
 
+use mandate_release::Tier;
+
+/// The hosts a cell token URL may name: the loopback literals and `localhost`. No Alpaca host is
+/// among them, so the URL can never reach Alpaca.
+const LOOPBACK: [&str; 3] = ["127.0.0.1", "[::1]", "localhost"];
+
 /// Why a cell token URL is refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Refused {
@@ -37,10 +43,52 @@ impl CellTokenUrl {
 ///
 /// # Errors
 /// [`Refused::Tier`] first, then [`Refused::Url`].
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
-pub fn parse(_tier: Option<&str>, _text: &str) -> Result<CellTokenUrl, Refused> {
-    todo!()
+pub fn parse(tier: Option<&str>, text: &str) -> Result<CellTokenUrl, Refused> {
+    if !matches!(Tier::from_setting(tier), Tier::Dev | Tier::Ci) {
+        return Err(Refused::Tier);
+    }
+    if admitted(text) {
+        Ok(CellTokenUrl(text.to_owned()))
+    } else {
+        Err(Refused::Url)
+    }
+}
+
+/// `http://` or `https://`, a [`LOOPBACK`] host with an optional port from 1 to 65535, and a
+/// non-empty path of unreserved characters and `/`: nothing else, so no user information, query,
+/// or fragment.
+fn admitted(text: &str) -> bool {
+    let Some(rest) = text
+        .strip_prefix("http://")
+        .or_else(|| text.strip_prefix("https://"))
+    else {
+        return false;
+    };
+    let Some((authority, path)) = rest.split_once('/') else {
+        return false;
+    };
+    let (host, port) = match authority.split_once(']') {
+        Some((inside, after)) => (
+            authority.get(..=inside.len()).unwrap_or_default(),
+            match after.strip_prefix(':') {
+                Some(port) => Some(port),
+                None if after.is_empty() => None,
+                None => return false,
+            },
+        ),
+        None => match authority.split_once(':') {
+            Some((host, port)) => (host, Some(port)),
+            None => (authority, None),
+        },
+    };
+    let port_ok = port.is_none_or(|port| {
+        !port.starts_with('0')
+            && port.bytes().all(|b| b.is_ascii_digit())
+            && port.parse::<u16>().is_ok_and(|n| n != 0)
+    });
+    let path_ok = !path.is_empty()
+        && path
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~' | b'/'));
+    LOOPBACK.contains(&host) && port_ok && path_ok
 }
