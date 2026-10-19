@@ -5,7 +5,7 @@
 mock_provider "digitalocean" {
   mock_data "digitalocean_kubernetes_versions" {
     defaults = {
-      valid_versions = ["1.35.1-do.0"]
+      valid_versions = ["1.35.9-do.1"]
     }
   }
 
@@ -80,6 +80,49 @@ run "refuses_a_public_api_origin" {
   }
 
   expect_failures = [var.api_origin]
+}
+
+# The listing provider 5.27.0 returned in the founder's first plan: one account, once per page.
+run "a_listing_that_repeats_one_account_is_that_account" {
+  command = plan
+
+  override_data {
+    target = data.cloudflare_accounts.visible
+    values = {
+      result = [{ id = "fedcba9876543210fedcba9876543210", name = "founder", type = "standard", created_on = "2026-01-01T00:00:00Z", managed_by = { parent_org_id = "", parent_org_name = "" }, settings = { abuse_contact_email = "", enforce_twofactor = true } }, { id = "fedcba9876543210fedcba9876543210", name = "founder", type = "standard", created_on = "2026-01-01T00:00:00Z", managed_by = { parent_org_id = "", parent_org_name = "" }, settings = { abuse_contact_email = "", enforce_twofactor = true } }, { id = "", name = "founder", type = "standard", created_on = "2026-01-01T00:00:00Z", managed_by = { parent_org_id = "", parent_org_name = "" }, settings = { abuse_contact_email = "", enforce_twofactor = true } }]
+    }
+  }
+
+  assert {
+    condition     = nonsensitive(output.cloudflare_account_id) == "fedcba9876543210fedcba9876543210"
+    error_message = "The repeated account is the one account the plan uses."
+  }
+}
+
+run "refuses_a_repeating_listing_of_two_accounts" {
+  command = plan
+
+  override_data {
+    target = data.cloudflare_accounts.visible
+    values = {
+      result = [{ id = "fedcba9876543210fedcba9876543210", name = "founder", type = "standard", created_on = "2026-01-01T00:00:00Z", managed_by = { parent_org_id = "", parent_org_name = "" }, settings = { abuse_contact_email = "", enforce_twofactor = true } }, { id = "0123456789abcdef0123456789abcdef", name = "founder", type = "standard", created_on = "2026-01-01T00:00:00Z", managed_by = { parent_org_id = "", parent_org_name = "" }, settings = { abuse_contact_email = "", enforce_twofactor = true } }, { id = "fedcba9876543210fedcba9876543210", name = "founder", type = "standard", created_on = "2026-01-01T00:00:00Z", managed_by = { parent_org_id = "", parent_org_name = "" }, settings = { abuse_contact_email = "", enforce_twofactor = true } }, { id = "0123456789abcdef0123456789abcdef", name = "founder", type = "standard", created_on = "2026-01-01T00:00:00Z", managed_by = { parent_org_id = "", parent_org_name = "" }, settings = { abuse_contact_email = "", enforce_twofactor = true } }]
+    }
+  }
+
+  expect_failures = [data.cloudflare_accounts.visible]
+}
+
+run "refuses_a_listing_with_no_account" {
+  command = plan
+
+  override_data {
+    target = data.cloudflare_accounts.visible
+    values = {
+      result = [{ id = "", name = "founder", type = "standard", created_on = "2026-01-01T00:00:00Z", managed_by = { parent_org_id = "", parent_org_name = "" }, settings = { abuse_contact_email = "", enforce_twofactor = true } }]
+    }
+  }
+
+  expect_failures = [data.cloudflare_accounts.visible]
 }
 
 run "refuses_a_token_that_sees_two_accounts" {
