@@ -31,6 +31,7 @@ fn a_loopback_url_with_a_path_and_nothing_else_is_admitted_as_given() {
     let admitted = [
         FIXTURE,
         "http://[::1]:8899/alpaca/oauth/token",
+        "http://[::1]/alpaca/oauth/token",
         "http://localhost:8899/alpaca/oauth/token",
         "https://localhost/alpaca/oauth/token",
         "http://127.0.0.1/t",
@@ -84,6 +85,8 @@ fn any_other_url_is_refused() {
         "http://localhost.evil.example/alpaca/oauth/token",
         "http://127.0.0.1.nip.io/alpaca/oauth/token",
         "http://[::ffff:127.0.0.1]/alpaca/oauth/token",
+        "http://[::1]8899/alpaca/oauth/token",
+        "http://[::1]x/alpaca/oauth/token",
         " http://127.0.0.1/alpaca/oauth/token",
         "http://127.0.0.1/alpaca/oauth/token ",
         "http://127.0.0.1/alpaca\\oauth/token",
