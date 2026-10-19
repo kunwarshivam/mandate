@@ -47,6 +47,6 @@
   journaled, and invalid ids refused. `src/fixture.rs`'s unit tests: its ids and wiring.
   `tests/journal.rs`: the binary's process on the in-memory journal and the fixture broker,
   reconciled and ready, once across a restart. `tests/launch.rs` and `tests/binary.rs`: the
-  launch's refusals, `connect-check`'s output, and probes and drain. `tests/pg.rs`: the connect
+  launch's refusals, `--fixture` refused on a manager's pod, `connect-check`'s output, and probes and drain. `tests/pg.rs`: the connect
   check and the process on Postgres.
 - **Run:** `cargo nextest run -p mandate-executord` (with `MANDATE_PG_URL` for `tests/pg.rs`).
