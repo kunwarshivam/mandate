@@ -1653,6 +1653,7 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
     if event_type == "StepUpConfirmed":
         rule("242.kind", p["action_kind"] == "approve", "schema", "payload.action_kind")
         rule("242.paper", draft["environment"] == "paper", "schema", "environment")
+        rule("242.time", p["confirmed_at"] == epoch_seconds(draft["event_time"]), "schema", "payload.confirmed_at")
         if rule_holds("242.user", draft["actor"]["kind"] == "user", skip):
             rule("242.principal", draft["actor"]["id"] == p["principal"], "schema", "actor.id")
         else:

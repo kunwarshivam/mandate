@@ -93,6 +93,7 @@ MEMBER_CASES = (
     ("code", 7, "7kxv6bgd"),
 )
 INT_MEMBERS = ("confirmed_at",)
+RULE_242_MEMBERS = ("action_kind", "confirmed_at")
 NULLED = ("challenge", "action_kind", "action_digest", "principal", "code", "confirmed_at")
 
 
@@ -136,6 +137,21 @@ def rule_drafts() -> list[dict]:
             "actor.kind",
         ),
         invalid("for_another_principal", "rule 242: the actor's id is the principal", [change("actor.id", OTHER_PRINCIPAL)], "schema", "actor.id"),
+        invalid("backdated", "rule 242: `confirmed_at` is `event_time`'s second", [change("payload.confirmed_at", 0)], "schema", "payload.confirmed_at"),
+        invalid(
+            "a_second_early",
+            "rule 242: not the second before",
+            [change("payload.confirmed_at", CONFIRMED_AT - 1)],
+            "schema",
+            "payload.confirmed_at",
+        ),
+        invalid(
+            "a_second_late",
+            "rule 242: not the second after",
+            [change("payload.confirmed_at", CONFIRMED_AT + 1)],
+            "schema",
+            "payload.confirmed_at",
+        ),
     ]
 
 
@@ -158,7 +174,11 @@ def valid_drafts() -> list[dict]:
             [change("payload.principal", OTHER_PRINCIPAL), change("actor.id", OTHER_PRINCIPAL)],
         ),
         valid("caused", "§9.29: no rule reads the cause", [change("causation_id", OTHER_CHALLENGE)]),
-        valid("an_early_second", "§9.29: no rule reads `confirmed_at`; the API judges it", [change("payload.confirmed_at", 0)]),
+        valid(
+            "within_its_second",
+            "rule 242: `confirmed_at` is `event_time`'s whole second, its fraction dropped",
+            [change("event_time", "2026-10-18T22:30:05.999999999Z")],
+        ),
         valid("all_digits", "§9.29 `confirm_code`: digits are Crockford characters", [change("payload.code", "01234567")]),
     ]
 
@@ -241,7 +261,8 @@ def check_section(section: dict) -> list[str]:
         if got:
             problems.append(found("drafts.valid", f"base draft {name}: {got}"))
     base = section["drafts"][BASE]
-    if base["actor"]["id"] != base["payload"]["principal"] or base["payload"]["action_kind"] != "approve":
+    own_second = base["event_time"] == AT and base["payload"]["confirmed_at"] == CONFIRMED_AT
+    if base["actor"]["id"] != base["payload"]["principal"] or base["payload"]["action_kind"] != "approve" or not own_second:
         problems.append(found("drafts.confirmation", "the base StepUpConfirmed is not the principal's own approve"))
     for case in section["invalid_drafts"]:
         got = violations(draft_for(section, case))
@@ -268,14 +289,16 @@ VALIDATOR_MUTANTS = (
     "record.extra",
     "record.missing",
     *(f"loose.payload.{member}" for member, _, _ in MEMBER_CASES),
-    # A null `action_kind` is refused by rule 242 with the same reason and path as by its type, so
-    # loosening its type alone changes no report: that mutant is equivalent and is not seeded.
-    *(f"nullable.payload.{member}" for member in NULLED if member != "action_kind"),
+    # A null `action_kind` or `confirmed_at` is refused by rule 242 with the same reason and path
+    # as by its type, so loosening its type alone changes no report: those mutants are equivalent
+    # and are not seeded.
+    *(f"nullable.payload.{member}" for member in NULLED if member not in RULE_242_MEMBERS),
     "types.confirm_code_case",
     "rule.242.kind",
     "rule.242.paper",
     "rule.242.user",
     "rule.242.principal",
+    "rule.242.time",
 )
 
 

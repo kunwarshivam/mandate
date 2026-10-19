@@ -67602,6 +67602,36 @@ step_up_confirmations:
       outcome: Invalid
       reason: schema
       path: actor.id
+  - name: backdated
+    clause: 'rule 242: `confirmed_at` is `event_time`''s second'
+    base_draft: step_up_confirmed
+    changes:
+    - path: payload.confirmed_at
+      value: 0
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.confirmed_at
+  - name: a_second_early
+    clause: 'rule 242: not the second before'
+    base_draft: step_up_confirmed
+    changes:
+    - path: payload.confirmed_at
+      value: 1792362604
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.confirmed_at
+  - name: a_second_late
+    clause: 'rule 242: not the second after'
+    base_draft: step_up_confirmed
+    changes:
+    - path: payload.confirmed_at
+      value: 1792362606
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.confirmed_at
   - name: at_version_2
     clause: '§9.29: closed at schema version 1 only'
     base_draft: step_up_confirmed
@@ -67639,12 +67669,12 @@ step_up_confirmations:
       value: 01JAA2P0A000000000000000H2
     expect:
       outcome: Valid
-  - name: an_early_second
-    clause: '§9.29: no rule reads `confirmed_at`; the API judges it'
+  - name: within_its_second
+    clause: 'rule 242: `confirmed_at` is `event_time`''s whole second, its fraction dropped'
     base_draft: step_up_confirmed
     changes:
-    - path: payload.confirmed_at
-      value: 0
+    - path: event_time
+      value: '2026-10-18T22:30:05.999999999Z'
     expect:
       outcome: Valid
   - name: all_digits

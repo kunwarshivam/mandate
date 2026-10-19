@@ -5473,14 +5473,16 @@ executor never read it, and the grant's own evidence is judged as mandate §6.1 
 | `action_digest` | `ref` | The action's digest, read by the CLI from this stream: the approval's content hash |
 | `principal` | `ulid` | The confirming principal, as the API writes its `actor.id` |
 | `code` | `confirm_code` | The code the owner typed, normalized |
-| `confirmed_at` | `integer` | The second the owner ran the command |
+| `confirmed_at` | `integer` | The second the owner ran the command: `event_time`'s whole second (rule 242) |
 
 **Consistency rules** (reason `schema`; the path is the member named):
 
 242. `StepUpConfirmed`: `action_kind` is `approve` (`payload.action_kind`); the envelope's
      `environment` is `paper` (`environment`): a `live` confirmation is never recorded; and the
      actor is a `user` whose `id` is `principal` (`actor.kind`, then `actor.id`), so no writer
-     confirms for another principal.
+     confirms for another principal; and `confirmed_at` is `event_time` in whole seconds, its
+     fraction dropped (`payload.confirmed_at`), so the second the API judges the challenge's
+     window by is the record's own time, never one the writer chose apart from it.
 
 **Stream rule** on the control stream, judged before anything takes effect, and failing closed:
 
@@ -5488,7 +5490,14 @@ executor never read it, and the grant's own evidence is judged as mandate §6.1 
      challenge is confirmed at most once, whether or not a grant then uses it.
 
 The CLI checks rules 242 and 243 against its own fold of the control stream before appending, and
-appends nothing that would fail them. `append` sees one record and checks rule 242 only.
+appends nothing that would fail them. `append` sees one record and checks rule 242 only, so rule
+243 is the writer's own: two writers racing could each append one. The API's verifier does not
+trust it: it counts the confirmations naming a challenge and accepts exactly one, so a race that
+leaves two refuses the grant (`step_up_missing`, DEC-2104 item 6 check 6) and never passes one.
+
+**What binds a confirmation.** A confirmation names no workspace: it is bound to its workspace by
+the stream it is on, the workspace's own control stream, which the API reads for that workspace
+alone, and to its action by `action_digest` and `action_kind`, which must be the challenge's.
 
 **What the API makes of it.** DEC-2104 item 6 is the order: the confirmation must name a challenge
 the API holds, match its kind, digest, and principal, fall within its 300 s, and carry its code.
