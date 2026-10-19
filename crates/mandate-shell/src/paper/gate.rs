@@ -232,15 +232,25 @@ pub(super) fn gate_mandate(document: &mandate_spec::Mandate) -> Result<GateManda
     ))
 }
 
-pub(super) fn advisory_gate_context(template: BindingGateInput) -> AdvisoryGateContext {
+/// The advisory gate's context from the binding gate's `template`, with the account risk view and
+/// the agent's mode named by the caller: the gate reads both only from here, so whoever builds a
+/// context says where its risk state came from (lane TW's E6-15 slice C supplies them from the
+/// account risk view).
+pub(super) fn advisory_gate_context(
+    template: BindingGateInput,
+    risk: RiskSnapshot,
+    mode: AgentMode,
+) -> AdvisoryGateContext {
+    let mut agent = template.agent;
+    agent.mode = mode;
     AdvisoryGateContext {
         now: template.now,
         pass: GatePass::First,
         config: template.config,
         mandate: template.mandate,
-        risk: template.risk,
+        risk,
         account: template.account,
-        agent: template.agent,
+        agent,
         instrument: template.instrument,
         market: template.market,
         conduct: template.conduct,
