@@ -549,6 +549,22 @@ pub(crate) fn rust_findings(sources: &[Source]) -> Vec<Finding> {
             if trimmed.contains("env::vars") {
                 hits.push("`env::vars()` reads every variable, secrets among them");
             }
+            if trimmed.split("env::{").skip(1).any(|group| {
+                group
+                    .split('}')
+                    .next()
+                    .unwrap_or_default()
+                    .split(',')
+                    .any(|item| {
+                        let name = item.split_whitespace().next().unwrap_or_default();
+                        matches!(name, "var" | "var_os" | "vars" | "vars_os")
+                    })
+            }) {
+                hits.push(
+                    "`env::var` and `env::vars` are called where they are named, never imported, \
+                     so every call is read",
+                );
+            }
             if trimmed.contains("::add-mask::") && source.path != MASK {
                 hits.push(
                     "`::add-mask::` is written only by `mask.rs`, through `mask::add_mask`, which \
@@ -620,9 +636,16 @@ fn env_var_problems(text: &str, first: usize) -> Vec<&'static str> {
             break;
         }
         let tail = text.get(from..).unwrap_or_default();
+        if tail.starts_with('s') {
+            continue;
+        }
         let os = tail.starts_with("_os");
         let tail = tail.strip_prefix("_os").unwrap_or(tail);
         let Some(inner) = tail.strip_prefix('(') else {
+            out.push(
+                "`env::var` is called where it is named, never imported or passed as a path, so \
+                 every call is read",
+            );
             continue;
         };
         let mut depth = 1_usize;
@@ -3910,8 +3933,8 @@ mod tests {
 
     /// The #1732 review's probes, each a line L10 once let through: a computed `env::var`
     /// argument; a secret's `env::var` error reaching `?`, `.unwrap()`, `.expect(` or `.map_err(`;
-    /// a second `env::var` on one line; `{:#?}`; an imported `vars`; and a `cfg_attr` or
-    /// multi-line `derive(Debug)` over a secret field.
+    /// a second `env::var` on one line; `{:#?}`; an imported `vars` or `var`, or `env::var`
+    /// passed as a path; and a `cfg_attr` or multi-line `derive(Debug)` over a secret field.
     const L10_REVIEW_PROBES: &[(&str, &str)] = &[
         ("call", "    let v = env::var(name_of(1)).context(\"x\")?;"),
         (
@@ -3935,6 +3958,11 @@ mod tests {
         ),
         ("pretty", "    eprintln!(\"running {command:#?}\");"),
         ("import", "use std::env::vars;"),
+        ("import-var", "use std::env::var;"),
+        ("import-var-as", "use std::env::var as v;"),
+        ("import-group", "use std::env::{self, var};"),
+        ("path-let", "    let f = env::var;"),
+        ("path-map", "    let v = names.iter().map(env::var);"),
         (
             "cfg-attr",
             "#[cfg_attr(test, derive(Debug))]\nstruct Login {\n    password: String,\n}",
