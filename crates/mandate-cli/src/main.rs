@@ -1,4 +1,4 @@
-use std::io;
+use std::io::{self, IsTerminal};
 use std::time::SystemTime;
 
 use anyhow::{Context, bail};
@@ -190,12 +190,19 @@ fn main() -> anyhow::Result<()> {
         Command::Vault(VaultCommand::Put(args)) => vault::run_put(
             &args,
             &mut io::stdin().lock(),
+            vault::Terminals {
+                stdin: io::stdin().is_terminal(),
+                stdout: io::stdout().is_terminal(),
+            },
             now()?.at,
             &mut io::stdout().lock(),
         ),
-        Command::Vault(VaultCommand::Provision(args)) => {
-            vault::run_provision(&args, &mut io::stdout().lock())
-        }
+        Command::Vault(VaultCommand::Provision(args)) => vault::run_provision(
+            &args,
+            &mut io::stdin().lock(),
+            io::stdout().is_terminal(),
+            &mut io::stdout().lock(),
+        ),
         Command::Db(DbCommand::Migrate(args)) => {
             db::migrate(&args, &mut io::stdout().lock())?;
             Ok(())

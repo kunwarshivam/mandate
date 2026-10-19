@@ -271,6 +271,35 @@ pub struct RevokeRequest {
     pub step_up: Option<StepUpEvidence>,
 }
 
+/// The broker an OAuth connect names: Alpaca alone (§4.5, DEC-2623 item 1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OauthBroker {
+    Alpaca,
+}
+
+/// The token-breadth disclosure an owner confirmed, by document and version, never by its text
+/// (DEC-2621 items 4 and 5).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(remote = "Self", deny_unknown_fields)]
+pub struct Disclosure {
+    pub document: Id,
+    pub version: String,
+}
+
+/// `POST /connections/oauth/start` (§4.5, DEC-2623 item 1). A `null` step-up is decoded, and the
+/// route refuses it with nothing appended; `environment` `live` is decoded, and the route refuses
+/// it as `live_unavailable` (DEC-883).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(remote = "Self", deny_unknown_fields)]
+pub struct OauthStartRequest {
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub step_up: Option<StepUpEvidence>,
+    pub broker: OauthBroker,
+    pub environment: Environment,
+    pub disclosure: Disclosure,
+}
+
 impl Rules for ConfirmRequest {
     fn rules(&self, at: &str, check: &mut Check) {
         for (index, path) in self.confirmed_paths.iter().enumerate() {
@@ -317,7 +346,17 @@ impl Rules for StopRequest {
 }
 
 crate::wire::rules!(checked: ConfirmRequest, ApprovalResponseRequest, DelegationPreviewRequest);
-crate::wire::rules!(checked: StopRequest);
+impl Rules for OauthStartRequest {
+    fn rules(&self, at: &str, check: &mut Check) {
+        let version = self.disclosure.version.as_str();
+        let holds = (1..=9).contains(&version.len())
+            && version.bytes().all(|b| b.is_ascii_digit())
+            && !version.starts_with('0');
+        check.rule(holds, &format!("{at}/disclosure/version"), "pattern");
+    }
+}
+
+crate::wire::rules!(checked: StopRequest, OauthStartRequest);
 crate::wire::rules!(none: KillSwitchRequest, OwnerExitRequest, RevokeRequest);
 
 crate::wire::object_only!(
@@ -338,5 +377,7 @@ crate::wire::object_only!(
     BidConfirmation,
     OwnerExitRequest,
     RevokeRequest,
-    StepUpChallengeRequest
+    StepUpChallengeRequest,
+    Disclosure,
+    OauthStartRequest
 );

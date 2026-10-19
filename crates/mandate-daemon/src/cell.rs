@@ -10,8 +10,9 @@ use std::rc::Rc;
 
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Digest, Key, Object, Value};
-use mandate_gateway::meter::SharedMeter;
+use mandate_gateway::meter::{MeterStore, SharedMeter};
 use mandate_gateway::money::Usd6;
+use mandate_gateway::provider::SequentialIds;
 use mandate_journal::{Environment, StreamId};
 use mandate_num::Usd;
 use mandate_research::PolicyOverlay;
@@ -154,8 +155,33 @@ pub fn research_daily_cap(document: &Value) -> Result<Usd6, CellError> {
     Usd6::parse(&cap.to_string()).map_err(|_| unavailable())
 }
 
+/// The ids a workspace's meter writer opens its stream with, its `StreamOpened` the one record it
+/// gives an id of its own (DEC-2258 item 2): drawn from the stream's own name, so no two
+/// workspaces' streams open with one id, as the journal's event ids must not repeat across streams.
+pub fn meter_opened_ids(workspace: &str) -> SequentialIds {
+    let digest = Digest::of(format!("meter:{workspace}").as_bytes());
+    let (high, _) = digest.as_bytes().split_at(16);
+    SequentialIds::starting_at(u128::from_be_bytes(high.try_into().unwrap_or([0; 16])))
+}
+
+/// As [`research`], with the worker's gateway and the research source sharing `meter`, the
+/// workspace's journaled meter stream in a process given a journal (DEC-2259 item 1).
+///
+/// # Errors
+/// As [`research`].
+pub fn research_metered(
+    opted: OptIn,
+    rows: Box<dyn Rows>,
+    meter: Box<dyn MeterStore>,
+    artifacts: &Path,
+    now: Box<dyn FnMut() -> UtcNanos>,
+) -> Result<CellResearch, CellError> {
+    wired(opted, rows, meter, artifacts, now)
+}
+
 /// The research `opted` asks for, reading the streams through `rows` and the mandate documents and
-/// artifacts from the store at `artifacts`.
+/// artifacts from the store at `artifacts`, its meter in memory, for fixtures and tests (DEC-2259
+/// item 1).
 ///
 /// # Errors
 /// [`CellError`] when the artifact store, the deployment, its mandate document, or the worker cannot
@@ -163,6 +189,17 @@ pub fn research_daily_cap(document: &Value) -> Result<Usd6, CellError> {
 pub fn research(
     opted: OptIn,
     rows: Box<dyn Rows>,
+    artifacts: &Path,
+    now: Box<dyn FnMut() -> UtcNanos>,
+) -> Result<CellResearch, CellError> {
+    wired(opted, rows, Box::new(SharedMeter::new()), artifacts, now)
+}
+
+/// The research `opted` asks for, its worker's gateway and source sharing `meter`.
+fn wired(
+    opted: OptIn,
+    rows: Box<dyn Rows>,
+    meter: Box<dyn MeterStore>,
     artifacts: &Path,
     now: Box<dyn FnMut() -> UtcNanos>,
 ) -> Result<CellResearch, CellError> {
@@ -178,12 +215,7 @@ pub fn research(
         agent: deployment.agent.clone(),
         environment: deployment.environment,
     };
-    let meter = CellMeter::new(
-        SharedMeter::new(),
-        Rc::clone(&rows),
-        who.clone(),
-        Rc::new(clock.clone()),
-    );
+    let meter = CellMeter::over(meter, Rc::clone(&rows), who.clone(), Rc::new(clock.clone()));
     let open =
         || FsArtifactStore::open_existing(artifacts).map_err(|_| CellError::ArtifactsUnavailable);
     let control = StreamId::parse(&format!("ctl:{}", deployment.workspace))
