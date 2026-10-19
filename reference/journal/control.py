@@ -1216,8 +1216,27 @@ VERSIONED_VERSIONS: dict[tuple[str, str], tuple[int, ...]] = {
     ("agent", "OwnerCommandRefused"): (1, 2),
     ("ctl", "VerificationRun"): (1, 2),
     ("ctl", "AgentDeployed"): (1, 2),
+    ("acct", "MarkUpdated"): (1, 2),
 }
+# §9.30 (DEC-2305): `MarkUpdated` version 2 adds the risk mark's bid, its sanity verdict, and its
+# session to version 1's members, with `risk_clock` last; version 1 stays registered.
+MARK_UPDATED_V1_MEMBERS = (
+    ("instrument_id", STR),
+    ("price", DEC),
+    ("source", STR),
+    ("feed", STR),
+)
+MARK_SESSIONS = ("overnight", "pre_market", "regular", "after_hours", "crypto")
+MARK_UPDATED_V2 = rec(
+    *MARK_UPDATED_V1_MEMBERS,
+    ("bid", opt(DEC)),
+    ("sane", BOOL),
+    ("session", one_of(*MARK_SESSIONS)),
+    ("risk_clock", RISK_CLOCK),
+)
 VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
+    ("acct", "MarkUpdated", 1): rec(*MARK_UPDATED_V1_MEMBERS, ("risk_clock", RISK_CLOCK)),
+    ("acct", "MarkUpdated", 2): MARK_UPDATED_V2,
     ("acct", "StreamOpened", 1): rec(
         ("stream_type", one_of("account")),
         ("workspace_id", IDENT_T),
@@ -1650,6 +1669,31 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
         if not holds and f"rule.{name}" not in skip:
             out.append(Violation(f"rule.{name}", reason, path))
 
+    if event_type == "MarkUpdated" and draft["schema_version"] == 2 and p["sane"]:
+        bid = p["bid"]
+        if bid is None:
+            positive = "rule.244.null" in skip
+        elif not isinstance(bid, str) or normalize_decimal(bid) is None:
+            positive = True
+        elif "boundary.rule_244_zero" in skip:
+            positive = Decimal(bid) >= 0
+        else:
+            positive = Decimal(bid) > 0
+        rule("244", positive, "schema", "payload.bid")
+    if event_type == "IntentReceived":
+        openings = ("open",) if "rule.245.increase" in skip else ("open", "increase")
+        known = p["type"] in ("limit", "market") or "rule.245.other_type" in skip
+        exit_only = p["type"] != "market" or p["purpose"] not in openings or "rule.245.market_opening" in skip
+        priced = p["limit_price"] is not None
+        if p["type"] == "limit":
+            price_ok = priced or "rule.245.limit_null" in skip
+        else:
+            price_ok = not priced or "rule.245.market_priced" in skip
+        clauses = [("type", known and exit_only), ("limit_price", price_ok)]
+        if "order.rule_245_price_first" in skip:
+            clauses.reverse()
+        wrong = next((m for m, ok in clauses if not ok), None)
+        rule("245", wrong is None, "schema", f"payload.{wrong}" if wrong else "")
     if event_type == "StepUpConfirmed":
         rule("242.kind", p["action_kind"] == "approve", "schema", "payload.action_kind")
         rule("242.paper", draft["environment"] == "paper", "schema", "environment")
@@ -3060,6 +3104,10 @@ def violations(draft: dict, skip: frozenset[str] = frozenset()) -> list[Violatio
         ]
     versions = VERSIONED_VERSIONS.get((stream[0], event_type), (1,))
     if event_type == "AgentDeployed" and "versions.agent_deployed_v2" in skip:
+        versions = (1,)
+    if event_type == "MarkUpdated" and "versions.mark_updated_v1" in skip:
+        versions = (2,)
+    if event_type == "MarkUpdated" and "versions.mark_updated_v2" in skip:
         versions = (1,)
     if draft["schema_version"] not in versions:
         return [*out, Violation("catalogue", "unknown_schema", "payload")]

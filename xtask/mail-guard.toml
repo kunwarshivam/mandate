@@ -23,6 +23,26 @@ crate = "mandate-mail-smtp"
 type = "FounderSmtpTransport"
 file = "crates/mandate-mail-smtp/src/lib.rs"
 
+# String literals that name a mail endpoint, refused anywhere but these crates: the founder-only
+# transport's, and xtask's own, whose configuration and tests name them (DEC-2511 item 9).
+[literals]
+exempt_crates = ["mandate-mail-smtp", "xtask"]
+substrings = [
+  "amazonses.com",
+  "api.mailgun.net",
+  "api.mailjet.com",
+  "api.postmarkapp.com",
+  "api.resend.com",
+  "api.sendgrid.com",
+  "api.sparkpost.com",
+  "email-smtp.",
+  "mandrillapp.com",
+  "sendmail",
+  "smtp://",
+  "smtps://",
+]
+ports = [25, 465, 587, 2525]
+
 # Mail-sending crates: SMTP clients, message builders that submit, and mail-provider SDKs.
 [denied]
 crates = [
