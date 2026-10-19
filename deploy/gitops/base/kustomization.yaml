@@ -11,6 +11,7 @@ resources:
   - backup-plugin.yaml
   - journal.yaml
   - workspace.yaml
+  - admission.yaml
 configMapGenerator:
   - name: workspace-managed-values
     namespace: flux-system

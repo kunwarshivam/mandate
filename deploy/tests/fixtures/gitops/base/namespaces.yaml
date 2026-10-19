@@ -1,6 +1,7 @@
 # The operator's and its plugin's namespace, and the one workspace's (one release a workspace,
 # infrastructure §3.2), as in the local cell. Flux never prunes them: deleting a namespace would
-# delete the journal's volumes with it, so removing one from git leaves it in place.
+# delete the journal's volumes with it, so removing one from git leaves it in place. The
+# workspace's is the one namespace whose images the admission policy checks (admission.yaml).
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -12,5 +13,7 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: ws-ws1
+  labels:
+    policy.sigstore.dev/include: "true"
   annotations:
     kustomize.toolkit.fluxcd.io/prune: disabled
