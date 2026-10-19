@@ -193,3 +193,24 @@ fn only_the_two_routes_and_methods_are_served() {
     let other_host = send(addr, "localhost", "GET", &authorize_path("paper"), &[], b"");
     assert_eq!(other_host.status, 421);
 }
+
+#[test]
+#[ignore = "pending E10-13"]
+fn two_authorizations_redirect_with_different_random_codes() {
+    let addr = serve_alpaca();
+    let codes: Vec<String> = (0..2)
+        .map(|_| {
+            let reply = get(addr, &authorize_path("paper"));
+            let location = reply.header("location").expect("a Location").to_owned();
+            let code = location
+                .split(['?', '&'])
+                .find_map(|pair| pair.strip_prefix("code="))
+                .expect("a code")
+                .to_owned();
+            let bytes = URL_SAFE_NO_PAD.decode(&code).expect("base64url");
+            assert_ne!(bytes, vec![0_u8; 32], "{code} is all zero");
+            code
+        })
+        .collect();
+    assert_ne!(codes[0], codes[1]);
+}

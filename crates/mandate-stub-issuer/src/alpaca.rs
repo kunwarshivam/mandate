@@ -346,7 +346,7 @@ pub fn read_secret(path: &Path) -> Result<Vec<u8>, SecretFileError> {
 ///
 /// # Errors
 /// [`Refused::Alpaca`] for some but not all three, an empty client id or redirect URI, or a secret
-/// file [`read_secret`] refuses.
+/// file [`read_secret`] refuses, or a redirect URI outside DEC-2623 item 2's shape.
 pub fn settings(
     client_id: Option<&str>,
     secret_file: Option<&str>,

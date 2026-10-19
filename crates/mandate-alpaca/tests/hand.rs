@@ -344,6 +344,18 @@ fn credentials_are_redacted_in_debug_output() {
     );
 }
 
+/// DEC-2306 item 2: a bearer token is as redacted as a key pair.
+#[test]
+fn a_bearer_token_is_redacted_in_debug_output() {
+    let credentials = Credentials::bearer(secrecy::SecretString::from(common::SENTINEL_SECRET));
+    let rendered = format!("{credentials:?}");
+    assert!(
+        !rendered.contains(common::SENTINEL_SECRET),
+        "`Debug` prints no token (AGENTS.md rule 7, ES-09): {rendered}"
+    );
+    assert!(rendered.contains("redacted"), "{rendered}");
+}
+
 #[test]
 fn a_missing_credential_names_the_variable_and_nothing_else() {
     let error = Credentials::from_lookup(|_| None).expect_err("nothing is set");

@@ -847,12 +847,12 @@ asset class, side, quantity, limit, order dollars, and purpose, and version 2's
 | Operation | Method and path | Event | Notes |
 |---|---|---|---|
 | List, read connections | `GET /connections`, `GET /connections/{id}` | — | Opaque id, broker, environment, scopes, the 1× check, data profile, restrictions, agents granted, loss carry (O4). **References only**: no account number, key, or token (API-11) |
-| Connect | `POST /connections/oauth/start`, then the broker redirects to the fixed `GET /v1/oauth/alpaca/callback`, outside the workspace prefix because a registered redirect URI cannot carry a workspace id; the workspace comes from the single-use `state` | At start, `ConnectionRequested`, committed with the step-up challenge marked used (identity spec §7.2 step 5); then `ConnectionEstablished` (version 2) once the checks pass, or `ConnectionRefused` (occasion `connect`) on a failed check or the teardown. Each closes the request once; an owner's revoke of the pending id (`ConnectionRevoked`) closes it instead, and nothing further is journaled for that request (journal spec §9.8 rule 131, [DEC-699](../project/decisions/DEC-699.md) item 5) | Step-up before start. PKCE and a single-use `state`; the callback refuses a `state` that does not name a server-issued `env=paper` request for that workspace (DEC-821 item 3), writes the code straight to the vault, and calls no broker; the token-exchange process exchanges it and the executor runs the permission checks, and the API appends the event once their passing results are journaled (§1.4); scopes beyond trading reject the connection (FR-2.2). Flow details are the connections spec's |
+| Connect | `POST /connections/oauth/start`, then the broker redirects to the fixed `GET /v1/oauth/alpaca/callback`, outside the workspace prefix because a registered redirect URI cannot carry a workspace id; the workspace comes from the single-use `state` | At start, `ConnectionRequested`, committed with the step-up challenge marked used (identity spec §7.2 step 5); then `ConnectionEstablished` (version 2) once the checks pass, or `ConnectionRefused` (occasion `connect`) on a failed check or the teardown. Each closes the request once; an owner's revoke of the pending id (`ConnectionRevoked`) closes it instead, and nothing further is journaled for that request (journal spec §9.8 rule 131, [DEC-699](../project/decisions/DEC-699.md) item 5) | Step-up before start, its digest binding the token-breadth disclosure's document and version ([DEC-2621](../project/decisions/DEC-2621.md) item 4, amending [DEC-693](../project/decisions/DEC-693.md) items 1 and 2). PKCE and a single-use `state`; the callback refuses a `state` that does not name a server-issued `env=paper` request for that workspace (DEC-821 item 3), writes the code straight to the vault, and calls no broker; the token-exchange process exchanges it and the executor runs the permission checks, and the API appends the event once their passing results are journaled (§1.4); scopes beyond trading reject the connection (FR-2.2). Flow details are the connections spec's |
 | Revoke | `POST /connections/{id}/revoke` | `ConnectionRevoked` | Step-up, bound to §5.6's ordinary-revoke digest. Refused while any agent on it holds positions or is not stopped, or while the folds that say so cannot answer (below): without the connection nothing can exit or re-protect, so an ordinary revoke is not risk reduction. For a credential the owner believes is compromised, use the next row |
 | Revoke now, on compromise | `POST /connections/{id}/revoke` with `compromised: true` | `OwnerCommandIssued` (`kill_switch`, connection scope), then `ConnectionRevoked` (reason `compromised`, journal spec §9.10), in one batch | §5.6. Never waits on positions: the kill switch runs first in the same command, then the credential is revoked |
 | Policies | `GET`, `PUT /policies/workspace` | `PolicyChanged` | A value looser than its parent is refused naming the nearest ancestor (FR-1.5); the response lists agents made nonconforming (X1). Step-up |
 | Members | `GET /members`, `POST /invitations`, `PATCH`, `DELETE /members/{id}` | Identity spec's events (journal change) | Removing a member ends their sessions and tokens at once |
-| My workspaces | `GET /v1/me/workspaces` | — | (planned: E10-10) The signed-in user's own workspace memberships, at the principal's own scope and outside every workspace path: identity spec §4.5's *List one's own workspace memberships*, which [#811](https://github.com/kunwarshivam/mandate/pull/811) adds. Returns only the caller's memberships (API-9) |
+| My workspaces | `GET /v1/me/workspaces` | — | The signed-in user's own workspace memberships, at the principal's own scope and outside every workspace path: identity spec §4.5's *List one's own workspace memberships*, which [#811](https://github.com/kunwarshivam/mandate/pull/811) adds. Returns only the caller's memberships (API-9); served from a hosted deployment's control stream (§4.10, [DEC-2113](../project/decisions/DEC-2113.md)) |
 | Clients | `GET /clients`, `POST /clients`, `DELETE /clients/{id}` | `ClientConnected`, `ClientRevoked` (journal spec §9.10) | Create needs step-up and shows the scopes in words (E10-8); revoke needs none |
 
 **The connections read** ([DEC-2620](../project/decisions/DEC-2620.md)). `GET /connections` returns
@@ -869,6 +869,22 @@ connect refusal's `check` and `reason`, set exactly when `refused`; `revoked_rea
 `agents`, those whose latest `AgentDeployed` is version 2, names it, and is not stopped. The
 journaled `account_ref`, `user`, and `step_up` are not served. The 1× check, the data profile, the
 restrictions, and the loss carry are planned as optional members. **(planned: E10-13)**
+
+**The connect start** ([DEC-2623](../project/decisions/DEC-2623.md)). `POST
+/connections/oauth/start` takes `commands/oauth-start-request`: `broker` (`alpaca`), `environment`,
+`disclosure` (the token-breadth disclosure's document and version, which the connect digest binds,
+[DEC-2621](../project/decisions/DEC-2621.md) item 4), and `step_up`. It answers `201` with
+`commands/oauth-start-response`: `authorization_url`, `expires_at`, and the pending
+`connection_id`. One code per response, in this order: §3.4's session, CSRF mark, key, and body
+checks; the `BrokerConnection` permission, and `live_unavailable` for a `live` workspace; `invalid`
+at `/disclosure` for a version other than the current one; §3.5's step-up codes; then
+`live_unavailable` for `environment` `live`, `journal_unavailable` for a control-stream fold that
+cannot answer, and `idempotency_conflict` for a request already open, an establishment, or a used
+`account_ref` under the key's derived ids. A refused start appends nothing. The `connection_id` and
+`account_ref` are derived from the key, so a retry names the same pending connection; while its
+`state` is held and unredeemed the retry answers the same `201`, and after that the key is spent
+(`idempotency_conflict`). The redirect URI is the deployment's own, an API setting, and a deployment
+that names no OAuth client answers `not_found`. **(planned: E10-13)**
 
 **The ordinary revoke's refusals** (`compromised` `false` or absent; [DEC-693](../project/decisions/DEC-693.md)
 items 6 and 7, [DEC-698](../project/decisions/DEC-698.md)). The API decides them from the journal's
@@ -1529,12 +1545,11 @@ workspace exists to name before it is authorized (identity spec §4.5, §6.4).
 
 | Operation | Method and path | Event | Notes |
 |---|---|---|---|
+| One's own session | `GET /v1/me/session` | — | On the authentication plane, outside the matrix (identity spec §4.2, §4.5; DEC-816 item 7): reads only the caller's own session record and yields no context. Answers `{principal_id, kind, expires_at}` with `as_of` `[]`: the caller's own principal id, never a session reference, cookie, token, digest, subject, or issuer; `expires_at` is the earlier of the idle and absolute deadlines. A session an outage narrowed is refused `reduction_only`, and no live session gets the one 401. Shape: `read-models/session` ([DEC-2113](../project/decisions/DEC-2113.md)) |
 | List one's own workspace memberships | `GET /v1/me/workspaces` | — | Authorized by the `self` row "List one's own workspace memberships" (identity spec §4.2): a full session of a user principal only. Returns the caller's `active` memberships as `{workspace_id, label, roles}` from the membership index, reading no workspace's data; absent and foreign workspaces look the same. A failed index read is `membership_unavailable` ([DEC-816](../project/decisions/DEC-816.md) item 1). A hosted deployment's index is its control stream's membership fold; `label` is `null` until one is recorded; `as_of` is `[]`. Shape: `read-models/my-workspaces` ([DEC-2113](../project/decisions/DEC-2113.md)) |
 
-Owed to the identity spec's lanes, and listed so the prefix rule above is complete: `GET /v1/me/session`
-(its answer, `{principal_id, kind, expires_at}` with `as_of` `[]`, is `read-models/session`,
-[DEC-2113](../project/decisions/DEC-2113.md)),
-`POST /v1/reduction-sessions/challenges`, and `POST /v1/reduction-sessions` (identity spec §6.4 route 2;
+Owed to the identity spec's lanes, and listed so the prefix rule above is complete:
+`POST /v1/reduction-sessions/challenges` and `POST /v1/reduction-sessions` (identity spec §6.4 route 2;
 they sit outside the matrix, DEC-816 item 7). Every failure of the last is the one answer, 401 `unauthenticated` (§3.5), with no distinguishing timing, and `GET /v1/oauth/alpaca/callback` (§4.5).
 
 | Operation | Method and path | Event | Notes |
@@ -2043,14 +2058,14 @@ risk-reducing call never consults one (API-7, API-8).
 | Approval service endpoints and delegation previews | **Planned** (E8-15) |
 | Connection endpoints | **Planned** (E10-13, with gap 9) |
 | Client tokens and scopes | **Planned** (E10-14, before E10-6) |
-| Read-model projections | **Planned** (E11-9) |
-| Journal queries, trace, exports over the API | **Planned** (E12-6); contracts in §4.8.1, served by the pure crate `mandate-audit` |
+| Read-model projections | **Partly served** (E11-9): agents and approvals (§4.3, §4.7, DEC-979), and an agent's orders and positions (§4.7, [DEC-2111](../project/decisions/DEC-2111.md)); the ledger, risk-mark, and protection folds are planned |
+| Journal queries, trace, exports over the API | **Partly served** (E12-6): a stream's events page and one event (§4.8.1); trace, exports, and verification over the API are planned, their contracts in §4.8.1, served by the pure crate `mandate-audit` |
 | The backtest report (`read-models/backtest`) and `BacktestRunRecorded` | **Specified** (DEC-1000, DEC-1001; journal spec v0.45 §9.18); the run is **planned** (E4-4), the record's registration and the route **planned** (E4-5) |
 | The forward-paper evaluation (`read-models/evaluation`) and `EvaluationRunRecorded` | **Specified** (DEC-1002; journal spec v0.45 §9.18); the pure scorer **exists** (`mandate_research::score`); the harness, the record's registration, and the route **planned** (E17-8) |
 | Journal events this spec needs: `MandateDraftSaved`, the compiler's invocation on the control stream, `MandateConfirmed`'s agent link, and `OwnerRequestSubmitted` | **Specified** (journal spec v0.21 §9.9, DEC-670); `mandate-journal` registration planned (E10-15) |
 | The `client` actor, `ConnectionRevoked`'s reason, and the client events | **Specified** (journal spec v0.22 §3 and §9.10, DEC-671); `mandate-journal` registration planned (E10-15) |
 | `hold_openings` and `lift_hold` | **Specified** (journal spec v0.23 §9.11, DEC-672); `mandate-journal` registration planned (E10-15) |
-| Sessions, roles, step-up ceremonies | **Planned** (E9, the identity spec) |
+| Sessions, roles, step-up ceremonies | **Partly served** (E9, the identity spec): browser sessions (§3.11 items 5 and 6), one's own session and memberships (§4.10, [DEC-2113](../project/decisions/DEC-2113.md)), and step-up challenges (§3.6, DEC-2103); member routes, role changes, and the passkey ceremony are planned |
 | Notification addresses (§4.11, §5.7) and `NotificationAddressChanged` | **Planned** (E8-14). Mounted once the API's authentication middleware lands and the journal spec change that writes the `NotificationAddressChanged` row (the L3 lane's journal spec v0.28 PR, §9.15) merges. Merge order: #811, #763, this change (#827), then #833. The push-service allowlist's decision is DEC-792 (this spec change, #827); the web client's mirror of its table is #833, which merges after #827. Accepted when: a canary scan of responses, problems, logs, metrics and the journal finds no endpoint, key, or endpoint hash; the append is failed at every step of §5.7's tables (API-3's test) and crash injection gives each stated outcome; a replay after a lost `202` returns it; a retry with a different body, once its event exists, answers the original outcome and writes nothing to the vault; before the event exists, with the entry present, it is `idempotency_conflict`; a retry racing the sweep ends with the entry present or `address_missing` recorded; inert and removed entries neither match an endpoint nor count to the limit; two concurrent PUTs of one endpoint, an eleventh address, and a double removal are each settled by the expected head; a PUT of an unreachable address's endpoint replaces it in one batch with no last send to the old address; a stream busy for 5 attempts answers `busy` without a second vault write or step-up judgment; deactivation removes every address in its own commit, under the acting principal; a foreign `address_ref` answers byte-for-byte as a random one; the shared allowlist table (DEC-792) passes; and a replayed or wrongly bound step-up is refused |
 | The relay's own allowlist check (DEC-792 item 3) | **Planned** (E20-8) |
 

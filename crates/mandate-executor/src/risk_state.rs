@@ -37,8 +37,8 @@ enum Reading {
     Record,
     /// The executor's copy of `ClockAdvanced`, read at version 1 (DEC-2304 item 7).
     Tick,
-    /// `MarkUpdated`: version 1 is no verdict and steps nothing (DEC-2305 item 3); the fold reads
-    /// no later version yet.
+    /// `MarkUpdated`: version 1 is no verdict and steps nothing (DEC-2305 item 3), version 2 is the
+    /// mark with its verdict (journal spec §9.30), and a later version is one the fold does not know.
     Mark,
     /// A risk input the fold reads at no version yet, so every version is one it does not know and
     /// the view fails closed rather than skip the input (DEC-2304 item 1).
@@ -266,7 +266,8 @@ impl<'c> AccountRiskFold<'c> {
     ///
     /// # Errors
     /// [`ExecutorError::ForeignStream`] for a row on another stream: a caller's mistake, which
-    /// changes nothing.
+    /// changes nothing. [`ExecutorError::Unimplemented`] for a version-2 `MarkUpdated` until E6-15
+    /// slice B2b reads it, which changes nothing either.
     pub fn fold(&mut self, row: &StoredEvent) -> Result<Vec<RiskAppend>, ExecutorError> {
         if row.stream_id != self.stream {
             return Err(ExecutorError::ForeignStream {
@@ -279,6 +280,9 @@ impl<'c> AccountRiskFold<'c> {
         if head.checked_add(1) != Some(row.seq) {
             self.unreadable(UnreadableCause::SeqGap);
             return Ok(Vec::new());
+        }
+        if (row.event_type.as_str(), row.schema_version) == ("MarkUpdated", 2) {
+            return Self::mark(row);
         }
         match self.read(row) {
             Ok(appends) => {
@@ -309,6 +313,13 @@ impl<'c> AccountRiskFold<'c> {
             (Some(Reading::Tick), 1) => self.tick(row, payload),
             (Some(_), _) => Err(UnreadableCause::UnknownSchemaVersion),
         }
+    }
+
+    /// Steps a `MarkUpdated` at version 2 (journal spec §9.30, DEC-2305): its `bid`, `sane`, and
+    /// `session` become `Input::Mark` at its `risk_clock`, as mandate spec §5.2 reads a mark.
+    fn mark(row: &StoredEvent) -> Result<Vec<RiskAppend>, ExecutorError> {
+        let _ = row;
+        Err(ExecutorError::Unimplemented { story: "E6-15" })
     }
 
     /// Steps a `ClockAdvanced` tick at its `clock` (DEC-2304 item 7). A tick that reaches the next

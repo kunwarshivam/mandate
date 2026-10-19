@@ -16,6 +16,7 @@ use mandate_stub_issuer::start::Refused;
 use proptest::prelude::{any, prop};
 use proptest::test_runner::{Config, TestRunner};
 use ring::digest::{SHA256, digest};
+use ring::rand::SystemRandom;
 
 const REDIRECT: &str = "http://127.0.0.1:8080/v1/oauth/alpaca/callback";
 const SECRET: &str = "secret-canary-9f2a";
@@ -488,5 +489,77 @@ fn the_settings_are_all_three_flags_or_none() {
             ),
             "{id:?} {path} {uri:?}"
         );
+    }
+}
+
+#[test]
+fn a_full_store_is_unavailable_and_every_other_refusal_is_a_bad_request() {
+    assert_eq!(Refusal::Unavailable.status(), 503);
+    assert_eq!(Refusal::Unavailable.code(), "temporarily_unavailable");
+    for (refusal, code) in [
+        (Refusal::InvalidRequest, "invalid_request"),
+        (Refusal::InvalidClient, "invalid_client"),
+        (Refusal::InvalidGrant, "invalid_grant"),
+    ] {
+        assert_eq!((refusal.status(), refusal.code()), (400, code));
+    }
+}
+
+#[test]
+#[ignore = "pending E10-13"]
+fn codes_and_tokens_from_the_system_random_source_differ_and_are_not_zero() {
+    let settings = Settings {
+        client_id: "client-1".to_owned(),
+        client_secret: SECRET.as_bytes().to_vec(),
+        redirect_uri: REDIRECT.to_owned(),
+    };
+    let provider = Alpaca::new(settings, Box::new(SystemRandom::new()));
+    let codes = [code(&provider, T0), code(&provider, T0)];
+    let tokens: Vec<String> = codes
+        .iter()
+        .map(|code| {
+            let body = provider
+                .token(&joined(&token_params(code)), T0 + 1)
+                .expect("a token");
+            let answer: serde_json::Value = serde_json::from_str(&body).expect("JSON");
+            answer["access_token"].as_str().expect("a token").to_owned()
+        })
+        .collect();
+    let drawn: Vec<&String> = codes.iter().chain(&tokens).collect();
+    for (index, value) in drawn.iter().enumerate() {
+        let bytes = URL_SAFE_NO_PAD.decode(value).expect("base64url");
+        assert_ne!(bytes, vec![0_u8; 32], "{value} is all zero");
+        assert!(
+            drawn[index + 1..].iter().all(|other| other != value),
+            "{value} repeats"
+        );
+    }
+}
+
+#[test]
+#[ignore = "pending E10-13"]
+fn a_redirect_uri_outside_dec_2623s_shape_is_refused_at_start() {
+    let file = secret_file(SECRET.as_bytes(), 0o600);
+    let file = file.to_str().expect("UTF-8");
+    for uri in [
+        "https://api.example.com/v1/oauth/alpaca/callback",
+        "http://localhost:8080/v1/oauth/alpaca/callback",
+        "http://[::1]:8080/v1/oauth/alpaca/callback",
+    ] {
+        let settings = settings(Some("client-1"), Some(file), Some(uri));
+        assert!(matches!(settings, Ok(Some(_))), "{uri}");
+    }
+    for uri in [
+        "http://example.com/v1/oauth/alpaca/callback",
+        "http://127.0.0.1:8080/v1/oauth/alpaca/callback/",
+        "http://127.0.0.1:8080/v1/oauth/alpaca/other",
+        "http://127.0.0.1:8080/v1/oauth/alpaca/callback?x=1",
+        "http://127.0.0.1:8080/v1/oauth/alpaca/callback#f",
+        "http://user@127.0.0.1:8080/v1/oauth/alpaca/callback",
+        "ftp://127.0.0.1/v1/oauth/alpaca/callback",
+        "http://127.0.0.1:0/v1/oauth/alpaca/callback",
+    ] {
+        let settings = settings(Some("client-1"), Some(file), Some(uri));
+        assert!(matches!(settings, Err(Refused::Alpaca)), "{uri}");
     }
 }
