@@ -21,7 +21,7 @@ use axum::response::{IntoResponse, Response};
 use secrecy::{ExposeSecret, SecretString};
 
 use crate::cell::parse;
-use crate::http::HttpTokenEndpoint;
+use crate::http::{HttpTokenEndpoint, Target};
 use crate::response::MAX_BODY;
 use mandate_connections::ConnectError;
 use mandate_connections::exchange::{ClientSecret, ExchangedGrant, PendingConnect, exchange_code};
@@ -387,4 +387,58 @@ fn an_unreachable_endpoint_is_endpoint_failed_and_names_no_secret() {
 #[test]
 fn the_live_adapter_builds_without_sending_anything() {
     assert!(HttpTokenEndpoint::live().is_ok());
+}
+
+/// The live adapter's client refuses a plain `http` URL before anything is sent.
+#[test]
+fn the_live_adapter_refuses_plain_http() {
+    let (addr, hits) = serve(Answer::Grant);
+    let endpoint = HttpTokenEndpoint::live().unwrap();
+    let sent = endpoint.runtime.block_on(
+        endpoint
+            .client
+            .post(format!("http://{addr}{TOKEN_PATH}"))
+            .send(),
+    );
+    assert!(sent.is_err(), "https only");
+    assert!(
+        hits.lock().unwrap().is_empty(),
+        "nothing reached the endpoint"
+    );
+}
+
+/// An endpoint that accepts the request and never answers fails the exchange at the adapter's
+/// total timeout, here a short one, instead of holding the process.
+#[test]
+fn a_hung_endpoint_fails_at_the_total_timeout() {
+    let addr = raw("", b"");
+    let url = parse(Some("ci"), &format!("http://{addr}{TOKEN_PATH}")).unwrap();
+    let mut endpoint =
+        HttpTokenEndpoint::built(false, Target::Cell(url), Duration::from_millis(300)).unwrap();
+    let mut vault = MemVault::default();
+    vault
+        .put_code(
+            &key(),
+            AuthorizationCode(SecretString::from("code-CANARY")),
+            PkceVerifier(SecretString::from("verifier-CANARY")),
+        )
+        .unwrap();
+    let pending = PendingConnect {
+        connection_id: "conn-1".to_owned(),
+        environment: Environment::Paper,
+        vault_key: key(),
+    };
+    let client = OAuthClient {
+        client_id: ClientId("client-1".to_owned()),
+        redirect_uri: RedirectUri::production(),
+    };
+    let secret = ClientSecret(SecretString::from("secret-CANARY"));
+    let started = Instant::now();
+    let result = exchange_code(&pending, &client, &secret, &mut vault, &mut endpoint);
+    assert_eq!(result.map(|_| ()), Err(ConnectError::EndpointFailed));
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "{:?}",
+        started.elapsed()
+    );
 }

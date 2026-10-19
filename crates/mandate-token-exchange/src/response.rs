@@ -14,7 +14,10 @@ const JSON: &str = "application/json";
 
 /// The answer's `access_token`, `token_type` and `scope`, from a `200` whose media type is
 /// `application/json` and whose body is at most [`MAX_BODY`] bytes of a JSON object holding all
-/// three as non-empty strings. Any other member is ignored.
+/// three as non-empty strings. The body is read by `mandate_canon::parse`, so it fails closed on
+/// anything that reader refuses: a float, an exponent, an integer out of range, a duplicate
+/// member, a byte-order mark, or text that is not UTF-8. Another member that reader accepts is
+/// ignored.
 ///
 /// # Errors
 /// [`ConnectError::EndpointFailed`] for any other answer. The error names nothing of the body.

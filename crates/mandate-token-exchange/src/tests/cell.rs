@@ -92,6 +92,11 @@ fn any_other_url_is_refused() {
         "http://127.0.0.1/alpaca\\oauth/token",
         "http://127.0.0.1:/alpaca/oauth/token",
         "http://127.0.0.1:99999/alpaca/oauth/token",
+        "http://xn--lcalhost-5za/alpaca/oauth/token",
+        "http://xn--localhost/alpaca/oauth/token",
+        "http://0.0.0.0/alpaca/oauth/token",
+        "http://[::]/alpaca/oauth/token",
+        "http://169.254.169.254/alpaca/oauth/token",
     ];
     for text in refused {
         assert_eq!(parse(Some("dev"), text), Err(Refused::Url), "{text:?}");

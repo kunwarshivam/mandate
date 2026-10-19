@@ -23,7 +23,7 @@ pub const TOTAL_TIMEOUT: Duration = Duration::from_secs(15);
 const FORM: &str = "application/x-www-form-urlencoded";
 
 /// Where the request goes.
-enum Target {
+pub(crate) enum Target {
     /// The URL the `LiveTokenRequest` carries.
     Live,
     /// A dev or CI cell's fixture provider (DEC-2629 item 3).
@@ -36,8 +36,8 @@ enum Target {
 /// cell's [`CellTokenUrl`]. Either follows no redirect, never retries, and reads at most
 /// [`crate::response::MAX_BODY`] bytes of the answer.
 pub struct HttpTokenEndpoint {
-    runtime: tokio::runtime::Runtime,
-    client: reqwest::Client,
+    pub(crate) runtime: tokio::runtime::Runtime,
+    pub(crate) client: reqwest::Client,
     target: Target,
 }
 
@@ -47,7 +47,7 @@ impl HttpTokenEndpoint {
     /// # Errors
     /// [`ConnectError::EndpointFailed`] when the client cannot be built.
     pub fn live() -> Result<Self, ConnectError> {
-        Self::built(true, Target::Live)
+        Self::built(true, Target::Live, TOTAL_TIMEOUT)
     }
 
     /// A dev or CI cell's adapter, sending to the fixture provider's `url` (DEC-2629 item 3),
@@ -57,12 +57,16 @@ impl HttpTokenEndpoint {
     /// [`ConnectError::EndpointFailed`] when the client cannot be built.
     #[cfg(debug_assertions)]
     pub fn for_cell(url: CellTokenUrl) -> Result<Self, ConnectError> {
-        Self::built(false, Target::Cell(url))
+        Self::built(false, Target::Cell(url), TOTAL_TIMEOUT)
     }
 
-    /// The client both adapters share: no redirect, bounded timeouts, TLS on `ring`, and a
-    /// runtime of its own for the one request.
-    fn built(https_only: bool, target: Target) -> Result<Self, ConnectError> {
+    /// The client both adapters share: no redirect, no retry, bounded timeouts with `total` for
+    /// the whole request, TLS on `ring`, and a runtime of its own for the one request.
+    pub(crate) fn built(
+        https_only: bool,
+        target: Target,
+        total: Duration,
+    ) -> Result<Self, ConnectError> {
         let _already_installed = rustls::crypto::ring::default_provider().install_default();
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -71,8 +75,9 @@ impl HttpTokenEndpoint {
         let client = reqwest::Client::builder()
             .https_only(https_only)
             .redirect(reqwest::redirect::Policy::none())
+            .retry(reqwest::retry::never())
             .connect_timeout(CONNECT_TIMEOUT)
-            .timeout(TOTAL_TIMEOUT)
+            .timeout(total)
             .build()
             .map_err(|_| ConnectError::EndpointFailed)?;
         Ok(Self {
