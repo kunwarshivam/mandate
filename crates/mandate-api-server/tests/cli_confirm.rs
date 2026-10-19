@@ -377,7 +377,6 @@ impl World {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn the_code_is_the_challenges_first_40_bits_in_crockford_base_32() {
     assert_eq!(code(&[0u8; 32]).as_deref(), Some("00000000"));
     assert_eq!(code(&[0xff; 32]).as_deref(), Some("ZZZZZZZZ"));
@@ -399,7 +398,6 @@ fn the_code_is_the_challenges_first_40_bits_in_crockford_base_32() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_confirmed_paper_approve_verifies_once() {
     let w = world(&[OWNER]);
     let control = w.confirmed();
@@ -412,7 +410,6 @@ fn a_confirmed_paper_approve_verifies_once() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn check_1_cli_confirm_for_every_other_kind_is_step_up_method() {
     for kind in OTHER_KINDS {
         let w = world(&[OWNER]);
@@ -427,7 +424,6 @@ fn check_1_cli_confirm_for_every_other_kind_is_step_up_method() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn check_2_a_challenge_the_server_does_not_hold_is_missing() {
     let w = world(&[OWNER]);
     let mut other = Confirmation::of(&w.record);
@@ -438,11 +434,39 @@ fn check_2_a_challenge_the_server_does_not_hold_is_missing() {
     assert_eq!(w.judge(&ask, &control), Err(ProblemCode::StepUpMissing));
 }
 
+/// Check 2 as DEC-2105 item 3 reads it: the lookup comes before the store's expiry drop, so an
+/// expired challenge is still held and stale at check 4, and only once the store has dropped it,
+/// when it next issues one, is it missing.
+#[test]
+fn check_2_an_expired_challenge_is_stale_until_the_store_drops_it() {
+    let w = world(&[OWNER]);
+    let control = w.confirmed();
+    let expired = Ask {
+        now: ISSUED + LIFE,
+        ..w.ask()
+    };
+    assert_eq!(w.judge(&expired, &control), Err(ProblemCode::StepUpStale));
+    w.port
+        .challenges
+        .issue(
+            &context(OWNER, StepUpActionKind::Approve, HOME),
+            approval(b"a later approval's content object"),
+            AssertionId(ANOTHER_CHALLENGE.to_owned()),
+            at(ISSUED + LIFE),
+        )
+        .expect("a later challenge, issued as the first expires");
+    assert_eq!(
+        w.judge(&expired, &control),
+        Err(ProblemCode::StepUpMissing),
+        "dropped by the later issue"
+    );
+}
+
 /// Check 3 binds the challenge to its principal, workspace, and org, and to the action's digest:
 /// the owner's challenge presented by another principal, in another workspace of the same org, in
-/// another org's workspace, or for another approval, is a mismatch.
+/// another org's workspace, or for another approval, is a mismatch. `ChallengeRecord` holds no
+/// org: the workspace id is what binds it, since no two orgs share a workspace.
 #[test]
-#[ignore = "pending E9-4"]
 fn check_3_another_digest_principal_workspace_or_org_is_a_mismatch() {
     let w = world(&[OWNER, OTHER]);
     let control = w.confirmed();
@@ -489,7 +513,6 @@ fn check_3_another_digest_principal_workspace_or_org_is_a_mismatch() {
 /// Check 4 as DEC-2105 item 1 reads it: `now` is within `[issued_at, expires_at)`, the half-open life
 /// `ChallengeRecord::is_current_at` and the store keep, and `authenticated_at` is `issued_at`.
 #[test]
-#[ignore = "pending E9-4"]
 fn check_4_the_challenges_life_is_issued_at_up_to_but_not_including_expiry() {
     for (now, want) in [
         (ISSUED - 1, Err(ProblemCode::StepUpStale)),
@@ -518,7 +541,6 @@ fn check_4_the_challenges_life_is_issued_at_up_to_but_not_including_expiry() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn check_5_a_challenge_an_earlier_event_carries_is_reused() {
     let w = world(&[OWNER]);
     let mut control = w.confirmed();
@@ -527,7 +549,6 @@ fn check_5_a_challenge_an_earlier_event_carries_is_reused() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn check_6_no_confirmation_or_two_is_missing() {
     let w = world(&[OWNER]);
     assert_eq!(w.grant(&[]), Err(ProblemCode::StepUpMissing), "none");
@@ -540,7 +561,6 @@ fn check_6_no_confirmation_or_two_is_missing() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn check_7_a_confirmation_for_another_action_or_principal_is_a_mismatch() {
     let w = world(&[OWNER, OTHER]);
     let mut digest = Confirmation::of(&w.record);
@@ -571,7 +591,6 @@ fn check_7_a_confirmation_for_another_action_or_principal_is_a_mismatch() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn check_7_a_principal_the_subject_link_no_longer_names_is_missing() {
     let w = world(&[OTHER]);
     assert_eq!(w.grant(&w.confirmed()), Err(ProblemCode::StepUpMissing));
@@ -580,7 +599,6 @@ fn check_7_a_principal_the_subject_link_no_longer_names_is_missing() {
 /// Check 8 as DEC-2105 item 2 reads it: `confirmed_at` is a whole second, and the whole of it lies in the challenge's
 /// half-open life: no earlier than `issued_at`'s second, and ending by `expires_at`.
 #[test]
-#[ignore = "pending E9-4"]
 fn check_8_the_confirmations_second_lies_wholly_within_the_challenges_life() {
     for (second, want) in [
         (ISSUED - 1, Err(ProblemCode::StepUpStale)),
@@ -605,8 +623,19 @@ fn check_8_the_confirmations_second_lies_wholly_within_the_challenges_life() {
     }
 }
 
+/// `code` with its first two different characters swapped: wrong at two places by the same bits,
+/// which a comparison that lets two differences cancel would accept.
+fn swapped(code: &str) -> String {
+    let mut chars: Vec<char> = code.chars().collect();
+    let second = chars
+        .iter()
+        .position(|c| *c != chars[0])
+        .expect("two different characters");
+    chars.swap(0, second);
+    chars.into_iter().collect()
+}
+
 #[test]
-#[ignore = "pending E9-4"]
 fn check_9_any_other_code_is_missing() {
     let w = world(&[OWNER]);
     let right = shown(&w.record);
@@ -618,6 +647,7 @@ fn check_9_any_other_code_is_missing() {
         right.to_lowercase(),
         format!("{}-{}", &right[..4], &right[4..]),
         String::new(),
+        swapped(&right),
     ];
     for code in wrong {
         let w = world(&[OWNER]);
@@ -634,7 +664,6 @@ fn check_9_any_other_code_is_missing() {
 
 /// DEC-2104 item 6's order: a step-up failing two checks gets the earlier check's code.
 #[test]
-#[ignore = "pending E9-4"]
 fn a_step_up_failing_two_checks_gets_the_earlier_ones_code() {
     let w = world(&[OWNER]);
     let ask = Ask {
@@ -696,7 +725,6 @@ fn a_step_up_failing_two_checks_gets_the_earlier_ones_code() {
 /// leaves the held one unconfirmed, missing at check 6; a request from another workspace or org
 /// is a mismatch at check 3. Every principal drawn is linked, so only the binding can refuse it.
 #[test]
-#[ignore = "pending E9-4"]
 fn one_bound_member_changed_gets_that_members_code() {
     let case = (
         0..6usize,
@@ -782,7 +810,6 @@ fn links_file(name: &str, lines: &str) -> std::path::PathBuf {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn the_links_name_a_principal_only_on_one_of_their_lines() {
     let line = format!("sha256:{} {}\n", "a".repeat(64), ulid(OWNER));
     let path = links_file("lines", &line);
@@ -804,7 +831,6 @@ fn the_links_name_a_principal_only_on_one_of_their_lines() {
 /// DEC-1023 and DEC-2104 item 4: the deployment's links are read at the fixed path, whatever that
 /// file holds on the machine running the test, absent included.
 #[test]
-#[ignore = "pending E9-4"]
 fn the_deployment_names_principals_from_the_fixed_path_only() {
     let fixed = std::path::Path::new(SUBJECT_LINKS);
     for principal in [OWNER, OTHER] {

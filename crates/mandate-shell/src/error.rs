@@ -105,6 +105,17 @@ fn sink_code(error: &SinkError) -> &'static str {
 }
 
 /// Why a run stopped. Every variant means that no order was sent after the stop.
+/// The shared ports' refusals, each as the shell's own cause with the same reason
+/// (DEC-2605 row 20): the extraction changes no reason code.
+impl From<mandate_ports::PortError> for Cause {
+    fn from(error: mandate_ports::PortError) -> Self {
+        match error {
+            mandate_ports::PortError::Absent { what } => Self::Absent { what },
+            mandate_ports::PortError::Gate(error) => Self::Gate(error),
+        }
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ShellError {
     /// A stage did not answer, or answered with nothing that permits an order.

@@ -42,27 +42,12 @@ impl TransportError {
 pub enum CredentialsError {
     #[error("{variable} is not set or empty")]
     Missing { variable: &'static str },
-    #[error("the vault secret is not JSON")]
-    NotJson,
-    #[error("the vault secret is JSON but not its canonical form")]
-    NotCanonical,
-    #[error("the vault secret is not a JSON object")]
-    NotAnObject,
-    #[error("the vault secret's {member} is not a string")]
-    NotAString { member: &'static str },
-    #[error("the vault secret holds a member other than key_id and secret")]
-    UnknownMember,
 }
 
 impl CredentialsError {
     pub fn code(self) -> &'static str {
         match self {
             Self::Missing { .. } => "missing",
-            Self::NotJson => "not_json",
-            Self::NotCanonical => "not_canonical",
-            Self::NotAnObject => "not_an_object",
-            Self::NotAString { .. } => "not_a_string",
-            Self::UnknownMember => "unknown_member",
         }
     }
 }

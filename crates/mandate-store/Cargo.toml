@@ -11,6 +11,7 @@ workspace = true
 
 [dependencies]
 mandate-canon.workspace = true
+mandate-gateway.workspace = true
 mandate-journal.workspace = true
 mandate-journal-pg.workspace = true
 mandate-time.workspace = true

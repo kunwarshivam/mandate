@@ -35,7 +35,7 @@ use crate::http::{App, problem, problem_body, session_cookie, unauthenticated, w
 use crate::members::ControlLookup;
 use crate::reads::{
     AgentView, ApprovalView, Deployment, Filter, account_positions, account_ref, agent,
-    agent_orders, approvals, deployed, inbox,
+    agent_orders, agent_positions, approvals, deployed, inbox,
 };
 use crate::session::Authenticated;
 
@@ -450,6 +450,51 @@ pub async fn agent_orders_read(
         ("agent_id", string(&deployment.0)),
         ("account_ref", reference),
         ("orders", orders),
+    ];
+    served(&reader, &[rows.as_slice()], members)
+}
+
+/// `GET /v1/workspaces/{ws}/agents/{agent_id}/positions` (§4.7 D3, DEC-2111):
+/// `read-models/positions`, from the account stream of the connection the agent's deployed
+/// document names. A fill of its own that cannot be read is `journal_unavailable`: no position is
+/// served from part of its fills.
+pub async fn agent_positions_read(
+    State(app): State<Arc<App>>,
+    headers: HeaderMap,
+    path: Result<Path<(String, String)>, PathRejection>,
+) -> Response {
+    let Ok(Path((workspace, id))) = path else {
+        return path_refused(&app, &headers, Request::Other).await;
+    };
+    let reader = match reader(&app, &headers, &workspace).await {
+        Ok(reader) => reader,
+        Err(refusal) => return refusal.response(),
+    };
+    let Some(deployment) = deployed(&reader.control)
+        .into_iter()
+        .find(|deployment| deployment.0 == id)
+    else {
+        return Refused::NotFound.response();
+    };
+    let account = match account_of(&app, &reader, document(&app, &deployment).as_ref()).await {
+        Ok(account) => account,
+        Err(refusal) => return refusal.response(),
+    };
+    let (reference, rows, holdings) = match account {
+        Some((reference, rows)) => {
+            let holdings = Value::Array(account_positions(&rows));
+            (string(&reference), rows, holdings)
+        }
+        None => (Value::Null, Vec::new(), Value::Null),
+    };
+    let Some(positions) = agent_positions(&rows, &deployment.0) else {
+        return Refused::JournalUnavailable.response();
+    };
+    let members = vec![
+        ("agent_id", string(&deployment.0)),
+        ("account_ref", reference),
+        ("positions", Value::Array(positions)),
+        ("account_positions", holdings),
     ];
     served(&reader, &[rows.as_slice()], members)
 }

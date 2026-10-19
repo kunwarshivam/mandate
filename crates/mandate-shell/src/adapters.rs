@@ -41,11 +41,10 @@ use std::sync::Arc;
 use mandate_accounting::{AssetClass, InstrumentId, Side};
 use mandate_alpaca::{RetryPolicy, TokioPause, TradingClient, TradingTransport};
 use mandate_builder::{
-    AccountSnapshot as BuilderAccountSnapshot, Action as BuilderAction, ActionContext,
-    BuilderMandate, Clip as BuilderClip, Direction, Market as BuilderMarket,
-    ModelOutput as BuilderModelOutput, RiskContext as BuilderRiskContext,
+    Action as BuilderAction, BuilderMandate, Clip as BuilderClip, Direction,
+    ModelOutput as BuilderModelOutput,
 };
-use mandate_canon::{Digest, Key, Object, Value};
+use mandate_canon::{Key, Object, Value};
 use mandate_domain::{
     AutonomyDecision, CapabilityProfile, ProfileError, Purpose as BuilderPurpose,
 };
@@ -64,13 +63,7 @@ use mandate_marketdata::dataset;
 use mandate_marketdata::inspect::{self, ActionsReport, GapClass, Inspection};
 use mandate_marketdata::model::{Bar, Kind, Records, TimeUnit, Timeframe};
 use mandate_num::{Fraction, Price, Qty, ShareIncrement, SignedQty, Usd, UsdExact};
-use mandate_risk::{
-    AccountSnapshot as GateAccountSnapshot, AgentSnapshot as GateAgentSnapshot, ConductState,
-    Decision, FlattenInitiator, FlattenInput, GateConfig, GateInput, GatePass,
-    InstrumentSnapshot as GateInstrumentSnapshot, MarketSnapshot as GateMarketSnapshot, Origin,
-    ProposedKind, ProposedOrder, RiskSnapshot, TimeInForce as GateTimeInForce,
-    ValidatedMandate as GateMandate, WorkingUniverse, agent_flatten,
-};
+use mandate_risk::{Decision, FlattenInitiator, FlattenInput, agent_flatten};
 use mandate_robinhood::Tools;
 use mandate_runtime::{
     AgentId, ApprovalSettings, Autonomy, Classified, DecisionClip, ExitOrigin, FlattenLeg,
@@ -799,55 +792,7 @@ impl Protection for ExecutorProtection {
     }
 }
 
-/// Trusted facts for one decision that neither the mandate document nor runtime proposal contains.
-#[derive(Debug, Clone)]
-pub struct BuilderContext {
-    pub account: BuilderAccountSnapshot,
-    pub market: BuilderMarket,
-    pub risk: BuilderRiskContext,
-    pub action: ActionContext,
-    /// Effective model content hashes from the trusted model registry, keyed by `(id, version)`.
-    /// Runtime outputs do not carry this §8.1 identity, so absence refuses instead of copying the
-    /// mandate's expected hash into an observation that never stated it.
-    pub model_content_hashes: BTreeMap<(String, String), Digest>,
-    pub execution: OrderExecution,
-}
-
-/// Proposed-order fields the runtime proposal does not carry.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AdvisoryOrderFacts {
-    pub kind: ProposedKind,
-    pub tif: GateTimeInForce,
-    pub extended_hours: bool,
-    pub origin: Origin,
-    pub owner_confirmed_bid: Option<Price>,
-    pub client_order_id: mandate_risk::ClientOrderId,
-    pub fee_reservation: Usd,
-}
-
-/// Every advisory-gate fact other than the four order fields copied from the runtime proposal.
-#[derive(Debug, Clone)]
-pub struct AdvisoryGateContext {
-    pub now: UtcNanos,
-    pub pass: GatePass,
-    pub config: GateConfig,
-    pub mandate: GateMandate,
-    pub risk: RiskSnapshot,
-    pub account: GateAccountSnapshot,
-    pub agent: GateAgentSnapshot,
-    pub instrument: GateInstrumentSnapshot,
-    pub market: GateMarketSnapshot,
-    pub conduct: ConductState,
-    pub universe: WorkingUniverse,
-    pub order: AdvisoryOrderFacts,
-}
-
-/// The typed facts used after admission for one deterministic decision.
-#[derive(Debug, Clone)]
-pub struct DecisionContext {
-    pub builder: Option<BuilderContext>,
-    pub gate: Option<AdvisoryGateContext>,
-}
+pub use mandate_ports::{AdvisoryGateContext, AdvisoryOrderFacts, BuilderContext, DecisionContext};
 
 /// Inputs outside the mandate document for validation, admission, and one decision run.
 #[derive(Debug, Clone)]
@@ -1400,45 +1345,11 @@ pub struct RiskGate {
     pub context: Option<Rc<RunContext>>,
 }
 
-fn proposed_order(proposal: &Proposal, facts: &AdvisoryOrderFacts) -> Result<ProposedOrder, Cause> {
-    Ok(ProposedOrder {
-        instrument: mandate_risk::AssetId::new(proposal.instrument.as_str()).map_err(|_| {
-            Cause::Absent {
-                what: "the gate's proposed instrument id",
-            }
-        })?,
-        side: proposal.side,
-        qty: proposal.qty,
-        limit_price: proposal.limit,
-        kind: facts.kind.clone(),
-        tif: facts.tif,
-        extended_hours: facts.extended_hours,
-        origin: facts.origin,
-        owner_confirmed_bid: facts.owner_confirmed_bid,
-        client_order_id: facts.client_order_id,
-        fee_reservation: facts.fee_reservation,
-    })
-}
-
 impl Gate for RiskGate {
     fn evaluate(&self, proposal: &Proposal) -> Result<Decision, Cause> {
         let context = required_context(&self.context)?;
         let gate = gate_context(context)?;
-        let proposed = proposed_order(proposal, &gate.order)?;
-        Ok(mandate_risk::evaluate(&GateInput {
-            now: gate.now,
-            pass: gate.pass,
-            config: &gate.config,
-            mandate: &gate.mandate,
-            risk: &gate.risk,
-            account: &gate.account,
-            agent: &gate.agent,
-            instrument: &gate.instrument,
-            market: &gate.market,
-            conduct: &gate.conduct,
-            universe: &gate.universe,
-            proposed: &proposed,
-        })?)
+        Ok(mandate_ports::evaluate(proposal, gate)?)
     }
 }
 
@@ -2326,7 +2237,7 @@ mod tests {
         AdvisoryGateContext, AdvisoryOrderFacts, CoreExecutor, DecisionContext, ExecutorContext,
         ExecutorMandateView, ExecutorOrder, ExecutorProtection, ExecutorSink, Protection,
         ProtectionProbePorts, RiskGate, RunContext, StoreJournal, action_order_matches,
-        is_unattributed_exit, listed_days, proposed_order, working_order_of,
+        is_unattributed_exit, listed_days, working_order_of,
     };
     use mandate_canon::{DecStr, Value};
     use mandate_journal::AppendOutcome;
@@ -2339,6 +2250,7 @@ mod tests {
         SplitRatio, Symbol, TimeUnit, Timeframe,
     };
     use mandate_num::{Price, Qty, Usd};
+    use mandate_ports::proposed_order;
     use mandate_runtime::{
         AgentId, EventId as RuntimeEventId, IntentBody, IntentHandoff, OrderExecution,
         ProtectionPrices, Purpose as RuntimePurpose, TimeInForce as RuntimeTimeInForce,
