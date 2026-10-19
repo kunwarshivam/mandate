@@ -1,6 +1,6 @@
 //! The connection records journal spec v0.20 §9.8 closes (E7-17, DEC-800): on the control stream,
 //! `ConnectionEstablished` at version 2, `ConnectionRefused`, `ConnectionCredentialRotated`, and
-//! v0.32's `ConnectionRequested` (DEC-699), at version 2 since v0.69 with rule 255 (DEC-2621); on the account stream, the executor's
+//! v0.32's `ConnectionRequested` (DEC-699), at version 2 since v0.68 with rule 255 (DEC-2621); on the account stream, the executor's
 //! `ConnectionChecked`, `ConnectionStateChanged`, and `ConnectionCredentialRefreshed`, and its
 //! copies of the establishment (version 2 only) and of each rotation, with `risk_clock`.
 //! Consistency rules 54 to 60, 62, 64 and 65, and copy rules 61 and 63. The owner's fold (rules 66
@@ -392,7 +392,7 @@ static CONNECTION_REQUESTED: Ty = Ty::Record(&[
     ("step_up", STEP_UP),
 ]);
 
-/// Version 2 (journal spec v0.69, DEC-2621): version 1's members, then how the credential is
+/// Version 2 (journal spec v0.68, DEC-2621): version 1's members, then how the credential is
 /// obtained and, for `oauth`, the token's possible breadth and the disclosure the owner confirmed.
 static CONNECTION_REQUESTED_V2: Ty = Ty::Record(&[
     ("connection_id", Ty::Ident),

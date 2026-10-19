@@ -28,6 +28,44 @@ use crate::meter::CellMeter;
 use crate::recorded::Bundle;
 use crate::runtime::{ResearchParts, ResearchSource};
 
+/// The `event_time` of `agent`'s latest research `MeterReserved` on the workspace's meter stream
+/// `meter` (DEC-2259 item 3), as the risk clock's second; `None` before the first. Other agents' and
+/// other purposes' reservations, and the stream's other records, are passed over.
+///
+/// # Errors
+/// [`FoldError::Unreadable`] naming the member when a `MeterReserved` gives no readable
+/// `agent_id`, `purpose` or `event_time`.
+pub fn last_research_reservation(
+    meter: &[StoredEvent],
+    agent: &str,
+) -> Result<Option<RiskClock>, FoldError> {
+    let unreadable = |member| FoldError::Unreadable { member };
+    let mut last = None;
+    for row in meter.iter().filter(|row| row.event_type == "MeterReserved") {
+        let body = parse(&row.body).map_err(|_| unreadable("payload"))?;
+        let payload = body.get("payload").ok_or(unreadable("payload"))?;
+        let mine = match payload.get("agent_id") {
+            Some(Value::Str(id)) => id == agent,
+            Some(Value::Null) => false,
+            _ => return Err(unreadable("agent_id")),
+        };
+        let research = payload
+            .get("purpose")
+            .and_then(Value::as_str)
+            .ok_or(unreadable("purpose"))?
+            == "research";
+        let at = body
+            .get("event_time")
+            .and_then(Value::as_str)
+            .and_then(|text| UtcNanos::parse_rfc3339(text).ok())
+            .ok_or(unreadable("event_time"))?;
+        if mine && research {
+            last = last.max(Some(RiskClock::from_secs(at.secs())));
+        }
+    }
+    Ok(last)
+}
+
 /// Where the source reads a stream's records: the process's store, or a read connection of its own.
 pub trait Rows {
     /// The stream's records, or `None` when they cannot be read.
@@ -320,8 +358,11 @@ impl ResearchSource for CellSource {
     fn parts(&self, state: &RuntimeState) -> Option<ResearchParts> {
         let control = StreamId::parse(&format!("ctl:{}", self.who.workspace))?;
         let stream = StreamId::parse(&format!("agent:{}:{}", self.who.workspace, self.who.agent))?;
+        let meter = StreamId::parse(&format!("meter:{}", self.who.workspace))?;
         let control = self.rows.rows(&control)?;
         let agent = self.rows.rows(&stream)?;
+        let last_reservation =
+            last_research_reservation(&self.rows.rows(&meter)?, &self.who.agent).ok()?;
         let (_, document) = deployment::document(
             &control,
             &self.who.agent,
@@ -380,7 +421,7 @@ impl ResearchSource for CellSource {
             },
             lineages: fold.lineages,
             active: fold.active,
-            last_reservation: None,
+            last_reservation,
             data_symbols: self
                 .instruments
                 .iter()

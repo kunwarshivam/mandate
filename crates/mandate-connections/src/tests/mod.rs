@@ -12,3 +12,4 @@ mod record;
 mod revoke;
 mod start;
 mod support;
+mod token_entry;

@@ -6,11 +6,14 @@
 //! reads a clock or a store.
 
 use mandate_gateway::CallRequest;
+use mandate_gateway::Gateway;
+use mandate_gateway::meter::MeterStore;
+use mandate_gateway::provider::{Clock, Transport};
 use mandate_gateway::tools::Turn;
 use mandate_time::UtcNanos;
 
 use crate::agentic::{RunKind, TurnPlan};
-use crate::call::{CallContext, CallPlan, ResearchCall, after_ms};
+use crate::call::{Answer, CallContext, CallPlan, ResearchCall, after_ms};
 use crate::error::ResearchRunError;
 use crate::retrieve::Retrieval;
 
@@ -127,4 +130,43 @@ impl TurnCall {
         request.observations = self.observations.clone();
         Ok(request)
     }
+}
+
+/// Everything a turn's call is built from but the dispatch instant, which the gateway's clock gives.
+#[derive(Debug, Clone)]
+pub struct TurnParts<'a> {
+    pub call: &'a CallPlan,
+    pub plan: &'a TurnPlan,
+    pub kind: RunKind,
+    pub seed: &'a Retrieval,
+    pub context: CallContext,
+    pub transcript: Vec<EarlierTurn>,
+}
+
+/// The worker's turn (§6.9 step 3): builds the turn's call at the gateway's own clock, as the single
+/// [`crate::call`] does, so the deadline counts from the dispatch instant, and sends it through the
+/// gateway, which renders, guards, reserves, calls, and validates the reply against the menu.
+///
+/// # Errors
+/// [`ResearchRunError`] when the turn's call cannot be built; nothing is then sent.
+pub fn call_turn<T: Transport, S: MeterStore, C: Clock>(
+    gateway: &mut Gateway<T, S, C>,
+    parts: TurnParts<'_>,
+) -> Result<(TurnCall, Answer), ResearchRunError> {
+    let dispatched_at = gateway.clock_mut().now();
+    let built = TurnCall::build(
+        parts.call,
+        parts.plan,
+        parts.kind,
+        parts.seed,
+        parts.context,
+        parts.transcript,
+        dispatched_at,
+    )?;
+    let request = built.request()?;
+    let answer = match gateway.call(&request) {
+        Ok(record) => Answer::Recorded(record),
+        Err(error) => Answer::Refused(error),
+    };
+    Ok((built, answer))
 }
