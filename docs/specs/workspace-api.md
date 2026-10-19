@@ -982,7 +982,17 @@ adds the account's holdings at its last reconciliation as `account_positions`, t
 `BrokerPositionObserved` per instrument on the account stream of the connection the document
 names (model and broker quantities, the mismatch flag, and when observed), `null` when that stream
 is not found. They are the account's, not the agent's: no journaled fold attributes holdings per
-agent yet. The account stream's watermark joins `as_of`. Limit usage (the ladder's rung, the day-trade count, headroom) is not
+agent yet. The account stream's watermark joins `as_of`.
+
+`GET /agents/{id}/orders` and `GET /agents/{id}/positions` return `read-models/orders` and
+`read-models/positions` ([DEC-2111](../project/decisions/DEC-2111.md)), from the account stream of
+the connection the deployed document names (`account_ref` `null`, and the lists empty, when it is
+not found). An order is the agent's when its `OrderRequestRecorded` names the agent: its request as
+first submitted, and `state` and `filled_qty` from the last `OrderStateChanged` (`null` before any;
+`unknown` served as unknown). `positions` is the net `filled_qty` of the agent's own fills per
+instrument, not the ledger's fold; `cost_basis`, `risk_mark`, and `protection` are present and
+`null` until those folds are served. `account_positions` is the account's, as on the single agent
+read. Limit usage (the ladder's rung, the day-trade count, headroom) is not
 journaled yet and is not served; it joins with E6-4's risk records. The rest of D2 (restrictions,
 the floor, the universe) is planned as optional members.
 
