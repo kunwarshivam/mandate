@@ -13,6 +13,7 @@ use std::time::{Duration, SystemTime};
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
+mod admission_drill;
 mod cell;
 mod gitops;
 mod image;

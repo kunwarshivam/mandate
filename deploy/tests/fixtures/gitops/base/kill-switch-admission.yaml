@@ -1,9 +1,12 @@
 # Who may make a kill switch's pod (DEC-2016 item 2). The signature webhooks fail closed but skip a
 # pod labelled `mandate.dev/process: control`, so that label must not be one anyone can set. These
-# policies run in the API server itself, with no webhook to go down: in the workspace's namespace,
-# only the Job controller may create a pod with that label, or add it to a pod, and no service
-# account may create a Job whose pods carry it. The founder's CLI creates the kill switch's Job as
-# a person, never a service account (E21-34); a workload in the namespace cannot mint one.
+# policies run in the API server itself, with no webhook to go down, in every namespace the
+# signature webhooks check (labelled `policy.sigstore.dev/include`), so a new workspace's namespace
+# is covered by the label that puts it under admission:
+# - a pod with that label, or one given it, must be the pod of a Job, made by the Job controller;
+# - no service account may create a Job whose pods carry it, and no CronJob may own one.
+# The founder's CLI creates the kill switch's Job as a person, never a service account (E21-34);
+# a workload in the namespace, a Deployment or a CronJob cannot mint one.
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
@@ -13,7 +16,7 @@ spec:
   matchConstraints:
     namespaceSelector:
       matchLabels:
-        kubernetes.io/metadata.name: ws-ws1
+        policy.sigstore.dev/include: "true"
     resourceRules:
       - apiGroups: [""]
         apiVersions: [v1]
@@ -32,8 +35,10 @@ spec:
   validations:
     - expression: >-
         request.userInfo.username in ['system:serviceaccount:kube-system:job-controller',
-        'system:kube-controller-manager']
-      message: only the Job controller may make a pod labelled mandate.dev/process=control
+        'system:kube-controller-manager'] && has(object.metadata.ownerReferences)
+        && object.metadata.ownerReferences.exists(r, r.apiVersion == 'batch/v1' && r.kind == 'Job'
+        && has(r.controller) && r.controller)
+      message: only the Job controller may make a pod labelled mandate.dev/process=control, for a Job
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
@@ -52,11 +57,11 @@ spec:
   matchConstraints:
     namespaceSelector:
       matchLabels:
-        kubernetes.io/metadata.name: ws-ws1
+        policy.sigstore.dev/include: "true"
     resourceRules:
       - apiGroups: [batch]
         apiVersions: [v1]
-        operations: [CREATE, UPDATE]
+        operations: [CREATE]
         resources: [jobs]
   matchConditions:
     - name: labelled-control
@@ -65,8 +70,13 @@ spec:
         && 'mandate.dev/process' in object.spec.template.metadata.labels
         && object.spec.template.metadata.labels['mandate.dev/process'] == 'control'
   validations:
-    - expression: "!request.userInfo.username.startsWith('system:serviceaccount:')"
-      message: no service account may create a Job whose pods are labelled mandate.dev/process=control
+    - expression: >-
+        !request.userInfo.username.startsWith('system:serviceaccount:')
+        && !(has(object.metadata.ownerReferences)
+        && object.metadata.ownerReferences.exists(r, r.kind == 'CronJob'))
+      message: >-
+        a Job whose pods are labelled mandate.dev/process=control is made by a person, never a
+        service account or a CronJob
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding

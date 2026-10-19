@@ -458,25 +458,31 @@ def kill_switch_exemption(docs: list[dict]) -> list[str]:
             "pods",
             "",
             CONTROL_LABEL.format("object.metadata.labels"),
-            f"request.userInfo.username in {JOB_CONTROLLER}",
+            f"request.userInfo.username in {JOB_CONTROLLER} && has(object.metadata.ownerReferences) "
+            "&& object.metadata.ownerReferences.exists(r, r.apiVersion == 'batch/v1' && r.kind == 'Job' "
+            "&& has(r.controller) && r.controller)",
+            ["CREATE", "UPDATE"],
         ),
         "mandate-control-jobs": (
             jobs,
             "jobs",
             "batch",
             CONTROL_LABEL.format("object.spec.template.metadata.labels"),
-            "!request.userInfo.username.startsWith('system:serviceaccount:')",
+            "!request.userInfo.username.startsWith('system:serviceaccount:') "
+            "&& !(has(object.metadata.ownerReferences) "
+            "&& object.metadata.ownerReferences.exists(r, r.kind == 'CronJob'))",
+            ["CREATE"],
         ),
     }
-    for name, (spec, resource, group, label, allowed) in expected.items():
+    for name, (spec, resource, group, label, allowed, operations) in expected.items():
         constraints = spec.get("matchConstraints", {})
         rules = constraints.get("resourceRules", [])
         if spec.get("failurePolicy") != "Fail":
             problems.append(f"{name}: does not fail closed")
-        if constraints.get("namespaceSelector") != {"matchLabels": {"kubernetes.io/metadata.name": "ws-ws1"}}:
-            problems.append(f"{name}: not the workspace's namespace")
+        if constraints.get("namespaceSelector") != {"matchLabels": ADMISSION_LABEL}:
+            problems.append(f"{name}: not every namespace the signature webhooks check")
         if [(r.get("apiGroups"), r.get("resources"), sorted(r.get("operations", []))) for r in rules] != [
-            ([group], [resource], ["CREATE", "UPDATE"])
+            ([group], [resource], operations)
         ]:
             problems.append(f"{name}: matches {rules}")
         conditions = {
@@ -501,6 +507,27 @@ def kill_switch_exemption(docs: list[dict]) -> list[str]:
 
 def test_kill_switch_exemption(overlay):
     assert kill_switch_exemption(overlay[1]) == []
+
+
+def uncovered_workspaces(docs: list[dict]) -> list[str]:
+    """Every workspace's namespace (`ws-*`) carries the label that puts it under the signature
+    webhooks and the kill-switch policies, so a new workspace cannot land unchecked."""
+    return sorted(
+        name
+        for name, namespace in of_kind(docs, "Namespace").items()
+        if name.startswith("ws-")
+        and {k: (namespace["metadata"].get("labels") or {}).get(k) for k in ADMISSION_LABEL}
+        != ADMISSION_LABEL
+    )
+
+
+def test_every_workspace_namespace_is_covered(overlay):
+    assert uncovered_workspaces(overlay[1]) == []
+
+
+def test_an_uncovered_workspace_namespace_is_caught(overlay):
+    added = {"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": "ws-ws2"}}
+    assert uncovered_workspaces([*overlay[1], added]) == ["ws-ws2"]
 
 
 def policies() -> list[dict]:
@@ -710,7 +737,23 @@ DOC_BUGS = [
         kill_switch_exemption,
         "ValidatingAdmissionPolicy",
         "mandate-control-jobs",
-        lambda d: d["spec"]["matchConstraints"]["resourceRules"][0].update(operations=["UPDATE"]),
+        lambda d: d["spec"]["matchConstraints"]["resourceRules"][0].update(operations=["CREATE", "UPDATE"]),
+    ),
+    (
+        kill_switch_exemption,
+        "ValidatingAdmissionPolicy",
+        "mandate-control-jobs",
+        lambda d: d["spec"]["validations"][0].update(
+            expression="!request.userInfo.username.startsWith('system:serviceaccount:')"
+        ),
+    ),
+    (
+        kill_switch_exemption,
+        "ValidatingAdmissionPolicy",
+        "mandate-control-pods",
+        lambda d: d["spec"]["validations"][0].update(
+            expression=d["spec"]["validations"][0]["expression"].split(" && has(")[0]
+        ),
     ),
     (
         kill_switch_exemption,
