@@ -16,6 +16,7 @@ use serde::Deserialize;
 mod cell;
 mod gitops;
 mod image;
+mod leak;
 mod mail;
 mod mask;
 mod mutant_costs;
@@ -54,6 +55,7 @@ commands:
   deps [--used-by]      check every direct dependency against docs/dependencies.md, or list
                         each cargo dependency with the crates that use it
   decisions             check that no two decision files take one DEC number
+  leak-guard            check workflows and scripts for what could leak a secret (DEC-2032)
   live-feature          check that only the runner may build `live`, and CI only compiles it or
                         tests its loopback-only rehearsal build in one job
   refcases [--write]    export reference-case YAML to fixtures/refcases (drift check unless --write)
@@ -292,6 +294,7 @@ fn run() -> Result<()> {
         ["deps"] => deps(),
         ["deps", "--used-by"] => deps_used_by(),
         ["decisions"] => decision_numbers(Path::new(".")),
+        ["leak-guard"] => leak::guard_in(&root),
         ["live-feature"] => live_feature_in(Path::new(".")),
         ["mail-guard"] => mail::guard_in(Path::new(".")),
         ["refcases"] => refcases(false),
@@ -2349,6 +2352,7 @@ fn lint(root: &Path, workspace_checks: impl FnOnce() -> Result<()>) -> Result<()
     live_feature_in(root)?;
     infra_workflow_in(root)?;
     mail::guard_in(root)?;
+    leak::guard_in(root)?;
     workspace_checks()
 }
 
@@ -15088,6 +15092,8 @@ mod tests {
         let report = "if: ${{ always() && (github.event_name == 'workflow_dispatch' || \
                       github.event_name == 'push') && github.ref == 'refs/heads/main' && \
                       (needs.fast.result == 'failure' || needs.full.result == 'failure') }}";
+        const AGGREGATE_GUARD: &str = "if: ${{ ((github.event_name == 'pull_request' && always()) \
+             || !cancelled()) && !github.event.pull_request.draft }}";
         for (job, guard) in [
             ("select", "if: ${{ !github.event.pull_request.draft }}"),
             ("fast-lint", "if: ${{ !github.event.pull_request.draft }}"),
@@ -15096,20 +15102,14 @@ mod tests {
             ("fast-python", "needs: select"),
             ("fast-portable", "needs: select"),
             ("fast-rh-sim-live", "needs: select"),
-            (
-                "fast",
-                "if: ${{ always() && !github.event.pull_request.draft }}",
-            ),
+            ("fast", AGGREGATE_GUARD),
             ("full-checks", "needs: select"),
             ("schema-mutants", "needs: select"),
             (
                 "mutants-plan",
                 "if: ${{ !github.event.pull_request.draft }}",
             ),
-            (
-                "full",
-                "if: ${{ always() && !github.event.pull_request.draft }}",
-            ),
+            ("full", AGGREGATE_GUARD),
             ("mutants", "needs: mutants-plan"),
             ("report-main", report),
         ] {
@@ -15122,7 +15122,7 @@ mod tests {
         }
         let guards = [
             "if: ${{ !github.event.pull_request.draft }}",
-            "if: ${{ always() && !github.event.pull_request.draft }}",
+            AGGREGATE_GUARD,
             "needs: mutants-plan",
             "needs: [mutants-plan, mutants]",
             "needs: select",

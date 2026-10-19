@@ -124,7 +124,6 @@ fn base(section: &Value, name: &str) -> Vec<u8> {
 }
 
 #[test]
-#[ignore = "pending E6-15"]
 fn every_risk_limit_base_and_valid_draft_parses() {
     let section = section();
     let drafts = section.get("drafts").and_then(Value::as_object).unwrap();
@@ -155,7 +154,6 @@ fn every_risk_limit_base_and_valid_draft_parses() {
 }
 
 #[test]
-#[ignore = "pending E6-15"]
 fn every_invalid_risk_limit_draft_is_refused_with_its_reason_at_its_path() {
     let section = section();
     let invalid = list(&section, "invalid_drafts");
@@ -181,7 +179,6 @@ fn every_invalid_risk_limit_draft_is_refused_with_its_reason_at_its_path() {
 }
 
 #[test]
-#[ignore = "pending E6-15"]
 fn the_risk_limit_records_append_on_the_account_stream_and_the_stream_verifies() {
     let section = section();
     let mut journal = MemoryJournal::new();
@@ -237,5 +234,33 @@ fn a_negative_breach_time_is_refused_before_any_rule_reads_it() {
         (e.reason, e.path.as_str()),
         (InvalidReason::Json(ParseErrorKind::IntegerRange), ""),
         "refused at decode, before the payload schema"
+    );
+}
+
+/// Rule 233 reports `payload.threshold`, then `payload.value`: a counted tripwire whose threshold
+/// is 0 and whose value is fractional breaks both, and is refused at its threshold (the A3
+/// review's nit, DEC-2301).
+#[test]
+fn rule_233_reports_the_threshold_before_the_value() {
+    let tripwire = String::from_utf8(base(&section(), "tripwire_triggered")).unwrap();
+    let both = tripwire
+        .replace("\"threshold\":\"2\"", "\"threshold\":\"0\"")
+        .replace("\"value\":\"2\"", "\"value\":\"2.5\"");
+    assert!(
+        tripwire.contains("\"threshold\":\"2\"") && tripwire.contains("\"value\":\"2\""),
+        "the base tripwire trigger counts fills with threshold 2 and value 2"
+    );
+    let e = Draft::parse(both.as_bytes()).unwrap_err();
+    assert_eq!(
+        (e.reason, e.path.as_str()),
+        (InvalidReason::Schema, "payload.threshold"),
+        "the threshold is reported first"
+    );
+    let value_only = tripwire.replace("\"value\":\"2\"", "\"value\":\"2.5\"");
+    let e = Draft::parse(value_only.as_bytes()).unwrap_err();
+    assert_eq!(
+        (e.reason, e.path.as_str()),
+        (InvalidReason::Schema, "payload.value"),
+        "a sound threshold leaves the value to be reported"
     );
 }

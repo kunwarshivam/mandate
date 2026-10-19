@@ -42,6 +42,7 @@ SECTION_3_1 = {
     "api": {("postgres", "TCP", 5432), ("identity-provider", "TCP", 443)},
     "control": {("postgres", "TCP", 5432), ("vault", "TCP", 8200), ("identity-provider", "TCP", 443)},
     "journal-verify": {("postgres", "TCP", 5432)},
+    "connect-check": {("postgres", "TCP", 5432)},
     "runtime": {("postgres", "TCP", 5432), ("model-gateway", "TCP", 8080), ("artifact-store", "TCP", 443)},
     "executor": {("postgres", "TCP", 5432), ("vault", "TCP", 8200), ("broker", "TCP", 443)},
     "token-exchange": {("vault", "TCP", 8200), ("token-host", "TCP", 443)},
@@ -164,10 +165,11 @@ def policies(docs: list[dict]) -> dict[str, dict]:
     return {d["metadata"]["name"]: d for d in docs if d["kind"] == "NetworkPolicy"}
 
 
-def one_workload_per_process(docs: list[dict]) -> list[str]:
+def one_workload_per_process(docs: list[dict], run_process: str = "control") -> list[str]:
     """Every process type renders exactly one Deployment (a service) or Job, and nothing else; once
     the deployment manager renders, the runtime and the executor are only its pod templates, which
-    it alone starts (DEC-1170)."""
+    it alone starts (DEC-1170). Of the `run` processes, only the one a run names renders, `control`
+    unless it names another (DEC-2035)."""
     kinds = {"service": "Deployment", "migration": "Job", "run": "Job", "verify": "Job"}
     manager = any(is_manager(w) for w in workloads(docs))
     problems = []
@@ -176,7 +178,9 @@ def one_workload_per_process(docs: list[dict]) -> list[str]:
             w for w in workloads(docs) if w["metadata"]["labels"].get("mandate.dev/process") == p["name"]
         ]
         want = "Pod" if manager and p["name"] in ("runtime", "executor") else kinds[p["kind"]]
-        if [w["kind"] for w in found] != [want]:
+        if p["kind"] == "run" and p["name"] != run_process:
+            want = None
+        if [w["kind"] for w in found] != ([want] if want else []):
             problems.append(f"{p['name']}: {[w['kind'] for w in found]}")
     return problems
 
@@ -529,6 +533,56 @@ def compose_matches(compose: dict) -> list[str]:
 
 def test_one_workload_per_process():
     assert one_workload_per_process(render_all()) == []
+
+
+CONNECT_CHECK = ["--set", "run.process=connect-check"]
+
+
+def test_a_run_renders_only_the_process_it_names():
+    """A one-off run renders one Job, of `control` unless `run.process` names another run process;
+    a name that is no run process fails the render rather than running nothing (DEC-2035)."""
+    assert one_workload_per_process(render_all(*CONNECT_CHECK), "connect-check") == []
+    assert (
+        helm(
+            CHART,
+            "-f",
+            str(CELL / "values" / "k3d.yaml"),
+            *every_image(),
+            "--set",
+            "run.id=t1",
+            "--set",
+            "run.process=runtime",
+        ).returncode
+        != 0
+    )
+
+
+def test_the_connect_check_runs_the_executor_on_its_journal_role_alone():
+    """The connect check is the executor's image, run with the run's arguments as the executor's
+    journal role, with Postgres its one destination and no store: its broker is the in-process
+    fixture (DEC-2007, DEC-2035)."""
+    docs = render_all(*CONNECT_CHECK)
+    job = next(
+        w for w in workloads(docs) if w["metadata"]["labels"].get("mandate.dev/process") == "connect-check"
+    )
+    run = pod_spec(job)["containers"][0]
+    assert run["image"] == PLACEHOLDER.format("executor")
+    assert run["args"] == ["workspace", "open", "--workspace", "ws9"]
+    dsn = next(e["value"] for e in run["env"] if e["name"] == "MANDATE_JOURNAL_DSN")
+    assert dsn.startswith("postgres://mandate_executor@")
+    assert "artifacts" not in {v["name"] for v in pod_spec(job)["volumes"]}
+    for check in (
+        colocated,
+        guaranteed,
+        default_deny,
+        no_ingress,
+        gated,
+        hardened,
+        secrets_as_files,
+        migration_first,
+    ):
+        assert check(docs) == [], check.__name__
+    assert egress_exact(docs) == []
 
 
 def test_a_process_renders_only_with_its_image():

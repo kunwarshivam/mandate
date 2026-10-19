@@ -714,10 +714,10 @@ fn image_sets() -> Result<Vec<String>> {
     Ok(sets)
 }
 
-/// `cargo xtask cell up`: build the `mandate`, `api`, `runtime`, `executor` and `deploy-manager` images from
-/// this checkout (never with the `live` feature), bring up the k3d cluster if it is not up, install
-/// the CloudNativePG operator, the journal's Postgres and the workspace chart, and wait until every
-/// pod is ready and the migration Job has finished.
+/// `cargo xtask cell up`: build the `mandate`, `api`, `runtime`, `executor` and `deploy-manager`
+/// images from this checkout (never with the `live` feature), bring up the k3d cluster if it is not
+/// up, install the CloudNativePG operator, the journal's Postgres and the workspace chart, and wait
+/// until every pod is ready and the migration Job has finished.
 pub fn up() -> Result<()> {
     let source = host_image_source()?;
     if source == ImageSource::Build {
@@ -939,10 +939,10 @@ const STATIC_TRIPLE: &str = "x86_64-unknown-linux-gnu";
 
 /// `mandate-cli`, the backtest runner, `mandate-api-server` and the runtime's `mandate-daemon`
 /// (DEC-1013), the deployment manager's `mandate-deployd` (DEC-1172) and the executor's
-/// `mandate-executord` (DEC-2031) linked statically, so their images need no base (DEC-993 item 9), with no feature at
-/// all: never `live`; with them the stub issuer once [`stub_ready`], which the dev profile's debug
-/// assertions are what compile in (DEC-2100 item 2). The dev profile, for the CI job's ten minutes
-/// (DEC-464): it keeps overflow checks, and the cell's journals are small.
+/// `mandate-executord` (DEC-2031) linked statically, so their images need no base (DEC-993 item
+/// 9), with no feature at all: never `live`; with them the stub issuer once [`stub_ready`], which
+/// the dev profile's debug assertions are what compile in (DEC-2100 item 2). The dev profile, for
+/// the CI job's ten minutes (DEC-464): it keeps overflow checks, and the cell's journals are small.
 fn build_binary() -> Result<()> {
     let mut args = vec!["build", "--locked"];
     for package in BUILT_PACKAGES {

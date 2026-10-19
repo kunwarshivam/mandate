@@ -1,9 +1,0 @@
-file = "crates/mandate-journal/tests/catalogue.rs"
-test = "the_risk_limit_records_are_closed_on_the_account_stream"
-reason = """
-DEC-2301 (journal spec v0.58 §9.27): the seven risk-limit records are closed on the account
-stream, so an unlisted member is refused `schema` there and version 2 is `unknown_schema`. The
-journal does not register them yet and refuses every draft as `unknown_schema` at `payload`, an
-answer of the journal's own rather than a stub's report. E6-15's registration (slice A3) deletes
-this file with the test's `#[ignore]` line.
-"""

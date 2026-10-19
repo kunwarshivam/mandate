@@ -108,10 +108,12 @@ egress:
       k8s-app: kube-dns
 
 # One-off runs of the `run` and `verify` processes, rendered only when set. `id` names the Job,
-# so each run is a new Job.
+# so each run is a new Job. `process` is the run process it runs, `control` (the CLI) unless it
+# names another (DEC-2035).
 run:
   id: ""
   args: []
+  process: control
 verify:
   id: ""
   streams: []
