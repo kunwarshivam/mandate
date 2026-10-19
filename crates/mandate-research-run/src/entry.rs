@@ -2,11 +2,16 @@
 //! the pinned prompt, the retrieval plan, and the output schema, all inside one content hash, so
 //! a change to any of them is a new pin (DEC-431 item 5).
 
+use std::collections::BTreeMap;
+
 use mandate_canon::{Int, Key, Object, Value};
 use mandate_gateway::registry::{Identity, Mode, PinnedContent, Snapshot, Template};
-use mandate_gateway::tools::Agentic;
+use mandate_gateway::tools::{
+    Agentic, LoopBounds as PinnedBounds, OutputKind, ToolClass, ToolDeclaration,
+};
 
 use crate::agentic::LoopBounds;
+use crate::dispatch::FILING_FORMS;
 use crate::error::ResearchRunError;
 use crate::output::OutputBounds;
 use crate::plan::RetrievalPlan;
@@ -138,10 +143,167 @@ impl ResearchEntry {
 /// # Errors
 /// [`ResearchRunError::UnpinnableLoop`] when the loop is not one a registry may pin.
 pub fn agentic_loop(
-    _bounds: &LoopBounds,
-    _output: &OutputBounds,
+    bounds: &LoopBounds,
+    output: &OutputBounds,
 ) -> Result<Agentic, ResearchRunError> {
-    Err(ResearchRunError::Unimplemented { story: "E19-13" })
+    let loop_bounds = PinnedBounds {
+        max_turns: bounds.max_turns,
+        max_tool_calls: bounds.max_tool_calls,
+        max_tool_calls_per_turn: bounds.max_tool_calls_per_turn,
+        max_theses: bounds.max_theses,
+        max_result_bytes: u64::from(bounds.max_result_bytes),
+        max_run_result_bytes: u64::from(bounds.max_run_result_bytes),
+        max_repeat_denials: bounds.max_repeat_denials,
+        max_run_s: u64::from(bounds.max_run_s),
+        tool_timeout_s: u64::from(bounds.tool_timeout_s),
+    };
+    let ideate = output_schema(output);
+    let monitor = object(vec![
+        (
+            "properties",
+            object(vec![(
+                "invalidations",
+                ideate
+                    .get("properties")
+                    .and_then(|members| members.get("invalidations"))
+                    .cloned()
+                    .ok_or(ResearchRunError::UnpinnableLoop)?,
+            )]),
+        ),
+        ("type", text("object")),
+    ]);
+    let agentic = Agentic {
+        output: OutputKind::FinalOutput,
+        tools: declarations(loop_bounds.max_result_bytes),
+        loop_bounds,
+        output_schemas: BTreeMap::from([
+            ("ideate".to_owned(), ideate),
+            ("monitor".to_owned(), monitor),
+        ]),
+    };
+    if agentic.well_formed() {
+        Ok(agentic)
+    } else {
+        Err(ResearchRunError::UnpinnableLoop)
+    }
+}
+
+/// The run kinds every declared tool is offered in, sorted.
+const MENU: [&str; 2] = ["ideate", "monitor"];
+
+/// §6.10's read tools the worker serves and its two think tools, in name order, each with its
+/// argument schema in the gateway's language. Ranges the language cannot state (at least one
+/// symbol, a term's characters, an item id the run received, byte lengths) are the dispatch's
+/// strict read's.
+fn declarations(result_cap_bytes: u64) -> Vec<ToolDeclaration> {
+    let string = |max: u64| object(vec![("max_length", int(max)), ("type", text("string"))]);
+    let integer = |lo: u64, hi: u64| {
+        object(vec![
+            ("maximum", int(hi)),
+            ("minimum", int(lo)),
+            ("type", text("integer")),
+        ])
+    };
+    let array = |items: Value, max: u64| {
+        object(vec![
+            ("items", items),
+            ("max_items", int(max)),
+            ("type", text("array")),
+        ])
+    };
+    let symbols = |max: u64| array(string(MAX_WORD_CHARS), max);
+    let terms = || array(string(MAX_WORD_CHARS), 5);
+    let forms = array(
+        object(vec![
+            (
+                "enum",
+                Value::Array(FILING_FORMS.iter().map(|form| text(form)).collect()),
+            ),
+            ("type", text("string")),
+        ]),
+        5,
+    );
+    let tool = |name: &str, class: ToolClass, description: &str, members: Vec<(&str, Value)>| {
+        ToolDeclaration {
+            name: name.to_owned(),
+            class,
+            description: description.to_owned(),
+            arguments: object(vec![
+                ("properties", object(members)),
+                ("type", text("object")),
+            ]),
+            result_cap_bytes,
+            menu: MENU.iter().map(|kind| (*kind).to_owned()).collect(),
+        }
+    };
+    vec![
+        tool(
+            "filings.get",
+            ToolClass::Read,
+            "A range of a received filing's stored text: offset from 0, length 1 to 8,000 bytes.",
+            vec![
+                ("item", string(MAX_ID_CHARS)),
+                ("length", integer(1, 8_000)),
+                ("offset", integer(0, u64::from(u32::MAX))),
+            ],
+        ),
+        tool(
+            "filings.search",
+            ToolClass::Read,
+            "Public filings for 1 to 5 symbols in the last 1 to 90 days, by form and terms.",
+            vec![
+                ("forms", forms),
+                ("limit", integer(1, 10)),
+                ("symbols", symbols(5)),
+                ("terms", terms()),
+                ("window_d", integer(1, 90)),
+            ],
+        ),
+        tool(
+            "market.bars",
+            ToolClass::Read,
+            "The newest 1 to 260 daily bars of one symbol, at or before the cut-off.",
+            vec![
+                ("count", integer(1, 260)),
+                ("symbol", string(MAX_WORD_CHARS)),
+            ],
+        ),
+        tool(
+            "market.quote",
+            ToolClass::Read,
+            "The last quote of 1 to 10 symbols at or before the cut-off, with its time.",
+            vec![("symbols", symbols(10))],
+        ),
+        tool(
+            "news.get",
+            ToolClass::Read,
+            "A received news item's stored text.",
+            vec![("item", string(MAX_ID_CHARS))],
+        ),
+        tool(
+            "news.search",
+            ToolClass::Read,
+            "Allowlisted news for 1 to 5 symbols in the last 1 to 168 hours, by terms.",
+            vec![
+                ("limit", integer(1, 20)),
+                ("symbols", symbols(5)),
+                ("terms", terms()),
+                ("window_h", integer(1, 168)),
+            ],
+        ),
+        tool(
+            "note",
+            ToolClass::Think,
+            "A note in this run's transcript; nothing else reads it.",
+            vec![("text", string(2_000))],
+        ),
+        tool(
+            "plan",
+            ToolClass::Think,
+            "This run's plan, 1 to 5 steps; never an input to a decision.",
+            vec![("steps", array(string(200), 5))],
+        ),
+    ]
 }
 
 /// The longest id or symbol the parser reads (`crate::output`'s bounds).
