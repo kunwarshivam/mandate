@@ -99,7 +99,8 @@ once:
    secrets. Run `cargo xtask gitops bootstrap staging` as above. After Flux, it asks for staging's
    vault seal key without showing what you type: paste the 64 hex characters. It creates
    `ws-ws1/vault-seal-key` only if it is not there, so a later bootstrap keeps it and says so.
-   Until it exists, the vault's pod waits to start; nothing else waits on it.
+   Until it exists, the vault's pod waits to start; nothing else waits on it. If you stop the command at
+   that prompt with Ctrl-C, your terminal may stay silent: run `stty echo` to get it back.
 2. **Initialize it.** Once the pod runs:
 
    ```sh
