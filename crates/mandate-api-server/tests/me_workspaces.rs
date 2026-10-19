@@ -89,14 +89,20 @@ fn ones_own_row_is_an_active_membership_with_the_roles_in_effect() {
         lookup(granted, T0 + 50).own_roles(alice),
         Ok(Some(roles(&[Operator])))
     );
-    for (seq, event) in [
-        (2, MembershipEvent::Deactivated { member: alice }),
-        (2, MembershipEvent::Removed { member: alice }),
-    ] {
-        let mut ended = joined.clone();
-        ended.push(record(seq, T0 - 10, event));
-        assert_eq!(lookup(ended, T0).own_roles(alice), Ok(None));
-    }
+    let mut deactivated = joined;
+    deactivated.push(record(
+        2,
+        T0 - 20,
+        MembershipEvent::Deactivated { member: alice },
+    ));
+    assert_eq!(lookup(deactivated.clone(), T0).own_roles(alice), Ok(None));
+    let mut removed = deactivated;
+    removed.push(record(
+        3,
+        T0 - 10,
+        MembershipEvent::Removed { member: alice },
+    ));
+    assert_eq!(lookup(removed, T0).own_roles(alice), Ok(None));
     let failed = ControlLookup::new(hosted(), Err(LookupFailed), at(T0));
     assert_eq!(failed.own_roles(alice), Err(LookupFailed));
 }
