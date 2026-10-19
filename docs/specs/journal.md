@@ -1588,7 +1588,8 @@ Stop of an agent no process ran, as its own actor: that `StreamOpened` is the st
 process wrote it, so a runtime's restart or a second launch of its slot resumes a stream an `agent`
 actor opened. A runtime that finds a claim when it starts appends nothing and sends nothing, and
 exits as `stream_claimed`; so does one whose own `StreamOpened` at head 0 the journal answers
-`HeadMismatch` or `Fenced`, since it sends nothing before its stream is open.
+`HeadMismatch` because a claim landed first, since it sends nothing before its stream is open. A
+claim takes no epoch, so a `Fenced` answer is another runtime's, and that exit stays `fenced`.
 
 **`ObservationRecorded`**
 
