@@ -292,7 +292,25 @@ impl Credentials {
     pub fn from_env() -> Result<Self, CredentialsError> {
         Self::from_lookup(|name| std::env::var(name).ok())
     }
+
+    /// Reads the credentials from the secret an executor's vault lease on its connection holds
+    /// (DEC-2306 item 2): the canonical JSON object `{"key_id": …, "secret": …}`, both members
+    /// non-empty strings and no other member. Every refusal names its rule and never the secret.
+    pub fn from_vault_secret(secret: &[u8]) -> Result<Self, CredentialsError> {
+        let _ = secret;
+        Err(CredentialsError::Unimplemented { story: "E21-30" })
+    }
 }
+
+/// Two credentials are equal when both values are, compared without exposing either.
+impl PartialEq for Credentials {
+    fn eq(&self, other: &Self) -> bool {
+        self.key_id.expose_secret() == other.key_id.expose_secret()
+            && self.secret.expose_secret() == other.secret.expose_secret()
+    }
+}
+
+impl Eq for Credentials {}
 
 /// Whether `path_and_query` is the path of any endpoint in [`ENDPOINTS`], with a path and query
 /// that cannot change the host, add a header, or reach another endpoint. The method is checked

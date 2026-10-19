@@ -42,12 +42,17 @@ impl TransportError {
 pub enum CredentialsError {
     #[error("{variable} is not set or empty")]
     Missing { variable: &'static str },
+    /// The stubs of this story's tests PR return this, so every pending test fails on them
+    /// (DEC-77); the implementation PR replaces the stub and removes the variant.
+    #[error("not implemented until {story}")]
+    Unimplemented { story: &'static str },
 }
 
 impl CredentialsError {
     pub fn code(self) -> &'static str {
         match self {
             Self::Missing { .. } => "missing",
+            Self::Unimplemented { .. } => "unimplemented",
         }
     }
 }
