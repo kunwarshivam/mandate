@@ -80,11 +80,14 @@ DEC-2031). Its probes are processes.json's `probe`, as a Deployment's are (DEC-1
 {{- end -}}
 {{- if eq .p.name "executor" -}}
 {{- $args = concat $args (include "mandate.executorBroker" .root | fromJsonArray) -}}
-{{- else if .p.one_shot -}}
-{{- $args = .p.args -}}
+{{- end -}}
+{{- $command := list -}}
+{{- if .p.one_shot -}}
+{{- $command = .p.command | default list -}}
+{{- $args = .p.args | default list -}}
 {{- $probe = dict -}}
 {{- end -}}
-{{- $container := include "mandate.container" (dict "root" .root "p" .p "name" .p.name "args" $args "probe" $probe) }}
+{{- $container := include "mandate.container" (dict "root" .root "p" .p "name" .p.name "command" $command "args" $args "probe" $probe) }}
 {{- fromYaml (include "mandate.pod" (dict "root" .root "p" .p "restartPolicy" "Never" "containers" $container)) | toJson }}
 {{- end -}}
 {{- define "mandate.deployManagerTemplates" -}}

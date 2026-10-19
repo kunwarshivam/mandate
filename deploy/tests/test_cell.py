@@ -1028,13 +1028,14 @@ def test_deploy_manager_contained():
     for pod in managed_pods(docs):
         spec = pod_spec(pod)
         container = first_container(pod)
-        assert "command" not in container, container.get("command")
         if pod["metadata"]["name"] == EXCHANGE:
-            assert container["args"] == process(EXCHANGE)["args"], container["args"]
+            assert container["command"] == ["/usr/local/bin/mandate-token-exchange"], container.get("command")
+            assert "args" not in container, container.get("args")
             assert "livenessProbe" not in container and "readinessProbe" not in container
             assert spec["restartPolicy"] == "Never" and spec["automountServiceAccountToken"] is False
             assert "serviceAccountName" not in spec
             continue
+        assert "command" not in container, container.get("command")
         research = ["--research", RESEARCH] if pod["metadata"]["name"] == "runtime" else []
         assert container["args"] == ["run", "--probe", "/tmp/process.sock", *research], container["args"]
         assert spec["restartPolicy"] == "Never" and spec["automountServiceAccountToken"] is False
@@ -1083,7 +1084,7 @@ def test_the_executor_runs_on_alpaca_paper_where_staging_names_it():
     and nothing else changes: the runtime's args, and the manager's containment."""
     docs = render_all(*ALPACA_PAPER)
     assert deploy_manager_contained(docs) == []
-    args = {p["metadata"]["name"]: first_container(p)["args"] for p in managed_pods(docs)}
+    args = {p["metadata"]["name"]: first_container(p)["args"] for p in managed_pods(docs) if p["metadata"]["name"] != EXCHANGE}
     assert args == {
         "executor": ["run", "--probe", "/tmp/process.sock", *PAPER_ARGS],
         "runtime": ["run", "--probe", "/tmp/process.sock", "--research", RESEARCH],
