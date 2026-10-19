@@ -1499,23 +1499,29 @@ const VAULT_DRILL_READS: [(&str, &str, bool); 10] = [
     ("model-gateway", "connections/demo-paper/token", false),
 ];
 
+/// The container of the vault drill's Job that logs in and reads; only its lines are judged, as
+/// `kubectl logs --prefix` writes them (see [`scenario::lines_of`]).
+const VAULT_DRILL_PROBE: &str = "probe";
+
 /// What a vault drill's check lines must say: `<role> <path> allowed` or `denied` for each of
 /// [`VAULT_DRILL_READS`], and no `wildcard in` line. A missing line is a problem too.
 fn vault_drill_problems(logs: &str) -> Vec<String> {
-    let mut problems: Vec<String> = logs
-        .lines()
+    let said = scenario::lines_of(logs, VAULT_DRILL_PROBE);
+    let mut problems: Vec<String> = said
+        .iter()
         .filter(|l| l.starts_with("wildcard in "))
-        .map(String::from)
+        .map(|l| l.to_string())
         .collect();
     for (role, path, allowed) in VAULT_DRILL_READS {
         let want = format!(
             "{role} {path} {}",
             if allowed { "allowed" } else { "denied" }
         );
-        if !logs.lines().any(|l| l == want) {
-            let got = logs
-                .lines()
+        if !said.iter().any(|l| *l == want) {
+            let got = said
+                .iter()
                 .find(|l| l.starts_with(&format!("{role} {path} ")))
+                .copied()
                 .unwrap_or("no answer");
             problems.push(format!("want `{want}`, got `{got}`"));
         }
@@ -4844,24 +4850,38 @@ mod tests {
             .iter()
             .map(|(role, path, allowed)| {
                 format!(
-                    "{role} {path} {}\n",
+                    "[pod/vault-drill-1-x/probe] {role} {path} {}\n",
                     if *allowed { "allowed" } else { "denied" }
                 )
             })
             .collect();
         assert!(vault_drill_problems(&held).is_empty());
+        let unprefixed: String = held.replace("[pod/vault-drill-1-x/probe] ", "");
+        assert_eq!(
+            vault_drill_problems(&unprefixed).len(),
+            VAULT_DRILL_READS.len(),
+            "only the probe's lines, as kubectl prefixes them, are judged"
+        );
+        let elsewhere = held.replace("/probe] ", "/provision] ");
+        assert_eq!(
+            vault_drill_problems(&elsewhere).len(),
+            VAULT_DRILL_READS.len()
+        );
         let leaked = held.replace(
             "runtime connections/demo-paper/token denied",
             "runtime connections/demo-paper/token allowed",
         );
-        let wildcard = format!("{leaked}wildcard in mandate-runtime\n");
+        let wildcard = format!("{leaked}[pod/vault-drill-1-x/probe] wildcard in mandate-runtime\n");
         let found = vault_drill_problems(&wildcard).join("\n");
         assert!(found.contains(Drill::Vault.seeded_symptom()), "{found}");
         assert!(
             found.contains("want `runtime connections/demo-paper/token denied`"),
             "{found}"
         );
-        let missing = held.replace("model-gateway platform/model-provider-key allowed\n", "");
+        let missing = held.replace(
+            "[pod/vault-drill-1-x/probe] model-gateway platform/model-provider-key allowed\n",
+            "",
+        );
         assert_eq!(
             vault_drill_problems(&missing),
             ["want `model-gateway platform/model-provider-key allowed`, got `no answer`"]
