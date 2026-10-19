@@ -71,7 +71,7 @@ pub use dispatch::{Dispatch, DispatchScope, Dispatched, dispatch};
 pub use entry::{EntryError, RESEARCH_INPUTS, ResearchEntry, output_schema};
 pub use error::ResearchRunError;
 pub use item::{
-    Allowlist, Bar, Filing, InstrumentFact, ItemId, ItemKind, NewsItem, SourceId, Symbol,
+    Allowlist, Bar, Filing, InstrumentFact, ItemId, ItemKind, NewsItem, Quote, SourceId, Symbol,
 };
 pub use mandate_gateway::registry::ModelRef as ModelPin;
 pub use output::{

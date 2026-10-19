@@ -12,10 +12,11 @@ use mandate_canon::Digest;
 use mandate_daemon::meter::CellMeter;
 use mandate_daemon::recorded::Bundle;
 use mandate_daemon::source::{Rows, SourceFor};
-use mandate_daemon::worker::{RecordedWorker, StoreSink, WorkerFor};
+use mandate_daemon::worker::{RecordedWorker, StoreSink, WorkerError, WorkerFor};
 use mandate_daemon::{ArtifactSink, ResearchParts, ResearchWorker};
 use mandate_gateway::Outcome as CallOutcome;
 use mandate_gateway::meter::{MeterRecord, SharedMeter};
+use mandate_gateway::money::Usd6;
 use mandate_journal::{ArtifactRef, ArtifactStore, Environment, StoredEvent, StreamId};
 use mandate_num::Usd;
 use mandate_research::{
@@ -413,6 +414,66 @@ fn a_restart_with_no_reserved_call_on_the_risk_day_calls_as_before() {
             .iter()
             .any(|r| matches!(r, MeterRecord::Reserved(x) if x.event_id == reservation)),
         "the call's reservation is in the shared store"
+    );
+}
+
+/// As [`metered`] over an agent stream with no call, the gateway's daily research cap at `daily`.
+fn capped(shelf: &Shelf, store: &SharedMeter, daily: Usd6) -> Result<RecordedWorker, WorkerError> {
+    let clock = || UtcNanos::from_parts(CUT_OFF + 5, 0).unwrap();
+    let meter = CellMeter::new(
+        store.clone(),
+        Rc::new(AgentRows::with_call(None)),
+        SourceFor {
+            workspace: "ws1".to_owned(),
+            agent: "agent-a".to_owned(),
+            environment: Environment::Paper,
+        },
+        Rc::new(clock),
+    );
+    RecordedWorker::capped(
+        &bundle(),
+        WorkerFor {
+            workspace: "ws1".to_owned(),
+            agent: "agent-a".to_owned(),
+            description: "Long-only US large caps, on public news and filings.".to_owned(),
+        },
+        Box::new(shelf.clone()),
+        Box::new(clock),
+        meter,
+        daily,
+    )
+}
+
+/// DEC-2254 item 4: the gateway holds the agent's research calls to the daily cap. Under the
+/// mandate's cap of five dollars the call goes out as before. Under a cap below the call's
+/// reservation, far under the workspace's and the deployment's budgets, it is refused
+/// `budget_exhausted`: nothing is reserved and nothing is sent. A cap above the workspace's
+/// monthly budget builds no worker (item 3).
+#[test]
+fn a_call_over_the_daily_research_cap_is_refused_and_nothing_is_sent() {
+    let (shelf, store) = (Shelf::default(), SharedMeter::new());
+    let mut worker = capped(&shelf, &store, Usd6::from_micros(5_000_000)).unwrap();
+    let record = called(&mut worker);
+    assert_eq!(record.outcome, CallOutcome::Ok);
+    assert!(record.reservation.is_some(), "an ok call is reserved");
+
+    let (shelf, store) = (Shelf::default(), SharedMeter::new());
+    let mut worker = capped(&shelf, &store, Usd6::from_micros(1)).unwrap();
+    let record = called(&mut worker);
+    assert_eq!(record.outcome, CallOutcome::BudgetExhausted);
+    assert_eq!(record.reservation, None);
+    assert!(store.records().is_empty(), "nothing reserved over the cap");
+    assert_eq!(record.response_ref, None, "nothing was sent");
+
+    let above = bundle().workspace_cap.micros() + 1;
+    assert_eq!(
+        capped(
+            &Shelf::default(),
+            &SharedMeter::new(),
+            Usd6::from_micros(above)
+        )
+        .err(),
+        Some(WorkerError::DailyCapAboveWorkspace)
     );
 }
 
