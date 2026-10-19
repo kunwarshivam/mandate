@@ -30,15 +30,21 @@ tests (deploy/tests/test_cell.py) and the drills (`cargo xtask cell drill`) read
 
 {{/*
 "true" when process `p` is started by another process (its `started_by`) whose image is named: it
-then renders no Deployment of its own, only its pod in that process's templates (DEC-1170).
+then renders no Deployment of its own, only its pod in that process's templates (DEC-1170). A
+`one_shot` process (the token exchange) is never a standing Deployment, whether or not that process
+renders: only it starts one, once (DEC-1175).
 */}}
 {{- define "mandate.startedElsewhere" -}}
 {{- $root := .root -}}
+{{- if .p.one_shot -}}
+true
+{{- else -}}
 {{- with .p.started_by -}}
 {{- $by := . -}}
 {{- range (include "mandate.processes" $root | fromJsonArray) -}}
 {{- if and (eq .name $by) (index $root.Values.images .image) -}}
 true
+{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
@@ -194,6 +200,11 @@ start without them (AGENTS.md rule 3).
 - name: artifacts
   mountPath: {{ include "mandate.artifactsPath" $ | quote }}
   readOnly: {{ ne . "rw" }}
+{{- end }}
+{{- if .p.vault_token }}
+- name: vault-token
+  mountPath: /run/mandate/vault-token
+  readOnly: true
 {{- end }}
 {{- end -}}
 
@@ -356,6 +367,16 @@ spec:
       persistentVolumeClaim:
         claimName: artifacts
         readOnly: {{ eq (include "mandate.artifactsAccess" .) "ro" }}
+    {{- end }}
+    {{- if $p.vault_token }}
+    - name: vault-token
+      projected:
+        defaultMode: 292
+        sources:
+          - serviceAccountToken:
+              audience: mandate-vault
+              expirationSeconds: 600
+              path: token
     {{- end }}
     {{- with .volumes }}
     {{- . | nindent 4 }}
