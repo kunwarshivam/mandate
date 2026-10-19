@@ -268,7 +268,6 @@ fn reply() -> impl Strategy<Value = Reply> {
 /// DEC-2264 item 5: any request reads back from its bytes as itself, and its bytes are canonical
 /// JSON that encode the same again.
 #[test]
-#[ignore = "pending E21-62"]
 fn any_request_reads_back_as_itself_from_canonical_bytes() {
     runner()
         .run(&request(), |request| {
@@ -285,7 +284,6 @@ fn any_request_reads_back_as_itself_from_canonical_bytes() {
 /// DEC-2264 items 5 and 6: any reply, a whole record with its prompt and response bytes or a
 /// refusal, reads back from its bytes as itself, and its bytes are canonical JSON.
 #[test]
-#[ignore = "pending E21-62"]
 fn any_reply_reads_back_as_itself_from_canonical_bytes() {
     runner()
         .run(&reply(), |reply| {
@@ -325,7 +323,6 @@ fn small_request() -> CallRequest {
 /// DEC-2264 item 5, pinned: a request and a refusal written out by hand, member by member, are the
 /// encoder's bytes exactly.
 #[test]
-#[ignore = "pending E21-62"]
 fn the_wire_form_is_the_one_written_out_here() {
     let hash = Digest::of(b"model").to_hex();
     let request = format!(
@@ -362,7 +359,6 @@ fn reencoded(object: &Object) -> Vec<u8> {
 /// DEC-2264 item 5: a frame that is not exactly what the encoder writes reads as nothing: not JSON,
 /// not canonical, another version, a member missing or unlisted, or a value out of range.
 #[test]
-#[ignore = "pending E21-62"]
 fn a_frame_the_encoder_would_not_write_reads_as_nothing() {
     let bytes = request_bytes(&small_request());
     let Value::Object(members) = parse(&bytes).unwrap() else {
