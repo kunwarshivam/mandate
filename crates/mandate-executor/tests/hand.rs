@@ -5082,6 +5082,7 @@ fn an_owner_exit_outside_the_session_prices_from_the_confirmed_bid() {
     let config = config();
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = protected_position(&ports);
+    shell.run(Input::Tick(clock(PRE_MARKET)), &ports);
 
     shell.run(
         Input::Command(Command::KillSwitch {
