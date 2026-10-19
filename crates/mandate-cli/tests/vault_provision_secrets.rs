@@ -102,7 +102,10 @@ fn a_namespace_that_is_not_a_label_is_refused_before_any_vault_is_reached() {
         let output = provision(
             NOWHERE,
             &ca(),
-            &["--operator-token-stdin", "--secrets-namespace", namespace],
+            &[
+                "--operator-token-stdin",
+                &format!("--secrets-namespace={namespace}"),
+            ],
             &format!("{CANARY}\n"),
         );
         refused(&output, "config", namespace);
