@@ -890,7 +890,8 @@ after U-A1 to U-A5 are recorded.
   ([DEC-2037](decisions/DEC-2037.md) item 6). *Accepted when:* the handoff carries the owner's
   confirmed bid, bid size and floor from the `OwnerExitRequested`; the core sends such an exit in
   extended hours as a limit never below the floor, as a confirmed kill switch's close does
-  (trading spec §5.5); and an unconfirmed one still waits for the session.
+  (trading spec §5.5); and an unconfirmed one still waits for the session. Design:
+  [DEC-2040](decisions/DEC-2040.md).
 
 ### E8 Escalation and approvals
 
