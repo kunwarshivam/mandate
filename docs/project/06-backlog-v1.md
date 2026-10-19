@@ -865,7 +865,9 @@ after U-A1 to U-A5 are recorded.
   process prices an owner's market exit at the floor its instrument-scoped `OwnerExitRequested`
   confirmed, and holds any other exit at the market with one opaque alert (`owner_exit_unpriced`
   or `exit_unpriced`), a gap against rule 13 that [DEC-2033](decisions/DEC-2033.md) item 4
-  records. *Accepted when:* `IntentBody::Order` carries an order type; the core receives, gates
+  records. [DEC-2037](decisions/DEC-2037.md) designs it: a handoff with no limit for an exit, sent
+  at the market where §5.1 allows and by the §5.6 ladder elsewhere. *Accepted when:*
+  `IntentBody::Order` carries an order type; the core receives, gates
   and submits a market exit (trading spec §5.1, §5.5) with the same write-before-acting and
   rule-13 exemptions as a limit exit; the executor process hands every exit and raises neither
   alert; `Purpose::exempt_from_pacing` is checked for `OwnerExit` (owner exits are paced only by
