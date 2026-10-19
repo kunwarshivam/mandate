@@ -51,8 +51,8 @@ use core::cmp::Ordering;
 use std::collections::BTreeSet;
 
 use mandate_accounting::{
-    Account, AccountType, AccountingError, AssetClass, Execution, FeeFamily, Input, InstrumentId,
-    Side,
+    Account, AccountType, AccountingError, AssetClass, CorporateAction, Execution, FeeFamily,
+    Input, InstrumentId, Side,
 };
 use mandate_num::{Adverse, NumError, Price, Qty, Ratio, TickRule, Usd};
 use mandate_sim::{
@@ -77,6 +77,10 @@ pub enum BacktestError {
     StrategyWindowsCrossed,
     #[error("a year must hold at least one period")]
     PeriodsPerYearNotPositive,
+    /// The stubs of this story's tests PR return this, so every pending test fails on them
+    /// (DEC-77); the implementation PR replaces the stub and removes the variant.
+    #[error("not implemented until {story}")]
+    Unimplemented { story: &'static str },
     #[error(transparent)]
     Sim(#[from] SimError),
     #[error(transparent)]
@@ -96,6 +100,7 @@ impl BacktestError {
             Self::EquityNotPositive(_) => "equity_not_positive",
             Self::StrategyWindowsCrossed => "strategy_windows_crossed",
             Self::PeriodsPerYearNotPositive => "periods_per_year_not_positive",
+            Self::Unimplemented { .. } => "unimplemented",
             Self::Sim(e) => e.code(),
             Self::Accounting(e) => e.code(),
             Self::Num(e) => e.code(),
@@ -137,6 +142,12 @@ pub struct BacktestInput<'a> {
     pub bars: &'a [SimBar],
     pub coverage_start: UtcNanos,
     pub first_bar_volumes: &'a dyn FirstBarVolumes,
+    /// The corporate actions the data snapshot holds for the instrument (DEC-2245 items 1 and 2).
+    /// One whose ex-date falls after the first bar's trade date and on or before the last's
+    /// applies at 20:00 New York time on the last trading day before its ex-date, so before the
+    /// first bar on or after it; any other was taken before the run or after it, and changes
+    /// nothing.
+    pub corporate_actions: &'a [CorporateAction],
 }
 
 /// One period's closing equity, at the bar that closed it (DEC-127 item 3).
@@ -400,6 +411,9 @@ pub fn walk(input: &BacktestInput<'_>, strategy: Strategy) -> Result<Walk, Backt
     let mut dates: BTreeSet<Date> = BTreeSet::new();
     let mut charged: BTreeSet<Date> = BTreeSet::new();
     let mut period: u32 = 0;
+    if !input.corporate_actions.is_empty() {
+        return Err(BacktestError::Unimplemented { story: "E4-4" });
+    }
     for ((index, bar), closes_period) in input.bars.iter().enumerate().zip(closing_bars(input.bars))
     {
         dates.insert(bar.trade_date);
