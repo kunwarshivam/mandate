@@ -244,6 +244,9 @@ pub struct Journal {
     streams: BTreeMap<String, (u64, Vec<StoredEvent>)>,
     /// The answer to the next append to an agent stream, in place of judging it.
     pub agent_refusal: Option<Refusal>,
+    /// Control-stream appends to answer with an error, storing nothing, as a journal that cannot
+    /// be reached would.
+    pub control_failures: u32,
     /// Appends to refuse as `Fenced`, taking a new epoch as another writer would.
     pub fence_next: u32,
     /// Appends before which another event lands at the current epoch, so the append is behind.
@@ -379,6 +382,12 @@ impl ControlJournal for Journal {
         }
         if stream.as_str() == CONTROL {
             self.attempts.push(ids.clone());
+            if self.control_failures > 0 {
+                self.control_failures -= 1;
+                return Err(ControlError::Journal(
+                    "the control stream cannot be written".to_owned(),
+                ));
+            }
             if self.lost_for_good && self.lost {
                 return Ok(AppendOutcome::Unavailable);
             }

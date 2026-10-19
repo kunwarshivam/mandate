@@ -514,6 +514,63 @@ fn a_claim_the_journal_refuses_or_fails_still_sends_the_stop_by_command() {
     }
 }
 
+/// The owner's `stop` commands for `agent` on the control stream.
+fn stop_commands(world: &World, agent: &str) -> usize {
+    world
+        .of("OwnerCommandIssued")
+        .iter()
+        .filter(|c| {
+            text(c, &["payload", "command"]) == Some("stop")
+                && text(c, &["payload", "agent"]) == Some(agent)
+        })
+        .count()
+}
+
+/// The `AgentStopped` records that name `agent`.
+fn stops_of(world: &World, agent: &str) -> usize {
+    world
+        .of("AgentStopped")
+        .iter()
+        .filter(|b| text(b, &["payload", "agent_id"]) == Some(agent))
+        .count()
+}
+
+/// The `AgentStopped` may be committed when its append reports nothing settled: the Stop finds it
+/// and returns it, and sends no command beside it, so one Stop has one effect.
+#[test]
+fn a_retirement_whose_append_may_have_committed_is_found_and_no_command_is_sent() {
+    let mut world = World::new();
+    world.established();
+    world.deployed(AGENT, true);
+    let code = world.code(AGENT);
+    world.journal.lost_for_good = true;
+    let outcome = world.stop(AGENT, Some(&code));
+    world.journal.recover();
+    assert!(outcome.is_ok(), "the Stop was refused: {outcome:?}");
+    assert_eq!(stops_of(&world, AGENT), 1, "the AgentStopped committed");
+    assert_eq!(stop_commands(&world, AGENT), 0, "no command beside it");
+}
+
+/// The claim is stored and the `AgentStopped`'s append then fails: the Stop goes by command, the
+/// stream stays claimed (its first record the owner's, so a runtime started on it refuses it,
+/// journal spec §9.1), and a later Stop resumes the claim and completes the retirement.
+#[test]
+fn a_retirement_that_fails_after_its_claim_goes_by_command_and_a_later_stop_completes_it() {
+    let mut world = World::new();
+    world.established();
+    world.deployed(AGENT, true);
+    let code = world.code(AGENT);
+    world.journal.control_failures = 1;
+    let outcome = world.stop(AGENT, Some(&code));
+    assert!(outcome.is_ok(), "the Stop was refused: {outcome:?}");
+    assert_eq!(stop_commands(&world, AGENT), 1, "the Stop went by command");
+    assert_eq!(stops_of(&world, AGENT), 0);
+    assert_claimed(&world, AGENT);
+    world.stop_with_code(AGENT).unwrap();
+    assert_eq!(stops_of(&world, AGENT), 1, "the later Stop retired it");
+    assert_claimed(&world, AGENT);
+}
+
 /// One step of the property: what a runtime or the manager does, or the owner's Stop.
 #[derive(Debug, Clone)]
 enum Op {
@@ -601,10 +658,17 @@ proptest! {
                         world.journal.agent_refusal = Some(*refusal);
                     }
                     let commands = world.of("OwnerCommandIssued").len();
+                    let effects = stops_of(&world, AGENTS[*i]) + stop_commands(&world, AGENTS[*i]);
+                    let retired_before = stops_of(&world, AGENTS[*i]) > 0;
                     let outcome = world.stop(AGENTS[*i], Some(&code));
                     let refused = matches!(op, Op::StopRefused(..))
                         && world.journal.agent_refusal.take().is_none();
                     prop_assert!(outcome.is_ok(), "{:?}: the Stop was refused: {:?}", op, outcome);
+                    let added = stops_of(&world, AGENTS[*i]) + stop_commands(&world, AGENTS[*i]) - effects;
+                    prop_assert!(
+                        added == 1 || (added == 0 && retired_before),
+                        "{:?}: the Stop left {} effects", op, added
+                    );
                     if refused {
                         prop_assert!(
                             world.of("OwnerCommandIssued").len() > commands,
