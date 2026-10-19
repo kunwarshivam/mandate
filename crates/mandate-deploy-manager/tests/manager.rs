@@ -12,7 +12,7 @@ use common::{
 };
 use mandate_canon::Value;
 use mandate_deploy_manager::fake::Call;
-use mandate_deploy_manager::orchestrator::{CRASH_LOOP, DEPLOYMENT_UNREAD};
+use mandate_deploy_manager::orchestrator::{CRASH_LOOP, DEPLOYMENT_UNCONNECTED, DEPLOYMENT_UNREAD};
 use mandate_deploy_manager::{
     Cause, ControlJournal, Deployer, Halt, Identity, Record, Slot, backoff,
 };
@@ -116,8 +116,8 @@ fn nothing_starts_for_a_deployment_that_names_no_established_connection() {
     assert!(journal.records().is_empty());
     assert_eq!(
         m.alerts().0,
-        vec![DEPLOYMENT_UNREAD],
-        "the version-1 deployment is reported once"
+        vec![DEPLOYMENT_UNREAD, DEPLOYMENT_UNCONNECTED],
+        "the version-1 deployment and the one rule 201 refuses are each reported once"
     );
 }
 
@@ -147,7 +147,61 @@ fn a_revocation_stops_nothing_but_a_deployment_after_it_starts_nothing() {
         starts(&mut m, &rt("agent_b")).is_empty(),
         "rule 201 refuses agent_b"
     );
+    assert_eq!(
+        m.alerts().0,
+        vec![DEPLOYMENT_UNCONNECTED],
+        "agent_b's refused deployment is reported once, agent_a's is not"
+    );
     clean(&mut m);
+}
+
+/// DEC-2038: a deployment rule 201 refuses is reported once per manager process, a later
+/// establishment revives it no more than it starts it, and a stop leaves nothing to report.
+#[test]
+fn a_refused_deployment_is_reported_once_until_its_agent_is_stopped() {
+    let journal = Journal::new();
+    let mut m = manager(&journal, accounts(&[]));
+    tick(&mut m, 1);
+    journal.services(
+        &deployed("agent_elsewhere", "01J8Z2ACCT00000000000000Z9"),
+        at(2),
+    );
+    for s in 2..5 {
+        tick(&mut m, s);
+    }
+    journal.services(
+        &established(
+            "conn_01J8Z2ACCT00000000000000Z9",
+            "01J8Z2ACCT00000000000000Z9",
+        ),
+        at(5),
+    );
+    tick(&mut m, 5);
+    assert_eq!(m.alerts().0, vec![DEPLOYMENT_UNCONNECTED], "raised once");
+    assert!(
+        m.orchestrator().fake.calls().is_empty(),
+        "a later establishment starts nothing"
+    );
+    let mut m = restart(m);
+    tick(&mut m, 6);
+    assert_eq!(
+        m.alerts().0,
+        vec![DEPLOYMENT_UNCONNECTED, DEPLOYMENT_UNCONNECTED],
+        "a new manager process reports it again"
+    );
+    journal.services(
+        &stopped("agent_elsewhere", "01J8Z2ACCT00000000000000Z9"),
+        at(7),
+    );
+    tick(&mut m, 7);
+    let mut m = restart(m);
+    tick(&mut m, 8);
+    assert_eq!(m.alerts().0.len(), 2, "once stopped, no process reports it");
+    assert_eq!(
+        (DEPLOYMENT_UNCONNECTED.code, DEPLOYMENT_UNCONNECTED.runbook),
+        ("deployment_unconnected", "RB-14"),
+        "a reason code and a runbook, nothing else"
+    );
 }
 
 #[test]
