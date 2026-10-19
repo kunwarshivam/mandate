@@ -1196,9 +1196,8 @@ pub fn api_verdict(
 }
 
 /// What became of a [`WebCheck`]: an earlier part failed, so it was not tried; the API could not
-/// be asked; this machine lacks `web/`'s tools;
-/// the gesture failed; or it recorded a command, with the agent and workspace it acted on and
-/// the signed-in read of that command.
+/// be asked; this machine lacks `web/`'s tools; the gesture failed; or it recorded a command,
+/// with the agent and workspace it acted on and the signed-in read of that command.
 #[derive(Debug)]
 pub enum WebOutcome {
     AfterFailure,
