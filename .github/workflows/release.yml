@@ -12,7 +12,7 @@
 # identity and attests its SBOM; then `publish-index` pushes and signs the multi-arch index a cell
 # pulls on any arch, and the hosted clusters' charts (E21-58). A pull request that changes the
 # release build runs the same builds and drills in `release-check.yml`, which keeps, publishes
-# and signs nothing and holds no environment, so this workflow, which holds one, runs only on
+# and signs nothing and holds no deploy gate, so this workflow, which holds one, runs only on
 # `main` and on dispatch (leak-guard L12, DEC-2032; ES-12). On a
 # manual dispatch from `main` only, `release-signing` waits for the founder to approve its
 # `release-signing` environment, then signs each arch's binaries and SHA256SUMS with the release key

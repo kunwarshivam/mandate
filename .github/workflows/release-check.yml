@@ -2,9 +2,9 @@
 # each arch's two builds of the pull request's merge commit, on two runners in two checkout paths
 # with no cache, compared by `compare`, and each `build-a` builds its images, signed by an
 # ephemeral test key, and drills the start-up signature check on them, as `release.yml` does on
-# `main`. It keeps, publishes and signs nothing, and it names no environment and reads no secret:
-# a workflow a pull request can run holds none (leak-guard L12). `release.yml` runs the same builds
-# on `main` and on dispatch, and alone publishes and signs.
+# `main`. It keeps, publishes and signs nothing, and it holds no deploy gate and no credential,
+# as leak-guard L12 requires of a workflow a pull request can run. `release.yml` runs the same
+# builds on `main` and on dispatch, and alone publishes and signs.
 name: release-check
 
 on:
