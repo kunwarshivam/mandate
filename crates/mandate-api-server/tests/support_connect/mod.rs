@@ -90,6 +90,11 @@ static DIRS: Mutex<u32> = Mutex::new(0);
 
 /// A paper workspace (or `environment`'s), offering a connect when `offered`.
 pub fn fixture(environment: &str, offered: bool, accepting: bool) -> Fixture {
+    fixture_drawing(environment, offered, accepting, 0)
+}
+
+/// [`fixture`], with the random source starting at [`DRAWS`]'s `first`: past both, it fails.
+pub fn fixture_drawing(environment: &str, offered: bool, accepting: bool, first: usize) -> Fixture {
     let mut n = DIRS.lock().expect("unpoisoned");
     *n += 1;
     let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
@@ -120,7 +125,8 @@ pub fn fixture(environment: &str, offered: bool, accepting: bool) -> Fixture {
         asked: Mutex::default(),
         accepting,
     });
-    let connect = offered.then(|| Arc::new(Connect::new(client(), Box::new(Draws(Mutex::new(0))))));
+    let connect =
+        offered.then(|| Arc::new(Connect::new(client(), Box::new(Draws(Mutex::new(first))))));
     let app = App {
         settings: Settings {
             app_origin: APP.to_owned(),
@@ -330,4 +336,30 @@ pub fn text<'v>(value: &'v Value, path: &[&str]) -> &'v str {
         .try_fold(value, |v, k| v.get(k))
         .and_then(Value::as_str)
         .unwrap_or_else(|| panic!("{path:?}"))
+}
+
+/// Appends a row of `event_type` at `version` with `payload` (JSON text) to the control stream,
+/// under an event id no start derives.
+pub fn seed(f: &Fixture, event_type: &str, version: u64, payload: &str) {
+    let mut streams = f.journal.streams.lock().expect("unpoisoned");
+    let rows = streams.entry(ctl()).or_default();
+    let seq = u64::try_from(rows.len()).expect("small") + 1;
+    let event_id = format!("01JBH3BTZ8K2M4N6P8R0S2T{seq:03}");
+    let text = format!(
+        r#"{{"environment":"paper","event_id":"{event_id}","event_type":"{event_type}","payload":{payload},"stream_id":"{}"}}"#,
+        ctl()
+    );
+    let body = to_canonical(&parse(text.as_bytes()).expect("JSON"));
+    rows.push(StoredEvent {
+        stream_id: ctl(),
+        seq,
+        event_id,
+        event_type: event_type.to_owned(),
+        schema_version: version,
+        environment: "paper".to_owned(),
+        recorded_at: format!("2026-10-17T10:00:{seq:02}.000000000Z"),
+        prev_hash: Digest::ZERO,
+        hash: Digest::of(&body),
+        body,
+    });
 }
