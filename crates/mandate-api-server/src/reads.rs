@@ -415,3 +415,17 @@ fn set(members: &mut [(&'static str, Value)], name: &str, value: Value) {
         *held = value;
     }
 }
+
+/// The agent's net filled quantity per instrument (`read-models/positions`, DEC-2111 item 4): the
+/// `FillApplied` and `LateFillApplied` records of its own orders, as `agent_orders` attributes
+/// them, buys adding and sells subtracting, in instrument order, leaving out an instrument that
+/// nets to zero. `cost_basis`, `risk_mark` and `protection` are `null` (DEC-2111 item 5). `None`
+/// when a fill of its own cannot be read, so no position is served from part of its fills.
+#[expect(
+    clippy::todo,
+    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+)]
+pub fn agent_positions(account: &[StoredEvent], agent_id: &str) -> Option<Vec<Value>> {
+    let _ = (account, agent_id);
+    todo!()
+}

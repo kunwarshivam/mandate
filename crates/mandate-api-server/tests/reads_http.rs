@@ -846,3 +846,93 @@ fn an_agents_orders_are_its_own_on_its_documents_account() {
     let stranger = get(&f, &ws("/agents/agt_a/orders"), Some(&cookie));
     assert_eq!(stranger.status, 404, "no membership is API-9's 404");
 }
+
+#[test]
+#[ignore = "pending E11-9"]
+fn an_agents_positions_are_its_own_fills_beside_the_accounts_holdings() {
+    let (bytes, version) = document();
+    let f = fixture_with(stored(bytes));
+    seed_documents(&f, &version);
+    seed_orders(&f);
+    let acct = format!("acct:{WORKSPACE}:acct_1");
+    let fill = |seq, id: &str, qty: &str| {
+        row(
+            &acct,
+            seq,
+            "FillApplied",
+            &format!(
+                r#"{{"fill_id":"f-{seq}","client_order_id":"{id}","instrument_id":"b0c2a3e4-5f60-4718-9a2b-3c4d5e6f7081","side":"buy","qty_gross":"{qty}","price":"101.5","trade_date":"2026-10-17","risk_clock":"2026-10-17T10:00:00Z","fees":[]}}"#
+            ),
+        )
+    };
+    f.journal
+        .streams
+        .lock()
+        .expect("unpoisoned")
+        .get_mut(&acct)
+        .expect("seeded")
+        .extend([fill(7, "o-1", "2"), fill(8, "o-2", "1")]);
+    members(&f, Ok(vec![activated(1, alice(), &[Role::Viewer])]));
+    let cookie = signed_in(&f, alice());
+    let reply = get(&f, &ws("/agents/agt_a/positions"), Some(&cookie));
+    assert_eq!(
+        reply.status,
+        200,
+        "{}",
+        String::from_utf8_lossy(&reply.body)
+    );
+    let served = json(&reply);
+    assert_eq!(text(&served, "agent_id"), "agt_a");
+    assert_eq!(text(&served, "account_ref"), "acct_1");
+    let positions = parse(
+        br#"[{"instrument_id":"b0c2a3e4-5f60-4718-9a2b-3c4d5e6f7081","filled_qty":"2","cost_basis":null,"risk_mark":null,"protection":null}]"#,
+    )
+    .expect("JSON");
+    assert_eq!(
+        served.get("positions"),
+        Some(&positions),
+        "agt_b's fill is not agt_a's"
+    );
+    let holdings = parse(
+        br#"[{"instrument":"b0c2a3e4-5f60-4718-9a2b-3c4d5e6f7081","qty":"3","broker_qty":"3","mismatch":false,"observed_at":"2026-10-17T10:00:02.000000000Z"}]"#,
+    )
+    .expect("JSON");
+    assert_eq!(
+        served.get("account_positions"),
+        Some(&holdings),
+        "the account's, as on the agent read"
+    );
+    let Some(Value::Array(as_of)) = served.get("as_of") else {
+        panic!("as_of");
+    };
+    let streams: Vec<&str> = as_of.iter().map(|w| text(w, "stream_id")).collect();
+    assert_eq!(streams, [ctl().as_str(), acct.as_str()]);
+
+    let undocumented = json(&get(&f, &ws("/agents/agt_b/positions"), Some(&cookie)));
+    assert_eq!(undocumented.get("account_ref"), Some(&Value::Null));
+    assert_eq!(
+        undocumented.get("positions"),
+        Some(&Value::Array(Vec::new()))
+    );
+    assert_eq!(undocumented.get("account_positions"), Some(&Value::Null));
+    assert_eq!(
+        get(&f, &ws("/agents/agt_x/positions"), Some(&cookie)).status,
+        404
+    );
+
+    f.journal
+        .streams
+        .lock()
+        .expect("unpoisoned")
+        .get_mut(&acct)
+        .expect("seeded")
+        .push(row(
+            &acct,
+            9,
+            "FillApplied",
+            r#"{"fill_id":"f-9","client_order_id":"o-1","instrument_id":"b0c2a3e4-5f60-4718-9a2b-3c4d5e6f7081","side":"short","qty_gross":"1","price":"1","trade_date":"2026-10-17","risk_clock":"2026-10-17T10:00:00Z","fees":[]}"#,
+        ));
+    let unreadable = get(&f, &ws("/agents/agt_a/positions"), Some(&cookie));
+    assert_eq!(unreadable.status, 503, "no position from part of its fills");
+    assert_eq!(text(&json(&unreadable), "code"), "journal_unavailable");
+}
