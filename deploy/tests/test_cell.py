@@ -819,10 +819,11 @@ def test_deploy_manager_contained():
         assert spec["restartPolicy"] == "Never" and spec["automountServiceAccountToken"] is False
         assert "serviceAccountName" not in spec
         probes = [container[k]["exec"]["command"] for k in ("livenessProbe", "readinessProbe")]
-        assert probes == [
-            ["/usr/local/bin/mandate-daemon", "probe", "livez", "--probe", "/tmp/process.sock"],
-            ["/usr/local/bin/mandate-daemon", "probe", "readyz", "--probe", "/tmp/process.sock"],
-        ], probes
+        listed = next(p for p in PROCESSES if p["name"] == pod["metadata"]["name"])
+        words = listed.get("probe") or [
+            "/usr/local/bin/mandate-daemon", "probe", "{probe}", "--probe", "/tmp/process.sock"
+        ]
+        assert probes == [[x.replace("{probe}", k) for x in words] for k in ("livez", "readyz")], probes
     only_runtime = render_all("--set", "images.executor=")
     assert [w["metadata"]["name"] for w in managed_pods(only_runtime)] == ["runtime"]
     assert deploy_manager_contained(only_runtime) == []
