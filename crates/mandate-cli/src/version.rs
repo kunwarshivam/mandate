@@ -21,8 +21,8 @@ use mandate_spec::{Mandate, MandateVersion, Pointer, ValidationContext, Violatio
 
 use crate::control::{
     Confirmation, ControlError, ControlJournal, Decision, Ids, Now, Owner, Repeat, Shape,
-    Submitted, account_stream, code_of, commit_choice, control_stream, decide, object,
-    same_environment, seconds, text,
+    Submitted, account_stream, code_of, commit_choice, commit_choice_at, control_stream, decide,
+    object, same_environment, seconds, text,
 };
 
 pub(crate) const CREATED: &str = "MandateVersionCreated";
@@ -223,18 +223,20 @@ pub(crate) fn commit(
     bound: (&str, &Value, Vec<(&'static str, Value)>),
     now: Now,
 ) -> Result<Submitted, ControlError> {
-    commit_at(journal, store, owner, (event, 1), bound, now)
+    commit_at(journal, store, owner, (event, 1, None), bound, now)?
+        .ok_or_else(|| ControlError::Journal("an unpinned commit always settles".into()))
 }
 
-/// [`commit`] at `schema_version` of the event type.
+/// [`commit`] at `schema_version` of the event type, and, when `pinned` names a head, appended
+/// there and nowhere else: `None` when the stream has moved past it, and the caller decides again.
 pub(crate) fn commit_at(
     journal: &mut dyn ControlJournal,
     store: &mut dyn ArtifactStore,
     owner: &Owner,
-    ((event_type, mut key, stepped_up), schema_version): (Event, u64),
+    ((event_type, mut key, stepped_up), schema_version, pinned): (Event, u64, Option<u64>),
     (version, record, config_refs): (&str, &Value, Vec<(&'static str, Value)>),
     now: Now,
-) -> Result<Submitted, ControlError> {
+) -> Result<Option<Submitted>, ControlError> {
     let bytes = to_canonical(record);
     let record_ref = reference(Digest::of(&bytes));
     key.push(("mandate_version", text(version)));
@@ -248,7 +250,7 @@ pub(crate) fn commit_at(
         confirmed,
         Repeat::FindsEarlier,
     )? {
-        Decision::Committed(earlier) => return Ok(earlier),
+        Decision::Committed(earlier) => return Ok(Some(earlier)),
         Decision::Fresh(decided) => decided,
     };
     store.put_artifact(&bytes).map_err(|e| store_error(&e))?;
@@ -259,7 +261,10 @@ pub(crate) fn commit_at(
         artifact_refs,
         config_refs,
     };
-    commit_choice(journal, owner, decided, shape, now)
+    match pinned {
+        Some(head) => commit_choice_at(journal, owner, decided, shape, now, head),
+        None => commit_choice(journal, owner, decided, shape, now).map(Some),
+    }
 }
 
 /// Stores `document`, a mandate, in canonical form under its version (mandate spec §9.1), and its

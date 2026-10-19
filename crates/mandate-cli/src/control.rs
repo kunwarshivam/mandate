@@ -890,6 +890,53 @@ pub(crate) fn commit_choice(
     commit_as(Writer::Owner, journal, owner, decided, shape, now)
 }
 
+/// [`commit_choice`] appended at `head` and nowhere else, so what the command decided from the
+/// rows it read at `head` holds at the append (#1748 review). `None` when the stream has moved
+/// past `head`: the command reads the rows again and decides again.
+///
+/// # Errors
+/// As [`commit`].
+pub(crate) fn commit_choice_at(
+    journal: &mut dyn ControlJournal,
+    owner: &Owner,
+    decided: Decided,
+    shape: Shape,
+    now: Now,
+    head: u64,
+) -> Result<Option<Submitted>, ControlError> {
+    let Decided {
+        stream,
+        event_type,
+        key,
+        event_id,
+        repeat,
+        ..
+    } = decided;
+    let payload = object(key)?;
+    let bytes = draft(
+        Writer::Owner,
+        owner,
+        &stream,
+        &event_id,
+        event_type,
+        shape,
+        payload,
+        now,
+    )?;
+    let mut retries = 1..ATTEMPTS;
+    loop {
+        match attempt(journal, &stream, (&event_id, &bytes), Some(head), now)? {
+            Attempted::Stored(seq) => return Ok(Some(Submitted { event_id, seq })),
+            Attempted::Moved => return Ok(None),
+            Attempted::Retry => {}
+        }
+        let Some(retry) = retries.next() else {
+            return Err(unsettled(&event_id, repeat));
+        };
+        journal.wait(backoff(retry, &event_id)?);
+    }
+}
+
 /// [`commit_choice`] for a `BacktestRunRecorded` whose payload is exactly the runner's, written by
 /// the `backtest_runner` system (DEC-1141, DEC-1144 item 7).
 ///
