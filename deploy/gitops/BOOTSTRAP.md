@@ -136,7 +136,9 @@ cluster:
 3. **The grant.** Once the `mandate` image staging runs has `workspace found --open`, staging's
    values set `founding.enabled: true`. The workspace chart's `founding` hook then runs on every
    apply: the first opens the workspace's control stream if it is empty and writes your founding
-   grant; every later one finds it and commits nothing.
+   grant; every later one finds it and commits nothing. Two runs racing on an empty stream never
+   open it twice: the one that loses fails closed, committing nothing, and the hook's retry finds
+   the stream opened and founds it (or finds the grant).
 
 If the control stream already holds records and no membership, the grant is refused
 `workspace_not_new`: the release fails, and verify's `founding` Job line names only that code. The
