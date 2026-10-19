@@ -144,15 +144,26 @@ def sealed_is_not_ready(docs: list[dict]) -> list[str]:
     return found
 
 
-def reached_only_by_its_processes(docs: list[dict]) -> list[str]:
+def reached_only_by_its_processes(docs: list[dict], api: dict | None = None) -> list[str]:
     """Only the workspace's pods whose egress names the vault reach it, on 8200; it reaches
-    nothing."""
+    nothing but, with Kubernetes auth (`api`, its CIDRs and ports), the cluster's API server for
+    TokenReview, by address and port alone."""
     found = []
     policy = one(docs, "NetworkPolicy", "vault")["spec"]
     labels = server(docs)["spec"]["template"]["metadata"]["labels"]
     if any(labels.get(k) != v for k, v in policy["podSelector"]["matchLabels"].items()):
         found.append("the policy does not select the vault's pods")
-    if sorted(policy.get("policyTypes", [])) != ["Egress", "Ingress"] or policy.get("egress"):
+    want_egress = (
+        [
+            {
+                "to": [{"ipBlock": {"cidr": cidr}} for cidr in api["cidrs"]],
+                "ports": [{"protocol": "TCP", "port": port} for port in api["ports"]],
+            }
+        ]
+        if api
+        else []
+    )
+    if sorted(policy.get("policyTypes", [])) != ["Egress", "Ingress"] or (policy.get("egress") or []) != want_egress:
         found.append(f"the vault's egress is {policy.get('egress')}")
     want_from = [
         {
@@ -390,6 +401,31 @@ def test_sealed_is_not_ready_catches_a_restart_or_a_sealed_route():
     bad = copy.deepcopy(docs)
     one(bad, "Service", "vault")["spec"]["publishNotReadyAddresses"] = True
     assert sealed_is_not_ready(bad)
+
+
+KUBE_API = {"cidrs": ["10.245.0.1/32", "10.110.0.2/32"], "ports": [443, 6443]}
+
+
+def test_kubernetes_auth_reaches_only_the_api_server():
+    plain = render("-f", str(STAGING))
+    assert reached_only_by_its_processes(plain) == []
+    on = render("-f", str(STAGING), "--set-json", f"kubeApi={json.dumps({'enabled': True, **KUBE_API})}")
+    assert reached_only_by_its_processes(on, KUBE_API) == []
+    assert reached_only_by_its_processes(on), "the plain check must refuse the API rule"
+    for mutate in (
+        lambda e: e[0]["to"].append({"ipBlock": {"cidr": "0.0.0.0/0"}}),
+        lambda e: e[0]["ports"].append({"protocol": "TCP", "port": 8443}),
+        lambda e: e[0].pop("ports"),
+        lambda e: e[0]["to"].append({"namespaceSelector": {}}),
+        lambda e: e.append({"to": [{"podSelector": {}}]}),
+    ):
+        bad = copy.deepcopy(on)
+        mutate(one(bad, "NetworkPolicy", "vault")["spec"]["egress"])
+        assert reached_only_by_its_processes(bad, KUBE_API), mutate
+    unknown = helm("-f", str(STAGING), "--set", "kubeApi.enabled=true")
+    assert unknown.returncode != 0 and "Kubernetes API" in unknown.stderr
+    for wide in ('{"enabled":true,"cidrs":["0.0.0.0/0"],"ports":[443]}', '{"enabled":true,"cidrs":["10.0.0.0/8"],"ports":[443]}'):
+        assert helm("-f", str(STAGING), "--set-json", f"kubeApi={wide}").returncode != 0, wide
 
 
 def test_reached_only_by_its_processes_catches_a_wider_policy():
