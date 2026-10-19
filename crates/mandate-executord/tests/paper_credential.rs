@@ -1,10 +1,8 @@
 //! The broker an executor runs over and its paper credential (DEC-2306 items 1 to 3): the run
 //! configuration's choice, the connection the account stream's latest connect check passed for,
-//! and the credentials the vault's lease on that connection holds, each refusal named and none
-//! naming the secret.
+//! and the OAuth access token the vault's lease on that connection holds, each refusal named and
+//! none naming the secret.
 
-use mandate_alpaca::{Credentials, KEY_ID_VAR, SECRET_VAR};
-use mandate_canon::{Key, Object, Value, to_canonical};
 use mandate_connections::record::ConnectionId;
 use mandate_domain::{CapabilityProfile, ProfileError};
 use mandate_executor::{
@@ -14,7 +12,7 @@ use mandate_executord::Broker;
 use mandate_executord::alpaca::AlpacaBroker;
 use mandate_executord::connect::connect_check;
 use mandate_executord::credential::{
-    BrokerChoice, broker_choice, checked_connection, paper_credentials,
+    BrokerChoice, broker_choice, checked_connection, paper_token, paper_transport, read_token,
 };
 use mandate_executord::fixture::Ids;
 use mandate_executord::paper::FixturePaper;
@@ -22,14 +20,13 @@ use mandate_store::MemoryStore;
 use mandate_time::UtcNanos;
 use mandate_vault::SourceError;
 use mandate_vault::lease::Lease;
-use secrecy::SecretSlice;
+use secrecy::{ExposeSecret, SecretSlice};
 
 type Error = Box<dyn std::error::Error>;
 
 const ACCOUNT: &str = "01J8Z2ACCT0000000000000001";
 const PII: &str = "pii_01J8Z2PQ000000000000000001";
-const KEY_ID: &str = "PKEXECUTORSENTINEL01";
-const SECRET: &str = "executorSentinelSecretValue0123456789abcd";
+const TOKEN: &str = "executorSentinelToken-0123456789~abcd";
 
 fn scope() -> AccountScope {
     AccountScope {
@@ -84,15 +81,12 @@ fn lease(secret: Vec<u8>) -> Result<Lease, Error> {
     })
 }
 
-fn vault_secret(key_id: &str, secret: &str) -> Vec<u8> {
-    let mut object = Object::new();
-    for (name, value) in [("key_id", key_id), ("secret", secret)] {
-        object.insert(
-            Key::new(name).unwrap_or_else(|_| panic!("{name}")),
-            Value::Str(value.to_owned()),
-        );
-    }
-    to_canonical(&Value::Object(object))
+/// DEC-2624's token entry for `token`, written out here rather than by its encoder.
+fn entry(token: &str) -> Vec<u8> {
+    format!(
+        r#"{{"access_token":"{token}","format":1,"scope":["data","trading"],"token_type":"bearer"}}"#
+    )
+    .into_bytes()
 }
 
 /// DEC-2306 item 1: no flag and `fixture` are the fixture, `alpaca-paper` is the paper host, and
@@ -143,19 +137,14 @@ fn the_connection_is_the_one_the_latest_check_passed_for() -> Result<(), Error> 
     Ok(())
 }
 
-/// DEC-2306 items 2 and 3: the lease's secret reads as the paper credentials, and the keeper
-/// holds the lease to renew. A refused lease or a secret that does not read refuses the start,
-/// and neither refusal names the secret.
+/// DEC-2306 items 2 and 3: the lease's secret decodes as the access token, and the keeper holds
+/// the lease to renew. A refused lease or a secret that is not a token entry, a key pair among
+/// them, refuses the start, and neither refusal names the secret.
 #[test]
 #[ignore = "pending E21-30"]
-fn the_lease_holds_the_credentials_or_refuses_the_start() -> Result<(), Error> {
-    let expected = Credentials::from_lookup(|name| match name {
-        KEY_ID_VAR => Some(KEY_ID.to_owned()),
-        SECRET_VAR => Some(SECRET.to_owned()),
-        _ => None,
-    })?;
-    let (credentials, keeper) = paper_credentials(Ok(lease(vault_secret(KEY_ID, SECRET))?))?;
-    assert_eq!(credentials, expected);
+fn the_lease_holds_the_token_or_refuses_the_start() -> Result<(), Error> {
+    let (token, keeper) = paper_token(Ok(lease(entry(TOKEN))?))?;
+    assert_eq!(token.0.expose_secret(), TOKEN);
     assert_eq!(
         keeper.lease().map(|held| held.connection.clone()),
         Some(ConnectionId::new("conn1")?)
@@ -166,12 +155,35 @@ fn the_lease_holds_the_credentials_or_refuses_the_start() -> Result<(), Error> {
         SourceError::Unavailable,
     ] {
         assert_eq!(
-            paper_credentials(Err(refused)).err(),
+            paper_token(Err(refused)).err(),
             Some("credential_unavailable")
         );
     }
-    let malformed = format!(r#"{{"key_id":"{KEY_ID}","secret":"{SECRET}","x":"{SECRET}"}}"#);
-    let refused = paper_credentials(Ok(lease(malformed.into_bytes())?)).err();
+    let key_pair = format!(r#"{{"key_id":"{TOKEN}","secret":"{TOKEN}"}}"#);
+    let refused = paper_token(Ok(lease(key_pair.into_bytes())?)).err();
     assert_eq!(refused, Some("credential_malformed"));
+    Ok(())
+}
+
+/// A rotated secret is read the same way: the entry decodes to its token, and anything else,
+/// another token type or a padded entry among them, is `credential_malformed`.
+#[test]
+#[ignore = "pending E21-30"]
+fn a_secret_reads_as_its_token_or_is_malformed() -> Result<(), Error> {
+    assert_eq!(read_token(&entry(TOKEN))?.0.expose_secret(), TOKEN);
+    let mut padded = entry(TOKEN);
+    padded.push(b'\n');
+    let other_type = String::from_utf8(entry(TOKEN))?.replace("bearer", "Bearer");
+    for secret in [padded, other_type.into_bytes(), entry(""), Vec::new()] {
+        assert_eq!(read_token(&secret).err(), Some("credential_malformed"));
+    }
+    Ok(())
+}
+
+/// DEC-2306 item 2: the token builds the paper host's transport.
+#[test]
+#[ignore = "pending E21-30"]
+fn the_token_builds_the_paper_transport() -> Result<(), Error> {
+    paper_transport(read_token(&entry(TOKEN))?)?;
     Ok(())
 }
