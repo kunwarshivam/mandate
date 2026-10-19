@@ -40,9 +40,14 @@ variable "region" {
 }
 
 variable "state_region" {
-  description = "The region of the Spaces state bucket, which stays in nyc3 until it moves to the US West in a later change (DEC-2044 item 2, DEC-2047)."
+  description = "The region of the Spaces state bucket: the US West alone (DEC-2047 item 6)."
   type        = string
-  default     = "nyc3"
+  default     = "sfo2"
+
+  validation {
+    condition     = contains(["sfo2", "sfo3"], var.state_region)
+    error_message = "The state bucket lives in sfo2 or sfo3; the founder put all of the infrastructure in the US West (DEC-2047)."
+  }
 }
 
 variable "vpc_ip_range" {

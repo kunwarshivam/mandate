@@ -38,7 +38,12 @@ OWN_CHARTS = {
     "mandate-backup-plugin-tls": "backup-plugin-tls",
     "mandate-journal-db": "journal-db",
     "mandate-workspace": "workspace",
+    "mandate-vault-server": "vault",
 }
+# The charts staging alone runs: the vault, whose production unseal is not decided (DEC-2021 item 6,
+# DEC-2051).
+STAGING_ONLY = {"mandate-vault-server"}
+VAULT_VALUES = ROOT / "deploy" / "cell" / "values" / "vault-staging.yaml"
 OWN_CHART_URL = "oci://ghcr.io/kunwarshivam/mandate/charts/"
 # The upstream charts and the digests whose chart layers are xtask/src/cell.rs's pinned tarballs.
 UPSTREAM_CHARTS = {
@@ -181,9 +186,9 @@ def render(release: dict, values: dict, tmp: Path) -> list[dict]:
     return [d for d in yaml.safe_load_all(done.stdout) if d]
 
 
-def sources_pinned(docs: list[dict]) -> list[str]:
+def sources_pinned(docs: list[dict], environment: str = "staging") -> list[str]:
     """Every chart comes by digest; the repository's own only once release.yml's signature on main
-    verifies; the upstream charts are exactly the pinned ones."""
+    verifies; the upstream charts are exactly the pinned ones; and only staging runs the vault."""
     problems = []
     sources = of_kind(docs, "OCIRepository")
     for name, source in sources.items():
@@ -192,6 +197,8 @@ def sources_pinned(docs: list[dict]) -> list[str]:
             problems.append(f"{name}: not pinned by digest alone: {spec.get('ref')}")
         if spec.get("layerSelector") != CHART_LAYER:
             problems.append(f"{name}: does not select the chart layer")
+        if name in STAGING_ONLY and environment != "staging":
+            problems.append(f"{name}: runs in staging alone (DEC-2051)")
         if name in OWN_CHARTS:
             if spec.get("url") != OWN_CHART_URL + name:
                 problems.append(f"{name}: url {spec.get('url')}")
@@ -205,7 +212,10 @@ def sources_pinned(docs: list[dict]) -> list[str]:
                 problems.append(f"{name}: not the pinned upstream chart")
         else:
             problems.append(f"{name}: an OCIRepository the hosted clusters do not run")
-    for name in set(OWN_CHARTS) | set(UPSTREAM_CHARTS):
+    expected = set(OWN_CHARTS) | set(UPSTREAM_CHARTS)
+    if environment != "staging":
+        expected -= STAGING_ONLY
+    for name in expected:
         if name not in sources:
             problems.append(f"{name}: missing")
     return problems
@@ -269,6 +279,37 @@ def endpoint_from_bootstrap(docs: list[dict]) -> list[str]:
     return problems
 
 
+def vault_release(docs: list[dict], environment: str = "staging") -> list[str]:
+    """Staging installs the vault with vault-staging.yaml unchanged, beside the workspace, never
+    waiting on a vault that stays sealed until the founder initializes it, and never pruned;
+    production installs none (DEC-2051)."""
+    release = of_kind(docs, "HelmRelease").get("vault")
+    if environment != "staging":
+        return [] if release is None else ["vault: runs in staging alone (DEC-2051)"]
+    if release is None:
+        return ["vault: missing"]
+    spec = release["spec"]
+    problems = []
+    if spec.get("chartRef") != {"kind": "OCIRepository", "name": "mandate-vault-server"}:
+        problems.append(f"vault: installs {spec.get('chartRef')}")
+    if (spec.get("targetNamespace"), spec.get("storageNamespace")) != ("ws-ws1", "ws-ws1"):
+        problems.append("vault: not beside the workspace in ws-ws1")
+    for phase in ("install", "upgrade"):
+        if (spec.get(phase) or {}).get("disableWait") is not True:
+            problems.append(f"vault: {phase} waits on a vault the founder has not initialized")
+    if spec.get("values") or spec.get("valuesFrom") != [
+        {"kind": "ConfigMap", "name": "vault-staging-values", "valuesKey": "values.yaml"}
+    ]:
+        problems.append(f"vault: values {spec.get('values')} {spec.get('valuesFrom')}")
+    source = of_kind(docs, "ConfigMap").get("vault-staging-values") or {"data": {}}
+    if yaml.safe_load(source["data"].get("values.yaml", "")) != yaml.safe_load(VAULT_VALUES.read_text()):
+        problems.append("vault: values are not deploy/cell/values/vault-staging.yaml")
+    annotations = release["metadata"].get("annotations") or {}
+    if {k: annotations.get(k) for k in PRUNE_DISABLED} != PRUNE_DISABLED:
+        problems.append("vault: prunable")
+    return problems
+
+
 def never_pruned(docs: list[dict]) -> list[str]:
     """Removing a namespace or the journal from git never deletes the journal's data: every
     namespace and the journal's release are unprunable, and the two the journal needs exist."""
@@ -296,6 +337,44 @@ def strings(value, path=""):
         yield path, value
 
 
+# A process image a hosted cluster names: a release binary's index under this repository's GHCR
+# path, by digest alone (DEC-2016, DEC-2026); `promote` writes only these.
+OWN_IMAGE = re.compile(r"ghcr\.io/kunwarshivam/mandate/mandate[a-z-]*@sha256:[0-9a-f]{64}")
+
+
+# A ULID, as the API server's org and workspace ids are (MANDATE_API_ORG, MANDATE_API_WORKSPACE).
+ULID = re.compile(r"[0-9A-HJKMNP-TV-Z]{26}")
+API_URLS = ("issuer", "jwksUrl", "appOrigin")
+
+
+def api_settings(values: dict[str, dict]) -> list[str]:
+    """No placeholder anywhere in a hosted workspace's values (`placeholder`, as in
+    `placeholder.invalid`, or the all-zero ULID); and once the API server's settings
+    are written, each is set: its org and workspace as ULIDs, its issuer, key set and app origin
+    over https, the key set under the issuer, and an audience."""
+    workspace = values.get("workspace", {})
+    problems = [
+        f"workspace: {path} is a placeholder"
+        for path, text in strings(workspace)
+        if "placeholder" in text.lower() or text == "0" * 26
+    ]
+    api = {key: str(value) for key, value in (workspace.get("api") or {}).items() if value}
+    named = (workspace.get("images") or {}).get("api")
+    if not named and not set(api) - {"subjectLinks"}:
+        return problems
+    for key in ("org", "workspace"):
+        if not ULID.fullmatch(api.get(key, "")):
+            problems.append(f"workspace: api.{key} is not a ULID")
+    for key in API_URLS:
+        if not api.get(key, "").startswith("https://"):
+            problems.append(f"workspace: api.{key} is not an https URL")
+    if not api.get("audience"):
+        problems.append("workspace: api.audience is not set")
+    if not api.get("jwksUrl", "").startswith(api.get("issuer", "") + "/"):
+        problems.append("workspace: api.jwksUrl is not the issuer's own key set")
+    return problems
+
+
 def values_policy(values: dict[str, dict], environment: str) -> list[str]:
     """No stub tier, no `live`, the paper environment, every image by digest, two journal instances
     on separate nodes."""
@@ -319,6 +398,8 @@ def values_policy(values: dict[str, dict], environment: str) -> list[str]:
             problems.append("workspace: the stub issuer is named")
         elif reference and not PINNED.search(reference):
             problems.append(f"workspace: image {image} not pinned by digest: {reference}")
+        elif reference and image != "postgres" and not OWN_IMAGE.fullmatch(reference):
+            problems.append(f"workspace: image {image} is not this repository's release: {reference}")
     for name in ("cnpg", "barman-cloud"):
         tree = values.get(name, {})
         for key in ("image", "sidecarImage"):
@@ -643,7 +724,17 @@ def test_each_admission_seeded_bug_is_caught(change, tmp_path):
 
 
 def test_sources_pinned(overlay):
-    assert sources_pinned(overlay[1]) == []
+    assert sources_pinned(overlay[1], overlay[0]) == []
+
+
+def test_vault_release(overlay):
+    assert vault_release(overlay[1], overlay[0]) == []
+
+
+def test_production_running_the_vault_is_caught(tmp_path):
+    docs = build("staging", FIXTURE, tmp_path)
+    assert sources_pinned(docs, "production") == ["mandate-vault-server: runs in staging alone (DEC-2051)"]
+    assert vault_release(docs, "production") == ["vault: runs in staging alone (DEC-2051)"]
 
 
 def test_releases_resolve(overlay):
@@ -660,6 +751,37 @@ def test_endpoint_from_bootstrap(overlay):
 
 def test_never_pruned(overlay):
     assert never_pruned(overlay[1]) == []
+
+
+def test_api_settings(overlay):
+    assert api_settings(overlay[2]) == []
+
+
+@pytest.mark.parametrize(
+    "api",
+    [
+        {"issuer": "https://placeholder.invalid"},
+        {"org": "0" * 26},
+        {"org": "01KDEM0000000000000000000R", "workspace": "ws1"},
+        {"issuer": "http://issuer.example"},
+        {"appOrigin": "https://app.example", "audience": ""},
+        {"jwksUrl": "https://other.example/jwks.json"},
+    ],
+)
+def test_each_api_settings_bug_is_caught(overlay, api):
+    good = {
+        "org": "01KDEM0000000000000000000R",
+        "workspace": "01KDEM0000000000000000000W",
+        "issuer": "https://issuer.example",
+        "audience": "authenticated",
+        "jwksUrl": "https://issuer.example/jwks.json",
+        "appOrigin": "https://app.example",
+    }
+    values = copy.deepcopy(overlay[2])
+    values["workspace"] = merge(values["workspace"], {"api": good})
+    assert api_settings(values) == []
+    values["workspace"] = merge(values["workspace"], {"api": api})
+    assert api_settings(values), f"api_settings missed {api}"
 
 
 def test_values_policy(overlay):
@@ -725,6 +847,20 @@ def seeded(docs: list[dict], kind: str, name: str, change) -> list[dict]:
 DOC_BUGS = [
     (sources_pinned, "OCIRepository", "mandate-workspace", lambda d: d["spec"].update(ref={"tag": "latest"})),
     (sources_pinned, "OCIRepository", "mandate-journal-db", lambda d: d["spec"].pop("verify")),
+    (sources_pinned, "OCIRepository", "mandate-vault-server", lambda d: d["spec"].pop("verify")),
+    (vault_release, "HelmRelease", "vault", lambda d: d["spec"].pop("install")),
+    (vault_release, "HelmRelease", "vault", lambda d: d["spec"]["upgrade"].update(disableWait=False)),
+    (vault_release, "HelmRelease", "vault", lambda d: d["spec"].update(targetNamespace="vault")),
+    (vault_release, "HelmRelease", "vault", lambda d: d["metadata"].pop("annotations")),
+    (vault_release, "HelmRelease", "vault", lambda d: d["spec"].update(values={"seal": {"type": "shamir"}})),
+    (
+        vault_release,
+        "ConfigMap",
+        "vault-staging-values",
+        lambda d: d["data"].update(
+            {"values.yaml": d["data"]["values.yaml"].replace("staging-1", "staging-2")}
+        ),
+    ),
     (
         sources_pinned,
         "OCIRepository",
@@ -933,6 +1069,9 @@ def test_each_overlay_seeded_bug_is_caught(check, kind, name, change, tmp_path):
 
 
 VALUE_BUGS = [
+    ("workspace", {"images": {"mandate": "docker.io/library/busybox@sha256:" + "a" * 64}}),
+    ("workspace", {"images": {"api": "ghcr.io/kunwarshivam/mandate/mandate:signed-abc"}}),
+    ("workspace", {"images": {"runtime": "ghcr.io/someone/mandate/mandate@sha256:" + "a" * 64}}),
     ("workspace", {"deploymentTier": "dev"}),
     ("workspace", {"deploymentTier": "ci"}),
     ("workspace", {"environment": "live"}),

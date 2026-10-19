@@ -2,10 +2,14 @@
 The workspace API server (workspace API spec §3.11, DEC-978): one replica, since sessions live in
 its memory until they move to Postgres (item 6).
 - Both listeners are on the pod's loopback (item 1), so no other pod and no node reaches it: a
-  port-forward reaches it for the local cell's demo, and the tunnel's route to it is a later change.
+  port-forward reaches it for the local cell's demo, and with the tunnel on, cloudflared runs as a
+  second container of this pod and reaches it there (DEC-2056, `ingress.yaml`).
 - The session signing key is 32 random bytes an init container writes, owner-only, into a
   memory-backed `CREDENTIALS_DIRECTORY` at each start (item 2). It never exists at rest or outside
   the pod, and a restart loses nothing a restart does not already lose: the sessions themselves.
+- The API's image is a bare binary with no CA bundle, and it fetches the identity provider's key
+  set over public TLS. The same init container copies the pinned postgres image's public bundle
+  into an emptyDir the API container alone mounts read-only and names in `SSL_CERT_FILE`.
 - The subject links are the operator's ConfigMap, mounted read-only at the one fixed path
   (DEC-1023); with none named the file is absent and every sign-in is refused.
 - In a dev or ci cell only, the local stub token issuer (DEC-2100, DEC-1025) runs as a sidecar on
@@ -72,6 +76,8 @@ its memory until they move to Postgres (item 6).
   value: {{ required "api.appOrigin is required with images.api" $a.appOrigin | quote }}
 - name: CREDENTIALS_DIRECTORY
   value: /run/credentials
+- name: SSL_CERT_FILE
+  value: /run/ca-bundle/ca-certificates.crt
 {{- end -}}
 {{- define "mandate.api" -}}
 apiVersion: apps/v1
@@ -88,27 +94,35 @@ spec:
     matchLabels:
       {{- include "mandate.selector" . | nindent 6 }}
   template:
-    {{- $mounts := "- {name: credentials, mountPath: /run/credentials, readOnly: true}" }}
+    {{- $mounts := "- {name: credentials, mountPath: /run/credentials, readOnly: true}\n- {name: ca-bundle, mountPath: /run/ca-bundle, readOnly: true}" }}
     {{- if .root.Values.api.subjectLinks }}
     {{- $mounts = printf "%s\n- {name: subject-links, mountPath: /etc/mandate/subject-links, subPath: subject-links, readOnly: true}" $mounts }}
     {{- end }}
     {{- $container := include "mandate.container" (dict "root" .root "p" .p "name" .p.name "args" (list "--bind" "127.0.0.1:8080" "--probe-bind" "127.0.0.1:8081") "mounts" $mounts) }}
     {{- $container = replace "  env:\n" (printf "  env:\n%s\n" (include "mandate.apiEnv" . | indent 4)) $container }}
+    {{- $tunnel := dict "root" .root "p" (include "mandate.cloudflaredProcess" .root | fromJson) }}
+    {{- if .root.Values.ingress.cloudflared.enabled }}
+    {{- $container = printf "%s\n%s" $container (include "mandate.cloudflaredContainer" $tunnel) }}
+    {{- end }}
     {{- $init := printf `- name: session-key
   image: %q
   imagePullPolicy: IfNotPresent
-  command: ["bash", "-c", "umask 077 && head -c 32 /dev/urandom > /run/credentials/session-signing-key"]
+  command: ["bash", "-c", "umask 077 && head -c 32 /dev/urandom > /run/credentials/session-signing-key && cp /etc/ssl/certs/ca-certificates.crt /run/ca-bundle/ca-certificates.crt"]
   securityContext:
 %s
   resources:
     limits: {cpu: "50m", memory: "32Mi"}
     requests: {cpu: "50m", memory: "32Mi"}
   volumeMounts:
-    - {name: credentials, mountPath: /run/credentials}` .root.Values.images.postgres (include "mandate.containerSecurity" . | indent 4) }}
+    - {name: credentials, mountPath: /run/credentials}
+    - {name: ca-bundle, mountPath: /run/ca-bundle}` .root.Values.images.postgres (include "mandate.containerSecurity" . | indent 4) }}
     {{- if index .root.Values.images "stub-issuer" }}
     {{- $init = printf "%s\n%s" $init (include "mandate.stubIssuer" .) }}
     {{- end }}
-    {{- $volumes := "- {name: credentials, emptyDir: {medium: Memory, sizeLimit: 1Mi}}" }}
+    {{- $volumes := "- {name: ca-bundle, emptyDir: {sizeLimit: 1Mi}}\n- {name: credentials, emptyDir: {medium: Memory, sizeLimit: 1Mi}}" }}
+    {{- if .root.Values.ingress.cloudflared.enabled }}
+    {{- $volumes = printf "%s\n%s" $volumes (include "mandate.tunnelVolume" $tunnel) }}
+    {{- end }}
     {{- with .root.Values.api.subjectLinks }}
     {{- $volumes = printf "%s\n- {name: subject-links, configMap: {name: %q, defaultMode: 292, items: [{key: subject-links, path: subject-links}]}}" $volumes . }}
     {{- end }}
