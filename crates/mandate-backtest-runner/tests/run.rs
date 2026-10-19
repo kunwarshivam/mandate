@@ -227,7 +227,6 @@ fn the_demo_completes_and_every_reference_resolves() {
 /// DEC-1001 item 4, journal spec §9.18 rule 143: a run `run_version` refuses still stores its
 /// payload, `refused` with the stable code and no report, and the journal admits it.
 #[test]
-#[ignore = "pending E4-4"]
 fn a_refused_run_stores_a_refused_payload() {
     let (store, ran) = ran(Some((
         "bars.json",
@@ -697,7 +696,6 @@ const DIVIDEND: &str = r#"{"kind": "cash_dividend", "ex_date": "2026-08-18", "pa
 /// DEC-2245 item 1: each kind decodes to its record, in the file's order; a dividend may be paid
 /// on its ex-date.
 #[test]
-#[ignore = "pending E4-4"]
 fn each_action_kind_decodes_to_its_record() {
     let inputs =
         with_actions(&format!("{SPLIT}, {DIVIDEND}")).unwrap_or_else(|e| panic!("decodes: {e:?}"));
@@ -736,7 +734,6 @@ fn each_action_kind_decodes_to_its_record() {
 /// DEC-2245 item 1: an action of another kind, or a record missing, adding, or mistyping a member,
 /// refuses, naming it; a dividend paid before its ex-date and a split of zero shares refuse too.
 #[test]
-#[ignore = "pending E4-4"]
 fn a_malformed_action_refuses_naming_its_member() {
     let at = "bars.json/corporate_actions/0";
     let cases = [

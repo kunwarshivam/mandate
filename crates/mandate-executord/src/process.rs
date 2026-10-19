@@ -10,8 +10,8 @@ use mandate_executor::{
     AccountScope, ActivityCursor, AgentId, BindingGateSource, BrokerOutcome, BrokerRequest,
     BrokerSnapshot, BrokerUpdate, Command, ConnectorError, Effect, EventDraft, ExecutorConfig,
     ExecutorError, ExecutorState, IdGen, Input, InstrumentSnapshot, IntentBody, IntentHandoff,
-    IntentId, KillScope, MandateView, Ports, ProtectionPrices, ReconcileReason, RiskClock, Seq,
-    WriterEpoch, fold, handle,
+    IntentId, KillScope, MandateView, Ports, ProtectionPrices, Purpose, ReconcileReason, RiskClock,
+    Seq, WriterEpoch, fold, handle,
 };
 use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId};
 use mandate_num::Price;
@@ -462,10 +462,10 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
 
     /// Hands one proposal as the handoff the runtime would make in one process, an opening or an
     /// increase with its mandate's protection. A protections port that cannot answer stops the
-    /// process rather than hand an opening unprotected (DEC-2033 item 3). An owner's exit at the
-    /// market with no confirmed floor raises one opaque `owner_exit_unpriced` alert naming the
-    /// intent and stops nothing, since the core takes only limit orders from a handoff (DEC-2033
-    /// item 4).
+    /// process rather than hand an opening unprotected (DEC-2033 item 3). An exit at the market
+    /// with no limit raises one opaque alert naming the intent and stops nothing, since the core
+    /// takes only limit orders from a handoff (DEC-2033 item 4): `owner_exit_unpriced` for an
+    /// owner's exit with no confirmed floor, `exit_unpriced` for any other exit.
     fn take(
         &mut self,
         now: UtcNanos,
@@ -476,8 +476,12 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         let Some(limit) = proposal.limit else {
             let intent = proposal.intent.0;
             if self.unpriced.insert(intent.clone()) {
+                let key = match proposal.purpose {
+                    Purpose::OwnerExit => "owner_exit_unpriced",
+                    _ => "exit_unpriced",
+                };
                 alerts.push(Alert {
-                    key: "owner_exit_unpriced",
+                    key,
                     subject: Some(intent),
                 });
             }

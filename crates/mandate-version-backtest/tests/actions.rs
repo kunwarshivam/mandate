@@ -48,7 +48,6 @@ fn price(text: &str) -> Price {
 /// A split with and without a cash-in-lieu price, and a cash dividend, each spelt with every
 /// member, in the records' order.
 #[test]
-#[ignore = "pending E4-4"]
 fn each_action_is_spelt_with_every_member() {
     let actions = [
         RecordedAction::Split {

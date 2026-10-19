@@ -129,7 +129,9 @@ agent needs the same correction twice, put the rule on the highest rung that can
    report (`cargo xtask ci pending`), a pending test a macro generates rather than a plain
    function, a saved proptest failure seed, tracked or not (DEC-381), feature-map drift, and
    mutants on the diff of safety-critical crates, an `Unimplemented` stub body in a crate whose
-   tests are still pending aside.
+   tests are still pending aside, and, while the general email footer is unresolved, the mail
+   guard (`cargo xtask mail-guard`: no mail transport but the recorded fixture and the founder's,
+   and no mail-sending crate elsewhere; DEC-2511).
 3. **Guided:** this file, skills under `.cursor/skills/`, and `.cursor/BUGBOT.md`.
 4. **Reviewed:** the PR template and the independent review agent, the last resort, not the plan.
 
@@ -174,7 +176,8 @@ As decided in [ADR-0001](docs/adr/0001-engineering-setup.md).
   Cloud Agents run it automatically through `.cursor/environment.json`. Rust comes from
   `rust-toolchain.toml` (1.98.1) via rustup, which must already be installed; Python 3.14 and uv
   0.12; cargo-deny, cargo-nextest, cargo-mutants, typos, gitleaks, shellcheck, and actionlint, and
-  for the local cell k3d, helm and kubeconform (DEC-993), at the versions in
+  for the local cell k3d, helm and kubeconform (DEC-993), and for `deploy/tofu/` OpenTofu and tflint
+  (DEC-2013), at the versions in
   `.github/workflows/ci.yml` (keep the two in sync). The binaries it downloads are
   x86_64 Linux builds. It downloads only from `github.com` (release assets redirect to
   `release-assets.githubusercontent.com`), `static.rust-lang.org`, `index.crates.io`,
@@ -182,7 +185,8 @@ As decided in [ADR-0001](docs/adr/0001-engineering-setup.md).
   publishes its binaries nowhere else; DEC-993 item 3), never from `astral.sh`, so it runs
   behind restrictive egress proxies. The one exception is PostgreSQL 18 for the Postgres journal
   tests: it tries the system package manager and `apt.postgresql.org`, and if that fails those
-  tests skip; without helm the cell's checks skip too. It also sets `python-install-mirror` in uv's user config
+  tests skip; without helm the cell's checks skip too. `deploy/tofu/`'s checks also fetch the pinned
+  OpenTofu providers from `registry.opentofu.org`. It also sets `python-install-mirror` in uv's user config
   (`~/.config/uv/uv.toml`) so later `uv` calls fetch Python from GitHub too. Work under `web/`
   (DEC-200) also needs `nodejs.org`, for the Node.js release pinned in `web/.nvmrc`,
   `registry.npmjs.org`, for `npm ci`, and `cdn.playwright.dev`, for the Chromium download that
@@ -199,8 +203,8 @@ As decided in [ADR-0001](docs/adr/0001-engineering-setup.md).
   schemas' mutation sweep (`schema-mutants`). CI runs them as two required checks:
   `cargo xtask ci fast` (lint, test, pending tests, spec guard, and `portable`, which CI runs on
   macOS so the runner keeps building where the founder runs it; DEC-954) and `full`, an aggregate over
-  `cargo xtask ci full` (fixtures, reference, schemas, supply chain, Postgres, and the
-  stub issuer's release build, DEC-2100), every
+  `cargo xtask ci full` (fixtures, reference, schemas, supply chain, Postgres, the stub issuer's
+  release build, DEC-2100, and `deploy/tofu/`'s checks when it changed, DEC-2013), every
   deterministic `cargo xtask ci mutants` shard, and every `cargo xtask ci schema-mutants` shard (DEC-688). Every
   required check and aggregated job must finish in under ten minutes; add parallel shards rather
   than removing tests, baselines, mutants, or safety gates (DEC-464). Both CI and `cargo xtask
@@ -209,14 +213,17 @@ As decided in [ADR-0001](docs/adr/0001-engineering-setup.md).
   doctests, pending tests, and the rehearsal and Postgres runs cover only those crates, and a
   crate handed another's binary (`MANDATE_RH_SIM_BIN`) follows that crate.
   `fast-python`, `fast-portable` (the runner's crates), `fast-rh-sim-live`, `full-checks` (any
-  path outside the documentation and `web/`), and `schema-mutants` (`schemas/`, the specs, the
-  backlog, the pinned Python requirements) start only when the diff needs them. Lint, the spec
+  path outside the documentation and `web/`), `schema-mutants` (`schemas/`, the specs, the
+  backlog, the pinned Python requirements), and the five cell jobs (`deploy/`, the cell's Python
+  pins, and any crate the cell's images hold or are built on; DEC-2609) start only when the diff
+  needs them. Lint, the spec
   guard and mutants on the diff of safety-critical crates run as always. `Cargo.lock`, any
   `Cargo.toml`, `rust-toolchain.toml`, `xtask/`, `.github/`, `.cargo/`, `deny.toml`,
   `clippy.toml`, an unknown path, and a run with no diff base select everything. `fast` and
-  `full` stay the required checks, and accept a skip only where `select` asked for it. The
-  nightly dispatches `ci` on main, which selects everything, and sweeps a seventh of every
-  safety-critical crate's mutants each night.
+  `full` stay the required checks, and accept a skip only where `select` asked for it. Every
+  push to main runs `ci` there after the merge (DEC-2610), and the nightly dispatches it on main;
+  both select everything and open an issue when they fail. The nightly also sweeps a seventh of
+  every safety-critical crate's mutants each night.
 - **New crates** get an entry in `xtask/layers.toml` in the same change; safety-critical crates also
   get a CODEOWNERS line and start `src/lib.rs` with the lint header `cargo xtask layers` checks.
 - **New dependencies** need a row in `docs/dependencies.md` in the same change (none by default).

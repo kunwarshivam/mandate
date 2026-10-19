@@ -61,7 +61,6 @@ fn secret() -> impl Strategy<Value = PlatformSecret> {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn each_platform_secret_has_one_reader_and_only_import_writes_it() {
     the_platform_secrets_have_their_holders();
 }
@@ -103,7 +102,6 @@ proptest! {
     /// The table and its refusal agree with the oracle for every identity, access and platform
     /// secret: an allowed access passes [`require`], and anything else is [`SourceError::Denied`].
     #[test]
-    #[ignore = "pending E21-32"]
     fn the_table_holds_each_platform_secret_to_the_oracle(
         identity in identity(),
         access in access(),
@@ -124,7 +122,6 @@ proptest! {
     /// platform paths, spelled out, with no wildcard: one read block for each reader and one
     /// write block per secret for the import.
     #[test]
-    #[ignore = "pending E21-32"]
     fn each_policy_grants_exactly_the_oracles_platform_paths(
         identity in identity(),
         connections in proptest::collection::vec(connection(), 0..4),

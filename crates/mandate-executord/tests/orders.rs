@@ -11,7 +11,7 @@ use mandate_executord::Alert;
 use mandate_process::{Exit, State};
 use support::{
     ACCOUNT_STREAM, AGENT, Allowing, CannotProtect, Error, Journal, NOON, OTHER_AGENT, Paper,
-    agent_stream, at, deploy, deployed, kill, object, owner_exit, propose,
+    agent_stream, at, deploy, deployed, kill, object, owner_exit, propose, propose_market_exit,
     propose_owner_market_exit, start, start_allowing, start_wired, wired,
 };
 
@@ -376,5 +376,43 @@ fn an_exit_without_a_mandate_version_sounds_the_exit_alarm_and_stops_nothing() -
     assert!(journal.received().is_empty());
     assert_eq!(journal.switched(), [AGENT]);
     assert!(!matches!(process.lifecycle().state(), State::Exited(_)));
+    Ok(())
+}
+
+/// A risk or discretionary exit at the market is neither refused nor handed: it raises one opaque
+/// `exit_unpriced` alert naming the intent, stops nothing, and the exit behind it still goes, on
+/// this pass and after a restart (`AGENTS.md` rule 13; DEC-2033 item 4).
+#[test]
+fn an_exit_at_the_market_alerts_and_stops_nothing() -> Result<(), Error> {
+    for purpose in ["risk_exit", "discretionary_exit"] {
+        let journal = deployed()?;
+        propose_market_exit(&journal, AGENT, OTHER_EXIT, purpose, "decision")?;
+        exit(&journal, AGENT, EXIT)?;
+        let broker = Paper::new(&journal);
+        held(&broker)?;
+        let mut process = start(&journal, &broker)?;
+        let first = process.step(at(NOON)?);
+        let second = process.step(at(NOON)?);
+        assert!(
+            !matches!(process.lifecycle().state(), State::Exited(_)),
+            "{purpose}"
+        );
+        assert_eq!(journal.received(), [EXIT], "{purpose}");
+        let unpriced = |alerts: &[Alert]| {
+            alerts
+                .iter()
+                .filter(|alert| {
+                    alert.key == "exit_unpriced" && alert.subject.as_deref() == Some(OTHER_EXIT)
+                })
+                .count()
+        };
+        assert_eq!((unpriced(&first), unpriced(&second)), (1, 0), "{purpose}");
+        let mut restarted = start(&journal, &broker)?;
+        restarted.step(at(NOON)?);
+        assert!(
+            !matches!(restarted.lifecycle().state(), State::Exited(_)),
+            "{purpose}"
+        );
+    }
     Ok(())
 }

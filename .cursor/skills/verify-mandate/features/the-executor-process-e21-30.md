@@ -15,13 +15,13 @@
   `AgentDeployed`; `switches`: an agent stream's `KillSwitchActivated` records with the bid the
   same command's `OwnerExitRequested` confirmed; `proposals`: its `IntentProposed` limit orders,
   less an opening a later switch or mode change follows, DEC-2033 item 2, and an owner's exit at
-  the market at the floor its `OwnerExitRequested` confirmed, item 4), and each handed once as the
-  runtime's handoff, an exit ready or not and an opening only once ready with its mandate's
-  protection from the `Protections` port, an unreadable protection stopping the process, a handoff
-  the gate has no input for held with one `opening_held` alert, or `exit_held` for an exit, the
-  alarm that must never sound, DEC-2033 items 1, 3, 5, and an
-  owner's market exit without a floor raising one `owner_exit_unpriced` alert;
-  `src/paper.rs` (`FixturePaper`, the fixture
+  the market at the floor its instrument-scoped `OwnerExitRequested` confirmed, item 4), and each
+  handed once as the runtime's handoff, an exit ready or not and an opening only once ready with
+  its mandate's protection from the `Protections` port, an unreadable protection stopping the
+  process, a handoff the gate has no input for held with one `opening_held` alert, or `exit_held`
+  for an exit, the alarm that must never sound, DEC-2033 items 1, 3, 5, and an exit at the market
+  with no limit held with one `owner_exit_unpriced` or `exit_unpriced` alert; `src/paper.rs`
+  (`FixturePaper`, the fixture
   paper broker below `mandate-alpaca`'s client, DEC-2007 item 1) and `src/alpaca.rs`
   (`AlpacaBroker`, the client as the process's `Broker`, DEC-2007 item 2), `src/connect.rs`
   (`connect_check`: `StreamOpened` and `ConnectionChecked` for a paper Alpaca connection, DEC-2007

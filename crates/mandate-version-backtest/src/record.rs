@@ -6,6 +6,7 @@
 //! artifact before it appends the record (journal before acting, `AGENTS.md` rule 5).
 
 use mandate_canon::{Digest, Value};
+use mandate_num::NumError;
 use mandate_risk::{DayTradeRegime, EtpClass, Exchange, GateConfig};
 
 use super::report::{VersionDigests, VersionReport, reference};
@@ -208,6 +209,40 @@ fn etp(class: EtpClass) -> &'static str {
 
 /// One corporate action as the configuration digest spells it (DEC-2245 item 4).
 fn action(action: &RecordedAction) -> Result<Value, VersionError> {
-    let _ = action;
-    Err(VersionError::Unimplemented { story: "E4-4" })
+    match action {
+        RecordedAction::Split {
+            ex_date,
+            ratio,
+            cash_in_lieu_price,
+        } => object(vec![
+            ("kind", text("split")),
+            ("ex_date", decimal(*ex_date)),
+            (
+                "ratio",
+                object(vec![
+                    ("new", shares(ratio.new_shares())?),
+                    ("old", shares(ratio.old_shares())?),
+                ])?,
+            ),
+            (
+                "cash_in_lieu_price",
+                cash_in_lieu_price.map_or(Value::Null, decimal),
+            ),
+        ]),
+        RecordedAction::CashDividend {
+            ex_date,
+            pay_date,
+            per_share,
+        } => object(vec![
+            ("kind", text("cash_dividend")),
+            ("ex_date", decimal(*ex_date)),
+            ("pay_date", decimal(*pay_date)),
+            ("per_share", decimal(*per_share)),
+        ]),
+    }
+}
+
+/// A split ratio's share count, which the configuration holds as a canonical integer.
+fn shares(count: u64) -> Result<Value, VersionError> {
+    int(u32::try_from(count).map_err(|_| NumError::Overflow)?)
 }
