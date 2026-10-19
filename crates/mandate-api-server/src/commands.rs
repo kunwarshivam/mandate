@@ -264,6 +264,7 @@ pub fn draft(issued: &Issued<'_>) -> Option<Vec<u8>> {
         .payload(issued.workspace, issued.principal, second)?;
     let event = Event {
         event_type: issued.command.event_type(),
+        schema_version: 1,
         payload,
         artifact_refs: issued.command.artifact_refs(),
         config_refs: Vec::new(),
@@ -298,6 +299,7 @@ impl<'a> Writer<'a> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Event {
     pub event_type: &'static str,
+    pub schema_version: u64,
     pub payload: Value,
     pub artifact_refs: Vec<Value>,
     pub config_refs: Vec<(&'static str, Value)>,
@@ -313,6 +315,7 @@ pub fn envelope(writer: &Writer<'_>, event: &Event) -> Option<Vec<u8>> {
         ("version", text(env!("CARGO_PKG_VERSION"))),
     ])?;
     let one = Value::Int(Int::new(1)?);
+    let schema_version = Value::Int(Int::new(event.schema_version)?);
     let envelope = object(vec![
         ("actor", actor),
         ("artifact_refs", Value::Array(event.artifact_refs.clone())),
@@ -327,7 +330,7 @@ pub fn envelope(writer: &Writer<'_>, event: &Event) -> Option<Vec<u8>> {
         ("event_type", text(event.event_type)),
         ("payload", event.payload.clone()),
         ("pii_refs", Value::Array(Vec::new())),
-        ("schema_version", one),
+        ("schema_version", schema_version),
         ("stream_id", text(&format!("ctl:{}", writer.workspace))),
     ])?;
     Some(to_canonical(&envelope))
@@ -408,9 +411,23 @@ pub async fn settle(
     draft: &[u8],
     now: UtcNanos,
 ) -> Settled {
+    settle_at(journal, stream, event_id, draft, now, None).await
+}
+
+/// [`settle`], appended at `pinned` and nowhere else when it names a head, so what the command
+/// decided from the rows it read at that head holds at the append (#1748 review): a moved head
+/// stores nothing and answers [`Settled::Unavailable`], and a retry reads the rows again.
+pub async fn settle_at(
+    journal: &dyn Journal,
+    stream: &str,
+    event_id: &str,
+    draft: &[u8],
+    now: UtcNanos,
+    pinned: Option<u64>,
+) -> Settled {
     let mut ambiguous = false;
     for _ in 0..ATTEMPTS {
-        match attempt(journal, stream, draft, now).await {
+        match attempt(journal, stream, draft, now, pinned).await {
             Some(AppendOutcome::Committed(rows) | AppendOutcome::AlreadyCommitted(rows)) => {
                 match rows.into_iter().find(|row| row.event_id == event_id) {
                     Some(row) => return Settled::Stored(Box::new(row)),
@@ -420,6 +437,7 @@ pub async fn settle(
             Some(AppendOutcome::IdempotencyConflict { .. }) => return Settled::Conflict,
             Some(AppendOutcome::Invalid { .. }) => break,
             Some(AppendOutcome::Ambiguous) => ambiguous = true,
+            Some(AppendOutcome::HeadMismatch { .. }) if pinned.is_some() => break,
             Some(_) | None => {}
         }
         tokio::time::sleep(BACKOFF).await;
@@ -431,15 +449,19 @@ pub async fn settle(
     }
 }
 
-/// One attempt: a new writer epoch, the head now, and the append; `None` when the journal did not
-/// answer.
+/// One attempt: a new writer epoch, the head now or `pinned`, and the append; `None` when the
+/// journal did not answer.
 async fn attempt(
     journal: &dyn Journal,
     stream: &str,
     draft: &[u8],
     now: UtcNanos,
+    pinned: Option<u64>,
 ) -> Option<AppendOutcome> {
     let epoch = journal.take_ownership(stream).await.ok()?;
-    let head = journal.head(stream).await.ok()?;
+    let head = match pinned {
+        Some(head) => head,
+        None => journal.head(stream).await.ok()?,
+    };
     journal.append(stream, head, epoch, now, draft).await.ok()
 }

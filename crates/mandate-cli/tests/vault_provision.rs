@@ -152,34 +152,59 @@ fn an_out_the_write_would_refuse_is_refused_before_any_vault_is_reached() {
     let token = token_file(CANARY, 0o600);
     let open = fresh("out-open");
     let planted = fresh("out-planted");
-    let _removed = Removed(vec![token.clone(), open.clone(), planted.clone()]);
+    let parent = fresh("out-parent");
+    let _removed = Removed(vec![
+        token.clone(),
+        open.clone(),
+        planted.clone(),
+        parent.clone(),
+    ]);
     fs::create_dir(&open).unwrap();
     fs::set_permissions(&open, fs::Permissions::from_mode(0o755)).unwrap();
     fs::create_dir(&planted).unwrap();
     fs::set_permissions(&planted, fs::Permissions::from_mode(0o700)).unwrap();
     fs::create_dir(planted.join("executor-c1.secret-id")).unwrap();
-    for (out, case) in [
-        (&open, "a 0755 --out"),
-        (&planted, "a directory at an output name"),
-    ] {
-        let before: Vec<_> = fs::read_dir(out)
+    fs::create_dir(&parent).unwrap();
+    fs::set_permissions(&parent, fs::Permissions::from_mode(0o777)).unwrap();
+    let listing = |dir: &Path| -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(dir)
             .unwrap()
-            .map(|e| e.unwrap().file_name())
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
             .collect();
-        let output = provision(NOWHERE, &ca(), &token, &["c1"], out);
+        names.sort();
+        names
+    };
+    for (out, case) in [
+        (open.clone(), "a 0755 --out"),
+        (planted.clone(), "a directory at an output name"),
+        (parent.join("out"), "an --out whose parent others may write"),
+    ] {
+        let before = if out.exists() {
+            listing(&out)
+        } else {
+            Vec::new()
+        };
+        let output = provision(NOWHERE, &ca(), &token, &["c1"], &out);
         let err = stderr(&output);
         assert!(!output.status.success(), "{case} succeeded: {err}");
         assert!(
             err.contains("(credential_file)"),
             "{case} reached the vault: {err}"
         );
+        assert!(
+            !err.contains(&CANARY[..16]),
+            "{case} printed the token: {err}"
+        );
         assert!(output.stdout.is_empty(), "{case} printed");
-        let after: Vec<_> = fs::read_dir(out)
-            .unwrap()
-            .map(|e| e.unwrap().file_name())
-            .collect();
+        let after = if out.exists() {
+            listing(&out)
+        } else {
+            Vec::new()
+        };
         assert_eq!(before, after, "{case} wrote into --out");
     }
+    assert!(!parent.join("out").exists());
+    fs::set_permissions(&parent, fs::Permissions::from_mode(0o700)).unwrap();
 }
 
 /// The token is never an argument: the command has no flag that takes one.
