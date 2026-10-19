@@ -103,7 +103,6 @@ fn now() -> Box<dyn FnMut() -> UtcNanos> {
 
 /// Without the opt-in the process runs deny-all, whatever the deployment.
 #[test]
-#[ignore = "pending E21-54"]
 fn without_the_opt_in_there_is_no_research() {
     let (root, control, _, _) = deployed("none");
     for deployment in [
@@ -121,7 +120,6 @@ fn without_the_opt_in_there_is_no_research() {
 
 /// Research is asked for only on a paper deployment the process read from the journal.
 #[test]
-#[ignore = "pending E21-54"]
 fn the_opt_in_refuses_any_but_a_resolved_paper_deployment() {
     let (root, control, _, _) = deployed("refused");
     let bundle = Some(Path::new(FIXTURE));
@@ -141,7 +139,6 @@ fn the_opt_in_refuses_any_but_a_resolved_paper_deployment() {
 /// What research needs and cannot read refuses the opt-in: the bundle, the deployment, or the
 /// artifact store.
 #[test]
-#[ignore = "pending E21-54"]
 fn the_opt_in_refuses_what_it_cannot_read() {
     let (root, control, _, _) = deployed("unreadable");
     let missing = std::env::temp_dir().join(format!("daemon-{}-no-bundle", std::process::id()));
@@ -183,7 +180,6 @@ fn the_opt_in_refuses_what_it_cannot_read() {
 /// revisions off, told the mandate's own description, and its records name the deployed mandate
 /// version and the entry's content.
 #[test]
-#[ignore = "pending E21-54"]
 fn the_opted_in_research_is_the_bundle_s_entry_for_the_deployed_mandate() {
     let (root, control, version, document) = deployed("wired");
     let wired = research(

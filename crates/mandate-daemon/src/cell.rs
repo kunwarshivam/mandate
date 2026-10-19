@@ -6,13 +6,17 @@
 use std::fmt;
 use std::path::Path;
 
-use mandate_journal::Environment;
+use mandate_artifacts_fs::FsArtifactStore;
+use mandate_canon::{Digest, Key, Object, Value};
+use mandate_journal::{Environment, StreamId};
+use mandate_runtime::{EventDraft, ResearchConfig};
 use mandate_time::UtcNanos;
 
-use crate::recorded::BundleError;
+use crate::deployment;
+use crate::recorded::{Bundle, BundleError};
 use crate::runtime::{Refs, ResearchWiring};
-use crate::source::Rows;
-use crate::worker::WorkerError;
+use crate::source::{CellSource, Rows, SourceFor};
+use crate::worker::{RecordedWorker, StoreSink, WorkerError, WorkerFor};
 
 /// The deployment research is asked for.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,8 +32,6 @@ pub struct CellDeployment {
 /// Why research could not be wired.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CellError {
-    /// DEC-2215's opt-in is not implemented yet (E21-54).
-    Unimplemented,
     /// Research runs only for a paper deployment.
     NotPaper,
     /// Research runs only for a deployment read from the journal.
@@ -44,17 +46,23 @@ pub enum CellError {
     Worker(WorkerError),
 }
 
-impl fmt::Display for CellError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::Unimplemented => "research_unimplemented",
+impl CellError {
+    /// The code the binary stops the start with.
+    pub fn code(&self) -> &'static str {
+        match self {
             Self::NotPaper => "research_needs_paper",
             Self::Unresolved => "research_needs_resolved_deployment",
             Self::ArtifactsUnavailable => "artifact_store_unavailable",
             Self::Bundle(_) => "research_bundle_unreadable",
             Self::Mandate(code) => code,
             Self::Worker(_) => "research_worker_unbuilt",
-        })
+        }
+    }
+}
+
+impl fmt::Display for CellError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.code())
     }
 }
 
@@ -64,6 +72,28 @@ impl std::error::Error for CellError {}
 pub struct CellResearch {
     pub wiring: ResearchWiring,
     pub refs: Box<dyn Refs>,
+}
+
+/// The references every record of a researching deployment carries: its mandate version and the
+/// research entry's model version.
+struct ResearchRefs {
+    mandate_version: String,
+    model_version: Digest,
+}
+
+impl Refs for ResearchRefs {
+    fn refs(&self, _: &EventDraft) -> Option<(u64, Object)> {
+        let mut refs = Object::new();
+        refs.insert(
+            Key::new("mandate_version").ok()?,
+            Value::Str(self.mandate_version.clone()),
+        );
+        refs.insert(
+            Key::new("model_version").ok()?,
+            Value::Str(format!("sha256:{}", self.model_version.to_hex())),
+        );
+        Some((1, refs))
+    }
 }
 
 /// The research for `deployment`, or `None` when `asked` names no bundle.
@@ -77,6 +107,84 @@ pub fn research(
     artifacts: &Path,
     now: Box<dyn FnMut() -> UtcNanos>,
 ) -> Result<Option<CellResearch>, CellError> {
-    let _ = (asked, deployment, rows, artifacts, now);
-    Err(CellError::Unimplemented)
+    let Some(bundle) = asked else {
+        return Ok(None);
+    };
+    if deployment.environment != Environment::Paper {
+        return Err(CellError::NotPaper);
+    }
+    if !deployment.resolved {
+        return Err(CellError::Unresolved);
+    }
+    let open =
+        || FsArtifactStore::open_existing(artifacts).map_err(|_| CellError::ArtifactsUnavailable);
+    let bundle = Bundle::load(bundle).map_err(CellError::Bundle)?;
+    let control = StreamId::parse(&format!("ctl:{}", deployment.workspace))
+        .ok_or(CellError::Mandate("deployment_missing"))?;
+    let rows_now = rows
+        .rows(&control)
+        .ok_or(CellError::Mandate("journal_unavailable"))?;
+    let (version, document) = deployment::document(
+        &rows_now,
+        &deployment.agent,
+        deployment.environment,
+        &open()?,
+    )
+    .map_err(CellError::Mandate)?;
+    let description = document
+        .get("behavior")
+        .and_then(|behavior| behavior.get("description"))
+        .and_then(Value::as_str)
+        .ok_or(CellError::Mandate("mandate_document_unavailable"))?
+        .to_owned();
+    let pin = bundle.entry.content().model_ref();
+    let deadline_ms = u32::try_from(bundle.entry.deadline_ms).map_err(|_| {
+        CellError::Bundle(BundleError::Malformed {
+            file: "research.json",
+            member: "deadline_ms",
+        })
+    })?;
+    let worker = RecordedWorker::new(
+        &bundle,
+        WorkerFor {
+            workspace: deployment.workspace.clone(),
+            agent: deployment.agent.clone(),
+            description: description.clone(),
+        },
+        Box::new(StoreSink(open()?)),
+        now,
+    )
+    .map_err(CellError::Worker)?;
+    let source = CellSource::new(
+        &bundle,
+        SourceFor {
+            workspace: deployment.workspace.clone(),
+            agent: deployment.agent.clone(),
+            environment: deployment.environment,
+        },
+        rows,
+        Box::new(open()?),
+    );
+    let refs = ResearchRefs {
+        mandate_version: version,
+        model_version: pin.content_hash,
+    };
+    Ok(Some(CellResearch {
+        wiring: ResearchWiring {
+            config: ResearchConfig {
+                pin,
+                deadline_ms,
+                max_output_tokens: bundle.entry.max_output_tokens,
+                plan: bundle.entry.plan,
+                bounds: bundle.entry.bounds,
+                description,
+                revisions_enabled: false,
+                agentic: None,
+            },
+            source: Box::new(source),
+            worker: Box::new(worker),
+            artifacts: Box::new(StoreSink(open()?)),
+        },
+        refs: Box::new(refs),
+    }))
 }
