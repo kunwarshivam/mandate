@@ -16,7 +16,7 @@
 //! 13). It keeps `paused` or `stopped` only when the last readable view already was.
 
 use mandate_canon::{Object, Value, parse};
-use mandate_domain::{AgentMode, MarketSession};
+use mandate_domain::{AgentMode, AssetId, MarketSession};
 use mandate_journal::StoredEvent;
 use mandate_num::Price;
 use mandate_spec::SpecError;
@@ -108,6 +108,21 @@ fn reading(event_type: &str) -> Option<Reading> {
         .iter()
         .find(|(name, _)| *name == event_type)
         .map(|(_, reading)| *reading)
+}
+
+/// Why the fold stopped at a row: a cause that makes the view unreadable, or a risk record whose
+/// writer is still E6-15 B2b-2's stub.
+enum Stop {
+    Unreadable(UnreadableCause),
+    /// A §9.27 record or `AgentModeApplied` (DEC-2307 item 3), which B2b-2 writes: the view fails
+    /// closed as on a failed append, and the fold reports the stub.
+    Unwritten,
+}
+
+impl From<UnreadableCause> for Stop {
+    fn from(cause: UnreadableCause) -> Self {
+        Self::Unreadable(cause)
+    }
 }
 
 /// A refusal to decide, which the fold fails closed on (DEC-2304 item 1).
@@ -268,7 +283,8 @@ impl<'c> AccountRiskFold<'c> {
     ///
     /// # Errors
     /// Whatever `RiskState::open` refuses, and `invalid_input` for a held opening, or an opening
-    /// after seq 1, that names no instrument.
+    /// after seq 1, that names no instrument. An instrument that is not a canonical asset id
+    /// (DEC-2313 item 1) stops at E6-15 B2b-2's `Unimplemented` stub.
     #[expect(
         clippy::too_many_arguments,
         reason = "each is one of the fold's independent inputs, none derivable from another"
@@ -285,6 +301,9 @@ impl<'c> AccountRiskFold<'c> {
     ) -> Result<Self, SpecError> {
         if instrument.is_none() && (!opening.position_qty.is_zero() || head > 1) {
             return Err(SpecError::InvalidInput { what: "instrument" });
+        }
+        if instrument.is_some_and(|named| AssetId::parse(named).is_err()) {
+            return Err(SpecError::Unimplemented);
         }
         let risk = RiskState::open(mandate, opening, calendar)?;
         let view = RiskView::Readable {
@@ -313,7 +332,8 @@ impl<'c> AccountRiskFold<'c> {
     ///
     /// # Errors
     /// [`ExecutorError::ForeignStream`] for a row on another stream: a caller's mistake, which
-    /// changes nothing.
+    /// changes nothing. [`ExecutorError::Unimplemented`] for a row whose step journals any record
+    /// but `RiskDayStarted`, until E6-15 B2b-2 writes them, with the view made unreadable.
     pub fn fold(&mut self, row: &StoredEvent) -> Result<Vec<RiskAppend>, ExecutorError> {
         if row.stream_id != self.stream {
             return Err(ExecutorError::ForeignStream {
@@ -335,27 +355,31 @@ impl<'c> AccountRiskFold<'c> {
                 };
                 Ok(appends)
             }
-            Err(cause) => {
+            Err(Stop::Unreadable(cause)) => {
                 self.unreadable(cause);
                 Ok(Vec::new())
+            }
+            Err(Stop::Unwritten) => {
+                self.unreadable(UnreadableCause::AppendFailed);
+                Err(ExecutorError::Unimplemented { story: "E6-15" })
             }
         }
     }
 
     /// Reads the row after the head: its body, its type and version, and, for a tick or a
     /// version-2 mark, the risk state's steps.
-    fn read(&mut self, row: &StoredEvent) -> Result<Vec<RiskAppend>, UnreadableCause> {
+    fn read(&mut self, row: &StoredEvent) -> Result<Vec<RiskAppend>, Stop> {
         let body = parse(&row.body).map_err(|_| UnreadableCause::Undecodable)?;
         let payload = body
             .get("payload")
             .and_then(Value::as_object)
             .ok_or(UnreadableCause::Undecodable)?;
         match (reading(&row.event_type), row.schema_version) {
-            (None, _) => Err(UnreadableCause::UnfoldedEventType),
+            (None, _) => Err(UnreadableCause::UnfoldedEventType.into()),
             (Some(Reading::Record), _) | (Some(Reading::Mark), 1) => Ok(Vec::new()),
             (Some(Reading::Tick), 1) => self.tick(row, payload),
             (Some(Reading::Mark), 2) => self.mark(row, payload),
-            (Some(_), _) => Err(UnreadableCause::UnknownSchemaVersion),
+            (Some(_), _) => Err(UnreadableCause::UnknownSchemaVersion.into()),
         }
     }
 
@@ -384,11 +408,7 @@ impl<'c> AccountRiskFold<'c> {
     /// reference cases do (MC-R13 steps a pre-market mark on the next day with E₀ unchanged and no
     /// `RiskDayStarted`). So a mark past midnight is stepped against the closing day's E₀, and the
     /// next tick still starts the new day.
-    fn mark(
-        &mut self,
-        row: &StoredEvent,
-        payload: &Object,
-    ) -> Result<Vec<RiskAppend>, UnreadableCause> {
+    fn mark(&mut self, row: &StoredEvent, payload: &Object) -> Result<Vec<RiskAppend>, Stop> {
         let instrument = payload
             .get("instrument_id")
             .and_then(Value::as_str)
@@ -396,7 +416,7 @@ impl<'c> AccountRiskFold<'c> {
         self.bind(instrument)?;
         let sane = match payload.get("sane") {
             Some(Value::Bool(sane)) => *sane,
-            _ => return Err(UnreadableCause::Undecodable),
+            _ => return Err(UnreadableCause::Undecodable.into()),
         };
         let bid = payload
             .get("bid")
@@ -428,11 +448,7 @@ impl<'c> AccountRiskFold<'c> {
     /// step settles time up to the tick under the closing day's state and then sets E₀ (§5.2's
     /// order), as the reference cases step a rollover at its tick. The tick's `Clock` input follows
     /// at the same instant, with no time passing.
-    fn tick(
-        &mut self,
-        row: &StoredEvent,
-        payload: &Object,
-    ) -> Result<Vec<RiskAppend>, UnreadableCause> {
+    fn tick(&mut self, row: &StoredEvent, payload: &Object) -> Result<Vec<RiskAppend>, Stop> {
         let clock = whole_second(payload, "clock")?;
         let session = self.calendar.session(clock).map_err(refused)?;
         let mut appends = Vec::new();
@@ -451,21 +467,21 @@ impl<'c> AccountRiskFold<'c> {
         at: UtcNanos,
         session: MarketSession,
         input: Input,
-    ) -> Result<Outcome, UnreadableCause> {
+    ) -> Result<Outcome, Stop> {
         self.risk
             .step(&Step { at, session, input })
-            .map_err(refused)
+            .map_err(|error| refused(error).into())
     }
 
-    /// The records a step journaled, as §9.27 closes them. B2a writes `RiskDayStarted` only, so any
-    /// other record is one it cannot append, and the view fails closed rather than hold a change it
+    /// The records a step journaled, as §9.27 closes them. B2a writes `RiskDayStarted` only, and any
+    /// other record stops at B2b-2's stub with the view failed closed, rather than hold a change it
     /// has not journaled (`AGENTS.md` rule 5).
     fn records(
         &self,
         row: &StoredEvent,
         clock: UtcNanos,
         outcome: &Outcome,
-    ) -> Result<Vec<RiskAppend>, UnreadableCause> {
+    ) -> Result<Vec<RiskAppend>, Stop> {
         outcome
             .journal
             .iter()
@@ -485,7 +501,7 @@ impl<'c> AccountRiskFold<'c> {
                     ])
                     .map_err(|_| UnreadableCause::AppendFailed)?,
                 }),
-                _ => Err(UnreadableCause::AppendFailed),
+                _ => Err(Stop::Unwritten),
             })
             .collect()
     }
