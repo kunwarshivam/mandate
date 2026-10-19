@@ -206,6 +206,7 @@ fn refusals_without_a_database(tag: &str) {
         let model = ModelArgs {
             model_id: "quant.ma_crossover".into(),
             model_version: "1.0.0".into(),
+            entry: None,
             owner,
             target: snapshot.target.clone(),
         };
@@ -216,6 +217,15 @@ fn refusals_without_a_database(tag: &str) {
     let args = snapshot_args(owner.clone(), &missing, &dsn, &store);
     refuses("config_file_unreadable", |out| run(&args, now(), out));
     assert!(!store.exists(), "a missing file: the store is not created");
+    let research = ModelArgs {
+        model_id: "llm.research_agent".into(),
+        model_version: "0.1.0".into(),
+        entry: Some(missing.clone()),
+        owner: owner.clone(),
+        target: args.target.clone(),
+    };
+    refuses("entry_unreadable", |out| run_model(&research, now(), out));
+    assert!(!store.exists(), "a missing entry: the store is not created");
     let nyse = dir.join("nyse.json");
     std::fs::write(&nyse, SPY.replace("arca", "nyse")).unwrap();
     let args = snapshot_args(owner.clone(), &nyse, &dsn, &store);

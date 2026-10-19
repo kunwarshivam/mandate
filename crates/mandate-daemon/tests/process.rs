@@ -208,9 +208,9 @@ fn a_refused_research_opt_in_stops_the_start() {
     assert!(!path.exists(), "a refused process serves no probe");
 }
 
-/// `--research` with no bundle after it, an empty one, or another flag where the bundle belongs
-/// refuses before the process is ready, rather than running deny-all as if research were not asked
-/// for (DEC-2215 item 2).
+/// `--research` with no bundle after it, an empty one, another flag where the bundle belongs, or
+/// written `--research=` with or without a bundle, refuses before the process is ready, rather
+/// than running deny-all as if research were not asked for (DEC-2215 item 2).
 #[test]
 fn research_asked_for_without_a_bundle_refuses() {
     let path = socket("research-missing");
@@ -234,6 +234,9 @@ fn research_asked_for_without_a_bundle_refuses() {
     assert_eq!(launch(&["--research"]), refused);
     assert_eq!(launch(&["--research", ""]), refused);
     assert_eq!(launch(&["--research", "--probe"]), refused);
+    assert_eq!(launch(&["--research="]), refused);
+    let joined = format!("--research={BUNDLE}");
+    assert_eq!(launch(&[joined.as_str()]), refused);
     assert_eq!(
         launch(&["--research", BUNDLE]),
         (
