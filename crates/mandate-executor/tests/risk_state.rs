@@ -231,6 +231,15 @@ fn only_paused_or_stopped_holds_an_exit_and_nothing_holds_a_kill_switch() {
             "a readable `normal` view holds no {path:?}"
         );
     }
+    let unread_normal = RiskView::Unreadable {
+        cause: UnreadableCause::SeqGap,
+        head: 1,
+        mode: AgentMode::Normal,
+    };
+    assert!(
+        unread_normal.holds(OrderPath::Opening),
+        "being unreadable holds openings, whatever mode it carries"
+    );
     for mode in [AgentMode::Paused, AgentMode::Stopped] {
         let view = RiskView::Unreadable {
             cause: UnreadableCause::SeqGap,
