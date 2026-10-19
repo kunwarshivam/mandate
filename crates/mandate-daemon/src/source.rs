@@ -15,7 +15,7 @@ use mandate_research::{
     PolicyOverlay, ResearchEnvelope, SourceAllowlist, ValidatedMandate, WorkingUniverse,
 };
 use mandate_research_run::{InstrumentFact, Symbol};
-use mandate_runtime::{JournalCatalog, Preconditions, RiskClock, RuntimeState};
+use mandate_runtime::{ActiveThesis, JournalCatalog, Preconditions, RiskClock, RuntimeState};
 use mandate_spec::risk::risk_day;
 use mandate_store::Store;
 use mandate_time::UtcNanos;
@@ -72,6 +72,46 @@ const UNFOLDED: [&str; 4] = [
     "ThesisInvalidated",
     "UniverseChanged",
 ];
+
+/// What an agent stream's own research records fold to (DEC-2249 items 1 and 2): the working
+/// universe, the lineages, and the active theses the next pass is handed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResearchFold {
+    pub universe: WorkingUniverse,
+    pub lineages: LineageState,
+    pub active: Vec<ActiveThesis>,
+}
+
+/// Why an agent stream's research records do not fold.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FoldError {
+    /// The fold is not implemented yet (E21-59, DEC-2249).
+    Unimplemented,
+    /// A record's member, by name, is missing or not what it must be, or the bundle names no
+    /// symbol for an admitted thesis's instrument (`symbol`).
+    Unreadable { member: &'static str },
+}
+
+/// Folds the agent stream's own research records, in stream order, as the core judged them
+/// (DEC-2249 items 1 and 2). Each `ThesisProposed` and `ThesisRevised` replays its recorded
+/// decision into its lineage through `LineageState::replay`; an admitted one becomes its
+/// instrument's one universe entry, replacing whatever thesis held it; a `ThesisInvalidated` marks
+/// the entry of the thesis it names, when that thesis still holds its instrument. The entries then
+/// go through `expire_theses` at `at`, the core's own expiry, and the survivors are the universe
+/// and the active theses, each with the symbol `instruments` gives its instrument. Nothing is
+/// judged again.
+///
+/// # Errors
+/// [`FoldError::Unreadable`] naming the first member a record cannot give, including an admitted
+/// record with a `reason`, a refused one without one, or a reason that is not a refusal's code.
+pub fn fold_research(
+    agent: &[StoredEvent],
+    at: UtcNanos,
+    instruments: &[InstrumentFact],
+) -> Result<ResearchFold, FoldError> {
+    let _ = (agent, at, instruments);
+    Err(FoldError::Unimplemented)
+}
 
 /// The cell's research source.
 pub struct CellSource {
