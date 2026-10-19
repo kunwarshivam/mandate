@@ -787,6 +787,30 @@ pub fn fold_theses(input: &FoldInput<'_>) -> Result<Fold, ResearchError> {
 }
 
 impl LineageState {
+    /// §8.6: applies one **recorded** admission decision to its lineage, exactly as the fold
+    /// applies the decision it has just made: the thesis's `lineage`, `revision` and `instrument`,
+    /// and the `decision` the journal recorded for it (DEC-2249 item 1). It never judges: no check
+    /// runs and no input but these is read, so replaying a lineage's journaled decisions in order
+    /// rebuilds the state the core held when it made them. A `lineage_retired` refusal retires a
+    /// live lineage; an admission raises the highest revision, counts the admission, and moves the
+    /// instrument's holder to this lineage; every other refusal leaves the lineage as it was,
+    /// although the lineage becomes known (MC-N19). Returns the lineage after the step, and
+    /// whether this step retired it.
+    #[expect(
+        clippy::todo,
+        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+    )]
+    pub fn replay(
+        &mut self,
+        lineage: &LineageId,
+        revision: u32,
+        instrument: &AssetId,
+        decision: AdmissionDecision,
+    ) -> (Lineage, bool) {
+        let _ = (lineage, revision, instrument, decision);
+        todo!()
+    }
+
     /// §8.6: folds one decision into its lineage. A `lineage_retired` refusal retires a live lineage;
     /// an admission raises the highest revision, counts the admission, and moves the instrument's
     /// holder to this lineage. Every other refusal leaves the lineage as it was, although the lineage

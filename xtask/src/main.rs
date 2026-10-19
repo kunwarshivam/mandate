@@ -23,6 +23,7 @@ mod leak;
 mod mail;
 mod mask;
 mod mutant_costs;
+mod promote;
 mod release;
 mod tofu_audit;
 
@@ -89,6 +90,11 @@ commands:
                         sync.yaml (the founder's terminal only; deploy/gitops/BOOTSTRAP.md, E21-58)
   gitops secrets <staging|production>
                         write the workload secrets alone (the founder's terminal only)
+  gitops promote staging <dir>
+                        rewrite staging's chart digests and images from a main release run's
+                        CHARTS and PUBLISHED in <dir> (E21-58, DEC-2016)
+  gitops promote production
+                        copy staging's chart digests and images into production (DEC-2016)
   cell up               build this change's images, bring up the local k3d cell, install the
                         workspace chart (deploy/cell/README.md)
   cell drill [--seeded] [boot|journal|egress|compose|restart|kill-switch|admission|standby-down|archive]...
@@ -327,6 +333,14 @@ fn run() -> Result<()> {
         ["gitops", "bootstrap", environment] => {
             gitops::bootstrap(&root, gitops::Environment::parse(environment)?)
         }
+        ["gitops", "promote", "staging", published] => promote::promote(
+            &root,
+            gitops::Environment::Staging,
+            Some(Path::new(published)),
+        ),
+        ["gitops", "promote", "production"] => {
+            promote::promote(&root, gitops::Environment::Production, None)
+        }
         ["gitops", "secrets", environment] => {
             gitops::secrets(gitops::Environment::parse(environment)?)
         }
@@ -355,6 +369,7 @@ fn run() -> Result<()> {
                     .chain(cell::JOURNAL_DRILLS)
                     .chain(cell::FAILOVER_DRILLS)
                     .chain(cell::KILL_SWITCH_DRILLS)
+                    .chain(cell::VAULT_DRILLS)
                     .collect()
             } else {
                 names
@@ -394,7 +409,10 @@ fn ci(job: &str) -> Result<()> {
         "cell-demo" => cell::scenario::ci(),
         "cell-journal" => cell::ci_drills(job, &cell::JOURNAL_DRILLS),
         "cell-failover" => cell::ci_drills(job, &cell::FAILOVER_DRILLS),
-        "cell-kill-switch" => cell::ci_drills(job, &cell::KILL_SWITCH_DRILLS),
+        "cell-kill-switch" => cell::ci_drills(
+            job,
+            &[cell::KILL_SWITCH_DRILLS, cell::VAULT_DRILLS].concat(),
+        ),
         "refcases" => refcases(false),
         "reference" => {
             reference(&["mandate/generate.py"])?;
@@ -1392,12 +1410,20 @@ fn infra() -> Result<()> {
     if run.is_empty() || !run.chars().all(|c| c.is_ascii_digit()) {
         bail!("GITHUB_RUN_ID must be the run's number, which names its Spaces key");
     }
-    let sha = env::var(INFRA_SHA_ENV).unwrap_or_default();
-    reviewed_commit(
-        &sha,
+    let named = env::var(INFRA_SHA_ENV).unwrap_or_default();
+    let sha = run_commit(
+        &action,
+        &named,
         &env::var("GITHUB_SHA").unwrap_or_default(),
         &head_commit()?,
     )?;
+    eprintln!("==> infra {action} of {environment} at commit {sha}");
+    if named.is_empty() {
+        eprintln!(
+            "    no sha was given, so this run uses the commit main was at when it started; to \
+             apply this plan, dispatch apply with sha={sha} (DEC-2042)"
+        );
+    }
     let work = repo_root()?.join("target").join("tofu");
     fs::create_dir_all(&work).with_context(|| format!("creating {}", work.display()))?;
     let plan_file = work.join(format!("{environment}.tfplan"));
@@ -1534,6 +1560,32 @@ fn reviewed_commit(sha: &str, run_sha: &str, head: &str) -> Result<()> {
     Ok(())
 }
 
+/// The commit a run proceeds at (DEC-2042). With `sha` given, [`reviewed_commit`] holds: it must
+/// be the run's commit and the checkout. With `sha` empty, `preflight` and `plan` proceed at the
+/// checkout, once it is the run's commit and a full commit, since main moves between the founder
+/// reading a commit and dispatching; `apply` never does, so an apply still binds to the commit the
+/// founder named.
+fn run_commit(action: &str, sha: &str, run_sha: &str, head: &str) -> Result<String> {
+    if !sha.is_empty() {
+        reviewed_commit(sha, run_sha, head)?;
+        return Ok(sha.to_owned());
+    }
+    match action {
+        "preflight" | "plan" => {
+            reviewed_commit(head, run_sha, head).context(
+                "no sha was given, so the run proceeds at the checkout, which must be the run's \
+                 full commit (DEC-2042)",
+            )?;
+            Ok(head.to_owned())
+        }
+        "apply" => bail!(
+            "apply needs {INFRA_SHA_ENV}, the full commit you reviewed, so the approval binds to \
+             it; plan first and dispatch apply naming the commit the plan printed (DEC-2042)"
+        ),
+        other => bail!("no infra action {other:?} (DEC-2042)"),
+    }
+}
+
 /// The paths a change to which changes what `infra.yml` does: the OpenTofu tree, the workflow, and
 /// everything the secret-holding binary is built from.
 const INFRA_PATHS: [&str; 7] = [
@@ -1616,6 +1668,7 @@ fn bootstrap_staging(tofu: &dyn Fn(&[String]) -> Command, chdir: &str, run: &str
         archive_access_key_id: gitops::Secret::new(output("archive_access_key_id")?),
         archive_secret_access_key: gitops::Secret::new(output("archive_secret_access_key")?),
         tunnel_token: gitops::Secret::new(output("tunnel_token")?),
+        archive_endpoint: gitops::Secret::new(output("archive_endpoint")?),
     };
     let cluster_id = output("cluster_id")?;
     let token = env::var("DIGITALOCEAN_TOKEN").unwrap_or_default();
@@ -16765,7 +16818,10 @@ mod tests {
         );
         let staging = body("\nfn bootstrap_staging(");
         let wrapped = staging.matches("gitops::Secret::new(output(").count();
-        assert_eq!(wrapped, 3, "each workload secret is wrapped as it is read");
+        assert_eq!(
+            wrapped, 4,
+            "each workload secret, and the archive endpoint, is wrapped as it is read"
+        );
         let kubeconfig = at(&staging, "infra_window::fetch_kubeconfig(");
         let last_secret = staging.rfind("gitops::Secret::new(output(");
         assert!(
@@ -16927,6 +16983,49 @@ mod tests {
                 "{named:?} at {run} / {head} is refused"
             );
         }
+    }
+
+    /// DEC-2042: `preflight` and `plan` may run at the checkout when no commit is named, and say
+    /// so; `apply` always needs the named commit, and a named commit is checked as before.
+    #[test]
+    fn only_apply_needs_the_commit_named() -> Result<()> {
+        let sha = "0123456789abcdef0123456789abcdef01234567";
+        let other = "1123456789abcdef0123456789abcdef01234567";
+        for action in ["preflight", "plan"] {
+            assert_eq!(crate::run_commit(action, "", sha, sha)?, sha);
+            assert_eq!(crate::run_commit(action, sha, sha, sha)?, sha);
+            assert!(
+                crate::run_commit(action, "", sha, other).is_err(),
+                "{action}: run and checkout differ"
+            );
+            assert!(
+                crate::run_commit(action, "", "", "").is_err(),
+                "{action}: no commit at all"
+            );
+            assert!(
+                crate::run_commit(action, "", "abc", "abc").is_err(),
+                "{action}: not a full commit"
+            );
+            assert!(
+                crate::run_commit(action, other, sha, sha).is_err(),
+                "{action}: a named commit is checked"
+            );
+        }
+        assert_eq!(crate::run_commit("apply", sha, sha, sha)?, sha);
+        let refused = crate::run_commit("apply", "", sha, sha)
+            .err()
+            .map(|error| error.to_string())
+            .unwrap_or_default();
+        assert!(
+            refused.contains("apply") && refused.contains("DEC-2042"),
+            "{refused}"
+        );
+        assert!(crate::run_commit("apply", other, sha, sha).is_err());
+        assert!(
+            crate::run_commit("destroy", "", sha, sha).is_err(),
+            "an unknown action never defaults"
+        );
+        Ok(())
     }
 
     /// E21-56 (DEC-2014): the committed `infra.yml` passes its guard, and each way of loosening

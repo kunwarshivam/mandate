@@ -539,6 +539,30 @@ pub struct Outcome {
     /// Limits with breach time accumulating, shown in the agent's state (§5.6).
     pub pending: BTreeSet<LimitKey>,
     pub rejection: Option<Rejection>,
+    /// Each `RiskLimitTriggered`'s breach time by its position in `journal`, which
+    /// [`Outcome::breach_time_s`] reads.
+    breach_times: BTreeMap<usize, u64>,
+}
+
+impl Outcome {
+    /// The breach time (§5.6) the limit's confirmation held at this input, in whole seconds, for the
+    /// `RiskLimitTriggered` at `event` in [`Outcome::journal`]: journal spec §9.27's `breach_time_s`
+    /// (DEC-2301 item 1). It is read before the fold's latch removes the confirmation, so a hard
+    /// trigger, `hard_breach_pending`, and `new_day_breach` carry whatever had accumulated, and it is
+    /// 0 where the limit has no confirmation: a `scale_sizes` rung, `after_reset` or not.
+    ///
+    /// Keyed by the event's position rather than by its limit, because the writer fills the member
+    /// one record at a time and a position names exactly one record, where a limit could name two in
+    /// an allocation change's settled batch. `Ok(None)` for any other event and for a position past
+    /// the journal's end. A tripwire's trigger is in [`Outcome::tripwire_journal`], never here, so
+    /// its `null` needs nothing from this accessor.
+    ///
+    /// # Errors
+    /// None today: the `Result` keeps the accessor's signature, so a writer already fails closed
+    /// on a step whose breach time could not be decided.
+    pub fn breach_time_s(&self, event: usize) -> Result<Option<u64>, SpecError> {
+        Ok(self.breach_times.get(&event).copied())
+    }
 }
 
 /// How many regular-session seconds lie between two instants, which is the clock §5.2 and §5.5 use for
