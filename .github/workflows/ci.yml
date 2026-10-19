@@ -36,8 +36,9 @@ name: ci
 # `workflow_dispatch` has no pull request, so it always runs.
 # DEC-2610: every push to `main` runs it too, after the merge, since merges no longer wait for
 # CI. A run on `main`'s tip has no diff base, so it selects everything, as the nightly's dispatch
-# does, and `report-main` opens an issue when it fails. `main`'s runs share one concurrency group,
-# so a burst of merges runs only the latest, which tests every one of them. A merge `merge.yml`
+# does, and `report-main` opens an issue when it fails. `main`'s runs share one concurrency group:
+# a run that has started finishes, and a burst of merges queues only its latest, which tests every
+# one of them. A merge `merge.yml`
 # makes with its own token starts no push run, so `merge.yml` dispatches this workflow then.
 on:
   pull_request:
@@ -53,13 +54,15 @@ on:
 
 permissions: {}
 
-# A pull request's runs share one group per ref, so a newer push cancels the older run. So do the
-# post-merge runs on `main`, a push's and the ones `merge.yml` dispatches with `post_merge`, so a
-# burst of merges runs only the latest. Any other dispatched run, the nightly's included, has a
-# group of its own, so it is never cancelled and cancels nothing (DEC-2610).
+# A pull request's runs share one group per ref, so a newer push cancels the older run. The
+# post-merge runs on `main`, a push's and the ones `merge.yml` dispatches with `post_merge`, share
+# one group too, but a newer one never cancels the run in progress: it waits, and replaces any run
+# still waiting, so every burst of merges gets a verdict and only its latest waits. Any other
+# dispatched run, the nightly's included, has a group of its own, so it is never cancelled and
+# cancels nothing (DEC-2610).
 concurrency:
   group: ci-${{ github.event_name == 'workflow_dispatch' && !inputs.post_merge && github.run_id || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
   CARGO_TERM_COLOR: always
