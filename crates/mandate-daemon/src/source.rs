@@ -5,6 +5,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::ops::RangeInclusive;
+use std::rc::Rc;
 
 use mandate_canon::{Digest, Value, parse};
 use mandate_journal::{ArtifactSource, Environment, StoredEvent, StreamId};
@@ -20,6 +21,7 @@ use mandate_store::Store;
 use mandate_time::UtcNanos;
 
 use crate::deployment;
+use crate::meter::CellMeter;
 use crate::recorded::Bundle;
 use crate::runtime::{ResearchParts, ResearchSource};
 
@@ -144,6 +146,26 @@ impl CellSource {
             rows,
             documents,
         }
+    }
+
+    /// The source over `bundle`'s recorded facts, reading the streams through `rows` and the
+    /// mandate documents from `documents`, and the agent's research spend from `meter`, the store
+    /// the worker's gateway reserves through (DEC-2249 item 3). A call the meter reserved then
+    /// counts at its settled cost, or its maximum while open, and gives the pass no context only
+    /// while the meter is held.
+    #[expect(
+        clippy::todo,
+        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+    )]
+    pub fn metered(
+        bundle: &Bundle,
+        who: SourceFor,
+        rows: Rc<dyn Rows>,
+        documents: Box<dyn ArtifactSource>,
+        meter: CellMeter,
+    ) -> Self {
+        let _ = (bundle, who, rows, documents, meter);
+        todo!()
     }
 
     /// Today's research spend: the recorded costs of the calls the agent stream records since the

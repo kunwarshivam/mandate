@@ -1,5 +1,5 @@
 //! `cargo xtask cell demo --scenario demo` (E21-54, DEC-2002): the demo's story, its six steps in
-//! order, on the local cell, with paper and demo data only and no credential. Every gesture whose
+//! order, with the owner's exit before the kill switch, on the local cell, with paper and demo data only and no credential. Every gesture whose
 //! pieces are on `main` runs for real, in one Job of the cell's own `control` process, so the
 //! artifact store its gestures share lives as long as they do; every link that is not on `main` is
 //! printed as a gap naming the PR or story that closes it, never faked. The scenario ends, in the
@@ -57,6 +57,17 @@ const SEGMENT: &str = "/work/segment.jsonl";
 pub const FOUNDER: &str = DEMO_OWNER;
 /// The demo's agent.
 pub const AGENT: &str = "demo-spy";
+/// The instrument the demo's envelope pins (SPY, [`INSTRUMENT_FILE`]'s `instrument_id`), which the
+/// owner's exit names.
+pub const SPY: &str = "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415";
+/// The bid, bid size and floor the owner's exit confirms, as the CLI's canonical text (DEC-2507
+/// item 1): fixed values the scenario types, since the cell shows no live quote.
+const EXIT_BID: (&str, &str, &str) = ("501.25", "100", "500");
+/// The run's control stream head when the owner's exit code is shown: the seq of the last control
+/// record before it, step 5's `backtest record` (the run's report on `main` numbers the records
+/// before it 1 to 9). The CLI binds it into the code (DEC-279 item 1), so a gesture that adds a
+/// control record before the exit moves it, and the shown code's check fails the run loudly.
+const EXIT_CONTROL_HEAD: u64 = 9;
 /// A second agent, on its own envelope ([`WEB_MANDATE_FILE`]), deployed for `web/`'s kill switch:
 /// the CLI stops [`AGENT`] inside the Job, and `web/` offers nothing to stop on a stopped agent, so
 /// the browser presses this one's (lane W2's D10).
@@ -82,7 +93,7 @@ pub fn workspace_of(id: &str) -> String {
     format!("01KDEM{id:0>10.10}000000000D")
 }
 
-/// One of the demo's six steps and what it is made of.
+/// One of the demo's steps and what it is made of.
 #[derive(Debug)]
 pub struct Step {
     pub number: u8,
@@ -385,13 +396,26 @@ fn confirm_code(version: &str) -> String {
     ))
 }
 
+/// The owner's exit code for `agent`'s `instrument` at the confirmed `bid` with the control stream
+/// at `head`: the canonical JSON `mandate agent exit --show-code` binds (DEC-279 item 1).
+fn exit_code(
+    agent: &str,
+    instrument: &str,
+    (bid, size, floor): (&str, &str, &str),
+    head: u64,
+) -> String {
+    code(&format!(
+        r#"{{"agent":"{agent}","bid":"{bid}","bid_size":"{size}","confirms":"owner_exit","control_head":"{head}","event":null,"floor":"{floor}","instrument":"{instrument}"}}"#
+    ))
+}
+
 fn deploy_code(agent: &str, version: &str) -> String {
     code(&format!(
         r#"{{"agent_id":"{agent}","gesture":"agent_deploy","mandate_version":"{version}"}}"#
     ))
 }
 
-/// The demo's six steps for `workspace`, given the bytes of the demo's mandate, of
+/// The demo's steps for `workspace`, given the bytes of the demo's mandate, of
 /// [`WEB_AGENT`]'s, and of [`RESEARCH_AGENT`]'s.
 pub fn plan(
     workspace: &str,
@@ -453,6 +477,28 @@ pub fn plan(
         confirm_code(&research_version),
         deploy_code(RESEARCH_AGENT, &research_version),
     );
+    let exit = exit_code(AGENT, SPY, EXIT_BID, EXIT_CONTROL_HEAD);
+    let (bid, bid_size, floor) = EXIT_BID;
+    let exit_args = |extra: &[&str]| {
+        owner(
+            &[
+                &[
+                    "agent",
+                    "exit",
+                    AGENT,
+                    SPY,
+                    "--confirm-bid",
+                    bid,
+                    "--bid-size",
+                    bid_size,
+                    "--floor",
+                    floor,
+                ][..],
+                extra,
+            ]
+            .concat(),
+        )
+    };
     let steps = vec![
         Step {
             number: 1,
@@ -808,6 +854,37 @@ pub fn plan(
         },
         Step {
             number: 6,
+            title: "the owner exits the agent's instrument at a confirmed floor",
+            parts: vec![
+                gesture(
+                    "the owner's exit code, shown for the confirmed bid, size and floor (nothing \
+                     committed)",
+                    exit_args(&["--show-code"]),
+                    format!("code {exit}"),
+                ),
+                gesture(
+                    "the owner's exit, committed with the code shown",
+                    exit_args(&["--code", &exit]),
+                    format!("owner_exit {AGENT} {SPY} committed as event"),
+                ),
+                Part::Gap(Gap {
+                    what: "the exit handed to the executor's core, priced at the confirmed floor",
+                    on_main: "the executor process hands its agents' orders to the core and \
+                              prices an owner's exit at the floor it confirmed (#1736, DEC-2033 \
+                              item 4), its image in the cell (#1702)",
+                    waits: vec![X_CONNECT],
+                }),
+                Part::Gap(Gap {
+                    what: "the exit's paper fill on the fixture broker, out of the position \
+                           step 4 filled",
+                    on_main: "the executor's interim image on the fixture paper broker (#1702, \
+                              DEC-2031)",
+                    waits: vec![X_EXECUTOR, P5_HOOK],
+                }),
+            ],
+        },
+        Step {
+            number: 7,
             title: "the kill switch from the web app stops the agent",
             parts: vec![
                 gesture(
@@ -874,7 +951,7 @@ pub fn plan(
             ],
         },
         Step {
-            number: 7,
+            number: 8,
             title: "the record: the workspace's control stream, exported and verified \
                     (journal spec §11)",
             parts: vec![
@@ -1622,6 +1699,11 @@ mod tests {
         assert_eq!(confirm_code(version), "e869cb19");
         assert_eq!(deploy_code(AGENT, version), "63fbe39f");
         assert_eq!(code(""), "e3b0c442");
+        assert_eq!(
+            exit_code(AGENT, SPY, EXIT_BID, 1),
+            "b0e0242b",
+            "the code `agent exit --show-code` showed with the control stream at seq 1"
+        );
         let research = reference(&research_mandate());
         assert_eq!(
             research,
@@ -1631,16 +1713,16 @@ mod tests {
         assert_eq!(deploy_code(RESEARCH_AGENT, &research), "a45a1728");
     }
 
-    /// The steps run 1 to 6 in order; a shown code precedes the gesture that types it, and the
+    /// The steps run 1 to 7 in order, then the record; a shown code precedes the gesture that types it, and the
     /// typed code is the one shown; every gesture's container name is unique and a Kubernetes name.
     #[test]
-    fn the_plan_runs_the_six_steps_and_types_the_codes_it_shows() {
+    fn the_plan_runs_its_steps_and_types_the_codes_it_shows() {
         let steps = planned("demo1");
         let numbers: Vec<u8> = steps.iter().map(|s| s.number).collect();
         assert_eq!(
             numbers,
-            [1, 2, 3, 4, 5, 6, 7],
-            "the six steps, then the record"
+            [1, 2, 3, 4, 5, 6, 7, 8],
+            "the seven steps, then the record"
         );
         let all = gestures(&steps);
         let mut names: Vec<&str> = all.iter().map(|g| g.container.as_str()).collect();
@@ -1954,15 +2036,73 @@ mod tests {
             .collect()
     }
 
-    /// Step 6 commits the owner's kill switch for the demo's agent, at agent scope only (an
+    /// Step 6 commits the owner's exit of the instrument the demo's envelope pins, on the demo's
+    /// agent, at a confirmed bid whose floor is at or below it, its code shown first and then
+    /// typed; after the agent is deployed and before the kill switch (a stopped agent's exits are
+    /// held, rule 13) and the export, so the closing verify covers it.
+    #[test]
+    fn step_six_exits_the_pinned_instrument_at_a_confirmed_floor_before_the_kill_switch() {
+        let pinned = parsed(INSTRUMENT_FILE);
+        assert_eq!(
+            pinned["instrument_id"], SPY,
+            "the exit names the pinned instrument"
+        );
+        let (bid, _, floor) = EXIT_BID;
+        assert!(
+            floor.parse::<u32>().unwrap() * 100 <= bid.replace('.', "").parse::<u32>().unwrap(),
+            "the floor is at or below the bid"
+        );
+        let steps = planned("demo1");
+        let all = gestures(&steps);
+        let at = |head: &[&str], last: &str| {
+            all.iter()
+                .position(|g| g.args[..head.len()] == *head && g.args.iter().any(|a| a == last))
+                .unwrap()
+        };
+        let shown = at(&["agent", "exit", AGENT, SPY], "--show-code");
+        let typed = at(&["agent", "exit", AGENT, SPY], "--code");
+        let code = exit_code(AGENT, SPY, EXIT_BID, EXIT_CONTROL_HEAD);
+        assert_eq!(all[shown].expect, format!("code {code}"));
+        assert!(
+            all[typed]
+                .args
+                .windows(2)
+                .any(|w| w == ["--code", code.as_str()])
+        );
+        assert_eq!(
+            all[typed].expect,
+            format!("owner_exit {AGENT} {SPY} committed as event")
+        );
+        let deployed = at(&["agent", "deploy", AGENT], "--code");
+        assert!(deployed < shown && shown < typed);
+        assert!(
+            typed < at(&["agent", "kill"], AGENT),
+            "before the kill switch"
+        );
+        assert!(
+            typed < at(&["journal", "export"], SEGMENT),
+            "before the export"
+        );
+        let step6 = &steps[5];
+        assert_eq!(step6.number, 6);
+        assert!(
+            step6
+                .parts
+                .iter()
+                .any(|p| matches!(p, Part::Gesture(g) if g.container == all[typed].container)),
+            "the exit is step 6's"
+        );
+    }
+
+    /// Step 7 commits the owner's kill switch for the demo's agent, at agent scope only (an
     /// agent-scoped switch never reaches the connection or the workspace, rule 13), after the
     /// agent is deployed and before the record is exported, so the closing verify covers it.
     #[test]
-    fn step_six_kills_the_demo_agent_at_agent_scope_before_the_record() {
+    fn step_seven_kills_the_demo_agent_at_agent_scope_before_the_record() {
         let steps = planned("demo1");
         let all = gestures(&steps);
         let at = |head: &[&str]| all.iter().position(|g| g.args[..head.len()] == *head);
-        let kill = at(&["agent", "kill"]).expect("step 6 runs `agent kill`");
+        let kill = at(&["agent", "kill"]).expect("step 7 runs `agent kill`");
         let g = all[kill];
         assert_eq!(g.args[2..4], ["--agent", AGENT]);
         assert!(
@@ -1985,12 +2125,12 @@ mod tests {
             kill < at(&["journal", "export"]).unwrap(),
             "exported after it"
         );
-        let step6 = &steps[5].parts;
+        let step7 = &steps[6].parts;
         assert!(
-            step6
+            step7
                 .iter()
                 .any(|p| matches!(p, Part::Gesture(x) if x.container == g.container)),
-            "the kill switch is step 6's"
+            "the kill switch is step 7's"
         );
     }
 
@@ -2153,8 +2293,8 @@ mod tests {
                 })
                 .map(|s| s.number)
         };
-        assert_eq!(step_of(&all[register].container), Some(6));
-        assert_eq!(step_of(&all[deploy].container), Some(6));
+        assert_eq!(step_of(&all[register].container), Some(7));
+        assert_eq!(step_of(&all[deploy].container), Some(7));
         let kill = all
             .iter()
             .find(|g| g.args[..2] == ["agent", "kill"])
@@ -2172,7 +2312,7 @@ mod tests {
             })
             .collect();
         assert_eq!(web.len(), 1);
-        assert_eq!(web[0].0, 6, "web/'s kill switch is step 6's");
+        assert_eq!(web[0].0, 7, "web/'s kill switch is step 7's");
         assert_eq!(web[0].1.agent, WEB_AGENT);
         assert_ne!(WEB_AGENT, AGENT);
     }
@@ -2479,15 +2619,17 @@ mod tests {
         );
     }
 
-    /// Which steps run today: the gestures on `main` make steps 1, 2, 4, 5 and 6 partial, step 3
-    /// waits wholly on other lanes, and the record runs whole.
+    /// Which steps run today: the gestures on `main` make steps 1 to 7 partial, step 3's research
+    /// gestures among them, and the record runs whole.
     #[test]
     fn each_step_reads_ready_partial_or_skipped_from_its_parts() {
         let steps = planned("demo1");
         let read: Vec<Readiness> = steps.iter().map(readiness).collect();
         assert_eq!(
             read,
-            [Partial, Partial, Partial, Partial, Partial, Partial, Ready]
+            [
+                Partial, Partial, Partial, Partial, Partial, Partial, Partial, Ready
+            ]
         );
         let step = |parts: Vec<Part>| Step {
             number: 9,
