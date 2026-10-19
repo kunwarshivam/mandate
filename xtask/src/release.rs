@@ -929,6 +929,49 @@ pub(crate) fn publish_index(root: &Path, out: &Path) -> Result<()> {
     Ok(())
 }
 
+/// `cargo xtask release publish-signed <dist> <signatures> <out>` (E21-35, DEC-2026): only on a
+/// dispatch from `main`, where CI's per-arch `release-signing-publish` job runs it after
+/// `release-signing-check`, holding no release secret. [`signed_images`] checks every signature
+/// against the committed public half before anything is built, and only then does it sign in,
+/// push each image as `signed-<commit>-<arch>`, sign its digest keyless, attest its SBOM and write
+/// `<out>/PUBLISHED`.
+pub(crate) fn publish_signed(
+    root: &Path,
+    dist: &Path,
+    signatures: &Path,
+    out: &Path,
+) -> Result<()> {
+    let paths = Paths::from_env(root)?;
+    let tools = tools(&paths.cargo_home)?;
+    let revision = git(root, &["rev-parse", "HEAD"])?;
+    let images = signed_images(
+        &tools,
+        &root.join(RELEASE_PUBLIC_KEY),
+        dist,
+        signatures,
+        Arch::host()?,
+        &revision,
+    )?;
+    let _ = (images, out);
+    bail!("pushing release-signed images is not implemented yet (E21-35)")
+}
+
+/// The release-signed image of every binary `dist/SHA256SUMS` lists, for `arch`, built from commit
+/// `revision`, each with its `<name>.sig` layer. Every binary must match its line, and every binary
+/// and `SHA256SUMS` itself must carry a signature in `signatures` that verifies against `key`,
+/// before any image is built, so a release the key did not sign is never pushed (DEC-2026).
+pub(crate) fn signed_images(
+    tools: &Path,
+    key: &Path,
+    dist: &Path,
+    signatures: &Path,
+    arch: Arch,
+    revision: &str,
+) -> Result<Vec<(String, image::Layout)>> {
+    let _ = (tools, key, dist, signatures, arch, revision);
+    bail!("building release-signed images is not implemented yet (E21-35)")
+}
+
 /// The charts a hosted cluster installs from `deploy/cell/charts/` (E21-58, DEC-2015 item 3).
 /// `archive-store` is the local cell's test stand-in and is never published (DEC-1050 item 5).
 pub(crate) const HOSTED_CHARTS: [&str; 4] =
@@ -2426,6 +2469,160 @@ mod tests {
                 .find(|line| line.starts_with(&format!("| `{}` |", tool.name)))
                 .with_context(|| format!("no registry row for {}", tool.name))?;
             assert!(row.contains(tool.version), "{}: {row}", tool.name);
+        }
+        Ok(())
+    }
+
+    /// One case of [`the_signed_images_refuse_a_release_the_key_did_not_sign`]: its name, what it
+    /// changes in the release [`signed_release`] wrote under the directory it is handed, and what
+    /// the refusal must name.
+    type SignedCase = (&'static str, fn(&Path) -> io::Result<()>, &'static str);
+
+    /// Writes under `dir` a release `signed_images` accepts: `dist` holding `a` and `b` with their
+    /// `SHA256SUMS`, a signature for each and for `SHA256SUMS` in `signatures`, the public half in
+    /// `release.pub`, and in `tools` a stand-in cosign that records each call and verifies a
+    /// signature only when it starts `good` and the key holds `release key`. Returns the tools
+    /// directory and the key.
+    fn signed_release(dir: &Path) -> Result<(PathBuf, PathBuf)> {
+        let _ = fs::remove_dir_all(dir);
+        fs::create_dir_all(dir.join("dist/bin"))?;
+        fs::create_dir_all(dir.join("signatures"))?;
+        fs::create_dir_all(dir.join("tools"))?;
+        fs::write(dir.join("dist/bin/a"), "a")?;
+        fs::write(dir.join("dist/bin/b"), "b")?;
+        write_sums(dir, SIGNER_SUMS)?;
+        fs::write(dir.join("signatures/a.sig"), "good signature over a")?;
+        fs::write(dir.join("signatures/b.sig"), "good signature over b")?;
+        fs::write(
+            dir.join("signatures/SHA256SUMS.sig"),
+            "good signature over the sums",
+        )?;
+        let key = dir.join("release.pub");
+        fs::write(&key, "release key\n")?;
+        let cosign = dir.join("tools/cosign");
+        fs::write(
+            &cosign,
+            concat!(
+                "#!/bin/sh\n",
+                "printf '%s\\n' \"$*\" >> \"$(dirname \"$0\")/calls\"\n",
+                "[ \"$1\" = verify-blob ] && grep -qx 'release key' \"$4\" && grep -q '^good' \"$6\"\n",
+            ),
+        )?;
+        fs::set_permissions(&cosign, fs::Permissions::from_mode(0o755))?;
+        Ok((dir.join("tools"), key))
+    }
+
+    /// Each release-signed image holds exactly its binary and that binary's release signature,
+    /// byte for byte, as a runtime unpacks it, and every binary and `SHA256SUMS` was verified
+    /// against the committed key first (DEC-2026).
+    #[test]
+    #[ignore = "pending E21-35"]
+    fn the_signed_images_carry_each_binary_and_its_release_signature() -> Result<()> {
+        let dir = env::temp_dir().join(format!("mandate-xtask-signed-{}", std::process::id()));
+        let (tools, key) = signed_release(&dir)?;
+        let arch = Arch::host()?;
+        let images = signed_images(
+            &tools,
+            &key,
+            &dir.join("dist"),
+            &dir.join("signatures"),
+            arch,
+            "release",
+        )?;
+        let names: Vec<&str> = images.iter().map(|(name, _)| name.as_str()).collect();
+        assert_eq!(names, ["a", "b"]);
+        for (name, layout) in &images {
+            let unpacked = dir.join("unpacked").join(name);
+            image::write(layout, &unpacked.join("layout"))?;
+            image::unpack(layout, &unpacked.join("layout"), &unpacked.join("rootfs"))?;
+            let mut files: Vec<String> = fs::read_dir(unpacked.join("rootfs"))?
+                .map(|entry| Ok(entry?.file_name().to_string_lossy().into_owned()))
+                .collect::<io::Result<_>>()?;
+            files.sort();
+            assert_eq!(files, [name.clone(), format!("{name}.sig")], "{name}");
+            assert_eq!(
+                fs::read(unpacked.join("rootfs").join(name))?,
+                fs::read(dir.join("dist/bin").join(name))?,
+                "{name}: the binary"
+            );
+            assert_eq!(
+                fs::read(unpacked.join("rootfs").join(format!("{name}.sig")))?,
+                fs::read(dir.join("signatures").join(format!("{name}.sig")))?,
+                "{name}: the signature"
+            );
+        }
+        let calls = fs::read_to_string(tools.join("calls"))?;
+        let mut verified: Vec<&str> = calls
+            .lines()
+            .map(|call| {
+                assert!(
+                    call.starts_with("verify-blob ")
+                        && call.contains(&format!("--key {} ", key.display())),
+                    "{call}"
+                );
+                call.rsplit('/').next().unwrap_or_default()
+            })
+            .collect();
+        verified.sort_unstable();
+        assert_eq!(verified, ["SHA256SUMS", "a", "b"]);
+        Ok(())
+    }
+
+    /// A release the key did not sign builds no image: a signature by another key, a missing one,
+    /// one over `SHA256SUMS` that does not verify, or a binary `SHA256SUMS` does not list each
+    /// stops `signed_images` with a refusal naming it, so `publish-signed` never signs in to the
+    /// registry or pushes (DEC-2026).
+    #[test]
+    #[ignore = "pending E21-35"]
+    fn the_signed_images_refuse_a_release_the_key_did_not_sign() -> Result<()> {
+        let root = env::temp_dir().join(format!(
+            "mandate-xtask-signed-refusals-{}",
+            std::process::id()
+        ));
+        let cases: Vec<SignedCase> = vec![
+            (
+                "a's signature is not the key's",
+                |d| fs::write(d.join("signatures/a.sig"), "bad"),
+                "a.sig",
+            ),
+            (
+                "b has no signature",
+                |d| fs::remove_file(d.join("signatures/b.sig")),
+                "b.sig",
+            ),
+            (
+                "the sums' signature is not the key's",
+                |d| fs::write(d.join("signatures/SHA256SUMS.sig"), "bad"),
+                "SHA256SUMS.sig",
+            ),
+            (
+                "b is not the binary SHA256SUMS lists",
+                |d| fs::write(d.join("dist/bin/b"), "x"),
+                "b is not the binary SHA256SUMS lists",
+            ),
+            (
+                "another key",
+                |d| fs::write(d.join("release.pub"), "another key\n"),
+                "verify-blob",
+            ),
+        ];
+        for (name, change, refusal) in cases {
+            let dir = root.join(name.replace(' ', "-"));
+            let (tools, key) = signed_release(&dir)?;
+            change(&dir)?;
+            let result = signed_images(
+                &tools,
+                &key,
+                &dir.join("dist"),
+                &dir.join("signatures"),
+                Arch::host()?,
+                "release",
+            );
+            let Err(err) = result else {
+                panic!("{name}: images were built");
+            };
+            let err = format!("{err:#}");
+            assert!(err.contains(refusal), "{name}: refused with {err:?}");
         }
         Ok(())
     }
