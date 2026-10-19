@@ -171,7 +171,8 @@ pub enum Drill {
     /// and fetch the segment back (E21-41).
     Archive,
     /// An agent deployed on a recorded paper connection, and the deployment manager starting that
-    /// account's executor until its `readyz` passes (E21-30, DEC-2035); see [`executor`].
+    /// account's executor until its pod runs and answers `livez`, not `readyz`, which needs a
+    /// scheduler tick the cell does not journal yet (E21-30, DEC-2035); see [`executor`].
     Executor,
     /// `mandate vault provision` sets the cell's vault up, then each AppRole logs in from a pod
     /// labelled as the executor and reads only what DEC-977 item 2's table gives it: a runtime
