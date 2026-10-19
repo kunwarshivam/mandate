@@ -1,0 +1,77 @@
+# Who may make a kill switch's pod (DEC-2016 item 2). The signature webhooks fail closed but skip a
+# pod labelled `mandate.dev/process: control`, so that label must not be one anyone can set. These
+# policies run in the API server itself, with no webhook to go down: in the workspace's namespace,
+# only the Job controller may create a pod with that label, or add it to a pod, and no service
+# account may create a Job whose pods carry it. The founder's CLI creates the kill switch's Job as
+# a person, never a service account (E21-34); a workload in the namespace cannot mint one.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: mandate-control-pods
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: ws-ws1
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [pods]
+  matchConditions:
+    - name: labelled-control
+      expression: >-
+        has(object.metadata.labels) && 'mandate.dev/process' in object.metadata.labels
+        && object.metadata.labels['mandate.dev/process'] == 'control'
+    - name: newly-control
+      expression: >-
+        request.operation == 'CREATE' || !(has(oldObject.metadata.labels)
+        && 'mandate.dev/process' in oldObject.metadata.labels
+        && oldObject.metadata.labels['mandate.dev/process'] == 'control')
+  validations:
+    - expression: >-
+        request.userInfo.username in ['system:serviceaccount:kube-system:job-controller',
+        'system:kube-controller-manager']
+      message: only the Job controller may make a pod labelled mandate.dev/process=control
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: mandate-control-pods
+spec:
+  policyName: mandate-control-pods
+  validationActions: [Deny]
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: mandate-control-jobs
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: ws-ws1
+    resourceRules:
+      - apiGroups: [batch]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [jobs]
+  matchConditions:
+    - name: labelled-control
+      expression: >-
+        has(object.spec.template.metadata.labels)
+        && 'mandate.dev/process' in object.spec.template.metadata.labels
+        && object.spec.template.metadata.labels['mandate.dev/process'] == 'control'
+  validations:
+    - expression: "!request.userInfo.username.startsWith('system:serviceaccount:')"
+      message: no service account may create a Job whose pods are labelled mandate.dev/process=control
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: mandate-control-jobs
+spec:
+  policyName: mandate-control-jobs
+  validationActions: [Deny]

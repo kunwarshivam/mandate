@@ -1,0 +1,32 @@
+# What the staging cluster reconciles (DEC-2015 item 2): this public repository, read anonymously
+# over HTTPS from `main` only, and this directory of it. The cluster holds no git credential and
+# cannot push. Charts come by digest (charts.yaml), never from this source (DEC-2015 item 3). The
+# bootstrap (DEC-2018) applies this file; from then on Flux keeps it as it keeps everything else
+# here.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: mandate
+  namespace: flux-system
+spec:
+  interval: 5m
+  url: https://github.com/kunwarshivam/mandate
+  ref:
+    branch: main
+  ignore: |
+    /*
+    !/deploy/gitops/
+    !/deploy/cell/values/
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: cluster
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./deploy/gitops/clusters/staging
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: mandate
