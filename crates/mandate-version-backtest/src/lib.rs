@@ -320,6 +320,12 @@ pub struct VersionRun {
 /// calendar errors the run wraps. Every error refuses the whole run: no partial report exists.
 pub fn run_version(input: &VersionInput<'_>) -> Result<VersionRun, VersionError> {
     check_inputs(input)?;
+    let first_date = input.bars.first().map(|bar| bar.trade_date);
+    if input.corporate_actions.iter().any(|action| {
+        matches!(action, RecordedAction::Split { .. }) && Some(action.ex_date()) > first_date
+    }) {
+        return Err(VersionError::Unimplemented { story: "E4-4" });
+    }
     let benchmark_config = benchmark_config(input)?;
     let benchmark_input = BacktestInput {
         config: &benchmark_config,

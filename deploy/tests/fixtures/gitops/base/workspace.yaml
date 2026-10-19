@@ -1,0 +1,28 @@
+# The workspace chart (mandate-workspace) with a managed cluster's values,
+# deploy/cell/values/managed.yaml, which turns on cloudflared for the tunnel. That file reaches the
+# release unchanged, generated into the ConfigMap `workspace-managed-values` (kustomization.yaml).
+# Each overlay generates `workspace-images` from its images.yaml: the environment's images, pinned
+# by digest, and its tier, which promotion sets (DEC-2016). Migrations run as
+# the chart's pre-install and pre-upgrade hook (OPS-13), which helm-controller runs as Helm does.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: workspace
+  namespace: flux-system
+spec:
+  interval: 1h
+  releaseName: workspace
+  targetNamespace: ws-ws1
+  storageNamespace: ws-ws1
+  dependsOn:
+    - name: journal
+  chartRef:
+    kind: OCIRepository
+    name: mandate-workspace
+  valuesFrom:
+    - kind: ConfigMap
+      name: workspace-managed-values
+      valuesKey: values.yaml
+    - kind: ConfigMap
+      name: workspace-images
+      valuesKey: values.yaml

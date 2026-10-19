@@ -1,0 +1,42 @@
+# The Barman Cloud plugin beside the operator, `plugin-barman-cloud` 0.8.1, with cert-manager off:
+# its two certificates come from deploy/cell/charts/backup-plugin-tls (DEC-1050 item 3), exactly
+# as `cargo xtask cell up` installs them (xtask/src/cell.rs, `backup_plugin`).
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: backup-plugin-tls
+  namespace: flux-system
+spec:
+  interval: 1h
+  releaseName: backup-plugin-tls
+  targetNamespace: cnpg-system
+  storageNamespace: cnpg-system
+  chartRef:
+    kind: OCIRepository
+    name: mandate-backup-plugin-tls
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: barman-cloud
+  namespace: flux-system
+spec:
+  interval: 1h
+  releaseName: barman-cloud
+  targetNamespace: cnpg-system
+  storageNamespace: cnpg-system
+  dependsOn:
+    - name: cnpg
+    - name: backup-plugin-tls
+  chartRef:
+    kind: OCIRepository
+    name: plugin-barman-cloud
+  values:
+    image:
+      tag: v0.15.1@sha256:c75acad19a36e8176cfe2885761ff1b836c6ef977d7257e298c99a28b5c302ef
+    sidecarImage:
+      tag: v0.15.1@sha256:2287a793a804db751edd0d07d44cd549e357677e98a800eb12e2cf7c0d53f9b0
+    certificate:
+      createClientCertificate: false
+      createServerCertificate: false
+      createIssuer: false
