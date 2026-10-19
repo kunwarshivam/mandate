@@ -27,6 +27,7 @@ mod mutant_costs;
 mod promote;
 mod release;
 mod tofu_audit;
+mod vault_init;
 
 const USAGE: &str = "\
 usage: cargo xtask <command>
