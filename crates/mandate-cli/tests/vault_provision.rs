@@ -4,8 +4,9 @@
 //! The last case runs against the OpenBao dev server `cargo xtask ci openbao` names, and checks the
 //! refusals first, so it fails the same way without one.
 
-use std::fs;
-use std::os::unix::fs::PermissionsExt;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -29,11 +30,31 @@ fn ca() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/vault-ca.pem")
 }
 
+/// A token file made at mode 0600, so the token is never readable by others while it is written,
+/// then given `mode`.
 fn token_file(text: &str, mode: u32) -> PathBuf {
     let path = fresh("token");
-    fs::write(&path, text).unwrap();
+    OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&path)
+        .and_then(|mut file| file.write_all(text.as_bytes()))
+        .unwrap();
     fs::set_permissions(&path, fs::Permissions::from_mode(mode)).unwrap();
     path
+}
+
+/// Removes the files and directories it holds when dropped, a failed assertion included.
+struct Removed(Vec<PathBuf>);
+
+impl Drop for Removed {
+    fn drop(&mut self) {
+        for path in &self.0 {
+            let _ = fs::remove_dir_all(path);
+            let _ = fs::remove_file(path);
+        }
+    }
 }
 
 fn provision(address: &str, ca: &Path, token: &Path, connections: &[&str], out: &Path) -> Output {
@@ -75,7 +96,7 @@ fn refused(output: &Output, code: &str, out: &Path, case: &str) {
         String::from_utf8_lossy(&output.stdout)
     );
     assert!(
-        !err.contains(&CANARY[..16]),
+        !err.contains(CANARY) && !err.contains(&CANARY[..16]),
         "{case} printed the token: {err}"
     );
     assert!(!out.exists(), "{case} wrote {}", out.display());
@@ -117,7 +138,7 @@ fn a_plain_http_address_a_bad_ca_or_a_bad_connection_is_refused() {
     let output = provision(NOWHERE, &bad_ca, &token, &["c1"], &out);
     refused(&output, "config", &out, "a CA that is not PEM");
     let output = provision(NOWHERE, &ca(), &token, &["not a connection id!"], &out);
-    refused(&output, "connection", &out, "a malformed connection id");
+    refused(&output, "(connection)", &out, "a malformed connection id");
 }
 
 /// The token is never an argument: the command has no flag that takes one.
@@ -136,7 +157,13 @@ fn the_token_is_never_an_argument() {
         .output()
         .expect("the CLI runs");
     assert!(!output.status.success());
-    assert!(!String::from_utf8_lossy(&output.stdout).contains(&CANARY[..16]));
+    for printed in [&output.stdout, &output.stderr] {
+        let printed = String::from_utf8_lossy(printed);
+        assert!(
+            !printed.contains(&CANARY[..16]),
+            "printed the token: {printed}"
+        );
+    }
 }
 
 /// The server the environment names, as `.github/scripts/start-openbao.sh` sets it.
@@ -159,6 +186,7 @@ fn provisioning_writes_each_identitys_files_and_prints_only_their_names() {
     };
     let token = token_file(fs::read_to_string(operator).unwrap().trim(), 0o600);
     let out = fresh("out");
+    let _removed = Removed(vec![token.clone(), out.clone()]);
     let output = provision(&address, &ca, &token, &["c1", "c2"], &out);
     assert!(output.status.success(), "{}", stderr(&output));
     let mut want: Vec<String> = [
