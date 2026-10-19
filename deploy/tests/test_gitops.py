@@ -481,12 +481,7 @@ DOC_BUGS = [
         "mandate-journal-db",
         lambda d: d["spec"]["verify"].update(secretRef={"name": "cosign-key"}),
     ),
-    (
-        sources_pinned,
-        "OCIRepository",
-        "mandate-workspace",
-        lambda d: d["metadata"].update(name="mandate-extra"),
-    ),
+    # A namespace the journal needs is missing; the every-namespace rule has the ConfigMap case below.
     (never_pruned, "Namespace", "cnpg-system", lambda d: d["metadata"].update(name="extra")),
     (
         never_pruned,
@@ -634,3 +629,14 @@ def test_an_account_in_git_is_caught():
     account = "fedcba9876543210" * 2
     endpoint = f"https://{account}.r2.cloudflarestorage.com"
     assert accounts_in_git({"deploy/gitops/clusters/staging/journal.yaml": f"endpointURL: {endpoint}\n"})
+
+
+def test_an_extra_source_is_caught(tmp_path):
+    """A source beside the pinned ones, every pinned one still present, is refused on its own."""
+    docs = build("staging", FIXTURE, tmp_path)
+    assert sources_pinned(docs) == []
+    extra = copy.deepcopy(of_kind(docs, "OCIRepository")["mandate-workspace"])
+    extra["metadata"]["name"] = "mandate-extra"
+    assert sources_pinned([*docs, extra]) == [
+        "mandate-extra: an OCIRepository the hosted clusters do not run"
+    ]
