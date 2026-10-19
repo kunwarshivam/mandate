@@ -7,9 +7,19 @@ use proptest::prelude::*;
 use super::conformance::{platform_holders, the_platform_secrets_have_their_holders};
 use crate::SourceError;
 use crate::policy::{
-    Access, Identity, Mounts, PlatformSecret, SecretPath, allows, kv_path, openbao_policy,
-    policy_name, require, role_name,
+    Access, Identity, Mounts, PlatformSecret, SecretPath, allows, policy_name, require, role_name,
 };
+
+/// [`crate::policy::kv_path`], which fails only for an id it cannot place; every id here is one it
+/// places.
+fn kv_path(path: &SecretPath) -> String {
+    crate::policy::kv_path(path).unwrap()
+}
+
+/// [`crate::policy::openbao_policy`], which fails only where [`kv_path`] does.
+fn openbao_policy(identity: &Identity, connections: &[ConnectionId], mounts: &Mounts) -> String {
+    crate::policy::openbao_policy(identity, connections, mounts).unwrap()
+}
 
 /// The oracle: who may do what to a platform secret, its own way: one reader each, the secret
 /// import the only writer, and no deleter.
