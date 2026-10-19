@@ -7,7 +7,7 @@
 //! every line holds or its rounds run out, and only reads: no `kubectl` verb but `get`, no request
 //! but `GET`.
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use serde_json::Value;
 
 use crate::infra_preflight::Checklist;
@@ -32,9 +32,10 @@ const FLUX_KINDS: [(&str, &str); 4] = [
 const BINDINGS: [&str; 2] = ["mandate-control-pods", "mandate-control-jobs"];
 /// The signature webhooks' configuration, as `admission.yaml`'s patch names it (DEC-2016 item 1).
 const SIGNATURE_WEBHOOK: &str = "policy.sigstore.dev";
-/// How many times the check reads staging before it reports what is still missing: with the
-/// HTTP layer's five-second pause, eight minutes, inside the kubeconfig's fifteen.
-pub(crate) const ROUNDS: u32 = 96;
+/// How long the check reads staging before it reports what is still missing, in seconds by the
+/// HTTP layer's clock: eight minutes, inside the kubeconfig's fifteen, however long each reading
+/// takes.
+pub(crate) const SECONDS: i64 = 480;
 
 /// `kubectl get` against the cluster, its arguments after `get`, answering what it printed.
 pub(crate) type Kubectl<'a> = &'a dyn Fn(&[&str]) -> Result<String>;
@@ -48,22 +49,198 @@ pub(crate) struct Edge<'a> {
     pub(crate) api_hostname: &'a str,
 }
 
-/// One reading of staging, as the checklist it prints.
-fn checks(_kubectl: Kubectl<'_>, _http: &dyn Http, _edge: &Edge<'_>) -> Result<Checklist> {
-    bail!("pending DEC-2050: staging's verify is not written yet")
+/// The items `kubectl get` lists for `args`, or a MISSING line naming `what` it could not read.
+fn listed(
+    list: &mut Checklist,
+    kubectl: Kubectl<'_>,
+    what: &str,
+    args: &[&str],
+) -> Option<Vec<Value>> {
+    let items = kubectl(args)
+        .ok()
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        .and_then(|listing| listing.get("items").and_then(Value::as_array).cloned());
+    if items.is_none() {
+        list.check(false, format!("kubectl can read {what}"));
+    }
+    items
 }
 
-/// Reads staging until every line holds, or [`ROUNDS`] times, pausing between readings, and
-/// answers the last reading.
+fn text<'v>(value: &'v Value, path: &[&str]) -> &'v str {
+    path.iter()
+        .fold(value, |node, key| &node[*key])
+        .as_str()
+        .unwrap_or_default()
+}
+
+/// Whether an object's `Ready` condition is `True`, as Flux sets it.
+fn is_ready(object: &Value) -> bool {
+    object["status"]["conditions"]
+        .as_array()
+        .is_some_and(|conditions| {
+            conditions
+                .iter()
+                .any(|c| text(c, &["type"]) == "Ready" && text(c, &["status"]) == "True")
+        })
+}
+
+fn where_is(object: &Value) -> String {
+    format!(
+        "{}/{}",
+        text(object, &["metadata", "namespace"]),
+        text(object, &["metadata", "name"])
+    )
+}
+
+/// Flux's sources, Kustomizations and HelmReleases: at least one of each kind, each Ready.
+fn flux(list: &mut Checklist, kubectl: Kubectl<'_>) {
+    let kinds: Vec<&str> = FLUX_KINDS.iter().map(|(_, resource)| *resource).collect();
+    let Some(items) = listed(
+        list,
+        kubectl,
+        "Flux's objects",
+        &[&kinds.join(","), "-A", "-o", "json"],
+    ) else {
+        return;
+    };
+    for (kind, _) in FLUX_KINDS {
+        let of_kind: Vec<&Value> = items
+            .iter()
+            .filter(|o| text(o, &["kind"]) == kind)
+            .collect();
+        if of_kind.is_empty() {
+            let article = if kind.starts_with(['A', 'E', 'I', 'O', 'U']) {
+                "an"
+            } else {
+                "a"
+            };
+            list.check(false, format!("Flux has {article} {kind}"));
+        }
+        for object in of_kind {
+            list.check(
+                is_ready(object),
+                format!("{kind} {} is Ready", where_is(object)),
+            );
+        }
+    }
+}
+
+/// Every pod of the platform and the workspaces, but a finished Job's, Running with every
+/// container ready, and at least one in each platform namespace.
+fn pods(list: &mut Checklist, kubectl: Kubectl<'_>) {
+    let Some(items) = listed(list, kubectl, "pods", &["pods", "-A", "-o", "json"]) else {
+        return;
+    };
+    let ours = |pod: &&Value| {
+        let namespace = text(pod, &["metadata", "namespace"]);
+        PLATFORM_NAMESPACES.contains(&namespace) || namespace.starts_with("ws-")
+    };
+    for pod in items.iter().filter(ours) {
+        if text(pod, &["status", "phase"]) == "Succeeded" {
+            continue;
+        }
+        let containers = pod["status"]["containerStatuses"].as_array();
+        let up = text(pod, &["status", "phase"]) == "Running"
+            && containers.is_some_and(|all| {
+                !all.is_empty() && all.iter().all(|c| c["ready"].as_bool() == Some(true))
+            });
+        list.check(up, format!("pod {} is Running and Ready", where_is(pod)));
+    }
+    for namespace in PLATFORM_NAMESPACES {
+        if !items
+            .iter()
+            .any(|pod| text(pod, &["metadata", "namespace"]) == namespace)
+        {
+            list.check(false, format!("{namespace} runs a pod"));
+        }
+    }
+}
+
+/// The kill-switch policies' bindings deny, and the signature webhooks fail closed.
+fn admission(list: &mut Checklist, kubectl: Kubectl<'_>) {
+    let bindings = "validatingadmissionpolicybindings";
+    if let Some(items) = listed(list, kubectl, bindings, &[bindings, "-o", "json"]) {
+        for name in BINDINGS {
+            let denies = items.iter().any(|binding| {
+                text(binding, &["metadata", "name"]) == name
+                    && text(binding, &["spec", "policyName"]) == name
+                    && binding["spec"]["validationActions"] == serde_json::json!(["Deny"])
+            });
+            list.check(denies, format!("binding {name} denies"));
+        }
+    }
+    let webhooks = "validatingwebhookconfigurations";
+    if let Some(items) = listed(list, kubectl, webhooks, &[webhooks, "-o", "json"]) {
+        let closed = items.iter().any(|configuration| {
+            text(configuration, &["metadata", "name"]) == SIGNATURE_WEBHOOK
+                && configuration["webhooks"].as_array().is_some_and(|all| {
+                    !all.is_empty() && all.iter().all(|w| text(w, &["failurePolicy"]) == "Fail")
+                })
+        });
+        list.check(closed, format!("webhook {SIGNATURE_WEBHOOK} fails closed"));
+    }
+}
+
+/// The tunnel's health as Cloudflare records it, and the API's answer to a request without
+/// credentials: Access redirects it to its login or refuses it; a success means the API is open.
+fn edge_checks(list: &mut Checklist, http: &dyn Http, edge: &Edge<'_>) {
+    let url = format!(
+        "{CF_API}/accounts/{}/cfd_tunnel/{}",
+        edge.account, edge.tunnel_id
+    );
+    let status = http
+        .api("GET", &url, edge.cloudflare_token, None)
+        .ok()
+        .filter(|answer| answer.ok())
+        .and_then(|answer| serde_json::from_str::<Value>(&answer.body).ok())
+        .map(|record| text(&record, &["result", "status"]).to_owned());
+    match status.as_deref() {
+        Some("healthy") => list.check(true, "the tunnel is healthy"),
+        Some(other) => {
+            let said: String = other
+                .chars()
+                .filter(char::is_ascii_alphabetic)
+                .take(16)
+                .collect();
+            list.check(
+                false,
+                format!("the tunnel is healthy (Cloudflare reports {said})"),
+            );
+        }
+        None => list.check(false, "the tunnel is healthy (Cloudflare did not answer)"),
+    }
+    let line = |answer: &str| {
+        format!("the API answers only through Access ({answer} without credentials)")
+    };
+    match http.get_public(&format!("https://{}/", edge.api_hostname)) {
+        Ok(answer) => list.check(
+            (300..400).contains(&answer.status) || matches!(answer.status, 401 | 403),
+            line(&answer.status.to_string()),
+        ),
+        Err(_) => list.check(false, line("no answer")),
+    }
+}
+
+/// One reading of staging, as the checklist it prints.
+fn checks(kubectl: Kubectl<'_>, http: &dyn Http, edge: &Edge<'_>) -> Result<Checklist> {
+    let mut list = Checklist::default();
+    flux(&mut list, kubectl);
+    pods(&mut list, kubectl);
+    admission(&mut list, kubectl);
+    edge_checks(&mut list, http, edge);
+    Ok(list)
+}
+
+/// Reads staging until every line holds or [`SECONDS`] have passed since the first reading,
+/// pausing between readings, and answers the last reading.
 pub(crate) fn verify(kubectl: Kubectl<'_>, http: &dyn Http, edge: &Edge<'_>) -> Result<Checklist> {
-    let mut round = 1;
+    let started = http.now()?;
     loop {
         let list = checks(kubectl, http, edge)?;
-        if list.complete() || round >= ROUNDS {
+        if list.complete() || http.now()? - started >= SECONDS {
             return Ok(list);
         }
         http.pause();
-        round += 1;
     }
 }
 
@@ -106,6 +283,9 @@ mod tests {
         })
     }
 
+    /// One way to break an up staging.
+    type Fault = fn(&mut Staging);
+
     /// A staging that is up, which each test breaks one way.
     struct Staging {
         flux: Vec<Value>,
@@ -116,6 +296,7 @@ mod tests {
         api: u16,
         unreadable: Option<&'static str>,
         rounds_until_up: u32,
+        seconds_per_reading: i64,
         reads: Cell<u32>,
         pauses: Cell<u32>,
         urls: std::cell::RefCell<Vec<String>>,
@@ -152,6 +333,7 @@ mod tests {
                 api: 302,
                 unreadable: None,
                 rounds_until_up: 0,
+                seconds_per_reading: 0,
                 reads: Cell::new(0),
                 pauses: Cell::new(0),
                 urls: std::cell::RefCell::new(Vec::new()),
@@ -221,7 +403,9 @@ mod tests {
         }
 
         fn now(&self) -> Result<i64> {
-            Ok(0)
+            Ok(1_700_000_000
+                + 5 * i64::from(self.pauses.get())
+                + self.seconds_per_reading * i64::from(self.reads.get()))
         }
     }
 
@@ -276,10 +460,10 @@ mod tests {
         Ok(())
     }
 
-    /// Each way staging can be down is its own MISSING line, after every round is spent.
+    /// Each way staging can be down is its own MISSING line, once the deadline has passed.
     #[test]
     fn each_fault_is_named() -> Result<()> {
-        let faults: [(fn(&mut Staging), &str); 11] = [
+        let faults: [(Fault, &str); 11] = [
             (
                 |s| s.flux[3] = ready("HelmRelease", "flux-system", "workspace", false),
                 "HelmRelease flux-system/workspace is Ready",
@@ -336,7 +520,7 @@ mod tests {
             fault(&mut staging);
             let text = run(&staging)?;
             assert_eq!(missing(&text), [line], "{text}");
-            assert_eq!(staging.pauses.get(), ROUNDS - 1, "{line}");
+            assert_eq!(i64::from(staging.pauses.get()), SECONDS / 5, "{line}");
         }
         Ok(())
     }
@@ -350,6 +534,15 @@ mod tests {
         let text = run(&staging)?;
         assert_eq!(missing(&text), Vec::<&str>::new(), "{text}");
         assert_eq!(staging.pauses.get(), 3);
+        let mut staging = Staging::up();
+        staging.tunnel = "down";
+        staging.seconds_per_reading = 60;
+        run(&staging)?;
+        assert_eq!(
+            staging.pauses.get(),
+            7,
+            "readings that take a minute each still stop at the deadline"
+        );
         let mut staging = Staging::up();
         staging.unreadable = Some("validatingwebhookconfigurations");
         let text = run(&staging)?;

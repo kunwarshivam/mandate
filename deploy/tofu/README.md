@@ -154,7 +154,9 @@ and actions.
    it. The job plans again after your approval, prints that plan, and applies exactly it, so the
    apply reflects the commit and the cloud as they are when the job runs. Dispatch `apply` only at
    a commit you have read, and read the apply job's printed plan afterwards. A first cluster takes
-   about ten minutes.
+   about ten minutes. After lane GO's bootstrap the job verifies staging for up to eight minutes and
+   prints `infra verify (staging):`; each `[MISSING]` line names what is not up yet, and the run
+   fails until every line reads `[ok]` (DEC-2050).
 4. **Handing over to lane GO (E21-58):** the outputs GO needs are the root outputs
    `archive_access_key_id`, `archive_secret_access_key` and `tunnel_token` (sensitive, never
    printed), and `archive_bucket`, `archive_endpoint`, `archive_destination_path`,
