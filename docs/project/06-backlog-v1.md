@@ -3293,7 +3293,7 @@ enables `live` (ES-23, OPS-5).
   over random journaled runs of several agents shows the folded claims equal an independent
   accumulator over the same records.
 
-- **E21-61 (Proposed, M8, after E21-59; lane G, the model gateway; DEC-2249)** As the founder, I
+- **E21-61 (Proposed, M8, after E21-59; lane I2, which holds it while lane G is inactive; DEC-2249, DEC-2255 item 2)** As the founder, I
   want the cell's model-gateway meter journaled on `meter:{workspace_id}` (journal spec §9.19) and
   folded back after a restart, so that a restarted runtime counts the day's research reservations
   and spend instead of failing closed for the rest of the risk day. *Accepted when:* the cell's
@@ -3301,6 +3301,24 @@ enables `live` (ES-23, OPS-5).
   rebuilds its meter from that stream at start, and the research source folds the same records
   through `mandate_gateway::meter::spend`; DEC-2249 item 3's fail-closed rule is then lifted by its
   own decision; a restart test shows the cap holds across a restart with reservations open.
+
+- **E21-62 (Proposed, M8, after E21-61; lane I2, with V2 for the key and GO for egress and images;
+  DEC-997, DEC-2020, DEC-2255)** As the founder, I want the research agent on staging to call
+  OpenRouter through the model-gateway service, so that the demo's research runs on a real pinned
+  model under DEC-997's routing lock and caps. *Accepted when:*
+  - the chart's `model-gateway` process is built: `mandate-gateway` over `HttpsTransport`, the
+    journaled meter and the system clock, serving the runtime's research calls;
+  - it refuses to start live without the journaled meter (DEC-2255 item 2);
+  - it reads `platform/model-provider-key` once at start as `ModelGateway`, and a test shows the
+    key's bytes in no log, record, artifact or error;
+  - it registers an endpoint only after the §4.3 identity probe matches the founder's chosen
+    registry entry, and enforces the workspace, deployment and daily research caps;
+  - the runtime's worker reaches a model only through the service, and keeps the recorded fake when
+    the service is not configured;
+  - `mandate vault import` writes the key from stdin as `SecretImport`, run by staging's infra
+    workflow from the `infra-staging` environment secret;
+  - egress to OpenRouter's host is open for the model-gateway pod alone;
+  - every test and CI job uses recorded responses only.
 
 ## Won't (v1)
 
