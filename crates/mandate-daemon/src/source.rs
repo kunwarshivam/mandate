@@ -8,6 +8,7 @@ use std::ops::RangeInclusive;
 use std::rc::Rc;
 
 use mandate_canon::{Digest, Value, parse};
+use mandate_gateway::meter::SharedMeter;
 use mandate_journal::{ArtifactSource, Environment, StoredEvent, StreamId};
 use mandate_num::Usd;
 use mandate_research::{
@@ -24,7 +25,6 @@ use crate::deployment;
 use crate::meter::CellMeter;
 use crate::recorded::Bundle;
 use crate::runtime::{ResearchParts, ResearchSource};
-use mandate_gateway::meter::SharedMeter;
 
 /// Where the source reads a stream's records: the process's store, or a read connection of its own.
 pub trait Rows {

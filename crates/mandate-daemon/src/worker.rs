@@ -10,6 +10,7 @@ use mandate_domain::AssetClass;
 use mandate_gateway::fake::{Recorded, RecordedTransport};
 use mandate_gateway::guard::GuardContext;
 use mandate_gateway::meter::{Caps, DeploymentMeter, MemoryMeter, Meter, SharedMeter};
+use mandate_gateway::money::Usd6;
 use mandate_gateway::openrouter::OpenRouter;
 use mandate_gateway::policy::EndpointPolicy;
 use mandate_gateway::provider::{Clock, Delivery, ManualClock, SequentialIds};
@@ -35,6 +36,8 @@ use crate::source::SourceFor;
 pub enum WorkerError {
     /// The bundle's entry or endpoint did not register.
     Bundle(BundleError),
+    /// The daily research cap is above the workspace's monthly budget (DEC-2254 item 3).
+    DailyCapAboveWorkspace,
 }
 
 /// Who the worker reads and calls for.
@@ -98,13 +101,9 @@ pub struct RecordedWorker {
 }
 
 impl RecordedWorker {
-    /// The worker over `bundle`, storing through `sink`, its gateway's clock moved to `now()`, its
-    /// meter its own and never held: it reads an empty agent stream, so no call record asks it for a
-    /// reservation it does not hold.
-    ///
-    /// The rest as [`RecordedWorker::metered`]: the worker over `bundle`, storing through `sink`,
-    /// its gateway's clock moved to `now()`
-    /// before each call.
+    /// The worker over `bundle`, storing through `sink`, its gateway's clock moved to `now()` before
+    /// each call, and its meter its own and never held: it reads an empty agent stream, so no call
+    /// record asks it for a reservation it does not hold. The rest as [`RecordedWorker::metered`].
     ///
     /// # Errors
     /// [`WorkerError::Bundle`] when the bundle's entry or endpoint does not register.
@@ -191,6 +190,29 @@ impl RecordedWorker {
             runs: BTreeMap::new(),
             ready: Vec::new(),
         })
+    }
+
+    /// As [`RecordedWorker::metered`], with the gateway refusing `budget_exhausted` any research call
+    /// whose reservation would take the agent's spend for the risk day past `daily` (DEC-2254 item
+    /// 4): nothing is reserved and nothing is sent.
+    ///
+    /// # Errors
+    /// As [`RecordedWorker::new`], and [`WorkerError::DailyCapAboveWorkspace`] when `daily` is above
+    /// the bundle's workspace budget.
+    #[expect(
+        clippy::todo,
+        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+    )]
+    pub fn capped(
+        bundle: &Bundle,
+        who: WorkerFor,
+        sink: Box<dyn ArtifactSink>,
+        now: Box<dyn FnMut() -> UtcNanos>,
+        meter: CellMeter,
+        daily: Usd6,
+    ) -> Result<Self, WorkerError> {
+        let _ = (bundle, who, sink, now, meter, daily);
+        todo!()
     }
 
     fn start(&mut self, run_id: &str, cut_off: RiskClock, parts: &ResearchParts) {
