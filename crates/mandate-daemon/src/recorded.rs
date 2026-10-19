@@ -6,10 +6,11 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 
-use mandate_canon::{Digest, Value, parse};
+use mandate_canon::{Digest, Value, parse, to_canonical};
 use mandate_domain::{AssetClass, AssetId};
 use mandate_gateway::money::{PriceTable, TokenPrice, Usage, Usd6};
 use mandate_gateway::registry::{Endpoint, Locality, Registry, Reported, Route, Status};
+use mandate_gateway::schema::fits;
 use mandate_num::{Price, Qty};
 use mandate_research::{AllowlistVersion, SourceAllowlist, SourceId as AllowedSource};
 use mandate_research_run::{
@@ -31,8 +32,6 @@ pub enum BundleError {
     },
     /// The gateway's registry refused the entry or its endpoint.
     Unregistered,
-    /// The body of the tests commit's stub (DEC-77).
-    Unimplemented,
 }
 
 /// The model's one recorded reply: the output text the fake replays, its latency, and its usage.
@@ -436,8 +435,55 @@ impl Read {
 /// `research.json`'s `turns` (DEC-2266): refused whole, `Malformed { member: "turns" }`, unless the
 /// entry names the agentic loop and every turn is one its gateway would accept, so no bundle a
 /// worker is built from scripts a call the entry does not declare.
-fn scripted(_turns: &Value, _entry: &ResearchEntry) -> Result<Vec<ScriptedTurn>, BundleError> {
-    Err(BundleError::Unimplemented)
+fn scripted(turns: &Value, entry: &ResearchEntry) -> Result<Vec<ScriptedTurn>, BundleError> {
+    let refused = BundleError::Malformed {
+        file: RESEARCH,
+        member: "turns",
+    };
+    let content = entry.content();
+    let (Some(agentic), Some(listed)) = (content.agentic(), turns.as_array()) else {
+        return Err(refused);
+    };
+    let bounds = agentic.loop_bounds;
+    if u32::try_from(listed.len()).map_or(true, |n| n >= bounds.max_turns) {
+        return Err(refused);
+    }
+    listed
+        .iter()
+        .map(|turn| {
+            let count = |member: &str| turn.get(member).and_then(Value::as_int);
+            let calls = turn.get("calls").and_then(Value::as_array)?;
+            let fits_turn = u32::try_from(calls.len())
+                .is_ok_and(|n| n > 0 && n <= bounds.max_tool_calls_per_turn);
+            if !fits_turn {
+                return None;
+            }
+            let calls = calls
+                .iter()
+                .map(|call| {
+                    let name = call.get("name").and_then(Value::as_str)?;
+                    let arguments = call.get("arguments")?;
+                    let declared = agentic.tool(name)?;
+                    fits(&declared.arguments, arguments).then(|| {
+                        (
+                            name.to_owned(),
+                            String::from_utf8_lossy(&to_canonical(arguments)).into_owned(),
+                        )
+                    })
+                })
+                .collect::<Option<Vec<_>>>()?;
+            Some(ScriptedTurn {
+                calls,
+                latency_ms: count("latency_ms")?,
+                usage: Usage {
+                    input: count("input_tokens")?,
+                    output: count("output_tokens")?,
+                    cached: count("cached_tokens")?,
+                },
+            })
+        })
+        .collect::<Option<Vec<_>>>()
+        .ok_or(refused)
 }
 
 /// The assets of the instruments `research.json`'s `halted_instruments` names by symbol, each one an
