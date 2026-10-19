@@ -11,9 +11,12 @@ use std::rc::Rc;
 
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Digest, Value, parse};
-use mandate_daemon::cell::{CellDeployment, CellError, OptIn, opt_in, research};
+use mandate_daemon::cell::{
+    CellDeployment, CellError, OptIn, opt_in, research, research_daily_cap,
+};
 use mandate_daemon::recorded::{Bundle, BundleError};
 use mandate_daemon::source::Rows;
+use mandate_gateway::money::Usd6;
 use mandate_journal::{ArtifactStore, Environment, StoredEvent, StreamId};
 use mandate_runtime::{EventDraft, EventId};
 use mandate_spec::document::Mandate;
@@ -222,5 +225,62 @@ fn each_refusal_is_a_code() {
         assert_eq!(error.to_string(), code);
         let as_error: &dyn std::error::Error = &error;
         assert!(as_error.source().is_none());
+    }
+}
+
+/// DEC-2254 items 1 to 3: the daily research cap is the mandate's own, tightened by the research
+/// profile, which sets no ceiling of its own; zero for a mandate with no research envelope; and no
+/// cap at all, so no start, for a document that cannot give one the gateway can hold.
+#[test]
+fn the_daily_research_cap_is_the_mandate_s_own_and_fails_closed() {
+    let cap = |edit: &dyn Fn(&mut Json)| {
+        let mut document: Json = serde_json::from_str(MANDATE).unwrap();
+        document["behavior"]["research"] = json!({
+            "interval_s": 3600,
+            "cost_cap_usd_per_day": "5",
+            "max_revisions_per_lineage": 3
+        });
+        edit(&mut document);
+        research_daily_cap(&parse(document.to_string().as_bytes()).unwrap())
+    };
+    let with = |value: Json| {
+        move |document: &mut Json| {
+            document["behavior"]["research"]["cost_cap_usd_per_day"] = value.clone()
+        }
+    };
+    assert_eq!(cap(&|_| {}), Ok(Usd6::from_micros(5_000_000)));
+    assert_eq!(cap(&with(json!("2.5"))), Ok(Usd6::from_micros(2_500_000)));
+    assert_eq!(cap(&with(json!("0.000001"))), Ok(Usd6::from_micros(1)));
+    assert_eq!(
+        cap(&|document| document["behavior"]["research"] = Json::Null),
+        Ok(Usd6::ZERO),
+        "no research envelope, no research spend"
+    );
+    let unavailable = Err(CellError::Mandate("mandate_document_unavailable"));
+    for (case, edit) in [
+        (
+            "no behavior.research",
+            Box::new(|document: &mut Json| {
+                document["behavior"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("research");
+            }) as Box<dyn Fn(&mut Json)>,
+        ),
+        (
+            "no cap",
+            Box::new(|document: &mut Json| {
+                document["behavior"]["research"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("cost_cap_usd_per_day");
+            }),
+        ),
+        ("a number", Box::new(with(json!(5)))),
+        ("no amount", Box::new(with(json!("five")))),
+        ("below a micro-dollar", Box::new(with(json!("0.0000001")))),
+        ("negative", Box::new(with(json!("-1")))),
+    ] {
+        assert_eq!(cap(&*edit), unavailable, "{case}");
     }
 }
