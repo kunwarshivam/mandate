@@ -181,7 +181,6 @@ fn turn_plan(turn: u32, tools: &[Tool]) -> TurnPlan {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn a_turn_through_the_recorded_fake_answers_with_the_reply_s_validated_tool_calls() {
     let (mut gateway, model) = agentic_gateway(vec![calls(&[BARS_CALL, NOTE_CALL])]);
     let retrieved = seed();
@@ -224,7 +223,6 @@ fn a_turn_through_the_recorded_fake_answers_with_the_reply_s_validated_tool_call
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn a_later_turn_carries_its_transcript_through_the_gateway_s_check() {
     let (mut gateway, model) = agentic_gateway(vec![calls(&[NOTE_CALL])]);
     let retrieved = seed();
@@ -258,7 +256,6 @@ fn a_later_turn_carries_its_transcript_through_the_gateway_s_check() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn a_turn_the_entry_could_not_have_made_is_refused_with_no_record() {
     let (mut gateway, model) = agentic_gateway(vec![calls(&[NOTE_CALL])]);
     let retrieved = seed();
@@ -283,7 +280,6 @@ fn a_turn_the_entry_could_not_have_made_is_refused_with_no_record() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn a_turn_that_cannot_be_built_sends_nothing() {
     let (mut gateway, model) = agentic_gateway(vec![calls(&[NOTE_CALL])]);
     let retrieved = seed();

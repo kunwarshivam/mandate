@@ -9,6 +9,9 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
+use mandate_cli::vault::{PutArgs, PutSecret, Terminals, run_put};
+use mandate_time::UtcNanos;
+
 const CANARY: &str = "canary-9d1e7a40-model-key-do-not-print";
 const ROLE: &str = "canary-role-3f0b";
 const SECRET_ID: &str = "canary-secret-id-77c2";
@@ -70,7 +73,39 @@ fn three_lines_are_read_and_the_vault_reached() {
     }
 }
 
-/// Stdin of exactly 16384 bytes is read and reaches the vault; one byte more is refused.
+/// A terminal on stdin is refused before it is read.
+#[test]
+fn a_terminal_never_gives_the_put_its_secret() {
+    let args = PutArgs {
+        secret: PutSecret::ModelProviderKey,
+        address: NOWHERE.to_owned(),
+        ca: ca(),
+    };
+    let stdin = three(ROLE, SECRET_ID, CANARY);
+    let mut piped = stdin.as_bytes();
+    let terminals = Terminals {
+        stdin: true,
+        stdout: false,
+    };
+    let now = UtcNanos::from_parts(1_800_000_000, 0).unwrap();
+    let mut printed = Vec::new();
+    let answer =
+        run_put(&args, &mut piped, terminals, now, &mut printed).map_err(|e| e.to_string());
+    let error = answer
+        .as_ref()
+        .err()
+        .map(String::as_str)
+        .unwrap_or_default();
+    assert!(
+        error.contains("(config)") && error.contains("terminal"),
+        "{answer:?}"
+    );
+    assert_eq!(piped.len(), stdin.len(), "stdin was read");
+    assert!(printed.is_empty());
+}
+
+/// Stdin of exactly 16384 bytes is read and reaches the vault, the last newline counted among
+/// them; one byte more is refused.
 #[test]
 fn stdin_is_read_up_to_its_bound_and_no_further() {
     let head = format!("{ROLE}\n{SECRET_ID}\n");
@@ -80,6 +115,17 @@ fn stdin_is_read_up_to_its_bound_and_no_further() {
     refused(&output, "unavailable", "the longest stdin");
     let output = put("model-provider-key", NOWHERE, &ca(), &format!("{longest}k"));
     refused(&output, "credential_file", "one byte more");
+    let with_newline = format!("{head}{}\n", "k".repeat(16383 - head.len()));
+    assert_eq!(with_newline.len(), 16384);
+    let output = put("model-provider-key", NOWHERE, &ca(), &with_newline);
+    refused(
+        &output,
+        "unavailable",
+        "the longest stdin, its newline counted",
+    );
+    let over = format!("{head}{}\n", "k".repeat(16384 - head.len()));
+    let output = put("model-provider-key", NOWHERE, &ca(), &over);
+    refused(&output, "credential_file", "a newline one byte over");
 }
 
 #[test]

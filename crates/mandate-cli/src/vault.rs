@@ -28,6 +28,7 @@ use mandate_vault_local::VaultError;
 use mandate_vault_local::import::{import_client_secret, resolve_ids};
 use mandate_vault_local::startup::{Inputs, Role};
 use mandate_vault_local::store::open;
+use secrecy::zeroize::Zeroize;
 use secrecy::{ExposeSecret, SecretSlice, SecretString};
 
 /// Where the demo host keeps the vault (DEC-692 item 1).
@@ -60,6 +61,14 @@ pub struct PutArgs {
     pub ca: PathBuf,
 }
 
+/// Which of the process's standard streams are terminals, which `vault put` refuses for the
+/// credentials and the secret it reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Terminals {
+    pub stdin: bool,
+    pub stdout: bool,
+}
+
 /// The platform secrets `vault put` writes (DEC-2020): each is written by the secret-import
 /// identity alone.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -82,14 +91,29 @@ pub struct ProvisionArgs {
     #[arg(long)]
     pub ca: PathBuf,
     /// A file holding the operator's token, readable by its owner alone.
+    #[arg(
+        long,
+        required_unless_present = "operator_token_stdin",
+        conflicts_with = "operator_token_stdin"
+    )]
+    pub operator_token_file: Option<PathBuf>,
+    /// Read the operator's token from stdin, a pipe its caller owns, instead (DEC-2630).
     #[arg(long)]
-    pub operator_token_file: PathBuf,
+    pub operator_token_stdin: bool,
     /// A connection the vault holds credentials for; repeat it for each.
     #[arg(long = "connection")]
     pub connections: Vec<String>,
     /// The directory the credentials are written to, made with mode 0700 when absent.
+    #[arg(
+        long,
+        required_unless_present = "secrets_namespace",
+        conflicts_with = "secrets_namespace"
+    )]
+    pub out: Option<PathBuf>,
+    /// Print the credentials instead, as Kubernetes Secrets in this namespace: one `v1` `List`
+    /// on stdout, which must be a pipe, never a terminal (DEC-2630).
     #[arg(long)]
-    pub out: PathBuf,
+    pub secrets_namespace: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -167,26 +191,40 @@ pub fn run_import(
 /// Logs in as the secret-import identity with the role id and secret id on `stdin`'s first two
 /// lines, and writes the third, the secret, at `args.secret`'s path (DEC-2020), printing only
 /// which secret was written. Stdin is exactly three non-empty lines, the last newline optional,
-/// with no carriage return, at most [`PUT_MAX`] bytes; anything else is refused `credential_file`
-/// before the vault is reached. A refusal names its reason code and carries no line of stdin.
+/// with no carriage return, at most [`PUT_MAX`] bytes, the last newline counted among them;
+/// anything else is refused `credential_file` before the vault is reached. A `stdin` that is a
+/// terminal is refused `config` before it is read, so nothing is typed where it echoes. A refusal
+/// names its reason code and carries no line of stdin. Its one line of output on success is shown
+/// only by a real vault: the CLI refuses the dev server CI runs (DEC-977 item 6), so staging's
+/// apply is where it is seen.
 pub fn run_put(
     args: &PutArgs,
     stdin: &mut impl Read,
+    terminals: Terminals,
     now: UtcNanos,
     out: &mut impl Write,
 ) -> anyhow::Result<()> {
     let refused = |e: SourceError| anyhow!("{e} ({})", e.code());
+    if terminals.stdin {
+        return Err(anyhow!(
+            "the credentials and the secret are read only from a pipe, never a terminal (config)"
+        ));
+    }
     let mut bytes = Vec::new();
-    stdin
+    let read = stdin
         .take(PUT_MAX.saturating_add(1))
-        .read_to_end(&mut bytes)
-        .map_err(|_| refused(SourceError::CredentialFile))?;
-    if u64::try_from(bytes.len()).map_or(true, |read| read > PUT_MAX) {
+        .read_to_end(&mut bytes);
+    if read.is_err() || u64::try_from(bytes.len()).map_or(true, |read| read > PUT_MAX) {
+        bytes.zeroize();
         return Err(refused(SourceError::CredentialFile));
     }
-    let text = SecretString::from(
-        String::from_utf8(bytes).map_err(|_| refused(SourceError::CredentialFile))?,
-    );
+    let text = match String::from_utf8(bytes) {
+        Ok(text) => SecretString::from(text),
+        Err(invalid) => {
+            invalid.into_bytes().zeroize();
+            return Err(refused(SourceError::CredentialFile));
+        }
+    };
     let body = text.expose_secret();
     let lines: Vec<&str> = body
         .strip_suffix('\n')
@@ -241,7 +279,18 @@ pub fn run_put(
 /// `--out` is checked before the vault is reached, so a directory the write would refuse leaves no
 /// secret id issued and unwritten. A refusal names its reason code; none carries a token, a
 /// secret id, or a response body.
-pub fn run_provision(args: &ProvisionArgs, out: &mut impl Write) -> anyhow::Result<()> {
+///
+/// With `--secrets-namespace` it writes no file and prints instead the credentials' Secrets as one
+/// `v1` `List` (DEC-2630), for its caller to hand `kubectl` on stdin. A namespace that is not a
+/// Kubernetes label, or an `out` that is a terminal, is refused `config` before the token is read
+/// or the vault reached. With `--operator-token-stdin` the token is read from `stdin` by
+/// [`mandate_vault::credentials::read_token`].
+pub fn run_provision(
+    args: &ProvisionArgs,
+    stdin: &mut impl Read,
+    stdout_is_terminal: bool,
+    out: &mut impl Write,
+) -> anyhow::Result<()> {
     let refused = |e: SourceError| anyhow!("{e} ({})", e.code());
     let connections = args
         .connections
@@ -250,8 +299,15 @@ pub fn run_provision(args: &ProvisionArgs, out: &mut impl Write) -> anyhow::Resu
             ConnectionId::new(id).map_err(|_| anyhow!("a connection id is malformed (connection)"))
         })
         .collect::<anyhow::Result<Vec<_>>>()?;
-    let operator = read_token_file(&args.operator_token_file).map_err(refused)?;
-    check_credential_dir(&args.out, &connections).map_err(refused)?;
+    let _ = (stdin, stdout_is_terminal);
+    let (Some(token_file), Some(dir)) = (&args.operator_token_file, &args.out) else {
+        return Err(anyhow!(
+            "{:?}",
+            SourceError::Unimplemented { story: "E21-32" }
+        ));
+    };
+    let operator = read_token_file(token_file).map_err(refused)?;
+    check_credential_dir(dir, &connections).map_err(refused)?;
     let config = OpenBaoConfig {
         address: args.address.clone(),
         ca_pem: fs::read(&args.ca).map_err(|_| refused(SourceError::Config))?,
@@ -264,7 +320,7 @@ pub fn run_provision(args: &ProvisionArgs, out: &mut impl Write) -> anyhow::Resu
     let credentials = runtime
         .block_on(provision(&config, &operator, &connections))
         .map_err(refused)?;
-    for name in write_credentials(&args.out, &credentials).map_err(refused)? {
+    for name in write_credentials(dir, &credentials).map_err(refused)? {
         writeln!(out, "{name}")?;
     }
     Ok(())

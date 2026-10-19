@@ -1,0 +1,20 @@
+[
+  {
+    "label": "a null step_up, which the route refuses",
+    "set": {
+      "/step_up": null
+    }
+  },
+  {
+    "label": "live, which the route refuses as live_unavailable",
+    "set": {
+      "/environment": "live"
+    }
+  },
+  {
+    "label": "a later version",
+    "set": {
+      "/disclosure/version": "12"
+    }
+  }
+]
