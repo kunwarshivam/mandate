@@ -17,9 +17,9 @@ use mandate_canon::{Key, Object, Value, to_canonical};
 
 use crate::agentic::{Code, LoopBounds, Tool, ToolCall, ToolCallId, ToolClass, ToolOutcome};
 use crate::error::ResearchRunError;
-use crate::item::{Bar, ItemKind, NewsItem, Symbol};
+use crate::item::{Bar, ItemId, ItemKind, NewsItem, Symbol};
 use crate::plan::Scope;
-use crate::ports::Readers;
+use crate::ports::{NewsText, Readers};
 use crate::retrieve::{RetrievedItem, TextRead, cut, digest, int, reserved, text, window_start};
 
 /// What a dispatch reads within: the run's frozen scope, its pinned bounds, and the result bytes the
@@ -121,6 +121,9 @@ struct Read {
     items: Vec<RetrievedItem>,
     trimmed: bool,
     untrusted: bool,
+    /// `news.get`'s stored text, shown in place of its one item's summary; the item observed stays
+    /// the news item's own record (DEC-2213 item 6).
+    stored: Option<String>,
 }
 
 impl Read {
@@ -131,7 +134,7 @@ impl Read {
         let mut truncated = self.trimmed;
         loop {
             let shown = self.items.get(..kept).unwrap_or_default();
-            let content = render(shown, truncated)?;
+            let content = render(shown, truncated, self.stored.as_deref())?;
             if content.len() <= budget || kept == 0 {
                 let mut items = self.items;
                 items.truncate(kept);
@@ -174,6 +177,9 @@ fn read(call: &ToolCall, scope: &Scope, readers: Readers<'_>) -> Result<Answer, 
     }
     if call.tool == Tool::NewsSearch {
         return news_search(call, scope, readers);
+    }
+    if call.tool == Tool::FilingsSearch {
+        return filings_search(call, scope, readers);
     }
     let Ok(arguments) = mandate_canon::parse(call.arguments.as_bytes()) else {
         return Ok(Answer::Failed);
@@ -255,6 +261,7 @@ fn news_search(
         items: kept.into_iter().map(RetrievedItem::News).collect(),
         trimmed,
         untrusted: true,
+        stored: None,
     }))
 }
 
@@ -283,8 +290,52 @@ fn terms(value: &Value) -> Option<Vec<String>> {
         .collect()
 }
 
-/// `news.get` (§6.10, DEC-2213 items 6 to 8).
+/// The most bytes of stored text one `news.get` result carries (§6.10).
+const NEWS_TEXT_BYTES: usize = 8_000;
+
+/// `news.get` (§6.10, DEC-2213 items 6 to 8): one received item's stored text, read with the item
+/// id, the run's cut-off, and its allowlist version and nothing else. An answer for another item,
+/// one after the cut-off, one off the allowlist, or licensed text reads nothing (item 7).
 fn news_get(
+    call: &ToolCall,
+    scope: &Scope,
+    readers: Readers<'_>,
+) -> Result<Answer, ResearchRunError> {
+    let Ok(arguments) = mandate_canon::parse(call.arguments.as_bytes()) else {
+        return Ok(Answer::Failed);
+    };
+    let Some(asked) = arguments
+        .get("item")
+        .and_then(Value::as_str)
+        .and_then(|id| ItemId::new(id).ok())
+    else {
+        return Ok(Answer::Failed);
+    };
+    let Ok(answered) = readers
+        .news
+        .news_text(&asked, scope.cut_off, scope.allowlist.version)
+    else {
+        return Ok(Answer::Failed);
+    };
+    let NewsText { item, text } = answered;
+    let leaks = item.item_id != asked
+        || item.knowledge_at > scope.cut_off
+        || !scope.allowlist.sources.contains(&item.source)
+        || item.licensed;
+    if leaks {
+        return Ok(Answer::Failed);
+    }
+    let shown = cut(&text, NEWS_TEXT_BYTES);
+    Ok(Answer::Read(Read {
+        trimmed: shown.len() < text.len(),
+        stored: Some(shown.to_owned()),
+        items: vec![RetrievedItem::News(item)],
+        untrusted: true,
+    }))
+}
+
+/// `filings.search` (§6.10, DEC-2250 items 1 to 5).
+fn filings_search(
     call: &ToolCall,
     scope: &Scope,
     readers: Readers<'_>,
@@ -324,6 +375,7 @@ fn bars(arguments: &Value, scope: &Scope, readers: Readers<'_>) -> Answer {
         items: kept.into_iter().map(RetrievedItem::Bar).collect(),
         trimmed: false,
         untrusted: false,
+        stored: None,
     })
 }
 
@@ -344,7 +396,11 @@ fn symbol(value: &Value) -> Option<Symbol> {
 
 /// `{"items": [...], "truncated": bool}`, each item with its ids beside its fields, which are
 /// wrapped as untrusted data whatever their source (§6.10, DEC-2209 item 4).
-fn render(items: &[RetrievedItem], truncated: bool) -> Result<Vec<u8>, ResearchRunError> {
+fn render(
+    items: &[RetrievedItem],
+    truncated: bool,
+    stored: Option<&str>,
+) -> Result<Vec<u8>, ResearchRunError> {
     let mut shown = Vec::with_capacity(items.len());
     for item in items {
         let (section, fields) = match item {
@@ -365,7 +421,10 @@ fn render(items: &[RetrievedItem], truncated: bool) -> Result<Vec<u8>, ResearchR
                 vec![
                     ("published_at", text(&news.published_at.to_string())),
                     ("headline", text(&news.headline)),
-                    ("summary", text(&news.summary)),
+                    match stored {
+                        Some(stored) => ("text", text(stored)),
+                        None => ("summary", text(&news.summary)),
+                    },
                     ("content_hash", digest(&news.content_hash)),
                     ("length_bytes", int(item.length_bytes())?),
                 ],

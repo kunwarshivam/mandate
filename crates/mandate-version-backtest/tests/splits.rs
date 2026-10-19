@@ -10,9 +10,12 @@ mod common;
 
 use common::*;
 use mandate_num::{Price, SplitRatio};
+use mandate_risk::Purpose;
 use mandate_sim::{OrderEnd, OrderKind, SimBar};
 use mandate_time::Date;
-use mandate_version_backtest::{RecordedAction, VersionOrder, VersionRun};
+use mandate_version_backtest::{
+    DecisionOutcome, DecisionRow, RecordedAction, RecordedOutput, VersionOrder, VersionRun,
+};
 use proptest::prelude::*;
 use proptest::test_runner::{Config as ProptestConfig, TestRunner};
 
@@ -129,7 +132,6 @@ fn a_split_on_the_first_bars_date_completes_the_run() {
 /// the ex-date equal those at the ex-date's close, the position held at twice the shares and half
 /// the price. Without the split the strategy's would halve its stock and the benchmark's too.
 #[test]
-#[ignore = "pending E4-4"]
 fn both_equities_are_flat_across_a_two_for_one_split() {
     let run = run_split(2, 1, None);
     let days = trading_days(DAYS);
@@ -156,7 +158,6 @@ fn both_equities_are_flat_across_a_two_for_one_split() {
 /// The resting OCO is canceled at the split and re-placed in the same step on twice the shares:
 /// stop 95.01 ÷ 2 = 47.505 up to 47.51, take-profit 110.02 ÷ 2 = 55.01 (DEC-2245 item 3).
 #[test]
-#[ignore = "pending E4-4"]
 fn the_protection_is_re_placed_at_the_split_on_the_new_shares() {
     let run = run_split(2, 1, None);
     let (before, after) = protections(&run);
@@ -182,7 +183,6 @@ fn the_protection_is_re_placed_at_the_split_on_the_new_shares() {
 /// A 1:3 reverse split re-places the protection on the whole shares left, the residual paid in cash
 /// at the posted 300: stop 95.01 × 3 = 285.03 and take-profit 110.02 × 3 = 330.06, both exact.
 #[test]
-#[ignore = "pending E4-4"]
 fn a_reverse_split_re_places_the_protection_on_the_whole_shares() {
     let run = run_split(1, 3, Some(price("300")));
     let (before, after) = protections(&run);
@@ -201,7 +201,6 @@ fn a_reverse_split_re_places_the_protection_on_the_whole_shares() {
 /// ladder that scales at 0.2% of equity, the same flat walk latches nothing with the split as
 /// without it.
 #[test]
-#[ignore = "pending E4-4"]
 fn the_risk_state_reads_no_drawdown_from_a_split() {
     let days = trading_days(DAYS);
     let control = run_with(
@@ -246,7 +245,6 @@ fn the_risk_state_reads_no_drawdown_from_a_split() {
 /// 110.02 × old ÷ new, and the quantity Q × new ÷ old truncated to a whole share. It shares nothing
 /// with `SplitRatio::price` or the fold.
 #[test]
-#[ignore = "pending E4-4"]
 fn re_placed_protection_covers_the_position_and_never_loosens() {
     let mut runner = TestRunner::new(ProptestConfig {
         cases: 24,
@@ -302,7 +300,6 @@ fn re_placed_protection_covers_the_position_and_never_loosens() {
 /// the re-placed OCO eligible from the old placement, its take-profit at 55.01 would have filled
 /// against a pre-split bar at 100 and ended there, leaving nothing to trigger.
 #[test]
-#[ignore = "pending E4-4"]
 fn the_carried_stop_triggers_on_a_post_split_fall() {
     let days = trading_days(DAYS);
     let mut bars = split_bars(2, 1);
@@ -335,7 +332,6 @@ fn the_carried_stop_triggers_on_a_post_split_fall() {
 /// A stop-limit protection is carried the same way, each price on its protective side: stop
 /// 95.01 ÷ 2 = 47.505 up to 47.51, limit 94.53495 ÷ 2 = 47.267475 down to 47.26.
 #[test]
-#[ignore = "pending E4-4"]
 fn a_stop_limit_protection_is_carried_on_its_protective_sides() {
     let days = trading_days(DAYS);
     let mut document = base("research_equity_pinned");
@@ -375,7 +371,6 @@ fn a_stop_limit_protection_is_carried_on_its_protective_sides() {
 /// Splits out of ex-date order refuse the run, as the benchmark's walk refuses them (DEC-2245 item
 /// 7), rather than skip one.
 #[test]
-#[ignore = "pending E4-4"]
 fn splits_out_of_ex_date_order_refuse_the_run() {
     let days = trading_days(DAYS);
     let earlier = RecordedAction::Split {
@@ -396,4 +391,246 @@ fn splits_out_of_ex_date_order_refuse_the_run() {
         refused.err().map(|e| e.code()),
         Some("corporate_actions_unordered")
     );
+}
+
+/// Flat bars at `before` with `volume` until the ex-date and at `after` with `after_volume` from
+/// it, each with a 1% range either side.
+fn stepped_bars(before: i128, volume: u64, after: i128, after_volume: u64) -> Vec<SimBar> {
+    trading_days(DAYS)
+        .iter()
+        .enumerate()
+        .map(|(index, date)| {
+            let (close, volume) = if index < EX {
+                (before, volume)
+            } else {
+                (after, after_volume)
+            };
+            daily_bar(
+                *date,
+                &cents_text(close),
+                &cents_text(close + close / 100),
+                &cents_text(close - close / 100),
+                &cents_text(close),
+                &volume.to_string(),
+            )
+        })
+        .collect()
+}
+
+/// The ex-date morning's decision row of a run over `bars` with `actions`.
+fn ex_date_row(
+    bars: &[SimBar],
+    outputs: &[RecordedOutput],
+    actions: &[RecordedAction],
+) -> DecisionRow {
+    let ex_date = trading_days(DAYS)[EX];
+    let run = run_with(&pinned(), &settings(), &xyz(), bars, outputs, &[], actions)
+        .unwrap_or_else(|e| panic!("the run completes: {}", e.code()));
+    run.report
+        .decisions
+        .into_iter()
+        .find(|row| row.date == ex_date)
+        .unwrap_or_else(|| panic!("a decision on the ex-date"))
+}
+
+/// The ex-date morning's decision reads the market in post-split terms: its quote, the gate's
+/// prior close, its trailing volume and the 20-day window behind the liquidity floor all come from
+/// history rescaled by the split. The oracle is a run without the split whose bars were at the
+/// post-split price and volume all along; for an opening, which holds nothing before, the two
+/// decide the same row. At 15,000 shares a day before the split, 30,000 after it, the opening clears
+/// the conduct cap and the 1,000,000 USD floor only on post-split shares; at 7,000, 14,000 after,
+/// it is below the floor, which a window still at pre-split prices would have it clear.
+#[test]
+fn an_opening_on_the_ex_date_is_priced_and_sized_after_the_split() {
+    let days = trading_days(DAYS);
+    let outputs = daily_outputs(&days[EX..], "0.5");
+    for (volume, outcome, reason) in [
+        (1_000_000, DecisionOutcome::Submitted, None),
+        (15_000, DecisionOutcome::Submitted, None),
+        (
+            7_000,
+            DecisionOutcome::GateDeny,
+            Some("below_liquidity_floor"),
+        ),
+    ] {
+        let split = ex_date_row(
+            &stepped_bars(10_000, volume, 5_000, 2 * volume),
+            &outputs,
+            &[split_at(2, 1, None)],
+        );
+        let control = ex_date_row(
+            &stepped_bars(5_000, 2 * volume, 5_000, 2 * volume),
+            &outputs,
+            &[],
+        );
+        assert_eq!(split, control, "at {volume} shares a day");
+        assert_eq!(split.purpose, Some(Purpose::Open), "{split:?}");
+        assert_eq!(
+            (split.outcome, split.reason.as_deref()),
+            (outcome, reason),
+            "at {volume} shares a day"
+        );
+    }
+}
+
+/// A discretionary exit decided on the ex-date morning sells the post-split position at the
+/// post-split price: 6 shares bought at 100.01 are 12 after the 2:1 split, and the limit is the
+/// one a run whose bars were at 50 all along sets, not one at twice the market that never fills.
+#[test]
+fn an_exit_on_the_ex_date_sells_the_new_shares_at_the_new_price() {
+    let days = trading_days(DAYS);
+    let mut outputs = daily_outputs(&days[..EX], "0.5");
+    outputs.extend(daily_outputs(&days[EX..], "-0.5"));
+    let split = ex_date_row(
+        &stepped_bars(10_000, 1_000_000, 5_000, 2_000_000),
+        &outputs,
+        &[split_at(2, 1, None)],
+    );
+    let control = ex_date_row(
+        &stepped_bars(5_000, 2_000_000, 5_000, 2_000_000),
+        &outputs,
+        &[],
+    );
+    assert_eq!(split.outcome, DecisionOutcome::Submitted, "{split:?}");
+    assert_eq!(split.purpose, Some(Purpose::DiscretionaryExit), "{split:?}");
+    assert_eq!(split.qty, Some(qty("12")));
+    assert_eq!(split.limit, control.limit);
+}
+
+/// The bar of `date` opens at 09:30 New York: 13:30Z in daylight saving time, 14:30Z from
+/// 2026-11-01.
+fn new_york_bar(date: Date, close: i128) -> SimBar {
+    let edt = daily_bar(
+        date,
+        &cents_text(close),
+        &cents_text(close + close / 100),
+        &cents_text(close - close / 100),
+        &cents_text(close),
+        "1000000",
+    );
+    if date < day("2026-11-01") {
+        return edt;
+    }
+    let start = at(&format!("{date}T14:30:00Z"));
+    SimBar {
+        start,
+        session_start: start,
+        ..edt
+    }
+}
+
+/// [`daily_outputs`] at 09:20 New York in either offset, received a minute later.
+fn new_york_outputs(days: &[Date]) -> Vec<RecordedOutput> {
+    let hour = |at: mandate_time::UtcNanos| {
+        mandate_time::UtcNanos::from_parts(at.secs() + 3600, 0).unwrap()
+    };
+    let mut outputs = daily_outputs(days, "0.5");
+    for recorded in outputs
+        .iter_mut()
+        .filter(|recorded| recorded.received_at >= at("2026-11-01T00:00:00Z"))
+    {
+        recorded.received_at = hour(recorded.received_at);
+        recorded.output.as_of = hour(recorded.output.as_of);
+        recorded.output.expires_at = hour(recorded.output.expires_at);
+    }
+    outputs
+}
+
+/// A 2:1 split whose ex-date has no bars, a Sunday in daylight saving time or Thanksgiving in
+/// standard time, applies at 20:00 New York on the last trading day before it: the protection is
+/// re-placed there on twice the shares, and the version's equity at that day's close equals its
+/// equity at the next trading day's close.
+#[test]
+fn an_ex_date_without_bars_applies_at_eight_pm_new_york_before_it() {
+    for (ex_date, first, instant) in [
+        ("2026-10-04", "2026-09-01", "2026-10-03T00:00:00Z"),
+        ("2026-11-26", "2026-10-21", "2026-11-26T01:00:00Z"),
+    ] {
+        let ex_date = day(ex_date);
+        let mut days = Vec::new();
+        let mut date = day(first);
+        while days.len() < DAYS {
+            if !date.is_weekend() && date != day("2026-09-07") && date != day("2026-11-26") {
+                days.push(date);
+            }
+            date = date.next().unwrap();
+        }
+        let bars: Vec<SimBar> = days
+            .iter()
+            .map(|date| new_york_bar(*date, if *date < ex_date { 10_000 } else { 5_000 }))
+            .collect();
+        let action = RecordedAction::Split {
+            ex_date,
+            ratio: SplitRatio::new(2, 1).unwrap(),
+            cash_in_lieu_price: None,
+        };
+        let run = run_with(
+            &pinned(),
+            &settings(),
+            &xyz(),
+            &bars,
+            &new_york_outputs(&days),
+            &[],
+            &[action],
+        )
+        .unwrap_or_else(|e| panic!("{ex_date}: the run completes: {}", e.code()));
+        let mut protective = run.orders.iter().filter(|order| order.protective);
+        let before = protective
+            .next()
+            .unwrap_or_else(|| panic!("{ex_date}: protected"));
+        let after = protective
+            .find(|order| order.decided_at == at(instant))
+            .unwrap_or_else(|| panic!("{ex_date}: re-placed at {instant}: {:?}", run.orders));
+        assert_eq!(
+            after.order.qty,
+            before.order.qty.checked_add(before.order.qty).unwrap(),
+            "{ex_date}"
+        );
+        let last_before = days.iter().rposition(|date| *date < ex_date).unwrap();
+        let equity = |index: usize| {
+            run.report
+                .strategy_equity
+                .iter()
+                .find(|observation| observation.date == days[index])
+                .unwrap_or_else(|| panic!("{ex_date}: an observation on {}", days[index]))
+                .equity
+        };
+        assert_eq!(equity(last_before), equity(last_before + 1), "{ex_date}");
+    }
+}
+
+/// An odd or reverse split rounds what it rescales: each close by old ÷ new, down onto the cent,
+/// and each volume by new ÷ old, truncated to whole shares. At 3:2 the close of 100 becomes
+/// 66.666…, so 66.66; at 1:3 it becomes 300. The oracle computes the figures by hand and runs
+/// without the split over bars at them all along: the two decide the same ex-date row. At 10,001
+/// shares a day before the split the truncation decides the liquidity floor of 1,000,000 USD:
+/// 15,001.5 shares at 66.66 truncate to 999,966.66 USD and 3,333.67 at 300 to 999,900, both below
+/// it, where a volume rounded up would clear it.
+#[test]
+fn an_opening_after_an_odd_or_reverse_split_reads_the_rounded_market() {
+    let days = trading_days(DAYS);
+    let outputs = daily_outputs(&days[EX..], "0.5");
+    let floor = (DecisionOutcome::GateDeny, Some("below_liquidity_floor"));
+    let submitted = (DecisionOutcome::Submitted, None);
+    for (new, old, after, volume, after_volume, expected) in [
+        (3, 2, 6_666, 1_000_001, 1_500_001, submitted),
+        (3, 2, 6_666, 10_001, 15_001, floor),
+        (1, 3, 30_000, 1_000_001, 333_333, submitted),
+        (1, 3, 30_000, 10_001, 3_333, floor),
+    ] {
+        let split = ex_date_row(
+            &stepped_bars(10_000, volume, after, after_volume),
+            &outputs,
+            &[split_at(new, old, None)],
+        );
+        let control = ex_date_row(
+            &stepped_bars(after, after_volume, after, after_volume),
+            &outputs,
+            &[],
+        );
+        let at = format!("{new}:{old} at {volume} shares a day");
+        assert_eq!(split, control, "{at}");
+        assert_eq!(split.purpose, Some(Purpose::Open), "{at}: {split:?}");
+        assert_eq!((split.outcome, split.reason.as_deref()), expected, "{at}");
+    }
 }

@@ -5,13 +5,13 @@
 mock_provider "digitalocean" {
   mock_data "digitalocean_kubernetes_versions" {
     defaults = {
-      valid_versions = ["1.35.1-do.0"]
+      valid_versions = ["1.35.9-do.1"]
     }
   }
 
   mock_data "digitalocean_sizes" {
     defaults = {
-      sizes = [{ slug = "s-2vcpu-4gb", price_monthly = 24, price_hourly = 0.03571, available = true, vcpus = 2, memory = 4096, disk = 80, transfer = 4, regions = ["nyc3"], gpu_info = [] }]
+      sizes = [{ slug = "s-2vcpu-4gb", price_monthly = 24, price_hourly = 0.03571, available = true, vcpus = 2, memory = 4096, disk = 80, transfer = 4, regions = ["nyc1", "nyc3"], gpu_info = [] }]
     }
   }
 }
@@ -82,6 +82,49 @@ run "refuses_a_public_api_origin" {
   expect_failures = [var.api_origin]
 }
 
+# The listing provider 5.27.0 returned in the founder's first plan: one account, once per page.
+run "a_listing_that_repeats_one_account_is_that_account" {
+  command = plan
+
+  override_data {
+    target = data.cloudflare_accounts.visible
+    values = {
+      result = [{ id = "fedcba9876543210fedcba9876543210", name = "founder", type = "standard", created_on = "2026-01-01T00:00:00Z", managed_by = { parent_org_id = "", parent_org_name = "" }, settings = { abuse_contact_email = "", enforce_twofactor = true } }, { id = "fedcba9876543210fedcba9876543210", name = "founder", type = "standard", created_on = "2026-01-01T00:00:00Z", managed_by = { parent_org_id = "", parent_org_name = "" }, settings = { abuse_contact_email = "", enforce_twofactor = true } }, { id = "", name = "founder", type = "standard", created_on = "2026-01-01T00:00:00Z", managed_by = { parent_org_id = "", parent_org_name = "" }, settings = { abuse_contact_email = "", enforce_twofactor = true } }]
+    }
+  }
+
+  assert {
+    condition     = nonsensitive(output.cloudflare_account_id) == "fedcba9876543210fedcba9876543210"
+    error_message = "The repeated account is the one account the plan uses."
+  }
+}
+
+run "refuses_a_repeating_listing_of_two_accounts" {
+  command = plan
+
+  override_data {
+    target = data.cloudflare_accounts.visible
+    values = {
+      result = [{ id = "fedcba9876543210fedcba9876543210", name = "founder", type = "standard", created_on = "2026-01-01T00:00:00Z", managed_by = { parent_org_id = "", parent_org_name = "" }, settings = { abuse_contact_email = "", enforce_twofactor = true } }, { id = "0123456789abcdef0123456789abcdef", name = "founder", type = "standard", created_on = "2026-01-01T00:00:00Z", managed_by = { parent_org_id = "", parent_org_name = "" }, settings = { abuse_contact_email = "", enforce_twofactor = true } }, { id = "fedcba9876543210fedcba9876543210", name = "founder", type = "standard", created_on = "2026-01-01T00:00:00Z", managed_by = { parent_org_id = "", parent_org_name = "" }, settings = { abuse_contact_email = "", enforce_twofactor = true } }, { id = "0123456789abcdef0123456789abcdef", name = "founder", type = "standard", created_on = "2026-01-01T00:00:00Z", managed_by = { parent_org_id = "", parent_org_name = "" }, settings = { abuse_contact_email = "", enforce_twofactor = true } }]
+    }
+  }
+
+  expect_failures = [data.cloudflare_accounts.visible]
+}
+
+run "refuses_a_listing_with_no_account" {
+  command = plan
+
+  override_data {
+    target = data.cloudflare_accounts.visible
+    values = {
+      result = [{ id = "", name = "founder", type = "standard", created_on = "2026-01-01T00:00:00Z", managed_by = { parent_org_id = "", parent_org_name = "" }, settings = { abuse_contact_email = "", enforce_twofactor = true } }]
+    }
+  }
+
+  expect_failures = [data.cloudflare_accounts.visible]
+}
+
 run "refuses_a_token_that_sees_two_accounts" {
   command = plan
 
@@ -129,4 +172,15 @@ run "refuses_a_short_commit" {
   }
 
   expect_failures = [var.commit_sha]
+}
+
+# DEC-2044 item 2: the cluster and its VPC are in nyc1, where nyc3 had no capacity, and the state
+# bucket stays in nyc3.
+run "the_cluster_moves_to_nyc1_and_the_state_bucket_stays" {
+  command = plan
+
+  assert {
+    condition     = module.cell.regions == { vpc = "nyc1", cluster = "nyc1", state_bucket = "nyc3" }
+    error_message = "Staging's VPC and cluster are in nyc1, and its state bucket stays in nyc3."
+  }
 }

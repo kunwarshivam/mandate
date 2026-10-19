@@ -29,8 +29,15 @@ variable "prefix" {
 }
 
 variable "region" {
-  type    = string
-  default = "nyc3"
+  description = "The region of the cluster and its VPC."
+  type        = string
+  default     = "nyc3"
+}
+
+variable "state_region" {
+  description = "The region of the Spaces state bucket, which stays in nyc3 wherever the cluster runs (DEC-2044 item 2)."
+  type        = string
+  default     = "nyc3"
 }
 
 variable "vpc_ip_range" {
@@ -109,12 +116,13 @@ module "spaces" {
   source      = "../spaces"
   prefix      = var.prefix
   environment = var.environment
-  region      = var.region
+  region      = var.state_region
 }
 
 module "budget" {
   source             = "../budget"
   node_size          = var.node_size
+  region             = var.region
   node_count         = module.doks.node_count
   spaces_monthly_usd = var.spaces_monthly_usd
   block_storage_gb   = var.block_storage_gb
@@ -135,4 +143,13 @@ output "state_bucket" {
 
 output "monthly_estimate_usd" {
   value = module.budget.estimate_usd
+}
+
+output "regions" {
+  description = "Where the VPC, the cluster and the state bucket are planned (DEC-2044 item 2)."
+  value = {
+    vpc          = module.network.region
+    cluster      = module.doks.region
+    state_bucket = module.spaces.region
+  }
 }

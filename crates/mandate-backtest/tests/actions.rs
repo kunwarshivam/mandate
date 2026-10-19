@@ -308,7 +308,6 @@ fn actions_it_cannot_apply_as_given_refuse_the_run() {
 }
 
 #[test]
-#[ignore = "pending E4-4"]
 fn actions_out_of_ex_date_order_refuse_with_their_code() {
     let config = config();
     let bars = split_series("100", "100");
@@ -320,7 +319,6 @@ fn actions_out_of_ex_date_order_refuse_with_their_code() {
 }
 
 #[test]
-#[ignore = "pending E4-4"]
 fn an_action_for_another_instrument_refuses_with_its_code() {
     let config = config();
     let bars = split_series("100", "100");
