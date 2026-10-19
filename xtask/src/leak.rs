@@ -537,16 +537,16 @@ pub(crate) fn rust_findings(sources: &[Source]) -> Vec<Finding> {
                 .collect::<Vec<_>>()
                 .join("");
             let mut hits = Vec::new();
-            if ["{command:?}", "{cmd:?}", "{child:?}"]
-                .iter()
-                .any(|form| trimmed.contains(form))
-            {
+            if ["command", "cmd", "child"].iter().any(|name| {
+                trimmed.contains(&format!("{{{name}:?}}"))
+                    || trimmed.contains(&format!("{{{name}:#?}}"))
+            }) {
                 hits.push("a command's `Debug` form prints its environment");
             }
             if trimmed.contains("dbg!") {
                 hits.push("`dbg!` prints its value to the log");
             }
-            if trimmed.contains("env::vars()") || trimmed.contains("env::vars_os()") {
+            if trimmed.contains("env::vars") {
                 hits.push("`env::vars()` reads every variable, secrets among them");
             }
             if trimmed.contains("::add-mask::") && source.path != MASK {
@@ -555,13 +555,14 @@ pub(crate) fn rust_findings(sources: &[Source]) -> Vec<Finding> {
                      escapes it",
                 );
             }
-            if trimmed.contains("env::var(") && var_context(&ahead) {
-                hits.push(
-                    "an `env::var` error wrapped by `.context` prints a non-Unicode value; read a \
-                     secret with `.ok()` first, or name it by a literal that names no secret",
-                );
-            }
-            if trimmed.starts_with("#[derive(") && trimmed.contains("Debug") {
+            hits.extend(env_var_problems(&ahead, trimmed.len()));
+            let derives_debug = (trimmed.starts_with("#[derive(")
+                || trimmed.starts_with("#[cfg_attr("))
+                && ahead
+                    .split(']')
+                    .next()
+                    .is_some_and(|attribute| attribute.contains("Debug"));
+            if derives_debug {
                 for field in secret_fields(&lines, index) {
                     let text = lines.get(field).map(|line| line.trim()).unwrap_or_default();
                     if !ALLOWED.contains(&("L10", source.path.as_str(), text)) {
@@ -589,39 +590,112 @@ pub(crate) fn rust_findings(sources: &[Source]) -> Vec<Finding> {
     found
 }
 
-/// Whether `text`, a line and the few after it joined, holds an `env::var(..)` whose result goes
-/// straight to `.context(` or `.with_context(` with a name that is not a string literal or an
-/// `UPPER_CASE` constant free of [`SECRET_WORDS`]: a lowercase name is computed, so it could be
-/// any variable's.
-fn var_context(text: &str) -> bool {
-    let Some(at) = text.find("env::var(") else {
-        return false;
-    };
-    let rest = text
-        .get(at.saturating_add("env::var(".len())..)
-        .unwrap_or_default();
-    let Some(close) = rest.find(')') else {
-        return false;
-    };
-    let name = rest.get(..close).unwrap_or_default().trim();
-    let after = rest.get(close.saturating_add(1)..).unwrap_or_default();
-    let wrapped = after.starts_with(".context(") || after.starts_with(".with_context(");
-    let constant = !name.is_empty()
-        && name
-            .chars()
-            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_');
-    let safe_literal = (name.starts_with('"') || constant)
-        && !SECRET_WORDS
-            .iter()
-            .any(|word| name.to_ascii_lowercase().contains(word));
-    wrapped && !safe_literal
+/// The ways a result of `env::var` or `env::var_os` may be consumed that never show its error,
+/// whose `NotUnicode` case holds the value itself.
+const QUIET_CONSUMERS: [&str; 7] = [
+    ".ok()",
+    ".map_err(|_|",
+    ".is_ok()",
+    ".is_err()",
+    ".unwrap_or(",
+    ".unwrap_or_default()",
+    ".unwrap_or_else(|_|",
+];
+
+/// Why each `env::var(..)` or `env::var_os(..)` that starts in the first `first` bytes of `text`
+/// (a line and the few after it, joined) could print a secret, if one could (L10). Its argument
+/// is a string literal or a plain identifier or path (`name`, `&name`, `module::NAME`), and nothing
+/// else; and an `env::var` result is consumed by one of [`QUIET_CONSUMERS`] (an `env::var_os`
+/// result is an `Option`, which holds no error), unless its name is a string literal or an
+/// `UPPER_CASE` constant that names none of [`SECRET_WORDS`], whose value is no secret. Any other
+/// consumer (`?`, `.unwrap()`, `.expect(`, `.map_err(`, `.context(`) can print the error, and so
+/// the value.
+fn env_var_problems(text: &str, first: usize) -> Vec<&'static str> {
+    let mut out = Vec::new();
+    let mut from = 0;
+    while let Some(found) = text.get(from..).and_then(|tail| tail.find("env::var")) {
+        let at = from.saturating_add(found);
+        from = at.saturating_add("env::var".len());
+        if at >= first {
+            break;
+        }
+        let tail = text.get(from..).unwrap_or_default();
+        let os = tail.starts_with("_os");
+        let tail = tail.strip_prefix("_os").unwrap_or(tail);
+        let Some(inner) = tail.strip_prefix('(') else {
+            continue;
+        };
+        let mut depth = 1_usize;
+        let Some(close) = inner.char_indices().find_map(|(at, c)| {
+            match c {
+                '(' => depth = depth.saturating_add(1),
+                ')' => depth = depth.saturating_sub(1),
+                _ => {}
+            }
+            (depth == 0).then_some(at)
+        }) else {
+            out.push("an `env::var` call the guard cannot read to its end");
+            continue;
+        };
+        let name = inner.get(..close).unwrap_or_default().trim();
+        let after = inner
+            .get(close.saturating_add(1)..)
+            .unwrap_or_default()
+            .trim_start();
+        let literal = name.len() >= 2
+            && name.starts_with('"')
+            && name.ends_with('"')
+            && !name
+                .get(1..name.len().saturating_sub(1))
+                .unwrap_or_default()
+                .contains('"');
+        let bare = name.strip_prefix('&').unwrap_or(name);
+        let identifier = !bare.is_empty()
+            && bare.split("::").all(|segment| {
+                !segment.is_empty()
+                    && segment
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '_')
+            });
+        if !(literal || identifier) {
+            out.push(
+                "an `env::var` name is a string literal or a plain identifier, never an \
+                 expression the guard cannot read",
+            );
+            continue;
+        }
+        let constant = bare.rsplit("::").next().is_some_and(|last| {
+            last.chars()
+                .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+        });
+        let names_no_secret = (literal || constant)
+            && !SECRET_WORDS
+                .iter()
+                .any(|word| name.to_ascii_lowercase().contains(word));
+        let quiet = os
+            || QUIET_CONSUMERS
+                .iter()
+                .any(|consumer| after.starts_with(consumer));
+        if !quiet && !names_no_secret {
+            out.push(
+                "an `env::var` error can print a non-Unicode value: read a secret with `.ok()` \
+                 first, or name it by a literal that names no secret",
+            );
+        }
+    }
+    out
 }
 
 /// The 0-based lines of every secret-named field of the struct a `#[derive(..Debug..)]` at
-/// `index` decorates, if it decorates a struct with braces.
+/// `index` decorates, if it decorates a struct with braces; the attribute may run over several
+/// lines, to its `]`.
 fn secret_fields(lines: &[&str], index: usize) -> Vec<usize> {
     let mut out = Vec::new();
-    let mut at = index.saturating_add(1);
+    let mut at = index;
+    while lines.get(at).is_some_and(|line| !line.contains(']')) {
+        at = at.saturating_add(1);
+    }
+    at = at.saturating_add(1);
     while lines
         .get(at)
         .is_some_and(|line| line.trim().starts_with("#[") || line.trim().starts_with("///"))
@@ -3714,6 +3788,9 @@ mod tests {
         ] {
             assert_eq!(rust(text), ["L10"], "{text:?}");
         }
+        for (name, text) in L10_REVIEW_PROBES {
+            assert!(rust(text).contains(&"L10"), "{name}: {text:?}");
+        }
         for text in [
             "    eprintln!(\"running {}\", args.join(\" \"));",
             "    let repo = env::var(\"GITHUB_REPOSITORY\").context(\"GITHUB_REPOSITORY is not set\")?;",
@@ -3724,10 +3801,53 @@ mod tests {
             "struct Login {\n    password: String,\n}",
             "// never dbg!(x)",
             "    mask::add_mask(&token);",
+            "    let token = env::var(\"GH_TOKEN\").unwrap_or_default();",
+            "    env::var(name).map_err(|_| format!(\"{name} is not set\"))",
+            "    let founder = env::var(infra_preflight::KUBE_CIDRS_ENV).ok();",
+            "    let home = env::var_os(\"HOME\").map(PathBuf::from);",
+            "    let repo = env::var(\"GITHUB_REPOSITORY\")?;",
+            "#[cfg_attr(test, derive(PartialEq))]\nstruct Login {\n    password: String,\n}",
         ] {
             assert_eq!(rust(text), Vec::<&str>::new(), "{text:?}");
         }
     }
+
+    /// The #1732 review's probes, each a line L10 once let through: a computed `env::var`
+    /// argument; a secret's `env::var` error reaching `?`, `.unwrap()`, `.expect(` or `.map_err(`;
+    /// a second `env::var` on one line; `{:#?}`; an imported `vars`; and a `cfg_attr` or
+    /// multi-line `derive(Debug)` over a secret field.
+    const L10_REVIEW_PROBES: &[(&str, &str)] = &[
+        ("call", "    let v = env::var(name_of(1)).context(\"x\")?;"),
+        (
+            "format",
+            "    let v = env::var(format!(\"{p}_KEY\")).context(\"x\")?;",
+        ),
+        ("question", "    let token = env::var(\"GH_TOKEN\")?;"),
+        ("unwrap", "    let token = env::var(\"GH_TOKEN\").unwrap();"),
+        (
+            "expect",
+            "    let token = env::var(\"GH_TOKEN\").expect(\"set\");",
+        ),
+        (
+            "map-err",
+            "    let token = env::var(\"GH_TOKEN\").map_err(|e| anyhow!(\"{e}\"))?;",
+        ),
+        ("computed-ident", "    let v = env::var(name)?;"),
+        (
+            "second",
+            "    let (a, b) = (env::var(\"HOME\").ok(), env::var(\"GH_TOKEN\")?);",
+        ),
+        ("pretty", "    eprintln!(\"running {command:#?}\");"),
+        ("import", "use std::env::vars;"),
+        (
+            "cfg-attr",
+            "#[cfg_attr(test, derive(Debug))]\nstruct Login {\n    password: String,\n}",
+        ),
+        (
+            "multi-line",
+            "#[derive(\n    Clone,\n    Debug\n)]\nstruct Login {\n    password: String,\n}",
+        ),
+    ];
 
     /// The repository's Rust passes; each L10 fixture seeded into each real file is refused there.
     #[test]
