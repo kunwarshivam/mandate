@@ -2040,6 +2040,7 @@ dependencies = [
  "mandate-journal-pg",
  "mandate-num",
  "mandate-process",
+ "mandate-risk",
  "mandate-store",
  "mandate-time",
  "proptest",
