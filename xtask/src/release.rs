@@ -997,6 +997,7 @@ pub(crate) fn publish_signed(
         &root.join(RELEASE_PUBLIC_KEY),
         dist,
         signatures,
+        out,
         arch,
         &revision,
     )?;
@@ -1021,14 +1022,16 @@ pub(crate) fn publish_signed(
 }
 
 /// The release-signed image of every binary `dist/SHA256SUMS` lists, for `arch`, built from commit
-/// `revision`, each with its `<name>.sig` layer. Every binary must match its line, and every binary
-/// and `SHA256SUMS` itself must carry a signature in `signatures` that verifies against `key`,
-/// before any image is built, so a release the key did not sign is never pushed (DEC-2026).
+/// `revision`, each with its `<name>.sig` layer and written as a layout to `<out>/images/<name>`,
+/// where the push reads it. Every binary must match its line, and every binary and `SHA256SUMS`
+/// itself must carry a signature in `signatures` that verifies against `key`, before any image is
+/// built or written, so a release the key did not sign is never pushed (DEC-2026).
 pub(crate) fn signed_images(
     tools: &Path,
     key: &Path,
     dist: &Path,
     signatures: &Path,
+    out: &Path,
     arch: Arch,
     revision: &str,
 ) -> Result<Vec<(String, image::Layout)>> {
@@ -1053,6 +1056,7 @@ pub(crate) fn signed_images(
             let signature = fs::read(signatures.join(format!("{name}.sig")))
                 .with_context(|| format!("reading {name}.sig"))?;
             let layout = image::layout(name, arch.oci(), &binary, Some(&signature), revision);
+            image::write(&layout, &out.join("images").join(name))?;
             Ok((name.clone(), layout))
         })
         .collect()
@@ -2612,7 +2616,11 @@ mod tests {
     /// One case of [`the_signed_images_refuse_a_release_the_key_did_not_sign`]: its name, what it
     /// changes in the release [`signed_release`] wrote under the directory it is handed, and what
     /// the refusal must name.
-    type SignedCase = (&'static str, fn(&Path) -> io::Result<()>, &'static str);
+    type SignedCase = (
+        &'static str,
+        fn(&Path) -> io::Result<()>,
+        &'static [&'static str],
+    );
 
     /// Writes under `dir` a release `signed_images` accepts: `dist` holding `a` and `b` with their
     /// `SHA256SUMS`, a signature for each and for `SHA256SUMS` in `signatures`, the public half in
@@ -2661,6 +2669,7 @@ mod tests {
             &key,
             &dir.join("dist"),
             &dir.join("signatures"),
+            &dir.join("out"),
             arch,
             "release",
         )?;
@@ -2668,8 +2677,9 @@ mod tests {
         assert_eq!(names, ["a", "b"]);
         for (name, layout) in &images {
             let unpacked = dir.join("unpacked").join(name);
-            image::write(layout, &unpacked.join("layout"))?;
-            image::unpack(layout, &unpacked.join("layout"), &unpacked.join("rootfs"))?;
+            let written = dir.join("out/images").join(name);
+            assert!(written.join("index.json").is_file(), "{name}: not written");
+            image::unpack(layout, &written, &unpacked.join("rootfs"))?;
             let mut files: Vec<String> = fs::read_dir(unpacked.join("rootfs"))?
                 .map(|entry| Ok(entry?.file_name().to_string_lossy().into_owned()))
                 .collect::<io::Result<_>>()?;
@@ -2705,8 +2715,9 @@ mod tests {
 
     /// A release the key did not sign builds no image: a signature by another key, a missing one,
     /// one over `SHA256SUMS` that does not verify, or a binary `SHA256SUMS` does not list each
-    /// stops `signed_images` with a refusal naming it, so `publish-signed` never signs in to the
-    /// registry or pushes (DEC-2026).
+    /// stops `signed_images` with a refusal naming it, and nothing is written under `out` or beside
+    /// the tools, so every check runs before any image is built and `publish-signed` never signs in
+    /// to the registry or pushes (DEC-2026).
     #[test]
     fn the_signed_images_refuse_a_release_the_key_did_not_sign() -> Result<()> {
         let root = env::temp_dir().join(format!(
@@ -2717,27 +2728,27 @@ mod tests {
             (
                 "a's signature is not the key's",
                 |d| fs::write(d.join("signatures/a.sig"), "bad"),
-                "a.sig",
+                &["verify-blob", "a.sig"],
             ),
             (
                 "b has no signature",
                 |d| fs::remove_file(d.join("signatures/b.sig")),
-                "b.sig",
+                &["verify-blob", "b.sig"],
             ),
             (
                 "the sums' signature is not the key's",
                 |d| fs::write(d.join("signatures/SHA256SUMS.sig"), "bad"),
-                "SHA256SUMS.sig",
+                &["verify-blob", "SHA256SUMS.sig"],
             ),
             (
                 "b is not the binary SHA256SUMS lists",
                 |d| fs::write(d.join("dist/bin/b"), "x"),
-                "b is not the binary SHA256SUMS lists",
+                &["b is not the binary SHA256SUMS lists"],
             ),
             (
                 "another key",
                 |d| fs::write(d.join("release.pub"), "another key\n"),
-                "verify-blob",
+                &["verify-blob", "/release.pub", "/signatures/a.sig"],
             ),
         ];
         for (name, change, refusal) in cases {
@@ -2749,6 +2760,7 @@ mod tests {
                 &key,
                 &dir.join("dist"),
                 &dir.join("signatures"),
+                &dir.join("out"),
                 Arch::host()?,
                 "release",
             );
@@ -2756,7 +2768,15 @@ mod tests {
                 panic!("{name}: images were built");
             };
             let err = format!("{err:#}");
-            assert!(err.contains(refusal), "{name}: refused with {err:?}");
+            for part in refusal {
+                assert!(err.contains(part), "{name}: refused with {err:?}");
+            }
+            assert!(!dir.join("out").exists(), "{name}: an image was written");
+            let mut tools: Vec<String> = fs::read_dir(&tools)?
+                .map(|entry| Ok(entry?.file_name().to_string_lossy().into_owned()))
+                .collect::<io::Result<_>>()?;
+            tools.sort();
+            assert_eq!(tools, ["calls", "cosign"], "{name}: the tools directory");
         }
         Ok(())
     }
