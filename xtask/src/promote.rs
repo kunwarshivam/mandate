@@ -210,7 +210,7 @@ fn cluster_dir(root: &Path, environment: Environment) -> PathBuf {
 
 /// Writes each file beside its target first and renames it into place only once every one is on
 /// disk, so a failed write leaves the overlay as it was, with no file half written and no stray
-/// sibling.
+/// sibling (DEC-2048 item 3).
 fn write_all(files: &[(PathBuf, String)]) -> Result<()> {
     let mut written: Vec<(PathBuf, &Path)> = Vec::new();
     for (path, contents) in files {

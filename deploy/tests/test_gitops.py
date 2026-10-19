@@ -929,7 +929,7 @@ def test_an_extra_source_is_caught(tmp_path):
     ]
 
 
-# Production moves only by copying what staging already ran on main (DEC-2016).
+# Production pins, per key, only what staging held on main (DEC-2016 item 5, DEC-2048).
 STAGING_FILES = ("deploy/gitops/clusters/staging/charts.yaml", "deploy/gitops/clusters/staging/images.yaml")
 PRODUCTION_FILES = (
     "deploy/gitops/clusters/production/charts.yaml",
