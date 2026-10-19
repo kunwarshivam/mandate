@@ -118,7 +118,7 @@ fn members(value: &Value) -> BTreeSet<String> {
 }
 
 #[test]
-#[ignore = "pending DEC-2113 W1: GET /v1/me/session"]
+#[ignore = "pending E10-10"]
 fn own_session_names_the_caller_and_nothing_secret_shaped() {
     let f = fixture();
     let alice = open(&f, ALICE, T0 - 10);
@@ -170,7 +170,7 @@ fn own_session_names_the_caller_and_nothing_secret_shaped() {
 }
 
 #[test]
-#[ignore = "pending DEC-2113 W1: GET /v1/me/session"]
+#[ignore = "pending E10-10"]
 fn without_a_live_full_session_nothing_is_served() {
     let f = fixture();
     let nowhere = send(f.addr, "GET", "/nowhere", &[], b"");
