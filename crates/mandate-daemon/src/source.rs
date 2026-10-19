@@ -12,8 +12,10 @@ use mandate_gateway::meter::SharedMeter;
 use mandate_journal::{ArtifactSource, Environment, StoredEvent, StreamId};
 use mandate_num::Usd;
 use mandate_research::{
-    AdmissionFacts, AssetClass, AssetId, AutonomyDecision, GroupId, LineageState, MandateEnvelope,
-    PolicyOverlay, ResearchEnvelope, SourceAllowlist, ValidatedMandate, WorkingUniverse,
+    AdmissionChange, AdmissionDecision, AdmissionFacts, AssetClass, AssetId, AutonomyDecision,
+    GroupId, LineageId, LineageState, MandateEnvelope, PolicyOverlay, RefusalReason,
+    ResearchEnvelope, SourceAllowlist, ThesisId, UniverseEntry, ValidatedMandate, WorkingUniverse,
+    expire_theses,
 };
 use mandate_research_run::{InstrumentFact, Symbol};
 use mandate_runtime::{ActiveThesis, JournalCatalog, Preconditions, RiskClock, RuntimeState};
@@ -110,8 +112,101 @@ pub fn fold_research(
     at: UtcNanos,
     instruments: &[InstrumentFact],
 ) -> Result<ResearchFold, FoldError> {
-    let _ = (agent, at, instruments);
-    Err(FoldError::Unimplemented)
+    let unreadable = |member| FoldError::Unreadable { member };
+    let mut lineages = LineageState::default();
+    let mut entries: BTreeMap<AssetId, UniverseEntry> = BTreeMap::new();
+    for row in agent {
+        let invalidation = row.event_type == "ThesisInvalidated";
+        if !invalidation && !matches!(row.event_type.as_str(), "ThesisProposed" | "ThesisRevised") {
+            continue;
+        }
+        let body = parse(&row.body).map_err(|_| unreadable("payload"))?;
+        let payload = body.get("payload").ok_or(unreadable("payload"))?;
+        let text = |member| {
+            payload
+                .get(member)
+                .and_then(Value::as_str)
+                .ok_or(unreadable(member))
+        };
+        let thesis = ThesisId::new(text("thesis_id")?).map_err(|_| unreadable("thesis_id"))?;
+        if invalidation {
+            for entry in entries.values_mut() {
+                if entry.thesis_id == thesis {
+                    entry.invalidated = true;
+                }
+            }
+            continue;
+        }
+        let lineage = LineageId::new(text("lineage_id")?).map_err(|_| unreadable("lineage_id"))?;
+        let instrument =
+            AssetId::new(text("instrument_id")?).map_err(|_| unreadable("instrument_id"))?;
+        let revision = payload
+            .get("revision")
+            .and_then(Value::as_int)
+            .and_then(|n| u32::try_from(n).ok())
+            .ok_or(unreadable("revision"))?;
+        let expires_at =
+            UtcNanos::parse_rfc3339(text("expires_at")?).map_err(|_| unreadable("expires_at"))?;
+        let admitted = match payload.get("admitted") {
+            Some(Value::Bool(admitted)) => *admitted,
+            _ => return Err(unreadable("admitted")),
+        };
+        let decision = match (admitted, payload.get("reason")) {
+            (true, Some(Value::Null)) => AdmissionDecision::Admitted {
+                change: AdmissionChange::Admitted,
+            },
+            (false, Some(Value::Str(code))) => AdmissionDecision::Refused {
+                reason: RefusalReason::parse(code).map_err(|_| unreadable("reason"))?,
+            },
+            _ => return Err(unreadable("reason")),
+        };
+        lineages.replay(&lineage, revision, &instrument, decision);
+        if admitted {
+            entries.insert(
+                instrument.clone(),
+                UniverseEntry {
+                    instrument,
+                    thesis_id: thesis,
+                    lineage_id: lineage,
+                    revision,
+                    expires_at,
+                    invalidated: false,
+                },
+            );
+        }
+    }
+    let entries: Vec<UniverseEntry> = entries.into_values().collect();
+    let expiry = expire_theses(at, &entries, &lineages).map_err(|_| unreadable("expires_at"))?;
+    let WorkingUniverse::Known {
+        instruments: kept, ..
+    } = &expiry.universe
+    else {
+        return Err(unreadable("expires_at"));
+    };
+    let active = entries
+        .iter()
+        .filter(|entry| kept.contains(&entry.instrument))
+        .map(|entry| {
+            let symbol = instruments
+                .iter()
+                .find(|fact| fact.asset_id.as_str() == entry.instrument.as_str())
+                .map(|fact| fact.symbol.clone())
+                .ok_or(unreadable("symbol"))?;
+            Ok(ActiveThesis {
+                thesis_id: entry.thesis_id.as_str().to_owned(),
+                lineage_id: entry.lineage_id.as_str().to_owned(),
+                revision: entry.revision,
+                instrument: entry.instrument.clone(),
+                symbol,
+                expires_at: RiskClock::from_secs(entry.expires_at.secs()),
+            })
+        })
+        .collect::<Result<Vec<_>, FoldError>>()?;
+    Ok(ResearchFold {
+        universe: expiry.universe,
+        lineages,
+        active,
+    })
 }
 
 /// The cell's research source.
