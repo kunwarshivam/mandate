@@ -750,12 +750,14 @@ forbidden_internal = ["mandate-shell", "mandate-executor", "mandate-alpaca", "ma
 # The account executor as a long-running process (E21-30, DEC-2003): one account's executor core
 # over mandate-store, with mandate-process's lifecycle and probes. It reads the runtime only through
 # the journal, so it may never reach the runtime's process, the shell, the paper runner, the MCP
-# client, the CLI, or the broker simulator; its broker is a port, and no host is named here.
+# client, the CLI, or the broker simulator; its broker is a port, and no host is named here. It is
+# the process that leases its connection's credential from mandate-vault (DEC-2306 item 2), which
+# is why it sits above it; the connector crates never take the vault.
 [crates.mandate-executord]
-layer = 8
+layer = 9
 safety_critical = true
 pure = false
-allowed_external = ["tokio"]
+allowed_external = ["secrecy", "tokio"]
 forbidden_internal = ["mandate-daemon", "mandate-agentd", "mandate-shell", "mandate-paper", "mandate-mcp", "mandate-cli", "mandate-rh-sim", "mandate-robinhood"]
 
 # The workspace scheduler process (E21-29, DEC-1010): the clock stream's single writer, over

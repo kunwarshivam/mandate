@@ -1,9 +1,10 @@
-//! The in-process fixture is the only broker the executor can reach (E21-30, DEC-2033 item 7,
-//! `AGENTS.md` rule 8). `xtask/layers.toml` holds it: no external crate of its own but `tokio`;
-//! none of the crates that carry a transport to a host or a simulator; and no `live` feature, which
-//! only the paper runner may declare. `mandate-alpaca` links `reqwest` for its paper HTTPS
-//! transport, so the second test pins that no source of the executor names that transport or the
-//! HTTP client. Loosening either fails here as well as in review.
+//! The executor reaches its in-process fixture or Alpaca's paper trading host, and nothing else
+//! (E21-30, DEC-2306 item 1, `AGENTS.md` rule 8). `xtask/layers.toml` holds it: no external crate
+//! of its own but `secrecy` and `tokio`; none of the crates that carry a transport to a host or a
+//! simulator; and no `live` feature, which only the paper runner may declare. `mandate-alpaca`
+//! carries the only paper transport, so the second test pins that one module of the executor,
+//! [`CREDENTIAL_MODULE`], may name it and the credentials, and that no source names the HTTP
+//! client, the data client, or a host. Loosening either fails here as well as in review.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -31,12 +32,12 @@ fn value(entry: &[String], key: &str) -> Option<String> {
 }
 
 #[test]
-fn the_executor_reaches_no_broker_but_its_in_process_fixture() -> Result<(), Error> {
+fn the_executor_reaches_no_broker_but_the_fixture_or_the_paper_host() -> Result<(), Error> {
     let entry = entry()?;
     assert!(!entry.is_empty(), "no mandate-executord entry");
     assert_eq!(
         value(&entry, "allowed_external").as_deref(),
-        Some(r#"["tokio"]"#)
+        Some(r#"["secrecy", "tokio"]"#)
     );
     assert_eq!(value(&entry, "live_feature"), None);
     let forbidden = value(&entry, "forbidden_internal").ok_or("no forbidden_internal")?;
@@ -68,14 +69,29 @@ fn sources(dir: &Path) -> Result<Vec<PathBuf>, Error> {
     Ok(found)
 }
 
+/// The one module that may name the paper transport and the credentials (DEC-2306 item 1).
+const CREDENTIAL_MODULE: &str = "credential.rs";
+
 #[test]
-fn the_executor_names_no_http_transport() -> Result<(), Error> {
+fn only_the_credential_module_names_the_paper_transport() -> Result<(), Error> {
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let files = sources(&src)?;
     assert!(!files.is_empty(), "no sources under {}", src.display());
     for file in files {
         let text = fs::read_to_string(&file)?;
-        for name in ["AlpacaPaperHttp", "reqwest", "DataClient", "Credentials"] {
+        for name in [
+            "reqwest",
+            "DataClient",
+            "alpaca.markets",
+            "https://",
+            "http://",
+        ] {
+            assert!(!text.contains(name), "{} names {name}", file.display());
+        }
+        if file.file_name().is_some_and(|n| n == CREDENTIAL_MODULE) {
+            continue;
+        }
+        for name in ["AlpacaPaperHttp", "Credentials"] {
             assert!(!text.contains(name), "{} names {name}", file.display());
         }
     }
