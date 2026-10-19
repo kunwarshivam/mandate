@@ -66,7 +66,6 @@ fn credentials(dir: &Path, identity: &Identity) -> Result<(String, String), Sour
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn an_executors_credentials_are_read_through_the_kubelets_links() {
     let dir = Fresh::new("kubelet");
     kubelet(
@@ -83,7 +82,6 @@ fn an_executors_credentials_are_read_through_the_kubelets_links() {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn plain_files_owner_only_are_read_too() {
     let dir = Fresh::new("plain");
     write(&dir.0.join("runtime.role-id"), "role-r", 0o600);
@@ -95,7 +93,6 @@ fn plain_files_owner_only_are_read_too() {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn a_ca_is_read_whole_lines_and_all() {
     let dir = Fresh::new("ca");
     let pem = "-----BEGIN CERTIFICATE-----\nAAAA\nBBBB\n-----END CERTIFICATE-----\n";
@@ -106,7 +103,6 @@ fn a_ca_is_read_whole_lines_and_all() {
 /// `..data` pointing at an absolute directory outside the mount is refused, though the file
 /// there is owner-only and well formed.
 #[test]
-#[ignore = "pending E21-32"]
 fn a_data_link_to_an_absolute_path_outside_the_mount_is_refused() {
     let dir = Fresh::new("absolute");
     let outside = Fresh::new("outside");
@@ -118,7 +114,6 @@ fn a_data_link_to_an_absolute_path_outside_the_mount_is_refused() {
 
 /// A name linked by a relative path that climbs out of the mount is refused.
 #[test]
-#[ignore = "pending E21-32"]
 fn a_link_that_climbs_out_of_the_mount_is_refused() {
     let parent = Fresh::new("parent");
     let dir = parent.0.join("mount");
@@ -130,7 +125,6 @@ fn a_link_that_climbs_out_of_the_mount_is_refused() {
 
 /// The mode is judged on the file the links reach: any group or other bit is refused.
 #[test]
-#[ignore = "pending E21-32"]
 fn a_reached_file_open_to_group_or_others_is_refused() {
     for mode in [0o440, 0o404, 0o644, 0o401, 0o410] {
         let dir = Fresh::new("mode");
@@ -144,7 +138,6 @@ fn a_reached_file_open_to_group_or_others_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn a_missing_file_a_directory_or_a_dangling_link_is_refused() {
     let dir = Fresh::new("missing");
     fs::create_dir(dir.0.join("sub")).unwrap();
@@ -160,7 +153,6 @@ fn a_missing_file_a_directory_or_a_dangling_link_is_refused() {
 
 /// A name that is not one plain path component is refused before anything is opened.
 #[test]
-#[ignore = "pending E21-32"]
 fn a_name_that_is_not_one_component_is_refused() {
     let dir = Fresh::new("names");
     let inner = dir.0.join("inner");
@@ -177,7 +169,6 @@ fn a_name_that_is_not_one_component_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn a_credential_that_is_empty_or_not_one_line_is_refused() {
     for text in ["", "\n", "a\n\n", "a\nb", "a\r\n", "a\rb"] {
         let dir = Fresh::new("lines");
@@ -192,7 +183,6 @@ fn a_credential_that_is_empty_or_not_one_line_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn a_missing_role_id_refuses_the_credentials() {
     let dir = Fresh::new("half");
     write(&dir.0.join("executor-c1.secret-id"), "secret-1", 0o400);
@@ -203,7 +193,6 @@ fn a_missing_role_id_refuses_the_credentials() {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn a_token_exchange_has_no_mounted_credentials() {
     let dir = Fresh::new("exchange");
     write(&dir.0.join("exchange-c1.role-id"), "role-1", 0o400);
