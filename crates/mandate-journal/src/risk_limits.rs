@@ -171,23 +171,20 @@ fn triggered(payload: &Value) -> Result<(), Invalid> {
             .map_err(|_| Invalid::new(InvalidReason::Schema, format!("payload.{member}")))
     };
     let threshold = amount("threshold", threshold_text)?;
-    let value = amount("value", value_text)?;
-    let (threshold_holds, value_whole) = if COUNTED.contains(&text("metric")) {
-        let count = threshold_text.parse::<u64>().ok();
-        (
-            count.is_some_and(|n| (1..=1000).contains(&n)),
-            value_text.parse::<u64>().is_ok(),
-        )
+    let counted = COUNTED.contains(&text("metric"));
+    let threshold_holds = if counted {
+        threshold_text
+            .parse::<u64>()
+            .is_ok_and(|n| (1..=1000).contains(&n))
     } else {
         let cents = threshold_text
             .split_once('.')
             .is_none_or(|(_, fraction)| fraction.len() <= 2);
-        (
-            cents && !threshold.is_negative() && threshold_text != "0",
-            true,
-        )
+        cents && !threshold.is_negative() && threshold_text != "0"
     };
     ensure(threshold_holds, "payload.threshold")?;
+    let value = amount("value", value_text)?;
+    let value_whole = !counted || value_text.parse::<u64>().is_ok();
     ensure(value_whole && value >= threshold, "payload.value")
 }
 

@@ -236,3 +236,31 @@ fn a_negative_breach_time_is_refused_before_any_rule_reads_it() {
         "refused at decode, before the payload schema"
     );
 }
+
+/// Rule 233 reports `payload.threshold`, then `payload.value`: a counted tripwire whose threshold
+/// is 0 and whose value is fractional breaks both, and is refused at its threshold (the A3
+/// review's nit, DEC-2301).
+#[test]
+fn rule_233_reports_the_threshold_before_the_value() {
+    let tripwire = String::from_utf8(base(&section(), "tripwire_triggered")).unwrap();
+    let both = tripwire
+        .replace("\"threshold\":\"2\"", "\"threshold\":\"0\"")
+        .replace("\"value\":\"2\"", "\"value\":\"2.5\"");
+    assert!(
+        tripwire.contains("\"threshold\":\"2\"") && tripwire.contains("\"value\":\"2\""),
+        "the base tripwire trigger counts fills with threshold 2 and value 2"
+    );
+    let e = Draft::parse(both.as_bytes()).unwrap_err();
+    assert_eq!(
+        (e.reason, e.path.as_str()),
+        (InvalidReason::Schema, "payload.threshold"),
+        "the threshold is reported first"
+    );
+    let value_only = tripwire.replace("\"value\":\"2\"", "\"value\":\"2.5\"");
+    let e = Draft::parse(value_only.as_bytes()).unwrap_err();
+    assert_eq!(
+        (e.reason, e.path.as_str()),
+        (InvalidReason::Schema, "payload.value"),
+        "a sound threshold leaves the value to be reported"
+    );
+}
