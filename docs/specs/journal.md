@@ -2194,8 +2194,8 @@ pinned byte for byte by the version-3 vectors. Each version-2 record carries `ri
 requires it (DEC-302 item 1). `StreamOpened` carries none — at seq 1 the stream has seen no tick —
 and `OwnerCommandRefused` none, whose schema is shared with the agent stream
 ([DEC-447](../project/decisions/DEC-447.md)). `FillApplied` and `MarkUpdated` carry it already at
-version 1 (DEC-81), and `MarkUpdated` version 2 is §9.30's; the rest of the account catalogue closes with its own stories. At either
-version the protective prices are never members of `IntentReceived`
+version 1 (DEC-81), and `MarkUpdated` version 2 is §9.30's; the rest of the account catalogue
+closes with its own stories. At either version the protective prices are never members of `IntentReceived`
 ([DEC-446](../project/decisions/DEC-446.md) item 5): they move to the `intended`
 `ProtectionChanged`, journaled beside the intent in its own batch, so the copy of the proposal
 stays exact and replay restores the protection the opening was handed in with (`AGENTS.md` rule
@@ -5574,10 +5574,16 @@ mark has **no verdict**. It is not a risk input: the fold applies nothing from i
 whether the fold settles time at it changes no result (MI-13). It is never read as sane, which
 would update E from a price no check judged and restart the staleness count, loosening §5.2. So E
 is not updated from it, and the instrument's staleness keeps counting from its last sane
-version-2 mark: once its age reaches `mark_max_age_s` (counted in regular-session seconds for an
-equity), `stale_mark` holds openings and increases in that instrument, and never its exits,
-protective orders, or kill switches (`AGENTS.md` rule 13). It is not
-read as unreadable either (DEC-2301 item 3): a version-1 mark is a well-formed record the stream
+version-2 mark: once its age reaches `mark_max_age_s`, `stale_mark` holds openings and increases
+in that instrument, and never its exits, protective orders, or kill switches (`AGENTS.md` rule 13).
+A sane version-2 mark restarts the count only in a session §5.2 counts, so an equity's sane
+after-hours mark does not, and a mark that is not sane restricts at once and restarts nothing.
+**The calendar.** An equity's age counts the regular-session seconds of the trading calendar
+([trading spec §2.2](trading-domain.md#22-time-and-calendars), §4.3), which the risk fold's
+`SessionClock` is given by its caller (`mandate_spec::risk`): `mandate-time`'s committed NYSE data,
+`crates/mandate-time/data/us-equities.calendar`, with its weekends, holidays, and early closes, so
+a weekend, a `closed` day, and the hours after an `early_close` count nothing. Crypto's counts all
+time. It is not read as unreadable either (DEC-2301 item 3): a version-1 mark is a well-formed record the stream
 holds legitimately, and holding every opening on any stream that holds one would add nothing that
 staleness, per instrument, does not already hold.
 
@@ -5598,9 +5604,14 @@ version-1 draft carrying a version-2 member, and version 3; valid drafts for the
 might be misread to refuse (not sane with no bid, a zero bid, or a bid above the price) and for every
 session, with `session: "closed"` refused at `payload.session`; the fold's reading of each base
 and valid draft: `no_verdict` for version 1, and `sane`, `session`, and, when sane, `bid` for
-version 2; and staleness sequences, an equity's and crypto's, in which a held instrument with only
-version-1 marks since its last sane mark, or since it opened, reaches `stale_mark` exactly at
-`mark_max_age_s`, with its openings held and its exits not. The vectors stay version 3.
+version 2; and staleness sequences in which a held instrument with only version-1 marks since its
+last sane mark, or since it opened, reaches `stale_mark` exactly at `mark_max_age_s`, with its
+openings and increases denied and each exit path, protective order, and kill switch not held: an
+equity within one session, across a close, from Friday to Monday, across Thanksgiving 2026, and
+across the early close the day after; an equity's sane after-hours mark and its regular-session
+mark that is not sane; and crypto over a weekend. The reference counts an equity's seconds by
+reading the same `us-equities.calendar` file `mandate-time` embeds, so the two cannot drift. The
+vectors stay version 3.
 
 ## 10. Anchoring
 

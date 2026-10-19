@@ -109957,6 +109957,7 @@
     "name": "equity_v1_after_sane",
     "clause": "DEC-2305 item 3: v1 marks after a sane v2 mark never restart the count; stale at the limit, not before",
     "asset_class": "us_equity",
+    "calendar": "crates/mandate-time/data/us-equities.calendar",
     "mark_max_age_s": 60,
     "opened_at": "2026-10-19T14:29:00.000000000Z",
     "steps": [
@@ -109973,8 +109974,15 @@
       "expect": {
        "stale_mark": false,
        "mode": "normal",
-       "openings": "allowed",
-       "exits": "allowed"
+       "orders": {
+        "open": "not_held_by_stale_mark",
+        "increase": "not_held_by_stale_mark",
+        "discretionary_exit": "not_held_by_stale_mark",
+        "risk_exit": "not_held_by_stale_mark",
+        "owner_exit": "not_held_by_stale_mark",
+        "protective": "not_held_by_stale_mark",
+        "kill_switch": "not_held_by_stale_mark"
+       }
       }
      },
      {
@@ -109990,8 +109998,15 @@
       "expect": {
        "stale_mark": false,
        "mode": "normal",
-       "openings": "allowed",
-       "exits": "allowed"
+       "orders": {
+        "open": "not_held_by_stale_mark",
+        "increase": "not_held_by_stale_mark",
+        "discretionary_exit": "not_held_by_stale_mark",
+        "risk_exit": "not_held_by_stale_mark",
+        "owner_exit": "not_held_by_stale_mark",
+        "protective": "not_held_by_stale_mark",
+        "kill_switch": "not_held_by_stale_mark"
+       }
       }
      },
      {
@@ -110007,8 +110022,15 @@
       "expect": {
        "stale_mark": false,
        "mode": "normal",
-       "openings": "allowed",
-       "exits": "allowed"
+       "orders": {
+        "open": "not_held_by_stale_mark",
+        "increase": "not_held_by_stale_mark",
+        "discretionary_exit": "not_held_by_stale_mark",
+        "risk_exit": "not_held_by_stale_mark",
+        "owner_exit": "not_held_by_stale_mark",
+        "protective": "not_held_by_stale_mark",
+        "kill_switch": "not_held_by_stale_mark"
+       }
       }
      },
      {
@@ -110024,8 +110046,15 @@
       "expect": {
        "stale_mark": true,
        "mode": "normal",
-       "openings": "held",
-       "exits": "allowed"
+       "orders": {
+        "open": "denied_stale_mark",
+        "increase": "denied_stale_mark",
+        "discretionary_exit": "not_held_by_stale_mark",
+        "risk_exit": "not_held_by_stale_mark",
+        "owner_exit": "not_held_by_stale_mark",
+        "protective": "not_held_by_stale_mark",
+        "kill_switch": "not_held_by_stale_mark"
+       }
       }
      },
      {
@@ -110041,8 +110070,15 @@
       "expect": {
        "stale_mark": true,
        "mode": "normal",
-       "openings": "held",
-       "exits": "allowed"
+       "orders": {
+        "open": "denied_stale_mark",
+        "increase": "denied_stale_mark",
+        "discretionary_exit": "not_held_by_stale_mark",
+        "risk_exit": "not_held_by_stale_mark",
+        "owner_exit": "not_held_by_stale_mark",
+        "protective": "not_held_by_stale_mark",
+        "kill_switch": "not_held_by_stale_mark"
+       }
       }
      },
      {
@@ -110058,8 +110094,125 @@
       "expect": {
        "stale_mark": false,
        "mode": "normal",
-       "openings": "allowed",
-       "exits": "allowed"
+       "orders": {
+        "open": "not_held_by_stale_mark",
+        "increase": "not_held_by_stale_mark",
+        "discretionary_exit": "not_held_by_stale_mark",
+        "risk_exit": "not_held_by_stale_mark",
+        "owner_exit": "not_held_by_stale_mark",
+        "protective": "not_held_by_stale_mark",
+        "kill_switch": "not_held_by_stale_mark"
+       }
+      }
+     }
+    ]
+   },
+   {
+    "name": "equity_not_sane_in_the_regular_session",
+    "clause": "§5.2: a regular-session mark that is not sane restricts at once and restarts nothing; a sane one clears",
+    "asset_class": "us_equity",
+    "calendar": "crates/mandate-time/data/us-equities.calendar",
+    "mark_max_age_s": 60,
+    "opened_at": "2026-10-19T14:29:00.000000000Z",
+    "steps": [
+     {
+      "draft": {
+       "base_draft": "mark_v2",
+       "changes": [
+        {
+         "path": "payload.risk_clock",
+         "value": "2026-10-19T14:30:00.000000000Z"
+        }
+       ]
+      },
+      "expect": {
+       "stale_mark": false,
+       "mode": "normal",
+       "orders": {
+        "open": "not_held_by_stale_mark",
+        "increase": "not_held_by_stale_mark",
+        "discretionary_exit": "not_held_by_stale_mark",
+        "risk_exit": "not_held_by_stale_mark",
+        "owner_exit": "not_held_by_stale_mark",
+        "protective": "not_held_by_stale_mark",
+        "kill_switch": "not_held_by_stale_mark"
+       }
+      }
+     },
+     {
+      "draft": {
+       "base_draft": "mark_v2",
+       "changes": [
+        {
+         "path": "payload.risk_clock",
+         "value": "2026-10-19T14:30:20.000000000Z"
+        },
+        {
+         "path": "payload.sane",
+         "value": false
+        }
+       ]
+      },
+      "expect": {
+       "stale_mark": true,
+       "mode": "normal",
+       "orders": {
+        "open": "denied_stale_mark",
+        "increase": "denied_stale_mark",
+        "discretionary_exit": "not_held_by_stale_mark",
+        "risk_exit": "not_held_by_stale_mark",
+        "owner_exit": "not_held_by_stale_mark",
+        "protective": "not_held_by_stale_mark",
+        "kill_switch": "not_held_by_stale_mark"
+       }
+      }
+     },
+     {
+      "draft": {
+       "base_draft": "mark_v1",
+       "changes": [
+        {
+         "path": "payload.risk_clock",
+         "value": "2026-10-19T14:30:50.000000000Z"
+        }
+       ]
+      },
+      "expect": {
+       "stale_mark": true,
+       "mode": "normal",
+       "orders": {
+        "open": "denied_stale_mark",
+        "increase": "denied_stale_mark",
+        "discretionary_exit": "not_held_by_stale_mark",
+        "risk_exit": "not_held_by_stale_mark",
+        "owner_exit": "not_held_by_stale_mark",
+        "protective": "not_held_by_stale_mark",
+        "kill_switch": "not_held_by_stale_mark"
+       }
+      }
+     },
+     {
+      "draft": {
+       "base_draft": "mark_v2",
+       "changes": [
+        {
+         "path": "payload.risk_clock",
+         "value": "2026-10-19T14:31:00.000000000Z"
+        }
+       ]
+      },
+      "expect": {
+       "stale_mark": false,
+       "mode": "normal",
+       "orders": {
+        "open": "not_held_by_stale_mark",
+        "increase": "not_held_by_stale_mark",
+        "discretionary_exit": "not_held_by_stale_mark",
+        "risk_exit": "not_held_by_stale_mark",
+        "owner_exit": "not_held_by_stale_mark",
+        "protective": "not_held_by_stale_mark",
+        "kill_switch": "not_held_by_stale_mark"
+       }
       }
      }
     ]
@@ -110068,6 +110221,7 @@
     "name": "equity_only_v1_across_the_close",
     "clause": "DEC-2305 item 3: only v1 marks since opening; an equity's age counts regular-session seconds only",
     "asset_class": "us_equity",
+    "calendar": "crates/mandate-time/data/us-equities.calendar",
     "mark_max_age_s": 120,
     "opened_at": "2026-10-19T19:59:00.000000000Z",
     "steps": [
@@ -110084,8 +110238,15 @@
       "expect": {
        "stale_mark": false,
        "mode": "normal",
-       "openings": "allowed",
-       "exits": "allowed"
+       "orders": {
+        "open": "not_held_by_stale_mark",
+        "increase": "not_held_by_stale_mark",
+        "discretionary_exit": "not_held_by_stale_mark",
+        "risk_exit": "not_held_by_stale_mark",
+        "owner_exit": "not_held_by_stale_mark",
+        "protective": "not_held_by_stale_mark",
+        "kill_switch": "not_held_by_stale_mark"
+       }
       }
      },
      {
@@ -110105,8 +110266,15 @@
       "expect": {
        "stale_mark": false,
        "mode": "normal",
-       "openings": "allowed",
-       "exits": "allowed"
+       "orders": {
+        "open": "not_held_by_stale_mark",
+        "increase": "not_held_by_stale_mark",
+        "discretionary_exit": "not_held_by_stale_mark",
+        "risk_exit": "not_held_by_stale_mark",
+        "owner_exit": "not_held_by_stale_mark",
+        "protective": "not_held_by_stale_mark",
+        "kill_switch": "not_held_by_stale_mark"
+       }
       }
      },
      {
@@ -110122,8 +110290,15 @@
       "expect": {
        "stale_mark": false,
        "mode": "normal",
-       "openings": "allowed",
-       "exits": "allowed"
+       "orders": {
+        "open": "not_held_by_stale_mark",
+        "increase": "not_held_by_stale_mark",
+        "discretionary_exit": "not_held_by_stale_mark",
+        "risk_exit": "not_held_by_stale_mark",
+        "owner_exit": "not_held_by_stale_mark",
+        "protective": "not_held_by_stale_mark",
+        "kill_switch": "not_held_by_stale_mark"
+       }
       }
      },
      {
@@ -110139,8 +110314,15 @@
       "expect": {
        "stale_mark": false,
        "mode": "normal",
-       "openings": "allowed",
-       "exits": "allowed"
+       "orders": {
+        "open": "not_held_by_stale_mark",
+        "increase": "not_held_by_stale_mark",
+        "discretionary_exit": "not_held_by_stale_mark",
+        "risk_exit": "not_held_by_stale_mark",
+        "owner_exit": "not_held_by_stale_mark",
+        "protective": "not_held_by_stale_mark",
+        "kill_switch": "not_held_by_stale_mark"
+       }
       }
      },
      {
@@ -110156,8 +110338,385 @@
       "expect": {
        "stale_mark": true,
        "mode": "normal",
-       "openings": "held",
-       "exits": "allowed"
+       "orders": {
+        "open": "denied_stale_mark",
+        "increase": "denied_stale_mark",
+        "discretionary_exit": "not_held_by_stale_mark",
+        "risk_exit": "not_held_by_stale_mark",
+        "owner_exit": "not_held_by_stale_mark",
+        "protective": "not_held_by_stale_mark",
+        "kill_switch": "not_held_by_stale_mark"
+       }
+      }
+     }
+    ]
+   },
+   {
+    "name": "equity_friday_to_monday",
+    "clause": "the calendar: a weekend counts no regular seconds; a sane after-hours v2 mark restarts nothing",
+    "asset_class": "us_equity",
+    "calendar": "crates/mandate-time/data/us-equities.calendar",
+    "mark_max_age_s": 120,
+    "opened_at": "2026-10-23T19:59:00.000000000Z",
+    "steps": [
+     {
+      "draft": {
+       "base_draft": "mark_v1",
+       "changes": [
+        {
+         "path": "payload.risk_clock",
+         "value": "2026-10-23T19:59:30.000000000Z"
+        }
+       ]
+      },
+      "expect": {
+       "stale_mark": false,
+       "mode": "normal",
+       "orders": {
+        "open": "not_held_by_stale_mark",
+        "increase": "not_held_by_stale_mark",
+        "discretionary_exit": "not_held_by_stale_mark",
+        "risk_exit": "not_held_by_stale_mark",
+        "owner_exit": "not_held_by_stale_mark",
+        "protective": "not_held_by_stale_mark",
+        "kill_switch": "not_held_by_stale_mark"
+       }
+      }
+     },
+     {
+      "draft": {
+       "base_draft": "mark_v2",
+       "changes": [
+        {
+         "path": "payload.risk_clock",
+         "value": "2026-10-23T20:30:00.000000000Z"
+        },
+        {
+         "path": "payload.session",
+         "value": "after_hours"
+        }
+       ]
+      },
+      "expect": {
+       "stale_mark": false,
+       "mode": "normal",
+       "orders": {
+        "open": "not_held_by_stale_mark",
+        "increase": "not_held_by_stale_mark",
+        "discretionary_exit": "not_held_by_stale_mark",
+        "risk_exit": "not_held_by_stale_mark",
+        "owner_exit": "not_held_by_stale_mark",
+        "protective": "not_held_by_stale_mark",
+        "kill_switch": "not_held_by_stale_mark"
+       }
+      }
+     },
+     {
+      "draft": {
+       "base_draft": "mark_v1",
+       "changes": [
+        {
+         "path": "payload.risk_clock",
+         "value": "2026-10-24T15:00:00.000000000Z"
+        }
+       ]
+      },
+      "expect": {
+       "stale_mark": false,
+       "mode": "normal",
+       "orders": {
+        "open": "not_held_by_stale_mark",
+        "increase": "not_held_by_stale_mark",
+        "discretionary_exit": "not_held_by_stale_mark",
+        "risk_exit": "not_held_by_stale_mark",
+        "owner_exit": "not_held_by_stale_mark",
+        "protective": "not_held_by_stale_mark",
+        "kill_switch": "not_held_by_stale_mark"
+       }
+      }
+     },
+     {
+      "draft": {
+       "base_draft": "mark_v1",
+       "changes": [
+        {
+         "path": "payload.risk_clock",
+         "value": "2026-10-25T15:00:00.000000000Z"
+        }
+       ]
+      },
+      "expect": {
+       "stale_mark": false,
+       "mode": "normal",
+       "orders": {
+        "open": "not_held_by_stale_mark",
+        "increase": "not_held_by_stale_mark",
+        "discretionary_exit": "not_held_by_stale_mark",
+        "risk_exit": "not_held_by_stale_mark",
+        "owner_exit": "not_held_by_stale_mark",
+        "protective": "not_held_by_stale_mark",
+        "kill_switch": "not_held_by_stale_mark"
+       }
+      }
+     },
+     {
+      "draft": {
+       "base_draft": "mark_v1",
+       "changes": [
+        {
+         "path": "payload.risk_clock",
+         "value": "2026-10-26T13:30:59.000000000Z"
+        }
+       ]
+      },
+      "expect": {
+       "stale_mark": false,
+       "mode": "normal",
+       "orders": {
+        "open": "not_held_by_stale_mark",
+        "increase": "not_held_by_stale_mark",
+        "discretionary_exit": "not_held_by_stale_mark",
+        "risk_exit": "not_held_by_stale_mark",
+        "owner_exit": "not_held_by_stale_mark",
+        "protective": "not_held_by_stale_mark",
+        "kill_switch": "not_held_by_stale_mark"
+       }
+      }
+     },
+     {
+      "draft": {
+       "base_draft": "mark_v1",
+       "changes": [
+        {
+         "path": "payload.risk_clock",
+         "value": "2026-10-26T13:31:00.000000000Z"
+        }
+       ]
+      },
+      "expect": {
+       "stale_mark": true,
+       "mode": "normal",
+       "orders": {
+        "open": "denied_stale_mark",
+        "increase": "denied_stale_mark",
+        "discretionary_exit": "not_held_by_stale_mark",
+        "risk_exit": "not_held_by_stale_mark",
+        "owner_exit": "not_held_by_stale_mark",
+        "protective": "not_held_by_stale_mark",
+        "kill_switch": "not_held_by_stale_mark"
+       }
+      }
+     }
+    ]
+   },
+   {
+    "name": "equity_across_thanksgiving",
+    "clause": "the calendar: `closed 2026-11-26 Thanksgiving Day` counts no regular seconds",
+    "asset_class": "us_equity",
+    "calendar": "crates/mandate-time/data/us-equities.calendar",
+    "mark_max_age_s": 120,
+    "opened_at": "2026-11-25T20:59:00.000000000Z",
+    "steps": [
+     {
+      "draft": {
+       "base_draft": "mark_v1",
+       "changes": [
+        {
+         "path": "payload.risk_clock",
+         "value": "2026-11-25T20:59:30.000000000Z"
+        }
+       ]
+      },
+      "expect": {
+       "stale_mark": false,
+       "mode": "normal",
+       "orders": {
+        "open": "not_held_by_stale_mark",
+        "increase": "not_held_by_stale_mark",
+        "discretionary_exit": "not_held_by_stale_mark",
+        "risk_exit": "not_held_by_stale_mark",
+        "owner_exit": "not_held_by_stale_mark",
+        "protective": "not_held_by_stale_mark",
+        "kill_switch": "not_held_by_stale_mark"
+       }
+      }
+     },
+     {
+      "draft": {
+       "base_draft": "mark_v1",
+       "changes": [
+        {
+         "path": "payload.risk_clock",
+         "value": "2026-11-26T16:00:00.000000000Z"
+        }
+       ]
+      },
+      "expect": {
+       "stale_mark": false,
+       "mode": "normal",
+       "orders": {
+        "open": "not_held_by_stale_mark",
+        "increase": "not_held_by_stale_mark",
+        "discretionary_exit": "not_held_by_stale_mark",
+        "risk_exit": "not_held_by_stale_mark",
+        "owner_exit": "not_held_by_stale_mark",
+        "protective": "not_held_by_stale_mark",
+        "kill_switch": "not_held_by_stale_mark"
+       }
+      }
+     },
+     {
+      "draft": {
+       "base_draft": "mark_v1",
+       "changes": [
+        {
+         "path": "payload.risk_clock",
+         "value": "2026-11-27T14:30:59.000000000Z"
+        }
+       ]
+      },
+      "expect": {
+       "stale_mark": false,
+       "mode": "normal",
+       "orders": {
+        "open": "not_held_by_stale_mark",
+        "increase": "not_held_by_stale_mark",
+        "discretionary_exit": "not_held_by_stale_mark",
+        "risk_exit": "not_held_by_stale_mark",
+        "owner_exit": "not_held_by_stale_mark",
+        "protective": "not_held_by_stale_mark",
+        "kill_switch": "not_held_by_stale_mark"
+       }
+      }
+     },
+     {
+      "draft": {
+       "base_draft": "mark_v1",
+       "changes": [
+        {
+         "path": "payload.risk_clock",
+         "value": "2026-11-27T14:31:00.000000000Z"
+        }
+       ]
+      },
+      "expect": {
+       "stale_mark": true,
+       "mode": "normal",
+       "orders": {
+        "open": "denied_stale_mark",
+        "increase": "denied_stale_mark",
+        "discretionary_exit": "not_held_by_stale_mark",
+        "risk_exit": "not_held_by_stale_mark",
+        "owner_exit": "not_held_by_stale_mark",
+        "protective": "not_held_by_stale_mark",
+        "kill_switch": "not_held_by_stale_mark"
+       }
+      }
+     }
+    ]
+   },
+   {
+    "name": "equity_across_an_early_close",
+    "clause": "the calendar: `early_close 2026-11-27 13:00` ends the regular session at 13:00 New York time",
+    "asset_class": "us_equity",
+    "calendar": "crates/mandate-time/data/us-equities.calendar",
+    "mark_max_age_s": 120,
+    "opened_at": "2026-11-27T17:59:00.000000000Z",
+    "steps": [
+     {
+      "draft": {
+       "base_draft": "mark_v1",
+       "changes": [
+        {
+         "path": "payload.risk_clock",
+         "value": "2026-11-27T17:59:30.000000000Z"
+        }
+       ]
+      },
+      "expect": {
+       "stale_mark": false,
+       "mode": "normal",
+       "orders": {
+        "open": "not_held_by_stale_mark",
+        "increase": "not_held_by_stale_mark",
+        "discretionary_exit": "not_held_by_stale_mark",
+        "risk_exit": "not_held_by_stale_mark",
+        "owner_exit": "not_held_by_stale_mark",
+        "protective": "not_held_by_stale_mark",
+        "kill_switch": "not_held_by_stale_mark"
+       }
+      }
+     },
+     {
+      "draft": {
+       "base_draft": "mark_v1",
+       "changes": [
+        {
+         "path": "payload.risk_clock",
+         "value": "2026-11-27T18:30:00.000000000Z"
+        }
+       ]
+      },
+      "expect": {
+       "stale_mark": false,
+       "mode": "normal",
+       "orders": {
+        "open": "not_held_by_stale_mark",
+        "increase": "not_held_by_stale_mark",
+        "discretionary_exit": "not_held_by_stale_mark",
+        "risk_exit": "not_held_by_stale_mark",
+        "owner_exit": "not_held_by_stale_mark",
+        "protective": "not_held_by_stale_mark",
+        "kill_switch": "not_held_by_stale_mark"
+       }
+      }
+     },
+     {
+      "draft": {
+       "base_draft": "mark_v1",
+       "changes": [
+        {
+         "path": "payload.risk_clock",
+         "value": "2026-11-30T14:30:59.000000000Z"
+        }
+       ]
+      },
+      "expect": {
+       "stale_mark": false,
+       "mode": "normal",
+       "orders": {
+        "open": "not_held_by_stale_mark",
+        "increase": "not_held_by_stale_mark",
+        "discretionary_exit": "not_held_by_stale_mark",
+        "risk_exit": "not_held_by_stale_mark",
+        "owner_exit": "not_held_by_stale_mark",
+        "protective": "not_held_by_stale_mark",
+        "kill_switch": "not_held_by_stale_mark"
+       }
+      }
+     },
+     {
+      "draft": {
+       "base_draft": "mark_v1",
+       "changes": [
+        {
+         "path": "payload.risk_clock",
+         "value": "2026-11-30T14:31:00.000000000Z"
+        }
+       ]
+      },
+      "expect": {
+       "stale_mark": true,
+       "mode": "normal",
+       "orders": {
+        "open": "denied_stale_mark",
+        "increase": "denied_stale_mark",
+        "discretionary_exit": "not_held_by_stale_mark",
+        "risk_exit": "not_held_by_stale_mark",
+        "owner_exit": "not_held_by_stale_mark",
+        "protective": "not_held_by_stale_mark",
+        "kill_switch": "not_held_by_stale_mark"
+       }
       }
      }
     ]
@@ -110166,6 +110725,7 @@
     "name": "crypto_only_v1",
     "clause": "DEC-2305 item 3: crypto's age counts all time, a weekend included",
     "asset_class": "crypto",
+    "calendar": null,
     "mark_max_age_s": 60,
     "opened_at": "2026-10-24T00:00:00.000000000Z",
     "steps": [
@@ -110186,8 +110746,15 @@
       "expect": {
        "stale_mark": false,
        "mode": "normal",
-       "openings": "allowed",
-       "exits": "allowed"
+       "orders": {
+        "open": "not_held_by_stale_mark",
+        "increase": "not_held_by_stale_mark",
+        "discretionary_exit": "not_held_by_stale_mark",
+        "risk_exit": "not_held_by_stale_mark",
+        "owner_exit": "not_held_by_stale_mark",
+        "protective": "not_held_by_stale_mark",
+        "kill_switch": "not_held_by_stale_mark"
+       }
       }
      },
      {
@@ -110207,8 +110774,15 @@
       "expect": {
        "stale_mark": true,
        "mode": "normal",
-       "openings": "held",
-       "exits": "allowed"
+       "orders": {
+        "open": "denied_stale_mark",
+        "increase": "denied_stale_mark",
+        "discretionary_exit": "not_held_by_stale_mark",
+        "risk_exit": "not_held_by_stale_mark",
+        "owner_exit": "not_held_by_stale_mark",
+        "protective": "not_held_by_stale_mark",
+        "kill_switch": "not_held_by_stale_mark"
+       }
       }
      },
      {
@@ -110232,8 +110806,15 @@
       "expect": {
        "stale_mark": false,
        "mode": "normal",
-       "openings": "allowed",
-       "exits": "allowed"
+       "orders": {
+        "open": "not_held_by_stale_mark",
+        "increase": "not_held_by_stale_mark",
+        "discretionary_exit": "not_held_by_stale_mark",
+        "risk_exit": "not_held_by_stale_mark",
+        "owner_exit": "not_held_by_stale_mark",
+        "protective": "not_held_by_stale_mark",
+        "kill_switch": "not_held_by_stale_mark"
+       }
       }
      }
     ]

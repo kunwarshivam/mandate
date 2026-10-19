@@ -14,7 +14,8 @@ caught.
 from __future__ import annotations
 
 import copy
-from datetime import UTC, datetime, timedelta
+import functools
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
 from zoneinfo import ZoneInfo
 
@@ -23,6 +24,7 @@ from control import (
     ACCOUNT_STREAM_REF,
     EXECUTOR,
     MARK_SESSIONS,
+    ROOT,
     WORKSPACE,
     check_of,
     draft_for,
@@ -213,22 +215,54 @@ def readings(section: dict) -> list[dict]:
 
 # DEC-2305 item 3 over a sequence: a held instrument whose only marks after its last sane mark are
 # version 1 reaches `stale_mark` once its age reaches `mark_max_age_s` (mandate spec §5.2: age >=
-# limit, counted in regular-session seconds for an equity, all time for crypto, and credited before
-# the input is applied). Once stale, openings and increases in it are denied `stale_mark`; exits,
-# protective orders, and kill switches are never held by it, and the agent's mode does not change
-# (`AGENTS.md` rule 13; §5.2: a stale mark never triggers a flatten). The expectations below are
-# written by hand from those sentences; `fold_staleness` is the reference reading they check.
+# limit, credited before the input is applied). An equity's age counts regular-session seconds of
+# the trading calendar (trading spec §2.2, §4.3), which the risk fold's `SessionClock` supplies:
+# `mandate-time`'s committed US-equities data, which `regular_seconds` reads from the same file, so
+# its weekends, holidays, and early closes cannot drift from the Rust calendar's. Crypto counts all
+# time. A sane version-2 mark restarts the count only in a counted session (an equity's regular
+# session); a mark that is not sane restricts at once and restarts nothing. Once stale, openings and
+# increases in the instrument are denied `stale_mark`; no exit, protective order, or kill switch is
+# held by it, and the agent's mode does not change (`AGENTS.md` rule 13; §5.2: a stale mark never
+# triggers a flatten). The expectations below are literals written from those sentences;
+# `fold_staleness` is the reference reading they check.
 NY = ZoneInfo("America/New_York")
+CALENDAR = ROOT / "crates/mandate-time/data/us-equities.calendar"
 OPENINGS = ("open", "increase")
 EXITS = ("discretionary_exit", "risk_exit", "owner_exit", "protective", "kill_switch")
-FRESH = {"stale_mark": False, "mode": "normal", "openings": "allowed", "exits": "allowed"}
-STALE = {"stale_mark": True, "mode": "normal", "openings": "held", "exits": "allowed"}
+DENIED = "denied_stale_mark"
+NOT_HELD = "not_held_by_stale_mark"
+FRESH = {
+    "stale_mark": False,
+    "mode": "normal",
+    "orders": {
+        "open": NOT_HELD,
+        "increase": NOT_HELD,
+        "discretionary_exit": NOT_HELD,
+        "risk_exit": NOT_HELD,
+        "owner_exit": NOT_HELD,
+        "protective": NOT_HELD,
+        "kill_switch": NOT_HELD,
+    },
+}
+STALE = {
+    "stale_mark": True,
+    "mode": "normal",
+    "orders": {
+        "open": DENIED,
+        "increase": DENIED,
+        "discretionary_exit": NOT_HELD,
+        "risk_exit": NOT_HELD,
+        "owner_exit": NOT_HELD,
+        "protective": NOT_HELD,
+        "kill_switch": NOT_HELD,
+    },
+}
 
 
 def step(base: str, risk_clock: str, expect: dict, *changes) -> dict:
     return {
         "draft": {"base_draft": base, "changes": [change("payload.risk_clock", risk_clock), *changes]},
-        "expect": dict(expect),
+        "expect": copy.deepcopy(expect),
     }
 
 
@@ -236,15 +270,28 @@ def crypto(*changes) -> tuple:
     return (change("payload.instrument_id", "BTC-USD"), *changes)
 
 
+def equity(name: str, clause: str, limit: int, opened_at: str, steps: list[dict]) -> dict:
+    return {
+        "name": name,
+        "clause": clause,
+        "asset_class": "us_equity",
+        "calendar": "crates/mandate-time/data/us-equities.calendar",
+        "mark_max_age_s": limit,
+        "opened_at": opened_at,
+        "steps": steps,
+    }
+
+
 def staleness_sequences() -> list[dict]:
+    after_hours = change("payload.session", "after_hours")
+    not_sane = change("payload.sane", False)
     return [
-        {
-            "name": "equity_v1_after_sane",
-            "clause": "DEC-2305 item 3: v1 marks after a sane v2 mark never restart the count; stale at the limit, not before",
-            "asset_class": "us_equity",
-            "mark_max_age_s": 60,
-            "opened_at": "2026-10-19T14:29:00.000000000Z",
-            "steps": [
+        equity(
+            "equity_v1_after_sane",
+            "DEC-2305 item 3: v1 marks after a sane v2 mark never restart the count; stale at the limit, not before",
+            60,
+            "2026-10-19T14:29:00.000000000Z",
+            [
                 step(V2, "2026-10-19T14:30:00.000000000Z", FRESH),
                 step(V1, "2026-10-19T14:30:30.000000000Z", FRESH),
                 step(V1, "2026-10-19T14:30:59.000000000Z", FRESH),
@@ -252,25 +299,75 @@ def staleness_sequences() -> list[dict]:
                 step(V1, "2026-10-19T14:31:30.000000000Z", STALE),
                 step(V2, "2026-10-19T14:31:40.000000000Z", FRESH),
             ],
-        },
-        {
-            "name": "equity_only_v1_across_the_close",
-            "clause": "DEC-2305 item 3: only v1 marks since opening; an equity's age counts regular-session seconds only",
-            "asset_class": "us_equity",
-            "mark_max_age_s": 120,
-            "opened_at": "2026-10-19T19:59:00.000000000Z",
-            "steps": [
+        ),
+        equity(
+            "equity_not_sane_in_the_regular_session",
+            "§5.2: a regular-session mark that is not sane restricts at once and restarts nothing; a sane one clears",
+            60,
+            "2026-10-19T14:29:00.000000000Z",
+            [
+                step(V2, "2026-10-19T14:30:00.000000000Z", FRESH),
+                step(V2, "2026-10-19T14:30:20.000000000Z", STALE, not_sane),
+                step(V1, "2026-10-19T14:30:50.000000000Z", STALE),
+                step(V2, "2026-10-19T14:31:00.000000000Z", FRESH),
+            ],
+        ),
+        equity(
+            "equity_only_v1_across_the_close",
+            "DEC-2305 item 3: only v1 marks since opening; an equity's age counts regular-session seconds only",
+            120,
+            "2026-10-19T19:59:00.000000000Z",
+            [
                 step(V1, "2026-10-19T19:59:30.000000000Z", FRESH),
                 step(V1, "2026-10-19T20:30:00.000000000Z", FRESH, change("payload.price", "187.10")),
                 step(V1, "2026-10-20T13:30:00.000000000Z", FRESH),
                 step(V1, "2026-10-20T13:30:59.000000000Z", FRESH),
                 step(V1, "2026-10-20T13:31:00.000000000Z", STALE),
             ],
-        },
+        ),
+        equity(
+            "equity_friday_to_monday",
+            "the calendar: a weekend counts no regular seconds; a sane after-hours v2 mark restarts nothing",
+            120,
+            "2026-10-23T19:59:00.000000000Z",
+            [
+                step(V1, "2026-10-23T19:59:30.000000000Z", FRESH),
+                step(V2, "2026-10-23T20:30:00.000000000Z", FRESH, after_hours),
+                step(V1, "2026-10-24T15:00:00.000000000Z", FRESH),
+                step(V1, "2026-10-25T15:00:00.000000000Z", FRESH),
+                step(V1, "2026-10-26T13:30:59.000000000Z", FRESH),
+                step(V1, "2026-10-26T13:31:00.000000000Z", STALE),
+            ],
+        ),
+        equity(
+            "equity_across_thanksgiving",
+            "the calendar: `closed 2026-11-26 Thanksgiving Day` counts no regular seconds",
+            120,
+            "2026-11-25T20:59:00.000000000Z",
+            [
+                step(V1, "2026-11-25T20:59:30.000000000Z", FRESH),
+                step(V1, "2026-11-26T16:00:00.000000000Z", FRESH),
+                step(V1, "2026-11-27T14:30:59.000000000Z", FRESH),
+                step(V1, "2026-11-27T14:31:00.000000000Z", STALE),
+            ],
+        ),
+        equity(
+            "equity_across_an_early_close",
+            "the calendar: `early_close 2026-11-27 13:00` ends the regular session at 13:00 New York time",
+            120,
+            "2026-11-27T17:59:00.000000000Z",
+            [
+                step(V1, "2026-11-27T17:59:30.000000000Z", FRESH),
+                step(V1, "2026-11-27T18:30:00.000000000Z", FRESH),
+                step(V1, "2026-11-30T14:30:59.000000000Z", FRESH),
+                step(V1, "2026-11-30T14:31:00.000000000Z", STALE),
+            ],
+        ),
         {
             "name": "crypto_only_v1",
             "clause": "DEC-2305 item 3: crypto's age counts all time, a weekend included",
             "asset_class": "crypto",
+            "calendar": None,
             "mark_max_age_s": 60,
             "opened_at": "2026-10-24T00:00:00.000000000Z",
             "steps": [
@@ -286,15 +383,47 @@ def instant(text: str) -> datetime:
     return datetime.strptime(text[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=UTC)
 
 
-def regular_seconds(t0: datetime, t1: datetime) -> int:
-    """Whole seconds of the regular session (09:30 to 16:00 New York time, weekdays) in [t0, t1)."""
+def wall(text: str) -> time:
+    hour, minute = text.split(":")
+    return time(int(hour), int(minute))
+
+
+@functools.cache
+def exchange_calendar() -> dict:
+    """`mandate-time`'s US-equities calendar, read as its header describes: the valid range, the
+    regular open and close of a full day, the closed weekdays, and each early close's regular close."""
+    out: dict = {"closed": set(), "early_close": {}}
+    for line in CALENDAR.read_text(encoding="utf-8").split("\n"):
+        if not line or line.startswith("#"):
+            continue
+        record, *fields = line.split(" ")
+        if record == "valid":
+            out["valid"] = (date.fromisoformat(fields[0]), date.fromisoformat(fields[1]))
+        elif record == "hours":
+            out["open"], out["close"] = wall(fields[1]), wall(fields[2])
+        elif record == "closed":
+            out["closed"].add(date.fromisoformat(fields[0]))
+        elif record == "early_close":
+            out["early_close"][date.fromisoformat(fields[0])] = wall(fields[1])
+        else:
+            raise ValueError(f"{CALENDAR}: unknown record {record}")
+    return out
+
+
+def regular_seconds(t0: datetime, t1: datetime, skip: frozenset[str] = frozenset()) -> int:
+    """Whole seconds of the calendar's regular sessions in [t0, t1)."""
+    cal = exchange_calendar()
     total = 0
     day = t0.astimezone(NY).date()
     while day <= t1.astimezone(NY).date():
-        if day.weekday() < 5:
-            opens = datetime(day.year, day.month, day.day, 9, 30, tzinfo=NY)
-            closes = datetime(day.year, day.month, day.day, 16, 0, tzinfo=NY)
-            lo, hi = max(opens, t0), min(closes, t1)
+        if not cal["valid"][0] <= day <= cal["valid"][1]:
+            raise ValueError(f"{day} is outside {CALENDAR}'s valid range")
+        weekend = day.weekday() >= 5 and "fold.weekend_counted" not in skip
+        holiday = day in cal["closed"] and "fold.holiday_counted" not in skip
+        if not (weekend or holiday):
+            closes = cal["close"] if "fold.early_close_ignored" in skip else cal["early_close"].get(day, cal["close"])
+            lo = max(datetime.combine(day, cal["open"], tzinfo=NY), t0)
+            hi = min(datetime.combine(day, closes, tzinfo=NY), t1)
             if hi > lo:
                 total += int((hi - lo).total_seconds())
         day += timedelta(days=1)
@@ -302,13 +431,15 @@ def regular_seconds(t0: datetime, t1: datetime) -> int:
 
 
 def order_outcomes(stale: bool, skip: frozenset[str]) -> dict:
-    held_exits = stale and "fold.stale_holds_exits" in skip
-    held_openings = stale and "fold.stale_allows_openings" not in skip
-    return {
-        "mode": "paused" if held_exits else "normal",
-        "openings": "held" if held_openings else "allowed",
-        "exits": "held" if held_exits else "allowed",
-    }
+    """What `stale_mark` does to each order path: it denies openings and increases, and holds nothing else."""
+    orders = {}
+    for purpose in OPENINGS:
+        orders[purpose] = DENIED if stale and "fold.stale_allows_openings" not in skip else NOT_HELD
+    for purpose in EXITS:
+        held = stale and ("fold.stale_holds_exits" in skip or f"fold.stale_holds_{purpose}" in skip)
+        orders[purpose] = DENIED if held else NOT_HELD
+    paused = stale and "fold.stale_pauses" in skip
+    return {"mode": "paused" if paused else "normal", "orders": orders}
 
 
 def fold_staleness(section: dict, sequence: dict, skip: frozenset[str] = frozenset()) -> list[dict]:
@@ -321,7 +452,7 @@ def fold_staleness(section: dict, sequence: dict, skip: frozenset[str] = frozens
         draft = draft_for(section, item["draft"])
         p = draft["payload"]
         now = instant(p["risk_clock"])
-        age += int((now - at).total_seconds()) if crypto_clock else regular_seconds(at, now)
+        age += int((now - at).total_seconds()) if crypto_clock else regular_seconds(at, now, skip)
         at = now
         reached = age > limit if "fold.strict_boundary" in skip else age >= limit
         if reached:
@@ -332,9 +463,13 @@ def fold_staleness(section: dict, sequence: dict, skip: frozenset[str] = frozens
                 age = 0
             if "fold.v1_as_not_sane" in skip:
                 stale = True
-        counted = sequence["asset_class"] == "crypto" or reading.get("session") == "regular"
+        counted = (
+            sequence["asset_class"] == "crypto"
+            or reading.get("session") == "regular"
+            or "fold.after_hours_restarts" in skip
+        )
         if reading["reading"] == "verdict" and counted:
-            if reading["sane"]:
+            if reading["sane"] or "fold.not_sane_restarts" in skip:
                 age, stale = 0, False
             else:
                 stale = True
@@ -454,6 +589,13 @@ READING_MUTANTS = ("reading.v1_as_sane", "reading.always_sane", "reading.bid_whe
 FOLD_MUTANTS = (
     "fold.strict_boundary",
     "fold.equity_all_hours",
+    "fold.weekend_counted",
+    "fold.holiday_counted",
+    "fold.early_close_ignored",
+    "fold.after_hours_restarts",
+    "fold.not_sane_restarts",
+    "fold.stale_pauses",
+    *(f"fold.stale_holds_{purpose}" for purpose in EXITS),
     "fold.v1_restarts_count",
     "fold.v1_as_not_sane",
     "fold.stale_allows_openings",
@@ -503,7 +645,7 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
         (
             "a staleness step expects the instrument fresh at the limit",
             "staleness",
-            mutated(lambda s: s["staleness"][0]["steps"][3].update(expect=dict(FRESH))),
+            mutated(lambda s: s["staleness"][0]["steps"][3].update(expect=copy.deepcopy(FRESH))),
         ),
         (
             "a reading takes version 1's price as a sane bid",
