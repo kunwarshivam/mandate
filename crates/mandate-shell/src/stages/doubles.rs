@@ -796,6 +796,7 @@ impl Sink for ConvertingSink {
                 RuntimeTimeInForce::Ioc => mandate_executor::TimeInForce::Ioc,
             }),
             body,
+            confirmation: None,
         })
     }
 }

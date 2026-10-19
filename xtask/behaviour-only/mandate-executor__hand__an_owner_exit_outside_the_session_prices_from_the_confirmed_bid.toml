@@ -7,5 +7,7 @@ rather than sold in extended hours from the confirmed bid. A loud stub there wou
 step that prices the close: the switch's own step where nothing needs cancelling first, so its
 mode and record would never be journaled (`AGENTS.md` rule 13: the kill switch is always
 available), or the step confirming the protection's cancel, leaving the position unprotected and
-unsold. The session slice deletes this file with the extended-hours path.
+unsold. Since DEC-506 its clock-10 instants read as the regular session, so E7-30's tests PR ticks it
+to pre-market, where it still fails: DEC-260 (13) sends the owner's flatten as a regular-session
+limit. E7-30's core (DEC-2040 item 3, amending DEC-260 (13)) deletes this file with its `#[ignore]`.
 """

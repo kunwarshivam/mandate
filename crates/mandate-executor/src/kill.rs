@@ -268,6 +268,7 @@ pub(crate) fn flatten_closes(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorEr
                         purpose: switch.purpose,
                         protection: None,
                     },
+                    confirmation: None,
                 },
             )?;
         }
@@ -914,6 +915,7 @@ mod tests {
                         take_profit: Some(Price::parse("170")?),
                     }),
                 },
+                confirmation: None,
             }),
             ports,
         )?;
@@ -1277,6 +1279,7 @@ mod tests {
                         purpose: Purpose::DiscretionaryExit,
                         protection: None,
                     },
+                    confirmation: None,
                 }),
                 &ports,
             );

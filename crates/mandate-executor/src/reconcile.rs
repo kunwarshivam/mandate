@@ -887,6 +887,7 @@ pub(crate) mod tests {
                 purpose,
                 protection: None,
             },
+            confirmation: None,
         }))
     }
 
@@ -3045,6 +3046,7 @@ pub(crate) mod tests {
                         take_profit: Some(Price::parse("170")?),
                     }),
                 },
+                confirmation: None,
             }),
             ports,
         )?;
@@ -3333,6 +3335,7 @@ pub(crate) mod tests {
                         take_profit: Some(Price::parse("170")?),
                     }),
                 },
+                confirmation: None,
             }),
             &ports,
         )?;

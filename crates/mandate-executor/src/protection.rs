@@ -147,6 +147,7 @@ pub(crate) fn watchdog(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
                     purpose: Purpose::RiskExit,
                     protection: None,
                 },
+                confirmation: None,
             },
         )?;
     }
@@ -2557,6 +2558,7 @@ fn flatten_unprotected(
                 purpose: Purpose::RiskExit,
                 protection: None,
             },
+            confirmation: None,
         },
     )
 }
@@ -3434,6 +3436,7 @@ mod sequence_tests {
                 purpose,
                 protection: None,
             },
+            confirmation: None,
         }))
     }
 
@@ -4244,6 +4247,7 @@ mod sequence_tests {
                     purpose: Purpose::RiskExit,
                     protection: None,
                 },
+                confirmation: None,
             })
         };
         let sent = |effects: &[Effect]| {
@@ -4290,6 +4294,7 @@ mod sequence_tests {
                 purpose,
                 protection: None,
             },
+            confirmation: None,
         }))
     }
 
@@ -4752,6 +4757,7 @@ mod sequence_tests {
                     purpose,
                     protection: None,
                 },
+                confirmation: None,
             });
             executor.run(at_the_market, &ports)?;
             let first = executor.run(cancel_accepted(OCO), &ports)?;
@@ -5684,6 +5690,7 @@ mod sequence_tests {
                 purpose,
                 protection: None,
             },
+            confirmation: None,
         }))
     }
 
@@ -14811,6 +14818,7 @@ mod bracket_tests {
                         take_profit: Some(Price::parse("170")?),
                     }),
                 },
+                confirmation: None,
             }),
             ports,
         )?;
