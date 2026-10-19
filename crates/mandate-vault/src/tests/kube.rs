@@ -45,7 +45,6 @@ fn parsed(manifest: &SecretManifest) -> Value {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn each_platform_identity_has_its_secret_name_written_out() {
     let names: Vec<_> = [
         Identity::Api,
@@ -72,7 +71,6 @@ fn each_platform_identity_has_its_secret_name_written_out() {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn an_executors_name_writes_its_connection_in_hex() {
     assert_eq!(
         secret_name(&Identity::Executor(c("c1"))),
@@ -85,7 +83,6 @@ fn an_executors_name_writes_its_connection_in_hex() {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn connections_that_differ_only_in_case_or_punctuation_get_different_names() {
     let names: Vec<_> = ["ab", "Ab", "a_b", "a-b"]
         .iter()
@@ -103,7 +100,6 @@ fn connections_that_differ_only_in_case_or_punctuation_get_different_names() {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn a_token_exchange_has_no_secret() {
     assert_eq!(
         secret_name(&Identity::TokenExchange(c("c1"))),
@@ -113,7 +109,6 @@ fn a_token_exchange_has_no_secret() {
 
 /// For any connection id the grammar admits, the name is the oracle's, and a valid object name.
 #[test]
-#[ignore = "pending E21-32"]
 fn every_executors_name_is_the_oracles_and_a_valid_object_name() {
     let mut runner = TestRunner::new(ProptestConfig {
         cases: 256,
@@ -133,7 +128,6 @@ fn every_executors_name_is_the_oracles_and_a_valid_object_name() {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn an_executors_manifest_is_written_out_whole() {
     let manifests = kube_secrets(
         "ws-ws1",
@@ -169,7 +163,6 @@ fn an_executors_manifest_is_written_out_whole() {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn manifests_keep_the_credentials_order() {
     let names = kube_secrets(
         "ws-ws1",
@@ -191,7 +184,6 @@ fn manifests_keep_the_credentials_order() {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn a_namespace_that_is_not_a_label_refuses_every_manifest() {
     let one = [credential(Identity::Api, "r", "s")];
     let long = "a".repeat(64);
@@ -213,7 +205,6 @@ fn a_namespace_that_is_not_a_label_refuses_every_manifest() {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn a_token_exchange_or_a_repeated_identity_refuses_every_manifest() {
     let exchange = [
         credential(Identity::Api, "r", "s"),
@@ -233,7 +224,6 @@ fn a_token_exchange_or_a_repeated_identity_refuses_every_manifest() {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn no_manifest_shows_its_secret_id_when_debugged() {
     let manifests = kube_secrets(
         "ws-ws1",
