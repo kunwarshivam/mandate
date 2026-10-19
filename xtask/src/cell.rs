@@ -26,6 +26,7 @@ use crate::admission_drill;
 use crate::{output, sh};
 use web::web_run;
 
+pub mod executor;
 pub mod scenario;
 pub mod web;
 
@@ -169,6 +170,9 @@ pub enum Drill {
     /// archived, and Barman's own tools, reading the store with the archive's key, list the backup
     /// and fetch the segment back (E21-41).
     Archive,
+    /// An agent deployed on a recorded paper connection, and the deployment manager starting that
+    /// account's executor until its `readyz` passes (E21-30, DEC-2035); see [`executor`].
+    Executor,
     /// `mandate vault provision` sets the cell's vault up, then each AppRole logs in from a pod
     /// labelled as the executor and reads only what DEC-977 item 2's table gives it: a runtime
     /// nothing, an executor exactly its own connection's token, the model gateway its key; and
@@ -186,9 +190,10 @@ pub const JOURNAL_DRILLS: [Drill; 2] = [Drill::StandbyDown, Drill::Archive];
 /// the old primary's rejoin; `cargo xtask ci cell-failover` runs it in a job of its own (DEC-464).
 pub const FAILOVER_DRILLS: [Drill; 1] = [Drill::Restart];
 
-/// The kill-switch drill (OPS-4, E21-34), which `cargo xtask ci cell-kill-switch` runs on a cell
-/// of its own so `ci cell` stays within its ten minutes (DEC-464, DEC-2602).
-pub const KILL_SWITCH_DRILLS: [Drill; 2] = [Drill::KillSwitch, Drill::Admission];
+/// The kill-switch drill (OPS-4, E21-34), the admission drill, and the executor drill (E21-30),
+/// which `cargo xtask ci cell-kill-switch` runs on a cell of its own so `ci cell` stays within its
+/// ten minutes (DEC-464, DEC-2602, DEC-2035).
+pub const KILL_SWITCH_DRILLS: [Drill; 3] = [Drill::KillSwitch, Drill::Admission, Drill::Executor];
 
 /// The vault's drill (E21-32, DEC-2022), which `cargo xtask ci cell-kill-switch` runs after the
 /// kill switch's, on that job's cell, so `ci cell` stays within its ten minutes (DEC-464).
@@ -206,6 +211,7 @@ impl Drill {
             Self::Admission => "admission",
             Self::StandbyDown => "standby-down",
             Self::Archive => "archive",
+            Self::Executor => "executor",
             Self::Vault => "vault",
         }
     }
@@ -245,6 +251,10 @@ impl Drill {
                 "the cluster's durability set to `preferred`, so the primary commits alone"
             }
             Self::Archive => "the archive pointed at another bucket of the same store",
+            Self::Executor => {
+                "the connect check skipped, so the connection is never recorded and the agent \
+                 deploys at version 1"
+            }
             Self::Vault => {
                 "the runtime's policy rewritten to read every connection's token through a wildcard"
             }
@@ -266,6 +276,7 @@ impl Drill {
             Self::Admission => "admitted a service account's change to a person's control Job",
             Self::StandbyDown => "committed with the standby fenced",
             Self::Archive => "is not in the archive",
+            Self::Executor => "no executor pod",
             Self::Vault => "wildcard in mandate-runtime",
         }
     }
@@ -1867,6 +1878,7 @@ pub fn drill(drills: &[Drill], seeded: bool) -> Result<()> {
             Drill::Admission => admission_drill::drill(seeded),
             Drill::StandbyDown => standby_down(seeded),
             Drill::Archive => archive(seeded),
+            Drill::Executor => executor::drill(seeded),
             Drill::Vault => vault_drill(seeded),
         };
         if seeded && matches!(d, Drill::Boot | Drill::Journal | Drill::Egress) {
