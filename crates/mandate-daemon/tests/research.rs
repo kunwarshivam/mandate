@@ -4,10 +4,13 @@
 
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
 use std::rc::Rc;
 use std::time::Duration;
 
+use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Digest, Key, Object, Value, parse};
+use mandate_daemon::cell::{self, CellDeployment, CellResearch, opt_in};
 use mandate_daemon::recorded::Bundle;
 use mandate_daemon::worker::{RecordedWorker, WorkerFor};
 use mandate_daemon::{
@@ -16,7 +19,7 @@ use mandate_daemon::{
 };
 use mandate_gateway::money::{Usage, Usd6};
 use mandate_gateway::{CallRecord, Outcome as CallOutcome, Purpose};
-use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId};
+use mandate_journal::{AppendOutcome, ArtifactStore, Environment, StoredEvent, StreamId};
 use mandate_num::Usd;
 use mandate_process::{Exit, State};
 use mandate_research::{
@@ -32,6 +35,7 @@ use mandate_runtime::{
     ResearchInput, ResearchRequest, RiskClock, RuntimeState, Seq, SignalInputs, TurnRequest,
     WorkspaceId, WriterEpoch,
 };
+use mandate_spec::document::Mandate;
 use mandate_store::{MemoryStore, Store};
 use mandate_time::UtcNanos;
 
@@ -1155,4 +1159,132 @@ fn the_recorded_worker_s_answers_never_reach_the_order_path() {
             .collect();
         assert!(orders.is_empty(), "{stream}: {orders:?}");
     }
+}
+
+/// The cell's demo research bundle, which every runtime pod is handed when the cell sets
+/// `runtime.research` (DEC-2246 item 4).
+const DEMO_BUNDLE: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../deploy/cell/demo/research"
+);
+/// The demo's own agent's mandate, as its owner confirms it (`deploy/cell/demo/mandate.json`).
+const DEMO_MANDATE: &str = include_str!("../../../deploy/cell/demo/mandate.json");
+
+/// The demo's mandate, edited by `edit`, stored in an artifact store of its own for test `name`
+/// and deployed for the agent on the rig's control stream; and the research the cell's opt-in
+/// wires over the demo bundle for that deployment.
+fn opted_in(rig: &Rig, name: &str, edit: impl FnOnce(&mut serde_json::Value)) -> CellResearch {
+    let root = std::env::temp_dir().join(format!("daemon-{}-demo-{name}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let mut store = FsArtifactStore::open(&root).unwrap();
+    let mut document: serde_json::Value = serde_json::from_str(DEMO_MANDATE).unwrap();
+    edit(&mut document);
+    let mandate = Mandate::parse(&parse(document.to_string().as_bytes()).unwrap()).unwrap();
+    let version = store
+        .put_artifact(&mandate.canonical_bytes().unwrap())
+        .unwrap()
+        .to_string();
+    let seq = u64::try_from(rig.control.borrow().len()).unwrap() + 1;
+    let payload = format!(
+        r#"{{"agent_id":"{AGENT}","mandate_version":"{version}","record_ref":"{version}"}}"#
+    );
+    rig.control
+        .borrow_mut()
+        .push(row(CONTROL, seq, "AgentDeployed", "user", &payload));
+    let deployment = CellDeployment {
+        workspace: WORKSPACE.to_owned(),
+        agent: AGENT.to_owned(),
+        environment: Environment::Paper,
+        resolved: true,
+    };
+    let opted = opt_in(Path::new(DEMO_BUNDLE), &deployment).unwrap_or_else(|e| panic!("{e:?}"));
+    cell::research(opted, Box::new(rig.clone()), &root, Box::new(|| at(NOW)))
+        .unwrap_or_else(|e| panic!("{e:?}"))
+}
+
+/// A worker that counts the runs it is handed, then hands every request on.
+struct Counted {
+    inner: Box<dyn ResearchWorker>,
+    starts: Rc<Cell<usize>>,
+}
+
+impl ResearchWorker for Counted {
+    fn hand(&mut self, request: &ResearchRequest, parts: &ResearchParts) {
+        if matches!(request, ResearchRequest::Start { .. }) {
+            self.starts.set(self.starts.get() + 1);
+        }
+        self.inner.hand(request, parts);
+    }
+
+    fn answers(&mut self, at: RiskClock) -> Vec<ResearchInput> {
+        self.inner.answers(at)
+    }
+}
+
+/// The runs a reconciled process starts, and the research records it journals, over a day of
+/// hourly ticks with `research` wired: past every interval its envelope could set, each tick
+/// stepped until the worker's answers are in.
+fn a_day_of_research(rig: &Rig, research: CellResearch) -> (usize, usize) {
+    reconciled(rig);
+    established(rig);
+    let starts = Rc::new(Cell::new(0));
+    let mut wiring = research.wiring;
+    wiring.worker = Box::new(Counted {
+        inner: wiring.worker,
+        starts: Rc::clone(&starts),
+    });
+    let mut process = RuntimeProcess::start(
+        rig.clone(),
+        wiring_with(Some(wiring), research.refs),
+        &config(),
+        at(NOW),
+    );
+    for hour in 1..=24 {
+        tick(rig, NOW + hour * 3_600);
+        for _ in 0..4 {
+            process.step(at(NOW + hour * 3_600));
+        }
+    }
+    let records = rig
+        .log
+        .borrow()
+        .iter()
+        .filter(|line| *line == "append research")
+        .count();
+    (starts.get(), records)
+}
+
+/// DEC-2246 item 4: the flag only makes the recorded bundle available; the confirmed envelope
+/// decides research. `demo-spy`'s mandate pins its universe and has no `behavior.research`, so
+/// opted in over the demo bundle it starts no run and journals no research record, so nothing is
+/// called, metered or spent, however long it runs. The same opt-in under an envelope that
+/// researches starts runs and journals their records, so the first answer is the envelope's, not
+/// the harness's.
+#[test]
+fn the_demo_agent_opted_in_runs_no_research_and_spends_nothing() {
+    let rig = Rig::default();
+    let research = opted_in(&rig, "spy", |_| {});
+    assert_eq!(
+        a_day_of_research(&rig, research),
+        (0, 0),
+        "{:?}",
+        kinds(&rig)
+    );
+    let researching = Rig::default();
+    let research = opted_in(&researching, "researching", |document| {
+        document["universe"]["pinned"] = serde_json::json!(false);
+        document["universe"]["pinned_instruments"] = serde_json::json!([]);
+        document["behavior"]["signal_models"][0]["admits_instruments"] = serde_json::json!(true);
+        document["behavior"]["research"] = serde_json::json!({
+            "interval_s": 3600,
+            "cost_cap_usd_per_day": "5",
+            "max_revisions_per_lineage": 3
+        });
+    });
+    let (starts, records) = a_day_of_research(&researching, research);
+    assert!(
+        starts > 0 && records > 0,
+        "{starts} {records} {:?}",
+        kinds(&researching)
+    );
 }
