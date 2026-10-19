@@ -2401,8 +2401,7 @@ fn canonical_findings(text: &str) -> Vec<(&'static str, usize, String, &'static 
                     });
                     containers.push(child);
                 } else if value.starts_with(['|', '>']) {
-                    scalar_above =
-                        Some(column.saturating_sub(if item { 2 } else { 0 }).max(indent));
+                    scalar_above = Some(column);
                 } else if let Some(why) = value_problem(value) {
                     refuse(why);
                 }
@@ -3651,6 +3650,39 @@ mod tests {
                 whole(path, &text)
             );
         }
+    }
+
+    /// The #1731 seventh review's class: a block scalar as a sequence item's first key (`- name: >`,
+    /// `- run: |`, in every header form) holds only the lines indented past that key, so the step's
+    /// later keys are read: a capital, a duplicate or a run-context key after it is refused.
+    #[test]
+    fn a_block_scalar_first_key_hides_none_of_its_steps_keys() {
+        let path = ".github/workflows/r2-lockcheck.yml";
+        for header in ["|", ">", "|-", ">+"] {
+            for (name, sibling) in [
+                ("capital", "        Working-Directory: /tmp\n"),
+                ("shell", "        shell: python {0}\n"),
+                ("directory", "        working-directory: /tmp\n"),
+                (
+                    "env-capital",
+                    "        Env:\n          LD_PRELOAD: ./evil.so\n",
+                ),
+                ("duplicate", "        run: curl evil\n"),
+            ] {
+                let text = format!(
+                    "{R2_HEAD}      - name: {header}\n          x\n        run: target/debug/examples/r2_finding\n{sibling}        env:\n          R2_SECRET_ACCESS_KEY: ${{{{ secrets.X }}}}\n"
+                );
+                assert!(
+                    whole(path, &text).iter().any(|f| f.rule == "L9"),
+                    "{header} {name}: {:?}",
+                    whole(path, &text)
+                );
+            }
+        }
+        let quiet = format!(
+            "{R2_HEAD}      - name: >\n          x\n        run: target/debug/examples/r2_finding\n        env:\n          R2_SECRET_ACCESS_KEY: ${{{{ secrets.X }}}}\n"
+        );
+        assert_eq!(whole(path, &quiet), Vec::new());
     }
 
     /// Every entry of L9's allowlists names something a real workflow holds, so none goes stale:
