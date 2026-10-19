@@ -159,7 +159,7 @@ upgrades every release in place.
 | The workspace API server, through a port-forward | Lane A1 (E21-31) marks `api` built in `processes.json` |
 | The agent runtime, on the deny-all wiring until the post-R0 hook | `runtime` is built in `processes.json` and `cell up` built its image (DEC-1013); with the deployment manager built, the manager starts it, which it does once it reads a deployment's account from `AgentDeployed` version 2 (DEC-1171) |
 | Sign-in as the demo owner, through the local stub issuer | Lane SI's stub issuer (E21-52) and the server's key-set tier check (E21-53) are both on `main` |
-| A paper agent on rh-sim and recorded Alpaca fixtures | Lane P1 (#1451) marks `runtime` and `executor` built |
+| A paper agent on rh-sim and recorded Alpaca fixtures | `runtime` and `executor` are built (the executor's interim image runs its fixture paper broker, DEC-2031), the runtime proposes orders once the post-R0 hook wires its ports (DEC-1013), and the executor takes them once slice X1b of E21-30 lands; until all three hold the part stays a named gap |
 | The founding membership | Lane ID1's `mandate membership` gesture is in the CLI |
 | `web/` against the cell's API | The API server is ready; until then `web/` runs on its own fixtures |
 
