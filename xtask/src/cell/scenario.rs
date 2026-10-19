@@ -210,8 +210,8 @@ const X_EXECUTOR: Wait = Wait {
     lane: "X",
     story: "E21-30",
     pr: None,
-    lands: "slice X1b: the executor takes the runtime's orders; its own process already runs in \
-            the cell on its fixture paper broker (DEC-2031, claim #1498)",
+    lands: "slice X1b-3: paper fills on the fixture; the executor already takes the \
+            runtime's orders (#1736)",
 };
 const P5_HOOK: Wait = Wait {
     lane: "P5",
@@ -620,8 +620,9 @@ pub fn plan(workspace: &str, (mandate, web_mandate): (&[u8], &[u8])) -> Vec<Step
                 Part::Gap(Gap {
                     what: "the paper fill and the protective stop on a fixture broker",
                     on_main: "the executor process (#1596, binary #1694) and its interim image \
-                              in the cell on the fixture paper broker (#1702, DEC-2031), with the \
-                              runtime proposing nothing on the deny-all wiring (DEC-1013)",
+                              in the cell on the fixture paper broker (#1702, DEC-2031), handing \
+                              its agents' orders to the core (#1736), with the runtime proposing \
+                              nothing on the deny-all wiring (DEC-1013)",
                     waits: vec![X_EXECUTOR, P5_HOOK],
                 }),
             ],
