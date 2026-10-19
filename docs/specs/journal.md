@@ -15,10 +15,12 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
 - **v0.67 ([DEC-2040](../project/decisions/DEC-2040.md); E7-30, claim #1498):** §9.5 adds the
   account stream's `OwnerConfirmationReceived` at `schema_version` 1: the bid, bid size, and floor
   the owner confirmed for an owner's exit, journaled immediately after its `IntentReceived` in the
-  same batch, so the executor's fold reads the floor back after a restart. Rule 247 requires the
-  three prices to be positive. Batch rule 248 requires the record immediately before it to be the
-  `IntentReceived` of the same intent, with purpose `owner_exit` and a limit that is null or not
-  below the floor. `IntentReceived` is unchanged, so it stays the exact copy of the proposal. The
+  same batch, so the executor's fold reads the floor back after a restart. It is bound to the one
+  intent that follows from the `OwnerExitRequested`, its instrument and quantity, and expires 300 s
+  after the step-up. Rule 247 requires its quantity, prices, and expiry to be positive. Batch rule
+  248 requires the record immediately before it to be the `IntentReceived` of the same intent,
+  instrument, and quantity, with purpose `owner_exit` and a limit that is null or not below the
+  floor. `IntentReceived` is unchanged, so it stays the exact copy of the proposal. The
   new `owner_confirmations` section holds the vectors. Agent-accepted under DEC-176: the record
   only lets a sell go where `AGENTS.md` rule 13 already permits it, never below the owner's floor.
   - **Versions.** The coordinator assigned this change v0.67 and rules 247 and 248. v0.66 and
@@ -2349,18 +2351,21 @@ proposal. One batch writes both records, so the fold reads the floor back after 
 
 | Member | Type | Meaning |
 |---|---|---|
-| `intent_id` | `ulid` | The intent of the owner's exit it confirms: rule 248 |
+| `intent_id` | `ulid` | The intent of the owner's exit it confirms, the one that follows from the `OwnerExitRequested`: rule 248 |
+| `instrument_id` | `text` | The instrument confirmed, the intent's: rule 248 |
+| `qty` | `decimal` | The quantity confirmed, the intent's; the confirmation never covers more: rules 247 and 248 |
 | `bid` | `decimal` | The displayed bid the owner confirmed: rule 247 |
 | `bid_size` | `decimal` | The displayed bid size the owner confirmed: rule 247 |
-| `floor` | `decimal` | The price below which the exit price ladder never prices: rules 247 and 248 |
-| `copied_from` | `ulid` | The `OwnerExitRequested` the confirmation was copied from |
+| `floor` | `decimal` | The price below which the exit never sells: rules 247 and 248 |
+| `expires_at` | `integer` | The risk-clock second from which the confirmation no longer applies: the step-up's `authenticated_at` plus 300 s ([DEC-2040](../project/decisions/DEC-2040.md) item 7). At or after it, judged at the executor's journaled event time, the exit takes the unconfirmed path: rule 247 |
+| `copied_from` | `ulid` | The `OwnerExitRequested` the confirmation was copied from, whose `step_up_status` was `valid` |
 | `risk_clock` | `risk_clock` | The latest tick the executor had seen (§2) |
 
 **Consistency rule** (reason `schema`; the path is the member named):
 
-247. `bid`, `bid_size`, and `floor` are each positive, reported at the first that is not, in that
-     order. A zero or negative price confirms nothing, and a floor of zero would let the ladder
-     price anywhere.
+247. `qty`, `bid`, `bid_size`, `floor`, and `expires_at` are each positive, reported at the first
+     that is not, in that order. A zero or negative price or quantity confirms nothing, and a floor
+     of zero would let the ladder price anywhere.
 
 **`ProtectionChanged`** on the account stream at `schema_version` 1: §5.4's protective orders and
 unprotected intervals, and the receipt-time protective prices of `intended` (DEC-446 item 4).
@@ -2425,7 +2430,9 @@ unprotected intervals, and the receipt-time protective prices of `intended` (DEC
     (DEC-446 item 3).
 248. An `OwnerConfirmationReceived` is immediately preceded in its `append` batch by an
      `IntentReceived` (reported at the confirmation's `event_type`) of the same intent (at its
-     `payload.intent_id`), whose `purpose` is `owner_exit` (at the intent's `payload.purpose`) and
+     `payload.intent_id`), the same instrument (at its `payload.instrument_id`), and the same
+     quantity, compared as decimals (at its `payload.qty`), whose `purpose` is `owner_exit` (at the
+     intent's `payload.purpose`) and
      whose `limit_price` is null or not below the confirmation's `floor` (at the intent's
      `payload.limit_price`). Checked after each draft's own rules, on each confirmation in batch
      order, and reported at the first that fails, in that order. An intent needs no confirmation:

@@ -122,7 +122,8 @@ impl Fold {
         let (hit, hard) = reading(readings, limit.key)?;
         let Some(latch) = self.daily else {
             if let Some(trigger) = self.decide(limit.key, (hit, hard), moment, journal)? {
-                self.latch_daily(limit, trigger.reason(), journal);
+                let breach_s = self.breach_s(limit.key);
+                self.latch_daily(limit, trigger.reason(), breach_s, journal);
             }
             return Ok(());
         };
@@ -135,6 +136,8 @@ impl Fold {
             self.breach_confirm_s,
         )? || (hard && moment.quote);
         if renewed {
+            self.breach_times
+                .insert(journal.len(), self.breach_s(limit.key));
             self.confirmations.remove(&limit.key);
             self.daily = Some(DailyLatch::at(self.at));
             journal.push(RiskEvent::RiskLimitTriggered {
@@ -175,7 +178,12 @@ impl Fold {
             .confirmation
             .update(hit, moment.wall_s, self.breach_confirm_s)?
         {
-            self.latch_daily(limit, Some(TriggerReason::ResolvedAtRollover), journal);
+            self.latch_daily(
+                limit,
+                Some(TriggerReason::ResolvedAtRollover),
+                carried.confirmation.accumulated_s(),
+                journal,
+            );
         } else if carried.confirmation.is_pending() {
             self.rollover = Some(carried);
         }
@@ -189,11 +197,12 @@ impl Fold {
         &mut self,
         limit: Limit,
         reason: Option<TriggerReason>,
+        breach_s: u64,
         journal: &mut Vec<RiskEvent>,
     ) {
         self.daily = Some(DailyLatch::at(self.at));
         self.rollover = None;
         self.clear_hard(limit.key);
-        self.latch(limit, reason, journal);
+        self.latch(limit, reason, breach_s, journal);
     }
 }

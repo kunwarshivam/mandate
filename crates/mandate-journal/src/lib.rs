@@ -20,6 +20,7 @@ use std::fmt;
 use mandate_canon::{Digest, Int, Key, ParseErrorKind, Value, parse, to_canonical};
 use mandate_time::UtcNanos;
 
+mod acknowledgments;
 mod agent;
 mod artifact;
 mod backtest_records;
