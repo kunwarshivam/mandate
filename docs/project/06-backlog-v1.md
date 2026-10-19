@@ -3133,6 +3133,11 @@ enables `live` (ES-23, OPS-5).
   *Status:* done. The tests (#1565), the cell wiring (#1572), the stub (#1591), xtask's release
   check and profile guard (#1620), and the release build's refusal of rustflags, compiler, wrapper
   and profile overrides from its environment or any cargo configuration it reads (DEC-2027).
+  *Follow-up (DEC-2032 item 3, the leak-guard's second review):* L1 to L3 do not yet read
+  `env:`-shaped lines inside a `run:` block, `#` lines inside a heredoc, a redirect before a flag
+  (`set >x -x`), a shell's `-O` before `-x`, `/proc/self/environ` built from parts or read by a
+  language one-liner (`python -c`, `node -e`, `perl -e`), a `secrets:` mapping across several
+  lines, or a duplicate `ALLOWED` line. L9's closed world holds meanwhile.
 - **E21-53 (Proposed, M8; SC; lane A1)** As the platform, I want the API server to refuse an `http`
   key-set URL outside `dev` and `ci`, so that a staging or production server never trusts a loopback
   issuer, even if its settings name one (DEC-2100 item 9). *Accepted when:* `mandate-api-server`
