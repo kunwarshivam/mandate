@@ -63,7 +63,7 @@ pub fn secret_name(identity: &Identity) -> Result<String, SourceError> {
 
 /// Whether `namespace` is a Kubernetes label: 1 to 63 lowercase letters, digits and hyphens,
 /// starting and ending with a letter or digit.
-fn is_label(namespace: &str) -> bool {
+pub(crate) fn is_label(namespace: &str) -> bool {
     let alphanumeric = |byte: &u8| byte.is_ascii_lowercase() || byte.is_ascii_digit();
     namespace.len() <= LABEL_MAX
         && namespace

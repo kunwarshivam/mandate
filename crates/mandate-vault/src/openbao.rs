@@ -38,7 +38,7 @@ use crate::source::{GRANT_SECS, Grant, SecretSource};
 /// How long one request may take before the vault counts as unreachable.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 /// The longest an executor's token lives through renewals before it logs in again: 30 days.
-const EXECUTOR_TOKEN_MAX_SECS: i64 = 2_592_000;
+pub(crate) const EXECUTOR_TOKEN_MAX_SECS: i64 = 2_592_000;
 /// Whether this build may use a dev server: only this crate's own unit-test build, so no other
 /// crate's build, test or not, can turn it on (DEC-977 item 6).
 const ALLOW_DEV_SERVER: bool = cfg!(test);
