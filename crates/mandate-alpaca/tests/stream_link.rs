@@ -389,6 +389,165 @@ fn a_status_or_band_that_cannot_be_read_resyncs_the_connection() {
     );
 }
 
+#[test]
+fn a_sustained_outage_alerts_once_however_many_reconnects_fail() {
+    let mut link = fresh();
+    subscribe(&mut link, 0);
+    link.on(at(1), LinkInput::Lost, 0);
+    link.on(at(20), LinkInput::Reconnecting, 0);
+    assert_eq!(link.state(), LinkState::Connecting);
+    assert!(reconnect_after(&link.on(at(25), LinkInput::Lost, 0)).is_some());
+    assert_eq!(
+        link.on(at(2 + DOWN_ALERT_S), LinkInput::Tick, 0),
+        [LinkAction::Alert("stream_down")],
+        "the outage runs from the first loss, not the failed reconnect"
+    );
+    link.on(at(40), LinkInput::Reconnecting, 0);
+    link.on(at(41), frame(&[connected()]), 0);
+    link.on(at(45), LinkInput::Lost, 0);
+    assert_eq!(
+        link.on(at(90), LinkInput::Tick, 0),
+        [],
+        "never a second alert"
+    );
+    link.on(at(91), LinkInput::Reconnecting, 0);
+    subscribe(&mut link, 92);
+    assert_eq!(
+        link.on(at(200), LinkInput::Tick, 0),
+        [],
+        "subscribed again: not down"
+    );
+}
+
+#[test]
+fn a_second_rejected_channel_pauses_rather_than_narrowing_again() {
+    let mut link = fresh();
+    subscribe(&mut link, 0);
+    link.on(at(1), frame(&[error(410)]), 0);
+    link.on(
+        at(2),
+        frame(&[r#"{"T":"subscription","trades":["AAPL"],"quotes":["AAPL","SPY"]}"#.to_owned()]),
+        0,
+    );
+    assert_eq!(link.state(), LinkState::Resyncing);
+    assert_eq!(
+        link.on(at(3), frame(&[error(410)]), 0),
+        [LinkAction::Alert("stream_subscription_invalid")],
+        "nothing left to narrow: no resubscribe loop"
+    );
+    assert_eq!(link.state(), LinkState::Paused);
+    assert_eq!(link.on(at(4), LinkInput::Lost, 0), []);
+    let mut link = fresh();
+    subscribe(&mut link, 0);
+    link.on(at(1), frame(&[error(410)]), 0);
+    assert_eq!(
+        link.on(at(1), frame(&[error(410)]), 0),
+        [LinkAction::Alert("stream_subscription_invalid")],
+        "before the narrowed echo too"
+    );
+    assert_eq!(link.state(), LinkState::Paused);
+}
+
+#[test]
+fn an_error_that_cannot_be_read_takes_the_link_down() {
+    let unreadable = r#"{"T":"error","code":"x","msg":"x"}"#.to_owned();
+    for subscribed in [false, true] {
+        let mut link = fresh();
+        if subscribed {
+            subscribe(&mut link, 0);
+        } else {
+            link.on(at(0), frame(&[connected()]), 0);
+        }
+        let actions = link.on(at(1), frame(std::slice::from_ref(&unreadable)), 0);
+        assert_eq!(link.state(), LinkState::Down, "subscribed: {subscribed}");
+        assert!(reconnect_after(&actions).is_some());
+        assert_eq!(
+            link.on(at(2), frame(std::slice::from_ref(&unreadable)), 0),
+            [],
+            "already down"
+        );
+    }
+}
+
+#[test]
+fn a_pause_or_narrow_from_a_lost_socket_changes_nothing() {
+    for code in [402, 409, 410] {
+        let mut link = fresh();
+        subscribe(&mut link, 0);
+        link.on(at(1), LinkInput::Lost, 0);
+        assert_eq!(link.on(at(2), frame(&[error(code)]), 0), [], "{code}");
+        assert_eq!(link.state(), LinkState::Down, "{code}");
+    }
+}
+
+#[test]
+fn a_subscription_with_nothing_left_pauses_instead_of_waiting() {
+    let statuses_only = Channels {
+        statuses: [id("AAPL")].into_iter().collect(),
+        ..Channels::default()
+    };
+    let mut link = Link::new(statuses_only, Duration::from_secs(30));
+    link.on(at(0), frame(&[connected()]), 0);
+    link.on(at(0), frame(&[authenticated()]), 0);
+    assert_eq!(
+        link.on(at(1), frame(&[error(410)]), 0),
+        [LinkAction::Alert("stream_subscription_invalid")]
+    );
+    assert_eq!(link.state(), LinkState::Paused);
+    let mut link = Link::new(Channels::default(), Duration::from_secs(30));
+    link.on(at(0), frame(&[connected()]), 0);
+    assert_eq!(
+        link.on(at(0), frame(&[authenticated()]), 0),
+        [LinkAction::Alert("stream_subscription_invalid")]
+    );
+    assert_eq!(link.state(), LinkState::Paused);
+}
+
+#[test]
+fn a_quote_missing_a_side_does_not_resync_its_instrument() {
+    for one_sided in [
+        quote("AAPL")
+            .replace(r#""bp":87.66"#, r#""bp":0"#)
+            .replace(r#""ap":87.68"#, r#""ap":0"#),
+        quote("AAPL").replace(r#""bp":87.66"#, r#""bp":0"#),
+        quote("AAPL").replace(r#""ap":87.68"#, r#""ap":0"#),
+    ] {
+        let mut link = fresh();
+        subscribe(&mut link, 0);
+        link.on(at(1), frame(&[one_sided.clone(), status("AAPL")]), 0);
+        assert!(!link.opens(&id("AAPL")), "{one_sided}");
+        link.on(at(2), frame(&[quote("AAPL")]), 0);
+        assert!(link.opens(&id("AAPL")), "a two-sided quote resyncs it");
+    }
+}
+
+#[test]
+fn a_pause_opens_the_gap_at_the_last_message() {
+    let mut link = fresh();
+    link.on(at(0), frame(&[connected()]), 0);
+    link.on(at(0), frame(&[error(402)]), 0);
+    assert_eq!(link.open_gap(), None, "no subscription, no gap");
+    let mut link = fresh();
+    subscribe(&mut link, 0);
+    assert_eq!(link.open_gap(), None);
+    link.on(at(4), frame(&[quote("AAPL")]), 0);
+    link.on(at(5), frame(&[error(402)]), 0);
+    assert_eq!(link.state(), LinkState::Paused);
+    assert_eq!(
+        link.open_gap(),
+        Some(at(4)),
+        "the record shows where it stopped"
+    );
+    let mut link = fresh();
+    subscribe(&mut link, 0);
+    link.on(at(4), frame(&[quote("AAPL")]), 0);
+    link.on(at(6), LinkInput::Lost, 0);
+    assert_eq!(link.open_gap(), Some(at(4)));
+    link.on(at(7), LinkInput::Reconnecting, 0);
+    subscribe(&mut link, 8);
+    assert_eq!(link.open_gap(), None, "closed by the resubscription");
+}
+
 /// One step of the property.
 #[derive(Debug, Clone)]
 enum Step {
@@ -424,6 +583,7 @@ proptest! {
         let mut link = fresh();
         let mut subscribed = false;
         let mut paused = false;
+        let mut down = false;
         let mut seen = [(false, false); 2];
         for (n, step) in steps.iter().enumerate() {
             let now = at(i64::try_from(n).unwrap());
@@ -432,6 +592,7 @@ proptest! {
                     link.on(now, LinkInput::Reconnecting, 0);
                     let actions = subscribe(&mut link, i64::try_from(n).unwrap());
                     subscribed = true;
+                    down = false;
                     seen = [(false, false); 2];
                     actions
                 }
@@ -446,13 +607,14 @@ proptest! {
                 }
                 Step::Lost => {
                     subscribed = false;
+                    down = true;
                     link.on(now, LinkInput::Lost, 0)
                 }
                 Step::Error(code) => {
                     match code {
-                        402 => { paused = true; subscribed = false; }
-                        405 => {}
-                        _ => subscribed = false,
+                        402 if !down => { paused = true; subscribed = false; }
+                        402 | 405 => {}
+                        _ => { subscribed = false; down = true; }
                     }
                     link.on(now, frame(&[error(*code)]), 0)
                 }

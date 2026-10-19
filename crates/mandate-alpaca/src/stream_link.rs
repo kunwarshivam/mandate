@@ -110,6 +110,12 @@ impl Link {
         self.state
     }
 
+    /// The start of the gap not yet closed by a resubscription, for the connection's record: the
+    /// last message received before the connection was lost or paused (spec §3.3).
+    pub fn open_gap(&self) -> Option<UtcNanos> {
+        self.gap_from
+    }
+
     /// Whether an opening in `instrument` may use this connection's data now.
     pub fn opens(&self, instrument: &InstrumentId) -> bool {
         matches!(self.state, LinkState::Resyncing | LinkState::Live)
