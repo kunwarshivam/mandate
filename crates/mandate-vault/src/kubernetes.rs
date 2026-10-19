@@ -18,16 +18,6 @@ use crate::policy::{Identity, Mounts};
 /// the cluster's API server accepts is not one the vault accepts.
 pub const AUDIENCE: &str = "mandate-vault";
 
-/// Where the per-connection roles live: the Kubernetes auth mount of each kind, and the namespace
-/// both kinds' ServiceAccounts are in, the workspace's own, so its default deny, its egress
-/// policies and its admission rules cover them.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct KubernetesLayout {
-    pub executor_mount: String,
-    pub exchange_mount: String,
-    pub namespace: String,
-}
-
 /// The ServiceAccount a connection's executor or token exchange runs as: the connection id's
 /// bytes in lowercase hexadecimal, after an `x` for the exchange, a valid Kubernetes name for
 /// every id. The exchange's name is the path segment both kinds' policies reach.
@@ -59,24 +49,24 @@ pub fn kubernetes_policy(
 /// The provisioner's policy, in HCL: it may create, update and read roles on the two Kubernetes
 /// auth mounts and nothing else, every parameter but the ServiceAccount's name pinned to its one
 /// value, so it can neither widen a role's namespace, policy, audience or lifetime nor reach a
-/// policy, a token or a secret. A layout whose mounts are not one plain path segment, or whose
-/// namespace is not a Kubernetes label, is [`SourceError::Config`].
-pub fn provisioner_policy(
-    mounts: &Mounts,
-    layout: &KubernetesLayout,
-) -> Result<String, SourceError> {
-    let _ = (mounts, layout);
+/// policy, a token or a secret. Both kinds' ServiceAccounts are in `namespace`, the workspace's
+/// own, so its default deny, egress policies and admission rules cover them. Kubernetes mounts
+/// that are not one plain path segment, or a namespace that is not a Kubernetes label, are
+/// [`SourceError::Config`].
+pub fn provisioner_policy(mounts: &Mounts, namespace: &str) -> Result<String, SourceError> {
+    let _ = (mounts, namespace);
     Err(SourceError::Unimplemented { story: "E21-32" })
 }
 
 /// The request that makes `identity`'s role: its path, `auth/<mount>/role/<connection id>`, and
-/// its body, bound to exactly its ServiceAccount in exactly the workspace's namespace. Anything but an
-/// executor or a token exchange is [`SourceError::Config`].
+/// its body, bound to exactly its ServiceAccount in exactly `namespace`, the workspace's. Anything
+/// but an executor or a token exchange, or mounts or a namespace [`provisioner_policy`] refuses, is
+/// [`SourceError::Config`].
 pub fn role_request(
     identity: &Identity,
     mounts: &Mounts,
-    layout: &KubernetesLayout,
+    namespace: &str,
 ) -> Result<(String, Value), SourceError> {
-    let _ = (identity, mounts, layout);
+    let _ = (identity, mounts, namespace);
     Err(SourceError::Unimplemented { story: "E21-32" })
 }

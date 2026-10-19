@@ -128,14 +128,20 @@ pub fn allows(identity: &Identity, access: Access, path: &SecretPath) -> bool {
 pub struct Mounts {
     pub kv: String,
     pub auth: String,
+    /// The Kubernetes auth mount a connection's executor logs in on (DEC-2060).
+    pub kubernetes_executor: String,
+    /// The Kubernetes auth mount a connection's token exchange logs in on (DEC-2060).
+    pub kubernetes_exchange: String,
 }
 
 impl Default for Mounts {
-    /// `mandate` and `approle`, the cell's.
+    /// `mandate`, `approle`, `kubernetes-executor` and `kubernetes-exchange`, the cell's.
     fn default() -> Self {
         Self {
             kv: "mandate".to_owned(),
             auth: "approle".to_owned(),
+            kubernetes_executor: "kubernetes-executor".to_owned(),
+            kubernetes_exchange: "kubernetes-exchange".to_owned(),
         }
     }
 }

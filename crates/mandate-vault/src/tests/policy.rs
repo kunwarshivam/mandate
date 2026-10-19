@@ -117,6 +117,7 @@ fn names_and_paths_are_pinned() {
     let other = Mounts {
         kv: "kv9".to_owned(),
         auth: "ar9".to_owned(),
+        ..Mounts::default()
     };
     assert_eq!(
         policy_name(&Identity::Api, &Mounts::default()),
