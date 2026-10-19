@@ -83,7 +83,6 @@ fn an_unpinnable_loop_has_its_own_code() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn the_loop_is_final_output_with_the_pinned_bounds_and_registers() {
     let agentic = pinned();
     assert_eq!(agentic.output, OutputKind::FinalOutput);
@@ -113,7 +112,6 @@ fn the_loop_is_final_output_with_the_pinned_bounds_and_registers() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn only_the_served_read_and_think_tools_are_declared_on_both_menus() {
     let agentic = pinned();
     let names: Vec<&str> = agentic.tools.iter().map(|t| t.name.as_str()).collect();
@@ -142,7 +140,6 @@ fn only_the_served_read_and_think_tools_are_declared_on_both_menus() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn no_schema_names_an_order_a_quantity_a_size_or_a_price() {
     let agentic = pinned();
     let mut names = BTreeSet::new();
@@ -174,7 +171,6 @@ fn no_schema_names_an_order_a_quantity_a_size_or_a_price() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn ideate_is_the_single_call_s_schema_and_monitor_has_no_theses() {
     let agentic = pinned();
     let kinds: Vec<&str> = agentic.output_schemas.keys().map(String::as_str).collect();
@@ -204,7 +200,6 @@ fn ideate_is_the_single_call_s_schema_and_monitor_has_no_theses() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn each_tool_s_schema_admits_the_arguments_the_dispatch_reads_and_no_more() {
     let agentic = pinned();
     for (tool, admitted, refused) in [
@@ -252,7 +247,6 @@ fn each_tool_s_schema_admits_the_arguments_the_dispatch_reads_and_no_more() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn bounds_the_registry_would_refuse_are_refused() {
     let output = OutputBounds::v0_1();
     for broken in [
