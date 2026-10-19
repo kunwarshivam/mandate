@@ -15821,6 +15821,21 @@ mod tests {
             for opaque in ["${GITHUB_SHA}", "${RUN_URL}"] {
                 assert!(issue.contains(opaque), "`{job}`'s issue names {opaque}");
             }
+            let title = issue
+                .split_once("-f title=\"")
+                .and_then(|(_, rest)| rest.split_once('"'))
+                .map(|(title, _)| title)
+                .with_context(|| format!("`{job}`'s issue has a title"))?;
+            let open = format!(
+                "if gh api --paginate \"repos/${{GITHUB_REPOSITORY}}/issues?state=open&per_page=100\" --jq '.[].title' | grep -Fqx \"{title}\"; then"
+            );
+            let at = |line: &str| lines.iter().position(|l| l == line);
+            let (check, create) = (at(&open), at(issue));
+            assert!(
+                check.is_some_and(|check| create.is_some_and(|create| check < create))
+                    && check.and_then(|check| lines.get(check + 2)) == Some(&"exit 0".to_owned()),
+                "`{job}` opens no second issue for a commit an open issue already reports"
+            );
             assert!(
                 !lines
                     .iter()
