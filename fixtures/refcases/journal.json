@@ -108826,5 +108826,1131 @@
     }
    }
   ]
+ },
+ "risk_marks": {
+  "spec": "docs/specs/journal.md v0.63 §9.30 (DEC-2305)",
+  "drafts": {
+   "mark_v2": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01JAB0M0A000000000000000M1",
+    "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+    "event_type": "MarkUpdated",
+    "schema_version": 2,
+    "event_time": "2026-10-19T14:30:00.250000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "executor",
+     "version": "0.1.0",
+     "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "config_refs": {},
+    "payload": {
+     "instrument_id": "AAPL",
+     "price": "187.42",
+     "source": "quote",
+     "feed": "iex",
+     "bid": "187.42",
+     "sane": true,
+     "session": "regular",
+     "risk_clock": "2026-10-19T14:30:01.000000000Z"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "mark_v1": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01JAB0M0A000000000000000M2",
+    "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+    "event_type": "MarkUpdated",
+    "schema_version": 1,
+    "event_time": "2026-10-19T14:30:00.250000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "executor",
+     "version": "0.1.0",
+     "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "config_refs": {},
+    "payload": {
+     "instrument_id": "AAPL",
+     "price": "187.42",
+     "source": "quote",
+     "feed": "iex",
+     "risk_clock": "2026-10-19T14:30:01.000000000Z"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   }
+  },
+  "invalid_drafts": [
+   {
+    "name": "instrument_id.kind",
+    "clause": "§9.30 types",
+    "base_draft": "mark_v2",
+    "changes": [
+     {
+      "path": "payload.instrument_id",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.instrument_id"
+    }
+   },
+   {
+    "name": "instrument_id.form",
+    "clause": "§9.30 types",
+    "base_draft": "mark_v2",
+    "changes": [
+     {
+      "path": "payload.instrument_id",
+      "value": ""
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.instrument_id"
+    }
+   },
+   {
+    "name": "instrument_id.kind.v1",
+    "clause": "§9.30 types",
+    "base_draft": "mark_v1",
+    "changes": [
+     {
+      "path": "payload.instrument_id",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.instrument_id"
+    }
+   },
+   {
+    "name": "instrument_id.form.v1",
+    "clause": "§9.30 types",
+    "base_draft": "mark_v1",
+    "changes": [
+     {
+      "path": "payload.instrument_id",
+      "value": ""
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.instrument_id"
+    }
+   },
+   {
+    "name": "price.kind",
+    "clause": "§9.30 types",
+    "base_draft": "mark_v2",
+    "changes": [
+     {
+      "path": "payload.price",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.price"
+    }
+   },
+   {
+    "name": "price.form",
+    "clause": "§9.30 types",
+    "base_draft": "mark_v2",
+    "changes": [
+     {
+      "path": "payload.price",
+      "value": "187,42"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.price"
+    }
+   },
+   {
+    "name": "price.kind.v1",
+    "clause": "§9.30 types",
+    "base_draft": "mark_v1",
+    "changes": [
+     {
+      "path": "payload.price",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.price"
+    }
+   },
+   {
+    "name": "price.form.v1",
+    "clause": "§9.30 types",
+    "base_draft": "mark_v1",
+    "changes": [
+     {
+      "path": "payload.price",
+      "value": "187,42"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.price"
+    }
+   },
+   {
+    "name": "source.kind",
+    "clause": "§9.30 types",
+    "base_draft": "mark_v2",
+    "changes": [
+     {
+      "path": "payload.source",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.source"
+    }
+   },
+   {
+    "name": "source.form",
+    "clause": "§9.30 types",
+    "base_draft": "mark_v2",
+    "changes": [
+     {
+      "path": "payload.source",
+      "value": ""
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.source"
+    }
+   },
+   {
+    "name": "source.kind.v1",
+    "clause": "§9.30 types",
+    "base_draft": "mark_v1",
+    "changes": [
+     {
+      "path": "payload.source",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.source"
+    }
+   },
+   {
+    "name": "source.form.v1",
+    "clause": "§9.30 types",
+    "base_draft": "mark_v1",
+    "changes": [
+     {
+      "path": "payload.source",
+      "value": ""
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.source"
+    }
+   },
+   {
+    "name": "feed.kind",
+    "clause": "§9.30 types",
+    "base_draft": "mark_v2",
+    "changes": [
+     {
+      "path": "payload.feed",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.feed"
+    }
+   },
+   {
+    "name": "feed.form",
+    "clause": "§9.30 types",
+    "base_draft": "mark_v2",
+    "changes": [
+     {
+      "path": "payload.feed",
+      "value": ""
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.feed"
+    }
+   },
+   {
+    "name": "feed.kind.v1",
+    "clause": "§9.30 types",
+    "base_draft": "mark_v1",
+    "changes": [
+     {
+      "path": "payload.feed",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.feed"
+    }
+   },
+   {
+    "name": "feed.form.v1",
+    "clause": "§9.30 types",
+    "base_draft": "mark_v1",
+    "changes": [
+     {
+      "path": "payload.feed",
+      "value": ""
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.feed"
+    }
+   },
+   {
+    "name": "bid.kind",
+    "clause": "§9.30 types",
+    "base_draft": "mark_v2",
+    "changes": [
+     {
+      "path": "payload.bid",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.bid"
+    }
+   },
+   {
+    "name": "bid.form",
+    "clause": "§9.30 types",
+    "base_draft": "mark_v2",
+    "changes": [
+     {
+      "path": "payload.bid",
+      "value": "187,42"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.bid"
+    }
+   },
+   {
+    "name": "sane.kind",
+    "clause": "§9.30 types",
+    "base_draft": "mark_v2",
+    "changes": [
+     {
+      "path": "payload.sane",
+      "value": "true"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.sane"
+    }
+   },
+   {
+    "name": "session.kind",
+    "clause": "§9.30 types",
+    "base_draft": "mark_v2",
+    "changes": [
+     {
+      "path": "payload.session",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.session"
+    }
+   },
+   {
+    "name": "session.form",
+    "clause": "§9.30 types",
+    "base_draft": "mark_v2",
+    "changes": [
+     {
+      "path": "payload.session",
+      "value": "closed"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.session"
+    }
+   },
+   {
+    "name": "risk_clock.kind",
+    "clause": "§9.30 types",
+    "base_draft": "mark_v2",
+    "changes": [
+     {
+      "path": "payload.risk_clock",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.risk_clock"
+    }
+   },
+   {
+    "name": "risk_clock.form",
+    "clause": "§9.30 types",
+    "base_draft": "mark_v2",
+    "changes": [
+     {
+      "path": "payload.risk_clock",
+      "value": "2026-10-19T14:30:01.500000000Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.risk_clock"
+    }
+   },
+   {
+    "name": "risk_clock.kind.v1",
+    "clause": "§9.30 types",
+    "base_draft": "mark_v1",
+    "changes": [
+     {
+      "path": "payload.risk_clock",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.risk_clock"
+    }
+   },
+   {
+    "name": "risk_clock.form.v1",
+    "clause": "§9.30 types",
+    "base_draft": "mark_v1",
+    "changes": [
+     {
+      "path": "payload.risk_clock",
+      "value": "2026-10-19T14:30:01.500000000Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.risk_clock"
+    }
+   },
+   {
+    "name": "instrument_id.null",
+    "clause": "§9.30 types: only `bid` is nullable",
+    "base_draft": "mark_v2",
+    "changes": [
+     {
+      "path": "payload.instrument_id",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.instrument_id"
+    }
+   },
+   {
+    "name": "price.null",
+    "clause": "§9.30 types: only `bid` is nullable",
+    "base_draft": "mark_v2",
+    "changes": [
+     {
+      "path": "payload.price",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.price"
+    }
+   },
+   {
+    "name": "source.null",
+    "clause": "§9.30 types: only `bid` is nullable",
+    "base_draft": "mark_v2",
+    "changes": [
+     {
+      "path": "payload.source",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.source"
+    }
+   },
+   {
+    "name": "feed.null",
+    "clause": "§9.30 types: only `bid` is nullable",
+    "base_draft": "mark_v2",
+    "changes": [
+     {
+      "path": "payload.feed",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.feed"
+    }
+   },
+   {
+    "name": "sane.null",
+    "clause": "§9.30 types: only `bid` is nullable",
+    "base_draft": "mark_v2",
+    "changes": [
+     {
+      "path": "payload.sane",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.sane"
+    }
+   },
+   {
+    "name": "session.null",
+    "clause": "§9.30 types: only `bid` is nullable",
+    "base_draft": "mark_v2",
+    "changes": [
+     {
+      "path": "payload.session",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.session"
+    }
+   },
+   {
+    "name": "risk_clock.null",
+    "clause": "§9.30 types: only `bid` is nullable",
+    "base_draft": "mark_v2",
+    "changes": [
+     {
+      "path": "payload.risk_clock",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.risk_clock"
+    }
+   },
+   {
+    "name": "instrument_id.missing",
+    "clause": "§9.30 closed: every member",
+    "base_draft": "mark_v2",
+    "changes": [
+     {
+      "path": "payload.instrument_id",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.instrument_id"
+    }
+   },
+   {
+    "name": "price.missing",
+    "clause": "§9.30 closed: every member",
+    "base_draft": "mark_v2",
+    "changes": [
+     {
+      "path": "payload.price",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.price"
+    }
+   },
+   {
+    "name": "source.missing",
+    "clause": "§9.30 closed: every member",
+    "base_draft": "mark_v2",
+    "changes": [
+     {
+      "path": "payload.source",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.source"
+    }
+   },
+   {
+    "name": "feed.missing",
+    "clause": "§9.30 closed: every member",
+    "base_draft": "mark_v2",
+    "changes": [
+     {
+      "path": "payload.feed",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.feed"
+    }
+   },
+   {
+    "name": "risk_clock.missing",
+    "clause": "§9.30 closed: every member",
+    "base_draft": "mark_v2",
+    "changes": [
+     {
+      "path": "payload.risk_clock",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.risk_clock"
+    }
+   },
+   {
+    "name": "bid.missing",
+    "clause": "§9.30 closed: every member",
+    "base_draft": "mark_v2",
+    "changes": [
+     {
+      "path": "payload.bid",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.bid"
+    }
+   },
+   {
+    "name": "sane.missing",
+    "clause": "§9.30 closed: every member",
+    "base_draft": "mark_v2",
+    "changes": [
+     {
+      "path": "payload.sane",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.sane"
+    }
+   },
+   {
+    "name": "session.missing",
+    "clause": "§9.30 closed: every member",
+    "base_draft": "mark_v2",
+    "changes": [
+     {
+      "path": "payload.session",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.session"
+    }
+   },
+   {
+    "name": "extra.ask",
+    "clause": "§9.30 closed: no member beyond the table",
+    "base_draft": "mark_v2",
+    "changes": [
+     {
+      "path": "payload.ask",
+      "value": "187.45"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.ask"
+    }
+   },
+   {
+    "name": "v1_with.bid",
+    "clause": "§9.30: version 1 is never edited (§8); its members stay its own",
+    "base_draft": "mark_v1",
+    "changes": [
+     {
+      "path": "payload.bid",
+      "value": "187.42"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.bid"
+    }
+   },
+   {
+    "name": "v1_with.sane",
+    "clause": "§9.30: version 1 is never edited (§8); its members stay its own",
+    "base_draft": "mark_v1",
+    "changes": [
+     {
+      "path": "payload.sane",
+      "value": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.sane"
+    }
+   },
+   {
+    "name": "v1_with.session",
+    "clause": "§9.30: version 1 is never edited (§8); its members stay its own",
+    "base_draft": "mark_v1",
+    "changes": [
+     {
+      "path": "payload.session",
+      "value": "regular"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.session"
+    }
+   },
+   {
+    "name": "sane_without_bid",
+    "clause": "rule 244: a sane mark carries a bid",
+    "base_draft": "mark_v2",
+    "changes": [
+     {
+      "path": "payload.bid",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.bid"
+    }
+   },
+   {
+    "name": "sane_at_zero",
+    "clause": "rule 244: a sane bid is greater than 0",
+    "base_draft": "mark_v2",
+    "changes": [
+     {
+      "path": "payload.bid",
+      "value": "0"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.bid"
+    }
+   },
+   {
+    "name": "sane_negative",
+    "clause": "rule 244: not a negative bid",
+    "base_draft": "mark_v2",
+    "changes": [
+     {
+      "path": "payload.bid",
+      "value": "-0.01"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.bid"
+    }
+   },
+   {
+    "name": "sane_without_bid_after_hours",
+    "clause": "rule 244: in every session",
+    "base_draft": "mark_v2",
+    "changes": [
+     {
+      "path": "payload.session",
+      "value": "after_hours"
+     },
+     {
+      "path": "payload.bid",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.bid"
+    }
+   },
+   {
+    "name": "at_version_3",
+    "clause": "§9.30: versions 1 and 2 only",
+    "base_draft": "mark_v2",
+    "changes": [
+     {
+      "path": "schema_version",
+      "value": 3
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "unknown_schema",
+     "path": "payload"
+    }
+   }
+  ],
+  "valid_drafts": [
+   {
+    "name": "not_sane_without_bid",
+    "clause": "rule 244: a quote with no bid is never sane",
+    "base_draft": "mark_v2",
+    "changes": [
+     {
+      "path": "payload.sane",
+      "value": false
+     },
+     {
+      "path": "payload.bid",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "not_sane_at_zero",
+    "clause": "rule 244: a mark that is not sane may carry any bid",
+    "base_draft": "mark_v2",
+    "changes": [
+     {
+      "path": "payload.sane",
+      "value": false
+     },
+     {
+      "path": "payload.bid",
+      "value": "0"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "not_sane_negative",
+    "clause": "rule 244: any bid, if not sane",
+    "base_draft": "mark_v2",
+    "changes": [
+     {
+      "path": "payload.sane",
+      "value": false
+     },
+     {
+      "path": "payload.bid",
+      "value": "-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "not_sane_regular",
+    "clause": "§9.30: the verdict is the writer's",
+    "base_draft": "mark_v2",
+    "changes": [
+     {
+      "path": "payload.sane",
+      "value": false
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "bid_above_price",
+    "clause": "§9.30: no rule ties `bid` to `price`",
+    "base_draft": "mark_v2",
+    "changes": [
+     {
+      "path": "payload.bid",
+      "value": "187.5"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "smallest_bid",
+    "clause": "rule 244: greater than 0 is enough",
+    "base_draft": "mark_v2",
+    "changes": [
+     {
+      "path": "payload.bid",
+      "value": "0.0001"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "session.overnight",
+    "clause": "§9.30: no rule ties `sane` to `session`",
+    "base_draft": "mark_v2",
+    "changes": [
+     {
+      "path": "payload.session",
+      "value": "overnight"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "session.pre_market",
+    "clause": "§9.30: no rule ties `sane` to `session`",
+    "base_draft": "mark_v2",
+    "changes": [
+     {
+      "path": "payload.session",
+      "value": "pre_market"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "session.after_hours",
+    "clause": "§9.30: no rule ties `sane` to `session`",
+    "base_draft": "mark_v2",
+    "changes": [
+     {
+      "path": "payload.session",
+      "value": "after_hours"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "session.crypto",
+    "clause": "§9.30: no rule ties `sane` to `session`",
+    "base_draft": "mark_v2",
+    "changes": [
+     {
+      "path": "payload.session",
+      "value": "crypto"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "v1_another_source",
+    "clause": "§9.30: version 1 stays registered as it was",
+    "base_draft": "mark_v1",
+    "changes": [
+     {
+      "path": "payload.source",
+      "value": "last_trade"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "caused",
+    "clause": "§9.30: no rule reads the cause",
+    "base_draft": "mark_v2",
+    "changes": [
+     {
+      "path": "causation_id",
+      "value": "01JAB0M0A000000000000000M2"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   }
+  ],
+  "readings": [
+   {
+    "draft": "mark_v2",
+    "reading": "verdict",
+    "sane": true,
+    "session": "regular",
+    "bid": "187.42"
+   },
+   {
+    "draft": "mark_v1",
+    "reading": "no_verdict"
+   },
+   {
+    "draft": "not_sane_without_bid",
+    "reading": "verdict",
+    "sane": false,
+    "session": "regular"
+   },
+   {
+    "draft": "not_sane_at_zero",
+    "reading": "verdict",
+    "sane": false,
+    "session": "regular"
+   },
+   {
+    "draft": "not_sane_negative",
+    "reading": "verdict",
+    "sane": false,
+    "session": "regular"
+   },
+   {
+    "draft": "not_sane_regular",
+    "reading": "verdict",
+    "sane": false,
+    "session": "regular"
+   },
+   {
+    "draft": "bid_above_price",
+    "reading": "verdict",
+    "sane": true,
+    "session": "regular",
+    "bid": "187.5"
+   },
+   {
+    "draft": "smallest_bid",
+    "reading": "verdict",
+    "sane": true,
+    "session": "regular",
+    "bid": "0.0001"
+   },
+   {
+    "draft": "session.overnight",
+    "reading": "verdict",
+    "sane": true,
+    "session": "overnight",
+    "bid": "187.42"
+   },
+   {
+    "draft": "session.pre_market",
+    "reading": "verdict",
+    "sane": true,
+    "session": "pre_market",
+    "bid": "187.42"
+   },
+   {
+    "draft": "session.after_hours",
+    "reading": "verdict",
+    "sane": true,
+    "session": "after_hours",
+    "bid": "187.42"
+   },
+   {
+    "draft": "session.crypto",
+    "reading": "verdict",
+    "sane": true,
+    "session": "crypto",
+    "bid": "187.42"
+   },
+   {
+    "draft": "v1_another_source",
+    "reading": "no_verdict"
+   },
+   {
+    "draft": "caused",
+    "reading": "verdict",
+    "sane": true,
+    "session": "regular",
+    "bid": "187.42"
+   }
+  ]
  }
 }
