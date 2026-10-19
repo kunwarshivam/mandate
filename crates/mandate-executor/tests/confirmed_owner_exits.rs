@@ -17,8 +17,8 @@ use common::{
 use mandate_accounting::Side;
 use mandate_canon::Value;
 use mandate_executor::{
-    EventId, ExecutorError, HandedConfirmation, Input, IntentBody, IntentHandoff, IntentId,
-    OrderType, Ports, Purpose, SubmitOrder, TimeInForce,
+    BrokerOutcome, BrokerRequest, EventId, ExecutorError, HandedConfirmation, Input, IntentBody,
+    IntentHandoff, IntentId, OrderType, Ports, Purpose, SubmitOrder, TimeInForce,
 };
 use mandate_num::Price;
 
@@ -35,11 +35,19 @@ const PRE_MARKET: i64 = 1_790_078_400;
 /// the next pre-market open (DEC-260 (13)).
 const OVERNIGHT: i64 = PRE_MARKET - 5 * 3_600;
 
+/// A confirmation that lasts well past every instant a case reaches, unless it says otherwise.
+const LATER: i64 = PRE_MARKET + 3_600;
+
 fn confirmation(bid: &str, floor: &str) -> HandedConfirmation {
+    expiring(bid, floor, LATER)
+}
+
+fn expiring(bid: &str, floor: &str, at: i64) -> HandedConfirmation {
     HandedConfirmation {
         bid: price(bid),
         bid_size: qty("300"),
         floor: price(floor),
+        expires_at: clock(at),
         copied_from: EventId(REQUEST.to_owned()),
     }
 }
@@ -158,8 +166,15 @@ fn a_confirmed_owner_exit_before_the_open_sells_in_extended_hours_from_the_confi
         Some(&"OwnerConfirmationReceived"),
         "immediately after its intent (rule 248): {types:?}"
     );
+    assert_eq!(
+        member(&ran, "OwnerConfirmationReceived", "expires_at").and_then(Value::as_int),
+        u64::try_from(LATER).ok(),
+        "the expiry, in risk-clock seconds"
+    );
     for (name, value) in [
         ("intent_id", INTENT),
+        ("instrument_id", AAPL),
+        ("qty", "10"),
         ("bid", "155"),
         ("bid_size", "300"),
         ("floor", "150.35"),
@@ -308,6 +323,106 @@ fn a_restart_keeps_the_confirmation_of_an_exit_held_overnight() {
     );
 }
 
+/// DEC-2040 item 7: a confirmation is judged against the core's journaled event time, and at
+/// exactly `expires_at` it has expired. Handed at its expiry, the exit takes the unconfirmed path
+/// and nothing goes extended-hours; handed one second before, it sells extended-hours from the
+/// confirmed bid. Either way the confirmation is journaled as it was handed.
+#[test]
+#[ignore = "pending E7-30"]
+fn a_confirmation_at_its_expiry_has_expired() {
+    let (ids, mandates, instruments, config) = (
+        TestIds,
+        FixedMandate::covering(&[AAPL]),
+        FixedInstruments,
+        config(),
+    );
+    let ports = common::ports(&ids, &mandates, &instruments, &config);
+    for (expires_at, confirmed) in [(PRE_MARKET, false), (PRE_MARKET + 1, true)] {
+        let mut shell = held(&ports, PRE_MARKET - 100);
+        shell.run(
+            Input::Market(quote(AAPL, FEED_BID, "150.2", PRE_MARKET)),
+            &ports,
+        );
+        let ran = shell.run(
+            handed(
+                exit(Purpose::OwnerExit, None),
+                Some(expiring("155", "150.35", expires_at)),
+            ),
+            &ports,
+        );
+        assert!(
+            ran.draft("OwnerConfirmationReceived").is_some(),
+            "{expires_at}: journaled as handed"
+        );
+        let extended: Vec<_> = ran
+            .submissions()
+            .into_iter()
+            .filter(|sent| sent.extended_hours)
+            .map(|sent| sent.limit_price)
+            .collect();
+        if confirmed {
+            assert_eq!(extended, vec![Some(price("154.23"))], "one second before");
+        } else {
+            assert!(extended.is_empty(), "at its expiry: {extended:?}");
+        }
+    }
+}
+
+/// DEC-2040 item 7: expiry never cancels a working order. The first rung, sent extended-hours
+/// before the confirmation expires, keeps working past the expiry; the ladder steps it only after
+/// `exit_step_s` (5 s), as any rung, and the next rung, sent after the expiry, takes the
+/// unconfirmed path: a regular-session limit, priced from the feed's last sane bid,
+/// 150 × (1 − 0.01) = 148.50, and clamped at the floor of 150.35, which still binds.
+#[test]
+#[ignore = "pending E7-30"]
+fn a_rung_after_the_confirmation_expires_takes_the_unconfirmed_path() {
+    let (ids, mandates, instruments, config) = (
+        TestIds,
+        FixedMandate::covering(&[AAPL]),
+        FixedInstruments,
+        config(),
+    );
+    let ports = common::ports(&ids, &mandates, &instruments, &config);
+    let mut shell = held(&ports, PRE_MARKET - 100);
+    shell.run(
+        Input::Market(quote(AAPL, FEED_BID, "150.2", PRE_MARKET)),
+        &ports,
+    );
+    let first = only_submission(&shell.run(
+        handed(
+            exit(Purpose::OwnerExit, None),
+            Some(expiring("155", "150.35", PRE_MARKET + 2)),
+        ),
+        &ports,
+    ));
+    assert!(first.extended_hours, "before the expiry");
+    let expired = shell.run(Input::Tick(clock(PRE_MARKET + 3)), &ports);
+    assert!(
+        expired.requests.is_empty(),
+        "the expiry cancels nothing: {:?}",
+        expired.requests
+    );
+    let due = shell.run(Input::Tick(clock(PRE_MARKET + 5)), &ports);
+    assert!(
+        due.requests
+            .iter()
+            .any(|request| matches!(request, BrokerRequest::Cancel { .. })),
+        "the ladder steps the rung after exit_step_s: {:?}",
+        due.requests
+    );
+    let next = only_submission(&shell.run(
+        Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+            client_order_id: first.client_order_id.as_str().to_owned(),
+        })),
+        &ports,
+    ));
+    assert_eq!(
+        (next.extended_hours, next.limit_price),
+        (false, Some(price("150.35"))),
+        "after the expiry: a regular-session limit, never below the floor"
+    );
+}
+
 fn refused(input: Input) -> ExecutorError {
     let (ids, mandates, instruments, config) = (
         TestIds,
@@ -347,6 +462,14 @@ fn a_confirmation_that_does_not_fit_its_exit_is_non_canonical() {
     assert_eq!(
         refused(handed(exit(Purpose::OwnerExit, None), Some(empty))),
         field("bid_size")
+    );
+    assert_eq!(
+        refused(handed(
+            exit(Purpose::OwnerExit, None),
+            Some(expiring("155", "150.35", 0))
+        )),
+        field("expires_at"),
+        "an expiry at the epoch confirms nothing"
     );
     assert_eq!(
         refused(handed(

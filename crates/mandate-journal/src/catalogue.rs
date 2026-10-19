@@ -45,7 +45,7 @@ pub(crate) fn lookup(event_type: &str) -> Option<Entry> {
         "MeterReserved" | "MeterSettled" => entry(&[Meter], NONE),
         "TradingDayStarted" | "ClockAdvanced" => entry(&[Account, Scheduler], NONE),
         "KillSwitchActivated" => entry(&[Account, Agent], NONE),
-        "OwnerAcknowledged" => entry(&[Account, Control], NONE),
+        "OwnerAcknowledged" | "OwnerAcknowledgmentRequested" => entry(&[Account, Control], NONE),
         "OwnerCommandRefused" => entry(&[Account, Agent], NONE),
 
         "IntentReceived" => entry(ACCOUNT, &[MAN]),

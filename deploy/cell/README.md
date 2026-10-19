@@ -114,7 +114,7 @@ cargo xtask cell down
 cargo xtask ci cell               # what CI runs: chart checks, up, drills, seeded drills, demo --no-web
 cargo xtask ci cell-journal       # and beside it: up, then standby-down and archive, plain and seeded
 cargo xtask ci cell-failover      # and beside it: up, then restart (a failover with the standby), plain and seeded
-cargo xtask ci cell-kill-switch   # and beside it: up, then kill-switch, plain and seeded (DEC-2602)
+cargo xtask ci cell-kill-switch   # and beside it: up, then kill-switch and vault, plain and seeded (DEC-2602, DEC-2022)
 ```
 
 `cell up` is idempotent: it reuses a running cluster and upgrades the releases. kubectl is the one
@@ -159,7 +159,7 @@ upgrades every release in place.
 | The workspace API server, through a port-forward | Lane A1 (E21-31) marks `api` built in `processes.json` |
 | The agent runtime, on the deny-all wiring until the post-R0 hook | `runtime` is built in `processes.json` and `cell up` built its image (DEC-1013); with the deployment manager built, the manager starts it, which it does once it reads a deployment's account from `AgentDeployed` version 2 (DEC-1171) |
 | Sign-in as the demo owner, through the local stub issuer | Lane SI's stub issuer (E21-52) and the server's key-set tier check (E21-53) are both on `main` |
-| A paper agent on rh-sim and recorded Alpaca fixtures | `runtime` and `executor` are built (the executor's interim image runs its fixture paper broker, DEC-2031), the runtime proposes orders once the post-R0 hook wires its ports (DEC-1013), and the executor takes them once slice X1b of E21-30 lands; until all three hold the part stays a named gap |
+| A paper agent on rh-sim and recorded Alpaca fixtures | `runtime` and `executor` are built (the executor's interim image runs its fixture paper broker, DEC-2031), the runtime proposes orders once the post-R0 hook wires its ports (DEC-1013), and the executor takes them (#1736) and fills them on the fixture once slice X1b-3 of E21-30 lands; until all three hold the part stays a named gap |
 | The founding membership | Lane ID1's `mandate membership` gesture is in the CLI |
 | `web/` against the cell's API | The API server is ready; until then `web/` runs on its own fixtures |
 
@@ -218,16 +218,16 @@ for both to roll out, so every step, through the CLI, the API or `web/`, acts on
 `mandate-backtest-runner` on its committed demo inputs and records the payload it stores, in the
 same pod, so the closing verify checks the record's report (DEC-2023).
 
-The run's own report is the up-to-date list; on 2026-10-18, after slice 8, it read:
+The run's own report is the up-to-date list; on 2026-10-19, after slice 9, it read:
 
 | Step | Today | Runs | Waits on |
 |---|---|---|---|
 | 1. Sign in, see the workspace | partial | `workspace open` (paper), `workspace found` for the demo owner; the cell's API refusing a read of the run's workspace with no session (the one 401); the demo owner's sign-in through the stub issuer (204 and its cookie); and the read with that session, whose agents list the demo's agent (200) | W2: the same in `web/` |
-| 2. Deploy under a confirmed envelope | partial | `config register`, `model register`, `version create`, `version confirm` and `agent deploy` of `demo-spy`, each code shown then typed | W2 (E11-9): the same from `web/`; D1 (E21-33): the runtime started from `AgentDeployed` (DEC-1171) |
-| 3. Research, through the gateway's recorded fake | skipped | Nothing yet | D1: the runtime started; I2 (E19-2): a deployment's research configured (DEC-2208); AH (E19-13): the agentic loop over its state (#1551, #1561, #1566, #1569 on `main`) |
-| 4. Sized, gated, asked, approved, filled, protected | partial | `approvals list` (empty until the runtime asks) | D1 and P5 (E21-2, the post-R0 hook): the runtime sizes and asks; L1 (E9-4) and W2: step-up for the approval; X (E21-30): the executor's fill and stop (DEC-2003) |
+| 2. Deploy under a confirmed envelope | partial | `config register`, `model register`, `version create`, `version confirm` and `agent deploy` of `demo-spy`, each code shown then typed | W2 (E11-9): the same from `web/`; X (E21-30): the executor's connect check, so `connection record` records the paper connection and the deployment is written at version 2 (DEC-1171), which the manager starts |
+| 3. Research, through the gateway's recorded fake | partial | In the same owner's second workspace, `<workspace>r`: `workspace open` (paper) and `workspace found`, `model register` of `quant.ma_crossover` and of `llm.research_agent` from the recorded bundle's entry (`--entry`, its hash recomputed), then `version create`, `version confirm` and `agent deploy` of `demo-research` on `deploy/cell/demo/research-mandate.json`, each code shown then typed, so it is the only agent on its control stream (DEC-2247) | X (E21-30): the executor's connect check, so its deployment is written at version 2 and the manager starts its runtime, which runs research over the bundle its image carries (DEC-2246) |
+| 4. Sized, gated, asked, approved, filled, protected | partial | `approvals list` (empty until the runtime asks) | X (E21-30): the connect check, so the runtime starts, and P5 (E21-2, the post-R0 hook): the runtime sizes and asks; L1 (E9-4) and W2: step-up for the approval; X (E21-30): paper fills on the fixture in slice X1b-3; the executor already takes the runtime's orders (#1736) and runs in the cell on its fixture paper broker (DEC-2031) |
 | 5. A backtest of the same version | partial | `config register --kind rule_set` (the run's settings), `mandate-backtest-runner run` on its committed demo inputs, `backtest record` of the payload it stores, which the closing verify checks, and the owner's signed-in read of it through the API (completed, with the stored report) | W2: web/'s report screen |
-| 6. The kill switch | partial | A second agent, `demo-web`, on its own envelope (QQQ's snapshot registered, its version created and confirmed after step 5's record, then deployed, each code shown then typed); `demo-web`'s kill switch pressed in `web/` after the gestures' Job (lane W2's `kill_switch_from_web`), its command read back with the owner's session from the run's control stream, accepted (its `KillSwitchActivated` waits on a runtime) (not run on a machine without npm, `web/node_modules`, Playwright's Chromium or openssl, unless `MANDATE_DEMO_WEB_REQUIRED` is set, which makes it fail; that switch alone still reads an unreachable API as not run, so a job that must run the gesture sets it with `MANDATE_CELL_REQUIRED`); `agent kill --agent demo-spy` through the CLI (agent scope), recorded before the closing export and verify (web/'s kill switch comes after them, so the read stands in for the verify) | D1 and X: the processes stop on it |
+| 6. The kill switch | partial | A second agent, `demo-web`, on its own envelope (QQQ's snapshot registered, its version created and confirmed after step 5's record, then deployed, each code shown then typed); `demo-web`'s kill switch pressed in `web/` after the gestures' Job (lane W2's `kill_switch_from_web`), its command read back with the owner's session from the run's control stream, accepted (its `KillSwitchActivated` waits on a runtime) (not run on a machine without npm, `web/node_modules`, Playwright's Chromium or openssl, unless `MANDATE_DEMO_WEB_REQUIRED` is set, which makes it fail; that switch alone still reads an unreachable API as not run, so a job that must run the gesture sets it with `MANDATE_CELL_REQUIRED`); `agent kill --agent demo-spy` through the CLI (agent scope), recorded before the closing export and verify (web/'s kill switch comes after them, so the read stands in for the verify) | X (E21-30): the connect check, so the deployment is written at version 2 and the manager starts the processes that stop on it (DEC-1171, DEC-2031) |
 
 The demo's envelope is `deploy/cell/demo/mandate.json`: paper, SPY on the moving-average crossover,
 every opening asked, protection on. `demo-web`'s is `deploy/cell/demo/web-mandate.json`, the same
@@ -247,6 +247,7 @@ the scenario on every change (`cargo xtask ci cell-demo`). Behind a TLS-inspecti
 | `kill-switch` | With every pod of `api`, `deploy-manager`, `exporter`, `model-gateway` and `control-plane` gone (scaled to zero, then back), `mandate agent kill` at agent, connection and workspace scope and `mandate agent pause` commit through one-off `control` Jobs, and the control stream exports, verifies and holds each (OPS-4, E21-34). Each stream owner's `KillSwitchActivated` is reported `skipped` until the runtime and executor run in the cell ([DEC-2000](../../docs/project/decisions/DEC-2000.md) item 6) | The connection-scope kill switch never committed: the check must name `no kill_switch of scope connection` |
 | `egress` | From a pod of every process type, each live trading host (`agent.robinhood.com`, `api.robinhood.com`, `api.alpaca.markets`) fails at the network layer, and the journal is reachable exactly from the rendered processes whose egress names Postgres (OPS-5) | Every network policy deleted |
 | `standby-down` | With the synchronous standby fenced, an append neither commits nor becomes visible on the primary, and its Job ends on its deadline; once the standby is back and streams synchronously, a new append commits and every stream written verifies by journal spec §11 (OPS-2, E21-41) | The cluster's durability set to `preferred`, so the primary commits alone: `committed with the standby fenced` |
+| `vault` | `mandate vault provision` sets the cell's vault up (DEC-2022), then from a pod labelled as the executor each AppRole logs in and reads: a runtime nothing, an executor exactly its own connection's token and not `drill-other`'s, the model gateway its key; and no `mandate-*` policy holds `*` or `+`. It runs in `cell-kill-switch`, after the kill switch's drill | The runtime's policy rewritten to read every connection's token through `+`: the check must name `wildcard in mandate-runtime` |
 | `archive` | A closed WAL segment is reported archived by Postgres, a base backup completes, and Barman's own tools, reading the store with the archive's key, list the backup and fetch the segment back (E21-41) | The archive pointed at another bucket of the same store, which Postgres cannot tell: `not in the archive` |
 
 A seeded run counts as caught only when its report names the planted bug's own symptom
@@ -332,8 +333,9 @@ chart refuses a second key today, so it waits on a chart change that renders Ope
 3. Once `bao status` shows the vault unsealed under the new key id, remove the previous key from
    the values, then the old key from the Secret.
 
-Not yet: provisioning policies and roles in the cell and handing each process its secret id as a
-mounted file, the egress drill's vault probe, and the vault's audit device.
+The `vault` drill provisions the cell's vault and proves each identity's reach (DEC-2022). Not yet:
+each process's secret id as a mounted file (V3, with the executor's wiring, E21-9), and the
+vault's audit device.
 
 ## The Compose file
 

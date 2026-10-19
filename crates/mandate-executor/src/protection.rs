@@ -233,10 +233,40 @@ pub(crate) fn exit_price(
 }
 
 /// Whether §5.1 lets an exit go at the market: in the regular session, outside the closing window,
-/// on a fresh, sane latest quote (§4.4: no presumed halt).
+/// on a fresh, sane latest quote (§4.4: no presumed halt) that shows a bid, so a market order never
+/// goes into a book with no buyer. With no bid the exit is laddered from the last sane bid or
+/// trade, or held with nothing to price from (DEC-2037 items 4 and 5).
 fn market_allowed(batch: &Batch<'_, '_>, instrument: &InstrumentId) -> bool {
     venue(batch.ports, instrument, batch.at()) == Venue::Regular
-        && current_quote(batch, instrument).is_some()
+        && current_quote(batch, instrument).is_some_and(|quote| quote.bid.is_some())
+}
+
+/// §5.6's tier for an intent's exit: its instrument's, or for an exit with no limit of its own on an
+/// instrument the snapshot gives none, the table's wider tier for other equities and crypto (1%
+/// off, 1% a step, 5% at most), so an exit at the market always has a ladder and is never held for
+/// want of a tier, which is no hold `AGENTS.md` rule 13 allows (DEC-2037 item 4). An exit with a
+/// limit keeps its own limit where there is no tier, as before.
+fn tier_of(
+    batch: &Batch<'_, '_>,
+    instrument: &InstrumentId,
+    intent: &IntentId,
+) -> Option<ExitTier> {
+    batch.ports.instruments.exit_tier(instrument).or_else(|| {
+        let unpriced = matches!(
+            batch.view.bodies.get(intent),
+            Some(IntentBody::Order { limit: None, .. })
+        );
+        unpriced.then(wider_tier).flatten()
+    })
+}
+
+/// §5.6's table's row for other equities and for crypto.
+fn wider_tier() -> Option<ExitTier> {
+    Some(ExitTier {
+        exit_offset: Fraction::parse("0.01").ok()?,
+        exit_offset_step: Fraction::parse("0.01").ok()?,
+        max_exit_offset: Fraction::parse("0.05").ok()?,
+    })
 }
 
 /// The latest quote, when it is sane and no older than one exit step.
@@ -261,7 +291,8 @@ fn current_quote<'b>(
 /// there: a risk exit, a protective order or a flatten in any of them, and an owner exit in the
 /// regular session. A discretionary exit is paced (§9.6), an instrument with no tier has no
 /// ladder, and an exit priced above a fresh sane bid is passive: each keeps its own limit. An exit
-/// with no limit is never passive (DEC-2037 item 4).
+/// with no limit is never passive, always has a tier ([`tier_of`]), and in the regular session is
+/// laddered too when the fresh quote shows no bid to sell at the market into (DEC-2037 item 4).
 pub(crate) fn alone(
     batch: &Batch<'_, '_>,
     instrument: &InstrumentId,
@@ -275,11 +306,15 @@ pub(crate) fn alone(
             && venue(batch.ports, instrument, batch.at()) != Venue::Extended;
     let needed = match venue(batch.ports, instrument, batch.at()) {
         Venue::Extended | Venue::Closing => true,
-        Venue::Regular => latest.is_some() && current.is_none(),
+        Venue::Regular => {
+            latest.is_some()
+                && (current.is_none()
+                    || limit.is_none() && current.and_then(|quote| quote.bid).is_none())
+        }
         Venue::Closed => false,
     };
     may && needed
-        && batch.ports.instruments.exit_tier(instrument).is_some()
+        && (limit.is_none() || batch.ports.instruments.exit_tier(instrument).is_some())
         && !current
             .and_then(|quote| quote.bid)
             .zip(limit)
@@ -319,7 +354,7 @@ pub(crate) fn exit_limit(
         }
         _ => {}
     }
-    let tier = batch.ports.instruments.exit_tier(instrument);
+    let tier = tier_of(batch, instrument, intent);
     match exit_price(
         tier,
         &observed_for(batch, intent, instrument),
@@ -345,7 +380,7 @@ pub(crate) fn reference_price(
     instrument: &InstrumentId,
     purpose: Purpose,
 ) -> Option<Price> {
-    let tier = batch.ports.instruments.exit_tier(instrument);
+    let tier = tier_of(batch, instrument, intent);
     let observations = observed_for(batch, intent, instrument);
     let floor = floor_of(&batch.view, intent);
     match exit_price(tier, &observations, 0, batch.at(), floor, purpose, None) {
@@ -528,7 +563,7 @@ pub(crate) fn ladder_steps(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorErro
         .iter()
         .filter(|(instrument, sequence)| {
             !sequence.passive
-                && batch.ports.instruments.exit_tier(instrument).is_some()
+                && tier_of(batch, instrument, &sequence.intent).is_some()
                 && climbs(&batch.view, sequence)
         })
         .map(|(_, sequence)| (&sequence.intent, sequence.ladder))
@@ -538,7 +573,7 @@ pub(crate) fn ladder_steps(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorErro
                 .ladders
                 .iter()
                 .filter(|((instrument, _), lone)| {
-                    batch.ports.instruments.exit_tier(instrument).is_some()
+                    tier_of(batch, instrument, &lone.intent).is_some()
                         && batch.view.effective_mode(&lone.agent) < Mode::Paused
                 })
                 .map(|(_, lone)| (&lone.intent, lone.ladder)),
@@ -596,7 +631,7 @@ fn next_rung(
     };
     let own = limit.or_else(|| last_rung_limit(batch, intent, rung));
     let step = rung.saturating_add(1);
-    let tier = batch.ports.instruments.exit_tier(instrument);
+    let tier = tier_of(batch, instrument, intent);
     let observations = observed_for(batch, intent, instrument);
     let floor = floor_of(&batch.view, intent);
     let rung = tier.map(|tier| ladder_price(tier, &observations, step, batch.at(), floor));
@@ -3210,7 +3245,7 @@ mod sequence_tests {
     use super::closed_form::{
         assert_before_sent, assert_closed, ids, intervals, named, record, records, replayed,
     };
-    use super::{fits, long, rests};
+    use super::{ExitPrice, exit_price, fits, long, rests, wider_tier};
     use crate::error::ExecutorError;
     use crate::fold::fold;
     use crate::ids::{ClientOrderId, IntentId};
@@ -4245,6 +4280,229 @@ mod sequence_tests {
         open.run(quote("150")?, &ports)?;
         let effects = open.run(market_exit(), &ports)?;
         assert_eq!(sent(&effects), vec![(OrderType::Market, None)]);
+        Ok(())
+    }
+
+    /// A sell of ten `AAPL` at the market for `purpose`: no limit (DEC-2037 item 1).
+    fn at_the_market(purpose: Purpose) -> Result<Input, ExecutorError> {
+        Ok(Input::Intent(IntentHandoff {
+            intent_id: IntentId(EventId(EXIT.to_owned())),
+            agent: AgentId("agent-a".to_owned()),
+            tif: Some(TimeInForce::Day),
+            body: IntentBody::Order {
+                instrument: aapl()?,
+                side: Side::Sell,
+                qty: Qty::parse("10")?,
+                limit: None,
+                purpose,
+                protection: None,
+            },
+            confirmation: None,
+        }))
+    }
+
+    /// The snapshot with no exit tier for any instrument, as every live snapshot is today.
+    fn untiered_ports<'p>(
+        config: &'p crate::types::ExecutorConfig,
+        fees: &'p mandate_accounting::Config,
+    ) -> Ports<'p> {
+        Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config,
+            fees,
+        }
+    }
+
+    /// DEC-2037 item 4, `AGENTS.md` rule 13: an exit at the market on an instrument with no exit
+    /// tier is not held for want of one. With the latest quote not sane it is laddered by the
+    /// table's wider tier, 150 × (1 − 0.01) = 148.50, and a rung left unfilled for `exit_step_s`
+    /// is stepped like any other.
+    #[test]
+    fn an_exit_at_the_market_with_no_exit_tier_is_laddered_by_the_wider_tier()
+    -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = untiered_ports(&config, &fees);
+        let mut executor = held(&ports)?;
+        executor.run(quote("150")?, &ports)?;
+        executor.run(
+            Input::Market(MarketObservation {
+                sane: false,
+                observed_at: RiskClock::from_secs(1),
+                ..match quote("150")? {
+                    Input::Market(observed) => observed,
+                    _ => {
+                        return Err(ExecutorError::NotInterpreted {
+                            what: "a quote".to_owned(),
+                            story: "E7-29",
+                        });
+                    }
+                }
+            }),
+            &ports,
+        )?;
+        let effects = executor.run(at_the_market(Purpose::RiskExit)?, &ports)?;
+        let sent: Vec<_> = submissions(&effects)
+            .iter()
+            .map(|order| (order.order_type, order.limit_price))
+            .collect();
+        assert_eq!(sent, vec![(OrderType::Limit, Some(Price::parse("148.5")?))]);
+        let due = RiskClock::from_secs(1_i64.saturating_add(config.exit_step_s));
+        let stepped = executor.run(Input::Tick(due), &ports)?;
+        assert_eq!(
+            cancels(&stepped),
+            vec![format!("md-{EXIT}").as_str()],
+            "the rung is stepped, not left resting"
+        );
+        Ok(())
+    }
+
+    /// §5.1, DEC-2037 items 4 and 5: a fresh, sane quote that shows no bid never sends an exit at
+    /// the market. With a last trade it is laddered from the trade, 150 × (1 − 0.005) = 149.25; with
+    /// neither it is held `exit_unpriced`.
+    #[test]
+    fn a_quote_with_no_bid_never_sends_an_exit_at_the_market() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut traded = held(&ports)?;
+        traded.run(
+            Input::Market(MarketObservation {
+                instrument: aapl()?,
+                bid: None,
+                bid_size: None,
+                ask: None,
+                last_trade: Some(Price::parse("150")?),
+                mark: None,
+                sane: true,
+                observed_at: RiskClock::from_secs(0),
+            }),
+            &ports,
+        )?;
+        let effects = traded.run(at_the_market(Purpose::RiskExit)?, &ports)?;
+        let sent: Vec<_> = submissions(&effects)
+            .iter()
+            .map(|order| (order.order_type, order.limit_price))
+            .collect();
+        assert_eq!(
+            sent,
+            vec![(OrderType::Limit, Some(Price::parse("149.25")?))]
+        );
+        let mut empty = held(&ports)?;
+        empty.run(unpriceable()?, &ports)?;
+        let effects = empty.run(at_the_market(Purpose::RiskExit)?, &ports)?;
+        assert!(submissions(&effects).is_empty(), "never into an empty book");
+        assert_eq!(
+            verdicts_with_reasons(&effects),
+            vec![("hold".to_owned(), "exit_unpriced".to_owned())]
+        );
+        Ok(())
+    }
+
+    /// The protective purpose's hold with no limit is unreachable: a protective order is always the
+    /// executor's own, priced from its stop, and never handed with no limit. Pinned here so a
+    /// change that reaches it is seen: whatever the tier and the quotes, it holds rather than
+    /// guessing a price.
+    #[test]
+    fn a_protective_order_with_no_limit_is_held_whatever_the_tier() -> Result<(), ExecutorError> {
+        let quoted = [MarketObservation {
+            instrument: aapl()?,
+            bid: Some(Price::parse("150")?),
+            bid_size: Some(Qty::parse("100")?),
+            ask: Some(Price::parse("150")?),
+            last_trade: Some(Price::parse("150")?),
+            mark: Some(Price::parse("150")?),
+            sane: true,
+            observed_at: RiskClock::from_secs(0),
+        }];
+        for tier in [None, wider_tier()] {
+            assert_eq!(
+                exit_price(
+                    tier,
+                    &quoted,
+                    0,
+                    RiskClock::from_secs(0),
+                    None,
+                    Purpose::Protective,
+                    None
+                ),
+                ExitPrice::Held
+            );
+        }
+        Ok(())
+    }
+
+    /// Rule 13 over the holds it allows and a tier-less instrument: an exit at the market is never
+    /// refused or denied. Paused or stopped, or with an `Unknown` order in the instrument, it is
+    /// held; on an instrument with no tier it is sent, at the market on a fresh quote.
+    #[test]
+    fn an_exit_at_the_market_is_never_refused_paused_stopped_unknown_or_untiered()
+    -> Result<(), String> {
+        let failed = |error: ExecutorError| format!("{error:?}");
+        let (config, fees) = (executor_config(), fees().map_err(failed)?);
+        let tiered = tiered_ports(&config, &fees);
+        let untiered = untiered_ports(&config, &fees);
+        let agent = AgentId("agent-a".to_owned());
+        for purpose in [
+            Purpose::RiskExit,
+            Purpose::DiscretionaryExit,
+            Purpose::OwnerExit,
+        ] {
+            for situation in ["paused", "stopped", "unknown", "untiered"] {
+                let ports = if situation == "untiered" {
+                    &untiered
+                } else {
+                    &tiered
+                };
+                let mut executor = held(ports).map_err(failed)?;
+                executor
+                    .run(quote("150").map_err(failed)?, ports)
+                    .map_err(failed)?;
+                match situation {
+                    "paused" | "stopped" => mode_applied(&mut executor, &agent, situation, 0)?,
+                    "unknown" => {
+                        committed(
+                            &mut executor,
+                            "OrderSubmitted",
+                            vec![
+                                ("client_order_id", text("md-other-1")),
+                                ("agent", text("agent-a")),
+                                ("instrument", text("AAPL")),
+                                ("side", text("buy")),
+                                ("qty", text("1")),
+                                ("limit", text("150")),
+                                ("purpose", text("increase")),
+                            ],
+                        )
+                        .map_err(failed)?;
+                        committed(
+                            &mut executor,
+                            "OrderStateChanged",
+                            vec![
+                                ("client_order_id", text("md-other-1")),
+                                ("state", text("unknown")),
+                            ],
+                        )
+                        .map_err(failed)?;
+                    }
+                    _ => {}
+                }
+                let at = format!("{purpose:?} {situation}");
+                let effects = executor
+                    .run(at_the_market(purpose).map_err(failed)?, ports)
+                    .map_err(|e| format!("{at}: refused with {e:?}"))?;
+                let decided = verdicts_with_reasons(&effects);
+                if decided.iter().any(|(verdict, _)| verdict == "deny") {
+                    return Err(format!("{at}: denied {decided:?}"));
+                }
+                let sent = submissions(&effects);
+                match (situation, sent.as_slice()) {
+                    ("untiered", [one]) if one.order_type == OrderType::Market => {}
+                    ("paused" | "stopped" | "unknown", []) => {}
+                    (_, other) => return Err(format!("{at}: {other:?}, {decided:?}")),
+                }
+            }
+        }
         Ok(())
     }
 
