@@ -494,7 +494,7 @@ fn filings_get(
 }
 
 /// The forms `filings.search` may name, in their order (DEC-2250 item 1).
-const FILING_FORMS: [&str; 6] = ["10-K", "10-K/A", "10-Q", "10-Q/A", "8-K", "8-K/A"];
+pub(crate) const FILING_FORMS: [&str; 6] = ["10-K", "10-K/A", "10-Q", "10-Q/A", "8-K", "8-K/A"];
 
 /// The most bytes of excerpt one `filings.search` entry carries (§6.10).
 const FILING_EXCERPT_BYTES: usize = 4_000;
