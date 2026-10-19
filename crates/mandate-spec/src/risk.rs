@@ -541,6 +541,28 @@ pub struct Outcome {
     pub rejection: Option<Rejection>,
 }
 
+impl Outcome {
+    /// The breach time (§5.6) the limit's confirmation held at this input, in whole seconds, for the
+    /// `RiskLimitTriggered` at `event` in [`Outcome::journal`]: journal spec §9.27's `breach_time_s`
+    /// (DEC-2301 item 1). It is read before the fold's latch removes the confirmation, so a hard
+    /// trigger, `hard_breach_pending`, and `new_day_breach` carry whatever had accumulated, and it is
+    /// 0 where the limit has no confirmation: a `scale_sizes` rung, `after_reset` or not.
+    ///
+    /// Keyed by the event's position rather than by its limit, because the writer fills the member
+    /// one record at a time and a position names exactly one record, where a limit could name two in
+    /// an allocation change's settled batch. `Ok(None)` for any other event and for a position past
+    /// the journal's end. A tripwire's trigger is in [`Outcome::tripwire_journal`], never here, so
+    /// its `null` needs nothing from this accessor.
+    ///
+    /// # Errors
+    /// [`SpecError::Unimplemented`] until E6-15 records the breach time: the `Result` is so this
+    /// stub cannot pass for "no breach time" (DEC-77).
+    pub fn breach_time_s(&self, event: usize) -> Result<Option<u64>, SpecError> {
+        let _ = event;
+        Err(SpecError::Unimplemented)
+    }
+}
+
 /// How many regular-session seconds lie between two instants, which is the clock §5.2 and §5.5 use for
 /// an equity's staleness and scale-lift timers.
 ///
