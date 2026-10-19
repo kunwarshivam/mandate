@@ -384,6 +384,55 @@ fn an_acknowledgment_naming_no_matching_unspent_request_is_refused_request_inval
     }
 }
 
+/// Rule 241 spends a request only by an acknowledgment that names it: an earlier plain
+/// acknowledgment, and an earlier acknowledgment of another request, leave a request unspent, so
+/// its acknowledgment commits.
+#[test]
+#[ignore = "pending E8-3"]
+fn an_earlier_acknowledgment_does_not_spend_another_request() {
+    let mut fx = Fixture::new();
+    let checker = user(CHECKER);
+    let first = answer(
+        "request",
+        run(&mut fx, &checker, AGENT, &request(42), ASKED_AT),
+    );
+    let second = answer(
+        "request",
+        run(&mut fx, &checker, AGENT, &request(42), ASKED_AT + 1),
+    );
+    answer(
+        "a plain acknowledgment",
+        run(
+            &mut fx,
+            &owner(),
+            AGENT,
+            &acknowledge(43, None),
+            ASKED_AT + 2,
+        ),
+    );
+    answer(
+        "the first request's acknowledgment",
+        run(
+            &mut fx,
+            &owner(),
+            AGENT,
+            &acknowledge(42, Some(&first.event_id)),
+            ASKED_AT + 3,
+        ),
+    );
+    let before = rows(&fx).len();
+    let ack = acknowledge(42, Some(&second.event_id));
+    answer(
+        "the second request's",
+        run(&mut fx, &user(THIRD), AGENT, &ack, ASKED_AT + 4),
+    );
+    let event = committed(&fx, before, THIRD, &ACKNOWLEDGED, ASKED_AT + 4);
+    assert_eq!(
+        member_text(&event, "payload.request"),
+        Some(second.event_id.as_str())
+    );
+}
+
 /// DEC-2512 items 1 and 2: the code binds what the owner confirms. A request's code differs from an
 /// acknowledgment's of the same event, and an acknowledgment's code differs with the request it
 /// names, or none.
