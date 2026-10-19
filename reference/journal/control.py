@@ -1208,6 +1208,7 @@ VERSIONED_VERSIONS: dict[tuple[str, str], tuple[int, ...]] = {
     ("acct", "OrderSubmitted"): (1, 2),
     ("acct", "OrderRequestRecorded"): (1,),
     ("acct", "ProtectionChanged"): (1,),
+    ("acct", "OwnerConfirmationReceived"): (1,),
     ("ctl", "ConnectionEstablished"): (1, 2),
     ("acct", "ConnectionEstablished"): (2,),
     ("ctl", "MandateConfirmed"): (1, 2),
@@ -1251,6 +1252,14 @@ VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
     ("acct", "OrderSubmitted", 2): rec(*SUBMITTED_V1.fields, ("risk_clock", RISK_CLOCK)),
     ("acct", "OrderRequestRecorded", 1): COMPANION,
     ("acct", "ProtectionChanged", 1): PROTECTION_CHANGED,
+    ("acct", "OwnerConfirmationReceived", 1): rec(
+        ("intent_id", ULID),
+        ("bid", DEC),
+        ("bid_size", DEC),
+        ("floor", DEC),
+        ("copied_from", ULID),
+        ("risk_clock", RISK_CLOCK),
+    ),
     ("ctl", "ConnectionEstablished", 2): ESTABLISHED_V2,
     ("acct", "ConnectionEstablished", 2): rec(*ESTABLISHED_V2.fields, ("risk_clock", RISK_CLOCK)),
     ("ctl", "MandateConfirmed", 2): CONFIRMED_V2,
@@ -1694,6 +1703,20 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
             clauses.reverse()
         wrong = next((m for m, ok in clauses if not ok), None)
         rule("245", wrong is None, "schema", f"payload.{wrong}" if wrong else "")
+    if event_type == "OwnerConfirmationReceived":
+        prices = ["bid", "bid_size", "floor"]
+        if "order.rule_246_floor_first" in skip:
+            prices.reverse()
+        zero_allowed = "boundary.rule_246_zero" in skip
+
+        def positive(member: str) -> bool:
+            value = normalize_decimal(p[member])
+            if f"rule.246.{member}" in skip or value is None:
+                return True
+            return Decimal(value) >= 0 if zero_allowed else Decimal(value) > 0
+
+        wrong = next((m for m in prices if not positive(m)), None)
+        rule("246", wrong is None, "schema", f"payload.{wrong}" if wrong else "")
     if event_type == "StepUpConfirmed":
         rule("242.kind", p["action_kind"] == "approve", "schema", "payload.action_kind")
         rule("242.paper", draft["environment"] == "paper", "schema", "environment")

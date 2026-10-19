@@ -52,6 +52,7 @@ import market_intents
 import marks
 import membership
 import membership_fold
+import owner_confirmations
 import requests
 import research
 import risk_limits
@@ -3867,6 +3868,7 @@ def render(
     confirmations_section: dict,
     marks_section: dict,
     market_intents_section: dict,
+    owner_confirmations_section: dict,
 ) -> str:
     head, _ = split_file(v3_text)
     body = yaml.dump(
@@ -3908,6 +3910,7 @@ def render(
             "step_up_confirmations": confirmations_section,
             "risk_marks": marks_section,
             "market_intents": market_intents_section,
+            "owner_confirmations": owner_confirmations_section,
         },
         Dumper=Dumper,
         sort_keys=False,
@@ -3980,6 +3983,7 @@ def main(argv: list[str] | None = None) -> int:
     confirmations_section = confirmations.build_section()
     marks_section = marks.build_section()
     market_intents_section = market_intents.build_section()
+    owner_confirmations_section = owner_confirmations.build_section()
 
     problems = check_chain(section, v3)
     problems += run_mutants(section, v3)
@@ -4027,6 +4031,8 @@ def main(argv: list[str] | None = None) -> int:
     problems += marks.run_mutants(marks_section)
     problems += market_intents.check_section(market_intents_section)
     problems += market_intents.run_mutants(market_intents_section)
+    problems += owner_confirmations.check_section(owner_confirmations_section)
+    problems += owner_confirmations.run_mutants(owner_confirmations_section)
     problems += check_broker_profile(broker_profile)
     problems += run_broker_profile_mutants(broker_profile)
     problems += connections.check_section(connections_section)
@@ -4099,6 +4105,7 @@ def main(argv: list[str] | None = None) -> int:
         confirmations_section,
         marks_section,
         market_intents_section,
+        owner_confirmations_section,
     )
     reread = yaml.safe_load(rendered)
     if (
@@ -4139,6 +4146,7 @@ def main(argv: list[str] | None = None) -> int:
         or confirmations.check_section(reread["step_up_confirmations"])
         or marks.check_section(reread["risk_marks"])
         or market_intents.check_section(reread["market_intents"])
+        or owner_confirmations.check_section(reread["owner_confirmations"])
     ):
         print(
             "FAIL the rendered YAML does not read back to the same vectors",
@@ -4206,6 +4214,10 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(market_intents_section['invalid_drafts'])} invalid and {len(market_intents_section['valid_drafts'])} valid "
         f"rule-245 IntentReceived drafts, {len(market_intents.VALIDATOR_MUTANTS)} validator and "
         f"{len(market_intents.vector_mutants(market_intents_section))} vector mutants caught; "
+        f"{len(owner_confirmations_section['invalid_drafts'])} invalid and {len(owner_confirmations_section['valid_drafts'])} valid "
+        f"rule-246 drafts and {len(owner_confirmations_section['batches'])} rule-247 batches, "
+        f"{len(owner_confirmations.VALIDATOR_MUTANTS)} validator, {len(owner_confirmations.BATCH_MUTANTS)} batch and "
+        f"{len(owner_confirmations.vector_mutants(owner_confirmations_section))} vector mutants caught; "
         f"{len(control_plane_section['invalid_drafts'])} invalid and {len(control_plane_section['valid_drafts'])} valid "
         f"control-plane drafts, {len(control_plane.VALIDATOR_MUTANTS)} validator and "
         f"{len(control_plane.vector_mutants(control_plane_section))} vector mutants caught; "
