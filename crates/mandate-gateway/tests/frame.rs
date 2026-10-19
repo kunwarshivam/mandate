@@ -74,6 +74,15 @@ impl Read for Counting {
     }
 }
 
+/// A connection that gives up after a few seconds, so a side that never writes fails the test
+/// rather than hanging it.
+fn bounded(connection: TcpStream) -> TcpStream {
+    connection
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    connection
+}
+
 fn framed(body: &[u8]) -> Vec<u8> {
     let length = u32::try_from(body.len()).unwrap();
     [length.to_be_bytes().as_slice(), body].concat()
@@ -198,7 +207,7 @@ fn a_call_crosses_one_connection_and_comes_back_whole() {
         let (mut gateway, _) = gateway();
         gateway.transport_mut().script(vec![ok_reply(800)]);
         for _ in 0..2 {
-            let (mut connection, _) = listener.accept().unwrap();
+            let mut connection = bounded(listener.accept().unwrap().0);
             frame::serve(&mut connection, |request| {
                 let reply = gateway.call(&request);
                 received.send((request, reply.clone())).unwrap();
@@ -208,7 +217,7 @@ fn a_call_crosses_one_connection_and_comes_back_whole() {
         }
     });
 
-    let mut connection = TcpStream::connect(address).unwrap();
+    let mut connection = bounded(TcpStream::connect(address).unwrap());
     let reply = frame::call(&mut connection, &served_request()).unwrap();
     let (request, served) = seen.recv().unwrap();
     assert_eq!(request, served_request());
@@ -219,7 +228,7 @@ fn a_call_crosses_one_connection_and_comes_back_whole() {
 
     let mut foreign = served_request();
     foreign.workspace_id = "ws_other".to_owned();
-    let mut connection = TcpStream::connect(address).unwrap();
+    let mut connection = bounded(TcpStream::connect(address).unwrap());
     assert_eq!(
         frame::call(&mut connection, &foreign),
         Ok(Err(RequestError::ForeignWorkspace))
