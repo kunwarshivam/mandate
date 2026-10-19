@@ -6,6 +6,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
+use mandate_canon::Digest;
 use mandate_domain::AssetClass;
 use mandate_gateway::fake::{Recorded, RecordedTransport};
 use mandate_gateway::guard::GuardContext;
@@ -18,11 +19,16 @@ use mandate_gateway::registry::Locality;
 use mandate_gateway::{CallRecord, Gateway, RateCaps, RequestError, Settings};
 use mandate_journal::{ArtifactRef, ArtifactStore, Environment};
 use mandate_research::{AssetClass as EnvelopeClass, WorkingUniverse};
+use mandate_research_run::agentic::LoopBounds;
 use mandate_research_run::{
-    Allowlist, Answer, CallContext, CallPlan, MemoryThesis, Readers, RecordedKey, Retrieval,
-    RetrievalPlan, RetrievedItem, Scope, SourceId, call, recorded_reply, retrieve,
+    Allowlist, Answer, CallContext, CallPlan, DispatchScope, MemoryThesis, Readers, RecordedKey,
+    ResearchRunError, Retrieval, RetrievalPlan, RetrievedItem, Scope, SourceId, call, dispatch,
+    recorded_reply, retrieve,
 };
-use mandate_runtime::{ResearchInput, ResearchRequest, RetrievedObservation, RiskClock};
+use mandate_runtime::{
+    DispatchRequest, DispatchedResult, ResearchInput, ResearchRequest, RetrievedObservation,
+    RiskClock,
+};
 use mandate_store::MemoryStore;
 use mandate_time::UtcNanos;
 
@@ -38,6 +44,26 @@ pub enum WorkerError {
     Bundle(BundleError),
     /// The daily research cap is above the workspace's monthly budget (DEC-2254 item 3).
     DailyCapAboveWorkspace,
+}
+
+/// Why a dispatch was answered with nothing (DEC-2260 item 6); the core's run bound then ends the
+/// run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DispatchError {
+    /// The worker was not given the loop's bounds (DEC-2260 item 1).
+    NoLoop,
+    /// The worker did not start the run, or it was cancelled (item 2).
+    NotStarted,
+    /// The pass's allowlist is not the version the run froze, or the cut-off is not an instant
+    /// (item 3).
+    ScopeMoved,
+    /// The harness refused the dispatch: an action among the calls, or a result it could not
+    /// write (item 6).
+    Refused(ResearchRunError),
+    /// An item's record could not be captured (item 6).
+    Uncaptured,
+    /// A content was longer than `u32` bytes, or the sink refused a store (items 5 and 6).
+    Unstored,
 }
 
 /// Who the worker reads and calls for.
@@ -74,6 +100,10 @@ enum Ready {
         run_id: String,
         dispatched: bool,
     },
+    Dispatched {
+        run_id: String,
+        results: Vec<DispatchedResult>,
+    },
 }
 
 /// What a run's call reads, kept from its start.
@@ -98,6 +128,7 @@ pub struct RecordedWorker {
     now: Box<dyn FnMut() -> UtcNanos>,
     runs: BTreeMap<String, Run>,
     ready: Vec<Ready>,
+    bounds: Option<LoopBounds>,
 }
 
 impl RecordedWorker {
@@ -202,6 +233,7 @@ impl RecordedWorker {
             now,
             runs: BTreeMap::new(),
             ready: Vec::new(),
+            bounds: None,
         })
     }
 
@@ -226,10 +258,79 @@ impl RecordedWorker {
         Self::built(bundle, who, sink, now, meter, caps)
     }
 
-    fn start(&mut self, run_id: &str, cut_off: RiskClock, parts: &ResearchParts) {
-        let Ok(at) = UtcNanos::from_parts(cut_off.secs(), 0) else {
-            return;
+    /// The worker, running a dispatch within `bounds`, the agentic entry's pinned `loop_bounds`
+    /// (DEC-2260 item 1). Without them it runs no dispatch.
+    #[must_use]
+    pub fn with_loop(mut self, bounds: LoopBounds) -> Self {
+        self.bounds = Some(bounds);
+        self
+    }
+
+    /// Runs the core's dispatch of a reply's reads and thinks (DEC-2260): within the run's frozen
+    /// scope and the loop's bounds, over the recorded plane, each result's content and each of its
+    /// items' records stored before `ResearchInput::Dispatched` is kept for the next pass.
+    ///
+    /// # Errors
+    /// [`DispatchError`] when nothing is answered, and why.
+    pub fn dispatch(
+        &mut self,
+        request: &DispatchRequest,
+        parts: &ResearchParts,
+    ) -> Result<(), DispatchError> {
+        let Some(bounds) = &self.bounds else {
+            return Err(DispatchError::NoLoop);
         };
+        if !self.runs.contains_key(&request.run_id) {
+            return Err(DispatchError::NotStarted);
+        }
+        let scope = self
+            .scope(request.cut_off, parts)
+            .filter(|scope| scope.allowlist.version == request.allowlist_version)
+            .ok_or(DispatchError::ScopeMoved)?;
+        let within = DispatchScope {
+            scope: &scope,
+            bounds,
+            result_bytes_left: request.result_bytes_left,
+        };
+        let ran = dispatch(request.turn, &request.calls, within, self.readers())
+            .map_err(DispatchError::Refused)?;
+        let mut results = Vec::with_capacity(ran.results.len());
+        for result in ran.results {
+            let bytes = u32::try_from(result.content.len()).map_err(|_| DispatchError::Unstored)?;
+            if !self.sink.put(&result.content) {
+                return Err(DispatchError::Unstored);
+            }
+            let mut items = Vec::with_capacity(result.items.len());
+            for item in &result.items {
+                let (observation, record) = RetrievedObservation::capture(item, request.cut_off)
+                    .map_err(|_| DispatchError::Uncaptured)?;
+                if !self.sink.put(&record) {
+                    return Err(DispatchError::Unstored);
+                }
+                items.push(observation);
+            }
+            results.push(DispatchedResult {
+                call: result.call,
+                outcome: result.outcome,
+                code: result.code,
+                content: Digest::of(&result.content),
+                bytes,
+                truncated: result.truncated,
+                untrusted: result.untrusted,
+                items,
+            });
+        }
+        self.ready.push(Ready::Dispatched {
+            run_id: request.run_id.clone(),
+            results,
+        });
+        Ok(())
+    }
+
+    /// The run's read scope at `cut_off`, from the pass's allowlist and data universe, with nothing
+    /// held; `None` when the cut-off is not an instant.
+    fn scope(&self, cut_off: RiskClock, parts: &ResearchParts) -> Option<Scope> {
+        let at = UtcNanos::from_parts(cut_off.secs(), 0).ok()?;
         let allowlist = Allowlist {
             version: parts.facts.allowlist.version.0,
             sources: parts
@@ -240,21 +341,31 @@ impl RecordedWorker {
                 .filter_map(|source| SourceId::new(source.as_str()).ok())
                 .collect(),
         };
-        let scope = Scope {
+        Some(Scope {
             workspace: self.workspace.clone(),
             agent: self.agent.clone(),
             cut_off: at,
             data_universe: parts.data_symbols.clone(),
             held: BTreeSet::new(),
             allowlist,
-        };
-        let readers = Readers {
+        })
+    }
+
+    /// The recorded plane as every reader.
+    fn readers(&self) -> Readers<'_> {
+        Readers {
             bars: &self.plane,
             news: &self.plane,
             filings: &self.plane,
             instruments: &self.plane,
+        }
+    }
+
+    fn start(&mut self, run_id: &str, cut_off: RiskClock, parts: &ResearchParts) {
+        let Some(scope) = self.scope(cut_off, parts) else {
+            return;
         };
-        let Ok(retrieval) = retrieve(&self.plan, &scope, readers) else {
+        let Ok(retrieval) = retrieve(&self.plan, &scope, self.readers()) else {
             return;
         };
         let mut kept = Vec::new();
@@ -396,7 +507,10 @@ impl ResearchWorker for RecordedWorker {
             ResearchRequest::Start { run_id, cut_off } => self.start(run_id, *cut_off, parts),
             ResearchRequest::Call(plan) => self.call(plan),
             ResearchRequest::Cancel { run_id } => self.cancel(run_id),
-            ResearchRequest::Turn(_) | ResearchRequest::Dispatch(_) => {}
+            ResearchRequest::Dispatch(request) => {
+                let _unanswered = self.dispatch(request, parts);
+            }
+            ResearchRequest::Turn(_) => {}
         }
     }
 
@@ -410,6 +524,11 @@ impl ResearchWorker for RecordedWorker {
                 Ready::Cancelled { run_id, dispatched } => {
                     ResearchInput::Cancelled { run_id, dispatched }
                 }
+                Ready::Dispatched { run_id, results } => ResearchInput::Dispatched {
+                    run_id,
+                    at,
+                    results,
+                },
             })
             .collect()
     }

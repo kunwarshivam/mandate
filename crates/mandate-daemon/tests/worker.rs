@@ -15,8 +15,10 @@ use mandate_daemon::source::{Rows, SourceFor};
 use mandate_daemon::worker::{RecordedWorker, StoreSink, WorkerError, WorkerFor};
 use mandate_daemon::{ArtifactSink, ResearchParts, ResearchWorker};
 use mandate_gateway::Outcome as CallOutcome;
+use mandate_gateway::meter::MeterStore;
 use mandate_gateway::meter::{MeterRecord, SharedMeter};
 use mandate_gateway::money::Usd6;
+use mandate_gateway::provider::SequentialIds;
 use mandate_journal::{ArtifactRef, ArtifactStore, Environment, StoredEvent, StreamId};
 use mandate_num::Usd;
 use mandate_research::{
@@ -30,6 +32,8 @@ use mandate_research_run::{
 use mandate_runtime::{
     JournalCatalog, Preconditions, ResearchInput, ResearchRequest, RetrievedObservation, RiskClock,
 };
+use mandate_store::MemoryStore;
+use mandate_store::meter::JournalMeter;
 use mandate_time::UtcNanos;
 use proptest::prelude::*;
 
@@ -503,4 +507,127 @@ fn the_store_sink_says_stored_only_for_the_bytes_own_reference() {
         Some(&b"a record".to_vec())
     );
     assert!(!StoreSink(Misfiled).put(b"a record"));
+}
+
+/// As [`called`], the call made as `call_id`: the core gives every call an id of its own, so a
+/// call after a restart is never the first call again (journal spec rule 158).
+fn called_as(worker: &mut RecordedWorker, call_id: &str) -> mandate_gateway::CallRecord {
+    start(worker);
+    let retrieved = worker.answers(RiskClock::from_secs(CUT_OFF + 1));
+    let Some(ResearchInput::Retrieved { items, .. }) = retrieved.first() else {
+        panic!("the run retrieved: {retrieved:?}");
+    };
+    let plan = CallPlan {
+        call_id: call_id.to_owned(),
+        ..call_plan(items.len())
+    };
+    worker.hand(&ResearchRequest::Call(plan), &parts());
+    let answers = worker.answers(RiskClock::from_secs(CUT_OFF + 2));
+    let [ResearchInput::Called { record, .. }] = answers.as_slice() else {
+        panic!("the call answered once: {answers:?}");
+    };
+    (**record).clone()
+}
+
+/// The journal's meter stream for `ws1`, opened by a writer of its own.
+fn journal_meter(journal: &MemoryStore, at: i64) -> JournalMeter<MemoryStore> {
+    let clock = move || UtcNanos::from_parts(at, 0).unwrap();
+    JournalMeter::open(
+        journal.clone(),
+        "ws1",
+        Environment::Paper,
+        Rc::new(clock),
+        Box::new(SequentialIds::starting_at(
+            u128::try_from(at).unwrap() << 32,
+        )),
+    )
+}
+
+/// A worker started at `at`, its gateway reserving through the journal's meter stream under the
+/// daily research cap `daily`, over an agent stream recording `rows`.
+fn journaled(journal: &MemoryStore, rows: AgentRows, at: i64, daily: Usd6) -> RecordedWorker {
+    let clock = move || UtcNanos::from_parts(at, 0).unwrap();
+    let meter = CellMeter::over(
+        Box::new(journal_meter(journal, at)),
+        Rc::new(rows),
+        SourceFor {
+            workspace: "ws1".to_owned(),
+            agent: "agent-a".to_owned(),
+            environment: Environment::Paper,
+        },
+        Rc::new(clock),
+    );
+    RecordedWorker::capped(
+        &bundle(),
+        WorkerFor {
+            workspace: "ws1".to_owned(),
+            agent: "agent-a".to_owned(),
+            description: "Long-only US large caps, on public news and filings.".to_owned(),
+        },
+        Box::new(Shelf::default()),
+        Box::new(clock),
+        meter,
+        daily,
+    )
+    .unwrap()
+}
+
+/// E21-61's acceptance in the cell (DEC-2259 items 1 and 2): a worker restarted over the journaled
+/// meter, its agent stream recording the call it made before, is not held, and the day's cap counts
+/// that call: a cap one micro-dollar short of its spend plus a new call's maximum refuses the new
+/// call `budget_exhausted` and journals nothing, and the cap at exactly that sum admits it. The
+/// sum is read from the journal's records, not from the worker.
+#[test]
+fn a_restarted_worker_over_the_journaled_meter_keeps_the_daily_cap() {
+    let journal = MemoryStore::default();
+    let first = called(&mut journaled(
+        &journal,
+        AgentRows::with_call(None),
+        CUT_OFF + 5,
+        Usd6::from_micros(5_000_000),
+    ));
+    assert_eq!(first.outcome, CallOutcome::Ok);
+    let reservation = first.reservation.expect("an ok call is reserved");
+    let records = journal_meter(&journal, CUT_OFF + 6).read().unwrap();
+    let (mut max, mut cost) = (None, None);
+    for record in &records {
+        match record {
+            MeterRecord::Reserved(r) if r.event_id == reservation => max = Some(r.max_cost),
+            MeterRecord::Settled(s) if s.reservation == reservation => cost = Some(s.cost),
+            _ => {}
+        }
+    }
+    let (max, cost) = (max.unwrap(), cost.unwrap());
+    let quoted = format!(r#""{reservation}""#);
+    let after = |at: i64, daily: u64| {
+        journaled(
+            &journal,
+            AgentRows::with_call(Some(&quoted)),
+            at,
+            Usd6::from_micros(daily),
+        )
+    };
+
+    let short = cost.micros() + max.micros() - 1;
+    let refused = called_as(
+        &mut after(CUT_OFF + 65, short),
+        "01J8Z3MR000000000000000002",
+    );
+    assert_eq!(refused.outcome, CallOutcome::BudgetExhausted);
+    assert_eq!(refused.reservation, None);
+    assert_eq!(
+        journal_meter(&journal, CUT_OFF + 66).read().unwrap(),
+        records,
+        "nothing journaled over the cap"
+    );
+
+    let admitted = called_as(
+        &mut after(CUT_OFF + 125, short + 1),
+        "01J8Z3MR000000000000000003",
+    );
+    assert_eq!(
+        admitted.outcome,
+        CallOutcome::Ok,
+        "not held after the restart"
+    );
 }
