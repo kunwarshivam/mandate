@@ -280,6 +280,10 @@ the spec invariants (DP-n) its tests cover.
   to fail on a seeded bug; zero missed mutants. *Slice 2:* corporate actions through the
   accounting fold, several instruments at once, and one shared mapping from a mandate document to
   the gate's mandate for the backtest and the shell.
+  *The risk state's corporate actions landed* ([DEC-2303](decisions/DEC-2303.md), #1656, #1671,
+  #1672): MC-R27 to MC-R32 pass. *Follow-up:* `dividends_due` is folded but not reported; a spec and
+  code pair adds it to `ref.py`'s risk snapshot and `mandate-spec`'s `Snapshot`, with every
+  `risk_state` case's expectation and the refcases harness reading it.
 - **E4-5 (Must, M5)** As an owner, I want my backtest report kept as a record with a stable shape,
   so that the go-live screen and the web app show exactly the report that was produced
   ([DEC-1001](decisions/DEC-1001.md)). *Accepted when:* the report is canonical JSON at
