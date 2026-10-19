@@ -157,7 +157,7 @@ pub fn read_secret(_path: &Path) -> Result<Vec<u8>, SecretFileError> {
 ///
 /// # Errors
 /// [`Refused::Alpaca`] for some but not all three, an empty client id or redirect URI, or a secret
-/// file [`read_secret`] refuses.
+/// file [`read_secret`] refuses, or a redirect URI outside DEC-2623 item 2's shape.
 #[expect(
     clippy::todo,
     reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
