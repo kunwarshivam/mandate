@@ -304,7 +304,7 @@ const TOOL_ENVS: [&str; 18] = [
 ];
 
 /// `program`, `kubectl` or `flux`, with an environment of [`TOOL_ENVS`] alone.
-fn tool(program: &str) -> Command {
+pub(crate) fn tool(program: &str) -> Command {
     tool_with(program, |name| env::var_os(name))
 }
 
