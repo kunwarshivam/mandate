@@ -36,6 +36,12 @@ pub const INSTRUMENT_FILE: &str = "deploy/cell/demo/instrument.json";
 /// already pins (DEC-2036).
 pub const WEB_MANDATE_FILE: &str = "deploy/cell/demo/web-mandate.json";
 pub const WEB_INSTRUMENT_FILE: &str = "deploy/cell/demo/web-instrument.json";
+/// The demo's research agent's envelope, as canonical JSON, and the recording its model registers
+/// from: an unpinned universe of one instrument, a research envelope, and `llm.research_agent`
+/// admitting instruments, pinned to the hash `model register --entry` recomputes from the demo
+/// bundle's entry (DEC-2246 item 4, DEC-2247).
+pub const RESEARCH_MANDATE_FILE: &str = "deploy/cell/demo/research-mandate.json";
+pub const RESEARCH_RECORDING_FILE: &str = "deploy/cell/demo/research/research.json";
 const INPUTS: &str = "/in";
 /// The journal and the artifact store every gesture names: the `control` process's DSN, expanded
 /// by Kubernetes from its environment, and the pod's own `/work`, which all its containers share.
@@ -53,10 +59,19 @@ pub const AGENT: &str = "demo-spy";
 /// the CLI stops [`AGENT`] inside the Job, and `web/` offers nothing to stop on a stopped agent, so
 /// the browser presses this one's (lane W2's D10).
 pub const WEB_AGENT: &str = "demo-web";
+/// The demo's research agent, deployed alone in [`research_workspace_of`] the run's workspace, so
+/// its research is the only agent on its control stream (DEC-2214 item 1, DEC-2247 item 2).
+pub const RESEARCH_AGENT: &str = "demo-research";
 /// How long the gestures' Job may run: the egress gate, the credentials copy and every gesture,
 /// one after another. Under the 300 s `run_job` polls for, so the Job ends, and the report is
 /// written, before the polling gives up.
 const DEADLINE_S: u64 = 240;
+
+/// The research agent's workspace for the run's `workspace`: the same owner's second workspace,
+/// `<workspace>r` (DEC-2247 item 2).
+pub fn research_workspace_of(workspace: &str) -> String {
+    format!("{workspace}r")
+}
 
 /// The run's workspace (DEC-2010): a ULID, since the API hosts only a ULID, fresh for each run id
 /// because a confirmed version refuses a second confirmation: `01KDEM`, the run id's ten digits,
@@ -368,11 +383,16 @@ fn deploy_code(agent: &str, version: &str) -> String {
     ))
 }
 
-/// The demo's six steps for `workspace`, given the bytes of the demo's mandate and of
-/// [`WEB_AGENT`]'s.
-pub fn plan(workspace: &str, (mandate, web_mandate): (&[u8], &[u8])) -> Vec<Step> {
+/// The demo's six steps for `workspace`, given the bytes of the demo's mandate, of
+/// [`WEB_AGENT`]'s, and of [`RESEARCH_AGENT`]'s.
+pub fn plan(
+    workspace: &str,
+    (mandate, web_mandate, research_mandate): (&[u8], &[u8], &[u8]),
+) -> Vec<Step> {
     let version = reference(mandate);
     let web_version = reference(web_mandate);
+    let research_version = reference(research_mandate);
+    let research_workspace = research_workspace_of(workspace);
     let user = FOUNDER.to_ascii_lowercase();
     let with = |args: &[&str], extra: &[&str]| -> Vec<String> {
         args.iter().chain(extra).map(|a| a.to_string()).collect()
@@ -382,6 +402,16 @@ pub fn plan(workspace: &str, (mandate, web_mandate): (&[u8], &[u8])) -> Vec<Step
         with(
             args,
             &[&["--workspace", workspace, "--user", &user][..], &target].concat(),
+        )
+    };
+    let researcher = |args: &[&str]| {
+        with(
+            args,
+            &[
+                &["--workspace", research_workspace.as_str(), "--user", &user][..],
+                &target,
+            ]
+            .concat(),
         )
     };
     let stream = format!("ctl:{workspace}");
@@ -410,6 +440,10 @@ pub fn plan(workspace: &str, (mandate, web_mandate): (&[u8], &[u8])) -> Vec<Step
     let (web_confirm, web_deploy) = (
         confirm_code(&web_version),
         deploy_code(WEB_AGENT, &web_version),
+    );
+    let (research_confirm, research_deploy) = (
+        confirm_code(&research_version),
+        deploy_code(RESEARCH_AGENT, &research_version),
     );
     let steps = vec![
         Step {
@@ -542,33 +576,109 @@ pub fn plan(workspace: &str, (mandate, web_mandate): (&[u8], &[u8])) -> Vec<Step
         Step {
             number: 3,
             title: "the research loop reads news and filings and asks the model",
-            parts: vec![Part::Gap(Gap {
-                what: "a research run in the agent's runtime, through mandate-gateway's \
-                       recorded fake",
-                on_main: "the runtime and its image (#1521, #1560), the research driver in the \
-                          runtime behind a deny-all default (#1575), the loop through the \
-                          gateway's recorded fake (#1520), E19-5's invalidation (#1559), and \
-                          E19-13's agentic run so far: the gateway's tool calls (#1551), its run \
-                          records (#1561), the loop's pure state (#1566) and the runtime's side \
-                          (#1569)",
-                waits: vec![
-                    X_CONNECT,
-                    wait(
-                        "I2",
-                        "E19-2",
-                        None,
-                        "a deployment's research configured, its context folded from the \
-                         account and meter streams (DEC-2208, claim #1531)",
+            parts: vec![
+                gesture(
+                    "the research agent's own paper workspace, opened (DEC-2247 item 2)",
+                    with(
+                        &[
+                            "workspace",
+                            "open",
+                            "--workspace",
+                            &research_workspace,
+                            "--environment",
+                            "paper",
+                        ],
+                        &target,
                     ),
-                    wait(
-                        "AH",
-                        "E19-13",
-                        None,
-                        "the agentic loop itself over that state, with its read and think tools \
-                         (ADR-0005, claim #1534)",
+                    format!("opened ctl:{research_workspace}"),
+                ),
+                gesture(
+                    "the same founder's membership there",
+                    with(
+                        &[
+                            "workspace",
+                            "found",
+                            "--workspace",
+                            &research_workspace,
+                            "--member",
+                            FOUNDER,
+                        ],
+                        &[&["--method", "oidc"][..], &target].concat(),
                     ),
-                ],
-            })],
+                    format!("founded ctl:{research_workspace} for member {FOUNDER}"),
+                ),
+                gesture(
+                    "the moving-average crossover model, registered there",
+                    researcher(&["model", "register", "quant.ma_crossover", "1.0.0"]),
+                    "registered as event".into(),
+                ),
+                gesture(
+                    "the research agent's model, registered from the recorded entry, its hash \
+                     recomputed (DEC-2247 item 1)",
+                    researcher(&[
+                        "model",
+                        "register",
+                        "llm.research_agent",
+                        "0.1.0",
+                        "--entry",
+                        &format!("{INPUTS}/research.json"),
+                    ]),
+                    "registered as event".into(),
+                ),
+                gesture(
+                    "the research envelope's version, created: unpinned, one instrument, research \
+                     on",
+                    researcher(&[
+                        "version",
+                        "create",
+                        &format!("{INPUTS}/research-mandate.json"),
+                    ]),
+                    format!("created {research_version}"),
+                ),
+                gesture(
+                    "its confirmation code, shown (nothing committed)",
+                    researcher(&["version", "confirm", &research_version]),
+                    format!("code {research_confirm}"),
+                ),
+                gesture(
+                    "the research envelope, confirmed with the code shown (rule 11)",
+                    researcher(&[
+                        "version",
+                        "confirm",
+                        &research_version,
+                        "--code",
+                        &research_confirm,
+                    ]),
+                    "confirmed as event".into(),
+                ),
+                gesture(
+                    "the research agent's code, shown (nothing committed)",
+                    researcher(&["agent", "deploy", RESEARCH_AGENT, &research_version]),
+                    format!("code {research_deploy}"),
+                ),
+                gesture(
+                    "the research agent, deployed with the code shown, alone on its control \
+                     stream",
+                    researcher(&[
+                        "agent",
+                        "deploy",
+                        RESEARCH_AGENT,
+                        &research_version,
+                        "--code",
+                        &research_deploy,
+                    ]),
+                    "deployed as event".into(),
+                ),
+                Part::Gap(Gap {
+                    what: "a research run in the research agent's runtime, over the recorded \
+                           bundle its image carries, through mandate-gateway's recorded fake",
+                    on_main: "the runtime opted into research over the bundle (#1757), the \
+                              bundle in the interim runtime image (#1769), every managed runtime \
+                              pod handed it (#1774), and the research model's registration \
+                              (#1779, #1782)",
+                    waits: vec![X_CONNECT],
+                }),
+            ],
         },
         Step {
             number: 4,
@@ -948,7 +1058,11 @@ pub fn run(name: &str) -> Result<()> {
         fs::read(WEB_MANDATE_FILE).with_context(|| format!("reading {WEB_MANDATE_FILE}"))?;
     let web_instrument = fs::read_to_string(WEB_INSTRUMENT_FILE)
         .with_context(|| format!("reading {WEB_INSTRUMENT_FILE}"))?;
-    let steps = plan(&workspace, (&mandate, &web_mandate));
+    let research_mandate = fs::read(RESEARCH_MANDATE_FILE)
+        .with_context(|| format!("reading {RESEARCH_MANDATE_FILE}"))?;
+    let research_recording = fs::read_to_string(RESEARCH_RECORDING_FILE)
+        .with_context(|| format!("reading {RESEARCH_RECORDING_FILE}"))?;
+    let steps = plan(&workspace, (&mandate, &web_mandate, &research_mandate));
     let all = gestures(&steps);
     let first = all.first().context("the scenario has no gesture")?;
     let rendered = render(
@@ -969,6 +1083,11 @@ pub fn run(name: &str) -> Result<()> {
             String::from_utf8(web_mandate).context("the second mandate is not UTF-8")?,
         ),
         ("web-instrument.json".into(), web_instrument),
+        (
+            "research-mandate.json".into(),
+            String::from_utf8(research_mandate).context("the research mandate is not UTF-8")?,
+        ),
+        ("research.json".into(), research_recording),
     ]
     .into_iter()
     .chain(backtest_inputs(Path::new("."))?)
@@ -1372,9 +1491,13 @@ mod tests {
         fs::read(format!("../{WEB_MANDATE_FILE}")).unwrap()
     }
 
-    /// The plan for `workspace` on the demo's two envelopes.
+    fn research_mandate() -> Vec<u8> {
+        fs::read(format!("../{RESEARCH_MANDATE_FILE}")).unwrap()
+    }
+
+    /// The plan for `workspace` on the demo's three envelopes.
     fn planned(workspace: &str) -> Vec<Step> {
-        plan(workspace, (&mandate(), &web_mandate()))
+        plan(workspace, (&mandate(), &web_mandate(), &research_mandate()))
     }
 
     fn parsed(path: &str) -> Value {
@@ -1391,6 +1514,7 @@ mod tests {
             INSTRUMENT_FILE,
             WEB_MANDATE_FILE,
             WEB_INSTRUMENT_FILE,
+            RESEARCH_MANDATE_FILE,
         ] {
             let bytes = fs::read(format!("../{path}")).unwrap();
             let again = serde_json::to_vec(&parsed(path)).unwrap();
@@ -1455,14 +1579,22 @@ mod tests {
         assert_eq!(snapshot, spy, "a plain, whole-share listed fund, as SPY is");
     }
 
-    /// DEC-530 item 4's codes for the demo's mandate, as the CLI binary showed them when the
-    /// scenario's gestures were run against a local Postgres (and the CLI accepted them typed).
+    /// DEC-530 item 4's codes for the demo's mandate and the research agent's, as the CLI binary
+    /// showed them when the scenario's gestures were run against a local Postgres (and the CLI
+    /// accepted them typed).
     #[test]
     fn the_codes_are_the_first_eight_hex_digits_of_the_gestures_hash() {
         let version = "sha256:19dd2428a410b41fa00ddc1b3d8d15d5775096ed223a20edf123c50adae292e6";
         assert_eq!(confirm_code(version), "e869cb19");
         assert_eq!(deploy_code(AGENT, version), "63fbe39f");
         assert_eq!(code(""), "e3b0c442");
+        let research = reference(&research_mandate());
+        assert_eq!(
+            research,
+            "sha256:c6c2018e6f60482ac6ae838f2535e92036f21c6638f9818df5028d45537cd9de"
+        );
+        assert_eq!(confirm_code(&research), "9d06451c");
+        assert_eq!(deploy_code(RESEARCH_AGENT, &research), "a45a1728");
     }
 
     /// The steps run 1 to 6 in order; a shown code precedes the gesture that types it, and the
@@ -1647,7 +1779,7 @@ mod tests {
                 g.args[..2] == ["journal", "verify"],
             );
             let runner = g.command == Some(RUNNER_BIN);
-            let scoped = value(&g.args, "--workspace") == Some("demo7")
+            let scoped = matches!(value(&g.args, "--workspace"), Some("demo7" | "demo7r"))
                 || (export && g.args[2] == "ctl:demo7")
                 || verify
                 || runner;
@@ -1670,6 +1802,122 @@ mod tests {
         assert_eq!(tail, [["journal", "export"], ["journal", "verify"]]);
         assert_eq!(all[all.len() - 2].args[3], SEGMENT);
         assert_eq!(all[all.len() - 1].args[2], SEGMENT);
+    }
+
+    /// The research agent's envelope: paper, every admission and opening asked, an unpinned
+    /// universe of one instrument, a research envelope, and exactly one `llm.` model admitting
+    /// instruments beside the demo's quant model, sorted by id (V-009, V-036; DEC-2246 item 4). Its
+    /// connection is the demo's.
+    #[test]
+    fn the_research_envelope_researches_one_instrument_and_asks_everything() {
+        let m = parsed(RESEARCH_MANDATE_FILE);
+        assert_eq!(m["environment"], "paper");
+        assert_eq!(m["autonomy"]["default"], "ask");
+        assert_eq!(m["autonomy"]["admission"], "ask");
+        assert_eq!(m["autonomy"]["rules"], json!([]));
+        assert_eq!(m["universe"]["pinned"], false);
+        assert_eq!(m["universe"]["pinned_instruments"], json!([]));
+        assert_eq!(m["universe"]["max_instruments"], 1);
+        assert_eq!(
+            m["behavior"]["research"],
+            json!({"cost_cap_usd_per_day": "5", "interval_s": 3600, "max_revisions_per_lineage": 3})
+        );
+        let models: Vec<(&str, bool)> = m["behavior"]["signal_models"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|model| {
+                (
+                    model["id"].as_str().unwrap(),
+                    model["admits_instruments"].as_bool().unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            models,
+            [("llm.research_agent", true), ("quant.ma_crossover", false)]
+        );
+        assert_eq!(m["connection_id"], parsed(MANDATE_FILE)["connection_id"]);
+    }
+
+    /// Step 3 opens and founds the research agent's own workspace, registers its two models
+    /// there, the research one from the recorded entry, then creates, confirms and deploys its
+    /// envelope, every gesture in that workspace and none in the run's, so the research agent is
+    /// alone on its control stream (DEC-2214 item 1, DEC-2247 item 2). What is left waits on the
+    /// manager starting a runtime from the deployment only (DEC-2247 item 3).
+    #[test]
+    fn step_three_deploys_the_research_agent_alone_in_its_own_workspace() {
+        let steps = planned("demo3");
+        let step = &steps[2];
+        assert_eq!(step.number, 3);
+        let gestures: Vec<&Gesture> = step
+            .parts
+            .iter()
+            .filter_map(|p| match p {
+                Part::Gesture(g) => Some(g),
+                _ => None,
+            })
+            .collect();
+        let words: Vec<[&str; 2]> = gestures
+            .iter()
+            .map(|g| [g.args[0].as_str(), g.args[1].as_str()])
+            .collect();
+        assert_eq!(
+            words,
+            [
+                ["workspace", "open"],
+                ["workspace", "found"],
+                ["model", "register"],
+                ["model", "register"],
+                ["version", "create"],
+                ["version", "confirm"],
+                ["version", "confirm"],
+                ["agent", "deploy"],
+                ["agent", "deploy"],
+            ]
+        );
+        for g in &gestures {
+            let at = g.args.iter().position(|a| a == "--workspace").unwrap();
+            assert_eq!(g.args[at + 1], "demo3r", "{:?}", g.args);
+        }
+        assert_eq!(
+            gestures[3].args[2..6],
+            [
+                "llm.research_agent",
+                "0.1.0",
+                "--entry",
+                "/in/research.json"
+            ]
+        );
+        let version = reference(&research_mandate());
+        assert_eq!(gestures[4].expect, format!("created {version}"));
+        let deployed = &gestures[8].args;
+        assert_eq!(deployed[2..4], [RESEARCH_AGENT, version.as_str()]);
+        assert_eq!(lanes(step), ["X"], "only the manager starting its runtime");
+        let others: Vec<&Gesture> = gestures_of(&steps, |n| n != 3);
+        assert!(
+            others.iter().all(|g| !g.args.iter().any(|a| a == "demo3r")),
+            "no other step touches the research workspace"
+        );
+        assert!(
+            others
+                .iter()
+                .all(|g| !g.args.iter().any(|a| a == RESEARCH_AGENT)),
+            "the research agent is deployed nowhere else"
+        );
+    }
+
+    /// The gestures of the steps whose number `keep` admits.
+    fn gestures_of(steps: &[Step], keep: impl Fn(u8) -> bool) -> Vec<&Gesture> {
+        steps
+            .iter()
+            .filter(|s| keep(s.number))
+            .flat_map(|s| &s.parts)
+            .filter_map(|p| match p {
+                Part::Gesture(g) => Some(g),
+                _ => None,
+            })
+            .collect()
     }
 
     /// Step 6 commits the owner's kill switch for the demo's agent, at agent scope only (an
@@ -1812,8 +2060,8 @@ mod tests {
         }
     }
 
-    /// The second agent has an envelope of its own, deployed only after step 5's backtest is
-    /// recorded: `agent deploy` and `backtest record` each take only the workspace's latest
+    /// The second agent in the run's workspace has an envelope of its own, deployed only after
+    /// step 5's backtest is recorded (the research agent deploys in its own workspace, step 3): `agent deploy` and `backtest record` each take only the workspace's latest
     /// confirmed version, so its confirmation comes after the record and its deployment after its
     /// confirmation. Its snapshot is registered before its version is created, and web/ presses
     /// that agent's kill switch, never the one the CLI stops (DEC-2036).
@@ -1825,7 +2073,7 @@ mod tests {
         let all = gestures(&steps);
         let deployed: Vec<[&str; 2]> = all
             .iter()
-            .filter(|g| g.args[..2] == ["agent", "deploy"])
+            .filter(|g| g.args[..2] == ["agent", "deploy"] && g.args.iter().any(|a| a == "demo6"))
             .map(|g| [g.args[2].as_str(), g.args[3].as_str()])
             .collect();
         let (v, w) = (version.as_str(), web.as_str());
@@ -2204,7 +2452,7 @@ mod tests {
         let read: Vec<Readiness> = steps.iter().map(readiness).collect();
         assert_eq!(
             read,
-            [Partial, Partial, Skipped, Partial, Partial, Partial, Ready]
+            [Partial, Partial, Partial, Partial, Partial, Partial, Ready]
         );
         let step = |parts: Vec<Part>| Step {
             number: 9,
