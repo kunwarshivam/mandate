@@ -341,7 +341,7 @@ def values_policy(values: dict[str, dict], environment: str) -> list[str]:
     archive = journal.get("archive") or {}
     if not R2_ENDPOINT.match(str(archive.get("endpointURL", ""))):
         problems.append(f"journal: archives to {archive.get('endpointURL')}, not R2's S3 endpoint")
-    if archive.get("destinationPath") != f"s3://mandate-journal-archive-{environment}/journal-db":
+    if archive.get("destinationPath") != f"s3://mandate-journal-archive-west-{environment}/journal-db":
         problems.append(f"journal: archives {environment} under {archive.get('destinationPath')}")
     if archive.get("egress") != R2_EGRESS:
         problems.append(f"journal: archive egress {archive.get('egress')}, not R2's two addresses on 443")
