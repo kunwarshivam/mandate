@@ -85,4 +85,4 @@ pub use ports::{
     ReadError, Readers, TextQuery,
 };
 pub use retrieve::{Drop, DropReason, Retrieval, RetrievedItem, retrieve};
-pub use turn::{EarlierTurn, TurnCall};
+pub use turn::{EarlierTurn, TurnCall, TurnParts, call_turn};
