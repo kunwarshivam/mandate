@@ -110822,7 +110822,7 @@
   ]
  },
  "market_intents": {
-  "spec": "docs/specs/journal.md v0.64 §9.5 rule 245 (DEC-2037)",
+  "spec": "docs/specs/journal.md v0.65 §9.5 rule 245 (DEC-2037)",
   "drafts": {
    "exit_v2": {
     "envelope_version": 1,

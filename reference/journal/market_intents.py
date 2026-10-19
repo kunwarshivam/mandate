@@ -31,7 +31,7 @@ from control import (
     valid as control_valid,
 )
 
-SPEC = "docs/specs/journal.md v0.64 §9.5 rule 245 (DEC-2037)"
+SPEC = "docs/specs/journal.md v0.65 §9.5 rule 245 (DEC-2037)"
 ACCOUNT = f"acct:{WORKSPACE}:{ACCOUNT_STREAM_REF}"
 AT = "2026-10-19T14:30:00.250000000Z"
 RISK_CLOCK = "2026-10-19T14:30:01.000000000Z"
