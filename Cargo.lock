@@ -2593,6 +2593,7 @@ name = "mandate-store"
 version = "0.0.0"
 dependencies = [
  "mandate-canon",
+ "mandate-gateway",
  "mandate-journal",
  "mandate-journal-pg",
  "mandate-time",
