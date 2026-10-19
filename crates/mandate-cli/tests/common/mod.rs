@@ -14,7 +14,9 @@ use mandate_approval::{
 };
 use mandate_canon::{Digest, Int, Key, Value, parse, to_canonical};
 use mandate_cli::control::{ControlError, ControlJournal, Ids, Now, Owner};
-use mandate_journal::{AppendOutcome, Environment, Head, StoredEvent, StreamId};
+use mandate_journal::{
+    AppendOutcome, Environment, Head, Invalid, InvalidReason, StoredEvent, StreamId,
+};
 use mandate_num::{Price, Qty, Signed};
 use mandate_time::UtcNanos;
 
@@ -225,9 +227,23 @@ pub fn code_of(content: &Value) -> String {
 /// `lost_for_good`, commits the next control-stream append, answers it `Ambiguous`, and answers
 /// every later one `Unavailable` until cleared, so a command gives up having committed. Every pause
 /// the CLI asks for between attempts is recorded, never slept.
+/// How the next append to an agent stream is answered instead of judged, as a journal that refuses
+/// the owner's claim would answer it; nothing is stored.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Refusal {
+    /// Another event is stored under the draft's id.
+    Conflict,
+    /// The journal's draft checks refuse the draft.
+    Invalid,
+    /// The journal cannot be reached: the append is an error.
+    Fails,
+}
+
 #[derive(Debug, Default)]
 pub struct Journal {
     streams: BTreeMap<String, (u64, Vec<StoredEvent>)>,
+    /// The answer to the next append to an agent stream, in place of judging it.
+    pub agent_refusal: Option<Refusal>,
     /// Appends to refuse as `Fenced`, taking a new epoch as another writer would.
     pub fence_next: u32,
     /// Appends before which another event lands at the current epoch, so the append is behind.
@@ -344,6 +360,23 @@ impl ControlJournal for Journal {
                     .unwrap_or_default()
             })
             .collect();
+        if stream.as_str().starts_with("agent:")
+            && let Some(refusal) = self.agent_refusal.take()
+        {
+            return match refusal {
+                Refusal::Conflict => Ok(AppendOutcome::IdempotencyConflict { stored_seq: 1 }),
+                Refusal::Invalid => Ok(AppendOutcome::Invalid {
+                    draft: 0,
+                    error: Invalid {
+                        reason: InvalidReason::Schema,
+                        path: "actor.kind".to_owned(),
+                    },
+                }),
+                Refusal::Fails => Err(ControlError::Journal(
+                    "the agent stream cannot be written".to_owned(),
+                )),
+            };
+        }
         if stream.as_str() == CONTROL {
             self.attempts.push(ids.clone());
             if self.lost_for_good && self.lost {

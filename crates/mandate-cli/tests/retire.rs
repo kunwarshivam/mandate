@@ -11,8 +11,8 @@ mod common;
 use std::collections::BTreeMap;
 
 use common::{
-    AGENT, CONTROL, FixedIds, Journal, OTHER_AGENT, OWNER, WORKSPACE, agent_stream, at, owner,
-    stream,
+    AGENT, CONTROL, FixedIds, Journal, OTHER_AGENT, OWNER, Refusal, WORKSPACE, agent_stream, at,
+    owner, stream,
 };
 use mandate_canon::{Digest, Value, parse, to_canonical};
 use mandate_cli::agent::{self, Command};
@@ -491,6 +491,29 @@ fn an_agent_never_deployed_is_stopped_by_command_unclaimed() {
     assert!(world.agent_kinds(AGENT).is_empty(), "nothing claimed");
 }
 
+/// DEC-2039 item 6 (a refused claim is Rejected; `AGENTS.md` rule 13): whatever the journal answers
+/// to the owner's claim, a conflict, a refusal of the draft, or an error, the Stop is never
+/// refused. It goes as an `OwnerCommandIssued`, and nothing is claimed.
+#[test]
+fn a_claim_the_journal_refuses_or_fails_still_sends_the_stop_by_command() {
+    for refusal in [Refusal::Conflict, Refusal::Invalid, Refusal::Fails] {
+        let mut world = World::new();
+        world.established();
+        world.deployed(AGENT, true);
+        world.journal.agent_refusal = Some(refusal);
+        let outcome = world.stop_with_code(AGENT);
+        assert!(
+            outcome.is_ok(),
+            "{refusal:?}: the Stop was refused: {outcome:?}"
+        );
+        assert_commanded(&world, AGENT);
+        assert!(
+            world.agent_kinds(AGENT).is_empty(),
+            "{refusal:?}: nothing claimed"
+        );
+    }
+}
+
 /// One step of the property: what a runtime or the manager does, or the owner's Stop.
 #[derive(Debug, Clone)]
 enum Op {
@@ -504,6 +527,8 @@ enum Op {
     StopRaced(usize),
     /// A runtime taking the stream's epoch between the Stop's read and its claim.
     StopFenced(usize),
+    /// A Stop whose claim the journal answers with a conflict, a refusal, or an error.
+    StopRefused(usize, Refusal),
     Stop(usize),
 }
 
@@ -517,6 +542,11 @@ fn op() -> impl Strategy<Value = Op> {
         2 => agent.clone().prop_map(Op::Open),
         2 => agent.clone().prop_map(Op::StopRaced),
         1 => agent.clone().prop_map(Op::StopFenced),
+        1 => (
+            agent.clone(),
+            prop_oneof![Just(Refusal::Conflict), Just(Refusal::Invalid), Just(Refusal::Fails)]
+        )
+            .prop_map(|(i, refusal)| Op::StopRefused(i, refusal)),
         3 => agent.prop_map(Op::Stop),
     ]
 }
@@ -555,7 +585,7 @@ proptest! {
                         ran[*i] = true;
                     }
                 }
-                Op::StopRaced(i) | Op::StopFenced(i) | Op::Stop(i) => {
+                Op::StopRaced(i) | Op::StopFenced(i) | Op::StopRefused(i, _) | Op::Stop(i) => {
                     let before = world.of("AgentStopped").len();
                     let records = world.agent_kinds(AGENTS[*i]).len();
                     let code = world.code(AGENTS[*i]);
@@ -567,7 +597,20 @@ proptest! {
                     if matches!(op, Op::StopFenced(_)) {
                         world.journal.fence_next = 1;
                     }
+                    if let Op::StopRefused(_, refusal) = op {
+                        world.journal.agent_refusal = Some(*refusal);
+                    }
+                    let commands = world.of("OwnerCommandIssued").len();
                     let outcome = world.stop(AGENTS[*i], Some(&code));
+                    let refused = matches!(op, Op::StopRefused(..))
+                        && world.journal.agent_refusal.take().is_none();
+                    prop_assert!(outcome.is_ok(), "{:?}: the Stop was refused: {:?}", op, outcome);
+                    if refused {
+                        prop_assert!(
+                            world.of("OwnerCommandIssued").len() > commands,
+                            "{:?}: a refused claim sent no command", op
+                        );
+                    }
                     let landed = raced && world.journal.land_before_next.is_empty();
                     world.journal.land_before_next.clear();
                     world.journal.fence_next = 0;
