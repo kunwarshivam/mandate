@@ -31,6 +31,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
@@ -44,6 +45,7 @@ use mandate_journal::{Environment, StreamId};
 use mandate_process::State;
 use mandate_process::probe::{self, Probe, Status};
 use mandate_runtime::{AgentId, ConnectionId, Deployment, WorkspaceId};
+use mandate_store::meter::JournalMeter;
 use mandate_store::{MemoryStore, PgStore, Store};
 use mandate_time::UtcNanos;
 use tokio::signal::unix::{SignalKind, signal};
@@ -207,9 +209,17 @@ fn run(
             let found = deployment::resolved(&rows, &agent, Environment::Paper, &artifacts)?;
             let mut wiring = fixture::wiring_for(&found.approvers, &found.author);
             if let Some(opted) = opted {
-                let wired = cell::research(
+                let meter = JournalMeter::open(
+                    PgStore::connect(&dsn)?,
+                    &workspace,
+                    Environment::Paper,
+                    Rc::new(host_now),
+                    Box::new(cell::meter_opened_ids(&workspace)),
+                );
+                let wired = cell::research_metered(
                     opted,
                     Box::new(PgStore::connect(&dsn)?),
+                    Box::new(meter),
                     Path::new(&root),
                     Box::new(host_now),
                 )
