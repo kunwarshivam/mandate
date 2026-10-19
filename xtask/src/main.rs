@@ -29,6 +29,7 @@ mod release;
 mod tofu_audit;
 mod trial;
 mod vault_init;
+mod vault_provision;
 
 const USAGE: &str = "\
 usage: cargo xtask <command>
@@ -1710,6 +1711,8 @@ fn bootstrap_staging(tofu: &dyn Fn(&[String]) -> Command, chdir: &str, run: &str
         archive_endpoint: gitops::Secret::new(output("archive_endpoint")?),
     };
     let cluster_id = output("cluster_id")?;
+    let connections = vault_provision::staging_connections(&repo_root()?)?;
+    let cli = vault_provision::build_cli(&repo_root()?)?;
     let token = env::var("DIGITALOCEAN_TOKEN").unwrap_or_default();
     let temp = env::var("RUNNER_TEMP").context("RUNNER_TEMP is not set")?;
     let (_, context) = infra_window::cluster_names("staging");
@@ -1770,6 +1773,34 @@ fn bootstrap_staging(tofu: &dyn Fn(&[String]) -> Command, chdir: &str, run: &str
     })?;
     for word in words {
         eprintln!("    vault-init: {word} (DEC-2052)");
+    }
+    let base = || {
+        let mut command = gitops::tool("kubectl");
+        command
+            .args(["--v=0", "--kubeconfig"])
+            .arg(kubeconfig.path())
+            .args(["--context", &context]);
+        command
+    };
+    let listed: Vec<&str> = connections.iter().map(String::as_str).collect();
+    let words = vault_provision::vault_provision(
+        &vault_provision::Steps {
+            kubectl: &in_cluster,
+            provision: &|root| {
+                vault_provision::run_cli(
+                    &base,
+                    &in_cluster,
+                    &cli,
+                    Path::new(&temp),
+                    &connections,
+                    root,
+                )
+            },
+        },
+        &listed,
+    )?;
+    for word in words {
+        eprintln!("    vault-provision: {word} (DEC-2630)");
     }
     let account = output("cloudflare_account_id")?;
     mask::add_mask(account.trim());
@@ -17017,6 +17048,16 @@ mod tests {
                 && init < at(&staging, "infra_verify::verify("),
             "staging's vault is set up after its bootstrap and before its verify (DEC-2052)"
         );
+        let provision = at(&staging, concat!("vault_provision::", "vault_provision("));
+        assert!(
+            init < provision && provision < at(&staging, "infra_verify::verify("),
+            "staging's vault is provisioned after its init and before its verify (DEC-2630)"
+        );
+        assert!(
+            at(&staging, "vault_provision::build_cli(")
+                < at(&staging, "infra_window::fetch_kubeconfig("),
+            "the CLI is built before the control-plane window opens (DEC-2630)"
+        );
         let source = include_str!("main.rs");
         assert_eq!(
             source
@@ -17024,6 +17065,13 @@ mod tests {
                 .count(),
             1,
             "only staging's bootstrap, which only staging's apply reaches, sets the vault up"
+        );
+        assert_eq!(
+            source
+                .matches(concat!("vault_provision::", "vault_provision("))
+                .count(),
+            1,
+            "only staging's bootstrap, which only staging's apply reaches, provisions the vault"
         );
         let account = at(&staging, "mask::add_mask(account.trim());");
         let verify = at(&staging, "infra_verify::verify(");
