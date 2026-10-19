@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | v0.6, draft ([DEC-2255](../project/decisions/DEC-2255.md)): v0.5 with DEC-997 Accepted, the live path through the model-gateway service, and §11 brought up to date. v0.5 ([DEC-2207](../project/decisions/DEC-2207.md)): v0.4 with the deployment meter writer and its orphan in §3.3 and §3.6. v0.4 ([DEC-2203](../project/decisions/DEC-2203.md)): v0.3 with turns and pinned tools for the agentic research loop, the founder's decision of 2026-10-17. v0.3 ([DEC-432](../project/decisions/DEC-432.md), [DEC-998](../project/decisions/DEC-998.md), [DEC-997](../project/decisions/DEC-997.md)): v0.2 with the call record and the meter stream closed in journal spec v0.46 (DEC-998, agent readings) and the aggregator and spend cap named (DEC-997, Proposed for the founder). Items 1 to 12 and 17 to 22 of DEC-432 are agent readings; the founder decided items 13 to 16 on 2026-10-03; item 23 is Proposed |
+| **Status** | v0.6, draft ([DEC-2257](../project/decisions/DEC-2257.md)): v0.5 with DEC-997 Accepted, the live path through the model-gateway service, and §11 brought up to date. v0.5 ([DEC-2207](../project/decisions/DEC-2207.md)): v0.4 with the deployment meter writer and its orphan in §3.3 and §3.6. v0.4 ([DEC-2203](../project/decisions/DEC-2203.md)): v0.3 with turns and pinned tools for the agentic research loop, the founder's decision of 2026-10-17. v0.3 ([DEC-432](../project/decisions/DEC-432.md), [DEC-998](../project/decisions/DEC-998.md), [DEC-997](../project/decisions/DEC-997.md)): v0.2 with the call record and the meter stream closed in journal spec v0.46 (DEC-998, agent readings) and the aggregator and spend cap named (DEC-997, Proposed for the founder). Items 1 to 12 and 17 to 22 of DEC-432 are agent readings; the founder decided items 13 to 16 on 2026-10-03; item 23 is Proposed |
 | **Implements** | [HLD §9](../HLD.md#9-intelligence-layer) (model gateway, speed tiers), [HLD §10](../HLD.md#10-billing) (model tokens at cost plus margin), PRD FR-3.7, FR-3.9, FR-10.2; backlog E15 |
 | **Depends on** | [Mandate spec §7, §8](mandate.md#8-signal-models-and-the-order-builder), [journal spec §6.3, §8, §9](journal.md#9-event-catalogue), [DEC-67](../project/04-decision-log.md#decisions), [DEC-120](../project/04-decision-log.md#decisions) |
 | **Caller side** | The [agent harness spec](agent-harness.md) says when the runtime asks for a model output and how long an evaluation waits. This spec says what happens to the call |
@@ -13,7 +13,7 @@ gateway is built and runs over recorded responses; its live path is the model-ga
 
 ## Change history
 
-- **v0.6 ([DEC-2255](../project/decisions/DEC-2255.md); E21-62):** DEC-997 is Accepted (DEC-2605
+- **v0.6 ([DEC-2257](../project/decisions/DEC-2257.md); E21-62):** DEC-997 is Accepted (DEC-2605
   row 19). §6 names the live path: the model-gateway service alone, over `HttpsTransport` and the
   journaled meter, which refuses to start live without it. The key is read once from the vault
   as `ModelGateway`, and §4.3's identity probe runs before an endpoint is registered. §11 says what
@@ -512,7 +512,7 @@ reports it. Both are fixed by the §4.3 identity probe, so the comparison is exa
   would forget open reservations on a crash (DEC-998 item 8). The gateway is built against recorded
   responses and a provider adapter interface. Live calls run only in the team's internal paper and
   demo workspaces, with the key read from the vault by the gateway alone.
-- **The live path ([DEC-2255](../project/decisions/DEC-2255.md)):** only the model-gateway service
+- **The live path ([DEC-2257](../project/decisions/DEC-2257.md)):** only the model-gateway service
   calls a provider, over `mandate-gateway-http`'s `HttpsTransport`. It refuses to start live
   unless its meter is the journaled `meter:{workspace_id}` stream. It reads
   `platform/model-provider-key` once at start as `ModelGateway` (DEC-2020), and registers an
@@ -721,7 +721,7 @@ the date only; it does not suggest a replacement.
 
 | Piece | Today | Planned |
 |---|---|---|
-| Model client | `mandate-gateway`, with the OpenRouter adapter and its routing lock, over the recorded fake in every test and cell build; `mandate-gateway-http`'s `HttpsTransport`, which no binary builds yet (DEC-2200 item 2). The research spike's client is spike code, not product code | The model-gateway service, the only live caller (E21-62, DEC-2255) |
+| Model client | `mandate-gateway`, with the OpenRouter adapter and its routing lock, over the recorded fake in every test and cell build; `mandate-gateway-http`'s `HttpsTransport`, which no binary builds yet (DEC-2200 item 2). The research spike's client is spike code, not product code | The model-gateway service, the only live caller (E21-62, DEC-2257) |
 | Pinning | `mandate-gateway`'s registry pins slug, snapshot and upstream, and refuses an endpoint whose probe does not match (§4.3); the cell's probe is the recorded bundle's own | A real §4.3 probe before the live entry is registered; the entry is the founder's choice (E21-62) |
 | Deadline | Fixed 60 s transport timeout | Pinned `deadline_ms` per entry (INF-3) |
 | Journaling | `mandate-journal` registers §9.19 (DEC-2201). The cell's meter is in memory, so a restart fails closed for the risk day (DEC-2249 item 3) | The journaled meter stream (E21-61), before any live call (DEC-998 item 8) |
@@ -752,7 +752,7 @@ the date only; it does not suggest a replacement.
 - **[DEC-997](../project/decisions/DEC-997.md), Accepted by the founder on 2026-10-19 (DEC-2605 row
   19):** OpenRouter, its routing lock, and the $50 a month cap, which DEC-2203 item 9 records as the
   demo deployment's own setting.
-- **[DEC-2255](../project/decisions/DEC-2255.md), agent readings:** the live path through the
+- **[DEC-2257](../project/decisions/DEC-2257.md), agent readings:** the live path through the
   model-gateway service alone, after the meter is journaled.
 - **[DEC-2203](../project/decisions/DEC-2203.md):** item 1, the founder's (2026-10-17): the research
   run is an agentic loop. Agent readings: pinned tools returned as data, the turn shape, the run
