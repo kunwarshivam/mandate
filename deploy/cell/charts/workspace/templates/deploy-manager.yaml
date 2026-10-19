@@ -69,6 +69,9 @@ DEC-2031). Its probes are processes.json's `probe`, as a Deployment's are (DEC-1
 {{- if and (eq .p.name "runtime") .root.Values.runtime.research -}}
 {{- $args = concat $args (list "--research" .root.Values.runtime.research) -}}
 {{- end -}}
+{{- if eq .p.name "executor" -}}
+{{- $args = concat $args (include "mandate.executorBroker" .root | fromJsonArray) -}}
+{{- end -}}
 {{- $container := include "mandate.container" (dict "root" .root "p" .p "name" .p.name "args" $args "probe" $probe) }}
 {{- fromYaml (include "mandate.pod" (dict "root" .root "p" .p "restartPolicy" "Never" "containers" $container)) | toJson }}
 {{- end -}}

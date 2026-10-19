@@ -1,4 +1,4 @@
-//! The wire form of one call between the runtime and the model-gateway service (DEC-2264 item 5):
+//! The wire form of one call between the runtime and the model-gateway service (DEC-2265 item 5):
 //! every request and every reply reads back as itself, its bytes are canonical JSON and the same
 //! when written again, the format is pinned by two frames written out by hand, and a frame that is
 //! not exactly what the encoder writes is refused.
@@ -265,7 +265,7 @@ fn reply() -> impl Strategy<Value = Reply> {
     ]
 }
 
-/// DEC-2264 item 5: any request reads back from its bytes as itself, and its bytes are canonical
+/// DEC-2265 item 5: any request reads back from its bytes as itself, and its bytes are canonical
 /// JSON that encode the same again.
 #[test]
 fn any_request_reads_back_as_itself_from_canonical_bytes() {
@@ -281,7 +281,7 @@ fn any_request_reads_back_as_itself_from_canonical_bytes() {
         .unwrap_or_else(|failure| panic!("{failure}"));
 }
 
-/// DEC-2264 items 5 and 6: any reply, a whole record with its prompt and response bytes or a
+/// DEC-2265 items 5 and 6: any reply, a whole record with its prompt and response bytes or a
 /// refusal, reads back from its bytes as itself, and its bytes are canonical JSON.
 #[test]
 fn any_reply_reads_back_as_itself_from_canonical_bytes() {
@@ -320,7 +320,7 @@ fn small_request() -> CallRequest {
     }
 }
 
-/// DEC-2264 item 5, pinned: a request and a refusal written out by hand, member by member, are the
+/// DEC-2265 item 5, pinned: a request and a refusal written out by hand, member by member, are the
 /// encoder's bytes exactly.
 #[test]
 fn the_wire_form_is_the_one_written_out_here() {
@@ -356,7 +356,7 @@ fn reencoded(object: &Object) -> Vec<u8> {
     to_canonical(&Value::Object(object.clone()))
 }
 
-/// DEC-2264 item 5: a frame that is not exactly what the encoder writes reads as nothing: not JSON,
+/// DEC-2265 item 5: a frame that is not exactly what the encoder writes reads as nothing: not JSON,
 /// not canonical, another version, a member missing or unlisted, or a value out of range.
 #[test]
 fn a_frame_the_encoder_would_not_write_reads_as_nothing() {
