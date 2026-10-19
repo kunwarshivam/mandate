@@ -8,7 +8,7 @@
 //! kill-switch Job is admitted and its pod made, with the webhook down; that every other way to a
 //! pod labelled `mandate.dev/process: control` is refused (a person's pod, a service account's
 //! pod or Job, a service account relabelling its suspended Job or changing a person's, a
-//! Deployment's pod, a CronJob's Job, the label added to a pod later, and a changed image or an
+//! Deployment's pod, any CronJob's Job, the label added to a pod later, and a changed image or an
 //! ephemeral container in the kill switch's pod); that an unlabelled pod is refused while the
 //! webhook is down; that a second workspace's namespace is covered by its label alone; and that a
 //! finished kill-switch Job is cleaned up by foreground deletion. It waits on conditions, not
@@ -520,6 +520,18 @@ fn exercise(
         )?),
         Outcome::RefusedByPolicy,
     );
+    let lookalike = job("lookalike", "control", false).replacen(
+        "metadata: {name: lookalike}",
+        "metadata:\n  name: lookalike\n  ownerReferences: [{apiVersion: example.com/v1, kind: CronJob, \
+         name: lookalike, uid: 00000000-0000-0000-0000-000000000001}]",
+        1,
+    );
+    expect(
+        &mut broken,
+        "a Job another API group's CronJob owns",
+        create(&FOUNDER, main, &lookalike)?,
+        Outcome::RefusedByPolicy,
+    );
     let (removed, text) = kubectl(&["delete", "validatingwebhookconfiguration", WEBHOOK], None)?;
     ensure!(removed, "removing the down webhook failed: {}", text.trim());
     let admitted = wait_for(
@@ -711,7 +723,9 @@ mod tests {
                         refuse(true)
                     }
                 }
-                Some("create") if manifest.contains("kind: Job") => refuse(!(control && workload)),
+                Some("create") if manifest.contains("kind: Job") => {
+                    refuse(!(control && (workload || manifest.contains("kind: CronJob"))))
+                }
                 Some("create") if args.contains(&"--from=cronjob/fake-control") => refuse(false),
                 Some("patch") if args.contains(&"held") => refuse(self.change || !workload),
                 Some("patch") => refuse(self.relabel || !workload),
