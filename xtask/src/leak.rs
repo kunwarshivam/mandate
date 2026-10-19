@@ -157,7 +157,7 @@ const SECRET_RUNS: &[SecretRun] = &[
     ),
     (
         ".github/workflows/web-deploy.yml",
-        "npx wrangler deploy",
+        "node_modules/.bin/wrangler deploy",
         &["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"],
     ),
 ];
@@ -220,7 +220,7 @@ const PRE_RUNS: &[(&str, &str)] = &[
     (".github/workflows/web-deploy.yml", "npm run cf:build"),
     (
         ".github/workflows/web-deploy.yml",
-        "npx wrangler deploy --dry-run --outdir .wrangler/dry-run",
+        "node_modules/.bin/wrangler deploy --dry-run --outdir .wrangler/dry-run",
     ),
     (
         ".github/workflows/web-deploy.yml",
@@ -3573,8 +3573,8 @@ mod tests {
         let opened = read(web)?.replacen("on:\n", "on:\n  pull_request_target:\n", 1);
         assert!(rules(web, &opened).contains(&"L12"));
         let chained = read(web)?.replacen(
-            "- run: npx wrangler deploy\n",
-            "- run: npx wrangler deploy && curl -sSfL https://x\n",
+            "- run: node_modules/.bin/wrangler deploy\n",
+            "- run: node_modules/.bin/wrangler deploy && curl -sSfL https://x\n",
             1,
         );
         assert!(rules(web, &chained).contains(&"L9"));
