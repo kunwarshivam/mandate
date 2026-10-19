@@ -56,7 +56,6 @@ fn granted() -> Answer {
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn a_full_session_ends_at_its_idle_deadline_unless_its_absolute_one_is_earlier() {
     let store = sessions();
     let cookie = store
@@ -114,7 +113,6 @@ fn a_full_session_ends_at_its_idle_deadline_unless_its_absolute_one_is_earlier()
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn only_a_live_session_by_its_current_secret_has_an_expiry() {
     let store = sessions();
     let opened = store
@@ -243,7 +241,6 @@ fn runner() -> TestRunner {
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn the_expiry_matches_deadlines_kept_apart_and_catches_seeded_bugs() {
     let steps = proptest::collection::vec((1..ACCESS_S, 0..IDLE_S + 60), 0..200);
     if let Err(failure) = runner().run(&steps, |steps| agrees(&steps, real)) {

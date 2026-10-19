@@ -380,12 +380,21 @@ impl Sessions {
     ///
     /// # Errors
     /// [`Unauthenticated`] for a cookie that names no session live at `now` by its current secret.
-    #[expect(
-        clippy::todo,
-        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-    )]
-    pub fn expires_at(&self, _cookie: &str, _now: UtcNanos) -> Result<UtcNanos, Unauthenticated> {
-        todo!()
+    pub fn expires_at(&self, cookie: &str, now: UtcNanos) -> Result<UtcNanos, Unauthenticated> {
+        let limits = self.limits.map_err(|_| Unauthenticated)?;
+        let (id, secret) = self.decode(cookie).ok_or(Unauthenticated)?;
+        let store = self.store();
+        let entry = store
+            .entries
+            .get(&id)
+            .filter(|entry| holds(entry, &secret) && live(entry, now.secs(), limits.idle_s()))
+            .ok_or(Unauthenticated)?;
+        let idle = if entry.record.reach() == Reach::Full {
+            entry.last_active.saturating_add(limits.idle_s())
+        } else {
+            entry.absolute_until
+        };
+        UtcNanos::from_parts(entry.absolute_until.min(idle), 0).map_err(|_| Unauthenticated)
     }
 
     /// How many sessions are held, for the tests' independent count.
