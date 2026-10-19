@@ -1420,7 +1420,6 @@ fn starts_a_run(step: &ResearchStep) -> bool {
 /// DEC-2261 item 1: the gateway's refusal of a turn ends the run `error` at once, with no record of
 /// the refused call, and asks the worker for nothing more.
 #[test]
-#[ignore = "pending E19-13"]
 fn a_refused_turn_ends_the_run_error_with_no_record() {
     let (ids, plan, view) = fixture();
     let ports = ports(&ids, &AllowGate, &plan, &view);
@@ -1446,7 +1445,6 @@ fn a_refused_turn_ends_the_run_error_with_no_record() {
 /// DEC-2261 item 2: a refused turn withdraws its pin, as a refused single call does: no run starts
 /// under it again, and a new version re-enables research.
 #[test]
-#[ignore = "pending E19-13"]
 fn a_refused_turn_withdraws_its_pin_until_a_new_version() {
     let (ids, plan, view) = fixture();
     let ports = ports(&ids, &AllowGate, &plan, &view);
@@ -1472,7 +1470,6 @@ fn a_refused_turn_withdraws_its_pin_until_a_new_version() {
 /// DEC-2261 item 3: a refusal while the run's reads are out, not its turn, is not interpreted, and
 /// the run stays as it was.
 #[test]
-#[ignore = "pending E19-13"]
 fn a_refusal_while_the_reads_are_out_is_not_interpreted() {
     let (ids, plan, view) = fixture();
     let ports = ports(&ids, &AllowGate, &plan, &view);
