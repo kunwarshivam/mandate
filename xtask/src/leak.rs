@@ -33,10 +33,13 @@
 //!   workflow command, in any case and after an escaped line break too; and nothing anywhere issues
 //!   `::add-mask::`, in any case, but a reviewed line that escapes its value first (`%` to `%25`,
 //!   then CR to `%0D` and LF to `%0A`).
-//! - **L9, the closed world:** a step a secret reaches, from the step, its job or its workflow,
-//!   and every step after it in its job, runs only one reviewed line of [`SECRET_RUNS`] or one of
-//!   xtask's pinned `READ_ACTIONS`, sets no `shell:`, and a secret job runs no local action; and
-//!   every `uses:` anywhere is pinned to a 40-character commit.
+//! - **L9, the canonical subset and the closed world:** every workflow is written in one plain
+//!   shape ([`canonical_findings`]), so these line readers see what GitHub does. A step a secret
+//!   reaches, from the step, its job or its workflow, and every step after it in its job, runs
+//!   only one reviewed line of [`SECRET_RUNS`] or one of xtask's pinned `READ_ACTIONS`, sets only
+//!   that entry's `env:` names and no `shell:` or `working-directory:`. Its job sets no
+//!   `container:`, `services:` or unreviewed `defaults:`, and a secret job runs no local action.
+//!   Every `uses:` anywhere is pinned to a 40-character commit.
 //! - **L12, triggers:** `pull_request_target` and `workflow_run` only in `merge.yml`, which names no
 //!   `head.sha`, `head.ref` or `head_ref`; no trigger anyone can raise (a comment, an issue, a
 //!   review, a discussion, a dispatch); a workflow holding an `environment:` triggers only on
@@ -152,21 +155,108 @@ const ALLOWED: &[(&str, &str, &str)] = &[
 /// - `release.yml`'s signing step runs the reviewed `release-sign.sh` (DEC-2024);
 /// - `web-deploy.yml`'s step runs the deploy tool its earlier `npm ci --ignore-scripts` installed
 ///   from the lockfile, its job's shape pinned by `web/scripts/workers.mjs` (#1700).
-const SECRET_RUNS: &[(&str, &str)] = &[
-    (".github/workflows/infra.yml", "target/debug/xtask infra"),
+///
+/// Each also names the `env:` its step may set, exactly; nothing else, so no `PATH`,
+/// `LD_PRELOAD`, `NODE_OPTIONS` or `BASH_ENV` reaches the secret step. `infra close`'s names
+/// include `TF_VAR_kube_api_allowed_addresses`, and `infra`'s `MANDATE_INFRA_SHA`, which IAC's
+/// #1771 adds, as [`SECRET_JOB_ENV`] does its kubectl and flux pins.
+const SECRET_RUNS: &[SecretRun] = &[
+    (
+        ".github/workflows/infra.yml",
+        "target/debug/xtask infra",
+        &[
+            "MANDATE_INFRA_ENVIRONMENT",
+            "MANDATE_INFRA_ACTION",
+            "MANDATE_INFRA_SHA",
+            "DIGITALOCEAN_TOKEN",
+            "TF_VAR_state_passphrase",
+            "TF_VAR_cloudflare_api_token",
+            "TF_VAR_kube_api_allowed_addresses",
+            "TF_VAR_access_allowed_emails",
+        ],
+    ),
     (
         ".github/workflows/infra.yml",
         "target/debug/xtask infra close",
+        &[
+            "MANDATE_INFRA_ENVIRONMENT",
+            "DIGITALOCEAN_TOKEN",
+            "TF_VAR_kube_api_allowed_addresses",
+        ],
     ),
     (
         ".github/workflows/r2-lockcheck.yml",
         "target/debug/examples/r2_finding",
+        &[
+            "R2_ENDPOINT",
+            "R2_ACCESS_KEY_ID",
+            "R2_SECRET_ACCESS_KEY",
+            "CLOUDFLARE_ACCOUNT_ID",
+            "CLOUDFLARE_API_TOKEN",
+        ],
     ),
     (
         ".github/workflows/release.yml",
         ".github/scripts/release-sign.sh",
+        &[
+            "DIGEST",
+            "COSIGN_URL",
+            "COSIGN_SHA256",
+            "RELEASE_SIGNING_KEY",
+            "COSIGN_PASSWORD",
+        ],
     ),
-    (".github/workflows/web-deploy.yml", "npx wrangler deploy"),
+    (
+        ".github/workflows/web-deploy.yml",
+        "npx wrangler deploy",
+        &["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"],
+    ),
+];
+
+/// The one job-level `defaults:` block a job holding a secret step may set, by workflow, its
+/// trimmed lines exactly (L9): `release.yml`'s signing job runs `bash`, as every job there does,
+/// and `web-deploy.yml`'s deploy job runs in `web/`, where its reviewed deploy step's tool is.
+const SECRET_JOB_DEFAULTS: &[(&str, &[&str])] = &[
+    (
+        ".github/workflows/release.yml",
+        &["defaults:", "run:", "shell: bash"],
+    ),
+    (
+        ".github/workflows/web-deploy.yml",
+        &["defaults:", "run:", "working-directory: web"],
+    ),
+];
+
+/// One [`SECRET_RUNS`] entry: the workflow, the `run:` line, and the `env:` names its step may set.
+type SecretRun = (&'static str, &'static str, &'static [&'static str]);
+
+/// The `env:` names a job holding a secret step, its steps after the first one, and its
+/// workflow's top level may set, by workflow, exactly (L9): pins, telemetry switches and colour.
+const SECRET_JOB_ENV: &[(&str, &[&str])] = &[
+    (
+        ".github/workflows/infra.yml",
+        &[
+            "TOFU_VERSION",
+            "TOFU_SHA256",
+            "KUBECTL_VERSION",
+            "KUBECTL_SHA256",
+            "FLUX_VERSION",
+            "FLUX_SHA256",
+        ],
+    ),
+    (".github/workflows/r2-lockcheck.yml", &["CARGO_TERM_COLOR"]),
+    (
+        ".github/workflows/release.yml",
+        &["CARGO_TERM_COLOR", "HELM_VERSION", "HELM_SHA256"],
+    ),
+    (
+        ".github/workflows/web-deploy.yml",
+        &[
+            "NEXT_TELEMETRY_DISABLED",
+            "DO_NOT_TRACK",
+            "WRANGLER_SEND_METRICS",
+        ],
+    ),
 ];
 
 /// Every path an `upload-artifact` step may upload, by workflow and path, matched exactly (L5):
@@ -493,7 +583,8 @@ pub(crate) fn findings(sources: &[Source]) -> Vec<Finding> {
         if source.path.contains("/workflows/") {
             let all = job_findings(&source.path, &source.text)
                 .into_iter()
-                .chain(workflow_findings(&source.path, &source.text));
+                .chain(workflow_findings(&source.path, &source.text))
+                .chain(canonical_findings(&source.text));
             for (rule, number, text, why) in all {
                 push(rule, &source.path, number, &text, why);
             }
@@ -1316,7 +1407,13 @@ fn upload_findings(
 fn job_findings(path: &str, text: &str) -> Vec<(&'static str, usize, String, &'static str)> {
     let mut out = Vec::new();
     let workflow_secret = workflow_level_secret(text);
-    for job in jobs(text) {
+    let all_jobs = jobs(text);
+    if all_jobs.iter().any(|job| {
+        workflow_secret || job_level_secret(job) || steps(job).iter().any(|step| step.secret)
+    }) {
+        out.extend(top_level_context(path, text));
+    }
+    for job in all_jobs {
         out.extend(step_shape(path, &job, workflow_secret));
         for step in step_lines(&job) {
             out.extend(upload_findings(path, &step));
@@ -1395,34 +1492,104 @@ fn workflow_level_secret(text: &str) -> bool {
     false
 }
 
-/// The value of a step's `key:`, its first line's text after the key, wherever in the step it is.
+/// A step's own keys: the item line's key and every key at the item's key column, so a `run:`
+/// inside the step's `env:` or inside a `name: |` block is not the step's (decoys). The
+/// canonical-subset gate holds every line to two spaces a level, so the column is exact.
+fn own_keys(step: &Step) -> Vec<(usize, &str, &str)> {
+    let Some((_, first)) = step.lines.first() else {
+        return Vec::new();
+    };
+    let column = first
+        .len()
+        .saturating_sub(first.trim_start().len())
+        .saturating_add(2);
+    step.lines
+        .iter()
+        .filter_map(|(number, raw)| {
+            let indent = raw.len().saturating_sub(raw.trim_start().len());
+            let node = uncommented(raw.trim());
+            let node = if raw.trim_start().starts_with("- ") {
+                node.strip_prefix("- ")?
+            } else if indent == column {
+                node
+            } else {
+                return None;
+            };
+            let (key, value) = node.split_once(':')?;
+            Some((*number, key, value.trim()))
+        })
+        .collect()
+}
+
+/// The value of a step's own `key:` ([`own_keys`]), with its line.
 fn step_value<'a>(step: &'a Step, key: &str) -> Option<(usize, &'a str)> {
-    step.lines.iter().find_map(|(number, raw)| {
-        uncommented(raw.trim())
-            .trim_start_matches("- ")
-            .strip_prefix(key)
-            .and_then(|rest| rest.strip_prefix(':'))
-            .map(|value| (*number, value.trim()))
-    })
+    own_keys(step)
+        .into_iter()
+        .find(|(_, own, _)| *own == key)
+        .map(|(number, _, value)| (number, value))
+}
+
+/// The names a step's own `env:` sets, each with its line: the keys one level under it.
+fn env_names(lines: &[(usize, String)], env_at: usize) -> Vec<(usize, String)> {
+    let mut out = Vec::new();
+    let mut env_column: Option<usize> = None;
+    for (number, raw) in lines {
+        let indent = raw.len().saturating_sub(raw.trim_start().len());
+        let trimmed = uncommented(raw.trim());
+        if trimmed.is_empty() || raw.trim_start().starts_with('#') {
+            continue;
+        }
+        if *number == env_at {
+            env_column = Some(indent.saturating_add(if trimmed.starts_with("- ") { 4 } else { 2 }));
+            continue;
+        }
+        let Some(column) = env_column else {
+            continue;
+        };
+        if indent < column {
+            break;
+        }
+        if indent == column
+            && let Some((name, _)) = trimmed.split_once(':')
+        {
+            out.push((*number, name.to_owned()));
+        }
+    }
+    out
 }
 
 /// Why a step that a secret reaches, or that follows one in its job, is outside L9's closed world,
-/// or `None` when it is inside it. Its `run:` is one line of [`SECRET_RUNS`] for its workflow,
-/// exactly, never a block; its `uses:` is one of xtask's reviewed pins, `READ_ACTIONS`, never a
-/// local action; and it sets no `shell:`.
-fn outside_closed_world(path: &str, step: &Step) -> Option<&'static str> {
-    if step_value(step, "shell").is_some() {
-        return Some("a step a secret reaches sets no `shell:`");
+/// or `None` when it is inside it. Its own `run:` is one line of [`SECRET_RUNS`] for its workflow,
+/// exactly, never a block; its own `uses:` is one of xtask's reviewed pins, `READ_ACTIONS`, never
+/// a local action; it sets no `shell:` or `working-directory:`; and its `env:` sets only the names
+/// its [`SECRET_RUNS`] entry, or the workflow's [`SECRET_JOB_ENV`], lists.
+fn outside_closed_world(path: &str, step: &Step) -> Vec<(usize, &'static str)> {
+    let mut out = Vec::new();
+    let own = own_keys(step);
+    let run = step_value(step, "run");
+    let entry = run.and_then(|(_, run)| {
+        SECRET_RUNS
+            .iter()
+            .find(|(file, line, _)| *file == path && *line == run)
+    });
+    for (number, key, _) in &own {
+        if RUN_CONTEXT_KEYS.contains(key) {
+            out.push((
+                *number,
+                "a step a secret reaches sets no `shell:` or `working-directory:`",
+            ));
+        }
     }
-    if let Some((_, run)) = step_value(step, "run")
-        && !SECRET_RUNS.contains(&(path, run))
+    if let Some((number, _)) = run
+        && entry.is_none()
     {
-        return Some(
-            "a step a secret reaches, or that follows one, runs only one line of xtask/src/leak.rs's \
-             SECRET_RUNS",
-        );
+        out.push((
+            number,
+            "a step a secret reaches, or that follows one, runs only one line of \
+             xtask/src/leak.rs's SECRET_RUNS",
+        ));
     }
-    if let Some((_, uses)) = step_value(step, "uses") {
+    if let Some((number, uses)) = step_value(step, "uses") {
         let action = uses
             .trim_matches(['"', '\''])
             .split_whitespace()
@@ -1432,32 +1599,102 @@ fn outside_closed_world(path: &str, step: &Step) -> Option<&'static str> {
             .iter()
             .any(|(name, only)| *name == action && only.is_none_or(|only| only == path));
         if !reviewed {
-            return Some(
+            out.push((
+                number,
                 "a step a secret reaches, or that follows one, uses only an action xtask's \
                  READ_ACTIONS pins",
-            );
+            ));
         }
     }
-    None
+    if let Some((env_at, _)) = step_value(step, "env") {
+        let allowed: &[&str] = entry.map_or(job_env_names(path), |(_, _, names)| names);
+        for (number, name) in env_names(&step.lines, env_at) {
+            if !allowed.contains(&name.as_str()) {
+                out.push((
+                    number,
+                    "a step a secret reaches, or that follows one, sets only the `env:` names its \
+                     SECRET_RUNS entry lists",
+                ));
+            }
+        }
+    }
+    out
+}
+
+/// L9 for the top level of a workflow holding a secret step: no `defaults:`, which would change
+/// how every `run:` executes, and a top-level `env:` of only [`SECRET_JOB_ENV`]'s names.
+fn top_level_context(path: &str, text: &str) -> Vec<(&'static str, usize, String, &'static str)> {
+    let mut out = Vec::new();
+    let mut in_env = false;
+    for (index, raw) in text.lines().enumerate() {
+        let trimmed = uncommented(raw.trim());
+        if trimmed.is_empty() || raw.trim_start().starts_with('#') {
+            continue;
+        }
+        let indent = raw.len().saturating_sub(raw.trim_start().len());
+        let key = trimmed.split_once(':').map(|(key, _)| key);
+        if indent == 0 {
+            in_env = key == Some("env");
+            if key == Some("defaults") {
+                out.push((
+                    "L9",
+                    index.saturating_add(1),
+                    trimmed.to_owned(),
+                    "a workflow holding a secret step sets no top-level `defaults:`",
+                ));
+            }
+        } else if in_env
+            && indent == 2
+            && key.is_some_and(|name| !job_env_names(path).contains(&name))
+        {
+            out.push((
+                "L9",
+                index.saturating_add(1),
+                trimmed.to_owned(),
+                "a workflow holding a secret step sets only SECRET_JOB_ENV's top-level `env:` names",
+            ));
+        }
+    }
+    out
+}
+
+/// The [`SECRET_JOB_ENV`] names of a workflow, none when it has no entry.
+fn job_env_names(path: &str) -> &'static [&'static str] {
+    SECRET_JOB_ENV
+        .iter()
+        .find(|(file, _)| *file == path)
+        .map_or(&[], |(_, names)| names)
 }
 
 /// L9 for a job: every step a secret reaches, from the step, the job or the workflow, and every
-/// step after the first such step, is inside the closed world; and a secret job runs no local
-/// action, whose steps no reviewer has read here.
+/// step after the first such step, is inside the closed world ([`outside_closed_world`]). A job
+/// holding such a step sets no `defaults:`, `container:`, `services:`, `shell:` or
+/// `working-directory:` anywhere, and its job-level `env:` only [`SECRET_JOB_ENV`]'s names; it
+/// has an `environment:` when its workflow is one of [`SECRET_RUNS`]'; and a secret job runs no
+/// local action, whose steps no reviewer has read here.
 fn step_shape(
     path: &str,
     job: &Job,
     workflow_secret: bool,
 ) -> Vec<(&'static str, usize, String, &'static str)> {
     let mut out = Vec::new();
+    let line_of = |number: usize| {
+        job.lines
+            .iter()
+            .find(|(at, _)| *at == number)
+            .map(|(_, raw)| raw.trim().to_owned())
+            .unwrap_or_default()
+    };
     let job_secret = workflow_secret || job_level_secret(job);
+    let all = steps(job);
+    let holds_secret_step = job_secret || all.iter().any(|step| step.secret);
     let mut after_secret = false;
-    for step in steps(job) {
+    for step in &all {
         let Some((number, first)) = step.lines.first() else {
             continue;
         };
         if job.secret
-            && step_value(&step, "uses")
+            && step_value(step, "uses")
                 .is_some_and(|(_, uses)| uses.trim_matches(['"', '\'']).starts_with("./"))
         {
             out.push((
@@ -1468,12 +1705,255 @@ fn step_shape(
             ));
         }
         let secret = step.secret || job_secret;
-        if (secret || after_secret)
-            && let Some(why) = outside_closed_world(path, &step)
-        {
-            out.push(("L9", *number, first.trim().to_owned(), why));
+        if secret || after_secret {
+            for (at, why) in outside_closed_world(path, step) {
+                out.push(("L9", at, line_of(at), why));
+            }
         }
         after_secret |= secret;
+    }
+    if holds_secret_step {
+        let job_key_column = 4;
+        let mut in_job_env = false;
+        let mut defaults: Option<(usize, Vec<String>)> = None;
+        let reviewed_defaults = SECRET_JOB_DEFAULTS
+            .iter()
+            .find(|(file, _)| *file == path)
+            .map(|(_, lines)| *lines);
+        let close_defaults = |block: Option<(usize, Vec<String>)>, out: &mut Vec<_>| {
+            if let Some((number, lines)) = block
+                && reviewed_defaults.is_none_or(|reviewed| lines != reviewed)
+            {
+                out.push((
+                    "L9",
+                    number,
+                    "defaults:".to_owned(),
+                    "a job holding a secret step sets no `defaults:` but its workflow's one                      reviewed block, SECRET_JOB_DEFAULTS",
+                ));
+            }
+        };
+        for (number, raw) in &job.lines {
+            let indent = raw.len().saturating_sub(raw.trim_start().len());
+            let node = uncommented(raw.trim()).trim_start_matches("- ");
+            if raw.trim_start().starts_with('#') || node.is_empty() {
+                continue;
+            }
+            if let Some((_, lines)) = defaults.as_mut() {
+                if indent > job_key_column {
+                    lines.push(node.to_owned());
+                    continue;
+                }
+                close_defaults(defaults.take(), &mut out);
+            }
+            let Some((key, _)) = node.split_once(':') else {
+                continue;
+            };
+            if key == "defaults" && indent == job_key_column {
+                defaults = Some((*number, vec![node.to_owned()]));
+                continue;
+            }
+            if RUN_CONTEXT_KEYS.contains(&key) {
+                out.push((
+                    "L9",
+                    *number,
+                    raw.trim().to_owned(),
+                    "a job holding a secret step sets no `defaults:`, `container:`, `services:`, \
+                     `shell:` or `working-directory:`",
+                ));
+            }
+            if indent == job_key_column {
+                in_job_env = key == "env";
+            } else if in_job_env
+                && indent == job_key_column.saturating_add(2)
+                && !job_env_names(path).contains(&key)
+            {
+                out.push((
+                    "L9",
+                    *number,
+                    raw.trim().to_owned(),
+                    "a job holding a secret step sets only SECRET_JOB_ENV's job-level `env:` names",
+                ));
+            }
+        }
+        close_defaults(defaults.take(), &mut out);
+        let listed = SECRET_RUNS.iter().any(|(file, _, _)| *file == path);
+        let gated = job
+            .lines
+            .iter()
+            .any(|(_, raw)| raw.starts_with("    environment:"));
+        if listed
+            && !gated
+            && let Some((number, header)) = job.lines.first()
+        {
+            out.push((
+                "L12",
+                *number,
+                header.trim().to_owned(),
+                "a job holding a secret step in a SECRET_RUNS workflow names an `environment:`",
+            ));
+        }
+    }
+    out
+}
+
+/// One entry of a canonical workflow line: a `key:` with its value, or a sequence item's scalar.
+enum Entry<'a> {
+    /// `key: value`, or `key:` with an empty value: its value.
+    Key(&'a str),
+    /// A sequence item that is a scalar, `- value`.
+    Scalar(&'a str),
+}
+
+/// Whether a mapping key is bare: `[A-Za-z0-9_-]+`, nothing quoted.
+fn bare_key(key: &str) -> bool {
+    !key.is_empty()
+        && key
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'))
+}
+
+/// A line's entry, as the canonical subset reads it, or why it is outside the subset: every key
+/// is bare and followed by `:` and then a space or the end of the line.
+fn entry(node: &str, item: bool) -> Result<Entry<'_>, &'static str> {
+    if let Some(at) = node.find(':') {
+        let (key, rest) = (
+            node.get(..at).unwrap_or_default(),
+            node.get(at.saturating_add(1)..).unwrap_or_default(),
+        );
+        if (rest.is_empty() || rest.starts_with(' ')) && bare_key(key) {
+            return Ok(Entry::Key(rest.trim()));
+        }
+        if !item || key.contains([' ', '"', '\'']) || rest.is_empty() || rest.starts_with(' ') {
+            return Err("a mapping key that is not bare, `[A-Za-z0-9_-]+` then `: `");
+        }
+    }
+    if item {
+        Ok(Entry::Scalar(node))
+    } else {
+        Err(
+            "a line that is neither a `key:` nor a `- ` item, such as a scalar run on from the line above",
+        )
+    }
+}
+
+/// Why a scalar value is outside the canonical subset, if it is: a flow collection but `{}` and a
+/// flat `[a, b]`; a quoted scalar not closed on its own line, or a double-quoted one holding a
+/// backslash escape; and a `${{` with no `}}` after it on the line.
+fn value_problem(value: &str) -> Option<&'static str> {
+    if value.starts_with('{') && value != "{}" {
+        return Some("a flow mapping, which the guard does not read");
+    }
+    if value.starts_with('[') && !flow_is_flat(value) {
+        return Some("a flow sequence that is not a flat `[a, b]`");
+    }
+    if let Some(quote) = value.chars().next().filter(|c| matches!(c, '"' | '\'')) {
+        if value.len() < 2 || !value.ends_with(quote) {
+            return Some("a quoted scalar not closed on its own line");
+        }
+        if quote == '"' && value.contains('\\') {
+            return Some("a double-quoted scalar holding a backslash escape");
+        }
+    }
+    if let Some(at) = value.rfind("${{")
+        && !value.get(at..).is_some_and(|tail| tail.contains("}}"))
+    {
+        return Some("a `${{` with no `}}` after it on its line");
+    }
+    None
+}
+
+/// A flow sequence of scalars only, `[a, b]`, with no nested collection or mapping in it.
+fn flow_is_flat(value: &str) -> bool {
+    value
+        .strip_prefix('[')
+        .and_then(|inner| inner.strip_suffix(']'))
+        .is_some_and(|inner| !inner.contains(['{', '[', ']', ':', '&', '*', '!']))
+}
+
+/// The keys a secret job, and a workflow that holds one, may not hold anywhere: each changes how
+/// or where every `run:` executes without changing its text.
+const RUN_CONTEXT_KEYS: [&str; 5] = [
+    "defaults",
+    "container",
+    "services",
+    "working-directory",
+    "shell",
+];
+
+/// L9's canonical-subset gate for a whole workflow: every line outside a block scalar is a bare
+/// `key:` or a `- ` item, indented exactly two spaces a level from the first line's, with no anchor, alias, tag or merge
+/// key, no flow collection but `{}` and a flat `[a, b]`, no scalar run on to the next line, and no
+/// split `${{`. So the line readers L1 to L12 use see the same structure GitHub does.
+fn canonical_findings(text: &str) -> Vec<(&'static str, usize, String, &'static str)> {
+    let mut out = Vec::new();
+    let mut columns: Vec<usize> = text
+        .lines()
+        .find(|line| {
+            let trimmed = line.trim();
+            !trimmed.is_empty() && !trimmed.starts_with('#')
+        })
+        .map(|line| line.len().saturating_sub(line.trim_start().len()))
+        .into_iter()
+        .collect();
+    let mut scalar_above: Option<usize> = None;
+    for (index, raw) in text.lines().enumerate() {
+        let number = index.saturating_add(1);
+        let trimmed = raw.trim();
+        let indent = raw.len().saturating_sub(raw.trim_start().len());
+        if scalar_above.is_some_and(|column| trimmed.is_empty() || indent > column) {
+            continue;
+        }
+        scalar_above = None;
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let mut refuse = |why: &'static str| out.push(("L9", number, trimmed.to_owned(), why));
+        if raw.contains('\t') {
+            refuse("a tab in a workflow's indentation or text");
+        }
+        while columns.last().is_some_and(|column| *column > indent) {
+            columns.pop();
+        }
+        if columns.last() != Some(&indent) {
+            refuse("indentation that is not two spaces a level");
+            columns.push(indent);
+        }
+        let node = uncommented(trimmed);
+        let (node, item, column) = match node.strip_prefix("- ") {
+            Some(rest) => (rest.trim_start(), true, indent.saturating_add(2)),
+            None if node == "-" => {
+                refuse("an empty sequence item");
+                continue;
+            }
+            None => (node, false, indent),
+        };
+        if item {
+            columns.push(column);
+        }
+        if node.starts_with(['&', '*', '!']) || node.starts_with("<<") {
+            refuse("a YAML anchor, alias, tag or merge key");
+            continue;
+        }
+        match entry(node, item) {
+            Err(why) => refuse(why),
+            Ok(Entry::Scalar(value)) => {
+                if let Some(why) = value_problem(value) {
+                    refuse(why);
+                }
+            }
+            Ok(Entry::Key(value)) => {
+                if value.starts_with(['&', '*', '!']) {
+                    refuse("a YAML anchor, alias, tag or merge key");
+                } else if value.is_empty() {
+                    columns.push(column.saturating_add(2));
+                } else if value.starts_with(['|', '>']) {
+                    scalar_above =
+                        Some(column.saturating_sub(if item { 2 } else { 0 }).max(indent));
+                } else if let Some(why) = value_problem(value) {
+                    refuse(why);
+                }
+            }
+        }
     }
     out
 }
@@ -1876,7 +2356,6 @@ mod tests {
         "env -i PATH=/usr/bin make",
         "env FOO=1 cargo test",
         "        env:",
-        "      - env: { TOKEN: ${{ secrets.TOKEN }} }",
         "bash ./build.sh",
         "#!/usr/bin/env bash",
         "kubectl get pods --v=4",
@@ -1913,7 +2392,12 @@ mod tests {
     #[test]
     fn each_rule_passes_its_passing_fixtures() {
         for line in PASSING {
-            assert_eq!(one(WORKFLOW, line), Vec::new(), "{line:?}");
+            let path = if line.starts_with(' ') {
+                WORKFLOW
+            } else {
+                SCRIPT
+            };
+            assert_eq!(one(path, line), Vec::new(), "{line:?}");
         }
     }
 
@@ -2079,7 +2563,7 @@ mod tests {
     const JOB_PASSING: &[&str] = &[
         "      - uses: actions/setup-go@SHA\n        with:\n          cache: false",
         "      - uses: astral-sh/setup-uv@SHA\n        with:\n          enable-cache: false",
-        "      - uses: actions/setup-node@SHA\n        with: { node-version: 22 }",
+        "      - uses: actions/setup-node@SHA\n        with:\n          node-version: 22",
         "      - run: echo done",
     ];
 
@@ -2249,21 +2733,26 @@ mod tests {
         let flow = |env: &str, job_env: &str, steps: &str| {
             format!(
                 "on: workflow_dispatch\n{env}jobs:\n  a:\n    if: github.ref == 'refs/heads/main'\n\
-                 {job_env}    steps:\n{steps}"
+                 \x20   environment: production\n{job_env}    steps:\n{steps}"
             )
         };
         let checkout = "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n";
         let build = "      - run: cargo build --locked\n";
-        let run = "      - run: target/debug/examples/r2_finding\n        env:\n          T: ${{ secrets.T }}\n";
+        let run = "      - run: target/debug/examples/r2_finding\n        env:\n          R2_SECRET_ACCESS_KEY: ${{ secrets.T }}\n";
         for steps in [format!("{checkout}{build}{run}"), run.to_owned()] {
             assert_eq!(one(path, &flow("", "", &steps)), Vec::new(), "{steps}");
         }
-        let job_env = "    env:\n      T: ${{ secrets.T }}\n";
-        let workflow_env = "env:\n  T: ${{ secrets.T }}\n";
-        assert_eq!(rules(path, &flow("", job_env, build)), ["L9"]);
-        assert_eq!(rules(path, &flow(workflow_env, "", build)), ["L9"]);
-        assert_eq!(rules(path, &flow("", job_env, run)), Vec::<&str>::new());
-        assert_eq!(rules(WORKFLOW, &flow("", "", run)), ["L9"]);
+        let job_env = "    env:\n      R2_SECRET_ACCESS_KEY: ${{ secrets.T }}\n";
+        let workflow_env = "env:\n  R2_SECRET_ACCESS_KEY: ${{ secrets.T }}\n";
+        assert!(rules(path, &flow("", job_env, build)).contains(&"L9"));
+        assert!(rules(path, &flow(workflow_env, "", build)).contains(&"L9"));
+        assert!(rules(path, &flow("", job_env, run)).contains(&"L9"));
+        let reviewed_job_env = "    env:\n      CARGO_TERM_COLOR: always\n";
+        assert_eq!(
+            rules(path, &flow("", reviewed_job_env, run)),
+            Vec::<&str>::new()
+        );
+        assert!(rules(WORKFLOW, &flow("", "", run)).contains(&"L9"));
         for secret_step in L9_SECRET_STEPS {
             let steps = format!("{secret_step}        env:\n          T: ${{{{ secrets.T }}}}\n");
             assert!(
@@ -2275,6 +2764,70 @@ mod tests {
             assert!(
                 rules(path, &flow("", "", &format!("{run}{later}"))).contains(&"L9"),
                 "{later}"
+            );
+        }
+    }
+
+    /// The `r2-lockcheck.yml` the #1731 re-review's probes start from: a dispatch-only workflow
+    /// whose one job is gated on `main` under an environment and checks out first.
+    const R2_HEAD: &str = "on: workflow_dispatch\npermissions: {}\njobs:\n  r2-lockcheck:\n    if: github.ref == 'refs/heads/main'\n    runs-on: ubuntu-24.04\n    environment: production\n    permissions:\n      contents: read\n    steps:\n      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n        with:\n          persist-credentials: false\n";
+
+    /// The reviewed secret step the probes vary.
+    const R2_STEP: &str = "      - run: target/debug/examples/r2_finding\n        env:\n          R2_SECRET_ACCESS_KEY: ${{ secrets.X }}\n";
+
+    /// The #1731 re-review's probes, by its names, each a workflow once let through by L9's line
+    /// reader: every one is refused by L9 now.
+    fn second_review_probes() -> Vec<(&'static str, String)> {
+        let head = R2_HEAD;
+        let job_head = head
+            .get(..head.find("    steps:").unwrap_or_default())
+            .unwrap_or_default();
+        let secret_env = "      - env:\n          R2_SECRET_ACCESS_KEY: ${{ secrets.X }}\n";
+        let build = "      - run: cargo build --locked\n";
+        vec![
+            ("m14", format!("{head}{secret_env}        run: target/debug/examples/r2_finding\n          curl evil\n")),
+            ("m15", format!("{head}{secret_env}        run: target/debug/examples/r2_finding\n          ; curl evil\n")),
+            ("m11", format!("{head}{secret_env}        \"run\": curl evil\n")),
+            ("m12", format!("{head}{secret_env}        run : curl evil\n")),
+            ("m13", format!("{head}{secret_env}        'uses': evil/act@0123456789012345678901234567890123456789\n")),
+            ("m09", format!("{job_head}    env:\n      R2_SECRET_ACCESS_KEY: ${{{{ secrets.X }}}}\n    steps: [{{run: curl evil}}]\n")),
+            ("m25", format!("{job_head}    env:\n      R2_SECRET_ACCESS_KEY: ${{{{ secrets.X }}}}\n    steps: [ {{name: a, run: curl evil}} ]\n")),
+            ("m37", format!("{head}{R2_STEP}      - {{run: curl evil}}\n")),
+            ("m16", format!("{head}{secret_env}          run: target/debug/examples/r2_finding\n        run: curl evil\n")),
+            ("m17", format!("{head}      - name: |\n          x\n          run: target/debug/examples/r2_finding\n        env:\n          R2_SECRET_ACCESS_KEY: ${{{{ secrets.X }}}}\n        run: curl evil\n")),
+            ("m18", format!("{job_head}    defaults:\n      run:\n        shell: bash -c 'curl evil' {{0}}\n    steps:\n{build}{R2_STEP}")),
+            ("m19", format!("defaults:\n  run:\n    shell: bash -c 'curl evil' {{0}}\n{head}{build}{R2_STEP}")),
+            ("m23", format!("{head}{R2_STEP}        'shell': bash -c 'curl evil' {{0}}\n")),
+            ("m24", format!("{head}{R2_STEP}        shell : bash -c 'curl evil' {{0}}\n")),
+            ("m23b", format!("{head}{R2_STEP}        shell: bash -c 'curl evil' {{0}}\n")),
+            ("m21", format!("{job_head}    container: evil/img@sha256:0000\n    steps:\n{build}{R2_STEP}")),
+            ("services", format!("{job_head}    services:\n      evil:\n        image: evil/img\n    steps:\n{R2_STEP}")),
+            ("m33", "on: workflow_dispatch\njobs:\n    r2-lockcheck:\n      environment: production\n      steps:\n        - run: curl evil\n          env:\n            R2_SECRET_ACCESS_KEY: ${{ secrets.X }}\n".to_owned()),
+            ("m34", head.replace("jobs:\n", "\"jobs\":\n")),
+            ("m35", format!("{}    \"steps\":\n      - run: curl evil\n        env:\n          R2_SECRET_ACCESS_KEY: ${{{{ secrets.X }}}}\n", job_head)),
+            ("m01", format!("{head}      - run: curl evil\n        env:\n          R2_SECRET_ACCESS_KEY: \"${{{{ \\x73ecrets.X }}}}\"\n")),
+            ("m22", format!("{head}      - run: curl evil\n        env:\n          R2_SECRET_ACCESS_KEY: ${{{{ secrets\n            .X }}}}\n")),
+            ("m20", format!("{head}{R2_STEP}        working-directory: evil\n")),
+            ("m05", format!("{head}{R2_STEP}          LD_PRELOAD: ./evil.so\n")),
+            ("m07", format!("{head}{R2_STEP}          PATH: ./evil\n")),
+            ("shell-env", format!("{head}{R2_STEP}          SHELL: ./evil\n")),
+            ("node-options", format!("{head}{R2_STEP}          NODE_OPTIONS: --require ./evil.js\n")),
+            ("bash-env", format!("{head}{R2_STEP}          BASH_ENV: ./evil.sh\n")),
+            ("job-env", format!("{job_head}    env:\n      LD_PRELOAD: ./evil.so\n    steps:\n{R2_STEP}")),
+            ("no-environment", head.replace("    environment: production\n", "") + R2_STEP),
+        ]
+    }
+
+    #[test]
+    fn every_probe_the_l9_re_review_found_is_refused() {
+        let path = ".github/workflows/r2-lockcheck.yml";
+        assert_eq!(one(path, &format!("{R2_HEAD}{R2_STEP}")), Vec::new());
+        for (name, text) in second_review_probes() {
+            let found = rules(path, &text);
+            assert!(
+                found.contains(&"L9") || (name == "no-environment" && found.contains(&"L12")),
+                "{name}: {:?}",
+                one(path, &text)
             );
         }
     }
@@ -2532,6 +3085,10 @@ mod tests {
         ("L2", "        run: set -o verbose\n"),
         ("L2", "        run: bash -v build.sh\n"),
         ("L2", "#!/bin/bash -v\n"),
+        (
+            "L9",
+            "      - env:\n          X: ${{\n            secrets.TOKEN }}\n",
+        ),
         ("L1", "        run: FOO=1 env\n"),
         ("L1", "        run: if true; then env; fi\n"),
         ("L1", "        run: for x in 1; do printenv; done\n"),
@@ -2604,7 +3161,6 @@ mod tests {
             "        run: bash -e build.sh\n",
             "        run: env -i PATH=/usr/bin make > build.log\n",
             "        if: github.ref == 'refs/heads/main'\n",
-            "      - env:\n          X: ${{\n            secrets.TOKEN }}\n",
             "        run: env -i PATH=/usr/bin make\n",
             "        run: timeout 5 make test\n",
             "        run: if [ -n \"$X\" ]; then make; fi\n",
@@ -2638,7 +3194,7 @@ mod tests {
     #[test]
     fn every_secret_run_is_still_there() -> Result<()> {
         let root = repo_root()?;
-        for (path, run) in SECRET_RUNS {
+        for (path, run, _) in SECRET_RUNS {
             let text = fs::read_to_string(root.join(path))?;
             assert!(
                 text.lines().any(|l| l
