@@ -230,12 +230,13 @@ fn begin_and_submit(
         begin_exit(batch, intent)?;
     }
     match gate(batch, intent, always)? {
-        ALLOW => submit(batch, intent)?,
-        HOLD if WAITS.contains(
-            &decide(batch, intent, GatePass::BeforeSubmission)?
-                .0
-                .reason_code(),
-        ) =>
+        (ALLOW, binding) => submit(batch, intent, binding)?,
+        (HOLD, _)
+            if WAITS.contains(
+                &decide(batch, intent, GatePass::BeforeSubmission)?
+                    .0
+                    .reason_code(),
+            ) =>
         {
             reprotect_unpriced(batch, intent)?;
         }
@@ -294,8 +295,15 @@ fn decide(
     let allowed = decision.verdict == GateVerdict::Allow;
     let closed = closed_hold(batch.ports, instrument, batch.at())
         .filter(|_| allowed && !purpose.adds_risk());
-    let unpriced =
-        allowed && exit_limit(batch, intent, instrument, *purpose, *limit) == ExitPrice::Held;
+    let unpriced = allowed
+        && exit_limit(
+            batch,
+            intent,
+            instrument,
+            *purpose,
+            *limit,
+            decision.is_binding(),
+        ) == ExitPrice::Held;
     let decision = match closed {
         Some(reason) => decision.closed(reason),
         None if unpriced => decision.unpriced(),
@@ -304,15 +312,15 @@ fn decide(
     Ok((decision, *purpose))
 }
 
-/// Runs the binding gate on an intent, journals the decision, and answers its verdict name:
-/// `allow`, `hold`, or `deny`. With `always` false, a decision that does not allow is not
+/// Runs the binding gate on an intent, journals the decision, and answers its verdict name,
+/// `allow`, `hold`, or `deny`, and whether the decision read a binding snapshot. With `always` false, a decision that does not allow is not
 /// journaled again: a held intent re-checked at a tick records only the moment it is released,
 /// or a discretionary exit's terminal denial beside a plan (DEC-410 item 3).
 fn gate(
     batch: &mut Batch<'_, '_>,
     intent: &IntentId,
     always: bool,
-) -> Result<&'static str, ExecutorError> {
+) -> Result<(&'static str, bool), ExecutorError> {
     let (decision, _) = decide(batch, intent, GatePass::BeforeSubmission)?;
     let verdict = decision.verdict_name();
     if verdict == ALLOW || always || decision.crowded_denial() {
@@ -339,7 +347,7 @@ fn gate(
             *limit = Some(paced);
         }
     }
-    Ok(verdict)
+    Ok((verdict, decision.is_binding()))
 }
 
 fn journal_decision(
@@ -411,7 +419,11 @@ pub(crate) fn order_tif(batch: &Batch<'_, '_>, instrument: &InstrumentId) -> Tim
 /// to price from goes at its own limit, journaled and alerted (DEC-160 (12)); a discretionary one
 /// is held before the gate allows it ([`decide`]), so one found unpriced after its allow goes the
 /// same way rather than being dropped (rule 13).
-fn submit(batch: &mut Batch<'_, '_>, intent: &IntentId) -> Result<(), ExecutorError> {
+fn submit(
+    batch: &mut Batch<'_, '_>,
+    intent: &IntentId,
+    binding: bool,
+) -> Result<(), ExecutorError> {
     let (agent, body) = intent_of(batch, intent)?;
     let IntentBody::Order {
         instrument,
@@ -440,9 +452,10 @@ fn submit(batch: &mut Batch<'_, '_>, intent: &IntentId) -> Result<(), ExecutorEr
                 confirmed_bid(&batch.view, intent, batch.at()).is_some(),
             ),
             limit,
+            binding,
         );
     let limit = match (
-        exit_limit(batch, intent, &instrument, purpose, limit),
+        exit_limit(batch, intent, &instrument, purpose, limit, binding),
         limit,
     ) {
         (ExitPrice::Own(limit) | ExitPrice::Laddered(limit), _) => Some(limit),
@@ -741,31 +754,46 @@ pub(crate) fn resubmit(batch: &mut Batch<'_, '_>, id: &ClientOrderId) -> Result<
         .get(id)
         .and_then(|order| order.intent_id.clone())
     else {
-        return send_again(batch, id);
+        return send_again(batch, id, true);
     };
     if too_old(batch, &intent) {
         return abandon(batch, &intent, "intent_too_old");
     }
     match gate(batch, &intent, true)? {
-        ALLOW => send_again(batch, id),
-        HOLD => Ok(()),
+        (ALLOW, binding) => send_again(batch, id, binding),
+        (HOLD, _) => Ok(()),
         _ => abandon(batch, &intent, "gate_recheck"),
     }
 }
 
 /// Sends the request an `OrderSubmitted` already named again, under the same id with the next
-/// attempt number.
-fn send_again(batch: &mut Batch<'_, '_>, id: &ClientOrderId) -> Result<(), ExecutorError> {
+/// attempt number. A request at the market whose re-check read no `binding` snapshot goes as a
+/// limit at the ladder's first rung instead, since nothing checked a market order's caps, and
+/// waits in `Intent` with nothing to price from (DEC-2037 items 3 and 4).
+fn send_again(
+    batch: &mut Batch<'_, '_>,
+    id: &ClientOrderId,
+    binding: bool,
+) -> Result<(), ExecutorError> {
     let unknown = || ExecutorError::UnknownOrder {
         client_order_id: id.as_str().to_owned(),
     };
     let order = batch.view.orders.get(id).cloned().ok_or_else(unknown)?;
-    let request = batch
+    let mut request = batch
         .view
         .details
         .get(id)
         .and_then(|detail| detail.request.clone())
         .ok_or_else(unknown)?;
+    if !binding && request.order_type == OrderType::Market {
+        let intent = order.intent_id.as_ref().ok_or_else(unknown)?;
+        let Some(limit) = reference_price(batch, intent, &request.instrument, request.purpose)
+        else {
+            return Ok(());
+        };
+        request.order_type = OrderType::Limit;
+        request.limit_price = Some(limit);
+    }
     let attempt = order.attempt.saturating_add(1);
     send(
         batch,
@@ -818,8 +846,8 @@ pub(crate) fn release_held(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorErro
             abandon(batch, &intent, "intent_too_old")?;
         } else if !batch.view.orders.contains_key(&id) {
             begin_and_submit(batch, &intent, false)?;
-        } else if gate(batch, &intent, false)? == ALLOW {
-            send_again(batch, &id)?;
+        } else if let (ALLOW, binding) = gate(batch, &intent, false)? {
+            send_again(batch, &id, binding)?;
         }
     }
     Ok(())

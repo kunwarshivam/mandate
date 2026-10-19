@@ -11,7 +11,7 @@ mock_provider "digitalocean" {
 
   mock_data "digitalocean_sizes" {
     defaults = {
-      sizes = [{ slug = "s-2vcpu-4gb", price_monthly = 24, price_hourly = 0.03571, available = true, vcpus = 2, memory = 4096, disk = 80, transfer = 4, regions = ["nyc3"], gpu_info = [] }]
+      sizes = [{ slug = "s-2vcpu-4gb", price_monthly = 24, price_hourly = 0.03571, available = true, vcpus = 2, memory = 4096, disk = 80, transfer = 4, regions = ["nyc3", "sfo2"], gpu_info = [] }]
     }
   }
 }
@@ -35,7 +35,7 @@ run "plans_with_the_estimate_under_the_cap" {
   }
 
   assert {
-    condition     = output.state_bucket == "mandate-tofu-state-staging"
+    condition     = output.state_bucket == "mandate-tofu-state-west-staging"
     error_message = "The state bucket is named for the environment."
   }
 }
@@ -68,4 +68,46 @@ run "refuses_spaces_counted_as_free" {
   }
 
   expect_failures = [var.spaces_monthly_usd]
+}
+
+# DEC-2047: a cluster outside the US West is refused.
+run "refuses_a_region_outside_the_west" {
+  command = plan
+
+  variables {
+    region = "nyc3"
+  }
+
+  expect_failures = [var.region]
+}
+
+# DEC-2047 item 6: a state bucket outside the US West is refused.
+run "refuses_a_state_bucket_outside_the_west" {
+  command = plan
+
+  variables {
+    state_region = "nyc3"
+  }
+
+  expect_failures = [var.state_region]
+}
+
+run "refuses_nyc1" {
+  command = plan
+
+  variables {
+    region = "nyc1"
+  }
+
+  expect_failures = [var.region]
+}
+
+run "refuses_tor1" {
+  command = plan
+
+  variables {
+    region = "tor1"
+  }
+
+  expect_failures = [var.region]
 }

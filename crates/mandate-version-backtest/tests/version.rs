@@ -244,24 +244,13 @@ fn an_unpinned_or_foreign_output_refuses_the_run() {
     );
 }
 
-/// DEC-1000 item 8 and DEC-2245 item 6: a cash dividend inside the bars still refuses the run, on
-/// either edge too, until slice 3 applies dividends; a split no longer does.
+/// DEC-2245 item 6: a split inside the bars, on either edge too, is applied, not refused.
 #[test]
-fn a_dividend_in_range_refuses_the_run() {
+fn a_split_in_range_is_not_refused() {
     let days = trading_days(DAYS);
     let outputs = daily_outputs(&days, "0.5");
     let bars = flat_bars(DAYS);
     for date in [days[10], days[0], days[DAYS - 1]] {
-        let inside = run_with(
-            &pinned(),
-            &settings(),
-            &xyz(),
-            &bars,
-            &outputs,
-            &[],
-            &[dividend_on(date)],
-        );
-        assert_eq!(refusal(inside), "corporate_action_in_range", "{date}");
         let split = run_with(
             &pinned(),
             &settings(),
@@ -279,19 +268,15 @@ fn a_dividend_in_range_refuses_the_run() {
     }
 }
 
-/// DEC-1000 item 8's range is closed at both edges and holds nothing past them: an action the day
-/// before the first bar, or the day after the last, is not refused as in range. Whatever else the
-/// run answers, a range read as "after the first bar *or* before the last" would refuse both.
+/// DEC-2245 item 6 slice 3: a cash dividend inside the bars, on either edge too, is applied and
+/// the run completes.
 #[test]
-fn an_action_past_either_edge_is_not_refused_as_in_range() {
+fn a_dividend_in_range_completes_the_run() {
     let days = trading_days(DAYS);
     let outputs = daily_outputs(&days, "0.5");
     let bars = flat_bars(DAYS);
-    let after_the_last = days[DAYS - 1]
-        .next()
-        .unwrap_or_else(|e| panic!("{}", e.code()));
-    for date in [day("2026-08-31"), after_the_last] {
-        let outside = run_with(
+    for date in [days[10], days[0], days[DAYS - 1]] {
+        run_with(
             &pinned(),
             &settings(),
             &xyz(),
@@ -299,12 +284,32 @@ fn an_action_past_either_edge_is_not_refused_as_in_range() {
             &outputs,
             &[],
             &[dividend_on(date)],
-        );
-        assert_ne!(
-            outside.err().map(|e| e.code()),
-            Some("corporate_action_in_range"),
-            "{date}"
-        );
+        )
+        .unwrap_or_else(|e| panic!("a dividend on {date}: the run completes: {}", e.code()));
+    }
+}
+
+/// An action the day before the first bar, or the day after the last, holds nothing the run
+/// walks: the run completes.
+#[test]
+fn an_action_past_either_edge_completes_the_run() {
+    let days = trading_days(DAYS);
+    let outputs = daily_outputs(&days, "0.5");
+    let bars = flat_bars(DAYS);
+    let after_the_last = days[DAYS - 1]
+        .next()
+        .unwrap_or_else(|e| panic!("{}", e.code()));
+    for date in [day("2026-08-31"), after_the_last] {
+        run_with(
+            &pinned(),
+            &settings(),
+            &xyz(),
+            &bars,
+            &outputs,
+            &[],
+            &[dividend_on(date)],
+        )
+        .unwrap_or_else(|e| panic!("a dividend on {date}: the run completes: {}", e.code()));
     }
 }
 
@@ -691,7 +696,7 @@ fn the_record_names_the_report_or_the_refusal() {
             "theses",
         ]
     );
-    let error = VersionError::CorporateActionInRange(days[3]);
+    let error = VersionError::AssetClassNotSupported;
     let refused = mandate_version_backtest::backtest_run_recorded(&RunRecord {
         backtest_id: "bt_02",
         mandate_version: completed.report.mandate_version,
@@ -703,7 +708,7 @@ fn the_record_names_the_report_or_the_refusal() {
     assert_eq!(refused.get("report"), Some(&Value::Null));
     assert_eq!(
         refused.get("refusal"),
-        Some(&Value::Str("corporate_action_in_range".to_owned()))
+        Some(&Value::Str("asset_class_not_supported".to_owned()))
     );
     assert_eq!(
         refused.get("result"),
