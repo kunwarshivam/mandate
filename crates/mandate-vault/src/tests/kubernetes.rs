@@ -28,7 +28,6 @@ const TEMPLATE: &str =
     "{{identity.entity.aliases.auth_kubernetes_1a2b.metadata.service_account_name}}";
 
 #[test]
-#[ignore = "pending E21-32"]
 fn a_connections_service_account_is_its_id_in_hex() {
     assert_eq!(
         service_account_name(&Identity::Executor(c("c1"))),
@@ -47,7 +46,6 @@ fn a_connections_service_account_is_its_id_in_hex() {
 /// A ServiceAccount name is lowercase hex alone, so no platform process's name, each of which
 /// holds a letter past `f` or a hyphen, can ever be one.
 #[test]
-#[ignore = "pending E21-32"]
 fn no_platform_process_name_is_a_service_account_name() {
     let named = service_account_name(&Identity::Executor(c("A_z-0")));
     assert!(named.is_ok(), "{named:?}");
@@ -81,7 +79,6 @@ fn no_platform_process_name_is_a_service_account_name() {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn each_kinds_policy_is_named_under_the_kv_mount() {
     let mounts = Mounts::default();
     assert_eq!(
@@ -99,7 +96,6 @@ fn each_kinds_policy_is_named_under_the_kv_mount() {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn the_executors_policy_reads_its_own_token_alone() {
     assert_eq!(
         kubernetes_policy(
@@ -114,7 +110,6 @@ fn the_executors_policy_reads_its_own_token_alone() {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn the_exchanges_policy_writes_its_token_and_reads_and_deletes_its_code() {
     assert_eq!(
         kubernetes_policy(
@@ -132,7 +127,6 @@ fn the_exchanges_policy_writes_its_token_and_reads_and_deletes_its_code() {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn no_platform_identity_has_a_kubernetes_policy() {
     for identity in [
         Identity::Api,
@@ -153,7 +147,6 @@ fn no_platform_identity_has_a_kubernetes_policy() {
 /// The provisioner's policy, written out whole: one block per mount, every parameter but the
 /// ServiceAccount's name pinned.
 #[test]
-#[ignore = "pending E21-32"]
 fn the_provisioners_policy_pins_every_parameter_but_the_name() {
     let block = |mount: &str, namespace: &str, policy: &str, ttl: &str, max: &str| {
         format!(
@@ -195,7 +188,6 @@ fn the_provisioners_policy_pins_every_parameter_but_the_name() {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn a_layout_that_is_not_plain_names_is_refused() {
     let bad: [fn(&mut KubernetesLayout); 6] = [
         |l| l.executor_mount = "kubernetes/executor".to_owned(),
@@ -223,7 +215,6 @@ fn a_layout_that_is_not_plain_names_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn an_executors_role_binds_exactly_its_service_account_in_its_namespace() {
     assert_eq!(
         role_request(&Identity::Executor(c("c1")), &Mounts::default(), &layout()),
@@ -244,7 +235,6 @@ fn an_executors_role_binds_exactly_its_service_account_in_its_namespace() {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn an_exchanges_role_binds_exactly_its_service_account_in_its_namespace() {
     assert_eq!(
         role_request(
@@ -272,7 +262,6 @@ fn an_exchanges_role_binds_exactly_its_service_account_in_its_namespace() {
 /// policy allows, with a value the policy pins, and every required one is sent. The oracle reads
 /// the policy's text, not the code that wrote it.
 #[test]
-#[ignore = "pending E21-32"]
 fn every_role_request_is_one_the_provisioners_policy_allows() {
     let written = provisioner_policy(&Mounts::default(), &layout());
     assert!(written.is_ok(), "{written:?}");
