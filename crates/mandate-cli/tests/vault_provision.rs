@@ -4,8 +4,9 @@
 //! The last case runs against the OpenBao dev server `cargo xtask ci openbao` names, and checks the
 //! refusals first, so it fails the same way without one.
 
-use std::fs;
-use std::os::unix::fs::PermissionsExt;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -29,11 +30,31 @@ fn ca() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/vault-ca.pem")
 }
 
+/// A token file made at mode 0600, so the token is never readable by others while it is written,
+/// then given `mode`.
 fn token_file(text: &str, mode: u32) -> PathBuf {
     let path = fresh("token");
-    fs::write(&path, text).unwrap();
+    OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&path)
+        .and_then(|mut file| file.write_all(text.as_bytes()))
+        .unwrap();
     fs::set_permissions(&path, fs::Permissions::from_mode(mode)).unwrap();
     path
+}
+
+/// Removes the files and directories it holds when dropped, a failed assertion included.
+struct Removed(Vec<PathBuf>);
+
+impl Drop for Removed {
+    fn drop(&mut self) {
+        for path in &self.0 {
+            let _ = fs::remove_dir_all(path);
+            let _ = fs::remove_file(path);
+        }
+    }
 }
 
 fn provision(address: &str, ca: &Path, token: &Path, connections: &[&str], out: &Path) -> Output {
@@ -75,18 +96,18 @@ fn refused(output: &Output, code: &str, out: &Path, case: &str) {
         String::from_utf8_lossy(&output.stdout)
     );
     assert!(
-        !err.contains(&CANARY[..16]),
+        !err.contains(CANARY) && !err.contains(&CANARY[..16]),
         "{case} printed the token: {err}"
     );
     assert!(!out.exists(), "{case} wrote {}", out.display());
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn a_token_file_open_to_others_or_missing_is_refused_before_any_vault_is_reached() {
     for mode in [0o640, 0o604, 0o644] {
         let out = fresh("out");
         let token = token_file(CANARY, mode);
+        let _removed = Removed(vec![token.clone(), out.clone()]);
         let output = provision(NOWHERE, &ca(), &token, &["c1"], &out);
         refused(
             &output,
@@ -101,26 +122,89 @@ fn a_token_file_open_to_others_or_missing_is_refused_before_any_vault_is_reached
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn an_unreachable_vault_is_an_outage_and_writes_nothing() {
     let out = fresh("out");
     let token = token_file(CANARY, 0o600);
+    let _removed = Removed(vec![token.clone(), out.clone()]);
     let output = provision(NOWHERE, &ca(), &token, &["c1"], &out);
     refused(&output, "unavailable", &out, "an unreachable vault");
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn a_plain_http_address_a_bad_ca_or_a_bad_connection_is_refused() {
     let token = token_file(CANARY, 0o600);
     let out = fresh("out");
+    let _removed = Removed(vec![token.clone(), out.clone()]);
     let output = provision("http://127.0.0.1:9", &ca(), &token, &["c1"], &out);
     refused(&output, "config", &out, "a plain-HTTP address");
     let bad_ca = token_file("not a certificate", 0o600);
     let output = provision(NOWHERE, &bad_ca, &token, &["c1"], &out);
     refused(&output, "config", &out, "a CA that is not PEM");
     let output = provision(NOWHERE, &ca(), &token, &["not a connection id!"], &out);
-    refused(&output, "connection", &out, "a malformed connection id");
+    refused(&output, "(connection)", &out, "a malformed connection id");
+}
+
+/// An `--out` the write would refuse is refused before the vault is reached: the address is one no
+/// vault listens on, so the refusal is `credential_file`, never `unavailable`, and nothing is
+/// written into `--out` (DEC-2022 item 2).
+#[test]
+fn an_out_the_write_would_refuse_is_refused_before_any_vault_is_reached() {
+    let token = token_file(CANARY, 0o600);
+    let open = fresh("out-open");
+    let planted = fresh("out-planted");
+    let parent = fresh("out-parent");
+    let _removed = Removed(vec![
+        token.clone(),
+        open.clone(),
+        planted.clone(),
+        parent.clone(),
+    ]);
+    fs::create_dir(&open).unwrap();
+    fs::set_permissions(&open, fs::Permissions::from_mode(0o755)).unwrap();
+    fs::create_dir(&planted).unwrap();
+    fs::set_permissions(&planted, fs::Permissions::from_mode(0o700)).unwrap();
+    fs::create_dir(planted.join("executor-c1.secret-id")).unwrap();
+    fs::create_dir(&parent).unwrap();
+    fs::set_permissions(&parent, fs::Permissions::from_mode(0o777)).unwrap();
+    let listing = |dir: &Path| -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect();
+        names.sort();
+        names
+    };
+    for (out, case) in [
+        (open.clone(), "a 0755 --out"),
+        (planted.clone(), "a directory at an output name"),
+        (parent.join("out"), "an --out whose parent others may write"),
+    ] {
+        let before = if out.exists() {
+            listing(&out)
+        } else {
+            Vec::new()
+        };
+        let output = provision(NOWHERE, &ca(), &token, &["c1"], &out);
+        let err = stderr(&output);
+        assert!(!output.status.success(), "{case} succeeded: {err}");
+        assert!(
+            err.contains("(credential_file)"),
+            "{case} reached the vault: {err}"
+        );
+        assert!(
+            !err.contains(&CANARY[..16]),
+            "{case} printed the token: {err}"
+        );
+        assert!(output.stdout.is_empty(), "{case} printed");
+        let after = if out.exists() {
+            listing(&out)
+        } else {
+            Vec::new()
+        };
+        assert_eq!(before, after, "{case} wrote into --out");
+    }
+    assert!(!parent.join("out").exists());
+    fs::set_permissions(&parent, fs::Permissions::from_mode(0o700)).unwrap();
 }
 
 /// The token is never an argument: the command has no flag that takes one.
@@ -139,7 +223,13 @@ fn the_token_is_never_an_argument() {
         .output()
         .expect("the CLI runs");
     assert!(!output.status.success());
-    assert!(!String::from_utf8_lossy(&output.stdout).contains(&CANARY[..16]));
+    for printed in [&output.stdout, &output.stderr] {
+        let printed = String::from_utf8_lossy(printed);
+        assert!(
+            !printed.contains(&CANARY[..16]),
+            "printed the token: {printed}"
+        );
+    }
 }
 
 /// The server the environment names, as `.github/scripts/start-openbao.sh` sets it.
@@ -151,7 +241,6 @@ fn server() -> Option<(String, PathBuf, PathBuf)> {
 }
 
 #[test]
-#[ignore = "pending E21-32"]
 fn provisioning_writes_each_identitys_files_and_prints_only_their_names() {
     a_token_file_open_to_others_or_missing_is_refused_before_any_vault_is_reached();
     let Some((address, ca, operator)) = server() else {
@@ -163,6 +252,7 @@ fn provisioning_writes_each_identitys_files_and_prints_only_their_names() {
     };
     let token = token_file(fs::read_to_string(operator).unwrap().trim(), 0o600);
     let out = fresh("out");
+    let _removed = Removed(vec![token.clone(), out.clone()]);
     let output = provision(&address, &ca, &token, &["c1", "c2"], &out);
     assert!(output.status.success(), "{}", stderr(&output));
     let mut want: Vec<String> = [

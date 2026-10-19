@@ -44,13 +44,9 @@ variable "node_size" {
 }
 
 variable "kube_api_allowed_addresses" {
-  description = "The only CIDRs the control plane's public endpoint admits."
+  description = "The founder's CIDRs, the only ones the control plane's public endpoint admits besides a run's window. Production's root refuses an empty list; staging's may be empty (DEC-2028)."
   type        = list(string)
-
-  validation {
-    condition     = length(var.kube_api_allowed_addresses) > 0
-    error_message = "The control plane's firewall needs at least one allowed CIDR; an empty list is refused."
-  }
+  sensitive   = true
 
   validation {
     condition = alltrue([
@@ -64,6 +60,7 @@ variable "kube_api_allowed_addresses" {
 variable "bootstrap_runner_cidr" {
   description = "One run's GitHub runner, opened for the bootstrap and closed again (DEC-2028); empty otherwise."
   type        = string
+  sensitive   = true
   default     = ""
 
   validation {
@@ -78,10 +75,14 @@ variable "bootstrap_runner_cidr" {
 
 locals {
   node_count = 2
-  allowed_addresses = concat(
+  requested_addresses = concat(
     var.kube_api_allowed_addresses,
     var.bootstrap_runner_cidr == "" ? [] : [var.bootstrap_runner_cidr],
   )
+  # With no CIDR at all the firewall stays on and admits only TEST-NET-1's 192.0.2.1, which no
+  # host on the internet holds (RFC 5737), so an empty list never reads as "no restriction".
+  admits_nobody     = ["192.0.2.1/32"]
+  allowed_addresses = length(local.requested_addresses) > 0 ? local.requested_addresses : local.admits_nobody
 }
 
 data "digitalocean_kubernetes_versions" "offered" {}

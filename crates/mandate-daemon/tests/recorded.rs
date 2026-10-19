@@ -209,6 +209,108 @@ fn the_bundle_records_its_allowlist_and_refuses_without_it() {
     }
 }
 
+/// The allowlist and halts are read strictly. An empty source list is read as it stands, an
+/// allowlist that admits no source, which refuses more, and version 0 is read as the recorded
+/// number. A version that is not an integer, or not one a `u32` holds, a source that is empty or
+/// not a string, and a halt that is not a string each refuse the load (DEC-2214 item 1).
+#[test]
+fn the_bundle_s_allowlist_and_halts_are_read_strictly() {
+    let set = |name: &str, member: &str, value: Value| {
+        copy(name, "research.json", |research| {
+            let Value::Object(object) = research else {
+                panic!("research.json is an object");
+            };
+            if member == "halted_instruments" {
+                object.insert(Key::new(member).unwrap(), value);
+                return;
+            }
+            let Some(Value::Object(allowlist)) = object.get_mut(&Key::new("allowlist").unwrap())
+            else {
+                panic!("the fixture has an allowlist");
+            };
+            allowlist.insert(Key::new(member).unwrap(), value);
+        })
+    };
+
+    let empty = Bundle::load(&set("allowlist-empty", "sources", Value::Array(Vec::new())))
+        .unwrap()
+        .allowlist;
+    assert!(
+        empty.sources.is_empty(),
+        "an empty allowlist admits no source"
+    );
+    let zero = Bundle::load(&set("allowlist-zero", "version", parse(b"0").unwrap()))
+        .unwrap()
+        .allowlist;
+    assert_eq!(zero.version, AllowlistVersion(0));
+
+    let refused = [
+        (
+            "allowlist-text",
+            "version",
+            Value::Str("3".to_owned()),
+            "allowlist",
+        ),
+        (
+            "allowlist-wide",
+            "version",
+            parse(b"4294967296").unwrap(),
+            "allowlist",
+        ),
+        (
+            "allowlist-empty-source",
+            "sources",
+            Value::Array(vec![Value::Str(String::new())]),
+            "allowlist",
+        ),
+        (
+            "allowlist-number-source",
+            "sources",
+            Value::Array(vec![parse(b"7").unwrap()]),
+            "allowlist",
+        ),
+        (
+            "halted-number",
+            "halted_instruments",
+            Value::Array(vec![parse(b"7").unwrap()]),
+            "halted_instruments",
+        ),
+        (
+            "halted-not-a-list",
+            "halted_instruments",
+            Value::Str("MSFT".to_owned()),
+            "halted_instruments",
+        ),
+        ("allowlist-flag", "version", Value::Bool(true), "allowlist"),
+    ];
+    for (name, member, value, refused_as) in refused {
+        assert_eq!(
+            Bundle::load(&set(name, member, value)),
+            Err(BundleError::Malformed {
+                file: "research.json",
+                member: refused_as
+            }),
+            "{name}"
+        );
+    }
+
+    for (name, version) in [("allowlist-negative", "-3"), ("allowlist-fraction", "3.5")] {
+        let dir = copy(name, "", |_| {});
+        let research = fs::read_to_string(dir.join("research.json")).unwrap();
+        let edited = research.replacen(r#""version":3"#, &format!(r#""version":{version}"#), 1);
+        assert_ne!(edited, research, "the fixture's version is written as 3");
+        fs::write(dir.join("research.json"), edited).unwrap();
+        assert_eq!(
+            Bundle::load(&dir),
+            Err(BundleError::Malformed {
+                file: "research.json",
+                member: ""
+            }),
+            "a version of {version} is not strict JSON"
+        );
+    }
+}
+
 /// The bundle records which of its instruments are halted at its as-of time, and a bundle that
 /// does not say refuses the load: an absent halt list would admit more (DEC-2214 item 1).
 #[test]

@@ -1,10 +1,16 @@
 # Plans, or plans and applies, one hosted environment's OpenTofu (E21-56, DEC-2011, DEC-2014).
+# Every run starts with the preflight, which names what is missing (DEC-2030); `preflight` alone
+# runs only that.
 # This file and its one job are the only place the repository reaches a cloud account: the job runs
 # only on a manual dispatch from `main`, under the GitHub environment `infra-staging` or
 # `infra-production`, whose required reviewer is the founder and which alone holds the cloud
 # tokens. No pull-request job can reach them (ES-12, DEC-1005's pattern); pull requests run the
 # credential-free checks in `ci.yml` instead. xtask is built in a step that holds no secret, and
-# only the last step, `cargo xtask infra`, receives them. `cargo xtask lint` checks this shape.
+# `target/debug/xtask infra`'s step, the built binary, receives them, so no build script ever runs
+# beside a secret; the last step, `if: always()` once the build succeeded, gets the DigitalOcean
+# token alone to delete the run's Spaces key. The run refuses unless `sha` is the commit checked
+# out, so the founder's approval binds to the commit they reviewed. `cargo xtask lint` checks this
+# shape.
 name: infra
 
 on:
@@ -16,11 +22,15 @@ on:
         type: choice
         options: [staging, production]
       action:
-        description: plan shows the changes; apply plans, shows, and applies that same plan
+        description: preflight lists what is missing; plan shows the changes; apply plans, shows, and applies that same plan
         required: true
         type: choice
-        default: plan
-        options: [plan, apply]
+        default: preflight
+        options: [preflight, plan, apply]
+      sha:
+        description: The full commit you reviewed; the run refuses unless it is the commit main was at when you dispatched
+        required: true
+        type: string
 
 permissions: {}
 
@@ -44,6 +54,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
       - name: Install OpenTofu (checksum-verified)
         run: |
           curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o tofu.tgz "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_amd64.tar.gz"
@@ -52,18 +63,23 @@ jobs:
       - name: Install the pinned Rust toolchain (rust-toolchain.toml)
         run: rustup show active-toolchain || rustup toolchain install
       # Built here, with no secret in the environment, so no build script ever sees one.
-      - run: cargo build --locked --package xtask
-      - run: cargo xtask infra
+      - id: build
+        run: cargo build --locked --package xtask
+      - run: target/debug/xtask infra
         env:
           MANDATE_INFRA_ENVIRONMENT: ${{ inputs.environment }}
           MANDATE_INFRA_ACTION: ${{ inputs.action }}
+          MANDATE_INFRA_SHA: ${{ inputs.sha }}
           DIGITALOCEAN_TOKEN: ${{ secrets.DIGITAL_OCEAN_API_KEY }}
-          SPACES_ACCESS_KEY_ID: ${{ secrets.SPACES_ACCESS_KEY_ID }}
-          SPACES_SECRET_ACCESS_KEY: ${{ secrets.SPACES_SECRET_ACCESS_KEY }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.SPACES_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.SPACES_SECRET_ACCESS_KEY }}
           TF_VAR_state_passphrase: ${{ secrets.TOFU_STATE_PASSPHRASE }}
           TF_VAR_cloudflare_api_token: ${{ secrets.CF_INFRA_API_TOKEN }}
-          TF_VAR_cloudflare_account_id: ${{ vars.CF_ACCOUNT_ID }}
-          TF_VAR_kube_api_allowed_addresses: ${{ vars.KUBE_API_ALLOWED_CIDRS }}
-          TF_VAR_access_allowed_emails: ${{ vars.ACCESS_ALLOWED_EMAILS }}
+          TF_VAR_kube_api_allowed_addresses: ${{ secrets.KUBE_API_ALLOWED_CIDRS }}
+          TF_VAR_access_allowed_emails: ${{ secrets.ACCESS_ALLOWED_EMAILS }}
+      # Runs however the step before ended, once the binary is built, with only the DigitalOcean
+      # token, and deletes every Spaces key minted for staging's or production's runs (DEC-2030
+      # item 4). It runs the built binary, so nothing compiles beside the token.
+      - if: always() && steps.build.outcome == 'success'
+        run: target/debug/xtask infra close
+        env:
+          MANDATE_INFRA_ENVIRONMENT: ${{ inputs.environment }}
+          DIGITALOCEAN_TOKEN: ${{ secrets.DIGITAL_OCEAN_API_KEY }}

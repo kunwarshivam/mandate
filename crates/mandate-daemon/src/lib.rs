@@ -31,11 +31,13 @@
 //! (the gate, the order plan, the flatten planner, and the configuration references) waits for the
 //! post-R0 hook (DEC-968 item 6, DEC-1012 item 6); until then the binary runs only fixture wiring.
 
+pub mod cell;
 pub mod deployment;
 pub mod fixture;
 pub mod launch;
 pub mod recorded;
 pub mod runtime;
+pub mod source;
 pub mod wake;
 pub mod worker;
 

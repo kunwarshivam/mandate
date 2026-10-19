@@ -49,7 +49,7 @@ its password anywhere but GitHub's secret form.
 ## Each release: sign it
 
 1. Open Actions → `release` → "Run workflow", choose the branch `main`, and run it.
-2. The builds and `compare` run as on every `main` commit, then `release-signing-build` rebuilds
+2. The builds and `compare` run as on a push to `main`, then `release-signing-build` rebuilds
    the release for each arch. Then each arch's `release-signing` job waits for your approval.
    Choose "Review deployments", tick `release-signing`, and approve.
 3. `release-signing` checks the release against `build-a`'s digest and signs every binary and

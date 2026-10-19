@@ -12,6 +12,16 @@ provider "cloudflare" {
 locals {
   environment = "staging"
   region      = "nyc3"
+  account_id  = sensitive(data.cloudflare_accounts.visible.result[0].id)
+}
+
+data "cloudflare_accounts" "visible" {
+  lifecycle {
+    postcondition {
+      condition     = length(self.result) == 1
+      error_message = "CF_INFRA_API_TOKEN must see exactly one Cloudflare account, whose id this plan uses."
+    }
+  }
 }
 
 import {
@@ -35,14 +45,21 @@ module "cell" {
 }
 
 module "cloudflare" {
-  source                = "../../modules/cloudflare"
-  name                  = "mandate-${local.environment}"
-  account_id            = var.cloudflare_account_id
-  zone_name             = "owlhead.ai"
-  api_hostname          = "api-staging.owlhead.ai"
-  api_origin            = var.api_origin
-  access_allowed_emails = var.access_allowed_emails
-  archive_bucket        = "mandate-journal-archive-${local.environment}"
+  source         = "../../modules/cloudflare"
+  name           = "mandate-${local.environment}"
+  account_id     = local.account_id
+  zone_name      = "owlhead.ai"
+  api_hostname   = "api-staging.owlhead.ai"
+  api_origin     = var.api_origin
+  archive_bucket = "mandate-journal-archive-${local.environment}"
+}
+
+resource "terraform_data" "applied_commit" {
+  input = var.commit_sha
+}
+
+output "applied_commit" {
+  value = terraform_data.applied_commit.output
 }
 
 output "cluster_id" {
@@ -58,7 +75,8 @@ output "archive_bucket" {
 }
 
 output "archive_endpoint" {
-  value = module.cloudflare.archive_endpoint
+  value     = module.cloudflare.archive_endpoint
+  sensitive = true
 }
 
 output "archive_destination_path" {
@@ -80,7 +98,8 @@ output "archive_jurisdiction" {
 }
 
 output "cloudflare_account_id" {
-  value = var.cloudflare_account_id
+  value     = local.account_id
+  sensitive = true
 }
 
 output "tunnel_id" {
