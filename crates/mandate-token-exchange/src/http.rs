@@ -6,9 +6,12 @@ use std::time::Duration;
 use mandate_connections::ConnectError;
 use mandate_connections::exchange::{ExchangeForm, TokenEndpoint, TokenResponse};
 use mandate_connections::hosts::LiveTokenRequest;
+use reqwest::header::CONTENT_TYPE;
 
 #[cfg(debug_assertions)]
 use crate::cell::CellTokenUrl;
+use crate::form::body;
+use crate::response::{MAX_BODY, token_response};
 
 /// How long the connection to the token endpoint may take.
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -16,12 +19,26 @@ pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 /// How long the whole request may take, its answer read.
 pub const TOTAL_TIMEOUT: Duration = Duration::from_secs(15);
 
+/// The request body's media type.
+const FORM: &str = "application/x-www-form-urlencoded";
+
+/// Where the request goes.
+enum Target {
+    /// The URL the `LiveTokenRequest` carries.
+    Live,
+    /// A dev or CI cell's fixture provider (DEC-2629 item 3).
+    #[cfg(debug_assertions)]
+    Cell(CellTokenUrl),
+}
+
 /// Sends the exchange's one request. [`HttpTokenEndpoint::live`] sends it only to the URL the
 /// `LiveTokenRequest` it is handed carries, over HTTPS; a debug build may instead send it to a
 /// cell's [`CellTokenUrl`]. Either follows no redirect, never retries, and reads at most
 /// [`crate::response::MAX_BODY`] bytes of the answer.
 pub struct HttpTokenEndpoint {
-    _target: (),
+    runtime: tokio::runtime::Runtime,
+    client: reqwest::Client,
+    target: Target,
 }
 
 impl HttpTokenEndpoint {
@@ -29,38 +46,89 @@ impl HttpTokenEndpoint {
     ///
     /// # Errors
     /// [`ConnectError::EndpointFailed`] when the client cannot be built.
-    #[expect(
-        clippy::todo,
-        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-    )]
     pub fn live() -> Result<Self, ConnectError> {
-        todo!()
+        Self::built(true, Target::Live)
     }
 
-    /// A dev or CI cell's adapter, sending to the fixture provider's `url` (DEC-2629 item 3).
+    /// A dev or CI cell's adapter, sending to the fixture provider's `url` (DEC-2629 item 3),
+    /// which [`crate::cell::parse`] admitted on a loopback host, over `http` or `https`.
     ///
     /// # Errors
     /// [`ConnectError::EndpointFailed`] when the client cannot be built.
     #[cfg(debug_assertions)]
-    #[expect(
-        clippy::todo,
-        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-    )]
-    pub fn for_cell(_url: CellTokenUrl) -> Result<Self, ConnectError> {
-        todo!()
+    pub fn for_cell(url: CellTokenUrl) -> Result<Self, ConnectError> {
+        Self::built(false, Target::Cell(url))
+    }
+
+    /// The client both adapters share: no redirect, bounded timeouts, TLS on `ring`, and a
+    /// runtime of its own for the one request.
+    fn built(https_only: bool, target: Target) -> Result<Self, ConnectError> {
+        let _already_installed = rustls::crypto::ring::default_provider().install_default();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|_| ConnectError::EndpointFailed)?;
+        let client = reqwest::Client::builder()
+            .https_only(https_only)
+            .redirect(reqwest::redirect::Policy::none())
+            .connect_timeout(CONNECT_TIMEOUT)
+            .timeout(TOTAL_TIMEOUT)
+            .build()
+            .map_err(|_| ConnectError::EndpointFailed)?;
+        Ok(Self {
+            runtime,
+            client,
+            target,
+        })
     }
 }
 
 impl TokenEndpoint for HttpTokenEndpoint {
-    #[expect(
-        clippy::todo,
-        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-    )]
     fn post(
         &mut self,
-        _request: LiveTokenRequest,
-        _form: &ExchangeForm<'_>,
+        request: LiveTokenRequest,
+        form: &ExchangeForm<'_>,
     ) -> Result<TokenResponse, ConnectError> {
-        todo!()
+        let url = match &self.target {
+            Target::Live => request.url(),
+            #[cfg(debug_assertions)]
+            Target::Cell(url) => url.as_str(),
+        };
+        let sent = self
+            .client
+            .post(url)
+            .header(CONTENT_TYPE, FORM)
+            .body(body(form));
+        self.runtime.block_on(async move {
+            let mut response = sent
+                .send()
+                .await
+                .map_err(|_| ConnectError::EndpointFailed)?;
+            let status = response.status().as_u16();
+            let content_type = response
+                .headers()
+                .get(CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_owned);
+            let limit = u64::try_from(MAX_BODY).map_err(|_| ConnectError::EndpointFailed)?;
+            if response
+                .content_length()
+                .is_some_and(|length| length > limit)
+            {
+                return Err(ConnectError::EndpointFailed);
+            }
+            let mut read = Vec::new();
+            while let Some(chunk) = response
+                .chunk()
+                .await
+                .map_err(|_| ConnectError::EndpointFailed)?
+            {
+                if read.len().saturating_add(chunk.len()) > MAX_BODY {
+                    return Err(ConnectError::EndpointFailed);
+                }
+                read.extend_from_slice(&chunk);
+            }
+            token_response(status, content_type.as_deref(), &read)
+        })
     }
 }

@@ -255,7 +255,6 @@ fn raw(head: &'static str, chunk: &'static [u8]) -> SocketAddr {
 
 /// An answer of exactly [`MAX_BODY`] bytes is read whole over HTTP.
 #[test]
-#[ignore = "pending E10-13"]
 fn an_answer_at_the_limit_is_read() {
     let (result, hits, vault) = exchanged(Answer::AtLimit);
     assert!(result.is_ok(), "{result:?}");
@@ -269,7 +268,6 @@ fn an_answer_at_the_limit_is_read() {
 /// An answer that declares more than [`MAX_BODY`] bytes is refused on its declaration, without
 /// waiting for a body that never comes.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_declared_oversized_answer_is_refused_before_its_body() {
     let addr = raw(
         "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 1048576\r\n\r\n",
@@ -287,7 +285,6 @@ fn a_declared_oversized_answer_is_refused_before_its_body() {
 
 /// An answer that never ends is refused once it passes [`MAX_BODY`], not read to the timeout.
 #[test]
-#[ignore = "pending E10-13"]
 fn an_endless_answer_is_refused_once_past_the_limit() {
     let addr = raw(
         "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n",
@@ -304,7 +301,6 @@ fn an_endless_answer_is_refused_once_past_the_limit() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn the_exchange_posts_the_exact_form_once_to_the_token_url() {
     let (result, hits, vault) = exchanged(Answer::Grant);
     assert!(result.is_ok(), "{result:?}");
@@ -327,7 +323,6 @@ fn the_exchange_posts_the_exact_form_once_to_the_token_url() {
 /// A redirect is never followed: the exchange fails, the redirect's target is never asked, and
 /// the consumed code is not sent again (DEC-2628).
 #[test]
-#[ignore = "pending E10-13"]
 fn a_redirect_is_not_followed() {
     for code in [301, 302, 303, 307, 308] {
         let (result, hits, vault) = exchanged(Answer::Redirect(code));
@@ -347,7 +342,6 @@ fn a_redirect_is_not_followed() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_refusal_or_an_oversized_answer_is_endpoint_failed() {
     for answer in [Answer::Status(400), Answer::Status(500), Answer::Oversized] {
         let (result, hits, vault) = exchanged(answer);
@@ -359,7 +353,6 @@ fn a_refusal_or_an_oversized_answer_is_endpoint_failed() {
 
 /// An endpoint nothing listens on fails the exchange, and no error names a secret.
 #[test]
-#[ignore = "pending E10-13"]
 fn an_unreachable_endpoint_is_endpoint_failed_and_names_no_secret() {
     let addr = {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -392,7 +385,6 @@ fn an_unreachable_endpoint_is_endpoint_failed_and_names_no_secret() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn the_live_adapter_builds_without_sending_anything() {
     assert!(HttpTokenEndpoint::live().is_ok());
 }
