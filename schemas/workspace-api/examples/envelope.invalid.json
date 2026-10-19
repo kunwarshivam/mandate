@@ -2307,5 +2307,34 @@
     [
       "Bad Value"
     ]
+  ],
+  "StepUpAssertion": [
+    {
+      "authenticator_data": "SZYN5YgOjGh0NBcPZHZgW4_krrmihjLHmVzzuoMdl2MFAAAABw",
+      "client_data_json": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0In0",
+      "signature": "MEUCIQDTGOxqmXsYyNkVsMfP0uhkhHbXn8kVCpX5ZRpG7LXyFQIgB4cPzYkM3Hv7Ix3b0Cf5Jt0sxQ3yrUPDNSMhS2h2kGs"
+    },
+    {
+      "passkey_id": "AAECAwQFBgcICQoLDA0ODw",
+      "client_data_json": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0In0",
+      "signature": "MEUCIQDTGOxqmXsYyNkVsMfP0uhkhHbXn8kVCpX5ZRpG7LXyFQIgB4cPzYkM3Hv7Ix3b0Cf5Jt0sxQ3yrUPDNSMhS2h2kGs"
+    },
+    {
+      "passkey_id": "AAECAwQFBgcICQoLDA0ODw",
+      "authenticator_data": "SZYN5YgOjGh0NBcPZHZgW4_krrmihjLHmVzzuoMdl2MFAAAABw",
+      "signature": "MEUCIQDTGOxqmXsYyNkVsMfP0uhkhHbXn8kVCpX5ZRpG7LXyFQIgB4cPzYkM3Hv7Ix3b0Cf5Jt0sxQ3yrUPDNSMhS2h2kGs"
+    },
+    {
+      "passkey_id": "AAECAwQFBgcICQoLDA0ODw",
+      "authenticator_data": "SZYN5YgOjGh0NBcPZHZgW4_krrmihjLHmVzzuoMdl2MFAAAABw",
+      "client_data_json": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0In0"
+    },
+    {
+      "passkey_id": "AAECAwQFBgcICQoLDA0ODw",
+      "authenticator_data": "SZYN5YgOjGh0NBcPZHZgW4_krrmihjLHmVzzuoMdl2MFAAAABw",
+      "client_data_json": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0In0",
+      "signature": "MEUCIQDTGOxqmXsYyNkVsMfP0uhkhHbXn8kVCpX5ZRpG7LXyFQIgB4cPzYkM3Hv7Ix3b0Cf5Jt0sxQ3yrUPDNSMhS2h2kGs",
+      "user_handle": "AAEC"
+    }
   ]
 }

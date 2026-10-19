@@ -1207,6 +1207,31 @@
         }
       }
     },
+    "StepUpAssertion": {
+      "description": "What a passkey's authenticator returned for the challenge `step_up` names, sent beside it (DEC-2108 item 7). The server judges it and stores its canonical bytes as the raw-assertion artifact (journal spec \u00a79.32); it is never part of the journaled evidence.",
+      "type": "object",
+      "required": [
+        "passkey_id",
+        "authenticator_data",
+        "client_data_json",
+        "signature"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "passkey_id": {
+          "$ref": "common.schema.json#/$defs/PasskeyId"
+        },
+        "authenticator_data": {
+          "$ref": "common.schema.json#/$defs/Base64url"
+        },
+        "client_data_json": {
+          "$ref": "common.schema.json#/$defs/Base64url"
+        },
+        "signature": {
+          "$ref": "common.schema.json#/$defs/Base64url"
+        }
+      }
+    },
     "StepUpStatus": {
       "enum": [
         "bound",
