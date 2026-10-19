@@ -46,6 +46,7 @@ pub mod journal;
 pub mod owner;
 pub mod postgres;
 pub mod register;
+pub mod retire;
 #[cfg(any(test, feature = "rh-sim"))]
 pub mod sim_clock;
 pub mod vault;
