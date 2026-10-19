@@ -18,7 +18,9 @@
   (`AlpacaBroker`, the client as the process's `Broker`, DEC-2007 item 2), `src/connect.rs`
   (`connect_check`: `StreamOpened` and `ConnectionChecked` for a paper Alpaca connection, DEC-2007
   item 4), `src/fixture.rs` (the binary's wiring, which admits no opening), and `mandate-store`'s
-  `draft_bytes_with_pii`. The agents' orders are slice X1b.
+  `draft_bytes_with_pii`; `src/launch.rs` (the account from `run`'s flags or the deployment
+  manager's variables) and the `mandate-executord` binary (`run`, `connect-check`, `probe`;
+  SIGTERM drains, DEC-2007 item 3). The agents' orders are slice X1b.
 - **Tests:** `crates/mandate-executord/tests/process.rs`: paper only, the stream opened once, the
   start waiting for a tick, readiness only after a clean startup reconciliation, a lost read read
   again without holding the kill switch, a process that is not ready applying the kill switch, a
@@ -43,4 +45,8 @@
   `tests/connect.rs`: a passing check opening the stream with every result and the reference in
   `pii_refs`, a second check appending only its record, an unreadable account failing and
   journaled, and invalid ids refused. `src/fixture.rs`'s unit tests: its ids and wiring.
-- **Run:** `cargo nextest run -p mandate-executord`.
+  `tests/journal.rs`: the binary's process on the in-memory journal and the fixture broker,
+  reconciled and ready, once across a restart. `tests/launch.rs` and `tests/binary.rs`: the
+  launch's refusals, `connect-check`'s output, and probes and drain. `tests/pg.rs`: the connect
+  check and the process on Postgres.
+- **Run:** `cargo nextest run -p mandate-executord` (with `MANDATE_PG_URL` for `tests/pg.rs`).
