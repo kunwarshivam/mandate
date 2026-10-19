@@ -343,6 +343,34 @@ pub async fn list_agents(
     served(&reader, &streams, vec![("agents", Value::Array(agents))])
 }
 
+/// `GET /v1/workspaces/{ws}/connections` (§4.5, DEC-2620): `read-models/connections`, for the
+/// workspace admin only (DEC-2631 item 1).
+#[expect(
+    clippy::todo,
+    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+)]
+pub async fn list_connections(
+    State(_app): State<Arc<App>>,
+    _headers: HeaderMap,
+    _path: Result<Path<String>, PathRejection>,
+) -> Response {
+    todo!()
+}
+
+/// `GET /v1/workspaces/{ws}/connections/{id}` (§4.5, DEC-2620): `read-models/connection`, the
+/// role checked before the id (DEC-2631 item 2).
+#[expect(
+    clippy::todo,
+    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+)]
+pub async fn one_connection(
+    State(_app): State<Arc<App>>,
+    _headers: HeaderMap,
+    _path: Result<Path<(String, String)>, PathRejection>,
+) -> Response {
+    todo!()
+}
+
 /// `GET /v1/workspaces/{ws}/agents/{agent_id}`.
 pub async fn one_agent(
     State(app): State<Arc<App>>,
