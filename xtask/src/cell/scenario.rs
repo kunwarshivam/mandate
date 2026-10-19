@@ -38,9 +38,11 @@ pub const WEB_MANDATE_FILE: &str = "deploy/cell/demo/web-mandate.json";
 pub const WEB_INSTRUMENT_FILE: &str = "deploy/cell/demo/web-instrument.json";
 const INPUTS: &str = "/in";
 /// The journal and the artifact store every gesture names: the `control` process's DSN, expanded
-/// by Kubernetes from its environment, and the pod's own `/work`, which all its containers share.
+/// by Kubernetes from its environment, and the workspace's shared store at the chart's path, which
+/// the control runs write and the API server reads, so step 5's signed-in read finds the report
+/// the runner stored. The segment stays on the pod's own `/work`, which all its containers share.
 const JOURNAL: &str = "$(MANDATE_JOURNAL_DSN)";
-const STORE: &str = "/work/store";
+const STORE: &str = "/var/lib/mandate/artifacts";
 const SEGMENT: &str = "/work/segment.jsonl";
 /// The founding member: the demo owner, the member the stub issuer's `demo-owner` subject is
 /// linked to, so the owner who signs in is the one the run's workspace was founded for (DEC-2010).
@@ -1397,6 +1399,30 @@ mod tests {
             assert_eq!(bytes, again, "{path} is not canonical JSON");
             assert!(bytes.is_ascii(), "{path} holds a non-ASCII byte");
         }
+    }
+
+    /// Every gesture's `--store` is the workspace's shared artifact store at the chart's own path,
+    /// which the control runs write and the API server reads, so the API serves what the gestures
+    /// stored, the backtest's report among them; a pod's own `/work` is a volume no other pod
+    /// sees.
+    #[test]
+    fn the_gestures_write_the_store_the_api_reads() {
+        let helpers =
+            fs::read_to_string("../deploy/cell/charts/workspace/templates/_helpers.tpl").unwrap();
+        assert!(
+            helpers.contains(&format!(
+                r#"{{{{- define "mandate.artifactsPath" -}}}}{STORE}{{{{- end -}}}}"#
+            )),
+            "{STORE} is not the chart's artifact store path"
+        );
+        assert!(
+            helpers.contains(r#"$access := dict "api" "seed" "control" "rw""#),
+            "the control runs write the store and the API server reads it"
+        );
+        assert!(
+            !STORE.starts_with("/work"),
+            "{STORE} is the pod's own volume"
+        );
     }
 
     /// The demo is paper, asks for every opening, and trades only the instrument it registers.
