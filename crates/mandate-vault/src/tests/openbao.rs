@@ -8,8 +8,8 @@ use mandate_time::UtcNanos;
 use serde_json::json;
 
 use crate::openbao::{
-    OpenBaoConfig, OpenBaoSource, provision, provisioned_identities, refusal, role_settings,
-    seal_verdict, secret_id_identities,
+    OpenBaoConfig, OpenBaoSource, kubernetes_login_path, kubernetes_login_verdict, provision,
+    provisioned_identities, refusal, role_settings, seal_verdict, secret_id_identities,
 };
 use crate::policy::{Identity, Mounts};
 use secrecy::SecretString;
@@ -246,4 +246,69 @@ async fn a_kubernetes_login_to_an_unreachable_vault_is_an_outage_that_shows_no_t
             "{identity:?}"
         );
     }
+}
+
+#[test]
+#[ignore = "pending E21-32"]
+fn each_kind_logs_in_on_its_own_mount_to_its_connections_role() {
+    let c1 = ConnectionId::new("c1").unwrap();
+    assert_eq!(
+        kubernetes_login_path(&Identity::Executor(c1.clone()), &Mounts::default()),
+        Ok(("auth/kubernetes-executor/login".to_owned(), "c1".to_owned()))
+    );
+    assert_eq!(
+        kubernetes_login_path(&Identity::TokenExchange(c1), &Mounts::default()),
+        Ok(("auth/kubernetes-exchange/login".to_owned(), "c1".to_owned()))
+    );
+    assert_eq!(
+        kubernetes_login_path(&Identity::ModelGateway, &Mounts::default()),
+        Err(SourceError::Config)
+    );
+}
+
+/// A login is the identity's own only when the vault reached its connection's role for its own
+/// ServiceAccount; another role, another account, or an answer missing either is refused.
+#[test]
+#[ignore = "pending E21-32"]
+fn a_kubernetes_login_is_accepted_only_for_its_own_role_and_account() {
+    let executor = Identity::Executor(ConnectionId::new("c1").unwrap());
+    let exchange = Identity::TokenExchange(ConnectionId::new("c1").unwrap());
+    let auth = |role: &str, account: &str| json!({"metadata": {"role": role, "service_account_name": account}});
+    assert_eq!(
+        kubernetes_login_verdict(&executor, Some(&auth("c1", "6331"))),
+        Ok(())
+    );
+    assert_eq!(
+        kubernetes_login_verdict(&exchange, Some(&auth("c1", "x6331"))),
+        Ok(())
+    );
+    for (identity, answer) in [
+        (&executor, auth("c2", "6331")),
+        (&executor, auth("c1", "6332")),
+        (&executor, auth("c1", "x6331")),
+        (&exchange, auth("c1", "6331")),
+        (&exchange, auth("C1", "x6331")),
+    ] {
+        assert_eq!(
+            kubernetes_login_verdict(identity, Some(&answer)),
+            Err(SourceError::Denied),
+            "{answer}"
+        );
+    }
+    for answer in [
+        json!({"metadata": {"role": "c1"}}),
+        json!({"metadata": {"service_account_name": "6331"}}),
+        json!({"metadata": {"role": 7, "service_account_name": "6331"}}),
+        json!({}),
+    ] {
+        assert_eq!(
+            kubernetes_login_verdict(&executor, Some(&answer)),
+            Err(SourceError::Malformed),
+            "{answer}"
+        );
+    }
+    assert_eq!(
+        kubernetes_login_verdict(&executor, None),
+        Err(SourceError::Malformed)
+    );
 }

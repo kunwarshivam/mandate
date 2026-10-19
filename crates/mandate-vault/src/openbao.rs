@@ -222,6 +222,29 @@ impl fmt::Debug for OpenBaoSource {
     }
 }
 
+/// The Kubernetes auth login path of `identity`, a connection's executor or token exchange, and
+/// the role it logs in to: `auth/<its kind's mount>/login` and the connection id (DEC-2060).
+/// Any other identity is [`SourceError::Config`].
+pub fn kubernetes_login_path(
+    identity: &Identity,
+    mounts: &Mounts,
+) -> Result<(String, String), SourceError> {
+    let _ = (identity, mounts);
+    Err(SourceError::Unimplemented { story: "E21-32" })
+}
+
+/// Whether the vault's answer to a Kubernetes auth login, its `auth` object, is `identity`'s own:
+/// the role it reached is its connection id, and the ServiceAccount the vault checked is its
+/// own. An answer without either is [`SourceError::Malformed`]; another's is
+/// [`SourceError::Denied`].
+pub fn kubernetes_login_verdict(
+    identity: &Identity,
+    auth: Option<&Value>,
+) -> Result<(), SourceError> {
+    let _ = (identity, auth);
+    Err(SourceError::Unimplemented { story: "E21-32" })
+}
+
 impl OpenBaoSource {
     /// Logs in as `identity` with its AppRole `role_id` and `secret_id` (read by the caller from
     /// mounted files, never the environment). The login is refused unless the role it reaches
