@@ -107,7 +107,6 @@ fn order(
 }
 
 #[test]
-#[ignore = "pending E11-9"]
 fn only_the_agents_own_orders_are_listed_in_the_order_first_submitted() {
     let mut a = Account::default();
     a.push("StreamOpened", None, "{}");
@@ -133,7 +132,6 @@ fn only_the_agents_own_orders_are_listed_in_the_order_first_submitted() {
 }
 
 #[test]
-#[ignore = "pending E11-9"]
 fn state_and_filled_qty_are_the_last_state_changes_and_null_before_any() {
     let mut a = Account::default();
     a.submit("agt_a", "o-1", "3", "101.5");
@@ -179,7 +177,6 @@ fn state_and_filled_qty_are_the_last_state_changes_and_null_before_any() {
 }
 
 #[test]
-#[ignore = "pending E11-9"]
 fn an_order_no_companion_names_is_no_agents() {
     let mut a = Account::default();
     a.push(
@@ -350,7 +347,6 @@ fn runner() -> TestRunner {
 }
 
 #[test]
-#[ignore = "pending E11-9"]
 fn the_fold_matches_an_independent_replay_and_catches_seeded_bugs() {
     let steps = proptest::collection::vec(step(), 0..24);
     if let Err(failure) = runner().run(&steps, |steps| agrees(&steps, real)) {

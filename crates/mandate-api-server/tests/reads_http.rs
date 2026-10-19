@@ -790,7 +790,6 @@ fn seed_orders(f: &Fixture) {
 }
 
 #[test]
-#[ignore = "pending E11-9"]
 fn an_agents_orders_are_its_own_on_its_documents_account() {
     let (bytes, version) = document();
     let f = fixture_with(stored(bytes));
