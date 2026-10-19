@@ -226,7 +226,7 @@ pub enum IntentBody {
         instrument: InstrumentId,
         side: Side,
         qty: Qty,
-        limit: Price,
+        limit: Option<Price>,
         purpose: Purpose,
         /// The protective prices the order builder computed from the mandate's stop and
         /// take-profit distances (stream H, mandate spec §3's `protection`). The executor places

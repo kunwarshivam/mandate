@@ -370,7 +370,7 @@ fn intent_received(
         instrument: instrument(payload)?,
         side: side_of(required_text(payload, "side")?)?,
         qty: qty(payload, "qty")?,
-        limit: limit_of(payload)?.ok_or_else(|| refused("limit_price"))?,
+        limit: Some(limit_of(payload)?.ok_or_else(|| refused("limit_price"))?),
         purpose: purpose_of(required_text(payload, "purpose")?)?,
         protection: prices_of(payload)?,
     };
