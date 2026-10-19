@@ -1,9 +1,0 @@
-file = "crates/mandate-journal/tests/owner_exit_records.rs"
-test = "every_invalid_market_intent_is_refused_at_the_member_rule_245_names"
-reason = """
-DEC-2037 (journal spec v0.65 §9.5, rule 245): `IntentReceived` takes `type` `market` only for an
-exit, with `limit_price` null exactly then. The journal does not enforce rule 245 yet, so it
-accepts every invalid draft (`got None`), an answer of the journal's own rather than a stub's
-report. No stub or new API is needed: the change is the consistency rule. E7-29's journal
-enforcement deletes this file with the test's `#[ignore]` line.
-"""
