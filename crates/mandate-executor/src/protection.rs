@@ -4134,6 +4134,78 @@ mod sequence_tests {
         Ok(())
     }
 
+    /// The binding gate's snapshot with its status feed stale (§4.3): `mandate-risk` then bars a
+    /// market order and answers `marketable_limit_required` (§5.1).
+    struct StaleFeed;
+
+    impl crate::ports::BindingGateSource for StaleFeed {
+        fn input(
+            &self,
+            request: &crate::ports::BindingGateRequest<'_>,
+        ) -> Option<crate::ports::BindingGateInput> {
+            let as_opening = crate::ports::BindingGateRequest {
+                agent: request.agent,
+                instrument: request.instrument,
+                side: request.side,
+                qty: request.qty,
+                limit: request.limit,
+                purpose: Purpose::Open,
+                tif: request.tif,
+                protection: request.protection,
+            };
+            let mut input = crate::ports::AllowingBindingGate.input(&as_opening)?;
+            input.instrument.status_feed_current = false;
+            Some(input)
+        }
+    }
+
+    /// §5.1, DEC-2037 items 3 and 4: where the risk gate bars a market order and requires a
+    /// marketable limit, an exit at the market goes as a limit at the ladder's first rung, never at
+    /// the market; with the binding gate answering nothing for it, the control, it goes at the
+    /// market.
+    #[test]
+    fn an_exit_at_the_market_the_gate_requires_marketable_goes_as_a_limit()
+    -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let (instrument, qty) = (aapl()?, Qty::parse("10")?);
+        let market_exit = || {
+            Input::Intent(IntentHandoff {
+                intent_id: IntentId(EventId(EXIT.to_owned())),
+                agent: AgentId("agent-a".to_owned()),
+                tif: Some(TimeInForce::Day),
+                body: IntentBody::Order {
+                    instrument: instrument.clone(),
+                    side: Side::Sell,
+                    qty,
+                    limit: None,
+                    purpose: Purpose::RiskExit,
+                    protection: None,
+                },
+            })
+        };
+        let sent = |effects: &[Effect]| {
+            submissions(effects)
+                .iter()
+                .map(|order| (order.order_type, order.limit_price))
+                .collect::<Vec<_>>()
+        };
+        let mut barred = held(&ports)?;
+        barred.run(quote("150")?, &ports)?;
+        let input = market_exit();
+        let effects = crate::step::handle(&mut barred.state, input, &ports, &StaleFeed)?;
+        assert_eq!(
+            sent(&effects),
+            vec![(OrderType::Limit, Some(Price::parse("149.25")?))],
+            "150 x (1 - 0.005), the liquid tier's first rung"
+        );
+        let mut open = held(&ports)?;
+        open.run(quote("150")?, &ports)?;
+        let effects = open.run(market_exit(), &ports)?;
+        assert_eq!(sent(&effects), vec![(OrderType::Market, None)]);
+        Ok(())
+    }
+
     /// A sane quote with a bid and no trade, observed at `at`.
     fn bid_only(bid: &str, at: i64) -> Result<Input, ExecutorError> {
         Ok(Input::Market(MarketObservation {
