@@ -916,6 +916,14 @@ def test_each_fqdn_egress_bug_is_caught(tmp_path):
             and d["spec"]["endpointSelector"]["matchLabels"]["mandate.dev/process"] == process
         )
 
+    def clusterwide(rule: dict) -> dict:
+        return {
+            "apiVersion": "cilium.io/v2",
+            "kind": "CiliumClusterwideNetworkPolicy",
+            "metadata": {"name": "wide"},
+            "spec": {"endpointSelector": {}, "egress": [rule]},
+        }
+
     def host_rule(process: str) -> dict:
         return next(r for r in policy(process)["spec"]["egress"] if "toFQDNs" in r)
 
@@ -949,6 +957,18 @@ def test_each_fqdn_egress_bug_is_caught(tmp_path):
         ),
         lambda: docs.append({**copy.deepcopy(policy("token-exchange")), "metadata": {"name": "twice", "namespace": "ws-ws1"}}),
         lambda: docs.append({"kind": "ConfigMap", "apiVersion": "v1", "metadata": {"name": "x"}, "data": {"h": "api.alpaca.markets"}}),
+        lambda: docs.append(clusterwide({"toEntities": ["world"]})),
+        lambda: docs.append(clusterwide({"toCIDR": ["0.0.0.0/0"]})),
+        lambda: docs.append(clusterwide({"toFQDNs": [{"matchPattern": "*"}]})),
+        lambda: docs.append(
+            {
+                "apiVersion": "networking.k8s.io/v1",
+                "kind": "NetworkPolicy",
+                "metadata": {"name": "wide", "namespace": "ws-ws1"},
+                "spec": {"podSelector": {}, "policyTypes": ["Egress"], "egress": [{"to": [{"ipBlock": {"cidr": "0.0.0.0/0"}}]}]},
+            }
+        ),
+        lambda: docs.append({"kind": "ConfigMap", "apiVersion": "v1", "metadata": {"name": "y"}, "data": {"h": "API.Alpaca.Markets"}}),
     ]
     pristine = copy.deepcopy(docs)
     for seed in seeds:
