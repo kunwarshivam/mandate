@@ -337,7 +337,7 @@ pub fn call<T: Transport, S: MeterStore, C: Clock>(
 }
 
 /// `at` plus `ms` milliseconds, exactly.
-fn after_ms(at: UtcNanos, ms: u32) -> Result<UtcNanos, ResearchRunError> {
+pub(crate) fn after_ms(at: UtcNanos, ms: u32) -> Result<UtcNanos, ResearchRunError> {
     let nanos = u64::from(at.nanos())
         .checked_add(u64::from(ms % 1_000).saturating_mul(1_000_000))
         .ok_or(ResearchRunError::TimeOutOfRange)?;

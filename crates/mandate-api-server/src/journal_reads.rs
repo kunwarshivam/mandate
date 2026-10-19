@@ -1,7 +1,8 @@
 //! The journal's audit reads over the workspace API (workspace API spec §4.8, §4.8.1; E12-6's route
 //! slices, lane MB, DEC-760): `GET /v1/workspaces/{ws}/journal/streams/{stream_id}/events`, one
 //! page of a stream in `seq` order, each event's stored canonical body bytes with its `hash` and
-//! `prev_hash`.
+//! `prev_hash`; and `GET /v1/workspaces/{ws}/journal/events/{event_id}`, one event in the same
+//! shape with its `stream_id` and its `artifact_refs` and `config_refs` as stored.
 //!
 //! The matrix row "Read records, verification; export" is checked before any id is resolved, so a
 //! viewer, an operator or an approver gets 403 `forbidden` whatever the id. Query members are
@@ -116,6 +117,72 @@ pub async fn events(
     enveloped(StatusCode::OK, now, members)
 }
 
+/// `GET /v1/workspaces/{ws}/journal/events/{event_id}` (§4.8.1): the event when its stream is one
+/// of the workspace's, else the one `not_found`.
+pub async fn one_event(
+    State(app): State<Arc<App>>,
+    headers: HeaderMap,
+    path: Result<Path<(String, String)>, PathRejection>,
+) -> Response {
+    let Ok(Path((workspace, event_id))) = path else {
+        return path_refused(&app, &headers, Request::Other).await;
+    };
+    let (admitted, now) = match session(&app, &headers, Request::Other) {
+        Ok(admitted) => admitted,
+        Err(refusal) => return refusal.response(),
+    };
+    let reader = match authorized(
+        &app,
+        &admitted,
+        now,
+        &workspace,
+        Permission::ReadRecords,
+        Unreadable::Read,
+    )
+    .await
+    {
+        Ok(reader) => reader,
+        Err(refusal) => return refusal.response(),
+    };
+    let row = match app.journal.event(&event_id).await {
+        Ok(row) => row,
+        Err(_) => return Refused::JournalUnavailable.response(),
+    };
+    let Some((row, stream)) = row.and_then(|row| {
+        StreamId::parse(&row.stream_id)
+            .filter(|id| owned(&reader.workspace, id))
+            .map(|stream| (row, stream))
+    }) else {
+        return Refused::NotFound.response();
+    };
+    let rows = match app.journal.rows(stream.as_str()).await {
+        Ok(rows) => rows,
+        Err(_) => return Refused::JournalUnavailable.response(),
+    };
+    let envelope = mandate_canon::parse(&row.body).ok();
+    let stored = |name: &str| {
+        envelope
+            .as_ref()
+            .and_then(|envelope| envelope.get(name))
+            .cloned()
+            .unwrap_or(Value::Null)
+    };
+    let mut members = vec![
+        ("stream_id", string(&row.stream_id)),
+        ("artifact_refs", stored("artifact_refs")),
+        ("config_refs", stored("config_refs")),
+    ];
+    members.extend(fields(&row));
+    let served = vec![
+        ("event", object(members)),
+        (
+            "as_of",
+            Value::Array(watermark(&rows).into_iter().collect()),
+        ),
+    ];
+    enveloped(StatusCode::OK, now, served)
+}
+
 /// Whether `stream` is one of the workspace's: its workspace segment, the second of every stream
 /// id (journal spec §2), equals `workspace` whole, never by prefix (DEC-770 item 1).
 fn owned(workspace: &str, stream: &StreamId) -> bool {
@@ -160,7 +227,12 @@ fn bounded(
 
 /// One served event (§4.8.1): its `seq`, ids, `recorded_at`, bare hashes, and body as base64.
 fn event(row: &StoredEvent) -> Value {
-    object(vec![
+    object(fields(row))
+}
+
+/// The members every served event carries.
+fn fields(row: &StoredEvent) -> Vec<(&'static str, Value)> {
+    vec![
         ("seq", int(row.seq)),
         ("event_id", string(&row.event_id)),
         ("event_type", string(&row.event_type)),
@@ -168,7 +240,7 @@ fn event(row: &StoredEvent) -> Value {
         ("prev_hash", string(&row.prev_hash.to_string())),
         ("hash", string(&row.hash.to_string())),
         ("body", string(&base64(&row.body))),
-    ])
+    ]
 }
 
 /// `bytes` as RFC 4648 §4 standard base64, with padding.
