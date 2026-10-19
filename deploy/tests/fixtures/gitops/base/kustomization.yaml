@@ -12,6 +12,7 @@ resources:
   - journal.yaml
   - workspace.yaml
   - admission.yaml
+  - kill-switch-admission.yaml
 configMapGenerator:
   - name: workspace-managed-values
     namespace: flux-system
