@@ -1,14 +1,16 @@
 //! A kill switch's cancel whose answer is lost within one run (DEC-2302 item 7; trading-domain
 //! spec §5.5, §5.7; `AGENTS.md` rules 5, 6 and 13).
 //!
-//! Each order a switch named in `cancels` that is still `PendingCancel` with its cancel
-//! unconfirmed has the cancel sent again every `unknown_absent_window_s` by the risk clock, at
-//! most `unknown_absent_lookups` times: §5.7's "N lookups over T seconds" pair, which now carries
-//! both meanings. Each re-send is journaled first, so the fold counts them and the cap survives a
-//! replay. The cap-th re-send carries an alert with an opaque key. After the cap nothing more is
-//! sent within the run, the order stays `PendingCancel` and is never dropped, and the next start
-//! sends the cancel again (DEC-2302 item 3). No other cancel is retried: protection keeps its own
-//! bound (§5.4), and an `Unknown` order is queried, never cancelled blind.
+//! Each order a switch named in `cancels` whose cancel is unconfirmed, `PendingCancel` or left
+//! working by an ignored ask, has the cancel sent again every `unknown_absent_window_s` by the
+//! risk clock, at most `unknown_absent_lookups` times in each run: §5.7's "N lookups over T
+//! seconds" pair, which now carries both meanings. Each re-send is journaled first, and a run
+//! counts the asks journaled since its start, so every run has its own budget. When the window
+//! after the last re-send passes with the cancel still unconfirmed, one alert with an opaque key
+//! sounds. After that nothing more is sent within the run, the order stays `PendingCancel` and is
+//! never dropped, and the next start sends the cancel again (DEC-2302 item 3) with a fresh budget.
+//! No other cancel is retried: protection keeps its own bound (§5.4), and an `Unknown` order is
+//! queried, never cancelled blind.
 
 mod common;
 
@@ -177,10 +179,11 @@ fn a_lost_kill_switch_cancel_is_sent_again_once_the_window_passes() {
     assert_eq!(state_of(&shell, &id), Some(OrderState::PendingCancel));
 }
 
-/// The re-sends stop at the cap, the cap-th carries the one alert, and the order stays
-/// `PendingCancel` with its cancel unconfirmed after it, never dropped.
+/// The re-sends stop at the cap; the one alert sounds when the window after the cap-th passes with
+/// the cancel still unconfirmed, never with the cap-th itself; the order stays `PendingCancel` with
+/// its cancel unconfirmed after it, never dropped.
 #[test]
-fn the_retry_stops_at_the_cap_and_alerts_once() {
+fn the_retry_stops_at_the_cap_and_alerts_once_its_last_window_passes() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
     let instruments = FixedInstruments;
@@ -193,15 +196,61 @@ fn the_retry_stops_at_the_cap_and_alerts_once() {
     for retry in 1..=i64::from(cap) {
         let ran = shell.run(Input::Tick(clock(SWITCHED_AT + retry * window)), &ports);
         sent += cancels(&ran, &id);
-        let last = retry == i64::from(cap);
-        assert_eq!(alerts(&ran), usize::from(last), "retry {retry}");
+        assert_eq!(alerts(&ran), 0, "retry {retry}");
     }
     assert_eq!(sent, usize::try_from(cap).unwrap_or(usize::MAX));
-    let after = SWITCHED_AT + i64::from(cap) * window;
-    let (more, alerted) = ticks(&mut shell, &ports, &id, after + 1, after + 4 * window);
+    let last = SWITCHED_AT + i64::from(cap) * window;
+    let (early, quiet) = ticks(&mut shell, &ports, &id, last + 1, last + window - 1);
+    assert_eq!(
+        (early, quiet),
+        (0, 0),
+        "no alert before the last window passes"
+    );
+    let expired = shell.run(Input::Tick(clock(last + window)), &ports);
+    assert_eq!((cancels(&expired, &id), alerts(&expired)), (0, 1));
+    let (more, alerted) = ticks(
+        &mut shell,
+        &ports,
+        &id,
+        last + window + 1,
+        last + 5 * window,
+    );
     assert_eq!((more, alerted), (0, 0), "nothing more within the run");
     assert_eq!(state_of(&shell, &id), Some(OrderState::PendingCancel));
     assert!(unconfirmed(&shell, &id));
+}
+
+/// A cancel the broker confirms after the cap-th re-send raises no alert: "exhausted" means the
+/// last window passed with the cancel still unconfirmed.
+#[test]
+fn a_cancel_confirmed_after_the_last_re_send_raises_no_alert() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let configuration = config();
+    let ports = ports(&ids, &mandates, &instruments, &configuration);
+    let window = configuration.unknown_absent_window_s;
+    let cap = i64::from(configuration.unknown_absent_lookups);
+    let (mut shell, id) = switched(&ports);
+    let (sent, early) = ticks(
+        &mut shell,
+        &ports,
+        &id,
+        SWITCHED_AT + 1,
+        SWITCHED_AT + cap * window,
+    );
+    assert_eq!(early, 0, "no alert with the cap-th re-send");
+    assert_eq!(sent, usize::try_from(cap).unwrap_or(usize::MAX));
+    shell.run(
+        Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+            client_order_id: id.clone(),
+        })),
+        &ports,
+    );
+    let last = SWITCHED_AT + cap * window;
+    let (more, alerted) = ticks(&mut shell, &ports, &id, last + 1, last + 3 * window);
+    assert_eq!((more, alerted), (0, 0));
+    assert_eq!(state_of(&shell, &id), Some(OrderState::Canceled));
 }
 
 /// The cadence and the cap are the configuration's, not literals: a window of 7 and two lookups
@@ -228,11 +277,12 @@ fn the_cadence_and_the_cap_follow_the_configuration() {
     assert_eq!(at, vec![7, 14]);
 }
 
-/// The count is the journal's: a restart after one re-send replays it, sends the cancel once at
-/// the start (DEC-2302 item 3), and the run then sends only the rest of the cap; a restart after
-/// the cap sends once at the start and nothing more within the run.
+/// Every run has its own budget: a run counts the asks journaled since its start. After one
+/// re-send in the first run, a restart sends the cancel once at the start (DEC-2302 item 3) and the
+/// run then retries the whole cap again, with its own alert; so does the run after that, so an
+/// outage that spends one run's budget never leaves the order working (`AGENTS.md` rule 13).
 #[test]
-fn the_cap_survives_a_restart() {
+fn every_run_retries_with_its_own_budget() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
     let instruments = FixedInstruments;
@@ -246,27 +296,30 @@ fn the_cap_survives_a_restart() {
 
     let (mut restarted, started) = shell.restart_keeping_broker(&ports);
     assert_eq!(cancels(&started, &id), 1, "{:?}", started.requests);
-    let (rest, alerted) = ticks(
+    let (again, alerted) = ticks(
         &mut restarted,
         &ports,
         &id,
         SWITCHED_AT + window + 1,
         SWITCHED_AT + 10 * window,
     );
-    assert_eq!(rest, cap - 1, "the replay counted the first re-send");
-    assert_eq!(alerted, 1);
+    assert_eq!(
+        (again, alerted),
+        (cap, 1),
+        "a fresh budget in the second run"
+    );
 
-    let (mut capped, started) = restarted.restart_keeping_broker(&ports);
+    let (mut third, started) = restarted.restart_keeping_broker(&ports);
     assert_eq!(cancels(&started, &id), 1, "{:?}", started.requests);
-    let (more, alerted) = ticks(
-        &mut capped,
+    let (again, alerted) = ticks(
+        &mut third,
         &ports,
         &id,
         SWITCHED_AT + 10 * window + 1,
         SWITCHED_AT + 20 * window,
     );
-    assert_eq!((more, alerted), (0, 0), "no send after the cap, replayed");
-    assert_eq!(state_of(&capped, &id), Some(OrderState::PendingCancel));
+    assert_eq!((again, alerted), (cap, 1), "and in the third");
+    assert_eq!(state_of(&third, &id), Some(OrderState::PendingCancel));
 }
 
 /// A confirmation, or any terminal report, ends the retry.
@@ -526,11 +579,12 @@ fn sells(ran: &Ran) -> Vec<String> {
         .collect()
 }
 
-/// Only a `PendingCancel` order is retried, as only one is re-sent at a start: an order a switch
-/// named whose cancel the journal asked but could not record as `PendingCancel` (an ignored
-/// attempt, which leaves it `Accepted` with the cancel unconfirmed) is not retried within the run.
+/// An order a switch named whose cancel the journal asked but could not record as `PendingCancel`
+/// (an ignored attempt, which leaves it `Accepted` with the cancel unconfirmed, as when it was
+/// `Unknown` at the switch) is cancelled again too: the re-send takes it to `PendingCancel`, within
+/// the same budget, with the alert when its last window passes (`AGENTS.md` rule 13).
 #[test]
-fn only_a_pending_cancel_is_retried() {
+fn a_switched_order_an_ignored_ask_left_working_is_cancelled_again() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
     let instruments = FixedInstruments;
@@ -605,12 +659,14 @@ fn only_a_pending_cancel_is_retried() {
     let mut shell = shell.restart_ready(&ports);
     assert_eq!(state_of(&shell, id), Some(OrderState::Accepted));
     assert!(unconfirmed(&shell, id));
+    let cap = usize::try_from(configuration.unknown_absent_lookups).unwrap_or(usize::MAX);
     let (sent, alerted) = ticks(
         &mut shell,
         &ports,
         id,
         SWITCHED_AT,
-        SWITCHED_AT + 5 * window,
+        SWITCHED_AT + 10 * window,
     );
-    assert_eq!((sent, alerted), (0, 0));
+    assert_eq!((sent, alerted), (cap, 1));
+    assert_eq!(state_of(&shell, id), Some(OrderState::PendingCancel));
 }

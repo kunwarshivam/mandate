@@ -20,7 +20,7 @@ use crate::protection::{overdue, protection_cancelled};
 use crate::state::{EVERY_AGENT, ExecutorState, restriction_for};
 use crate::types::{
     AccountState, BrokerAccount, BrokerFill, BrokerOrder, BrokerReject, BrokerRequest, EventId,
-    Mode, OrderState, Purpose, StatusMapping,
+    Mode, OrderState, Purpose, RiskClock, Seq, StatusMapping,
 };
 
 /// Trading-domain spec §5.7's broker status table. It is **total**: every value the table names
@@ -455,41 +455,65 @@ pub(crate) fn lookups_due(batch: &mut Batch<'_, '_>) {
     }
 }
 
-/// The alert the last of a kill switch's in-run cancel re-sends carries: an opaque key, never the
-/// order (`AGENTS.md` rule 6).
+/// The alert a kill switch's in-run cancel retry raises once its budget is spent and the cancel
+/// is still unconfirmed: an opaque key, never the order (`AGENTS.md` rule 6).
 const RETRIES_EXHAUSTED: &str = "kill_switch_cancel_retries_exhausted";
 
-/// DEC-2302 item 7, on a tick: a kill switch's cancel still unconfirmed on a `PendingCancel` order
-/// is asked again once `unknown_absent_window_s` has passed by the risk clock since the journal
-/// last asked it, at most `unknown_absent_lookups` times after the first: §5.7's "N lookups over
-/// T seconds" pair, which carries this meaning too. Each re-send is journaled before it is sent
-/// (rule 5), so the count is the fold's and survives a replay; the last carries the alert. After
-/// it the order stays `PendingCancel` and nothing more is sent within the run, and the next start
-/// sends the cancel again. No other cancel is retried here: protection keeps its own bound (§5.4).
+/// DEC-2302 item 7, on a tick: a kill switch's cancel still unconfirmed, on a `PendingCancel`
+/// order or on one an ignored ask left `Accepted` or `PartiallyFilled`, is asked again once
+/// `unknown_absent_window_s` has passed by the risk clock since the journal last asked it, at most
+/// `unknown_absent_lookups` times in each run: §5.7's "N lookups over T seconds" pair, which
+/// carries this meaning too. Each re-send is journaled before it is sent (rule 5). A run counts
+/// the asks journaled since its start: the first of a run that began with the cancel already asked
+/// is the start's re-send (item 3), otherwise the switch's own ask. When the window after the
+/// run's last re-send passes with the cancel still unconfirmed, the alert sounds on that tick,
+/// once. No other cancel is retried here: protection keeps its own bound (§5.4).
 pub(crate) fn kill_cancels_due(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
     let config = batch.ports.config;
     let now = batch.at().secs();
     let view = &batch.view;
-    let due: Vec<(ClientOrderId, bool)> = view
-        .orders
-        .values()
-        .filter(|order| order.state == OrderState::PendingCancel && order.cancel_unconfirmed)
-        .filter(|order| view.kill_switch_cancels(&order.client_order_id))
-        .filter_map(|order| {
-            let detail = view.details.get(&order.client_order_id)?;
-            let asked = detail.cancel_asked_at?;
-            (detail.cancel_asks <= config.unknown_absent_lookups
-                && now.saturating_sub(asked.secs()) >= config.unknown_absent_window_s)
-                .then(|| {
-                    (
-                        order.client_order_id.clone(),
-                        detail.cancel_asks == config.unknown_absent_lookups,
-                    )
-                })
-        })
-        .collect();
-    for (id, last) in due {
-        let asked = record_state_change(
+    let window = config.unknown_absent_window_s;
+    let expired = |at: i64, asked: RiskClock| at.saturating_sub(asked.secs()) >= window;
+    let mut due = Vec::new();
+    let mut exhausted = Vec::new();
+    for order in view.orders.values().filter(|order| {
+        order.cancel_unconfirmed
+            && matches!(
+                order.state,
+                OrderState::PendingCancel | OrderState::Accepted | OrderState::PartiallyFilled
+            )
+            && view.kill_switch_cancels(&order.client_order_id)
+    }) {
+        let Some(detail) = view.details.get(&order.client_order_id) else {
+            continue;
+        };
+        let Some(asked) = detail.cancel_asked_at else {
+            continue;
+        };
+        let before_run = |seq: &&Seq| view.started_at.is_some_and(|start| **seq <= start);
+        let asked_before = detail.cancel_asked_seqs.iter().any(|seq| before_run(&seq));
+        let in_run = detail
+            .cancel_asked_seqs
+            .iter()
+            .filter(|seq| !before_run(seq))
+            .count();
+        let resent = in_run.saturating_sub(usize::from(!asked_before));
+        let budget = usize::try_from(config.unknown_absent_lookups).unwrap_or(usize::MAX);
+        if !expired(now, asked) {
+            continue;
+        }
+        if resent < budget {
+            due.push(order.client_order_id.clone());
+        } else if !view
+            .previous_now
+            .is_some_and(|previous| expired(previous.secs(), asked))
+            && let Some(last) = detail.cancel_asked_event.clone()
+        {
+            exhausted.push(last);
+        }
+    }
+    for id in due {
+        record_state_change(
             batch,
             &id,
             OrderState::PendingCancel,
@@ -501,9 +525,9 @@ pub(crate) fn kill_cancels_due(batch: &mut Batch<'_, '_>) -> Result<(), Executor
         batch.broker(BrokerRequest::Cancel {
             client_order_id: id,
         });
-        if last {
-            batch.notify(asked, RETRIES_EXHAUSTED);
-        }
+    }
+    for last in exhausted {
+        batch.notify(last, RETRIES_EXHAUSTED);
     }
     Ok(())
 }

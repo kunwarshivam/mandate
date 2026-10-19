@@ -71,6 +71,7 @@ pub fn handle(
         return Err(ExecutorError::AppendUnresolved { head: batch.head.0 });
     }
     if let Input::Tick(at) = &input {
+        state.previous_now = state.now;
         state.now = state.now.max(Some(*at));
     }
     if let Input::Market(observation) = &input {
