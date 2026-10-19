@@ -13,20 +13,21 @@
 //! not know, is refused and counted with its place in the frame, never completed (spec §3.1); the
 //! rest of the frame is still read.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_accounting::InstrumentId;
 use mandate_num::{Price, Qty};
 use mandate_time::UtcNanos;
-use secrecy::SecretString;
+use secrecy::{ExposeSecret, SecretString};
+use serde_json::value::RawValue;
 
 use crate::error::WireError;
+use crate::http::is_symbol_like;
+use crate::read::{raw_object, token};
 
 /// The market-data stream host. With [`crate::PAPER_HOST`] and [`crate::DATA_HOST`], one of the
 /// hosts compiled in (DEC-1174 item 4).
 pub const STREAM_HOST: &str = "wss://stream.data.alpaca.markets";
-
-const STORY: &str = "E2-5 slice 1";
 
 /// Which equity feed a stream reads (DEC-35): `iex` for paper, `sip` for live.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,7 +39,11 @@ pub enum StreamFeed {
 impl StreamFeed {
     /// The feed's stream address on [`STREAM_HOST`].
     pub fn url(self) -> String {
-        String::new()
+        let feed = match self {
+            Self::Iex => "iex",
+            Self::Sip => "sip",
+        };
+        format!("{STREAM_HOST}/v2/{feed}")
     }
 }
 
@@ -58,8 +63,12 @@ pub struct Channels {
 /// The authentication frame. It carries the credential, so it stays secret until the transport
 /// writes it, and is never logged.
 pub fn auth_frame(key_id: &SecretString, secret: &SecretString) -> SecretString {
-    let _ = (key_id, secret);
-    SecretString::from(String::new())
+    let frame = serde_json::json!({
+        "action": "auth",
+        "key": key_id.expose_secret(),
+        "secret": secret.expose_secret(),
+    });
+    SecretString::from(frame.to_string())
 }
 
 /// The subscription frame for `channels`, every symbol checked against the equity alphabet.
@@ -68,8 +77,44 @@ pub fn auth_frame(key_id: &SecretString, secret: &SecretString) -> SecretString 
 /// [`WireError::WrongType`] for a channel set that names nothing, or a symbol that is not an
 /// equity's.
 pub fn subscribe_frame(channels: &Channels) -> Result<String, WireError> {
-    let _ = channels;
-    Err(WireError::Unimplemented { story: STORY })
+    let named = channels.named();
+    if named.iter().all(|(_, set)| set.is_empty()) {
+        return Err(WireError::WrongType { field: "channels" });
+    }
+    let mut frame = String::from(r#"{"action":"subscribe""#);
+    for (key, set) in named {
+        let symbols = set
+            .iter()
+            .map(|instrument| {
+                let symbol = instrument.as_str();
+                if is_symbol_like(symbol) {
+                    Ok(symbol)
+                } else {
+                    Err(WireError::WrongType { field: key })
+                }
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let list =
+            serde_json::to_string(&symbols).map_err(|_| WireError::WrongType { field: key })?;
+        frame.push_str(&format!(r#","{key}":{list}"#));
+    }
+    frame.push('}');
+    Ok(frame)
+}
+
+impl Channels {
+    /// Each channel with the key the vendor names it by, in the subscribe frame's order.
+    fn named(&self) -> [(&'static str, &BTreeSet<InstrumentId>); 7] {
+        [
+            ("trades", &self.trades),
+            ("quotes", &self.quotes),
+            ("bars", &self.bars),
+            ("updatedBars", &self.updated_bars),
+            ("dailyBars", &self.daily_bars),
+            ("statuses", &self.statuses),
+            ("lulds", &self.lulds),
+        ]
+    }
 }
 
 /// What the stream's error message asks of the connection (spec §3.2, DEC-1174 item 5).
@@ -94,10 +139,12 @@ pub struct Fault {
 impl Fault {
     /// The fault for the vendor's `code`.
     pub fn of(code: u16) -> Self {
-        Self {
-            code,
-            disposition: Disposition::Down,
-        }
+        let disposition = match code {
+            402 | 409 => Disposition::Pause,
+            405 => Disposition::Overflow,
+            _ => Disposition::Down,
+        };
+        Self { code, disposition }
     }
 }
 
@@ -260,6 +307,215 @@ pub struct Frame {
 /// [`WireError::NotJson`] for a frame that is not JSON, and [`WireError::WrongType`] for one that
 /// is not an array: nothing of it is read.
 pub fn read_frame(text: &str) -> Result<Frame, WireError> {
-    let _ = text;
-    Err(WireError::Unimplemented { story: STORY })
+    let raw: &RawValue = serde_json::from_str(text).map_err(|_| WireError::NotJson)?;
+    let items: Vec<&RawValue> =
+        serde_json::from_str(raw.get()).map_err(|_| WireError::WrongType { field: "frame" })?;
+    let mut frame = Frame::default();
+    for (index, item) in items.into_iter().enumerate() {
+        match message(item) {
+            Ok(message) => frame.messages.push(message),
+            Err(reason) => frame.refused.push(Refused { index, reason }),
+        }
+    }
+    Ok(frame)
+}
+
+type Fields<'a> = BTreeMap<String, &'a RawValue>;
+
+fn message(raw: &RawValue) -> Result<StreamMessage, WireError> {
+    let f = raw_object(raw, "message")?;
+    Ok(match text(&f, "T")?.as_str() {
+        "success" => match text(&f, "msg")?.as_str() {
+            "connected" => StreamMessage::Connected,
+            "authenticated" => StreamMessage::Authenticated,
+            _ => return Err(WireError::WrongType { field: "msg" }),
+        },
+        "subscription" => StreamMessage::Subscribed(subscribed(&f)?),
+        "error" => {
+            let code = u16::try_from(integer(&f, "code")?)
+                .map_err(|_| WireError::WrongType { field: "code" })?;
+            StreamMessage::Error(Fault::of(code))
+        }
+        "q" => StreamMessage::Quote(StreamQuote {
+            instrument: instrument(&f)?,
+            vendor_time: time(&f, "t")?,
+            bid: side(&f, "bp", "bs", "bx")?,
+            ask: side(&f, "ap", "as", "ax")?,
+            conditions: texts(&f, "c")?,
+            tape: text(&f, "z")?,
+        }),
+        "t" => StreamMessage::Trade(StreamTrade {
+            instrument: instrument(&f)?,
+            vendor_time: time(&f, "t")?,
+            id: integer(&f, "i")?,
+            exchange: text(&f, "x")?,
+            price: price(&f, "p")?,
+            size: qty(&f, "s")?,
+            conditions: texts(&f, "c")?,
+            tape: text(&f, "z")?,
+        }),
+        "b" => StreamMessage::Bar(BarKind::Minute, bar(&f)?),
+        "u" => StreamMessage::Bar(BarKind::Updated, bar(&f)?),
+        "d" => StreamMessage::Bar(BarKind::Daily, bar(&f)?),
+        "s" => StreamMessage::Status(StreamStatus {
+            instrument: instrument(&f)?,
+            vendor_time: time(&f, "t")?,
+            status_code: text(&f, "sc")?,
+            status_message: text(&f, "sm")?,
+            reason_code: text(&f, "rc")?,
+            reason_message: text(&f, "rm")?,
+            tape: text(&f, "z")?,
+        }),
+        "l" => StreamMessage::Luld(StreamLuld {
+            instrument: instrument(&f)?,
+            vendor_time: time(&f, "t")?,
+            up: price(&f, "u")?,
+            down: price(&f, "d")?,
+            indicator: text(&f, "i")?,
+            tape: text(&f, "z")?,
+        }),
+        "c" => StreamMessage::Correction(StreamCorrection {
+            instrument: instrument(&f)?,
+            vendor_time: time(&f, "t")?,
+            exchange: text(&f, "x")?,
+            original: TradeTerms {
+                id: integer(&f, "oi")?,
+                price: price(&f, "op")?,
+                size: qty(&f, "os")?,
+                conditions: texts(&f, "oc")?,
+            },
+            corrected: TradeTerms {
+                id: integer(&f, "ci")?,
+                price: price(&f, "cp")?,
+                size: qty(&f, "cs")?,
+                conditions: texts(&f, "cc")?,
+            },
+            tape: text(&f, "z")?,
+        }),
+        "x" => StreamMessage::Cancel(StreamCancel {
+            instrument: instrument(&f)?,
+            vendor_time: time(&f, "t")?,
+            id: integer(&f, "i")?,
+            exchange: text(&f, "x")?,
+            price: price(&f, "p")?,
+            size: qty(&f, "s")?,
+            action: match text(&f, "a")?.as_str() {
+                "C" => CancelAction::Cancel,
+                "E" => CancelAction::Error,
+                _ => return Err(WireError::WrongType { field: "a" }),
+            },
+            tape: text(&f, "z")?,
+        }),
+        _ => return Err(WireError::WrongType { field: "T" }),
+    })
+}
+
+/// The channels a `subscription` message lists. A channel it leaves out is empty, and the
+/// corrections and cancel errors it mirrors from trades are not channels of their own.
+fn subscribed(f: &Fields<'_>) -> Result<Channels, WireError> {
+    let mut channels = Channels::default();
+    let keys = [
+        "trades",
+        "quotes",
+        "bars",
+        "updatedBars",
+        "dailyBars",
+        "statuses",
+        "lulds",
+    ];
+    for key in keys {
+        let symbols = match f.get(key) {
+            Some(_) => texts(f, key)?,
+            None => Vec::new(),
+        };
+        let set = symbols
+            .iter()
+            .map(|symbol| symbol_id(symbol, key))
+            .collect::<Result<BTreeSet<_>, _>>()?;
+        match key {
+            "trades" => channels.trades = set,
+            "quotes" => channels.quotes = set,
+            "bars" => channels.bars = set,
+            "updatedBars" => channels.updated_bars = set,
+            "dailyBars" => channels.daily_bars = set,
+            "statuses" => channels.statuses = set,
+            _ => channels.lulds = set,
+        }
+    }
+    Ok(channels)
+}
+
+fn bar(f: &Fields<'_>) -> Result<StreamBar, WireError> {
+    Ok(StreamBar {
+        instrument: instrument(f)?,
+        start: time(f, "t")?,
+        open: price(f, "o")?,
+        high: price(f, "h")?,
+        low: price(f, "l")?,
+        close: price(f, "c")?,
+        volume: qty(f, "v")?,
+        vwap: price(f, "vw")?,
+        trades: integer(f, "n")?,
+    })
+}
+
+/// A quote side, or `None` for the zero price Alpaca sends for an empty side (DEC-116).
+fn side(
+    f: &Fields<'_>,
+    price_field: &'static str,
+    size_field: &'static str,
+    exchange_field: &'static str,
+) -> Result<Option<QuoteSide>, WireError> {
+    if token(f, price_field)? == "0" {
+        return Ok(None);
+    }
+    Ok(Some(QuoteSide {
+        price: price(f, price_field)?,
+        size: qty(f, size_field)?,
+        exchange: text(f, exchange_field)?,
+    }))
+}
+
+fn raw<'a>(f: &Fields<'a>, field: &'static str) -> Result<&'a RawValue, WireError> {
+    f.get(field)
+        .copied()
+        .ok_or(WireError::MissingField { field })
+}
+
+fn text(f: &Fields<'_>, field: &'static str) -> Result<String, WireError> {
+    serde_json::from_str(raw(f, field)?.get()).map_err(|_| WireError::WrongType { field })
+}
+
+fn texts(f: &Fields<'_>, field: &'static str) -> Result<Vec<String>, WireError> {
+    serde_json::from_str(raw(f, field)?.get()).map_err(|_| WireError::WrongType { field })
+}
+
+fn integer(f: &Fields<'_>, field: &'static str) -> Result<u64, WireError> {
+    token(f, field)?
+        .parse()
+        .map_err(|_| WireError::WrongType { field })
+}
+
+fn price(f: &Fields<'_>, field: &'static str) -> Result<Price, WireError> {
+    Ok(Price::parse(&token(f, field)?)?)
+}
+
+fn qty(f: &Fields<'_>, field: &'static str) -> Result<Qty, WireError> {
+    Ok(Qty::parse(&token(f, field)?)?)
+}
+
+fn time(f: &Fields<'_>, field: &'static str) -> Result<UtcNanos, WireError> {
+    Ok(UtcNanos::parse_rfc3339(&text(f, field)?)?)
+}
+
+fn instrument(f: &Fields<'_>) -> Result<InstrumentId, WireError> {
+    symbol_id(&text(f, "S")?, "S")
+}
+
+/// An equity's symbol as an instrument: the stream names each by its symbol alone.
+fn symbol_id(symbol: &str, field: &'static str) -> Result<InstrumentId, WireError> {
+    if !is_symbol_like(symbol) {
+        return Err(WireError::WrongType { field });
+    }
+    InstrumentId::new(symbol).map_err(|_| WireError::WrongType { field })
 }
