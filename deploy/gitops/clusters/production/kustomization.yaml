@@ -1,0 +1,18 @@
+# Production (E21-58): the base, with production's own values patched in. It moves only by a
+# pull request that copies what staging runs (DEC-2016).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - sync.yaml
+  - charts.yaml
+  - ../../base
+patches:
+  - path: journal.yaml
+  - path: workspace.yaml
+configMapGenerator:
+  - name: workspace-images
+    namespace: flux-system
+    files:
+      - values.yaml=images.yaml
+generatorOptions:
+  disableNameSuffixHash: true
