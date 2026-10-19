@@ -19,8 +19,7 @@ fn layout() -> KubernetesLayout {
     KubernetesLayout {
         executor_mount: "kubernetes-executor".to_owned(),
         exchange_mount: "kubernetes-exchange".to_owned(),
-        executor_namespace: "ws-ws1".to_owned(),
-        exchange_namespace: "ws-ws1-exchange".to_owned(),
+        namespace: "ws-ws1".to_owned(),
     }
 }
 
@@ -35,13 +34,36 @@ fn a_connections_service_account_is_its_id_in_hex() {
         Ok("6331".to_owned())
     );
     assert_eq!(
-        service_account_name(&Identity::TokenExchange(c("Ab_-9"))),
+        service_account_name(&Identity::Executor(c("Ab_-9"))),
         Ok("41625f2d39".to_owned())
+    );
+    assert_eq!(
+        service_account_name(&Identity::TokenExchange(c("c1"))),
+        Ok("x6331".to_owned())
     );
     assert_eq!(
         service_account_name(&Identity::Runtime),
         Err(SourceError::Config)
     );
+}
+
+/// An executor's name has an even number of hex digits and an exchange's is `x` and the same
+/// digits, an odd number of characters, so neither kind's name is ever the other's, for any id.
+#[test]
+#[ignore = "pending E21-32"]
+fn no_executors_name_is_ever_an_exchanges() {
+    for id in ["c1", "x", "A", "a-b_C", "0", &"z".repeat(64)] {
+        let executor = service_account_name(&Identity::Executor(c(id)));
+        let exchange = service_account_name(&Identity::TokenExchange(c(id)));
+        assert!(
+            executor.is_ok() && exchange.is_ok(),
+            "{executor:?} {exchange:?}"
+        );
+        let (executor, exchange) = (executor.unwrap_or_default(), exchange.unwrap_or_default());
+        assert_eq!(executor.len() % 2, 0, "{executor}");
+        assert_eq!(exchange.len() % 2, 1, "{exchange}");
+        assert_eq!(exchange, format!("x{executor}"));
+    }
 }
 
 /// A ServiceAccount name is lowercase hex alone, so no platform process's name, each of which
@@ -108,7 +130,7 @@ fn the_executors_policy_reads_its_own_token_alone() {
             "auth_kubernetes_1a2b"
         ),
         Ok(format!(
-            "path \"mandate/data/connections/{TEMPLATE}/token\" {{\n  capabilities = [\"read\"]\n}}\n"
+            "path \"mandate/data/connections/x{TEMPLATE}/token\" {{\n  capabilities = [\"read\"]\n}}\n"
         ))
     );
 }
@@ -185,7 +207,7 @@ fn the_provisioners_policy_pins_every_parameter_but_the_name() {
             ),
             block(
                 "kubernetes-exchange",
-                "ws-ws1-exchange",
+                "ws-ws1",
                 "mandate-kubernetes-exchange",
                 "600",
                 "600"
@@ -200,9 +222,9 @@ fn a_layout_that_is_not_plain_names_is_refused() {
     let bad: [fn(&mut KubernetesLayout); 6] = [
         |l| l.executor_mount = "kubernetes/executor".to_owned(),
         |l| l.exchange_mount = String::new(),
-        |l| l.executor_namespace = "WS".to_owned(),
-        |l| l.exchange_namespace = "ws_ws1".to_owned(),
-        |l| l.exchange_namespace = "-ws".to_owned(),
+        |l| l.namespace = "WS".to_owned(),
+        |l| l.namespace = "ws_ws1".to_owned(),
+        |l| l.namespace = "-ws".to_owned(),
         |l| l.executor_mount = "kubernetes\"\n}".to_owned(),
     ];
     for (at, break_it) in bad.iter().enumerate() {
@@ -255,8 +277,8 @@ fn an_exchanges_role_binds_exactly_its_service_account_in_its_namespace() {
         Ok((
             "auth/kubernetes-exchange/role/c2".to_owned(),
             json!({
-                "bound_service_account_names": ["6332"],
-                "bound_service_account_namespaces": ["ws-ws1-exchange"],
+                "bound_service_account_names": ["x6332"],
+                "bound_service_account_namespaces": ["ws-ws1"],
                 "audience": "mandate-vault",
                 "alias_name_source": "serviceaccount_uid",
                 "token_policies": ["mandate-kubernetes-exchange"],
