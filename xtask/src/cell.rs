@@ -25,6 +25,7 @@ use sha2::Digest;
 use crate::{output, sh};
 use web::web_run;
 
+pub mod executor;
 pub mod scenario;
 pub mod web;
 
@@ -152,6 +153,9 @@ pub enum Drill {
     /// archived, and Barman's own tools, reading the store with the archive's key, list the backup
     /// and fetch the segment back (E21-41).
     Archive,
+    /// An agent deployed on a recorded paper connection, and the deployment manager starting that
+    /// account's executor until its `readyz` passes (E21-30, DEC-2035); see [`executor`].
+    Executor,
 }
 
 pub const DRILLS: [Drill; 4] = [Drill::Boot, Drill::Journal, Drill::Egress, Drill::Compose];
@@ -164,9 +168,10 @@ pub const JOURNAL_DRILLS: [Drill; 2] = [Drill::StandbyDown, Drill::Archive];
 /// the old primary's rejoin; `cargo xtask ci cell-failover` runs it in a job of its own (DEC-464).
 pub const FAILOVER_DRILLS: [Drill; 1] = [Drill::Restart];
 
-/// The kill-switch drill (OPS-4, E21-34), which `cargo xtask ci cell-kill-switch` runs on a cell
-/// of its own so `ci cell` stays within its ten minutes (DEC-464, DEC-2602).
-pub const KILL_SWITCH_DRILLS: [Drill; 1] = [Drill::KillSwitch];
+/// The kill-switch drill (OPS-4, E21-34) and the executor drill (E21-30), which `cargo xtask ci
+/// cell-kill-switch` runs on a cell of its own so `ci cell` stays within its ten minutes (DEC-464,
+/// DEC-2602, DEC-2035).
+pub const KILL_SWITCH_DRILLS: [Drill; 2] = [Drill::KillSwitch, Drill::Executor];
 
 impl Drill {
     pub fn name(self) -> &'static str {
@@ -179,6 +184,7 @@ impl Drill {
             Self::KillSwitch => "kill-switch",
             Self::StandbyDown => "standby-down",
             Self::Archive => "archive",
+            Self::Executor => "executor",
         }
     }
 
@@ -213,6 +219,10 @@ impl Drill {
                 "the cluster's durability set to `preferred`, so the primary commits alone"
             }
             Self::Archive => "the archive pointed at another bucket of the same store",
+            Self::Executor => {
+                "the connect check skipped, so the connection is never recorded and the agent \
+                 deploys at version 1"
+            }
         }
     }
 }
@@ -230,6 +240,7 @@ impl Drill {
             Self::KillSwitch => "no kill_switch of scope connection",
             Self::StandbyDown => "committed with the standby fenced",
             Self::Archive => "is not in the archive",
+            Self::Executor => "no executor pod",
         }
     }
 }
@@ -1516,6 +1527,7 @@ pub fn drill(drills: &[Drill], seeded: bool) -> Result<()> {
             Drill::KillSwitch => kill_switch(seeded),
             Drill::StandbyDown => standby_down(seeded),
             Drill::Archive => archive(seeded),
+            Drill::Executor => executor::drill(seeded),
         };
         if seeded && matches!(d, Drill::Boot | Drill::Journal | Drill::Egress) {
             restore()?;

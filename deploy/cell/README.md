@@ -108,13 +108,13 @@ Needs docker, plus k3d, helm and kubeconform at the versions in `.github/workflo
 
 ```bash
 cargo xtask cell up               # build the image, start k3d, install the operator, its backup plugin, the test store, journal-db, vault, workspace
-cargo xtask cell drill            # boot, journal, egress, compose, restart, kill-switch, standby-down, archive
+cargo xtask cell drill            # boot, journal, egress, compose, restart, kill-switch, standby-down, archive, executor
 cargo xtask cell drill --seeded   # each drill with its bug planted; fails if one still holds
 cargo xtask cell down
 cargo xtask ci cell               # what CI runs: chart checks, up, drills, seeded drills, demo --no-web
 cargo xtask ci cell-journal       # and beside it: up, then standby-down and archive, plain and seeded
 cargo xtask ci cell-failover      # and beside it: up, then restart (a failover with the standby), plain and seeded
-cargo xtask ci cell-kill-switch   # and beside it: up, then kill-switch, plain and seeded (DEC-2602)
+cargo xtask ci cell-kill-switch   # and beside it: up, then kill-switch and executor, plain and seeded (DEC-2602, DEC-2035)
 ```
 
 `cell up` is idempotent: it reuses a running cluster and upgrades the releases. kubectl is the one
@@ -246,10 +246,12 @@ the scenario on every change (`cargo xtask ci cell-demo`). Behind a TLS-inspecti
 | `egress` | From a pod of every process type, each live trading host (`agent.robinhood.com`, `api.robinhood.com`, `api.alpaca.markets`) fails at the network layer, and the journal is reachable exactly from the rendered processes whose egress names Postgres (OPS-5) | Every network policy deleted |
 | `standby-down` | With the synchronous standby fenced, an append neither commits nor becomes visible on the primary, and its Job ends on its deadline; once the standby is back and streams synchronously, a new append commits and every stream written verifies by journal spec §11 (OPS-2, E21-41) | The cluster's durability set to `preferred`, so the primary commits alone: `committed with the standby fenced` |
 | `archive` | A closed WAL segment is reported archived by Postgres, a base backup completes, and Barman's own tools, reading the store with the archive's key, list the backup and fetch the segment back (E21-41) | The archive pointed at another bucket of the same store, which Postgres cannot tell: `not in the archive` |
+| `executor` | An agent deployed on a recorded paper connection, and the deployment manager starting that account's executor until its `readyz` passes (E21-30, [DEC-2035](../../docs/project/decisions/DEC-2035.md)). Three one-off Jobs: the executor's connect check on its in-process fixture broker, which prints the passing `ConnectionChecked`; the workspace opened and founded and the record's code shown; then the record committed and the demo's mandate registered, created, confirmed and deployed, so `AgentDeployed` is version 2 (journal spec §9.24 rule 201). No credential, no broker host | The connect check skipped, so the connection is never recorded and the agent deploys at version 1: `no executor pod` |
 
 A seeded run counts as caught only when its report names the planted bug's own symptom
 (`rehash_mismatch`, a live host reached, the deleted policy missing, `export_stream_empty`, the
-missing kill switch, a commit with the standby fenced, a segment not in the archive), never any
+missing kill switch, a commit with the standby fenced, a segment not in the archive, no executor
+pod), never any
 failure. `standby-down` and `archive` run in CI's `cell-journal` job and `restart`, which with the
 synchronous standby is a failover and the old primary's rejoin, in `cell-failover`, each beside
 `cell`, so each stays within ten minutes (DEC-464). A part of a drill that cannot run yet is reported
