@@ -2291,6 +2291,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-ports"
+version = "0.0.0"
+dependencies = [
+ "mandate-accounting",
+ "mandate-builder",
+ "mandate-canon",
+ "mandate-num",
+ "mandate-risk",
+ "mandate-runtime",
+ "mandate-time",
+ "proptest",
+ "thiserror",
+]
+
+[[package]]
 name = "mandate-process"
 version = "0.0.0"
 dependencies = [
