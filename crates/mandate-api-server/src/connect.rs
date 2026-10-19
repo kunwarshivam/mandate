@@ -166,7 +166,8 @@ async fn started(
         .verify(evidence, &action, &judged)
         .map_err(|code| coded(StatusCode::UNAUTHORIZED, code))?;
     planned(&reader, &ids, &request, evidence)?;
-    match appended_at(app, &reader, (&ids.event, &draft), gate.now, None).await {
+    let judged_head = reader.control.last().map(|row| row.seq);
+    match appended_at(app, &reader, (&ids.event, &draft), gate.now, judged_head).await {
         Settled::Stored(_) => {}
         Settled::Conflict => {
             return Err(coded(
@@ -401,8 +402,14 @@ fn facts(control: &[StoredEvent], connection: &str, account: &str) -> StartFacts
     StartFacts { id, account_ref }
 }
 
-/// Draws the `state` and verifier, issues the `state`, and keeps the answer (items 4 and 7).
+/// Draws the `state` and verifier, issues the `state`, and keeps the answer (items 4 and 7). The
+/// answers are held locked from the check to the insert, so a request whose record another start
+/// under its key committed first gets that start's answer, never a second `state` (item 8).
 fn issued(connect: &Connect, reader: &Reader, ids: &Ids, gate: &Gate) -> Option<Answered> {
+    let mut answered = connect.answered.lock().ok()?;
+    if let Some(earlier) = answered.get(&ids.event) {
+        return Some(earlier.clone());
+    }
     let mut drawn = [[0_u8; RANDOM_BYTES]; 2];
     for draw in &mut drawn {
         connect.random.fill(draw).ok()?;
@@ -420,24 +427,21 @@ fn issued(connect: &Connect, reader: &Reader, ids: &Ids, gate: &Gate) -> Option<
     let url = {
         let mut states = connect.states.lock().ok()?;
         states.prune(now);
+        answered.retain(|_, kept| states.holds(&kept.state, now));
         states
             .begin(&connect.client, binding, &state, verifier, &challenge, now)
             .ok()?
     };
     let expires_at =
         UtcNanos::from_parts(now.secs().checked_add(STATE_LIFETIME_SECS)?, now.nanos()).ok()?;
-    let answered = Answered {
+    let issued = Answered {
         url: url.0,
         state,
         expires_at,
         connection_id: ids.connection.clone(),
     };
-    connect
-        .answered
-        .lock()
-        .ok()?
-        .insert(ids.event.clone(), answered.clone());
-    Some(answered)
+    answered.insert(ids.event.clone(), issued.clone());
+    Some(issued)
 }
 
 /// The `201` (DEC-2623 item 1); it reads no stream into its answer, so `as_of` is empty.
