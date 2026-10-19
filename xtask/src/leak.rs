@@ -37,7 +37,8 @@
 //!   shape ([`canonical_findings`]), so these line readers see what GitHub does. A step a secret
 //!   reaches, from the step, its job or its workflow, and every step after it in its job, runs
 //!   only one reviewed line of [`SECRET_RUNS`] or one of xtask's pinned `READ_ACTIONS`, sets only
-//!   that entry's `env:` names and no `shell:` or `working-directory:`. Its job sets no
+//!   that entry's `env:` names and no `shell:` or `working-directory:`; every step before it
+//!   runs only a [`PRE_RUNS`] entry or a pinned action. Its job sets no
 //!   `container:`, `services:` or unreviewed `defaults:`, and a secret job runs no local action.
 //!   Every `uses:` anywhere is pinned to a 40-character commit.
 //! - **L12, triggers:** `pull_request_target` and `workflow_run` only in `merge.yml`, which names no
@@ -171,6 +172,58 @@ const SECRET_JOB_DEFAULTS: &[(&str, &[&str])] = &[
     (
         ".github/workflows/web-deploy.yml",
         &["defaults:", "run:", "working-directory: web"],
+    ),
+];
+
+/// Every `run:` a step before the first secret step of a job holding one may hold, by workflow,
+/// exactly: the whole of a block's lines, each trimmed and joined by a line feed (L9's closed
+/// world, before the secret). Each installs a pinned, checksum-verified tool or the repository's
+/// own toolchain, or builds or checks the checkout with its lockfile, so nothing a step before
+/// the secret writes can replace what the secret step runs but the reviewed build. IAC's #1771's
+/// kubectl and flux install is listed with them.
+const PRE_RUNS: &[(&str, &str)] = &[
+    (
+        ".github/workflows/infra.yml",
+        "curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o tofu.tgz \"https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_amd64.tar.gz\"\n\
+         echo \"${TOFU_SHA256}  tofu.tgz\" | sha256sum --check\n\
+         tar xzf tofu.tgz tofu && sudo install tofu /usr/local/bin/ && rm tofu tofu.tgz",
+    ),
+    (
+        ".github/workflows/infra.yml",
+        "curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o kubectl \"https://dl.k8s.io/release/v${KUBECTL_VERSION}/bin/linux/amd64/kubectl\"\n\
+         echo \"${KUBECTL_SHA256}  kubectl\" | sha256sum --check\n\
+         curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o flux.tgz \"https://github.com/fluxcd/flux2/releases/download/v${FLUX_VERSION}/flux_${FLUX_VERSION}_linux_amd64.tar.gz\"\n\
+         echo \"${FLUX_SHA256}  flux.tgz\" | sha256sum --check\n\
+         tar xzf flux.tgz flux && sudo install kubectl flux /usr/local/bin/ && rm kubectl flux flux.tgz",
+    ),
+    (
+        ".github/workflows/infra.yml",
+        "rustup show active-toolchain || rustup toolchain install",
+    ),
+    (
+        ".github/workflows/infra.yml",
+        "cargo build --locked --package xtask",
+    ),
+    (
+        ".github/workflows/r2-lockcheck.yml",
+        "rustup show active-toolchain || rustup toolchain install",
+    ),
+    (
+        ".github/workflows/r2-lockcheck.yml",
+        "cargo build --locked --package mandate-objectstore --example r2_finding",
+    ),
+    (
+        ".github/workflows/web-deploy.yml",
+        "npm ci --ignore-scripts",
+    ),
+    (".github/workflows/web-deploy.yml", "npm run cf:build"),
+    (
+        ".github/workflows/web-deploy.yml",
+        "npx wrangler deploy --dry-run --outdir .wrangler/dry-run",
+    ),
+    (
+        ".github/workflows/web-deploy.yml",
+        "node scripts/workers.mjs size .wrangler/dry-run",
     ),
 ];
 
@@ -347,6 +400,9 @@ pub(crate) fn findings(sources: &[Source]) -> Vec<Finding> {
         }
     };
     for source in sources {
+        for (number, why) in hidden_breaks(&source.text) {
+            push("L9", &source.path, number, "", why);
+        }
         if source.path.contains("/workflows/") {
             let all = job_findings(&source.path, &source.text)
                 .into_iter()
@@ -1296,6 +1352,66 @@ fn step_value<'a>(step: &'a Step, key: &str) -> Option<(usize, &'a str)> {
         .map(|(number, _, value)| (number, value))
 }
 
+/// A step's own `run:` text, with its line: the value on its line, or a block scalar's lines,
+/// each trimmed, joined by a line feed.
+fn run_text(step: &Step) -> Option<(usize, String)> {
+    let (number, value) = step_value(step, "run")?;
+    if !value.starts_with(['|', '>']) {
+        return Some((number, value.to_owned()));
+    }
+    let key_indent = step
+        .lines
+        .iter()
+        .find(|(at, _)| *at == number)
+        .map(|(_, raw)| {
+            let indent = raw.len().saturating_sub(raw.trim_start().len());
+            if raw.trim_start().starts_with("- ") {
+                indent.saturating_add(2)
+            } else {
+                indent
+            }
+        })
+        .unwrap_or_default();
+    let body: Vec<&str> = step
+        .lines
+        .iter()
+        .skip_while(|(at, _)| *at <= number)
+        .take_while(|(_, raw)| {
+            raw.trim().is_empty() || raw.len().saturating_sub(raw.trim_start().len()) > key_indent
+        })
+        .map(|(_, raw)| raw.trim())
+        .filter(|line| !line.is_empty())
+        .collect();
+    Some((number, body.join("\n")))
+}
+
+/// Why a step before a job's first secret step is outside L9's closed world, if it is: its own
+/// `run:` is no [`PRE_RUNS`] entry for its workflow, or its own `uses:` no `READ_ACTIONS` pin.
+fn before_secret_problem(path: &str, step: &Step) -> Option<(usize, &'static str)> {
+    if let Some((number, text)) = run_text(step)
+        && !PRE_RUNS.contains(&(path, text.as_str()))
+    {
+        return Some((
+            number,
+            "a step before the secret step, in its job, runs only one of xtask/src/leak.rs's \
+             PRE_RUNS",
+        ));
+    }
+    let (number, uses) = step_value(step, "uses")?;
+    let action = uses
+        .trim_matches(['"', '\''])
+        .split_whitespace()
+        .next()
+        .unwrap_or_default();
+    let reviewed = crate::READ_ACTIONS
+        .iter()
+        .any(|(name, only)| *name == action && only.is_none_or(|only| only == path));
+    (!reviewed).then_some((
+        number,
+        "a step before the secret step, in its job, uses only an action xtask's READ_ACTIONS pins",
+    ))
+}
+
 /// The names a step's own `env:` sets, each with its line: the keys one level under it.
 fn env_names(lines: &[(usize, String)], env_at: usize) -> Vec<(usize, String)> {
     let mut out = Vec::new();
@@ -1476,6 +1592,8 @@ fn step_shape(
             for (at, why) in outside_closed_world(path, step) {
                 out.push(("L9", at, line_of(at), why));
             }
+        } else if holds_secret_step && let Some((at, why)) = before_secret_problem(path, step) {
+            out.push(("L9", at, line_of(at), why));
         }
         after_secret |= secret;
     }
@@ -1637,6 +1755,23 @@ fn flow_is_flat(value: &str) -> bool {
         .is_some_and(|inner| !inner.contains(['{', '[', ']', ':', '&', '*', '!']))
 }
 
+/// Each line of `text` that holds a line break `str::lines` does not split on, with its 1-based
+/// number: a carriage return not followed by a line feed, U+0085, U+2028 or U+2029. YAML breaks a
+/// line at each, so a comment or a value to the guard could be a step to GitHub.
+fn hidden_breaks(text: &str) -> Vec<(usize, &'static str)> {
+    let mut out = Vec::new();
+    for (index, line) in text.split('\n').enumerate() {
+        let body = line.strip_suffix('\r').unwrap_or(line);
+        if body.contains(['\r', '\u{85}', '\u{2028}', '\u{2029}']) {
+            out.push((
+                index.saturating_add(1),
+                "a line break the guard does not read: a lone CR, U+0085, U+2028 or U+2029",
+            ));
+        }
+    }
+    out
+}
+
 /// The keys a secret job, and a workflow that holds one, may not hold anywhere: each changes how
 /// or where every `run:` executes without changing its text.
 const RUN_CONTEXT_KEYS: [&str; 5] = [
@@ -1648,20 +1783,13 @@ const RUN_CONTEXT_KEYS: [&str; 5] = [
 ];
 
 /// L9's canonical-subset gate for a whole workflow: every line outside a block scalar is a bare
-/// `key:` or a `- ` item, indented exactly two spaces a level from the first line's, with no anchor, alias, tag or merge
-/// key, no flow collection but `{}` and a flat `[a, b]`, no scalar run on to the next line, and no
-/// split `${{`. So the line readers L1 to L12 use see the same structure GitHub does.
+/// `key:` or a `- ` item, its top level at column 0 and each level exactly two spaces in, with
+/// `- ` followed by one space only; no anchor, alias, tag or merge key; no flow collection but `{}`
+/// and a flat `[a, b]`; no scalar run on to the next line; and no split `${{`. So the line readers
+/// L1 to L12 use, which find `on:` and `jobs:` at column 0, see the same structure GitHub does.
 fn canonical_findings(text: &str) -> Vec<(&'static str, usize, String, &'static str)> {
     let mut out = Vec::new();
-    let mut columns: Vec<usize> = text
-        .lines()
-        .find(|line| {
-            let trimmed = line.trim();
-            !trimmed.is_empty() && !trimmed.starts_with('#')
-        })
-        .map(|line| line.len().saturating_sub(line.trim_start().len()))
-        .into_iter()
-        .collect();
+    let mut columns: Vec<usize> = vec![0];
     let mut scalar_above: Option<usize> = None;
     for (index, raw) in text.lines().enumerate() {
         let number = index.saturating_add(1);
@@ -1686,6 +1814,10 @@ fn canonical_findings(text: &str) -> Vec<(&'static str, usize, String, &'static 
             columns.push(indent);
         }
         let node = uncommented(trimmed);
+        if node.starts_with("-  ") {
+            refuse("a `-` followed by more than one space");
+            continue;
+        }
         let (node, item, column) = match node.strip_prefix("- ") {
             Some(rest) => (rest.trim_start(), true, indent.saturating_add(2)),
             None if node == "-" => {
@@ -2056,7 +2188,32 @@ mod tests {
     use super::*;
     use crate::repo_root;
 
+    /// The findings for one file. A fixture that is a fragment of a workflow, its first line
+    /// indented, is read as a workflow would be, less the one finding that its first line is not at
+    /// column 0; the gate's own tests read whole workflows.
     fn one(path: &str, text: &str) -> Vec<Finding> {
+        let first = text.lines().position(|line| {
+            let trimmed = line.trim();
+            !trimmed.is_empty() && !trimmed.starts_with('#')
+        });
+        let fragment = first
+            .and_then(|at| text.lines().nth(at))
+            .is_some_and(|line| line.starts_with(' '));
+        findings(&[Source {
+            path: path.to_owned(),
+            text: text.to_owned(),
+        }])
+        .into_iter()
+        .filter(|f| {
+            !(fragment
+                && Some(f.line) == first.map(|at| at.saturating_add(1))
+                && f.why == "indentation that is not two spaces a level")
+        })
+        .collect()
+    }
+
+    /// The findings for one whole workflow, nothing set aside.
+    fn whole(path: &str, text: &str) -> Vec<Finding> {
         findings(&[Source {
             path: path.to_owned(),
             text: text.to_owned(),
@@ -2504,7 +2661,7 @@ mod tests {
             )
         };
         let checkout = "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n";
-        let build = "      - run: cargo build --locked\n";
+        let build = "      - run: cargo build --locked --package mandate-objectstore --example r2_finding\n";
         let run = "      - run: target/debug/examples/r2_finding\n        env:\n          R2_SECRET_ACCESS_KEY: ${{ secrets.T }}\n";
         for steps in [format!("{checkout}{build}{run}"), run.to_owned()] {
             assert_eq!(one(path, &flow("", "", &steps)), Vec::new(), "{steps}");
@@ -2585,16 +2742,105 @@ mod tests {
         ]
     }
 
+    /// The #1731 third review's probes: a whole-file indent shift, line breaks `str::lines` does
+    /// not split on, `-` with two spaces, and a step before the secret step that overwrites the
+    /// reviewed binary. Each is tried in the secret job of [`R2_HEAD`] and, but the last, in a
+    /// workflow with no secret, and every one is refused.
+    fn third_review_probes() -> Vec<(&'static str, String)> {
+        let secret = format!("{R2_HEAD}{R2_STEP}");
+        let open =
+            "on: push\njobs:\n  a:\n    runs-on: ubuntu-24.04\n    steps:\n      - run: echo ok\n";
+        let shift = |text: &str, by: &str| {
+            text.lines()
+                .map(|line| format!("{by}{line}\n"))
+                .collect::<String>()
+        };
+        vec![
+            (
+                "bl1-secret-2",
+                shift(&format!("{secret}      - run: curl evil\n"), "  "),
+            ),
+            (
+                "bl1-secret-4",
+                shift(&format!("{secret}      - run: curl evil\n"), "    "),
+            ),
+            (
+                "bl1-open-target",
+                shift(
+                    &open.replace("on: push", "on:\n  pull_request_target:"),
+                    "  ",
+                ),
+            ),
+            (
+                "bl1-open-comment",
+                shift(&open.replace("on: push", "on: issue_comment"), "    "),
+            ),
+            (
+                "bl2-secret-comment",
+                format!("{secret}# note\r      - run: curl evil\n"),
+            ),
+            (
+                "bl2-secret-value",
+                format!(
+                    "{R2_HEAD}      - run: target/debug/examples/r2_finding # x\r      - run: curl evil\n        env:\n          R2_SECRET_ACCESS_KEY: ${{{{ secrets.X }}}}\n"
+                ),
+            ),
+            (
+                "bl2-open-nel",
+                format!("{open}# note\u{85}      - run: echo x\n"),
+            ),
+            (
+                "bl2-open-ls",
+                format!("{open}# note\u{2028}      - run: echo x\n"),
+            ),
+            (
+                "bl2-open-ps",
+                format!("{open}# note\u{2029}      - run: echo x\n"),
+            ),
+            ("bl3-secret", format!("{secret}      -  run: curl evil\n")),
+            ("bl3-open", format!("{open}      -  uses: evil/act@main\n")),
+            (
+                "pre-overwrite",
+                format!(
+                    "{R2_HEAD}      - run: printf 'curl evil' > target/debug/examples/r2_finding\n{R2_STEP}"
+                ),
+            ),
+            (
+                "pre-unpinned",
+                format!(
+                    "{R2_HEAD}      - uses: someone/build@0123456789abcdef0123456789abcdef01234567\n{R2_STEP}"
+                ),
+            ),
+        ]
+    }
+
+    #[test]
+    fn every_probe_the_l9_third_review_found_is_refused() {
+        let path = ".github/workflows/r2-lockcheck.yml";
+        for (name, text) in third_review_probes() {
+            assert!(!whole(path, &text).is_empty(), "{name}");
+            assert!(
+                whole(path, &text).iter().any(|f| f.rule == "L9"),
+                "{name}: {:?}",
+                whole(path, &text)
+            );
+        }
+        let reviewed_pre = format!(
+            "{R2_HEAD}      - run: rustup show active-toolchain || rustup toolchain install\n      - run: cargo build --locked --package mandate-objectstore --example r2_finding\n{R2_STEP}"
+        );
+        assert_eq!(whole(path, &reviewed_pre), Vec::new());
+    }
+
     #[test]
     fn every_probe_the_l9_re_review_found_is_refused() {
         let path = ".github/workflows/r2-lockcheck.yml";
-        assert_eq!(one(path, &format!("{R2_HEAD}{R2_STEP}")), Vec::new());
+        assert_eq!(whole(path, &format!("{R2_HEAD}{R2_STEP}")), Vec::new());
         for (name, text) in second_review_probes() {
-            let found = rules(path, &text);
+            let found: Vec<&str> = whole(path, &text).into_iter().map(|f| f.rule).collect();
             assert!(
                 found.contains(&"L9") || (name == "no-environment" && found.contains(&"L12")),
                 "{name}: {:?}",
-                one(path, &text)
+                whole(path, &text)
             );
         }
     }
