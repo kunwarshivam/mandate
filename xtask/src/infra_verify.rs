@@ -131,12 +131,71 @@ fn flux(list: &mut Checklist, kubectl: Kubectl<'_>) {
             list.check(false, format!("Flux has {article} {kind}"));
         }
         for object in of_kind {
-            list.check(
-                is_ready(object),
-                format!("{kind} {} is Ready", where_is(object)),
-            );
+            let what = format!("{kind} {} is Ready", where_is(object));
+            if is_ready(object) {
+                list.check(true, what);
+            } else {
+                list.check(false, format!("{what} ({})", flux_why(object)));
+            }
         }
     }
+}
+
+/// What a Flux object's condition messages say, as fixed class words alone: a message may quote a
+/// value, an image or a path, so none is printed, only which of these it matched.
+const FLUX_CLASSES: [(&str, &str); 16] = [
+    ("dependency", "dependency"),
+    ("context deadline exceeded", "timeout"),
+    ("timed out", "timeout"),
+    ("schema", "values-schema"),
+    ("admission webhook", "admission-denied"),
+    ("denied the request", "admission-denied"),
+    ("signature", "signature"),
+    ("verification failed", "signature"),
+    ("hooks failed", "hook-failed"),
+    ("failed pre-", "hook-failed"),
+    ("failed post-", "hook-failed"),
+    ("immutable", "immutable-field"),
+    ("not found", "missing-object"),
+    ("forbidden", "forbidden"),
+    ("unauthorized", "auth-failed"),
+    ("retries exhausted", "retries-exhausted"),
+];
+
+/// Why a Flux object is not Ready: its Ready condition's status and reason word, a Stalled
+/// condition's reason, and the classes their messages match; a message that matches none is
+/// `unclassified`.
+fn flux_why(object: &Value) -> String {
+    let conditions = object["status"]["conditions"].as_array();
+    let find =
+        |kind: &str| conditions.and_then(|all| all.iter().find(|c| text(c, &["type"]) == kind));
+    let Some(ready) = find("Ready") else {
+        return "no Ready condition".to_owned();
+    };
+    let mut said = word(text(ready, &["status"]));
+    let reason = word(text(ready, &["reason"]));
+    if !reason.is_empty() {
+        said.push_str(&format!(": {reason}"));
+    }
+    let mut messages = vec![text(ready, &["message"])];
+    if let Some(stalled) = find("Stalled").filter(|c| text(c, &["status"]) == "True") {
+        said.push_str(&format!("; Stalled: {}", word(text(stalled, &["reason"]))));
+        messages.push(text(stalled, &["message"]));
+    }
+    let lower = messages.join("\n").to_lowercase();
+    let mut found: Vec<&str> = Vec::new();
+    for (needle, class) in FLUX_CLASSES {
+        if lower.contains(needle) && !found.contains(&class) {
+            found.push(class);
+        }
+    }
+    if found.is_empty() && !lower.trim().is_empty() {
+        found.push("unclassified");
+    }
+    if !found.is_empty() {
+        said.push_str(&format!("; message {}", found.join(", ")));
+    }
+    said
 }
 
 /// Every pod of the platform and the workspaces, but a finished Job's, Running with every
@@ -389,6 +448,67 @@ fn cilium(list: &mut Checklist, kubectl: Kubectl<'_>) {
     );
 }
 
+/// What cloudflared's last log lines are about, as fixed class words alone: a line may quote the
+/// tunnel's token, an address or a hostname, so none is printed.
+const CLOUDFLARED_CLASSES: [(&str, &str); 10] = [
+    ("registered tunnel connection", "registered"),
+    ("unauthorized", "auth-failed"),
+    ("invalid tunnel secret", "auth-failed"),
+    ("invalid token", "auth-failed"),
+    ("connection refused", "connection-refused"),
+    ("timeout", "timeout"),
+    ("deadline exceeded", "timeout"),
+    ("no such host", "dns"),
+    ("server misbehaving", "dns"),
+    ("i/o timeout", "timeout"),
+];
+
+/// Which workspace pod runs cloudflared, and what its last lines are about: read only once
+/// Cloudflare reports the tunnel down, so a healthy staging reads no log.
+fn cloudflared_why(kubectl: Kubectl<'_>) -> String {
+    let pods = kubectl(&["get", "pods", "-A", "-o", "json"])
+        .ok()
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        .and_then(|listing| listing["items"].as_array().cloned())
+        .unwrap_or_default();
+    let Some(pod) = pods.iter().find(|pod| {
+        text(pod, &["metadata", "namespace"]).starts_with("ws-")
+            && pod["spec"]["containers"]
+                .as_array()
+                .is_some_and(|all| all.iter().any(|c| text(c, &["name"]) == "cloudflared"))
+    }) else {
+        return "no cloudflared pod".to_owned();
+    };
+    let at = where_is(pod);
+    let logs = kubectl(&[
+        "logs",
+        text(pod, &["metadata", "name"]),
+        "--namespace",
+        text(pod, &["metadata", "namespace"]),
+        "--container",
+        "cloudflared",
+        "--tail=50",
+    ]);
+    let Ok(logs) = logs else {
+        return format!("cloudflared {at} logs unreadable");
+    };
+    let lower = logs.to_lowercase();
+    let mut found: Vec<&str> = Vec::new();
+    for (needle, class) in CLOUDFLARED_CLASSES {
+        if lower.contains(needle) && !found.contains(&class) {
+            found.push(class);
+        }
+    }
+    let failed = lower.lines().any(|line| line.contains("err"));
+    if failed && found.iter().all(|class| *class == "registered") {
+        found.push("unclassified");
+    }
+    if found.is_empty() {
+        found.push("quiet");
+    }
+    format!("cloudflared {at} logs {}", found.join(", "))
+}
+
 /// A line of the edge's: failing, or pending on `pending` when it names a change.
 fn edge_line(
     list: &mut Checklist,
@@ -406,6 +526,7 @@ fn edge_line(
 /// credentials: Access redirects it to its login or refuses it; a success means the API is open.
 fn edge_checks(
     list: &mut Checklist,
+    kubectl: Kubectl<'_>,
     http: &dyn Http,
     edge: &Edge<'_>,
     pending: Option<&'static str>,
@@ -432,7 +553,10 @@ fn edge_checks(
                 list,
                 pending,
                 false,
-                format!("the tunnel is healthy (Cloudflare reports {said})"),
+                format!(
+                    "the tunnel is healthy (Cloudflare reports {said}; {})",
+                    cloudflared_why(kubectl)
+                ),
             );
         }
         None => edge_line(
@@ -471,7 +595,7 @@ fn checks(
     pods(&mut list, kubectl);
     admission(&mut list, kubectl);
     cilium(&mut list, kubectl);
-    edge_checks(&mut list, http, edge, pending);
+    edge_checks(&mut list, kubectl, http, edge, pending);
     Ok(list)
 }
 
@@ -730,6 +854,135 @@ mod tests {
         Ok(list.render_titled("infra verify (staging)"))
     }
 
+    fn failing(kind: &str, name: &str, conditions: Value) -> Value {
+        json!({
+            "kind": kind,
+            "metadata": {"name": name, "namespace": "flux-system"},
+            "status": {"conditions": conditions},
+        })
+    }
+
+    /// A Flux object that is not Ready says why in its condition's reason word and the fixed
+    /// classes its message matches, never the message itself, which may quote values or images.
+    #[test]
+    fn a_flux_object_that_is_not_ready_says_why_without_its_message() -> Result<()> {
+        let cases = [
+            (
+                json!([{"type": "Ready", "status": "False", "reason": "DependencyNotReady",
+                    "message": "dependency 'flux-system/journal' is not ready"}]),
+                "(False: DependencyNotReady; message dependency)",
+            ),
+            (
+                json!([
+                    {"type": "Ready", "status": "False", "reason": "UpgradeFailed",
+                        "message": "Helm upgrade failed for release ws-ws1/workspace: context deadline exceeded"},
+                    {"type": "Stalled", "status": "True", "reason": "RetriesExceeded",
+                        "message": "upgrade retries exhausted"},
+                ]),
+                "(False: UpgradeFailed; Stalled: RetriesExceeded; message timeout, retries-exhausted)",
+            ),
+            (
+                json!([{"type": "Ready", "status": "False", "reason": "InstallFailed",
+                    "message": "admission webhook \"policy.sigstore.dev\" denied the request: validation failed: no matching signatures: ghcr.io/kunwarshivam/mandate/secret-token-xyz"}]),
+                "(False: InstallFailed; message admission-denied, signature)",
+            ),
+            (
+                json!([{"type": "Ready", "status": "False", "reason": "InstallFailed",
+                    "message": "values don't meet the specifications of the schema(s): api.org: Does not match pattern"}]),
+                "(False: InstallFailed; message values-schema)",
+            ),
+            (
+                json!([{"type": "Ready", "status": "False", "reason": "Progressing",
+                    "message": "something new and odd: hunter2"}]),
+                "(False: Progressing; message unclassified)",
+            ),
+            (json!([]), "(no Ready condition)"),
+        ];
+        for (conditions, why) in cases {
+            let mut staging = Staging::up();
+            staging.flux[3] = failing("HelmRelease", "workspace", conditions);
+            let text = run(&staging)?;
+            assert_eq!(
+                missing(&text),
+                [format!("HelmRelease flux-system/workspace is Ready {why}").as_str()],
+                "{text}"
+            );
+            for secret in [
+                "secret-token-xyz",
+                "hunter2",
+                "api.org",
+                "'flux-system/journal'",
+            ] {
+                assert!(!text.contains(secret), "{secret} leaked: {text}");
+            }
+        }
+        Ok(())
+    }
+
+    fn tunnel_pod(namespace: &str, name: &str) -> Value {
+        let mut found = pod(namespace, name, "Running", &[true]);
+        found["spec"] = json!({"containers": [{"name": "cloudflared"}]});
+        found
+    }
+
+    /// A tunnel Cloudflare reports down says what its cloudflared pod's last lines are about, as
+    /// fixed classes, never the lines themselves, which may quote the token or a hostname.
+    #[test]
+    fn a_down_tunnel_says_what_cloudflared_logs_without_them() -> Result<()> {
+        let cases = [
+            (
+                "2026-10-19T15:00:00Z ERR Register tunnel error from server side error=\"Unauthorized: Invalid tunnel secret eyJhIjoiS0VZIn0\"",
+                "cloudflared ws-ws1/cloudflared-x logs auth-failed",
+            ),
+            (
+                "ERR Failed to dial a quic connection error=\"timeout: no recent network activity\" connIndex=0 ip=198.41.192.7",
+                "cloudflared ws-ws1/cloudflared-x logs timeout",
+            ),
+            (
+                "ERR edge discovery: error looking up Cloudflare edge IPs: lookup _v2-origintunneld._tcp.argotunnel.com: no such host",
+                "cloudflared ws-ws1/cloudflared-x logs dns",
+            ),
+            (
+                "INF Registered tunnel connection connIndex=0\nERR  error=\"Unable to reach the origin service. dial tcp 127.0.0.1:8080: connect: connection refused\"",
+                "cloudflared ws-ws1/cloudflared-x logs registered, connection-refused",
+            ),
+            (
+                "ERR something odd happened secret-xyz",
+                "cloudflared ws-ws1/cloudflared-x logs unclassified",
+            ),
+        ];
+        for (logs, why) in cases {
+            let mut staging = Staging::up();
+            staging.tunnel = "down";
+            staging.pods.push(tunnel_pod("ws-ws1", "cloudflared-x"));
+            staging.logs = logs;
+            let text = run(&staging)?;
+            assert_eq!(
+                missing(&text),
+                [format!("the tunnel is healthy (Cloudflare reports down; {why})").as_str()],
+                "{text}"
+            );
+            for secret in [
+                "eyJhIjoiS0VZIn0",
+                "198.41.192.7",
+                "argotunnel",
+                "secret-xyz",
+                "127.0.0.1",
+            ] {
+                assert!(!text.contains(secret), "{secret} leaked: {text}");
+            }
+        }
+        let mut staging = Staging::up();
+        staging.tunnel = "down";
+        let text = run(&staging)?;
+        assert_eq!(
+            missing(&text),
+            ["the tunnel is healthy (Cloudflare reports down; no cloudflared pod)"],
+            "{text}"
+        );
+        Ok(())
+    }
+
     fn missing(text: &str) -> Vec<&str> {
         text.lines()
             .filter_map(|line| line.trim_start().strip_prefix("[MISSING] "))
@@ -782,7 +1035,7 @@ mod tests {
         let faults: [(Fault, &str); 9] = [
             (
                 |s| s.flux[3] = ready("HelmRelease", "flux-system", "workspace", false),
-                "HelmRelease flux-system/workspace is Ready",
+                "HelmRelease flux-system/workspace is Ready (False)",
             ),
             (
                 |s| {
@@ -874,7 +1127,7 @@ mod tests {
         assert_eq!(
             missing(&text),
             [
-                "the tunnel is healthy (Cloudflare reports down)",
+                "the tunnel is healthy (Cloudflare reports down; no cloudflared pod)",
                 "the API answers only through Access (502 without credentials)",
             ],
             "{text}"
@@ -883,7 +1136,7 @@ mod tests {
         let text = list.render_titled("infra verify (staging)");
         assert_eq!(missing(&text), Vec::<&str>::new(), "{text}");
         for line in [
-            "[pending #1] the tunnel is healthy (Cloudflare reports down)",
+            "[pending #1] the tunnel is healthy (Cloudflare reports down; no cloudflared pod)",
             "[pending #1] the API answers only through Access (502 without credentials)",
         ] {
             assert!(text.contains(line), "{line}: {text}");
