@@ -3,16 +3,20 @@
 //! paper deployment read from the journal. Without the opt-in the process runs deny-all
 //! (DEC-2208 item 1).
 
+use std::cell::RefCell;
 use std::fmt;
 use std::path::Path;
+use std::rc::Rc;
 
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Digest, Key, Object, Value};
+use mandate_gateway::meter::SharedMeter;
 use mandate_journal::{Environment, StreamId};
 use mandate_runtime::{EventDraft, ResearchConfig};
 use mandate_time::UtcNanos;
 
 use crate::deployment;
+use crate::meter::CellMeter;
 use crate::recorded::{Bundle, BundleError};
 use crate::runtime::{Refs, ResearchWiring};
 use crate::source::{CellSource, Rows, SourceFor};
@@ -135,6 +139,23 @@ pub fn research(
     now: Box<dyn FnMut() -> UtcNanos>,
 ) -> Result<CellResearch, CellError> {
     let OptIn { bundle, deployment } = opted;
+    let rows: Rc<dyn Rows> = Rc::from(rows);
+    let now = Rc::new(RefCell::new(now));
+    let clock = {
+        let now = Rc::clone(&now);
+        move || (now.borrow_mut())()
+    };
+    let who = SourceFor {
+        workspace: deployment.workspace.clone(),
+        agent: deployment.agent.clone(),
+        environment: deployment.environment,
+    };
+    let meter = CellMeter::new(
+        SharedMeter::new(),
+        Rc::clone(&rows),
+        who.clone(),
+        Rc::new(clock.clone()),
+    );
     let open =
         || FsArtifactStore::open_existing(artifacts).map_err(|_| CellError::ArtifactsUnavailable);
     let control = StreamId::parse(&format!("ctl:{}", deployment.workspace))
@@ -162,7 +183,7 @@ pub fn research(
             member: "deadline_ms",
         })
     })?;
-    let worker = RecordedWorker::new(
+    let worker = RecordedWorker::metered(
         &bundle,
         WorkerFor {
             workspace: deployment.workspace.clone(),
@@ -170,19 +191,11 @@ pub fn research(
             description: description.clone(),
         },
         Box::new(StoreSink(open()?)),
-        now,
+        Box::new(clock),
+        meter.clone(),
     )
     .map_err(CellError::Worker)?;
-    let source = CellSource::new(
-        &bundle,
-        SourceFor {
-            workspace: deployment.workspace.clone(),
-            agent: deployment.agent.clone(),
-            environment: deployment.environment,
-        },
-        rows,
-        Box::new(open()?),
-    );
+    let source = CellSource::metered(&bundle, who, rows, Box::new(open()?), meter);
     let refs = ResearchRefs {
         mandate_version: version,
         model_version: pin.content_hash,

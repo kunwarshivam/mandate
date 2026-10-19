@@ -325,6 +325,16 @@ impl Price {
         parse(text, QTY_SCALE).and_then(positive).map(Self)
     }
 
+    /// `self − other`, exact at the 9 places a price holds: a price less a cash dividend per share
+    /// (DEC-2253 item 2). `not_positive` when it reaches zero or below.
+    pub fn checked_sub(self, other: Self) -> Result<Self, NumError> {
+        self.exact()
+            .sub(other.exact())?
+            .to_decimal(QTY_SCALE)
+            .and_then(positive)
+            .map(Self)
+    }
+
     /// A backtest fill price after slippage (spec §6.4 rules 4 to 7): `self + ceil(self × bps ÷
     /// 10000, 9)` for [`Adverse::Up`], a buy, and `self − ceil(self × bps ÷ 10000, 9)` for
     /// [`Adverse::Down`], a sell. Rounding the slippage amount up, once, at the 9 places a price
