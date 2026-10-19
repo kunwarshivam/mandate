@@ -191,7 +191,6 @@ fn lineage(revisions: u32, admitted: u32, retired: bool) -> Lineage {
 /// active thesis, until the revision's horizon; at it the instrument is removed (§8.6, DEC-118),
 /// and the lineage is unchanged. An empty stream folds to nothing at all.
 #[test]
-#[ignore = "pending E21-59"]
 fn a_proposal_and_its_revision_hold_the_instrument_until_the_revision_s_horizon() {
     let empty = Stream::default().fold(T).unwrap();
     assert_eq!(empty.universe, universe(&[]));
@@ -222,7 +221,6 @@ fn a_proposal_and_its_revision_hold_the_instrument_until_the_revision_s_horizon(
 /// A `lineage_retired` refusal retires the lineage, which removes the instrument it holds; an
 /// invalidation removes its thesis's instrument. Each lineage keeps what it admitted.
 #[test]
-#[ignore = "pending E21-59"]
 fn a_retiring_refusal_and_an_invalidation_each_remove_their_instrument() {
     let mut stream = Stream::default();
     stream.admitted("th-1", "th-1", 0, AAPL, T + 3_600);
@@ -246,7 +244,6 @@ fn a_retiring_refusal_and_an_invalidation_each_remove_their_instrument() {
 /// lineage loses its holder, and an invalidation of the first lineage's thesis, which no longer
 /// holds the instrument, removes nothing.
 #[test]
-#[ignore = "pending E21-59"]
 fn another_lineage_s_admission_takes_the_instrument_and_a_stale_invalidation_removes_nothing() {
     let mut stream = Stream::default();
     stream.admitted("th-1", "th-1", 0, AAPL, T + 3_600);
@@ -268,7 +265,6 @@ fn another_lineage_s_admission_takes_the_instrument_and_a_stale_invalidation_rem
 /// A refusal for any other reason admits nothing, though its lineage becomes known (MC-N19), and
 /// active theses are ordered by instrument.
 #[test]
-#[ignore = "pending E21-59"]
 fn another_refusal_admits_nothing_and_the_active_theses_are_in_instrument_order() {
     let mut stream = Stream::default();
     stream.admitted("th-7", "th-7", 0, MSFT, T + 3_600);
@@ -293,7 +289,6 @@ fn another_refusal_admits_nothing_and_the_active_theses_are_in_instrument_order(
 /// reason that is no refusal's code, an admission with a reason or a refusal without one, and an
 /// admitted instrument the bundle names no symbol for, each give no fold, naming the member.
 #[test]
-#[ignore = "pending E21-59"]
 fn a_record_it_cannot_read_gives_no_fold() {
     let mut cases: Vec<(Stream, &str)> = Vec::new();
     let mut s = Stream::default();
@@ -388,7 +383,6 @@ proptest! {
     /// DEC-2249 items 1 and 2, over random journaled runs: the fold's universe, lineages and
     /// active theses at a random clock equal the accumulator's over the same events.
     #[test]
-    #[ignore = "pending E21-59"]
     fn the_fold_equals_an_independent_accumulator_over_random_runs(
         events in prop::collection::vec(event(), 0..24),
         now in 0_i64..7_200,
