@@ -1192,14 +1192,16 @@ after U-A1 to U-A5 are recorded.
   *Follow-up (DEC-2509, M7 S2; claim [#1594](https://github.com/kunwarshivam/mandate/issues/1594)):*
   journal spec §9.28 closes `OwnerAcknowledged` and adds `OwnerAcknowledgmentRequested`. Still
   owed:
-  - `mandate-journal` registers both, with rule 239 and §9.28's vectors (M7 S2);
-  - `mandate-journal` registers `OwnerCommandRefused`'s reasons `trigger_unknown`,
-    `trigger_superseded` and `request_invalid`, with rule 28's scoping (M7 S2);
   - the CLI's `agent request-ack` and `agent acknowledge` (M7 S2);
   - the workspace API's members (DEC-2102 item 4, lane L1);
   - the executor's copy and its four checks (E7-4, lane X);
   - **a §11 range check for stream rules 240 and 241**, with a new `VerificationRun` check code.
     Until it lands, the writers and the executor hold those rules, failing closed.
+  *Done (M7 S2a to S2c, #1670, #1734, #1765):* §9.28's vectors, and `mandate-journal` registers
+  both records on the control and account streams with rule 239, and `OwnerCommandRefused`'s
+  reasons `trigger_unknown`, `trigger_superseded` and `request_invalid` with rule 28's scoping.
+  *Follow-up (#1765 review, nit):* `acknowledgments.rs`'s module doc should say that the account
+  stream's copies are judged by the same schema and rule.
 - **E8-4 (Must)** As an approver, I want notifications through web push, email, and a chat
   channel, with escalation chains and quiet hours.
   *Spec:* [notifications spec](../specs/notifications.md) ([DEC-438](decisions/DEC-438.md)). The
@@ -1263,6 +1265,12 @@ after U-A1 to U-A5 are recorded.
   `xtask` email-footer check (DEC-700 item 4) exists, runs in `cargo xtask ci fast`'s lint, and is
   shown to fail on a planted third mail transport and on a planted deny-listed mail crate (`lettre`)
   outside the founder-only transport while the general footer is unresolved.
+  *Done (lane M7, #1691, #1715, #1697, #1716, #1761):* the email adapter and its recorded transport,
+  and the mail guard (`cargo xtask mail-guard`, DEC-2511). The founder-only SMTP transport (S5) is
+  still owed.
+  *Follow-up (#1761 review, nits; DEC-2511 item 9):* the literal scan misses escaped spellings
+  (`send\u{6d}ail`, `smtp\x3a//`), `[::1]:25`, `host:25/path`, and a trailing space; and a
+  transport `struct` under `#[cfg(...)]` counts as declared, with no test for it.
 - **E8-12 (Deferred: not in v1; SC)** As an approver, I want one chat channel (spec §4.5). The
   founder did not take DEC-438 item 20 (2026-10-08, DEC-824): v1 has no chat channel, and Telegram
   at M10 is a later option. If it is built, *accepted when:* NT-1's canary test passes; every inbound message, button, or
