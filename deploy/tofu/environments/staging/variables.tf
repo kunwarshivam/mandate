@@ -13,24 +13,15 @@ variable "state_passphrase" {
 }
 
 variable "kube_api_allowed_addresses" {
-  description = "KUBE_API_ALLOWED_CIDRS: the only CIDRs the control plane admits, as a JSON list."
+  description = "KUBE_API_ALLOWED_CIDRS: the only CIDRs the control plane admits besides a run's window, as a JSON list. Staging's may be empty: each run opens its own window (DEC-2028)."
   type        = list(string)
+  default     = []
 }
 
 variable "cloudflare_api_token" {
   description = "CF_INFRA_API_TOKEN: the Cloudflare token scoped to what this plan needs."
   type        = string
   sensitive   = true
-}
-
-variable "cloudflare_account_id" {
-  description = "CF_ACCOUNT_ID."
-  type        = string
-}
-
-variable "access_allowed_emails" {
-  description = "ACCESS_ALLOWED_EMAILS: who Access admits to the API host, as a JSON list."
-  type        = list(string)
 }
 
 variable "adopt_state_bucket" {
