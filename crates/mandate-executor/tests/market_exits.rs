@@ -10,13 +10,15 @@
 mod common;
 
 use common::{
-    ACCOUNT_STREAM, AGENT, FixedInstruments, FixedMandate, Ran, Shell, TestIds, clock, config,
-    event, handoff, instrument, price, qty, quote, stale_quote, stream_opened, text, with_clock,
+    ACCOUNT_STREAM, AGENT, ALLOWING_BINDING_GATE, BINDING_EXITS, FixedInstruments, FixedMandate,
+    MISSING_BINDING_GATE, Ran, Shell, TestIds, clock, config, event, handoff, instrument, price,
+    qty, quote, stale_quote, stream_opened, text, with_clock,
 };
 use mandate_accounting::Side;
 use mandate_canon::Value;
 use mandate_executor::{
-    BrokerOutcome, ExecutorError, Input, IntentBody, OrderType, Ports, Purpose, SubmitOrder,
+    BindingGateSource, BrokerOutcome, ExecutorError, Input, IntentBody, OrderType, Ports, Purpose,
+    SubmitOrder,
 };
 use mandate_num::Price;
 
@@ -173,7 +175,8 @@ fn an_exit_at_the_market_is_received_as_a_market_order_with_no_limit() {
 }
 
 /// §5.1: in the regular session, outside the close window, on a fresh, sane quote, with nothing
-/// resting, an exit at the market goes at the market (DEC-2037 item 4).
+/// resting, an exit at the market whose gate decision read a binding snapshot goes at the market
+/// (DEC-2037 item 4).
 #[test]
 #[ignore = "pending E7-29"]
 fn an_exit_at_the_market_goes_at_the_market_on_a_fresh_quote_in_the_regular_session() {
@@ -187,7 +190,11 @@ fn an_exit_at_the_market_goes_at_the_market_on_a_fresh_quote_in_the_regular_sess
     for purpose in [Purpose::RiskExit, Purpose::OwnerExit] {
         let mut shell = held(&ports, 10);
         shell.run(Input::Market(quote(AAPL, BID, "150.2", 20)), &ports);
-        let ran = shell.run(handoff(INTENT, AGENT, market_exit(purpose)), &ports);
+        let ran = shell.run_with_binding(
+            handoff(INTENT, AGENT, market_exit(purpose)),
+            &ports,
+            &BINDING_EXITS,
+        );
         let sent = only_submission(&ran);
         assert_eq!(
             (sent.order_type, sent.limit_price, sent.qty),
@@ -203,6 +210,43 @@ fn an_exit_at_the_market_goes_at_the_market_on_a_fresh_quote_in_the_regular_sess
             Some(&Value::Null),
             "{purpose:?}: journaled before it is sent, as sent (rule 5)"
         );
+    }
+}
+
+/// §5.1, DEC-2037 items 3 and 4: where the gate's decision on an exit read no binding snapshot (no
+/// source, or one that answers nothing for it), nothing checked a market order's participation
+/// caps, marketable-limit rule or collar, so even on a fresh regular quote the exit goes as a limit
+/// at the ladder's first rung, never at the market.
+#[test]
+#[ignore = "pending E7-29"]
+fn an_exit_at_the_market_whose_gate_read_no_snapshot_goes_by_the_ladder() {
+    let (ids, mandates, instruments, config) = (
+        TestIds,
+        FixedMandate::covering(&[AAPL]),
+        FixedInstruments,
+        config(),
+    );
+    let ports = common::ports(&ids, &mandates, &instruments, &config);
+    let sources: [(&str, &dyn BindingGateSource); 2] = [
+        ("no source", &MISSING_BINDING_GATE),
+        ("no answer for an exit", &ALLOWING_BINDING_GATE),
+    ];
+    for purpose in [Purpose::RiskExit, Purpose::OwnerExit] {
+        for (name, source) in sources {
+            let mut shell = held(&ports, 10);
+            shell.run(Input::Market(quote(AAPL, BID, "150.2", 20)), &ports);
+            let ran = shell.run_with_binding(
+                handoff(INTENT, AGENT, market_exit(purpose)),
+                &ports,
+                source,
+            );
+            let sent = only_submission(&ran);
+            assert_eq!(
+                (sent.order_type, sent.limit_price),
+                (OrderType::Limit, Some(first_rung(BID))),
+                "{purpose:?}, {name}"
+            );
+        }
     }
 }
 
@@ -356,7 +400,7 @@ fn an_exit_received_at_the_market_survives_a_restart() {
     );
     let (mut restarted, _) = shell.restart(&ports);
     restarted.run(Input::Market(quote(AAPL, BID, "150.2", 20)), &ports);
-    let released = restarted.run(Input::Tick(clock(21)), &ports);
+    let released = restarted.run_with_binding(Input::Tick(clock(21)), &ports, &BINDING_EXITS);
     let sent = only_submission(&released);
     assert_eq!(
         (sent.order_type, sent.limit_price),
@@ -396,9 +440,11 @@ fn an_opening_or_an_increase_with_no_limit_is_refused_before_anything_is_journal
     }
 }
 
-/// Rule 13 over every exit purpose and market situation: an exit at the market is never refused
-/// and never denied; it is sent, or held with a reason; and it goes at the market only in the
-/// regular session on a fresh, sane quote, never as a limit with no price.
+/// Rule 13 over every exit purpose, market situation and gate source: an exit at the market is never
+/// refused and never denied; it is sent, or held for a reason rule 13 allows (nothing to price
+/// from, or a discretionary exit waiting for the session); and it goes at the market only in the
+/// regular session on a fresh, sane quote with a binding gate decision, never as a limit with no
+/// price.
 #[test]
 #[ignore = "pending E7-29"]
 fn no_exit_at_the_market_is_refused_and_only_a_fresh_regular_quote_sends_it_at_the_market() {
@@ -410,46 +456,60 @@ fn no_exit_at_the_market_is_refused_and_only_a_fresh_regular_quote_sends_it_at_t
     );
     let ports = common::ports(&ids, &mandates, &instruments, &config);
     let situations = ["fresh", "stale", "none", "pre_market"];
-    for purpose in [
+    let sources: [(&str, &dyn BindingGateSource); 2] = [
+        ("binding", &BINDING_EXITS),
+        ("unbound", &MISSING_BINDING_GATE),
+    ];
+    let allowed_holds = ["exit_unpriced", "session_closed", "session_unknown"];
+    let cases = [
         Purpose::RiskExit,
         Purpose::DiscretionaryExit,
         Purpose::OwnerExit,
-    ] {
-        for situation in situations {
-            let start = if situation == "pre_market" {
-                PRE_MARKET
-            } else {
-                20
-            };
-            let mut shell = held(&ports, start - 10);
-            match situation {
-                "fresh" | "pre_market" => {
-                    shell.run(Input::Market(quote(AAPL, BID, "150.2", start)), &ports);
-                }
-                "stale" => {
-                    shell.run(Input::Market(quote(AAPL, BID, "150.2", start)), &ports);
-                    shell.run(Input::Market(stale_quote(AAPL, BID, start + 5)), &ports);
-                }
-                _ => {}
+    ]
+    .into_iter()
+    .flat_map(|purpose| situations.map(|situation| (purpose, situation)))
+    .flat_map(|(purpose, situation)| sources.map(|source| (purpose, situation, source)));
+    for (purpose, situation, (name, source)) in cases {
+        let start = if situation == "pre_market" {
+            PRE_MARKET
+        } else {
+            20
+        };
+        let mut shell = held(&ports, start - 10);
+        match situation {
+            "fresh" | "pre_market" => {
+                shell.run(Input::Market(quote(AAPL, BID, "150.2", start)), &ports);
             }
-            let at = format!("{purpose:?} {situation}");
-            let ran = shell
-                .step(handoff(INTENT, AGENT, market_exit(purpose)), &ports)
-                .unwrap_or_else(|e| panic!("{at}: refused with {}: {e}", e.code()));
-            let decided = verdict(&ran).unwrap_or_else(|| panic!("{at}: no gate decision"));
-            assert_ne!(decided.0, "deny", "{at}: denied {decided:?}");
-            match ran.submissions().as_slice() {
-                [] => assert_eq!(decided.0, "hold", "{at}: neither sent nor held"),
-                [sent] => {
-                    let market = sent.order_type == OrderType::Market;
-                    assert_eq!(market, sent.limit_price.is_none(), "{at}: {sent:?}");
-                    assert!(
-                        !market || situation == "fresh",
-                        "{at}: at the market outside a fresh regular quote"
-                    );
-                }
-                more => panic!("{at}: {more:?}"),
+            "stale" => {
+                shell.run(Input::Market(quote(AAPL, BID, "150.2", start)), &ports);
+                shell.run(Input::Market(stale_quote(AAPL, BID, start + 5)), &ports);
             }
+            _ => {}
+        }
+        let at = format!("{purpose:?} {situation} {name}");
+        let ran = shell
+            .step_with_binding(handoff(INTENT, AGENT, market_exit(purpose)), &ports, source)
+            .unwrap_or_else(|e| panic!("{at}: refused with {}: {e}", e.code()));
+        let decided = verdict(&ran).unwrap_or_else(|| panic!("{at}: no gate decision"));
+        assert_ne!(decided.0, "deny", "{at}: denied {decided:?}");
+        match ran.submissions().as_slice() {
+            [] => {
+                assert_eq!(decided.0, "hold", "{at}: neither sent nor held");
+                assert!(
+                    allowed_holds.contains(&decided.1.as_str()),
+                    "{at}: held for {:?}, which rule 13 does not allow",
+                    decided.1
+                );
+            }
+            [sent] => {
+                let market = sent.order_type == OrderType::Market;
+                assert_eq!(market, sent.limit_price.is_none(), "{at}: {sent:?}");
+                assert!(
+                    !market || situation == "fresh" && name == "binding",
+                    "{at}: at the market outside a fresh regular quote and a binding gate"
+                );
+            }
+            more => panic!("{at}: {more:?}"),
         }
     }
 }
