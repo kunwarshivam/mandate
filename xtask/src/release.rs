@@ -1863,8 +1863,11 @@ mod tests {
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github/scripts/release-sign.sh"),
         )?;
         assert!(
-            script.contains("\nset +x +v\nset -euo pipefail\n"),
-            "release-sign.sh must turn tracing off before anything else"
+            script.starts_with("#!/bin/bash --posix\n")
+                && script.contains(
+                    "\nset +x +v\nunset -f compgen\ncase \"$(compgen -A function)\" in\n"
+                ),
+            "release-sign.sh must start in POSIX mode, turn tracing off and refuse functions first"
         );
         let ordered = [
             "grep -Evq '^[0-9a-f]{64}  [A-Za-z0-9._-]+$' \"$sums\"",
@@ -1921,7 +1924,7 @@ mod tests {
             "cargo",
             "xtask",
             "dist/bin/*",
-            "compgen",
+            "compgen -e",
             "COSIGN_PASSWORD=",
         ] {
             assert!(!script.contains(absent), "release-sign.sh holds {absent:?}");
@@ -1941,10 +1944,11 @@ mod tests {
     }
 
     /// cosign runs with exactly `COSIGN_PASSWORD`, `HOME` and `PATH` in its environment, whatever
-    /// else the job held (an exported function, a name that is no identifier, a variable bash
-    /// keeps read-only, a trace switch), with the password nowhere in its command line and neither
-    /// secret in the signer's stderr (DEC-2024 item 4, `AGENTS.md` rule 7). A stand-in cosign, served to the signer by a `file://` URL and pinned by
-    /// its SHA-256 as the real one is, records the names its process received and its arguments.
+    /// else the job held (a name that is no identifier, a variable bash keeps read-only, a trace
+    /// switch), with the password nowhere in its command line and neither secret in the signer's
+    /// stderr (DEC-2024 item 4, `AGENTS.md` rule 7). A stand-in cosign, served to the signer by a
+    /// `file://` URL and pinned by its SHA-256 as the real one is, records the names its process
+    /// received and its arguments.
     #[test]
     fn cosign_sees_only_the_password_home_and_path() -> Result<()> {
         let script =
@@ -1965,8 +1969,7 @@ mod tests {
             ),
         )?;
         let password = "the-password-is-not-an-argument";
-        let output = Command::new("bash")
-            .arg(&script)
+        let output = Command::new(&script)
             .current_dir(&dir)
             .env_clear()
             .env("PATH", "/usr/bin:/bin")
@@ -1979,7 +1982,6 @@ mod tests {
             .env("LD_PRELOAD", "planted.so")
             .env("SIGSTORE_REKOR_URL", "https://planted.invalid")
             .env("HTTPS_PROXY", "http://planted.invalid")
-            .env("BASH_FUNC_evil%%", "() { echo planted; }")
             .env("a b", "planted")
             .env("EUID", "0")
             .env("SHELLOPTS", "xtrace")
@@ -2007,6 +2009,62 @@ mod tests {
             !dir.join("runner/release-key").exists(),
             "the key was left behind"
         );
+        Ok(())
+    }
+
+    /// The signer runs in POSIX mode, where bash refuses to start when an exported function shadows
+    /// a special builtin such as `set`, and it refuses any other exported function before it reads
+    /// anything, so a planted `BASH_FUNC_echo%%` or `BASH_FUNC_set%%` can neither silence its
+    /// `set +x +v` nor stand in for a check, and a planted `compgen` that lists nothing cannot hide
+    /// another, even beside a planted `unset` that would keep it (DEC-2024 item 4). No run reaches
+    /// the key.
+    #[test]
+    fn the_signer_refuses_exported_functions() -> Result<()> {
+        let script =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github/scripts/release-sign.sh");
+        let root = env::temp_dir().join(format!(
+            "mandate-xtask-signer-functions-{}",
+            std::process::id()
+        ));
+        let echo = ("BASH_FUNC_echo%%", "() { builtin echo planted; }");
+        let compgen = ("BASH_FUNC_compgen%%", "() { :; }");
+        let cases: [&[(&str, &str)]; 4] = [
+            &[echo],
+            &[("BASH_FUNC_set%%", "() { builtin echo planted; }")],
+            &[compgen, echo],
+            &[("BASH_FUNC_unset%%", "() { :; }"), compgen, echo],
+        ];
+        for planted in cases {
+            let name = planted
+                .iter()
+                .map(|(n, _)| n.replace('%', ""))
+                .collect::<Vec<_>>()
+                .join("+");
+            let dir = root.join(&name);
+            let _ = fs::remove_dir_all(&dir);
+            fs::create_dir_all(dir.join("dist/bin"))?;
+            fs::write(dir.join("dist/bin/a"), "a")?;
+            fs::write(dir.join("dist/bin/b"), "b")?;
+            write_sums(&dir, SIGNER_SUMS)?;
+            let output = Command::new(&script)
+                .current_dir(&dir)
+                .env_clear()
+                .env("PATH", "/usr/bin:/bin")
+                .env("DIGEST", sha256(&dir.join("dist/SHA256SUMS"))?)
+                .env("RUNNER_TEMP", dir.join("runner"))
+                .envs(planted.iter().copied())
+                .output()?;
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert!(!output.status.success(), "{name}: the signer went on");
+            assert!(
+                !stdout.contains("OK"),
+                "{name}: the signer checked the copies"
+            );
+            assert!(
+                !dir.join("runner").exists(),
+                "{name}: the signer reached RUNNER_TEMP"
+            );
+        }
         Ok(())
     }
 
@@ -2164,8 +2222,7 @@ mod tests {
             } else {
                 "runner"
             });
-            let output = Command::new("bash")
-                .arg(&script)
+            let output = Command::new(&script)
                 .current_dir(&dir)
                 .env_clear()
                 .env("PATH", "/usr/bin:/bin")

@@ -128,13 +128,14 @@ No repository-level secret or variable is used, so no other workflow can read th
 copy button). The run refuses unless it is the commit `main` was at when you dispatched, which the
 run checks out. `preflight` and `plan` may leave `sha` empty: they then run at the commit `main`
 was at when they started and print it first (`==> infra plan of staging at commit …`), so you can
-dispatch `apply` with exactly that commit (DEC-2042). If `main` moved since, plan again. It lists what changed under `deploy/tofu/`,
-`infra.yml`, `xtask/` and the Rust build inputs since the last apply, so you approve a commit you
-have seen. The log never shows a value: only addresses and actions.
+dispatch `apply` with exactly that commit (DEC-2042). If `main` moved since, plan again. It
+lists what changed under `deploy/tofu/`, `infra.yml`, `xtask/` and the Rust build inputs since the
+last apply, so you approve a commit you have seen. The log never shows a value: only addresses
+and actions.
 
 1. **Actions → infra → Run workflow**, branch `main`, environment `staging`, action `preflight`,
-   and `sha` empty. Approve the job. Every line should read `[ok]`; each `[MISSING]` line names the step
-   above that is still to do.
+   and `sha` empty. Approve the job. Every line should read `[ok]`; each `[MISSING]` line names the
+   step above that is still to do.
 2. Dispatch again with action `plan`. Read the plan's list of changes:
    - one VPC, a tag, a firewall and a cluster;
    - the state bucket, imported;
@@ -152,10 +153,11 @@ have seen. The log never shows a value: only addresses and actions.
      the state buckets stay in `nyc3` until they move.
    - The buckets the move to the US West leaves behind are listed under
      [Deleted by hand, later](#5-deleted-by-hand-later).
-3. Dispatch again with action `apply` and `sha` set to the commit the plan printed, and approve it. The job plans again after
-   your approval, prints that plan, and applies exactly it, so the apply reflects the commit and
-   the cloud as they are when the job runs. Dispatch `apply` only at a commit you have read, and
-   read the apply job's printed plan afterwards. A first cluster takes about ten minutes.
+3. Dispatch again with action `apply` and `sha` set to the commit the plan printed, and approve
+   it. The job plans again after your approval, prints that plan, and applies exactly it, so the
+   apply reflects the commit and the cloud as they are when the job runs. Dispatch `apply` only at
+   a commit you have read, and read the apply job's printed plan afterwards. A first cluster takes
+   about ten minutes.
 4. **Handing over to lane GO (E21-58):** the outputs GO needs are the root outputs
    `archive_access_key_id`, `archive_secret_access_key` and `tunnel_token` (sensitive, never
    printed), and `archive_bucket`, `archive_endpoint`, `archive_destination_path`,

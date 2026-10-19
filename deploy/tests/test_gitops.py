@@ -455,26 +455,30 @@ def kill_switch_exemption(docs: list[dict]) -> list[str]:
     expected = {
         "mandate-control-pods": (
             pods,
-            "pods",
+            ["pods", "pods/ephemeralcontainers"],
             "",
             CONTROL_LABEL.format("object.metadata.labels"),
             f"request.userInfo.username in {JOB_CONTROLLER} && has(object.metadata.ownerReferences) "
             "&& object.metadata.ownerReferences.exists(r, r.apiVersion == 'batch/v1' && r.kind == 'Job' "
             "&& has(r.controller) && r.controller)",
             ["CREATE", "UPDATE"],
+            "request.operation == 'CREATE' || object.spec != oldObject.spec || !("
+            + CONTROL_LABEL.format("oldObject.metadata.labels")
+            + ")",
         ),
         "mandate-control-jobs": (
             jobs,
-            "jobs",
+            ["jobs"],
             "batch",
             CONTROL_LABEL.format("object.spec.template.metadata.labels"),
             "!request.userInfo.username.startsWith('system:serviceaccount:') "
             "&& !(has(object.metadata.ownerReferences) "
             "&& object.metadata.ownerReferences.exists(r, r.kind == 'CronJob'))",
             ["CREATE", "UPDATE"],
+            "request.operation == 'CREATE' || object.spec != oldObject.spec",
         ),
     }
-    for name, (spec, resource, group, label, allowed, operations) in expected.items():
+    for name, (spec, resources, group, label, allowed, operations, changed) in expected.items():
         constraints = spec.get("matchConstraints", {})
         rules = constraints.get("resourceRules", [])
         if spec.get("failurePolicy") != "Fail":
@@ -482,17 +486,21 @@ def kill_switch_exemption(docs: list[dict]) -> list[str]:
         if constraints.get("namespaceSelector") != {"matchLabels": ADMISSION_LABEL}:
             problems.append(f"{name}: not every namespace the signature webhooks check")
         if [(r.get("apiGroups"), r.get("resources"), sorted(r.get("operations", []))) for r in rules] != [
-            ([group], [resource], operations)
+            ([group], resources, operations)
         ]:
             problems.append(f"{name}: matches {rules}")
         conditions = {
             c.get("name"): squash(c.get("expression", "").split()) for c in spec.get("matchConditions", [])
         }
-        newly = "request.operation == 'CREATE' || !(" + label.replace("object.", "oldObject.") + ")"
-        if set(conditions) != {"labelled-control", "newly-control"} or conditions["labelled-control"] != label:
+        if (
+            set(conditions) != {"labelled-control", "changed-control"}
+            or conditions["labelled-control"] != label
+        ):
             problems.append(f"{name}: matches {conditions.get('labelled-control')!r}, not the control label")
-        elif conditions["newly-control"] != newly:
-            problems.append(f"{name}: matches {conditions['newly-control']!r}, not only a newly control label")
+        elif conditions["changed-control"] != changed:
+            problems.append(
+                f"{name}: matches {conditions['changed-control']!r}, not every change to a control spec"
+            )
         validations = [squash(v.get("expression", "").split()) for v in spec.get("validations", [])]
         if validations != [allowed]:
             problems.append(f"{name}: allows {validations}")
@@ -504,6 +512,84 @@ def kill_switch_exemption(docs: list[dict]) -> list[str]:
 
 def test_kill_switch_exemption(overlay):
     assert kill_switch_exemption(overlay[1]) == []
+
+
+# What reaches into a running pod. Exec, attach, port-forward and proxy are CONNECT requests whose
+# admission object is their options, not the pod, so no policy can tell a kill switch's pod from
+# another: RBAC holds them, and nothing the overlays or this repository's charts apply grants them
+# (DEC-2046). The third-party charts (policy-controller, CloudNativePG) are not rendered here, and a
+# role is read by its own rules, so an aggregated ClusterRole's borrowed rules are not seen.
+POD_ACCESS = {
+    "pods/exec",
+    "pods/attach",
+    "pods/portforward",
+    "pods/proxy",
+    "pods/ephemeralcontainers",
+    "pods/*",
+    "*",
+}
+BROAD_ROLES = {"cluster-admin", "admin", "edit"}
+
+
+def pod_access(objects: list[dict]) -> list[str]:
+    """No Role or ClusterRole the overlays or this repository's charts apply reaches into a pod, and no
+    binding hands out a built-in role that does."""
+    problems = []
+    for doc in objects:
+        where = f"{doc.get('kind')} {doc.get('metadata', {}).get('name')}"
+        if doc.get("kind") in ("Role", "ClusterRole"):
+            for rule in doc.get("rules") or []:
+                groups = set(rule.get("apiGroups") or [])
+                reached = POD_ACCESS & set(rule.get("resources") or [])
+                if groups & {"", "*"} and reached:
+                    problems.append(f"{where}: grants {sorted(reached)}")
+        if doc.get("kind") in ("RoleBinding", "ClusterRoleBinding"):
+            role = (doc.get("roleRef") or {}).get("name")
+            if role in BROAD_ROLES:
+                problems.append(f"{where}: binds {role}")
+    return problems
+
+
+def test_nothing_reaches_into_a_pod(overlay):
+    _, docs, _, rendered, _ = overlay
+    assert pod_access(docs + rendered) == []
+
+
+@pytest.mark.parametrize(
+    "added",
+    [
+        {
+            "kind": "Role",
+            "metadata": {"name": "debugger"},
+            "rules": [{"apiGroups": [""], "resources": ["pods", "pods/exec"], "verbs": ["create"]}],
+        },
+        {
+            "kind": "ClusterRole",
+            "metadata": {"name": "everything"},
+            "rules": [{"apiGroups": ["*"], "resources": ["*"], "verbs": ["*"]}],
+        },
+        {
+            "kind": "Role",
+            "metadata": {"name": "debug-container"},
+            "rules": [{"apiGroups": [""], "resources": ["pods/ephemeralcontainers"], "verbs": ["patch"]}],
+        },
+        {
+            "kind": "RoleBinding",
+            "metadata": {"name": "editor"},
+            "roleRef": {"kind": "ClusterRole", "name": "edit"},
+        },
+        {
+            "kind": "Role",
+            "metadata": {"name": "tunnel"},
+            "rules": [
+                {"apiGroups": [""], "resources": ["pods/portforward", "pods/proxy"], "verbs": ["create"]}
+            ],
+        },
+    ],
+)
+def test_access_into_a_pod_is_caught(overlay, added):
+    _, docs, _, rendered, _ = overlay
+    assert pod_access([*docs, *rendered, added])
 
 
 def uncovered_workspaces(docs: list[dict]) -> list[str]:
@@ -747,6 +833,32 @@ DOC_BUGS = [
         "ValidatingAdmissionPolicy",
         "mandate-control-jobs",
         lambda d: d["spec"]["matchConditions"][1].update(expression="true"),
+    ),
+    (
+        kill_switch_exemption,
+        "ValidatingAdmissionPolicy",
+        "mandate-control-jobs",
+        lambda d: d["spec"]["matchConditions"][1].update(
+            expression="request.operation == 'CREATE' || !("
+            + CONTROL_LABEL.format("oldObject.spec.template.metadata.labels")
+            + ")"
+        ),
+    ),
+    (
+        kill_switch_exemption,
+        "ValidatingAdmissionPolicy",
+        "mandate-control-pods",
+        lambda d: d["spec"]["matchConditions"][1].update(
+            expression=d["spec"]["matchConditions"][1]["expression"].replace(
+                "object.spec != oldObject.spec || ", ""
+            )
+        ),
+    ),
+    (
+        kill_switch_exemption,
+        "ValidatingAdmissionPolicy",
+        "mandate-control-pods",
+        lambda d: d["spec"]["matchConstraints"]["resourceRules"][0].update(resources=["pods"]),
     ),
     (
         kill_switch_exemption,

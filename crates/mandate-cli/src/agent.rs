@@ -41,8 +41,16 @@ pub enum Command {
         bid: Option<Confirmed>,
     },
     /// The owner's acknowledgment of an account-stream event (mandate spec §5.8, trading spec
-    /// §11), committed as `OwnerAcknowledged`, which the executor copies.
+    /// §11), committed as `OwnerAcknowledged`, which the executor copies. With `request`, it answers
+    /// the `OwnerAcknowledgmentRequested` of that event id, which another user recorded (journal
+    /// spec §9.28, DEC-2512 item 2).
     Acknowledge {
+        event: String,
+        request: Option<String>,
+    },
+    /// The owner's request that another user acknowledge `event`, committed as
+    /// `OwnerAcknowledgmentRequested` (journal spec §9.28, DEC-2512 item 1).
+    RequestAcknowledgment {
         event: String,
     },
 }
@@ -95,7 +103,16 @@ fn code_at(agent: &str, command: &Command, head: u64) -> Result<Option<String>, 
         Command::Stop { release: false } => ("stop", None, &None, None),
         Command::Stop { release: true } => ("stop_release", None, &None, None),
         Command::Exit { instrument, bid } => ("owner_exit", Some(instrument), bid, None),
-        Command::Acknowledge { event } => ("acknowledge", None, &None, Some(event)),
+        Command::Acknowledge {
+            event,
+            request: None,
+        } => ("acknowledge", None, &None, Some(event)),
+        Command::Acknowledge {
+            request: Some(_), ..
+        }
+        | Command::RequestAcknowledgment { .. } => {
+            return Err(ControlError::Unimplemented { story: "E8-3" });
+        }
     };
     let bound = object(vec![
         ("confirms", text(name)),
@@ -163,7 +180,16 @@ pub fn command(
         Command::Resume | Command::Stop { .. } | Command::Acknowledge { .. }
     );
     let (event_type, key, timed): (_, _, &[&'static str]) = match command {
-        Command::Acknowledge { event } => (
+        Command::Acknowledge {
+            request: Some(_), ..
+        }
+        | Command::RequestAcknowledgment { .. } => {
+            return Err(ControlError::Unimplemented { story: "E8-3" });
+        }
+        Command::Acknowledge {
+            event,
+            request: None,
+        } => (
             "OwnerAcknowledged",
             vec![
                 ("agent", text(agent)),

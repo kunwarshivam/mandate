@@ -99,7 +99,7 @@ pub(super) struct Fold {
     stepping: bool,
     /// The breach time of each `RiskLimitTriggered` the input being folded has journalled, by its
     /// position: empty between inputs, since [`Fold::evaluate`] hands it to its [`Outcome`].
-    breach_times: BTreeMap<usize, u64>,
+    breach_times: BTreeMap<usize, (LimitKey, u64)>,
 }
 
 /// A `scale_sizes` rung's timers (§5.5), in session seconds.
@@ -262,8 +262,8 @@ impl Fold {
         let mut outcome = self.evaluate(clock, step, tripwire)?;
         outcome.tripwire_journal_index =
             outcome.tripwire_journal_index.saturating_add(journal.len());
-        for (position, seconds) in &outcome.breach_times {
-            breach_times.insert(position.saturating_add(journal.len()), *seconds);
+        for (position, recorded) in &outcome.breach_times {
+            breach_times.insert(position.saturating_add(journal.len()), *recorded);
         }
         outcome.breach_times = breach_times;
         journal.append(&mut outcome.journal);
@@ -689,7 +689,7 @@ impl Fold {
         if hit {
             if rung.active_s.is_none() {
                 rung.active_s = Some(0);
-                self.breach_times.insert(journal.len(), 0);
+                self.breach_times.insert(journal.len(), (key, 0));
                 journal.push(RiskEvent::RiskLimitTriggered {
                     limit: key,
                     action: LadderAction::ScaleSizes,
@@ -745,7 +745,8 @@ impl Fold {
         journal: &mut Vec<RiskEvent>,
     ) {
         self.confirmations.remove(&limit.key);
-        self.breach_times.insert(journal.len(), breach_s);
+        self.breach_times
+            .insert(journal.len(), (limit.key, breach_s));
         self.restrictions.insert(limit.restriction);
         journal.push(RiskEvent::RiskLimitTriggered {
             limit: limit.key,
@@ -868,7 +869,8 @@ impl Fold {
         let Some(since) = self.hard_since.get(&key).copied() else {
             self.hard_since.insert(key, self.at);
             self.restrictions.insert(Restriction::HardBreach);
-            self.breach_times.insert(journal.len(), self.breach_s(key));
+            self.breach_times
+                .insert(journal.len(), (key, self.breach_s(key)));
             journal.push(RiskEvent::RiskLimitTriggered {
                 limit: key,
                 action: LadderAction::ExitsOnly,

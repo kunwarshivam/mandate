@@ -80,3 +80,23 @@ run "refuses_a_region_outside_the_west" {
 
   expect_failures = [var.region]
 }
+
+run "refuses_nyc1" {
+  command = plan
+
+  variables {
+    region = "nyc1"
+  }
+
+  expect_failures = [var.region]
+}
+
+run "refuses_tor1" {
+  command = plan
+
+  variables {
+    region = "tor1"
+  }
+
+  expect_failures = [var.region]
+}
