@@ -330,8 +330,8 @@ jobs:
           name: charts-${{ github.sha }}
           path: published/CHARTS
 
-  # The three jobs below run on a manual dispatch from `main` only, never on a push or a pull
-  # request (DEC-2024; DEC-2605 rows 8 and 9). `release-signing-build` rebuilds the release, requires
+  # The five jobs below run on a manual dispatch from `main` only, never on a push or a pull
+  # request (DEC-2024, DEC-2026; DEC-2605 rows 8 and 9). `release-signing-build` rebuilds the release, requires
   # its build-a's digest, so what is signed is what `compare` proved reproducible, and hands `dist`
   # on. It holds no secret.
   release-signing-build:
@@ -371,6 +371,7 @@ jobs:
           path: |
             dist/SHA256SUMS
             dist/bin/
+            dist/sbom/
           if-no-files-found: error
           retention-days: 1
 
@@ -464,3 +465,81 @@ jobs:
         run: rustup show active-toolchain || rustup toolchain install
       - name: Verify the signatures and drill the signed release at tier production
         run: cargo xtask release check-signed dist signed/signatures
+
+  # A hosted cell's images (DEC-2026): only once `release-signing-check` proved this run's
+  # signatures. `publish-signed` verifies every signature against the committed public half again
+  # before it builds or pushes anything, then pushes each image with its binary's release signature
+  # as `signed-<commit>-<arch>`, signs it keyless and attests its SBOM. Neither job holds a release
+  # secret: only the run's own token, as `publish` on a push.
+  release-signing-publish:
+    needs: [release-signing-check]
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-to-sign-${{ github.sha }}-${{ matrix.arch }}
+          path: dist
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-signatures-${{ github.sha }}-${{ matrix.arch }}
+          path: signed
+      - name: Install the pinned Rust toolchain (rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - name: Publish this arch's release-signed images, sign them keyless and attest their SBOMs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: cargo xtask release publish-signed dist signed/signatures signed-published
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: signed-published-${{ github.sha }}-${{ matrix.arch }}
+          path: signed-published/PUBLISHED
+          if-no-files-found: error
+          retention-days: 90
+
+  release-signing-publish-index:
+    needs: [release-signing-publish]
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned Rust toolchain (rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - name: Push and sign the release-signed multi-arch index
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: cargo xtask release publish-signed-index signed-published
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: signed-published-${{ github.sha }}
+          path: signed-published/PUBLISHED
+          if-no-files-found: error
+          retention-days: 90

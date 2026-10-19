@@ -84,9 +84,9 @@ const ALLOWED: &[(&str, &str, &str)] = &[
 
 /// Every path an `upload-artifact` step may upload, by workflow and path, matched exactly (L5):
 /// the mutation cost reports, the release build's binaries, SBOMs, images and their test-key
-/// signatures, what each publish wrote, the release to sign and its signatures, and the
-/// Playwright traces of a failed end-to-end run, uploaded before the sign-in suite runs, so they
-/// never hold a sign-in session's cookies.
+/// signatures, what each publish wrote (the release-signed publish's too, DEC-2026), the release
+/// to sign with its SBOMs and its signatures, and the Playwright traces of a failed end-to-end
+/// run, uploaded before the sign-in suite runs, so they never hold a sign-in session's cookies.
 const ARTIFACT_PATHS: &[(&str, &str)] = &[
     (".github/workflows/ci.yml", "target/mutant-cost.json"),
     (
@@ -106,6 +106,11 @@ const ARTIFACT_PATHS: &[(&str, &str)] = &[
     (".github/workflows/release.yml", "published/CHARTS"),
     (".github/workflows/release.yml", "dist/SHA256SUMS"),
     (".github/workflows/release.yml", "dist/bin/"),
+    (".github/workflows/release.yml", "dist/sbom/"),
+    (
+        ".github/workflows/release.yml",
+        "signed-published/PUBLISHED",
+    ),
     (".github/workflows/release.yml", "signatures/"),
     (".github/workflows/web-e2e.yml", "web/test-results/"),
 ];

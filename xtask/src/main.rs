@@ -86,6 +86,9 @@ commands:
                         verify every release signature against the committed key, then push this
                         arch's images with them as signed-<commit>-<arch> (dispatch from main,
                         from CI; DEC-2026)
+  release publish-signed-index <out>
+                        push and sign the multi-arch signed-<commit> index over every arch's
+                        release-signed images (dispatch from main, from CI; DEC-2026)
   release publish-charts <out>
                         package the hosted clusters' charts, push them to GHCR and sign each
                         digest keyless (main only, from CI; E21-58)
@@ -339,6 +342,9 @@ fn run() -> Result<()> {
         ),
         ["infra"] => infra(),
         ["infra", "close"] => infra_close(),
+        ["release", "publish-signed-index", out] => {
+            release::publish_signed_index(&root, Path::new(out))
+        }
         ["release", "publish-charts", out] => release::publish_charts(&root, Path::new(out)),
         ["gitops", "bootstrap", environment] => {
             gitops::bootstrap(&root, gitops::Environment::parse(environment)?)
