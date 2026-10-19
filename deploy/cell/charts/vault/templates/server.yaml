@@ -144,8 +144,41 @@ spec:
     - {name: https, port: 8200, targetPort: 8200, protocol: TCP}
 {{- end -}}
 {{- /*
-Only the workspace's processes whose egress names the vault reach it, on 8200 alone; the vault
-reaches nothing. The operator reaches it through `kubectl exec`, never the network.
+The Kubernetes API's addresses and ports, from values or else read from the cluster: the
+`kubernetes` Service's address and its EndpointSlice's, since a policy controller may see either,
+as the journal-db chart reads them.
+*/ -}}
+{{- define "vault.kubeApi" -}}
+{{- $cidrs := .Values.kubeApi.cidrs -}}
+{{- $ports := .Values.kubeApi.ports -}}
+{{- if not $cidrs -}}
+{{- $service := lookup "v1" "Service" "default" "kubernetes" -}}
+{{- $slice := lookup "discovery.k8s.io/v1" "EndpointSlice" "default" "kubernetes" -}}
+{{- if and $service $slice -}}
+{{- $cidrs = list (printf "%s/32" $service.spec.clusterIP) -}}
+{{- $ports = list -}}
+{{- range $service.spec.ports -}}
+{{- $ports = append $ports (int .port) -}}
+{{- end -}}
+{{- range $slice.endpoints -}}
+{{- range .addresses -}}
+{{- $cidrs = append $cidrs (printf "%s/32" .) -}}
+{{- end -}}
+{{- end -}}
+{{- range $slice.ports -}}
+{{- $ports = append $ports (int .port) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if or (not $cidrs) (not $ports) -}}
+{{- fail "the Kubernetes API's address is unknown: install into a cluster, or set kubeApi.cidrs and kubeApi.ports" -}}
+{{- end -}}
+{{- dict "cidrs" (uniq $cidrs) "ports" (uniq $ports) | toJson -}}
+{{- end -}}
+{{- /*
+Only the workspace's processes whose egress names the vault reach it, on 8200 alone. The vault
+reaches nothing, but, with Kubernetes auth on, the cluster's API server, by address and port, for
+TokenReview. The operator reaches it through `kubectl exec`, never the network.
 */ -}}
 {{- define "vault.policy" -}}
 apiVersion: networking.k8s.io/v1
@@ -167,7 +200,21 @@ spec:
               mandate.dev/egress-vault: "true"
       ports:
         - {protocol: TCP, port: 8200}
+  {{- if .Values.kubeApi.enabled }}
+  {{- $api := include "vault.kubeApi" . | fromJson }}
+  egress:
+    - to:
+        {{- range $api.cidrs }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+      ports:
+        {{- range $api.ports }}
+        - {protocol: TCP, port: {{ . }}}
+        {{- end }}
+  {{- else }}
   egress: []
+  {{- end }}
 {{- end -}}
 ---
 {{ include "vault.emit" (include "vault.config" .) }}
