@@ -105,7 +105,6 @@ fn held_equities(run: &BacktestRun) -> Vec<Usd> {
 /// A 2:1 split halves the raw price and doubles the shares, so a flat series stays flat: every
 /// period close after the buy has the same equity, on both sides of the ex-date.
 #[test]
-#[ignore = "pending E4-4"]
 fn buy_and_hold_holds_through_a_two_for_one_split_with_flat_equity() {
     let config = config();
     let bars = split_series("100", "50");
@@ -123,7 +122,6 @@ fn buy_and_hold_holds_through_a_two_for_one_split_with_flat_equity() {
 /// the posted 300; with the raw price tripled to 300 too, equity stays flat, and the residual's
 /// cash is the difference between Q × 100 and Q' × 300.
 #[test]
-#[ignore = "pending E4-4"]
 fn a_reverse_split_pays_cash_in_lieu_for_its_residual() {
     let config = config();
     let bars = split_series("100", "300");
@@ -151,7 +149,6 @@ fn a_reverse_split_pays_cash_in_lieu_for_its_residual() {
 /// pre-split limit, so the run refuses rather than guess its adjustment: the limit at the first
 /// close plus the collar rests below the pre-split bars at 120 and would fill at 60 after a 2:1.
 #[test]
-#[ignore = "pending E4-4"]
 fn an_order_working_across_a_split_refuses_the_run() {
     let config = config();
     let mut bars = split_series("120", "60");
@@ -166,7 +163,6 @@ fn an_order_working_across_a_split_refuses_the_run() {
 /// Actions outside the run change nothing: one whose ex-date is the first bar's trade date was
 /// taken before the run began, and one after the last bar after it ended.
 #[test]
-#[ignore = "pending E4-4"]
 fn actions_outside_the_bars_change_nothing() {
     let config = config();
     let bars = split_series("100", "100");
@@ -192,7 +188,6 @@ fn actions_outside_the_bars_change_nothing() {
 /// Q' × k × old + f × k × old = Q × k × new exactly. The oracle is that constant, computed from the
 /// first held close; it shares nothing with the fold.
 #[test]
-#[ignore = "pending E4-4"]
 fn equity_is_flat_through_any_split_of_a_flat_series() {
     let mut runner = TestRunner::new(ProptestConfig {
         cases: 64,
