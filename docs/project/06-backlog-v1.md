@@ -872,7 +872,9 @@ after U-A1 to U-A5 are recorded.
   process prices an owner's market exit at the floor its instrument-scoped `OwnerExitRequested`
   confirmed, and holds any other exit at the market with one opaque alert (`owner_exit_unpriced`
   or `exit_unpriced`), a gap against rule 13 that [DEC-2033](decisions/DEC-2033.md) item 4
-  records. *Accepted when:* `IntentBody::Order` carries an order type; the core receives, gates
+  records. [DEC-2037](decisions/DEC-2037.md) designs it: a handoff with no limit for an exit, sent
+  at the market where §5.1 allows and by the §5.6 ladder elsewhere. *Accepted when:*
+  `IntentBody::Order` carries an order type; the core receives, gates
   and submits a market exit (trading spec §5.1, §5.5) with the same write-before-acting and
   rule-13 exemptions as a limit exit; the executor process hands every exit and raises neither
   alert; `Purpose::exempt_from_pacing` is checked for `OwnerExit` (owner exits are paced only by
@@ -880,6 +882,15 @@ after U-A1 to U-A5 are recorded.
   `tests/owner_exits.rs`) is re-seeded once the fixture fills, with a held position, gate facts
   and an `Unknown` order in the instrument, and shows no owner exit is refused for conduct,
   eligibility, day-trade budget, buying power or opening-session reasons.
+
+- **E7-30 (Must, M6, immediately after E7-29)** As an owner, I want my confirmed exit to sell outside the
+  regular session when I confirmed the displayed bid, as rule 13 allows, so that a runtime-proposed
+  owner exit is not held to the session the way an unconfirmed one is. Today the handoff carries
+  no confirmation, so the core treats every handed owner exit as unconfirmed
+  ([DEC-2037](decisions/DEC-2037.md) item 6). *Accepted when:* the handoff carries the owner's
+  confirmed bid, bid size and floor from the `OwnerExitRequested`; the core sends such an exit in
+  extended hours as a limit never below the floor, as a confirmed kill switch's close does
+  (trading spec §5.5); and an unconfirmed one still waits for the session.
 
 ### E8 Escalation and approvals
 
