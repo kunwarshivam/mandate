@@ -1581,11 +1581,11 @@ fn vault_drill_problems(logs: &str) -> Vec<String> {
 /// as the operator, then logs in as each role from the files `mandate vault provision` wrote and
 /// prints one line per read, and one per policy of the cell's that holds `*` or `+`. Seeded, it
 /// first rewrites the runtime's policy to read every connection's token through `+`, and puts the
-/// policy it read back when the script exits. Each read first looks its token up, so a token the
-/// vault does not honour is an `error`, never a denial. The scan counts the `mandate-*` policies it
-/// reads, and a failed read ends the script. Each read is
-/// `bao read` of the KV v2 data path, not `bao kv get`, whose preflight on the mount fails without
-/// `permission denied` for a role granted nothing under it, as the runtime is.
+/// policy it read back when the script exits, printing what the restore says so a failed one is
+/// seen. Each read first looks its token up, so a token the vault does not honour is an `error`,
+/// never a denial. The scan counts the `mandate-*` policies it reads, and a failed read ends the
+/// script. Each read is `bao read` of the KV v2 data path, not `bao kv get`, whose preflight on the
+/// mount fails without `permission denied` for a role granted nothing under it, as the runtime is.
 fn vault_drill_script(seeded: bool) -> String {
     let mut reads = String::new();
     for (role, path, _) in VAULT_DRILL_READS {
@@ -1606,7 +1606,7 @@ fn vault_drill_script(seeded: bool) -> String {
     }
     let plant = if seeded {
         "orig=$(BAO_TOKEN=\"$op\" bao policy read mandate-runtime)\n\
-         trap 'printf \"%s\\n\" \"$orig\" | BAO_TOKEN=\"$op\" bao policy write mandate-runtime - >/dev/null' EXIT\n\
+         trap 'printf \"%s\\n\" \"$orig\" | BAO_TOKEN=\"$op\" bao policy write mandate-runtime -' EXIT\n\
          printf 'path \"mandate/data/connections/+/token\" {\\n  capabilities = [\"read\"]\\n}\\n' \
          | BAO_TOKEN=\"$op\" bao policy write mandate-runtime - >/dev/null\n"
     } else {
@@ -4982,6 +4982,14 @@ mod tests {
             vault_drill_problems(&unscanned),
             ["want `checked 10 mandate policies`, got `checked 0 mandate policies`"]
         );
+        let scanned_twice = format!("{held}{}", probe(&["checked 10 mandate policies"]));
+        assert_eq!(
+            vault_drill_problems(&scanned_twice),
+            [
+                "want `checked 10 mandate policies`, got `checked 10 mandate policies` and \
+                 `checked 10 mandate policies`"
+            ]
+        );
         let no_scan = probe(&expected[..expected.len() - 1]);
         assert_eq!(
             vault_drill_problems(&no_scan),
@@ -4996,6 +5004,10 @@ mod tests {
         let seeded = vault_drill_script(true);
         assert!(!plain.contains("policy write"), "{plain}");
         assert!(seeded.contains("trap ") && seeded.contains("bao policy read mandate-runtime"));
+        assert!(
+            seeded.contains("bao policy write mandate-runtime -' EXIT"),
+            "the restore's output is not discarded: {seeded}"
+        );
         assert!(
             seeded.find("trap ") < seeded.find("connections/+/token"),
             "the restore is armed before the wildcard is planted: {seeded}"
