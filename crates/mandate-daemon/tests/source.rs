@@ -450,7 +450,8 @@ fn spend_sums_the_recorded_costs_and_refuses_one_it_cannot_read() {
 }
 
 /// Today's spend is the risk day's (DEC-2214 items 2 and 3): a cost recorded on an earlier New York
-/// day does not count, and without a risk clock there is no today, so no context.
+/// day does not count, a cost recorded after the clock's day began counts even when the clock has
+/// not caught up with it, and without a risk clock there is no today, so no context.
 #[test]
 #[ignore = "pending E21-54"]
 fn spend_counts_only_the_risk_day_s_recorded_costs() {
@@ -473,12 +474,61 @@ fn spend_counts_only_the_risk_day_s_recorded_costs() {
     let facts = source.parts(&state()).unwrap().facts;
     assert_eq!(
         facts.research_spend_usd_today,
-        Usd::parse("0.5").unwrap(),
-        "23:59:59 the evening before is yesterday's, midnight in New York is today's, and the next \
-         midnight is tomorrow's"
+        Usd::parse("2.5").unwrap(),
+        "23:59:59 the evening before is yesterday's; midnight in New York and anything after it, \
+         the next midnight included, counts while the clock still reads today"
     );
     assert!(
         source.parts(&unclocked()).is_none(),
         "no risk clock, no today"
+    );
+}
+
+/// Every cost record is read strictly, an earlier day's too (DEC-2214 item 2): a cost or time it
+/// cannot read, a record without a `reservation` member, or a negative cost gives no context.
+#[test]
+#[ignore = "pending E21-54"]
+fn every_cost_record_is_read_strictly() {
+    let yesterday = "2026-10-15T13:00:00.000000000Z";
+    let cases: [(&str, &str, &str); 5] = [
+        (
+            "an earlier day's unreadable cost",
+            r#"{"cost_usd":"a lot","reservation":null}"#,
+            yesterday,
+        ),
+        (
+            "an earlier day's unreadable time",
+            r#"{"cost_usd":"0.25","reservation":null}"#,
+            "yesterday",
+        ),
+        (
+            "no reservation member",
+            r#"{"cost_usd":"0.25"}"#,
+            EVENT_TIME,
+        ),
+        (
+            "a negative cost",
+            r#"{"cost_usd":"-0.25","reservation":null}"#,
+            EVENT_TIME,
+        ),
+        (
+            "a negative cost on an earlier day",
+            r#"{"cost_usd":"-0.25","reservation":null}"#,
+            yesterday,
+        ),
+    ];
+    for (case, payload, event_time) in cases {
+        let (journal, source) = deployed(&bundle(), &researching());
+        journal.agent_at("ModelInvocationRecorded", payload, event_time);
+        assert!(source.parts(&state()).is_none(), "{case}");
+    }
+    let (journal, source) = deployed(&bundle(), &researching());
+    journal.agent(
+        "ModelInvocationRecorded",
+        r#"{"cost_usd":"0","reservation":null}"#,
+    );
+    assert!(
+        source.parts(&state()).is_some(),
+        "a null reservation and a zero cost are read"
     );
 }
