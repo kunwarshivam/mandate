@@ -443,9 +443,6 @@ const ACCOUNT_ONLY_REASONS: [&str; 4] = [
 /// `ConfigSnapshotRegistered`'s kind for a signal model.
 const MODEL_KIND: &str = "model_version";
 
-/// §9.5's rules 39 and 40 on a well-typed `OrderRequestRecorded` (DEC-446 item 2), the first
-/// offending member in the order the spec reports: 39's pairs at `order_class` then
-/// `take_profit`, 40 at `at_floor`.
 /// Rule 245 at either version (DEC-2037 items 1 and 2): `type` is `limit` or `market`, `market`
 /// only for an exit, and then `limit_price` is non-null exactly for `limit`.
 fn intent_received_rules(p: Payload<'_>) -> Result<(), Invalid> {
@@ -482,6 +479,9 @@ fn confirmation_rules(p: Payload<'_>) -> Result<(), Invalid> {
     )
 }
 
+/// §9.5's rules 39 and 40 on a well-typed `OrderRequestRecorded` (DEC-446 item 2), the first
+/// offending member in the order the spec reports: 39's pairs at `order_class` then
+/// `take_profit`, 40 at `at_floor`.
 fn companion_rules(p: Payload<'_>) -> Result<(), Invalid> {
     let class = !p.is_null("order_class");
     let take_profit = !p.is_null("take_profit");
@@ -1106,9 +1106,6 @@ static ORDER_SUBMITTED_V2: Ty = Ty::Record(&[
     ("risk_clock", Ty::RiskClock),
 ]);
 
-/// §9.5's companion at `schema_version` 1: the executor-only members the fold rebuilds the exact
-/// request and the order's owner from (DEC-446 item 2). Every member is present (§4.2); rules 39
-/// and 40 say which are null.
 /// §9.5's `OwnerConfirmationReceived` (DEC-2040 item 2).
 static OWNER_CONFIRMATION_RECEIVED: Ty = Ty::Record(&[
     ("intent_id", Ty::Ulid),
@@ -1122,6 +1119,9 @@ static OWNER_CONFIRMATION_RECEIVED: Ty = Ty::Record(&[
     ("risk_clock", Ty::RiskClock),
 ]);
 
+/// §9.5's companion at `schema_version` 1: the executor-only members the fold rebuilds the exact
+/// request and the order's owner from (DEC-446 item 2). Every member is present (§4.2); rules 39
+/// and 40 say which are null.
 static ORDER_REQUEST_RECORDED: Ty = Ty::Record(&[
     ("agent_id", Ty::Ident),
     ("intent_id", Ty::Nullable(&Ty::Ulid)),
