@@ -8,6 +8,8 @@
 //! not read). A lost credential stops the process for its supervisor, which leases again on
 //! restart; a vault outage keeps the lease until it expires (`AGENTS.md` rule 3).
 
+use std::fmt;
+
 use mandate_time::UtcNanos;
 use mandate_vault::lease::{Lease, LeaseKeeper};
 use mandate_vault::source::SecretSource;
@@ -23,8 +25,9 @@ fn runtime() -> Result<Runtime, &'static str> {
         .map_err(|_| "runtime_unavailable")
 }
 
-/// What one pass found.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// What one pass found. Its `Debug` names the variant and never the credentials it carries
+/// (`AGENTS.md` rule 7).
+#[derive(Clone, PartialEq, Eq)]
 pub enum Held<C> {
     /// The lease holds the same secret as before.
     Unchanged,
@@ -32,6 +35,16 @@ pub enum Held<C> {
     Rotated(C),
     /// No credential is held any more.
     Lost,
+}
+
+impl<C> fmt::Debug for Held<C> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Unchanged => f.write_str("Unchanged"),
+            Self::Rotated(_) => f.write_str("Rotated(<redacted>)"),
+            Self::Lost => f.write_str("Lost"),
+        }
+    }
 }
 
 /// One connection's credential under the vault's lease, read by `read`.
@@ -83,12 +96,13 @@ impl<V: SecretSource, C, E, R: Fn(&[u8]) -> Result<C, E>> Leased<V, R> {
         }))
     }
 
-    /// Ends the lease on stop, so the vault can take it back before it expires.
+    /// Ends the lease on stop, so the vault can take it back before it expires: whatever lease
+    /// the keeper still holds, a renewed one whose secret did not read included.
     ///
     /// # Errors
     /// `runtime_unavailable`, or `revoke_failed` when the vault refused or could not be reached.
     pub fn revoke(self) -> Result<(), &'static str> {
-        let Some(held) = self.keeper.lease().filter(|_| !self.lost) else {
+        let Some(held) = self.keeper.lease() else {
             return Ok(());
         };
         let lease = Lease {

@@ -182,3 +182,25 @@ fn stopping_gives_the_lease_back() -> Result<(), Error> {
     assert!(calls.borrow().revoked.is_empty());
     Ok(())
 }
+
+/// A renewal whose new secret does not read loses the credential, and the lease the vault
+/// renewed is still given back on stop rather than left to expire.
+#[test]
+fn an_unreadable_rotation_still_gives_the_lease_back() -> Result<(), Error> {
+    let (mut leased, calls) = held(vec![Ok("bad-2")])?;
+    assert_eq!(leased.tick(at(1)?)?, Held::Lost);
+    leased.revoke()?;
+    assert_eq!(calls.borrow().revoked, ["bad-2"]);
+    Ok(())
+}
+
+/// `Held`'s `Debug` names the variant and never the credentials a rotation carries.
+#[test]
+fn held_never_prints_its_credentials() {
+    let rotated: Held<String> = Held::Rotated("ok-sentinel-credential".to_owned());
+    let shown = format!("{rotated:?}");
+    assert!(!shown.contains("ok-sentinel-credential"), "{shown}");
+    assert_eq!(shown, "Rotated(<redacted>)");
+    assert_eq!(format!("{:?}", Held::<String>::Lost), "Lost");
+    assert_eq!(format!("{:?}", Held::<String>::Unchanged), "Unchanged");
+}
