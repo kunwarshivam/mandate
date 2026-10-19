@@ -214,7 +214,8 @@ pub fn answer(
         Command::Resume => format!("resume {agent}"),
         Command::Stop { .. } => format!("stop {agent}"),
         Command::Pause => format!("pause {agent}"),
-        Command::Acknowledge { event } => format!("acknowledge {agent} {event}"),
+        Command::Acknowledge { event, .. } => format!("acknowledge {agent} {event}"),
+        Command::RequestAcknowledgment { event } => format!("request-ack {agent} {event}"),
     };
     Ok(vec![format!(
         "{named} committed as event {event_id} at seq {seq}"

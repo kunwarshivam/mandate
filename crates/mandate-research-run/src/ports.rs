@@ -38,6 +38,15 @@ pub struct NewsText {
     pub text: String,
 }
 
+/// One filing as `filings.search` reads it: its record, and the byte length of the text the store
+/// holds for it, so the model can ask `filings.get` for a range that starts inside it (§6.10,
+/// DEC-2250 item 2).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FilingEntry {
+    pub filing: Filing,
+    pub stored_bytes: u64,
+}
+
 /// Daily bars (`mandate-marketdata`'s, through the shell's adapter).
 pub trait BarReader {
     /// # Errors
@@ -90,6 +99,24 @@ pub trait FilingReader {
     /// # Errors
     /// [`ReadError`] when the store cannot answer.
     fn filings(&self, query: &TextQuery) -> Result<Vec<Filing>, ReadError>;
+
+    /// `filings.search`'s read: the query, narrowed by the forms and the model's search terms, each
+    /// matched inside the data service and never sent to a source (§6.10, data-plane spec §4.6,
+    /// HI-28). `forms` is never empty: a call that names none passes the whole pinned list
+    /// (DEC-2250 items 1 and 2). A reader that cannot match keeps this default and answers
+    /// [`ReadError::Unavailable`], which reads nothing (rule 3).
+    ///
+    /// # Errors
+    /// [`ReadError`] when the store cannot answer.
+    fn search(
+        &self,
+        query: &TextQuery,
+        forms: &[String],
+        terms: &[String],
+    ) -> Result<Vec<FilingEntry>, ReadError> {
+        let _ = (query, forms, terms);
+        Err(ReadError::Unavailable)
+    }
 }
 
 /// The instrument snapshot by symbol.
