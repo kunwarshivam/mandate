@@ -1,4 +1,4 @@
-//! Journal spec v0.65 rule 245 (E7-29, DEC-2037) and v0.66 rules 246 and 247 (E7-30, DEC-2039),
+//! Journal spec v0.65 rule 245 (E7-29, DEC-2037) and v0.67 rules 247 and 248 (E7-30, DEC-2040),
 //! through the journal's own checks against the vectors' `market_intents` and
 //! `owner_confirmations` sections. Every base and valid draft parses; every invalid draft is
 //! refused with its reason at its path; and every batch is judged by `check_batch` as it says.
@@ -113,7 +113,7 @@ fn every_invalid_market_intent_is_refused_at_the_member_rule_245_names() {
     assert!(count >= 14, "{count} invalid drafts; never fewer");
 }
 
-/// The owner exit at the market, its `OwnerConfirmationReceived`, and the confirmations rule 246
+/// The owner exit at the market, its `OwnerConfirmationReceived`, and the confirmations rule 247
 /// might be misread to refuse, parse.
 #[test]
 #[ignore = "pending E7-30"]
@@ -122,7 +122,7 @@ fn every_owner_confirmation_base_and_valid_draft_parses() {
     assert!(failed.is_empty(), "{}", failed.join("\n"));
 }
 
-/// Rule 246 and the closed schema: a price that is not positive, a null or absent member, or an
+/// Rule 247 and the closed schema: a price that is not positive, a null or absent member, or an
 /// extra one, refused at the member named.
 #[test]
 #[ignore = "pending E7-30"]
@@ -132,7 +132,7 @@ fn every_invalid_owner_confirmation_is_refused_with_its_reason_at_its_path() {
     assert!(count >= 10, "{count} invalid drafts; never fewer");
 }
 
-/// Rule 247 over each batch vector: each draft's own rules first, then each confirmation against
+/// Rule 248 over each batch vector: each draft's own rules first, then each confirmation against
 /// the record immediately before it, reported by its index in the batch.
 #[test]
 #[ignore = "pending E7-30"]
