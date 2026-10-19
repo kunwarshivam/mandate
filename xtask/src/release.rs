@@ -84,10 +84,13 @@ const TARGET_CC: &str = "gcc";
 
 /// What a release ships: each package and the binary it builds. `mandate-rh-sim` is the
 /// loopback test double the local cell runs beside the executor (DEC-124), never a broker.
-pub(crate) const BINARIES: [(&str, &str); 3] = [
+/// `mandate-api-server` is the workspace API server a hosted cell runs as its chart's `api`
+/// process, so its image must be signed and published like the others (DEC-2026).
+pub(crate) const BINARIES: [(&str, &str); 4] = [
     ("mandate-cli", "mandate"),
     ("mandate-agentd", "mandate-agentd"),
     ("mandate-rh-sim", "mandate-rh-sim"),
+    ("mandate-api-server", "mandate-api-server"),
 ];
 
 /// Where `release build` keeps its own target directory, apart from the workspace's, because its
@@ -1416,6 +1419,23 @@ mod tests {
         assert_eq!(
             rustflags(&paths()).replace("/work/a/mandate", "/elsewhere/b/src"),
             rustflags(&other)
+        );
+    }
+
+    /// What a release ships, exactly: the CLI, the agent daemon, the simulator the local cell's
+    /// drills run, and the workspace API server, whose image a hosted cell runs as `images.api`,
+    /// each package building the binary of its name but the CLI's `mandate` (DEC-971, DEC-2026).
+    #[test]
+    fn the_release_ships_exactly_these_binaries() {
+        assert_eq!(
+            BINARIES.as_slice(),
+            [
+                ("mandate-cli", "mandate"),
+                ("mandate-agentd", "mandate-agentd"),
+                ("mandate-rh-sim", "mandate-rh-sim"),
+                ("mandate-api-server", "mandate-api-server"),
+            ]
+            .as_slice()
         );
     }
 
