@@ -40,7 +40,6 @@ fn lookup(records: Vec<MembershipRecord>, now: i64) -> ControlLookup {
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn ones_own_row_is_an_active_membership_with_the_roles_in_effect() {
     let alice = principal(ALICE);
     let joined = vec![activated(
@@ -225,7 +224,6 @@ fn row(roles: &[Role]) -> Value {
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn each_caller_is_served_only_their_own_membership() {
     let f = fixture();
     *f.records.lock().expect("unpoisoned") = Ok(vec![
@@ -261,7 +259,6 @@ fn each_caller_is_served_only_their_own_membership() {
 }
 
 #[test]
-#[ignore = "pending E10-10"]
 fn an_unreadable_index_is_membership_unavailable_and_no_full_session_reads_it() {
     let f = fixture();
     let alice = open(&f, ALICE);

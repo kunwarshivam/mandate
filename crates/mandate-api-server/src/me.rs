@@ -17,10 +17,15 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::Response;
 use mandate_authn::Request;
 use mandate_canon::Value;
+use mandate_identity::{
+    Authorized, LookupFailed, Permission, Principal, Refusal, Scope, Session, authorize,
+};
+use mandate_identity_seal::Seal;
 use mandate_time::UtcNanos;
 
 use crate::http::{App, session_cookie};
-use crate::routes::{self, Refused, enveloped, string};
+use crate::members::ControlLookup;
+use crate::routes::{self, Refused, enveloped, object, string};
 use crate::session::Authenticated;
 
 /// `GET /v1/me/session` (DEC-2113 items 1 to 3): `{principal_id, kind, expires_at}` with an
@@ -60,10 +65,49 @@ pub async fn workspaces(State(app): State<Arc<App>>, headers: HeaderMap) -> Resp
 
 /// The admitted caller's memberships: authorized by the `self` row at the principal's scope, then
 /// read from the control stream's fold; `membership_unavailable` when it cannot be read.
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
-async fn own_workspaces(_app: &App, _admitted: &Authenticated, _now: UtcNanos) -> Response {
-    todo!()
+async fn own_workspaces(app: &App, admitted: &Authenticated, now: UtcNanos) -> Response {
+    let Ok(workspace) = app.hosted.workspace.to_ulid_text() else {
+        return Refused::MembershipUnavailable.response();
+    };
+    let records = match app.journal.rows(&format!("ctl:{workspace}")).await {
+        Ok(rows) => (app.members)(&rows),
+        Err(_) => Err(LookupFailed),
+    };
+    let lookup = ControlLookup::new(app.hosted, records, now);
+    let session = Session::new(Seal::grant(), admitted.reference, admitted.kind, Vec::new());
+    let authorized = authorize(
+        &lookup,
+        &Principal::User {
+            id: admitted.principal,
+        },
+        &session,
+        Scope::Principal,
+        Permission::ListOwnMemberships,
+        now,
+    );
+    let caller = match authorized {
+        Ok(Authorized::Principal { context, .. }) => context.principal(),
+        Err(Refusal::ReductionOnly) => return Refused::ReductionOnly.response(),
+        Ok(_) | Err(_) => return Refused::Forbidden.response(),
+    };
+    let rows = match lookup.own_roles(caller) {
+        Ok(Some(roles)) => vec![object(vec![
+            ("workspace_id", string(&workspace)),
+            ("label", Value::Null),
+            (
+                "roles",
+                Value::Array(roles.iter().filter_map(|r| r.code()).map(string).collect()),
+            ),
+        ])],
+        Ok(None) => Vec::new(),
+        Err(LookupFailed) => return Refused::MembershipUnavailable.response(),
+    };
+    enveloped(
+        StatusCode::OK,
+        now,
+        vec![
+            ("workspaces", Value::Array(rows)),
+            ("as_of", Value::Array(Vec::new())),
+        ],
+    )
 }

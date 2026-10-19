@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use mandate_canon::{Value, encode_ulid};
 use mandate_identity::{
     ControlEntry, LookupFailed, Membership, MembershipFold, MembershipLookup, MembershipQuery,
-    MembershipRecord, OrgId, PrincipalId, Role, Scope, WorkspaceId, control_entry,
+    MembershipRecord, MembershipState, OrgId, PrincipalId, Role, Scope, WorkspaceId, control_entry,
 };
 use mandate_identity_seal::{LookupSeal, Seal};
 use mandate_journal::StoredEvent;
@@ -140,12 +140,12 @@ impl ControlLookup {
     ///
     /// # Errors
     /// [`LookupFailed`] when the control stream's records cannot be read or folded.
-    #[expect(
-        clippy::todo,
-        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-    )]
-    pub fn own_roles(&self, _member: PrincipalId) -> Result<Option<BTreeSet<Role>>, LookupFailed> {
-        todo!()
+    pub fn own_roles(&self, member: PrincipalId) -> Result<Option<BTreeSet<Role>>, LookupFailed> {
+        let fold = self.fold()?;
+        Ok(
+            (fold.state(member, self.now) == Some(MembershipState::Active))
+                .then(|| fold.effective_roles(member, self.now)),
+        )
     }
 
     /// The hosted workspace's scope.
