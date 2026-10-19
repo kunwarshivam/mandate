@@ -528,6 +528,7 @@ mod tests {
         bindings: Vec<Value>,
         webhooks: Vec<Value>,
         jobs: Vec<Value>,
+        cilium: Vec<Value>,
         logs: &'static str,
         tunnel: &'static str,
         api: u16,
@@ -564,6 +565,7 @@ mod tests {
                     })
                     .collect(),
                 jobs: vec![job("migrate", "Complete")],
+                cilium: vec![cilium_config(Some("true"))],
                 logs: "",
                 webhooks: vec![json!({
                     "metadata": {"name": SIGNATURE_WEBHOOK},
@@ -619,6 +621,7 @@ mod tests {
                 "validatingadmissionpolicybindings" => self.bindings.clone(),
                 "validatingwebhookconfigurations" => self.webhooks.clone(),
                 "jobs" => self.jobs.clone(),
+                "configmaps" => self.cilium.clone(),
                 kinds if kinds.contains("fluxcd.io") => self.flux.clone(),
                 other => return Err(anyhow!("unexpected kubectl get {other}")),
             };
@@ -657,6 +660,34 @@ mod tests {
                 + 5 * i64::from(self.pauses.get())
                 + self.seconds_per_reading * i64::from(self.reads.get()))
         }
+    }
+
+    fn cilium_config(l7_proxy: Option<&str>) -> Value {
+        let mut config =
+            json!({"metadata": {"name": "cilium-config", "namespace": "kube-system"}, "data": {}});
+        if let Some(value) = l7_proxy {
+            config["data"]["enable-l7-proxy"] = json!(value);
+        }
+        config
+    }
+
+    /// The FQDN egress policies hold only while Cilium runs its DNS proxy (DEC-2058): a cluster
+    /// whose config turns it off, or has no Cilium config, fails; Cilium's default, an unset key,
+    /// holds.
+    #[test]
+    fn fqdn_egress_needs_ciliums_dns_proxy() -> Result<()> {
+        let line = "Cilium runs the L7 DNS proxy the FQDN egress policies need";
+        let mut staging = Staging::up();
+        let text = run(&staging)?;
+        assert!(text.contains(&format!("[ok] {line}")), "{text}");
+        staging.cilium = vec![cilium_config(None)];
+        assert_eq!(missing(&run(&staging)?), Vec::<&str>::new());
+        for config in [vec![cilium_config(Some("false"))], Vec::new()] {
+            staging.cilium = config;
+            let text = run(&staging)?;
+            assert_eq!(missing(&text), [line], "{text}");
+        }
+        Ok(())
     }
 
     fn run(staging: &Staging) -> Result<String> {

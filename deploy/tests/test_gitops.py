@@ -825,6 +825,99 @@ def test_rendered_objects_match_the_kubernetes_schemas(overlay, tmp_path):
 # What deploy/gitops/ may hold: the base, one overlay per hosted environment, the admission
 # policies, and the runbook. A
 # manifest anywhere else would be reconciled by nothing, or checked by nothing.
+# The external hosts each process may reach in a hosted cluster (DEC-2058), written out here from the
+# decision, not read from the overlay: infrastructure §3.1's external slots, as names. Paper only:
+# Alpaca's live trading host is never one of them (AGENTS.md rule 8).
+FQDN_EGRESS = {
+    "api": {"wyyxngmblqqokcvraflx.supabase.co"},
+    "control": {"wyyxngmblqqokcvraflx.supabase.co"},
+    "executor": {"paper-api.alpaca.markets"},
+    "data": {"data.alpaca.markets", "stream.data.alpaca.markets"},
+    "model-gateway": {"openrouter.ai"},
+}
+LIVE_HOST = re.compile(r"(?<![\w.-])api\.alpaca\.markets\b")
+KUBE_DNS = {"io.kubernetes.pod.namespace": "kube-system", "k8s-app": "kube-dns"}
+
+
+def fqdn_egress(docs: list[dict], hosts: dict[str, set[str]]) -> list[str]:
+    """Every CiliumNetworkPolicy in a hosted overlay lets exactly one process of the workspace reach
+    exactly its own hosts, by exact name on TCP 443, after asking the cluster DNS through Cilium's
+    proxy; nothing else, no ingress. Every process `hosts` names has one, and no live host appears."""
+    problems = [f"{d['kind']} {d['metadata']['name']} names api.alpaca.markets" for d in docs if LIVE_HOST.search(str(d))]
+    seen = set()
+    for policy in [d for d in docs if d["kind"] == "CiliumNetworkPolicy"]:
+        name = policy["metadata"]["name"]
+        spec = policy["spec"]
+        selector = spec.get("endpointSelector", {}).get("matchLabels", {})
+        process = selector.get("mandate.dev/process")
+        if policy["apiVersion"] != "cilium.io/v2" or policy["metadata"].get("namespace") != "ws-ws1":
+            problems.append(f"{name} is not a cilium.io/v2 policy in ws-ws1")
+        if selector != {"mandate.dev/workspace": "ws1", "mandate.dev/process": process} or process not in hosts:
+            problems.append(f"{name} selects {selector}")
+            continue
+        seen.add(process)
+        if set(spec) != {"endpointSelector", "egress"}:
+            problems.append(f"{name} sets {sorted(set(spec) - {'endpointSelector', 'egress'})}")
+        dns_rule = {
+            "toEndpoints": [{"matchLabels": KUBE_DNS}],
+            "toPorts": [{"ports": [{"port": "53", "protocol": "ANY"}], "rules": {"dns": [{"matchPattern": "*"}]}}],
+        }
+        rules = spec.get("egress", [])
+        named = [r for r in rules if r != dns_rule]
+        if len(rules) - len(named) != 1 or len(named) != 1:
+            problems.append(f"{name} is not one DNS rule and one host rule")
+            continue
+        rule = named[0]
+        names = {f.get("matchName") for f in rule.get("toFQDNs", [])}
+        if set(rule) != {"toFQDNs", "toPorts"} or any(set(f) != {"matchName"} for f in rule.get("toFQDNs", [])):
+            problems.append(f"{name} reaches more than exact names: {rule}")
+        if rule.get("toPorts") != [{"ports": [{"port": "443", "protocol": "TCP"}]}]:
+            problems.append(f"{name} reaches ports {rule.get('toPorts')}")
+        if names != hosts[process]:
+            problems.append(f"{name} reaches {sorted(names)}, want {sorted(hosts[process])}")
+    if hosts and seen != set(hosts):
+        problems.append(f"FQDN policies for {sorted(seen)}, want {sorted(hosts)}")
+    return problems
+
+
+def test_fqdn_egress(overlay):
+    environment, docs, *_ = overlay
+    assert fqdn_egress(docs, FQDN_EGRESS if environment == "staging" and overlay[4] != FIXTURE else {}) == []
+
+
+def test_each_fqdn_egress_bug_is_caught(tmp_path):
+    docs = build("staging", GITOPS / "clusters" / "staging", tmp_path)
+    assert fqdn_egress(docs, FQDN_EGRESS) == []
+
+    def policy(process: str) -> dict:
+        return next(
+            d
+            for d in docs
+            if d["kind"] == "CiliumNetworkPolicy"
+            and d["spec"]["endpointSelector"]["matchLabels"]["mandate.dev/process"] == process
+        )
+
+    def host_rule(process: str) -> dict:
+        return next(r for r in policy(process)["spec"]["egress"] if "toFQDNs" in r)
+
+    seeds = [
+        lambda: host_rule("executor")["toFQDNs"].append({"matchName": "api.alpaca.markets"}),
+        lambda: host_rule("data")["toFQDNs"].append({"matchPattern": "*.alpaca.markets"}),
+        lambda: host_rule("model-gateway")["toFQDNs"].append({"matchName": "paper-api.alpaca.markets"}),
+        lambda: host_rule("executor")["toPorts"][0]["ports"].append({"port": "80", "protocol": "TCP"}),
+        lambda: policy("api")["spec"]["egress"].append({"toCIDR": ["0.0.0.0/0"]}),
+        lambda: policy("api")["spec"]["endpointSelector"]["matchLabels"].update({"mandate.dev/process": "runtime"}),
+        lambda: policy("control")["spec"]["endpointSelector"]["matchLabels"].pop("mandate.dev/workspace"),
+        lambda: policy("data")["spec"].update(ingress=[{}]),
+        lambda: docs.remove(policy("model-gateway")),
+    ]
+    pristine = copy.deepcopy(docs)
+    for seed in seeds:
+        docs[:] = copy.deepcopy(pristine)
+        seed()
+        assert fqdn_egress(docs, FQDN_EGRESS), seed
+
+
 GITOPS_ENTRIES = {"base", "clusters", "policies", "BOOTSTRAP.md"}
 
 
