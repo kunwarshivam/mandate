@@ -4009,6 +4009,8 @@ const READ_ENV_NAMES: &[&str] = &[
     "DO_NOT_TRACK",
     "EVENT",
     "FAST_RESULT",
+    "FLUX_SHA256",
+    "FLUX_VERSION",
     "FULL_CHECKS_RESULT",
     "FULL_CHECKS_SELECTED",
     "FULL_RESULT",
