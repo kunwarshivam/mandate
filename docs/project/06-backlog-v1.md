@@ -880,7 +880,7 @@ after U-A1 to U-A5 are recorded.
   and an `Unknown` order in the instrument, and shows no owner exit is refused for conduct,
   eligibility, day-trade budget, buying power or opening-session reasons.
 
-- **E7-30 (Should, M6, after E7-29)** As an owner, I want my confirmed exit to sell outside the
+- **E7-30 (Must, M6, immediately after E7-29)** As an owner, I want my confirmed exit to sell outside the
   regular session when I confirmed the displayed bid, as rule 13 allows, so that a runtime-proposed
   owner exit is not held to the session the way an unconfirmed one is. Today the handoff carries
   no confirmation, so the core treats every handed owner exit as unconfirmed
@@ -2889,7 +2889,8 @@ enables `live` (ES-23, OPS-5).
   `connection_lifecycle_mismatch` and rule 200 in §9.2's mapping; the manager reads a deployment's
   account from version 2 and its connection's establishment, and the resolver is gone; a stop is
   final, read or not, and a version-1 deployment raises `deployment_unread`; the CLI and the
-  workspace API write version 2 exactly when rule 201 holds, check rule 200, and never redeploy a
+  workspace API write version 2 exactly when rule 201 holds, rule 200 holding by construction (the
+  connection taken from the document, the draft appended at the head read), and never redeploy a
   stopped agent's id. *Left:* the Compose adapter; the restart drill through `cargo xtask cell
   drill`; the owner's resume lifting a crash-loop pause once the runtime copies the pause (E21-30);
   alerts through the cell's alert path, and for an instance stuck `Pending` or `Unknown`; deleting

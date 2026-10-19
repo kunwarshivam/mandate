@@ -699,10 +699,11 @@ per workspace deployment (item 6).
       canonical `{agent_id, mandate_version}`, kind `deploy`. It commits `AgentDeployed` with
       `config_refs.mandate_version`: version 2, naming the document's `connection_id`, exactly when
       journal spec §9.24 rule 201 holds on the control stream (the connection established there at
-      version 2 and not since revoked), and version 1 otherwise; it refuses a version-2 draft whose
-      `connection_id` is not the document's (rule 200), appending nothing
-      ([DEC-1171](../project/decisions/DEC-1171.md)). Until the code change that follows DEC-1171
-      lands, it commits version 1. A refusal commits nothing: `DeploymentRejected` is not
+      version 2 and not since revoked), and version 1 otherwise. Rule 200 holds by construction:
+      the draft takes `connection_id` from the document, and is appended at the control stream's
+      head the route read, so a record written in between (a revocation) appends nothing and the
+      route answers `503` `journal_unavailable`, retryable
+      ([DEC-1171](../project/decisions/DEC-1171.md)). A refusal commits nothing: `DeploymentRejected` is not
       written until the deployment manager journals its own refusals. Its `202`, and the `200`
       of an agent already deployed with the version, are `commands/command-accepted`.
     - **Go live** answers `409` `live_unavailable` to every principal the deploy row authorizes,
