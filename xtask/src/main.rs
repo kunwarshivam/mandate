@@ -17,6 +17,7 @@ mod cell;
 mod gitops;
 mod image;
 mod mail;
+mod mask;
 mod mutant_costs;
 mod release;
 mod tofu_audit;
@@ -716,28 +717,24 @@ fn openbao() -> Result<()> {
         );
         return Ok(());
     }
-    if selection()?.among(&OPENBAO_TESTED).is_empty() {
-        eprintln!("    openbao: mandate-vault is not affected (DEC-1190)");
+    let packages = selection()?.among(&OPENBAO_TESTED);
+    if packages.is_empty() {
+        eprintln!("    openbao: neither mandate-vault nor mandate-cli is affected (DEC-1190)");
         return Ok(());
     }
-    let args = [
-        "nextest",
-        "run",
-        "--package",
-        "mandate-vault",
-        "--lib",
-        "--filterset",
-        "test(/^tests::openbao_server::/)",
-        "--locked",
-    ];
-    eprintln!("    $ {OPENBAO_REQUIRED}=1 cargo {}", args.join(" "));
-    let status = Command::new("cargo")
-        .args(args)
-        .env(OPENBAO_REQUIRED, "1")
-        .status()
-        .context("starting `cargo nextest`")?;
-    if !status.success() {
-        bail!("the OpenBao conformance suite failed with {status}");
+    for package in packages {
+        let mut args = vec!["nextest", "run", "--package", package];
+        args.extend_from_slice(openbao_tests(package));
+        args.push("--locked");
+        eprintln!("    $ {OPENBAO_REQUIRED}=1 cargo {}", args.join(" "));
+        let status = Command::new("cargo")
+            .args(&args)
+            .env(OPENBAO_REQUIRED, "1")
+            .status()
+            .context("starting `cargo nextest`")?;
+        if !status.success() {
+            bail!("{package}'s OpenBao tests failed with {status}");
+        }
     }
     Ok(())
 }
@@ -879,6 +876,16 @@ fn tofu_checks() -> Result<()> {
         eprintln!("    tofu: nothing under {TOFU_DIR} changed (DEC-1190)");
         return Ok(());
     }
+    let tofu_root = repo_root()?.join(TOFU_DIR);
+    let mut forbidden = tofu_symlinks(&tofu_root)?;
+    forbidden.extend(tofu_committed_working_dirs(&tofu_root)?);
+    forbidden.extend(tofu_forbidden_blocks(&tofu_sources(&tofu_root)?));
+    if !forbidden.is_empty() {
+        bail!("tofu:\n  {}", forbidden.join("\n  "));
+    }
+    eprintln!(
+        "    tofu: no provisioner, external or http data source, or remote module (DEC-2014)"
+    );
     let installed = |tool: &str| {
         Command::new(tool)
             .arg("--version")
@@ -944,6 +951,181 @@ fn tofu_checks() -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// The provider sources `deploy/tofu/` may name (DEC-2012 item 4).
+const TOFU_PROVIDER_SOURCES: [&str; 2] = ["digitalocean/digitalocean", "cloudflare/cloudflare"];
+
+/// Whether `word` occurs in `text` at `at` as a whole word: no letter, digit or `_` on either side.
+fn whole_word_at(text: &str, at: usize, word: &str) -> bool {
+    let word_char = |c: char| c.is_ascii_alphanumeric() || c == '_';
+    let before = text.get(..at).and_then(|head| head.chars().last());
+    let after = text
+        .get(at.saturating_add(word.len())..)
+        .and_then(|tail| tail.chars().next());
+    !before.is_some_and(word_char) && !after.is_some_and(word_char)
+}
+
+/// The byte offsets where `word` occurs in `text` as a whole word.
+fn whole_words<'a>(text: &'a str, word: &'a str) -> impl Iterator<Item = usize> + 'a {
+    text.match_indices(word)
+        .map(|(at, _)| at)
+        .filter(move |at| whole_word_at(text, *at, word))
+}
+
+/// Whether one line, its runs of whitespace collapsed, is a `source` this tree allows: a pinned
+/// provider, a sibling module (`../<name>`), or, from a root, a module of `deploy/tofu/modules`
+/// (`../../modules/<name>`), each name lower-case letters, digits, `_` and `-`.
+fn allowed_source_line(line: &str) -> bool {
+    let collapsed = line.split_whitespace().collect::<Vec<_>>().join(" ");
+    let Some(value) = collapsed
+        .strip_prefix("source = \"")
+        .and_then(|rest| rest.strip_suffix('"'))
+    else {
+        return false;
+    };
+    let plain = |name: &str| {
+        !name.is_empty()
+            && name
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '_' | '-'))
+    };
+    TOFU_PROVIDER_SOURCES.contains(&value)
+        || value.strip_prefix("../").is_some_and(plain)
+        || value.strip_prefix("../../modules/").is_some_and(plain)
+}
+
+/// Every reason `files` (each a path and its raw text) fail DEC-2014 item 6, read as raw text
+/// with no parser: comments, strings and heredocs count the same as code, so no syntax can hide a
+/// construct, and a false refusal is fixed by rewording. Refused, as whole words, case aside:
+/// `provisioner` anywhere; `external` anywhere; `http` unless `://` follows it at once; and
+/// `source` on any line that is not exactly an allowed `source = "..."` ([`allowed_source_line`]).
+/// A JSON file (`.tf.json` and the like) is refused outright, since `deploy/tofu/` holds none.
+fn tofu_forbidden_blocks(files: &[(String, String)]) -> Vec<String> {
+    let mut problems = Vec::new();
+    for (path, text) in files {
+        if path.ends_with(".json") {
+            problems.push(format!(
+                "{path}: deploy/tofu holds no JSON-syntax file, which the scan does not read \
+                 (DEC-2014)"
+            ));
+            continue;
+        }
+        for (number, raw) in (1_usize..).zip(text.lines()) {
+            let line = raw.to_ascii_lowercase();
+            let mut refuse = |why: &str| {
+                problems.push(format!("{path}:{number}: {why} (DEC-2014)"));
+            };
+            if raw.contains('\\') {
+                refuse("holds a backslash, an escape the scan would not decode");
+            }
+            if whole_words(&line, "provisioner").next().is_some() {
+                refuse("names `provisioner`, which deploy/tofu never may");
+            }
+            if whole_words(&line, "external").next().is_some() {
+                refuse("names `external`, the data source deploy/tofu never may use");
+            }
+            if whole_words(&line, "http").any(|at| {
+                !line
+                    .get(at.saturating_add(4)..)
+                    .is_some_and(|t| t.starts_with("://"))
+            }) {
+                refuse(
+                    "names `http` other than in a URL, the data source deploy/tofu never may use",
+                );
+            }
+            if whole_words(&line, "source").next().is_some() && !allowed_source_line(&line) {
+                refuse(
+                    "names `source` on a line that is not a pinned provider or a module of this \
+                     tree",
+                );
+            }
+        }
+    }
+    problems
+}
+
+/// Every symlink under `dir`, real `.terraform` working directories aside: a link could point the
+/// raw scan at one file and OpenTofu at another, so `deploy/tofu/` holds none (DEC-2014 item 6).
+/// A `.terraform` that is itself a link is refused like any other, since the raw scan skips what
+/// it holds. Whether a `.terraform` is committed is [`tofu_committed_working_dirs`]'s.
+fn tofu_symlinks(dir: &Path) -> Result<Vec<String>> {
+    let mut links = Vec::new();
+    let mut pending = vec![dir.to_path_buf()];
+    while let Some(dir) = pending.pop() {
+        for entry in fs::read_dir(&dir).with_context(|| format!("reading {}", dir.display()))? {
+            let path = entry?.path();
+            let kind = fs::symlink_metadata(&path)
+                .with_context(|| format!("reading {}", path.display()))?
+                .file_type();
+            if kind.is_dir() && path.file_name().is_some_and(|name| name == ".terraform") {
+                continue;
+            }
+            if kind.is_symlink() {
+                links.push(format!(
+                    "{}: a symlink, which deploy/tofu never holds (DEC-2014)",
+                    path.display()
+                ));
+            } else if kind.is_dir() {
+                pending.push(path);
+            }
+        }
+    }
+    links.sort();
+    Ok(links)
+}
+
+/// Every path git tracks under `dir` that sits in a `.terraform` working directory: the raw scan
+/// skips those directories, so one committed would carry configuration past it (DEC-2014 item 6).
+fn tofu_committed_working_dirs(dir: &Path) -> Result<Vec<String>> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["ls-files", "-z", "--", "."])
+        .output()
+        .context("starting `git ls-files`")?;
+    if !out.status.success() {
+        bail!(
+            "`git ls-files` under {} failed: {}",
+            dir.display(),
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    Ok(committed_working_dirs(&String::from_utf8_lossy(
+        &out.stdout,
+    )))
+}
+
+/// The paths of a NUL-separated `git ls-files` listing that sit in a `.terraform` directory.
+fn committed_working_dirs(listing: &str) -> Vec<String> {
+    listing
+        .split('\0')
+        .filter(|path| path.split('/').any(|part| part == ".terraform"))
+        .map(|path| {
+            format!("{path}: committed inside a .terraform working directory, which the scan skips (DEC-2014)")
+        })
+        .collect()
+}
+
+/// Every file under `dir` the raw scan reads, with its text: `.tf`, `.tofu`, `.hcl` and `.json`,
+/// outside `.terraform` working directories and OpenTofu's own lock files, which it writes.
+fn tofu_sources(dir: &Path) -> Result<Vec<(String, String)>> {
+    files_by_extension(dir, &["tf", "tofu", "hcl", "json"])?
+        .into_iter()
+        .filter(|path| {
+            !path
+                .components()
+                .any(|part| part.as_os_str() == ".terraform")
+                && path
+                    .file_name()
+                    .is_none_or(|name| name != ".terraform.lock.hcl")
+        })
+        .map(|path| {
+            let text =
+                fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+            Ok((path.display().to_string(), text))
+        })
+        .collect()
 }
 
 /// Every OpenTofu root under `tofu_dir` that the checks run in: each directory directly under
@@ -1125,12 +1307,234 @@ fn infra_workflow_in(root: &Path) -> Result<()> {
     Ok(())
 }
 
+/// The only workflow lines that may name the words `secrets` or `environment`, comments included,
+/// exactly, after trimming (DEC-2014 item 7). Every other line that names either is refused, so a
+/// secret or an environment is reached only on a line a reviewer has read here: no expression
+/// form, block scalar, bare `if:`, flow map or comment can carry one past the check. Adding a line
+/// is a reviewed change to this list.
+const GUARDED_WORKFLOW_LINES: &[(&str, &str)] = &[
+    (
+        ".github/workflows/r2-lockcheck.yml",
+        "- name: Build the R2 finding (no secrets)",
+    ),
+    (
+        ".github/workflows/release.yml",
+        "# `release-signing` environment, then signs each arch's binaries and SHA256SUMS with the release key",
+    ),
+    (
+        ".github/workflows/release.yml",
+        "# that environment's secrets hold (DEC-2024, as the founder decided in DEC-2605 rows 8 and 9).",
+    ),
+    (
+        ".github/workflows/release.yml",
+        "# environment's required reviewer, approves the run. It checks out only `.github/scripts` and",
+    ),
+    (
+        ".github/workflows/release.yml",
+        "# by SHA-256, and signs in a clean environment. The key is single-line base64, so GitHub masks",
+    ),
+    (
+        ".github/workflows/release.yml",
+        "environment: release-signing",
+    ),
+    (
+        ".github/workflows/release.yml",
+        "RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}",
+    ),
+    (
+        ".github/workflows/release.yml",
+        "COSIGN_PASSWORD: ${{ secrets.RELEASE_SIGNING_PASSWORD }}",
+    ),
+    (
+        ".github/workflows/ci.yml",
+        "# droplets, against a two-node k3d cluster: the namespace and its secrets, the pull secret on the",
+    ),
+    (
+        ".github/workflows/ci.yml",
+        "# mandate-vault's conformance suite against OpenBao in dev mode, fake secrets only (DEC-977).",
+    ),
+    (
+        ".github/workflows/r2-lockcheck.yml",
+        "# on demand, from `main` only, in the `production` environment, which holds R2's key and the",
+    ),
+    (
+        ".github/workflows/r2-lockcheck.yml",
+        "environment: production",
+    ),
+    (
+        ".github/workflows/r2-lockcheck.yml",
+        "R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}",
+    ),
+    (
+        ".github/workflows/r2-lockcheck.yml",
+        "CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}",
+    ),
+    (
+        ".github/workflows/web-deploy.yml",
+        "# `web/` or this file, or on demand from `main`, and its `environment: production` is the only",
+    ),
+    (
+        ".github/workflows/web-deploy.yml",
+        "# holder of the Cloudflare API token, an environment secret GitHub hands only to jobs on `main`.",
+    ),
+    (
+        ".github/workflows/web-deploy.yml",
+        "# true: a job-level condition cannot read the environment's own variables, so it is the",
+    ),
+    (
+        ".github/workflows/web-deploy.yml",
+        "environment: production",
+    ),
+    (
+        ".github/workflows/web-deploy.yml",
+        "CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}",
+    ),
+    (
+        ".github/workflows/web.yml",
+        "# deploys, from `main`, through the `production` environment (DEC-1005).",
+    ),
+    (
+        INFRA_WORKFLOW,
+        "# Plans, or plans and applies, one hosted environment's OpenTofu (E21-56, DEC-2011, DEC-2014).",
+    ),
+    (
+        INFRA_WORKFLOW,
+        "# only on a manual dispatch from `main`, under the GitHub environment `infra-staging` or",
+    ),
+    (INFRA_WORKFLOW, "environment:"),
+    (
+        INFRA_WORKFLOW,
+        "description: The environment to plan or apply",
+    ),
+    (INFRA_WORKFLOW, "group: infra-${{ inputs.environment }}"),
+    (
+        INFRA_WORKFLOW,
+        "environment: infra-${{ inputs.environment }}",
+    ),
+    (
+        INFRA_WORKFLOW,
+        "# Built here, with no secret in the environment, so no build script ever sees one.",
+    ),
+    (
+        INFRA_WORKFLOW,
+        "MANDATE_INFRA_ENVIRONMENT: ${{ inputs.environment }}",
+    ),
+    (
+        INFRA_WORKFLOW,
+        "DIGITALOCEAN_TOKEN: ${{ secrets.DIGITAL_OCEAN_API_KEY }}",
+    ),
+    (
+        INFRA_WORKFLOW,
+        "SPACES_ACCESS_KEY_ID: ${{ secrets.SPACES_ACCESS_KEY_ID }}",
+    ),
+    (
+        INFRA_WORKFLOW,
+        "SPACES_SECRET_ACCESS_KEY: ${{ secrets.SPACES_SECRET_ACCESS_KEY }}",
+    ),
+    (
+        INFRA_WORKFLOW,
+        "AWS_ACCESS_KEY_ID: ${{ secrets.SPACES_ACCESS_KEY_ID }}",
+    ),
+    (
+        INFRA_WORKFLOW,
+        "AWS_SECRET_ACCESS_KEY: ${{ secrets.SPACES_SECRET_ACCESS_KEY }}",
+    ),
+    (
+        INFRA_WORKFLOW,
+        "TF_VAR_state_passphrase: ${{ secrets.TOFU_STATE_PASSPHRASE }}",
+    ),
+    (
+        INFRA_WORKFLOW,
+        "TF_VAR_cloudflare_api_token: ${{ secrets.CF_INFRA_API_TOKEN }}",
+    ),
+];
+
+/// The only workflow lines that may hold a backslash, exactly, after trimming (DEC-2014 item 7):
+/// a backslash in a quoted YAML scalar is an escape (`\x73ecrets`) the raw scan would not decode,
+/// and a multi-line double-quoted scalar can carry one on a line that holds no quote and no
+/// `${{` at all, so outside these reviewed shell lines every backslash is refused.
+const BACKSLASH_WORKFLOW_LINES: &[(&str, &str)] = &[
+    (
+        ".github/workflows/ci.yml",
+        r##"printf 'Affected-set selection (DEC-1190): %s\n' "$REASONS" | tee -a "$GITHUB_STEP_SUMMARY""##,
+    ),
+    (
+        ".github/workflows/ci.yml",
+        r##"printf 'mutants=0\nshards=[]\ntotal=0\nper_shard=1\n' >> "$GITHUB_OUTPUT""##,
+    ),
+    (
+        ".github/workflows/codeql.yml",
+        r##"echo 'If you are using a "manual" build mode for one or more of the' \"##,
+    ),
+    (
+        ".github/workflows/codeql.yml",
+        r##"'languages you are analyzing, replace this with the commands to build' \"##,
+    ),
+    (
+        ".github/workflows/merge.yml",
+        r##"prs=$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --base main \"##,
+    ),
+    (".github/workflows/merge.yml", r##"printf '%s\n' "$out""##),
+    (
+        ".github/workflows/merge.yml",
+        r##"if printf '%s\n' "$out" | grep -q '^merged as '; then"##,
+    ),
+    (
+        ".github/workflows/web-e2e.yml",
+        r##"run: grep -rls 'packages\.microsoft\.com' /etc/apt/sources.list /etc/apt/sources.list.d/ | tee /dev/stderr | xargs -r sudo rm -f"##,
+    ),
+];
+
+/// Every line of `file` that names `secrets`, `environment` or `inherit` as a whole word, case
+/// aside and comments included, and is not one of [`GUARDED_WORKFLOW_LINES`] for that file: raw
+/// text, no parser (DEC-2014 item 7). `inherit` is never allowed, since it passes every secret on
+/// unnamed.
+fn guarded_word_problems(file: &CiFile) -> Vec<String> {
+    let mut problems = Vec::new();
+    for (number, raw) in (1_usize..).zip(file.text.lines()) {
+        let line = raw.to_ascii_lowercase();
+        let names = |word: &str| whole_words(&line, word).next().is_some();
+        if names("inherit") {
+            problems.push(format!(
+                "{}:{number}: names `inherit`, which passes every secret on unnamed (DEC-2014)",
+                file.path
+            ));
+        }
+        let allowed = GUARDED_WORKFLOW_LINES
+            .iter()
+            .any(|(path, allowed)| *path == file.path && *allowed == raw.trim());
+        let escaped = raw.contains('\\')
+            && !BACKSLASH_WORKFLOW_LINES
+                .iter()
+                .any(|(path, allowed)| *path == file.path && *allowed == raw.trim());
+        if escaped {
+            problems.push(format!(
+                "{}:{number}: a backslash, which YAML or the shell may decode as an escape the \
+                 scan would not, on a line xtask's BACKSLASH_WORKFLOW_LINES has not reviewed \
+                 (DEC-2014)",
+                file.path
+            ));
+        }
+        if (names("secrets") || names("environment")) && !allowed {
+            problems.push(format!(
+                "{}:{number}: names `secrets` or `environment` on a line xtask's \
+                 GUARDED_WORKFLOW_LINES has not reviewed (DEC-2014)",
+                file.path
+            ));
+        }
+    }
+    problems
+}
+
 /// Every way the workflows break DEC-2014's shape for plan and apply: `infra.yml` must run on
 /// `workflow_dispatch` alone; grant nothing at the top; hold one job, `tofu`, which runs only on
 /// `refs/heads/main`, under `environment: infra-${{ inputs.environment }}`, reading contents only,
 /// with a checkout that keeps no credential; offer exactly `staging` and `production`; and read a
 /// secret only in the one step that runs [`INFRA_RUN`], and only [`INFRA_SECRETS`]. No other
-/// workflow may read any of [`INFRA_SECRETS`] or name `infra-staging` or `infra-production`.
+/// workflow may read any of [`INFRA_SECRETS`], name `infra-staging` or `infra-production`, or
+/// compute an `environment:` name, which could resolve to one of them. No workflow, `infra.yml`
+/// included, may reach secrets by a form the check cannot name: an index (`secrets['x']`), the
+/// whole context (`toJSON(secrets)`), or `secrets: inherit`.
 fn infra_workflow_problems(files: &[CiFile]) -> Vec<String> {
     let secret_names = |text: &str| {
         text.match_indices("secrets.")
@@ -1144,6 +1548,9 @@ fn infra_workflow_problems(files: &[CiFile]) -> Vec<String> {
             .collect::<Vec<_>>()
     };
     let mut problems = Vec::new();
+    for file in files {
+        problems.extend(guarded_word_problems(file));
+    }
     for file in files.iter().filter(|file| file.path != INFRA_WORKFLOW) {
         for (number, line) in (1_usize..).zip(file.text.lines()) {
             let code = uncommented(line);
@@ -1380,9 +1787,17 @@ const BINARY_REFERENCE: &str = "bin:";
 /// them the selection holds.
 const PG_TESTED: [&str; 3] = ["mandate-journal-pg", "mandate-cli", "mandate-dispatcher"];
 
-/// The package whose tests need the OpenBao dev server (E21-32, DEC-977): `cargo xtask ci openbao`
-/// runs its suite when the selection holds it.
-const OPENBAO_TESTED: [&str; 1] = ["mandate-vault"];
+/// The packages whose tests need the OpenBao dev server (E21-32, DEC-977, DEC-2022): `cargo xtask
+/// ci openbao` runs each one's server tests when the selection holds it.
+const OPENBAO_TESTED: [&str; 2] = ["mandate-vault", "mandate-cli"];
+
+/// Which of `package`'s tests need the OpenBao dev server, as nextest arguments.
+fn openbao_tests(package: &str) -> &'static [&'static str] {
+    match package {
+        "mandate-cli" => &["--test", "vault_provision"],
+        _ => &["--lib", "--filterset", "test(/^tests::openbao_server::/)"],
+    }
+}
 
 /// Whether `path` is `entry`, lies under it when `entry` names a directory (ends in `/`), or
 /// starts with it when `entry` ends in `*`.
@@ -4328,8 +4743,11 @@ const READ_CARGO_NAMES: &[&str] = &[
 /// reports' `RUN_URL` and `VERDICTS` (DEC-1190), `merge.yml` the merge inputs, `web.yml` and
 /// `web-e2e.yml` the telemetry switches, `nightly.yml`'s service `POSTGRES_PASSWORD`, and
 /// `web-deploy.yml` the build's public Supabase values and the deploy step's Cloudflare token and
-/// account (DEC-1005), and `release.yml`'s `release-signing` job the release key, its password, the pinned
-/// cosign it signs with, and the digest it checks (DEC-2024).
+/// account (DEC-1005), `release.yml`'s `release-signing` job the release key, its password, the
+/// pinned cosign it signs with, and the digest it checks (DEC-2024), and `ci.yml` and `infra.yml`
+/// OpenTofu's and tflint's versions and checksums, and `infra.yml` its step's cloud credentials,
+/// `TF_VAR_*` inputs and `MANDATE_INFRA_*` choices (DEC-2013, DEC-2014), which
+/// [`infra_workflow_problems`] keeps to that one step.
 const READ_ENV_NAMES: &[&str] = &[
     "ACTIONLINT_SHA256",
     "ACTIONLINT_VERSION",
@@ -10170,7 +10588,7 @@ mod tests {
     use std::env;
     use std::ffi::OsStr;
     use std::fs;
-    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::fs::{PermissionsExt, symlink};
     use std::os::unix::process::ExitStatusExt;
     use std::path::{Path, PathBuf};
     use std::process::{Command, ExitStatus, Stdio};
@@ -10211,6 +10629,10 @@ mod tests {
     use super::{CREDENTIAL_GUARD, CREDENTIAL_NAME_PARTS, rehearsal_live_run};
     use super::{ProcessGroups, process_group_problems};
     use super::{Resolve, ResolvedNode, cargo_resolve, resolved_live_problems};
+    use super::{
+        TOFU_DIR, committed_working_dirs, guarded_word_problems, tofu_committed_working_dirs,
+        tofu_forbidden_blocks, tofu_sources, tofu_symlinks,
+    };
     use super::{unoptimised_config, unoptimised_packages};
 
     #[test]
@@ -14622,13 +15044,22 @@ mod tests {
         );
         assert!(
             workflow.contains(
-                "concurrency:\n  group: ci-${{ github.ref }}\n  cancel-in-progress: true\n"
+                "concurrency:\n  group: ci-${{ github.event_name == 'workflow_dispatch' && \
+                 !inputs.post_merge && github.run_id || github.ref }}\n  cancel-in-progress: \
+                 true\n"
             ),
-            "a newer run of the same ref cancels the older one"
+            "a newer run of the same ref cancels the older one, post-merge runs on main share \
+             one group, and any other dispatched run, the nightly's included, has a group of its \
+             own, so it is never cancelled (DEC-2610)"
         );
-        let report = "if: ${{ always() && github.event_name == 'workflow_dispatch' && \
-                      github.ref == 'refs/heads/main' && (needs.fast.result == 'failure' || \
-                      needs.full.result == 'failure') }}";
+        assert!(
+            workflow.contains("  push:\n    branches: [main]\n"),
+            "every push to main runs CI after the merge, and a push to any other branch does not \
+             (DEC-2610)"
+        );
+        let report = "if: ${{ always() && (github.event_name == 'workflow_dispatch' || \
+                      github.event_name == 'push') && github.ref == 'refs/heads/main' && \
+                      (needs.fast.result == 'failure' || needs.full.result == 'failure') }}";
         for (job, guard) in [
             ("select", "if: ${{ !github.event.pull_request.draft }}"),
             ("fast-lint", "if: ${{ !github.event.pull_request.draft }}"),
@@ -15386,6 +15817,21 @@ mod tests {
             for opaque in ["${GITHUB_SHA}", "${RUN_URL}"] {
                 assert!(issue.contains(opaque), "`{job}`'s issue names {opaque}");
             }
+            let title = issue
+                .split_once("-f title=\"")
+                .and_then(|(_, rest)| rest.split_once('"'))
+                .map(|(title, _)| title)
+                .with_context(|| format!("`{job}`'s issue has a title"))?;
+            let open = format!(
+                "if gh api --paginate \"repos/${{GITHUB_REPOSITORY}}/issues?state=open&per_page=100\" --jq '.[].title' | grep -Fqx \"{title}\"; then"
+            );
+            let at = |line: &str| lines.iter().position(|l| l == line);
+            let (check, create) = (at(&open), at(issue));
+            assert!(
+                check.is_some_and(|check| create.is_some_and(|create| check < create))
+                    && check.and_then(|check| lines.get(check + 2)) == Some(&"exit 0".to_owned()),
+                "`{job}` opens no second issue for a commit an open issue already reports"
+            );
             assert!(
                 !lines
                     .iter()
@@ -15440,6 +15886,201 @@ mod tests {
 
     fn crate_set(names: &[&str]) -> BTreeSet<String> {
         names.iter().map(|name| (*name).to_owned()).collect()
+    }
+
+    /// E21-56 (DEC-2014 item 6): the raw-text scan refuses `provisioner`, `external`, `http`
+    /// outside a URL, and any `source` line that is not a pinned provider or a module of this
+    /// tree, wherever they appear: code, strings, comments, heredocs, after HCL's `$${` escape
+    /// (the delta review's repro), in `.tofu`; and any JSON file. Lines without them, and the
+    /// committed tree, pass.
+    #[test]
+    fn deploy_tofu_names_no_provisioner_fetching_data_source_or_foreign_source() -> Result<()> {
+        let one =
+            |path: &str, text: &str| tofu_forbidden_blocks(&[(path.to_owned(), text.to_owned())]);
+        for (path, text, line) in [
+            (
+                "m/a.tf",
+                "resource \"x\" \"y\" {\n  provisioner \"local-exec\" {}\n}\n",
+                2,
+            ),
+            (
+                "m/a.tf",
+                "resource x y {\n  PROVISIONER local-exec {}\n}\n",
+                2,
+            ),
+            ("m/a.tf", "# provisioner \"local-exec\" {}\n", 1),
+            ("m/a.tf", "x = <<EOT\nprovisioner\nEOT\n", 2),
+            (
+                "m/a.tf",
+                "resource \"terraform_data\" \"t\" {\n  triggers_replace = \"$${\"\n  provisioner \"local-exec\" { command = \"id\" }\n  input = \"}\"\n}\n",
+                3,
+            ),
+            ("m/a.tf", "data \"external\" \"run\" {}\n", 1),
+            ("m/a.tf", "data\n  external\n  run {}\n", 2),
+            ("m/a.tf", "data \"http\" \"fetch\" {}\n", 1),
+            ("m/a.tofu", "data http f {}\n", 1),
+            (
+                "m/a.tf",
+                "module \"m\" {\n  source = \"git::https://example.com/m.git\"\n}\n",
+                2,
+            ),
+            (
+                "m/a.tf",
+                "module \"m\" {\n  source = \"./${var.x}\"\n}\n",
+                2,
+            ),
+            (
+                "m/a.tf",
+                "module \"m\" {\n  source = \"./../../../elsewhere\"\n}\n",
+                2,
+            ),
+            ("m/a.tf", "module \"m\" {\n  source =\n    \"../x\"\n}\n", 2),
+            ("m/a.tf", "# a public source\n", 1),
+        ] {
+            let problems = one(path, text);
+            assert_eq!(problems.len(), 1, "{text:?}: {problems:?}");
+            assert!(
+                problems[0].starts_with(&format!("{path}:{line}:")),
+                "{text:?}: {problems:?}"
+            );
+        }
+        assert_eq!(
+            one("m/a.tf.json", "{}").len(),
+            1,
+            "any JSON file is refused"
+        );
+        for text in [
+            "data \"ext\\u0065rnal\" \"x\" {}\n",
+            "data \"h\\u0074tp\" \"x\" {}\n",
+            "x = \"a\\nb\"\n",
+        ] {
+            assert!(
+                !one("m/a.tf", text).is_empty(),
+                "{text:?}: a backslash is refused"
+            );
+        }
+        let root = env::temp_dir().join(format!("mandate-tofu-links-{}", std::process::id()));
+        if root.exists() {
+            fs::remove_dir_all(&root)?;
+        }
+        fs::create_dir_all(root.join("modules/x/.terraform"))?;
+        fs::write(root.join("modules/x/main.tf"), "")?;
+        symlink(
+            root.join("modules/x/main.tf"),
+            root.join("modules/x/link.tf"),
+        )?;
+        symlink(root.join("modules/x"), root.join("modules/x/.terraform/ok"))?;
+        fs::create_dir_all(root.join("modules/y"))?;
+        symlink(root.join("modules/x"), root.join("modules/y/.terraform"))?;
+        let links = tofu_symlinks(&root)?;
+        fs::remove_dir_all(&root)?;
+        assert_eq!(links.len(), 2, "{links:?}");
+        assert!(links.iter().any(|l| l.contains("link.tf")), "{links:?}");
+        assert!(
+            links.iter().any(|l| l.contains("modules/y/.terraform")),
+            "a .terraform that is a link is refused: {links:?}"
+        );
+        assert_eq!(
+            committed_working_dirs("modules/x/main.tf\0modules/x/.terraform/modules/m/main.tf\0"),
+            [
+                "modules/x/.terraform/modules/m/main.tf: committed inside a .terraform working directory, which the scan skips (DEC-2014)"
+            ]
+        );
+        assert_eq!(
+            tofu_committed_working_dirs(&repo_root()?.join(TOFU_DIR))?,
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            tofu_symlinks(&repo_root()?.join(TOFU_DIR))?,
+            Vec::<String>::new()
+        );
+        for text in [
+            "api_origin = \"http://127.0.0.1:8080\"\n",
+            "condition = can(regex(\"^https?://\", var.api_origin))\n",
+            "service = \"http_status:404\"\n",
+            "source_addresses = [\"10.0.0.0/8\"]\n",
+            "source  = \"digitalocean/digitalocean\"\n",
+            "source = \"cloudflare/cloudflare\"\n",
+            "source   = \"../network\"\n",
+            "source = \"../../modules/cell\"\n",
+            "data \"digitalocean_sizes\" \"node\" {}\n",
+        ] {
+            assert_eq!(one("m/a.tf", text), Vec::<String>::new(), "{text:?}");
+        }
+        assert_eq!(
+            tofu_forbidden_blocks(&tofu_sources(&repo_root()?.join(TOFU_DIR))?),
+            Vec::<String>::new(),
+            "the committed deploy/tofu passes"
+        );
+        Ok(())
+    }
+
+    /// E21-56 (DEC-2014 item 7): outside its reviewed lines, a workflow line naming `secrets` or
+    /// `environment`, and any line naming `inherit`, is refused, raw: in every form the delta
+    /// reviews found (multi-line expressions, a comment inside a `run: |` block, a bare `if:`,
+    /// `with:`, quoted and flow `inherit`, a block-scalar, flow-map or continued `environment`).
+    /// The committed workflows pass, and a reviewed line moved to another file does not.
+    #[test]
+    fn workflows_name_secrets_and_environments_only_on_reviewed_lines() -> Result<()> {
+        let guarded = |text: &str| guarded_word_problems(&ci_file(".github/workflows/x.yml", text));
+        for text in [
+            "jobs:\n  x:\n    steps:\n      - run: echo ${{ secrets['A'] }}\n",
+            "jobs:\n  x:\n    steps:\n      - run: echo ${{\n          secrets['A'] }}\n",
+            "jobs:\n  x:\n    steps:\n      - run: |\n          # ${{ toJSON(secrets) }}\n",
+            "jobs:\n  x:\n    steps:\n      - run: |\n          echo hi # ${{ format('{0}', secrets) }}\n",
+            "jobs:\n  x:\n    steps:\n      - if: contains(toJSON(secrets), 'a')\n        run: echo\n",
+            "jobs:\n  x:\n    steps:\n      - uses: a/b@c\n        with:\n          all: ${{ toJson( SECRETS ) }}\n",
+            "jobs:\n  x:\n    uses: ./y.yml\n    secrets: inherit\n",
+            "jobs:\n  x: {uses: ./y.yml, secrets: 'inherit'}\n",
+            "jobs:\n  x:\n    environment: |\n      infra-${{ inputs.e }}\n",
+            "jobs:\n  x:\n    environment: >-\n      infra-${{ inputs.e }}\n",
+            "jobs:\n  x:\n    environment: {\n      name: infra-${{ inputs.e }} }\n",
+            "jobs:\n  x:\n    environment: infra-\n      ${{ inputs.e }}\n",
+            "jobs:\n  x:\n    environment: production\n",
+            "# no secrets in this file\n",
+            "jobs:\n  x:\n    steps:\n      - run: echo \"${{ \\x73ecrets.A }}\"\n",
+            "jobs:\n  x:\n    \"envir\\x6fnment\": infra-staging\n",
+            "jobs:\n  x:\n    steps:\n      - run: \"echo ${{ sec\\\n          rets.A }}\"\n",
+            "jobs:\n  x:\n    env:\n      T: \"${{\n        \\x73ecrets.A\n        }}\"\n",
+            "jobs:\n  x:\n    steps:\n      - run: echo \\x73ecrets\n",
+        ] {
+            assert!(!guarded(text).is_empty(), "{text}");
+        }
+        assert!(
+            guarded("x:\n  y: ${{ secrets.A }}\n  inherit: z\n").len() == 2,
+            "each offending line is named"
+        );
+        for text in [
+            "jobs:\n  x:\n    steps:\n      - run: echo ${{ github.token }}\n",
+            "env:\n  MANDATE_INFRA_ENVIRONMENT_X: y\n",
+            "jobs:\n  x:\n    steps:\n      - run: echo secret_name\n",
+        ] {
+            assert_eq!(guarded(text), Vec::<String>::new(), "{text}");
+        }
+        let dir = repo_root()?.join(".github/workflows");
+        for path in files_by_extension(&dir, &["yml", "yaml"])? {
+            let relative = format!(
+                ".github/workflows/{}",
+                path.file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default()
+            );
+            let file = ci_file(&relative, &fs::read_to_string(&path)?);
+            assert_eq!(
+                guarded_word_problems(&file),
+                Vec::<String>::new(),
+                "{relative}"
+            );
+        }
+        assert!(
+            !guarded_word_problems(&ci_file(
+                ".github/workflows/ci.yml",
+                "environment: production\n"
+            ))
+            .is_empty(),
+            "a line reviewed for web-deploy.yml is not allowed in ci.yml"
+        );
+        Ok(())
     }
 
     /// E21-56 (DEC-2014): `plan` inits and saves a plan; `apply` applies that same saved plan,
@@ -15597,13 +16238,37 @@ mod tests {
                 "{name}: {problems:?}"
             );
         }
+        for indirect in [
+            "          X: ${{ secrets['DIGITAL_OCEAN_API_KEY'] }}\n",
+            "          X: ${{ toJSON(secrets) }}\n",
+            "          X: ${{ ToJson( secrets ) }}\n",
+        ] {
+            let infra = edited(
+                "          TF_VAR_access_allowed_emails",
+                &format!("{indirect}          TF_VAR_access_allowed_emails"),
+            );
+            assert!(
+                check(&infra, &[])
+                    .iter()
+                    .any(|p| p.contains("GUARDED_WORKFLOW_LINES")),
+                "{indirect} in infra.yml is refused"
+            );
+        }
         for other in [
             "jobs:\n  x:\n    steps:\n      - run: echo ${{ secrets.TOFU_STATE_PASSPHRASE }}\n",
             "jobs:\n  x:\n    environment: infra-staging\n",
+            "jobs:\n  x:\n    environment: ${{ inputs.target }}\n",
+            "jobs:\n  x:\n    uses: ./.github/workflows/y.yml\n    secrets: inherit\n",
+            "jobs:\n  x:\n    steps:\n      - run: echo ${{ secrets[inputs.name] }}\n",
         ] {
             let problems = check(&text, &[ci_file(".github/workflows/ci.yml", other)]);
-            assert_eq!(problems.len(), 1, "{other}: {problems:?}");
-            assert!(problems[0].starts_with(".github/workflows/ci.yml:"));
+            assert!(!problems.is_empty(), "{other}: {problems:?}");
+            assert!(
+                problems
+                    .iter()
+                    .all(|p| p.starts_with(".github/workflows/ci.yml:") && p.contains("(DEC-2014)")),
+                "{other}: {problems:?}"
+            );
         }
         Ok(())
     }
@@ -16976,6 +17641,71 @@ jq -r "$filter" "$src"
 "##;
 
     const APPROVED_HEAD: &str = "1111111111111111111111111111111111111111";
+
+    /// DEC-2610: a merge `merge.yml` makes pushes with its own token, which starts no workflow, so
+    /// it dispatches `ci` on `main` once after any merge, and only then, with the one right that
+    /// takes.
+    #[test]
+    fn the_merge_workflow_runs_ci_on_main_after_a_merge_it_made() -> Result<()> {
+        let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/merge.yml"))?;
+        let job = |name: &str| -> Result<Vec<String>> {
+            Ok(workflow_job(&workflow, name)
+                .with_context(|| format!("merge.yml has a `{name}` job"))?
+                .iter()
+                .map(|line| line.trim().trim_start_matches("- ").to_owned())
+                .collect())
+        };
+        let merge = job("merge")?;
+        assert!(
+            merge
+                .iter()
+                .any(|l| l == "echo \"merged=true\" >> \"$GITHUB_OUTPUT\"")
+        );
+        assert!(
+            merge
+                .iter()
+                .any(|l| l == "if printf '%s\\n' \"$out\" | grep -q '^merged as '; then"),
+            "only a run that merged says so"
+        );
+        assert!(
+            !merge
+                .iter()
+                .filter(|l| !l.starts_with('#'))
+                .any(|l| l.contains("actions:") || l.contains("dispatches")),
+            "the merging job holds no `actions` right and dispatches nothing"
+        );
+        let dispatch = job("ci-on-main")?;
+        for line in [
+            "needs: merge",
+            "if: ${{ always() && needs.merge.outputs.merged == 'true' }}",
+            "actions: write",
+            "run: gh api -X POST \"repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/dispatches\" \
+             -f ref=main -f \"inputs[post_merge]=true\"",
+        ] {
+            assert!(
+                dispatch.iter().any(|l| l == line),
+                "`ci-on-main` has `{line}`"
+            );
+        }
+        let rights: Vec<&String> = dispatch
+            .iter()
+            .skip_while(|l| *l != "permissions:")
+            .skip(1)
+            .take_while(|l| l.ends_with(": write") || l.ends_with(": read"))
+            .collect();
+        assert_eq!(
+            rights,
+            ["actions: write"],
+            "`actions: write` and nothing else"
+        );
+        assert!(
+            !dispatch
+                .iter()
+                .any(|l| l.contains("checkout") || l.contains("secrets.")),
+            "the dispatch job runs no code and reads no secret"
+        );
+        Ok(())
+    }
 
     #[test]
     fn merge_workflow_supplies_the_authorized_coordinator_identities() -> Result<()> {
@@ -22541,7 +23271,7 @@ jq -r "$filter" "$src"
             "build-file-unreadable",
             &[(".github/workflows/a.yml", "x\n")],
         )?;
-        std::os::unix::fs::symlink(root.join("missing"), root.join("Makefile"))?;
+        symlink(root.join("missing"), root.join("Makefile"))?;
         fs::write(root.join("justfile"), [0xff_u8, 0xfe, b'\n'])?;
         fs::write(root.join("Dockerfile"), "RUN echo hi\0\n")?;
         let read = ci_files(&root);
