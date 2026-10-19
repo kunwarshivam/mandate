@@ -205,6 +205,10 @@ pub struct HandedConfirmation {
     pub bid: Price,
     pub bid_size: Qty,
     pub floor: Price,
+    /// The instant from which it no longer applies: the step-up's `authenticated_at` plus 300 s,
+    /// judged against the core's journaled event time; at exactly this instant it has expired
+    /// (DEC-2040 item 7).
+    pub expires_at: RiskClock,
     pub copied_from: EventId,
 }
 
