@@ -214,19 +214,22 @@ pub fn register_model(
     registration(journal, store, owner, key, stored, 1, now)
 }
 
-/// Registers the research agent's model from a recorded research entry (DEC-2247 item 1): the
-/// recording's `entry` member, read as [`ResearchEntry::recorded`] reads it,
-/// whose `model_id` and `model_version` must be the ones named. Its content object and hash are
-/// recomputed here from the entry with the fixed template, plan, bounds and schema; no caller
-/// supplies a hash. It commits one `ConfigSnapshotRegistered` of kind `model_version` with
-/// `admits_instruments: true` and no parameters, the only registration that admits instruments,
-/// and changes no envelope field (rule 11).
+/// Registers the research agent's model from the recorded research entry in `recording`, the
+/// recorded bundle's `research.json` (DEC-2247 item 1).
+///
+/// It reads the recording's `entry` member with [`ResearchEntry::recorded`], the reader the bundle's
+/// loader uses, and checks that the entry is of `model_id` at `model_version`. It recomputes the
+/// content object and its hash from the entry, with the fixed template, plan, bounds and schema;
+/// no caller supplies a hash. Then it stores the content and commits one
+/// `ConfigSnapshotRegistered` of kind `model_version` with `admits_instruments: true` and no
+/// parameters. It is the only registration that admits instruments, and it changes no envelope
+/// field: the mandate naming the model is still the owner's to confirm (rule 11).
 ///
 /// # Errors
 /// [`ControlError::Refused`] with `paper_only`, `model_not_research` for an id without the `llm.`
 /// prefix, `entry_unreadable` for a recording that is not strict JSON or whose entry is missing a
-/// member, or `entry_mismatch` for an entry of another model or version, before anything is stored
-/// or committed; [`ControlError::Journal`] as `commit` reports.
+/// member, or `entry_mismatch` for an entry of another model or version, each before anything is
+/// stored or committed; [`ControlError::Journal`] as `commit` reports.
 pub fn register_research_model(
     journal: &mut dyn ControlJournal,
     store: &mut dyn ArtifactStore,
