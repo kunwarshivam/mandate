@@ -4,9 +4,9 @@
 //! item 5). In paper, or in live on the owner's recorded Robinhood connection (DEC-925). The
 //! deployment is version 2, naming the document's connection, exactly when journal spec v0.54
 //! §9.24 rule 201 holds on the control stream, and version 1 otherwise (DEC-1171); an agent id is
-//! deployed once (DEC-1173 item 1).
+//! deployed once (DEC-1173 item 1). Rule 200 holds by construction: the `connection_id` it names
+//! is the one parsed from the stored document it deploys.
 
-use mandate_canon::Value;
 use mandate_journal::ArtifactStore;
 
 use crate::control::{
@@ -53,13 +53,20 @@ fn established_v2(rows: &[Row], connection: &str) -> bool {
     bound && latest.is_some_and(|r| r.event_type == ESTABLISHED)
 }
 
+/// How many times [`deploy`] reads the rows and decides again when the stream moves under a
+/// version-2 deployment before it gives up.
+const DECISIONS: u32 = 3;
+
 /// Deploys `agent` with `version` when `code` is the one shown for both (DEC-530 item 4): stores
 /// the record, then commits one `AgentDeployed` with `config_refs.mandate_version`. A re-run while
-/// the agent's active deployment is `version` returns it and commits nothing.
+/// the agent's active deployment is `version` returns it and commits nothing. A version-2
+/// deployment is appended at the head its rows were read at, so rule 201 still holds at the append:
+/// when another writer moves the stream first (a revocation, say), the rows are read and the
+/// deployment decided again.
 ///
 /// # Errors
 /// [`ControlError::Refused`] with a DEC-530 item 9 code, having written nothing;
-/// [`ControlError::Journal`] for a store or journal that fails.
+/// [`ControlError::Journal`] for a store or journal that fails, or a stream that keeps moving.
 #[allow(
     clippy::too_many_arguments,
     reason = "the journal, store, ids and owner every gesture takes, and the gesture's four inputs"
@@ -74,6 +81,26 @@ pub fn deploy(
     code: &str,
     now: Now,
 ) -> Result<Submitted, ControlError> {
+    for _ in 0..DECISIONS {
+        let gesture = (agent, version, code);
+        if let Some(submitted) = decide_and_commit(journal, store, ids, owner, gesture, now)? {
+            return Ok(submitted);
+        }
+    }
+    Err(ControlError::Journal(
+        "the control stream kept moving under the deployment; nothing was committed".into(),
+    ))
+}
+
+/// One reading of the rows and one decision: `None` when a version-2 deployment's head moved.
+fn decide_and_commit(
+    journal: &mut dyn ControlJournal,
+    store: &mut dyn ArtifactStore,
+    ids: &mut dyn Ids,
+    owner: &Owner,
+    (agent, version, code): (&str, &str, &str),
+    now: Now,
+) -> Result<Option<Submitted>, ControlError> {
     paper_or_live(owner)?;
     agent_stream(owner, agent).map_err(|_| refused("agent_invalid"))?;
     let rows = rows(journal, owner)?;
@@ -99,7 +126,7 @@ pub fn deploy(
     match last_of(&rows, agent) {
         Some(deployed) if deployed.event_type == DEPLOYED => {
             if deployed.member("mandate_version") == Some(version) {
-                return Ok(deployed.submitted());
+                return Ok(Some(deployed.submitted()));
             }
             return Err(refused("agent_active"));
         }
@@ -121,18 +148,14 @@ pub fn deploy(
         ("user", text(&owner.user)),
     ])?;
     let connection = mandate.connection_id.as_str();
-    let named = document.get("connection_id").and_then(Value::as_str);
-    if named != Some(connection) {
-        return Err(refused("version_invalid"));
-    }
     let mut members = vec![("agent_id", text(agent))];
-    let schema_version = if established_v2(&rows, connection) {
+    let (schema_version, pinned) = if established_v2(&rows, connection) {
         members.push(("connection_id", text(connection)));
-        2
+        (2, rows.last().map(|r| r.seq))
     } else {
-        1
+        (1, None)
     };
-    let event = ((DEPLOYED, members, true), schema_version);
+    let event = ((DEPLOYED, members, true), schema_version, pinned);
     let bound = vec![("mandate_version", text(version))];
     commit_at(journal, store, owner, event, (version, &record, bound), now)
 }

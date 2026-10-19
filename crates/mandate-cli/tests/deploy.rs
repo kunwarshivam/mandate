@@ -143,6 +143,17 @@ impl World {
     fn seed_at(&mut self, event_type: &str, payload: &str, schema_version: u64) {
         let control = stream(CONTROL);
         let head = self.journal.head(&control).unwrap().seq;
+        let draft = self.drafted(event_type, payload, schema_version);
+        let (journal, at) = (&mut self.journal, at(NOW).at);
+        let epoch = journal.take_ownership(&control).unwrap();
+        let outcome = journal.append(&control, head, epoch, at, &[draft.as_slice()]);
+        assert!(matches!(outcome, Ok(AppendOutcome::Committed(_))));
+    }
+
+    /// Another control-stream writer's draft of `event_type`, its event id from the head now.
+    fn drafted(&self, event_type: &str, payload: &str, schema_version: u64) -> Vec<u8> {
+        let control = stream(CONTROL);
+        let head = self.journal.head(&control).unwrap().seq;
         let draft = SEEDED.replace("@I", &format!("9{head:025}"));
         let draft = match schema_version {
             1 => draft,
@@ -157,11 +168,7 @@ impl World {
                 ),
         };
         let draft = draft.replace("@T", event_type);
-        let draft = [draft.replace("@P", payload)];
-        let (journal, at) = (&mut self.journal, at(NOW).at);
-        let epoch = journal.take_ownership(&control).unwrap();
-        let outcome = journal.append(&control, head, epoch, at, &[draft[0].as_bytes()]);
-        assert!(matches!(outcome, Ok(AppendOutcome::Committed(_))));
+        draft.replace("@P", payload).into_bytes()
     }
 
     /// A §9.2 version record of `event_type` for the named document, every envelope path entered
@@ -366,7 +373,15 @@ fn a_deployment_names_its_connection_exactly_when_rule_201_holds() {
         Seed("ConnectionRevoked", REVOKED),
         SeedV2("ConnectionEstablished", ESTABLISHED),
     ];
-    let cases: [(&str, &[Do<'_>], DeployedAs); 4] = [
+    let another = ESTABLISHED
+        .replace("conn_alpaca_paper_01", "conn_alpaca_paper_02")
+        .replace("01J0ACC0VNT000000000000000", "01J0ACC0VNT000000000000001");
+    let cases: [(&str, &[Do<'_>], DeployedAs); 5] = [
+        (
+            "another_connection_established",
+            &[SeedV2("ConnectionEstablished", &another)],
+            (1, None),
+        ),
         ("unrecorded", &[], (1, None)),
         (
             "established",
@@ -388,6 +403,41 @@ fn a_deployment_names_its_connection_exactly_when_rule_201_holds() {
         world.run(Deploy(AGENT, "v1", None)).unwrap();
         assert_eq!(deployed_as(&world), expected, "{name}");
     }
+}
+
+/// A revocation another writer commits after `agent deploy` read the rows, and before it appends,
+/// never lets it append version 2 after the revocation: the version-2 draft is pinned to the head
+/// it was decided at, so it reads the rows again, where V-001 now refuses the revoked connection,
+/// and nothing is appended (#1748 review). A connection revoked before the command ran is the
+/// refusal table's `version_invalid`.
+#[test]
+fn a_revocation_that_lands_before_the_append_is_read_and_the_deployment_refused() {
+    let mut world = World::new();
+    for step in [
+        SeedV2("ConnectionEstablished", ESTABLISHED),
+        Created("v1"),
+        Confirmed("v1"),
+    ] {
+        world.run(step).unwrap();
+    }
+    let revocation = world.drafted("ConnectionRevoked", REVOKED, 1);
+    world.journal.land_before_next.push(revocation);
+    let before = world.appends();
+    let result = world.run(Deploy(AGENT, "v1", None));
+    assert_eq!(refused(result), "version_invalid", "decided again after it");
+    let rows = world.rows();
+    let last = rows.last().map(|r| r.event_type.as_str());
+    assert_eq!(last, Some("ConnectionRevoked"));
+    let deployed = rows
+        .iter()
+        .filter(|r| r.event_type == "AgentDeployed")
+        .count();
+    assert_eq!(deployed, 0, "no deployment after the revocation");
+    assert_eq!(
+        world.appends(),
+        before + 1,
+        "the pinned append, refused as behind, and no other"
+    );
 }
 
 /// Every refusal carries one of DEC-530 item 9's codes, each case its own, and writes nothing: no

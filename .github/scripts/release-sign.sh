@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Signs a release with the release key, in `release.yml`'s `release-signing` job only (DEC-2024; the
 # founder's route is DEC-2605 rows 8 and 9). It runs beside the key, so it builds nothing and runs
-# no repository build. It requires dist/bin to hold exactly the names dist/SHA256SUMS lists, checks
-# them against it and SHA256SUMS against build-a's DIGEST, installs cosign from COSIGN_URL pinned
-# to COSIGN_SHA256, and signs those names and SHA256SUMS, and nothing else, into signatures/ in a
-# clean environment that holds only the password, HOME and PATH. RELEASE_SIGNING_KEY is cosign.key
-# as single-line base64, decoded into a 0600 file under RUNNER_TEMP and deleted on every exit;
-# neither secret is printed.
+# no repository build. It requires dist/bin to hold exactly the names dist/SHA256SUMS lists, as
+# regular files (no symlink, directory or other node), checks them against it and SHA256SUMS
+# against build-a's DIGEST, installs cosign from COSIGN_URL pinned to COSIGN_SHA256, and signs
+# those names and SHA256SUMS, and nothing else, into signatures/ in a clean environment that holds
+# only the password, HOME and PATH. RELEASE_SIGNING_KEY is cosign.key as single-line base64,
+# decoded into a 0600 file under RUNNER_TEMP and deleted on every exit; neither secret is printed.
 #
 # Usage: release-sign.sh   (with DIGEST, COSIGN_URL, COSIGN_SHA256, RELEASE_SIGNING_KEY,
 #                           COSIGN_PASSWORD and RUNNER_TEMP set)
@@ -14,6 +14,14 @@ set -euo pipefail
 umask 077
 
 sums=dist/SHA256SUMS
+if [ ! -f "$sums" ] || [ -L "$sums" ] || [ ! -d dist/bin ] || [ -L dist/bin ]; then
+  echo "dist/SHA256SUMS and dist/bin must be a regular file and a directory; nothing is signed" >&2
+  exit 1
+fi
+if [ -n "$(find dist/bin -mindepth 1 -not -type f -print -quit)" ]; then
+  echo "dist/bin holds something that is not a regular file; nothing is signed" >&2
+  exit 1
+fi
 if grep -Evq '^[0-9a-f]{64}  [A-Za-z0-9._-]+$' "$sums" || [ ! -s "$sums" ]; then
   echo "SHA256SUMS is empty or holds a line that is not '<sha256>  <name>'" >&2
   exit 1
