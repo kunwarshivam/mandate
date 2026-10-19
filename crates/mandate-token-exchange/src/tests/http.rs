@@ -2,9 +2,16 @@
 //! exact form to the token URL, no redirect followed, and nothing read past the answer's limit
 //! (DEC-2629 item 2). It is a cell adapter (DEC-2629 item 3) on loopback; no test sends to Alpaca.
 
+#![allow(
+    clippy::disallowed_methods,
+    reason = "two tests measure that a refusal does not wait out the timeout; no product code reads the clock"
+)]
+
 use std::collections::BTreeMap;
+use std::io::{Read, Write};
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use axum::Router;
 use axum::body::Bytes;
@@ -15,6 +22,7 @@ use secrecy::{ExposeSecret, SecretString};
 
 use crate::cell::parse;
 use crate::http::HttpTokenEndpoint;
+use crate::response::MAX_BODY;
 use mandate_connections::ConnectError;
 use mandate_connections::exchange::{ClientSecret, ExchangedGrant, PendingConnect, exchange_code};
 use mandate_connections::grant::GrantedScopes;
@@ -46,6 +54,7 @@ enum Answer {
     Redirect(u16),
     Status(u16),
     Oversized,
+    AtLimit,
 }
 
 #[derive(Clone)]
@@ -89,6 +98,10 @@ async fn answered(
             r#"{"error":"invalid_grant"}"#,
         )
             .into_response(),
+        Answer::AtLimit => {
+            let padded = format!("{GRANT}{}", " ".repeat(MAX_BODY - GRANT.len()));
+            (StatusCode::OK, json, padded).into_response()
+        }
         Answer::Oversized => {
             let padded = format!("{GRANT}{}", " ".repeat(1 << 20));
             (StatusCode::OK, json, padded).into_response()
@@ -178,6 +191,13 @@ fn key() -> VaultKey {
 /// the vault after it.
 fn exchanged(answer: Answer) -> (Result<ExchangedGrant, ConnectError>, Vec<Hit>, MemVault) {
     let (addr, hits) = serve(answer);
+    let result = exchange_at(addr);
+    let seen = hits.lock().unwrap().clone();
+    (result.0, seen, result.1)
+}
+
+/// Runs one exchange against whatever answers on `addr`, returning its result and the vault.
+fn exchange_at(addr: SocketAddr) -> (Result<ExchangedGrant, ConnectError>, MemVault) {
     let url = parse(Some("ci"), &format!("http://{addr}{TOKEN_PATH}")).unwrap();
     let mut endpoint = HttpTokenEndpoint::for_cell(url).unwrap();
     let mut vault = MemVault::default();
@@ -199,8 +219,88 @@ fn exchanged(answer: Answer) -> (Result<ExchangedGrant, ConnectError>, Vec<Hit>,
     };
     let secret = ClientSecret(SecretString::from("secret-CANARY"));
     let result = exchange_code(&pending, &client, &secret, &mut vault, &mut endpoint);
-    let seen = hits.lock().unwrap().clone();
-    (result, seen, vault)
+    (result, vault)
+}
+
+/// A raw endpoint that reads the request, writes `head`, then writes `chunk` until the client
+/// hangs up (or, with an empty `chunk`, holds the connection open without a body).
+fn raw(head: &'static str, chunk: &'static [u8]) -> SocketAddr {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut request = [0_u8; 4096];
+        let _read = stream.read(&mut request);
+        if stream.write_all(head.as_bytes()).is_err() {
+            return;
+        }
+        let started = Instant::now();
+        while started.elapsed() < Duration::from_secs(30) {
+            if chunk.is_empty() {
+                std::thread::sleep(Duration::from_millis(50));
+                let mut probe = [0_u8; 1];
+                stream
+                    .set_read_timeout(Some(Duration::from_millis(50)))
+                    .unwrap();
+                if matches!(stream.read(&mut probe), Ok(0)) {
+                    return;
+                }
+            } else if stream.write_all(chunk).is_err() {
+                return;
+            }
+        }
+    });
+    addr
+}
+
+/// An answer of exactly [`MAX_BODY`] bytes is read whole over HTTP.
+#[test]
+#[ignore = "pending E10-13"]
+fn an_answer_at_the_limit_is_read() {
+    let (result, hits, vault) = exchanged(Answer::AtLimit);
+    assert!(result.is_ok(), "{result:?}");
+    assert_eq!(hits.len(), 1);
+    assert_eq!(
+        vault.tokens.get(&key()).map(String::as_str),
+        Some("tok-CANARY")
+    );
+}
+
+/// An answer that declares more than [`MAX_BODY`] bytes is refused on its declaration, without
+/// waiting for a body that never comes.
+#[test]
+#[ignore = "pending E10-13"]
+fn a_declared_oversized_answer_is_refused_before_its_body() {
+    let addr = raw(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 1048576\r\n\r\n",
+        b"",
+    );
+    let started = Instant::now();
+    let (result, _) = exchange_at(addr);
+    assert_eq!(result.map(|_| ()), Err(ConnectError::EndpointFailed));
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "{:?}",
+        started.elapsed()
+    );
+}
+
+/// An answer that never ends is refused once it passes [`MAX_BODY`], not read to the timeout.
+#[test]
+#[ignore = "pending E10-13"]
+fn an_endless_answer_is_refused_once_past_the_limit() {
+    let addr = raw(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n",
+        b"                                                                ",
+    );
+    let started = Instant::now();
+    let (result, _) = exchange_at(addr);
+    assert_eq!(result.map(|_| ()), Err(ConnectError::EndpointFailed));
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "{:?}",
+        started.elapsed()
+    );
 }
 
 #[test]
