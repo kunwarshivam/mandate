@@ -31,7 +31,6 @@ fn researching() -> Json {
 /// The envelope is the document's own, member by member (mandate spec §8.5 and §8.6), for the
 /// fixture as committed and for a researching one.
 #[test]
-#[ignore = "pending E21-54"]
 fn the_envelope_is_the_documents_own() {
     for document in [
         serde_json::from_str::<Json>(MANDATE).unwrap(),
@@ -82,7 +81,6 @@ fn the_envelope_is_the_documents_own() {
 /// Every value the mandate schema allows is read as itself: each asset class, a disclosure version,
 /// and each admission decision.
 #[test]
-#[ignore = "pending E21-54"]
 fn the_envelope_reads_every_value_the_schema_allows() {
     let disclosure = Digest::of(b"the leveraged ETP disclosure");
     for (admission, decision) in [
@@ -108,7 +106,6 @@ fn the_envelope_reads_every_value_the_schema_allows() {
 /// Any signal model that admits instruments makes the envelope admit them, not only the first;
 /// with none admitting, a research envelope is still read as written (mandate spec §8.5).
 #[test]
-#[ignore = "pending E21-54"]
 fn the_envelope_admits_instruments_when_any_model_does() {
     let mut second = researching();
     let mut model = second["behavior"]["signal_models"][0].clone();
@@ -144,7 +141,6 @@ fn a_refusal_names_its_member() {
 
 /// A member the envelope cannot read refuses it, naming that member: nothing is defaulted.
 #[test]
-#[ignore = "pending E21-54"]
 fn an_envelope_member_it_cannot_read_refuses_it() {
     type Edit = fn(&mut Json);
     let cases: [(&str, Edit); 18] = [
