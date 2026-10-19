@@ -463,17 +463,23 @@ fn intent_received_rules(p: Payload<'_>) -> Result<(), Invalid> {
     )
 }
 
-/// Rule 247 (DEC-2040 item 2): the confirmed bid, bid size, and floor are each positive, reported
-/// at the first that is not.
+/// Rule 247 (DEC-2040 items 2 and 7): the confirmed quantity, bid, bid size, floor, and expiry are
+/// each positive, reported at the first that is not.
 fn confirmation_rules(p: Payload<'_>) -> Result<(), Invalid> {
-    for member in ["bid", "bid_size", "floor"] {
+    for member in ["qty", "bid", "bid_size", "floor"] {
         ensure(
             crate::scheduler::positive(p.text(member)),
             InvalidReason::Schema,
             &format!("payload.{member}"),
         )?;
     }
-    Ok(())
+    ensure(
+        p.0.get("expires_at")
+            .and_then(Value::as_int)
+            .is_some_and(|at| at > 0),
+        InvalidReason::Schema,
+        "payload.expires_at",
+    )
 }
 
 fn companion_rules(p: Payload<'_>) -> Result<(), Invalid> {
@@ -851,14 +857,17 @@ pub(crate) fn check_batch(drafts: &[Draft]) -> Result<(), (usize, Invalid)> {
     Ok(())
 }
 
-/// Rule 248 for the confirmation at `at` (DEC-2040 item 2): the record immediately before it is
-/// an `IntentReceived` (else the confirmation's `event_type`) of the same intent (its
-/// `payload.intent_id`), whose purpose is `owner_exit` (the intent's `payload.purpose`) and whose
-/// limit is null or not below the floor (the intent's `payload.limit_price`).
+/// A draft's normalized payload, as the rules read it.
 fn payload_of(draft: &Draft) -> Payload<'_> {
     Payload(draft.fields().get("payload").unwrap_or(&Value::Null))
 }
 
+/// Rule 248 for the confirmation at `at` (DEC-2040 items 2 and 7): the record immediately before
+/// it is an `IntentReceived` (else the confirmation's `event_type`) of the same intent, instrument,
+/// and quantity (its `payload.intent_id`, `payload.instrument_id`, `payload.qty`; decimals are
+/// normalized, so equal text is an equal value), whose purpose is `owner_exit` (the intent's
+/// `payload.purpose`) and whose limit is null or not below the floor (the intent's
+/// `payload.limit_price`).
 fn confirmed_intent(drafts: &[Draft], at: usize) -> Result<(), (usize, Invalid)> {
     let refuse = |index: usize, path: &str| Err((index, Invalid::new(InvalidReason::Schema, path)));
     let before = at
@@ -871,6 +880,11 @@ fn confirmed_intent(drafts: &[Draft], at: usize) -> Result<(), (usize, Invalid)>
     let (mine, theirs) = (payload_of(confirmation), payload_of(intent));
     if theirs.text("intent_id") != mine.text("intent_id") {
         return refuse(at, "payload.intent_id");
+    }
+    for member in ["instrument_id", "qty"] {
+        if theirs.text(member) != mine.text(member) {
+            return refuse(at, &format!("payload.{member}"));
+        }
     }
     if theirs.text("purpose") != "owner_exit" {
         return refuse(index, "payload.purpose");
@@ -1098,9 +1112,12 @@ static ORDER_SUBMITTED_V2: Ty = Ty::Record(&[
 /// §9.5's `OwnerConfirmationReceived` (DEC-2040 item 2).
 static OWNER_CONFIRMATION_RECEIVED: Ty = Ty::Record(&[
     ("intent_id", Ty::Ulid),
+    ("instrument_id", Ty::Str),
+    ("qty", Ty::Decimal),
     ("bid", Ty::Decimal),
     ("bid_size", Ty::Decimal),
     ("floor", Ty::Decimal),
+    ("expires_at", Ty::Int),
     ("copied_from", Ty::Ulid),
     ("risk_clock", Ty::RiskClock),
 ]);
