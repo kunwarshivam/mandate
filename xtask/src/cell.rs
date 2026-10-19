@@ -4340,7 +4340,7 @@ pub fn demo_parts(processes: &[Value], cli_help: &str, stub_ready: bool) -> Vec<
                 Some(
                     "the executor runs on the fixture paper broker (DEC-2031), but the runtime \
                      proposes no order on the deny-all wiring until the post-R0 hook (DEC-1013), \
-                     and the executor takes no order before slice X1b (E21-30)"
+                     and the executor fills no paper order before slice X1b-3 (E21-30)"
                         .to_string(),
                 )
             } else {
@@ -5246,7 +5246,7 @@ mod tests {
             gaps.len(),
             2,
             "every lane on main, the paper agent and research still wait on the post-R0 hook and \
-             X1b (DEC-2031): {gaps:?}"
+             X1b-3 (DEC-2031): {gaps:?}"
         );
         assert!(gaps.contains(&RESEARCH_GATEWAY), "{gaps:?}");
         let no_stub = demo_parts(
@@ -5441,8 +5441,8 @@ mod tests {
     }
 
     /// Both images built still run no paper agent and no research: the runtime proposes nothing on
-    /// the deny-all wiring and the executor takes no order before X1b, so neither part is called
-    /// ready, and the paper fill stays a named gap rather than a faked one (DEC-2031).
+    /// the deny-all wiring and the executor fills no paper order before X1b-3, so neither part is
+    /// called ready, and the paper fill stays a named gap rather than a faked one (DEC-2031).
     #[test]
     fn both_images_built_still_call_no_paper_agent_or_research_ready() {
         let list = [process("runtime", true), process("executor", true)];
@@ -5454,7 +5454,7 @@ mod tests {
                 .and_then(|p| p.skipped.clone())
         };
         assert!(
-            skipped("a paper agent").is_some_and(|why| why.contains("X1b")),
+            skipped("a paper agent").is_some_and(|why| why.contains("X1b-3")),
             "{:?}",
             skipped("a paper agent")
         );

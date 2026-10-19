@@ -244,9 +244,10 @@ fn an_unpinned_or_foreign_output_refuses_the_run() {
     );
 }
 
-/// DEC-1000 item 8: a corporate action inside the bars refuses the run, on either edge too.
+/// DEC-1000 item 8 and DEC-2245 item 6: a cash dividend inside the bars still refuses the run, on
+/// either edge too, until slice 3 applies dividends; a split no longer does.
 #[test]
-fn a_corporate_action_in_range_refuses_the_run() {
+fn a_dividend_in_range_refuses_the_run() {
     let days = trading_days(DAYS);
     let outputs = daily_outputs(&days, "0.5");
     let bars = flat_bars(DAYS);
@@ -258,9 +259,23 @@ fn a_corporate_action_in_range_refuses_the_run() {
             &bars,
             &outputs,
             &[],
-            &[split_on(date)],
+            &[dividend_on(date)],
         );
         assert_eq!(refusal(inside), "corporate_action_in_range", "{date}");
+        let split = run_with(
+            &pinned(),
+            &settings(),
+            &xyz(),
+            &bars,
+            &outputs,
+            &[],
+            &[split_on(date)],
+        );
+        assert_ne!(
+            split.err().map(|e| e.code()),
+            Some("corporate_action_in_range"),
+            "a split on {date} is applied, not refused (DEC-2245 item 6)"
+        );
     }
 }
 
@@ -283,7 +298,7 @@ fn an_action_past_either_edge_is_not_refused_as_in_range() {
             &bars,
             &outputs,
             &[],
-            &[split_on(date)],
+            &[dividend_on(date)],
         );
         assert_ne!(
             outside.err().map(|e| e.code()),

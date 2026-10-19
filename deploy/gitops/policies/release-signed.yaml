@@ -1,0 +1,18 @@
+# Every image of this repository's must carry the keyless signature `release.yml` made on a push to
+# `main`, logged in Rekor: the same identity Flux checks on the charts (DEC-2015 item 3,
+# DEC-2016 item 4).
+apiVersion: policy.sigstore.dev/v1beta1
+kind: ClusterImagePolicy
+metadata:
+  name: mandate-release-signed
+spec:
+  images:
+    - glob: "ghcr.io/kunwarshivam/mandate/**"
+  authorities:
+    - keyless:
+        url: https://fulcio.sigstore.dev
+        identities:
+          - issuer: https://token.actions.githubusercontent.com
+            subjectRegExp: ^https://github\.com/kunwarshivam/mandate/\.github/workflows/release\.yml@refs/heads/main$
+      ctlog:
+        url: https://rekor.sigstore.dev

@@ -14,7 +14,8 @@
   hook), `src/launch.rs` (the deployment from `run`'s flags or the deployment manager's variables,
   DEC-1015), `src/deployment.rs` (the connection, approvers and author from the latest
   `AgentDeployed` and its stored mandate document, DEC-1016), and the `mandate-daemon` binary (`run` over Postgres, or `--fixture` over an in-memory
-  journal, and `probe` for `exec` probes; SIGTERM drains). In the cell: the `runtime` image
+  journal, refused `fixture_under_manager` on a pod the manager started, and `probe` for `exec`
+  probes; SIGTERM drains). In the cell: the `runtime` image
   (`deploy/cell/images/runtime.Dockerfile`), its `args` and `probe` in
   `deploy/cell/charts/workspace/processes.json`, and `cargo xtask cell up` building it (DEC-1013). `mandate-store` (`crates/mandate-store`): the `Store` port and the shared envelope.
   `mandate-runtime`'s `src/tail.rs` (`tailed`, shared with the shell). `src/recorded.rs` (the cell's
@@ -34,7 +35,7 @@
   `a_reconciliation_from_before_the_start_does_not_lift_a_hold_taken_with_an_intent_outstanding`
   (DEC-1014 item 6).
   `tests/process.rs`: the binary's refusals (a manager launch refused until its deployment is
-  resolved), probes, and SIGTERM drain. `tests/launch.rs`: flags, the manager's variables, a pod for
+  resolved, and `--fixture` on a manager's pod), probes, and SIGTERM drain. `tests/launch.rs`: flags, the manager's variables, a pod for
   another process, and a flag that disagrees with the manager. `tests/deployment.rs`: the latest
   deployment, a stopped agent, a missing, corrupt or invalid document, another environment, only
   `user:` approvers, and an unknown author. `tests/pg.rs`: the binary

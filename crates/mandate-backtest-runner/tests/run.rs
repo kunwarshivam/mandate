@@ -231,7 +231,7 @@ fn a_refused_run_stores_a_refused_payload() {
     let (store, ran) = ran(Some((
         "bars.json",
         r#""corporate_actions": []"#,
-        r#""corporate_actions": [{"kind": "split", "ex_date": "2026-09-15", "ratio": {"new": 2, "old": 1}, "cash_in_lieu_price": null}]"#,
+        r#""corporate_actions": [{"kind": "cash_dividend", "ex_date": "2026-09-15", "pay_date": "2026-09-22", "per_share": "0.25"}]"#,
     )));
     assert_eq!(ran.outcome, Err("corporate_action_in_range"));
     let payload = payload(&store, &ran);
