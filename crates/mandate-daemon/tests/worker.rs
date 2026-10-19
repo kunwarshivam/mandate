@@ -578,7 +578,6 @@ fn journaled(journal: &MemoryStore, rows: AgentRows, at: i64, daily: Usd6) -> Re
 /// call `budget_exhausted` and journals nothing, and the cap at exactly that sum admits it. The
 /// sum is read from the journal's records, not from the worker.
 #[test]
-#[ignore = "pending E21-61"]
 fn a_restarted_worker_over_the_journaled_meter_keeps_the_daily_cap() {
     let journal = MemoryStore::default();
     let first = called(&mut journaled(

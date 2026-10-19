@@ -339,7 +339,6 @@ fn journaled_reservation(n: u128, max: &str) -> MeterRecord {
 /// reserved call counts that reservation at its maximum, and the agent stream's record of the call
 /// holds nothing. A call record whose reservation the journal lacks still holds the store.
 #[test]
-#[ignore = "pending E21-61"]
 fn a_journaled_meter_restarted_counts_its_reservation_and_holds_nothing() {
     let (journal, stream, clock) = (MemoryStore::default(), Stream::default(), Clock::at(NOW));
     let journaled = |from: u128| {

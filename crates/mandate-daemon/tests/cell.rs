@@ -292,7 +292,6 @@ fn the_daily_research_cap_is_the_mandate_s_own_and_fails_closed() {
 /// DEC-2259 item 1: research over a meter the process gives, its journaled meter stream, is the
 /// same research the in-memory meter wires: the same configuration and the same references.
 #[test]
-#[ignore = "pending E21-61"]
 fn research_over_a_given_meter_is_the_same_research() {
     let (root, control, version, _) = deployed("metered");
     let meter = JournalMeter::open(
@@ -329,7 +328,6 @@ fn research_over_a_given_meter_is_the_same_research() {
 /// DEC-2258 item 2: a workspace's meter stream opens with an id drawn from its own name, the same
 /// at every start, and no two workspaces' streams open with one id.
 #[test]
-#[ignore = "pending E21-61"]
 fn each_workspace_s_meter_stream_opens_with_an_id_of_its_own() {
     let first = |workspace: &str| meter_opened_ids(workspace).next_id();
     assert_eq!(first("ws1"), first("ws1"));

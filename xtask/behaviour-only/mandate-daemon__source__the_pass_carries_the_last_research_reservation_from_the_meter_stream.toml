@@ -1,7 +1,0 @@
-file = "crates/mandate-daemon/tests/source.rs"
-test = "the_pass_carries_the_last_research_reservation_from_the_meter_stream"
-reason = """
-`CellSource::parts` is implemented and cannot be stubbed without stopping every other source test, so
-this test fails on its answer: `last_reservation` is still `None` and the meter stream is not read.
-E21-61 pair B's implementation PR wires `last_research_reservation` into `parts` and deletes this row.
-"""

@@ -1008,7 +1008,6 @@ proptest! {
 /// purposes'; `None` before the first; and a reservation whose agent, purpose or time cannot be
 /// read gives no answer, naming the member.
 #[test]
-#[ignore = "pending E21-61"]
 fn the_last_research_reservation_is_the_agent_s_latest_on_the_meter_stream() {
     let secs = |text: &str| RiskClock::from_secs(UtcNanos::parse_rfc3339(text).unwrap().secs());
     assert_eq!(last_research_reservation(&[], AGENT), Ok(None));
@@ -1053,7 +1052,6 @@ fn the_last_research_reservation_is_the_agent_s_latest_on_the_meter_stream() {
 /// DEC-2259 item 3, wired: the pass carries the agent's last research reservation from the
 /// workspace's meter stream, and gives no context while that stream cannot be read.
 #[test]
-#[ignore = "pending E21-61"]
 fn the_pass_carries_the_last_research_reservation_from_the_meter_stream() {
     let (journal, source) = deployed(&bundle(), &researching());
     assert_eq!(source.parts(&state()).unwrap().last_reservation, None);
