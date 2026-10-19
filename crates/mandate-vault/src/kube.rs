@@ -10,7 +10,7 @@ use serde_json::json;
 
 use crate::SourceError;
 use crate::openbao::RoleCredentials;
-use crate::policy::{Identity, role_name};
+use crate::policy::{Identity, connection_hex, role_name};
 
 /// What every Secret's name starts with, before the identity's role.
 pub const SECRET_PREFIX: &str = "vault-approle-";
@@ -43,14 +43,7 @@ pub struct SecretManifest {
 pub fn secret_name(identity: &Identity) -> Result<String, SourceError> {
     let role = match identity {
         Identity::TokenExchange(_) => return Err(SourceError::Config),
-        Identity::Executor(connection) => {
-            let hex: String = connection
-                .as_str()
-                .bytes()
-                .map(|byte| format!("{byte:02x}"))
-                .collect();
-            format!("executor-{hex}")
-        }
+        Identity::Executor(connection) => format!("executor-{}", connection_hex(connection)),
         Identity::Api
         | Identity::ConnectionManager
         | Identity::Runtime
