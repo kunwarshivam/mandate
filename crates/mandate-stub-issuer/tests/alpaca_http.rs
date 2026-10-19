@@ -106,7 +106,6 @@ fn no_secret(reply: &Reply) {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn the_browser_is_redirected_with_a_code_the_exchange_redeems_for_a_token() {
     let addr = serve_alpaca();
     let redirected = get(addr, &authorize_path("paper"));
@@ -142,7 +141,6 @@ fn the_browser_is_redirected_with_a_code_the_exchange_redeems_for_a_token() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_refused_authorization_redirects_nowhere() {
     let addr = serve_alpaca();
     let refused = get(addr, &authorize_path("live"));

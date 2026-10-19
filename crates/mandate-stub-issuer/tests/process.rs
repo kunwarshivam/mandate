@@ -239,7 +239,6 @@ fn secret_files() -> (String, String) {
 const REDIRECT: &str = "http://127.0.0.1:8080/v1/oauth/alpaca/callback";
 
 #[test]
-#[ignore = "pending E10-13"]
 fn some_but_not_all_alpaca_flags_or_a_shared_secret_file_are_refused() {
     let (owner, shared) = secret_files();
     let mut partial = stub(Some("dev"), "127.0.0.1:8898");
@@ -271,7 +270,6 @@ fn some_but_not_all_alpaca_flags_or_a_shared_secret_file_are_refused() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn with_its_three_flags_the_stub_serves_the_alpaca_provider() {
     let (owner, _) = secret_files();
     let flags = [

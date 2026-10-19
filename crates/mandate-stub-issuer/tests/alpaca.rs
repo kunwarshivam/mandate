@@ -168,7 +168,6 @@ fn without(params: &[(String, String)], name: &str) -> Vec<(String, String)> {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_code_for_the_registered_client_redeems_for_a_bearer_token_once() {
     let provider = provider();
     let location = provider
@@ -202,7 +201,6 @@ fn a_code_for_the_registered_client_redeems_for_a_bearer_token_once() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn every_other_authorization_request_is_refused_and_issues_no_code() {
     let base = authorize_params();
     let mut requests: Vec<Vec<(String, String)>> = Vec::new();
@@ -240,7 +238,6 @@ fn every_other_authorization_request_is_refused_and_issues_no_code() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_code_tried_once_is_spent_whatever_the_answer() {
     let provider = provider();
     let code = code(&provider, T0);
@@ -259,7 +256,6 @@ fn a_code_tried_once_is_spent_whatever_the_answer() {
 type Form = dyn Fn(&str) -> Vec<(String, String)>;
 
 #[test]
-#[ignore = "pending E10-13"]
 fn each_token_refusal_has_its_code() {
     let provider = provider();
     let cases: Vec<(Box<Form>, Refusal)> = vec![
@@ -326,7 +322,6 @@ fn each_token_refusal_has_its_code() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_code_expires_six_hundred_seconds_after_it_is_issued() {
     let provider = provider();
     let fresh = code(&provider, T0);
@@ -343,7 +338,6 @@ fn a_code_expires_six_hundred_seconds_after_it_is_issued() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn the_store_holds_at_most_its_bound_and_drops_expired_codes_first() {
     let provider = provider();
     for _ in 0..MAX_CODES {
@@ -360,7 +354,6 @@ fn the_store_holds_at_most_its_bound_and_drops_expired_codes_first() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_failed_random_source_issues_nothing() {
     let settings = Settings {
         client_id: "client-1".to_owned(),
@@ -376,7 +369,6 @@ fn a_failed_random_source_issues_nothing() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn any_tampered_token_parameter_is_refused() {
     let names = [
         "grant_type",
@@ -422,7 +414,6 @@ fn secret_file(contents: &[u8], mode: u32) -> std::path::PathBuf {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn the_client_secret_is_read_only_from_an_owner_only_regular_file() {
     assert_eq!(
         read_secret(&secret_file(SECRET.as_bytes(), 0o600)),
@@ -454,7 +445,6 @@ fn the_client_secret_is_read_only_from_an_owner_only_regular_file() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn the_settings_are_all_three_flags_or_none() {
     let file = secret_file(SECRET.as_bytes(), 0o600);
     let file = file.to_str().expect("UTF-8");
