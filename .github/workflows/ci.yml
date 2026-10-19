@@ -944,4 +944,8 @@ jobs:
           FULL_RESULT: ${{ needs.full.result }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
+          if gh api --paginate "repos/${GITHUB_REPOSITORY}/issues?state=open&per_page=100" --jq '.[].title' | grep -Fqx "ci on main failed at ${GITHUB_SHA}"; then
+            echo "An open issue already reports ci on main failing at ${GITHUB_SHA}"
+            exit 0
+          fi
           gh api "repos/${GITHUB_REPOSITORY}/issues" -f title="ci on main failed at ${GITHUB_SHA}" -f body="The ${GITHUB_EVENT_NAME} ci run on main failed (fast ${FAST_RESULT}, full ${FULL_RESULT}): ${RUN_URL} (DEC-1190, DEC-2610)"
