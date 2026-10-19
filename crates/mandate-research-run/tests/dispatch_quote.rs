@@ -173,7 +173,6 @@ fn a_text_reader_may_not_use_the_quote_namespace() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn market_quote_asks_each_symbol_once_in_order_as_of_the_cut_off() {
     let fixture = answering(&[
         (
@@ -205,7 +204,6 @@ fn market_quote_asks_each_symbol_once_in_order_as_of_the_cut_off() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn a_quote_shows_its_time_sides_and_flag_under_untrusted() {
     let last = quote("AAPL", CUT_OFF - 5, Some("189.5"), Some("189.52"));
     let fixture = answering(&[("AAPL", last.clone())]);
@@ -255,7 +253,6 @@ fn a_quote_shows_its_time_sides_and_flag_under_untrusted() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn the_sanity_flag_is_both_sides_priced_with_the_bid_at_or_below_the_ask() {
     for (bid, ask, flag, why) in [
         (Some("189.5"), Some("189.52"), true, "a normal quote"),
@@ -284,7 +281,6 @@ fn the_sanity_flag_is_both_sides_priced_with_the_bid_at_or_below_the_ask() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn every_quote_is_filtered_again_on_its_symbol_and_time() {
     let fixture = answering(&[
         ("AAPL", quote("MSFT", CUT_OFF - 5, Some("1"), Some("2"))),
@@ -313,7 +309,6 @@ fn every_quote_is_filtered_again_on_its_symbol_and_time() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn market_quote_arguments_outside_the_pinned_schema_ask_no_reader() {
     let fixture = Fixture::default();
     let ten = format!(r#"{{"symbols":[{}]}}"#, [r#""AAPL""#; 10].join(","));
@@ -343,7 +338,6 @@ fn market_quote_arguments_outside_the_pinned_schema_ask_no_reader() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn a_quote_read_outside_the_universe_or_unanswered_reads_nothing() {
     let fixture = Fixture::default();
     let result = run(fixture.readers(), r#"{"symbols":["AAPL","TSLA"]}"#);
