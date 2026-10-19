@@ -8,14 +8,14 @@ use std::rc::Rc;
 
 use mandate_canon::Digest;
 use mandate_domain::AssetClass;
-use mandate_gateway::fake::{Recorded, RecordedTransport};
+use mandate_gateway::fake::{Recorded, RecordedTransport, openrouter_reply};
 use mandate_gateway::guard::GuardContext;
 use mandate_gateway::meter::{Caps, DeploymentMeter, MemoryMeter, Meter, SharedMeter};
 use mandate_gateway::money::Usd6;
 use mandate_gateway::openrouter::OpenRouter;
 use mandate_gateway::policy::EndpointPolicy;
 use mandate_gateway::provider::{Clock, Delivery, ManualClock, SequentialIds};
-use mandate_gateway::registry::Locality;
+use mandate_gateway::registry::{Locality, Reported};
 use mandate_gateway::{CallRecord, Gateway, RateCaps, RequestError, Settings};
 use mandate_journal::{ArtifactRef, ArtifactStore, Environment, get_artifact};
 use mandate_research::{AssetClass as EnvelopeClass, WorkingUniverse};
@@ -33,7 +33,7 @@ use mandate_store::MemoryStore;
 use mandate_time::UtcNanos;
 
 use crate::meter::CellMeter;
-use crate::recorded::{Bundle, BundleError, RecordedPlane, RecordedReply};
+use crate::recorded::{Bundle, BundleError, RecordedPlane, RecordedReply, ScriptedTurn};
 use crate::runtime::{ArtifactSink, ResearchParts, ResearchWorker};
 use crate::source::SourceFor;
 
@@ -134,6 +134,7 @@ pub struct RecordedWorker {
     plane: RecordedPlane,
     plan: RetrievalPlan,
     reply: RecordedReply,
+    turns: Vec<ScriptedTurn>,
     slug: String,
     provider: String,
     workspace: String,
@@ -239,6 +240,7 @@ impl RecordedWorker {
             plane: bundle.plane.clone(),
             plan: bundle.entry.plan,
             reply: bundle.reply.clone(),
+            turns: bundle.turns.clone(),
             slug: bundle.entry.identity.model_name.clone(),
             provider: bundle.endpoint.route.reported_provider.clone(),
             workspace: who.workspace,
@@ -406,7 +408,7 @@ impl RecordedWorker {
             })
             .collect::<Option<Vec<_>>>()
             .ok_or(TurnError::Missing)?;
-        self.script_reply();
+        self.script_reply(Some(request.plan.turn));
         let Some(run) = self.runs.get_mut(&run_id) else {
             return Err(TurnError::NotStarted);
         };
@@ -530,7 +532,7 @@ impl RecordedWorker {
         if !self.runs.contains_key(&plan.run_id) {
             return;
         }
-        self.script_reply();
+        self.script_reply(None);
         let Some(run) = self.runs.get_mut(&plan.run_id) else {
             return;
         };
@@ -557,23 +559,48 @@ impl RecordedWorker {
         }
     }
 
-    /// Moves the gateway's clock to now and scripts the recorded reply for the next call alone: a
-    /// reply left by a call that was never sent (one not built, or refused before sending) is
-    /// cleared first.
-    fn script_reply(&mut self) {
+    /// Moves the gateway's clock to now and scripts the recorded reply for the next call alone: an
+    /// agentic run's turn n its scripted turn n, and the single call and every turn past the script
+    /// the final reply (DEC-2266). A reply left by a call that was never sent (one not built, or
+    /// refused before sending) is cleared first.
+    fn script_reply(&mut self, turn: Option<u32>) {
         let now = (self.now)();
         self.gateway.clock_mut().wait_until(now);
         self.gateway.transport_mut().clear_script();
-        self.gateway.transport_mut().script(vec![Recorded {
-            latency_ms: self.reply.latency_ms,
-            delivery: Delivery::Response {
-                status: 200,
-                body: recorded_reply(
+        let scripted = turn
+            .and_then(|turn| turn.checked_sub(1))
+            .and_then(|index| self.turns.get(usize::try_from(index).ok()?));
+        let (latency_ms, body) = match scripted {
+            Some(scripted) => {
+                let calls: Vec<(&str, &str)> = scripted
+                    .calls
+                    .iter()
+                    .map(|(name, arguments)| (name.as_str(), arguments.as_str()))
+                    .collect();
+                let reported = Reported {
+                    model: Some(self.slug.clone()),
+                    provider: Some(self.provider.clone()),
+                };
+                (
+                    scripted.latency_ms,
+                    openrouter_reply(None, &calls, &reported, scripted.usage),
+                )
+            }
+            None => (
+                self.reply.latency_ms,
+                recorded_reply(
                     &self.reply.output,
                     &self.slug,
                     &self.provider,
                     self.reply.usage,
                 ),
+            ),
+        };
+        self.gateway.transport_mut().script(vec![Recorded {
+            latency_ms,
+            delivery: Delivery::Response {
+                status: 200,
+                body,
                 retry_after_ms: None,
             },
         }]);
