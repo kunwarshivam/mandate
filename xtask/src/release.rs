@@ -1969,6 +1969,7 @@ mod tests {
             ),
         )?;
         let password = "the-password-is-not-an-argument";
+        let key = image::base64(b"stand-in key");
         let output = Command::new(&script)
             .current_dir(&dir)
             .env_clear()
@@ -1976,7 +1977,7 @@ mod tests {
             .env("DIGEST", sha256(&dir.join("dist/SHA256SUMS"))?)
             .env("COSIGN_URL", format!("file://{}", stand_in.display()))
             .env("COSIGN_SHA256", sha256(&stand_in)?)
-            .env("RELEASE_SIGNING_KEY", "c3RhbmQtaW4ga2V5")
+            .env("RELEASE_SIGNING_KEY", &key)
             .env("COSIGN_PASSWORD", password)
             .env("RUNNER_TEMP", dir.join("runner"))
             .env("LD_PRELOAD", "planted.so")
@@ -1996,7 +1997,7 @@ mod tests {
             "COSIGN_PASSWORD\nHOME\nPATH\n"
         );
         let stderr = String::from_utf8_lossy(&output.stderr);
-        for secret in [password, "c3RhbmQtaW4ga2V5", "stand-in key"] {
+        for secret in [password, key.as_str(), "stand-in key"] {
             assert!(
                 !stderr.contains(secret),
                 "stderr shows {secret:?}: {stderr}"
