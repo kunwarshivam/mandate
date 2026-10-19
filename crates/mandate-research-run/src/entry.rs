@@ -49,7 +49,29 @@ pub struct ResearchEntry {
     pub bounds: OutputBounds,
 }
 
+/// Why a recorded research entry could not be read: the member that is missing or not what it
+/// must be.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EntryError {
+    /// The reading is not implemented yet (E21-54, DEC-2247).
+    Unimplemented,
+    Member(&'static str),
+}
+
 impl ResearchEntry {
+    /// The research entry a recording names (DEC-2210 item 1, DEC-2247 item 1): `model_id`,
+    /// `model_version`, `provider`, `model_name`, a dated `snapshot`, `deadline_ms`,
+    /// `max_output_tokens` and `seed`, with the fixed `v0_1` plan and bounds. Nothing is defaulted:
+    /// the recorded bundle's loader and `model register --entry` read it here alike, so the pin a
+    /// run carries and the hash a registration records are of the same content.
+    ///
+    /// # Errors
+    /// [`EntryError::Member`] naming the first member that is missing, empty, or out of range.
+    pub fn recorded(entry: &Value) -> Result<Self, EntryError> {
+        let _ = entry;
+        Err(EntryError::Unimplemented)
+    }
+
     /// The pinned content the registry holds and the mandate's pin names by its hash.
     pub fn content(&self) -> PinnedContent {
         PinnedContent {
