@@ -88,9 +88,10 @@ jobs:
           TF_VAR_kube_api_allowed_addresses: ${{ secrets.KUBE_API_ALLOWED_CIDRS }}
           TF_VAR_access_allowed_emails: ${{ secrets.ACCESS_ALLOWED_EMAILS }}
       # Runs however the step before ended, once the binary is built, with only the DigitalOcean
-      # token and the founder's CIDRs: it deletes every Spaces key minted for staging's or
-      # production's runs (DEC-2030 item 4) and, in staging, closes the control plane to every
-      # run's window (DEC-2028 item 3). It runs the built binary, so nothing compiles beside them.
+      # token and the founder's CIDRs: in staging it closes the control plane to every run's window
+      # (DEC-2028 item 3), then it deletes every Spaces key minted for staging's or production's
+      # runs (DEC-2030 item 4), each whatever the other did. It runs the built binary, so nothing
+      # compiles beside them.
       - if: always() && steps.build.outcome == 'success'
         run: target/debug/xtask infra close
         env:

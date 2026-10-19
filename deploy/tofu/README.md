@@ -41,7 +41,7 @@ never a value.
    | VPC | create, read, update, delete | `modules/network`'s VPC |
    | Firewall | create, read, update, delete | the node firewall |
    | Tag | create, read, delete | the node tag the firewall applies to |
-   | Kubernetes | create, read, update, delete | the cluster and its node pool; read also lists the offered versions |
+   | Kubernetes | create, read, update, delete, access_cluster | the cluster and its node pool; read also lists the offered versions; update closes staging's window; access_cluster fetches the bootstrap's 900-second credentials |
    | Sizes | read | the budget's node price |
    | Regions | read | the cluster's region |
    | Spaces Keys | create, read, delete | each run mints its own Spaces key, makes the state bucket if it is missing, and deletes the key (DEC-2030 item 4; DEC-2605 row 13) |
@@ -151,7 +151,10 @@ have seen. The log never shows a value: only addresses and actions.
    `archive_jurisdiction` and `cloudflare_account_id`. Staging's `apply` bootstraps the cluster
    itself (DEC-2028): it opens the control plane to the run's own runner in the plan you approve,
    writes the Secrets `ws-ws1/cloudflared-tunnel` and `ws-ws1/journal-archive-key` through lane
-   GO's code, and closes the window again, however the run ends. Flux pulls from then on.
+   GO's code, and closes the window again, reading the cluster back to confirm it. If the close
+   cannot be confirmed the run fails and says the window may be open; the workflow's last step and
+   the next run close it, and a runner that dies before both is DEC-2028 item 3's residual. Flux
+   pulls from then on.
    Production's bootstrap is lane GO's `deploy/gitops/BOOTSTRAP.md`, run from an address in
    `KUBE_API_ALLOWED_CIDRS`.
 

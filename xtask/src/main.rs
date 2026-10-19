@@ -1409,43 +1409,92 @@ fn infra() -> Result<()> {
     let read = |name: &str| env::var(name).ok();
     let preflight = infra_preflight::preflight(&environment, &run, !commands.is_empty(), &read)?;
     eprint!("{}", preflight.checklist.render(&environment));
+    let mut window = None;
     let outcome = if preflight.checklist.complete() {
-        let window = opens_window(&environment, &action)
-            .then(infra_window::open_window)
-            .transpose()?;
-        let outcome = run_tofu(
-            &commands,
-            preflight.key.key(),
-            &sha,
-            &plan_file,
-            window.as_deref(),
-            &run,
-        );
-        if window.is_some() {
-            let token = env::var("DIGITALOCEAN_TOKEN").unwrap_or_default();
-            let founder = env::var(infra_preflight::KUBE_CIDRS_ENV).ok();
-            match infra_window::close_window(&token, &environment, founder.as_deref()) {
-                Ok(_) => eprintln!("    the control plane's window is closed (DEC-2028 item 3)"),
-                Err(error) if outcome.is_err() => eprintln!(
-                    "    the control plane's window was not closed ({error:#}); `infra close` closes it"
-                ),
-                Err(error) => return Err(error),
+        match opens_window(&environment, &action)
+            .then(|| infra_window::open_window(&infra_window::Curl))
+            .transpose()
+        {
+            Ok(opened) => {
+                window = opened;
+                run_tofu(
+                    &commands,
+                    preflight.key.key(),
+                    &sha,
+                    &plan_file,
+                    window.as_deref(),
+                    &run,
+                )
             }
+            Err(error) => Err(error),
         }
-        outcome
     } else {
         Err(anyhow::anyhow!(
             "infra preflight: each MISSING line above is a step in deploy/tofu/README.md; nothing \
              was planned"
         ))
     };
-    if !preflight.key.release()? {
-        bail!(
+    let closed = window.is_some().then(|| {
+        let token = env::var("DIGITALOCEAN_TOKEN").unwrap_or_default();
+        let founder = env::var(infra_preflight::KUBE_CIDRS_ENV).ok();
+        infra_window::close_window(
+            &infra_window::Curl,
+            &token,
+            &environment,
+            founder.as_deref(),
+        )
+    });
+    let applied = outcome.is_ok();
+    let keys = match preflight.key.release() {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(anyhow::anyhow!(
             "this run's Spaces key was not deleted; `infra close` and the next run of \
              {environment} delete it (DEC-2030 item 4)"
-        );
+        )),
+        Err(error) => Err(error),
+    };
+    settle(outcome, closed, applied, keys)
+}
+
+/// How a run that may have opened a window ends (the review of #1771, B1 and B2): the window's
+/// close and the Spaces key's deletion are each attempted and reported, whatever came before, and
+/// the first error is returned. A close reports the window closed only when the cluster was read
+/// back admitting exactly the closed addresses, or had no such cluster when none was expected;
+/// `cluster_expected` makes a missing cluster an error, as after a successful apply.
+fn settle(
+    outcome: Result<()>,
+    closed: Option<Result<infra_window::Window>>,
+    cluster_expected: bool,
+    keys: Result<()>,
+) -> Result<()> {
+    let window = match closed {
+        None => Ok(()),
+        Some(Ok(infra_window::Window::Closed | infra_window::Window::AlreadyClosed)) => {
+            eprintln!("    the control plane's window is closed (DEC-2028 item 3)");
+            Ok(())
+        }
+        Some(Ok(infra_window::Window::NoCluster)) if !cluster_expected => {
+            eprintln!("    no cluster exists, so no window is open (DEC-2028 item 3)");
+            Ok(())
+        }
+        Some(Ok(infra_window::Window::NoCluster)) => Err(anyhow::anyhow!(
+            "the apply succeeded but DigitalOcean lists no such cluster, so the window's close \
+             could not be confirmed"
+        )),
+        Some(Err(error)) => Err(error),
     }
-    outcome
+    .context("the control plane's window may be open; `infra close` and the next run close it");
+    let mut first = None;
+    for result in [outcome, window, keys] {
+        if let Err(error) = result {
+            if first.is_some() {
+                eprintln!("    also: {error:#}");
+            } else {
+                first = Some(error);
+            }
+        }
+    }
+    first.map_or(Ok(()), Err)
 }
 
 /// The dispatch's `sha` input, which the founder approves the run for (the audit's item 5).
@@ -1496,10 +1545,11 @@ const INFRA_PATHS: [&str; 7] = [
     ".cargo/",
 ];
 
-/// `cargo xtask infra close` (DEC-2030 item 4): `infra.yml`'s last step, which runs `if:
-/// always()` with only the DigitalOcean token, deletes every Spaces key this environment's runs
-/// minted, so a run killed before its own guard ran leaves none. Like `infra`, it runs only in
-/// that job on `main`.
+/// `cargo xtask infra close` (DEC-2030 item 4, DEC-2028 item 3): `infra.yml`'s last step, which
+/// runs `if: always()` with only the DigitalOcean token and the founder's CIDRs, closes staging's
+/// window first and then deletes every Spaces key this environment's runs minted, each attempted
+/// whatever the other did, so a run killed before its own guard ran leaves neither. Like `infra`,
+/// it runs only in that job on `main`.
 fn infra_close() -> Result<()> {
     let actions = env::var("GITHUB_ACTIONS").unwrap_or_default();
     let reference = env::var("GITHUB_REF").unwrap_or_default();
@@ -1512,17 +1562,24 @@ fn infra_close() -> Result<()> {
         eprintln!("    infra close: DIGITAL_OCEAN_API_KEY is not set, so no key was minted");
         return Ok(());
     }
-    let deleted = infra_preflight::close(&environment, &token)?;
-    eprintln!("    infra close: deleted {deleted} Spaces key(s) this environment's runs minted");
-    if opens_window(&environment, "apply") {
+    let closed = opens_window(&environment, "apply").then(|| {
         let founder = env::var(infra_preflight::KUBE_CIDRS_ENV).ok();
         for value in tofu_audit::list_items(founder.as_deref().unwrap_or_default()) {
             mask::add_mask(&value);
         }
-        infra_window::close_window(&token, &environment, founder.as_deref())?;
-        eprintln!("    infra close: the control plane admits no run's window (DEC-2028 item 3)");
-    }
-    Ok(())
+        infra_window::close_window(
+            &infra_window::Curl,
+            &token,
+            &environment,
+            founder.as_deref(),
+        )
+    });
+    let keys = infra_preflight::close(&environment, &token).map(|deleted| {
+        eprintln!(
+            "    infra close: deleted {deleted} Spaces key(s) this environment's runs minted"
+        );
+    });
+    settle(Ok(()), closed, false, keys)
 }
 
 /// Whether `action` on `environment` opens the control plane to its own runner and bootstraps
@@ -1562,9 +1619,15 @@ fn bootstrap_staging(tofu: &dyn Fn(&[String]) -> Command, chdir: &str, run: &str
     let cluster_id = output("cluster_id")?;
     let token = env::var("DIGITALOCEAN_TOKEN").unwrap_or_default();
     let temp = env::var("RUNNER_TEMP").context("RUNNER_TEMP is not set")?;
-    let kubeconfig =
-        infra_window::fetch_kubeconfig(&token, cluster_id.trim(), Path::new(&temp), run)?;
     let (_, context) = infra_window::cluster_names("staging");
+    let kubeconfig = infra_window::fetch_kubeconfig(
+        &infra_window::Curl,
+        &token,
+        cluster_id.trim(),
+        &context,
+        Path::new(&temp),
+        run,
+    )?;
     gitops::bootstrap_from_infra(
         &repo_root()?,
         gitops::Environment::Staging,
@@ -16639,7 +16702,7 @@ mod tests {
         let infra = body("\nfn infra() -> Result<()> {");
         let at = |text: &str, needle: &str| text.find(needle);
         let open = at(&infra, "infra_window::open_window");
-        let run = at(&infra, "let outcome = run_tofu(");
+        let run = at(&infra, "window = opened;\n                run_tofu(");
         let close = at(&infra, "infra_window::close_window(");
         assert!(
             open.is_some() && open < run,
@@ -16684,6 +16747,13 @@ mod tests {
             masks.is_some() && masks < closes,
             "`infra close` masks the CIDRs, then closes"
         );
+        let keys = at(&close_step, "infra_preflight::close(");
+        assert!(
+            keys.is_some()
+                && closes < keys
+                && !close_step[closes.unwrap_or_default()..].contains(")?;"),
+            "`infra close` closes the window before the keys, and no error skips either"
+        );
         assert!(super::opens_window("staging", "apply"));
         for (environment, action) in [
             ("staging", "plan"),
@@ -16695,6 +16765,74 @@ mod tests {
                 "{environment} {action} opens nothing"
             );
         }
+    }
+
+    /// The review of #1771, B1 and B2: every close is attempted and the first error is returned; a
+    /// window is reported closed only when it was, and a missing cluster after an apply is an
+    /// error.
+    #[test]
+    fn a_run_settles_every_close_and_keeps_the_first_error() {
+        fn fail<T>(text: &str) -> Result<T> {
+            Err(anyhow::anyhow!("{text}"))
+        }
+        let message = |result: Result<()>| result.err().map(|error| format!("{error:#}"));
+        assert!(super::settle(Ok(()), None, true, Ok(())).is_ok());
+        for closed in [
+            super::infra_window::Window::Closed,
+            super::infra_window::Window::AlreadyClosed,
+        ] {
+            assert!(super::settle(Ok(()), Some(Ok(closed)), true, Ok(())).is_ok());
+        }
+        assert!(
+            super::settle(
+                Ok(()),
+                Some(Ok(super::infra_window::Window::NoCluster)),
+                false,
+                Ok(())
+            )
+            .is_ok()
+        );
+        let missing = message(super::settle(
+            Ok(()),
+            Some(Ok(super::infra_window::Window::NoCluster)),
+            true,
+            Ok(()),
+        ));
+        assert!(
+            missing.is_some_and(|text| text.contains("lists no such cluster")),
+            "a missing cluster after an apply is an error"
+        );
+        let open = message(super::settle(
+            Ok(()),
+            Some(fail("still open")),
+            false,
+            Ok(()),
+        ));
+        assert!(
+            open.is_some_and(|text| text.contains("may be open") && text.contains("still open"))
+        );
+        assert_eq!(
+            message(super::settle(Ok(()), None, false, fail("key kept"))).as_deref(),
+            Some("key kept")
+        );
+        assert_eq!(
+            message(super::settle(
+                fail("apply failed"),
+                Some(fail("still open")),
+                false,
+                fail("key kept")
+            ))
+            .as_deref(),
+            Some("apply failed"),
+            "the first error is returned"
+        );
+        let window_first = message(super::settle(
+            Ok(()),
+            Some(fail("still open")),
+            false,
+            fail("key kept"),
+        ));
+        assert!(window_first.is_some_and(|text| text.contains("still open")));
     }
 
     /// The review's major (2): `infra` masks every item of the CIDR and email list secrets, each

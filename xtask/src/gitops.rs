@@ -211,6 +211,25 @@ fn infra_refusal(run: &Run<'_>) -> Option<&'static str> {
 /// The `flux` the pins in [`FLUX_IMAGES`] belong to.
 const FLUX_VERSION: &str = "2.9.6";
 
+/// Every secret `infra.yml`'s steps hand `cargo xtask infra`, which `kubectl` and `flux` never need
+/// and so never inherit (the review of #1771).
+const INFRA_SECRET_ENVS: [&str; 5] = [
+    "DIGITALOCEAN_TOKEN",
+    "TF_VAR_state_passphrase",
+    "TF_VAR_cloudflare_api_token",
+    "TF_VAR_kube_api_allowed_addresses",
+    "TF_VAR_access_allowed_emails",
+];
+
+/// `program`, `kubectl` or `flux`, without [`INFRA_SECRET_ENVS`] in its environment.
+fn tool(program: &str) -> Command {
+    let mut command = Command::new(program);
+    for name in INFRA_SECRET_ENVS {
+        command.env_remove(name);
+    }
+    command
+}
+
 /// `manifest`, from `flux install --export`, with every image pinned by digest. It refuses an image
 /// that [`FLUX_IMAGES`] does not name, and a pinned image the manifest never uses, since either
 /// means the CLI is not the pinned version.
@@ -311,7 +330,7 @@ fn founder_confirms(environment: Environment, action: &str) -> Result<String> {
 
 /// The kubeconfig's current context.
 fn current_context() -> Result<String> {
-    let out = Command::new("kubectl")
+    let out = tool("kubectl")
         .args(["config", "current-context"])
         .output()
         .context("starting kubectl (deploy/gitops/BOOTSTRAP.md)")?;
@@ -349,7 +368,7 @@ fn confirm(
 
 /// Runs `kubectl` against `cluster` with `stdin` as its input.
 fn kubectl(cluster: &Cluster<'_>, args: &[&str], stdin: Option<&str>) -> Result<()> {
-    let mut command = Command::new("kubectl");
+    let mut command = tool("kubectl");
     if let Some(kubeconfig) = cluster.kubeconfig {
         command.arg("--kubeconfig").arg(kubeconfig);
     }
@@ -421,7 +440,7 @@ fn prepare(root: &Path, environment: Environment) -> Result<(String, String)> {
         .join(environment.name())
         .join("sync.yaml");
     let sync = fs::read_to_string(&sync).with_context(|| format!("reading {}", sync.display()))?;
-    let version = Command::new("flux")
+    let version = tool("flux")
         .args(["version", "--client"])
         .output()
         .context("starting flux (deploy/gitops/BOOTSTRAP.md)")?;
@@ -431,7 +450,7 @@ fn prepare(root: &Path, environment: Environment) -> Result<(String, String)> {
         "flux {} is not the pinned v{FLUX_VERSION}",
         printed.trim()
     );
-    let exported = Command::new("flux")
+    let exported = tool("flux")
         .args(["install", "--export", "--components", FLUX_COMPONENTS])
         .output()
         .context("starting flux")?;
@@ -526,7 +545,7 @@ pub(crate) fn bootstrap_from_infra(
     }) {
         bail!("{reason} (DEC-2018)");
     }
-    let out = Command::new("kubectl")
+    let out = tool("kubectl")
         .args(["--v=0", "--kubeconfig"])
         .arg(kubeconfig)
         .args(["config", "current-context"])
@@ -556,6 +575,47 @@ pub(crate) fn bootstrap_from_infra(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every secret `infra.yml` hands a step is kept from `kubectl` and `flux`, and only they are
+    /// started, so a new secret in the workflow fails this test until it is listed.
+    #[test]
+    fn the_tools_inherit_no_infra_secret() {
+        let workflow = include_str!("../../.github/workflows/infra.yml");
+        let handed: Vec<&str> = workflow
+            .lines()
+            .filter(|line| line.contains("${{ secrets."))
+            .filter_map(|line| line.trim().split(':').next())
+            .collect();
+        assert!(
+            !handed.is_empty(),
+            "the workflow hands secrets to its steps"
+        );
+        for name in handed {
+            assert!(
+                INFRA_SECRET_ENVS.contains(&name),
+                "{name} reaches kubectl and flux"
+            );
+        }
+        let command = tool("kubectl");
+        let removed: Vec<_> = command
+            .get_envs()
+            .filter(|(_, value)| value.is_none())
+            .map(|(name, _)| name.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(removed.len(), INFRA_SECRET_ENVS.len());
+        for name in INFRA_SECRET_ENVS {
+            assert!(
+                removed.iter().any(|removed| removed == name),
+                "{name} is removed"
+            );
+        }
+        let source = include_str!("gitops.rs");
+        assert_eq!(
+            source.matches(concat!("Command", "::new(")).count(),
+            1,
+            "every child gitops starts goes through `tool`"
+        );
+    }
 
     /// An excerpt of `flux install --export` for v2.9.6, its image lines as the CLI prints them.
     fn exported() -> String {
