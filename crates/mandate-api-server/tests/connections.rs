@@ -153,7 +153,6 @@ fn scopes() -> Option<Vec<String>> {
 const SCOPES: &str = r#"["trading","account:read"]"#;
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_request_is_connecting_and_its_establishment_sets_the_scopes() {
     assert_eq!(
         connections(&[requested(1, C1)]),
@@ -168,7 +167,6 @@ fn a_request_is_connecting_and_its_establishment_sets_the_scopes() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_connect_refusal_is_refused_with_its_check_and_reason() {
     let mut expected = view(C1, ConnectionState::Refused, 2);
     expected.refusal = Some(Refusal {
@@ -195,7 +193,6 @@ fn a_connect_refusal_is_refused_with_its_check_and_reason() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_refused_reconnect_or_reauthorize_and_a_rotation_leave_the_state_as_it_was() {
     let base = [requested(1, C1), established(2, C1, SCOPES)];
     let mut expected = view(C1, ConnectionState::Established, 2);
@@ -220,7 +217,6 @@ fn a_refused_reconnect_or_reauthorize_and_a_rotation_leave_the_state_as_it_was()
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_revocation_names_its_reason_at_version_two_and_none_at_version_one() {
     for (row, reason) in [
         (revoked(3, C1, "compromised"), Some("compromised")),
@@ -237,7 +233,6 @@ fn a_revocation_names_its_reason_at_version_two_and_none_at_version_one() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_later_request_never_moves_a_connection_back() {
     let mut expected = view(C1, ConnectionState::Revoked, 2);
     expected.revoked_reason = Some("owner".to_owned());
@@ -248,7 +243,6 @@ fn a_later_request_never_moves_a_connection_back() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn only_a_request_an_establishment_or_a_connect_refusal_names_a_connection() {
     let rows = [
         revoked(1, C2, "owner"),
@@ -265,7 +259,6 @@ fn only_a_request_an_establishment_or_a_connect_refusal_names_a_connection() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn connections_are_listed_in_the_order_they_are_first_named() {
     let rows = [
         requested(1, C2),
@@ -280,7 +273,6 @@ fn connections_are_listed_in_the_order_they_are_first_named() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn agents_are_those_whose_latest_deployment_names_it_at_version_two_and_is_not_stopped() {
     let rows = [
         requested(1, C1),
@@ -353,7 +345,6 @@ fn rows_of(picks: &[(u8, u8)]) -> Vec<StoredEvent> {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn the_fold_agrees_with_a_backwards_reading() {
     let mut runner = TestRunner::new(Config::with_cases(512));
     let strategy = prop::collection::vec((0u8..6, any::<bool>()), 0..24);

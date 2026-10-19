@@ -13,19 +13,25 @@
 
 use std::fs;
 use std::io::{Read, Write};
+use std::iter;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, anyhow};
 use clap::{Args, Subcommand, ValueEnum};
 use mandate_connections::record::ConnectionId;
+use mandate_time::UtcNanos;
 use mandate_vault::SourceError;
-use mandate_vault::credentials::{check_credential_dir, read_token_file, write_credentials};
+use mandate_vault::credentials::{
+    check_credential_dir, read_token, read_token_file, write_credentials,
+};
+use mandate_vault::kube::kube_secrets;
 use mandate_vault::openbao::{OpenBaoConfig, provision};
 use mandate_vault::policy::Mounts;
 use mandate_vault_local::VaultError;
 use mandate_vault_local::import::{import_client_secret, resolve_ids};
 use mandate_vault_local::startup::{Inputs, Role};
 use mandate_vault_local::store::open;
+use secrecy::ExposeSecret;
 
 /// Where the demo host keeps the vault (DEC-692 item 1).
 pub const DEFAULT_VAULT_DIR: &str = "/var/lib/owlhead/vault";
@@ -38,7 +44,37 @@ pub enum VaultCommand {
     /// Set an OpenBao vault up for the cell's connections and write each process's AppRole
     /// credentials, owner-only, into `--out`. The operator's token is read from a file.
     Provision(ProvisionArgs),
+    /// Write a platform secret into an OpenBao vault as the secret-import identity. Stdin holds
+    /// that identity's role id, its secret id, and the secret, one line each; none is ever an
+    /// argument (DEC-2020, DEC-2630).
+    Put(PutArgs),
 }
+
+#[derive(Debug, Args)]
+pub struct PutArgs {
+    /// Which platform secret stdin's last line is.
+    #[arg(value_enum)]
+    pub secret: PutSecret,
+    /// The vault's address, `https://host:port`.
+    #[arg(long)]
+    pub address: String,
+    /// The CA certificate (PEM) the vault's certificate must chain to.
+    #[arg(long)]
+    pub ca: PathBuf,
+}
+
+/// The platform secrets `vault put` writes (DEC-2020): each is written by the secret-import
+/// identity alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum PutSecret {
+    #[value(name = "model-provider-key")]
+    ModelProviderKey,
+    #[value(name = "email-credential")]
+    EmailCredential,
+}
+
+/// The most bytes `vault put` reads from stdin: two credentials and a secret are far shorter.
+pub const PUT_MAX: u64 = 16384;
 
 #[derive(Debug, Args)]
 pub struct ProvisionArgs {
@@ -69,9 +105,18 @@ pub struct ProvisionArgs {
     )]
     pub out: Option<PathBuf>,
     /// Print the credentials instead, as Kubernetes Secrets in this namespace: one `v1` `List`
-    /// on stdout, which must be a pipe, never a terminal (DEC-2630).
+    /// on stdout, which must be a pipe to `kubectl apply -f -`, never a terminal; redirected to a
+    /// file, it leaves every secret id there at your umask (DEC-2630).
     #[arg(long)]
     pub secrets_namespace: Option<String>,
+}
+
+/// Which of the process's standard streams are terminals, which `vault provision` refuses for its
+/// token and its Secrets, and `vault put` for the credentials and the secret it reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Terminals {
+    pub stdin: bool,
+    pub stdout: bool,
 }
 
 #[derive(Debug, Args)]
@@ -146,6 +191,29 @@ pub fn run_import(
     Ok(())
 }
 
+/// Logs in as the secret-import identity with the role id and secret id on `stdin`'s first two
+/// lines, and writes the third, the secret, at `args.secret`'s path (DEC-2020), printing only
+/// which secret was written. Stdin is exactly three non-empty lines, the last newline optional,
+/// with no carriage return, at most [`PUT_MAX`] bytes, the last newline counted among them;
+/// anything else is refused `credential_file` before the vault is reached. A `stdin` that is a
+/// terminal is refused `config` before it is read, so nothing is typed where it echoes. A refusal
+/// names its reason code and carries no line of stdin. Its one line of output on success is shown
+/// only by a real vault: the CLI refuses the dev server CI runs (DEC-977 item 6), so staging's
+/// apply is where it is seen.
+pub fn run_put(
+    args: &PutArgs,
+    stdin: &mut impl Read,
+    terminals: Terminals,
+    now: UtcNanos,
+    out: &mut impl Write,
+) -> anyhow::Result<()> {
+    let _ = (args, stdin, terminals, now, out);
+    Err(anyhow!(
+        "{:?}",
+        SourceError::Unimplemented { story: "E21-32" }
+    ))
+}
+
 /// Runs the provisioning and prints, to `out`, the name of each file written and nothing else.
 /// `--out` is checked before the vault is reached, so a directory the write would refuse leaves no
 /// secret id issued and unwritten. A refusal names its reason code; none carries a token, a
@@ -154,12 +222,14 @@ pub fn run_import(
 /// With `--secrets-namespace` it writes no file and prints instead the credentials' Secrets as one
 /// `v1` `List` (DEC-2630), for its caller to hand `kubectl` on stdin. A namespace that is not a
 /// Kubernetes label, or an `out` that is a terminal, is refused `config` before the token is read
-/// or the vault reached. With `--operator-token-stdin` the token is read from `stdin` by
-/// [`mandate_vault::credentials::read_token`].
+/// or the vault reached. Its output is meant for `kubectl apply -f -`: redirected to a file, it
+/// leaves every secret id there at the caller's umask. With `--operator-token-stdin` the token is
+/// read from `stdin` by [`mandate_vault::credentials::read_token`], and a `stdin` that is a
+/// terminal is refused `config` before it is read, so a token is never typed where it echoes.
 pub fn run_provision(
     args: &ProvisionArgs,
     stdin: &mut impl Read,
-    stdout_is_terminal: bool,
+    terminals: Terminals,
     out: &mut impl Write,
 ) -> anyhow::Result<()> {
     let refused = |e: SourceError| anyhow!("{e} ({})", e.code());
@@ -170,15 +240,27 @@ pub fn run_provision(
             ConnectionId::new(id).map_err(|_| anyhow!("a connection id is malformed (connection)"))
         })
         .collect::<anyhow::Result<Vec<_>>>()?;
-    let _ = (stdin, stdout_is_terminal);
-    let (Some(token_file), Some(dir)) = (&args.operator_token_file, &args.out) else {
+    if let Some(namespace) = &args.secrets_namespace {
+        if terminals.stdout {
+            return Err(anyhow!(
+                "the Secrets are printed only to a pipe, never a terminal (config)"
+            ));
+        }
+        kube_secrets(namespace, &[]).map_err(refused)?;
+    }
+    if args.operator_token_stdin && terminals.stdin {
         return Err(anyhow!(
-            "{:?}",
-            SourceError::Unimplemented { story: "E21-32" }
+            "the operator's token is read only from a pipe, never a terminal (config)"
         ));
-    };
-    let operator = read_token_file(token_file).map_err(refused)?;
-    check_credential_dir(dir, &connections).map_err(refused)?;
+    }
+    let operator = match &args.operator_token_file {
+        Some(path) => read_token_file(path),
+        None => read_token(stdin),
+    }
+    .map_err(refused)?;
+    if let Some(dir) = &args.out {
+        check_credential_dir(dir, &connections).map_err(refused)?;
+    }
     let config = OpenBaoConfig {
         address: args.address.clone(),
         ca_pem: fs::read(&args.ca).map_err(|_| refused(SourceError::Config))?,
@@ -191,8 +273,22 @@ pub fn run_provision(
     let credentials = runtime
         .block_on(provision(&config, &operator, &connections))
         .map_err(refused)?;
-    for name in write_credentials(dir, &credentials).map_err(refused)? {
-        writeln!(out, "{name}")?;
+    match (&args.out, &args.secrets_namespace) {
+        (Some(dir), _) => {
+            for name in write_credentials(dir, &credentials).map_err(refused)? {
+                writeln!(out, "{name}")?;
+            }
+        }
+        (None, Some(namespace)) => {
+            let manifests = kube_secrets(namespace, &credentials).map_err(refused)?;
+            write!(out, "{{\"apiVersion\":\"v1\",\"kind\":\"List\",\"items\":[")?;
+            let separators = iter::once("").chain(iter::repeat(","));
+            for (separator, manifest) in separators.zip(&manifests) {
+                write!(out, "{separator}{}", manifest.manifest.expose_secret())?;
+            }
+            writeln!(out, "]}}")?;
+        }
+        (None, None) => return Err(refused(SourceError::Config)),
     }
     Ok(())
 }

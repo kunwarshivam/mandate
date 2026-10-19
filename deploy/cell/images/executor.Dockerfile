@@ -5,6 +5,6 @@
 # reproducible, signed build. `cargo xtask cell up` builds it from a context holding only the
 # binary, and never with the `live` feature.
 FROM scratch
-COPY mandate-executord /usr/local/bin/mandate-executord
+COPY mandate-executord /mandate-executord
 USER 65532:65532
-ENTRYPOINT ["/usr/local/bin/mandate-executord"]
+ENTRYPOINT ["/mandate-executord"]
