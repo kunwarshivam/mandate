@@ -15088,6 +15088,8 @@ mod tests {
         let report = "if: ${{ always() && (github.event_name == 'workflow_dispatch' || \
                       github.event_name == 'push') && github.ref == 'refs/heads/main' && \
                       (needs.fast.result == 'failure' || needs.full.result == 'failure') }}";
+        const AGGREGATE_GUARD: &str = "if: ${{ ((github.event_name == 'pull_request' && always()) \
+             || !cancelled()) && !github.event.pull_request.draft }}";
         for (job, guard) in [
             ("select", "if: ${{ !github.event.pull_request.draft }}"),
             ("fast-lint", "if: ${{ !github.event.pull_request.draft }}"),
@@ -15096,20 +15098,14 @@ mod tests {
             ("fast-python", "needs: select"),
             ("fast-portable", "needs: select"),
             ("fast-rh-sim-live", "needs: select"),
-            (
-                "fast",
-                "if: ${{ always() && !github.event.pull_request.draft }}",
-            ),
+            ("fast", AGGREGATE_GUARD),
             ("full-checks", "needs: select"),
             ("schema-mutants", "needs: select"),
             (
                 "mutants-plan",
                 "if: ${{ !github.event.pull_request.draft }}",
             ),
-            (
-                "full",
-                "if: ${{ always() && !github.event.pull_request.draft }}",
-            ),
+            ("full", AGGREGATE_GUARD),
             ("mutants", "needs: mutants-plan"),
             ("report-main", report),
         ] {
@@ -15122,7 +15118,7 @@ mod tests {
         }
         let guards = [
             "if: ${{ !github.event.pull_request.draft }}",
-            "if: ${{ always() && !github.event.pull_request.draft }}",
+            AGGREGATE_GUARD,
             "needs: mutants-plan",
             "needs: [mutants-plan, mutants]",
             "needs: select",
