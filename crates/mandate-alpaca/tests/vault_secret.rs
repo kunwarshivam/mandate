@@ -110,8 +110,9 @@ fn any_canonical_pair_reads_as_its_credentials() {
             let read = Credentials::from_vault_secret(&secret_of(&[
                 ("key_id", &key_id),
                 ("secret", &secret),
-            ]));
-            prop_assert_eq!(read.ok(), Some(from_lookup(&key_id, &secret)));
+            ]))
+            .unwrap_or_else(|e| panic!("it reads: {e}"));
+            prop_assert_eq!(read, from_lookup(&key_id, &secret));
             Ok(())
         })
         .unwrap_or_else(|e| panic!("{e}"));
