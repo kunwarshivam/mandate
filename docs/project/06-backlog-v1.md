@@ -566,7 +566,10 @@ the spec invariants (DP-n) its tests cover.
   - **B1 to B4:** `mandate_executor::risk_state`, off R0's path. It is a pure fold of the account
     stream's records into the records to append and a gate view, either readable or unreadable.
     An unreadable view holds openings and never exits (DEC-2301 item 3). Its property tests use a
-    latch oracle that derives the latched set from the appended records alone.
+    latch oracle that derives the latched set from the appended records alone. B3's journaled
+    reference-case driver also walks the cases `mandate-spec`'s `breach_time_s` tests do not:
+    daily loss (`resolved_at_rollover`, `new_day_breach`), the lifetime floor, crypto, and the
+    owner's acknowledgments and allocation changes.
   - **C:** the wiring in `mandate-shell`'s `adapters.rs`, `paper/gate.rs`, and `paper/context.rs`,
     which are R0 files. It waits for R0 to close, or for the founder's call.
   - **Follow-up ([DEC-2305](decisions/DEC-2305.md)):** a last-trade risk mark (trading spec §8.2,
@@ -1201,14 +1204,16 @@ after U-A1 to U-A5 are recorded.
   *Follow-up (DEC-2509, M7 S2; claim [#1594](https://github.com/kunwarshivam/mandate/issues/1594)):*
   journal spec §9.28 closes `OwnerAcknowledged` and adds `OwnerAcknowledgmentRequested`. Still
   owed:
-  - `mandate-journal` registers both, with rule 239 and §9.28's vectors (M7 S2);
-  - `mandate-journal` registers `OwnerCommandRefused`'s reasons `trigger_unknown`,
-    `trigger_superseded` and `request_invalid`, with rule 28's scoping (M7 S2);
   - the CLI's `agent request-ack` and `agent acknowledge` (M7 S2);
   - the workspace API's members (DEC-2102 item 4, lane L1);
   - the executor's copy and its four checks (E7-4, lane X);
   - **a §11 range check for stream rules 240 and 241**, with a new `VerificationRun` check code.
     Until it lands, the writers and the executor hold those rules, failing closed.
+  *Done (M7 S2a to S2c, #1670, #1734, #1765):* §9.28's vectors, and `mandate-journal` registers
+  both records on the control and account streams with rule 239, and `OwnerCommandRefused`'s
+  reasons `trigger_unknown`, `trigger_superseded` and `request_invalid` with rule 28's scoping.
+  *Follow-up (#1765 review, nit):* `acknowledgments.rs`'s module doc should say that the account
+  stream's copies are judged by the same schema and rule.
 - **E8-4 (Must)** As an approver, I want notifications through web push, email, and a chat
   channel, with escalation chains and quiet hours.
   *Spec:* [notifications spec](../specs/notifications.md) ([DEC-438](decisions/DEC-438.md)). The
@@ -1272,6 +1277,12 @@ after U-A1 to U-A5 are recorded.
   `xtask` email-footer check (DEC-700 item 4) exists, runs in `cargo xtask ci fast`'s lint, and is
   shown to fail on a planted third mail transport and on a planted deny-listed mail crate (`lettre`)
   outside the founder-only transport while the general footer is unresolved.
+  *Done (lane M7, #1691, #1715, #1697, #1716, #1761):* the email adapter and its recorded transport,
+  and the mail guard (`cargo xtask mail-guard`, DEC-2511). The founder-only SMTP transport (S5) is
+  still owed.
+  *Follow-up (#1761 review, nits; DEC-2511 item 9):* the literal scan misses escaped spellings
+  (`send\u{6d}ail`, `smtp\x3a//`), `[::1]:25`, `host:25/path`, and a trailing space; and a
+  transport `struct` under `#[cfg(...)]` counts as declared, with no test for it.
 - **E8-12 (Deferred: not in v1; SC)** As an approver, I want one chat channel (spec §4.5). The
   founder did not take DEC-438 item 20 (2026-10-08, DEC-824): v1 has no chat channel, and Telegram
   at M10 is a later option. If it is built, *accepted when:* NT-1's canary test passes; every inbound message, button, or
@@ -2897,9 +2908,11 @@ enables `live` (ES-23, OPS-5).
   alerts through the cell's alert path, and for an instance stuck `Pending` or `Unknown`; deleting
   exited pods; the demo's runtime, which needs a version-2 deployment and so `connection record`
   for the demo's paper connection, waiting on the executor's connect check (E21-30, lane X). From
-  #1737's review, minors left under the freeze rule: a version-2 deployment rule 201 refuses (its
-  connection revoked or never established) starts nothing silently, where a once-per-process opaque
-  alert like `deployment_unread` would show it; and RB-14 has no page under `docs/runbooks/`. From
+  #1737's review, two minors were left under the freeze rule. *Slice 4* ([DEC-2038](decisions/DEC-2038.md))
+  closes both: a version-2 deployment that rule 201 refuses raises `deployment_unconnected` once per
+  process, and RB-14 has its page. Also *left*: nothing journals `AgentStopped` yet, so a deployment
+  that never ran, or a crash-looped runtime, is never stopped, and its alert repeats on each manager
+  start (DEC-2038 item 3). From
   slice 2's review, minors left under the freeze rule:
   - The manager's egress gate reads any connection failure on port 9153 as filtered, so a dead or
     restarting resolver fails open; a positive control first (TCP 53 on the same address) would
@@ -3255,6 +3268,26 @@ enables `live` (ES-23, OPS-5).
   (`fold_theses`, `expire_theses`, the reservation ceiling's fold), gives no context on a pass when
   any record cannot be folded (DEC-2210 item 4), and a property test over random journaled runs
   shows the folded facts equal an independent accumulator over the same records.
+
+- **E21-60 (Proposed, M8, after E21-59; lane I2; DEC-2214, DEC-2249)** As the founder, I want the
+  runtime process's research source to fold the instruments other agents on the same connection
+  have claimed, from their own agent streams, so that a workspace with more than one agent deployed
+  can research instead of giving every pass no context. *Accepted when:* `mandate-daemon`'s cell
+  source reads every other deployed agent's stream in the environment, folds the instruments each
+  has admitted or pinned into `claimed_by_other_agents` through the same functions the core judges
+  V-006 and admission with, gives no context on a pass when any of those streams or records cannot
+  be read or folded (DEC-2210 item 4), and only then lifts DEC-2214 item 1's rule; a property test
+  over random journaled runs of several agents shows the folded claims equal an independent
+  accumulator over the same records.
+
+- **E21-61 (Proposed, M8, after E21-59; lane G, the model gateway; DEC-2249)** As the founder, I
+  want the cell's model-gateway meter journaled on `meter:{workspace_id}` (journal spec §9.19) and
+  folded back after a restart, so that a restarted runtime counts the day's research reservations
+  and spend instead of failing closed for the rest of the risk day. *Accepted when:* the cell's
+  worker writes `MeterReserved` and `MeterSettled` through the journal before and after each call,
+  rebuilds its meter from that stream at start, and the research source folds the same records
+  through `mandate_gateway::meter::spend`; DEC-2249 item 3's fail-closed rule is then lifted by its
+  own decision; a restart test shows the cap holds across a restart with reservations open.
 
 ## Won't (v1)
 

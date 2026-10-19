@@ -98,6 +98,10 @@ fn main() -> ExitCode {
                     return ExitCode::from(2);
                 }
             };
+            if let Err(code) = launch::fixture_permitted(fixture, &var) {
+                eprintln!("{code}");
+                return ExitCode::from(2);
+            }
             let deployment = (named.workspace, named.agent);
             let joined = args.iter().any(|a| a.starts_with("--research="));
             let asked = joined || args.iter().any(|a| a == "--research");

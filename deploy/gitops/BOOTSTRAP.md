@@ -42,11 +42,15 @@ break-glass path, from your own machine, for when CI cannot run.
      `archive_secret_access_key`.
    - `CLOUDFLARED_TUNNEL_TOKEN`: the tunnel's token, the sensitive OpenTofu output `tunnel_token` of
      `deploy/tofu/environments/staging`.
+   - `JOURNAL_ARCHIVE_ENDPOINT`: the archive's R2 endpoint, the sensitive output `archive_endpoint`.
+     It names your Cloudflare account, so it is never in git; the bootstrap writes it into the
+     ConfigMap `flux-system/journal-archive-endpoint`, which the journal reads (DEC-2017 item 6).
 
    ```sh
    export JOURNAL_ARCHIVE_ACCESS_KEY_ID="$(tofu -chdir=deploy/tofu/environments/staging output -raw archive_access_key_id)"
    export JOURNAL_ARCHIVE_SECRET_KEY="$(tofu -chdir=deploy/tofu/environments/staging output -raw archive_secret_access_key)"
    export CLOUDFLARED_TUNNEL_TOKEN="$(tofu -chdir=deploy/tofu/environments/staging output -raw tunnel_token)"
+   export JOURNAL_ARCHIVE_ENDPOINT="$(tofu -chdir=deploy/tofu/environments/staging output -raw archive_endpoint)"
    ```
 
 ## Bootstrap
@@ -58,13 +62,14 @@ cargo xtask gitops bootstrap staging
 1. The command first checks everything:
    - flux is 2.9.6;
    - every Flux image is pinned by digest;
-   - the three secrets are set and not empty;
+   - the three secrets are set and not empty, and the endpoint is an R2 account endpoint;
    - `deploy/gitops/clusters/staging/sync.yaml` exists.
 2. It prints the context it will use. Type that context's name to go on; anything else stops it
    with nothing applied.
 3. It then:
    - installs Flux's source, kustomize and helm controllers and waits for them;
-   - writes `ws-ws1/journal-archive-key` and `ws-ws1/cloudflared-tunnel`;
+   - writes `ws-ws1/journal-archive-key`, `ws-ws1/cloudflared-tunnel` and
+     `flux-system/journal-archive-endpoint`, stopping with an error if any write fails;
    - applies `sync.yaml`.
 
    It prints no secret.
@@ -82,10 +87,30 @@ cargo xtask gitops bootstrap staging
    kubectl -n ws-ws1 get cluster,pods
    ```
 
+## When the journal does not install
+
+The journal's release waits for `flux-system/journal-archive-endpoint` and never falls back to an
+address of its own, so a cluster bootstrapped without it installs the operator and plugin but holds
+the journal and the workspace. `flux get helmreleases -A` then shows `journal` not ready, naming
+the missing ConfigMap. The bootstrap stops with an error when it cannot write it; fix the cause
+and run it again, or let the next infra run re-assert it. A healthy journal reports
+`ContinuousArchiving` true: `kubectl -n ws-ws1 get cluster journal -o jsonpath='{.status.conditions}'`.
+
+## When R2's addresses change
+
+The journal reaches R2 only at the two /32s DEC-2017 item 1 resolved, so if Cloudflare moves them,
+archiving stops (`ContinuousArchiving` goes false) and nothing opens wider. Resolve the endpoint
+again (`dig +short <account>.r2.cloudflarestorage.com`) and change, in one reviewed pull request:
+
+- `archive.egress.cidrs` in `deploy/gitops/clusters/staging/journal.yaml` and
+  `deploy/gitops/clusters/production/journal.yaml`;
+- `R2_EGRESS` in `deploy/tests/test_gitops.py`, the checks' own copy;
+- DEC-2017 item 1, by a new decision that records the new addresses.
+
 ## Rotating a secret
 
 Set the new values in your shell, then run `cargo xtask gitops secrets staging`. It rewrites both
-Secrets and nothing else, after the same confirmation. A pod reads a Secret only at start, so
+Secrets and the endpoint's ConfigMap and nothing else, after the same confirmation. A pod reads a Secret only at start, so
 restart the tunnel with `kubectl -n ws-ws1 rollout restart deployment/cloudflared`. The journal
 picks up the new archive key on its next archive attempt.
 
