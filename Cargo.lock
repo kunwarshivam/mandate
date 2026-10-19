@@ -2306,6 +2306,7 @@ dependencies = [
  "mandate-spec",
  "mandate-time",
  "proptest",
+ "serde_json",
  "thiserror",
 ]
 

@@ -16,6 +16,9 @@
   four fields; the shared gate equals the gate called directly, refusals included, for any
   quantity and over varied passes, modes, account states, eligibility, quotes, participation,
   positions, protective orders and sides (each input shown caught when the port drops it);
+  `crates/mandate-ports/tests/plan.rs`: the reference cases' whole-position exit at the threshold,
+  and the refusal of an output keyed under another instrument, of an unpinned model version, of a
+  sell that would require protection, and of another asset class's execution policy;
   `src/plan.rs`'s unit test pins the classification's order-amount match. The shell's own
   adapter tests still pin sizing, classification and the view through its stages.
 - **Run:** `cargo nextest run -p mandate-ports -p mandate-shell`.
