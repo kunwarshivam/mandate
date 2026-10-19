@@ -357,3 +357,152 @@ fn a_batch_reads_its_stream_only_for_the_records_the_stream_rules_judge() {
     assert!(!reads_stream(std::slice::from_ref(&opened)));
     assert!(!reads_stream(&[]));
 }
+
+const DEPLOYMENT: &str = "dep_01J8Z2";
+
+/// The base draft `name` moved to the deployment meter stream, the copy's own record (journal
+/// spec v0.53 §9.19): `StreamOpened` takes the deployment stream's own payload.
+fn on_deployment_stream(section: &Value, name: &str, deployment: &str) -> Draft {
+    parsed_on_deployment_stream(section, name, deployment).unwrap()
+}
+
+/// As [`on_deployment_stream`], before `Draft::parse`'s answer is taken.
+fn parsed_on_deployment_stream(
+    section: &Value,
+    name: &str,
+    deployment: &str,
+) -> Result<Draft, mandate_journal::Invalid> {
+    let mut body = section
+        .get("drafts")
+        .and_then(|d| d.get(name))
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap();
+    body.insert(
+        Key::new("stream_id").unwrap(),
+        Value::Str(format!("dmeter:{DEPLOYMENT}")),
+    );
+    if name == "opened" {
+        let mut payload = Object::new();
+        payload.insert(
+            Key::new("deployment_id").unwrap(),
+            Value::Str(deployment.to_owned()),
+        );
+        payload.insert(
+            Key::new("stream_type").unwrap(),
+            Value::Str("deployment_meter".to_owned()),
+        );
+        body.insert(Key::new("payload").unwrap(), Value::Object(payload));
+    }
+    Draft::parse(&to_canonical(&Value::Object(body)))
+}
+
+/// Journal spec v0.53 §2 (DEC-2207): `dmeter:{deployment_id}` is a stream type of its own, one
+/// identifier segment, never a workspace's meter stream.
+#[test]
+fn the_deployment_meter_stream_is_its_own_stream_type() {
+    let stream = StreamId::parse("dmeter:dep_01J8Z2").unwrap();
+    assert_eq!(stream.stream_type(), StreamType::DeploymentMeter);
+    assert_eq!(stream.as_str(), "dmeter:dep_01J8Z2");
+    for refused in [
+        "dmeter:",
+        "dmeter:dep:extra",
+        "dmeter:dep 1",
+        "dmeters:dep_1",
+    ] {
+        assert_eq!(StreamId::parse(refused), None, "{refused}");
+    }
+}
+
+/// The catalogue closes the deployment meter stream's `StreamOpened`, `MeterReserved` and
+/// `MeterSettled` at version 1, and nothing else there.
+#[test]
+fn the_catalogue_closes_the_deployment_meter_stream_s_records_at_version_1() {
+    use mandate_journal::closes;
+    for record in ["StreamOpened", "MeterReserved", "MeterSettled"] {
+        assert!(closes(record, 1, StreamType::DeploymentMeter), "{record}");
+        assert!(
+            !closes(record, 2, StreamType::DeploymentMeter),
+            "{record} v2"
+        );
+    }
+    assert!(!closes("MarkUpdated", 1, StreamType::DeploymentMeter));
+    assert!(!closes(
+        "ModelInvocationRecorded",
+        1,
+        StreamType::DeploymentMeter
+    ));
+}
+
+/// Journal spec v0.53 §9.19 on the deployment meter stream: it opens naming itself (rule 154), its
+/// copies keep rules 155 to 158 as the workspace's stream does, and the workspace stream's
+/// `StreamOpened` is not its own.
+#[test]
+fn the_deployment_meter_stream_opens_naming_itself_and_keeps_rule_158() {
+    let section = section();
+    let opened = on_deployment_stream(&section, "opened", DEPLOYMENT);
+    let reserved = on_deployment_stream(&section, "reserved", DEPLOYMENT);
+    let settled = on_deployment_stream(&section, "settled", DEPLOYMENT);
+    assert_eq!(
+        check_stream(&[], &[opened.clone(), reserved.clone(), settled.clone()]),
+        Ok(())
+    );
+    let judged = |batch: &[Draft]| {
+        check_stream(&[], batch)
+            .err()
+            .map(|(i, e)| (i, e.reason.code(), e.path))
+    };
+    let mismatched = parsed_on_deployment_stream(&section, "opened", "dep_other")
+        .err()
+        .map(|e| (e.reason.code(), e.path));
+    assert_eq!(
+        mismatched,
+        Some(("stream_mismatch", "stream_id".to_owned())),
+        "rule 154"
+    );
+    assert_eq!(
+        judged(&[opened.clone(), settled.clone()]),
+        Some((1, "schema", "payload.reservation".to_owned())),
+        "rule 158: an unreserved settlement"
+    );
+    assert_eq!(
+        judged(&[opened.clone(), reserved.clone(), settled.clone(), settled]),
+        Some((3, "schema", "payload.reservation".to_owned())),
+        "rule 158: a second settlement"
+    );
+    let mut workspace_opened = section
+        .get("drafts")
+        .and_then(|d| d.get("opened"))
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap();
+    workspace_opened.insert(
+        Key::new("stream_id").unwrap(),
+        Value::Str(format!("dmeter:{DEPLOYMENT}")),
+    );
+    assert!(
+        Draft::parse(&to_canonical(&Value::Object(workspace_opened))).is_err(),
+        "a workspace meter stream's opening is not the deployment stream's"
+    );
+}
+
+/// Journal spec §2 and v0.53 §2: a stream is a workspace's exactly when its second segment is the
+/// workspace's id whole, never by prefix, and the deployment meter stream is no workspace's, even
+/// when its deployment id is the workspace's own segment.
+#[test]
+fn the_deployment_meter_stream_is_no_workspace_s_whatever_its_id() {
+    use mandate_journal::workspace_owns;
+    let stream = |id: &str| StreamId::parse(id).unwrap();
+    for (id, owned) in [
+        ("ctl:ws_1", true),
+        ("agent:ws_1:agent_a", true),
+        ("meter:ws_1", true),
+        ("ctl:ws_10", false),
+        ("acct:ws_2:acct_1", false),
+        ("meter:ws_2", false),
+    ] {
+        assert_eq!(workspace_owns("ws_1", &stream(id)), owned, "{id}");
+    }
+    assert!(!workspace_owns("ws_1", &stream("dmeter:ws_1")));
+    assert!(!workspace_owns("dep_01", &stream("dmeter:dep_01")));
+}
