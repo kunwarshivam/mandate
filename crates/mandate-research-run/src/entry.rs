@@ -4,7 +4,10 @@
 
 use mandate_canon::{Int, Key, Object, Value};
 use mandate_gateway::registry::{Identity, Mode, PinnedContent, Snapshot, Template};
+use mandate_gateway::tools::Agentic;
 
+use crate::agentic::LoopBounds;
+use crate::error::ResearchRunError;
 use crate::output::OutputBounds;
 use crate::plan::RetrievalPlan;
 
@@ -126,6 +129,19 @@ impl ResearchEntry {
             authorship: AUTHORSHIP.to_owned(),
         }
     }
+}
+
+/// An agentic research entry's pinned loop (agent harness spec §6.9 to §6.11, DEC-2262):
+/// `final_output`, the read and think tools the worker serves, each on both run kinds' menus,
+/// `bounds` as the gateway pins them, and each run kind's final output schema from `output`.
+///
+/// # Errors
+/// [`ResearchRunError::UnpinnableLoop`] when the loop is not one a registry may pin.
+pub fn agentic_loop(
+    _bounds: &LoopBounds,
+    _output: &OutputBounds,
+) -> Result<Agentic, ResearchRunError> {
+    Err(ResearchRunError::Unimplemented { story: "E19-13" })
 }
 
 /// The longest id or symbol the parser reads (`crate::output`'s bounds).
