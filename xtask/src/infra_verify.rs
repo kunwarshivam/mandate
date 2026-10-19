@@ -448,6 +448,67 @@ fn cilium(list: &mut Checklist, kubectl: Kubectl<'_>) {
     );
 }
 
+/// What cloudflared's last log lines are about, as fixed class words alone: a line may quote the
+/// tunnel's token, an address or a hostname, so none is printed.
+const CLOUDFLARED_CLASSES: [(&str, &str); 10] = [
+    ("registered tunnel connection", "registered"),
+    ("unauthorized", "auth-failed"),
+    ("invalid tunnel secret", "auth-failed"),
+    ("invalid token", "auth-failed"),
+    ("connection refused", "connection-refused"),
+    ("timeout", "timeout"),
+    ("deadline exceeded", "timeout"),
+    ("no such host", "dns"),
+    ("server misbehaving", "dns"),
+    ("i/o timeout", "timeout"),
+];
+
+/// Which workspace pod runs cloudflared, and what its last lines are about: read only once
+/// Cloudflare reports the tunnel down, so a healthy staging reads no log.
+fn cloudflared_why(kubectl: Kubectl<'_>) -> String {
+    let pods = kubectl(&["get", "pods", "-A", "-o", "json"])
+        .ok()
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        .and_then(|listing| listing["items"].as_array().cloned())
+        .unwrap_or_default();
+    let Some(pod) = pods.iter().find(|pod| {
+        text(pod, &["metadata", "namespace"]).starts_with("ws-")
+            && pod["spec"]["containers"]
+                .as_array()
+                .is_some_and(|all| all.iter().any(|c| text(c, &["name"]) == "cloudflared"))
+    }) else {
+        return "no cloudflared pod".to_owned();
+    };
+    let at = where_is(pod);
+    let logs = kubectl(&[
+        "logs",
+        text(pod, &["metadata", "name"]),
+        "--namespace",
+        text(pod, &["metadata", "namespace"]),
+        "--container",
+        "cloudflared",
+        "--tail=50",
+    ]);
+    let Ok(logs) = logs else {
+        return format!("cloudflared {at} logs unreadable");
+    };
+    let lower = logs.to_lowercase();
+    let mut found: Vec<&str> = Vec::new();
+    for (needle, class) in CLOUDFLARED_CLASSES {
+        if lower.contains(needle) && !found.contains(&class) {
+            found.push(class);
+        }
+    }
+    let failed = lower.lines().any(|line| line.contains("err"));
+    if failed && found.iter().all(|class| *class == "registered") {
+        found.push("unclassified");
+    }
+    if found.is_empty() {
+        found.push("quiet");
+    }
+    format!("cloudflared {at} logs {}", found.join(", "))
+}
+
 /// A line of the edge's: failing, or pending on `pending` when it names a change.
 fn edge_line(
     list: &mut Checklist,
@@ -465,6 +526,7 @@ fn edge_line(
 /// credentials: Access redirects it to its login or refuses it; a success means the API is open.
 fn edge_checks(
     list: &mut Checklist,
+    kubectl: Kubectl<'_>,
     http: &dyn Http,
     edge: &Edge<'_>,
     pending: Option<&'static str>,
@@ -491,7 +553,10 @@ fn edge_checks(
                 list,
                 pending,
                 false,
-                format!("the tunnel is healthy (Cloudflare reports {said})"),
+                format!(
+                    "the tunnel is healthy (Cloudflare reports {said}; {})",
+                    cloudflared_why(kubectl)
+                ),
             );
         }
         None => edge_line(
@@ -530,7 +595,7 @@ fn checks(
     pods(&mut list, kubectl);
     admission(&mut list, kubectl);
     cilium(&mut list, kubectl);
-    edge_checks(&mut list, http, edge, pending);
+    edge_checks(&mut list, kubectl, http, edge, pending);
     Ok(list)
 }
 
@@ -854,6 +919,70 @@ mod tests {
         Ok(())
     }
 
+    fn tunnel_pod(namespace: &str, name: &str) -> Value {
+        let mut found = pod(namespace, name, "Running", &[true]);
+        found["spec"] = json!({"containers": [{"name": "cloudflared"}]});
+        found
+    }
+
+    /// A tunnel Cloudflare reports down says what its cloudflared pod's last lines are about, as
+    /// fixed classes, never the lines themselves, which may quote the token or a hostname.
+    #[test]
+    fn a_down_tunnel_says_what_cloudflared_logs_without_them() -> Result<()> {
+        let cases = [
+            (
+                "2026-10-19T15:00:00Z ERR Register tunnel error from server side error=\"Unauthorized: Invalid tunnel secret eyJhIjoiS0VZIn0\"",
+                "cloudflared ws-ws1/cloudflared-x logs auth-failed",
+            ),
+            (
+                "ERR Failed to dial a quic connection error=\"timeout: no recent network activity\" connIndex=0 ip=198.41.192.7",
+                "cloudflared ws-ws1/cloudflared-x logs timeout",
+            ),
+            (
+                "ERR edge discovery: error looking up Cloudflare edge IPs: lookup _v2-origintunneld._tcp.argotunnel.com: no such host",
+                "cloudflared ws-ws1/cloudflared-x logs dns",
+            ),
+            (
+                "INF Registered tunnel connection connIndex=0\nERR  error=\"Unable to reach the origin service. dial tcp 127.0.0.1:8080: connect: connection refused\"",
+                "cloudflared ws-ws1/cloudflared-x logs registered, connection-refused",
+            ),
+            (
+                "ERR something odd happened secret-xyz",
+                "cloudflared ws-ws1/cloudflared-x logs unclassified",
+            ),
+        ];
+        for (logs, why) in cases {
+            let mut staging = Staging::up();
+            staging.tunnel = "down";
+            staging.pods.push(tunnel_pod("ws-ws1", "cloudflared-x"));
+            staging.logs = logs;
+            let text = run(&staging)?;
+            assert_eq!(
+                missing(&text),
+                [format!("the tunnel is healthy (Cloudflare reports down; {why})").as_str()],
+                "{text}"
+            );
+            for secret in [
+                "eyJhIjoiS0VZIn0",
+                "198.41.192.7",
+                "argotunnel",
+                "secret-xyz",
+                "127.0.0.1",
+            ] {
+                assert!(!text.contains(secret), "{secret} leaked: {text}");
+            }
+        }
+        let mut staging = Staging::up();
+        staging.tunnel = "down";
+        let text = run(&staging)?;
+        assert_eq!(
+            missing(&text),
+            ["the tunnel is healthy (Cloudflare reports down; no cloudflared pod)"],
+            "{text}"
+        );
+        Ok(())
+    }
+
     fn missing(text: &str) -> Vec<&str> {
         text.lines()
             .filter_map(|line| line.trim_start().strip_prefix("[MISSING] "))
@@ -998,7 +1127,7 @@ mod tests {
         assert_eq!(
             missing(&text),
             [
-                "the tunnel is healthy (Cloudflare reports down)",
+                "the tunnel is healthy (Cloudflare reports down; no cloudflared pod)",
                 "the API answers only through Access (502 without credentials)",
             ],
             "{text}"
@@ -1007,7 +1136,7 @@ mod tests {
         let text = list.render_titled("infra verify (staging)");
         assert_eq!(missing(&text), Vec::<&str>::new(), "{text}");
         for line in [
-            "[pending #1] the tunnel is healthy (Cloudflare reports down)",
+            "[pending #1] the tunnel is healthy (Cloudflare reports down; no cloudflared pod)",
             "[pending #1] the API answers only through Access (502 without credentials)",
         ] {
             assert!(text.contains(line), "{line}: {text}");
