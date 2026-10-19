@@ -131,6 +131,34 @@ impl Stream {
         );
     }
 
+    /// Th-1's admitted `ThesisProposed` on AAPL, with each member in `changed` set to its JSON value,
+    /// or left out when the value is `None`.
+    fn edited(&mut self, changed: &[(&str, Option<&str>)]) {
+        let expires = format!(r#""{}""#, stamp(T + 60));
+        let members = [
+            ("thesis_id", r#""th-1""#),
+            ("lineage_id", r#""th-1""#),
+            ("revision", "0"),
+            ("predecessor_thesis_id", "null"),
+            ("instrument_id", &format!(r#""{AAPL}""#)),
+            ("expires_at", &expires),
+            ("admitted", "true"),
+            ("reason", "null"),
+        ];
+        let payload = members
+            .iter()
+            .filter_map(|&(member, value)| {
+                let value = changed
+                    .iter()
+                    .find(|(name, _)| *name == member)
+                    .map_or(Some(value), |(_, changed)| *changed)?;
+                Some(format!(r#""{member}":{value}"#))
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        self.push("ThesisProposed", &format!("{{{payload}}}"));
+    }
+
     /// A model's `ThesisInvalidated` of `thesis` (journal spec §9.22).
     fn invalidated(&mut self, thesis: &str, lineage: &str, instrument: &str) {
         self.push(
@@ -289,9 +317,10 @@ fn another_refusal_admits_nothing_and_the_active_theses_are_in_instrument_order(
     );
 }
 
-/// Fail closed (DEC-2210 item 4): a record missing a folded member, a time it cannot read, a
-/// reason that is no refusal's code, an admission with a reason or a refusal without one, and an
-/// admitted instrument the bundle names no symbol for, each give no fold, naming the member.
+/// Fail closed (DEC-2210 item 4, DEC-2251 item 1): a record missing any folded member, a
+/// non-boolean `admitted`, a revision that is no integer, a time it cannot read, a reason that is
+/// no refusal's code, an admission with a reason or a refusal without one, and a surviving admitted
+/// instrument the bundle names no symbol for, each give no fold, naming the member.
 #[test]
 #[ignore = "pending E21-59"]
 fn a_record_it_cannot_read_gives_no_fold() {
@@ -325,6 +354,25 @@ fn a_record_it_cannot_read_gives_no_fold() {
     let mut s = Stream::default();
     s.push("ThesisInvalidated", r#"{"lineage_id":"th-1"}"#);
     cases.push((s, "thesis_id"));
+    for member in [
+        "thesis_id",
+        "lineage_id",
+        "instrument_id",
+        "revision",
+        "expires_at",
+        "admitted",
+        "reason",
+    ] {
+        let mut s = Stream::default();
+        s.edited(&[(member, None)]);
+        cases.push((s, member));
+    }
+    let mut s = Stream::default();
+    s.edited(&[("admitted", Some(r#""yes""#))]);
+    cases.push((s, "admitted"));
+    let mut s = Stream::default();
+    s.edited(&[("revision", Some(r#""0""#))]);
+    cases.push((s, "revision"));
     for (stream, member) in cases {
         assert_eq!(
             stream.fold(T),
