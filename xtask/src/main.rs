@@ -7911,6 +7911,17 @@ impl PipelineCommand {
             .collect()
     }
 
+    /// The token position of each of [`Self::command`]'s words, in the same order, so a word's
+    /// index there names its position here.
+    fn command_positions(&self) -> Vec<usize> {
+        self.words
+            .iter()
+            .skip(self.command_index())
+            .filter(|(word, quoted, at)| !self.redirection_word(word, *quoted, *at))
+            .map(|(_, _, at)| *at)
+            .collect()
+    }
+
     /// Whether a word belongs to a redirection rather than the command: unquoted, and holding
     /// `<` or `>`, or a descriptor (`2`, `{fd}`) right before a redirection's operator.
     fn redirection_word(&self, word: &str, quoted: bool, at: usize) -> bool {
@@ -8067,11 +8078,9 @@ fn pipeline_live_flag(
             }
         }
         let command_at = command
-            .words
-            .iter()
-            .filter(|(word, _, _)| !is_skipped_word(word))
-            .nth(named.len().saturating_sub(unwrapped_named.len()))
-            .map(|(_, _, at)| *at);
+            .command_positions()
+            .get(named.len().saturating_sub(unwrapped_named.len()))
+            .copied();
         let expanding_command_word = !ctx.quoted_reread
             && unwrapped_named.first().is_some_and(|word| {
                 word.starts_with(['$', '`'])
