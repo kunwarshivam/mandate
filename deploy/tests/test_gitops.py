@@ -870,3 +870,43 @@ def test_an_extra_source_is_caught(tmp_path):
     assert sources_pinned([*docs, extra]) == [
         "mandate-extra: an OCIRepository the hosted clusters do not run"
     ]
+
+
+# Production moves only by copying what staging already ran on main (DEC-2016).
+STAGING_FILES = ("deploy/gitops/clusters/staging/charts.yaml", "deploy/gitops/clusters/staging/images.yaml")
+PRODUCTION_FILES = (
+    "deploy/gitops/clusters/production/charts.yaml",
+    "deploy/gitops/clusters/production/images.yaml",
+)
+ANY_DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
+
+
+def unstaged_digests(production: str, staged: str) -> list[str]:
+    """Each digest production pins that staging's history on main never held."""
+    return sorted(set(ANY_DIGEST.findall(production)) - set(ANY_DIGEST.findall(staged)))
+
+
+def git(*args: str) -> str:
+    done = subprocess.run(["git", *args], capture_output=True, text=True, check=False, cwd=ROOT)
+    assert done.returncode == 0, done.stderr
+    return done.stdout
+
+
+def test_production_runs_only_what_staging_ran():
+    if subprocess.run(
+        ["git", "rev-parse", "--verify", "-q", "origin/main"], cwd=ROOT, check=False
+    ).returncode:
+        if REQUIRED:
+            raise RuntimeError("MANDATE_GITOPS_REQUIRED is set but origin/main is not fetched")
+        pytest.skip("origin/main is not fetched")
+    base = git("merge-base", "HEAD", "origin/main").strip()
+    staged = git("log", "-p", "--format=", base, "--", *STAGING_FILES)
+    production = "".join((ROOT / path).read_text() for path in PRODUCTION_FILES)
+    assert unstaged_digests(production, staged) == [], "production gains a digest staging never ran on main"
+
+
+def test_a_production_digest_staging_never_ran_is_caught():
+    ran, new = f"sha256:{'1' * 64}", f"sha256:{'2' * 64}"
+    staged = f"+    digest: {ran}\n"
+    assert unstaged_digests(f"    digest: {ran}\n", staged) == []
+    assert unstaged_digests(f"    digest: {ran}\n  mandate: ghcr.io/x@{new}\n", staged) == [new]

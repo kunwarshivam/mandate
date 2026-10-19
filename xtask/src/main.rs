@@ -22,6 +22,7 @@ mod leak;
 mod mail;
 mod mask;
 mod mutant_costs;
+mod promote;
 mod release;
 mod tofu_audit;
 
@@ -88,6 +89,11 @@ commands:
                         sync.yaml (the founder's terminal only; deploy/gitops/BOOTSTRAP.md, E21-58)
   gitops secrets <staging|production>
                         write the workload secrets alone (the founder's terminal only)
+  gitops promote staging <dir>
+                        rewrite staging's chart digests and images from a main release run's
+                        CHARTS and PUBLISHED in <dir> (E21-58, DEC-2016)
+  gitops promote production
+                        copy staging's chart digests and images into production (DEC-2016)
   cell up               build this change's images, bring up the local k3d cell, install the
                         workspace chart (deploy/cell/README.md)
   cell drill [--seeded] [boot|journal|egress|compose|restart|kill-switch|standby-down|archive]...
@@ -325,6 +331,14 @@ fn run() -> Result<()> {
         ["release", "publish-charts", out] => release::publish_charts(&root, Path::new(out)),
         ["gitops", "bootstrap", environment] => {
             gitops::bootstrap(&root, gitops::Environment::parse(environment)?)
+        }
+        ["gitops", "promote", "staging", published] => promote::promote(
+            &root,
+            gitops::Environment::Staging,
+            Some(Path::new(published)),
+        ),
+        ["gitops", "promote", "production"] => {
+            promote::promote(&root, gitops::Environment::Production, None)
         }
         ["gitops", "secrets", environment] => {
             gitops::secrets(gitops::Environment::parse(environment)?)
