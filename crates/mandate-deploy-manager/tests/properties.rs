@@ -1,11 +1,13 @@
-//! E21-33's property (DEC-1170): across random sequences of deploys, stops, kill switches, crashes,
-//! readiness flaps, lost nodes and clock jumps, through the control stream in a
+//! E21-33's property (DEC-1170, DEC-1171): across random sequences of deploys, stops (of read and
+//! never-read deployments), connection revocations and re-establishments, kill switches, crashes, readiness flaps, lost nodes and clock jumps, through the
+//! control stream in a
 //! [`mandate_journal::MemoryJournal`] and the fake orchestrator:
 //!
 //! - no slot ever has two instances that may be running, and no start or stop comes before its
 //!   record is committed (the checking orchestrator of the harness);
 //! - nothing starts for a process the control stream does not want, and a stopped agent's runtime
-//!   is never started again;
+//!   is never started again; a deployment on a connection revoked before it is not wanted, and a
+//!   revocation after a deployment stops nothing (journal spec §9.24 rule 201);
 //! - nothing stops a process the control stream still wants, whatever its readiness or a kill
 //!   switch;
 //! - in the pass after a kill switch, every process it covers that the control stream wants is up:
@@ -25,7 +27,8 @@ mod common;
 use std::collections::{BTreeMap, BTreeSet};
 
 use common::{
-    Journal, Manager, Seed, accounts, at, block_on, deployed, kill, manager, restart, stopped,
+    Journal, Manager, Seed, accounts, at, block_on, connection_of, deployed, established_again,
+    kill, manager, restart, revoked_again, stopped,
 };
 use mandate_deploy_manager::Slot;
 use mandate_deploy_manager::fake::Call;
@@ -48,6 +51,10 @@ const WINDOW_STARTS: usize = 7;
 enum Op {
     Deploy(usize),
     Stop(usize),
+    /// The connection of one account is revoked.
+    Revoke(usize),
+    /// A revoked connection is established again: deployments after it run, ones before it do not.
+    Reestablish(usize),
     KillAgent(usize),
     KillConnection(usize),
     KillWorkspace,
@@ -73,6 +80,8 @@ fn op() -> impl Strategy<Value = Op> {
     prop_oneof![
         3 => (0..AGENTS.len()).prop_map(Op::Deploy),
         1 => (0..AGENTS.len()).prop_map(Op::Stop),
+        1 => (0..ACCOUNTS.len()).prop_map(Op::Revoke),
+        1 => (0..ACCOUNTS.len()).prop_map(Op::Reestablish),
         1 => (0..AGENTS.len()).prop_map(Op::KillAgent),
         1 => (0..ACCOUNTS.len()).prop_map(Op::KillConnection),
         1 => Just(Op::KillWorkspace),
@@ -89,7 +98,16 @@ fn op() -> impl Strategy<Value = Op> {
 /// The oracle's own view of the control stream.
 #[derive(Default)]
 struct Oracle {
+    /// The agents whose deployment was journaled, wanted or not.
+    journaled: BTreeSet<usize>,
+    /// The agents deployed while their connection was established: the deployments rule 201 admits.
     deployed: BTreeSet<usize>,
+    /// The accounts whose connection is revoked.
+    revoked: BTreeSet<&'static str>,
+    /// Per account, how many revocations and establishments the stream holds beyond the first
+    /// establishment, so each is its own event.
+    revocations: BTreeMap<&'static str, u32>,
+    establishments: BTreeMap<&'static str, u32>,
     stopped: BTreeSet<usize>,
     /// Per slot, the second of each kill switch that covered it.
     kills: BTreeMap<Slot, Vec<i64>>,
@@ -149,12 +167,33 @@ fn run_seeded(ops: &[Op], seed: Seed) -> Result<(), TestCaseError> {
         let all = slots();
         match op {
             Op::Deploy(i) => {
-                if oracle.deployed.insert(*i) {
-                    journal.services(&deployed(AGENTS[*i].0), at(now));
+                let (agent, account) = AGENTS[*i];
+                if oracle.journaled.insert(*i) {
+                    journal.services(&deployed(agent, account), at(now));
+                    if !oracle.revoked.contains(account) {
+                        oracle.deployed.insert(*i);
+                    }
+                }
+            }
+            Op::Revoke(j) => {
+                let account = ACCOUNTS[*j];
+                if oracle.revoked.insert(account) {
+                    let nth = oracle.revocations.entry(account).or_default();
+                    journal.services(&revoked_again(&connection_of(account), *nth), at(now));
+                    *nth += 1;
+                }
+            }
+            Op::Reestablish(j) => {
+                let account = ACCOUNTS[*j];
+                if oracle.revoked.remove(account) {
+                    let nth = oracle.establishments.entry(account).or_insert(1);
+                    let draft = established_again(&connection_of(account), account, *nth);
+                    journal.services(&draft, at(now));
+                    *nth += 1;
                 }
             }
             Op::Stop(i) => {
-                if oracle.deployed.contains(i) && oracle.stopped.insert(*i) {
+                if oracle.journaled.contains(i) && oracle.stopped.insert(*i) {
                     journal.services(&stopped(AGENTS[*i].0, AGENTS[*i].1), at(now));
                 }
             }

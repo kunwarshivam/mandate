@@ -81,11 +81,10 @@ fn a_deployment_on_postgres_is_journaled_once_before_its_processes_start() {
     runtime().block_on(async {
         let mut services = control(&dsn);
         let account = "01J8Z2ACCT00000000000000A1";
-        let resolver = harness::accounts(&[("agent_1", account)]);
         for draft in [
             harness::opened(),
             harness::established(&harness::connection_of(account), account),
-            harness::deployed("agent_1"),
+            harness::deployed("agent_1", account),
         ] {
             let outcome = services.append(&draft, harness::at(0)).await.unwrap();
             assert!(committed(&outcome), "{outcome:?}");
@@ -95,7 +94,6 @@ fn a_deployment_on_postgres_is_journaled_once_before_its_processes_start() {
             control(&dsn),
             Fake::new(),
             StderrAlerts::default(),
-            resolver,
         );
         deployer.tick(harness::at(1)).await.unwrap();
         let rows = services.rows_after(0).await.unwrap();
@@ -131,7 +129,7 @@ fn a_restarted_manager_on_postgres_journals_no_second_start() {
         for draft in [
             harness::opened(),
             harness::established(&harness::connection_of(account), account),
-            harness::deployed("agent_1"),
+            harness::deployed("agent_1", account),
         ] {
             services.append(&draft, harness::at(0)).await.unwrap();
         }
@@ -140,16 +138,14 @@ fn a_restarted_manager_on_postgres_journals_no_second_start() {
             control(&dsn),
             Fake::new(),
             StderrAlerts::default(),
-            harness::accounts(&[("agent_1", account)]),
         );
         first.tick(harness::at(1)).await.unwrap();
-        let (_, orchestrator, _, resolver) = first.into_ports();
+        let (_, orchestrator, _) = first.into_ports();
         let mut second = Deployer::new(
             harness::identity(),
             control(&dsn),
             orchestrator,
             StderrAlerts::default(),
-            resolver,
         );
         second.tick(harness::at(2)).await.unwrap();
         let rows = services.rows_after(0).await.unwrap();

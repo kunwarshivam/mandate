@@ -719,28 +719,24 @@ fn openbao() -> Result<()> {
         );
         return Ok(());
     }
-    if selection()?.among(&OPENBAO_TESTED).is_empty() {
-        eprintln!("    openbao: mandate-vault is not affected (DEC-1190)");
+    let packages = selection()?.among(&OPENBAO_TESTED);
+    if packages.is_empty() {
+        eprintln!("    openbao: neither mandate-vault nor mandate-cli is affected (DEC-1190)");
         return Ok(());
     }
-    let args = [
-        "nextest",
-        "run",
-        "--package",
-        "mandate-vault",
-        "--lib",
-        "--filterset",
-        "test(/^tests::openbao_server::/)",
-        "--locked",
-    ];
-    eprintln!("    $ {OPENBAO_REQUIRED}=1 cargo {}", args.join(" "));
-    let status = Command::new("cargo")
-        .args(args)
-        .env(OPENBAO_REQUIRED, "1")
-        .status()
-        .context("starting `cargo nextest`")?;
-    if !status.success() {
-        bail!("the OpenBao conformance suite failed with {status}");
+    for package in packages {
+        let mut args = vec!["nextest", "run", "--package", package];
+        args.extend_from_slice(openbao_tests(package));
+        args.push("--locked");
+        eprintln!("    $ {OPENBAO_REQUIRED}=1 cargo {}", args.join(" "));
+        let status = Command::new("cargo")
+            .args(&args)
+            .env(OPENBAO_REQUIRED, "1")
+            .status()
+            .context("starting `cargo nextest`")?;
+        if !status.success() {
+            bail!("{package}'s OpenBao tests failed with {status}");
+        }
     }
     Ok(())
 }
@@ -1786,6 +1782,11 @@ const BACKSLASH_WORKFLOW_LINES: &[(&str, &str)] = &[
         ".github/workflows/merge.yml",
         r##"prs=$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --base main \"##,
     ),
+    (".github/workflows/merge.yml", r##"printf '%s\n' "$out""##),
+    (
+        ".github/workflows/merge.yml",
+        r##"if printf '%s\n' "$out" | grep -q '^merged as '; then"##,
+    ),
     (
         ".github/workflows/web-e2e.yml",
         r##"run: grep -rls 'packages\.microsoft\.com' /etc/apt/sources.list /etc/apt/sources.list.d/ | tee /dev/stderr | xargs -r sudo rm -f"##,
@@ -2121,9 +2122,17 @@ const BINARY_REFERENCE: &str = "bin:";
 /// them the selection holds.
 const PG_TESTED: [&str; 3] = ["mandate-journal-pg", "mandate-cli", "mandate-dispatcher"];
 
-/// The package whose tests need the OpenBao dev server (E21-32, DEC-977): `cargo xtask ci openbao`
-/// runs its suite when the selection holds it.
-const OPENBAO_TESTED: [&str; 1] = ["mandate-vault"];
+/// The packages whose tests need the OpenBao dev server (E21-32, DEC-977, DEC-2022): `cargo xtask
+/// ci openbao` runs each one's server tests when the selection holds it.
+const OPENBAO_TESTED: [&str; 2] = ["mandate-vault", "mandate-cli"];
+
+/// Which of `package`'s tests need the OpenBao dev server, as nextest arguments.
+fn openbao_tests(package: &str) -> &'static [&'static str] {
+    match package {
+        "mandate-cli" => &["--test", "vault_provision"],
+        _ => &["--lib", "--filterset", "test(/^tests::openbao_server::/)"],
+    }
+}
 
 /// Whether `path` is `entry`, lies under it when `entry` names a directory (ends in `/`), or
 /// starts with it when `entry` ends in `*`.
@@ -15355,7 +15364,7 @@ mod tests {
     /// while the pull request is a draft, the scoped jobs follow `select` (DEC-1190) and the matrix
     /// its plan, `fast` and `full` are skipped too rather than judging skipped jobs, the failure
     /// report runs only on a dispatch on main, marking a pull request ready starts its run, and a
-    /// newer push still cancels the older run of the same ref.
+    /// newer push still cancels the older run of a pull request, while a started run on `main` finishes.
     #[test]
     fn ci_runs_nothing_on_a_draft() -> Result<()> {
         let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/ci.yml"))?;
@@ -15367,13 +15376,22 @@ mod tests {
         );
         assert!(
             workflow.contains(
-                "concurrency:\n  group: ci-${{ github.ref }}\n  cancel-in-progress: true\n"
+                "concurrency:\n  group: ci-${{ github.event_name == 'workflow_dispatch' && \
+                 !inputs.post_merge && github.run_id || github.ref }}\n  cancel-in-progress: \
+                 ${{ github.ref != 'refs/heads/main' }}\n"
             ),
-            "a newer run of the same ref cancels the older one"
+            "a newer run of a pull request cancels the older one, post-merge runs on main share \
+             one group in which a started run finishes, and any other dispatched run, the \
+             nightly's included, has a group of its own, so it is never cancelled (DEC-2610)"
         );
-        let report = "if: ${{ always() && github.event_name == 'workflow_dispatch' && \
-                      github.ref == 'refs/heads/main' && (needs.fast.result == 'failure' || \
-                      needs.full.result == 'failure') }}";
+        assert!(
+            workflow.contains("  push:\n    branches: [main]\n"),
+            "every push to main runs CI after the merge, and a push to any other branch does not \
+             (DEC-2610)"
+        );
+        let report = "if: ${{ always() && (github.event_name == 'workflow_dispatch' || \
+                      github.event_name == 'push') && github.ref == 'refs/heads/main' && \
+                      (needs.fast.result == 'failure' || needs.full.result == 'failure') }}";
         for (job, guard) in [
             ("select", "if: ${{ !github.event.pull_request.draft }}"),
             ("fast-lint", "if: ${{ !github.event.pull_request.draft }}"),
@@ -16131,6 +16149,21 @@ mod tests {
             for opaque in ["${GITHUB_SHA}", "${RUN_URL}"] {
                 assert!(issue.contains(opaque), "`{job}`'s issue names {opaque}");
             }
+            let title = issue
+                .split_once("-f title=\"")
+                .and_then(|(_, rest)| rest.split_once('"'))
+                .map(|(title, _)| title)
+                .with_context(|| format!("`{job}`'s issue has a title"))?;
+            let open = format!(
+                "if gh api --paginate \"repos/${{GITHUB_REPOSITORY}}/issues?state=open&per_page=100\" --jq '.[].title' | grep -Fqx \"{title}\"; then"
+            );
+            let at = |line: &str| lines.iter().position(|l| l == line);
+            let (check, create) = (at(&open), at(issue));
+            assert!(
+                check.is_some_and(|check| create.is_some_and(|create| check < create))
+                    && check.and_then(|check| lines.get(check + 2)) == Some(&"exit 0".to_owned()),
+                "`{job}` opens no second issue for a commit an open issue already reports"
+            );
             assert!(
                 !lines
                     .iter()
@@ -18016,6 +18049,71 @@ jq -r "$filter" "$src"
 "##;
 
     const APPROVED_HEAD: &str = "1111111111111111111111111111111111111111";
+
+    /// DEC-2610: a merge `merge.yml` makes pushes with its own token, which starts no workflow, so
+    /// it dispatches `ci` on `main` once after any merge, and only then, with the one right that
+    /// takes.
+    #[test]
+    fn the_merge_workflow_runs_ci_on_main_after_a_merge_it_made() -> Result<()> {
+        let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/merge.yml"))?;
+        let job = |name: &str| -> Result<Vec<String>> {
+            Ok(workflow_job(&workflow, name)
+                .with_context(|| format!("merge.yml has a `{name}` job"))?
+                .iter()
+                .map(|line| line.trim().trim_start_matches("- ").to_owned())
+                .collect())
+        };
+        let merge = job("merge")?;
+        assert!(
+            merge
+                .iter()
+                .any(|l| l == "echo \"merged=true\" >> \"$GITHUB_OUTPUT\"")
+        );
+        assert!(
+            merge
+                .iter()
+                .any(|l| l == "if printf '%s\\n' \"$out\" | grep -q '^merged as '; then"),
+            "only a run that merged says so"
+        );
+        assert!(
+            !merge
+                .iter()
+                .filter(|l| !l.starts_with('#'))
+                .any(|l| l.contains("actions:") || l.contains("dispatches")),
+            "the merging job holds no `actions` right and dispatches nothing"
+        );
+        let dispatch = job("ci-on-main")?;
+        for line in [
+            "needs: merge",
+            "if: ${{ always() && needs.merge.outputs.merged == 'true' }}",
+            "actions: write",
+            "run: gh api -X POST \"repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/dispatches\" \
+             -f ref=main -f \"inputs[post_merge]=true\"",
+        ] {
+            assert!(
+                dispatch.iter().any(|l| l == line),
+                "`ci-on-main` has `{line}`"
+            );
+        }
+        let rights: Vec<&String> = dispatch
+            .iter()
+            .skip_while(|l| *l != "permissions:")
+            .skip(1)
+            .take_while(|l| l.ends_with(": write") || l.ends_with(": read"))
+            .collect();
+        assert_eq!(
+            rights,
+            ["actions: write"],
+            "`actions: write` and nothing else"
+        );
+        assert!(
+            !dispatch
+                .iter()
+                .any(|l| l.contains("checkout") || l.contains("secrets.")),
+            "the dispatch job runs no code and reads no secret"
+        );
+        Ok(())
+    }
 
     #[test]
     fn merge_workflow_supplies_the_authorized_coordinator_identities() -> Result<()> {
