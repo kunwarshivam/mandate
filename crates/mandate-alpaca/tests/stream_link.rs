@@ -275,6 +275,11 @@ fn a_connection_down_past_its_threshold_alerts_once() {
     assert_eq!(link.state(), LinkState::Live);
     link.on(at(6 + DOWN_ALERT_S), LinkInput::Lost, 0);
     assert_eq!(
+        link.on(at(6 + 2 * DOWN_ALERT_S), LinkInput::Tick, 0),
+        [],
+        "the clock restarts at the new loss, not the first outage's"
+    );
+    assert_eq!(
         link.on(at(7 + 2 * DOWN_ALERT_S), LinkInput::Tick, 0),
         [LinkAction::Alert("stream_down")],
         "live again, so a new loss alerts again"
