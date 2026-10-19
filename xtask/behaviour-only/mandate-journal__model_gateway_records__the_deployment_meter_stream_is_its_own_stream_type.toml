@@ -1,0 +1,8 @@
+file = "crates/mandate-journal/tests/model_gateway_records.rs"
+test = "the_deployment_meter_stream_is_its_own_stream_type"
+reason = """
+`mandate-journal` is implemented and its stream parsing and catalogue cannot be stubbed without
+stopping every other journal test, so this test fails on the journal's answer: `dmeter:` does not
+parse yet and its records are closed nowhere. E21-61 pair C's implementation PR registers the
+deployment meter stream (journal spec v0.53 §2, §9.19) and deletes this row.
+"""

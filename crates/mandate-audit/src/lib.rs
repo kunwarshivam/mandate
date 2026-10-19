@@ -260,7 +260,9 @@ fn stream_type(stream: &StreamId) -> StreamType {
         mandate_journal::StreamType::Control => StreamType::Control,
         mandate_journal::StreamType::Scheduler => StreamType::Scheduler,
         mandate_journal::StreamType::Notice => StreamType::Notice,
-        mandate_journal::StreamType::Meter => StreamType::Meter,
+        mandate_journal::StreamType::Meter | mandate_journal::StreamType::DeploymentMeter => {
+            StreamType::Meter
+        }
     }
 }
 

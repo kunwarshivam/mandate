@@ -212,6 +212,10 @@ pub enum StreamType {
     /// `meter:{workspace_id}`, whose single writer is the workspace's model gateway meter (journal
     /// spec v0.46 §2, §9.19, DEC-998 item 3).
     Meter,
+    /// `dmeter:{deployment_id}`, whose single writer is the deployment's model gateway meter writer,
+    /// a copy of every workspace's meter records for the deployment's cap (journal spec v0.53 §2,
+    /// §9.19, DEC-2207). Not yet parsed: E21-61 pair C registers it.
+    DeploymentMeter,
 }
 
 /// `acct:{workspace_id}:{account_ref}`, `agent:{workspace_id}:{agent_id}`, `ctl:{workspace_id}`,
