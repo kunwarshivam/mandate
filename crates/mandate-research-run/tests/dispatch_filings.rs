@@ -122,7 +122,6 @@ fn excerpt(result: &Dispatched) -> String {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn filings_search_takes_its_scope_from_the_harness_and_its_forms_and_terms_from_the_model() {
     let fixture = Fixture::default();
     let arguments = r#"{"forms":["8-K","10-Q"],"limit":4,"symbols":["AAPL","MSFT"],"terms":["guidance"],"window_d":30}"#;
@@ -159,7 +158,6 @@ fn filings_search_takes_its_scope_from_the_harness_and_its_forms_and_terms_from_
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn filings_search_filters_every_answer_again() {
     let mut licensed = filed("f-licensed", "8-K", "AAPL", CUT_OFF - 60);
     licensed.filing.licensed = true;
@@ -208,7 +206,6 @@ fn filings_search_filters_every_answer_again() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn filings_are_newest_first_then_by_id_up_to_the_models_limit() {
     let fixture = with_filings(vec![
         filed("f-b", "8-K", "AAPL", CUT_OFF - 60),
@@ -230,7 +227,6 @@ fn filings_are_newest_first_then_by_id_up_to_the_models_limit() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn filing_entries_carry_their_stored_length_under_untrusted() {
     let entry = filed("f-1", "8-K", "AAPL", CUT_OFF - 60);
     let record: Filing = entry.filing.clone();
@@ -283,7 +279,6 @@ fn filing_entries_carry_their_stored_length_under_untrusted() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn a_filing_excerpt_is_cut_to_four_thousand_bytes() {
     let mut long = filed("f-1", "8-K", "AAPL", CUT_OFF - 60);
     long.filing.excerpt = "é".repeat(3_000);
@@ -306,7 +301,6 @@ fn a_filing_excerpt_is_cut_to_four_thousand_bytes() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn the_byte_caps_drop_the_oldest_filings_first() {
     let entries = (0..10)
         .map(|n| {
@@ -341,7 +335,6 @@ fn the_byte_caps_drop_the_oldest_filings_first() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn filings_search_arguments_outside_the_pinned_schema_read_nothing() {
     let fixture = Fixture::default();
     let search = |symbols: &str, forms: &str, window: u32, limit: u32, terms: &str| {
@@ -393,7 +386,6 @@ fn filings_search_arguments_outside_the_pinned_schema_read_nothing() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn a_filings_search_outside_the_universe_or_unanswered_reads_nothing() {
     let fixture = Fixture::default();
     let tsla = r#"{"forms":[],"limit":5,"symbols":["AAPL","TSLA"],"terms":[],"window_d":30}"#;
