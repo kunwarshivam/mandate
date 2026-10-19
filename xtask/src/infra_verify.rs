@@ -29,11 +29,9 @@ const FLUX_KINDS: [(&str, &str); 4] = [
     ("HelmRelease", "helmreleases.helm.toolkit.fluxcd.io"),
 ];
 /// The vault's chart, as its pods' `app.kubernetes.io/name` label names it (DEC-2051). Its pod is
-/// ready only once unsealed, which needs the founder's one-time `bao operator init` first, so until
-/// it is ready its line waits on that rather than failing; this check cannot tell a vault never
-/// initialized from one that fails to unseal, which only the vault's own status can.
+/// ready only once unsealed; staging's apply initializes it just before this check (DEC-2052), so a
+/// vault still not ready is a failure like any other.
 const VAULT_CHART: &str = "mandate-vault-server";
-const VAULT_PENDING: &str = "founder init";
 /// The kill-switch admission policies' bindings (DEC-2045, DEC-2046).
 const BINDINGS: [&str; 2] = ["mandate-control-pods", "mandate-control-jobs"];
 /// The signature webhooks' configuration, as `admission.yaml`'s patch names it (DEC-2016 item 1).
@@ -155,12 +153,11 @@ fn pods(list: &mut Checklist, kubectl: Kubectl<'_>) {
             && containers.is_some_and(|all| {
                 !all.is_empty() && all.iter().all(|c| c["ready"].as_bool() == Some(true))
             });
-        let what = format!("pod {} is Running and Ready", where_is(pod));
+        let mut what = format!("pod {} is Running and Ready", where_is(pod));
         if text(pod, &["metadata", "labels", "app.kubernetes.io/name"]) == VAULT_CHART {
-            list.check_or_pending(up, VAULT_PENDING, format!("{what}, so unsealed"));
-        } else {
-            list.check(up, what);
+            what.push_str(", so unsealed");
         }
+        list.check(up, what);
     }
     for namespace in PLATFORM_NAMESPACES {
         if !items
@@ -641,10 +638,9 @@ mod tests {
         Ok(())
     }
 
-    /// A sealed vault waits on the founder's one-time init without failing the run; an unsealed
-    /// one is an ordinary line (DEC-2051).
+    /// An unsealed vault holds; a sealed one, after the apply initialized it, fails (DEC-2052).
     #[test]
-    fn a_sealed_vault_waits_on_the_founders_init() -> Result<()> {
+    fn a_sealed_vault_fails() -> Result<()> {
         let staging = Staging::up();
         let text = run(&staging)?;
         assert!(
@@ -654,12 +650,9 @@ mod tests {
         let mut staging = Staging::up();
         staging.pods[5] = vault(false);
         let text = run(&staging)?;
-        assert_eq!(missing(&text), Vec::<&str>::new(), "{text}");
-        assert_eq!(staging.pauses.get(), 0);
-        assert!(
-            text.contains(
-                "[pending founder init] pod ws-ws1/vault-0 is Running and Ready, so unsealed"
-            ),
+        assert_eq!(
+            missing(&text),
+            ["pod ws-ws1/vault-0 is Running and Ready, so unsealed"],
             "{text}"
         );
         Ok(())

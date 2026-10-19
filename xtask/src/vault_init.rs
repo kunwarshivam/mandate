@@ -8,7 +8,11 @@
 //! written to a file; the log carries status words. Each step is skipped when already done, so
 //! every later apply changes nothing.
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail, ensure};
+use serde_json::{Value, json};
+
+use crate::gitops::{SEAL_KEY_SECRET, SealKey, WORKSPACE_NAMESPACE, ensure_seal_key};
+use crate::{image, mask};
 
 /// `kubectl` against staging: its arguments and standard input, answering whether it succeeded
 /// and what it printed on standard output.
@@ -30,9 +34,230 @@ pub(crate) struct Steps<'a> {
     pub(crate) pause: &'a dyn Fn(),
 }
 
+/// `kubectl exec` into the vault's container, with `stdin` when the command reads one.
+fn in_vault(steps: &Steps<'_>, command: &[&str], stdin: Option<&str>) -> Result<(bool, String)> {
+    let mut args = vec!["exec"];
+    if stdin.is_some() {
+        args.push("-i");
+    }
+    args.extend([
+        POD,
+        "--namespace",
+        WORKSPACE_NAMESPACE,
+        "-c",
+        CONTAINER,
+        "--",
+    ]);
+    args.extend(command);
+    (steps.kubectl)(&args, stdin)
+}
+
+/// The seal key: kept when the Secret exists, else made, masked, and created from stdin.
+fn seal(steps: &Steps<'_>) -> Result<&'static str> {
+    let exists = || -> Result<bool> {
+        let (read, listed) = (steps.kubectl)(
+            &[
+                "get",
+                "secret",
+                SEAL_KEY_SECRET,
+                "--namespace",
+                WORKSPACE_NAMESPACE,
+                "--ignore-not-found",
+                "-o",
+                "name",
+            ],
+            None,
+        )?;
+        ensure!(read, "reading staging's vault seal key failed");
+        Ok(!listed.trim().is_empty())
+    };
+    let made = || -> Result<String> {
+        let key = (steps.new_key)()?;
+        mask::add_mask(&key);
+        Ok(key)
+    };
+    let create = |manifest: &str| -> Result<()> {
+        let (created, _) = (steps.kubectl)(&["create", "-f", "-"], Some(manifest))?;
+        ensure!(created, "creating staging's vault seal key failed");
+        Ok(())
+    };
+    Ok(match ensure_seal_key(exists, made, create)? {
+        SealKey::Kept => "seal key: exists",
+        SealKey::Created => "seal key: created",
+    })
+}
+
+/// Waits for the vault's pod to run; it waits on its seal key's Secret to mount.
+fn running(steps: &Steps<'_>) -> Result<()> {
+    for read in 1..=POD_READS {
+        let (_, phase) = (steps.kubectl)(
+            &[
+                "get",
+                "pod",
+                POD,
+                "--namespace",
+                WORKSPACE_NAMESPACE,
+                "--ignore-not-found",
+                "-o",
+                "jsonpath={.status.phase}",
+            ],
+            None,
+        )?;
+        if phase.trim() == "Running" {
+            return Ok(());
+        }
+        if read < POD_READS {
+            (steps.pause)();
+        }
+    }
+    bail!("the vault's pod {WORKSPACE_NAMESPACE}/{POD} never ran, so it was not initialized")
+}
+
+/// Whether the vault is initialized, from `bao status`, which exits 2 while sealed but still
+/// answers; an answer it cannot read stops the step rather than initializing blind.
+fn initialized(steps: &Steps<'_>) -> Result<bool> {
+    let (_, answer) = in_vault(steps, &["bao", "status", "-format=json"], None)?;
+    serde_json::from_str::<Value>(&answer)
+        .ok()
+        .and_then(|status| status["initialized"].as_bool())
+        .context("the vault's status could not be read, so it was not initialized")
+}
+
+/// Every string in `value`, each masked before anything can print it.
+fn mask_all(value: &Value) {
+    match value {
+        Value::String(text) => mask::add_mask(text),
+        Value::Array(items) => items.iter().for_each(mask_all),
+        Value::Object(fields) => fields.values().for_each(mask_all),
+        _ => {}
+    }
+}
+
+/// The root token `bao operator init` returned, revoked when dropped: on success, on an error and
+/// on a panic alike. [`RootToken::revoke`] revokes it early and says whether it worked.
+struct RootToken<'s, 'a> {
+    steps: &'s Steps<'a>,
+    token: Option<String>,
+}
+
+impl RootToken<'_, '_> {
+    fn revoke(mut self) -> Result<()> {
+        let Some(token) = self.token.take() else {
+            return Ok(());
+        };
+        let (revoked, _) = in_vault(
+            self.steps,
+            &[
+                "sh",
+                "-c",
+                "BAO_TOKEN=\"$(cat)\" exec bao token revoke -self",
+            ],
+            Some(&token),
+        )?;
+        ensure!(
+            revoked,
+            "revoking the vault's root token failed, so it may be live: revoke it with a token \
+             generated from the recovery keys in {RECOVERY_NAMESPACE}/{RECOVERY_SECRET}"
+        );
+        Ok(())
+    }
+}
+
+impl Drop for RootToken<'_, '_> {
+    fn drop(&mut self) {
+        if let Some(token) = self.token.take() {
+            in_vault(
+                self.steps,
+                &[
+                    "sh",
+                    "-c",
+                    "BAO_TOKEN=\"$(cat)\" exec bao token revoke -self",
+                ],
+                Some(&token),
+            )
+            .ok();
+        }
+    }
+}
+
+/// Initializes the vault, stores its whole answer in the recovery Secret, and revokes the root
+/// token, whether or not the answer was stored.
+fn init(steps: &Steps<'_>) -> Result<()> {
+    let (done, answer) = in_vault(
+        steps,
+        &[
+            "bao",
+            "operator",
+            "init",
+            "-format=json",
+            "-recovery-shares=3",
+            "-recovery-threshold=2",
+        ],
+        None,
+    )?;
+    let parsed = serde_json::from_str::<Value>(&answer).ok();
+    if let Some(parsed) = &parsed {
+        mask_all(parsed);
+    }
+    ensure!(done, "initializing the vault failed");
+    let parsed = parsed.context("the vault's init answer could not be read")?;
+    let root = RootToken {
+        steps,
+        token: parsed["root_token"].as_str().map(str::to_owned),
+    };
+    let stored = store(steps, &answer);
+    let revoked = root.revoke();
+    stored?;
+    revoked
+}
+
+/// The vault's init answer as the Secret `vault-recovery/vault-init`, created from stdin in a
+/// namespace made for it.
+fn store(steps: &Steps<'_>, answer: &str) -> Result<()> {
+    let namespace = json!({
+        "apiVersion": "v1",
+        "kind": "Namespace",
+        "metadata": {"name": RECOVERY_NAMESPACE},
+    });
+    let (made, _) = (steps.kubectl)(
+        &["apply", "--server-side", "-f", "-"],
+        Some(&namespace.to_string()),
+    )?;
+    ensure!(made, "making the namespace {RECOVERY_NAMESPACE} failed");
+    let secret = json!({
+        "apiVersion": "v1",
+        "kind": "Secret",
+        "metadata": {
+            "name": RECOVERY_SECRET,
+            "namespace": RECOVERY_NAMESPACE,
+            "labels": {"app.kubernetes.io/managed-by": "mandate-infra"},
+        },
+        "type": "Opaque",
+        "data": {"init.json": image::base64(answer.as_bytes())},
+    });
+    let (created, _) = (steps.kubectl)(&["create", "-f", "-"], Some(&secret.to_string()))?;
+    ensure!(
+        created,
+        "storing the vault's recovery keys in {RECOVERY_NAMESPACE}/{RECOVERY_SECRET} failed"
+    );
+    Ok(())
+}
+
 /// Sets staging's vault up as far as it is not yet, answering the status words to print.
-pub(crate) fn vault_init(_steps: &Steps<'_>) -> Result<Vec<&'static str>> {
-    bail!("pending DEC-2052: staging's vault-init is not written yet")
+pub(crate) fn vault_init(steps: &Steps<'_>) -> Result<Vec<&'static str>> {
+    let mut words = vec![seal(steps)?];
+    running(steps)?;
+    if initialized(steps)? {
+        words.push("vault: already initialized");
+        return Ok(words);
+    }
+    init(steps)?;
+    words.extend([
+        "vault: initialized",
+        "recovery keys: stored",
+        "root token: revoked",
+    ]);
+    Ok(words)
 }
 
 #[cfg(test)]
@@ -43,7 +268,6 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::image;
 
     const KEY: &str = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
     const ROOT: &str = "s.root-token-1";

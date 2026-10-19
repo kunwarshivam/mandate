@@ -4,7 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs;
-use std::io::Write;
+use std::io::{Read as _, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -1692,6 +1692,49 @@ fn bootstrap_staging(tofu: &dyn Fn(&[String]) -> Command, chdir: &str, run: &str
         &context,
         &secrets,
     )?;
+    let in_cluster = |args: &[&str], stdin: Option<&str>| -> Result<(bool, String)> {
+        let mut child = gitops::tool("kubectl")
+            .args(["--v=0", "--kubeconfig"])
+            .arg(kubeconfig.path())
+            .args(["--context", &context])
+            .args(args)
+            .stdin(if stdin.is_some() {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .context("starting kubectl")?;
+        if let Some(text) = stdin {
+            child
+                .stdin
+                .take()
+                .context("kubectl's stdin")?
+                .write_all(text.as_bytes())?;
+        }
+        let out = child.wait_with_output().context("waiting for kubectl")?;
+        Ok((
+            out.status.success(),
+            String::from_utf8(out.stdout).context("kubectl printed non-UTF-8")?,
+        ))
+    };
+    let new_key = || -> Result<String> {
+        let mut key = [0_u8; 32];
+        fs::File::open("/dev/urandom")
+            .and_then(|mut random| random.read_exact(&mut key))
+            .context("reading /dev/urandom")?;
+        Ok(key.iter().map(|byte| format!("{byte:02x}")).collect())
+    };
+    let words = vault_init::vault_init(&vault_init::Steps {
+        kubectl: &in_cluster,
+        new_key: &new_key,
+        pause: &|| std::thread::sleep(Duration::from_secs(5)),
+    })?;
+    for word in words {
+        eprintln!("    vault-init: {word} (DEC-2052)");
+    }
     let account = output("cloudflare_account_id")?;
     mask::add_mask(account.trim());
     let (tunnel_id, api_hostname) = (output("tunnel_id")?, output("api_hostname")?);
@@ -16892,6 +16935,20 @@ mod tests {
         assert!(
             last_secret < kubeconfig && kubeconfig < at(&staging, "gitops::bootstrap_from_infra("),
             "the kubeconfig is fetched after the secrets are wrapped and before the bootstrap"
+        );
+        let init = at(&staging, concat!("vault_init::", "vault_init("));
+        assert!(
+            at(&staging, "gitops::bootstrap_from_infra(") < init
+                && init < at(&staging, "infra_verify::verify("),
+            "staging's vault is set up after its bootstrap and before its verify (DEC-2052)"
+        );
+        let source = include_str!("main.rs");
+        assert_eq!(
+            source
+                .matches(concat!("vault_init::", "vault_init("))
+                .count(),
+            1,
+            "only staging's bootstrap, which only staging's apply reaches, sets the vault up"
         );
         let account = at(&staging, "mask::add_mask(account.trim());");
         let verify = at(&staging, "infra_verify::verify(");
