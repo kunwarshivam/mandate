@@ -6,18 +6,25 @@
 //! line.
 
 use std::collections::BTreeSet;
+use std::fs::{self, OpenOptions};
 use std::io::Write;
+use std::os::unix::fs::OpenOptionsExt;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result, bail, ensure};
 use serde::Deserialize;
+use sha2::{Digest as _, Sha256};
 
 use crate::mask;
 
 pub(crate) const DO_API: &str = "https://api.digitalocean.com/v2";
 const CF_API: &str = "https://api.cloudflare.com/client/v4";
-/// The region of every environment's state bucket (DEC-995 item 2).
-const SPACES_REGION: &str = "nyc3";
+/// The region of every environment's state bucket: the US West (DEC-2047 item 6).
+const SPACES_REGION: &str = "sfo2";
+/// Where the state buckets were before the move, kept as the rollback until the founder deletes
+/// them (DEC-2047 item 6).
+const LEGACY_SPACES_REGION: &str = "nyc3";
 /// The environment variables `infra.yml`'s step sets from the environment's secrets and variables.
 const DO_TOKEN_ENV: &str = "DIGITALOCEAN_TOKEN";
 const CF_TOKEN_ENV: &str = "TF_VAR_cloudflare_api_token";
@@ -386,17 +393,20 @@ pub(crate) fn api(method: &str, url: &str, token: &str, body: Option<&str>) -> R
     curl(&config, method != "POST")
 }
 
+/// The curl config that signs a request to `path` in `region`'s Spaces with SigV4.
+fn spaces_config(region: &str, path: &str, key: &SpacesKey) -> Result<String> {
+    Ok(format!(
+        "url = {}\naws-sigv4 = {}\nuser = {}\n",
+        config_quoted(&format!("https://{region}.digitaloceanspaces.com/{path}"))?,
+        config_quoted(&format!("aws:amz:{region}:s3"))?,
+        config_quoted(&format!("{}:{}", key.access_key, key.secret_key))?,
+    ))
+}
+
 /// A SigV4-signed request for the state bucket itself: `HEAD` to ask whether it exists, `PUT` to
 /// make it.
 fn bucket(method: &str, name: &str, key: &SpacesKey) -> Result<u16> {
-    let mut config = format!(
-        "url = {}\naws-sigv4 = {}\nuser = {}\n",
-        config_quoted(&format!(
-            "https://{SPACES_REGION}.digitaloceanspaces.com/{name}"
-        ))?,
-        config_quoted(&format!("aws:amz:{SPACES_REGION}:s3"))?,
-        config_quoted(&format!("{}:{}", key.access_key, key.secret_key))?,
-    );
+    let mut config = spaces_config(SPACES_REGION, name, key)?;
     if method == "HEAD" {
         config.push_str("head\n");
     } else {
@@ -521,14 +531,167 @@ fn digitalocean(
     Ok(guard)
 }
 
-/// Finds the state bucket with this run's key, or makes it when `make_bucket`.
+/// The environment's state bucket in the US West, and the one in nyc3 it replaces (DEC-2047 item 6).
+pub(crate) fn state_buckets(environment: &str) -> (String, String) {
+    (
+        format!("mandate-tofu-state-west-{environment}"),
+        format!("mandate-tofu-state-{environment}"),
+    )
+}
+
+/// What the run does with the state, from whether the West bucket and the nyc3 one hold the state
+/// object: their `HEAD` statuses.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum StateMove {
+    /// The West bucket holds the state; nothing is copied.
+    InWest,
+    /// Neither holds it: a first run, with nothing to move.
+    NothingToMove,
+    /// Only the nyc3 bucket holds it: it is copied, never moved.
+    Copy,
+    /// An answer that is neither: the run stops before `init`, so no plan reads empty state.
+    Unreadable,
+}
+
+pub(crate) fn state_move(west: u16, legacy: u16) -> StateMove {
+    match (west, legacy) {
+        (200, _) => StateMove::InWest,
+        (404, 404) => StateMove::NothingToMove,
+        (404, 200) => StateMove::Copy,
+        _ => StateMove::Unreadable,
+    }
+}
+
+/// A file in the run's temporary directory, readable by this user alone, deleted when dropped.
+struct TempFile {
+    path: PathBuf,
+}
+
+impl TempFile {
+    fn new(name: &str) -> Result<Self> {
+        let dir = std::env::var_os("RUNNER_TEMP")
+            .map(PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir);
+        let path = dir.join(name);
+        OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&path)
+            .with_context(|| format!("creating {}", path.display()))?;
+        Ok(Self { path })
+    }
+}
+
+impl Drop for TempFile {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
+/// A SigV4-signed request for one object: `HEAD` to ask whether it exists, `GET` into `file`, `PUT`
+/// from it, or `DELETE`, which only a West copy that failed its check is ever given.
+fn object(method: &str, region: &str, path: &str, key: &SpacesKey, file: &Path) -> Result<u16> {
+    let mut config = spaces_config(region, path, key)?;
+    let file = config_quoted(&file.to_string_lossy())?;
+    match method {
+        "HEAD" => config.push_str("head\n"),
+        "GET" => config.push_str(&format!("output = {file}\n")),
+        "PUT" => config.push_str(&format!("upload-file = {file}\n")),
+        _ => config.push_str(&format!("request = {}\n", config_quoted(method)?)),
+    }
+    Ok(curl(&config, true)?.status)
+}
+
+/// The SHA-256 of a file's bytes, refusing an empty one.
+fn digest(file: &Path) -> Result<Vec<u8>> {
+    let bytes = fs::read(file).with_context(|| format!("reading {}", file.display()))?;
+    ensure!(!bytes.is_empty(), "the state object is empty");
+    Ok(Sha256::digest(&bytes).to_vec())
+}
+
+/// Copies the encrypted state from the nyc3 bucket to the West one when only the nyc3 one holds it
+/// (DEC-2047 item 6): byte for byte, never decrypted, then read back and compared by SHA-256. A West
+/// copy that fails the check is deleted, so the next run copies again rather than trusting it. The
+/// nyc3 object is never changed or deleted. Only `plan` and `apply` copy; `preflight` reports.
+fn move_state(list: &mut Checklist, environment: &str, key: &SpacesKey, copy: bool) -> Result<()> {
+    let (west, legacy) = state_buckets(environment);
+    let object_key = format!("{environment}/tofu.tfstate");
+    let unused = Path::new("/dev/null");
+    let west_status = object(
+        "HEAD",
+        SPACES_REGION,
+        &format!("{west}/{object_key}"),
+        key,
+        unused,
+    )?;
+    let legacy_status = object(
+        "HEAD",
+        LEGACY_SPACES_REGION,
+        &format!("{legacy}/{object_key}"),
+        key,
+        unused,
+    )?;
+    match state_move(west_status, legacy_status) {
+        StateMove::InWest => list.check(true, format!("OpenTofu's state is in {west}")),
+        StateMove::NothingToMove => list.check(
+            true,
+            format!("no earlier state in {legacy} ({LEGACY_SPACES_REGION}) to move"),
+        ),
+        StateMove::Copy if !copy => list.check(
+            true,
+            format!(
+                "the state in {legacy} ({LEGACY_SPACES_REGION}) is copied to {west} by plan or \
+                 apply"
+            ),
+        ),
+        StateMove::Copy => {
+            let read = TempFile::new(&format!("mandate-state-{environment}-read"))?;
+            let back = TempFile::new(&format!("mandate-state-{environment}-back"))?;
+            let west_path = format!("{west}/{object_key}");
+            let fetched = object(
+                "GET",
+                LEGACY_SPACES_REGION,
+                &format!("{legacy}/{object_key}"),
+                key,
+                &read.path,
+            )? == 200;
+            let written = fetched
+                && (200..300).contains(&object("PUT", SPACES_REGION, &west_path, key, &read.path)?);
+            let verified = written
+                && object("GET", SPACES_REGION, &west_path, key, &back.path)? == 200
+                && digest(&read.path)? == digest(&back.path)?;
+            if written && !verified {
+                object("DELETE", SPACES_REGION, &west_path, key, unused)?;
+            }
+            list.check(
+                verified,
+                format!(
+                    "the state is copied from {legacy} ({LEGACY_SPACES_REGION}) to {west} and \
+                     verified by SHA-256; {legacy} is kept as the rollback"
+                ),
+            );
+        }
+        StateMove::Unreadable => list.check(
+            false,
+            format!(
+                "the state in {west} and {legacy} is readable (statuses {west_status} and \
+                 {legacy_status}); nothing was planned, so no plan reads empty state"
+            ),
+        ),
+    }
+    Ok(())
+}
+
+/// Finds the state bucket with this run's key, or makes it when `make_bucket`, then moves the
+/// state into it from nyc3 if it is still there.
 fn state_bucket(
     list: &mut Checklist,
     environment: &str,
     key: &SpacesKey,
     make_bucket: bool,
 ) -> Result<()> {
-    let name = format!("mandate-tofu-state-{environment}");
+    let (name, _) = state_buckets(environment);
     match bucket("HEAD", &name, key)? {
         200 => list.check(true, format!("Spaces bucket {name} exists")),
         404 if make_bucket => {
@@ -547,7 +710,7 @@ fn state_bucket(
             format!("Spaces bucket {name} is reachable (its name may be held by another account)"),
         ),
     }
-    Ok(())
+    move_state(list, environment, key, make_bucket)
 }
 
 /// The Cloudflare half: one account, the token's own permission groups, R2 enabled, and Access set
@@ -878,6 +1041,61 @@ mod tests {
 
     /// DEC-2029 item 4: each needed Cloudflare permission is named when no group grants it, by
     /// either of Cloudflare's spellings.
+    /// DEC-2047 item 6: the state is copied only when the West bucket lacks it and nyc3 holds it;
+    /// any other answer stops the run before `init`, so no plan reads empty state.
+    #[test]
+    fn the_state_moves_only_from_a_readable_nyc3_copy() {
+        assert_eq!(state_move(200, 200), StateMove::InWest);
+        assert_eq!(state_move(200, 404), StateMove::InWest);
+        assert_eq!(state_move(200, 403), StateMove::InWest);
+        assert_eq!(state_move(404, 200), StateMove::Copy);
+        assert_eq!(state_move(404, 404), StateMove::NothingToMove);
+        for (west, legacy) in [(403, 200), (500, 404), (404, 403), (404, 500), (301, 200)] {
+            assert_eq!(
+                state_move(west, legacy),
+                StateMove::Unreadable,
+                "{west} and {legacy} stop the run"
+            );
+        }
+    }
+
+    /// The West buckets carry the new names, and the nyc3 ones the old (DEC-2047 item 6).
+    #[test]
+    fn the_state_buckets_are_named_for_the_west() {
+        assert_eq!(
+            state_buckets("staging"),
+            (
+                "mandate-tofu-state-west-staging".to_owned(),
+                "mandate-tofu-state-staging".to_owned()
+            )
+        );
+        for root in [
+            include_str!("../../deploy/tofu/environments/staging/versions.tf"),
+            include_str!("../../deploy/tofu/environments/production/versions.tf"),
+        ] {
+            assert!(root.contains(&format!("https://{SPACES_REGION}.digitaloceanspaces.com")));
+            assert!(root.contains("bucket                      = \"mandate-tofu-state-west-"));
+        }
+    }
+
+    /// A copy is compared byte for byte; an empty object is never taken as the state.
+    #[test]
+    fn the_copy_is_compared_by_digest() -> Result<()> {
+        let one = TempFile::new(&format!("mandate-digest-test-a-{}", std::process::id()))?;
+        let two = TempFile::new(&format!("mandate-digest-test-b-{}", std::process::id()))?;
+        fs::write(&one.path, b"ciphertext")?;
+        fs::write(&two.path, b"ciphertext")?;
+        assert_eq!(digest(&one.path)?, digest(&two.path)?);
+        fs::write(&two.path, b"ciphertexu")?;
+        assert_ne!(digest(&one.path)?, digest(&two.path)?);
+        fs::write(&two.path, b"")?;
+        assert!(digest(&two.path).is_err(), "an empty object is refused");
+        let path = one.path.clone();
+        drop(one);
+        assert!(!path.exists(), "the temporary copy is deleted");
+        Ok(())
+    }
+
     /// DEC-2044 item 1: Access not yet set up is named as the console step, before any plan.
     #[test]
     fn access_not_enabled_names_the_console_step() {

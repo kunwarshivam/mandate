@@ -52,8 +52,13 @@ never a value.
    earlier run left a key to delete; a missing delete scope fails the run's last step by name. A
    missing write scope shows up as a 403 that names it in the first apply.
 2. **No Spaces key and no bucket by hand.** Each run mints `mandate-infra-<env>-<run id>`, makes
-   `mandate-tofu-state-<env>` in NYC3 if it is missing, and deletes the key when it ends. The first
-   apply adopts the bucket, makes it versioned, and protects it from deletion.
+   `mandate-tofu-state-west-<env>` in `sfo2` if it is missing, and deletes the key when it ends.
+   The first apply adopts the bucket, makes it versioned, and protects it from deletion. If the old
+   `nyc3` bucket `mandate-tofu-state-<env>` still holds the state and the West one does not, the
+   first `plan` or `apply` copies the encrypted state across byte for byte, reads it back,
+   compares it by SHA-256, and stops before planning if they differ (DEC-2047 item 6). It never
+   changes or deletes the `nyc3` copy, which stays as the rollback. A `preflight` only reports
+   what the next run will copy.
 3. **Console: the billing alert at 80% of the cap.** In **Billing → Billing Alerts**, set an alert
    at **$120** a month (DEC-2011 item 2). No API sets or reads this, so the preflight only reminds
    you. The plan itself refuses an estimate over $65 per environment.
@@ -177,7 +182,7 @@ once staging runs in `sfo2`. Delete each only if it exists; none holds anything 
 | Where | Exact name | Why it is left | When |
 |---|---|---|---|
 | Cloudflare R2 | `mandate-journal-archive-staging`, with its lock rule (deleting the empty bucket removes the rule) | staging's first apply may have made it in eastern North America; the archive is now `mandate-journal-archive-west-staging` | after staging's first apply in `sfo2` |
-| DigitalOcean Spaces, `nyc3` | `mandate-tofu-state-staging` | the old state bucket, kept as the rollback when the state moves to `sfo2` | after the state move lands and a plan reads the new bucket |
+| DigitalOcean Spaces, `nyc3` | `mandate-tofu-state-staging` | the old state bucket, kept as the rollback when the state moves to `mandate-tofu-state-west-staging` in `sfo2` | after a plan's checklist says the state is copied and verified, and an apply has run from the West bucket |
 | DigitalOcean Spaces, `nyc3` | `mandate-tofu-state-production` | the same, if a production run made it before the move | after the state move lands |
 
 ## What this does not guard, said plainly
