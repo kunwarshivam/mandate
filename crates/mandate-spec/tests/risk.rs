@@ -4746,7 +4746,6 @@ fn an_event_that_is_not_a_trigger_has_no_breach_time() -> Result<(), String> {
 /// A trigger replaced by another event after the step leaves its recorded time with nothing to
 /// belong to: refused (`journal` is a public field a caller can edit).
 #[test]
-#[ignore = "pending E6-15"]
 fn a_trigger_replaced_after_the_step_is_refused() -> Result<(), String> {
     let (mut outcome, trigger, mode) = confirmed_rung_step()?;
     let other = outcome.journal[mode].clone();
@@ -4757,7 +4756,6 @@ fn a_trigger_replaced_after_the_step_is_refused() -> Result<(), String> {
 
 /// A trigger whose limit was changed after the step is not the record the time was read for.
 #[test]
-#[ignore = "pending E6-15"]
 fn a_trigger_whose_limit_was_changed_is_refused() -> Result<(), String> {
     let (mut outcome, trigger, _) = confirmed_rung_step()?;
     if let Some(RiskEvent::RiskLimitTriggered { limit, .. }) = outcome.journal.get_mut(trigger) {
@@ -4774,7 +4772,6 @@ fn a_trigger_whose_limit_was_changed_is_refused() -> Result<(), String> {
 /// A trigger put where the step journalled another event has no time recorded for it, which is not
 /// the same answer as 0.
 #[test]
-#[ignore = "pending E6-15"]
 fn a_trigger_put_in_place_of_another_event_is_refused() -> Result<(), String> {
     let (mut outcome, trigger, mode) = confirmed_rung_step()?;
     let other = outcome.journal[trigger].clone();
@@ -4785,7 +4782,6 @@ fn a_trigger_put_in_place_of_another_event_is_refused() -> Result<(), String> {
 
 /// A position past the end of the journal names no record at all.
 #[test]
-#[ignore = "pending E6-15"]
 fn a_position_past_the_journal_is_refused() -> Result<(), String> {
     let (outcome, _, _) = confirmed_rung_step()?;
     assert_refused(&outcome, outcome.journal.len(), "one past the last event");
