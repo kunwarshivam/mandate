@@ -4,7 +4,7 @@
 # overlay checks keep every such image pinned by digest (DEC-2017). The pod webhooks fail closed,
 # except for pods labelled `mandate.dev/process: control`, the Job that commits a kill switch
 # (AGENTS.md rule 13), which neither webhook sees; kill-switch-admission.yaml lets only the Job
-# controller create such a pod, from a Job no service account made. The one policy is in
+# controller create such a pod, for a Job no service account or CronJob made. The one policy is in
 # deploy/gitops/policies/, applied by its own Kustomization once this chart's CRD exists.
 apiVersion: v1
 kind: Namespace

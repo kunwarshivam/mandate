@@ -22,6 +22,7 @@ use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 use sha2::Digest;
 
+use crate::admission_drill;
 use crate::{output, sh};
 use web::web_run;
 
@@ -29,7 +30,7 @@ pub mod scenario;
 pub mod web;
 
 pub const CLUSTER: &str = "mandate-cell";
-const NODE: &str = "k3d-mandate-cell-server-0";
+pub(crate) const NODE: &str = "k3d-mandate-cell-server-0";
 /// The workspace the drills deploy, and its namespace: one release per workspace (§3.2).
 const WORKSPACE: &str = "ws1";
 const NAMESPACE: &str = "ws-ws1";
@@ -155,6 +156,11 @@ pub enum Drill {
     /// exports and verifies by journal spec §11. The stream owners' `KillSwitchActivated` is
     /// named as skipped until the runtime and executor run in the cell (DEC-2000 item 6).
     KillSwitch,
+    /// The hosted clusters' kill-switch admission policies on the cell's API server, with the
+    /// signature webhook down and failing closed (DEC-2045): the founder's kill-switch Job is
+    /// admitted and its pod made, and every other way to a pod labelled `mandate.dev/process:
+    /// control` is refused.
+    Admission,
     /// With the synchronous standby fenced, an append waits: nothing commits on the primary alone,
     /// and once the standby is back the cluster takes appends again and every stream it holds
     /// verifies (OPS-2, E21-41).
@@ -182,7 +188,7 @@ pub const FAILOVER_DRILLS: [Drill; 1] = [Drill::Restart];
 
 /// The kill-switch drill (OPS-4, E21-34), which `cargo xtask ci cell-kill-switch` runs on a cell
 /// of its own so `ci cell` stays within its ten minutes (DEC-464, DEC-2602).
-pub const KILL_SWITCH_DRILLS: [Drill; 1] = [Drill::KillSwitch];
+pub const KILL_SWITCH_DRILLS: [Drill; 2] = [Drill::KillSwitch, Drill::Admission];
 
 /// The vault's drill (E21-32, DEC-2022), which `cargo xtask ci cell-kill-switch` runs after the
 /// kill switch's, on that job's cell, so `ci cell` stays within its ten minutes (DEC-464).
@@ -197,6 +203,7 @@ impl Drill {
             Self::Compose => "compose",
             Self::Restart => "restart",
             Self::KillSwitch => "kill-switch",
+            Self::Admission => "admission",
             Self::StandbyDown => "standby-down",
             Self::Archive => "archive",
             Self::Vault => "vault",
@@ -231,6 +238,9 @@ impl Drill {
                 "the stream lost across the restart: a stream id the restart did not keep"
             }
             Self::KillSwitch => "the connection-scope kill switch never committed",
+            Self::Admission => {
+                "the Job policy matches creation only, so a service account can relabel its suspended Job's pods"
+            }
             Self::StandbyDown => {
                 "the cluster's durability set to `preferred`, so the primary commits alone"
             }
@@ -253,6 +263,7 @@ impl Drill {
             Self::Egress => "reached the live trading host",
             Self::Restart => "export_stream_empty",
             Self::KillSwitch => "no kill_switch of scope connection",
+            Self::Admission => "admitted the control label on a suspended Job",
             Self::StandbyDown => "committed with the standby fenced",
             Self::Archive => "is not in the archive",
             Self::Vault => "wildcard in mandate-runtime",
@@ -1802,6 +1813,7 @@ pub fn drill(drills: &[Drill], seeded: bool) -> Result<()> {
             Drill::Compose => compose_drill(seeded),
             Drill::Restart => restart(seeded),
             Drill::KillSwitch => kill_switch(seeded),
+            Drill::Admission => admission_drill::drill(seeded),
             Drill::StandbyDown => standby_down(seeded),
             Drill::Archive => archive(seeded),
             Drill::Vault => vault_drill(seeded),

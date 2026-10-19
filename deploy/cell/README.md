@@ -108,13 +108,13 @@ Needs docker, plus k3d, helm and kubeconform at the versions in `.github/workflo
 
 ```bash
 cargo xtask cell up               # build the image, start k3d, install the operator, its backup plugin, the test store, journal-db, vault, workspace
-cargo xtask cell drill            # boot, journal, egress, compose, restart, kill-switch, standby-down, archive
+cargo xtask cell drill            # boot, journal, egress, compose, restart, kill-switch, admission, standby-down, archive
 cargo xtask cell drill --seeded   # each drill with its bug planted; fails if one still holds
 cargo xtask cell down
 cargo xtask ci cell               # what CI runs: chart checks, up, drills, seeded drills, demo --no-web
 cargo xtask ci cell-journal       # and beside it: up, then standby-down and archive, plain and seeded
 cargo xtask ci cell-failover      # and beside it: up, then restart (a failover with the standby), plain and seeded
-cargo xtask ci cell-kill-switch   # and beside it: up, then kill-switch and vault, plain and seeded (DEC-2602, DEC-2022)
+cargo xtask ci cell-kill-switch   # and beside it: up, then kill-switch, admission and vault, plain and seeded (DEC-2602, DEC-2022)
 ```
 
 `cell up` is idempotent: it reuses a running cluster and upgrades the releases. kubectl is the one
@@ -245,6 +245,7 @@ the scenario on every change (`cargo xtask ci cell-demo`). Behind a TLS-inspecti
 | `compose` | The Compose file on the host's docker: Postgres initializes the roles, the migration applies, the CLI opens a control stream and commits each scope's kill switch and an agent pause through `docker compose run control agent …` (E21-34), and its export verifies and holds every one | The first event's hash changed before it is verified |
 | `restart` | A control stream written before the journal's Postgres primary pod is deleted still exports and verifies by journal spec §11 once CloudNativePG has the cluster Ready again | A stream id the restart never held is verified, which must read as lost (`export_stream_empty`): it proves the drill sees a lost stream, not a loss the restart itself caused |
 | `kill-switch` | With every pod of `api`, `deploy-manager`, `exporter`, `model-gateway` and `control-plane` gone (scaled to zero, then back), `mandate agent kill` at agent, connection and workspace scope and `mandate agent pause` commit through one-off `control` Jobs, and the control stream exports, verifies and holds each (OPS-4, E21-34). Each stream owner's `KillSwitchActivated` is reported `skipped` until the runtime and executor run in the cell ([DEC-2000](../../docs/project/decisions/DEC-2000.md) item 6) | The connection-scope kill switch never committed: the check must name `no kill_switch of scope connection` |
+| `admission` | The hosted clusters' kill-switch admission policies (`deploy/gitops/base/kill-switch-admission.yaml`), applied as they are with a signature webhook that is down and fails closed: the founder's kill-switch Job is admitted and its pod made; an unlabelled pod, a person's or a service account's `control` pod, a service account's control Job, the control label a service account gives its suspended Job, a labelled Deployment's pod, a CronJob's control Job and the label added to a pod later are each refused; a second workspace's namespace is covered by its label; and a finished kill-switch Job is removed by foreground deletion ([DEC-2045](../../docs/project/decisions/DEC-2045.md)) | The Job policy matching creation only: the check must name `admitted the control label on a suspended Job` |
 | `egress` | From a pod of every process type, each live trading host (`agent.robinhood.com`, `api.robinhood.com`, `api.alpaca.markets`) fails at the network layer, and the journal is reachable exactly from the rendered processes whose egress names Postgres (OPS-5) | Every network policy deleted |
 | `standby-down` | With the synchronous standby fenced, an append neither commits nor becomes visible on the primary, and its Job ends on its deadline; once the standby is back and streams synchronously, a new append commits and every stream written verifies by journal spec §11 (OPS-2, E21-41) | The cluster's durability set to `preferred`, so the primary commits alone: `committed with the standby fenced` |
 | `vault` | `mandate vault provision` sets the cell's vault up (DEC-2022), then from a pod labelled as the executor each AppRole logs in and reads: a runtime nothing, an executor exactly its own connection's token and not `drill-other`'s, the model gateway its key; and no `mandate-*` policy holds `*` or `+`. It runs in `cell-kill-switch`, after the kill switch's drill | The runtime's policy rewritten to read every connection's token through `+`: the check must name `wildcard in mandate-runtime` |

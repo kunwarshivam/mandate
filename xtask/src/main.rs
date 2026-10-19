@@ -13,6 +13,7 @@ use std::time::{Duration, SystemTime};
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
+mod admission_drill;
 mod cell;
 mod gitops;
 mod image;
@@ -96,7 +97,7 @@ commands:
                         copy staging's chart digests and images into production (DEC-2016)
   cell up               build this change's images, bring up the local k3d cell, install the
                         workspace chart (deploy/cell/README.md)
-  cell drill [--seeded] [boot|journal|egress|compose|restart|kill-switch|standby-down|archive]...
+  cell drill [--seeded] [boot|journal|egress|compose|restart|kill-switch|admission|standby-down|archive]...
                         run the cell's drills; --seeded plants each drill's bug and fails if a
                         drill still holds
   cell demo [--no-web]  the full local cell for a laptop: up, the demo workspace verified, what is
@@ -410,7 +411,7 @@ fn ci(job: &str) -> Result<()> {
         "cell-failover" => cell::ci_drills(job, &cell::FAILOVER_DRILLS),
         "cell-kill-switch" => cell::ci_drills(
             job,
-            &[cell::KILL_SWITCH_DRILLS, cell::VAULT_DRILLS].concat(),
+            &[&cell::KILL_SWITCH_DRILLS[..], &cell::VAULT_DRILLS[..]].concat(),
         ),
         "refcases" => refcases(false),
         "reference" => {
