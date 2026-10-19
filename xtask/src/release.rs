@@ -2772,18 +2772,24 @@ mod tests {
             let written = dir.join("out/images").join(name);
             assert!(written.join("index.json").is_file(), "{name}: not written");
             image::unpack(layout, &written, &unpacked.join("rootfs"))?;
-            let mut files: Vec<String> = fs::read_dir(unpacked.join("rootfs"))?
+            let bin = unpacked.join("rootfs/usr/local/bin");
+            let mut top: Vec<String> = fs::read_dir(unpacked.join("rootfs"))?
+                .map(|entry| Ok(entry?.file_name().to_string_lossy().into_owned()))
+                .collect::<io::Result<_>>()?;
+            top.sort();
+            assert_eq!(top, ["usr"], "{name}");
+            let mut files: Vec<String> = fs::read_dir(&bin)?
                 .map(|entry| Ok(entry?.file_name().to_string_lossy().into_owned()))
                 .collect::<io::Result<_>>()?;
             files.sort();
             assert_eq!(files, [name.clone(), format!("{name}.sig")], "{name}");
             assert_eq!(
-                fs::read(unpacked.join("rootfs").join(name))?,
+                fs::read(bin.join(name))?,
                 fs::read(dir.join("dist/bin").join(name))?,
                 "{name}: the binary"
             );
             assert_eq!(
-                fs::read(unpacked.join("rootfs").join(format!("{name}.sig")))?,
+                fs::read(bin.join(format!("{name}.sig")))?,
                 fs::read(dir.join("signatures").join(format!("{name}.sig")))?,
                 "{name}: the signature"
             );

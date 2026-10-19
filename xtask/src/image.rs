@@ -612,8 +612,9 @@ mod tests {
         assert_ne!(unsigned.manifest, one.manifest);
     }
 
-    /// Non-root, the binary as the entrypoint, and nothing else to run: no `Cmd`, no `Env`, no
-    /// `Shell`, no working directory, no volume, no exposed port.
+    /// Non-root, the binary at `/usr/local/bin`, where the chart's exec probes name it, as the
+    /// entrypoint, and nothing else to run: no `Cmd`, no `Env`, no `Shell`, no working directory,
+    /// no volume, no exposed port.
     #[test]
     fn the_image_runs_its_binary_as_a_non_root_user_and_nothing_else() {
         let image = layout("mandate-agentd", "amd64", BINARY, Some(b"sig"), REVISION);
@@ -626,7 +627,10 @@ mod tests {
         let keys: Vec<&str> = run.keys().map(String::as_str).collect();
         assert_eq!(keys, ["Entrypoint", "Labels", "User"]);
         assert_eq!(run["User"], USER);
-        assert_eq!(run["Entrypoint"], serde_json::json!(["/mandate-agentd"]));
+        assert_eq!(
+            run["Entrypoint"],
+            serde_json::json!(["/usr/local/bin/mandate-agentd"])
+        );
         assert_eq!(run["Labels"]["org.opencontainers.image.revision"], REVISION);
         assert_eq!(run["Labels"]["org.opencontainers.image.source"], SOURCE);
         let diff_ids: Vec<String> = config["rootfs"]["diff_ids"]
@@ -682,8 +686,9 @@ mod tests {
         fs::remove_dir_all(&dir).ok();
     }
 
-    /// Read back by `tar`: the binary's layer holds exactly the binary, root's and not writable;
-    /// the signature's holds exactly the signature, read-only. Nothing else, so no shell.
+    /// Read back by `tar`: the binary's layer holds exactly the binary at `usr/local/bin`, root's
+    /// and not writable; the signature's holds exactly the signature beside it, read-only, where
+    /// the start-up check looks for it. Nothing else, so no shell.
     #[test]
     fn each_layer_holds_exactly_its_one_file() {
         let image = layout(
@@ -704,15 +709,21 @@ mod tests {
         let lines: Vec<&str> = listing.lines().collect();
         assert_eq!(lines.len(), 1, "{listing}");
         assert!(lines[0].starts_with("-r-xr-xr-x 0/0"), "{listing}");
-        assert!(lines[0].ends_with(" mandate-agentd"), "{listing}");
-        assert_eq!(tar_extract(&binary, "mandate-agentd"), BINARY);
+        assert!(
+            lines[0].ends_with(" usr/local/bin/mandate-agentd"),
+            "{listing}"
+        );
+        assert_eq!(tar_extract(&binary, "usr/local/bin/mandate-agentd"), BINARY);
         let listing = tar_listing(&signature);
         let lines: Vec<&str> = listing.lines().collect();
         assert_eq!(lines.len(), 1, "{listing}");
         assert!(lines[0].starts_with("-r--r--r-- 0/0"), "{listing}");
-        assert!(lines[0].ends_with(" mandate-agentd.sig"), "{listing}");
+        assert!(
+            lines[0].ends_with(" usr/local/bin/mandate-agentd.sig"),
+            "{listing}"
+        );
         assert_eq!(
-            tar_extract(&signature, "mandate-agentd.sig"),
+            tar_extract(&signature, "usr/local/bin/mandate-agentd.sig"),
             b"the signature"
         );
         fs::remove_dir_all(&dir).ok();
@@ -748,11 +759,14 @@ mod tests {
         assert_eq!(header(text, "etag"), None);
     }
 
-    /// Every shipped binary's name, and its signature's, fits the header's name field.
+    /// Every shipped binary's path in its image, and its signature's, fits the header's name field.
     #[test]
     fn every_shipped_name_fits_a_tar_header() {
         for (_, name) in crate::release::BINARIES {
-            assert!(format!("{name}.sig").len() <= NAME_LEN, "{name}");
+            assert!(
+                format!("usr/local/bin/{name}.sig").len() <= NAME_LEN,
+                "{name}"
+            );
         }
     }
 
