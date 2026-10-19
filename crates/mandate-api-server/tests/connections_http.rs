@@ -334,7 +334,6 @@ fn code(reply: &Reply) -> String {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn without_a_live_session_both_reads_are_the_one_401() {
     let f = fixture();
     seed(&f);
@@ -351,7 +350,6 @@ fn without_a_live_session_both_reads_are_the_one_401() {
 /// A viewer and an operator are refused before any id is looked up: a known id, an unknown one,
 /// another workspace's, and one that does not decode all answer the same 403 (DEC-2631).
 #[test]
-#[ignore = "pending E10-13"]
 fn the_role_is_checked_before_the_id() {
     let f = fixture();
     seed(&f);
@@ -371,7 +369,6 @@ fn the_role_is_checked_before_the_id() {
 /// For the admin, an id the control stream does not name, another workspace's id, and an id
 /// that does not decode are one and the same `not_found`.
 #[test]
-#[ignore = "pending E10-13"]
 fn an_unknown_a_foreign_and_a_malformed_id_are_the_same_404() {
     let f = fixture();
     seed(&f);
@@ -393,7 +390,6 @@ fn an_unknown_a_foreign_and_a_malformed_id_are_the_same_404() {
 /// A non-member, a deactivated member, and another workspace's path are the same `not_found`;
 /// memberships that cannot be read are `membership_unavailable`, never an empty list.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_stranger_finds_nothing_and_unreadable_memberships_are_503() {
     let f = fixture();
     seed(&f);
@@ -418,7 +414,6 @@ fn a_stranger_finds_nothing_and_unreadable_memberships_are_503() {
 /// The list serves every connection in first-named order with the control stream's watermark,
 /// and one connection is that list's member, each against [`expected`].
 #[test]
-#[ignore = "pending E10-13"]
 fn the_admin_reads_every_connection_and_one_as_the_fold_states_them() {
     let f = fixture();
     seed(&f);
@@ -448,7 +443,6 @@ fn the_admin_reads_every_connection_and_one_as_the_fold_states_them() {
 /// Neither answer carries what is journaled but not served: the account reference, the user, the
 /// step-up, the existing connection, or a secret-shaped member a record carries (DEC-2620 item 4).
 #[test]
-#[ignore = "pending E10-13"]
 fn no_answer_carries_a_journaled_only_member() {
     let f = fixture();
     seed(&f);
@@ -467,7 +461,6 @@ fn no_answer_carries_a_journaled_only_member() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_control_stream_that_cannot_be_read_is_503() {
     let f = fixture();
     seed(&f);
