@@ -737,9 +737,12 @@ PartiallyFilled); fills during either pending state update filled quantity witho
     lookups of an `Unknown` order paces these re-sends too. An order an ignored ask left `Accepted`
     or `PartiallyFilled` with the cancel unconfirmed is retried the same way.
     - Each re-send journals `OrderStateChanged` (`PendingCancel`, `cancel_requested`) before it is
-      sent. A run counts the asks journaled since its start, so every run has its own budget.
+      sent. A run counts the re-sends journaled since its start, so every run has its own budget.
+      The switch's own ask is not a re-send, and the start's re-send is not journaled, so a run
+      that began with the cancel outstanding sends it at most `unknown_absent_lookups` + 1 times.
     - When the window after the run's last re-send passes with the cancel still unconfirmed, an
-      operator alert sounds once, under an opaque key.
+      operator alert sounds under an opaque key, at most once per run; a run that ends on that tick
+      raises none, and the next start sends the cancel again.
     - After that nothing more is sent within the run, the order stays `PendingCancel`, and the next
       start sends the cancel again with a new budget.
     - No other cancel is retried this way: protection keeps §5.4's own bound, and an `Unknown`
