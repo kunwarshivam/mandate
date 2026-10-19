@@ -76,17 +76,78 @@ impl RedirectUri {
     ///
     /// # Errors
     /// [`ConnectError::RedirectUriInvalid`] for any other text.
-    #[expect(
-        clippy::todo,
-        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-    )]
-    pub fn parse(_text: &str) -> Result<Self, ConnectError> {
-        todo!()
+    pub fn parse(text: &str) -> Result<Self, ConnectError> {
+        let (loopback_only, rest) = if let Some(rest) = text.strip_prefix("https://") {
+            (false, rest)
+        } else if let Some(rest) = text.strip_prefix("http://") {
+            (true, rest)
+        } else {
+            return Err(ConnectError::RedirectUriInvalid);
+        };
+        let authority = rest
+            .strip_suffix(CALLBACK_PATH)
+            .filter(|authority| !authority.contains('/'))
+            .ok_or(ConnectError::RedirectUriInvalid)?;
+        let (host, port) = split_authority(authority).ok_or(ConnectError::RedirectUriInvalid)?;
+        let port_fits = port.is_none_or(|port| {
+            port.bytes().all(|b| b.is_ascii_digit()) && port.parse::<u16>().is_ok_and(|n| n != 0)
+        });
+        let host_fits = match host {
+            Host::Bracketed(inner) => loopback_only && inner == "::1",
+            Host::Named(name) if loopback_only => LOOPBACK_HOSTS.contains(&name),
+            Host::Named(name) => is_dns_name(name),
+        };
+        if port_fits && host_fits {
+            Ok(Self(text.to_owned()))
+        } else {
+            Err(ConnectError::RedirectUriInvalid)
+        }
     }
 
     pub fn as_str(&self) -> &str {
         &self.0
     }
+}
+
+/// The named hosts on which a redirect URI may be `http`, beside `[::1]`: the cell's fixture
+/// provider runs on loopback.
+const LOOPBACK_HOSTS: [&str; 2] = ["localhost", "127.0.0.1"];
+
+/// An authority's host: a bracketed IPv6 literal's inside, or a name or IPv4 address.
+enum Host<'a> {
+    Bracketed(&'a str),
+    Named(&'a str),
+}
+
+/// Splits `authority` into its host and its port's text, `None` without a port; `None` when a
+/// bracket is unclosed, or something other than a port follows one.
+fn split_authority(authority: &str) -> Option<(Host<'_>, Option<&str>)> {
+    if let Some(bracketed) = authority.strip_prefix('[') {
+        let (inner, tail) = bracketed.split_once(']')?;
+        let port = match tail {
+            "" => None,
+            tail => Some(tail.strip_prefix(':')?),
+        };
+        return Some((Host::Bracketed(inner), port));
+    }
+    Some(match authority.split_once(':') {
+        Some((name, port)) => (Host::Named(name), Some(port)),
+        None => (Host::Named(authority), None),
+    })
+}
+
+/// A lowercase DNS name: dot-separated labels of `a-z`, `0-9`, and `-`, none empty and none
+/// starting or ending with `-`.
+fn is_dns_name(host: &str) -> bool {
+    !host.is_empty()
+        && host.split('.').all(|label| {
+            !label.is_empty()
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+                && label
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+        })
 }
 
 /// The platform's OAuth client as one deployment registered it: its client id and redirect URI.
@@ -174,12 +235,9 @@ impl PendingStates {
 
     /// Drops every `state` expired at `now`, so a `state` never redeemed does not stay held
     /// (DEC-2623 item 4). One not yet expired is kept unchanged.
-    #[expect(
-        clippy::todo,
-        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-    )]
-    pub fn prune(&mut self, _now: UtcNanos) {
-        todo!()
+    pub fn prune(&mut self, now: UtcNanos) {
+        self.issued
+            .retain(|_, issued| now < expiry(issued.issued_at));
     }
 
     /// How many `state` values are held.
