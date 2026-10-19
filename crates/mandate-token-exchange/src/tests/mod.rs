@@ -3,3 +3,6 @@
 
 mod form;
 mod response;
+
+#[cfg(debug_assertions)]
+mod cell;
