@@ -371,11 +371,11 @@ fn facts(control: &[StoredEvent], connection: &str, account: &str) -> StartFacts
         if member("connection_id") != Some(connection) {
             continue;
         }
-        id = match row.event_type.as_str() {
-            "ConnectionRequested" if id == IdFold::Free => IdFold::RequestOpen,
-            "ConnectionEstablished" => IdFold::Established,
-            "ConnectionRefused" | "ConnectionRevoked" if id == IdFold::RequestOpen => IdFold::Free,
-            _ => id,
+        id = match (row.event_type.as_str(), id) {
+            ("ConnectionRequested", IdFold::Free) => IdFold::RequestOpen,
+            ("ConnectionEstablished", _) => IdFold::Established,
+            ("ConnectionRefused" | "ConnectionRevoked", IdFold::RequestOpen) => IdFold::Free,
+            (_, unchanged) => unchanged,
         };
     }
     StartFacts { id, account_ref }
