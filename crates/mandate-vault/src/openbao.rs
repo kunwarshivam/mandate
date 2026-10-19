@@ -486,6 +486,24 @@ pub(crate) fn role_settings(identity: &Identity) -> Value {
     }
 }
 
+/// Every identity [`provision`] makes a policy and a role for: each process type's, then each
+/// connection's executor and token exchange, in that order.
+pub(crate) fn provisioned_identities(connections: &[ConnectionId]) -> Vec<Identity> {
+    let mut identities = vec![
+        Identity::Api,
+        Identity::ConnectionManager,
+        Identity::Runtime,
+        Identity::SecretImport,
+        Identity::ModelGateway,
+        Identity::EmailSender,
+    ];
+    for connection in connections {
+        identities.push(Identity::Executor(connection.clone()));
+        identities.push(Identity::TokenExchange(connection.clone()));
+    }
+    identities
+}
+
 /// Sets a vault up for `connections`, with an operator's token: the KV v2 mount, the AppRole
 /// auth method, one policy and one role per identity, and a secret id for every identity but the
 /// token exchanges, whose secret ids are grants. Running it again rewrites the policies and
@@ -534,18 +552,8 @@ pub async fn provision(
         )
         .await?;
     }
-    let mut identities = vec![
-        Identity::Api,
-        Identity::ConnectionManager,
-        Identity::Runtime,
-        Identity::SecretImport,
-    ];
-    for connection in connections {
-        identities.push(Identity::Executor(connection.clone()));
-        identities.push(Identity::TokenExchange(connection.clone()));
-    }
     let mut credentials = Vec::new();
-    for identity in identities {
+    for identity in provisioned_identities(connections) {
         let policy = policy_name(&identity, mounts);
         let hcl = openbao_policy(&identity, connections, mounts);
         http.call(

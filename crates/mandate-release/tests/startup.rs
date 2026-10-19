@@ -14,6 +14,7 @@ use mandate_release::{Admitted, BuildDigest, Refused, ReleaseKey, Tier, Trust};
 use proptest::prelude::*;
 use ring::rand::SystemRandom;
 use ring::signature::{ECDSA_P256_SHA256_ASN1_SIGNING, EcdsaKeyPair, KeyPair as _};
+use sha2::{Digest as _, Sha256};
 
 const TIERS: [Tier; 4] = [Tier::Dev, Tier::Ci, Tier::Staging, Tier::Production];
 const SPKI_P256_PREFIX: [u8; 26] = [
@@ -80,11 +81,37 @@ fn no_setting_and_an_unknown_setting_are_production() {
     assert_eq!(Tier::from_setting(Some("production")), Tier::Production);
 }
 
-/// No release key is wired until the founder's hardware key exists (H8), so nothing passes the
-/// check outside dev and CI yet.
+/// The SHA-256 of the founder's release key's DER `SubjectPublicKeyInfo`, as
+/// `openssl pkey -pubin -outform DER < cosign.pub | sha256sum` prints it (DEC-2605 rows 8 and 9).
+const FOUNDERS_RELEASE_KEY_SHA256: &str =
+    "45a03a7c8b5133aa9672669c978f029b1df93402a518871307496a161daee12f";
+
+/// Exactly one release key is compiled in, it parses as a P-256 key, and it is the founder's: a
+/// swapped or added key file fails here.
 #[test]
-fn no_release_key_is_compiled_in_yet() {
-    assert!(RELEASE_KEYS.is_empty());
+fn exactly_the_founders_release_key_is_compiled_in() {
+    let [pem] = RELEASE_KEYS else {
+        panic!(
+            "expected exactly one release key, found {}",
+            RELEASE_KEYS.len()
+        );
+    };
+    assert!(
+        ReleaseKey::from_pem(pem).is_ok(),
+        "the release key must parse"
+    );
+    let body: String = pem
+        .lines()
+        .filter(|line| !line.starts_with("-----"))
+        .collect();
+    let der = STANDARD
+        .decode(body)
+        .expect("the release key's body is base64");
+    let digest: String = Sha256::digest(&der)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    assert_eq!(digest, FOUNDERS_RELEASE_KEY_SHA256);
 }
 
 #[test]
@@ -182,7 +209,7 @@ fn a_signature_that_is_not_base64_is_malformed_in_every_tier() {
     }
 }
 
-/// With no release key at all, as now, a signed build is refused outside dev and CI too.
+/// With no release key at all, a signed build is refused outside dev and CI too.
 #[test]
 fn without_a_release_key_nothing_starts_outside_dev_and_ci() {
     let test = Signer::new();

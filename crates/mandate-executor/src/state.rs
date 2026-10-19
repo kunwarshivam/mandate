@@ -133,6 +133,11 @@ pub struct ExecutorState {
     /// id, with the closes it has not yet raised as flatten intents (§5.5, DEC-485).
     pub(crate) switches: BTreeMap<EventId, Switch>,
     pub(crate) now: Option<RiskClock>,
+    /// The latest tick before the one now handed, a running field `step.rs` writes and the fold
+    /// never does: the retry's alert sounds on the tick its last window first expires, once
+    /// (DEC-2302 item 7). A tick handed again while its batch's append is unresolved keeps the
+    /// earlier tick it was first judged against, so its alert is not lost.
+    pub(crate) previous_now: Option<RiskClock>,
     /// The broker's capability profile protection reads (DEC-838 item 5): set by the shell from
     /// `connector.profile()` at every start ([`ExecutorState::with_profile`]), and otherwise the
     /// transitional Alpaca table. `None` only if that table failed to build, which protection
@@ -146,10 +151,15 @@ pub struct ExecutorState {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Switch {
     pub(crate) agent: AgentId,
+    /// The record on another stream this switch copied, from its `copied_from` (DEC-2003 item 4).
+    pub(crate) copied_from: Option<EventId>,
     pub(crate) purpose: Purpose,
     pub(crate) floor: Option<Price>,
     pub(crate) instruments: Vec<InstrumentId>,
     pub(crate) pending: BTreeSet<InstrumentId>,
+    /// The orders the switch cancelled, which no refusal of that cancel returns to working while
+    /// the broker still reports them working (DEC-2302).
+    pub(crate) cancels: BTreeSet<ClientOrderId>,
 }
 
 /// What one `OrderRequestRecorded` carries (§9.5): the executor-only members of the order that
@@ -185,6 +195,13 @@ pub(crate) struct OrderDetail {
     /// broker's to refuse. A resubmission after a confirmed absence is a new attempt, with a new
     /// detail, which an exit waits on afresh (#174 ruling 5863046153, DEC-160 (18)).
     pub(crate) cancel_overdue: bool,
+    /// The account-stream position of each record that asked the order's cancel
+    /// (`cancel_requested`), when it last asked, and that last record's id: a run counts a kill
+    /// switch's re-sends against `unknown_absent_lookups` from the asks after its start, so each run
+    /// has its own budget (DEC-2302 item 7).
+    pub(crate) cancel_asked_seqs: Vec<Seq>,
+    pub(crate) cancel_asked_at: Option<RiskClock>,
+    pub(crate) cancel_asked_event: Option<EventId>,
     /// The broker's own cumulative filled quantity for the order, from the `filled_qty` its
     /// latest report carried: a bracket entry's filled quantity before its fills are ingested
     /// (§5.4's "the filled quantity", DEC-346 item 3).
@@ -329,6 +346,7 @@ impl ExecutorState {
             pending_requests: BTreeMap::new(),
             switches: BTreeMap::new(),
             now: None,
+            previous_now: None,
             profile: transitional_alpaca().ok(),
         }
     }
@@ -376,6 +394,13 @@ impl ExecutorState {
     /// One order, or `None` for an id this executor never derived.
     pub fn order(&self, client_order_id: &ClientOrderId) -> Option<&Order> {
         self.orders.get(client_order_id)
+    }
+
+    /// Whether an agent-scoped kill switch cancelled `id` (§5.5, DEC-2302).
+    pub(crate) fn kill_switch_cancels(&self, id: &ClientOrderId) -> bool {
+        self.switches
+            .values()
+            .any(|switch| switch.cancels.contains(id))
     }
 
     /// The orders whose `OrderSubmitted` committed with no acknowledgment. `Input::Started`
@@ -562,6 +587,15 @@ impl ExecutorState {
     /// The writer epoch this state was folded under, once `Input::Started` has taken one.
     pub fn epoch(&self) -> Option<WriterEpoch> {
         self.epoch
+    }
+
+    /// Whether a switch this stream journaled copied `source`, another stream's record
+    /// (`copied_from`, DEC-2003 item 4): read from this stream's own `KillSwitchActivated`
+    /// records alone, so no mode another restriction set can make a switch count as applied.
+    pub fn applied_copy(&self, source: &EventId) -> bool {
+        self.switches
+            .values()
+            .any(|switch| switch.copied_from.as_ref() == Some(source))
     }
 
     pub fn started(&self) -> bool {

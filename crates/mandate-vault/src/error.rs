@@ -22,6 +22,10 @@ pub enum SourceError {
     GrantInvalid,
     #[error("the vault's address must be https and its CA certificate PEM")]
     Config,
+    #[error(
+        "a credentials file or directory is missing, not a plain file or directory, or open to others"
+    )]
+    CredentialFile,
     #[error("{story} has not been implemented yet")]
     Unimplemented { story: &'static str },
 }
@@ -39,6 +43,7 @@ impl SourceError {
             Self::Missing => "missing",
             Self::GrantInvalid => "grant_invalid",
             Self::Config => "config",
+            Self::CredentialFile => "credential_file",
             Self::Unimplemented { .. } => "unimplemented",
         }
     }

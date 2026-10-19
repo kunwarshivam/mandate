@@ -3,22 +3,26 @@
 //! ages before each read's cut-off. Loaded once at start; anything missing refuses the load.
 
 use std::collections::BTreeSet;
+use std::fs;
 use std::path::Path;
 
-use mandate_gateway::money::{Usage, Usd6};
-use mandate_gateway::registry::{Endpoint, Registry, Reported};
+use mandate_canon::{Digest, Value, parse};
+use mandate_domain::{AssetClass, AssetId};
+use mandate_gateway::money::{PriceTable, TokenPrice, Usage, Usd6};
+use mandate_gateway::registry::{
+    Endpoint, Identity, Locality, Registry, Reported, Route, Snapshot, Status,
+};
 use mandate_num::{Price, Qty};
+use mandate_research::{AllowlistVersion, SourceAllowlist, SourceId as AllowedSource};
 use mandate_research_run::{
     Bar, BarReader, Filing, FilingReader, InstrumentFact, InstrumentReader, ItemId, NewsItem,
-    NewsReader, ReadError, ResearchEntry, SourceId, Symbol, TextQuery,
+    NewsReader, OutputBounds, ReadError, ResearchEntry, RetrievalPlan, SourceId, Symbol, TextQuery,
 };
 use mandate_time::UtcNanos;
 
 /// Why a bundle could not be loaded or registered.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BundleError {
-    /// DEC-2210's loader is not implemented yet (E21-54).
-    Unimplemented,
     /// A file is missing or unreadable.
     Unreadable { file: &'static str },
     /// A file is not strict JSON, or a member is missing or out of its range. `member` names the
@@ -66,12 +70,28 @@ pub struct RecordedNews {
     pub licensed: bool,
 }
 
-/// The recorded data plane. It returns no filings, and stamps every item at its age before the
-/// cut-off of the read it answers; `retrieve` filters the answer again.
+/// One recorded filing, known `age_s` and filed `filed_age_s` seconds before the read's cut-off
+/// (DEC-2211).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordedFiling {
+    pub item_id: ItemId,
+    pub source: SourceId,
+    pub symbol: Symbol,
+    pub form: String,
+    pub age_s: u32,
+    pub filed_age_s: u32,
+    pub excerpt: String,
+    pub licensed: bool,
+}
+
+/// The recorded data plane. It stamps every item at its age before the cut-off of the read it
+/// answers; `retrieve` filters the answer again. The cell's recording holds no filings (DEC-2210
+/// item 2, DEC-2211).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecordedPlane {
     pub bars: Vec<RecordedBar>,
     pub news: Vec<RecordedNews>,
+    pub filings: Vec<RecordedFiling>,
     pub instruments: Vec<InstrumentFact>,
 }
 
@@ -86,7 +106,17 @@ pub struct Bundle {
     pub deployment_cap: Usd6,
     pub reply: RecordedReply,
     pub plane: RecordedPlane,
+    /// The recorded instruments halted at the bundle's as-of time (DEC-2214 item 1).
+    pub halted: BTreeSet<AssetId>,
+    /// The source allowlist the bundle's items were recorded under (DEC-2214 item 1).
+    pub allowlist: SourceAllowlist,
 }
+
+const RESEARCH: &str = "research.json";
+const BARS: &str = "bars.json";
+const NEWS: &str = "news.json";
+const FILINGS: &str = "filings.json";
+const INSTRUMENTS: &str = "instruments.json";
 
 impl Bundle {
     /// The bundle in `dir`.
@@ -94,8 +124,90 @@ impl Bundle {
     /// # Errors
     /// [`BundleError`] when a file is missing or unreadable, or a member is missing or invalid.
     pub fn load(dir: &Path) -> Result<Self, BundleError> {
-        let _ = dir;
-        Err(BundleError::Unimplemented)
+        let research = Doc::read(dir, RESEARCH)?;
+        let entry = research.member("entry")?;
+        let endpoint = research.member("endpoint")?;
+        let caps = research.member("caps")?;
+        let reply = research.member("reply")?;
+        let slug = entry.text("model_name")?;
+        let reported_provider = endpoint.text("reported_provider")?;
+        let prices = PriceTable::new(
+            endpoint.per_million("input_per_million")?,
+            endpoint.per_million("output_per_million")?,
+            endpoint.per_million("cached_per_million")?,
+            Digest::of(endpoint.text("price_table")?.as_bytes()),
+        )
+        .map_err(|_| endpoint.malformed("cached_per_million"))?;
+        let plane = RecordedPlane {
+            bars: Doc::read(dir, BARS)?
+                .rows()?
+                .iter()
+                .map(bar)
+                .collect::<Result<_, _>>()?,
+            news: Doc::read(dir, NEWS)?
+                .rows()?
+                .iter()
+                .map(news)
+                .collect::<Result<_, _>>()?,
+            filings: Doc::read(dir, FILINGS)?
+                .rows()?
+                .iter()
+                .map(filing)
+                .collect::<Result<_, _>>()?,
+            instruments: Doc::read(dir, INSTRUMENTS)?
+                .rows()?
+                .iter()
+                .map(instrument)
+                .collect::<Result<_, _>>()?,
+        };
+        let halted = halts(&research, &plane.instruments)?;
+        let allowlist = allowlist(&research)?;
+        Ok(Self {
+            entry: ResearchEntry {
+                model_id: entry.text("model_id")?.to_owned(),
+                model_version: entry.text("model_version")?.to_owned(),
+                identity: Identity {
+                    provider: entry.text("provider")?.to_owned(),
+                    model_name: slug.to_owned(),
+                    snapshot: Snapshot::Dated(entry.text("snapshot")?.to_owned()),
+                    quantization: None,
+                },
+                deadline_ms: entry.int("deadline_ms")?,
+                max_output_tokens: entry.small("max_output_tokens")?,
+                seed: Some(entry.int("seed")?),
+                plan: RetrievalPlan::v0_1(),
+                bounds: OutputBounds::v0_1(),
+            },
+            endpoint: Endpoint {
+                id: endpoint.text("id")?.to_owned(),
+                host: endpoint.text("host")?.to_owned(),
+                region: endpoint.text("region")?.to_owned(),
+                locality: Locality::Hosted,
+                route: Route {
+                    upstream: endpoint.text("upstream")?.to_owned(),
+                    reported_provider: reported_provider.to_owned(),
+                },
+                prices,
+            },
+            probe: Reported {
+                model: Some(slug.to_owned()),
+                provider: Some(reported_provider.to_owned()),
+            },
+            workspace_cap: caps.usd6("workspace_monthly_usd")?,
+            deployment_cap: caps.usd6("deployment_usd")?,
+            reply: RecordedReply {
+                output: reply.text("output")?.to_owned(),
+                latency_ms: reply.int("latency_ms")?,
+                usage: Usage {
+                    input: reply.int("input_tokens")?,
+                    output: reply.int("output_tokens")?,
+                    cached: reply.int("cached_tokens")?,
+                },
+            },
+            plane,
+            halted,
+            allowlist,
+        })
     }
 
     /// The gateway's registry: the entry, offered, on its one endpoint.
@@ -103,51 +215,332 @@ impl Bundle {
     /// # Errors
     /// [`BundleError::Unregistered`] when the registry refuses the entry or the endpoint.
     pub fn registry(&self) -> Result<Registry, BundleError> {
-        Err(BundleError::Unimplemented)
+        let content = self.entry.content();
+        let pin = content.model_ref();
+        let mut registry = Registry::new();
+        registry
+            .register(content)
+            .map_err(|_| BundleError::Unregistered)?;
+        registry
+            .add_endpoint(
+                &pin,
+                self.endpoint.clone(),
+                std::slice::from_ref(&self.probe),
+            )
+            .map_err(|_| BundleError::Unregistered)?;
+        registry
+            .set_status(&pin, Status::Offered)
+            .map_err(|_| BundleError::Unregistered)?;
+        Ok(registry)
     }
 }
 
+/// `age_s` seconds before `cut_off`, or `None` before the representable range.
+fn before(cut_off: UtcNanos, age_s: u32) -> Option<UtcNanos> {
+    let secs = cut_off.secs().checked_sub(i64::from(age_s))?;
+    UtcNanos::from_parts(secs, cut_off.nanos()).ok()
+}
+
 impl BarReader for RecordedPlane {
-    #[expect(
-        clippy::todo,
-        reason = "a reader's error has no stub variant, so its stub is todo!(), the other form DEC-137 names"
-    )]
     fn daily_bars(
         &self,
-        _symbol: &Symbol,
-        _cut_off: UtcNanos,
+        symbol: &Symbol,
+        cut_off: UtcNanos,
         _limit: u32,
     ) -> Result<Vec<Bar>, ReadError> {
-        todo!()
+        Ok(self
+            .bars
+            .iter()
+            .filter(|bar| bar.symbol == *symbol)
+            .filter_map(|bar| {
+                Some(Bar {
+                    symbol: bar.symbol.clone(),
+                    knowledge_at: before(cut_off, bar.age_s)?,
+                    open: bar.open,
+                    high: bar.high,
+                    low: bar.low,
+                    close: bar.close,
+                    volume: bar.volume,
+                })
+            })
+            .collect())
     }
 }
 
 impl NewsReader for RecordedPlane {
-    #[expect(
-        clippy::todo,
-        reason = "a reader's error has no stub variant, so its stub is todo!(), the other form DEC-137 names"
-    )]
-    fn news(&self, _query: &TextQuery) -> Result<Vec<NewsItem>, ReadError> {
-        todo!()
+    fn news(&self, query: &TextQuery) -> Result<Vec<NewsItem>, ReadError> {
+        Ok(self
+            .news
+            .iter()
+            .filter_map(|item| {
+                Some(NewsItem {
+                    item_id: item.item_id.clone(),
+                    source: item.source.clone(),
+                    symbols: item.symbols.clone(),
+                    knowledge_at: before(query.cut_off, item.age_s)?,
+                    published_at: before(query.cut_off, item.published_age_s)?,
+                    headline: item.headline.clone(),
+                    summary: item.summary.clone(),
+                    link: item.link.clone(),
+                    content_hash: Digest::of_parts(&[
+                        item.headline.as_bytes(),
+                        item.summary.as_bytes(),
+                    ]),
+                    licensed: item.licensed,
+                })
+            })
+            .collect())
     }
 }
 
 impl FilingReader for RecordedPlane {
-    #[expect(
-        clippy::todo,
-        reason = "a reader's error has no stub variant, so its stub is todo!(), the other form DEC-137 names"
-    )]
-    fn filings(&self, _query: &TextQuery) -> Result<Vec<Filing>, ReadError> {
-        todo!()
+    fn filings(&self, query: &TextQuery) -> Result<Vec<Filing>, ReadError> {
+        Ok(self
+            .filings
+            .iter()
+            .filter_map(|item| {
+                Some(Filing {
+                    item_id: item.item_id.clone(),
+                    source: item.source.clone(),
+                    symbol: item.symbol.clone(),
+                    form: item.form.clone(),
+                    knowledge_at: before(query.cut_off, item.age_s)?,
+                    filed_at: before(query.cut_off, item.filed_age_s)?,
+                    excerpt: item.excerpt.clone(),
+                    content_hash: Digest::of_parts(&[
+                        item.form.as_bytes(),
+                        item.excerpt.as_bytes(),
+                    ]),
+                    licensed: item.licensed,
+                })
+            })
+            .collect())
     }
 }
 
 impl InstrumentReader for RecordedPlane {
-    #[expect(
-        clippy::todo,
-        reason = "a reader's error has no stub variant, so its stub is todo!(), the other form DEC-137 names"
-    )]
-    fn instruments(&self, _symbols: &BTreeSet<Symbol>) -> Result<Vec<InstrumentFact>, ReadError> {
-        todo!()
+    fn instruments(&self, symbols: &BTreeSet<Symbol>) -> Result<Vec<InstrumentFact>, ReadError> {
+        Ok(self
+            .instruments
+            .iter()
+            .filter(|fact| symbols.contains(&fact.symbol))
+            .cloned()
+            .collect())
     }
+}
+
+/// One JSON value of a bundle file, with the file it came from for errors.
+struct Doc<'a> {
+    file: &'static str,
+    value: &'a Value,
+}
+
+/// A bundle file's parsed text.
+struct Read {
+    file: &'static str,
+    value: Value,
+}
+
+impl Doc<'_> {
+    fn read(dir: &Path, file: &'static str) -> Result<Read, BundleError> {
+        let bytes = fs::read(dir.join(file)).map_err(|_| BundleError::Unreadable { file })?;
+        let value = parse(&bytes).map_err(|_| BundleError::Malformed { file, member: "" })?;
+        Ok(Read { file, value })
+    }
+
+    fn malformed(&self, member: &'static str) -> BundleError {
+        BundleError::Malformed {
+            file: self.file,
+            member,
+        }
+    }
+
+    fn text(&self, member: &'static str) -> Result<&str, BundleError> {
+        self.value
+            .get(member)
+            .and_then(Value::as_str)
+            .filter(|text| !text.is_empty())
+            .ok_or_else(|| self.malformed(member))
+    }
+
+    fn int(&self, member: &'static str) -> Result<u64, BundleError> {
+        self.value
+            .get(member)
+            .and_then(Value::as_int)
+            .ok_or_else(|| self.malformed(member))
+    }
+
+    fn small(&self, member: &'static str) -> Result<u32, BundleError> {
+        u32::try_from(self.int(member)?).map_err(|_| self.malformed(member))
+    }
+
+    fn flag(&self, member: &'static str) -> Result<bool, BundleError> {
+        match self.value.get(member) {
+            Some(Value::Bool(flag)) => Ok(*flag),
+            _ => Err(self.malformed(member)),
+        }
+    }
+
+    fn usd6(&self, member: &'static str) -> Result<Usd6, BundleError> {
+        Usd6::parse(self.text(member)?).map_err(|_| self.malformed(member))
+    }
+
+    fn per_million(&self, member: &'static str) -> Result<TokenPrice, BundleError> {
+        self.usd6(member).map(TokenPrice::per_million)
+    }
+
+    fn price(&self, member: &'static str) -> Result<Price, BundleError> {
+        Price::parse(self.text(member)?).map_err(|_| self.malformed(member))
+    }
+
+    fn symbol(&self, member: &'static str) -> Result<Symbol, BundleError> {
+        Symbol::new(self.text(member)?).map_err(|_| self.malformed(member))
+    }
+}
+
+impl Read {
+    fn member(&self, member: &'static str) -> Result<Doc<'_>, BundleError> {
+        let value = self.value.get(member).ok_or(BundleError::Malformed {
+            file: self.file,
+            member,
+        })?;
+        Ok(Doc {
+            file: self.file,
+            value,
+        })
+    }
+
+    fn rows(&self) -> Result<Vec<Doc<'_>>, BundleError> {
+        let rows = self.value.as_array().ok_or(BundleError::Malformed {
+            file: self.file,
+            member: "",
+        })?;
+        Ok(rows
+            .iter()
+            .map(|value| Doc {
+                file: self.file,
+                value,
+            })
+            .collect())
+    }
+}
+
+/// The assets of the instruments `research.json`'s `halted_instruments` names by symbol, each one an
+/// instrument the bundle records.
+fn halts(
+    research: &Read,
+    instruments: &[InstrumentFact],
+) -> Result<BTreeSet<AssetId>, BundleError> {
+    let malformed = BundleError::Malformed {
+        file: RESEARCH,
+        member: "halted_instruments",
+    };
+    research
+        .value
+        .get("halted_instruments")
+        .and_then(Value::as_array)
+        .ok_or_else(|| malformed.clone())?
+        .iter()
+        .map(|symbol| {
+            symbol
+                .as_str()
+                .and_then(|text| instruments.iter().find(|fact| fact.symbol.as_str() == text))
+                .map(|fact| fact.asset_id.clone())
+                .ok_or_else(|| malformed.clone())
+        })
+        .collect()
+}
+
+/// `research.json`'s `allowlist`: its version and its sources.
+fn allowlist(research: &Read) -> Result<SourceAllowlist, BundleError> {
+    let malformed = || BundleError::Malformed {
+        file: RESEARCH,
+        member: "allowlist",
+    };
+    let allowlist = research.value.get("allowlist").ok_or_else(malformed)?;
+    let version = allowlist
+        .get("version")
+        .and_then(Value::as_int)
+        .and_then(|version| u32::try_from(version).ok())
+        .ok_or_else(malformed)?;
+    let sources = allowlist
+        .get("sources")
+        .and_then(Value::as_array)
+        .ok_or_else(malformed)?
+        .iter()
+        .map(|source| {
+            source
+                .as_str()
+                .and_then(|text| AllowedSource::new(text).ok())
+                .ok_or_else(malformed)
+        })
+        .collect::<Result<_, _>>()?;
+    Ok(SourceAllowlist {
+        version: AllowlistVersion(version),
+        sources,
+    })
+}
+
+fn bar(row: &Doc<'_>) -> Result<RecordedBar, BundleError> {
+    Ok(RecordedBar {
+        symbol: row.symbol("symbol")?,
+        age_s: row.small("age_s")?,
+        open: row.price("open")?,
+        high: row.price("high")?,
+        low: row.price("low")?,
+        close: row.price("close")?,
+        volume: Qty::parse(row.text("volume")?).map_err(|_| row.malformed("volume"))?,
+    })
+}
+
+fn filing(row: &Doc<'_>) -> Result<RecordedFiling, BundleError> {
+    Ok(RecordedFiling {
+        item_id: ItemId::new(row.text("item_id")?).map_err(|_| row.malformed("item_id"))?,
+        source: SourceId::new(row.text("source")?).map_err(|_| row.malformed("source"))?,
+        symbol: Symbol::new(row.text("symbol")?).map_err(|_| row.malformed("symbol"))?,
+        form: row.text("form")?.to_owned(),
+        age_s: row.small("age_s")?,
+        filed_age_s: row.small("filed_age_s")?,
+        excerpt: row.text("excerpt")?.to_owned(),
+        licensed: row.flag("licensed")?,
+    })
+}
+
+fn news(row: &Doc<'_>) -> Result<RecordedNews, BundleError> {
+    let symbols = row
+        .value
+        .get("symbols")
+        .and_then(Value::as_array)
+        .ok_or_else(|| row.malformed("symbols"))?
+        .iter()
+        .map(|symbol| {
+            symbol
+                .as_str()
+                .and_then(|text| Symbol::new(text).ok())
+                .ok_or_else(|| row.malformed("symbols"))
+        })
+        .collect::<Result<_, _>>()?;
+    Ok(RecordedNews {
+        item_id: ItemId::new(row.text("item_id")?).map_err(|_| row.malformed("item_id"))?,
+        source: SourceId::new(row.text("source")?).map_err(|_| row.malformed("source"))?,
+        symbols,
+        age_s: row.small("age_s")?,
+        published_age_s: row.small("published_age_s")?,
+        headline: row.text("headline")?.to_owned(),
+        summary: row.text("summary")?.to_owned(),
+        link: row.text("link")?.to_owned(),
+        licensed: row.flag("licensed")?,
+    })
+}
+
+fn instrument(row: &Doc<'_>) -> Result<InstrumentFact, BundleError> {
+    Ok(InstrumentFact {
+        asset_id: AssetId::parse(row.text("asset_id")?).map_err(|_| row.malformed("asset_id"))?,
+        symbol: row.symbol("symbol")?,
+        asset_class: AssetClass::parse(row.text("asset_class")?)
+            .map_err(|_| row.malformed("asset_class"))?,
+        eligible: row.flag("eligible")?,
+        group: None,
+        leveraged_or_inverse_etp: row.flag("leveraged_or_inverse_etp")?,
+    })
 }

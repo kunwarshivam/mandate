@@ -4,7 +4,7 @@
 |---|---|
 | **Owner** | The coordinating agent session; the founder reviews |
 | **Status** | Living document, one page. Updated at the end of every working session |
-| **Last updated** | 2026-10-18 evening: a coordinator session landed the CI unblocks (#1587, #1595), #1501, #1588 and #1590 merged, and #1539, #1591, #1592 and #1597 approved, and restarted eleven builder lanes; the M5 to M7 and intelligence rows below were re-read against `main` the same day |
+| **Last updated** | 2026-10-18 late evening (main at #1709): the founder's fourteen decisions of the day are recorded in [DEC-2605](decisions/DEC-2605.md); the demo cell checks sign-in, the signed-in reads, the backtest and the kill switch (E2E slices 4 to 7); the hosted infrastructure's first modules merged (IAC, GO, V2); release signing's key is compiled in (#1689) |
 
 Where the project stands, what is waiting on whom, and what comes next, on one page. How the work
 ran, with every PR number, lives in [11-work-log.md](11-work-log.md). Plans live in
@@ -23,22 +23,25 @@ Open PRs and claim issues on GitHub are the live record of who holds what.
 | M3 Simulated execution and backtest | Done | The backtest runner's remaining pieces (DEC-127 items 15, 24, 25) have no story row yet |
 | M4 Journal | In progress: core, Postgres, artifacts, verification CLI, cold store and its checks, E5-8 `verify-cold` (#654, #662) merged; E7-19's artifact-aware Postgres append in tests (#676, DEC-510) | E5-5 the personal-data vault; E5-7 and E5-9 the cold store's operational half and examination bundle; all safety-critical; DEC-265 item 1 waits on the founder |
 | M5 Agent runtime and risk | In progress: the runtime and kill switches, the mandate document (validation, policy, change classification), the risk state and ladder, the gate with the US account rules, eligibility, conduct controls and restrictions, autonomy and the order builder, delegations, the client ceiling, the review date, V-047. **Tripwires (E6-13) are done**: #613 tests, #618 implementation, #621 status; MC-W01 to MC-W57 and MC-J01 to MC-J10 pass | **E6-15** (lane TW, claim #1599): the account stream's risk state, tripwires and the ladder latch, binds only in the harness today; no runtime or shell gate reads it, and §9.3 closes none of its seven records. Slices A (journal spec and registration) and B (a pure, fail-closed `AccountRiskFold`) are off R0's path; slice C wires the shell gate and the live door, timing is the founder's (Waiting on the founder) |
-| M6 Alpaca connector (paper) and recovery | Code complete for paper, and every first-live-trade code row in the brief is merged (S2 #1349, B3 #1426, K1b #1346, B2b #1084/#1085, C1 to C4, G1a, G1b, the R0 gap rows R1 to R22; lane LV's map, 2026-10-18). The R0 rehearsal against `mandate-rh-sim` passes 1a to 2t; 2u expects today's not-flat refusal (#1518, #1524) | **First paper trade**: the founder's run (E2). **First live trade** (DEC-529, target 2026-10-23): the founder's R0 run and DEC-529 live-door items; R23 (DEC-1152 item 4) is the founder's; DEC-1152's open items: (a) a Robinhood sell's unpublished fill price, DEC-2300 Proposed (#1598), (b) `mandate agent exit`, lane M7's S1, (c) a fresh connection record per entry, by design. E6-15 slice C (M5) is the founder's timing call |
+| M6 Alpaca connector (paper) and recovery | Code complete for paper, and every first-live-trade code row in the brief is merged (S2 #1349, B3 #1426, K1b #1346, B2b #1084/#1085, C1 to C4, G1a, G1b, the R0 gap rows R1 to R22; lane LV's map, 2026-10-18). The R0 rehearsal against `mandate-rh-sim` passes 1a to 2t; 2u expects today's not-flat refusal (#1518, #1524) | **First paper trade**: the founder's run (E2). **First live trade** (DEC-529, target 2026-10-23): the founder's R0 run and DEC-529 live-door items; R23 (DEC-1152 item 4) is the founder's; DEC-1152's open items: (a) a Robinhood sell's unpublished fill price, DEC-2300 Accepted (#1598, DEC-2605 row 6), booked at the limit once its journal spec PR and executor pairs land, (b) `mandate agent exit`, lane M7's S1 (#1686), (c) a fresh connection record per entry, by design. E6-15 slice C (M5) is the founder's timing call |
 | M7 Escalation v0 | In progress: `mandate-approval` (E8-1 to E8-3), the runtime's approval path, owner commands, the MC-E lifecycle driver; MC-E01, E06, E17 to E24 and E29 pass; `approvals list/show/approve/skip` and `agent deploy/pause/kill` are wired in the CLI | Lane M7 (claim #1594): S1 `agent status`, `resume`, `stop` and `exit` in the CLI; S2 `agent acknowledge`, which needs `OwnerAcknowledged`'s closed schema (journal spec first); S3 to S5 E8-11's email adapter on a recorded-fixture transport and a founder-only SMTP transport tested on a loopback fake. Chat (E8-12) stays deferred (DEC-824) |
 | M9 Web app (started early, DEC-200) | On fixtures: the shell, Home, agents, approvals, Messages and the copilot, the set-up chat, sign-in, the landing page (its windows move as a Mac's, its name the product's logo, its buttons grey: DEC-903; a switch between Windows 98 and a System 7 desktop, Windows the default until the Mac is finished: DEC-904; the app's own screens in a second browser tab, a painting per visit, and desktop motion: DEC-905; the app itself live in front, driven by the browser, owls with their own minds, and no explaining copy: DEC-906); the design plan's first five decisions (DEC-511 to DEC-515) on #669; the gate decision record is a ledger that fits the first screen (2026-10-17) | `web/design/plan.md`, every unticked item, in its order; then the connection to a deployment; after the first paper trade, the founder's Home (signed-in, D1), holdings, search and watchlist stories (E11-10, E11-11; [DEC-528](decisions/DEC-528.md), which also places E10-19 and E19-12 later and defers adoption) |
 | M8 and M9's demo lanes (DEC-820, demo about 2026-10-26) | In progress in five lanes (below): identity spec v0.3, the authn, identity and passkey crates' tests and the passkey implementation; the workspace API contract and schemas; journal spec to v0.21; notifications spec v0.2 and its crates' tests; the web client foundation; the audit read contracts | L1 E9-1 sessions, E9-2 I1 implementation, E9-4 step-up, E9-7; L2 the journal spec queue (after v0.21), E10-13, E10-10 implementation, E10-7, E7-17 (fold tests and DEC-687 merged, the tests' correction in review, then the fold implementation, then the state-machine slice); L3 the E8-9 and E8-14 implementations; L4 the E11-9 slices; L5 E12-6, waiting on E9-2's `authorize` (identity ID-8) |
 | M8, M10 to M13 | Planned; the design layer drafted (DEC-431 to DEC-443) | ADR-0003's code stories (E8-8, E10-7 to E10-9, E11-4 to E11-8, E12-5) |
 | Intelligence layer, lane I2 (research in the runtime, demo 2026-10-26) | On `main`: `mandate-research-run`, the runtime's `handle_research` (DEC-996), the loop through `mandate-gateway` over its recorded fake (DEC-1120), §9.19's registration (DEC-2201), E19-5 (#1543, #1559; DEC-2202, DEC-2205), `mandate-research-driver` (DEC-2204) and the daemon's research hook, deny-all by default (#1575, DEC-2208) | Lane I2 (claim #1531, DEC-2210): 4a the cell's research source, worker and sink in `mandate-daemon`, failing closed; 4b an explicit opt-in on a resolved paper deployment; 4c demo step 3 checks the run, call and thesis records. OpenRouter is never selected in a cell build |
+| Hosted infrastructure, lanes IAC, GO, V2, RS (E21-56, E21-58, E21-32, E21-35; staging by 2026-10-26) | The founder chose OpenTofu, DOKS and GitOps, a $150 a month cap, staging for the demo and Cloudflare R2 with a bucket lock for the journal's archive (DEC-2605 rows 1 to 4, [DEC-2011](decisions/DEC-2011.md)). Merged: lane H's droplet bring-up (#1539); IAC's design and modules (#1639 to #1643: DEC-2012 and ADR-0006, the network and DOKS, the Spaces state bucket and budget, Cloudflare with the R2 archive); GO's Flux reconciliation and the founder's one bootstrap (#1642, #1651), and the hosted charts published, the vault chart among them (#1647, #1681); V2's OpenBao in the cell (#1646), the platform secrets' tests (#1655) and staging's self-unseal (#1662, DEC-2021, row 10) | Open: IAC's B4 roots (#1644), C1 checks (#1648), C2 `infra.yml` (#1650), D runbook (#1652), E follow-ups (#1654), and F1, G1, G2 for rows 11 to 13 (#1690, #1701, #1703: each run opens staging's Kubernetes API to its own runner for the run, OpenTofu mints the archive's bucket-scoped R2 token, each run mints and deletes its own Spaces key); GO's bootstrap from IAC's workflow (#1695); V2's platform secrets (#1665) and provisioning (#1675 to #1683). Signing: the founder chose a CI key in a protected environment, staging running first (rows 8 and 9); the key is compiled in (#1689) and RS's signing job is #1673 |
 | Intelligence layer, lane AH (agentic research loop, demo 2026-10-26) | The founder decided on 2026-10-17 that the research harness is agentic ([ADR-0005](../adr/0005-agentic-harness.md), [DEC-2203](decisions/DEC-2203.md), E19-13, claim #1534). On `main`: the specs (#1540), the gateway's tool calls (#1551), slice 3a (#1566), the run records (#1561) and I2's core side (#1569, DEC-2206) | Lane AH (DEC-2209): 3b a pure read and think dispatch, 3c the turn-to-gateway request builder, 3d the memory, records and mandate reads, 3e recorded multi-turn scenarios and E19-6's adversarial bench; each a DEC-77 pair. Nothing depends on OpenRouter or DEC-997 |
-| The demo end to end, lane E2E (E21-54, demo 2026-10-26) | Slices 1 (#1538, DEC-2002) and 2 (#1568) merged: `cargo xtask cell demo --scenario demo` runs the six steps on the local cell and verifies the control stream; CI's `cell-demo` job runs it. Sign-in: web/'s dev-cell sign-in is on `main` (#1588); the stub issuer (#1591) and web/ against the cell (#1597) are approved and merging | Slice 3 (#1600): each step reads ready, partial or skipped with the lanes it waits on (today: 1, 2 and 4 partial; 3, 5 and 6 skipped). Then step 6's kill switch through the CLI, step 1's signed-in read, step 5's backtest (the runner is in the image, #1581), and the rest as lanes land: L1's step-up, D1's runtime start (waits on lane X's connect check), X's executor, I2 and AH's research. A web deploy of a new agent also needs an agent-creation route (DEC-2101 item 6, lane A1 #1444, no builder) |
+| The demo end to end, lane E2E (E21-54, demo 2026-10-26) | Slices 1 to 7 merged (#1538, #1568, #1600, #1614, #1625, #1674, #1693; DEC-2002, DEC-2010, DEC-2023). `cargo xtask cell demo --scenario demo` checks, in the cell: each run's own ULID workspace founded for the demo owner, the API pointed at it; the 401 with no session, the owner's sign-in through the stub issuer and the signed-in read of the agents; the confirmed envelope and the agent's deployment; the backtest run, recorded and read through the API as completed; the agent-scoped kill switch through the CLI; and the control stream exported and verified | Named gaps, each waiting on its lane: web/'s gestures, step 6's kill switch from web/ against a second agent (W2, #1666); the runtime started from `AgentDeployed` (D1, #1704); the executor taking the runtime's orders (X: #1694, #1702, then X1b) after P5's post-R0 hook; step-up for the approval (L1, #1698); the research run (I2, AH: #1631, #1699) |
 
 **Reference cases.** Journal 46 of 46. Trading domain 13 of 26 cases plus four variants; the rest
 wait on the executor stories (E7-2 to E7-5) and the founder's DEC-129 items. Mandate: the MC-W, MC-J
 and MC-E cases pass; the rest wait on E8-8 and DEC-444's harness. `crates/mandate-refcases/status.toml`
 is the record and outranks this line.
 
-**Open PRs.** GitHub is the live record. Each merges on green CI and an independent review on a
-different model (DEC-79), approved by the coordinator under DEC-175.
+**Open PRs.** GitHub is the live record. Each merges on an independent review on a different
+model (DEC-79), approved by the coordinator under DEC-175, which the founder relaxed (DEC-2605
+row 14): an approved PR merges right after its independent review, without waiting on `fast`,
+`full` or `web`. `main`'s own CI then shows a break, and the lane that caused it fixes `main`.
 
 ## Next, in order
 
@@ -49,9 +52,9 @@ different model (DEC-79), approved by the coordinator under DEC-175.
 2. **The first live trade** (DEC-529, target 2026-10-23, deadline 2026-11-02): every code row is
    merged and the agent rehearsal passes; what remains is the founder's R0 run, the DEC-529
    live-door items, R23, and the founder's timing call on E6-15 slice C.
-3. **The demo, 2026-10-26** (lane E2E): sign-in (SI, W2), step-up (L1, E9-4 steps 2 and 3), the
-   runtime started from the account (D1, DEC-1171, after lane X's connect check), the executor in
-   the cell (X, `mandate-executord`), research in the cell (I2, AH).
+3. **The demo, 2026-10-26**: staging up on DOKS (IAC, GO, V2, RS); in the scenario, web/'s kill
+   switch (W2, #1666), step-up (L1, #1698), the runtime started from the account (D1, #1704), the
+   executor in the cell (X, #1694, #1702), research in the cell (I2, AH).
 4. **E6-15** (lane TW): the risk state read by the runtime and the shell gate, slices A and B now.
 5. **M7's remainder** (lane M7) and **the backtest and evaluation runs** (lane LV on claim #1463:
    the evaluation run append, then E4-4 slice 2).
@@ -98,26 +101,26 @@ Streams that touch different crates run in parallel; reviews and merges run one 
   history rewrite.
 - **Spike paper runs** (E17-0): the go-ahead.
 - **Dependabot:** six alerts on `main` (one high) to review.
-- **Cell #1 and model spend:** [DEC-995](decisions/DEC-995.md) (two DigitalOcean droplets, about
-  $104 a month; Proposed, from #1456), [DEC-997](decisions/DEC-997.md) (OpenRouter, a $50 a month
+- **Model spend and push egress:** [DEC-997](decisions/DEC-997.md) (OpenRouter, a $50 a month
   cap) and [DEC-2504](decisions/DEC-2504.md) (the managed cell's egress to the browsers' push
-  services); and, on #1539's branch only, DEC-2001 items 6 (the hosted tier is `dev` until release
-  signing) and 7 (`doctl`).
+  services). The hosting, budget and signing questions (DEC-995, DEC-2001 items 6 and 7, DEC-971
+  item 7) were answered by DEC-2605 rows 1 to 4, 8 and 9; their lanes amend those DECs to cite
+  the rows.
 - **E6-15 slice C's timing** (claim #1599): wire the account risk state (tripwires, the ladder
   latch) into the shell gate and the live door before the first live trade, re-running R0, or
   after it, recording today's gate (no drawdown, no latch, `Normal`) as a known limit of the one
   supervised order. Recommendation: before, if slices A and B land by 2026-10-21.
-- **DEC-2300** (#1598, Proposed): how a Robinhood sell whose fill price is not published is booked.
-  Meanwhile nothing is booked and the agent stays paused.
 - **The executor's kill-switch reach** (DEC-2003 item 6, lane X): until E7-4's account and
   workspace scopes land, a kill switch reaches `mandate-executord` only through the runtime's
   copy; a backlog line makes those scopes a prerequisite before the executor runs beyond the dev
   and CI cells.
-- **Decided 2026-10-18:** the `Co-authored-by` check is gone ([DEC-2601](decisions/DEC-2601.md)), so
-  #1539 lands without a history rewrite; #1501 carries its `wrangler` 4.151.1 registry row.
-- **#1582** (the deployment manager in the cell, merged) took option 1: the manager starts the
-  runtime, and starts none until DEC-1171's account read lands, so the cell runs no runtime until
-  then. Option 2 keeps #1560's static runtime meanwhile, one line in `processes.json`.
+- **Decided 2026-10-18:** the `Co-authored-by` check is gone ([DEC-2601](decisions/DEC-2601.md));
+  and the fourteen rows of [DEC-2605](decisions/DEC-2605.md): hosting, budget, the demo on staging,
+  the archive (rows 1 to 4), `cli_confirm` step-up for paper grants (row 5, DEC-2103 item 7), a
+  Robinhood sell booked at its limit price (row 6, DEC-2300, #1598), no hardware key and a CI
+  signing key with staging first (rows 8, 9), staging's vault unsealing itself (row 10), and
+  staging's automation needing no step from you (rows 11 to 13), and DEC-175 relaxed so an approved PR
+  merges without waiting on CI (row 14). None of these waits on you.
 
 Nothing else is blocked on you.
 
@@ -128,6 +131,7 @@ it up.
 
 | Issue | Owner |
 |---|---|
+| The coordinator's secrets audit (2026-10-18): each finding's fix is assigned to its lane, IAC, GO, RS and CT, and SI's leak guard | Those lanes |
 | CI minutes: 3,000 Actions minutes a month (DEC-256); Playwright runs weekly and on dispatch (`web-e2e.yml`); the coordinator dispatches it before merging a web change that moves layout, tokens or the specs | Coordinator |
 | A local e2e run against a server already on the port tests the production build with the scenario switch off; let Playwright build `.next-e2e` itself | Next e2e touch |
 | A stale or absent ETP classification denies every US-equity opening (DEC-129 item 33); RC-16's harness and the AAPL tracer need a fresh `etp_classified_at` | RC-16 with E6-7; the tracer with E7-7 |
