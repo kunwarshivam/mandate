@@ -11,6 +11,23 @@ import pathlib, shutil, subprocess, sys, tempfile
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 MUTANTS = {
+    "a split leaves the mark unadjusted": (
+        '        self.mark = (self.mark * old / new).quantize(D("1e-12"), rounding=ROUND_DOWN)\n', "        pass\n"),
+    "a split rounds its mark half to even, which can raise E (MC-R31)": (
+        '        self.mark = (self.mark * old / new).quantize(D("1e-12"), rounding=ROUND_DOWN)\n',
+        '        self.mark = (self.mark * old / new).quantize(D("1e-12"), rounding=ROUND_HALF_EVEN)\n'),
+    "a split drops its cash in lieu when a share is left": (
+        "        cash = cents((q_raw - q2) * D(cash_in_lieu_price or 0))",
+        "        cash = cents((q_raw - q2) * D(cash_in_lieu_price or 0)) if q2 == 0 else D(0)"),
+    "a dividend is not income": ("            self.dividends_due += cents(self.qty * D(s[\"per_share\"]))",
+                                 "            pass"),
+    "a dividend counts at application, against the cum-dividend mark (MC-R30)": (
+        "            self.dividends_due += cents(self.qty * D(s[\"per_share\"]))",
+        "            self.realized += cents(self.qty * D(s[\"per_share\"]))"),
+    "the dividends due never join E": ("                self.realized += self.dividends_due\n", ""),
+    "posting a receivable counts it again": (
+        '        elif kind in ("cash_in_lieu_posted", "dividend_paid"):\n            pass',
+        '        elif kind in ("cash_in_lieu_posted", "dividend_paid"):\n            self.realized += D("0.01")'),
     "V-008 and W-002 read crypto, not the profile": (
         '    return any(c in classes for c in m["universe"]["asset_classes"])',
         '    return "crypto" in m["universe"]["asset_classes"]'),
@@ -435,7 +452,7 @@ UNASKED_MUTANTS = {
 }
 
 PROBE = ("import sys; sys.argv=['x','1']; exec(open('fuzz.py').read().split('if __name__')[0]); "
-         "fuzz_ladder_precision(200); fuzz_risk(400); fuzz_stepped_lift(300); fuzz_gate(200); fuzz_gate_universe(200); fuzz_admission(300); fuzz_expiry(400); "
+         "fuzz_ladder_precision(200); fuzz_risk(400); fuzz_split_boundaries(400); fuzz_stepped_lift(300); fuzz_gate(200); fuzz_gate_universe(200); fuzz_admission(300); fuzz_expiry(400); "
          "fuzz_lineage(300); fuzz_pinning(400); fuzz_autonomy(1500); "
          "fuzz_delegations(400); fuzz_delegation_changes(400); fuzz_delegation_rules(300); fuzz_delegated_rule_changes(2500); fuzz_client_ceiling(300); "
          "fuzz_review(400); fuzz_review_changes(400); fuzz_review_rules(400); "

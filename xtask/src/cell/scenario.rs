@@ -184,12 +184,13 @@ pub fn by_lane(steps: &[Step]) -> BTreeMap<&'static str, Vec<(u8, &Gap, &Wait)>>
 
 /// The waits several gaps share: the agent's runtime started by the deployment manager, web/
 /// driven against the cell, and the executor in the cell.
-const D1_RUNTIME: Wait = Wait {
-    lane: "D1",
-    story: "E21-33",
+const X_CONNECT: Wait = Wait {
+    lane: "X",
+    story: "E21-30",
     pr: None,
-    lands: "the deployment manager reads a deployment's account from AgentDeployed version 2 and \
-            starts its runtime (DEC-1171, claim #1491); until then it starts none",
+    lands: "the executor's connect check, so `connection record` can record the demo's paper \
+            connection and its deployment is written at version 2, which the manager starts; \
+            until then the deployment is version 1 and starts nothing (DEC-1171)",
 };
 const W2_WEB: Wait = Wait {
     lane: "W2",
@@ -537,10 +538,11 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
                 }),
                 Part::Gap(Gap {
                     what: "the agent's runtime started from AgentDeployed",
-                    on_main: "the deployment manager in the cell (#1582), the runtime's image \
+                    on_main: "the deployment manager in the cell (#1582), starting a runtime \
+                              from a version-2 deployment (DEC-1171, E21-33), the runtime's image \
                               (#1560), and the runtime reading its deployment and mandate from \
                               the manager (#1576, #1577)",
-                    waits: vec![D1_RUNTIME],
+                    waits: vec![X_CONNECT],
                 }),
             ],
         },
@@ -557,7 +559,7 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
                           records (#1561), the loop's pure state (#1566) and the runtime's side \
                           (#1569)",
                 waits: vec![
-                    D1_RUNTIME,
+                    X_CONNECT,
                     wait(
                         "I2",
                         "E19-2",
@@ -585,7 +587,7 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
                     on_main: "the runtime and its image (#1521, #1560), on the deny-all wiring \
                               that proposes nothing (DEC-1013 item 2)",
                     waits: vec![
-                        D1_RUNTIME,
+                        X_CONNECT,
                         wait(
                             "P5",
                             "E21-2",
@@ -716,7 +718,7 @@ pub fn plan(workspace: &str, mandate: &[u8]) -> Vec<Step> {
                 Part::Gap(Gap {
                     what: "the agent's processes stop on it",
                     on_main: "the runtime reads the kill switch first (#1521, image #1560)",
-                    waits: vec![D1_RUNTIME, X_EXECUTOR],
+                    waits: vec![X_CONNECT, X_EXECUTOR],
                 }),
             ],
         },

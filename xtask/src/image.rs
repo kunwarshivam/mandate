@@ -67,6 +67,55 @@ pub(crate) fn tar_one(name: &str, mode: u32, contents: &[u8]) -> Vec<u8> {
     tar
 }
 
+/// Where the local cell's interim runtime image carries the demo's recorded research bundle
+/// (DEC-2246). No release image ever holds a file under it.
+pub(crate) const CELL_RESEARCH: &str = "usr/local/share/mandate/research";
+
+/// Whether any layer of `image` holds a file under [`CELL_RESEARCH`], or a layer that cannot be
+/// read as a tar, which counts as holding one, so the check fails closed.
+pub(crate) fn carries_cell_research(image: &Layout) -> bool {
+    image.layers.iter().any(|layer| {
+        image
+            .blobs
+            .get(layer)
+            .and_then(|tar| tar_names(tar))
+            .is_none_or(|names| {
+                names.iter().any(|name| {
+                    name.trim_start_matches("./")
+                        .trim_start_matches('/')
+                        .starts_with(CELL_RESEARCH)
+                })
+            })
+    })
+}
+
+/// The names in `tar`'s headers, each its prefix and name joined, or `None` when a header's size is
+/// not octal or a member runs past the end.
+fn tar_names(tar: &[u8]) -> Option<Vec<String>> {
+    let text = |field: &[u8]| {
+        let end = field.iter().position(|b| *b == 0).unwrap_or(field.len());
+        String::from_utf8_lossy(field.get(..end).unwrap_or_default()).into_owned()
+    };
+    let mut names = Vec::new();
+    let mut at: usize = 0;
+    while let Some(header) = tar.get(at..at.checked_add(RECORD)?) {
+        if header.iter().all(|b| *b == 0) {
+            return Some(names);
+        }
+        let (name, prefix) = (text(header.get(..100)?), text(header.get(345..500)?));
+        names.push(if prefix.is_empty() {
+            name
+        } else {
+            format!("{prefix}/{name}")
+        });
+        let size = usize::from_str_radix(text(header.get(124..136)?).trim(), 8).ok()?;
+        at = at
+            .checked_add(RECORD)?
+            .checked_add(size.div_ceil(RECORD).checked_mul(RECORD)?)?;
+    }
+    (at == tar.len()).then_some(names)
+}
+
 /// Writes `field` into `header` at `at`; a field past the end is dropped, which no caller does.
 fn put(header: &mut [u8; RECORD], at: usize, field: &[u8]) {
     if let Some(slot) = header.get_mut(at..at + field.len()) {
@@ -783,6 +832,36 @@ mod tests {
         short.manifest.pop();
         assert!(index(&[short]).is_err());
         assert!(index(&[platform("amd64", 'A', 1)]).is_err());
+    }
+
+    /// A release image holds no cell research bundle; a layer under [`CELL_RESEARCH`], wherever
+    /// it is rooted, or one that is not a tar, counts as holding one (DEC-2246).
+    #[test]
+    fn only_an_image_with_the_cell_s_bundle_carries_it() {
+        let image = layout("mandate-daemon", "amd64", BINARY, Some(b"sig"), REVISION);
+        assert!(!carries_cell_research(&image));
+        for name in [
+            "usr/local/share/mandate/research/research.json",
+            "/usr/local/share/mandate/research/news.json",
+            "./usr/local/share/mandate/research/bars.json",
+        ] {
+            let mut planted = image.clone();
+            let tar = tar_one(name, SIGNATURE_MODE, b"{}");
+            planted.layers.push(hex(&tar));
+            planted.blobs.insert(hex(&tar), tar);
+            assert!(carries_cell_research(&planted), "{name}");
+        }
+        let mut torn = image.clone();
+        let mut tar = tar_one("usr/share/other", SIGNATURE_MODE, b"{}");
+        tar.truncate(700);
+        torn.layers.push(hex(&tar));
+        torn.blobs.insert(hex(&tar), tar);
+        assert!(carries_cell_research(&torn), "a torn layer fails closed");
+        let mut other = image;
+        let tar = tar_one("usr/local/share/mandate/other", SIGNATURE_MODE, b"{}");
+        other.layers.push(hex(&tar));
+        other.blobs.insert(hex(&tar), tar);
+        assert!(!carries_cell_research(&other));
     }
 
     /// A tar is whole 512-byte records and ends in two zero records.

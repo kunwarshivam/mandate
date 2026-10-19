@@ -464,10 +464,12 @@ const RETRIES_EXHAUSTED: &str = "kill_switch_cancel_retries_exhausted";
 /// `unknown_absent_window_s` has passed by the risk clock since the journal last asked it, at most
 /// `unknown_absent_lookups` times in each run: §5.7's "N lookups over T seconds" pair, which
 /// carries this meaning too. Each re-send is journaled before it is sent (rule 5). A run counts
-/// the asks journaled since its start: the first of a run that began with the cancel already asked
-/// is the start's re-send (item 3), otherwise the switch's own ask. When the window after the
-/// run's last re-send passes with the cancel still unconfirmed, the alert sounds on that tick,
-/// once. No other cancel is retried here: protection keeps its own bound (§5.4).
+/// the re-sends journaled since its start: the switch's own ask, journaled in its run, is not one,
+/// and the start's re-send (item 3) is journaled nowhere (item 4), so a run that began with the
+/// cancel already asked sends it at most `unknown_absent_lookups` + 1 times. When the window after
+/// the run's last re-send passes with the cancel still unconfirmed, the alert sounds on the tick it
+/// first passes, judged against the tick before it, at most once per run. No other cancel is
+/// retried here: protection keeps its own bound (§5.4).
 pub(crate) fn kill_cancels_due(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
     let config = batch.ports.config;
     let now = batch.at().secs();

@@ -266,7 +266,6 @@ impl Store for OneRow {
 
 /// Any store is a source of rows, read as the store reads them.
 #[test]
-#[ignore = "pending E21-54"]
 fn a_store_is_read_as_its_own_rows() {
     let stream = StreamId::parse("ctl:ws1").unwrap();
     assert_eq!(Rows::rows(&OneRow, &stream), Store::rows(&OneRow, &stream));
@@ -276,7 +275,6 @@ fn a_store_is_read_as_its_own_rows() {
 /// On a fresh agent stream, the pass gets the deployed mandate's envelope and the bundle's
 /// recorded facts, an empty working universe, and no theses, lineages or reservation.
 #[test]
-#[ignore = "pending E21-54"]
 fn a_fresh_agent_gets_its_mandate_and_the_bundle_s_facts() {
     let bundle = bundle();
     let document = researching();
@@ -324,7 +322,6 @@ fn a_fresh_agent_gets_its_mandate_and_the_bundle_s_facts() {
 
 /// The bundle's halts and ineligible instruments reach the eligibility floor, by asset.
 #[test]
-#[ignore = "pending E21-54"]
 fn the_bundle_s_halts_and_ineligible_instruments_reach_the_floor() {
     let halted = bundle_with("halted", "research.json", |r| {
         r["halted_instruments"] = json!(["MSFT"])
@@ -354,7 +351,6 @@ fn the_bundle_s_halts_and_ineligible_instruments_reach_the_floor() {
 /// Without a deployed mandate it can read, the pass has no context: the agent never deployed or
 /// since stopped, its document missing, or a stream unreadable.
 #[test]
-#[ignore = "pending E21-54"]
 fn no_context_without_a_deployed_mandate_it_can_read() {
     let bundle = bundle();
     let journal = Journal::default();
@@ -384,7 +380,6 @@ fn no_context_without_a_deployed_mandate_it_can_read() {
 /// Another agent deployed in the environment may claim instruments this pass cannot see, so the
 /// pass has no context until it stops (DEC-2214 item 2).
 #[test]
-#[ignore = "pending E21-54"]
 fn no_context_while_another_agent_is_deployed() {
     let (journal, source) = deployed(&bundle(), &researching());
     journal.deployed("agent-b", &format!("sha256:{}", "cd".repeat(32)), "paper");
@@ -402,7 +397,6 @@ fn no_context_while_another_agent_is_deployed() {
 /// (DEC-2214 item 3, until E21-59): a thesis, a universe change, or a call the meter reserved. A
 /// run's start and observations do not pause it, so the first run is never held mid-way.
 #[test]
-#[ignore = "pending E21-54"]
 fn research_pauses_once_the_stream_holds_a_fact_it_cannot_fold() {
     let (journal, source) = deployed(&bundle(), &researching());
     journal.agent("RunStarted", r#"{"run_id":"01RUN"}"#);
@@ -431,7 +425,6 @@ fn research_pauses_once_the_stream_holds_a_fact_it_cannot_fold() {
 /// Today's spend is at most every unmetered call's recorded cost, summed; a cost it cannot read
 /// gives no context.
 #[test]
-#[ignore = "pending E21-54"]
 fn spend_sums_the_recorded_costs_and_refuses_one_it_cannot_read() {
     let (journal, source) = deployed(&bundle(), &researching());
     for cost in ["0.25", "0.5"] {
@@ -453,7 +446,6 @@ fn spend_sums_the_recorded_costs_and_refuses_one_it_cannot_read() {
 /// day does not count, a cost recorded after the clock's day began counts even when the clock has
 /// not caught up with it, and without a risk clock there is no today, so no context.
 #[test]
-#[ignore = "pending E21-54"]
 fn spend_counts_only_the_risk_day_s_recorded_costs() {
     let (journal, source) = deployed(&bundle(), &researching());
     journal.agent_at(
@@ -487,7 +479,6 @@ fn spend_counts_only_the_risk_day_s_recorded_costs() {
 /// Every cost record is read strictly, an earlier day's too (DEC-2214 item 2): a cost or time it
 /// cannot read, a record without a `reservation` member, or a negative cost gives no context.
 #[test]
-#[ignore = "pending E21-54"]
 fn every_cost_record_is_read_strictly() {
     let yesterday = "2026-10-15T13:00:00.000000000Z";
     let cases: [(&str, &str, &str); 5] = [

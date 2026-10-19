@@ -37,6 +37,7 @@ mod membership;
 mod merkle;
 mod notices;
 mod records;
+mod risk_limits;
 mod runs;
 mod scheduler;
 mod schema;

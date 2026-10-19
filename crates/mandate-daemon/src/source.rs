@@ -2,14 +2,24 @@
 //! bundle, the deployment's mandate document, and the workspace's control and agent streams. A
 //! fact it cannot read gives the pass no context; it never fills one in (DEC-2210 item 4).
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::ops::RangeInclusive;
 
-use mandate_canon::Value;
+use mandate_canon::{Digest, Value, parse};
 use mandate_journal::{ArtifactSource, Environment, StoredEvent, StreamId};
-use mandate_research::MandateEnvelope;
-use mandate_runtime::RuntimeState;
+use mandate_num::Usd;
+use mandate_research::{
+    AdmissionFacts, AssetClass, AssetId, AutonomyDecision, GroupId, LineageState, MandateEnvelope,
+    PolicyOverlay, ResearchEnvelope, SourceAllowlist, ValidatedMandate, WorkingUniverse,
+};
+use mandate_research_run::{InstrumentFact, Symbol};
+use mandate_runtime::{JournalCatalog, Preconditions, RiskClock, RuntimeState};
+use mandate_spec::risk::risk_day;
 use mandate_store::Store;
+use mandate_time::UtcNanos;
 
+use crate::deployment;
 use crate::recorded::Bundle;
 use crate::runtime::{ResearchParts, ResearchSource};
 
@@ -20,20 +30,14 @@ pub trait Rows {
 }
 
 impl<S: Store> Rows for S {
-    #[expect(
-        clippy::todo,
-        reason = "the read returns no error, so its stub is todo!(), the other form DEC-137 names"
-    )]
-    fn rows(&self, _stream: &StreamId) -> Option<Vec<StoredEvent>> {
-        todo!()
+    fn rows(&self, stream: &StreamId) -> Option<Vec<StoredEvent>> {
+        Store::rows(self, stream)
     }
 }
 
 /// Why a mandate document's research envelope cannot be read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SourceError {
-    /// DEC-2214's envelope read is not implemented yet (E21-54).
-    Unimplemented,
     /// The member at this path is missing or out of its range.
     Unreadable { member: &'static str },
 }
@@ -41,7 +45,6 @@ pub enum SourceError {
 impl fmt::Display for SourceError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Unimplemented => f.write_str("the research envelope read is not implemented"),
             Self::Unreadable { member } => {
                 write!(f, "the mandate document's `{member}` cannot be read")
             }
@@ -59,36 +62,164 @@ pub struct SourceFor {
     pub environment: Environment,
 }
 
+/// The records an agent stream may hold whose facts the source cannot fold yet (E21-59): any one of
+/// them gives the pass no context, so research pauses (DEC-2214 item 3).
+const UNFOLDED: [&str; 4] = [
+    "ThesisProposed",
+    "ThesisRevised",
+    "ThesisInvalidated",
+    "UniverseChanged",
+];
+
 /// The cell's research source.
 pub struct CellSource {
-    _unbuilt: (),
+    who: SourceFor,
+    allowlist: SourceAllowlist,
+    /// The bundle's halted instruments, or `None` when one cannot be read as an asset, which gives
+    /// every pass no context.
+    halted: Option<BTreeSet<AssetId>>,
+    instruments: Vec<InstrumentFact>,
+    rows: Box<dyn Rows>,
+    documents: Box<dyn ArtifactSource>,
 }
 
 impl CellSource {
     /// The source over `bundle`'s recorded facts, reading the streams through `rows` and the
     /// mandate documents from `documents`.
-    #[expect(
-        clippy::todo,
-        reason = "the constructor returns no error, so its stub is todo!(), the other form DEC-137 names"
-    )]
     pub fn new(
         bundle: &Bundle,
         who: SourceFor,
         rows: Box<dyn Rows>,
         documents: Box<dyn ArtifactSource>,
     ) -> Self {
-        let _ = (bundle, who, rows, documents);
-        todo!()
+        Self {
+            who,
+            allowlist: bundle.allowlist.clone(),
+            halted: bundle
+                .halted
+                .iter()
+                .map(|id| AssetId::new(id.as_str()).ok())
+                .collect(),
+            instruments: bundle.plane.instruments.clone(),
+            rows,
+            documents,
+        }
+    }
+
+    /// Today's research spend: the recorded costs of the calls the agent stream records since the
+    /// risk day of `clock` began, which counts a record the lagging clock has not reached yet, and
+    /// `None` when the stream holds a record the source cannot fold, or a cost or time it cannot
+    /// read, on any day.
+    fn spend(&self, agent: &[StoredEvent], clock: RiskClock) -> Option<Usd> {
+        let day = risk_day(UtcNanos::from_parts(clock.secs(), 0).ok()?).ok()?;
+        let mut spend = Usd::parse("0").ok()?;
+        for row in agent {
+            if UNFOLDED.contains(&row.event_type.as_str()) {
+                return None;
+            }
+            if row.event_type != "ModelInvocationRecorded" {
+                continue;
+            }
+            let body = parse(&row.body).ok()?;
+            let payload = body.get("payload")?;
+            if !matches!(payload.get("reservation"), Some(Value::Null)) {
+                return None;
+            }
+            let cost = Usd::parse(payload.get("cost_usd").and_then(Value::as_str)?)
+                .ok()
+                .filter(|cost| !cost.is_negative())?;
+            let at = body
+                .get("event_time")
+                .and_then(Value::as_str)
+                .and_then(|text| UtcNanos::parse_rfc3339(text).ok())?;
+            if day.starts_at <= at {
+                spend = spend.checked_add(cost).ok()?;
+            }
+        }
+        Some(spend)
+    }
+
+    /// Whether an agent other than this one is deployed in this environment, or `None` when a
+    /// deployment record cannot be read.
+    fn others_deployed(&self, control: &[StoredEvent]) -> Option<bool> {
+        let mut latest = BTreeMap::new();
+        for row in control.iter().filter(|row| {
+            row.environment == self.who.environment.as_str()
+                && matches!(row.event_type.as_str(), "AgentDeployed" | "AgentStopped")
+        }) {
+            let body = parse(&row.body).ok()?;
+            let agent = body
+                .get("payload")
+                .and_then(|payload| payload.get("agent_id"))
+                .and_then(Value::as_str)?
+                .to_owned();
+            latest.insert(agent, row.event_type == "AgentDeployed");
+        }
+        Some(
+            latest
+                .iter()
+                .any(|(agent, deployed)| *deployed && *agent != self.who.agent),
+        )
     }
 }
 
 impl ResearchSource for CellSource {
-    #[expect(
-        clippy::todo,
-        reason = "the trait's method returns no error, so its stub is todo!(), the other form DEC-137 names"
-    )]
-    fn parts(&self, _state: &RuntimeState) -> Option<ResearchParts> {
-        todo!()
+    fn parts(&self, state: &RuntimeState) -> Option<ResearchParts> {
+        let control = StreamId::parse(&format!("ctl:{}", self.who.workspace))?;
+        let stream = StreamId::parse(&format!("agent:{}:{}", self.who.workspace, self.who.agent))?;
+        let control = self.rows.rows(&control)?;
+        let agent = self.rows.rows(&stream)?;
+        let (_, document) = deployment::document(
+            &control,
+            &self.who.agent,
+            self.who.environment,
+            self.documents.as_ref(),
+        )
+        .ok()?;
+        let envelope = envelope(&document).ok()?;
+        if self.others_deployed(&control)? {
+            return None;
+        }
+        let spend = self.spend(&agent, state.risk_clock()?)?;
+        let asset = |fact: &InstrumentFact| AssetId::new(fact.asset_id.as_str()).ok();
+        let pinned = envelope.universe_pinned;
+        Some(ResearchParts {
+            preconditions: Preconditions::read(&JournalCatalog::JOURNAL),
+            mandate: ValidatedMandate::from_validated_envelope(envelope),
+            overlay: PolicyOverlay::internal_research_profile(),
+            universe: WorkingUniverse::Known {
+                instruments: BTreeSet::new(),
+                pinned,
+            },
+            facts: AdmissionFacts {
+                allowlist: self.allowlist.clone(),
+                eligibility_failures: self
+                    .instruments
+                    .iter()
+                    .filter(|fact| !fact.eligible)
+                    .map(asset)
+                    .collect::<Option<_>>()?,
+                instrument_groups: self
+                    .instruments
+                    .iter()
+                    .filter_map(|fact| Some((asset(fact), GroupId::new(fact.group.as_ref()?).ok())))
+                    .map(|(asset, group)| Some((asset?, group?)))
+                    .collect::<Option<_>>()?,
+                claimed_by_other_agents: BTreeSet::new(),
+                halted_instruments: self.halted.clone()?,
+                disclosures_accepted: BTreeSet::new(),
+                data_universe: Some(self.instruments.iter().map(asset).collect::<Option<_>>()?),
+                research_spend_usd_today: spend,
+            },
+            lineages: LineageState::default(),
+            active: Vec::new(),
+            last_reservation: None,
+            data_symbols: self
+                .instruments
+                .iter()
+                .map(|fact| fact.symbol.clone())
+                .collect::<BTreeSet<Symbol>>(),
+        })
     }
 }
 
@@ -99,6 +230,128 @@ impl ResearchSource for CellSource {
 /// # Errors
 /// [`SourceError::Unreadable`] naming the first member that is missing or out of its range.
 pub fn envelope(document: &Value) -> Result<MandateEnvelope, SourceError> {
-    let _ = document;
-    Err(SourceError::Unimplemented)
+    let at = |path: &'static str| {
+        path.split('.')
+            .try_fold(document, |value, key| value.get(key))
+            .ok_or(SourceError::Unreadable { member: path })
+    };
+    let flag = |path: &'static str| match at(path)? {
+        Value::Bool(flag) => Ok(*flag),
+        _ => Err(SourceError::Unreadable { member: path }),
+    };
+    let ranged = |value: &Value, path: &'static str, range: RangeInclusive<u32>| {
+        value
+            .as_int()
+            .and_then(|n| u32::try_from(n).ok())
+            .filter(|n| range.contains(n))
+            .ok_or(SourceError::Unreadable { member: path })
+    };
+    let asset_classes = at("universe.asset_classes")?
+        .as_array()
+        .ok_or(SourceError::Unreadable {
+            member: "universe.asset_classes",
+        })?
+        .iter()
+        .map(|class| match class.as_str() {
+            Some("us_equity") => Ok(AssetClass::UsEquity),
+            Some("crypto") => Ok(AssetClass::Crypto),
+            _ => Err(SourceError::Unreadable {
+                member: "universe.asset_classes",
+            }),
+        })
+        .collect::<Result<BTreeSet<_>, _>>()?;
+    if asset_classes.is_empty() {
+        return Err(SourceError::Unreadable {
+            member: "universe.asset_classes",
+        });
+    }
+    let disclosure = match at("universe.leveraged_etp_disclosure_version")? {
+        Value::Null => None,
+        Value::Str(text) => Some(
+            text.strip_prefix("sha256:")
+                .and_then(Digest::from_hex)
+                .ok_or(SourceError::Unreadable {
+                    member: "universe.leveraged_etp_disclosure_version",
+                })?,
+        ),
+        _ => {
+            return Err(SourceError::Unreadable {
+                member: "universe.leveraged_etp_disclosure_version",
+            });
+        }
+    };
+    let models = at("behavior.signal_models")?
+        .as_array()
+        .ok_or(SourceError::Unreadable {
+            member: "behavior.signal_models",
+        })?;
+    let mut admits_instruments = false;
+    for model in models {
+        match model.get("admits_instruments") {
+            Some(Value::Bool(admits)) => admits_instruments |= *admits,
+            _ => {
+                return Err(SourceError::Unreadable {
+                    member: "behavior.signal_models",
+                });
+            }
+        }
+    }
+    let research = match at("behavior.research")? {
+        Value::Null => None,
+        research => {
+            let member = |key: &'static str, path: &'static str| {
+                research
+                    .get(key)
+                    .ok_or(SourceError::Unreadable { member: path })
+            };
+            Some(ResearchEnvelope {
+                interval_s: ranged(
+                    member("interval_s", "behavior.research.interval_s")?,
+                    "behavior.research.interval_s",
+                    300..=604_800,
+                )?,
+                cost_cap_usd_per_day: member(
+                    "cost_cap_usd_per_day",
+                    "behavior.research.cost_cap_usd_per_day",
+                )?
+                .as_str()
+                .and_then(|text| Usd::parse(text).ok())
+                .ok_or(SourceError::Unreadable {
+                    member: "behavior.research.cost_cap_usd_per_day",
+                })?,
+                max_revisions_per_lineage: ranged(
+                    member(
+                        "max_revisions_per_lineage",
+                        "behavior.research.max_revisions_per_lineage",
+                    )?,
+                    "behavior.research.max_revisions_per_lineage",
+                    0..=10,
+                )?,
+            })
+        }
+    };
+    let admission = match at("autonomy.admission")?.as_str() {
+        Some("auto") => AutonomyDecision::Auto,
+        Some("ask") => AutonomyDecision::Ask,
+        Some("deny") => AutonomyDecision::Deny,
+        _ => {
+            return Err(SourceError::Unreadable {
+                member: "autonomy.admission",
+            });
+        }
+    };
+    Ok(MandateEnvelope {
+        universe_pinned: flag("universe.pinned")?,
+        max_instruments: ranged(
+            at("universe.max_instruments")?,
+            "universe.max_instruments",
+            1..=20,
+        )?,
+        asset_classes,
+        leveraged_etps_enabled: flag("universe.leveraged_etps_enabled")?,
+        leveraged_etp_disclosure_version: disclosure,
+        admits_instruments,
+        research,
+        admission,
+    })
 }
