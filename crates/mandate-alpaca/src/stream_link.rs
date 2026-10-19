@@ -8,10 +8,10 @@
 //! asks for it, so a run replays exactly.
 //!
 //! Openings in an instrument are allowed only while [`Link::opens`] says so: the connection is
-//! subscribed and not down, and that instrument has had a live quote and a status, each received
-//! after the latest subscription (spec §3.2's `resyncing`, DP-5, DP-7). A status channel that
-//! never sends leaves its instruments blocked (DEC-1174 item 2). Nothing here touches an exit:
-//! exits and protection never wait on the stream (DP-4, `AGENTS.md` rule 13).
+//! subscribed and not down, and that instrument has had a two-sided quote and a status, each
+//! received after the latest subscription (spec §3.2's `resyncing`, DP-5, DP-7; DEC-1174 item 9).
+//! A status channel that never sends leaves its instruments blocked (DEC-1174 item 2). Nothing here
+//! touches an exit: exits and protection never wait on the stream (DP-4, `AGENTS.md` rule 13).
 
 use std::collections::BTreeSet;
 use std::time::Duration;
@@ -160,40 +160,46 @@ impl Link {
         if self.state != LinkState::Down {
             self.last_received = Some(at);
         }
-        let missed_halt = frame
+        let subscribed = matches!(self.state, LinkState::Resyncing | LinkState::Live);
+        let unreadable_fault = frame
             .refused
             .iter()
-            .any(|refused| matches!(refused.kind.as_deref(), Some("s" | "l")));
-        if missed_halt && matches!(self.state, LinkState::Resyncing | LinkState::Live) {
+            .any(|refused| match refused.kind.as_deref() {
+                Some("error") => self.state != LinkState::Down,
+                Some("s" | "l") => subscribed,
+                _ => false,
+            });
+        if unreadable_fault {
             self.down(at, jitter, actions);
             return;
         }
         for message in frame.messages {
             if let StreamMessage::Error(fault) = &message {
                 match fault.disposition {
+                    Disposition::Pause | Disposition::Narrow | Disposition::Down
+                        if self.state == LinkState::Down =>
+                    {
+                        continue;
+                    }
                     Disposition::Pause => {
-                        self.state = LinkState::Paused;
-                        self.clear();
-                        actions.push(LinkAction::Alert("stream_credential_rejected"));
+                        self.pause("stream_credential_rejected", actions);
+                        return;
+                    }
+                    Disposition::Narrow if self.channels == self.channels.narrowed() => {
+                        self.pause("stream_subscription_invalid", actions);
                         return;
                     }
                     Disposition::Narrow => {
                         self.channels = self.channels.narrowed();
                         self.state = LinkState::Connecting;
                         self.clear();
-                        match subscribe_frame(&self.channels) {
-                            Ok(frame) => actions.push(LinkAction::Subscribe(frame)),
-                            Err(_) => {
-                                actions.push(LinkAction::Alert("stream_subscription_invalid"));
-                            }
-                        }
+                        self.subscribe(actions);
                         return;
                     }
                     Disposition::Overflow => {
                         actions.push(LinkAction::Alert("stream_symbol_limit"));
                         continue;
                     }
-                    Disposition::Down if self.state == LinkState::Down => continue,
                     Disposition::Down => {
                         self.down(at, jitter, actions);
                         return;
@@ -208,9 +214,9 @@ impl Link {
                     actions.push(LinkAction::Authenticate);
                 }
                 StreamMessage::Authenticated if self.state == LinkState::Connecting => {
-                    match subscribe_frame(&self.channels) {
-                        Ok(frame) => actions.push(LinkAction::Subscribe(frame)),
-                        Err(_) => actions.push(LinkAction::Alert("stream_subscription_invalid")),
+                    self.subscribe(actions);
+                    if self.state == LinkState::Paused {
+                        return;
                     }
                 }
                 StreamMessage::Subscribed(_) => {
@@ -218,11 +224,12 @@ impl Link {
                     self.clear();
                     self.subscribed_at = Some(at);
                     self.lost_at = None;
+                    self.alerted_down = false;
                     if let Some(from) = self.gap_from.take() {
                         actions.push(LinkAction::Gap { from, to: at });
                     }
                 }
-                StreamMessage::Quote(quote) => {
+                StreamMessage::Quote(quote) if quote.bid.is_some() && quote.ask.is_some() => {
                     self.quoted.insert(quote.instrument);
                 }
                 StreamMessage::Status(status) => {
@@ -241,12 +248,31 @@ impl Link {
         self.mark_gap();
         self.state = LinkState::Down;
         self.clear();
-        self.lost_at = Some(at);
-        self.alerted_down = false;
+        if self.lost_at.is_none() {
+            self.lost_at = Some(at);
+        }
         actions.push(LinkAction::Reconnect {
             after: backoff(self.attempts, jitter),
         });
         self.attempts = self.attempts.saturating_add(1);
+    }
+
+    /// Ends the connection until its owner acts: no reconnect, openings blocked, and the gap open
+    /// from the last message received (spec §3.2, §3.3).
+    fn pause(&mut self, alert: &'static str, actions: &mut Vec<LinkAction>) {
+        self.mark_gap();
+        self.state = LinkState::Paused;
+        self.clear();
+        actions.push(LinkAction::Alert(alert));
+    }
+
+    /// Asks for the subscribe frame of the current channels, or pauses when nothing is left to
+    /// subscribe, so the link never waits in `connecting` for an echo that cannot come.
+    fn subscribe(&mut self, actions: &mut Vec<LinkAction>) {
+        match subscribe_frame(&self.channels) {
+            Ok(frame) => actions.push(LinkAction::Subscribe(frame)),
+            Err(_) => self.pause("stream_subscription_invalid", actions),
+        }
     }
 
     /// Opens a gap at the last message received, once a subscription has existed and none is

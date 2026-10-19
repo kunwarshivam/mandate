@@ -497,10 +497,25 @@ fn a_subscription_with_nothing_left_pauses_instead_of_waiting() {
     let mut link = Link::new(Channels::default(), Duration::from_secs(30));
     link.on(at(0), frame(&[connected()]), 0);
     assert_eq!(
-        link.on(at(0), frame(&[authenticated()]), 0),
+        link.on(at(0), frame(&[authenticated(), subscription()]), 0),
         [LinkAction::Alert("stream_subscription_invalid")]
     );
-    assert_eq!(link.state(), LinkState::Paused);
+    assert_eq!(
+        link.state(),
+        LinkState::Paused,
+        "nothing after the pause in its frame is read"
+    );
+    let mut link = fresh();
+    link.on(at(0), frame(&[connected()]), 0);
+    assert_eq!(
+        link.on(at(0), frame(&[authenticated(), subscription()]), 0),
+        [LinkAction::Subscribe(subscribe_frame(&channels()).unwrap())]
+    );
+    assert_eq!(
+        link.state(),
+        LinkState::Resyncing,
+        "a subscription in the same frame is read"
+    );
 }
 
 #[test]
@@ -535,8 +550,8 @@ fn a_pause_opens_the_gap_at_the_last_message() {
     assert_eq!(link.state(), LinkState::Paused);
     assert_eq!(
         link.open_gap(),
-        Some(at(4)),
-        "the record shows where it stopped"
+        Some(at(5)),
+        "from the last message received, the rejection itself"
     );
     let mut link = fresh();
     subscribe(&mut link, 0);
