@@ -216,7 +216,6 @@ fn an_exit_at_the_market_goes_at_the_market_on_a_fresh_quote_in_the_regular_sess
 /// caps, marketable-limit rule or collar, so even on a fresh regular quote the exit goes as a limit
 /// at the ladder's first rung, never at the market.
 #[test]
-#[ignore = "pending E7-29"]
 fn an_exit_at_the_market_whose_gate_read_no_snapshot_goes_by_the_ladder() {
     let (ids, mandates, instruments, config) = (
         TestIds,
