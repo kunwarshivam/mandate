@@ -7,8 +7,9 @@ unseals by hand (DEC-977 item 5), except in staging, which may unseal itself fro
 exits 0 only then, over TLS to the pod's loopback, so the probe needs no network policy to admit the
 kubelet), and nothing restarts it on its own, since a restart seals it again. Staging alone has a
 second listener, on the pod's loopback, the one that answers root generation from the recovery keys
-staging keeps in the cluster (DEC-2052): only `kubectl exec` into the pod reaches it, so staging's
-apply provisions the vault without a standing root token (DEC-2630). No Service or policy names it.
+staging keeps in the cluster (DEC-2052): only `kubectl exec` or `kubectl port-forward` into the pod
+reaches it, so staging's apply provisions the vault without a standing root token (DEC-2630). No
+Service or policy names it.
 */ -}}
 {{- define "vault.config" -}}
 apiVersion: v1
