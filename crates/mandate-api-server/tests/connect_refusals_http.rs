@@ -4,26 +4,33 @@
 mod common;
 mod support_connect;
 
+use common::Reply;
 use mandate_api::problem::ProblemCode;
-use mandate_api_server::connect::{ACCOUNT_OPERATION, CONNECTION_OPERATION};
 use mandate_canon::to_canonical;
 use support_connect::{
     ALICE, BOB, CAROL, Fixture, KEY, appended, base, code, ctl, derived, fixture, fixture_drawing,
-    seed, signed_in, start, with,
+    seed, signed_in, start, unissued, with,
 };
 
-/// Nothing was appended and the step-up port was never asked.
+/// Nothing was appended, no `state` is held, and the step-up port was never asked.
 fn untouched(f: &Fixture) {
     assert!(appended(f).is_empty(), "nothing recorded");
+    unissued(f, b"");
     assert!(
         f.port.asked.lock().expect("unpoisoned").is_empty(),
         "no step-up judged"
     );
 }
 
+/// A refusal's status and code, after checking it left nothing redeemable.
+fn refused(f: &Fixture, reply: &Reply) -> (u16, ProblemCode) {
+    unissued(f, &reply.body);
+    code(reply)
+}
+
 fn admin(f: &Fixture, body: &[u8]) -> (u16, ProblemCode) {
     let cookie = signed_in(f, ALICE);
-    code(&start(f, Some(&cookie), Some(KEY), body))
+    refused(f, &start(f, Some(&cookie), Some(KEY), body))
 }
 
 #[test]
@@ -31,10 +38,10 @@ fn admin(f: &Fixture, body: &[u8]) -> (u16, ProblemCode) {
 fn the_session_then_the_key_then_the_body_are_checked_first() {
     let f = fixture("paper", true, true);
     let body = to_canonical(&base());
-    assert_eq!(code(&start(&f, None, Some(KEY), &body)).0, 401);
+    assert_eq!(refused(&f, &start(&f, None, Some(KEY), &body)).0, 401);
     let cookie = signed_in(&f, ALICE);
     assert_eq!(
-        code(&start(&f, Some(&cookie), None, &body)).1,
+        refused(&f, &start(&f, Some(&cookie), None, &body)).1,
         ProblemCode::Invalid
     );
     assert_eq!(admin(&f, b"not json").1, ProblemCode::Invalid);
@@ -52,12 +59,12 @@ fn a_member_without_the_permission_is_forbidden_and_a_stranger_finds_nothing() {
     let body = to_canonical(&base());
     let viewer = signed_in(&f, BOB);
     assert_eq!(
-        code(&start(&f, Some(&viewer), Some(KEY), &body)),
+        refused(&f, &start(&f, Some(&viewer), Some(KEY), &body)),
         (403, ProblemCode::Forbidden)
     );
     let stranger = signed_in(&f, CAROL);
     assert_eq!(
-        code(&start(&f, Some(&stranger), Some(KEY), &body)),
+        refused(&f, &start(&f, Some(&stranger), Some(KEY), &body)),
         (404, ProblemCode::NotFound)
     );
     untouched(&f);
@@ -74,6 +81,38 @@ fn a_live_workspace_is_refused_before_any_step_up() {
     untouched(&f);
 }
 
+/// The role is checked before the workspace's environment: a viewer of a live workspace is
+/// forbidden, not told the workspace is live (§4.5).
+#[test]
+#[ignore = "pending E10-13"]
+fn a_viewer_of_a_live_workspace_is_forbidden_before_live_unavailable() {
+    let f = fixture("live", true, true);
+    let viewer = signed_in(&f, BOB);
+    assert_eq!(
+        refused(
+            &f,
+            &start(&f, Some(&viewer), Some(KEY), &to_canonical(&base()))
+        ),
+        (403, ProblemCode::Forbidden)
+    );
+    untouched(&f);
+}
+
+/// The workspace's environment is checked before the disclosure (§4.5).
+#[test]
+#[ignore = "pending E10-13"]
+fn a_live_workspace_is_live_unavailable_before_the_disclosure_is_read() {
+    let f = fixture("live", true, true);
+    let body = String::from_utf8(to_canonical(&base()))
+        .expect("UTF-8")
+        .replace(r#""version":"1""#, r#""version":"2""#);
+    assert_eq!(
+        admin(&f, body.as_bytes()),
+        (409, ProblemCode::LiveUnavailable)
+    );
+    untouched(&f);
+}
+
 #[test]
 #[ignore = "pending E10-13"]
 fn another_disclosure_version_is_invalid_before_any_step_up() {
@@ -83,6 +122,7 @@ fn another_disclosure_version_is_invalid_before_any_step_up() {
         .replace(r#""version":"1""#, r#""version":"2""#);
     assert_eq!(admin(&f, body.as_bytes()), (422, ProblemCode::Invalid));
     let reply = start(&f, Some(&signed_in(&f, ALICE)), Some(KEY), body.as_bytes());
+    unissued(&f, &reply.body);
     let problem = String::from_utf8_lossy(&reply.body).into_owned();
     assert!(problem.contains("/disclosure"), "{problem}");
     untouched(&f);
@@ -172,8 +212,8 @@ fn requested(id: &str, account: &str) -> String {
 #[test]
 #[ignore = "pending E10-13"]
 fn a_derived_id_the_control_stream_already_names_conflicts_after_step_up() {
-    let connection = format!("conn_{}", derived(CONNECTION_OPERATION));
-    let account = derived(ACCOUNT_OPERATION);
+    let connection = format!("conn_{}", derived("connect_connection"));
+    let account = derived("connect_account");
     let other = "01JB3K6F0C9R2V7N4M8Q1T5W70";
     let cases: [Vec<(&str, String)>; 5] = [
         vec![("ConnectionEstablished", requested(&connection, other))],
@@ -207,13 +247,48 @@ fn a_derived_id_the_control_stream_already_names_conflicts_after_step_up() {
     }
 }
 
+/// A connection row the fold cannot read (one without its `connection_id`, or a request without
+/// its `account_ref`, journal spec §9) leaves the start unanswerable: after step-up, as §4.5
+/// places the fold, it is `journal_unavailable` and nothing is recorded.
+#[test]
+#[ignore = "pending E10-13"]
+fn a_connection_row_the_fold_cannot_read_is_unavailable_after_step_up() {
+    let rows = [
+        (
+            "ConnectionRequested",
+            r#"{"account_ref":"01JB3K6F0C9R2V7N4M8Q1T5W70","broker":"alpaca","environment":"paper"}"#,
+        ),
+        ("ConnectionRefused", r#"{"occasion":"connect"}"#),
+        ("ConnectionRevoked", r#"{"broker":"alpaca"}"#),
+        (
+            "ConnectionRequested",
+            r#"{"connection_id":"conn_other","broker":"alpaca","environment":"paper"}"#,
+        ),
+    ];
+    for (event_type, payload) in rows {
+        let f = fixture("paper", true, true);
+        seed(&f, event_type, 1, payload);
+        assert_eq!(
+            admin(&f, &to_canonical(&base())),
+            (503, ProblemCode::JournalUnavailable),
+            "{event_type} {payload}"
+        );
+        assert_eq!(after(&f, 1), 0, "{event_type} {payload}");
+        assert_eq!(
+            f.port.asked.lock().expect("unpoisoned").len(),
+            1,
+            "the step-up is judged first"
+        );
+    }
+}
+
 /// A request of the derived connection closed by its refusal or revocation frees the id, and a
 /// refusal of another connection naming the derived account does not use it: the start commits.
 #[test]
 #[ignore = "pending E10-13"]
 fn a_closed_request_frees_the_id_and_a_refusal_does_not_use_the_account() {
-    let connection = format!("conn_{}", derived(CONNECTION_OPERATION));
-    let account = derived(ACCOUNT_OPERATION);
+    let connection = format!("conn_{}", derived("connect_connection"));
+    let account = derived("connect_account");
     let cases: [Vec<(&str, String)>; 3] = [
         vec![
             (

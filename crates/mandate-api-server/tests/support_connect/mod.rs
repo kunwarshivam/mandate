@@ -326,6 +326,43 @@ pub fn code(reply: &Reply) -> (u16, ProblemCode) {
     (reply.status, problem.code)
 }
 
+/// The text a start derives from [`DRAWS`]: the `state`, the verifier, and its challenge.
+pub fn drawn_texts() -> [String; 3] {
+    let state = b64(&DRAWS[0]);
+    let verifier = b64(&DRAWS[1]);
+    let challenge = challenge(&verifier);
+    [state, verifier, challenge]
+}
+
+/// A refused start leaves nothing redeemable: no `state` is held, and neither `body` nor any
+/// journal row carries a text derived from the draws.
+pub fn unissued(f: &Fixture, body: &[u8]) {
+    if let Some(connect) = &f.connect {
+        assert_eq!(
+            connect.states.lock().expect("unpoisoned").len(),
+            0,
+            "no state is held"
+        );
+    }
+    let rows: Vec<String> = f
+        .journal
+        .streams
+        .lock()
+        .expect("unpoisoned")
+        .values()
+        .flatten()
+        .map(|row| String::from_utf8_lossy(&row.body).into_owned())
+        .collect();
+    let body = String::from_utf8_lossy(body);
+    for drawn in drawn_texts() {
+        assert!(!body.contains(&drawn), "the answer carries no drawn text");
+        assert!(
+            rows.iter().all(|row| !row.contains(&drawn)),
+            "no row carries a drawn text"
+        );
+    }
+}
+
 /// The control stream's rows after the seeded `StreamOpened`.
 pub fn appended(f: &Fixture) -> Vec<StoredEvent> {
     f.journal.rows_of(&ctl()).into_iter().skip(1).collect()
