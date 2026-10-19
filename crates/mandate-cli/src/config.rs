@@ -7,6 +7,7 @@
 use mandate_canon::{Digest, Object, Value, parse, to_canonical};
 use mandate_journal::ArtifactStore;
 use mandate_modelhost::Refusal;
+use mandate_research_run::ResearchEntry;
 use mandate_time::UtcNanos;
 
 use crate::control::{
@@ -214,7 +215,7 @@ pub fn register_model(
 }
 
 /// Registers the research agent's model from a recorded research entry (DEC-2247 item 1): the
-/// recording's `entry` member, read as `mandate_research_run::ResearchEntry::recorded` reads it,
+/// recording's `entry` member, read as [`ResearchEntry::recorded`] reads it,
 /// whose `model_id` and `model_version` must be the ones named. Its content object and hash are
 /// recomputed here from the entry with the fixed template, plan, bounds and schema; no caller
 /// supplies a hash. It commits one `ConfigSnapshotRegistered` of kind `model_version` with
@@ -234,14 +235,28 @@ pub fn register_research_model(
     recording: &[u8],
     now: Now,
 ) -> Result<Submitted, ControlError> {
-    let _ = (
-        journal,
-        store,
-        owner,
-        model_id,
-        model_version,
-        recording,
-        now,
-    );
-    Err(ControlError::Unimplemented { story: "E21-54" })
+    paper_or_live(owner)?;
+    if !model_id.starts_with("llm.") {
+        return Err(refused("model_not_research"));
+    }
+    let recording = parse(recording).map_err(|_| refused("entry_unreadable"))?;
+    let entry = recording
+        .get("entry")
+        .ok_or_else(|| refused("entry_unreadable"))
+        .and_then(|entry| {
+            ResearchEntry::recorded(entry).map_err(|_| refused("entry_unreadable"))
+        })?;
+    if (entry.model_id.as_str(), entry.model_version.as_str()) != (model_id, model_version) {
+        return Err(refused("entry_mismatch"));
+    }
+    let canonical = to_canonical(&entry.content().canonical());
+    let hash = Digest::of(&canonical);
+    let key = vec![
+        ("admits_instruments", Value::Bool(true)),
+        ("kind", text("model_version")),
+        ("model_id", text(model_id)),
+        ("model_version", text(model_version)),
+        ("params", Value::Array(Vec::new())),
+    ];
+    registration(journal, store, owner, key, (&canonical, hash), 1, now)
 }

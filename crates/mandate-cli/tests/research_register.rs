@@ -68,7 +68,6 @@ fn recording_with(edit: impl FnOnce(&mut serde_json::Value)) -> Vec<u8> {
 }
 
 #[test]
-#[ignore = "pending E21-54"]
 fn the_research_model_is_registered_from_its_entry_with_a_recomputed_hash() {
     let (mut journal, mut store) = (Journal::default(), Store::new());
     register(
@@ -113,7 +112,6 @@ fn the_research_model_is_registered_from_its_entry_with_a_recomputed_hash() {
 }
 
 #[test]
-#[ignore = "pending E21-54"]
 fn a_registration_that_is_not_the_research_entry_s_is_refused_before_anything_is_written() {
     let missing = |member: &'static str| {
         recording_with(move |r| {
@@ -235,7 +233,6 @@ fn models_with(edit: impl FnOnce(&mut Vec<serde_json::Value>)) -> String {
 /// still refuses a second admitting `llm.` model, an `llm.` model that admits nothing under a
 /// research envelope, and a quant model that claims to admit.
 #[test]
-#[ignore = "pending E21-54"]
 fn the_demo_research_mandate_confirms_and_v_007_and_v_036_still_refuse() {
     confirmed(MANDATE).unwrap();
     let research = |models: &mut Vec<serde_json::Value>| {
