@@ -43,3 +43,7 @@ resource "digitalocean_spaces_bucket" "state" {
 output "state_bucket" {
   value = digitalocean_spaces_bucket.state.name
 }
+
+output "region" {
+  value = digitalocean_spaces_bucket.state.region
+}

@@ -11,7 +11,7 @@ mock_provider "digitalocean" {
 
   mock_data "digitalocean_sizes" {
     defaults = {
-      sizes = [{ slug = "s-2vcpu-4gb", price_monthly = 24, price_hourly = 0.03571, available = true, vcpus = 2, memory = 4096, disk = 80, transfer = 4, regions = ["nyc3"], gpu_info = [] }]
+      sizes = [{ slug = "s-2vcpu-4gb", price_monthly = 24, price_hourly = 0.03571, available = true, vcpus = 2, memory = 4096, disk = 80, transfer = 4, regions = ["nyc1", "nyc3"], gpu_info = [] }]
     }
   }
 }
@@ -172,4 +172,15 @@ run "refuses_a_short_commit" {
   }
 
   expect_failures = [var.commit_sha]
+}
+
+# DEC-2044 item 2: the cluster and its VPC are in nyc1, where nyc3 had no capacity, and the state
+# bucket stays in nyc3.
+run "the_cluster_moves_to_nyc1_and_the_state_bucket_stays" {
+  command = plan
+
+  assert {
+    condition     = module.cell.regions == { vpc = "nyc1", cluster = "nyc1", state_bucket = "nyc3" }
+    error_message = "Staging's VPC and cluster are in nyc1, and its state bucket stays in nyc3."
+  }
 }

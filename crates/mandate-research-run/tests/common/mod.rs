@@ -23,7 +23,7 @@ use mandate_gateway::registry::{
 use mandate_gateway::{Gateway, RateCaps, Settings};
 use mandate_num::{Price, Qty};
 use mandate_research_run::{
-    Allowlist, Bar, BarReader, Filing, FilingReader, GatewayParts, InstrumentFact,
+    Allowlist, Bar, BarReader, Filing, FilingEntry, FilingReader, GatewayParts, InstrumentFact,
     InstrumentReader, ItemId, ModelPin, NewsItem, NewsReader, NewsText, NoHostedTransport,
     OutputBounds, ReadError, Readers, ResearchEntry, ResearchTransport, RetrievalPlan, Scope,
     Selection, SourceId, Symbol, TextQuery, recorded_reply, research_gateway,
@@ -156,6 +156,8 @@ pub struct Fixture {
     pub terms: std::cell::RefCell<Vec<Vec<String>>>,
     pub texts: Vec<NewsText>,
     pub text_asks: std::cell::RefCell<Vec<(ItemId, UtcNanos, u32)>>,
+    pub filing_entries: Vec<FilingEntry>,
+    pub forms: std::cell::RefCell<Vec<Vec<String>>>,
 }
 
 impl Fixture {
@@ -223,6 +225,18 @@ impl FilingReader for Fixture {
     fn filings(&self, query: &TextQuery) -> Result<Vec<Filing>, ReadError> {
         self.queries.borrow_mut().push(query.clone());
         self.answer(&self.filings)
+    }
+
+    fn search(
+        &self,
+        query: &TextQuery,
+        forms: &[String],
+        terms: &[String],
+    ) -> Result<Vec<FilingEntry>, ReadError> {
+        self.queries.borrow_mut().push(query.clone());
+        self.forms.borrow_mut().push(forms.to_vec());
+        self.terms.borrow_mut().push(terms.to_vec());
+        self.answer(&self.filing_entries)
     }
 }
 

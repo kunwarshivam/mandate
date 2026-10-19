@@ -1,21 +1,35 @@
-#!/usr/bin/env bash
+#!/bin/bash --posix
 # Signs a release with the release key, in `release.yml`'s `release-signing` job only (DEC-2024; the
 # founder's route is DEC-2605 rows 8 and 9). It runs beside the key, so it builds nothing and runs
-# no repository build. It turns off any trace the job's environment asked for before anything else,
-# so no secret is echoed. It requires dist and dist/bin to be real directories and dist/SHA256SUMS
-# a regular file, dist/bin to hold exactly the names SHA256SUMS lists, once each, as regular files,
-# and says which rule failed. It copies those files into a private directory under RUNNER_TEMP,
-# checks the copies against SHA256SUMS and SHA256SUMS against build-a's DIGEST, and signs the
-# copies, so nothing can change between the check and the signature. It installs cosign from
-# COSIGN_URL pinned to COSIGN_SHA256. Each signature starts release-sign-cosign.sh from an empty
-# environment (`env -i`); it sets HOME and PATH, reads the password from its stdin and execs cosign
-# with exactly HOME, PATH and COSIGN_PASSWORD, so the password is never on a command line
-# (`AGENTS.md` rule 7). RELEASE_SIGNING_KEY is cosign.key as single-line base64, decoded into a 0600 file under
-# RUNNER_TEMP; the key and the copies are deleted on every exit, and neither secret is printed.
+# no repository build. It starts in POSIX mode, where bash refuses to start at all when an exported
+# function shadows a special builtin such as `set`, turns off any trace the job's environment asked
+# for, removes a planted `compgen` (the check's own tool) and refuses any other exported function,
+# so nothing the environment planted can silence the trace switch or stand in for a check; then it
+# leaves POSIX mode. It requires dist and dist/bin to
+# be real directories and dist/SHA256SUMS a regular file, dist/bin to hold exactly the names
+# SHA256SUMS lists, once each, as regular files, and says which rule failed. It copies those files
+# into a private directory under RUNNER_TEMP, checks the copies against SHA256SUMS and SHA256SUMS
+# against build-a's DIGEST, and signs the copies, so nothing can change between the check and the
+# signature. It installs cosign from COSIGN_URL pinned to COSIGN_SHA256. Each signature starts
+# release-sign-cosign.sh from an empty environment (`env -i`); it sets HOME and PATH, reads the
+# password from its stdin and execs cosign with exactly HOME, PATH and COSIGN_PASSWORD, so the
+# password is never on a command line (`AGENTS.md` rule 7). RELEASE_SIGNING_KEY is cosign.key as
+# single-line base64, decoded into a 0600 file under RUNNER_TEMP; the key and the copies are
+# deleted on every exit, and neither secret is printed.
 #
 # Usage: release-sign.sh   (with DIGEST, COSIGN_URL, COSIGN_SHA256, RELEASE_SIGNING_KEY,
 #                           COSIGN_PASSWORD and RUNNER_TEMP set)
 set +x +v
+unset -f compgen
+case "$(compgen -A function)" in
+  "") ;;
+  *)
+    unset -f echo
+    echo "the environment defines shell functions; nothing is signed" >&2
+    exit 1
+    ;;
+esac
+set +o posix
 set -euo pipefail
 umask 077
 
