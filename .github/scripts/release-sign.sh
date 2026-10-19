@@ -6,9 +6,11 @@
 # and says which rule failed. It copies those files into a private directory under RUNNER_TEMP,
 # checks the copies against SHA256SUMS and SHA256SUMS against build-a's DIGEST, and signs the
 # copies, so nothing can change between the check and the signature. It installs cosign from
-# COSIGN_URL pinned to COSIGN_SHA256 and signs in a clean environment that holds only the password,
-# HOME and PATH. RELEASE_SIGNING_KEY is cosign.key as single-line base64, decoded into a 0600 file
-# under RUNNER_TEMP; the key and the copies are deleted on every exit, and neither secret is printed.
+# COSIGN_URL pinned to COSIGN_SHA256 and signs in a subshell that unsets the loader, shell-startup
+# and runner-token variables and sets its own HOME and PATH, so the password reaches cosign through
+# the environment the job gave it and never on a command line (`AGENTS.md` rule 7). RELEASE_SIGNING_KEY is cosign.key
+# as single-line base64, decoded into a 0600 file under RUNNER_TEMP; the key and the copies are
+# deleted on every exit, and neither secret is printed.
 #
 # Usage: release-sign.sh   (with DIGEST, COSIGN_URL, COSIGN_SHA256, RELEASE_SIGNING_KEY,
 #                           COSIGN_PASSWORD and RUNNER_TEMP set)
@@ -16,10 +18,16 @@ set -euo pipefail
 umask 077
 
 sums=dist/SHA256SUMS
-if [ ! -d dist ] || [ -L dist ] || [ ! -f "$sums" ] || [ -L "$sums" ] || [ ! -d dist/bin ] ||
-  [ -L dist/bin ]; then
-  echo "dist, dist/SHA256SUMS and dist/bin must be a directory, a regular file and a directory," \
-    "none a symlink; nothing is signed" >&2
+if [ ! -d dist ] || [ -L dist ]; then
+  echo "dist must be a real directory, not a symlink; nothing is signed" >&2
+  exit 1
+fi
+if [ ! -f "$sums" ] || [ -L "$sums" ]; then
+  echo "dist/SHA256SUMS must be a regular file, not a symlink; nothing is signed" >&2
+  exit 1
+fi
+if [ ! -d dist/bin ] || [ -L dist/bin ]; then
+  echo "dist/bin must be a real directory, not a symlink; nothing is signed" >&2
   exit 1
 fi
 if [ -n "$(find dist/bin -mindepth 1 -not -type f -print -quit)" ]; then
@@ -68,8 +76,8 @@ for name in "${names[@]}"; do
   cp -- "dist/bin/$name" "$verified/bin/$name"
 done
 (cd "$verified/bin" && sha256sum --check --strict ../SHA256SUMS)
-printf '%s  %s\n' "$DIGEST" "$verified/SHA256SUMS" > "$verified/DIGEST"
-sha256sum --check --strict "$verified/DIGEST"
+printf '%s  SHA256SUMS\n' "$DIGEST" > "$verified/DIGEST"
+(cd "$verified" && sha256sum --check --strict DIGEST)
 
 mkdir -p "$tools" "$key_dir/home" signatures
 curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o "$tools/cosign" "$COSIGN_URL"
@@ -81,8 +89,12 @@ printf '%s' "$RELEASE_SIGNING_KEY" > "$key_dir/cosign.key.base64"
 base64 --decode "$key_dir/cosign.key.base64" > "$key_dir/cosign.key"
 unset RELEASE_SIGNING_KEY
 for file in "${names[@]/#/$verified/bin/}" "$verified/SHA256SUMS"; do
-  env -i HOME="$key_dir/home" PATH="$tools:/usr/bin:/bin" COSIGN_PASSWORD="$COSIGN_PASSWORD" \
+  (
+    unset LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT ENV CDPATH GITHUB_TOKEN \
+      ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL
+    export HOME="$key_dir/home" PATH="$tools:/usr/bin:/bin"
     cosign sign-blob --yes --new-bundle-format=false --use-signing-config=false \
-    --tlog-upload=false --key "$key_dir/cosign.key" \
-    --output-signature "signatures/$(basename "$file").sig" "$file"
+      --tlog-upload=false --key "$key_dir/cosign.key" \
+      --output-signature "signatures/$(basename "$file").sig" "$file"
+  )
 done

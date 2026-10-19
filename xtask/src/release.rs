@@ -1870,11 +1870,13 @@ mod tests {
             "trap 'rm -rf \"$key_dir\" \"$verified\"' EXIT",
             "cp -- \"dist/bin/$name\" \"$verified/bin/$name\"",
             "(cd \"$verified/bin\" && sha256sum --check --strict ../SHA256SUMS)",
-            "sha256sum --check --strict \"$verified/DIGEST\"",
+            "(cd \"$verified\" && sha256sum --check --strict DIGEST)",
             "sha256sum --check --strict \"$tools/cosign.sha256\"",
             "base64 --decode \"$key_dir/cosign.key.base64\" > \"$key_dir/cosign.key\"",
             "unset RELEASE_SIGNING_KEY",
-            "env -i HOME=\"$key_dir/home\" PATH=\"$tools:/usr/bin:/bin\" COSIGN_PASSWORD=\"$COSIGN_PASSWORD\"",
+            "unset LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT ENV CDPATH GITHUB_TOKEN \\",
+            "ACTIONS_RUNTIME_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL",
+            "export HOME=\"$key_dir/home\" PATH=\"$tools:/usr/bin:/bin\"",
         ];
         let mut from = 0;
         for line in ordered {
@@ -1886,7 +1888,14 @@ mod tests {
                 })?;
             from = from.saturating_add(at).saturating_add(line.len());
         }
-        for absent in ["set -x", "cargo", "xtask", "dist/bin/*"] {
+        for absent in [
+            "set -x",
+            "cargo",
+            "xtask",
+            "dist/bin/*",
+            "env -i",
+            "COSIGN_PASSWORD=",
+        ] {
             assert!(!script.contains(absent), "release-sign.sh holds {absent:?}");
         }
         assert!(
@@ -1930,15 +1939,19 @@ mod tests {
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github/scripts/release-sign.sh");
         let root =
             env::temp_dir().join(format!("mandate-xtask-release-sign-{}", std::process::id()));
-        let refused = "none a symlink";
         let not_regular = "not a regular file";
         let malformed = "is not '<sha256>  <name>'";
         let cases: Vec<SignerCase> = vec![
-            ("exact", |_| Ok(()), "FAILED"),
+            ("exact", |_| Ok(()), "b: OK\nSHA256SUMS: FAILED"),
+            (
+                "exact with a spaced RUNNER_TEMP",
+                |_| Ok(()),
+                "b: OK\nSHA256SUMS: FAILED",
+            ),
             (
                 "tampered",
                 |d| fs::write(d.join("dist/bin/a"), "x"),
-                "FAILED",
+                "a: FAILED",
             ),
             (
                 "extra",
@@ -2005,7 +2018,7 @@ mod tests {
                     fs::rename(d.join("dist/bin"), d.join("dist/real"))?;
                     symlink("real", d.join("dist/bin"))
                 },
-                refused,
+                "dist/bin must be a real directory, not a symlink",
             ),
             (
                 "symlinked-sums",
@@ -2013,7 +2026,7 @@ mod tests {
                     fs::rename(d.join("dist/SHA256SUMS"), d.join("dist/sums"))?;
                     symlink("sums", d.join("dist/SHA256SUMS"))
                 },
-                refused,
+                "dist/SHA256SUMS must be a regular file, not a symlink",
             ),
             (
                 "symlinked-dist",
@@ -2021,7 +2034,7 @@ mod tests {
                     fs::rename(d.join("dist"), d.join("real"))?;
                     symlink("real", d.join("dist"))
                 },
-                refused,
+                "dist must be a real directory, not a symlink",
             ),
             (
                 "crlf",
@@ -2048,7 +2061,11 @@ mod tests {
             fs::write(dir.join("dist/bin/b"), "b")?;
             write_sums(&dir, SIGNER_SUMS)?;
             change(&dir)?;
-            let runner = dir.join("runner");
+            let runner = dir.join(if name.contains("spaced") {
+                "run ner"
+            } else {
+                "runner"
+            });
             let output = Command::new("bash")
                 .arg(&script)
                 .current_dir(&dir)
