@@ -75,13 +75,23 @@ impl BindingGateSource for AllowingBindingGate {
     }
 }
 
-/// [`AllowingBindingGate`]'s snapshot for an exit too, so a reducing order's gate decision is
-/// binding (DEC-2034 item 2): what an exit needs before it may go at the market (DEC-2037 item 4).
+/// [`AllowingBindingGate`]'s snapshot for an exit too, holding the quantity the exit sells, so a
+/// reducing order's gate decision is binding (DEC-2034 item 2): what an exit needs before it may
+/// go at the market (DEC-2037 item 4).
 pub struct BindingExits;
 
 impl BindingGateSource for BindingExits {
     fn input(&self, request: &BindingGateRequest<'_>) -> Option<BindingGateInput> {
-        allowing_snapshot(request)
+        let mut input = allowing_snapshot(request)?;
+        input
+            .account
+            .positions
+            .insert(input.asset.clone(), request.qty);
+        input
+            .agent
+            .positions
+            .insert(input.asset.clone(), request.qty);
+        Some(input)
     }
 }
 
