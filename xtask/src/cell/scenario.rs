@@ -390,7 +390,7 @@ pub fn code(canonical: &str) -> String {
     hex(&Sha256::digest(canonical.as_bytes()))[..8].to_owned()
 }
 
-fn confirm_code(version: &str) -> String {
+pub(super) fn confirm_code(version: &str) -> String {
     code(&format!(
         r#"{{"gesture":"mandate_confirm","mandate_version":"{version}"}}"#
     ))
@@ -419,7 +419,7 @@ fn exit_code(
     ))
 }
 
-fn deploy_code(agent: &str, version: &str) -> String {
+pub(super) fn deploy_code(agent: &str, version: &str) -> String {
     code(&format!(
         r#"{{"agent_id":"{agent}","gesture":"agent_deploy","mandate_version":"{version}"}}"#
     ))
@@ -1336,7 +1336,7 @@ fn api_unaskable() -> Result<Option<String>> {
 /// Deployments have rolled out, so no pod of an earlier run still serves another workspace; and
 /// any earlier `kubectl port-forward` to the API is stopped, so the checks never reach an old pod
 /// through it (`api_port_forward` would reuse a forward that still answers its 401).
-fn point_api(workspace: &str) -> Result<()> {
+pub(super) fn point_api(workspace: &str) -> Result<()> {
     let hosted = format!("api.workspace={workspace}");
     helm(&[
         "upgrade",

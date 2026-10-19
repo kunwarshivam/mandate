@@ -189,6 +189,18 @@ pub(crate) fn seconds(secs: i64) -> Result<Value, ControlError> {
         .ok_or_else(|| ControlError::Journal(format!("the second {secs}")))
 }
 
+/// The member §9.2 types as `risk_clock`, a timestamp, where every other timed member is whole
+/// seconds.
+const RISK_CLOCK: &str = "risk_clock";
+
+/// The owner's tick at the second `secs`, as §9.2's `risk_clock` writes it: a timestamp with no
+/// fraction (journal spec §9.28, DEC-2509 item 1).
+fn risk_clock(secs: i64) -> Result<Value, ControlError> {
+    UtcNanos::from_parts(secs, 0)
+        .map(|at| text(&at.to_string()))
+        .map_err(|_| ControlError::Journal(format!("the second {secs}")))
+}
+
 /// `cli_confirm` evidence for one gesture: a fresh assertion id, authenticated when the owner ran
 /// the command (DEC-155 item 4). Minted only once every local check has passed, so a refused
 /// command uses no assertion.
@@ -756,7 +768,12 @@ pub(crate) fn commit(
     } = decided;
     same_environment(journal, &stream, owner)?;
     for name in timed {
-        key.push((name, seconds(now.secs)?));
+        let value = if *name == RISK_CLOCK {
+            risk_clock(now.secs)?
+        } else {
+            seconds(now.secs)?
+        };
+        key.push((name, value));
     }
     let evidence = if stepped_up {
         step_up(ids, now)?

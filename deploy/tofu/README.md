@@ -157,7 +157,10 @@ and actions.
    it. The job plans again after your approval, prints that plan, and applies exactly it, so the
    apply reflects the commit and the cloud as they are when the job runs. Dispatch `apply` only at
    a commit you have read, and read the apply job's printed plan afterwards. A first cluster takes
-   about ten minutes.
+   about ten minutes. After lane GO's bootstrap the job verifies staging for up to eight minutes and
+   prints `infra verify (staging):`; each `[MISSING]` line names what is not up yet, and the run
+   fails until none is left. Until the API's tunnel connector lands, the tunnel's and Access's
+   lines may read `[pending #1539]`, which fails nothing (DEC-2050).
 4. **Handing over to lane GO (E21-58):** the outputs GO needs are the root outputs
    `archive_access_key_id`, `archive_secret_access_key` and `tunnel_token` (sensitive, never
    printed), and `archive_bucket`, `archive_endpoint`, `archive_destination_path`,
@@ -179,6 +182,7 @@ once staging runs in `sfo2`. Delete each only if it exists; none holds anything 
 | Where | Exact name | Why it is left | When |
 |---|---|---|---|
 | Cloudflare R2 | `mandate-journal-archive-staging`, with its lock rule (deleting the empty bucket removes the rule) | staging's first apply may have made it in eastern North America; the archive is now `mandate-journal-archive-west-staging` | after staging's first apply in `sfo2` |
+| DigitalOcean VPC, `nyc3` | `mandate-staging` (range `10.110.0.0/20`) | staging's first VPC, which became `nyc3`'s default VPC, so DigitalOcean refuses to delete it; staging's VPC is now `mandate-staging-sfo2` (DEC-2054). It is free and holds nothing | whenever you like, after making another `nyc3` VPC the default or deleting it from the console once DigitalOcean allows; it may simply stay |
 | DigitalOcean Spaces, `nyc3` | `mandate-tofu-state-staging` | the old state bucket, kept as the rollback when the state moves to `sfo2` | after the state move lands and a plan reads the new bucket |
 | DigitalOcean Spaces, `nyc3` | `mandate-tofu-state-production` | the same, if a production run made it before the move | after the state move lands |
 

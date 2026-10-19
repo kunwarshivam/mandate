@@ -1,5 +1,10 @@
-//! `mandate agent status`, `resume`, `stop` and `exit` (E8-3's `clap` follow-up, DEC-279 item 10;
-//! DEC-2507): [`crate::agent`]'s owner commands over P0's `--journal`, run as D1b's owner.
+//! `mandate agent status`, `resume`, `stop`, `exit`, `acknowledge` and `request-ack` (E8-3's `clap`
+//! follow-up, DEC-279 item 10; DEC-2507, DEC-2512): [`crate::agent`]'s owner commands over P0's
+//! `--journal`, run as D1b's owner.
+//!
+//! `acknowledge` and `request-ack` take a code as `resume` does: without `--code` they print it and
+//! commit nothing. An acknowledgment naming `--request` is refused, committing nothing, under
+//! journal spec §9.28's rules 239 to 241.
 //!
 //! `resume` and `stop` without `--code` print the code [`crate::agent::code`] gives and commit
 //! nothing; with it they commit one `OwnerCommandIssued`, and a wrong code is refused with nothing
@@ -54,6 +59,40 @@ pub struct StopArgs {
     #[arg(long)]
     pub release: bool,
     /// The code `agent stop` showed; without it, nothing is committed.
+    #[arg(long, value_name = "CODE")]
+    pub code: Option<String>,
+    #[command(flatten)]
+    pub owner: OwnerArgs,
+    #[command(flatten)]
+    pub target: JournalArgs,
+}
+
+#[derive(Debug, Args)]
+pub struct AcknowledgeArgs {
+    /// The agent's id.
+    pub agent: String,
+    /// The `event_id` of the account stream's `RiskLimitTriggered` to acknowledge.
+    pub event: String,
+    /// The `event_id` of the `OwnerAcknowledgmentRequested` another user recorded, where an
+    /// independent user must acknowledge.
+    #[arg(long, value_name = "ID")]
+    pub request: Option<String>,
+    /// The code `agent acknowledge` showed; without it, nothing is committed.
+    #[arg(long, value_name = "CODE")]
+    pub code: Option<String>,
+    #[command(flatten)]
+    pub owner: OwnerArgs,
+    #[command(flatten)]
+    pub target: JournalArgs,
+}
+
+#[derive(Debug, Args)]
+pub struct RequestAckArgs {
+    /// The agent's id.
+    pub agent: String,
+    /// The `event_id` of the account stream's `RiskLimitTriggered` to ask another user to lift.
+    pub event: String,
+    /// The code `agent request-ack` showed; without it, nothing is committed.
     #[arg(long, value_name = "CODE")]
     pub code: Option<String>,
     #[command(flatten)]
@@ -127,6 +166,39 @@ impl ResumeArgs {
         self.code
             .as_deref()
             .map_or(Typed::Show, |c| Typed::Commit(Some(c)))
+    }
+}
+
+impl AcknowledgeArgs {
+    #[must_use]
+    pub fn typed(&self) -> Typed<'_> {
+        self.code
+            .as_deref()
+            .map_or(Typed::Show, |c| Typed::Commit(Some(c)))
+    }
+
+    #[must_use]
+    pub fn command(&self) -> Command {
+        Command::Acknowledge {
+            event: self.event.clone(),
+            request: self.request.clone(),
+        }
+    }
+}
+
+impl RequestAckArgs {
+    #[must_use]
+    pub fn typed(&self) -> Typed<'_> {
+        self.code
+            .as_deref()
+            .map_or(Typed::Show, |c| Typed::Commit(Some(c)))
+    }
+
+    #[must_use]
+    pub fn command(&self) -> Command {
+        Command::RequestAcknowledgment {
+            event: self.event.clone(),
+        }
     }
 }
 
@@ -349,6 +421,48 @@ pub fn run_resume(args: &ResumeArgs, now: Now, report: &mut impl Write) -> anyho
 /// # Errors
 /// As [`run_resume`].
 pub fn run_stop(args: &StopArgs, now: Now, report: &mut impl Write) -> anyhow::Result<()> {
+    let (command, typed) = (args.command(), args.typed());
+    run(
+        &args.owner,
+        &args.target,
+        &args.agent,
+        &command,
+        typed,
+        now,
+        report,
+    )
+}
+
+/// Runs `agent acknowledge` and prints [`answer`]'s lines.
+///
+/// # Errors
+/// As [`run_resume`], and §9.28's refusals of an acknowledgment naming a request.
+pub fn run_acknowledge(
+    args: &AcknowledgeArgs,
+    now: Now,
+    report: &mut impl Write,
+) -> anyhow::Result<()> {
+    let (command, typed) = (args.command(), args.typed());
+    run(
+        &args.owner,
+        &args.target,
+        &args.agent,
+        &command,
+        typed,
+        now,
+        report,
+    )
+}
+
+/// Runs `agent request-ack` and prints [`answer`]'s lines.
+///
+/// # Errors
+/// As [`run_resume`].
+pub fn run_request_ack(
+    args: &RequestAckArgs,
+    now: Now,
+    report: &mut impl Write,
+) -> anyhow::Result<()> {
     let (command, typed) = (args.command(), args.typed());
     run(
         &args.owner,

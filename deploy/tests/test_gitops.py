@@ -38,7 +38,12 @@ OWN_CHARTS = {
     "mandate-backup-plugin-tls": "backup-plugin-tls",
     "mandate-journal-db": "journal-db",
     "mandate-workspace": "workspace",
+    "mandate-vault-server": "vault",
 }
+# The charts staging alone runs: the vault, whose production unseal is not decided (DEC-2021 item 6,
+# DEC-2051).
+STAGING_ONLY = {"mandate-vault-server"}
+VAULT_VALUES = ROOT / "deploy" / "cell" / "values" / "vault-staging.yaml"
 OWN_CHART_URL = "oci://ghcr.io/kunwarshivam/mandate/charts/"
 # The upstream charts and the digests whose chart layers are xtask/src/cell.rs's pinned tarballs.
 UPSTREAM_CHARTS = {
@@ -181,9 +186,9 @@ def render(release: dict, values: dict, tmp: Path) -> list[dict]:
     return [d for d in yaml.safe_load_all(done.stdout) if d]
 
 
-def sources_pinned(docs: list[dict]) -> list[str]:
+def sources_pinned(docs: list[dict], environment: str = "staging") -> list[str]:
     """Every chart comes by digest; the repository's own only once release.yml's signature on main
-    verifies; the upstream charts are exactly the pinned ones."""
+    verifies; the upstream charts are exactly the pinned ones; and only staging runs the vault."""
     problems = []
     sources = of_kind(docs, "OCIRepository")
     for name, source in sources.items():
@@ -192,6 +197,8 @@ def sources_pinned(docs: list[dict]) -> list[str]:
             problems.append(f"{name}: not pinned by digest alone: {spec.get('ref')}")
         if spec.get("layerSelector") != CHART_LAYER:
             problems.append(f"{name}: does not select the chart layer")
+        if name in STAGING_ONLY and environment != "staging":
+            problems.append(f"{name}: runs in staging alone (DEC-2051)")
         if name in OWN_CHARTS:
             if spec.get("url") != OWN_CHART_URL + name:
                 problems.append(f"{name}: url {spec.get('url')}")
@@ -205,7 +212,10 @@ def sources_pinned(docs: list[dict]) -> list[str]:
                 problems.append(f"{name}: not the pinned upstream chart")
         else:
             problems.append(f"{name}: an OCIRepository the hosted clusters do not run")
-    for name in set(OWN_CHARTS) | set(UPSTREAM_CHARTS):
+    expected = set(OWN_CHARTS) | set(UPSTREAM_CHARTS)
+    if environment != "staging":
+        expected -= STAGING_ONLY
+    for name in expected:
         if name not in sources:
             problems.append(f"{name}: missing")
     return problems
@@ -266,6 +276,37 @@ def endpoint_from_bootstrap(docs: list[dict]) -> list[str]:
         problems.append("journal: git sets the archive endpoint")
     if "journal-archive-endpoint" in of_kind(docs, "ConfigMap"):
         problems.append("journal-archive-endpoint is in git, so Flux would overwrite the bootstrap's")
+    return problems
+
+
+def vault_release(docs: list[dict], environment: str = "staging") -> list[str]:
+    """Staging installs the vault with vault-staging.yaml unchanged, beside the workspace, never
+    waiting on a vault that stays sealed until the founder initializes it, and never pruned;
+    production installs none (DEC-2051)."""
+    release = of_kind(docs, "HelmRelease").get("vault")
+    if environment != "staging":
+        return [] if release is None else ["vault: runs in staging alone (DEC-2051)"]
+    if release is None:
+        return ["vault: missing"]
+    spec = release["spec"]
+    problems = []
+    if spec.get("chartRef") != {"kind": "OCIRepository", "name": "mandate-vault-server"}:
+        problems.append(f"vault: installs {spec.get('chartRef')}")
+    if (spec.get("targetNamespace"), spec.get("storageNamespace")) != ("ws-ws1", "ws-ws1"):
+        problems.append("vault: not beside the workspace in ws-ws1")
+    for phase in ("install", "upgrade"):
+        if (spec.get(phase) or {}).get("disableWait") is not True:
+            problems.append(f"vault: {phase} waits on a vault the founder has not initialized")
+    if spec.get("values") or spec.get("valuesFrom") != [
+        {"kind": "ConfigMap", "name": "vault-staging-values", "valuesKey": "values.yaml"}
+    ]:
+        problems.append(f"vault: values {spec.get('values')} {spec.get('valuesFrom')}")
+    source = of_kind(docs, "ConfigMap").get("vault-staging-values") or {"data": {}}
+    if yaml.safe_load(source["data"].get("values.yaml", "")) != yaml.safe_load(VAULT_VALUES.read_text()):
+        problems.append("vault: values are not deploy/cell/values/vault-staging.yaml")
+    annotations = release["metadata"].get("annotations") or {}
+    if {k: annotations.get(k) for k in PRUNE_DISABLED} != PRUNE_DISABLED:
+        problems.append("vault: prunable")
     return problems
 
 
@@ -643,7 +684,17 @@ def test_each_admission_seeded_bug_is_caught(change, tmp_path):
 
 
 def test_sources_pinned(overlay):
-    assert sources_pinned(overlay[1]) == []
+    assert sources_pinned(overlay[1], overlay[0]) == []
+
+
+def test_vault_release(overlay):
+    assert vault_release(overlay[1], overlay[0]) == []
+
+
+def test_production_running_the_vault_is_caught(tmp_path):
+    docs = build("staging", FIXTURE, tmp_path)
+    assert sources_pinned(docs, "production") == ["mandate-vault-server: runs in staging alone (DEC-2051)"]
+    assert vault_release(docs, "production") == ["vault: runs in staging alone (DEC-2051)"]
 
 
 def test_releases_resolve(overlay):
@@ -725,6 +776,20 @@ def seeded(docs: list[dict], kind: str, name: str, change) -> list[dict]:
 DOC_BUGS = [
     (sources_pinned, "OCIRepository", "mandate-workspace", lambda d: d["spec"].update(ref={"tag": "latest"})),
     (sources_pinned, "OCIRepository", "mandate-journal-db", lambda d: d["spec"].pop("verify")),
+    (sources_pinned, "OCIRepository", "mandate-vault-server", lambda d: d["spec"].pop("verify")),
+    (vault_release, "HelmRelease", "vault", lambda d: d["spec"].pop("install")),
+    (vault_release, "HelmRelease", "vault", lambda d: d["spec"]["upgrade"].update(disableWait=False)),
+    (vault_release, "HelmRelease", "vault", lambda d: d["spec"].update(targetNamespace="vault")),
+    (vault_release, "HelmRelease", "vault", lambda d: d["metadata"].pop("annotations")),
+    (vault_release, "HelmRelease", "vault", lambda d: d["spec"].update(values={"seal": {"type": "shamir"}})),
+    (
+        vault_release,
+        "ConfigMap",
+        "vault-staging-values",
+        lambda d: d["data"].update(
+            {"values.yaml": d["data"]["values.yaml"].replace("staging-1", "staging-2")}
+        ),
+    ),
     (
         sources_pinned,
         "OCIRepository",
