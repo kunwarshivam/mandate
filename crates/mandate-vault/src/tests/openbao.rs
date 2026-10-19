@@ -4,11 +4,12 @@ use crate::SourceError;
 use reqwest::StatusCode;
 
 use mandate_connections::record::ConnectionId;
+use mandate_time::UtcNanos;
 use serde_json::json;
 
 use crate::openbao::{
-    OpenBaoConfig, provision, provisioned_identities, refusal, role_settings, seal_verdict,
-    secret_id_identities,
+    OpenBaoConfig, OpenBaoSource, provision, provisioned_identities, refusal, role_settings,
+    seal_verdict, secret_id_identities,
 };
 use crate::policy::{Identity, Mounts};
 use secrecy::SecretString;
@@ -181,4 +182,68 @@ async fn provisioning_an_unreachable_vault_is_an_outage() {
         provisioned.map(|credentials| credentials.len()),
         Err(SourceError::Unavailable)
     );
+}
+
+fn unreachable() -> OpenBaoConfig {
+    OpenBaoConfig {
+        address: "https://127.0.0.1:9".to_owned(),
+        ca_pem: include_bytes!("fixtures/isrg-root-x1.pem").to_vec(),
+        mounts: Mounts::default(),
+    }
+}
+
+const JWT: &str = "canary-3e91-projected-service-account-token-do-not-print";
+
+fn at_start() -> UtcNanos {
+    UtcNanos::from_parts(1_800_000_000, 0).unwrap()
+}
+
+/// Only a connection's executor or token exchange logs in with Kubernetes auth; any other
+/// identity is refused before the vault is reached.
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "pending E21-32"]
+async fn only_a_connections_processes_log_in_with_kubernetes_auth() {
+    for identity in [
+        Identity::Api,
+        Identity::ConnectionManager,
+        Identity::Runtime,
+        Identity::SecretImport,
+        Identity::ModelGateway,
+        Identity::EmailSender,
+    ] {
+        let login = OpenBaoSource::login_kubernetes(
+            &unreachable(),
+            identity.clone(),
+            &SecretString::from(JWT.to_owned()),
+            at_start(),
+        )
+        .await;
+        assert_eq!(login.map(|_| ()), Err(SourceError::Config), "{identity:?}");
+    }
+}
+
+/// An executor's and an exchange's login reach the vault: one nobody answers for is an outage,
+/// and neither the outage nor its `Debug` shows the token.
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "pending E21-32"]
+async fn a_kubernetes_login_to_an_unreachable_vault_is_an_outage_that_shows_no_token() {
+    for identity in [
+        Identity::Executor(ConnectionId::new("c1").unwrap()),
+        Identity::TokenExchange(ConnectionId::new("c1").unwrap()),
+    ] {
+        let login = OpenBaoSource::login_kubernetes(
+            &unreachable(),
+            identity.clone(),
+            &SecretString::from(JWT.to_owned()),
+            at_start(),
+        )
+        .await;
+        let shown = format!("{login:?}");
+        assert!(!shown.contains(JWT), "{shown}");
+        assert_eq!(
+            login.map(|_| ()),
+            Err(SourceError::Unavailable),
+            "{identity:?}"
+        );
+    }
 }

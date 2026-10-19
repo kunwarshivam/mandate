@@ -239,6 +239,25 @@ impl OpenBaoSource {
         Self::log_in(config, identity, role_id, secret_id, now).await
     }
 
+    /// Logs in as `identity`, a connection's executor or token exchange, with the projected
+    /// ServiceAccount token `jwt` its pod was given (audience [`crate::kubernetes::AUDIENCE`],
+    /// read by the caller with [`crate::mounted::read_service_account_token`] at each login), on
+    /// its kind's Kubernetes auth mount, its role named by its connection id (DEC-2060). The vault
+    /// checks the token with the cluster on every login, and admits only the one ServiceAccount
+    /// the role binds. Any other identity is [`SourceError::Config`]; a login refused, or one that
+    /// reaches a role that is not `identity`'s own, is [`SourceError::Denied`]; a vault that cannot
+    /// reach the cluster is [`SourceError::Unavailable`]. The token is never logged, never put in
+    /// an error, and dropped once the login is done.
+    pub async fn login_kubernetes(
+        config: &OpenBaoConfig,
+        identity: Identity,
+        jwt: &SecretString,
+        now: UtcNanos,
+    ) -> Result<Self, SourceError> {
+        let _ = (config, identity, jwt, now);
+        Err(SourceError::Unimplemented { story: "E21-32" })
+    }
+
     /// The token exchange's session for the grant's connection, spending the grant. A grant
     /// expired at `now`, used, revoked, or for another connection is
     /// [`SourceError::GrantInvalid`].

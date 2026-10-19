@@ -82,6 +82,24 @@ pub(crate) fn read_checked(
     }
 }
 
+/// Where a connection's executor or token exchange finds its projected ServiceAccount token, the
+/// file `token` in it (DEC-2060): projected for the audience [`crate::kubernetes::AUDIENCE`],
+/// lasting 600 seconds, and rotated by the kubelet, so it is read again at each login.
+pub const SERVICE_ACCOUNT_TOKEN_DIR: &str = "/run/mandate/vault-token";
+
+/// Reads the projected ServiceAccount token `dir/token` by [`read_mounted`]'s rules but its mode:
+/// the kubelet writes a projected token readable by all, and it is short-lived and bound to the
+/// vault's audience, so only a group or other write bit is refused. It must be one line, at most
+/// one trailing newline, no carriage return, and no longer than [`SERVICE_ACCOUNT_TOKEN_MAX`]
+/// bytes. Anything else is [`SourceError::CredentialFile`].
+pub fn read_service_account_token(dir: &Path) -> Result<SecretString, SourceError> {
+    let _ = dir;
+    Err(SourceError::Unimplemented { story: "E21-32" })
+}
+
+/// The most bytes a projected ServiceAccount token may hold; a real one is about a kilobyte.
+pub const SERVICE_ACCOUNT_TOKEN_MAX: u64 = 16384;
+
 /// `value` as one line: at most one trailing newline, which is dropped, and no other line break
 /// or carriage return, and not empty.
 fn one_line(value: &SecretString) -> Result<SecretString, SourceError> {
