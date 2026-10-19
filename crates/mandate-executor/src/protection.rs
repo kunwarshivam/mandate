@@ -16,7 +16,8 @@ use crate::fold::single_holder;
 use crate::gate::available;
 use crate::ids::{ClientOrderId, IntentId, WATCHDOG};
 use crate::intent::{
-    abandon, gate_and_submit, intent_of, journal_rung, journal_submission, order_tif, received,
+    abandon, gate_and_submit, intent_of, journal_rung, journal_submission, order_tif, priced,
+    received,
 };
 use crate::kill::{flatten_closes, floor_of, is_flatten, mode_holds};
 use crate::listing::query_unknown;
@@ -143,7 +144,7 @@ pub(crate) fn watchdog(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
                     instrument,
                     side: Side::Sell,
                     qty: held,
-                    limit,
+                    limit: Some(limit),
                     purpose: Purpose::RiskExit,
                     protection: None,
                 },
@@ -537,6 +538,7 @@ fn next_rung(
     else {
         return Ok(());
     };
+    let limit = priced(limit)?;
     let step = rung.saturating_add(1);
     let tier = batch.ports.instruments.exit_tier(instrument);
     let observations = observed(batch, instrument);
@@ -807,6 +809,7 @@ fn begin(
     else {
         return Ok(());
     };
+    let limit = priced(limit)?;
     let fresh = batch
         .at()
         .secs()
@@ -2447,7 +2450,7 @@ fn flatten_unprotected(
                 instrument: instrument.clone(),
                 side: Side::Sell,
                 qty: held,
-                limit,
+                limit: Some(limit),
                 purpose: Purpose::RiskExit,
                 protection: None,
             },
@@ -3324,7 +3327,7 @@ mod sequence_tests {
                 instrument: aapl()?,
                 side: Side::Sell,
                 qty: Qty::parse(qty)?,
-                limit: Price::parse(limit)?,
+                limit: Some(Price::parse(limit)?),
                 purpose,
                 protection: None,
             },
@@ -5157,7 +5160,7 @@ mod sequence_tests {
                 instrument: InstrumentId::new(name)?,
                 side,
                 qty: Qty::parse("1")?,
-                limit: Price::parse(limit)?,
+                limit: Some(Price::parse(limit)?),
                 purpose,
                 protection: None,
             },
@@ -14281,7 +14284,7 @@ mod bracket_tests {
                     instrument: aapl()?,
                     side: Side::Buy,
                     qty: Qty::parse("10")?,
-                    limit: Price::parse("150")?,
+                    limit: Some(Price::parse("150")?),
                     purpose: Purpose::Open,
                     protection: Some(ProtectionPrices {
                         stop: Price::parse("140")?,

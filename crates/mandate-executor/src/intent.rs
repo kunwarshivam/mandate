@@ -3,6 +3,7 @@
 
 use mandate_accounting::{AssetClass, InstrumentId};
 use mandate_canon::Value;
+use mandate_num::Price;
 use mandate_risk::GatePass;
 
 use crate::batch::{Batch, config_refs};
@@ -209,7 +210,7 @@ fn decide(
             qty: *qty,
             purpose: *purpose,
             protection: *protection,
-            limit: *limit,
+            limit: priced(*limit)?,
             tif: order_tif(batch, instrument),
             flatten: is_flatten(&batch.view, intent),
         },
@@ -222,7 +223,7 @@ fn decide(
         .filter(|_| allowed && !purpose.adds_risk());
     let unpriced = *purpose == Purpose::DiscretionaryExit
         && allowed
-        && exit_limit(batch, intent, instrument, *purpose, *limit) == ExitPrice::Held;
+        && exit_limit(batch, intent, instrument, *purpose, priced(*limit)?) == ExitPrice::Held;
     let decision = match closed {
         Some(reason) => decision.closed(reason),
         None if unpriced => decision.unpriced(),
@@ -263,7 +264,7 @@ fn gate(
             *qty = sized;
         }
         if let Some(paced) = decision.paced_limit() {
-            *limit = paced;
+            *limit = Some(paced);
         }
     }
     Ok(verdict)
@@ -333,6 +334,15 @@ pub(crate) fn order_tif(batch: &Batch<'_, '_>, instrument: &InstrumentId) -> Tim
     }
 }
 
+/// A body's limit. An exit at the market carries none, which the core does not send until E7-29
+/// (DEC-2037).
+///
+/// # Errors
+/// [`ExecutorError::Unimplemented`] for a body with no limit.
+pub(crate) fn priced(limit: Option<Price>) -> Result<Price, ExecutorError> {
+    limit.ok_or(ExecutorError::Unimplemented { story: "E7-29" })
+}
+
 /// The first submission of an intent: journaled as `OrderSubmitted` naming the id the request
 /// carries, and only then described (journal spec §5.2, `AGENTS.md` rule 5). An exit with nothing
 /// to price from goes at its own limit, journaled and alerted (DEC-160 (12)); a discretionary one
@@ -351,6 +361,7 @@ fn submit(batch: &mut Batch<'_, '_>, intent: &IntentId) -> Result<(), ExecutorEr
     else {
         return Ok(());
     };
+    let limit = priced(limit)?;
     if awaits_cancel(&batch.view, &agent, &instrument, purpose)
         || passive_exit(batch, intent, &instrument, qty, limit)?
     {
@@ -579,7 +590,7 @@ pub(crate) fn intent_received_fields(
         ("type", text(order_type_name(OrderType::Limit))),
         ("tif", text(tif_name(proposed_tif))),
         ("qty", text(qty.to_string())),
-        ("limit_price", text(limit.to_string())),
+        ("limit_price", text(priced(*limit)?.to_string())),
         ("purpose", text(purpose_name(*purpose))),
     ])
 }
@@ -1096,7 +1107,7 @@ mod bracket_call_tests {
                 instrument: InstrumentId::new("AAPL")?,
                 side: Side::Buy,
                 qty: Qty::parse("5")?,
-                limit: Price::parse("150")?,
+                limit: Some(Price::parse("150")?),
                 purpose: Purpose::Increase,
                 protection,
             },
@@ -1277,7 +1288,7 @@ mod draft_member_tests {
                 instrument: InstrumentId::new(vector_text(payload, "instrument_id")?)?,
                 side: Side::Buy,
                 qty: Qty::parse(vector_text(payload, "qty")?)?,
-                limit: Price::parse(vector_text(payload, "limit_price")?)?,
+                limit: Some(Price::parse(vector_text(payload, "limit_price")?)?),
                 purpose: Purpose::Open,
                 protection,
             },
