@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/commands/reduction-session-request.schema.json",
+  "type": "object",
+  "required": [
+    "challenge_id",
+    "passkey_id",
+    "authenticator_data",
+    "client_data_json",
+    "signature"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "challenge_id": {
+      "$ref": "../common.schema.json#/$defs/EventId"
+    },
+    "passkey_id": {
+      "$ref": "../common.schema.json#/$defs/PasskeyId"
+    },
+    "authenticator_data": {
+      "$ref": "../common.schema.json#/$defs/Base64url"
+    },
+    "client_data_json": {
+      "$ref": "../common.schema.json#/$defs/Base64url"
+    },
+    "signature": {
+      "$ref": "../common.schema.json#/$defs/Base64url"
+    }
+  },
+  "description": "POST /v1/reduction-sessions (\u00a74.10 route 2, identity spec \u00a76.4 route 2, DEC-2117): the reduction-session challenge it answers and the authenticator's assertion for it. The passkey is found by passkey_id alone, so a discoverable passkey and a non-discoverable one whose id the client supplies both serve (DEC-833). Every refusal is the one 401."
+}

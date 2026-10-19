@@ -1,0 +1,8 @@
+[
+  {
+    "label": "a non-discoverable passkey's longer id",
+    "set": {
+      "/passkey_id": "EBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8"
+    }
+  }
+]
