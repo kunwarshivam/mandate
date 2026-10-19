@@ -190,7 +190,10 @@ fn main() -> anyhow::Result<()> {
         Command::Vault(VaultCommand::Provision(args)) => vault::run_provision(
             &args,
             &mut io::stdin().lock(),
-            io::stdout().is_terminal(),
+            vault::Terminals {
+                stdin: io::stdin().is_terminal(),
+                stdout: io::stdout().is_terminal(),
+            },
             &mut io::stdout().lock(),
         ),
         Command::Db(DbCommand::Migrate(args)) => {
