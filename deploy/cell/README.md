@@ -63,8 +63,10 @@ Each is a test in `deploy/tests/test_cell.py`, run with helm by `cargo xtask ci 
 - `MANDATE_DEPLOYMENT_TIER` on every process comes from the `deploymentTier` value alone:
   `production` unless a values file says otherwise, `ci` in the local cell, `dev` on hosted cell #1
   (DEC-971 item 2, [DEC-2001](../../docs/project/decisions/DEC-2001.md) item 6);
-- the cell's one ingress is a `cloudflared` pod dialing out to Cloudflare's tunnel edge, off in the
+- the cell's one ingress is `cloudflared` dialing out to Cloudflare's tunnel edge, off in the
   local cell: no Service, NodePort, LoadBalancer or Ingress, and the tunnel token a mounted file;
+  where the API runs, it runs as a second container of the API's pod and reaches the API's
+  loopback listener (DEC-2056);
 - no k3s-only, provider-only or cloud-only API: the k3s and managed renderings are identical, and
   k3d's differs only by the tunnel.
 - one shared artifact store (mandate documents, backtest reports), the claim `artifacts` at
@@ -114,7 +116,8 @@ cargo xtask cell down
 cargo xtask ci cell               # what CI runs: chart checks, up, drills, seeded drills, demo --no-web
 cargo xtask ci cell-journal       # and beside it: up, then standby-down and archive, plain and seeded
 cargo xtask ci cell-failover      # and beside it: up, then restart (a failover with the standby), plain and seeded
-cargo xtask ci cell-kill-switch   # and beside it: up, then kill-switch, admission, executor and vault, plain and seeded (DEC-2602, DEC-2022, DEC-2035)
+cargo xtask ci cell-kill-switch   # and beside it: up, then kill-switch and admission, plain and seeded (DEC-2602)
+cargo xtask ci cell-executor      # and beside it: up, then executor and vault, plain and seeded (DEC-2615, DEC-2022, DEC-2035)
 ```
 
 `cell up` is idempotent: it reuses a running cluster and upgrades the releases. kubectl is the one
