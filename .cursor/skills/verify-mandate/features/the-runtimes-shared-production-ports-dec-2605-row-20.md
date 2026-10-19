@@ -6,9 +6,16 @@
 - **Code:** `mandate-ports` (`crates/mandate-ports`): `src/context.rs` (the decision-time
   contexts: `BuilderContext`, `AdvisoryOrderFacts`, `AdvisoryGateContext`, `DecisionContext`),
   `src/gate.rs` (`proposed_order`, the runtime proposal mapped to the gate's order; `evaluate`,
-  `mandate_risk::evaluate` over the trusted context), `src/error.rs` (`PortError`). The shell's
-  `RiskGate` (`crates/mandate-shell/src/adapters.rs`) calls it, with its reason codes unchanged.
+  `mandate_risk::evaluate` over the trusted context), `src/view.rs` (`runtime_view` over
+  `ViewFacts`, the runtime's view of an admitted mandate), `src/plan.rs` (`size`, the builder's
+  `conviction_linear` sizing as the runtime's proposal; `classify`, §6 classification with the
+  §6.2 step 5c overlay; `validate_order_execution`), `src/error.rs` (`PortError`). The shell's
+  `SpecMandate`, `BuilderPlan`, `RiskGate` and `ExecutorSink`
+  (`crates/mandate-shell/src/adapters.rs`) call them, with their reason codes unchanged.
 - **Tests:** `crates/mandate-ports/tests/gate.rs`: the proposed order copies only the proposal's
   four fields; the shared gate equals the gate called directly, refusals included, for any
-  quantity. The shell's own adapter tests still pin its behaviour.
+  quantity and over varied passes, modes, account states, eligibility, quotes, participation,
+  positions, protective orders and sides (each input shown caught when the port drops it);
+  `src/plan.rs`'s unit test pins the classification's order-amount match. The shell's own
+  adapter tests still pin sizing, classification and the view through its stages.
 - **Run:** `cargo nextest run -p mandate-ports -p mandate-shell`.

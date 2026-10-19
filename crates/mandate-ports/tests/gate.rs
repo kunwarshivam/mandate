@@ -238,8 +238,208 @@ fn the_shared_gate_is_the_real_gate_over_the_mapped_order() {
     }
 }
 
+/// A context in which the gate allows an opening buy of up to 10 shares at 100: the gate's own
+/// unit-test baseline, so a varied input reaches every check rather than stopping at the first.
+fn allowing() -> AdvisoryGateContext {
+    let usd = |text: &str| mandate_num::Usd::parse(text).unwrap();
+    let fraction = |text: &str| mandate_num::Fraction::parse(text).unwrap();
+    let asset = mandate_risk::AssetId::new(ASSET).unwrap();
+    let mut context = context();
+    context.now = UtcNanos::parse("2026-09-21T15:00:00.000000000Z").unwrap();
+    context.config = mandate_risk::GateConfig {
+        price_floor: usd("5"),
+        liquidity_floor_usd: usd("1000000"),
+        crypto_liquidity_floor_usd: usd("2000000"),
+        collar_liquid_threshold_usd: usd("50000000"),
+        collar_liquid_x: fraction("0.01"),
+        collar_other_x: fraction("0.02"),
+        collar_crypto_x: fraction("0.02"),
+        collar_passive_band: fraction("0.2"),
+        opposite_fill_interval_s: 60,
+        min_resting_time_s: 2,
+        order_to_fill_max: 10,
+        order_to_fill_min_orders: 20,
+        order_size_participation: fraction("0.05"),
+        daily_participation: fraction("0.05"),
+        close_window_minutes: 10,
+        legacy_pdt_equity_threshold: usd("25000"),
+        etp_classification_max_age_s: 604_800,
+    };
+    context.mandate = mandate_risk::ValidatedMandate::from_validated_parts(
+        mandate_risk::spec_types::RiskLimits {
+            max_position_usd: usd("1500"),
+            max_position_fraction: fraction("0.2"),
+            max_order_usd: usd("1000"),
+            max_gross_exposure_usd: usd("2000"),
+            max_orders_per_day: 50,
+            reentry_cooldown_s: 3600,
+            rebalance_band: fraction("0.05"),
+            breach_confirm_s: 60,
+            drawdown_ladder: Vec::new(),
+        },
+        mandate_risk::spec_types::GoalState::Running,
+        false,
+        false,
+    );
+    for equity in [
+        &mut context.risk.agent_equity,
+        &mut context.risk.high_water_mark,
+        &mut context.risk.day_start_equity,
+        &mut context.risk.capital_base,
+        &mut context.account.equity,
+    ] {
+        *equity = usd("10000");
+    }
+    context.account.account_type = mandate_risk::AccountType::Margin;
+    context.account.crypto_active = true;
+    context.account.prior_close_equity = usd("30000");
+    context.account.model_buying_power = usd("100000");
+    context.account.broker_buying_power = usd("100000");
+    context.account.broker_non_marginable_buying_power = usd("100000");
+    context.instrument.exchange = Some(mandate_risk::Exchange::Nasdaq);
+    context.instrument.status_active = true;
+    context.instrument.tradable = true;
+    context.instrument.etp_classified_at =
+        Some(UtcNanos::parse("2026-09-21T00:00:00.000000000Z").unwrap());
+    context.instrument.quote_currency = Some(mandate_risk::QuoteCurrency::Usd);
+    context.instrument.prior_close = Some(Price::parse("100").unwrap());
+    context.instrument.median_dollar_volume_20d = Some(usd("90000000"));
+    context.instrument.min_order_size = Qty::parse("1").unwrap();
+    context.instrument.status_feed_current = true;
+    context.market = mandate_risk::MarketSnapshot {
+        quote: Some(mandate_risk::SaneQuote {
+            bid: Price::parse("99.95").unwrap(),
+            ask: Price::parse("100.05").unwrap(),
+            at: UtcNanos::parse("2026-09-21T14:59:59.000000000Z").unwrap(),
+        }),
+        last_trade: None,
+        trailing_5m_volume: Some(Qty::parse("100000").unwrap()),
+        adv_20d: Some(Qty::parse("1000000").unwrap()),
+    };
+    context.universe = mandate_risk::WorkingUniverse::Known {
+        instruments: [asset].into(),
+        pinned: true,
+    };
+    context
+}
+
+/// The gate's inputs other than the order, varied so a port that drops, swaps or fixes one of
+/// them answers differently from the gate itself.
+#[derive(Debug, Clone)]
+struct Varied {
+    pass: mandate_risk::GatePass,
+    risk_mode: mandate_risk::AgentMode,
+    account_state: mandate_risk::AccountState,
+    agent_mode: mandate_risk::AgentMode,
+    eligible: bool,
+    collar_breaking_bid: bool,
+    participation_today: u32,
+    held: u32,
+    protective_open: u32,
+    side: Side,
+}
+
+fn mode() -> impl Strategy<Value = mandate_risk::AgentMode> {
+    prop_oneof![
+        4 => Just(mandate_risk::AgentMode::Normal),
+        1 => Just(mandate_risk::AgentMode::ExitsOnly),
+        1 => Just(mandate_risk::AgentMode::Paused),
+        1 => Just(mandate_risk::AgentMode::Stopped),
+    ]
+}
+
+fn varied() -> impl Strategy<Value = Varied> {
+    (
+        (
+            prop_oneof![
+                Just(mandate_risk::GatePass::First),
+                Just(mandate_risk::GatePass::BeforeSubmission),
+            ],
+            mode(),
+            prop_oneof![
+                4 => Just(mandate_risk::AccountState::Active),
+                1 => Just(mandate_risk::AccountState::ClosingOnly),
+                1 => Just(mandate_risk::AccountState::Blocked),
+            ],
+            mode(),
+            prop::bool::weighted(0.8),
+        ),
+        (
+            any::<bool>(),
+            prop_oneof![Just(0_u32), Just(49_995)],
+            0_u32..12,
+            0_u32..6,
+            prop_oneof![Just(Side::Buy), Just(Side::Sell)],
+        ),
+    )
+        .prop_map(
+            |(
+                (pass, risk_mode, account_state, agent_mode, eligible),
+                (collar_breaking_bid, participation_today, held, protective_open, side),
+            )| Varied {
+                pass,
+                risk_mode,
+                account_state,
+                agent_mode,
+                eligible,
+                collar_breaking_bid,
+                participation_today,
+                held,
+                protective_open,
+                side,
+            },
+        )
+}
+
+fn varied_context(varied: &Varied) -> AdvisoryGateContext {
+    let asset = mandate_risk::AssetId::new(ASSET).unwrap();
+    let mut context = allowing();
+    context.pass = varied.pass;
+    context.risk.agent_mode = varied.risk_mode;
+    context.account.state = varied.account_state;
+    context.agent.mode = varied.agent_mode;
+    context.instrument.status_active = varied.eligible;
+    if varied.collar_breaking_bid {
+        context.market.quote = Some(mandate_risk::SaneQuote {
+            bid: Price::parse("80").unwrap(),
+            ask: Price::parse("80.1").unwrap(),
+            at: UtcNanos::parse("2026-09-21T14:59:59.000000000Z").unwrap(),
+        });
+    }
+    if varied.participation_today > 0 {
+        context.conduct.participation_today.insert(
+            asset.clone(),
+            Qty::parse(&varied.participation_today.to_string()).unwrap(),
+        );
+    }
+    if varied.held > 0 {
+        context
+            .agent
+            .positions
+            .insert(asset.clone(), Qty::parse(&varied.held.to_string()).unwrap());
+    }
+    if varied.protective_open > 0 {
+        let id = mandate_risk::ClientOrderId(9);
+        context.agent.working_orders.insert(id);
+        context.account.working_orders.insert(
+            id,
+            mandate_risk::WorkingOrder {
+                agent: context.agent.agent,
+                instrument: asset,
+                side: Side::Sell,
+                max_cost: mandate_num::Usd::ZERO,
+                open_qty: Qty::parse(&varied.protective_open.to_string()).unwrap(),
+                protective: true,
+                opening: false,
+                submitted_on: mandate_time::Date::parse("2026-09-21").unwrap(),
+            },
+        );
+    }
+    context
+}
+
 proptest! {
-    #![proptest_config(ProptestConfig { cases: 64, failure_persistence: None, ..ProptestConfig::default() })]
+    #![proptest_config(ProptestConfig { cases: 256, failure_persistence: None, ..ProptestConfig::default() })]
 
     /// The port never changes the gate's answer: for any quantity, the shared evaluation and the
     /// gate called directly agree, refusals included.
@@ -249,6 +449,24 @@ proptest! {
         let ours = evaluate(&proposal, &context());
         let theirs = direct(&proposal, &context());
         match ours {
+            Ok(decision) => prop_assert_eq!(format!("Ok({decision:?})"), theirs),
+            Err(PortError::Gate(error)) => prop_assert_eq!(format!("Err({error:?})"), theirs),
+            Err(other) => prop_assert!(false, "{other}"),
+        }
+    }
+
+    /// The port hands the gate every input as its host gave it: over varied passes, account and
+    /// agent modes, account states, eligibility, quotes, the day's participation, positions, protective
+    /// orders and sides, the shared
+    /// evaluation and the gate called directly agree.
+    #[test]
+    fn the_port_answers_as_the_gate_over_every_input(varied in varied(), units in 1_u32..12) {
+        let mut proposal = proposal(&units.to_string());
+        proposal.side = varied.side;
+        proposal.limit = Price::parse("100").unwrap();
+        let context = varied_context(&varied);
+        let theirs = direct(&proposal, &context);
+        match evaluate(&proposal, &context) {
             Ok(decision) => prop_assert_eq!(format!("Ok({decision:?})"), theirs),
             Err(PortError::Gate(error)) => prop_assert_eq!(format!("Err({error:?})"), theirs),
             Err(other) => prop_assert!(false, "{other}"),
