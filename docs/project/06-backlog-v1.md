@@ -3257,6 +3257,26 @@ enables `live` (ES-23, OPS-5).
   any record cannot be folded (DEC-2210 item 4), and a property test over random journaled runs
   shows the folded facts equal an independent accumulator over the same records.
 
+- **E21-60 (Proposed, M8, after E21-59; lane I2; DEC-2214, DEC-2249)** As the founder, I want the
+  runtime process's research source to fold the instruments other agents on the same connection
+  have claimed, from their own agent streams, so that a workspace with more than one agent deployed
+  can research instead of giving every pass no context. *Accepted when:* `mandate-daemon`'s cell
+  source reads every other deployed agent's stream in the environment, folds the instruments each
+  has admitted or pinned into `claimed_by_other_agents` through the same functions the core judges
+  V-006 and admission with, gives no context on a pass when any of those streams or records cannot
+  be read or folded (DEC-2210 item 4), and only then lifts DEC-2214 item 1's rule; a property test
+  over random journaled runs of several agents shows the folded claims equal an independent
+  accumulator over the same records.
+
+- **E21-61 (Proposed, M8, after E21-59; lane G, the model gateway; DEC-2249)** As the founder, I
+  want the cell's model-gateway meter journaled on `meter:{workspace_id}` (journal spec §9.19) and
+  folded back after a restart, so that a restarted runtime counts the day's research reservations
+  and spend instead of failing closed for the rest of the risk day. *Accepted when:* the cell's
+  worker writes `MeterReserved` and `MeterSettled` through the journal before and after each call,
+  rebuilds its meter from that stream at start, and the research source folds the same records
+  through `mandate_gateway::meter::spend`; DEC-2249 item 3's fail-closed rule is then lifted by its
+  own decision; a restart test shows the cap holds across a restart with reservations open.
+
 ## Won't (v1)
 
 Live retail trading before counsel signs off; users outside the US; options; Interactive Brokers and Coinbase connectors; native mobile apps; WebAssembly plug-ins; SAML and SCIM;
