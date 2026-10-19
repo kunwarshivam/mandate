@@ -23,7 +23,7 @@ use std::time::Duration;
 use mandate_accounting::InstrumentId;
 use mandate_executor::AccountWideScope;
 use reqwest::Url;
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderName, HeaderValue};
 use secrecy::{ExposeSecret, SecretString};
 
 use crate::data::{BarsRequest, DATA_HOST, DataTransport, QuoteRequest};
@@ -250,23 +250,40 @@ pub trait TradingTransport {
     -> impl Future<Output = Result<Response, TransportError>>;
 }
 
-/// The paper account's trading credentials, read through an injected lookup so a test never
-/// touches the process environment.
+/// The paper account's trading credentials: the key pair read through an injected lookup, so a
+/// test never touches the process environment, or a connection's OAuth access token (DEC-2306
+/// item 2, DEC-2624).
 ///
-/// `Debug` prints neither value: the derive is deliberately absent and the manual implementation
+/// `Debug` prints no value: the derive is deliberately absent and the manual implementation
 /// names the fields without their contents (`AGENTS.md` rule 7, ES-09).
 #[derive(Clone)]
 pub struct Credentials {
-    key_id: SecretString,
-    secret: SecretString,
+    auth: Auth,
+}
+
+/// How a request proves the account: Alpaca's key pair headers, or an OAuth bearer token.
+#[derive(Clone)]
+enum Auth {
+    KeyPair {
+        key_id: SecretString,
+        secret: SecretString,
+    },
+    Bearer(SecretString),
 }
 
 impl core::fmt::Debug for Credentials {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("Credentials")
-            .field("key_id", &"<redacted>")
-            .field("secret", &"<redacted>")
-            .finish()
+        match self.auth {
+            Auth::KeyPair { .. } => f
+                .debug_struct("Credentials")
+                .field("key_id", &"<redacted>")
+                .field("secret", &"<redacted>")
+                .finish(),
+            Auth::Bearer(_) => f
+                .debug_struct("Credentials")
+                .field("bearer", &"<redacted>")
+                .finish(),
+        }
     }
 }
 
@@ -281,8 +298,10 @@ impl Credentials {
         let key_id = read(KEY_ID_VAR)?;
         let secret = read(SECRET_VAR)?;
         Ok(Self {
-            key_id: SecretString::from(key_id),
-            secret: SecretString::from(secret),
+            auth: Auth::KeyPair {
+                key_id: SecretString::from(key_id),
+                secret: SecretString::from(secret),
+            },
         })
     }
 
@@ -291,6 +310,31 @@ impl Credentials {
     /// that path is M13's, not this stream's (milestones M6, `AGENTS.md` rule 8).
     pub fn from_env() -> Result<Self, CredentialsError> {
         Self::from_lookup(|name| std::env::var(name).ok())
+    }
+
+    /// A connection's OAuth access token, as the executor's vault lease holds it (DEC-2306 item 2,
+    /// DEC-2624): every request carries it as `Authorization: Bearer <token>`, and nothing else
+    /// that proves the account.
+    pub fn bearer(token: SecretString) -> Self {
+        Self {
+            auth: Auth::Bearer(token),
+        }
+    }
+
+    /// The headers that prove the account, each marked sensitive so no log of the request shows
+    /// it. A value no header can carry is refused, and nothing is sent.
+    fn headers(&self) -> Result<HeaderMap, TransportError> {
+        let mut headers = HeaderMap::new();
+        match &self.auth {
+            Auth::KeyPair { key_id, secret } => {
+                headers.insert(KEY_ID_HEADER, sensitive(key_id)?);
+                headers.insert(SECRET_HEADER, sensitive(secret)?);
+            }
+            Auth::Bearer(token) => {
+                headers.insert(AUTHORIZATION, bearer_header(token)?);
+            }
+        }
+        Ok(headers)
     }
 }
 
@@ -502,9 +546,7 @@ impl AlpacaPaperHttp {
         url: Url,
         body: Option<&str>,
     ) -> Result<Response, TransportError> {
-        let mut headers = HeaderMap::new();
-        headers.insert(KEY_ID_HEADER, sensitive(&self.credentials.key_id)?);
-        headers.insert(SECRET_HEADER, sensitive(&self.credentials.secret)?);
+        let headers = self.credentials.headers()?;
         let mut builder = self.client.request(method, url).headers(headers);
         if let Some(body) = body {
             builder = builder
@@ -525,6 +567,14 @@ fn sensitive(value: &SecretString) -> Result<HeaderValue, TransportError> {
     Ok(header)
 }
 
+/// `Bearer <token>`, marked sensitive.
+fn bearer_header(token: &SecretString) -> Result<HeaderValue, TransportError> {
+    sensitive(&SecretString::from(format!(
+        "Bearer {}",
+        token.expose_secret()
+    )))
+}
+
 /// Maps a transport failure to a reason that carries no URL, header, or body.
 fn classify(error: reqwest::Error) -> TransportError {
     if error.is_timeout() {
@@ -543,11 +593,13 @@ mod tests {
     use std::time::Duration;
 
     use mandate_time::UtcNanos;
+    use reqwest::header::AUTHORIZATION;
+    use secrecy::SecretString;
 
     use super::{
-        AlpacaPaperHttp, BarsRequest, Credentials, DATA_HOST, DataTransport, HttpRequest, Method,
-        QuoteRequest, TradingTransport, TransportError, bars_url, data_url, is_dot_segment,
-        position_path, sent_as_built, sent_as_built_on,
+        AlpacaPaperHttp, BarsRequest, Credentials, DATA_HOST, DataTransport, HttpRequest,
+        KEY_ID_HEADER, Method, QuoteRequest, SECRET_HEADER, TradingTransport, TransportError,
+        bars_url, data_url, is_dot_segment, position_path, sent_as_built, sent_as_built_on,
     };
 
     /// A request as [`HttpRequest::close_position`] builds one: straight from an instrument id,
@@ -565,6 +617,52 @@ mod tests {
         let credentials = Credentials::from_lookup(|name| Some(format!("unit-test-{name}")))
             .map_err(|e| e.to_string())?;
         AlpacaPaperHttp::new(credentials).map_err(|e| e.to_string())
+    }
+
+    /// A key pair travels as Alpaca's two key headers, both sensitive, and no `Authorization`.
+    #[test]
+    fn a_key_pair_is_sent_as_its_two_sensitive_headers() -> Result<(), String> {
+        let credentials = Credentials::from_lookup(|name| Some(format!("unit-test-{name}")))
+            .map_err(|e| e.to_string())?;
+        let headers = credentials.headers().map_err(|e| e.to_string())?;
+        assert_eq!(headers.len(), 2);
+        for (name, value) in [
+            (KEY_ID_HEADER, "unit-test-MANDATE_ALPACA_PAPER_KEY_ID"),
+            (SECRET_HEADER, "unit-test-MANDATE_ALPACA_PAPER_SECRET"),
+        ] {
+            let header = headers.get(&name).ok_or(format!("{name} is sent"))?;
+            assert_eq!(header.as_bytes(), value.as_bytes());
+            assert!(header.is_sensitive(), "{name} is marked sensitive");
+        }
+        assert!(headers.get(AUTHORIZATION).is_none());
+        Ok(())
+    }
+
+    /// DEC-2306 item 2: an OAuth access token travels as one sensitive `Authorization: Bearer`
+    /// header, and neither key header is sent beside it.
+    #[test]
+    fn a_bearer_token_is_sent_as_one_sensitive_authorization_header() -> Result<(), String> {
+        let credentials = Credentials::bearer(SecretString::from("unit-test-token~!#$"));
+        let headers = credentials.headers().map_err(|e| e.to_string())?;
+        assert_eq!(headers.len(), 1);
+        let header = headers.get(AUTHORIZATION).ok_or("Authorization is sent")?;
+        assert_eq!(header.as_bytes(), b"Bearer unit-test-token~!#$");
+        assert!(header.is_sensitive(), "the token is marked sensitive");
+        Ok(())
+    }
+
+    /// A token no header can carry is refused before anything is sent, and the refusal carries
+    /// nothing of it.
+    #[test]
+    fn a_token_no_header_can_carry_is_refused() {
+        for token in ["unit-test\ntoken", "unit-test\rtoken", "unit-test\0token"] {
+            let credentials = Credentials::bearer(SecretString::from(token));
+            assert_eq!(
+                credentials.headers().err(),
+                Some(TransportError::Request),
+                "{token:?}"
+            );
+        }
     }
 
     #[test]

@@ -12,7 +12,8 @@ use mandate_canon::{Digest, parse};
 use mandate_daemon::ResearchSource;
 use mandate_daemon::meter::CellMeter;
 use mandate_daemon::recorded::Bundle;
-use mandate_daemon::source::{CellSource, Rows, SourceFor, envelope};
+use mandate_daemon::source::FoldError;
+use mandate_daemon::source::{CellSource, Rows, SourceFor, envelope, last_research_reservation};
 use mandate_gateway::Outcome as CallOutcome;
 use mandate_gateway::kinds::{KeyOwner, Purpose};
 use mandate_gateway::meter::{MeterRecord, MeterStore, Reservation, Settlement, SharedMeter};
@@ -22,8 +23,8 @@ use mandate_journal::{AppendOutcome, ArtifactRef, Environment, StoredEvent, Stre
 use mandate_num::Usd;
 use mandate_research::{AssetId, LineageId, LineageState, WorkingUniverse};
 use mandate_runtime::{
-    ActorKind, AgentId, ConnectionId, Deployment, EventId, FoldedEvent, RuntimeState, Seq,
-    WorkspaceId, fold,
+    ActorKind, AgentId, ConnectionId, Deployment, EventId, FoldedEvent, RiskClock, RuntimeState,
+    Seq, WorkspaceId, fold,
 };
 use mandate_spec::document::Mandate;
 use mandate_store::Store;
@@ -81,6 +82,7 @@ fn row_at(
 struct Journal {
     control: Rc<RefCell<Vec<StoredEvent>>>,
     agent: Rc<RefCell<Vec<StoredEvent>>>,
+    meter: Rc<RefCell<Vec<StoredEvent>>>,
     unreadable: Rc<RefCell<BTreeSet<String>>>,
 }
 
@@ -92,6 +94,7 @@ impl Rows for Journal {
         match stream.as_str() {
             "ctl:ws1" => Some(self.control.borrow().clone()),
             "agent:ws1:agent-a" => Some(self.agent.borrow().clone()),
+            "meter:ws1" => Some(self.meter.borrow().clone()),
             _ => None,
         }
     }
@@ -117,6 +120,20 @@ impl Journal {
             event_type,
             "paper",
             payload,
+            event_time,
+        ));
+    }
+
+    /// A `MeterReserved` on the workspace's meter stream for `agent` (JSON: a quoted id or `null`)
+    /// and `purpose`, at `event_time`.
+    fn reserved_at(&self, agent: &str, purpose: &str, event_time: &str) {
+        let seq = u64::try_from(self.meter.borrow().len()).unwrap() + 1;
+        self.meter.borrow_mut().push(row_at(
+            "meter:ws1",
+            seq,
+            "MeterReserved",
+            "paper",
+            &format!(r#"{{"agent_id":{agent},"purpose":"{purpose}","max_cost_usd":"0.4"}}"#),
             event_time,
         ));
     }
@@ -984,4 +1001,72 @@ proptest! {
             Usd::parse(&dollars(spend_cents)).unwrap()
         );
     }
+}
+
+/// DEC-2259 item 3: the last reservation is the `event_time` of the agent's latest research
+/// `MeterReserved` on the meter stream, passing over other agents', the compiler's and other
+/// purposes'; `None` before the first; and a reservation whose agent, purpose or time cannot be
+/// read gives no answer, naming the member.
+#[test]
+fn the_last_research_reservation_is_the_agent_s_latest_on_the_meter_stream() {
+    let secs = |text: &str| RiskClock::from_secs(UtcNanos::parse_rfc3339(text).unwrap().secs());
+    assert_eq!(last_research_reservation(&[], AGENT), Ok(None));
+    let journal = Journal::default();
+    journal.reserved_at(r#""agent-a""#, "research", "2026-10-16T13:00:00.000000000Z");
+    journal.reserved_at(r#""agent-a""#, "research", "2026-10-16T14:10:00.000000000Z");
+    journal.reserved_at(r#""agent-b""#, "research", "2026-10-16T14:20:00.000000000Z");
+    journal.reserved_at(
+        r#""agent-a""#,
+        "llm_signal",
+        "2026-10-16T14:30:00.000000000Z",
+    );
+    journal.reserved_at("null", "compiler", "2026-10-16T14:40:00.000000000Z");
+    let rows = journal.meter.borrow().clone();
+    assert_eq!(
+        last_research_reservation(&rows, AGENT),
+        Ok(Some(secs("2026-10-16T14:10:00Z")))
+    );
+    assert_eq!(last_research_reservation(&rows, "agent-c"), Ok(None));
+    for (member, from, to) in [
+        ("agent_id", r#""agent_id":"agent-a","#, ""),
+        ("purpose", r#""purpose":"research""#, r#""purpose":7"#),
+        (
+            "event_time",
+            r#""event_time":"2026-10-16T13:00:00.000000000Z""#,
+            r#""event_time":"soon""#,
+        ),
+    ] {
+        let mut bad = rows.clone();
+        bad[0].body = String::from_utf8(bad[0].body.clone())
+            .unwrap()
+            .replace(from, to)
+            .into_bytes();
+        assert_eq!(
+            last_research_reservation(&bad, AGENT),
+            Err(FoldError::Unreadable { member }),
+            "{member}"
+        );
+    }
+}
+
+/// DEC-2259 item 3, wired: the pass carries the agent's last research reservation from the
+/// workspace's meter stream, and gives no context while that stream cannot be read.
+#[test]
+fn the_pass_carries_the_last_research_reservation_from_the_meter_stream() {
+    let (journal, source) = deployed(&bundle(), &researching());
+    assert_eq!(source.parts(&state()).unwrap().last_reservation, None);
+    journal.reserved_at(r#""agent-a""#, "research", "2026-10-16T14:10:00.000000000Z");
+    assert_eq!(
+        source.parts(&state()).unwrap().last_reservation,
+        Some(RiskClock::from_secs(
+            UtcNanos::parse_rfc3339("2026-10-16T14:10:00Z")
+                .unwrap()
+                .secs()
+        ))
+    );
+    journal
+        .unreadable
+        .borrow_mut()
+        .insert("meter:ws1".to_owned());
+    assert!(source.parts(&state()).is_none());
 }
