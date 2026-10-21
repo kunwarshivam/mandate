@@ -87,7 +87,6 @@ fn the_credential_section_holds_every_part() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn each_base_and_every_valid_credential_draft_parse_as_its_record() {
     let section = section();
     let mut failed = Vec::new();
@@ -112,7 +111,6 @@ fn each_base_and_every_valid_credential_draft_parse_as_its_record() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn every_invalid_credential_draft_is_refused_with_its_reason_at_its_path() {
     let section = section();
     let mut failed = Vec::new();
@@ -136,7 +134,6 @@ fn every_invalid_credential_draft_is_refused_with_its_reason_at_its_path() {
 /// since rule 251 is the API's against its own fold and the verifier's fold fails closed on it
 /// (§9.31).
 #[test]
-#[ignore = "pending E9-4"]
 fn append_judges_rules_249_and_250_alone_and_leaves_rule_251_to_the_writer() {
     let section = section();
     let mut failed = Vec::new();

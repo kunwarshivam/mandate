@@ -34,6 +34,7 @@ mod control_verify;
 mod deployment;
 mod draft;
 mod gateway;
+mod credentials;
 mod invalidation;
 mod membership;
 mod merkle;
