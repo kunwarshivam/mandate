@@ -7,6 +7,16 @@
 //! account stream's latest connect check passed for, and a lease the vault refused or an entry
 //! that does not decode refuses the start, before the process takes the account stream
 //! (`AGENTS.md` rules 3 and 7). The token reaches the paper host only as a bearer header.
+//!
+//! The start in `alpaca-paper` runs in this order: [`paper_settings`] from the flags,
+//! [`vault_config`] with the vault's CA from the mount, [`vault_login`] by Kubernetes auth with
+//! the pod's ServiceAccount token (the coordinator's row 23, V2's option B), then
+//! [`paper_broker`], which takes the lease and builds the broker, all before the process takes the
+//! account stream. Each pass [`RunLease::pass`] ticks the lease, and [`lease_verdict`] says
+//! whether the run goes on: a lost credential, and a rotated one, which the supervisor's restart
+//! leases afresh, drain the process and stop it.
+
+use std::path::PathBuf;
 
 use mandate_alpaca::{AlpacaPaperHttp, Credentials};
 use mandate_canon::{Value, parse};
@@ -16,9 +26,24 @@ use mandate_connections::vault::AccessToken;
 use mandate_executor::AccountScope;
 use mandate_journal::StreamId;
 use mandate_store::Store;
+use mandate_time::UtcNanos;
 use mandate_vault::SourceError;
 use mandate_vault::lease::{Lease, LeaseKeeper};
-use secrecy::ExposeSecret;
+use mandate_vault::openbao::OpenBaoConfig;
+use mandate_vault::policy::Identity;
+use mandate_vault::source::SecretSource;
+use secrecy::{ExposeSecret, SecretString};
+
+use crate::alpaca::AlpacaBroker;
+use crate::lease::{Held, Leased};
+
+/// The code every stub of this story's tests PR returns, so every pending test fails at it
+/// (DEC-77); the implementation PR replaces the stubs and removes it.
+#[allow(
+    non_upper_case_globals,
+    reason = "the pending gate recognises a stub by the name `Unimplemented` (DEC-137)"
+)]
+pub const Unimplemented: &str = "unimplemented";
 
 /// Which broker the process runs over.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -112,4 +137,115 @@ pub fn paper_token(
 /// `transport_unavailable` when the HTTPS client cannot be built.
 pub fn paper_transport(token: AccessToken) -> Result<AlpacaPaperHttp, &'static str> {
     AlpacaPaperHttp::new(Credentials::bearer(token.0)).map_err(|_| "transport_unavailable")
+}
+
+/// Where the vault is and where its CA is mounted: `--vault-address` and `--vault-dir`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VaultMount {
+    pub address: String,
+    pub dir: PathBuf,
+}
+
+/// The vault mount a run on Alpaca's paper host needs, from `flag` (the value after a flag):
+/// `None` for the fixture broker, which needs none.
+///
+/// # Errors
+/// [`broker_choice`]'s refusal; `broker_conflict` for `alpaca-paper` with `--fixture`, whose
+/// journal forgets everything at exit; `vault_address_missing` and `vault_dir_missing`.
+pub fn paper_settings(
+    flag: &dyn Fn(&str) -> Option<String>,
+    fixture: bool,
+) -> Result<Option<VaultMount>, &'static str> {
+    let _ = (flag, fixture);
+    Err(Unimplemented)
+}
+
+/// The vault's configuration: `mount`'s address, the CA read whole from the mount's `ca.crt`, and
+/// the cell's mounts.
+///
+/// # Errors
+/// `vault_ca_unreadable` when the CA is not a mounted file the reader accepts.
+pub fn vault_config(mount: &VaultMount) -> Result<OpenBaoConfig, &'static str> {
+    let _ = mount;
+    Err(Unimplemented)
+}
+
+/// The vault session of `connection`'s executor: `service_account_token` reads the pod's token
+/// first, and only then does `login` dial the vault as [`Identity::Executor`] of `connection`
+/// with it. Both are the caller's: `mandate-vault`'s reader and Kubernetes login in the process,
+/// scripted ones in a test.
+///
+/// # Errors
+/// `vault_credentials_unreadable` when the token cannot be read, and `vault_login_failed` when the
+/// vault cannot be reached or refuses it.
+pub fn vault_login<V>(
+    service_account_token: impl FnOnce() -> Result<SecretString, SourceError>,
+    login: impl FnOnce(Identity, SecretString) -> Result<V, SourceError>,
+    connection: &ConnectionId,
+) -> Result<V, &'static str> {
+    let _ = (service_account_token, login, connection);
+    Err(Unimplemented)
+}
+
+/// How a renewed secret is read: as the access token.
+pub type TokenReader = fn(&[u8]) -> Result<AccessToken, &'static str>;
+
+/// The broker on Alpaca's paper host over the token `vault` leases to `connection`, and the
+/// lease the run holds it under. A lease whose secret does not decode is given back before the
+/// start is refused.
+///
+/// # Errors
+/// [`paper_token`]'s refusals and [`paper_transport`]'s; `runtime_unavailable`.
+pub fn paper_broker<V: SecretSource>(
+    vault: V,
+    connection: &ConnectionId,
+    now: UtcNanos,
+) -> Result<(AlpacaBroker<AlpacaPaperHttp>, RunLease<V>), &'static str> {
+    let _ = (vault, connection, now);
+    Err(Unimplemented)
+}
+
+/// Whether the run goes on after a lease tick: only while the credential is unchanged.
+///
+/// # Errors
+/// `credential_rotated`, `credential_lost`, or the tick's own refusal: each drains the process and
+/// stops it for its supervisor.
+pub fn lease_verdict(tick: Result<Held<AccessToken>, &'static str>) -> Result<(), &'static str> {
+    let _ = tick;
+    Err(Unimplemented)
+}
+
+/// The lease a run holds its broker under, ticked once a pass until a tick stops the run.
+pub struct RunLease<V> {
+    leased: Leased<V, TokenReader>,
+    stopped: Option<&'static str>,
+}
+
+impl<V: SecretSource> RunLease<V> {
+    /// The run's hold on `leased`, which nothing has stopped yet.
+    pub fn new(leased: Leased<V, TokenReader>) -> Self {
+        Self {
+            leased,
+            stopped: None,
+        }
+    }
+
+    /// The code that stops the run, or `None` while it goes on: the first tick [`lease_verdict`]
+    /// refuses gives it, and every later pass answers it again without asking the vault.
+    #[expect(
+        clippy::todo,
+        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+    )]
+    pub fn pass(&mut self, _now: UtcNanos) -> Option<&'static str> {
+        todo!()
+    }
+
+    /// Gives the lease back to the vault when the run stops.
+    ///
+    /// # Errors
+    /// `revoke_failed` when the vault does not take it back; it then expires.
+    pub fn give_back(self) -> Result<(), &'static str> {
+        let _ = (self.leased, self.stopped);
+        Err(Unimplemented)
+    }
 }
