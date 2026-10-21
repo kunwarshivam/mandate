@@ -546,7 +546,7 @@ pub async fn owner_exit(
 
 /// A strict command's gate and body, decoded as `T`, or its refusal: §3.3's checks, then
 /// `invalid` with the decoder's violations.
-async fn strictly<T>(
+pub(crate) async fn strictly<T>(
     app: &App,
     headers: &HeaderMap,
     body: Body,

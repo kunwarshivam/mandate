@@ -8,22 +8,22 @@ use std::rc::Rc;
 
 use mandate_canon::Digest;
 use mandate_domain::AssetClass;
-use mandate_gateway::fake::{Recorded, RecordedTransport};
+use mandate_gateway::fake::{Recorded, RecordedTransport, openrouter_reply};
 use mandate_gateway::guard::GuardContext;
 use mandate_gateway::meter::{Caps, DeploymentMeter, MemoryMeter, Meter, SharedMeter};
 use mandate_gateway::money::Usd6;
 use mandate_gateway::openrouter::OpenRouter;
 use mandate_gateway::policy::EndpointPolicy;
 use mandate_gateway::provider::{Clock, Delivery, ManualClock, SequentialIds};
-use mandate_gateway::registry::Locality;
+use mandate_gateway::registry::{Locality, Reported};
 use mandate_gateway::{CallRecord, Gateway, RateCaps, RequestError, Settings};
 use mandate_journal::{ArtifactRef, ArtifactStore, Environment, get_artifact};
 use mandate_research::{AssetClass as EnvelopeClass, WorkingUniverse};
 use mandate_research_run::agentic::LoopBounds;
 use mandate_research_run::{
-    Allowlist, Answer, CallContext, CallPlan, DispatchScope, MemoryThesis, Readers, RecordedKey,
-    ResearchRunError, Retrieval, RetrievalPlan, RetrievedItem, Scope, SourceId, call, dispatch,
-    recorded_reply, retrieve,
+    Allowlist, Answer, CallContext, CallPlan, DispatchScope, EarlierTurn, MemoryThesis, Readers,
+    RecordedKey, ResearchRunError, Retrieval, RetrievalPlan, RetrievedItem, Scope, SourceId,
+    TurnParts, call, call_turn, dispatch, recorded_reply, retrieve,
 };
 use mandate_runtime::{
     DispatchRequest, DispatchedResult, ResearchInput, ResearchRequest, RetrievedObservation,
@@ -33,7 +33,7 @@ use mandate_store::MemoryStore;
 use mandate_time::UtcNanos;
 
 use crate::meter::CellMeter;
-use crate::recorded::{Bundle, BundleError, RecordedPlane, RecordedReply};
+use crate::recorded::{Bundle, BundleError, RecordedPlane, RecordedReply, ScriptedTurn};
 use crate::runtime::{ArtifactSink, ResearchParts, ResearchWorker};
 use crate::source::SourceFor;
 
@@ -69,8 +69,6 @@ pub enum DispatchError {
 /// Why a turn was answered with nothing (DEC-2264); the core's run bound then ends the run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TurnError {
-    /// The turn path is not implemented yet (E19-13, DEC-2264).
-    Unimplemented,
     /// The worker's bundle names no agentic loop (DEC-2263 item 5).
     NoLoop,
     /// The worker did not start the run, or it was cancelled.
@@ -136,6 +134,7 @@ pub struct RecordedWorker {
     plane: RecordedPlane,
     plan: RetrievalPlan,
     reply: RecordedReply,
+    turns: Vec<ScriptedTurn>,
     slug: String,
     provider: String,
     workspace: String,
@@ -241,6 +240,7 @@ impl RecordedWorker {
             plane: bundle.plane.clone(),
             plan: bundle.entry.plan,
             reply: bundle.reply.clone(),
+            turns: bundle.turns.clone(),
             slug: bundle.entry.identity.model_name.clone(),
             provider: bundle.endpoint.route.reported_provider.clone(),
             workspace: who.workspace,
@@ -385,8 +385,60 @@ impl RecordedWorker {
     ///
     /// # Errors
     /// [`TurnError`] when nothing is answered, and why.
-    pub fn turn(&mut self, _request: &TurnRequest) -> Result<(), TurnError> {
-        Err(TurnError::Unimplemented)
+    pub fn turn(&mut self, request: &TurnRequest) -> Result<(), TurnError> {
+        if self.bounds.is_none() {
+            return Err(TurnError::NoLoop);
+        }
+        let run_id = request.call.run_id.clone();
+        if !self.runs.contains_key(&run_id) {
+            return Err(TurnError::NotStarted);
+        }
+        let transcript = request
+            .transcript
+            .iter()
+            .map(|earlier| {
+                Some(EarlierTurn {
+                    response: self.sink.get(&earlier.response)?,
+                    results: earlier
+                        .results
+                        .iter()
+                        .map(|result| self.sink.get(result))
+                        .collect::<Option<_>>()?,
+                })
+            })
+            .collect::<Option<Vec<_>>>()
+            .ok_or(TurnError::Missing)?;
+        self.script_reply(Some(request.plan.turn));
+        let Some(run) = self.runs.get_mut(&run_id) else {
+            return Err(TurnError::NotStarted);
+        };
+        let parts = TurnParts {
+            call: &request.call,
+            plan: &request.plan,
+            kind: request.kind,
+            seed: &run.retrieval,
+            context: run.context.clone(),
+            transcript,
+        };
+        let (_, answer) = call_turn(&mut self.gateway, parts).map_err(TurnError::Unbuilt)?;
+        run.dispatched = true;
+        match answer {
+            Answer::Recorded(record) => {
+                let stored = [&record.prompt, &record.response]
+                    .into_iter()
+                    .flatten()
+                    .all(|bytes| self.sink.put(bytes));
+                if !stored {
+                    return Err(TurnError::Unstored);
+                }
+                self.ready.push(Ready::Called {
+                    run_id,
+                    record: Box::new(record),
+                });
+            }
+            Answer::Refused(error) => self.ready.push(Ready::Refused { run_id, error }),
+        }
+        Ok(())
     }
 
     fn start(&mut self, run_id: &str, cut_off: RiskClock, parts: &ResearchParts) {
@@ -477,24 +529,13 @@ impl RecordedWorker {
     }
 
     fn call(&mut self, plan: &CallPlan) {
+        if !self.runs.contains_key(&plan.run_id) {
+            return;
+        }
+        self.script_reply(None);
         let Some(run) = self.runs.get_mut(&plan.run_id) else {
             return;
         };
-        let now = (self.now)();
-        self.gateway.clock_mut().wait_until(now);
-        self.gateway.transport_mut().script(vec![Recorded {
-            latency_ms: self.reply.latency_ms,
-            delivery: Delivery::Response {
-                status: 200,
-                body: recorded_reply(
-                    &self.reply.output,
-                    &self.slug,
-                    &self.provider,
-                    self.reply.usage,
-                ),
-                retry_after_ms: None,
-            },
-        }]);
         let Ok((_, answer)) = call(&mut self.gateway, plan, &run.retrieval, run.context.clone())
         else {
             return;
@@ -516,6 +557,53 @@ impl RecordedWorker {
             }
             Answer::Refused(error) => self.ready.push(Ready::Refused { run_id, error }),
         }
+    }
+
+    /// Moves the gateway's clock to now and scripts the recorded reply for the next call alone: an
+    /// agentic run's turn n its scripted turn n, and the single call and every turn past the script
+    /// the final reply (DEC-2266). A reply left by a call that was never sent (one not built, or
+    /// refused before sending) is cleared first.
+    fn script_reply(&mut self, turn: Option<u32>) {
+        let now = (self.now)();
+        self.gateway.clock_mut().wait_until(now);
+        self.gateway.transport_mut().clear_script();
+        let scripted = turn
+            .and_then(|turn| turn.checked_sub(1))
+            .and_then(|index| self.turns.get(usize::try_from(index).ok()?));
+        let (latency_ms, body) = match scripted {
+            Some(scripted) => {
+                let calls: Vec<(&str, &str)> = scripted
+                    .calls
+                    .iter()
+                    .map(|(name, arguments)| (name.as_str(), arguments.as_str()))
+                    .collect();
+                let reported = Reported {
+                    model: Some(self.slug.clone()),
+                    provider: Some(self.provider.clone()),
+                };
+                (
+                    scripted.latency_ms,
+                    openrouter_reply(None, &calls, &reported, scripted.usage),
+                )
+            }
+            None => (
+                self.reply.latency_ms,
+                recorded_reply(
+                    &self.reply.output,
+                    &self.slug,
+                    &self.provider,
+                    self.reply.usage,
+                ),
+            ),
+        };
+        self.gateway.transport_mut().script(vec![Recorded {
+            latency_ms,
+            delivery: Delivery::Response {
+                status: 200,
+                body,
+                retry_after_ms: None,
+            },
+        }]);
     }
 
     fn cancel(&mut self, run_id: &str) {
