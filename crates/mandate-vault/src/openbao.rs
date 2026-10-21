@@ -38,7 +38,7 @@ use crate::source::{GRANT_SECS, Grant, SecretSource};
 /// How long one request may take before the vault counts as unreachable.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 /// The longest an executor's token lives through renewals before it logs in again: 30 days.
-const EXECUTOR_TOKEN_MAX_SECS: i64 = 2_592_000;
+pub(crate) const EXECUTOR_TOKEN_MAX_SECS: i64 = 2_592_000;
 /// Whether this build may use a dev server: only this crate's own unit-test build, so no other
 /// crate's build, test or not, can turn it on (DEC-977 item 6).
 const ALLOW_DEV_SERVER: bool = cfg!(test);
@@ -307,8 +307,8 @@ impl OpenBaoSource {
         self.http.call(method, path, Some(&self.token), body).await
     }
 
-    fn data_path(&self, path: &SecretPath) -> String {
-        format!("{}/data/{}", self.mounts.kv, kv_path(path))
+    fn data_path(&self, path: &SecretPath) -> Result<String, SourceError> {
+        Ok(format!("{}/data/{}", self.mounts.kv, kv_path(path)?))
     }
 
     fn token_expiry(&self) -> Result<UtcNanos, SourceError> {
@@ -325,7 +325,7 @@ impl OpenBaoSource {
     }
 
     async fn read_value(&self, path: &SecretPath) -> Result<Option<SecretSlice<u8>>, SourceError> {
-        let value = match self.call(Method::GET, &self.data_path(path), None).await {
+        let value = match self.call(Method::GET, &self.data_path(path)?, None).await {
             Ok(value) => value,
             Err(SourceError::Missing) => return Ok(None),
             Err(e) => return Err(e),
@@ -355,7 +355,7 @@ impl SecretSource for OpenBaoSource {
         let mut encoded = STANDARD.encode(secret.expose_secret());
         let body = json!({ "data": { "value": encoded } });
         encoded.zeroize();
-        self.call(Method::POST, &self.data_path(path), Some(&body))
+        self.call(Method::POST, &self.data_path(path)?, Some(&body))
             .await
             .map(drop)
     }
@@ -365,7 +365,7 @@ impl SecretSource for OpenBaoSource {
     }
 
     async fn delete(&self, path: &SecretPath) -> Result<(), SourceError> {
-        let metadata = format!("{}/metadata/{}", self.mounts.kv, kv_path(path));
+        let metadata = format!("{}/metadata/{}", self.mounts.kv, kv_path(path)?);
         match self.call(Method::DELETE, &metadata, None).await {
             Ok(_) | Err(SourceError::Missing) => Ok(()),
             Err(e) => Err(e),
@@ -565,7 +565,7 @@ pub async fn provision(
     let mut credentials = Vec::new();
     for identity in provisioned_identities(connections) {
         let policy = policy_name(&identity, mounts);
-        let hcl = openbao_policy(&identity, connections, mounts);
+        let hcl = openbao_policy(&identity, connections, mounts)?;
         http.call(
             Method::PUT,
             &format!("sys/policies/acl/{policy}"),
