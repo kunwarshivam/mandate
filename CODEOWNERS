@@ -96,6 +96,7 @@
 /crates/mandate-stub-issuer/ @kunwarshivam
 /crates/mandate-tenant/     @kunwarshivam
 /crates/mandate-time/       @kunwarshivam
+/crates/mandate-token-exchange/ @kunwarshivam
 /crates/mandate-vault-local/ @kunwarshivam
 /crates/mandate-vault/      @kunwarshivam
 /crates/mandate-version-backtest/ @kunwarshivam
