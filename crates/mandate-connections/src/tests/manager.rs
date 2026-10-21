@@ -20,7 +20,7 @@ use crate::manager::StartRefusal as R;
 use crate::manager::{
     AccountRefFold, ConnectOutcome, FinishPlan, FinishRefusal, IdFold, ManagerEffect, RefusalCause,
     RefusedAs, RequestFold, RequestMembers, StartFacts, StartPlan, StartRequest, StepUpCheck,
-    StepUpEvidence, connect_digest, plan_finish, plan_start,
+    StepUpEvidence, connect_digest, oauth_connect_digest, plan_finish, plan_start,
 };
 use crate::record::Broker::{Alpaca, KrakenDerivativesUs, Robinhood};
 use crate::record::Environment::{Live, Paper};
@@ -541,4 +541,20 @@ fn a_finish_closes_its_request_once_or_plans_no_effect() {
             Ok(())
         })
         .unwrap();
+}
+
+/// DEC-2621 item 4: an OAuth connect's digest binds the disclosure's document and version, written
+/// out by hand here, so evidence for one version is refused for another.
+#[test]
+fn an_oauth_connect_digest_binds_the_disclosure_it_confirms() {
+    let canonical = br#"{"action":"connect","broker":"alpaca","disclosure":{"document":"alpaca_oauth_token_breadth","version":"1"},"environment":"paper","workspace_id":"ws_01"}"#;
+    let one = oauth_connect_digest("ws_01", "alpaca_oauth_token_breadth", "1").unwrap();
+    assert_eq!(one, Digest::of(canonical));
+    let two = oauth_connect_digest("ws_01", "alpaca_oauth_token_breadth", "2").unwrap();
+    let other = oauth_connect_digest("ws_02", "alpaca_oauth_token_breadth", "1").unwrap();
+    let document = oauth_connect_digest("ws_01", "another_document", "1").unwrap();
+    assert_ne!(one, two);
+    assert_ne!(one, other);
+    assert_ne!(one, document);
+    assert_ne!(one, connect_digest("ws_01", Alpaca, Paper).unwrap());
 }
