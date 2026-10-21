@@ -11421,11 +11421,23 @@ fn classify<'a>(changed: impl Iterator<Item = &'a str>) -> (Vec<&'a str>, Vec<&'
     for file in changed {
         if PROTECTED_PATHS.iter().any(|p| file.starts_with(p)) {
             protected.push(file);
-        } else if CODE_PATHS.iter().any(|p| file.starts_with(p)) {
+        } else if CODE_PATHS.iter().any(|p| file.starts_with(p)) && !is_crate_tests_path(file) {
             code.push(file);
         }
     }
     (protected, code)
+}
+
+/// Whether `file` is a test of a crate rather than the code it tests: a `tests/` directory under a
+/// crate (`crates/<crate>/tests/…`), the crate-level integration tests, per DEC-917. Such a file
+/// alters no behaviour any spec describes, so ES-22's split guard lets it travel with the protected
+/// path it is the reproduction of. A `src/` file stays code wholesale, whatever `#[cfg(test)]`
+/// modules it holds inline, and so does `xtask/src/`; the classifier reads paths, never contents.
+fn is_crate_tests_path(file: &str) -> bool {
+    let mut segments = file.split('/');
+    segments.next() == Some("crates")
+        && segments.next().is_some_and(|krate| !krate.is_empty())
+        && segments.next() == Some("tests")
 }
 
 fn contains_dec_id(text: &str) -> bool {
@@ -13193,6 +13205,42 @@ mod tests {
         assert_eq!(
             code,
             ["crates/mandate-journal/src/lib.rs", "xtask/src/main.rs"]
+        );
+    }
+
+    /// DEC-917: a crate's `tests/` directory holds tests, not the code ES-22's split guards. Such a
+    /// file travels with the protected path it reproduces; a `src/` file stays code wholesale, and
+    /// so does `xtask/src/`, whatever `#[cfg(test)]` modules either holds inline.
+    #[test]
+    fn a_crates_tests_directory_is_tests_not_code() {
+        let (protected, code) = classify(
+            [
+                "crates/mandate-journal/tests/credentials.rs",
+                "crates/mandate-api/tests/body_workspace.rs",
+                "crates/mandate-journal/src/lib.rs",
+                "crates/mandate-api/src/requests.rs",
+                "docs/specs/journal.md",
+                "schemas/workspace-api/examples/x.json",
+                "xtask/src/main.rs",
+                "xtask/tests/planned.rs",
+            ]
+            .into_iter(),
+        );
+        assert_eq!(
+            protected,
+            [
+                "docs/specs/journal.md",
+                "schemas/workspace-api/examples/x.json"
+            ]
+        );
+        assert_eq!(
+            code,
+            [
+                "crates/mandate-journal/src/lib.rs",
+                "crates/mandate-api/src/requests.rs",
+                "xtask/src/main.rs",
+            ],
+            "a src file and xtask/src stay code; a crate's tests do not"
         );
     }
 
