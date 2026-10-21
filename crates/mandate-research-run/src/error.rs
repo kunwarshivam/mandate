@@ -22,6 +22,9 @@ pub enum ResearchRunError {
     /// not asked for, results that are not the dispatch's calls, or a second end (§6.9).
     #[error("out of the loop's order: {what}")]
     LoopOrder { what: &'static str },
+    /// An agentic loop whose bounds or declarations no registry may pin (DEC-2262 item 5).
+    #[error("the agentic loop is not one a registry may pin")]
+    UnpinnableLoop,
 }
 
 impl ResearchRunError {
@@ -32,6 +35,7 @@ impl ResearchRunError {
             Self::ObservationsMismatch { .. } => "observations_mismatch",
             Self::TimeOutOfRange => "time_out_of_range",
             Self::LoopOrder { .. } => "loop_order",
+            Self::UnpinnableLoop => "unpinnable_loop",
         }
     }
 }

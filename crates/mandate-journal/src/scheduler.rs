@@ -149,7 +149,7 @@ fn negative(decimal: &str) -> bool {
     decimal.starts_with('-')
 }
 
-fn positive(decimal: &str) -> bool {
+pub(crate) fn positive(decimal: &str) -> bool {
     !negative(decimal) && decimal != "0"
 }
 
@@ -171,7 +171,7 @@ fn magnitude(a: &str, b: &str) -> Ordering {
 
 /// Two normalized decimals compared by value: every negative is below every non-negative, and
 /// among negatives the larger magnitude is the smaller value.
-fn signed(a: &str, b: &str) -> Ordering {
+pub(crate) fn signed(a: &str, b: &str) -> Ordering {
     match (negative(a), negative(b)) {
         (true, false) => Ordering::Less,
         (false, true) => Ordering::Greater,

@@ -1,9 +1,0 @@
-file = "crates/mandate-cli/tests/acknowledgments.rs"
-test = "a_plain_acknowledgment_has_section_9_28s_members_and_a_journal_accepts_it"
-reason = """
-DEC-2512 item 2 (journal spec §9.28, DEC-2509 item 1): a plain `agent acknowledge` already commits,
-with DEC-279 item 7's six members and `risk_clock` in integer seconds, so `Draft::parse` refuses it
-at `payload.requested_by`, the CLI's own answer rather than a stub's report. Stubbing it would
-break every passing test that acknowledges. The implementation PR writes §9.28's nine members and
-deletes this file with the test's `#[ignore]` line.
-"""

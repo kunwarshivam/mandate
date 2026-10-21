@@ -7,10 +7,9 @@ mod common;
 
 use std::collections::BTreeMap;
 
-use common::control::OTHER_WORKSPACE;
 use common::control::{
-    Rows, T0, activated, activation, change, hosted_stream, member, membership, other_stream,
-    query, reactivation, record, roles, scope,
+    OTHER_WORKSPACE, Rows, T0, activated, activation, change, hosted_stream, member, membership,
+    other_stream, query, reactivation, record, roles, scope,
 };
 use common::{at, hosted};
 use mandate_api_server::members::{ControlLookup, RowsRefused, control_parser, membership_records};

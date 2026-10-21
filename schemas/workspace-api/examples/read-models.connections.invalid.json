@@ -1,0 +1,20 @@
+[
+  {
+    "label": "a missing connections",
+    "remove": [
+      "/connections"
+    ]
+  },
+  {
+    "label": "a credential member in a connection",
+    "set": {
+      "/connections/0/credential": "x"
+    }
+  },
+  {
+    "label": "an unknown top-level member",
+    "set": {
+      "/extra": 1
+    }
+  }
+]

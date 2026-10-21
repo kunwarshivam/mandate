@@ -40,15 +40,8 @@ use std::sync::Arc;
 
 use mandate_accounting::{AssetClass, InstrumentId, Side};
 use mandate_alpaca::{RetryPolicy, TokioPause, TradingClient, TradingTransport};
-use mandate_builder::{
-    AccountSnapshot as BuilderAccountSnapshot, Action as BuilderAction, ActionContext,
-    BuilderMandate, Clip as BuilderClip, Direction, Market as BuilderMarket,
-    ModelOutput as BuilderModelOutput, RiskContext as BuilderRiskContext,
-};
-use mandate_canon::{Digest, Key, Object, Value};
-use mandate_domain::{
-    AutonomyDecision, CapabilityProfile, ProfileError, Purpose as BuilderPurpose,
-};
+use mandate_canon::{Key, Object, Value};
+use mandate_domain::{CapabilityProfile, ProfileError};
 use mandate_executor::{
     AccountRef, AccountScope, AgentId as ExecutorAgentId, BindingGateSource, BrokerConnector,
     BrokerOutcome, BrokerRequest, ConnectorError, EventId, ExecutorConfig, ExecutorState,
@@ -63,19 +56,13 @@ use mandate_journal_pg::PgJournal;
 use mandate_marketdata::dataset;
 use mandate_marketdata::inspect::{self, ActionsReport, GapClass, Inspection};
 use mandate_marketdata::model::{Bar, Kind, Records, TimeUnit, Timeframe};
-use mandate_num::{Fraction, Price, Qty, ShareIncrement, SignedQty, Usd, UsdExact};
-use mandate_risk::{
-    AccountSnapshot as GateAccountSnapshot, AgentSnapshot as GateAgentSnapshot, ConductState,
-    Decision, FlattenInitiator, FlattenInput, GateConfig, GateInput, GatePass,
-    InstrumentSnapshot as GateInstrumentSnapshot, MarketSnapshot as GateMarketSnapshot, Origin,
-    ProposedKind, ProposedOrder, RiskSnapshot, TimeInForce as GateTimeInForce,
-    ValidatedMandate as GateMandate, WorkingUniverse, agent_flatten,
-};
+use mandate_num::{Fraction, Price, Qty, ShareIncrement, SignedQty, Usd};
+use mandate_risk::{Decision, FlattenInitiator, FlattenInput, agent_flatten};
 use mandate_robinhood::Tools;
 use mandate_runtime::{
-    AgentId, ApprovalSettings, Autonomy, Classified, DecisionClip, ExitOrigin, FlattenLeg,
-    FlattenPlan, FlattenRequest, Initiator, IntentBody, IntentHandoff, LiveScope, MandateView,
-    ModelDirection, OrderExecution, Proposal, Purpose, RiskClock, SignalInputs, TimeInForce,
+    AgentId, Classified, FlattenLeg, FlattenPlan, FlattenRequest, Initiator, IntentBody,
+    IntentHandoff, LiveScope, MandateView, OrderExecution, Proposal, Purpose, RiskClock,
+    SignalInputs, TimeInForce,
 };
 use mandate_spec::policy::PolicyLevel;
 use mandate_spec::{ValidatedMandate, ValidationContext};
@@ -799,55 +786,8 @@ impl Protection for ExecutorProtection {
     }
 }
 
-/// Trusted facts for one decision that neither the mandate document nor runtime proposal contains.
-#[derive(Debug, Clone)]
-pub struct BuilderContext {
-    pub account: BuilderAccountSnapshot,
-    pub market: BuilderMarket,
-    pub risk: BuilderRiskContext,
-    pub action: ActionContext,
-    /// Effective model content hashes from the trusted model registry, keyed by `(id, version)`.
-    /// Runtime outputs do not carry this §8.1 identity, so absence refuses instead of copying the
-    /// mandate's expected hash into an observation that never stated it.
-    pub model_content_hashes: BTreeMap<(String, String), Digest>,
-    pub execution: OrderExecution,
-}
-
-/// Proposed-order fields the runtime proposal does not carry.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AdvisoryOrderFacts {
-    pub kind: ProposedKind,
-    pub tif: GateTimeInForce,
-    pub extended_hours: bool,
-    pub origin: Origin,
-    pub owner_confirmed_bid: Option<Price>,
-    pub client_order_id: mandate_risk::ClientOrderId,
-    pub fee_reservation: Usd,
-}
-
-/// Every advisory-gate fact other than the four order fields copied from the runtime proposal.
-#[derive(Debug, Clone)]
-pub struct AdvisoryGateContext {
-    pub now: UtcNanos,
-    pub pass: GatePass,
-    pub config: GateConfig,
-    pub mandate: GateMandate,
-    pub risk: RiskSnapshot,
-    pub account: GateAccountSnapshot,
-    pub agent: GateAgentSnapshot,
-    pub instrument: GateInstrumentSnapshot,
-    pub market: GateMarketSnapshot,
-    pub conduct: ConductState,
-    pub universe: WorkingUniverse,
-    pub order: AdvisoryOrderFacts,
-}
-
-/// The typed facts used after admission for one deterministic decision.
-#[derive(Debug, Clone)]
-pub struct DecisionContext {
-    pub builder: Option<BuilderContext>,
-    pub gate: Option<AdvisoryGateContext>,
-}
+pub use mandate_ports::{AdvisoryGateContext, AdvisoryOrderFacts, BuilderContext, DecisionContext};
+use mandate_ports::{ViewFacts, validate_order_execution};
 
 /// Inputs outside the mandate document for validation, admission, and one decision run.
 #[derive(Debug, Clone)]
@@ -906,42 +846,16 @@ fn validated_mandate(path: &Path, context: &RunContext) -> Result<ValidatedManda
 }
 
 fn runtime_view(validated: &ValidatedMandate, context: &RunContext) -> Result<MandateView, Cause> {
-    let document = validated.mandate();
-    let working_universe = document
-        .universe
-        .pinned_instruments
-        .iter()
-        .map(|instrument| {
-            InstrumentId::new(instrument.asset_id.as_str()).map_err(|_| Cause::Absent {
-                what: "a runtime instrument id",
-            })
-        })
-        .collect::<Result<BTreeSet<_>, Cause>>()?;
-    let environment = match document.environment {
-        mandate_domain::Environment::Paper => mandate_journal::Environment::Paper,
-        mandate_domain::Environment::Live => mandate_journal::Environment::Live,
-    };
-    let approvers = resolve(&document.autonomy.approval.approvers, &context.members);
-    Ok(MandateView {
-        version: format!(
-            "sha256:{}",
-            document
-                .version()
-                .map_err(|_| Cause::Absent {
-                    what: "the validated mandate's canonical version",
-                })?
-                .digest()
+    let facts = ViewFacts {
+        approvers: resolve(
+            &validated.mandate().autonomy.approval.approvers,
+            &context.members,
         ),
-        working_universe,
+        author: context.author.clone(),
         restricted_instruments: context.restricted_instruments.clone(),
-        approval: ApprovalSettings {
-            approvers,
-            author: context.author.clone(),
-            timeout_s: i64::from(document.autonomy.approval.timeout_s),
-            environment,
-            live_cli_confirm: context.live_cli_confirm.clone(),
-        },
-    })
+        live_cli_confirm: context.live_cli_confirm.clone(),
+    };
+    Ok(mandate_ports::runtime_view(validated, facts)?)
 }
 
 /// The mandate document at `path`, validated with no violation against the injected run context.
@@ -1107,203 +1021,6 @@ pub struct BuilderPlan {
     pub context: Option<Rc<RunContext>>,
 }
 
-fn builder_output(
-    output: &mandate_runtime::ModelOutput,
-    outer_model: &str,
-    outer_instrument: &InstrumentId,
-    mandate: &BuilderMandate,
-    context: &BuilderContext,
-) -> Result<BuilderModelOutput, Cause> {
-    if output.model_id != outer_model || output.instrument_id != *outer_instrument {
-        return Err(Cause::Absent {
-            what: "a consistently keyed model output",
-        });
-    }
-    let pinned = mandate
-        .models
-        .iter()
-        .find(|model| {
-            model.id.as_str() == output.model_id && model.version.as_str() == output.model_version
-        })
-        .ok_or(Cause::Absent {
-            what: "a model output pinned by the validated mandate",
-        })?;
-    let content_hash = context
-        .model_content_hashes
-        .get(&(output.model_id.clone(), output.model_version.clone()))
-        .copied()
-        .ok_or(Cause::Absent {
-            what: "the model output's trusted content hash",
-        })?;
-    if content_hash != output.content_hash {
-        return Err(Cause::Absent {
-            what: "the model output's matching trusted content hash",
-        });
-    }
-    let direction = match &output.direction {
-        ModelDirection::Long => Direction::Long,
-        ModelDirection::Other(_) => {
-            return Err(Cause::Absent {
-                what: "a supported model output direction",
-            });
-        }
-    };
-    Ok(BuilderModelOutput {
-        model_id: pinned.id.clone(),
-        model_version: pinned.version.clone(),
-        content_hash,
-        instrument: mandate_domain::AssetId::parse(output.instrument_id.as_str())
-            .map_err(mandate_builder::BuilderError::from)?,
-        as_of: UtcNanos::from_parts(output.as_of.secs(), 0).map_err(|_| Cause::Absent {
-            what: "the model output's timestamp",
-        })?,
-        expires_at: UtcNanos::from_parts(output.expires_at.secs(), 0).map_err(|_| {
-            Cause::Absent {
-                what: "the model output's expiry",
-            }
-        })?,
-        direction,
-        conviction: output.conviction,
-        confidence: output.confidence,
-    })
-}
-
-fn builder_outputs(
-    inputs: &SignalInputs,
-    mandate: &BuilderMandate,
-    context: &BuilderContext,
-) -> Result<Vec<BuilderModelOutput>, Cause> {
-    inputs
-        .outputs
-        .iter()
-        .flat_map(|(model, instruments)| {
-            instruments
-                .iter()
-                .map(move |(instrument, output)| (model, instrument, output))
-        })
-        .map(|(model, instrument, output)| {
-            builder_output(output, model, instrument, mandate, context)
-        })
-        .collect()
-}
-
-fn runtime_purpose(purpose: BuilderPurpose) -> Purpose {
-    match purpose {
-        BuilderPurpose::Open => Purpose::Open,
-        BuilderPurpose::Increase => Purpose::Increase,
-        BuilderPurpose::DiscretionaryExit => Purpose::DiscretionaryExit,
-        BuilderPurpose::OwnerExit => Purpose::OwnerExit,
-        BuilderPurpose::RiskExit => Purpose::RiskExit,
-        BuilderPurpose::Protective => Purpose::Protective,
-    }
-}
-
-fn runtime_proposal(
-    proposal: mandate_builder::Proposal,
-    context: &BuilderContext,
-    mandate: &BuilderMandate,
-    validated: &ValidatedMandate,
-) -> Result<Option<Proposal>, Cause> {
-    let mut clips_applied = Vec::new();
-    if proposal.clipped_by.contains(&BuilderClip::Limits) {
-        let delta = proposal.sizes.delta.ok_or(Cause::Absent {
-            what: "the builder delta behind its limit clip",
-        })?;
-        let max_order = UsdExact::of(mandate.limits.max_order_usd);
-        let position_room = proposal
-            .sizes
-            .cap
-            .checked_sub(proposal.sizes.current_mv)?
-            .checked_sub(UsdExact::of(context.account.working_opening_cost))?;
-        let gross_room = UsdExact::of(mandate.limits.max_gross_exposure_usd)
-            .min(UsdExact::of(context.account.agent_equity))?
-            .checked_sub(UsdExact::of(context.account.gross_usd))?;
-        if max_order.is_below(delta)? {
-            clips_applied.push(DecisionClip::MaxOrderUsd);
-        }
-        if position_room.is_below(delta)? {
-            clips_applied.push(DecisionClip::PositionCap);
-        }
-        if gross_room.is_below(delta)? {
-            clips_applied.push(DecisionClip::GrossExposureCap);
-        }
-        if clips_applied.is_empty() {
-            return Err(Cause::Absent {
-                what: "the exact journal clip applied by the builder",
-            });
-        }
-    }
-    if proposal.clipped_by.contains(&BuilderClip::Goal) {
-        return Err(Cause::Absent {
-            what: "the exact journal goal clip applied by the builder",
-        });
-    }
-    let (side, purpose, qty, limit) = match proposal.action {
-        BuilderAction::Hold { .. } => return Ok(None),
-        BuilderAction::Buy {
-            purpose,
-            qty,
-            limit_price,
-            ..
-        } => (Side::Buy, runtime_purpose(purpose), qty, limit_price),
-        BuilderAction::Sell {
-            purpose,
-            qty,
-            limit_price,
-            ..
-        } => (Side::Sell, runtime_purpose(purpose), qty, limit_price),
-    };
-    let instrument =
-        InstrumentId::new(context.market.instrument.as_str()).map_err(|_| Cause::Absent {
-            what: "the builder market's runtime instrument id",
-        })?;
-    validate_order_execution(side, purpose, context.execution)?;
-    let mandate_requires_protection = validated.mandate().protection.enabled;
-    let execution_matches_mandate = match side {
-        Side::Buy => context.execution.protection_required == mandate_requires_protection,
-        Side::Sell => !context.execution.protection_required,
-    };
-    if context.execution.asset_class != context.market.asset_class || !execution_matches_mandate {
-        return Err(Cause::Absent {
-            what: "the mandate-derived execution policy",
-        });
-    }
-    let outputs_used = proposal
-        .combined
-        .outputs_used
-        .iter()
-        .map(|model| model.as_str().to_owned())
-        .collect();
-    let model_weights = validated
-        .mandate()
-        .behavior
-        .signal_models
-        .iter()
-        .map(|model| {
-            (
-                model.id.as_str().to_owned(),
-                Value::Str(model.weight.to_string()),
-            )
-        })
-        .collect();
-    Ok(Some(Proposal {
-        instrument,
-        asset_class: context.market.asset_class,
-        side,
-        qty,
-        limit,
-        purpose,
-        exit_origin: (purpose == Purpose::DiscretionaryExit).then_some(ExitOrigin::Signal),
-        exit_conviction: Some(Value::Str(proposal.combined.exit_conviction.to_string())),
-        buy_conviction: Some(Value::Str(proposal.combined.buy_conviction.to_string())),
-        combined_score: Value::Str(proposal.combined.score.to_string()),
-        outputs_used,
-        model_weights,
-        clips_applied,
-        execution: Some(context.execution),
-    }))
-}
-
 impl Sizing for BuilderPlan {
     fn size(&self, view: &MandateView, inputs: &SignalInputs) -> Result<Option<Proposal>, Cause> {
         let context = required_context(&self.context)?;
@@ -1313,35 +1030,13 @@ impl Sizing for BuilderPlan {
                 what: "the admitted mandate view used for sizing",
             });
         }
-        let mandate = BuilderMandate::try_from(&validated)?;
-        let builder = builder_context(context)?;
-        let outputs = builder_outputs(inputs, &mandate, builder)?;
-        let now = UtcNanos::from_parts(inputs.now.secs(), 0).map_err(|_| Cause::Absent {
-            what: "the decision timestamp",
-        })?;
-        let proposal = mandate_builder::propose(
-            &mandate,
-            &builder.account,
-            &builder.market,
-            &builder.risk,
-            &outputs,
-            now,
-        )?;
-        runtime_proposal(proposal, builder, &mandate, &validated)
+        Ok(mandate_ports::size(
+            &validated,
+            builder_context(context)?,
+            inputs,
+        )?)
     }
 }
-
-fn action_order_matches(
-    action_order_usd: Usd,
-    proposal_qty: Qty,
-    proposal_limit: Price,
-) -> Result<bool, Cause> {
-    Ok(action_order_usd == proposal_qty.notional(proposal_limit)?)
-}
-
-/// The `decided_by` label of mandate spec §6.2 step 5c, the policy overlay (DEC-536 item 2;
-/// journal spec §9.1).
-const POLICY_OVERLAY: &str = "policy_overlay";
 
 impl Classifier for BuilderPlan {
     /// Mandate spec §6.2 step 5c (DEC-534 item 2, DEC-536): an opening or an increase while the
@@ -1357,40 +1052,16 @@ impl Classifier for BuilderPlan {
                 what: "the admitted mandate view used for classification",
             });
         }
-        let action = &builder_context(context)?.action;
-        let expected_score = Value::Str(action.combined_score.to_string());
-        if action.instrument.as_str() != proposal.instrument.as_str()
-            || action.asset_class != proposal.asset_class
-            || runtime_purpose(action.purpose) != proposal.purpose
-            || expected_score != proposal.combined_score
-            || !action_order_matches(action.order_usd, proposal.qty, proposal.limit)?
-        {
-            return Err(Cause::Absent {
-                what: "classification facts for the proposed action",
-            });
-        }
-        let policy_nonconforming = proposal.purpose.adds_risk()
-            && context
-                .governance
-                .as_ref()
-                .is_some_and(|governance| !governance.violations.is_empty());
-        let classification =
-            mandate_builder::classify(mandate_builder::autonomy_policy(&validated), action)?;
-        let autonomy = match classification.decision {
-            AutonomyDecision::Auto => Autonomy::Auto,
-            AutonomyDecision::Ask => Autonomy::Ask,
-            AutonomyDecision::Deny => Autonomy::Deny,
-        };
-        if policy_nonconforming && autonomy != Autonomy::Deny {
-            return Ok(Classified {
-                autonomy: Autonomy::Deny,
-                decided_by: Some(POLICY_OVERLAY.to_owned()),
-            });
-        }
-        Ok(Classified {
-            autonomy,
-            decided_by: Some(classification.by.label()),
-        })
+        let policy_nonconforming = context
+            .governance
+            .as_ref()
+            .is_some_and(|governance| !governance.violations.is_empty());
+        Ok(mandate_ports::classify(
+            &validated,
+            &builder_context(context)?.action,
+            proposal,
+            policy_nonconforming,
+        )?)
     }
 }
 
@@ -1400,45 +1071,11 @@ pub struct RiskGate {
     pub context: Option<Rc<RunContext>>,
 }
 
-fn proposed_order(proposal: &Proposal, facts: &AdvisoryOrderFacts) -> Result<ProposedOrder, Cause> {
-    Ok(ProposedOrder {
-        instrument: mandate_risk::AssetId::new(proposal.instrument.as_str()).map_err(|_| {
-            Cause::Absent {
-                what: "the gate's proposed instrument id",
-            }
-        })?,
-        side: proposal.side,
-        qty: proposal.qty,
-        limit_price: proposal.limit,
-        kind: facts.kind.clone(),
-        tif: facts.tif,
-        extended_hours: facts.extended_hours,
-        origin: facts.origin,
-        owner_confirmed_bid: facts.owner_confirmed_bid,
-        client_order_id: facts.client_order_id,
-        fee_reservation: facts.fee_reservation,
-    })
-}
-
 impl Gate for RiskGate {
     fn evaluate(&self, proposal: &Proposal) -> Result<Decision, Cause> {
         let context = required_context(&self.context)?;
         let gate = gate_context(context)?;
-        let proposed = proposed_order(proposal, &gate.order)?;
-        Ok(mandate_risk::evaluate(&GateInput {
-            now: gate.now,
-            pass: gate.pass,
-            config: &gate.config,
-            mandate: &gate.mandate,
-            risk: &gate.risk,
-            account: &gate.account,
-            agent: &gate.agent,
-            instrument: &gate.instrument,
-            market: &gate.market,
-            conduct: &gate.conduct,
-            universe: &gate.universe,
-            proposed: &proposed,
-        })?)
+        Ok(mandate_ports::evaluate(proposal, gate)?)
     }
 }
 
@@ -1668,7 +1305,7 @@ impl Sink for ExecutorSink {
                     instrument: instrument.clone(),
                     side: *side,
                     qty: *qty,
-                    limit: *limit,
+                    limit: Some(*limit),
                     purpose: executor_purpose(*purpose),
                     protection: execution.protection.map(|prices| {
                         mandate_executor::ProtectionPrices {
@@ -1716,41 +1353,8 @@ impl Sink for ExecutorSink {
             agent: ExecutorAgentId(self.agent.0.clone()),
             tif: executor_tif(handoff.execution),
             body,
+            confirmation: None,
         })
-    }
-}
-
-fn validate_order_execution(
-    side: Side,
-    purpose: Purpose,
-    execution: OrderExecution,
-) -> Result<(), Cause> {
-    let direction_is_valid = match purpose {
-        Purpose::Open | Purpose::Increase => side == Side::Buy,
-        Purpose::RiskExit
-        | Purpose::OwnerExit
-        | Purpose::DiscretionaryExit
-        | Purpose::Protective
-        | Purpose::Flatten => side == Side::Sell,
-    };
-    if !direction_is_valid {
-        return Err(Cause::Absent {
-            what: "an order direction that cannot create a short position",
-        });
-    }
-    if execution.protection_required != execution.protection.is_some() {
-        return Err(Cause::Absent {
-            what: "the mandate-required protective prices",
-        });
-    }
-    match (execution.asset_class, execution.tif) {
-        (AssetClass::Crypto, TimeInForce::Day) | (AssetClass::UsEquity, TimeInForce::Ioc) => {
-            Err(Cause::Absent {
-                what: "a time in force allowed by the mandate's asset class",
-            })
-        }
-        (AssetClass::UsEquity, TimeInForce::Day | TimeInForce::Gtc)
-        | (AssetClass::Crypto, TimeInForce::Gtc | TimeInForce::Ioc) => Ok(()),
     }
 }
 
@@ -2324,8 +1928,8 @@ mod tests {
     use super::{
         AdvisoryGateContext, AdvisoryOrderFacts, CoreExecutor, DecisionContext, ExecutorContext,
         ExecutorMandateView, ExecutorOrder, ExecutorProtection, ExecutorSink, Protection,
-        ProtectionProbePorts, RiskGate, RunContext, StoreJournal, action_order_matches,
-        is_unattributed_exit, listed_days, proposed_order, working_order_of,
+        ProtectionProbePorts, RiskGate, RunContext, StoreJournal, is_unattributed_exit,
+        listed_days, working_order_of,
     };
     use mandate_canon::{DecStr, Value};
     use mandate_journal::AppendOutcome;
@@ -2337,7 +1941,8 @@ mod tests {
         AssetClass, Bar, CorporateActions, DatasetId, DayRange, Feed, Kind, Records, Split,
         SplitRatio, Symbol, TimeUnit, Timeframe,
     };
-    use mandate_num::{Price, Qty, Usd};
+    use mandate_num::{Price, Qty};
+    use mandate_ports::proposed_order;
     use mandate_runtime::{
         AgentId, EventId as RuntimeEventId, IntentBody, IntentHandoff, OrderExecution,
         ProtectionPrices, Purpose as RuntimePurpose, TimeInForce as RuntimeTimeInForce,
@@ -3613,30 +3218,6 @@ mod tests {
             .collect();
         let expected: Vec<String> = rising().iter().map(|c| canonical(c)).collect();
         assert_eq!(read, expected, "the stray 1.23 is never read");
-        Ok(())
-    }
-
-    #[test]
-    fn classification_order_facts_must_match_the_sized_proposal() -> Result<(), String> {
-        let one_share = Usd::parse("255.2").map_err(|e| e.to_string())?;
-        let limit = Price::parse("255.2").map_err(|e| e.to_string())?;
-        assert!(
-            action_order_matches(
-                one_share,
-                Qty::parse("1").map_err(|e| e.to_string())?,
-                limit
-            )
-            .map_err(|e| e.to_string())?
-        );
-        assert!(
-            !action_order_matches(
-                one_share,
-                Qty::parse("2").map_err(|e| e.to_string())?,
-                limit
-            )
-            .map_err(|e| e.to_string())?,
-            "one-share autonomy facts cannot classify a two-share proposal"
-        );
         Ok(())
     }
 

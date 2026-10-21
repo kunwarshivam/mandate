@@ -35,7 +35,7 @@ neither the invalidation verdict (E19-5) nor the agent-stream `ModelInvocationRe
   (the per-agent trigger queue) and `crates/mandate-research-driver/src/driver.rs` (the step
   machine: commit, check, fold back, then hand on; hold on an unknown append; abandon and halt on a
   refused one; halt as diverged otherwise), with `mandate_runtime::abandon_refused_research`.
-- **Tests:** `crates/mandate-research-run/tests/retrieve.rs`, `crates/mandate-research-run/tests/dispatch.rs`, `crates/mandate-research-run/tests/dispatch_news.rs`, `crates/mandate-research-run/tests/dispatch_news_get.rs`, `crates/mandate-research-run/tests/dispatch_filings.rs`
+- **Tests:** `crates/mandate-research-run/tests/retrieve.rs`, `crates/mandate-research-run/tests/dispatch.rs`, `crates/mandate-research-run/tests/dispatch_news.rs`, `crates/mandate-research-run/tests/dispatch_news_get.rs`, `crates/mandate-research-run/tests/dispatch_filings.rs`, `crates/mandate-research-run/tests/dispatch_filings_get.rs`, `crates/mandate-research-run/tests/dispatch_quote.rs`, `crates/mandate-research-run/tests/turn.rs`, `crates/mandate-research-run/tests/call_turn.rs`, `crates/mandate-research-run/tests/agentic_entry.rs`
   (with a property over random answers and byte budgets), `crates/mandate-research-run/tests/output.rs`
   (with a property over arbitrary bytes and an integer-thousandths oracle),
   `crates/mandate-research-run/tests/call.rs`, `crates/mandate-research-run/tests/item.rs`,

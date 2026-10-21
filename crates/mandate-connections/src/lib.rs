@@ -35,6 +35,8 @@
 //!   those, and its egress contains no live host (DEC-821 item 4).
 //! - [`revoke`] plans the platform-side revoke, ordinary or on a compromised credential, for the
 //!   **API process**, which maps each planned effect to its journal event (DEC-694).
+//! - [`token_entry`] is the vault's token entry, the one byte form the token-exchange process
+//!   writes and the executor reads (DEC-2624).
 //! - [`manager`] plans the connection manager's start of a connect, in the **API process**: the
 //!   pending record `ConnectionRequested` and the connect's step-up digest (DEC-694, DEC-699).
 
@@ -47,6 +49,7 @@ pub mod manager;
 pub mod record;
 pub mod revoke;
 pub mod start;
+pub mod token_entry;
 pub mod vault;
 
 pub use error::ConnectError;

@@ -1,0 +1,38 @@
+[
+  {
+    "label": "no memberships",
+    "set": {
+      "/workspaces": []
+    }
+  },
+  {
+    "label": "roles all still cooling off",
+    "set": {
+      "/workspaces/0/roles": []
+    }
+  },
+  {
+    "label": "a recorded label",
+    "set": {
+      "/workspaces/0/label": "Paper desk"
+    }
+  },
+  {
+    "label": "every workspace role",
+    "set": {
+      "/workspaces/0/roles": [
+        "workspace_admin",
+        "operator",
+        "approver",
+        "viewer",
+        "auditor"
+      ]
+    }
+  },
+  {
+    "label": "a label of 200 characters",
+    "set": {
+      "/workspaces/0/label": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    }
+  }
+]

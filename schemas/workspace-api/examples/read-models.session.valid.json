@@ -1,0 +1,26 @@
+[
+  {
+    "label": "a reduction-only session with the workspaces it covers",
+    "set": {
+      "/kind": "reduction_only",
+      "/workspaces": [
+        {
+          "workspace_id": "ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y",
+          "label": "Paper desk"
+        }
+      ]
+    }
+  },
+  {
+    "label": "a covered workspace with no label recorded",
+    "set": {
+      "/kind": "reduction_only",
+      "/workspaces": [
+        {
+          "workspace_id": "ws_1",
+          "label": null
+        }
+      ]
+    }
+  }
+]

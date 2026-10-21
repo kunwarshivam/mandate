@@ -1687,15 +1687,18 @@ name = "mandate-api-server"
 version = "0.0.0"
 dependencies = [
  "axum",
+ "base64 0.22.1",
  "mandate-api",
  "mandate-artifacts-fs",
  "mandate-authn",
  "mandate-canon",
+ "mandate-connections",
  "mandate-identity",
  "mandate-identity-seal",
  "mandate-identity-testkit",
  "mandate-journal",
  "mandate-journal-pg",
+ "mandate-num",
  "mandate-passkey",
  "mandate-release",
  "mandate-spec",
@@ -1705,6 +1708,7 @@ dependencies = [
  "ring",
  "rustix",
  "rustls",
+ "secrecy",
  "serde_json",
  "tokio",
 ]
@@ -2044,7 +2048,9 @@ dependencies = [
  "mandate-risk",
  "mandate-store",
  "mandate-time",
+ "mandate-vault",
  "proptest",
+ "secrecy",
  "serde_json",
  "sqlx",
  "tokio",
@@ -2291,6 +2297,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-ports"
+version = "0.0.0"
+dependencies = [
+ "mandate-accounting",
+ "mandate-builder",
+ "mandate-canon",
+ "mandate-domain",
+ "mandate-journal",
+ "mandate-num",
+ "mandate-risk",
+ "mandate-runtime",
+ "mandate-spec",
+ "mandate-time",
+ "proptest",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "mandate-process"
 version = "0.0.0"
 dependencies = [
@@ -2488,6 +2513,7 @@ dependencies = [
  "mandate-marketdata",
  "mandate-modelhost",
  "mandate-num",
+ "mandate-ports",
  "mandate-risk",
  "mandate-robinhood",
  "mandate-runtime",
@@ -2576,6 +2602,7 @@ name = "mandate-store"
 version = "0.0.0"
 dependencies = [
  "mandate-canon",
+ "mandate-gateway",
  "mandate-journal",
  "mandate-journal-pg",
  "mandate-time",
@@ -2592,10 +2619,12 @@ dependencies = [
  "base64 0.22.1",
  "mandate-api-server",
  "mandate-authn",
+ "mandate-connections",
  "mandate-identity",
  "mandate-journal",
  "mandate-release",
  "mandate-time",
+ "proptest",
  "ring",
  "serde_json",
  "tokio",
@@ -2631,6 +2660,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-token-exchange"
+version = "0.0.0"
+dependencies = [
+ "mandate-canon",
+ "mandate-connections",
+ "mandate-release",
+ "proptest",
+ "secrecy",
+]
+
+[[package]]
 name = "mandate-vault"
 version = "0.0.0"
 dependencies = [
@@ -2641,6 +2681,7 @@ dependencies = [
  "proptest",
  "reqwest",
  "ring",
+ "rustix",
  "rustls",
  "secrecy",
  "serde_json",
@@ -3357,9 +3398,9 @@ checksum = "eec689c0bc40ff2458a5977b6619cb718087084a18e02a131c599b62d05e1a5f"
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.15"
+version = "0.103.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3c3cf1d8b1e7d4927e2d154c3fcb02979afb9939629c62cd9048d4f07b60ac2"
+checksum = "4443b1b6d39d7c663139942cc4558262562d2c84123bb6282ef177009ca8b281"
 dependencies = [
  "ring",
  "rustls-pki-types",

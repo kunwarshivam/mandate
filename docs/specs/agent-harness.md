@@ -488,7 +488,7 @@ template (inference spec §3.1); callers never pass free-form prompt text.
 | The cut-off, the data universe, `universe.asset_classes`, `universe.max_instruments`, and the current working universe | Allocation, equity, P&L, or any other dollar figure of the agent or account; limits only as percentages of the allocation, through `mandate.read` (DEC-2203 item 19). Sizing is not the model's business |
 | Held instruments, and the agent's own theses and their scores | Other agents' or other workspaces' data, the aggregate-flow monitor, operator halts |
 | For a revision, once allowed (§6.5): the predecessor and its score | Approval content, owner commands, notification text, autonomy rules, delegations, tripwires, the review date |
-| In an agentic run: the run kind and its menu's tool schemas, the agent's latest run summaries marked untrusted (§6.12), the transcript of earlier turns (each reply, and each tool result as recorded: read items, think results, and action verdicts as codes), and the run's remaining turns and tool calls | The run's cost ceiling, its spend, or any price: the budget is the harness's to enforce, not the model's to plan around |
+| In an agentic run: the run kind and its menu's tool schemas, the agent's latest run summaries marked untrusted (§6.12), the transcript of earlier turns (each reply, and each tool result as recorded: read items, think results, and action verdicts as codes), and the run's pinned starting `max_turns` and `max_tool_calls` (the counts left are carried by the turn structure, not by an input: §6.9 step 3, DEC-2256) | The run's cost ceiling, its spend, or any price: the budget is the harness's to enforce, not the model's to plan around |
 
 **Untrusted data is marked, not trusted to stay marked.** The template puts retrieved text in
 delimited data sections and says it is data. That lowers, but does not remove, the chance that
@@ -716,8 +716,11 @@ One run, in order:
    - `tools`: the run's menu; in the last turn (*k* = `max_turns`) only the action tools of an
      `action_tools` entry, or none; and none once the run has no tool call left, so the model must
      end;
-   - the run's kind and its remaining turns and tool calls, among the typed inputs (§6.4); the tool
-     calls left are `max_tool_calls` less the run's `ToolCallRecorded` records, refused ones
+   - `run_kind`: the run's kind, which fixes its menu, its tool schemas, and its pinned
+     `loop_bounds`, all in the prompt's prefix (§6.12). The turns and tool calls left are not typed
+     inputs, since the prefix is the same for every turn: the turn structure carries them, as the
+     menu above narrows, and the gateway refuses a transcript at or past `max_turns` (DEC-2256). The
+     tool calls left are `max_tool_calls` less the run's `ToolCallRecorded` records, refused ones
      included, as `RunEnded.tool_calls` counts them;
    - `spend_ceiling_usd`: the run's ceiling less the `cost_usd` of its earlier turns' records
      (inference spec §3.1, §7.3);

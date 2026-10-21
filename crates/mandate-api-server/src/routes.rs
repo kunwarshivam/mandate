@@ -30,12 +30,13 @@ use mandate_time::UtcNanos;
 use crate::backtests::{
     Found, Outcome, backtest, backtest_report, evaluation, evaluation_report, paper,
 };
+use crate::connections::{ConnectionView, connections};
 use crate::documents::{Envelope, checked, envelope};
 use crate::http::{App, problem, problem_body, session_cookie, unauthenticated, with_type};
 use crate::members::ControlLookup;
 use crate::reads::{
-    AgentView, ApprovalView, Deployment, Filter, account_positions, account_ref, agent, approvals,
-    deployed, inbox,
+    AgentView, ApprovalView, Deployment, Filter, account_positions, account_ref, agent,
+    agent_orders, agent_positions, approvals, deployed, inbox,
 };
 use crate::session::Authenticated;
 
@@ -209,7 +210,7 @@ async fn agent_rows(
     Ok(read)
 }
 
-fn object(members: Vec<(&str, Value)>) -> Value {
+pub(crate) fn object(members: Vec<(&str, Value)>) -> Value {
     let mut object = Object::new();
     for (key, value) in members {
         if let Ok(key) = Key::new(key) {
@@ -223,7 +224,7 @@ pub(crate) fn string(text: &str) -> Value {
     Value::Str(text.to_owned())
 }
 
-fn int(n: u64) -> Value {
+pub(crate) fn int(n: u64) -> Value {
     Int::new(n).map_or(Value::Null, Value::Int)
 }
 
@@ -343,6 +344,98 @@ pub async fn list_agents(
     served(&reader, &streams, vec![("agents", Value::Array(agents))])
 }
 
+/// `GET /v1/workspaces/{ws}/connections` (§4.5, DEC-2620): `read-models/connections`, for the
+/// workspace admin only (DEC-2631 item 1).
+pub async fn list_connections(
+    State(app): State<Arc<App>>,
+    headers: HeaderMap,
+    path: Result<Path<String>, PathRejection>,
+) -> Response {
+    let Ok(Path(workspace)) = path else {
+        return path_refused(&app, &headers, Request::Other).await;
+    };
+    let reader = match connections_reader(&app, &headers, &workspace).await {
+        Ok(reader) => reader,
+        Err(refusal) => return refusal.response(),
+    };
+    let views = connections(&reader.control)
+        .iter()
+        .map(connection_value)
+        .collect();
+    served(&reader, &[], vec![("connections", Value::Array(views))])
+}
+
+/// `GET /v1/workspaces/{ws}/connections/{id}` (§4.5, DEC-2620): `read-models/connection`, the
+/// role checked before the id (DEC-2631 item 2).
+pub async fn one_connection(
+    State(app): State<Arc<App>>,
+    headers: HeaderMap,
+    path: Result<Path<(String, String)>, PathRejection>,
+) -> Response {
+    let Ok(Path((workspace, id))) = path else {
+        return path_refused(&app, &headers, Request::Other).await;
+    };
+    let reader = match connections_reader(&app, &headers, &workspace).await {
+        Ok(reader) => reader,
+        Err(refusal) => return refusal.response(),
+    };
+    let Some(view) = connections(&reader.control)
+        .into_iter()
+        .find(|view| view.connection_id == id)
+    else {
+        return Refused::NotFound.response();
+    };
+    served(&reader, &[], vec![("connection", connection_value(&view))])
+}
+
+/// The session, then the broker-connection row (DEC-2631 item 1), before anything is looked up.
+async fn connections_reader(
+    app: &App,
+    headers: &HeaderMap,
+    workspace: &str,
+) -> Result<Reader, Refused> {
+    let (admitted, now) = session(app, headers, Request::Other)?;
+    authorized(
+        app,
+        &admitted,
+        now,
+        workspace,
+        Permission::BrokerConnection,
+        Unreadable::Read,
+    )
+    .await
+}
+
+/// `read-models/connection`'s `Connection` (DEC-2620 item 2).
+fn connection_value(view: &ConnectionView) -> Value {
+    let texts = |items: &[String]| Value::Array(items.iter().map(|item| string(item)).collect());
+    object(vec![
+        ("connection_id", string(&view.connection_id)),
+        ("broker", string(&view.broker)),
+        ("environment", string(&view.environment)),
+        ("state", string(view.state.code())),
+        ("scopes", view.scopes.as_deref().map_or(Value::Null, texts)),
+        ("since", string(&view.since)),
+        (
+            "refusal",
+            view.refusal.as_ref().map_or(Value::Null, |refusal| {
+                object(vec![
+                    (
+                        "check",
+                        refusal.check.as_deref().map_or(Value::Null, string),
+                    ),
+                    ("reason", string(&refusal.reason)),
+                ])
+            }),
+        ),
+        (
+            "revoked_reason",
+            view.revoked_reason.as_deref().map_or(Value::Null, string),
+        ),
+        ("agents", texts(&view.agents)),
+    ])
+}
+
 /// `GET /v1/workspaces/{ws}/agents/{agent_id}`.
 pub async fn one_agent(
     State(app): State<Arc<App>>,
@@ -370,18 +463,9 @@ pub async fn one_agent(
         return Refused::NotFound.response();
     };
     let found = document(&app, deployment);
-    let account = match &found {
-        Some(found) => match account_ref(&reader.control, &found.connection_id) {
-            Some(reference) => {
-                let stream = format!("acct:{}:{reference}", reader.workspace);
-                match app.journal.rows(&stream).await {
-                    Ok(rows) => Some(rows),
-                    Err(_) => return Refused::JournalUnavailable.response(),
-                }
-            }
-            None => None,
-        },
-        None => None,
+    let account = match account_of(&app, &reader, found.as_ref()).await {
+        Ok(account) => account.map(|(_, rows)| rows),
+        Err(refusal) => return refusal.response(),
     };
     let mut members = agent_members(&agent(deployment, rows), found.as_ref());
     members.push((
@@ -407,6 +491,105 @@ async fn all_approvals(
         .flat_map(|(deployment, rows)| approvals(&deployment.0, rows))
         .collect();
     Ok((views, read.into_iter().map(|(_, rows)| rows).collect()))
+}
+
+/// The `account_ref` the control stream binds to the connection `document` names, and that
+/// account stream's rows (DEC-1020 item 3); `None` with no document or no bound reference.
+async fn account_of(
+    app: &App,
+    reader: &Reader,
+    document: Option<&Envelope>,
+) -> Result<Option<(String, Vec<StoredEvent>)>, Refused> {
+    let Some(reference) = document.and_then(|d| account_ref(&reader.control, &d.connection_id))
+    else {
+        return Ok(None);
+    };
+    let stream = format!("acct:{}:{reference}", reader.workspace);
+    match app.journal.rows(&stream).await {
+        Ok(rows) => Ok(Some((reference, rows))),
+        Err(_) => Err(Refused::JournalUnavailable),
+    }
+}
+
+/// `GET /v1/workspaces/{ws}/agents/{agent_id}/orders` (§4.7 D3, DEC-2111): `read-models/orders`,
+/// from the account stream of the connection the agent's deployed document names.
+pub async fn agent_orders_read(
+    State(app): State<Arc<App>>,
+    headers: HeaderMap,
+    path: Result<Path<(String, String)>, PathRejection>,
+) -> Response {
+    let Ok(Path((workspace, id))) = path else {
+        return path_refused(&app, &headers, Request::Other).await;
+    };
+    let reader = match reader(&app, &headers, &workspace).await {
+        Ok(reader) => reader,
+        Err(refusal) => return refusal.response(),
+    };
+    let Some(deployment) = deployed(&reader.control)
+        .into_iter()
+        .find(|deployment| deployment.0 == id)
+    else {
+        return Refused::NotFound.response();
+    };
+    let account = match account_of(&app, &reader, document(&app, &deployment).as_ref()).await {
+        Ok(account) => account,
+        Err(refusal) => return refusal.response(),
+    };
+    let (reference, rows) = account.map_or((Value::Null, Vec::new()), |(reference, rows)| {
+        (string(&reference), rows)
+    });
+    let orders = Value::Array(agent_orders(&rows, &deployment.0));
+    let members = vec![
+        ("agent_id", string(&deployment.0)),
+        ("account_ref", reference),
+        ("orders", orders),
+    ];
+    served(&reader, &[rows.as_slice()], members)
+}
+
+/// `GET /v1/workspaces/{ws}/agents/{agent_id}/positions` (§4.7 D3, DEC-2111):
+/// `read-models/positions`, from the account stream of the connection the agent's deployed
+/// document names. A fill of its own that cannot be read is `journal_unavailable`: no position is
+/// served from part of its fills.
+pub async fn agent_positions_read(
+    State(app): State<Arc<App>>,
+    headers: HeaderMap,
+    path: Result<Path<(String, String)>, PathRejection>,
+) -> Response {
+    let Ok(Path((workspace, id))) = path else {
+        return path_refused(&app, &headers, Request::Other).await;
+    };
+    let reader = match reader(&app, &headers, &workspace).await {
+        Ok(reader) => reader,
+        Err(refusal) => return refusal.response(),
+    };
+    let Some(deployment) = deployed(&reader.control)
+        .into_iter()
+        .find(|deployment| deployment.0 == id)
+    else {
+        return Refused::NotFound.response();
+    };
+    let account = match account_of(&app, &reader, document(&app, &deployment).as_ref()).await {
+        Ok(account) => account,
+        Err(refusal) => return refusal.response(),
+    };
+    let (reference, rows, holdings) = match account {
+        Some((reference, rows)) => {
+            let holdings = Value::Array(account_positions(&rows));
+            (string(&reference), rows, holdings)
+        }
+        None => (Value::Null, Vec::new(), Value::Null),
+    };
+    let Some(positions) = agent_positions(&rows, &deployment.0) else {
+        return Refused::JournalUnavailable.response();
+    };
+    let members = vec![
+        ("agent_id", string(&deployment.0)),
+        ("account_ref", reference),
+        ("positions", Value::Array(positions)),
+        ("account_positions", holdings),
+    ];
+    served(&reader, &[rows.as_slice()], members)
 }
 
 /// `GET /v1/workspaces/{ws}/approvals?state=pending|resolved`.

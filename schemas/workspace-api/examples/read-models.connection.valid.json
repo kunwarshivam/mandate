@@ -1,0 +1,97 @@
+[
+  {
+    "label": "connecting, nothing granted yet",
+    "set": {
+      "/connection/state": "connecting",
+      "/connection/scopes": null,
+      "/connection/agents": []
+    }
+  },
+  {
+    "label": "revoked by the owner",
+    "set": {
+      "/connection/state": "revoked",
+      "/connection/revoked_reason": "owner",
+      "/connection/agents": []
+    }
+  },
+  {
+    "label": "revoked at version 1, reason not reported",
+    "set": {
+      "/connection/state": "revoked"
+    }
+  },
+  {
+    "label": "revoked because the credential was compromised",
+    "set": {
+      "/connection/state": "revoked",
+      "/connection/revoked_reason": "compromised"
+    }
+  },
+  {
+    "label": "refused by a teardown no check caused",
+    "set": {
+      "/connection/state": "refused",
+      "/connection/refusal": {
+        "check": null,
+        "reason": "timeout"
+      }
+    }
+  },
+  {
+    "label": "refused by the scope check",
+    "set": {
+      "/connection/state": "refused",
+      "/connection/refusal": {
+        "check": "scope",
+        "reason": "scope_mismatch"
+      }
+    }
+  },
+  {
+    "label": "refused by the environment check",
+    "set": {
+      "/connection/state": "refused",
+      "/connection/refusal": {
+        "check": "environment",
+        "reason": "live_unavailable"
+      }
+    }
+  },
+  {
+    "label": "refused by the account check",
+    "set": {
+      "/connection/state": "refused",
+      "/connection/refusal": {
+        "check": "account",
+        "reason": "account_mismatch"
+      }
+    }
+  },
+  {
+    "label": "refused by the uniqueness check",
+    "set": {
+      "/connection/state": "refused",
+      "/connection/refusal": {
+        "check": "uniqueness",
+        "reason": "already_connected"
+      }
+    }
+  },
+  {
+    "label": "refused by the contract check",
+    "set": {
+      "/connection/state": "refused",
+      "/connection/refusal": {
+        "check": "contract",
+        "reason": "scope_mismatch"
+      }
+    }
+  },
+  {
+    "label": "a live connection",
+    "set": {
+      "/connection/environment": "live"
+    }
+  }
+]

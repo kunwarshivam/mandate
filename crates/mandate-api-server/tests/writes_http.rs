@@ -90,6 +90,7 @@ fn fixture() -> Fixture {
         objects: None,
         step_up: Arc::new(mandate_api_server::stepup::Unbound),
         challenges: Arc::default(),
+        connect: None,
     };
     let drain = Drain::new();
     let f = Fixture {

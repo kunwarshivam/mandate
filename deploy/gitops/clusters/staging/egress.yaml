@@ -1,0 +1,179 @@
+# Staging's external egress (DEC-2058): each process that infrastructure §3.1 gives an external
+# destination reaches exactly its hosts, by exact name on TCP 443, and nothing else. DOKS runs Cilium,
+# whose DNS proxy learns each name's addresses as the pod resolves it, so an anycast host such as
+# OpenRouter's is allowed without opening every address its CDN serves. The workspace chart's own
+# NetworkPolicies stay as they are, with no CIDR for these slots; Cilium adds these allows to them.
+# The chart stays portable (DEC-967 item 6): this file is the hosted cluster's alone. Alpaca's live
+# host is the token-exchange process's alone, for its one OAuth call (DEC-2059); every other process
+# trades on paper only (AGENTS.md rule 8), and test_gitops refuses the host anywhere else.
+---
+# api: the identity provider's key set (DEC-2057).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: egress-fqdn-api
+  namespace: ws-ws1
+spec:
+  endpointSelector:
+    matchLabels:
+      mandate.dev/workspace: ws1
+      mandate.dev/process: api
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - {port: "53", protocol: ANY}
+          rules:
+            dns:
+              - matchPattern: "*"
+    - toFQDNs:
+        - matchName: wyyxngmblqqokcvraflx.supabase.co
+      toPorts:
+        - ports:
+            - {port: "443", protocol: TCP}
+---
+# control: the identity provider, as the API reaches it.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: egress-fqdn-control
+  namespace: ws-ws1
+spec:
+  endpointSelector:
+    matchLabels:
+      mandate.dev/workspace: ws1
+      mandate.dev/process: control
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - {port: "53", protocol: ANY}
+          rules:
+            dns:
+              - matchPattern: "*"
+    - toFQDNs:
+        - matchName: wyyxngmblqqokcvraflx.supabase.co
+      toPorts:
+        - ports:
+            - {port: "443", protocol: TCP}
+---
+# executor: Alpaca's paper trading API, never its live one.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: egress-fqdn-executor
+  namespace: ws-ws1
+spec:
+  endpointSelector:
+    matchLabels:
+      mandate.dev/workspace: ws1
+      mandate.dev/process: executor
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - {port: "53", protocol: ANY}
+          rules:
+            dns:
+              - matchPattern: "*"
+    - toFQDNs:
+        - matchName: paper-api.alpaca.markets
+      toPorts:
+        - ports:
+            - {port: "443", protocol: TCP}
+---
+# data: Alpaca's market data, REST and stream.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: egress-fqdn-data
+  namespace: ws-ws1
+spec:
+  endpointSelector:
+    matchLabels:
+      mandate.dev/workspace: ws1
+      mandate.dev/process: data
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - {port: "53", protocol: ANY}
+          rules:
+            dns:
+              - matchPattern: "*"
+    - toFQDNs:
+        - matchName: data.alpaca.markets
+        - matchName: stream.data.alpaca.markets
+      toPorts:
+        - ports:
+            - {port: "443", protocol: TCP}
+---
+# model-gateway: the model provider; the runtime reaches models only through the gateway.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: egress-fqdn-model-gateway
+  namespace: ws-ws1
+spec:
+  endpointSelector:
+    matchLabels:
+      mandate.dev/workspace: ws1
+      mandate.dev/process: model-gateway
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - {port: "53", protocol: ANY}
+          rules:
+            dns:
+              - matchPattern: "*"
+    - toFQDNs:
+        - matchName: openrouter.ai
+      toPorts:
+        - ports:
+            - {port: "443", protocol: TCP}
+---
+# token-exchange: Alpaca's OAuth token endpoint, POST https://api.alpaca.markets/oauth/token, once
+# per connect (DEC-2627). The network sees the name and the port, not the path, so the client's
+# dedicated type is the barrier to the rest of the live API (DEC-821 items 2 and 4, DEC-2059).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: egress-fqdn-token-exchange
+  namespace: ws-ws1
+spec:
+  endpointSelector:
+    matchLabels:
+      mandate.dev/workspace: ws1
+      mandate.dev/process: token-exchange
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - {port: "53", protocol: ANY}
+          rules:
+            dns:
+              - matchPattern: "*"
+    - toFQDNs:
+        - matchName: api.alpaca.markets
+      toPorts:
+        - ports:
+            - {port: "443", protocol: TCP}

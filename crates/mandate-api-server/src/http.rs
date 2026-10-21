@@ -21,7 +21,9 @@ use mandate_journal::ArtifactSource;
 use crate::challenges::{self, Challenges};
 use crate::clock::Clock;
 use crate::journal::Journal;
+use crate::journal_reads;
 use crate::lifecycle::{Drain, Lifecycle};
+use crate::me;
 use crate::members::{Hosted, ParseMembers};
 use crate::objects::ObjectStore;
 use crate::routes;
@@ -78,10 +80,14 @@ pub struct App {
     /// The same store, which the version routes add objects to (DEC-2101 item 8); `None` when
     /// the deployment names none, and those routes then answer `journal_unavailable`.
     pub objects: Option<Arc<dyn ObjectStore>>,
-    /// The step-up port (DEC-2101 item 2): [`crate::stepup::Unbound`] until E9-4 binds it.
+    /// The step-up port (DEC-2101 item 2): the deployment binds [`crate::confirm::CliConfirm`]
+    /// (DEC-2104), and tests bind [`crate::stepup::Unbound`] or their own.
     pub step_up: Arc<dyn StepUp>,
     /// The step-up challenges issued and not yet expired (DEC-2103 item 5).
     pub challenges: Arc<Challenges>,
+    /// The connect start's OAuth client and `state` values (DEC-2623); `None` when the deployment
+    /// offers no connect, and the start answers `not_found`.
+    pub connect: Option<Arc<crate::connect::Connect>>,
 }
 
 /// The API listener's router: every path answers the one 401 until its route lands (API-1).
@@ -108,6 +114,14 @@ pub fn api(app: App, drain: Arc<Drain>) -> Router {
             delete(end_session).fallback(otherwise.clone()),
         )
         .route(
+            "/v1/me/session",
+            get(me::session).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/me/workspaces",
+            get(me::workspaces).fallback(otherwise.clone()),
+        )
+        .route(
             "/v1/workspaces/{workspace}/agents",
             get(routes::list_agents)
                 .post(version_routes::deploy)
@@ -118,12 +132,28 @@ pub fn api(app: App, drain: Arc<Drain>) -> Router {
             get(routes::one_agent).fallback(otherwise.clone()),
         )
         .route(
+            "/v1/workspaces/{workspace}/agents/{agent}/orders",
+            get(routes::agent_orders_read).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/agents/{agent}/positions",
+            get(routes::agent_positions_read).fallback(otherwise.clone()),
+        )
+        .route(
             "/v1/workspaces/{workspace}/approvals",
             get(routes::list_approvals).fallback(otherwise.clone()),
         )
         .route(
             "/v1/workspaces/{workspace}/approvals/{approval}",
             get(routes::one_approval).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/journal/events/{event}",
+            get(journal_reads::one_event).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/journal/streams/{stream}/events",
+            get(journal_reads::events).fallback(otherwise.clone()),
         )
         .route(
             "/v1/workspaces/{workspace}/backtests/{backtest}",
@@ -176,6 +206,18 @@ pub fn api(app: App, drain: Arc<Drain>) -> Router {
         .route(
             "/v1/workspaces/{workspace}/step-up/challenges",
             post(challenges::challenge).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/connections",
+            get(routes::list_connections).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/connections/{connection}",
+            get(routes::one_connection).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/connections/oauth/start",
+            post(crate::connect::start).fallback(otherwise.clone()),
         )
         .route(
             "/v1/workspaces/{workspace}/agents/{agent}/go-live",

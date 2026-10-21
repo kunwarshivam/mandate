@@ -154,6 +154,7 @@ fn built(port: Port, with_store: bool) -> Fixture {
         objects: with_store.then(|| Arc::clone(&store) as Arc<dyn ObjectStore>),
         step_up,
         challenges: Arc::default(),
+        connect: None,
     };
     let f = Fixture {
         addr: serve(http::api(app, Drain::new())),
@@ -1001,6 +1002,47 @@ fn a_verified_deploy_commits_agent_deployed_bound_to_its_version() {
     let same = deploy(&f, &cookie, KEY_2, &deploy_body("agt_a", "v1", EVIDENCE));
     assert_eq!(same.status, 200, "the agent already runs this version");
     assert_eq!(events(&f, "AgentDeployed").len(), 1);
+}
+
+/// No route creates an agent (#1444): deploying names it, and the reads serve it from that
+/// `AgentDeployed` alone, before any runtime opens its stream.
+#[test]
+fn deploying_an_agent_id_never_seen_creates_the_agent() {
+    let f = fixture();
+    let cookie = signed_in(&f, alice());
+    confirmed(&f, &cookie, "v1");
+    assert_eq!(get(&f, &ws("/agents/agt_new"), &cookie).status, 404);
+    let reply = deploy(&f, &cookie, KEY, &deploy_body("agt_new", "v1", EVIDENCE));
+    assert_eq!(
+        reply.status,
+        202,
+        "{:?}",
+        String::from_utf8_lossy(&reply.body)
+    );
+    assert!(
+        !f.journal
+            .streams
+            .lock()
+            .expect("unpoisoned")
+            .contains_key(&format!("agent:{WORKSPACE}:agt_new")),
+        "the deploy opens no agent stream; the runtime does"
+    );
+    let one = get(&f, &ws("/agents/agt_new"), &cookie);
+    assert_eq!(one.status, 200, "{:?}", String::from_utf8_lossy(&one.body));
+    let agent = body(&one);
+    assert_eq!(text(&agent, &["agent", "agent_id"]), "agt_new");
+    assert_eq!(text(&agent, &["agent", "mandate_version"]), version("v1"));
+    assert_eq!(
+        agent.get("agent").and_then(|a| a.get("mode")),
+        Some(&Value::Null),
+        "no mode is reported before the runtime opens the stream"
+    );
+    let listed = body(&get(&f, &ws("/agents"), &cookie));
+    let ids: Vec<&str> = match listed.get("agents") {
+        Some(Value::Array(agents)) => agents.iter().map(|a| text(a, &["agent_id"])).collect(),
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(ids, vec!["agt_new"]);
 }
 
 #[test]

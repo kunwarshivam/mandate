@@ -12,9 +12,10 @@ use mandate_api::envelope::{
 use mandate_api::problem::{Problem, Violation};
 use mandate_api::requests::{
     AcknowledgeRequest, ApprovalResponseRequest, BidConfirmation, ConfirmRequest, DelegationChosen,
-    DelegationPreviewRequest, EndDelegationRequest, Environment, HoldRequest, KillSwitchRequest,
-    LiftHoldRequest, OwnerExitRequest, OwnerRequest, PauseRequest, ResumeRequest, RevokeRequest,
-    Scope, Shape, Side, StepUpChallengeRequest, StopRequest, Verdict,
+    DelegationPreviewRequest, Disclosure, EndDelegationRequest, Environment, HoldRequest,
+    KillSwitchRequest, LiftHoldRequest, OauthStartRequest, OwnerExitRequest, OwnerRequest,
+    PauseRequest, ResumeRequest, RevokeRequest, Scope, Shape, Side, StepUpChallengeRequest,
+    StopRequest, Verdict,
 };
 use mandate_api::responses::{
     AlreadyEnded, Applies, ApprovalResponseAccepted, Classification, CommandAccepted, CommandPhase,
@@ -184,6 +185,9 @@ fn every_struct_names_exactly_its_schemas_members() {
     members::<BidConfirmation>(&[exit], None);
     members::<OwnerExitRequest>(&[&schema!("owner-exit-request")], None);
     members::<RevokeRequest>(&[&schema!("revoke-request")], None);
+    let start = schema!("oauth-start-request");
+    members::<OauthStartRequest>(&[&start], None);
+    members::<Disclosure>(&[&start["properties"]["disclosure"]], None);
     members::<StepUpChallengeRequest>(&[&schema!("step-up-challenge-request")], None);
     let preview = schema!("delegation-preview");
     members::<DelegationPreview>(&[&defs["Envelope"], &preview], None);
@@ -247,6 +251,9 @@ fn every_member_is_null_able_and_optional_exactly_as_its_schema_says() {
     nulls::<BidConfirmation>(&[&kill["properties"]["owner_exit"]["oneOf"][0]["items"]]);
     nulls::<OwnerExitRequest>(&[&schema!("owner-exit-request")]);
     nulls::<RevokeRequest>(&[&schema!("revoke-request")]);
+    let start = schema!("oauth-start-request");
+    nulls::<OauthStartRequest>(&[&start]);
+    nulls::<Disclosure>(&[&start["properties"]["disclosure"]]);
     let preview = schema!("delegation-preview");
     nulls::<DelegationPreview>(&[envelope, &preview]);
     nulls::<PreviewedDelegation>(&[&preview["properties"]["delegation"]]);
@@ -485,6 +492,7 @@ fn the_conditional_requests_match_their_examples() {
     request::<KillSwitchRequest>(cases!("kill-switch-request"));
     request::<OwnerExitRequest>(cases!("owner-exit-request"));
     request::<RevokeRequest>(cases!("revoke-request"));
+    request::<OauthStartRequest>(cases!("oauth-start-request"));
 }
 
 #[test]

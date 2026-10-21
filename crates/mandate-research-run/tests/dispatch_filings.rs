@@ -447,3 +447,55 @@ fn the_filings_search_default_answers_unavailable() {
     let answered = Bare.search(&query, &ids(&LIST), &[]);
     assert_eq!(answered, Err(ReadError::Unavailable));
 }
+
+#[test]
+fn terms_too_long_or_off_their_alphabet_read_nothing() {
+    let fixture = Fixture::default();
+    let longer = "t".repeat(33);
+    for term in [longer.as_str(), "é", "!", "a_b"] {
+        let arguments = format!(
+            r#"{{"forms":[],"limit":5,"symbols":["AAPL"],"terms":["{term}"],"window_d":30}}"#
+        );
+        assert_eq!(verdict(&one(&fixture, &arguments)), FAILED, "{term}");
+    }
+    assert_eq!(fixture.calls.get(), 0, "no reader is asked");
+}
+
+#[test]
+fn a_filing_known_at_the_cut_off_or_the_windows_start_is_kept() {
+    let fixture = with_filings(vec![
+        filed("f-cut-off", "8-K", "AAPL", CUT_OFF),
+        filed("f-window-start", "8-K", "AAPL", CUT_OFF - 30 * DAY),
+        filed("f-before", "8-K", "AAPL", CUT_OFF - 30 * DAY - 1),
+    ]);
+    assert_eq!(
+        shown(&one(&fixture, AAPL_FILINGS)),
+        ids(&["f-cut-off", "f-window-start"]),
+        "both edges are inside the window, and a second before it is not (DEC-2252 item 4)"
+    );
+}
+
+#[test]
+fn forms_match_exactly_and_reach_the_reader_in_the_lists_order() {
+    let fixture = Fixture::default();
+    let case = r#"{"forms":["8-K","8-k"],"limit":5,"symbols":["AAPL"],"terms":[],"window_d":30}"#;
+    assert_eq!(
+        verdict(&one(&fixture, case)),
+        FAILED,
+        "a form in another case is off the list"
+    );
+    assert_eq!(fixture.calls.get(), 0);
+
+    let pair =
+        r#"{"forms":["8-K/A","10-K","8-K"],"limit":5,"symbols":["AAPL"],"terms":[],"window_d":30}"#;
+    assert_eq!(
+        verdict(&one(&fixture, pair)),
+        OK,
+        "a form and its amendment are two forms"
+    );
+    assert_eq!(
+        *fixture.forms.borrow(),
+        vec![ids(&["10-K", "8-K", "8-K/A"])],
+        "the list's order, not the model's (DEC-2252 item 1)"
+    );
+}

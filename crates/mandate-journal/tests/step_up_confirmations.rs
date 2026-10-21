@@ -82,7 +82,6 @@ fn the_confirmation_section_holds_every_part() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn the_base_and_every_valid_confirmation_draft_parse() {
     let section = section();
     let mut failed = Vec::new();
@@ -102,7 +101,6 @@ fn the_base_and_every_valid_confirmation_draft_parse() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn every_invalid_confirmation_draft_is_refused_with_its_reason_at_its_path() {
     let section = section();
     let mut failed = Vec::new();
@@ -125,7 +123,6 @@ fn every_invalid_confirmation_draft_is_refused_with_its_reason_at_its_path() {
 /// challenges of rule 243 included, and [`check_stream`] refuses none of them, since rule 243 is
 /// the CLI's own and the API's verifier counts the confirmations itself (§9.29).
 #[test]
-#[ignore = "pending E9-4"]
 fn append_judges_rule_242_alone_and_leaves_rule_243_to_the_writer() {
     let section = section();
     let mut failed = Vec::new();

@@ -10,7 +10,7 @@ use crate::ConnectError;
 use crate::exchange::{ExchangeForm, TokenEndpoint, TokenResponse};
 use crate::grant::GrantedScopes;
 use crate::hosts::LiveTokenRequest;
-use crate::start::{ClientId, PkceVerifier};
+use crate::start::{ClientId, OAuthClient, PkceVerifier, RedirectUri};
 use crate::vault::{AccessToken, AuthorizationCode, Vault, VaultKey, WaitingCode};
 
 pub const CODE: &str = "code-canary-3f9a";
@@ -23,8 +23,11 @@ pub fn at(secs: i64) -> UtcNanos {
     UtcNanos::from_parts(secs, 0).unwrap()
 }
 
-pub fn client() -> ClientId {
-    ClientId("client-1".to_owned())
+pub fn client() -> OAuthClient {
+    OAuthClient {
+        client_id: ClientId("client-1".to_owned()),
+        redirect_uri: RedirectUri::production(),
+    }
 }
 
 pub fn key() -> VaultKey {

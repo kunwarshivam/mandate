@@ -325,11 +325,11 @@
         "postgres-superuser",
         "journal-role-mandate-migrator",
         "journal-role-mandate-control",
+        "journal-role-mandate-executor",
         "journal-role-mandate-verify",
         "journal-role-mandate-api",
         "journal-role-mandate-deploy-manager",
         "journal-role-mandate-runtime",
-        "journal-role-mandate-executor",
         "journal-role-mandate-scheduler",
         "journal-role-mandate-gateway",
         "journal-role-mandate-exporter"
@@ -389,7 +389,7 @@
         "retries": 6,
         "test": [
           "CMD",
-          "/usr/local/bin/mandate-daemon",
+          "/mandate-daemon",
           "probe",
           "readyz",
           "--probe",

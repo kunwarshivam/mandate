@@ -4,14 +4,21 @@ use secrecy::{ExposeSecret, SecretString};
 
 use super::support::{VERIFIER, at, client};
 use crate::ConnectError;
+use crate::record::ConnectionId;
 use crate::start::{
-    Binding, ClientId, Environment, PendingStates, PkceVerifier, STATE_LIFETIME_SECS,
+    Binding, ClientId, Environment, OAuthClient, PendingStates, PkceVerifier, RedirectUri,
+    STATE_LIFETIME_SECS,
 };
+
+fn connection(id: &str) -> ConnectionId {
+    ConnectionId::new(id).unwrap()
+}
 
 fn binding(user: &str, environment: Environment) -> Binding {
     Binding {
         workspace_id: "ws-1".to_owned(),
         user_id: user.to_owned(),
+        connection_id: connection("conn_1"),
         environment,
     }
 }
@@ -157,6 +164,7 @@ fn begin_with(
     let binding = Binding {
         workspace_id: workspace.to_owned(),
         user_id: user.to_owned(),
+        connection_id: connection(&format!("conn_{workspace}")),
         environment: Environment::Paper,
     };
     let verifier = PkceVerifier(SecretString::from(verifier));
@@ -245,7 +253,10 @@ fn reserved_characters_in_the_state_and_client_id_are_percent_encoded() {
     let mut states = PendingStates::default();
     let url = states
         .begin(
-            &ClientId("id&x=y z+w".to_owned()),
+            &OAuthClient {
+                client_id: ClientId("id&x=y z+w".to_owned()),
+                redirect_uri: RedirectUri::production(),
+            },
             binding("u1", Environment::Paper),
             "a&b=c d+e",
             verifier(),
@@ -268,4 +279,149 @@ fn reserved_characters_in_the_state_and_client_id_are_percent_encoded() {
 #[test]
 fn the_verifier_prints_no_secret() {
     assert_eq!(format!("{:?}", verifier()), "PkceVerifier(redacted)");
+}
+
+#[test]
+fn the_state_returns_the_connection_it_was_issued_for() {
+    let mut states = PendingStates::default();
+    begin_with(&mut states, "st-a", ("ws-a", "u1"), "verifier-a", 1000).unwrap();
+    begin_with(&mut states, "st-b", ("ws-b", "u1"), "verifier-b", 1000).unwrap();
+    let redeemed = states.redeem("st-b", "u1", at(1010)).unwrap();
+    assert_eq!(redeemed.binding.connection_id, connection("conn_ws-b"));
+    assert_eq!(states.len(), 1);
+    assert!(!states.is_empty());
+}
+
+const ACCEPTED_REDIRECTS: [&str; 7] = [
+    "https://api.owlhead.ai/v1/oauth/alpaca/callback",
+    "https://api-staging.owlhead.ai/v1/oauth/alpaca/callback",
+    "https://api.example.test:8443/v1/oauth/alpaca/callback",
+    "http://localhost:8080/v1/oauth/alpaca/callback",
+    "http://127.0.0.1/v1/oauth/alpaca/callback",
+    "http://[::1]:9000/v1/oauth/alpaca/callback",
+    "http://[::1]/v1/oauth/alpaca/callback",
+];
+
+const REFUSED_REDIRECTS: [&str; 23] = [
+    "",
+    "http://api.owlhead.ai/v1/oauth/alpaca/callback",
+    "http://localhost.evil.test/v1/oauth/alpaca/callback",
+    "http://127.0.0.2.evil.test/v1/oauth/alpaca/callback",
+    "HTTPS://api.owlhead.ai/v1/oauth/alpaca/callback",
+    "ftp://api.owlhead.ai/v1/oauth/alpaca/callback",
+    "https:///v1/oauth/alpaca/callback",
+    "https://api.owlhead.ai/v1/oauth/alpaca/callback/",
+    "https://api.owlhead.ai/v1/oauth/alpaca/callbacks",
+    "https://api.owlhead.ai/v1/workspaces/ws-1/oauth/alpaca/callback",
+    "https://api.owlhead.ai/v1/oauth/alpaca/callback?ws=1",
+    "https://api.owlhead.ai/v1/oauth/alpaca/callback#f",
+    "https://user@api.owlhead.ai/v1/oauth/alpaca/callback",
+    "https://api.owlhead.ai/v1/oauth/alpaca/../alpaca/callback",
+    "https://api owlhead.ai/v1/oauth/alpaca/callback",
+    "https://api.owlhead.ai:/v1/oauth/alpaca/callback",
+    "https://api.owlhead.ai:99999/v1/oauth/alpaca/callback",
+    " https://api.owlhead.ai/v1/oauth/alpaca/callback",
+    "https://api.owlhead.ai:0/v1/oauth/alpaca/callback",
+    "https://api.owlhead.ai:+443/v1/oauth/alpaca/callback",
+    "https://[::1]/v1/oauth/alpaca/callback",
+    "http://[::2]/v1/oauth/alpaca/callback",
+    "http://[::1/v1/oauth/alpaca/callback",
+];
+
+#[test]
+fn a_redirect_uri_is_an_https_origin_or_a_loopback_http_one_with_the_callback_path() {
+    for text in ACCEPTED_REDIRECTS {
+        assert_eq!(
+            RedirectUri::parse(text).map(|uri| uri.as_str().to_owned()),
+            Ok(text.to_owned()),
+            "{text}"
+        );
+    }
+    for text in REFUSED_REDIRECTS {
+        assert_eq!(
+            RedirectUri::parse(text),
+            Err(ConnectError::RedirectUriInvalid),
+            "{text:?}"
+        );
+    }
+    assert_eq!(
+        RedirectUri::parse(ACCEPTED_REDIRECTS[0]),
+        Ok(RedirectUri::production())
+    );
+}
+
+#[test]
+fn the_authorization_url_carries_the_deployments_own_redirect_uri() {
+    let staging = OAuthClient {
+        client_id: ClientId("client-1".to_owned()),
+        redirect_uri: RedirectUri::parse(ACCEPTED_REDIRECTS[1]).unwrap(),
+    };
+    let mut states = PendingStates::default();
+    let url = states
+        .begin(
+            &staging,
+            binding("u1", Environment::Paper),
+            "st-1",
+            verifier(),
+            "chal",
+            at(1000),
+        )
+        .unwrap();
+    assert!(
+        url.0.contains(
+            "&redirect_uri=https%3A%2F%2Fapi-staging.owlhead.ai%2Fv1%2Foauth%2Falpaca%2Fcallback&"
+        ),
+        "{}",
+        url.0
+    );
+    assert!(!url.0.contains("api.owlhead.ai"), "{}", url.0);
+}
+
+#[test]
+fn pruning_drops_only_the_expired_states() {
+    let mut states = PendingStates::default();
+    begin_with(&mut states, "st-old", ("ws-a", "u1"), "verifier-a", 1000).unwrap();
+    begin_with(&mut states, "st-new", ("ws-b", "u1"), "verifier-b", 1300).unwrap();
+    states.prune(at(1000 + STATE_LIFETIME_SECS - 1));
+    assert_eq!(states.len(), 2, "nothing has expired yet");
+    states.prune(at(1000 + STATE_LIFETIME_SECS));
+    assert_eq!(states.len(), 1, "the first expires at its lifetime");
+    assert_eq!(
+        redeemed(&mut states, "st-old", "u1", 1001),
+        Err(ConnectError::StateUnknown)
+    );
+    assert_eq!(
+        redeemed(&mut states, "st-new", "u1", 1301),
+        Ok(owned("ws-b", "u1", "verifier-b"))
+    );
+    states.prune(at(1300 + STATE_LIFETIME_SECS));
+    assert!(states.is_empty());
+}
+
+#[test]
+fn holding_a_state_neither_spends_it_nor_outlives_it() {
+    let mut states = PendingStates::default();
+    begin_with(&mut states, "st-a", ("ws-a", "u1"), "verifier-a", 1000).unwrap();
+    assert!(states.holds("st-a", at(1000)), "held when issued");
+    assert!(
+        states.holds("st-a", at(1000 + STATE_LIFETIME_SECS - 1)),
+        "held to its last second"
+    );
+    assert!(
+        !states.holds("st-a", at(1000 + STATE_LIFETIME_SECS)),
+        "not held once expired"
+    );
+    assert!(
+        !states.holds("st-b", at(1000)),
+        "an unknown state is not held"
+    );
+    assert_eq!(
+        redeemed(&mut states, "st-a", "u1", 1001),
+        Ok(owned("ws-a", "u1", "verifier-a")),
+        "holding spends nothing"
+    );
+    assert!(
+        !states.holds("st-a", at(1001)),
+        "a redeemed state is not held"
+    );
 }

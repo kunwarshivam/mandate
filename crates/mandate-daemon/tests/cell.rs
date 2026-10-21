@@ -11,12 +11,19 @@ use std::rc::Rc;
 
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Digest, Value, parse};
-use mandate_daemon::cell::{CellDeployment, CellError, OptIn, opt_in, research};
+use mandate_daemon::cell::{
+    CellDeployment, CellError, OptIn, meter_opened_ids, opt_in, research, research_daily_cap,
+    research_metered,
+};
 use mandate_daemon::recorded::{Bundle, BundleError};
 use mandate_daemon::source::Rows;
+use mandate_gateway::money::Usd6;
+use mandate_gateway::provider::{IdSource, SequentialIds};
 use mandate_journal::{ArtifactStore, Environment, StoredEvent, StreamId};
 use mandate_runtime::{EventDraft, EventId};
 use mandate_spec::document::Mandate;
+use mandate_store::MemoryStore;
+use mandate_store::meter::JournalMeter;
 use mandate_time::UtcNanos;
 use serde_json::{Value as Json, json};
 
@@ -223,4 +230,110 @@ fn each_refusal_is_a_code() {
         let as_error: &dyn std::error::Error = &error;
         assert!(as_error.source().is_none());
     }
+}
+
+/// DEC-2254 items 1 to 3: the daily research cap is the mandate's own, tightened by the research
+/// profile, which sets no ceiling of its own; zero for a mandate with no research envelope; and no
+/// cap at all, so no start, for a document that cannot give one the gateway can hold.
+#[test]
+fn the_daily_research_cap_is_the_mandate_s_own_and_fails_closed() {
+    let cap = |edit: &dyn Fn(&mut Json)| {
+        let mut document: Json = serde_json::from_str(MANDATE).unwrap();
+        document["behavior"]["research"] = json!({
+            "interval_s": 3600,
+            "cost_cap_usd_per_day": "5",
+            "max_revisions_per_lineage": 3
+        });
+        edit(&mut document);
+        research_daily_cap(&parse(document.to_string().as_bytes()).unwrap())
+    };
+    let with = |value: Json| {
+        move |document: &mut Json| {
+            document["behavior"]["research"]["cost_cap_usd_per_day"] = value.clone()
+        }
+    };
+    assert_eq!(cap(&|_| {}), Ok(Usd6::from_micros(5_000_000)));
+    assert_eq!(cap(&with(json!("2.5"))), Ok(Usd6::from_micros(2_500_000)));
+    assert_eq!(cap(&with(json!("0.000001"))), Ok(Usd6::from_micros(1)));
+    assert_eq!(
+        cap(&|document| document["behavior"]["research"] = Json::Null),
+        Ok(Usd6::ZERO),
+        "no research envelope, no research spend"
+    );
+    let unavailable = Err(CellError::Mandate("mandate_document_unavailable"));
+    for (case, edit) in [
+        (
+            "no behavior.research",
+            Box::new(|document: &mut Json| {
+                document["behavior"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("research");
+            }) as Box<dyn Fn(&mut Json)>,
+        ),
+        (
+            "no cap",
+            Box::new(|document: &mut Json| {
+                document["behavior"]["research"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("cost_cap_usd_per_day");
+            }),
+        ),
+        ("a number", Box::new(with(json!(5)))),
+        ("no amount", Box::new(with(json!("five")))),
+        ("below a micro-dollar", Box::new(with(json!("0.0000001")))),
+        ("negative", Box::new(with(json!("-1")))),
+    ] {
+        assert_eq!(cap(&*edit), unavailable, "{case}");
+    }
+}
+
+/// DEC-2259 item 1: research over a meter the process gives, its journaled meter stream, is the
+/// same research the in-memory meter wires: the same configuration and the same references.
+#[test]
+fn research_over_a_given_meter_is_the_same_research() {
+    let (root, control, version, _) = deployed("metered");
+    let meter = JournalMeter::open(
+        MemoryStore::default(),
+        "ws1",
+        Environment::Paper,
+        Rc::new(|| UtcNanos::from_parts(1_792_180_800, 0).unwrap()),
+        Box::new(SequentialIds::starting_at(1 << 70)),
+    );
+    let metered = research_metered(
+        opted(),
+        Box::new(control.clone()),
+        Box::new(meter),
+        &root,
+        now(),
+    )
+    .unwrap_or_else(|error| panic!("{error:?}"));
+    let (plain_root, plain_control, _, _) = deployed("plain");
+    let plain = research(opted(), Box::new(plain_control), &plain_root, now()).unwrap();
+    assert_eq!(metered.wiring.config, plain.wiring.config);
+    let draft = EventDraft {
+        event_id: EventId("01J8Z3MC000000000000000001".to_owned()),
+        event_type: "RunStarted".to_owned(),
+        causation_id: None,
+        payload: Value::Null,
+    };
+    let (_, refs) = metered.refs.refs(&draft).unwrap();
+    assert_eq!(
+        refs.get("mandate_version").and_then(Value::as_str),
+        Some(version.as_str())
+    );
+}
+
+/// DEC-2258 item 2: a workspace's meter stream opens with an id drawn from its own name, the same
+/// at every start, and no two workspaces' streams open with one id.
+#[test]
+fn each_workspace_s_meter_stream_opens_with_an_id_of_its_own() {
+    let first = |workspace: &str| meter_opened_ids(workspace).next_id();
+    assert_eq!(first("ws1"), first("ws1"));
+    assert_ne!(first("ws1"), first("ws2"));
+    assert_ne!(first("ws2"), first("ws3"));
+    let mut ids = meter_opened_ids("ws1");
+    let (one, two) = (ids.next_id(), ids.next_id());
+    assert_ne!(one, two);
 }

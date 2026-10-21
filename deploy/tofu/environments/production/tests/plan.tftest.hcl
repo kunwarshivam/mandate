@@ -187,7 +187,7 @@ run "the_cluster_runs_in_sfo2" {
   command = plan
 
   assert {
-    condition     = module.cell.regions == { vpc = "sfo2", cluster = "sfo2", state_bucket = "nyc3" }
-    error_message = "Production's VPC and cluster are in sfo2, and its state bucket stays in nyc3 for now."
+    condition     = module.cell.regions == { vpc = "sfo2", cluster = "sfo2", state_bucket = "sfo2" }
+    error_message = "Production's VPC, cluster and state bucket are in sfo2."
   }
 }

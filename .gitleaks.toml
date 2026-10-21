@@ -169,15 +169,62 @@ paths = ['''^xtask/src/cell\.rs$''']
 regexTarget = "match"
 regexes = ['''^api:0123456789ab"$''']
 
-# The step-up challenge examples' `webauthn_challenge` values (E9-4, DEC-2103 item 9): fixed
-# base64url strings of 32 example bytes and four malformed variants the invalid cases refuse, not
-# credentials (a WebAuthn challenge is public by design). Allowed only as those exact values and
-# only in the challenge response's example files, so another value there, or the same value
-# anywhere else, is still reported.
+# The step-up and passkey challenge examples' `webauthn_challenge` values (E9-4, DEC-2103 item 9;
+# DEC-2632): fixed base64url strings of 32 example bytes and the malformed variants the invalid
+# cases refuse, not credentials (a WebAuthn challenge is public by design). Allowed only as those
+# exact values and only in the challenge responses' and the registration challenge's example files,
+# so another value there, or the same value anywhere else, is still reported.
 [[allowlists]]
-description = "Example WebAuthn challenges in the step-up challenge examples"
+description = "Example WebAuthn challenges in the step-up and passkey challenge examples"
 targetRules = ["generic-api-key"]
 condition = "AND"
-paths = ['''^schemas/workspace-api/examples/commands\.step-up-challenge(?:\.valid|\.invalid)?\.json$''']
+paths = ['''^schemas/workspace-api/examples/commands\.(?:step-up-challenge|passkey-registration-challenge)(?:\.valid|\.invalid)?\.json$''']
 regexTarget = "match"
 regexes = ['''^webauthn_challenge": "(?:q83vEjRWeJCrze8SNFZ4kKvN7xI0VniQq83vEjRWeJ(?:A=?|B)|q83vEjRWeJCrze8SNFZ4kKvN7xI0VniQq83vEjRWe\+A|q83vEjRWeJCrze8SNFZ4kA)"$''']
+
+# The passkey enrolment examples' `authenticator_data` values and the `credential` and
+# `public_key` sentinels the journal reference cases, the vault fixture and the API examples use
+# (DEC-2632): fixed base64url and base64 strings of a made-up attestation object and 16 example
+# credential bytes, not credentials. A passkey's credential id and public key are public by design
+# (identity spec §7.2). Allowed only as those exact values and only in the files that show a
+# passkey's enrolment, so another value there, or the same value anywhere else, is still reported.
+[[allowlists]]
+description = "Example passkey credentials and authenticator data"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = [
+  '''^schemas/workspace-api/examples/(?:commands\.passkey-enrol-request(?:\.valid|\.invalid)?|envelope(?:\.valid|\.invalid)?)\.json$''',
+  '''^docs/specs/reference-cases/journal\.yaml$''',
+  '''^fixtures/refcases/journal\.json$''',
+  '''^reference/journal/credentials\.py$''',
+]
+regexTarget = "match"
+regexes = [
+  '''^authenticator_data": "SZYN5YgOjGh0NBcPZHZgW4_krrmihjLHmVzzuoMdl2MFAAAABw"$''',
+  '''^credential: (?:AAECAwQFBgcICQoLDA0ODw|EBESExQVFhcYGRobHB0eHw)$''',
+  '''^credential": "(?:AAECAwQFBgcICQoLDA0ODw|EBESExQVFhcYGRobHB0eHw)"$''',
+  '''^(?:CREDENTIAL|OTHER_CREDENTIAL) = "(?:AAECAwQFBgcICQoLDA0ODw|EBESExQVFhcYGRobHB0eHw)"$''',
+]
+
+# The stub issuer's stand-in OAuth secret and the one value its test varies it to (E10-13,
+# DEC-2625): `secret-canary-...`, a literal that exists only so a wrong client secret can be
+# refused, not a credential. The generic key heuristic reads the `"client_secret", "<value>"` pair
+# as an assignment. Allowed only as that exact value and only in that test file, so a real secret
+# there, or the same text anywhere else, is still reported.
+[[allowlists]]
+description = "Stub issuer's wrong-secret canary"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^crates/mandate-stub-issuer/tests/alpaca\.rs$''']
+regexTarget = "match"
+regexes = ['''^client_secret", "secret-canary-9f2b"$''']
+
+# Cargo's build output at the workspace root. CI restores `target/` from its cache before
+# `cargo xtask ci full`, and on a push to `main` the scan is `gitleaks dir .`, which walks it: a
+# dependency's compiled test vectors there (p256's private-key example, in its `.rmeta`) are
+# reported though no source holds them. Only the root `target/` is allowed, never a `target`
+# directory elsewhere or a name that merely starts with it; `cargo xtask ci supply-chain` plants
+# both beside the allowed one.
+[[allowlists]]
+description = "Cargo's build output at the workspace root"
+paths = ['''^target/''']

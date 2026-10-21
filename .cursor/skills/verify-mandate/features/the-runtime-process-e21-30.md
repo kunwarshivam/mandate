@@ -52,6 +52,15 @@
   missing file, a missing member, or text that is not strict JSON refusing the load, no filings,
   and a property test that every recorded item is stamped at its age before any cut-off and kept
   by `retrieve` (fixtures in `tests/fixtures/research/`).
+  `tests/worker_dispatch.rs`: the worker's dispatch of an agentic run's reads and thinks (DEC-2260):
+  every content and record stored before the answer, and nothing answered without the loop's bounds,
+  for a run not started, under a moved allowlist, for an action, or when a store is refused.
+  `tests/worker_turn.rs`: the worker's turn (DEC-2264): its transcript loaded through the sink,
+  the record's prompt and response stored before `Called`, the gateway's refusal answered
+  `Refused`, and nothing answered for a missing artifact, a run not started, or no agentic loop.
+  `tests/recorded_turns.rs`: an agentic bundle's scripted turns (DEC-2266): read in order, a script
+  the entry could not serve refusing the load, no order or size member, and each turn answered
+  with its scripted calls, then the final reply.
 - **Run:** `cargo nextest run -p mandate-daemon -p mandate-store -p mandate-runtime -p mandate-shell`
   (with `MANDATE_PG_URL` for `tests/pg.rs`); `cargo xtask cell demo --no-web` shows the runtime
   ready in the local cell.

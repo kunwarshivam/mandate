@@ -32,3 +32,12 @@ storage:
 # How long the server certificate and its CA are valid from the install that made them. An
 # install or upgrade within 30 days of their end makes new ones.
 days: 365
+
+# The cluster's API server, which the vault reaches only for Kubernetes auth's TokenReview, by
+# address and port (V2, DEC-2630). Off, the vault reaches nothing. On, empty `cidrs` reads the
+# `kubernetes` Service and its EndpointSlice at install, as the journal-db chart does; a rendering
+# without a cluster must name them. Each address is one host (`/32`).
+kubeApi:
+  enabled: false
+  cidrs: []
+  ports: []

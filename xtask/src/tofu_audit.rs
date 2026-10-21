@@ -365,4 +365,24 @@ mod tests {
         assert!(list_items("not json").is_empty());
         assert!(list_items("[\"\", 7]").is_empty());
     }
+
+    /// DEC-2054: no plan can destroy a VPC, since DigitalOcean refuses to delete a region's default
+    /// VPC and an apply that tried failed halfway: every VPC the tree declares keeps
+    /// `prevent_destroy`.
+    #[test]
+    fn every_vpc_is_protected_from_destruction() {
+        let network = include_str!("../../deploy/tofu/modules/network/main.tf");
+        let blocks: Vec<&str> = network
+            .split("resource \"digitalocean_vpc\" ")
+            .skip(1)
+            .map(|rest| rest.split("\n}\n").next().unwrap_or_default())
+            .collect();
+        assert_eq!(blocks.len(), 1, "the network module declares one VPC");
+        for block in blocks {
+            assert!(
+                block.contains("prevent_destroy = true"),
+                "a VPC without prevent_destroy: {block}"
+            );
+        }
+    }
 }

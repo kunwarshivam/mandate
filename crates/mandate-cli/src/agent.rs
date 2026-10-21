@@ -1,8 +1,11 @@
-//! `mandate agent status`, `pause`, `resume`, `stop`, `kill`, `exit`, and `acknowledge` (the M7 brief's "The CLI
-//! control surface"; mandate spec §6.1; DEC-155 item 4, DEC-158 option (c), DEC-257 item 5).
+//! `mandate agent status`, `pause`, `resume`, `stop`, `kill`, `exit`, `acknowledge`, and
+//! `request-ack` (the M7 brief's "The CLI control surface"; mandate spec §6.1; DEC-155 item 4,
+//! DEC-158 option (c), DEC-257 item 5; journal spec §9.28, DEC-2512).
 //!
 //! Every command commits exactly one control-stream event: `OwnerCommandIssued`, or
-//! `OwnerAcknowledged` for an acknowledgment. Pause
+//! `OwnerAcknowledged` for an acknowledgment and `OwnerAcknowledgmentRequested` for its request.
+//! An acknowledgment that names a request is checked against the control stream under §9.28's
+//! rules 239 to 241 first, and a failure commits nothing. Pause
 //! needs no code (PX-4). Resume, Stop, and acknowledge need the code [`code`] prints, and a wrong
 //! one is refused
 //! locally with nothing committed, so pause stays the brake. A kill switch and an owner exit are
@@ -103,18 +106,10 @@ fn code_at(agent: &str, command: &Command, head: u64) -> Result<Option<String>, 
         Command::Stop { release: false } => ("stop", None, &None, None),
         Command::Stop { release: true } => ("stop_release", None, &None, None),
         Command::Exit { instrument, bid } => ("owner_exit", Some(instrument), bid, None),
-        Command::Acknowledge {
-            event,
-            request: None,
-        } => ("acknowledge", None, &None, Some(event)),
-        Command::Acknowledge {
-            request: Some(_), ..
-        }
-        | Command::RequestAcknowledgment { .. } => {
-            return Err(ControlError::Unimplemented { story: "E8-3" });
-        }
+        Command::Acknowledge { event, .. } => ("acknowledge", None, &None, Some(event)),
+        Command::RequestAcknowledgment { event } => ("request_ack", None, &None, Some(event)),
     };
-    let bound = object(vec![
+    let mut bound = vec![
         ("confirms", text(name)),
         ("agent", text(agent)),
         ("control_head", text(&head.to_string())),
@@ -123,8 +118,15 @@ fn code_at(agent: &str, command: &Command, head: u64) -> Result<Option<String>, 
         ("bid_size", bid(|b| &b.bid_size, confirmed)),
         ("floor", bid(|b| &b.floor, confirmed)),
         ("event", event.map_or(Value::Null, |e| text(e))),
-    ])?;
-    Ok(Some(code_of(&bound)))
+    ];
+    if let Command::Acknowledge {
+        request: Some(request),
+        ..
+    } = command
+    {
+        bound.push(("request", text(request)));
+    }
+    Ok(Some(code_of(&object(bound)?)))
 }
 
 /// The code for a kill switch of `scope`: `mandate_approval::kill_switch_code` of the scope and the
@@ -177,24 +179,37 @@ pub fn command(
     };
     let needs_code = matches!(
         command,
-        Command::Resume | Command::Stop { .. } | Command::Acknowledge { .. }
+        Command::Resume
+            | Command::Stop { .. }
+            | Command::Acknowledge { .. }
+            | Command::RequestAcknowledgment { .. }
     );
     let (event_type, key, timed): (_, _, &[&'static str]) = match command {
-        Command::Acknowledge {
-            request: Some(_), ..
+        Command::Acknowledge { event, request } => {
+            let requested_by = match request {
+                Some(request) => requester(journal, owner, agent, event, request)?,
+                None => owner.user.clone(),
+            };
+            (
+                ACKNOWLEDGED,
+                vec![
+                    ("agent", text(agent)),
+                    ("event", text(event)),
+                    ("user", text(&owner.user)),
+                    ("requested_by", text(&requested_by)),
+                    ("independent_required", Value::Bool(request.is_some())),
+                    ("request", request.as_deref().map_or(Value::Null, text)),
+                ],
+                &["risk_clock", "submitted_at"],
+            )
         }
-        | Command::RequestAcknowledgment { .. } => {
-            return Err(ControlError::Unimplemented { story: "E8-3" });
-        }
-        Command::Acknowledge {
-            event,
-            request: None,
-        } => (
-            "OwnerAcknowledged",
+        Command::RequestAcknowledgment { event } => (
+            REQUESTED,
             vec![
                 ("agent", text(agent)),
                 ("event", text(event)),
-                ("user", text(&owner.user)),
+                ("requested_by", text(&owner.user)),
+                ("independent_required", Value::Bool(true)),
             ],
             &["risk_clock", "submitted_at"],
         ),
@@ -247,8 +262,105 @@ pub fn command(
                 reason: "step_up_missing",
             })
         }
-        Decision::Fresh(decided) => commit(journal, ids, owner, decided, timed, now),
+        Decision::Fresh(decided) => {
+            if let Command::Acknowledge {
+                request: Some(request),
+                ..
+            } = command
+            {
+                unspent(journal, owner, request)?;
+            }
+            commit(journal, ids, owner, decided, timed, now)
+        }
     }
+}
+
+const ACKNOWLEDGED: &str = "OwnerAcknowledged";
+const REQUESTED: &str = "OwnerAcknowledgmentRequested";
+
+/// The control stream's records, parsed from their bytes. A row that does not parse fails the
+/// whole read, so a rule never passes on a stream it could not read in full: a dropped
+/// acknowledgment would leave its request looking unspent (rule 241).
+///
+/// # Errors
+/// [`ControlError::Journal`] when the journal cannot be read or a row does not parse.
+fn records(journal: &dyn ControlJournal, owner: &Owner) -> Result<Vec<Value>, ControlError> {
+    journal
+        .rows(&control_stream(owner)?)?
+        .iter()
+        .map(|row| {
+            mandate_canon::parse(&row.body).map_err(|_| {
+                ControlError::Journal(format!(
+                    "the control stream's row {} does not parse",
+                    row.seq
+                ))
+            })
+        })
+        .collect()
+}
+
+/// The text at the dotted `path` of `record`, if any.
+fn named(record: &Value, path: &str) -> Option<String> {
+    path.split('.')
+        .try_fold(record, |v, k| v.get(k))
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+}
+
+/// The requester of `request`, the control-stream request an acknowledgment of `agent`'s `event`
+/// by `owner` names, once journal spec §9.28's rules 239 and 240 hold against the control stream
+/// (DEC-2512 items 2 and 4).
+///
+/// # Errors
+/// [`ControlError::Refused`] with `request_invalid` when no `OwnerAcknowledgmentRequested` has
+/// that id, or it names another agent or event (rule 240); with `not_independent` when the owner
+/// requested it (rule 239); and [`ControlError::Journal`] when the journal cannot be read.
+fn requester(
+    journal: &dyn ControlJournal,
+    owner: &Owner,
+    agent: &str,
+    event: &str,
+    request: &str,
+) -> Result<String, ControlError> {
+    let refused = |reason| ControlError::Refused { reason };
+    let records = records(journal, owner)?;
+    let asked = records
+        .iter()
+        .find(|r| {
+            named(r, "event_id").as_deref() == Some(request)
+                && named(r, "event_type").as_deref() == Some(REQUESTED)
+        })
+        .ok_or(refused("request_invalid"))?;
+    let requested_by = named(asked, "payload.requested_by").unwrap_or_default();
+    if requested_by == owner.user {
+        return Err(refused("not_independent"));
+    }
+    let same = named(asked, "payload.agent").as_deref() == Some(agent)
+        && named(asked, "payload.event").as_deref() == Some(event);
+    if !same {
+        return Err(refused("request_invalid"));
+    }
+    Ok(requested_by)
+}
+
+/// Rule 241 before a fresh acknowledgment of `request` is committed: no `OwnerAcknowledged` on the
+/// control stream names it already. It is judged after [`decide`], so a re-run of an acknowledgment
+/// that did commit still reports it (DEC-290 item 5).
+///
+/// # Errors
+/// [`ControlError::Refused`] with `request_invalid` when one does, and [`ControlError::Journal`]
+/// when the journal cannot be read.
+fn unspent(journal: &dyn ControlJournal, owner: &Owner, request: &str) -> Result<(), ControlError> {
+    let spent = records(journal, owner)?.iter().any(|r| {
+        named(r, "event_type").as_deref() == Some(ACKNOWLEDGED)
+            && named(r, "payload.request").as_deref() == Some(request)
+    });
+    if spent {
+        return Err(ControlError::Refused {
+            reason: "request_invalid",
+        });
+    }
+    Ok(())
 }
 
 /// Commits a kill switch of `scope`, with step-up evidence only when `typed` is the scope's code.

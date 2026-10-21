@@ -108,13 +108,22 @@ egress:
       k8s-app: kube-dns
 
 # One-off runs of the `run` and `verify` processes, rendered only when set. `id` names the Job,
-# so each run is a new Job.
+# so each run is a new Job. `process` is the run process it runs, `control` (the CLI) unless it
+# names another (DEC-2035).
 run:
   id: ""
   args: []
+  process: control
 verify:
   id: ""
   streams: []
+
+# The workspace's founding grant (DEC-2114): with `enabled`, a post-install and post-upgrade hook
+# runs `workspace found --open` for `member`, the founder's principal ULID, on `api.workspace`.
+# Never the founder's identity-provider subject: the sign-in link is the `subject-links` ConfigMap.
+founding:
+  enabled: false
+  member: ""
 
 # The agent deployment the runtime process runs (DEC-1013): its agent, the connection it trades
 # through, and the owner whose kill switch it acts on. Required once `images.runtime` is named;
@@ -127,6 +136,15 @@ runtime:
   connection: ""
   owner: ""
   research: ""
+
+# The broker every executor runs over (DEC-2306 item 1): `fixture`, the in-process fixture paper
+# broker, or `alpaca-paper`, Alpaca's paper trading host under the vault lease on its connection,
+# which staging alone may name. `vaultAddress` is the cell's vault, which `alpaca-paper` needs: the
+# executor trusts the CA mounted at /run/mandate/vault and logs in with the ServiceAccount token at
+# /run/mandate/vault-token, both of which the vault wiring mounts.
+executor:
+  broker: fixture
+  vaultAddress: ""
 
 # The cell's one ingress: cloudflared dialing out to Cloudflare's tunnel edge, so the cluster
 # exposes no port (DEC-967 item 6). Off in the local cell, which has no tunnel.

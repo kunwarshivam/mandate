@@ -18,7 +18,9 @@
     "ingress",
     "deploymentTier",
     "api",
-    "artifacts"
+    "artifacts",
+    "founding",
+    "executor"
   ],
   "properties": {
     "workspace": {
@@ -288,6 +290,11 @@
           "items": {
             "type": "string"
           }
+        },
+        "process": {
+          "description": "The run process this run runs (DEC-2035); a name that is no run process fails the render",
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,39}$"
         }
       }
     },
@@ -340,6 +347,41 @@
         }
       }
     },
+    "executor": {
+      "description": "The broker every executor runs over (DEC-2306 item 1); a vault address, never a secret",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "broker",
+        "vaultAddress"
+      ],
+      "properties": {
+        "broker": {
+          "enum": [
+            "fixture",
+            "alpaca-paper"
+          ]
+        },
+        "vaultAddress": {
+          "type": "string",
+          "pattern": "^$|^https://[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?(:[0-9]{1,5})?$"
+        }
+      },
+      "if": {
+        "properties": {
+          "broker": {
+            "const": "alpaca-paper"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "vaultAddress": {
+            "minLength": 1
+          }
+        }
+      }
+    },
     "localImages": {
       "type": "boolean",
       "description": "true only in the local cell's values: allows mandate.local/ images"
@@ -385,7 +427,7 @@
       }
     },
     "api": {
-      "description": "The workspace API server's settings (workspace API spec \u00a73.11 item 2), each required once images.api is named. None is a secret: the session signing key is made in the pod's memory at each start, and the subject links are a ConfigMap the operator makes.",
+      "description": "The workspace API server's settings (workspace API spec §3.11 item 2), each required once images.api is named. None is a secret: the session signing key is made in the pod's memory at each start, and the subject links are a ConfigMap the operator makes.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -459,6 +501,53 @@
           ]
         }
       }
+    },
+    "founding": {
+      "description": "The workspace's founding grant (DEC-2114): with enabled, a post-install and post-upgrade hook runs `workspace found --open` for member on api.workspace. Ids only: the founder's identity-provider subject is never a value",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "member"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "member": {
+          "description": "The founder's principal, an opaque ULID (identity spec §3.1), or empty when founding is off",
+          "type": "string",
+          "pattern": "^([0-7][0-9A-HJKMNP-TV-Z]{25})?$"
+        }
+      }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "executor": {
+            "properties": {
+              "broker": {
+                "const": "alpaca-paper"
+              }
+            }
+          }
+        },
+        "required": [
+          "executor"
+        ]
+      },
+      "then": {
+        "properties": {
+          "deploymentTier": {
+            "const": "staging"
+          }
+        },
+        "required": [
+          "deploymentTier"
+        ]
+      }
+    }
+  ]
 }

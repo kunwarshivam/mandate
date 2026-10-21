@@ -42,6 +42,7 @@ SECTION_3_1 = {
     "api": {("postgres", "TCP", 5432), ("identity-provider", "TCP", 443)},
     "control": {("postgres", "TCP", 5432), ("vault", "TCP", 8200), ("identity-provider", "TCP", 443)},
     "journal-verify": {("postgres", "TCP", 5432)},
+    "connect-check": {("postgres", "TCP", 5432)},
     "runtime": {("postgres", "TCP", 5432), ("model-gateway", "TCP", 8080), ("artifact-store", "TCP", 443)},
     "executor": {("postgres", "TCP", 5432), ("vault", "TCP", 8200), ("broker", "TCP", 443)},
     "token-exchange": {("vault", "TCP", 8200), ("token-host", "TCP", 443)},
@@ -166,10 +167,11 @@ def policies(docs: list[dict]) -> dict[str, dict]:
     return {d["metadata"]["name"]: d for d in docs if d["kind"] == "NetworkPolicy"}
 
 
-def one_workload_per_process(docs: list[dict]) -> list[str]:
+def one_workload_per_process(docs: list[dict], run_process: str = "control") -> list[str]:
     """Every process type renders exactly one Deployment (a service) or Job, and nothing else; once
     the deployment manager renders, the runtime and the executor are only its pod templates, which
-    it alone starts (DEC-1170)."""
+    it alone starts (DEC-1170). Of the `run` processes, only the one a run names renders, `control`
+    unless it names another (DEC-2035)."""
     kinds = {"service": "Deployment", "migration": "Job", "run": "Job", "verify": "Job"}
     manager = any(is_manager(w) for w in workloads(docs))
     problems = []
@@ -178,7 +180,9 @@ def one_workload_per_process(docs: list[dict]) -> list[str]:
             w for w in workloads(docs) if w["metadata"]["labels"].get("mandate.dev/process") == p["name"]
         ]
         want = "Pod" if manager and p["name"] in ("runtime", "executor") else kinds[p["kind"]]
-        if [w["kind"] for w in found] != [want]:
+        if p["kind"] == "run" and p["name"] != run_process:
+            want = None
+        if [w["kind"] for w in found] != ([want] if want else []):
             problems.append(f"{p['name']}: {[w['kind'] for w in found]}")
     return problems
 
@@ -533,6 +537,56 @@ def test_one_workload_per_process():
     assert one_workload_per_process(render_all()) == []
 
 
+CONNECT_CHECK = ["--set", "run.process=connect-check"]
+
+
+def test_a_run_renders_only_the_process_it_names():
+    """A one-off run renders one Job, of `control` unless `run.process` names another run process;
+    a name that is no run process fails the render rather than running nothing (DEC-2035)."""
+    assert one_workload_per_process(render_all(*CONNECT_CHECK), "connect-check") == []
+    assert (
+        helm(
+            CHART,
+            "-f",
+            str(CELL / "values" / "k3d.yaml"),
+            *every_image(),
+            "--set",
+            "run.id=t1",
+            "--set",
+            "run.process=runtime",
+        ).returncode
+        != 0
+    )
+
+
+def test_the_connect_check_runs_the_executor_on_its_journal_role_alone():
+    """The connect check is the executor's image, run with the run's arguments as the executor's
+    journal role, with Postgres its one destination and no store: its broker is the in-process
+    fixture (DEC-2007, DEC-2035)."""
+    docs = render_all(*CONNECT_CHECK)
+    job = next(
+        w for w in workloads(docs) if w["metadata"]["labels"].get("mandate.dev/process") == "connect-check"
+    )
+    run = pod_spec(job)["containers"][0]
+    assert run["image"] == PLACEHOLDER.format("executor")
+    assert run["args"] == ["workspace", "open", "--workspace", "ws9"]
+    dsn = next(e["value"] for e in run["env"] if e["name"] == "MANDATE_JOURNAL_DSN")
+    assert dsn.startswith("postgres://mandate_executor@")
+    assert "artifacts" not in {v["name"] for v in pod_spec(job)["volumes"]}
+    for check in (
+        colocated,
+        guaranteed,
+        default_deny,
+        no_ingress,
+        gated,
+        hardened,
+        secrets_as_files,
+        migration_first,
+    ):
+        assert check(docs) == [], check.__name__
+    assert egress_exact(docs) == []
+
+
 def test_a_process_renders_only_with_its_image():
     docs = render("-f", str(CELL / "values" / "k3d.yaml"))
     assert {w["metadata"]["name"] for w in workloads(docs)} == {"migrate"}
@@ -694,6 +748,156 @@ def test_api_contained():
         assert helm(CHART, *args).returncode != 0, refused
 
 
+FOUNDER = "01KDEM0000000000000000000F"
+FOUNDING = ("--set", "founding.enabled=true", "--set", f"founding.member={FOUNDER}")
+FOUNDING_HOOK = "post-install,post-upgrade"
+
+
+def founding_hook(docs: list[dict]) -> list[str]:
+    """With founding on (DEC-2114), the one `founding` Job is the control process's: a post-install
+    and post-upgrade hook made again before each run, running exactly `workspace found --open` for
+    the founder on the hosted workspace as the control role, and naming no identity-provider
+    subject anywhere."""
+    jobs = [d for d in docs if d["kind"] == "Job" and d["metadata"]["name"] == "founding"]
+    if len(jobs) != 1:
+        return [f"{len(jobs)} founding Jobs"]
+    job = jobs[0]
+    problems = []
+    annotations = job["metadata"].get("annotations", {})
+    if annotations.get("helm.sh/hook") != FOUNDING_HOOK:
+        problems.append(f"the founding Job is not a {FOUNDING_HOOK} hook: {annotations}")
+    if annotations.get("helm.sh/hook-delete-policy") != "before-hook-creation":
+        problems.append(f"the founding Job is not made again before each run: {annotations}")
+    if job["metadata"]["labels"].get("mandate.dev/process") != "control":
+        problems.append(f"the founding Job is not the control process's: {job['metadata']['labels']}")
+    run = pod_spec(job)["containers"]
+    if len(run) != 1:
+        return [*problems, f"the founding Job runs {len(run)} containers"]
+    args = run[0].get("args", [])
+    want = [
+        "workspace",
+        "found",
+        "--open",
+        "--workspace",
+        args[4] if len(args) > 4 else "",
+        "--member",
+        FOUNDER,
+        "--method",
+        "oidc",
+        "--journal",
+        "$(MANDATE_JOURNAL_DSN)",
+        "--store",
+        "/work/store",
+    ]
+    if args != want or not re.fullmatch(r"[0-7][0-9A-HJKMNP-TV-Z]{25}", want[4]):
+        problems.append(f"the founding Job runs {args}")
+    dsn = next((e.get("value", "") for e in run[0]["env"] if e["name"] == "MANDATE_JOURNAL_DSN"), "")
+    if not dsn.startswith("postgres://mandate_control@"):
+        problems.append(f"the founding Job connects as {dsn}")
+    if "subject" in json.dumps(job).lower():
+        problems.append("the founding Job names a subject")
+    return problems
+
+
+def test_the_founding_grant_is_a_hook_of_the_control_process():
+    """Off by default; on, one hook Job of `control` with control's role, gate, hardening, files
+    and egress, and nothing else changed; refused without the workspace, the member, or the control
+    process's image (DEC-2114)."""
+    assert not [d for d in render_all() if d["metadata"]["name"] == "founding"]
+    base = ("-f", str(CELL / "values" / "k3d.yaml"), *every_image(), "--set-json", f'egress.kube-api=["{KUBE_API}"]')
+    docs = render(*base, *FOUNDING)
+    plain = render(*base)
+    assert founding_hook(docs) == []
+    assert [d for d in docs if d["metadata"]["name"] != "founding"] == plain, "founding adds only its Job"
+    for check in (gated, hardened, secrets_as_files, egress_exact):
+        assert check(docs) == [], check.__name__
+    for seed in (
+        lambda j: j["metadata"]["annotations"].update({"helm.sh/hook": "pre-install,pre-upgrade"}),
+        lambda j: j["metadata"]["annotations"].pop("helm.sh/hook-delete-policy"),
+        lambda j: j["metadata"]["labels"].update({"mandate.dev/process": "api"}),
+        lambda j: pod_spec(j)["containers"][0]["args"].remove("--open"),
+        lambda j: pod_spec(j)["containers"][0]["args"].append("--subject"),
+        lambda j: pod_spec(j)["containers"][0]["env"].append({"name": "FOUNDER_OIDC_SUBJECT", "value": "x"}),
+        lambda j: pod_spec(j)["containers"][0]["env"][0].update(value="postgres://mandate_migrator@journal-rw"),
+        lambda j: pod_spec(j)["containers"].append(pod_spec(j)["containers"][0]),
+    ):
+        assert founding_hook(mutate(docs, "founding", "Job", seed)), seed
+    assert founding_hook([d for d in docs if d["metadata"]["name"] != "founding"])
+    for refused in (
+        ("--set", "founding.member="),
+        ("--set", "api.workspace="),
+        ("--set", "founding.member=not-a-ulid"),
+    ):
+        args = ["-f", str(CELL / "values" / "k3d.yaml"), *every_image(), *FOUNDING, *refused]
+        assert helm(CHART, *args).returncode != 0, refused
+    without_control = ["-f", str(CELL / "values" / "k3d.yaml"), *FOUNDING]
+    assert helm(CHART, *without_control).returncode != 0
+
+
+# The public CA bundle the API server trusts for the identity provider's key set (RS's finding 1):
+# copied from the pinned postgres image by the pod's init container, since the API's own image is
+# a bare binary with none.
+CA_BUNDLE_DIR = "/run/ca-bundle"
+CA_BUNDLE = f"{CA_BUNDLE_DIR}/ca-certificates.crt"
+SYSTEM_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
+
+
+def ca_bundle(docs: list[dict]) -> list[str]:
+    """The API container, and no other container, mounts the CA bundle read-only and names it in
+    SSL_CERT_FILE; one init container of its pod copies it from the system bundle."""
+    problems = []
+    for w in workloads(docs):
+        spec = pod_spec(w)
+        for c in spec.get("containers", []):
+            env = {e["name"]: e.get("value") for e in c.get("env", [])}
+            mounts = {m["mountPath"]: m for m in c.get("volumeMounts", [])}
+            is_api = w["metadata"]["name"] == "api" and c["name"] == "api"
+            if not is_api:
+                if "SSL_CERT_FILE" in env or CA_BUNDLE_DIR in mounts:
+                    problems.append(f"{w['metadata']['name']}/{c['name']} gets the API's CA bundle")
+                continue
+            mount = mounts.get(CA_BUNDLE_DIR)
+            if env.get("SSL_CERT_FILE") != CA_BUNDLE:
+                problems.append(f"api's SSL_CERT_FILE is {env.get('SSL_CERT_FILE')!r}")
+            if not mount or mount.get("readOnly") is not True:
+                problems.append(f"api does not mount the CA bundle read-only: {mount}")
+                continue
+            copiers = [
+                i
+                for i in spec.get("initContainers", [])
+                if any(m["name"] == mount["name"] for m in i.get("volumeMounts", []))
+                and f"cp {SYSTEM_BUNDLE} {CA_BUNDLE}" in " ".join(i.get("command", []))
+            ]
+            if len(copiers) != 1:
+                problems.append("api's CA bundle is not copied by one init container")
+    return problems
+
+
+def test_only_the_api_gets_the_ca_bundle():
+    docs = render_all()
+    assert ca_bundle(docs) == []
+    api = owner_workload(docs)
+    assert CA_BUNDLE_DIR in {m["mountPath"] for m in first_container(api)["volumeMounts"]}
+    for seed in (
+        lambda w: next(m for m in first_container(w)["volumeMounts"] if m["mountPath"] == CA_BUNDLE_DIR).update(
+            readOnly=False
+        ),
+        lambda w: first_container(w).update(
+            env=[e for e in first_container(w)["env"] if e["name"] != "SSL_CERT_FILE"]
+        ),
+        lambda w: pod_spec(w).update(initContainers=[]),
+    ):
+        assert ca_bundle(mutate(docs, "api", "Deployment", seed)), seed
+    other = next(w for w in workloads(docs) if w["kind"] == "Deployment" and w["metadata"]["name"] != "api")
+    leaked = mutate(
+        docs,
+        other["metadata"]["name"],
+        other["kind"],
+        lambda w: first_container(w).setdefault("env", []).append({"name": "SSL_CERT_FILE", "value": CA_BUNDLE}),
+    )
+    assert ca_bundle(leaked)
+
+
 POD_RULE = {"apiGroups": [""], "resources": ["pods"], "verbs": ["create", "delete", "get", "list"]}
 TOKEN_PATH = "/var/run/secrets/kubernetes.io/serviceaccount"
 
@@ -824,7 +1028,7 @@ def test_deploy_manager_contained():
         probes = [container[k]["exec"]["command"] for k in ("livenessProbe", "readinessProbe")]
         listed = next(p for p in PROCESSES if p["name"] == pod["metadata"]["name"])
         words = listed.get("probe") or [
-            "/usr/local/bin/mandate-daemon", "probe", "{probe}", "--probe", "/tmp/process.sock"
+            "/mandate-daemon", "probe", "{probe}", "--probe", "/tmp/process.sock"
         ]
         assert probes == [[x.replace("{probe}", k) for x in words] for k in ("livez", "readyz")], probes
     only_runtime = render_all("--set", "images.executor=")
@@ -846,6 +1050,55 @@ def test_runtime_research_names_only_the_interim_image_s_bundle():
     for path in ["/tmp/research", "relative/research", f"{RESEARCH}/"]:
         done = helm(CHART, "-f", k3d, *every_image(), "--set", f"runtime.research={path}")
         assert done.returncode != 0, path
+
+
+# The executor on Alpaca's paper host (DEC-2306 item 1): staging's tier, and the cell's vault.
+VAULT = "https://vault.ws-ws1.svc:8200"
+ALPACA_PAPER = [
+    "--set", "deploymentTier=staging",
+    "--set", "executor.broker=alpaca-paper",
+    "--set", f"executor.vaultAddress={VAULT}",
+]
+PAPER_ARGS = ["--broker", "alpaca-paper", "--vault-address", VAULT, "--vault-dir", "/run/mandate/vault"]
+
+
+def test_the_executor_runs_on_alpaca_paper_where_staging_names_it():
+    """DEC-2306 item 1: `executor.broker=alpaca-paper` hands every executor the paper host, the
+    vault's address and the CA's directory, whether the manager starts it or it is a Deployment,
+    and nothing else changes: the runtime's args, and the manager's containment."""
+    docs = render_all(*ALPACA_PAPER)
+    assert deploy_manager_contained(docs) == []
+    args = {p["metadata"]["name"]: first_container(p)["args"] for p in managed_pods(docs)}
+    assert args == {
+        "executor": ["run", "--probe", "/tmp/process.sock", *PAPER_ARGS],
+        "runtime": ["run", "--probe", "/tmp/process.sock", "--research", RESEARCH],
+    }, args
+    unmanaged = render_all(*ALPACA_PAPER, "--set", f"images.{MANAGER}=")
+    executor = next(
+        w for w in workloads(unmanaged) if w["kind"] == "Deployment" and w["metadata"]["name"] == "executor"
+    )
+    assert first_container(executor)["args"] == ["run", "--probe", "/tmp/process.sock", *PAPER_ARGS]
+
+
+def test_the_paper_broker_needs_staging_and_its_vault():
+    """DEC-2306 item 1: the fixture stays the default and the only broker outside staging; the
+    paper host needs the cell's vault by an https address; any other broker, a live one included,
+    is refused by the schema, so no executor is pointed at a host the decision does not name."""
+    k3d = str(CELL / "values" / "k3d.yaml")
+    base = ["-f", k3d, *every_image()]
+    assert helm(CHART, *base, *ALPACA_PAPER).returncode == 0
+    staging = ALPACA_PAPER[:2]
+    refused = {
+        "outside staging": ALPACA_PAPER[2:],
+        "in production": [*ALPACA_PAPER, "--set", "deploymentTier=production"],
+        "without a vault": [*staging, "--set", "executor.broker=alpaca-paper"],
+        "over http": [*ALPACA_PAPER, "--set", "executor.vaultAddress=http://vault.ws-ws1.svc:8200"],
+        "with a path": [*ALPACA_PAPER, "--set", f"executor.vaultAddress={VAULT}/v1"],
+        "a live broker": [*staging, "--set", "executor.broker=alpaca-live"],
+        "an unnamed broker": [*staging, "--set", "executor.broker=alpaca"],
+    }
+    for why, extra in refused.items():
+        assert helm(CHART, *base, *extra).returncode != 0, why
 
 
 def test_without_the_manager_the_runtime_and_executor_are_deployments():
@@ -1281,7 +1534,14 @@ def owner_workload(docs: list[dict]) -> dict:
 
 
 def without_ingress(docs: list[dict]) -> list[dict]:
-    return [d for d in docs if d["metadata"]["name"] not in ("cloudflared", "egress-cloudflared")]
+    """`docs` without the tunnel: its Deployment and policy, and its container and token volume in
+    the API's pod (DEC-2056)."""
+    docs = copy.deepcopy([d for d in docs if d["metadata"]["name"] not in ("cloudflared", "egress-cloudflared")])
+    for w in workloads(docs):
+        spec = pod_spec(w)
+        spec["containers"] = [c for c in spec["containers"] if c["name"] != "cloudflared"]
+        spec["volumes"] = [v for v in spec.get("volumes", []) if v["name"] != "tunnel"]
+    return docs
 
 
 def test_portable_across_k3d_k3s_and_managed():
@@ -1348,6 +1608,95 @@ def test_ingress_only_by_tunnel():
     assert ingress_only_by_tunnel(wide)
 
 
+TUNNEL_TOKEN = "/run/secrets/tunnel/token"
+
+
+def tunnel_route(docs: list[dict]) -> list[str]:
+    """The tunnel reaches the API's loopback listener, the origin lane IAC routes the API's host to
+    (`http://127.0.0.1:8080`), by running in the API's pod: with the API, cloudflared is a second
+    container there and no other pod runs one, so every connector of the tunnel can reach the API;
+    without it, cloudflared runs alone. Only cloudflared reads the tunnel token, it mounts nothing of
+    the API's, and the tunnel's egress policy selects the pod it runs in."""
+    problems = []
+    if "egress-cloudflared" not in policies(docs):
+        return problems
+    runners = [
+        (w, c) for w in workloads(docs) for c in pod_spec(w)["containers"] if c["name"] == "cloudflared"
+    ]
+    api = [w for w in workloads(docs) if w["metadata"]["name"] == "api"]
+    want = api[0]["metadata"]["name"] if api else "cloudflared"
+    if [w["metadata"]["name"] for w, _ in runners] != [want]:
+        problems.append(f"cloudflared runs in {[w['metadata']['name'] for w, _ in runners]}, want [{want!r}]")
+        return problems
+    pod, tunnel = runners[0]
+    selector = policies(docs)["egress-cloudflared"]["spec"]["podSelector"]["matchLabels"]
+    if any(pod["spec"]["template"]["metadata"]["labels"].get(k) != v for k, v in selector.items()):
+        problems.append(f"the tunnel's egress policy selects {selector}, not its pod")
+    token_volume = next(
+        (
+            v["name"]
+            for v in pod_spec(pod).get("volumes", [])
+            if any(i.get("path") == "token" for i in v.get("secret", {}).get("items", []))
+        ),
+        None,
+    )
+    for c in [*pod_spec(pod).get("initContainers", []), *pod_spec(pod)["containers"]]:
+        names = {m["name"] for m in c.get("volumeMounts", [])}
+        if c is tunnel:
+            if token_volume not in names or TUNNEL_TOKEN not in c.get("args", []):
+                problems.append("cloudflared does not read the tunnel token's file")
+            if names - {token_volume, "tmp"}:
+                problems.append(f"cloudflared mounts {sorted(names - {token_volume, 'tmp'})}")
+        elif token_volume in names:
+            problems.append(f"{c['name']} mounts the tunnel token")
+    return problems
+
+
+def tunnelled(*extra: str) -> list[dict]:
+    return render_all("-f", str(CELL / "values" / "managed.yaml"), "--set", "localImages=true", *extra)
+
+
+def test_the_tunnel_runs_beside_the_api():
+    docs = tunnelled()
+    assert tunnel_route(docs) == []
+    api = owner_workload(docs)
+    assert [c["name"] for c in pod_spec(api)["containers"]] == ["api", "cloudflared"]
+    assert api_contained(docs) == [], "the API still listens on its pod's loopback only"
+    assert not [d for d in docs if d["kind"] in ("Service", "Ingress")]
+    alone = render("-f", str(CELL / "values" / "k3s.yaml"))
+    assert tunnel_route(alone) == []
+    assert [d["metadata"]["name"] for d in alone if d["kind"] == "Deployment"] == ["cloudflared"]
+    standalone = next(d for d in alone if d["kind"] == "Deployment" and d["metadata"]["name"] == "cloudflared")
+    seeds = [
+        [*docs, standalone],
+        mutate(docs, "api", "Deployment", lambda w: pod_spec(w)["containers"].pop()),
+        mutate(
+            docs,
+            "egress-cloudflared",
+            "NetworkPolicy",
+            lambda p: p["spec"]["podSelector"]["matchLabels"].update({"mandate.dev/process": "cloudflared"}),
+        ),
+        mutate(
+            docs,
+            "api",
+            "Deployment",
+            lambda w: first_container(w)["volumeMounts"].append(
+                {"name": "tunnel", "mountPath": "/run/secrets/tunnel", "readOnly": True}
+            ),
+        ),
+        mutate(
+            docs,
+            "api",
+            "Deployment",
+            lambda w: pod_spec(w)["containers"][1]["volumeMounts"].append(
+                {"name": "credentials", "mountPath": "/run/credentials", "readOnly": True}
+            ),
+        ),
+    ]
+    for seeded in seeds:
+        assert tunnel_route(seeded), seeded
+
+
 def test_environment_is_paper_or_backtest():
     assert render("--set", "environment=backtest")
     for refused in ("live", "production", ""):
@@ -1363,7 +1712,7 @@ def tiers(docs: list[dict]) -> set[str]:
             names = [e["name"] for e in c.get("env", [])]
             assert len(names) == len(set(names)), f"{w['metadata']['name']} sets an env var twice: {names}"
             env = {e["name"]: e.get("value") for e in c.get("env", [])}
-            if "HOME" in env and w["metadata"]["name"] != "cloudflared":
+            if "HOME" in env and c["name"] != "cloudflared":
                 found.add(env.get("MANDATE_DEPLOYMENT_TIER", "unset"))
     return found
 
@@ -1826,3 +2175,50 @@ def test_roles_and_compose_seeded_bugs_are_caught():
         compose = copy.deepcopy(COMPOSE)
         change(compose)
         assert compose_matches(compose), change
+
+
+def probe_binaries(docs: list[dict]) -> list[str]:
+    """Every exec probe in the chart, the manager's pod templates included, names its binary at the
+    image's root, where release images put it (`xtask/src/image.rs`, entrypoint `/<name>`) and the
+    cell's images do too, so the same chart runs on both."""
+    problems = []
+    for w in workloads(docs):
+        for c in containers(w):
+            for kind in ("readinessProbe", "livenessProbe", "startupProbe"):
+                command = c.get(kind, {}).get("exec", {}).get("command")
+                if command and not re.fullmatch(r"/mandate-[a-z-]+", command[0]):
+                    problems.append(f"{w['metadata']['name']}/{c['name']} {kind} runs {command[0]}")
+    return problems
+
+
+def test_probes_name_the_binary_at_the_image_root():
+    docs = render_all()
+    assert probe_binaries(docs) == []
+    assert any(
+        c.get("readinessProbe", {}).get("exec") for w in workloads(docs) for c in containers(w)
+    ), "no exec probe rendered, so nothing was checked"
+    moved = mutate(
+        docs,
+        "executor",
+        "Pod",
+        lambda w: first_container(w)["readinessProbe"]["exec"]["command"].__setitem__(
+            0, "/usr/local/bin/mandate-executord"
+        ),
+    )
+    assert probe_binaries(moved)
+
+
+def test_the_journal_reaches_the_kubernetes_api_by_ipv4_hosts_only():
+    """Whatever names the Kubernetes API's addresses, values or the cluster lookup, the policy takes
+    only single IPv4 hosts: an IPv6 address read as `/32` would cover a vast range. The schema
+    refuses them in values; the template refuses them from any source, shown with the schema
+    skipped, since a rendering without a cluster cannot fake the lookup."""
+    k3d = ("-f", str(CELL / "values" / "k3d-journal-db.yaml"))
+    assert helm(JOURNAL_CHART, *JOURNAL_ARGS).returncode == 0
+    for cidrs in (["fd00::1/32"], ["10.43.0.1/32", "fd00::1/32"], ["10.0.0.0/8"], ["0.0.0.0/0"], ["10.43.0.1"]):
+        api = json.dumps({"cidrs": cidrs, "ports": [443]})
+        assert helm(JOURNAL_CHART, *k3d, "--set-json", f"kubeApi={api}").returncode != 0, cidrs
+        skipped = helm(JOURNAL_CHART, *k3d, "--skip-schema-validation", "--set-json", f"kubeApi={api}")
+        assert skipped.returncode != 0 and "Kubernetes API" in skipped.stderr, cidrs
+    unknown = helm(JOURNAL_CHART, *k3d)
+    assert unknown.returncode != 0 and "Kubernetes API" in unknown.stderr

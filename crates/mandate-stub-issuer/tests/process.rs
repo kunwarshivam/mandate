@@ -218,3 +218,80 @@ fn the_audience_given_is_announced_and_signed() {
     .expect("JSON");
     assert_eq!(claims["aud"], "mandate-demo");
 }
+
+/// An owner-only client secret file, and a group-readable one, in a fresh directory.
+fn secret_files() -> (String, String) {
+    use std::os::unix::fs::PermissionsExt as _;
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("stub-process-alpaca-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("a directory");
+    let mut paths = Vec::new();
+    for (name, mode) in [("owner", 0o600), ("shared", 0o640)] {
+        let path = dir.join(name);
+        std::fs::write(&path, "secret-canary-9f2a").expect("written");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).expect("mode");
+        paths.push(path.to_str().expect("UTF-8").to_owned());
+    }
+    (paths.remove(0), paths.remove(0))
+}
+
+const REDIRECT: &str = "http://127.0.0.1:8080/v1/oauth/alpaca/callback";
+
+#[test]
+fn some_but_not_all_alpaca_flags_or_a_shared_secret_file_are_refused() {
+    let (owner, shared) = secret_files();
+    let mut partial = stub(Some("dev"), "127.0.0.1:8898");
+    partial.args([
+        "--alpaca-client-id",
+        "client-1",
+        "--alpaca-redirect-uri",
+        REDIRECT,
+    ]);
+    refused(&output(partial), "stub_issuer_alpaca");
+    let mut no_uri = stub(Some("dev"), "127.0.0.1:8898");
+    no_uri.args([
+        "--alpaca-client-id",
+        "client-1",
+        "--alpaca-client-secret-file",
+        &owner,
+    ]);
+    refused(&output(no_uri), "stub_issuer_alpaca");
+    let mut open = stub(Some("dev"), "127.0.0.1:8898");
+    open.args([
+        "--alpaca-client-id",
+        "client-1",
+        "--alpaca-client-secret-file",
+        &shared,
+        "--alpaca-redirect-uri",
+        REDIRECT,
+    ]);
+    refused(&output(open), "stub_issuer_alpaca");
+}
+
+#[test]
+fn with_its_three_flags_the_stub_serves_the_alpaca_provider() {
+    let (owner, _) = secret_files();
+    let flags = [
+        "--alpaca-client-id",
+        "client-1",
+        "--alpaca-client-secret-file",
+        owner.as_str(),
+        "--alpaca-redirect-uri",
+        REDIRECT,
+    ];
+    let (_child, _stdout, addr) = started(&flags, "authenticated");
+    let refused = common::send(
+        addr,
+        &addr.to_string(),
+        "GET",
+        "/alpaca/oauth/authorize",
+        &[],
+        b"",
+    );
+    assert_eq!(refused.status, 400, "served, and refusing an empty request");
+    assert_eq!(
+        refused.json(),
+        serde_json::json!({"error": "invalid_request"})
+    );
+}

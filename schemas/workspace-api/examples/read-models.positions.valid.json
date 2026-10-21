@@ -1,0 +1,22 @@
+[
+  {
+    "label": "no account",
+    "set": {
+      "/account_ref": null,
+      "/account_positions": null,
+      "/positions": []
+    }
+  },
+  {
+    "label": "a negative net quantity",
+    "set": {
+      "/positions/0/filled_qty": "-3"
+    }
+  },
+  {
+    "label": "an account with no holdings",
+    "set": {
+      "/account_positions": []
+    }
+  }
+]

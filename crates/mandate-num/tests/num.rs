@@ -2110,3 +2110,42 @@ fn cents_text(cents: i128) -> String {
         .trim_end_matches('.')
         .to_owned()
 }
+
+/// A price less a dividend per share is exact at 9 places, and refuses `not_positive` at zero or
+/// below (DEC-2253 item 2).
+#[test]
+fn a_price_less_another_is_exact_and_stays_positive() {
+    assert_eq!(p("100").checked_sub(p("0.25")), Ok(p("99.75")));
+    assert_eq!(
+        p("10.000000001").checked_sub(p("0.000000002")),
+        Ok(p("9.999999999"))
+    );
+    assert_eq!(
+        p("0.000000002").checked_sub(p("0.000000001")),
+        Ok(p("0.000000001"))
+    );
+    assert_eq!(p("5").checked_sub(p("5")), Err(NumError::NotPositive));
+    assert_eq!(p("5").checked_sub(p("6")), Err(NumError::NotPositive));
+}
+
+proptest! {
+    /// The difference of two prices in billionths is the difference of their billionths, whenever
+    /// it is positive; the oracle is integer arithmetic.
+    #[test]
+    fn a_price_less_another_matches_integer_billionths(
+        a in 1_i64..=1_000_000_000_000,
+        b in 1_i64..=1_000_000_000_000,
+    ) {
+        let text = |n: i64| {
+            let whole = n / 1_000_000_000;
+            let fraction = n % 1_000_000_000;
+            format!("{whole}.{fraction:09}").trim_end_matches('0').trim_end_matches('.').to_owned()
+        };
+        let got = p(&text(a)).checked_sub(p(&text(b)));
+        if a > b {
+            prop_assert_eq!(got, Ok(p(&text(a - b))));
+        } else {
+            prop_assert_eq!(got, Err(NumError::NotPositive));
+        }
+    }
+}

@@ -10,7 +10,7 @@ use secrecy::SecretString;
 use crate::ConnectError;
 use crate::grant::{GrantedScopes, check_scope};
 use crate::hosts::LiveTokenRequest;
-use crate::start::{ClientId, Environment, PkceVerifier, REDIRECT_URI};
+use crate::start::{ClientId, Environment, OAuthClient, PkceVerifier};
 use crate::vault::{AccessToken, AuthorizationCode, Vault, VaultKey};
 
 /// The only token type accepted, matched exactly (connections spec §5.2 step 4).
@@ -86,7 +86,7 @@ pub struct ExchangedGrant {
 ///    the grant, without the token, is returned.
 pub fn exchange_code(
     pending: &PendingConnect,
-    client_id: &ClientId,
+    client: &OAuthClient,
     client_secret: &ClientSecret,
     vault: &mut impl Vault,
     endpoint: &mut impl TokenEndpoint,
@@ -99,9 +99,9 @@ pub fn exchange_code(
     let form = ExchangeForm {
         code: &waiting.code,
         code_verifier: &waiting.verifier,
-        client_id,
+        client_id: &client.client_id,
         client_secret,
-        redirect_uri: REDIRECT_URI,
+        redirect_uri: client.redirect_uri.as_str(),
     };
     let checked = endpoint
         .post(LiveTokenRequest::token_endpoint(), &form)

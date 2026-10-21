@@ -7,7 +7,7 @@
 # release images` refuses one). `cargo xtask cell up` builds it from a context holding only the
 # binary and the bundle, and never with the `live` feature.
 FROM scratch
-COPY mandate-daemon /usr/local/bin/mandate-daemon
+COPY mandate-daemon /mandate-daemon
 COPY research/ /usr/local/share/mandate/research/
 USER 65532:65532
-ENTRYPOINT ["/usr/local/bin/mandate-daemon"]
+ENTRYPOINT ["/mandate-daemon"]

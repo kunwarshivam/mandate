@@ -1803,7 +1803,7 @@ def request_invalid_drafts() -> list[dict]:
     req = "requested"
     return [
         *member_drafts(REQUEST_CASES, REQUEST_NULLED),
-        invalid("requested_version_2", "§9.8: version 1 only", req, [change("schema_version", 2)], "unknown_schema", "payload"),
+        invalid("requested_version_3", "§9.8 v0.68: versions 1 and 2 only", req, [change("schema_version", 3)], "unknown_schema", "payload"),
         invalid("requested_on_the_account_stream", "§9.8: a control-stream record", req, [change("stream_id", ACCOUNT_STREAM)],
                 "wrong_stream", "event_type"),
         invalid("requested_carries_the_code", "§9.8, CN-1: the code and verifier go to the vault only", req,
@@ -1928,7 +1928,7 @@ def run_request_mutants(section: dict) -> list[str]:
          mutated(lambda s: s["drafts"]["requested"]["payload"]["step_up"].update(token="canary"))),
         ("the base request is untyped", "drafts.valid", mutated(lambda s: s["drafts"]["requested"]["payload"].update(broker=7))),
         ("an invalid request's expectation differs", "invalid_drafts",
-         mutated(lambda s: case(s, "invalid_drafts", "requested_version_2")["expect"].update(reason="schema"))),
+         mutated(lambda s: case(s, "invalid_drafts", "requested_version_3")["expect"].update(reason="schema"))),
         ("a valid request breaks a rule", "valid_drafts",
          mutated(lambda s: case(s, "valid_drafts", "requested_live")["changes"].append(change("payload.user", 7)))),
         ("a sequence's expected mismatch moves", "sequences",

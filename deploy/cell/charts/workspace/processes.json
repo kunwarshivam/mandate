@@ -32,6 +32,22 @@
       }
     },
     {
+      "name": "connect-check",
+      "row": "The executor's connect check of a paper connection (connections spec §8.1), run as a one-off Job: Postgres only, on the in-process fixture broker, with no credential (DEC-2035)",
+      "kind": "run",
+      "image": "executor",
+      "built": true,
+      "compose": false,
+      "db_role": "mandate_executor",
+      "guaranteed": false,
+      "colocate": false,
+      "egress": ["postgres"],
+      "resources": {
+        "requests": {"cpu": "100m", "memory": "64Mi"},
+        "limits": {"cpu": "200m", "memory": "128Mi"}
+      }
+    },
+    {
       "name": "journal-verify",
       "row": "A `mandate journal export` then `mandate journal verify` of each named stream (journal spec §11), as a one-off Job",
       "kind": "verify",
@@ -85,7 +101,7 @@
       "built": true,
       "started_by": "deploy-manager",
       "args": ["run", "--workspace", "{workspace}", "--agent", "{agent}", "--connection", "{connection}", "--owner", "{owner}", "--probe", "/tmp/process.sock"],
-      "probe": ["/usr/local/bin/mandate-daemon", "probe", "{probe}", "--probe", "/tmp/process.sock"],
+      "probe": ["/mandate-daemon", "probe", "{probe}", "--probe", "/tmp/process.sock"],
       "db_role": "mandate_runtime",
       "guaranteed": false,
       "colocate": true,
@@ -104,7 +120,7 @@
       "compose": false,
       "started_by": "deploy-manager",
       "args": ["run", "--probe", "/tmp/process.sock"],
-      "probe": ["/usr/local/bin/mandate-executord", "probe", "{probe}", "--probe", "/tmp/process.sock"],
+      "probe": ["/mandate-executord", "probe", "{probe}", "--probe", "/tmp/process.sock"],
       "db_role": "mandate_executor",
       "guaranteed": true,
       "colocate": true,

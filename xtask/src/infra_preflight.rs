@@ -6,18 +6,27 @@
 //! line.
 
 use std::collections::BTreeSet;
+use std::fs::{self, OpenOptions};
 use std::io::Write;
+use std::os::unix::fs::OpenOptionsExt;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::{Context, Result, bail, ensure};
 use serde::Deserialize;
+use sha2::{Digest as _, Sha256};
 
+use crate::founding::without_step_secrets;
 use crate::mask;
 
 pub(crate) const DO_API: &str = "https://api.digitalocean.com/v2";
 const CF_API: &str = "https://api.cloudflare.com/client/v4";
-/// The region of every environment's state bucket (DEC-995 item 2).
-const SPACES_REGION: &str = "nyc3";
+/// The region of every environment's state bucket: the US West (DEC-2047 item 6).
+const SPACES_REGION: &str = "sfo2";
+/// Where the state buckets were before the move, kept as the rollback until the founder deletes
+/// them (DEC-2047 item 6).
+const LEGACY_SPACES_REGION: &str = "nyc3";
 /// The environment variables `infra.yml`'s step sets from the environment's secrets and variables.
 const DO_TOKEN_ENV: &str = "DIGITALOCEAN_TOKEN";
 const CF_TOKEN_ENV: &str = "TF_VAR_cloudflare_api_token";
@@ -72,6 +81,11 @@ pub(crate) enum Item {
     Ready(String),
     Missing(String),
     Reminder(String),
+    /// A line that does not hold yet but waits on the change `until` names, so it does not fail.
+    Pending {
+        until: &'static str,
+        what: String,
+    },
 }
 
 /// The checklist the preflight prints, in the order it was checked.
@@ -81,12 +95,27 @@ pub(crate) struct Checklist {
 }
 
 impl Checklist {
-    fn check(&mut self, holds: bool, what: impl Into<String>) {
+    pub(crate) fn check(&mut self, holds: bool, what: impl Into<String>) {
         let what = what.into();
         self.items.push(if holds {
             Item::Ready(what)
         } else {
             Item::Missing(what)
+        });
+    }
+
+    /// A line that holds, or else waits on `until` without failing the checklist.
+    pub(crate) fn check_or_pending(
+        &mut self,
+        holds: bool,
+        until: &'static str,
+        what: impl Into<String>,
+    ) {
+        let what = what.into();
+        self.items.push(if holds {
+            Item::Ready(what)
+        } else {
+            Item::Pending { until, what }
         });
     }
 
@@ -104,15 +133,21 @@ impl Checklist {
 
     /// The checklist as printed: one line each, missing lines marked so a reader finds them.
     pub(crate) fn render(&self, environment: &str) -> String {
-        let mut out = format!("infra preflight ({environment}):\n");
+        self.render_titled(&format!("infra preflight ({environment})"))
+    }
+
+    /// The checklist under `title`, as [`Checklist::render`] prints the preflight's.
+    pub(crate) fn render_titled(&self, title: &str) -> String {
+        let mut out = format!("{title}:\n");
         for item in &self.items {
             let (mark, what) = match item {
-                Item::Ready(what) => ("[ok]      ", what),
-                Item::Missing(what) => ("[MISSING] ", what),
-                Item::Reminder(what) => ("[console] ", what),
+                Item::Ready(what) => ("[ok]      ".to_owned(), what),
+                Item::Missing(what) => ("[MISSING] ".to_owned(), what),
+                Item::Reminder(what) => ("[console] ".to_owned(), what),
+                Item::Pending { until, what } => (format!("[pending {until}] "), what),
             };
             out.push_str("  ");
-            out.push_str(mark);
+            out.push_str(&mark);
             out.push_str(what);
             out.push('\n');
         }
@@ -329,7 +364,7 @@ impl Answer {
 /// Runs `curl` with `config` on its standard input, so no credential is on a command line, and
 /// returns the status and body. Only a request that is safe to repeat is retried.
 fn curl(config: &str, retry: bool) -> Result<Answer> {
-    let mut child = Command::new("curl")
+    let mut child = without_step_secrets(&mut Command::new("curl"))
         .args(["-sS", "--max-time", "60", "-K", "-"])
         .args(if retry {
             ["--retry", "3"].as_slice()
@@ -386,17 +421,20 @@ pub(crate) fn api(method: &str, url: &str, token: &str, body: Option<&str>) -> R
     curl(&config, method != "POST")
 }
 
+/// The curl config that signs a request to `path` in `region`'s Spaces with SigV4.
+fn spaces_config(region: &str, path: &str, key: &SpacesKey) -> Result<String> {
+    Ok(format!(
+        "url = {}\naws-sigv4 = {}\nuser = {}\n",
+        config_quoted(&format!("https://{region}.digitaloceanspaces.com/{path}"))?,
+        config_quoted(&format!("aws:amz:{region}:s3"))?,
+        config_quoted(&format!("{}:{}", key.access_key, key.secret_key))?,
+    ))
+}
+
 /// A SigV4-signed request for the state bucket itself: `HEAD` to ask whether it exists, `PUT` to
 /// make it.
 fn bucket(method: &str, name: &str, key: &SpacesKey) -> Result<u16> {
-    let mut config = format!(
-        "url = {}\naws-sigv4 = {}\nuser = {}\n",
-        config_quoted(&format!(
-            "https://{SPACES_REGION}.digitaloceanspaces.com/{name}"
-        ))?,
-        config_quoted(&format!("aws:amz:{SPACES_REGION}:s3"))?,
-        config_quoted(&format!("{}:{}", key.access_key, key.secret_key))?,
-    );
+    let mut config = spaces_config(SPACES_REGION, name, key)?;
     if method == "HEAD" {
         config.push_str("head\n");
     } else {
@@ -521,14 +559,247 @@ fn digitalocean(
     Ok(guard)
 }
 
-/// Finds the state bucket with this run's key, or makes it when `make_bucket`.
+/// The environment's state bucket in the US West, and the one in nyc3 it replaces (DEC-2047 item 6).
+pub(crate) fn state_buckets(environment: &str) -> (String, String) {
+    (
+        format!("mandate-tofu-state-west-{environment}"),
+        format!("mandate-tofu-state-{environment}"),
+    )
+}
+
+/// What the run does with the state, from the `HEAD` statuses of the West state object, its copy
+/// marker, and the nyc3 state object.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum StateMove {
+    /// The West bucket holds the state, and it was either verified when copied (the marker) or
+    /// born there (nyc3 holds none); nothing is copied.
+    InWest,
+    /// Neither holds it: a first run, with nothing to move.
+    NothingToMove,
+    /// nyc3 holds it and the West bucket holds no verified copy: it is copied, never moved,
+    /// replacing any unverified West copy an interrupted run left.
+    Copy,
+    /// An answer that is none of these, a marker whose state is gone among them (the nyc3 copy may
+    /// be older than what the West held): the run stops before `init`, so no plan reads empty,
+    /// stale or unverified state.
+    Unreadable,
+}
+
+pub(crate) fn state_move(west: u16, marker: u16, legacy: u16) -> StateMove {
+    match (west, marker, legacy) {
+        (200, 200, _) | (200, 404, 404) => StateMove::InWest,
+        (200 | 404, 404, 200) => StateMove::Copy,
+        (404, 404, 404) => StateMove::NothingToMove,
+        _ => StateMove::Unreadable,
+    }
+}
+
+/// A file in the run's temporary directory, named for this process and numbered per call, so no
+/// two in one machine share a name, readable by this user alone, deleted when dropped.
+struct TempFile {
+    path: PathBuf,
+}
+
+/// The next number a [`TempFile`] takes in this process.
+static TEMP_FILES: AtomicU64 = AtomicU64::new(0);
+
+impl TempFile {
+    fn new(name: &str) -> Result<Self> {
+        let dir = std::env::var_os("RUNNER_TEMP")
+            .map(PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir);
+        let path = dir.join(format!(
+            "{name}-{}-{}",
+            std::process::id(),
+            TEMP_FILES.fetch_add(1, Ordering::Relaxed)
+        ));
+        OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&path)
+            .with_context(|| format!("creating {}", path.display()))?;
+        Ok(Self { path })
+    }
+}
+
+impl Drop for TempFile {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
+/// The Spaces objects the state move reads and writes, so tests can drive the copy against a fake.
+trait Store {
+    /// `HEAD` to ask whether `path` in `region` exists, `GET` it into `file`, `PUT` it from `file`,
+    /// or `DELETE` it, which only a West copy that failed its check is ever given; the status.
+    fn object(&self, method: &str, region: &str, path: &str, file: &Path) -> Result<u16>;
+}
+
+/// The real store: SigV4-signed requests with this run's key, each a curl config on standard input.
+struct Spaces<'key>(&'key SpacesKey);
+
+impl Store for Spaces<'_> {
+    fn object(&self, method: &str, region: &str, path: &str, file: &Path) -> Result<u16> {
+        let mut config = spaces_config(region, path, self.0)?;
+        let file = config_quoted(&file.to_string_lossy())?;
+        match method {
+            "HEAD" => config.push_str("head\n"),
+            "GET" => config.push_str(&format!("output = {file}\n")),
+            "PUT" => config.push_str(&format!("upload-file = {file}\n")),
+            _ => config.push_str(&format!("request = {}\n", config_quoted(method)?)),
+        }
+        Ok(curl(&config, true)?.status)
+    }
+}
+
+/// The SHA-256 of a file's bytes, refusing an empty one.
+fn digest(file: &Path) -> Result<Vec<u8>> {
+    let bytes = fs::read(file).with_context(|| format!("reading {}", file.display()))?;
+    ensure!(!bytes.is_empty(), "the state object is empty");
+    Ok(Sha256::digest(&bytes).to_vec())
+}
+
+/// The state object's path in a bucket, and its copy marker's.
+fn state_paths(bucket: &str, environment: &str) -> (String, String) {
+    let object = format!("{bucket}/{environment}/tofu.tfstate");
+    let marker = format!("{object}.verified-copy");
+    (object, marker)
+}
+
+/// How a copy ended.
+#[derive(Debug, PartialEq, Eq)]
+enum Copied {
+    /// Read back, equal by SHA-256, and marked.
+    Verified,
+    /// Not verified; `left_behind` when an unverified West copy could not be deleted. It has no
+    /// marker, so the next run copies again rather than trusting it.
+    Refused { left_behind: bool },
+}
+
+/// What the run says about a West copy that failed its check.
+fn left_behind_note(left_behind: bool) -> &'static str {
+    if left_behind {
+        "an unverified copy is left in the West bucket without a marker, so the next run copies \
+         the state again"
+    } else {
+        "no unverified copy is left in the West bucket"
+    }
+}
+
+/// Copies the nyc3 state into the West bucket and verifies it: `PUT`, read back, compare by
+/// SHA-256, then write the marker holding the digest. After a `PUT` that answered 2xx, or whose
+/// answer was lost, any error or mismatch deletes the West copy, best effort, and keeps the
+/// original error, saying whether the copy was left behind; a `PUT` that was refused wrote
+/// nothing, so nothing is deleted.
+fn copy_state(store: &dyn Store, environment: &str, read: &Path, back: &Path) -> Result<Copied> {
+    let (west, legacy) = state_buckets(environment);
+    let (west_path, marker_path) = state_paths(&west, environment);
+    let (legacy_path, _) = state_paths(&legacy, environment);
+    if store.object("GET", LEGACY_SPACES_REGION, &legacy_path, read)? != 200 {
+        return Ok(Copied::Refused { left_behind: false });
+    }
+    let original = digest(read)?;
+    let put = store.object("PUT", SPACES_REGION, &west_path, read);
+    let may_have_written = !matches!(put, Ok(status) if !(200..300).contains(&status));
+    let verified = match put {
+        Ok(status) if (200..300).contains(&status) => (|| -> Result<bool> {
+            if store.object("GET", SPACES_REGION, &west_path, back)? != 200 {
+                return Ok(false);
+            }
+            Ok(digest(back)? == original)
+        })(),
+        Ok(_) => Ok(false),
+        Err(error) => Err(error),
+    };
+    if !matches!(verified, Ok(true)) {
+        let left_behind = may_have_written
+            && !matches!(
+                store.object("DELETE", SPACES_REGION, &west_path, Path::new("/dev/null")),
+                Ok(200..=299)
+            );
+        return match verified {
+            Err(error) => Err(error.context(format!(
+                "copying the state to {west}: {}",
+                left_behind_note(left_behind)
+            ))),
+            Ok(_) => Ok(Copied::Refused { left_behind }),
+        };
+    }
+    let hex: String = original.iter().map(|byte| format!("{byte:02x}")).collect();
+    fs::write(back, hex).context("writing the copy marker")?;
+    if (200..300).contains(&store.object("PUT", SPACES_REGION, &marker_path, back)?) {
+        Ok(Copied::Verified)
+    } else {
+        Ok(Copied::Refused { left_behind: true })
+    }
+}
+
+/// Moves the encrypted state from the nyc3 bucket to the West one (DEC-2047 item 6): byte for byte,
+/// never decrypted, verified by SHA-256 and marked before `init`. The nyc3 object is never changed
+/// or deleted. Only `plan` and `apply` copy; `preflight` reports.
+fn move_state(
+    list: &mut Checklist,
+    store: &dyn Store,
+    environment: &str,
+    copy: bool,
+) -> Result<()> {
+    let (west, legacy) = state_buckets(environment);
+    let (west_path, marker_path) = state_paths(&west, environment);
+    let (legacy_path, _) = state_paths(&legacy, environment);
+    let unused = Path::new("/dev/null");
+    let west_status = store.object("HEAD", SPACES_REGION, &west_path, unused)?;
+    let marker_status = store.object("HEAD", SPACES_REGION, &marker_path, unused)?;
+    let legacy_status = store.object("HEAD", LEGACY_SPACES_REGION, &legacy_path, unused)?;
+    match state_move(west_status, marker_status, legacy_status) {
+        StateMove::InWest => list.check(true, format!("OpenTofu's state is in {west}")),
+        StateMove::NothingToMove => list.check(
+            true,
+            format!("no earlier state in {legacy} ({LEGACY_SPACES_REGION}) to move"),
+        ),
+        StateMove::Copy if !copy => list.check(
+            true,
+            format!(
+                "the state in {legacy} ({LEGACY_SPACES_REGION}) is copied to {west} by plan or \
+                 apply"
+            ),
+        ),
+        StateMove::Copy => {
+            let read = TempFile::new(&format!("mandate-state-{environment}-read"))?;
+            let back = TempFile::new(&format!("mandate-state-{environment}-back"))?;
+            let what = format!(
+                "the state is copied from {legacy} ({LEGACY_SPACES_REGION}) to {west} and \
+                 verified by SHA-256; {legacy} is kept as the rollback"
+            );
+            match copy_state(store, environment, &read.path, &back.path)? {
+                Copied::Verified => list.check(true, what),
+                Copied::Refused { left_behind } => list.check(
+                    false,
+                    format!("{what} (it was not: {})", left_behind_note(left_behind)),
+                ),
+            }
+        }
+        StateMove::Unreadable => list.check(
+            false,
+            format!(
+                "the state in {west} and {legacy} is readable (statuses {west_status}, \
+                 {marker_status} and {legacy_status}); nothing was planned, so no plan reads \
+                 unverified state"
+            ),
+        ),
+    }
+    Ok(())
+}
+
+/// Finds the state bucket with this run's key, or makes it when `make_bucket`, then moves the
+/// state into it from nyc3 if it is still there.
 fn state_bucket(
     list: &mut Checklist,
     environment: &str,
     key: &SpacesKey,
     make_bucket: bool,
 ) -> Result<()> {
-    let name = format!("mandate-tofu-state-{environment}");
+    let (name, _) = state_buckets(environment);
     match bucket("HEAD", &name, key)? {
         200 => list.check(true, format!("Spaces bucket {name} exists")),
         404 if make_bucket => {
@@ -547,7 +818,7 @@ fn state_bucket(
             format!("Spaces bucket {name} is reachable (its name may be held by another account)"),
         ),
     }
-    Ok(())
+    move_state(list, &Spaces(key), environment, make_bucket)
 }
 
 /// The Cloudflare half: one account, the token's own permission groups, R2 enabled, and Access set
@@ -738,6 +1009,9 @@ pub(crate) fn close(environment: &str, token: &str) -> Result<usize> {
 mod tests {
     use super::*;
 
+    use std::cell::{Cell, RefCell};
+    use std::collections::BTreeMap;
+
     fn reader(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> + use<> {
         let pairs: Vec<(String, String)> = pairs
             .iter()
@@ -876,8 +1150,370 @@ mod tests {
         Ok(())
     }
 
-    /// DEC-2029 item 4: each needed Cloudflare permission is named when no group grants it, by
-    /// either of Cloudflare's spellings.
+    /// DEC-2047 item 6: the state is copied only when nyc3 holds it and the West bucket holds no
+    /// verified copy; a marker whose state is gone, or any other answer, stops the run before
+    /// `init`, so no plan reads empty, stale or unverified state.
+    #[test]
+    fn the_state_moves_only_from_a_readable_nyc3_copy() {
+        assert_eq!(state_move(200, 200, 200), StateMove::InWest);
+        assert_eq!(state_move(200, 200, 404), StateMove::InWest);
+        assert_eq!(state_move(200, 200, 403), StateMove::InWest);
+        assert_eq!(state_move(200, 404, 404), StateMove::InWest);
+        assert_eq!(state_move(404, 404, 200), StateMove::Copy);
+        assert_eq!(state_move(200, 404, 200), StateMove::Copy);
+        assert_eq!(state_move(404, 404, 404), StateMove::NothingToMove);
+        for (west, marker, legacy) in [
+            (404, 200, 200),
+            (404, 200, 404),
+            (200, 403, 200),
+            (200, 404, 403),
+            (403, 404, 200),
+            (500, 404, 404),
+            (404, 404, 403),
+            (301, 404, 200),
+        ] {
+            assert_eq!(
+                state_move(west, marker, legacy),
+                StateMove::Unreadable,
+                "{west}, {marker} and {legacy} stop the run"
+            );
+        }
+    }
+
+    /// How the fake store misbehaves.
+    #[derive(Default)]
+    struct Faults {
+        read_back_fails: bool,
+        read_back_empty: bool,
+        put_response_lost: bool,
+        put_corrupts: bool,
+        put_refused: bool,
+        delete_fails: bool,
+    }
+
+    /// Spaces in memory, keyed by region and path.
+    #[derive(Default)]
+    struct FakeStore {
+        objects: RefCell<BTreeMap<String, Vec<u8>>>,
+        faults: Faults,
+        writes: Cell<u32>,
+        deletes: Cell<u32>,
+    }
+
+    impl FakeStore {
+        fn with_legacy(state: &[u8], faults: Faults) -> Self {
+            let store = Self {
+                faults,
+                ..Self::default()
+            };
+            store.objects.borrow_mut().insert(
+                format!("{LEGACY_SPACES_REGION}/mandate-tofu-state-staging/staging/tofu.tfstate"),
+                state.to_vec(),
+            );
+            store
+        }
+
+        fn get(&self, path: &str) -> Option<Vec<u8>> {
+            self.objects
+                .borrow()
+                .get(&format!("{SPACES_REGION}/{path}"))
+                .cloned()
+        }
+    }
+
+    impl Store for FakeStore {
+        fn object(&self, method: &str, region: &str, path: &str, file: &Path) -> Result<u16> {
+            let at = format!("{region}/{path}");
+            let west = region == SPACES_REGION && path.ends_with("tofu.tfstate");
+            let present = self.objects.borrow().contains_key(&at);
+            match method {
+                "HEAD" => Ok(if present { 200 } else { 404 }),
+                "GET" if west && self.faults.read_back_fails => bail!("curl: operation timed out"),
+                "GET" => {
+                    let bytes = self.objects.borrow().get(&at).cloned();
+                    match bytes {
+                        Some(_) if west && self.faults.read_back_empty => {
+                            fs::write(file, b"")?;
+                            Ok(200)
+                        }
+                        Some(bytes) => {
+                            fs::write(file, bytes)?;
+                            Ok(200)
+                        }
+                        None => Ok(404),
+                    }
+                }
+                "PUT" if west && self.faults.put_refused => Ok(403),
+                "PUT" => {
+                    self.writes.set(self.writes.get() + 1);
+                    let mut bytes = fs::read(file)?;
+                    if west && self.faults.put_corrupts {
+                        bytes.reverse();
+                    }
+                    self.objects.borrow_mut().insert(at, bytes);
+                    if west && self.faults.put_response_lost {
+                        bail!("curl: connection reset after the upload");
+                    }
+                    Ok(200)
+                }
+                "DELETE" if self.faults.delete_fails => {
+                    self.deletes.set(self.deletes.get() + 1);
+                    bail!("curl: could not resolve host")
+                }
+                "DELETE" => {
+                    self.deletes.set(self.deletes.get() + 1);
+                    self.objects.borrow_mut().remove(&at);
+                    Ok(204)
+                }
+                _ => bail!("an unexpected request"),
+            }
+        }
+    }
+
+    const STATE: &[u8] = b"encrypted-state-bytes";
+    const WEST_STATE: &str = "mandate-tofu-state-west-staging/staging/tofu.tfstate";
+    const WEST_MARKER: &str = "mandate-tofu-state-west-staging/staging/tofu.tfstate.verified-copy";
+
+    fn run_move(store: &FakeStore, copy: bool) -> Result<Vec<String>> {
+        let mut list = Checklist::default();
+        move_state(&mut list, store, "staging", copy)?;
+        Ok(missing(&list))
+    }
+
+    /// DEC-2047 item 6: a verified copy is the nyc3 bytes, marked with their digest, and the nyc3
+    /// object is untouched; the next run trusts it and copies nothing.
+    #[test]
+    fn a_verified_copy_is_marked_and_trusted() -> Result<()> {
+        let store = FakeStore::with_legacy(STATE, Faults::default());
+        assert!(run_move(&store, true)?.is_empty());
+        assert_eq!(store.get(WEST_STATE).as_deref(), Some(STATE));
+        let marker = String::from_utf8(store.get(WEST_MARKER).unwrap_or_default())?;
+        let expected: String = Sha256::digest(STATE)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        assert_eq!(marker, expected, "the marker holds the verified digest");
+        assert_eq!(
+            store
+                .objects
+                .borrow()
+                .get(&format!(
+                    "{LEGACY_SPACES_REGION}/mandate-tofu-state-staging/staging/tofu.tfstate"
+                ))
+                .map(Vec::as_slice),
+            Some(STATE),
+            "the nyc3 object is untouched"
+        );
+        let writes = store.writes.get();
+        assert!(run_move(&store, true)?.is_empty());
+        assert_eq!(
+            store.writes.get(),
+            writes,
+            "a marked copy is not copied again"
+        );
+        Ok(())
+    }
+
+    /// A preflight reports the copy and writes nothing.
+    #[test]
+    fn a_preflight_copies_nothing() -> Result<()> {
+        let store = FakeStore::with_legacy(STATE, Faults::default());
+        assert!(run_move(&store, false)?.is_empty());
+        assert_eq!(store.writes.get(), 0);
+        assert!(store.get(WEST_STATE).is_none());
+        Ok(())
+    }
+
+    /// The review of #1854: once a `PUT` is attempted, a timed-out or empty read-back, a lost `PUT`
+    /// answer, or a mismatch deletes the West copy, keeps the original error, and writes no marker.
+    #[test]
+    fn an_unverified_copy_is_deleted_and_never_marked() -> Result<()> {
+        for (name, faults, errs) in [
+            (
+                "a timed-out read-back",
+                Faults {
+                    read_back_fails: true,
+                    ..Faults::default()
+                },
+                true,
+            ),
+            (
+                "an empty read-back",
+                Faults {
+                    read_back_empty: true,
+                    ..Faults::default()
+                },
+                true,
+            ),
+            (
+                "a lost PUT answer",
+                Faults {
+                    put_response_lost: true,
+                    ..Faults::default()
+                },
+                true,
+            ),
+            (
+                "a mismatch",
+                Faults {
+                    put_corrupts: true,
+                    ..Faults::default()
+                },
+                false,
+            ),
+        ] {
+            let store = FakeStore::with_legacy(STATE, faults);
+            match run_move(&store, true) {
+                Err(error) => {
+                    assert!(errs, "{name} fails the run with its own error");
+                    assert!(
+                        format!("{error:#}").contains("no unverified copy is left"),
+                        "{name}: {error:#}"
+                    );
+                }
+                Ok(missing) => {
+                    assert!(!errs, "{name} fails the run with its own error");
+                    assert_eq!(missing.len(), 1, "{name} is a MISSING line");
+                    assert!(missing[0].contains("no unverified copy is left"), "{name}");
+                }
+            }
+            assert!(
+                store.get(WEST_STATE).is_none(),
+                "{name} deletes the West copy"
+            );
+            assert!(store.get(WEST_MARKER).is_none(), "{name} writes no marker");
+        }
+        Ok(())
+    }
+
+    /// The review of #1854: a `PUT` that was refused wrote nothing, so nothing is deleted, and the
+    /// line says no copy is left.
+    #[test]
+    fn a_refused_put_deletes_nothing() -> Result<()> {
+        let store = FakeStore::with_legacy(
+            STATE,
+            Faults {
+                put_refused: true,
+                delete_fails: true,
+                ..Faults::default()
+            },
+        );
+        let missing = run_move(&store, true)?;
+        assert_eq!(missing.len(), 1);
+        assert!(
+            missing[0].contains("no unverified copy is left"),
+            "{}",
+            missing[0]
+        );
+        assert_eq!(
+            store.deletes.get(),
+            0,
+            "nothing was written, so nothing is deleted"
+        );
+        assert!(store.get(WEST_STATE).is_none() && store.get(WEST_MARKER).is_none());
+        Ok(())
+    }
+
+    /// A refused `PUT` never leads to a marker, even over an unmarked West copy an earlier run
+    /// left, whose bytes this run cannot vouch for.
+    #[test]
+    fn a_refused_put_never_marks_an_old_copy() -> Result<()> {
+        let store = FakeStore::with_legacy(
+            STATE,
+            Faults {
+                put_refused: true,
+                ..Faults::default()
+            },
+        );
+        store
+            .objects
+            .borrow_mut()
+            .insert(format!("{SPACES_REGION}/{WEST_STATE}"), STATE.to_vec());
+        assert_eq!(run_move(&store, true)?.len(), 1);
+        assert!(
+            store.get(WEST_MARKER).is_none(),
+            "no marker over a copy this run did not write"
+        );
+        Ok(())
+    }
+
+    /// Two temporary files in one process never share a name.
+    #[test]
+    fn temporary_files_never_share_a_name() -> Result<()> {
+        let one = TempFile::new("mandate-name-test")?;
+        let two = TempFile::new("mandate-name-test")?;
+        assert_ne!(one.path, two.path);
+        Ok(())
+    }
+
+    /// A copy that could not even be deleted carries no marker, so the next run copies again and
+    /// verifies, rather than trusting it.
+    #[test]
+    fn an_unmarked_copy_is_copied_again() -> Result<()> {
+        let store = FakeStore::with_legacy(
+            STATE,
+            Faults {
+                put_corrupts: true,
+                delete_fails: true,
+                ..Faults::default()
+            },
+        );
+        let missing = run_move(&store, true)?;
+        assert_eq!(missing.len(), 1);
+        assert!(
+            missing[0].contains("an unverified copy is left"),
+            "the line says the copy was left behind: {}",
+            missing[0]
+        );
+        assert!(store.get(WEST_STATE).is_some(), "the bad copy survived");
+        assert!(store.get(WEST_MARKER).is_none());
+        let healed = FakeStore {
+            objects: RefCell::new(store.objects.borrow().clone()),
+            ..FakeStore::default()
+        };
+        assert!(run_move(&healed, true)?.is_empty());
+        assert_eq!(healed.get(WEST_STATE).as_deref(), Some(STATE));
+        assert!(healed.get(WEST_MARKER).is_some());
+        Ok(())
+    }
+
+    /// The West buckets carry the new names, and the nyc3 ones the old (DEC-2047 item 6).
+    #[test]
+    fn the_state_buckets_are_named_for_the_west() {
+        assert_eq!(
+            state_buckets("staging"),
+            (
+                "mandate-tofu-state-west-staging".to_owned(),
+                "mandate-tofu-state-staging".to_owned()
+            )
+        );
+        for root in [
+            include_str!("../../deploy/tofu/environments/staging/versions.tf"),
+            include_str!("../../deploy/tofu/environments/production/versions.tf"),
+        ] {
+            assert!(root.contains(&format!("https://{SPACES_REGION}.digitaloceanspaces.com")));
+            assert!(root.contains("bucket                      = \"mandate-tofu-state-west-"));
+        }
+    }
+
+    /// A copy is compared byte for byte; an empty object is never taken as the state.
+    #[test]
+    fn the_copy_is_compared_by_digest() -> Result<()> {
+        let one = TempFile::new(&format!("mandate-digest-test-a-{}", std::process::id()))?;
+        let two = TempFile::new(&format!("mandate-digest-test-b-{}", std::process::id()))?;
+        fs::write(&one.path, b"ciphertext")?;
+        fs::write(&two.path, b"ciphertext")?;
+        assert_eq!(digest(&one.path)?, digest(&two.path)?);
+        fs::write(&two.path, b"ciphertexu")?;
+        assert_ne!(digest(&one.path)?, digest(&two.path)?);
+        fs::write(&two.path, b"")?;
+        assert!(digest(&two.path).is_err(), "an empty object is refused");
+        let path = one.path.clone();
+        drop(one);
+        assert!(!path.exists(), "the temporary copy is deleted");
+        Ok(())
+    }
+
     /// DEC-2044 item 1: Access not yet set up is named as the console step, before any plan.
     #[test]
     fn access_not_enabled_names_the_console_step() {
@@ -906,6 +1542,8 @@ mod tests {
         );
     }
 
+    /// DEC-2029 item 4: each needed Cloudflare permission is named when no group grants it, by
+    /// either of Cloudflare's spellings.
     #[test]
     fn cloudflare_gaps_name_each_missing_permission() {
         let all: BTreeSet<String> = [

@@ -1,0 +1,39 @@
+{
+  "api_version": "v1",
+  "build": "sha256:abababababababababababababababababababababababababababababababab",
+  "served_at": "2026-10-19T14:30:00.000000000Z",
+  "as_of": [
+    {
+      "stream_id": "ctl:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y",
+      "seq": 312,
+      "hash": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+      "recorded_at": "2026-10-19T14:30:00.000000000Z"
+    },
+    {
+      "stream_id": "acct:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y:acct_paper_1",
+      "seq": 88,
+      "hash": "sha256:efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+      "recorded_at": "2026-10-19T14:29:00.000000000Z"
+    }
+  ],
+  "agent_id": "agt_demo_spy",
+  "account_ref": "acct_paper_1",
+  "positions": [
+    {
+      "instrument_id": "8ccae427-5dd0-45b3-b5fe-7c0c3a8ee5c4",
+      "filled_qty": "10",
+      "cost_basis": null,
+      "risk_mark": null,
+      "protection": null
+    }
+  ],
+  "account_positions": [
+    {
+      "instrument": "8ccae427-5dd0-45b3-b5fe-7c0c3a8ee5c4",
+      "qty": "10",
+      "broker_qty": "10",
+      "mismatch": false,
+      "observed_at": "2026-10-19T14:29:00.000000000Z"
+    }
+  ]
+}

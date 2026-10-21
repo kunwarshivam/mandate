@@ -52,8 +52,15 @@ never a value.
    earlier run left a key to delete; a missing delete scope fails the run's last step by name. A
    missing write scope shows up as a 403 that names it in the first apply.
 2. **No Spaces key and no bucket by hand.** Each run mints `mandate-infra-<env>-<run id>`, makes
-   `mandate-tofu-state-<env>` in NYC3 if it is missing, and deletes the key when it ends. The first
-   apply adopts the bucket, makes it versioned, and protects it from deletion.
+   `mandate-tofu-state-west-<env>` in `sfo2` if it is missing, and deletes the key when it ends.
+   The first apply adopts the bucket, makes it versioned, and protects it from deletion. If the old
+   `nyc3` bucket `mandate-tofu-state-<env>` still holds the state and the West one does not, the
+   first `plan` or `apply` copies the encrypted state across byte for byte, reads it back,
+   compares it by SHA-256, and stops before planning if they differ (DEC-2047 item 6). A verified
+   copy gets a marker object beside it holding its digest; a West copy without one is never
+   trusted while `nyc3` holds the state, so an interrupted run is simply copied again. It never
+   changes or deletes the `nyc3` copy, which stays as the rollback. A `preflight` only reports
+   what the next run will copy.
 3. **Console: the billing alert at 80% of the cap.** In **Billing → Billing Alerts**, set an alert
    at **$120** a month (DEC-2011 item 2). No API sets or reads this, so the preflight only reminds
    you. The plan itself refuses an estimate over $65 per environment.
@@ -109,6 +116,11 @@ needs:
   | `CF_INFRA_API_TOKEN` | §2.2 |
   | `TOFU_STATE_PASSPHRASE` | at least 32 random characters, for example `openssl rand -base64 48`. It is stretched with PBKDF2-SHA-512 at 600,000 iterations into an AES-GCM key. **Keep a copy in your password manager.** Without it the state cannot be read, and every later plan fails. Use a different one per environment |
 
+- **Environment secret, staging only:** `FOUNDER_OIDC_SUBJECT`, your user id in staging's
+  Supabase project (Authentication → Users, the `id` of your user), which staging's apply links to
+  the founder's principal so you can sign in to staging's web app
+  ([DEC-2114](../../docs/project/decisions/DEC-2114.md)). It never leaves the apply step: only its
+  digest reaches the cluster. Without it, the apply links no one and changes nothing.
 - **Environment secret, production only:** `ACCESS_ALLOWED_EMAILS`, for example
   `["you@example.com"]`: who Access lets through to production's API host, as a JSON list of full
   addresses. It is a secret so the public log never shows it. Staging needs none: its Access
@@ -157,7 +169,10 @@ and actions.
    it. The job plans again after your approval, prints that plan, and applies exactly it, so the
    apply reflects the commit and the cloud as they are when the job runs. Dispatch `apply` only at
    a commit you have read, and read the apply job's printed plan afterwards. A first cluster takes
-   about ten minutes.
+   about ten minutes. After lane GO's bootstrap the job verifies staging for up to eight minutes and
+   prints `infra verify (staging):`; each `[MISSING]` line names what is not up yet, and the run
+   fails until none is left. Until the API's tunnel connector lands, the tunnel's and Access's
+   lines may read `[pending #1539]`, which fails nothing (DEC-2050).
 4. **Handing over to lane GO (E21-58):** the outputs GO needs are the root outputs
    `archive_access_key_id`, `archive_secret_access_key` and `tunnel_token` (sensitive, never
    printed), and `archive_bucket`, `archive_endpoint`, `archive_destination_path`,
@@ -179,7 +194,8 @@ once staging runs in `sfo2`. Delete each only if it exists; none holds anything 
 | Where | Exact name | Why it is left | When |
 |---|---|---|---|
 | Cloudflare R2 | `mandate-journal-archive-staging`, with its lock rule (deleting the empty bucket removes the rule) | staging's first apply may have made it in eastern North America; the archive is now `mandate-journal-archive-west-staging` | after staging's first apply in `sfo2` |
-| DigitalOcean Spaces, `nyc3` | `mandate-tofu-state-staging` | the old state bucket, kept as the rollback when the state moves to `sfo2` | after the state move lands and a plan reads the new bucket |
+| DigitalOcean VPC, `nyc3` | `mandate-staging` (range `10.110.0.0/20`) | staging's first VPC, which became `nyc3`'s default VPC, so DigitalOcean refuses to delete it; staging's VPC is now `mandate-staging-sfo2` (DEC-2054). It is free and holds nothing | whenever you like, after making another `nyc3` VPC the default or deleting it from the console once DigitalOcean allows; it may simply stay |
+| DigitalOcean Spaces, `nyc3` | `mandate-tofu-state-staging` | the old state bucket, kept as the rollback when the state moves to `mandate-tofu-state-west-staging` in `sfo2` | after a plan's checklist says the state is copied and verified, and an apply has run from the West bucket |
 | DigitalOcean Spaces, `nyc3` | `mandate-tofu-state-production` | the same, if a production run made it before the move | after the state move lands |
 
 ## What this does not guard, said plainly

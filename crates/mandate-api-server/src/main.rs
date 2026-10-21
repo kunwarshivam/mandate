@@ -43,6 +43,7 @@ use mandate_api_server::config::{
     check_environment, check_internal_paper, check_key_set_tier, internal_paper_workspace,
     read_session_key,
 };
+use mandate_api_server::confirm::CliConfirm;
 use mandate_api_server::http::{self, App, Settings};
 use mandate_api_server::journal::{Journal, JournalUnavailable, Postgres};
 use mandate_api_server::keys::{FetchedKeys, REFETCH};
@@ -50,7 +51,6 @@ use mandate_api_server::lifecycle::{DRAIN_BOUND, Drain, Local};
 use mandate_api_server::members::{self, Hosted};
 use mandate_api_server::objects::{ObjectStore, Objects};
 use mandate_api_server::session::{OsRandom, Sessions};
-use mandate_api_server::stepup::Unbound;
 use mandate_api_server::subject;
 use mandate_api_server::token::Issuer;
 use mandate_artifacts_fs::FsArtifactStore;
@@ -261,6 +261,11 @@ async fn run(args: Args, start: Start) -> io::Result<()> {
             tokio::time::sleep(REFETCH).await;
         }
     });
+    let challenges = Arc::new(Challenges::default());
+    let step_up = CliConfirm {
+        challenges: Arc::clone(&challenges),
+        links: Arc::new(subject::Fixed),
+    };
     let app = App {
         settings: start.settings,
         sessions: Arc::new(Sessions::new(&start.key, Box::new(OsRandom::new()))),
@@ -280,8 +285,9 @@ async fn run(args: Args, start: Start) -> io::Result<()> {
             let store: Arc<dyn ObjectStore> = store;
             store
         }),
-        step_up: Arc::new(Unbound),
-        challenges: Arc::new(Challenges::default()),
+        step_up: Arc::new(step_up),
+        challenges,
+        connect: None,
     };
     let api = spawn_listener(
         serve(
@@ -338,6 +344,10 @@ async fn wait_for(mut stop: watch::Receiver<bool>) {
 }
 
 fn main() -> ExitCode {
+    if let Err(refused) = mandate_release::startup::check_running() {
+        eprintln!("{}", refused.code());
+        return ExitCode::from(2);
+    }
     let (args, start) = match checked() {
         Ok(checked) => checked,
         Err(refusal) => {

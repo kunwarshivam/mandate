@@ -94,6 +94,7 @@ shared: the instances may share one node, so the standby is no second failure do
 {{- /*
 The Kubernetes API's addresses and ports, from values or else read from the cluster: the
 `kubernetes` Service's address and its EndpointSlice's, since a policy controller may see either.
+Each must be one IPv4 host, from any source: an IPv6 address read as `/32` would cover a vast range.
 */ -}}
 {{- define "journal.kubeApi" -}}
 {{- $cidrs := .Values.kubeApi.cidrs -}}
@@ -119,6 +120,11 @@ The Kubernetes API's addresses and ports, from values or else read from the clus
 {{- end -}}
 {{- if or (not $cidrs) (not $ports) -}}
 {{- fail "the Kubernetes API's address is unknown: install into a cluster, or set kubeApi.cidrs and kubeApi.ports" -}}
+{{- end -}}
+{{- range $cidrs -}}
+{{- if or (contains ":" .) (not (regexMatch "^([0-9]{1,3}\\.){3}[0-9]{1,3}/32$" .)) -}}
+{{- fail (printf "the Kubernetes API's address %s is not one IPv4 host: an IPv6 or wider address would open far more than the API" .) -}}
+{{- end -}}
 {{- end -}}
 {{- dict "cidrs" (uniq $cidrs) "ports" (uniq $ports) | toJson -}}
 {{- end -}}

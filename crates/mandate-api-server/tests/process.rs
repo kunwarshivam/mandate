@@ -135,30 +135,96 @@ fn a_password_in_the_database_url_is_refused_and_never_printed() {
     assert!(!text.contains("canary-pw-93c1"), "{text}");
 }
 
-/// E21-53: the binary reads its tier itself, and an `http` key set outside dev and CI, no tier
-/// included, refuses the start by naming the setting; an `https` one starts in production.
+/// E21-53: the binary reads its tier itself, and in dev and CI starts with an `http` key set as
+/// with an `https` one. Outside dev and CI only a release-signed build gets as far as its settings
+/// (E21-35), which no test build is, so the `http` refusal at staging, production and no tier is
+/// `tests/config.rs`'s `check_key_set_tier` cases, the function `main` calls.
 #[test]
-fn an_http_key_set_outside_dev_and_ci_refuses_the_start() {
-    for tier in [None, Some("staging"), Some("production"), Some("Dev")] {
-        let mut outside = command(&LOCAL, &[]);
+fn an_http_or_https_key_set_starts_in_dev_and_ci() {
+    for tier in ["dev", "ci"] {
+        for key_set in [
+            "http://127.0.0.1:9/jwks",
+            "https://issuer.test/auth/v1/.well-known/jwks.json",
+        ] {
+            let (mut running, api, _) = start(&[
+                ("MANDATE_DEPLOYMENT_TIER", tier),
+                ("MANDATE_API_JWKS_URL", key_set),
+            ]);
+            assert_eq!(
+                get(api, "/v1/workspaces/ws_1/agents").status,
+                401,
+                "{tier} {key_set}"
+            );
+            terminate(&running.0);
+            assert_eq!(
+                wait(&mut running.0, Duration::from_secs(10)),
+                Some(0),
+                "{tier} {key_set}"
+            );
+        }
+    }
+}
+
+/// One start of [`outside_dev_and_ci_an_unsigned_or_wrongly_signed_build_refuses_first`]: its tier
+/// setting, if any, the variables it adds, and the whole of what it must print.
+type StartCase<'a> = (Option<&'a str>, &'a [(&'a str, &'a str)], &'a str);
+
+/// E21-35, DEC-971 items 2 and 3: the API server runs the release start-up check before anything
+/// else, as `mandate-agentd` does. Outside dev and CI, which no tier setting means, the unsigned
+/// test build refuses with the check's generic code alone and exit status 2, even with every
+/// setting valid and an `https` key set, and before a secret-named variable or an `http` key set
+/// could refuse it; a signature that is not cosign's is refused in every tier.
+#[test]
+fn outside_dev_and_ci_an_unsigned_or_wrongly_signed_build_refuses_first() {
+    let garbage = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("mandate-api-server-{}.sig", std::process::id()));
+    fs::write(&garbage, "not a signature").expect("the signature file");
+    let garbage = garbage.display().to_string();
+    let https = "https://issuer.test/auth/v1/.well-known/jwks.json";
+    let cases: [StartCase; 7] = [
+        (
+            None,
+            &[("MANDATE_API_JWKS_URL", https)],
+            "release_unsigned\n",
+        ),
+        (
+            Some("staging"),
+            &[("MANDATE_API_JWKS_URL", https)],
+            "release_unsigned\n",
+        ),
+        (
+            Some("production"),
+            &[("MANDATE_API_JWKS_URL", https)],
+            "release_unsigned\n",
+        ),
+        (Some("staging"), &[], "release_unsigned\n"),
+        (
+            Some("production"),
+            &[("BROKER_TOKEN", "canary-5e2a-never-printed")],
+            "release_unsigned\n",
+        ),
+        (
+            Some("ci"),
+            &[("MANDATE_RELEASE_SIGNATURE", &garbage)],
+            "release_signature_malformed\n",
+        ),
+        (
+            Some("production"),
+            &[("MANDATE_RELEASE_SIGNATURE", &garbage)],
+            "release_signature_malformed\n",
+        ),
+    ];
+    for (tier, extra, expected) in cases {
+        let mut outside = command(&LOCAL, extra);
         match tier {
             Some(tier) => outside.env("MANDATE_DEPLOYMENT_TIER", tier),
             None => outside.env_remove("MANDATE_DEPLOYMENT_TIER"),
         };
         let (code, text) = refused(outside);
-        assert_eq!(code, Some(2), "{tier:?}: {text}");
-        assert!(text.contains("MANDATE_API_JWKS_URL"), "{tier:?}: {text}");
+        assert_eq!(code, Some(2), "{tier:?} {extra:?}: {text}");
+        assert_eq!(text, expected, "{tier:?} {extra:?}");
     }
-    let (mut running, api, _) = start(&[
-        ("MANDATE_DEPLOYMENT_TIER", "production"),
-        (
-            "MANDATE_API_JWKS_URL",
-            "https://issuer.test/auth/v1/.well-known/jwks.json",
-        ),
-    ]);
-    assert_eq!(get(api, "/v1/workspaces/ws_1/agents").status, 401);
-    terminate(&running.0);
-    assert_eq!(wait(&mut running.0, Duration::from_secs(10)), Some(0));
+    fs::remove_file(&garbage).ok();
 }
 
 #[test]

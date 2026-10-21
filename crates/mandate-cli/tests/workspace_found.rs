@@ -110,10 +110,34 @@ fn run(journal: &mut Journal, n: u8, method: &str) -> (Result<Founded, ControlEr
         workspace: "ws1",
         member: &ulid,
         method,
+        open: false,
     };
     let mut out = Vec::new();
     let got = found_in(journal, founding, &mut ticking(), &mut out);
     (got, String::from_utf8(out).unwrap())
+}
+
+/// `run` with `--open`.
+fn run_opening(journal: &mut Journal, n: u8) -> (Result<Founded, ControlError>, String) {
+    let ulid = member(n);
+    let founding = Founding {
+        workspace: "ws1",
+        member: &ulid,
+        method: "oidc",
+        open: true,
+    };
+    let mut out = Vec::new();
+    let got = found_in(journal, founding, &mut ticking(), &mut out);
+    (got, String::from_utf8(out).unwrap())
+}
+
+fn kinds(journal: &Journal) -> Vec<String> {
+    journal
+        .rows(&ctl())
+        .unwrap()
+        .into_iter()
+        .map(|r| r.event_type)
+        .collect()
 }
 
 fn refused(reason: &'static str) -> Result<Founded, ControlError> {
@@ -194,6 +218,7 @@ fn bad_input_is_refused_before_the_journal_is_touched() {
             workspace,
             member: &ulid,
             method,
+            open: false,
         };
         let mut out = Vec::new();
         let got = found_in(&mut journal, founding, &mut ticking(), &mut out);
@@ -303,6 +328,156 @@ fn a_re_run_succeeds_and_another_member_is_refused() {
     assert_eq!(run(&mut journal, 2, "oidc").0, refused("members_exist"));
     assert_eq!(journal.head(&ctl()).unwrap().seq, head, "nothing committed");
     assert_eq!(grants(&journal).len(), 1);
+}
+
+/// `--open` is a flag, off unless given (DEC-2114).
+#[test]
+fn open_is_a_flag_off_by_default() {
+    let line = "mandate workspace found --workspace ws1 --member 01J8Z4M0AD0000000000000AD1 \
+                --method oidc --journal postgres://h/j --store s";
+    let base: Vec<&str> = line.split_whitespace().collect();
+    for (extra, want) in [(None, false), (Some("--open"), true)] {
+        let given: Vec<&str> = base.iter().copied().chain(extra).collect();
+        let parsed = Cli::try_parse_from(given).map(|cli| cli.command);
+        let Ok(Command::Workspace(WorkspaceCommand::Found(args))) = parsed else {
+            panic!("{parsed:?}")
+        };
+        assert_eq!(args.open, want, "{extra:?}");
+    }
+}
+
+/// With `--open`, a stream holding no event is opened in `paper` as the system's
+/// `control_services`, at the clock's first reading, and founded at seq 2; a re-run opens nothing
+/// and commits nothing.
+#[test]
+fn open_opens_an_empty_stream_once_then_founds_it() {
+    let mut journal = Journal::default();
+    let (got, printed) = run_opening(&mut journal, 1);
+    assert_eq!(
+        got,
+        Ok(Founded {
+            seq: 2,
+            granted: true
+        })
+    );
+    assert_eq!(kinds(&journal), ["StreamOpened", "MemberActivated"]);
+    let rows = journal.rows(&ctl()).unwrap();
+    let opening = body(&rows[0]);
+    assert_eq!(get(&opening, "environment"), &text("paper"));
+    assert_eq!(get(&opening, "actor.kind"), &text("system"));
+    assert_eq!(get(&opening, "actor.id"), &text("control_services"));
+    assert_eq!(get(&opening, "payload.workspace_id"), &text("ws1"));
+    assert_eq!(
+        get(&opening, "event_time"),
+        &text(&UtcNanos::from_parts(EPOCH + 1, 0).unwrap().to_string())
+    );
+    assert_eq!(
+        Draft::parse(&rows[0].body).map(|d| d.event_type().to_owned()),
+        Ok("StreamOpened".to_owned())
+    );
+    let lines: Vec<&str> = printed.lines().collect();
+    assert_eq!(lines.len(), 2, "{printed}");
+    assert!(
+        lines[0].starts_with("opened ") && lines[0].contains("seq 1"),
+        "{printed}"
+    );
+    assert!(
+        lines[1].starts_with("founded ") && lines[1].contains("seq 2"),
+        "{printed}"
+    );
+    let (again, printed) = run_opening(&mut journal, 1);
+    assert_eq!(
+        again,
+        Ok(Founded {
+            seq: 2,
+            granted: false
+        })
+    );
+    assert!(!printed.contains("opened"), "{printed}");
+    assert_eq!(kinds(&journal), ["StreamOpened", "MemberActivated"]);
+}
+
+/// `--open` never opens a stream that holds an event: an opened stream is founded as without it,
+/// in its own environment, and a used or founded one is refused as without it.
+#[test]
+fn open_leaves_a_stream_holding_any_event_as_it_is() {
+    let mut live = Journal::default();
+    open(&mut live, "live");
+    assert_eq!(
+        run_opening(&mut live, 1).0,
+        Ok(Founded {
+            seq: 2,
+            granted: true
+        })
+    );
+    assert_eq!(kinds(&live), ["StreamOpened", "MemberActivated"]);
+    assert_eq!(get(&body(&grants(&live)[0]), "environment"), &text("live"));
+    let mut used = Journal::default();
+    open(&mut used, "paper");
+    other(&mut used, 1);
+    assert_eq!(run_opening(&mut used, 1).0, refused("workspace_not_new"));
+    assert_eq!(kinds(&used), ["StreamOpened", "ConfigSnapshotRegistered"]);
+    assert_eq!(run_opening(&mut live, 2).0, refused("members_exist"));
+    assert_eq!(kinds(&live), ["StreamOpened", "MemberActivated"]);
+    let mut empty = Journal::default();
+    assert_eq!(run(&mut empty, 1, "oidc").0, refused("workspace_not_open"));
+    assert!(kinds(&empty).is_empty(), "without --open nothing is opened");
+}
+
+/// The rows another process's `found --open` for `member(1)` commits on a journal of its own,
+/// with its own later clock: its opening, and its grant when `granted`.
+fn another_openers(granted: bool) -> Vec<Vec<u8>> {
+    let mut theirs = Journal::default();
+    let ulid = member(1);
+    let mut secs = EPOCH + 100;
+    let mut later = move || {
+        secs += 1;
+        UtcNanos::from_parts(secs, 0).unwrap()
+    };
+    let founding = Founding {
+        workspace: "ws1",
+        member: &ulid,
+        method: "oidc",
+        open: true,
+    };
+    found_in(&mut theirs, founding, &mut later, &mut Vec::new()).unwrap();
+    let rows = theirs.rows(&ctl()).unwrap();
+    rows.iter()
+        .take(if granted { 2 } else { 1 })
+        .map(|r| r.body.clone())
+        .collect()
+}
+
+/// Two processes run `--open` on the same empty stream, and the other commits first, between this
+/// one's read and its append. Its opening has this one's id (derived at head 0) but its own
+/// instant, so the journal answers this one's opening as an idempotency conflict: this run fails
+/// closed, committing nothing, and is never a second opening. A rerun, as the founding hook's
+/// retry is, finds the stream opened and founds it, or finds the other's grant and commits nothing
+/// (DEC-2114).
+#[test]
+fn two_processes_opening_at_once_open_the_stream_once() {
+    let theirs_at = UtcNanos::from_parts(EPOCH + 101, 0).unwrap().to_string();
+    for (granted, landed) in [(true, 1), (false, 2)] {
+        let mut journal = Journal::default();
+        journal.land_before_next = another_openers(landed == 2);
+        let (first, printed) = run_opening(&mut journal, 1);
+        assert!(
+            matches!(first, Err(ControlError::Journal(_))),
+            "{landed}: {first:?}"
+        );
+        assert!(!printed.contains("founded"), "{printed}");
+        assert_eq!(
+            kinds(&journal).len(),
+            landed,
+            "nothing of this run's is stored"
+        );
+        let (rerun, _) = run_opening(&mut journal, 1);
+        assert_eq!(rerun, Ok(Founded { seq: 2, granted }), "{landed}");
+        assert_eq!(kinds(&journal), ["StreamOpened", "MemberActivated"]);
+        let rows = journal.rows(&ctl()).unwrap();
+        assert_eq!(get(&body(&rows[0]), "event_time"), &text(&theirs_at));
+        assert_eq!(grants(&journal).len(), 1);
+    }
 }
 
 /// A stream with a record after its opening and no membership is not new.
@@ -577,6 +752,7 @@ fn a_late_visible_grant_is_found_not_failed() {
         workspace: "ws1",
         member: &ulid,
         method: "oidc",
+        open: false,
     };
     let got = found_in(&mut journal, founding, &mut ticking(), &mut Vec::new());
     assert_eq!(
@@ -642,6 +818,7 @@ fn a_commit_answer_without_the_grant_is_not_a_grant() {
         workspace: "ws1",
         member: &ulid,
         method: "oidc",
+        open: false,
     };
     let got = found_in(&mut journal, founding, &mut ticking(), &mut Vec::new());
     assert!(matches!(got, Err(ControlError::Journal(_))), "{got:?}");

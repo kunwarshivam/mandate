@@ -15,8 +15,9 @@ use std::path::{Path, PathBuf};
 use mandate_api::problem::Violation;
 use mandate_api::requests::{
     AcknowledgeRequest, ApprovalResponseRequest, ConfirmRequest, DelegationPreviewRequest,
-    EndDelegationRequest, HoldRequest, KillSwitchRequest, LiftHoldRequest, OwnerExitRequest,
-    OwnerRequest, PauseRequest, ResumeRequest, RevokeRequest, StepUpChallengeRequest, StopRequest,
+    EndDelegationRequest, HoldRequest, KillSwitchRequest, LiftHoldRequest, OauthStartRequest,
+    OwnerExitRequest, OwnerRequest, PauseRequest, ResumeRequest, RevokeRequest,
+    StepUpChallengeRequest, StopRequest,
 };
 use mandate_api::wire::{Refused, Validate, decode};
 use serde::de::DeserializeOwned;
@@ -104,7 +105,7 @@ fn judge<T: DeserializeOwned + Validate + Debug>(body: &[u8]) -> Result<(), Vec<
 }
 
 /// Each request schema's decoder, by the schema's stem.
-const DECODERS: [(&str, Judge); 15] = [
+const DECODERS: [(&str, Judge); 16] = [
     ("acknowledge-request", judge::<AcknowledgeRequest>),
     (
         "approval-response-request",
@@ -120,6 +121,7 @@ const DECODERS: [(&str, Judge); 15] = [
     ("kill-switch-request", judge::<KillSwitchRequest>),
     ("lift-hold-request", judge::<LiftHoldRequest>),
     ("owner-exit-request", judge::<OwnerExitRequest>),
+    ("oauth-start-request", judge::<OauthStartRequest>),
     ("owner-request", judge::<OwnerRequest>),
     ("pause-request", judge::<PauseRequest>),
     ("resume-request", judge::<ResumeRequest>),
@@ -133,7 +135,10 @@ const DECODERS: [(&str, Judge); 15] = [
 /// changes, this list naming its stem, then its schema, then its type and decoder row, which
 /// empties the list again. A listed stem has no request type and no row, and may not stay listed
 /// once its type lands.
-const SCHEMA_AHEAD_OF_TYPE: [&str; 0] = [];
+const SCHEMA_AHEAD_OF_TYPE: [&str; 2] = [
+    "passkey-enrol-request",
+    "passkey-registration-challenge-request",
+];
 
 /// The decoders cover every request schema and every request type the crate declares, so a shape
 /// added to either without a row here fails this test rather than escaping the next one. The only

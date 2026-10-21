@@ -25,6 +25,7 @@ mod agent;
 mod artifact;
 mod backtest_records;
 mod catalogue;
+mod confirmations;
 mod connection_fold;
 mod connections;
 mod control;
@@ -51,6 +52,16 @@ pub use agent::{
     verify_agent_stream, verify_agent_stream_anchored,
 };
 
+/// Whether `stream` is one of workspace `workspace`'s streams: its workspace segment, the second of
+/// every stream id (journal spec §2), equals `workspace` whole, never by prefix (DEC-770 item 1).
+/// The deployment meter stream is the platform operator's and no workspace's, whatever its
+/// deployment id (journal spec v0.53 §2). Every workspace read and every record naming a workspace's
+/// streams asks this one function, so no copy can drift.
+pub fn workspace_owns(workspace: &str, stream: &StreamId) -> bool {
+    stream.stream_type() != StreamType::DeploymentMeter
+        && stream.as_str().split(':').nth(1) == Some(workspace)
+}
+
 /// Whether the journal closes `event_type` at `schema_version` on `stream`: the catalogue admits it
 /// there and a schema is registered for it, so a draft is judged member by member rather than
 /// refused `unknown_schema`. `mandate-runtime`'s `JournalCatalog` reads its answer for the agent
@@ -59,6 +70,17 @@ pub fn closes(event_type: &str, schema_version: u64, stream: StreamType) -> bool
     catalogue::lookup(event_type).is_some_and(|entry| entry.streams.contains(&stream))
         && (control::closed_schema(event_type, schema_version, stream).is_some()
             || (stream == StreamType::Agent && agent::closes(event_type, schema_version)))
+}
+
+/// Every event type the catalogue admits on `stream` (journal spec §9, with §2's copies), so a fold
+/// over a stream can prove it reads each one. `mandate-executor`'s account risk fold checks its
+/// table against it (E6-15).
+pub fn stream_event_types(stream: StreamType) -> impl Iterator<Item = &'static str> {
+    catalogue::EVENT_TYPES
+        .into_iter()
+        .filter(move |event_type| {
+            catalogue::lookup(event_type).is_some_and(|entry| entry.streams.contains(&stream))
+        })
 }
 
 /// The event types the stream rules read: §9.19's rules 153 and 158, the invalidation's rule 187,
@@ -93,7 +115,10 @@ pub fn reads_stream(batch: &[Draft]) -> bool {
                     | "RunSummaryRecorded"
                     | "RunEnded",
                 StreamType::Agent
-            ) | ("MeterReserved" | "MeterSettled", StreamType::Meter)
+            ) | (
+                "MeterReserved" | "MeterSettled",
+                StreamType::Meter | StreamType::DeploymentMeter
+            )
         )
     })
 }
@@ -211,11 +236,15 @@ pub enum StreamType {
     /// `meter:{workspace_id}`, whose single writer is the workspace's model gateway meter (journal
     /// spec v0.46 §2, §9.19, DEC-998 item 3).
     Meter,
+    /// `dmeter:{deployment_id}`, whose single writer is the deployment's model gateway meter writer,
+    /// a copy of every workspace's meter records for the deployment's cap (journal spec v0.53 §2,
+    /// §9.19, DEC-2207).
+    DeploymentMeter,
 }
 
 /// `acct:{workspace_id}:{account_ref}`, `agent:{workspace_id}:{agent_id}`, `ctl:{workspace_id}`,
-/// `clock:{workspace_id}`, `ntf:{workspace_id}`, or `meter:{workspace_id}`, each segment
-/// `[A-Za-z0-9_-]+` (journal spec §2).
+/// `clock:{workspace_id}`, `ntf:{workspace_id}`, `meter:{workspace_id}`, or
+/// `dmeter:{deployment_id}`, each segment `[A-Za-z0-9_-]+` (journal spec §2).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct StreamId {
     text: String,
@@ -232,6 +261,7 @@ impl StreamId {
             ["clock", _] => StreamType::Scheduler,
             ["ntf", _] => StreamType::Notice,
             ["meter", _] => StreamType::Meter,
+            ["dmeter", _] => StreamType::DeploymentMeter,
             _ => return None,
         };
         parts

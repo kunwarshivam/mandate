@@ -2,17 +2,22 @@
 
 | | |
 |---|---|
-| **Status** | v0.5, draft ([DEC-2207](../project/decisions/DEC-2207.md)): v0.4 with the deployment meter writer and its orphan in §3.3 and §3.6. v0.4 ([DEC-2203](../project/decisions/DEC-2203.md)): v0.3 with turns and pinned tools for the agentic research loop, the founder's decision of 2026-10-17. v0.3 ([DEC-432](../project/decisions/DEC-432.md), [DEC-998](../project/decisions/DEC-998.md), [DEC-997](../project/decisions/DEC-997.md)): v0.2 with the call record and the meter stream closed in journal spec v0.46 (DEC-998, agent readings) and the aggregator and spend cap named (DEC-997, Proposed for the founder). Items 1 to 12 and 17 to 22 of DEC-432 are agent readings; the founder decided items 13 to 16 on 2026-10-03; item 23 is Proposed |
+| **Status** | v0.6, draft ([DEC-2257](../project/decisions/DEC-2257.md)): v0.5 with DEC-997 Accepted, the live path through the model-gateway service, and §11 brought up to date. v0.5 ([DEC-2207](../project/decisions/DEC-2207.md)): v0.4 with the deployment meter writer and its orphan in §3.3 and §3.6. v0.4 ([DEC-2203](../project/decisions/DEC-2203.md)): v0.3 with turns and pinned tools for the agentic research loop, the founder's decision of 2026-10-17. v0.3 ([DEC-432](../project/decisions/DEC-432.md), [DEC-998](../project/decisions/DEC-998.md), [DEC-997](../project/decisions/DEC-997.md)): v0.2 with the call record and the meter stream closed in journal spec v0.46 (DEC-998, agent readings) and the aggregator and spend cap named (DEC-997, Proposed for the founder). Items 1 to 12 and 17 to 22 of DEC-432 are agent readings; the founder decided items 13 to 16 on 2026-10-03; item 23 is Proposed |
 | **Implements** | [HLD §9](../HLD.md#9-intelligence-layer) (model gateway, speed tiers), [HLD §10](../HLD.md#10-billing) (model tokens at cost plus margin), PRD FR-3.7, FR-3.9, FR-10.2; backlog E15 |
 | **Depends on** | [Mandate spec §7, §8](mandate.md#8-signal-models-and-the-order-builder), [journal spec §6.3, §8, §9](journal.md#9-event-catalogue), [DEC-67](../project/04-decision-log.md#decisions), [DEC-120](../project/04-decision-log.md#decisions) |
 | **Caller side** | The [agent harness spec](agent-harness.md) says when the runtime asks for a model output and how long an evaluation waits. This spec says what happens to the call |
 
-This spec covers every model call the platform makes and the gateway that brokers them. Today
-the only model code is the research spike's client (`python/research_spike`); the gateway itself
-is not built (§11).
+This spec covers every model call the platform makes and the gateway that brokers them. The
+gateway is built and runs over recorded responses; its live path is the model-gateway service
+(§6, §11).
 
 ## Change history
 
+- **v0.6 ([DEC-2257](../project/decisions/DEC-2257.md); E21-62):** DEC-997 is Accepted (DEC-2605
+  row 19). §6 names the live path: the model-gateway service alone, over `HttpsTransport` and the
+  journaled meter, which refuses to start live without it. The key is read once from the vault
+  as `ModelGateway`, and §4.3's identity probe runs before an endpoint is registered. §11 says what
+  exists today. Agent-accepted under DEC-176: it only refuses more.
 - **v0.5 ([DEC-2207](../project/decisions/DEC-2207.md); E19-13, delivery slice 2 of ADR-0005):**
   §3.3's `meter_unavailable` and §3.6's meter-writer bullets cover the deployment meter stream,
   `dmeter:{deployment_id}` (journal spec v0.53 §9.19), that §7.3's deployment cap folds from: the
@@ -468,8 +473,7 @@ pinned model.
 
 **Decision (DEC-432 item 14, the founder, 2026-10-03): option 2**, not the direct APIs this draft
 recommended. **The aggregator is OpenRouter** ([DEC-997](../project/decisions/DEC-997.md), the
-founder's "Keep OpenRouter" of 2026-10-17, Proposed until the founder accepts it; until then
-DEC-432 item 14's guard stands and no live call runs). The routing lock is set per call:
+founder's "Keep OpenRouter" of 2026-10-17, Accepted on 2026-10-19 as DEC-2605 row 19). The routing lock is set per call:
 - one pinned model slug, with no fallback list, router, variant suffix, or alias;
 - one upstream provider: `provider.order` and `provider.only`, `allow_fallbacks: false`, and
   `require_parameters: true`; for open weights, `provider.quantizations` lists the pinned
@@ -502,13 +506,18 @@ reports it. Both are fixed by the §4.3 identity probe, so the comparison is exa
 - **Hybrid and on-prem:** local-only by default (DEC-432 item 8). A customer may enable hosted
   endpoints in policy, and may bring their own key under the same routing lock (§7.4, DEC-432
   item 16). Self-hosted open weights (option 4) remain the local path after v1.
-- **Spend guard:** until DEC-997 is Accepted, DEC-432 item 14's guard stands: no new paid service
-  beyond the spike key, and no live gateway call. Once accepted, the platform's own model spend is capped at $50 a month
+- **Spend guard:** DEC-997 replaces DEC-432 item 14's guard: the platform's own model spend is capped at $50 a month
   for the demo and dev deployment, a deployment setting (DEC-997 item 3, §7.3; DEC-2203 item 9). Live calls also wait for the meter stream
   to be durable, `mandate-journal`'s registration of journal spec §9.19, because an in-memory meter
   would forget open reservations on a crash (DEC-998 item 8). The gateway is built against recorded
   responses and a provider adapter interface. Live calls run only in the team's internal paper and
   demo workspaces, with the key read from the vault by the gateway alone.
+- **The live path ([DEC-2257](../project/decisions/DEC-2257.md)):** only the model-gateway service
+  calls a provider, over `mandate-gateway-http`'s `HttpsTransport`. It refuses to start live
+  unless its meter is the journaled `meter:{workspace_id}` stream. It reads
+  `platform/model-provider-key` once at start as `ModelGateway` (DEC-2020), and registers an
+  endpoint only after §4.3's identity probe matches the pin. A runtime without the service keeps
+  the recorded fake.
 
 ---
 
@@ -549,7 +558,7 @@ a settlement only for the calls that could cost money, and spend for caps folds 
 | Research cost cap | `behavior.research.cost_cap_usd_per_day`, an envelope field ([DEC-120](../project/04-decision-log.md#decisions)), tightened by the policy's `research_cost_cap_usd_per_day` | The research agent's calls, per agent per risk day |
 | Workspace model spend | HLD §8 quota ("model spend"), set by the operator or plan | All calls of the workspace per risk day |
 | Workspace monthly cap | Workspace configuration: each workspace's own monthly model budget, from its setting; per-agent monthly caps under it, each at most the workspace's. No figure is a product limit, and none is hardcoded (DEC-2203 item 9) | All calls of the workspace per calendar month of risk days |
-| Deployment monthly cap | A deployment setting, separate from every workspace's: the platform's own provider spend for that deployment, folded from the deployment meter stream `dmeter:{deployment_id}` ([DEC-2207](../project/decisions/DEC-2207.md)). **$50 a month** today, for the demo and dev deployment ([DEC-997](../project/decisions/DEC-997.md) item 3, Proposed; until accepted, no live call runs at all). The founder clarified on 2026-10-17 that it is the platform's demo cap, not a customer limit (DEC-2203 item 9) | All calls of the deployment per calendar month of risk days |
+| Deployment monthly cap | A deployment setting, separate from every workspace's: the platform's own provider spend for that deployment, folded from the deployment meter stream `dmeter:{deployment_id}` ([DEC-2207](../project/decisions/DEC-2207.md)). **$50 a month** today, for the demo and dev deployment ([DEC-997](../project/decisions/DEC-997.md) item 3, Accepted; a live call also waits for the journaled meter, §6). The founder clarified on 2026-10-17 that it is the platform's demo cap, not a customer limit (DEC-2203 item 9) | All calls of the deployment per calendar month of risk days |
 | Workspace cycle allotment | The license's `model_spend_usd_per_cycle`, from the plan ([billing design](../design/billing.md) §3.4, DEC-442 item 4) | All calls of the workspace per billing cycle; enforced alongside the per-risk-day caps, never instead of them |
 | Run ceiling | The request's `spend_ceiling_usd`: the workspace's configured `research_run_cost_cap_usd`, less the cost of the run's earlier turns as the caller folds them from its own records ([agent harness spec §6.11](agent-harness.md#611-bounds-and-budgets), DEC-2203 item 9) | One call: its reservation must fit under the ceiling. It only refuses, and never lifts another cap |
 | Rate caps | Per agent: research runs only in proposal rounds no more often than `behavior.research.interval_s`, an agentic run's turns inside its one round; per workspace: a token bucket set by the plan | Calls per second |
@@ -712,13 +721,13 @@ the date only; it does not suggest a replacement.
 
 | Piece | Today | Planned |
 |---|---|---|
-| Model client | `python/research_spike/src/research_spike/openrouter.py`: one aggregator, JSON output, temperature 0, cost from a cached price catalogue, 60 s HTTP timeout, no retries. Spike code, not product code | The gateway (E15-6) |
-| Pinning | The spike names a model by its aggregator name, with no dated snapshot, no upstream lock, and no check of the reported model | INF-1, INF-2, the registry (E15-7) |
+| Model client | `mandate-gateway`, with the OpenRouter adapter and its routing lock, over the recorded fake in every test and cell build; `mandate-gateway-http`'s `HttpsTransport`, which no binary builds yet (DEC-2200 item 2). The research spike's client is spike code, not product code | The model-gateway service, the only live caller (E21-62, DEC-2257) |
+| Pinning | `mandate-gateway`'s registry pins slug, snapshot and upstream, and refuses an endpoint whose probe does not match (§4.3); the cell's probe is the recorded bundle's own | A real §4.3 probe before the live entry is registered; the entry is the founder's choice (E21-62) |
 | Deadline | Fixed 60 s transport timeout | Pinned `deadline_ms` per entry (INF-3) |
-| Journaling | The spike writes `llm_call` records and prompt and response artifacts to its own hash-chained JSONL. The agent-stream `ModelInvocationRecorded` and the meter stream are closed in journal spec v0.46 §9.19 (DEC-998); `mandate-journal` does not register them yet | `mandate-journal`'s registration (E15-8's code change) |
-| Spend | `mandate-research` reads `research_spend_usd_today` and refuses a thesis by check 7. Nothing produces that number in product code | Meter, reservation, and caps (E15-9) |
+| Journaling | `mandate-journal` registers §9.19 (DEC-2201). The cell's meter is in memory, so a restart fails closed for the risk day (DEC-2249 item 3) | The journaled meter stream (E21-61), before any live call (DEC-998 item 8) |
+| Spend | The gateway's meter reserves and settles each call under the workspace, deployment and daily research caps (DEC-2207, DEC-2254); the cell's source hands check 7 the meter's spend (DEC-2249) | The same caps in the model-gateway service (E21-62) |
 | Registry | Mandate pins id, version, and content hash (V-007); no registry service | E15-7 |
-| Prompt guard, egress allowlist, local-only policy key | None | E15-10 |
+| Prompt guard, egress allowlist, local-only policy key | The chart's `model-providers` egress target, empty, so it allows nothing | OpenRouter's host for the model-gateway pod alone (E21-62); the rest E15-10 |
 | Billing feed | None | §7.4 (E15-11), shown in E14-3's usage view |
 | Laya, Jev | Names only (§5) | Decided by the founder (DEC-432 item 13) |
 | Turns and tool calls | None: `mandate-gateway` takes typed inputs and returns one output | v0.4's request and reply shape, the pinned declarations, and the run ceiling (E19-13) |
@@ -740,8 +749,11 @@ the date only; it does not suggest a replacement.
 - **Item 23, Proposed for the founder:** a prompt record that keeps no licensed text (§13 question 6).
 - **[DEC-998](../project/decisions/DEC-998.md), agent readings:** the closed agent-stream record and
   the meter stream (journal spec §9.19), what the meter counts, and the one crash fold.
-- **[DEC-997](../project/decisions/DEC-997.md), Proposed for the founder:** OpenRouter, its routing
-  lock, and the $50 a month cap, which DEC-2203 item 9 records as the demo deployment's own setting.
+- **[DEC-997](../project/decisions/DEC-997.md), Accepted by the founder on 2026-10-19 (DEC-2605 row
+  19):** OpenRouter, its routing lock, and the $50 a month cap, which DEC-2203 item 9 records as the
+  demo deployment's own setting.
+- **[DEC-2257](../project/decisions/DEC-2257.md), agent readings:** the live path through the
+  model-gateway service alone, after the meter is journaled.
 - **[DEC-2203](../project/decisions/DEC-2203.md):** item 1, the founder's (2026-10-17): the research
   run is an agentic loop. Agent readings: pinned tools returned as data, the turn shape, the run
   ceiling, budgets as configuration, pinned reasoning, the stable prompt order, and no fallback to a single call. Items 14 to 16, 19, and 20 were decided

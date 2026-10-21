@@ -25,7 +25,7 @@ use common::{ASSET_A, arr, obj, s, with, with_all};
 use mandate_canon::Value;
 use mandate_domain::{AgentMode, AssetClass, AssetId, Environment, MarketSession, Side};
 use mandate_num::{Price, Qty, Ratio, ShareIncrement, SplitRatio, Usd};
-use mandate_spec::document::ProvenanceMap;
+use mandate_spec::document::{LadderAction, ProvenanceMap};
 use mandate_spec::risk::{
     ApplyResult, Confirmation, Input, InstrumentRestriction, Latch, LimitKey, Opening, Outcome,
     RemovalReason, Restriction, RiskEvent, RiskState, SessionClock, Snapshot, Step, StopReason,
@@ -4769,6 +4769,25 @@ fn a_trigger_whose_limit_was_changed_is_refused() -> Result<(), String> {
     Ok(())
 }
 
+/// The guard compares a trigger's limit and nothing else of it: a trigger whose action and reason
+/// were changed after the step, with its limit kept, still answers the 60 s it was recorded with.
+#[test]
+fn a_trigger_whose_action_and_reason_were_changed_keeps_its_breach_time() -> Result<(), String> {
+    let (mut outcome, trigger, _) = confirmed_rung_step()?;
+    let Some(RiskEvent::RiskLimitTriggered { action, reason, .. }) =
+        outcome.journal.get_mut(trigger)
+    else {
+        return Err("the 0.06 rung's trigger is at its position".to_owned());
+    };
+    *action = LadderAction::FlattenAndPause;
+    *reason = Some(TriggerReason::HardTrigger);
+    assert_eq!(
+        outcome.breach_time_s(trigger).map_err(|e| e.to_string())?,
+        Some(60)
+    );
+    Ok(())
+}
+
 /// A trigger put where the step journalled another event has no time recorded for it, which is not
 /// the same answer as 0.
 #[test]
@@ -4797,14 +4816,14 @@ enum GuardInput {
     Allocate(i64),
 }
 
-fn guard_input() -> impl Strategy<Value = (GuardInput, u64)> {
+fn guard_input() -> impl Strategy<Value = (GuardInput, u32)> {
     (
         prop_oneof![
             (60_i64..140).prop_map(GuardInput::Mark),
             Just(GuardInput::Tick),
             (-2_000_i64..2_000).prop_map(GuardInput::Allocate),
         ],
-        1_u64..120,
+        1_u32..120,
     )
 }
 
@@ -4840,7 +4859,7 @@ fn no_outcome_triggers_one_limit_twice() {
         let mut when = at("2026-09-21T14:00:00.000000000Z").secs();
         let mut steps = Vec::new();
         for (input, gap) in &inputs {
-            when += i64::try_from(*gap).unwrap_or(1);
+            when += i64::from(*gap);
             let instant = UtcNanos::from_parts(when, 0).expect("an instant");
             steps.push(match input {
                 GuardInput::Mark(bid) => {

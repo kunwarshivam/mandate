@@ -5,6 +5,7 @@ kind: Kustomization
 resources:
   - sync.yaml
   - charts.yaml
+  - vault.yaml
   - ../../base
 patches:
   - path: journal.yaml
@@ -14,5 +15,9 @@ configMapGenerator:
     namespace: flux-system
     files:
       - values.yaml=images.yaml
+  - name: vault-staging-values
+    namespace: flux-system
+    files:
+      - values.yaml=../../../../../cell/values/vault-staging.yaml
 generatorOptions:
   disableNameSuffixHash: true

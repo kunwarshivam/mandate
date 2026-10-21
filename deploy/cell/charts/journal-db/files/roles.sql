@@ -28,6 +28,15 @@ GRANT CONNECT ON DATABASE mandate TO mandate_control;
 ALTER ROLE mandate_control IN DATABASE mandate SET search_path = journal;
 DO $$
 BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'mandate_executor') THEN
+    CREATE ROLE mandate_executor LOGIN IN ROLE mandate_journal_app;
+  END IF;
+END
+$$;
+GRANT CONNECT ON DATABASE mandate TO mandate_executor;
+ALTER ROLE mandate_executor IN DATABASE mandate SET search_path = journal;
+DO $$
+BEGIN
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'mandate_verify') THEN
     CREATE ROLE mandate_verify LOGIN IN ROLE mandate_journal_app;
   END IF;
@@ -62,15 +71,6 @@ END
 $$;
 GRANT CONNECT ON DATABASE mandate TO mandate_runtime;
 ALTER ROLE mandate_runtime IN DATABASE mandate SET search_path = journal;
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'mandate_executor') THEN
-    CREATE ROLE mandate_executor LOGIN IN ROLE mandate_journal_app;
-  END IF;
-END
-$$;
-GRANT CONNECT ON DATABASE mandate TO mandate_executor;
-ALTER ROLE mandate_executor IN DATABASE mandate SET search_path = journal;
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'mandate_scheduler') THEN

@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/read-models/my-workspaces.schema.json",
+  "description": "GET /v1/me/workspaces (§4.10; identity spec §4.5, DEC-816 item 1, DEC-2113): the caller's own active memberships in this deployment, from the membership index (a hosted deployment's is its control stream's membership fold). roles are the workspace roles in effect at the read, empty while all still cool off. label is null until a display label is recorded; it is never invented. as_of is empty: the index is no journal stream, and a watermark would tell a non-member the workspace exists.",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../envelope.schema.json#/$defs/Envelope"
+    }
+  ],
+  "required": [
+    "workspaces"
+  ],
+  "properties": {
+    "workspaces": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/MyWorkspace"
+      }
+    },
+    "as_of": {
+      "maxItems": 0
+    }
+  },
+  "unevaluatedProperties": false,
+  "$defs": {
+    "MyWorkspace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workspace_id",
+        "label",
+        "roles"
+      ],
+      "properties": {
+        "workspace_id": {
+          "$ref": "../common.schema.json#/$defs/Id"
+        },
+        "label": {
+          "$ref": "#/$defs/Label"
+        },
+        "roles": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/WorkspaceRole"
+          }
+        }
+      }
+    },
+    "Label": {
+      "description": "A workspace's display label, or null when none is recorded (DEC-2113 item 5).",
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "WorkspaceRole": {
+      "description": "Journal spec §9.12's workspace role codes (identity spec §4.1).",
+      "enum": [
+        "workspace_admin",
+        "operator",
+        "approver",
+        "viewer",
+        "auditor"
+      ]
+    }
+  }
+}

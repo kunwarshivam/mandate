@@ -1,0 +1,252 @@
+[
+  {
+    "label": "an empty as_of",
+    "set": {
+      "/as_of": []
+    }
+  },
+  {
+    "label": "an unknown top-level member",
+    "set": {
+      "/extra": 1
+    }
+  },
+  {
+    "label": "an unknown connection member",
+    "set": {
+      "/connection/extra": 1
+    }
+  },
+  {
+    "label": "a token member",
+    "set": {
+      "/connection/access_token": "x"
+    }
+  },
+  {
+    "label": "an account number member",
+    "set": {
+      "/connection/account_number": "x"
+    }
+  },
+  {
+    "label": "a vault path member",
+    "set": {
+      "/connection/vault_path": "x"
+    }
+  },
+  {
+    "label": "a fingerprint member",
+    "set": {
+      "/connection/fingerprint": "x"
+    }
+  },
+  {
+    "label": "a missing state",
+    "remove": [
+      "/connection/state"
+    ]
+  },
+  {
+    "label": "a health state",
+    "set": {
+      "/connection/state": "closing_only"
+    }
+  },
+  {
+    "label": "a backtest environment",
+    "set": {
+      "/connection/environment": "backtest"
+    }
+  },
+  {
+    "label": "a missing agents",
+    "remove": [
+      "/connection/agents"
+    ]
+  },
+  {
+    "label": "an established connection with a refusal",
+    "set": {
+      "/connection/refusal": {
+        "check": "scope",
+        "reason": "scope_mismatch"
+      }
+    }
+  },
+  {
+    "label": "a refused connection without a refusal",
+    "set": {
+      "/connection/state": "refused"
+    }
+  },
+  {
+    "label": "an established connection with a revoked reason",
+    "set": {
+      "/connection/revoked_reason": "owner"
+    }
+  },
+  {
+    "label": "an unknown revoked reason",
+    "set": {
+      "/connection/state": "revoked",
+      "/connection/revoked_reason": "expired"
+    }
+  },
+  {
+    "label": "an unknown refusal check",
+    "set": {
+      "/connection/state": "refused",
+      "/connection/refusal": {
+        "check": "health",
+        "reason": "x"
+      }
+    }
+  },
+  {
+    "label": "a refusal with an extra member",
+    "set": {
+      "/connection/state": "refused",
+      "/connection/refusal": {
+        "check": null,
+        "reason": "timeout",
+        "detail": "x"
+      }
+    }
+  },
+  {
+    "label": "an empty scope",
+    "set": {
+      "/connection/scopes": [
+        ""
+      ]
+    }
+  },
+  {
+    "label": "a missing connection",
+    "remove": [
+      "/connection"
+    ]
+  },
+  {
+    "label": "a missing connection_id",
+    "remove": [
+      "/connection/connection_id"
+    ]
+  },
+  {
+    "label": "a missing broker",
+    "remove": [
+      "/connection/broker"
+    ]
+  },
+  {
+    "label": "a missing environment",
+    "remove": [
+      "/connection/environment"
+    ]
+  },
+  {
+    "label": "a missing state that the refusal would have masked",
+    "set": {
+      "/connection/refusal": {
+        "check": "scope",
+        "reason": "scope_mismatch"
+      }
+    },
+    "remove": [
+      "/connection/state"
+    ]
+  },
+  {
+    "label": "a connecting connection that omits its null scopes",
+    "set": {
+      "/connection/state": "connecting",
+      "/connection/agents": []
+    },
+    "remove": [
+      "/connection/scopes"
+    ]
+  },
+  {
+    "label": "a missing since",
+    "remove": [
+      "/connection/since"
+    ]
+  },
+  {
+    "label": "a missing refusal",
+    "remove": [
+      "/connection/refusal"
+    ]
+  },
+  {
+    "label": "a missing revoked_reason",
+    "remove": [
+      "/connection/revoked_reason"
+    ]
+  },
+  {
+    "label": "an empty broker",
+    "set": {
+      "/connection/broker": ""
+    }
+  },
+  {
+    "label": "an environment no enum names",
+    "set": {
+      "/connection/environment": "mutant_value"
+    }
+  },
+  {
+    "label": "a state no enum names",
+    "set": {
+      "/connection/state": "mutant_value"
+    }
+  },
+  {
+    "label": "a refusal whose reason is not a lowercase token",
+    "set": {
+      "/connection/state": "refused",
+      "/connection/refusal": {
+        "check": "scope",
+        "reason": "Has Space"
+      }
+    }
+  },
+  {
+    "label": "a refusal without a check",
+    "set": {
+      "/connection/state": "refused",
+      "/connection/refusal": {
+        "reason": "x"
+      }
+    }
+  },
+  {
+    "label": "a refusal without a reason",
+    "set": {
+      "/connection/state": "refused",
+      "/connection/refusal": {
+        "check": "scope"
+      }
+    }
+  },
+  {
+    "label": "a refusal check no enum names",
+    "set": {
+      "/connection/state": "refused",
+      "/connection/refusal": {
+        "check": "mutant_value",
+        "reason": "x"
+      }
+    }
+  },
+  {
+    "label": "a revoked reason no enum names",
+    "set": {
+      "/connection/state": "revoked",
+      "/connection/revoked_reason": "mutant_value"
+    }
+  }
+]

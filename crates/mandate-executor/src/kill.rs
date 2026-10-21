@@ -19,7 +19,7 @@ use crate::session::{Venue, venue};
 use crate::state::{EVERY_AGENT, ExecutorState, IntentOutcome, Switch};
 use crate::types::{
     AgentId, BrokerRequest, EventId, Initiator, IntentBody, IntentHandoff, KillScope, Mode, Order,
-    OrderState, OwnerConfirmation, Purpose,
+    OrderState, OwnerConfirmation, Purpose, RiskClock,
 };
 
 /// The restriction the kill switch's final mode is recorded under (mandate spec §5.9).
@@ -264,10 +264,11 @@ pub(crate) fn flatten_closes(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorEr
                         instrument: instrument.clone(),
                         side: Side::Sell,
                         qty,
-                        limit,
+                        limit: Some(limit),
                         purpose: switch.purpose,
                         protection: None,
                     },
+                    confirmation: None,
                 },
             )?;
         }
@@ -330,10 +331,31 @@ fn switch_of<'s>(view: &'s ExecutorState, intent: &IntentId) -> Option<&'s Switc
     closes_with(switch, ordinal, &record.agent, instrument).then_some(switch)
 }
 
-/// The floor an exit's ladder never prices below (§5.5, §5.6): the owner's confirmed floor for a
-/// flatten raised by a confirmed switch, nothing for any other exit.
+/// The floor an exit's ladder never prices below (§5.5, §5.6): the owner's confirmed floor for an
+/// owner's exit received with one, or for a flatten raised by a confirmed switch, the higher where
+/// both are; nothing for any other exit (DEC-2040 item 3).
 pub(crate) fn floor_of(view: &ExecutorState, intent: &IntentId) -> Option<Price> {
-    switch_of(view, intent)?.floor
+    let own = view
+        .confirmations
+        .get(intent)
+        .map(|confirmed| confirmed.floor);
+    own.max(switch_of(view, intent).and_then(|switch| switch.floor))
+}
+
+/// The bid the owner confirmed for an owner's exit received with one, while it has not expired at
+/// `at`, the step's journaled clock, or for a flatten raised by a confirmed switch: with it the exit
+/// sells outside the regular session, priced from that bid (§5.5, DEC-2040 items 3 and 7). At
+/// exactly `expires_at` it has expired.
+pub(crate) fn confirmed_bid(
+    view: &ExecutorState,
+    intent: &IntentId,
+    at: RiskClock,
+) -> Option<Price> {
+    view.confirmations
+        .get(intent)
+        .filter(|confirmed| at < confirmed.expires_at)
+        .map(|confirmed| confirmed.bid)
+        .or_else(|| switch_of(view, intent).and_then(|switch| switch.bid))
 }
 
 /// Whether an intent is a journaled switch's own flatten, which the agent's mode never holds.
@@ -907,13 +929,14 @@ mod tests {
                     instrument: aapl()?,
                     side: Side::Buy,
                     qty: Qty::parse("10")?,
-                    limit: Price::parse("150")?,
+                    limit: Some(Price::parse("150")?),
                     purpose: Purpose::Open,
                     protection: Some(ProtectionPrices {
                         stop: Price::parse("140")?,
                         take_profit: Some(Price::parse("170")?),
                     }),
                 },
+                confirmation: None,
             }),
             ports,
         )?;
@@ -1273,10 +1296,11 @@ mod tests {
                         instrument: aapl()?,
                         side: Side::Sell,
                         qty: Qty::parse("1")?,
-                        limit: Price::parse("150")?,
+                        limit: Some(Price::parse("150")?),
                         purpose: Purpose::DiscretionaryExit,
                         protection: None,
                     },
+                    confirmation: None,
                 }),
                 &ports,
             );

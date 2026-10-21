@@ -15,9 +15,12 @@ use mandate_gateway::meter::{
     MeterRecord, MeterStore, Reservation, Settlement, SharedMeter, StoreError,
 };
 use mandate_gateway::money::{Usage, Usd6};
+use mandate_gateway::provider::SequentialIds;
 use mandate_gateway::registry::ModelRef;
 use mandate_journal::{Environment, StoredEvent, StreamId};
 use mandate_num::Usd;
+use mandate_store::MemoryStore;
+use mandate_store::meter::JournalMeter;
 use mandate_time::{Date, UtcNanos};
 
 const AGENT: &str = "agent-a";
@@ -63,11 +66,25 @@ impl Stream {
     /// A `ModelInvocationRecorded` at `event_time` whose payload's `reservation` is `reservation`,
     /// written as JSON (a string, `null`, or anything else).
     fn call(&self, reservation: &str, event_time: &str) {
+        self.recorded(
+            &format!(r#"{{"cost_usd":"0.25","reservation":{reservation}}}"#),
+            event_time,
+        );
+    }
+
+    /// A `ModelInvocationRecorded` at `event_time` with `payload`, written as JSON.
+    fn recorded(&self, payload: &str, event_time: &str) {
         let seq = u64::try_from(self.rows.borrow().len()).unwrap() + 1;
         let event_id = format!("01J8Z3MA{seq:018}");
-        let body = format!(
-            r#"{{"envelope_version":1,"environment":"paper","event_id":"{event_id}","stream_id":"{AGENT_STREAM}","event_type":"ModelInvocationRecorded","schema_version":1,"event_time":"{event_time}","clock_source":"system","causation_id":null,"correlation_id":"01RUN","actor":{{"kind":"agent","id":"{AGENT}","version":"1","build":null}},"config_refs":{{}},"payload":{{"cost_usd":"0.25","reservation":{reservation}}},"artifact_refs":[],"pii_refs":[]}}"#
-        );
+        self.raw(format!(
+            r#"{{"envelope_version":1,"environment":"paper","event_id":"{event_id}","stream_id":"{AGENT_STREAM}","event_type":"ModelInvocationRecorded","schema_version":1,"event_time":"{event_time}","clock_source":"system","causation_id":null,"correlation_id":"01RUN","actor":{{"kind":"agent","id":"{AGENT}","version":"1","build":null}},"config_refs":{{}},"payload":{payload},"artifact_refs":[],"pii_refs":[]}}"#
+        ), event_time);
+    }
+
+    /// A `ModelInvocationRecorded` whose stored body is `body`, whatever it holds.
+    fn raw(&self, body: String, event_time: &str) {
+        let seq = u64::try_from(self.rows.borrow().len()).unwrap() + 1;
+        let event_id = format!("01J8Z3MA{seq:018}");
         self.rows.borrow_mut().push(StoredEvent {
             stream_id: AGENT_STREAM.into(),
             seq,
@@ -160,7 +177,6 @@ fn settled(id: &str, cost: &str) -> MeterRecord {
 /// its maximum, a settled one at its cost; another agent's and another day's count for nothing.
 /// The records are written through the store, as the gateway writes them, and read back as written.
 #[test]
-#[ignore = "pending E21-59"]
 fn the_spend_counts_open_reservations_at_most_and_settled_ones_at_cost() {
     let (store, stream, clock) = (SharedMeter::new(), Stream::default(), Clock::at(NOW));
     let mut meter = cell_meter(&store, &stream, &clock);
@@ -194,7 +210,6 @@ fn the_spend_counts_open_reservations_at_most_and_settled_ones_at_cost() {
 /// 03:59:59Z the next morning, the day's last second in New York; from the next risk day it is
 /// free. A store that holds the call's reservation is not held.
 #[test]
-#[ignore = "pending E21-59"]
 fn a_reserved_call_today_the_store_does_not_hold_holds_it_until_the_next_risk_day() {
     let (store, stream, clock) = (SharedMeter::new(), Stream::default(), Clock::at(NOW));
     stream.call(r#""R1""#, "2026-10-16T14:00:00.000000000Z");
@@ -233,7 +248,6 @@ fn a_reserved_call_today_the_store_does_not_hold_holds_it_until_the_next_risk_da
 /// A reserved call on an earlier risk day, and a call no reservation backed, hold nothing: the
 /// store writes, reads back, and counts what it is given.
 #[test]
-#[ignore = "pending E21-59"]
 fn an_earlier_day_s_reserved_call_and_an_unreserved_call_hold_nothing() {
     let (store, stream, clock) = (SharedMeter::new(), Stream::default(), Clock::at(NOW));
     stream.call(r#""R0""#, "2026-10-16T03:59:59.000000000Z");
@@ -249,7 +263,6 @@ fn an_earlier_day_s_reserved_call_and_an_unreserved_call_hold_nothing() {
 /// A call record whose reservation is neither a string nor `null`, or is missing, or whose time
 /// cannot be read, holds the store, as does an agent stream that cannot be read: fail closed.
 #[test]
-#[ignore = "pending E21-59"]
 fn a_call_record_or_a_stream_it_cannot_read_holds_the_store() {
     for (reservation, event_time) in [
         ("7", "2026-10-16T14:00:00.000000000Z"),
@@ -268,4 +281,101 @@ fn a_call_record_or_a_stream_it_cannot_read_holds_the_store() {
     *stream.down.borrow_mut() = true;
     assert!(meter.held(at(NOW)), "an unreadable stream");
     assert_eq!(meter.read(), Err(StoreError::Unavailable));
+}
+
+/// A call record whose body is no JSON, or whose payload has no `reservation` member, holds the
+/// store as an unreadable reservation does: the meter cannot tell it was unreserved.
+#[test]
+fn a_call_record_with_no_body_or_no_reservation_member_holds_the_store() {
+    let unparseable =
+        |stream: &Stream| stream.raw("not json".to_owned(), "2026-10-16T14:00:00.000000000Z");
+    let unreserved = |stream: &Stream| {
+        stream.recorded(r#"{"cost_usd":"0.25"}"#, "2026-10-16T14:00:00.000000000Z")
+    };
+    for (case, record) in [
+        ("no body", &unparseable as &dyn Fn(&Stream)),
+        ("no reservation member", &unreserved),
+    ] {
+        let (store, stream, clock) = (SharedMeter::new(), Stream::default(), Clock::at(NOW));
+        record(&stream);
+        let meter = cell_meter(&store, &stream, &clock);
+        assert!(meter.held(at(NOW)), "{case}");
+        assert_eq!(meter.read(), Err(StoreError::Unavailable), "{case}");
+        assert_eq!(meter.research_spend(at(NOW)), None, "{case}");
+    }
+}
+
+/// Every spend the gateway can hold is a `Usd`: one micro-dollar, whole dollars, and the largest
+/// `Usd6` each come back as the same amount, so the spend is never refused for its size.
+#[test]
+fn every_spend_the_gateway_can_hold_converts_exactly() {
+    for (max, spent) in [
+        ("0.000001", "0.000001"),
+        ("7", "7"),
+        ("0.25", "0.25"),
+        ("18446744073709.551615", "18446744073709.551615"),
+    ] {
+        let (store, stream, clock) = (SharedMeter::new(), Stream::default(), Clock::at(NOW));
+        let mut meter = cell_meter(&store, &stream, &clock);
+        meter
+            .append(reserved("R9", AGENT, max, day(TODAY)))
+            .unwrap();
+        assert_eq!(meter.research_spend(at(NOW)), Some(usd(spent)), "{max}");
+    }
+}
+
+/// A research reservation of the agent today at `max` dollars, its ids ULIDs from `n`, as the
+/// journal takes them.
+fn journaled_reservation(n: u128, max: &str) -> MeterRecord {
+    let MeterRecord::Reserved(mut reservation) = reserved("", AGENT, max, day(TODAY)) else {
+        unreachable!("reserved gives a reservation")
+    };
+    reservation.event_id = mandate_canon::encode_ulid(n);
+    reservation.call_id = mandate_canon::encode_ulid(n + 1);
+    MeterRecord::Reserved(reservation)
+}
+
+/// DEC-2259 items 1 and 2: over the journaled meter stream, a cell meter restarted after a
+/// reserved call counts that reservation at its maximum, and the agent stream's record of the call
+/// holds nothing. A call record whose reservation the journal lacks still holds the store.
+#[test]
+fn a_journaled_meter_restarted_counts_its_reservation_and_holds_nothing() {
+    let (journal, stream, clock) = (MemoryStore::default(), Stream::default(), Clock::at(NOW));
+    let journaled = |from: u128| {
+        CellMeter::over(
+            Box::new(JournalMeter::open(
+                journal.clone(),
+                "ws1",
+                Environment::Paper,
+                clock.reading(),
+                Box::new(SequentialIds::starting_at(from)),
+            )),
+            Rc::new(stream.clone()),
+            who(),
+            clock.reading(),
+        )
+    };
+    let mut before = journaled(1 << 70);
+    let reservation = journaled_reservation(10, "0.25");
+    before.append(reservation.clone()).unwrap();
+    stream.call(
+        &format!(r#""{}""#, reservation.event_id()),
+        "2026-10-16T14:00:00.000000000Z",
+    );
+    drop(before);
+
+    let after = journaled(1 << 71);
+    assert!(!after.held(at(NOW)), "the journal holds the reservation");
+    assert_eq!(after.read(), Ok(vec![reservation]));
+    assert_eq!(after.research_spend(at(NOW)), Some(usd("0.25")));
+
+    stream.call(
+        r#""01J8Z3MR000000000000000777""#,
+        "2026-10-16T14:30:00.000000000Z",
+    );
+    assert!(
+        after.held(at(NOW)),
+        "a reservation the journal lacks still holds"
+    );
+    assert_eq!(after.research_spend(at(NOW)), None);
 }

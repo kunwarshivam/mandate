@@ -27,6 +27,9 @@ pub trait Journal: Send + Sync {
     fn take_ownership<'a>(&'a self, stream: &'a str) -> Answer<'a, u64>;
     /// The `seq` of `stream`'s last row, 0 for none.
     fn head<'a>(&'a self, stream: &'a str) -> Answer<'a, u64>;
+    /// The event stored under `event_id` in any stream, or `None` when no stream holds it. The
+    /// caller scopes it to a workspace (§4.8.1).
+    fn event<'a>(&'a self, event_id: &'a str) -> Answer<'a, Option<StoredEvent>>;
     /// Appends the one `draft` at `expected_head` under `writer_epoch`. A failure that wrote
     /// nothing is [`JournalUnavailable`].
     fn append<'a>(
@@ -66,6 +69,10 @@ impl Journal for Postgres {
             let head = self.0.head(&id).await.map_err(|_| JournalUnavailable)?;
             Ok(head.seq)
         })
+    }
+
+    fn event<'a>(&'a self, event_id: &'a str) -> Answer<'a, Option<StoredEvent>> {
+        Box::pin(async move { self.0.event(event_id).await.map_err(|_| JournalUnavailable) })
     }
 
     fn append<'a>(

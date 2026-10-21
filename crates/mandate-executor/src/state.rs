@@ -132,6 +132,9 @@ pub struct ExecutorState {
     /// Each agent-scoped kill switch as its `KillSwitchActivated` journaled it, by that record's
     /// id, with the closes it has not yet raised as flatten intents (§5.5, DEC-485).
     pub(crate) switches: BTreeMap<EventId, Switch>,
+    /// The owner's confirmation each owner's exit was received with, by intent, from its
+    /// `OwnerConfirmationReceived` (journal spec §9.5, DEC-2040 item 2).
+    pub(crate) confirmations: BTreeMap<IntentId, Confirmed>,
     pub(crate) now: Option<RiskClock>,
     /// The latest tick before the one now handed, a running field `step.rs` writes and the fold
     /// never does: the retry's alert sounds on the tick its last window first expires, once
@@ -155,11 +158,24 @@ pub(crate) struct Switch {
     pub(crate) copied_from: Option<EventId>,
     pub(crate) purpose: Purpose,
     pub(crate) floor: Option<Price>,
+    /// The bid the owner confirmed, with which an owner's switch sells outside the regular session
+    /// (§5.5, DEC-2040 item 3).
+    pub(crate) bid: Option<Price>,
     pub(crate) instruments: Vec<InstrumentId>,
     pub(crate) pending: BTreeSet<InstrumentId>,
     /// The orders the switch cancelled, which no refusal of that cancel returns to working while
     /// the broker still reports them working (DEC-2302).
     pub(crate) cancels: BTreeSet<ClientOrderId>,
+}
+
+/// The bid and floor an owner confirmed for an owner's exit (§5.5, DEC-2040): the ladder prices
+/// from the bid outside the regular session and never below the floor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Confirmed {
+    pub(crate) bid: Price,
+    pub(crate) floor: Price,
+    /// From this instant the bid no longer applies, while the floor still does (DEC-2040 item 7).
+    pub(crate) expires_at: RiskClock,
 }
 
 /// What one `OrderRequestRecorded` carries (§9.5): the executor-only members of the order that
@@ -345,6 +361,7 @@ impl ExecutorState {
             uncompensated: BTreeMap::new(),
             pending_requests: BTreeMap::new(),
             switches: BTreeMap::new(),
+            confirmations: BTreeMap::new(),
             now: None,
             previous_now: None,
             profile: transitional_alpaca().ok(),

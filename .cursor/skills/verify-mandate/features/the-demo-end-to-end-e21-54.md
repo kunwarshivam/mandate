@@ -18,8 +18,10 @@
   runner on its committed demo inputs and records the payload it stores, which is pinned to the
   runner's golden store; every gap cites what of it is on `main` and waits on
   a named lane with its backlog story; each step reads ready, partial or skipped from its parts;
-  the closing summary lists every wait once under its lane; and the gestures run in one pod after
-  the egress gate.
+  the closing summary lists every wait once under its lane; the gestures run in one pod after
+  the egress gate; and a dry run for staging takes only a digest-pinned image and a workspace ULID,
+  renders with staging's values and no cluster lookup, and prints every object in its namespace.
 - **Run:** `cargo xtask cell demo --scenario demo` on a machine with docker, k3d and helm
   (`deploy/cell/README.md`, "The demo's scenario"); CI's `cell-demo` job, which no required check
-  depends on.
+  depends on; `cargo xtask cell demo --scenario demo --dry-run --image <ref@sha256:...> --workspace
+  <ULID>` renders the gestures' Job for staging with `helm template` alone.

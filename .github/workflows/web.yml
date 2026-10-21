@@ -88,7 +88,7 @@ jobs:
         env:
           NEXT_PUBLIC_SUPABASE_URL: "https://stub-project.supabase.invalid"
           NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_ci_stub"
-      - run: npx wrangler deploy --dry-run --outdir .wrangler/dry-run
+      - run: node_modules/.bin/wrangler deploy --dry-run --outdir .wrangler/dry-run
         if: steps.app.outputs.present == 'true'
         env:
           WRANGLER_SEND_METRICS: "false"

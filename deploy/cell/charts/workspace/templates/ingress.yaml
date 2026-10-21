@@ -3,13 +3,36 @@ The cell's one ingress (DEC-967 item 6): a cloudflared pod that dials out to Clo
 edge, so the cluster exposes no port: no Service, no NodePort, no LoadBalancer. Off unless
 `ingress.cloudflared.enabled`; the local cell has no tunnel. The tunnel token is a mounted file
 from a Secret the operator makes, never a value (DEC-822 item 4). It reaches the edge's CIDRs on
-port 7844 and DNS; the workspace API server's route joins when lane A1 lands.
+port 7844 and DNS.
+- The API's route (DEC-2056): the API listens on its pod's loopback only, and lane IAC's tunnel
+  sends the API's host to `http://127.0.0.1:8080`. So where the API runs, cloudflared runs as a
+  second container of the API's pod and the egress policy selects that pod; no other pod runs a
+  connector, since Cloudflare spreads requests over every connector and one without the API would
+  answer 502. Without the API, cloudflared runs alone as before.
 */ -}}
 {{- define "mandate.cloudflaredProcess" -}}
 {{- dict "name" "cloudflared" "colocate" false "egress" (list) "db_role" "" "guaranteed" false "resources" (dict "limits" (dict "cpu" "200m" "memory" "128Mi") "requests" (dict "cpu" "100m" "memory" "64Mi")) | toJson -}}
 {{- end -}}
-{{- define "mandate.cloudflared" -}}
+{{- define "mandate.cloudflaredContainer" -}}
 {{- $c := .root.Values.ingress.cloudflared -}}
+- name: cloudflared
+  image: {{ $c.image | quote }}
+  imagePullPolicy: IfNotPresent
+  args: ["tunnel", "--metrics", "127.0.0.1:20241", "run", "--token-file", "/run/secrets/tunnel/token"]
+  env:
+    - {name: HOME, value: /tmp}
+  securityContext:
+    {{- include "mandate.containerSecurity" . | nindent 4 }}
+  resources:
+    {{- include "mandate.resources" . | nindent 4 }}
+  volumeMounts:
+    - {name: tmp, mountPath: /tmp}
+    - {name: tunnel, mountPath: /run/secrets/tunnel, readOnly: true}
+{{- end -}}
+{{- define "mandate.tunnelVolume" -}}
+- {name: tunnel, secret: {secretName: {{ .root.Values.ingress.cloudflared.tokenFrom | quote }}, defaultMode: 288, items: [{key: token, path: token}]}}
+{{- end -}}
+{{- define "mandate.cloudflared" -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -24,22 +47,7 @@ spec:
     matchLabels:
       {{- include "mandate.selector" . | nindent 6 }}
   template:
-    {{- $mounts := "- {name: tunnel, mountPath: /run/secrets/tunnel, readOnly: true}" }}
-    {{- $container := printf `- name: cloudflared
-  image: %q
-  imagePullPolicy: IfNotPresent
-  args: ["tunnel", "--metrics", "127.0.0.1:20241", "run", "--token-file", "/run/secrets/tunnel/token"]
-  env:
-    - {name: HOME, value: /tmp}
-  securityContext:
-%s
-  resources:
-%s
-  volumeMounts:
-    - {name: tmp, mountPath: /tmp}
-%s` $c.image (include "mandate.containerSecurity" . | indent 4) (include "mandate.resources" . | indent 4) ($mounts | indent 4) }}
-    {{- $volumes := printf "- {name: tunnel, secret: {secretName: %q, defaultMode: 288, items: [{key: token, path: token}]}}" $c.tokenFrom }}
-    {{- include "mandate.pod" (dict "root" .root "p" .p "restartPolicy" "Always" "containers" $container "volumes" $volumes) | nindent 4 }}
+    {{- include "mandate.pod" (dict "root" .root "p" .p "restartPolicy" "Always" "containers" (include "mandate.cloudflaredContainer" .) "volumes" (include "mandate.tunnelVolume" .)) | nindent 4 }}
 {{- end -}}
 {{- define "mandate.cloudflaredPolicy" -}}
 apiVersion: networking.k8s.io/v1
@@ -51,7 +59,7 @@ metadata:
 spec:
   podSelector:
     matchLabels:
-      {{- include "mandate.selector" . | nindent 6 }}
+      {{- include "mandate.selector" (dict "root" .root "p" .host) | nindent 6 }}
   policyTypes: ["Ingress", "Egress"]
   egress:
     - to:
@@ -77,8 +85,16 @@ spec:
 {{- end -}}
 {{- if .Values.ingress.cloudflared.enabled }}
 {{- $ctx := dict "root" . "p" (include "mandate.cloudflaredProcess" . | fromJson) }}
+{{- $host := $ctx.p }}
+{{- range (include "mandate.rendered" (dict "root" . "kind" "service") | fromJsonArray) }}
+{{- if eq .name "api" }}
+{{- $host = . }}
+{{- end }}
+{{- end }}
+{{- if eq $host.name "cloudflared" }}
 ---
 {{ include "mandate.emit" (include "mandate.cloudflared" $ctx) }}
+{{- end }}
 ---
-{{ include "mandate.emit" (include "mandate.cloudflaredPolicy" $ctx) }}
+{{ include "mandate.emit" (include "mandate.cloudflaredPolicy" (set $ctx "host" $host)) }}
 {{- end }}

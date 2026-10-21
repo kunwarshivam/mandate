@@ -1,6 +1,6 @@
 //! The connection records journal spec v0.20 §9.8 closes (E7-17, DEC-800): on the control stream,
 //! `ConnectionEstablished` at version 2, `ConnectionRefused`, `ConnectionCredentialRotated`, and
-//! v0.32's `ConnectionRequested` (DEC-699); on the account stream, the executor's
+//! v0.32's `ConnectionRequested` (DEC-699), at version 2 since v0.68 with rule 255 (DEC-2621); on the account stream, the executor's
 //! `ConnectionChecked`, `ConnectionStateChanged`, and `ConnectionCredentialRefreshed`, and its
 //! copies of the establishment (version 2 only) and of each rotation, with `risk_clock`.
 //! Consistency rules 54 to 60, 62, 64 and 65, and copy rules 61 and 63. The owner's fold (rules 66
@@ -70,6 +70,7 @@ pub(crate) fn schema(
         (ESTABLISHED, 2, StreamType::Account) => Some(&ESTABLISHED_COPY),
         ("ConnectionRefused", 1, StreamType::Control) => Some(&CONNECTION_REFUSED),
         ("ConnectionRequested", 1, StreamType::Control) => Some(&CONNECTION_REQUESTED),
+        ("ConnectionRequested", 2, StreamType::Control) => Some(&CONNECTION_REQUESTED_V2),
         (ROTATED, 1, StreamType::Control) => Some(&ROTATED_RECORD),
         (ROTATED, 1, StreamType::Account) => Some(&ROTATED_COPY),
         ("ConnectionChecked", 1, StreamType::Account) => Some(&CONNECTION_CHECKED),
@@ -122,6 +123,7 @@ pub(crate) fn rules(
         (ROTATED | "ConnectionCredentialRefreshed", _) => ascending(&p.texts("scopes")),
         ("ConnectionChecked", _) => checked_rules(p, pii_refs),
         ("ConnectionStateChanged", _) => state_rules(p),
+        ("ConnectionRequested", 2) => requested_rules(p),
         (ESTABLISHED, 2) => ensure(
             p.is_null("margin_attestation") != (p.text("environment") == "live"),
             InvalidReason::Schema,
@@ -129,6 +131,44 @@ pub(crate) fn rules(
         ),
         _ => Ok(()),
     }
+}
+
+/// The one disclosure an `oauth` request may name (DEC-2621 item 5).
+const BREADTH_DISCLOSURE: &str = "alpaca_oauth_token_breadth";
+
+/// Rule 255 on a version-2 `ConnectionRequested` (DEC-2621 item 2): `breadth` exactly for
+/// `oauth`; an `oauth` request names `alpaca` and `paper`, and the breadth disclosure. The first
+/// clause that fails is reported, in that order.
+fn requested_rules(p: View<'_>) -> Result<(), Invalid> {
+    let oauth = p.text("credential") == "oauth";
+    ensure(
+        p.is_null("breadth") != oauth,
+        InvalidReason::Schema,
+        "payload.breadth",
+    )?;
+    if !oauth {
+        return Ok(());
+    }
+    ensure(
+        p.text("broker") == "alpaca",
+        InvalidReason::Schema,
+        "payload.broker",
+    )?;
+    ensure(
+        p.text("environment") == "paper",
+        InvalidReason::Schema,
+        "payload.environment",
+    )?;
+    let document =
+        p.0.get("breadth")
+            .and_then(|breadth| breadth.get("disclosure"))
+            .and_then(|disclosure| disclosure.get("document"))
+            .and_then(Value::as_str);
+    ensure(
+        document == Some(BREADTH_DISCLOSURE),
+        InvalidReason::Schema,
+        "payload.breadth.disclosure.document",
+    )
 }
 
 /// Rules 57, 58 and 62 on a `ConnectionChecked`.
@@ -350,6 +390,27 @@ static CONNECTION_REQUESTED: Ty = Ty::Record(&[
     ("environment", Ty::OneOf(&["paper", "live"])),
     ("user", Ty::Str),
     ("step_up", STEP_UP),
+]);
+
+/// Version 2 (journal spec v0.68, DEC-2621): version 1's members, then how the credential is
+/// obtained and, for `oauth`, the token's possible breadth and the disclosure the owner confirmed.
+static CONNECTION_REQUESTED_V2: Ty = Ty::Record(&[
+    ("connection_id", Ty::Ident),
+    ("account_ref", Ty::Ulid),
+    ("broker", Ty::Str),
+    ("environment", Ty::OneOf(&["paper", "live"])),
+    ("user", Ty::Str),
+    ("step_up", STEP_UP),
+    ("credential", Ty::OneOf(&["oauth", "api_key"])),
+    ("breadth", Ty::Nullable(&BREADTH)),
+]);
+
+const BREADTH: Ty = Ty::Record(&[
+    ("other_environment", Ty::OneOf(&["may_reach"])),
+    (
+        "disclosure",
+        Ty::Record(&[("document", Ty::Ident), ("version", Ty::Str)]),
+    ),
 ]);
 
 static ROTATED_RECORD: Ty = Ty::Record(&[

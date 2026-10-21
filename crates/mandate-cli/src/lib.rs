@@ -22,7 +22,9 @@
 //! E8-3). Their `clap` commands land once `mandate-journal` registers the control stream's schemas,
 //! without which a real journal refuses every event they commit (DEC-257 item 17, DEC-279 item
 //! 10). `vault import` stores the
-//! platform's OAuth client secret in the demo host's local vault, from stdin (E10-13 V1).
+//! platform's OAuth client secret in the demo host's local vault, from stdin (E10-13 V1). `step-up
+//! confirm` records, in paper, the owner's confirmation of a web grant's step-up challenge (E9-4,
+//! DEC-2104).
 
 use clap::{Parser, Subcommand};
 
@@ -46,8 +48,10 @@ pub mod journal;
 pub mod owner;
 pub mod postgres;
 pub mod register;
+pub mod retire;
 #[cfg(any(test, feature = "rh-sim"))]
 pub mod sim_clock;
+pub mod step_up;
 pub mod vault;
 pub mod version;
 pub mod workspace;
@@ -113,4 +117,8 @@ pub enum Command {
     /// `evaluator` system.
     #[command(subcommand)]
     Evaluation(evaluation::EvaluationCommand),
+    /// Confirm, in paper, the step-up challenge the web app shows for an approval's grant
+    /// (DEC-2104).
+    #[command(subcommand)]
+    StepUp(step_up::StepUpCommand),
 }

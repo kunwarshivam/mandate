@@ -15,6 +15,7 @@
 //! (DEC-1012).
 
 pub mod envelope;
+pub mod meter;
 
 use std::cell::RefCell;
 use std::rc::Rc;

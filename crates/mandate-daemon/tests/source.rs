@@ -12,22 +12,24 @@ use mandate_canon::{Digest, parse};
 use mandate_daemon::ResearchSource;
 use mandate_daemon::meter::CellMeter;
 use mandate_daemon::recorded::Bundle;
-use mandate_daemon::source::{CellSource, Rows, SourceFor, envelope};
+use mandate_daemon::source::FoldError;
+use mandate_daemon::source::{CellSource, Rows, SourceFor, envelope, last_research_reservation};
 use mandate_gateway::Outcome as CallOutcome;
 use mandate_gateway::kinds::{KeyOwner, Purpose};
 use mandate_gateway::meter::{MeterRecord, MeterStore, Reservation, Settlement, SharedMeter};
 use mandate_gateway::money::{Usage, Usd6};
 use mandate_gateway::registry::ModelRef;
-use mandate_journal::{AppendOutcome, ArtifactRef, Environment, StoredEvent, StreamId};
+use mandate_journal::{AppendOutcome, ArtifactRef, Environment, StoredEvent, StreamId, StreamType};
 use mandate_num::Usd;
-use mandate_research::{LineageState, WorkingUniverse};
+use mandate_research::{AssetId, LineageId, LineageState, WorkingUniverse};
 use mandate_runtime::{
-    ActorKind, AgentId, ConnectionId, Deployment, EventId, FoldedEvent, RuntimeState, Seq,
-    WorkspaceId, fold,
+    ActorKind, AgentId, ConnectionId, Deployment, EventId, FoldedEvent, RiskClock, RuntimeState,
+    Seq, WorkspaceId, fold,
 };
 use mandate_spec::document::Mandate;
 use mandate_store::Store;
 use mandate_time::{Date, UtcNanos};
+use proptest::prelude::*;
 use serde_json::{Value as Json, json};
 
 const FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/research");
@@ -80,6 +82,7 @@ fn row_at(
 struct Journal {
     control: Rc<RefCell<Vec<StoredEvent>>>,
     agent: Rc<RefCell<Vec<StoredEvent>>>,
+    meter: Rc<RefCell<Vec<StoredEvent>>>,
     unreadable: Rc<RefCell<BTreeSet<String>>>,
 }
 
@@ -91,6 +94,7 @@ impl Rows for Journal {
         match stream.as_str() {
             "ctl:ws1" => Some(self.control.borrow().clone()),
             "agent:ws1:agent-a" => Some(self.agent.borrow().clone()),
+            "meter:ws1" => Some(self.meter.borrow().clone()),
             _ => None,
         }
     }
@@ -116,6 +120,20 @@ impl Journal {
             event_type,
             "paper",
             payload,
+            event_time,
+        ));
+    }
+
+    /// A `MeterReserved` on the workspace's meter stream for `agent` (JSON: a quoted id or `null`)
+    /// and `purpose`, at `event_time`.
+    fn reserved_at(&self, agent: &str, purpose: &str, event_time: &str) {
+        let seq = u64::try_from(self.meter.borrow().len()).unwrap() + 1;
+        self.meter.borrow_mut().push(row_at(
+            "meter:ws1",
+            seq,
+            "MeterReserved",
+            "paper",
+            &format!(r#"{{"agent_id":{agent},"purpose":"{purpose}","max_cost_usd":"0.4"}}"#),
             event_time,
         ));
     }
@@ -399,22 +417,18 @@ fn no_context_while_another_agent_is_deployed() {
     );
 }
 
-/// Once the agent stream holds a record whose facts the source cannot fold yet, research pauses
-/// (DEC-2214 item 3, until E21-59): a thesis, a universe change, or a call the meter reserved. A
-/// run's start and observations do not pause it, so the first run is never held mid-way.
+/// A record the source cannot fold gives the pass no context, so research pauses (DEC-2251): a
+/// thesis or an invalidation it cannot read, or a call the meter reserved that the source's own
+/// meter does not hold. A run's start and observations do not pause it, so the first run is never
+/// held mid-way.
 #[test]
-fn research_pauses_once_the_stream_holds_a_fact_it_cannot_fold() {
+fn research_pauses_once_the_stream_holds_a_record_it_cannot_fold() {
     let (journal, source) = deployed(&bundle(), &researching());
     journal.agent("RunStarted", r#"{"run_id":"01RUN"}"#);
     journal.agent("ObservationRecorded", r#"{"source":"src.newswire"}"#);
     assert!(source.parts(&state()).is_some(), "a run under way");
 
-    for kind in [
-        "ThesisProposed",
-        "ThesisRevised",
-        "ThesisInvalidated",
-        "UniverseChanged",
-    ] {
+    for kind in ["ThesisProposed", "ThesisRevised", "ThesisInvalidated"] {
         let (journal, source) = deployed(&bundle(), &researching());
         journal.agent(kind, r#"{}"#);
         assert!(source.parts(&state()).is_none(), "{kind}");
@@ -595,7 +609,6 @@ fn reservation(id: &str, max: &str) -> MeterRecord {
 /// meter holds for it, its settled cost here, beside the unmetered calls' recorded costs, which
 /// still count as before: 0.25 settled plus 0.5 recorded.
 #[test]
-#[ignore = "pending E21-59"]
 fn a_call_the_meter_holds_counts_at_its_settled_cost_and_research_goes_on() {
     let store = SharedMeter::new();
     let (journal, source) = metered(&bundle(), &researching(), &store);
@@ -636,7 +649,6 @@ fn a_call_the_meter_holds_counts_at_its_settled_cost_and_research_goes_on() {
 /// the risk day: no context, until the risk clock reaches the next risk day, when the earlier call
 /// is another day's and the day's spend starts again from nothing.
 #[test]
-#[ignore = "pending E21-59"]
 fn a_restarted_source_gives_no_context_until_the_next_risk_day() {
     let store = SharedMeter::new();
     let (journal, source) = metered(&bundle(), &researching(), &store);
@@ -656,4 +668,405 @@ fn a_restarted_source_gives_no_context_until_the_next_risk_day() {
         parts.facts.research_spend_usd_today,
         Usd::parse("0").unwrap()
     );
+}
+
+/// A thesis record (journal spec §9.4) with every member the schema names; `reason` is JSON.
+fn thesis_payload(
+    thesis: &str,
+    lineage: &str,
+    revision: u32,
+    instrument: &str,
+    admitted: bool,
+    reason: &str,
+    expires_at: &str,
+) -> String {
+    let predecessor = if revision == 0 {
+        "null".to_owned()
+    } else {
+        format!(r#""{lineage}""#)
+    };
+    format!(
+        r#"{{"model_id":"llm.research_agent","model_version":"0.1.0","content_hash":"sha256:{hash}","thesis_id":"{thesis}","lineage_id":"{lineage}","revision":{revision},"predecessor_thesis_id":{predecessor},"autopsy_ref":null,"instrument_id":"{instrument}","asset_class":"us_equity","direction":"long","as_of":"2026-10-16T13:00:00.000000000Z","expires_at":"{expires_at}","horizon_s":3600,"conviction":"0.6","confidence":"0.7","evidence_ref":null,"evidence_sources":["src.newswire"],"corroboration":"independent_source","invalidation":"a guidance cut","allowlist_version":3,"prompt_ref":"sha256:{hash}","response_ref":"sha256:{hash}","admitted":{admitted},"reason":{reason}}}"#,
+        hash = Digest::of(b"x").to_hex(),
+    )
+}
+
+/// `RISK_CLOCK` moved by `secs`, as the journal writes a timestamp.
+fn after_clock(secs: i64) -> String {
+    UtcNanos::from_parts(
+        UtcNanos::parse_rfc3339(RISK_CLOCK).unwrap().secs() + secs,
+        0,
+    )
+    .unwrap()
+    .to_string()
+}
+
+/// E21-59, DEC-2249 items 1 and 2: the agent's own theses reach the pass. An admitted proposal
+/// holds its instrument as the active thesis until its horizon, its lineage is replayed, and a
+/// refusal for another reason admits nothing, where before any thesis record paused research.
+#[test]
+fn the_agent_s_own_theses_reach_the_pass() {
+    let (journal, source) = deployed(&bundle(), &researching());
+    journal.agent(
+        "ThesisProposed",
+        &thesis_payload("th-1", "th-1", 0, AAPL, true, "null", &after_clock(3_600)),
+    );
+    journal.agent(
+        "ThesisProposed",
+        &thesis_payload(
+            "th-2",
+            "th-2",
+            0,
+            MSFT,
+            false,
+            r#""universe_full""#,
+            &after_clock(3_600),
+        ),
+    );
+    let parts = source.parts(&state()).expect("the theses fold");
+    assert_eq!(
+        parts.universe,
+        WorkingUniverse::Known {
+            instruments: [AssetId::new(AAPL).unwrap()].into(),
+            pinned: false,
+        }
+    );
+    let active: Vec<(&str, &str, i64)> = parts
+        .active
+        .iter()
+        .map(|t| (t.thesis_id.as_str(), t.symbol.as_str(), t.expires_at.secs()))
+        .collect();
+    let horizon = UtcNanos::parse_rfc3339(&after_clock(3_600)).unwrap().secs();
+    assert_eq!(active, [("th-1", "AAPL", horizon)]);
+    let lineage = |id: &str| {
+        parts
+            .lineages
+            .lineage(&LineageId::new(id).unwrap())
+            .copied()
+    };
+    assert_eq!(
+        lineage("th-1").map(|l| (l.revisions, l.admitted, l.retired)),
+        Some((0, 1, false))
+    );
+    assert_eq!(lineage("th-2").map(|l| l.admitted), Some(0));
+    let expired = source
+        .parts(&state_at(&after_clock(3_600)))
+        .expect("an expired thesis folds too");
+    assert!(expired.active.is_empty(), "at its horizon, removed");
+}
+
+/// DEC-2249 item 2: `UniverseChanged` is the account stream's (journal spec §9.3), never closed on
+/// the agent stream, so the source does not read it there: a stray one pauses nothing.
+#[test]
+fn a_universe_change_never_reaches_the_agent_stream_and_pauses_nothing() {
+    assert!(!mandate_journal::closes(
+        "UniverseChanged",
+        1,
+        StreamType::Agent
+    ));
+    assert!(mandate_journal::closes(
+        "UniverseChanged",
+        1,
+        StreamType::Account
+    ));
+    let (journal, source) = deployed(&bundle(), &researching());
+    journal.agent("UniverseChanged", r#"{}"#);
+    assert!(source.parts(&state()).is_some());
+}
+
+/// A pinned envelope researches nothing, so a thesis record under one, admitted or refused, is not
+/// a state the core judged into it: no context (DEC-2251).
+#[test]
+fn a_pinned_envelope_with_a_thesis_record_gives_no_context() {
+    let document: Json = serde_json::from_str(MANDATE).unwrap();
+    assert_eq!(
+        document["universe"]["pinned"],
+        json!(true),
+        "the fixture pins SPY"
+    );
+    let (journal, source) = deployed(&bundle(), &document);
+    assert!(
+        source.parts(&state()).is_some(),
+        "pinned, with nothing to fold"
+    );
+    journal.agent(
+        "ThesisProposed",
+        &thesis_payload("th-1", "th-1", 0, AAPL, true, "null", &after_clock(3_600)),
+    );
+    assert!(source.parts(&state()).is_none());
+    let (journal, source) = deployed(&bundle(), &document);
+    journal.agent(
+        "ThesisProposed",
+        &thesis_payload(
+            "th-2",
+            "th-2",
+            0,
+            AAPL,
+            false,
+            r#""universe_pinned""#,
+            &after_clock(3_600),
+        ),
+    );
+    assert!(
+        source.parts(&state()).is_none(),
+        "a refused thesis leaves a known lineage and no active one, and still gives no context"
+    );
+}
+
+/// One generated record of a pass's agent stream and meter.
+#[derive(Debug, Clone)]
+enum Record {
+    /// A thesis of lineage `lineage` at `revision` on AAPL or MSFT, admitted, or refused
+    /// `lineage_retired` when `retires`, else `not_in_data_universe`, its horizon `expires`
+    /// seconds after the risk clock (negative: already passed).
+    Thesis {
+        lineage: u8,
+        revision: u32,
+        msft: bool,
+        admitted: bool,
+        retires: bool,
+        expires: i64,
+    },
+    /// An invalidation of the `n`th thesis so far, modulo how many there are.
+    Invalidated { n: usize },
+    /// A reserved call of at most `max` cents, settled at `cost` cents and recorded, or still open.
+    Reserved { max: u64, cost: Option<u64> },
+    /// A call no reservation backed, recorded at `cost` cents.
+    Unmetered { cost: u64 },
+}
+
+fn record() -> impl Strategy<Value = Record> {
+    prop_oneof![
+        4 => (0_u8..3, 0_u32..4, any::<bool>(), any::<bool>(), any::<bool>(), -3_600_i64..7_200)
+            .prop_map(|(lineage, revision, msft, admitted, retires, expires)| Record::Thesis {
+                lineage,
+                revision,
+                msft,
+                admitted,
+                retires,
+                expires,
+            }),
+        1 => (0_usize..16).prop_map(|n| Record::Invalidated { n }),
+        2 => (1_u64..200, prop::option::of(0_u64..200)).prop_map(|(max, cost)| Record::Reserved {
+            max,
+            cost: cost.map(|c| c.min(max)),
+        }),
+        1 => (0_u64..200).prop_map(|cost| Record::Unmetered { cost }),
+    ]
+}
+
+/// `cents` as the canonical decimal text `Usd::parse` and `Usd6::parse` read.
+fn dollars(cents: u64) -> String {
+    match (cents / 100, cents % 100) {
+        (whole, 0) => whole.to_string(),
+        (whole, part) if part % 10 == 0 => format!("{whole}.{}", part / 10),
+        (whole, part) => format!("{whole}.{part:02}"),
+    }
+}
+
+/// An instrument's entry in the accumulator: its thesis, lineage, revision, horizon in seconds
+/// after the risk clock, and whether it was invalidated.
+type Entry = (String, String, u32, i64, bool);
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(128))]
+
+    /// E21-59 over random journaled runs: the pass the source gives, its universe, lineages, active
+    /// theses and today's research spend, equals an accumulator rebuilt from the generated records
+    /// alone. Spend is every settled call at its cost, every open reservation at its maximum, and
+    /// every unmetered call at its recorded cost (DEC-2249 item 3).
+    #[test]
+    fn the_pass_equals_an_independent_accumulator_over_random_runs(
+        records in prop::collection::vec(record(), 1..24),
+    ) {
+        let store = SharedMeter::new();
+        let (journal, source) = metered(&bundle(), &researching(), &store);
+        let mut writer = store.clone();
+        let mut lineages: BTreeMap<String, (u32, u32, bool)> = BTreeMap::new();
+        let mut holders: BTreeMap<String, &str> = BTreeMap::new();
+        let mut entries: BTreeMap<&str, Entry> = BTreeMap::new();
+        let mut theses: Vec<(String, String, &str)> = Vec::new();
+        let mut spend_cents = 0_u64;
+        for (index, record) in records.iter().enumerate() {
+            match *record {
+                Record::Thesis { lineage, revision, msft, admitted, retires, expires } => {
+                    let thesis = format!("th-{index}");
+                    let lineage = format!("ln-{lineage}");
+                    let instrument = if msft { MSFT } else { AAPL };
+                    let kind = if revision == 0 { "ThesisProposed" } else { "ThesisRevised" };
+                    let reason = match (admitted, retires) {
+                        (true, _) => "null",
+                        (false, true) => r#""lineage_retired""#,
+                        (false, false) => r#""not_in_data_universe""#,
+                    };
+                    journal.agent(kind, &thesis_payload(
+                        &thesis, &lineage, revision, instrument, admitted, reason,
+                        &after_clock(expires),
+                    ));
+                    let entry = lineages.entry(lineage.clone()).or_default();
+                    if admitted {
+                        entry.0 = entry.0.max(revision);
+                        entry.1 += 1;
+                        holders.retain(|_, held| *held != instrument);
+                        holders.insert(lineage.clone(), instrument);
+                        entries.insert(instrument, (thesis.clone(), lineage.clone(), revision, expires, false));
+                    } else if retires {
+                        entry.2 = true;
+                    }
+                    theses.push((thesis, lineage, instrument));
+                }
+                Record::Invalidated { n } => {
+                    let Some((thesis, lineage, instrument)) = theses.get(n % theses.len().max(1)).cloned() else {
+                        continue;
+                    };
+                    journal.agent("ThesisInvalidated", &format!(
+                        r#"{{"thesis_id":"{thesis}","lineage_id":"{lineage}","instrument_id":"{instrument}","cause":"model","candidate":0,"evidence":["01OBS"],"source":"src.newswire"}}"#
+                    ));
+                    for entry in entries.values_mut() {
+                        if entry.0 == thesis {
+                            entry.4 = true;
+                        }
+                    }
+                }
+                Record::Reserved { max, cost } => {
+                    let id = format!("R{index}");
+                    writer.append(reservation(&id, &dollars(max))).unwrap();
+                    match cost {
+                        Some(cost) => {
+                            writer.append(MeterRecord::Settled(Settlement {
+                                event_id: format!("S{index}"),
+                                call_id: format!("call-{id}"),
+                                reservation: id.clone(),
+                                outcome: CallOutcome::Ok,
+                                attempts: 1,
+                                tokens: Usage { input: 1, output: 1, cached: 0 },
+                                cost: Usd6::parse(&dollars(cost)).unwrap(),
+                            })).unwrap();
+                            journal.agent("ModelInvocationRecorded", &format!(
+                                r#"{{"cost_usd":"{}","reservation":"{id}"}}"#, dollars(cost)
+                            ));
+                            spend_cents += cost;
+                        }
+                        None => spend_cents += max,
+                    }
+                }
+                Record::Unmetered { cost } => {
+                    journal.agent("ModelInvocationRecorded", &format!(
+                        r#"{{"cost_usd":"{}","reservation":null}}"#, dollars(cost)
+                    ));
+                    spend_cents += cost;
+                }
+            }
+        }
+        let parts = source.parts(&state()).expect("every generated record folds");
+        let survivors: Vec<(&&str, &Entry)> = entries
+            .iter()
+            .filter(|(_, (_, lineage, _, expires, invalidated))| {
+                !invalidated && !lineages[lineage].2 && 0 < *expires
+            })
+            .collect();
+        prop_assert_eq!(
+            &parts.universe,
+            &WorkingUniverse::Known {
+                instruments: survivors.iter().map(|(i, _)| AssetId::new(i).unwrap()).collect(),
+                pinned: false,
+            }
+        );
+        let active: Vec<(String, String, u32, String)> = parts
+            .active
+            .iter()
+            .map(|t| (t.thesis_id.clone(), t.lineage_id.clone(), t.revision, t.instrument.as_str().to_owned()))
+            .collect();
+        let expected: Vec<(String, String, u32, String)> = survivors
+            .iter()
+            .map(|(i, (t, l, r, _, _))| (t.clone(), l.clone(), *r, (**i).to_owned()))
+            .collect();
+        prop_assert_eq!(active, expected);
+        for (lineage, (revisions, admitted, retired)) in &lineages {
+            let folded = parts.lineages.lineage(&LineageId::new(lineage).unwrap()).copied();
+            prop_assert_eq!(
+                folded.map(|l| (l.revisions, l.admitted, l.retired)),
+                Some((*revisions, *admitted, *retired)),
+                "{}", lineage
+            );
+        }
+        for (lineage, instrument) in &holders {
+            prop_assert_eq!(
+                parts.lineages.holder_of(&LineageId::new(lineage).unwrap()),
+                Some(&AssetId::new(instrument).unwrap())
+            );
+        }
+        prop_assert_eq!(
+            parts.facts.research_spend_usd_today,
+            Usd::parse(&dollars(spend_cents)).unwrap()
+        );
+    }
+}
+
+/// DEC-2259 item 3: the last reservation is the `event_time` of the agent's latest research
+/// `MeterReserved` on the meter stream, passing over other agents', the compiler's and other
+/// purposes'; `None` before the first; and a reservation whose agent, purpose or time cannot be
+/// read gives no answer, naming the member.
+#[test]
+fn the_last_research_reservation_is_the_agent_s_latest_on_the_meter_stream() {
+    let secs = |text: &str| RiskClock::from_secs(UtcNanos::parse_rfc3339(text).unwrap().secs());
+    assert_eq!(last_research_reservation(&[], AGENT), Ok(None));
+    let journal = Journal::default();
+    journal.reserved_at(r#""agent-a""#, "research", "2026-10-16T13:00:00.000000000Z");
+    journal.reserved_at(r#""agent-a""#, "research", "2026-10-16T14:10:00.000000000Z");
+    journal.reserved_at(r#""agent-b""#, "research", "2026-10-16T14:20:00.000000000Z");
+    journal.reserved_at(
+        r#""agent-a""#,
+        "llm_signal",
+        "2026-10-16T14:30:00.000000000Z",
+    );
+    journal.reserved_at("null", "compiler", "2026-10-16T14:40:00.000000000Z");
+    let rows = journal.meter.borrow().clone();
+    assert_eq!(
+        last_research_reservation(&rows, AGENT),
+        Ok(Some(secs("2026-10-16T14:10:00Z")))
+    );
+    assert_eq!(last_research_reservation(&rows, "agent-c"), Ok(None));
+    for (member, from, to) in [
+        ("agent_id", r#""agent_id":"agent-a","#, ""),
+        ("purpose", r#""purpose":"research""#, r#""purpose":7"#),
+        (
+            "event_time",
+            r#""event_time":"2026-10-16T13:00:00.000000000Z""#,
+            r#""event_time":"soon""#,
+        ),
+    ] {
+        let mut bad = rows.clone();
+        bad[0].body = String::from_utf8(bad[0].body.clone())
+            .unwrap()
+            .replace(from, to)
+            .into_bytes();
+        assert_eq!(
+            last_research_reservation(&bad, AGENT),
+            Err(FoldError::Unreadable { member }),
+            "{member}"
+        );
+    }
+}
+
+/// DEC-2259 item 3, wired: the pass carries the agent's last research reservation from the
+/// workspace's meter stream, and gives no context while that stream cannot be read.
+#[test]
+fn the_pass_carries_the_last_research_reservation_from_the_meter_stream() {
+    let (journal, source) = deployed(&bundle(), &researching());
+    assert_eq!(source.parts(&state()).unwrap().last_reservation, None);
+    journal.reserved_at(r#""agent-a""#, "research", "2026-10-16T14:10:00.000000000Z");
+    assert_eq!(
+        source.parts(&state()).unwrap().last_reservation,
+        Some(RiskClock::from_secs(
+            UtcNanos::parse_rfc3339("2026-10-16T14:10:00Z")
+                .unwrap()
+                .secs()
+        ))
+    );
+    journal
+        .unreadable
+        .borrow_mut()
+        .insert("meter:ws1".to_owned());
+    assert!(source.parts(&state()).is_none());
 }

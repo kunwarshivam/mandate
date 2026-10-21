@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/commands/oauth-start-request.schema.json",
+  "description": "POST /connections/oauth/start (\u00a74.5, DEC-2623 item 1). broker is alpaca, the only OAuth connect served; environment live is refused live_unavailable by the route (DEC-883). disclosure names the token-breadth disclosure the owner confirmed, which the connect's step-up digest binds (DEC-2621 item 4). A null step_up is refused by the route and commits nothing.",
+  "type": "object",
+  "required": [
+    "broker",
+    "environment",
+    "disclosure",
+    "step_up"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "broker": {
+      "enum": [
+        "alpaca"
+      ]
+    },
+    "environment": {
+      "enum": [
+        "paper",
+        "live"
+      ]
+    },
+    "disclosure": {
+      "type": "object",
+      "required": [
+        "document",
+        "version"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "document": {
+          "$ref": "../common.schema.json#/$defs/Id"
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,8}$"
+        }
+      }
+    },
+    "step_up": {
+      "oneOf": [
+        {
+          "$ref": "../envelope.schema.json#/$defs/StepUpEvidence"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/read-models/session.schema.json",
+  "description": "GET /v1/me/session (\u00a74.10; identity spec \u00a74.5, DEC-816 item 7, DEC-2113): the caller's own session, on the authentication plane. principal_id is the session's own principal in the form the journal records as the actor's id; no session reference, cookie, token, digest, subject, or issuer is ever served. expires_at is the earlier of the idle and absolute deadlines. workspaces is present only on a reduction-only session (\u00a76.4 route 2). as_of is empty: one's own session is no stream.",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../envelope.schema.json#/$defs/Envelope"
+    },
+    {
+      "if": {
+        "required": [
+          "kind"
+        ],
+        "properties": {
+          "kind": {
+            "const": "reduction_only"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "workspaces"
+        ]
+      },
+      "else": {
+        "not": {
+          "required": [
+            "workspaces"
+          ]
+        }
+      }
+    }
+  ],
+  "required": [
+    "principal_id",
+    "kind",
+    "expires_at"
+  ],
+  "properties": {
+    "principal_id": {
+      "$ref": "#/$defs/PrincipalId"
+    },
+    "kind": {
+      "enum": [
+        "full",
+        "reduction_only"
+      ],
+      "x-planned": {
+        "reduction_only": "E9-1"
+      }
+    },
+    "expires_at": {
+      "$ref": "../common.schema.json#/$defs/Timestamp"
+    },
+    "workspaces": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "workspace_id",
+          "label"
+        ],
+        "properties": {
+          "workspace_id": {
+            "$ref": "../common.schema.json#/$defs/Id"
+          },
+          "label": {
+            "$ref": "my-workspaces.schema.json#/$defs/Label"
+          }
+        }
+      }
+    },
+    "as_of": {
+      "maxItems": 0
+    }
+  },
+  "unevaluatedProperties": false,
+  "$defs": {
+    "PrincipalId": {
+      "description": "A principal's opaque id: a ULID in Crockford base32, as the journal records an actor's id. It names no person, address, or subject.",
+      "type": "string",
+      "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+    }
+  }
+}

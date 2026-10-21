@@ -15,6 +15,9 @@ pub enum Refused {
     /// An address that is not `127.0.0.1` or `[::1]` with a port from 1 to 65535, or a port in
     /// use (items 5 and 10).
     Bind,
+    /// Some but not all of the Alpaca provider's three settings, an empty one, or a client secret
+    /// file that is not an owner-only regular file with content (DEC-2625 items 1 and 2).
+    Alpaca,
 }
 
 impl Refused {
@@ -24,6 +27,7 @@ impl Refused {
             Self::NotBuilt => "stub_issuer_not_built",
             Self::Tier => "stub_issuer_tier",
             Self::Bind => "stub_issuer_bind",
+            Self::Alpaca => "stub_issuer_alpaca",
         }
     }
 }

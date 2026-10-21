@@ -1,0 +1,17 @@
+{
+  "challenge_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+  "passkey_id": "EBESExQVFhcYGRobHB0eHw",
+  "attestation_object": "o2NmbXRkbm9uZWdhdHRTdG10oGhhdXRoRGF0YVjE",
+  "client_data_json": "eyJ0eXBlIjoid2ViYXV0aG4uY3JlYXRlIn0",
+  "step_up": {
+    "assertion_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+    "authenticated_at": "2026-10-08T14:30:00.000000000Z",
+    "method": "passkey"
+  },
+  "step_up_assertion": {
+    "passkey_id": "AAECAwQFBgcICQoLDA0ODw",
+    "authenticator_data": "SZYN5YgOjGh0NBcPZHZgW4_krrmihjLHmVzzuoMdl2MFAAAABw",
+    "client_data_json": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0In0",
+    "signature": "MEUCIQDTGOxqmXsYyNkVsMfP0uhkhHbXn8kVCpX5ZRpG7LXyFQIgB4cPzYkM3Hv7Ix3b0Cf5Jt0sxQ3yrUPDNSMhS2h2kGs"
+  }
+}

@@ -1,0 +1,248 @@
+[
+  {
+    "label": "an unknown top-level member",
+    "set": {
+      "/extra": 1
+    }
+  },
+  {
+    "label": "a missing as_of",
+    "remove": [
+      "/as_of"
+    ]
+  },
+  {
+    "label": "a malformed agent_id",
+    "set": {
+      "/agent_id": "a b"
+    }
+  },
+  {
+    "label": "a malformed account_ref",
+    "set": {
+      "/account_ref": "a b"
+    }
+  },
+  {
+    "label": "orders not an array",
+    "set": {
+      "/orders": {}
+    }
+  },
+  {
+    "label": "an unknown order member",
+    "set": {
+      "/orders/0/extra": 1
+    }
+  },
+  {
+    "label": "a missing client_order_id",
+    "remove": [
+      "/orders/0/client_order_id"
+    ]
+  },
+  {
+    "label": "a missing intent_id",
+    "remove": [
+      "/orders/0/intent_id"
+    ]
+  },
+  {
+    "label": "a missing purpose",
+    "remove": [
+      "/orders/0/purpose"
+    ]
+  },
+  {
+    "label": "a missing instrument_id",
+    "remove": [
+      "/orders/0/instrument_id"
+    ]
+  },
+  {
+    "label": "a missing side",
+    "remove": [
+      "/orders/0/side"
+    ]
+  },
+  {
+    "label": "a missing type",
+    "remove": [
+      "/orders/0/type"
+    ]
+  },
+  {
+    "label": "a missing tif",
+    "remove": [
+      "/orders/0/tif"
+    ]
+  },
+  {
+    "label": "a missing qty",
+    "remove": [
+      "/orders/0/qty"
+    ]
+  },
+  {
+    "label": "a missing limit_price",
+    "remove": [
+      "/orders/0/limit_price"
+    ]
+  },
+  {
+    "label": "a missing stop_price",
+    "remove": [
+      "/orders/0/stop_price"
+    ]
+  },
+  {
+    "label": "a missing state",
+    "remove": [
+      "/orders/0/state"
+    ]
+  },
+  {
+    "label": "a missing filled_qty",
+    "remove": [
+      "/orders/0/filled_qty"
+    ]
+  },
+  {
+    "label": "a missing submitted_at",
+    "remove": [
+      "/orders/0/submitted_at"
+    ]
+  },
+  {
+    "label": "a missing updated_at",
+    "remove": [
+      "/orders/0/updated_at"
+    ]
+  },
+  {
+    "label": "a missing agent_id",
+    "remove": [
+      "/agent_id"
+    ]
+  },
+  {
+    "label": "a missing account_ref",
+    "remove": [
+      "/account_ref"
+    ]
+  },
+  {
+    "label": "a missing orders",
+    "remove": [
+      "/orders"
+    ]
+  },
+  {
+    "label": "an empty client_order_id",
+    "set": {
+      "/orders/0/client_order_id": ""
+    }
+  },
+  {
+    "label": "a client_order_id of 129 characters",
+    "set": {
+      "/orders/0/client_order_id": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    }
+  },
+  {
+    "label": "a malformed intent_id",
+    "set": {
+      "/orders/0/intent_id": "x"
+    }
+  },
+  {
+    "label": "an unknown purpose",
+    "set": {
+      "/orders/0/purpose": "mutant_value"
+    }
+  },
+  {
+    "label": "an empty instrument_id",
+    "set": {
+      "/orders/0/instrument_id": ""
+    }
+  },
+  {
+    "label": "an instrument_id of 201 characters",
+    "set": {
+      "/orders/0/instrument_id": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    }
+  },
+  {
+    "label": "an unknown side",
+    "set": {
+      "/orders/0/side": "mutant_value"
+    }
+  },
+  {
+    "label": "an empty type",
+    "set": {
+      "/orders/0/type": ""
+    }
+  },
+  {
+    "label": "a type of 33 characters",
+    "set": {
+      "/orders/0/type": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    }
+  },
+  {
+    "label": "an empty tif",
+    "set": {
+      "/orders/0/tif": ""
+    }
+  },
+  {
+    "label": "a tif of 33 characters",
+    "set": {
+      "/orders/0/tif": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    }
+  },
+  {
+    "label": "a numeric qty",
+    "set": {
+      "/orders/0/qty": 10
+    }
+  },
+  {
+    "label": "a malformed limit_price",
+    "set": {
+      "/orders/0/limit_price": "1.50"
+    }
+  },
+  {
+    "label": "a malformed stop_price",
+    "set": {
+      "/orders/0/stop_price": "x"
+    }
+  },
+  {
+    "label": "an unknown state",
+    "set": {
+      "/orders/0/state": "mutant_value"
+    }
+  },
+  {
+    "label": "a malformed filled_qty",
+    "set": {
+      "/orders/0/filled_qty": "01"
+    }
+  },
+  {
+    "label": "a malformed submitted_at",
+    "set": {
+      "/orders/0/submitted_at": "2026-10-19"
+    }
+  },
+  {
+    "label": "a malformed updated_at",
+    "set": {
+      "/orders/0/updated_at": "2026-10-19"
+    }
+  }
+]

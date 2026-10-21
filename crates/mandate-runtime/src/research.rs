@@ -46,7 +46,8 @@ use mandate_research::{
     ValidatedMandate, WorkingUniverse, next_proposal_at,
 };
 use mandate_research_run::agentic::{
-    Code, EndReason, LoopBounds, OutputMode, Tool, ToolCall, ToolCallId, ToolOutcome, TurnPlan,
+    Code, EndReason, LoopBounds, OutputMode, RunKind, Tool, ToolCall, ToolCallId, ToolOutcome,
+    TurnPlan,
 };
 use mandate_research_run::{
     CallPlan, InstrumentFact, ItemId, ItemKind, ModelPin, OutputBounds, RetrievalPlan,
@@ -334,6 +335,8 @@ pub struct DispatchedResult {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TurnRequest {
     pub call: CallPlan,
+    /// The run's kind, fixed at its start (§6.9 step 1), which the turn's call names (DEC-2256).
+    pub kind: RunKind,
     pub plan: TurnPlan,
     pub transcript: Vec<TurnRef>,
 }
@@ -571,7 +574,7 @@ pub fn handle_research(
         }
         ResearchInput::Refused { run_id, at, error } => {
             not_behind(state, *at)?;
-            refused(research, run_id, *error)?;
+            refused(research, run_id, *error, &mut step)?;
         }
         ResearchInput::Cancelled { run_id, dispatched } => {
             acknowledged(research, run_id, *dispatched);
@@ -1203,7 +1206,15 @@ fn refused(
     research: &mut ResearchState,
     run_id: &str,
     _error: RequestError,
+    step: &mut Step<'_, '_>,
 ) -> Result<(), RuntimeError> {
+    let turning = research
+        .run
+        .as_ref()
+        .is_some_and(|run| run.run_id == run_id && matches!(run.phase, Phase::Agentic(_)));
+    if turning {
+        return refused_turn(research, run_id, step);
+    }
     let in_flight = research
         .run
         .take_if(|run| run.run_id == run_id && matches!(run.phase, Phase::Calling { .. }));
@@ -1219,6 +1230,23 @@ fn refused(
     };
     research.withdrawn.insert(run.pin);
     research.last_attempt = Some(run.cut_off);
+    Ok(())
+}
+
+/// The gateway's refusal of an agentic run's turn (DEC-2261): the run ends `error` with no record,
+/// and its pin is withdrawn as a refused single call's is. A refusal while no turn is out is not
+/// interpreted, and the run stays as it was.
+fn refused_turn(
+    research: &mut ResearchState,
+    run_id: &str,
+    step: &mut Step<'_, '_>,
+) -> Result<(), RuntimeError> {
+    let Some(run) = research.run.take_if(|run| run.run_id == run_id) else {
+        return not_ours(research, run_id, "a refused turn");
+    };
+    let pin = run.pin.clone();
+    drive(research, run, step, agentic::refused)?;
+    research.withdrawn.insert(pin);
     Ok(())
 }
 

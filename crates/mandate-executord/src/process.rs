@@ -10,8 +10,8 @@ use mandate_executor::{
     AccountScope, ActivityCursor, AgentId, BindingGateSource, BrokerOutcome, BrokerRequest,
     BrokerSnapshot, BrokerUpdate, Command, ConnectorError, Effect, EventDraft, ExecutorConfig,
     ExecutorError, ExecutorState, IdGen, Input, InstrumentSnapshot, IntentBody, IntentHandoff,
-    IntentId, KillScope, MandateVersion, MandateView, Ports, ProtectionPrices, Purpose,
-    ReconcileReason, RiskClock, Seq, WriterEpoch, fold, handle,
+    IntentId, KillScope, MandateVersion, MandateView, Ports, ProtectionPrices, ReconcileReason,
+    RiskClock, Seq, WriterEpoch, fold, handle,
 };
 use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId};
 use mandate_num::{Fraction, Price};
@@ -20,7 +20,7 @@ use mandate_store::Store;
 use mandate_store::envelope::{Envelope, Fields, draft_bytes, object, text};
 use mandate_time::UtcNanos;
 
-use crate::follow::{Proposal, Switch, agents_of, folded, proposals, switches};
+use crate::follow::{Proposal, Switch, agents_of, bounded, folded, proposals, switches};
 
 /// The version the envelope's actor carries.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -165,11 +165,16 @@ pub struct ExecutorProcess<S, B> {
     /// Each followed agent's deployed mandate version, from its `AgentDeployed`, which the core's
     /// mandate port answers with (DEC-2034 item 1).
     deployed: BTreeMap<AgentId, MandateVersion>,
-    /// The owner's exits at the market with no confirmed floor to price them at, each alerted once
-    /// and asked again every pass; never dropped, refused or held in silence (DEC-2033 item 4).
-    unpriced: BTreeSet<String>,
     max_chain: usize,
     written_at: UtcNanos,
+}
+
+/// What one pass reads from the agents' streams: the kill switches this stream has not applied,
+/// the proposals the core does not hold yet, each with its agent, and whether a row did not read.
+struct Followed {
+    switches: Vec<(AgentId, Switch)>,
+    proposals: Vec<(AgentId, Proposal)>,
+    unreadable: bool,
 }
 
 impl<S: Store, B: Broker> ExecutorProcess<S, B> {
@@ -198,7 +203,6 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             unreadable: BTreeSet::new(),
             held: BTreeSet::new(),
             deployed: BTreeMap::new(),
-            unpriced: BTreeSet::new(),
             max_chain: config.max_chain,
             written_at: now,
         };
@@ -299,7 +303,12 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                 return alerts;
             }
         }
-        let Some((switches, proposed, unreadable)) = self.switches(now, &mut alerts) else {
+        let Some(Followed {
+            switches,
+            proposals: proposed,
+            unreadable,
+        }) = self.switches(now, &mut alerts)
+        else {
             return alerts;
         };
         for (agent, switch) in switches {
@@ -415,15 +424,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
     /// that cannot be read. A control record that does not read stops the process at once, since
     /// the agents it names are unknown; a row on one agent's stream that does not read stops it only
     /// after the other agents' switches are applied (DEC-85, `AGENTS.md` rule 13).
-    #[allow(
-        clippy::type_complexity,
-        reason = "the switches, the proposals, and whether a row did not read"
-    )]
-    fn switches(
-        &mut self,
-        now: UtcNanos,
-        alerts: &mut Vec<Alert>,
-    ) -> Option<(Vec<(AgentId, Switch)>, Vec<(AgentId, Proposal)>, bool)> {
+    fn switches(&mut self, now: UtcNanos, alerts: &mut Vec<Alert>) -> Option<Followed> {
         let control = self.control.clone()?;
         let rows = self.follow(&control, alerts)?;
         let Ok(agents) = agents_of(&rows, self.state.scope(), self.environment) else {
@@ -468,7 +469,11 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                     .map(|switch| (agent.clone(), switch)),
             );
         }
-        Some((pending, proposed, unreadable))
+        Some(Followed {
+            switches: pending,
+            proposals: proposed,
+            unreadable,
+        })
     }
 
     /// Applies one switch as the core's own kill switch of that agent alone, never an account-wide
@@ -491,10 +496,9 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
 
     /// Hands one proposal as the handoff the runtime would make in one process, an opening or an
     /// increase with its mandate's protection. A protections port that cannot answer stops the
-    /// process rather than hand an opening unprotected (DEC-2033 item 3). An exit at the market
-    /// with no limit raises one opaque alert naming the intent and stops nothing, since the core
-    /// takes only limit orders from a handoff (DEC-2033 item 4): `owner_exit_unpriced` for an
-    /// owner's exit with no confirmed floor, `exit_unpriced` for any other exit.
+    /// process rather than hand an opening unprotected (DEC-2033 item 3). An exit at the market is
+    /// handed with no limit, which the core sends at the market or prices by the ladder; an
+    /// owner's with a confirmed floor carries the floor as its limit (DEC-2037 items 1 and 7).
     fn take(
         &mut self,
         now: UtcNanos,
@@ -502,34 +506,22 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         proposal: Proposal,
         alerts: &mut Vec<Alert>,
     ) -> bool {
-        let Some(limit) = proposal.limit else {
-            let intent = proposal.intent.0;
-            if self.unpriced.insert(intent.clone()) {
-                let key = match proposal.purpose {
-                    Purpose::OwnerExit => "owner_exit_unpriced",
-                    _ => "exit_unpriced",
-                };
-                alerts.push(Alert {
-                    key,
-                    subject: Some(intent),
-                });
-            }
-            return true;
-        };
-        let protection = if proposal.purpose.adds_risk() {
-            match self
-                .wiring
-                .protections
-                .protection(&agent, &proposal.instrument, limit)
-            {
-                Ok(protection) => protection,
-                Err(Unplanned) => {
-                    self.lifecycle.observe(now, Lifecycled::Failed);
-                    return false;
+        let opening = proposal.limit.filter(|_| proposal.purpose.adds_risk());
+        let protection = match opening {
+            Some(limit) => {
+                match self
+                    .wiring
+                    .protections
+                    .protection(&agent, &proposal.instrument, limit)
+                {
+                    Ok(protection) => protection,
+                    Err(Unplanned) => {
+                        self.lifecycle.observe(now, Lifecycled::Failed);
+                        return false;
+                    }
                 }
             }
-        } else {
-            None
+            None => None,
         };
         let handoff = IntentHandoff {
             intent_id: IntentId(proposal.intent),
@@ -539,10 +531,11 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                 instrument: proposal.instrument,
                 side: proposal.side,
                 qty: proposal.qty,
-                limit,
+                limit: proposal.limit,
                 purpose: proposal.purpose,
                 protection,
             },
+            confirmation: proposal.confirmation.map(|handed| bounded(handed, now)),
         };
         self.hand(now, now, Input::Intent(handoff), alerts, 0)
     }
@@ -862,10 +855,11 @@ mod tests {
                 instrument: InstrumentId::new("AAPL")?,
                 side: Side::Sell,
                 qty: Qty::parse("10")?,
-                limit: Price::parse("150")?,
+                limit: Some(Price::parse("150")?),
                 purpose,
                 protection: None,
             },
+            confirmation: None,
         }))
     }
 

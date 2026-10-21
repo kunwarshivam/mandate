@@ -225,26 +225,27 @@ fn the_demo_completes_and_every_reference_resolves() {
 }
 
 /// DEC-1001 item 4, journal spec §9.18 rule 143: a run `run_version` refuses still stores its
-/// payload, `refused` with the stable code and no report, and the journal admits it.
+/// payload, `refused` with the stable code and no report, and the journal admits it. Two splits out
+/// of ex-date order refuse the run (DEC-2245 item 7).
 #[test]
 fn a_refused_run_stores_a_refused_payload() {
     let (store, ran) = ran(Some((
         "bars.json",
         r#""corporate_actions": []"#,
-        r#""corporate_actions": [{"kind": "cash_dividend", "ex_date": "2026-09-15", "pay_date": "2026-09-22", "per_share": "0.25"}]"#,
+        r#""corporate_actions": [{"kind": "split", "ex_date": "2026-09-15", "ratio": {"new": 2, "old": 1}, "cash_in_lieu_price": null}, {"kind": "split", "ex_date": "2026-09-10", "ratio": {"new": 2, "old": 1}, "cash_in_lieu_price": null}]"#,
     )));
-    assert_eq!(ran.outcome, Err("corporate_action_in_range"));
+    assert_eq!(ran.outcome, Err("corporate_actions_unordered"));
     let payload = payload(&store, &ran);
     assert_eq!(member(&payload, "result"), &Value::Str("refused".into()));
     assert_eq!(member(&payload, "report"), &Value::Null);
     assert_eq!(
         member(&payload, "refusal"),
-        &Value::Str("corporate_action_in_range".into())
+        &Value::Str("corporate_actions_unordered".into())
     );
     journaled(&payload).unwrap();
     assert!(
         ran.to_string()
-            .ends_with("refused=corporate_action_in_range\n")
+            .ends_with("refused=corporate_actions_unordered\n")
     );
 }
 

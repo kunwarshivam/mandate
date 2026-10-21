@@ -11,7 +11,7 @@
 # DEC-1190 scopes the jobs to the diff: `select` runs `cargo xtask ci select`, which takes the
 # changed paths, the crates owning them or naming them in their sources, and every crate built on
 # those, and says which jobs the diff needs. `fast-test`, `fast-pending`, `fast-python`,
-# `fast-portable`, `fast-rh-sim-live`, `full-checks`, `schema-mutants` and the five cell jobs
+# `fast-portable`, `fast-rh-sim-live`, `full-checks`, `schema-mutants` and the seven cell jobs
 # (DEC-2609: a crate the cell's images hold or are built on, or `deploy/` and the cell's Python
 # pins) start only when it says so, and inside them xtask runs only the selected crates' tests. `fast-lint`, the mutation plan
 # and its shards run on every ready pull request as before. A build input, CI, xtask, any
@@ -108,6 +108,7 @@ jobs:
       full_checks: ${{ steps.select.outputs.full_checks }}
       schema_mutants: ${{ steps.select.outputs.schema_mutants }}
       cell: ${{ steps.select.outputs.cell }}
+      cell_web: ${{ steps.select.outputs.cell_web }}
       reasons: ${{ steps.select.outputs.reasons }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -471,9 +472,9 @@ jobs:
   # both charts, runs the chart's invariant tests, brings up a k3d cluster, installs the chart from
   # the image this change built, runs its drills, runs each again with its bug planted, which
   # each must catch (the journal's drills run in `cell-journal` and `cell-failover`, and the kill
-  # switch's in `cell-kill-switch`, below), and ends with `cell demo --no-web`, an upgrade of every release in place. Not yet in `full` (DEC-993 item 10); the chart's invariants are in
-  # `fast-python`. It and the four cell jobs below start only when `select` says the diff reaches
-  # the cell (DEC-2609); main's nightly run has no diff base and runs all five.
+  # switch's in `cell-kill-switch` and the executor's and the vault's in `cell-executor` and `cell-vault`, below), and ends with `cell demo --no-web`, an upgrade of every release in place. Not yet in `full` (DEC-993 item 10); the chart's invariants are in
+  # `fast-python`. It and the six cell jobs below start only when `select` says the diff reaches
+  # the cell (DEC-2609); main's nightly run has no diff base and runs all seven.
   cell:
     needs: select
     if: needs.select.outputs.cell == 'true'
@@ -553,6 +554,94 @@ jobs:
           shared-key: cell-demo
           cache-on-failure: true
       - run: cargo xtask ci cell-demo
+
+  # E21-54 (DEC-2002, DEC-2609 item 5): the demo's scenario again, with its web gesture required.
+  # `web/`'s tools are installed: `npm ci --ignore-scripts`, so no dependency's install script runs
+  # in a job that runs cargo, and the Chromium headless shell of the Playwright the lockfile pins,
+  # cached per that version as `web-e2e.yml` caches it. MANDATE_DEMO_WEB_REQUIRED
+  # makes a machine without them fail the run, and MANDATE_CELL_REQUIRED an API that cannot be
+  # asked, rather than either reading "not run". It holds no secret. Not required, as `cell-demo`
+  # is not; it starts for the cell jobs' changes and for any change under `web/`. It restores
+  # `cell-demo`'s cache and saves none of its own.
+  cell-demo-web:
+    needs: select
+    if: needs.select.outputs.cell_web == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      MANDATE_CELL_REQUIRED: "1"
+      MANDATE_DEMO_WEB_REQUIRED: "1"
+      NEXT_TELEMETRY_DISABLED: "1"
+      DO_NOT_TRACK: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.19"
+          enable-cache: true
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: web/.nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci --ignore-scripts
+        working-directory: web
+      - name: Playwright version
+        id: playwright
+        working-directory: web
+        run: echo "version=$(node -p 'require("@playwright/test/package.json").version')" | tee -a "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: browsers
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+      # Chromium's libraries come from Ubuntu's archive. The runner also lists packages.microsoft.com,
+      # which has answered 403 for noble; one failing source fails `apt-get update` and the install.
+      - name: Drop the runner's Microsoft package source
+        run: grep -rls 'packages\.microsoft\.com' /etc/apt/sources.list /etc/apt/sources.list.d/ | tee /dev/stderr | xargs -r sudo rm -f
+      - name: Install Chromium
+        if: steps.browsers.outputs.cache-hit != 'true'
+        working-directory: web
+        run: npx playwright install --with-deps --only-shell chromium
+      - name: Install Chromium's system libraries
+        if: steps.browsers.outputs.cache-hit == 'true'
+        working-directory: web
+        run: npx playwright install-deps chromium
+      - name: Install k3d, helm and kubeconform (checksum-verified)
+        run: |
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o k3d "https://github.com/k3d-io/k3d/releases/download/v${K3D_VERSION}/k3d-linux-amd64"
+          echo "${K3D_SHA256}  k3d" | sha256sum --check
+          sudo install k3d /usr/local/bin/ && rm k3d
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o helm.tgz "https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz"
+          echo "${HELM_SHA256}  helm.tgz" | sha256sum --check
+          tar xzf helm.tgz linux-amd64 && cat linux-amd64/helm > helm
+          sudo install helm /usr/local/bin/ && rm -r helm helm.tgz linux-amd64
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o kubeconform.tgz "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          echo "${KUBECONFORM_SHA256}  kubeconform.tgz" | sha256sum --check
+          tar xzf kubeconform.tgz kubeconform && sudo install kubeconform /usr/local/bin/ && rm kubeconform kubeconform.tgz
+      - name: Install the pinned Rust toolchain (rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: cell-demo
+          save-if: false
+          cache-on-failure: true
+      - run: cargo xtask ci cell-demo
+      # The web gesture's Playwright output when the job fails, so its cause can be read off the run
+      # rather than off the runner. Only the log: the same directory holds next dev's throwaway TLS
+      # key (DEC-2609 item 5).
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: failure()
+        with:
+          name: cell-demo-web-playwright
+          path: target/cell/web-gesture/playwright.log
+          if-no-files-found: ignore
+          retention-days: 7
 
   # E21-41 (DEC-1050 item 7): the journal's own drills on the same cell, in a job of their own so
   # each cell job stays within its ten minutes (DEC-464). `cargo xtask ci cell-journal` brings the
@@ -639,9 +728,9 @@ jobs:
           cache-on-failure: true
       - run: cargo xtask ci cell-failover
 
-  # E21-34 (DEC-2602): the kill-switch drill, plain and seeded, on its own cell, so `cell` stays
-  # within its ten minutes (DEC-464). Not required, as `cell` is not. It restores `cell`'s cache and
-  # saves none of its own.
+  # E21-34 (DEC-2602): the kill-switch and admission drills, plain and seeded, on their own cell, so
+  # `cell` stays within its ten minutes (DEC-464). Not required, as `cell` is not. It restores
+  # `cell`'s cache and saves none of its own.
   cell-kill-switch:
     needs: select
     if: needs.select.outputs.cell == 'true'
@@ -680,6 +769,90 @@ jobs:
           save-if: false
           cache-on-failure: true
       - run: cargo xtask ci cell-kill-switch
+
+  # E21-30 (DEC-2615): the executor drill, plain and seeded, on its own cell, so `cell-kill-switch`
+  # stays within its ten minutes (DEC-464). Not required, as `cell` is not. It restores `cell`'s
+  # cache and saves none of its own.
+  cell-executor:
+    needs: select
+    if: needs.select.outputs.cell == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      MANDATE_CELL_REQUIRED: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.19"
+          enable-cache: true
+      - name: Install k3d, helm and kubeconform (checksum-verified)
+        run: |
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o k3d "https://github.com/k3d-io/k3d/releases/download/v${K3D_VERSION}/k3d-linux-amd64"
+          echo "${K3D_SHA256}  k3d" | sha256sum --check
+          sudo install k3d /usr/local/bin/ && rm k3d
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o helm.tgz "https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz"
+          echo "${HELM_SHA256}  helm.tgz" | sha256sum --check
+          tar xzf helm.tgz linux-amd64 && cat linux-amd64/helm > helm
+          sudo install helm /usr/local/bin/ && rm -r helm helm.tgz linux-amd64
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o kubeconform.tgz "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          echo "${KUBECONFORM_SHA256}  kubeconform.tgz" | sha256sum --check
+          tar xzf kubeconform.tgz kubeconform && sudo install kubeconform /usr/local/bin/ && rm kubeconform kubeconform.tgz
+      - name: Install the pinned Rust toolchain (rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: cell
+          save-if: false
+          cache-on-failure: true
+      - run: cargo xtask ci cell-executor
+
+  # E21-32 (DEC-2616): the vault drill, plain and seeded, on its own cell, so `cell-executor` stays
+  # within its ten minutes (DEC-464). Not required, as `cell` is not. It restores `cell`'s cache
+  # and saves none of its own.
+  cell-vault:
+    needs: select
+    if: needs.select.outputs.cell == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      MANDATE_CELL_REQUIRED: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.19"
+          enable-cache: true
+      - name: Install k3d, helm and kubeconform (checksum-verified)
+        run: |
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o k3d "https://github.com/k3d-io/k3d/releases/download/v${K3D_VERSION}/k3d-linux-amd64"
+          echo "${K3D_SHA256}  k3d" | sha256sum --check
+          sudo install k3d /usr/local/bin/ && rm k3d
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o helm.tgz "https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz"
+          echo "${HELM_SHA256}  helm.tgz" | sha256sum --check
+          tar xzf helm.tgz linux-amd64 && cat linux-amd64/helm > helm
+          sudo install helm /usr/local/bin/ && rm -r helm helm.tgz linux-amd64
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o kubeconform.tgz "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          echo "${KUBECONFORM_SHA256}  kubeconform.tgz" | sha256sum --check
+          tar xzf kubeconform.tgz kubeconform && sudo install kubeconform /usr/local/bin/ && rm kubeconform kubeconform.tgz
+      - name: Install the pinned Rust toolchain (rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: cell
+          save-if: false
+          cache-on-failure: true
+      - run: cargo xtask ci cell-vault
 
   # E21-51, DEC-2001 item 11. Cell #1's `cluster` step, the same code the founder runs against the
   # droplets, against a two-node k3d cluster: the namespace and its secrets, the pull secret on the

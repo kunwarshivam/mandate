@@ -84,10 +84,19 @@ const TARGET_CC: &str = "gcc";
 
 /// What a release ships: each package and the binary it builds. `mandate-rh-sim` is the
 /// loopback test double the local cell runs beside the executor (DEC-124), never a broker.
-pub(crate) const BINARIES: [(&str, &str); 3] = [
+/// `mandate-api-server` is the workspace API server a hosted cell runs as its chart's `api`
+/// process, so its image must be signed and published like the others (DEC-2026).
+/// `mandate-deployd`, `mandate-daemon` and `mandate-executord` are the deployment manager, the agent
+/// runtime and the account executor a hosted cell runs, released the same way. The runtime's image
+/// holds no recorded research bundle, which only the local cell's interim image carries (DEC-2246).
+pub(crate) const BINARIES: [(&str, &str); 7] = [
     ("mandate-cli", "mandate"),
     ("mandate-agentd", "mandate-agentd"),
     ("mandate-rh-sim", "mandate-rh-sim"),
+    ("mandate-api-server", "mandate-api-server"),
+    ("mandate-deployd", "mandate-deployd"),
+    ("mandate-daemon", "mandate-daemon"),
+    ("mandate-executord", "mandate-executord"),
 ];
 
 /// Where `release build` keeps its own target directory, apart from the workspace's, because its
@@ -753,6 +762,17 @@ pub(crate) fn index_tag(revision: &str) -> String {
     format!("main-{revision}")
 }
 
+/// The tag of one arch's release-signed image of commit `revision` (DEC-2026 item 3).
+pub(crate) fn signed_arch_tag(revision: &str, arch: Arch) -> String {
+    format!("signed-{revision}-{}", arch.oci())
+}
+
+/// The tag of commit `revision`'s release-signed multi-arch index, the one a hosted cell pulls
+/// (DEC-2026 item 3).
+pub(crate) fn signed_index_tag(revision: &str) -> String {
+    format!("signed-{revision}")
+}
+
 /// A signed-in session with GHCR: the 0600 file holding the Basic header the registry trades for
 /// push tokens, in a 0700 directory deleted when the session ends, and cosign logged in through its
 /// stdin. The token is read from `GH_TOKEN` and reaches nothing else.
@@ -766,7 +786,7 @@ struct Registry {
 
 impl Registry {
     fn sign_in(tools: &Path) -> Result<Self> {
-        let token = env::var("GH_TOKEN").context("GH_TOKEN is not set")?;
+        let token = env::var("GH_TOKEN").ok().context("GH_TOKEN is not set")?;
         let actor = env::var("GITHUB_ACTOR").context("GITHUB_ACTOR is not set")?;
         let secrets = SecretDir::create()?;
         let basic = secrets.0.join("basic");
@@ -854,31 +874,48 @@ pub(crate) fn publish(root: &Path, dist: &Path, out: &Path) -> Result<()> {
     let sums = parse_sums(&fs::read_to_string(dist.join("SHA256SUMS"))?)?;
     let mut published = String::new();
     for name in sums.keys() {
-        let repository = format!("{REPOSITORY}/{name}");
-        let bearer = registry.bearer(&repository)?;
-        let dir = out.join("images").join(name);
         let bytes = fs::read(dist.join("bin").join(name))?;
         let layout = image::layout(name, arch.oci(), &bytes, None, &revision);
-        let digest = image::push(
-            &layout,
-            &dir,
-            REGISTRY,
-            &repository,
-            &arch_tag(&revision, arch),
-            Some(&bearer),
-        )?;
-        let reference = format!("{REGISTRY_HOST}/{repository}@{digest}");
-        run(Command::new(tools.join("cosign")).args(["sign", "--yes", &reference]))?;
-        run(Command::new(tools.join("cosign"))
-            .args(["attest", "--yes", "--type", "cyclonedx", "--predicate"])
-            .arg(dist.join("sbom").join(format!("{name}.cdx.json")))
-            .arg(&reference))?;
-        published.push_str(&format!("{reference}  {name}  {}\n", arch.oci()));
+        let tag = arch_tag(&revision, arch);
+        published.push_str(&push_image(
+            &tools,
+            &registry,
+            dist,
+            out,
+            (name, &layout),
+            &tag,
+            arch,
+        )?);
     }
     registry.sign_out()?;
     fs::write(out.join("PUBLISHED"), &published).context("writing PUBLISHED")?;
     eprint!("    published {revision}:\n{published}");
     Ok(())
+}
+
+/// Pushes `layout`, the image of the binary `name`, to GHCR as `tag`, checks the registry reports
+/// its own digest, signs that digest keyless with cosign (the run's GitHub OIDC identity), attaches
+/// `dist`'s SBOM of the binary as a CycloneDX attestation, and returns its `PUBLISHED` line.
+fn push_image(
+    tools: &Path,
+    registry: &Registry,
+    dist: &Path,
+    out: &Path,
+    (name, layout): (&str, &image::Layout),
+    tag: &str,
+    arch: Arch,
+) -> Result<String> {
+    let repository = format!("{REPOSITORY}/{name}");
+    let bearer = registry.bearer(&repository)?;
+    let dir = out.join("images").join(name);
+    let digest = image::push(layout, &dir, REGISTRY, &repository, tag, Some(&bearer))?;
+    let reference = format!("{REGISTRY_HOST}/{repository}@{digest}");
+    run(Command::new(tools.join("cosign")).args(["sign", "--yes", &reference]))?;
+    run(Command::new(tools.join("cosign"))
+        .args(["attest", "--yes", "--type", "cyclonedx", "--predicate"])
+        .arg(dist.join("sbom").join(format!("{name}.cdx.json")))
+        .arg(&reference))?;
+    Ok(format!("{reference}  {name}  {}\n", arch.oci()))
 }
 
 /// `cargo xtask release publish-index <out>` (DEC-1060): only from a push to `main`, after every
@@ -887,6 +924,25 @@ pub(crate) fn publish(root: &Path, dist: &Path, out: &Path) -> Result<()> {
 /// `main-<commit>`, checks the registry reports the index's digest, signs the index digest
 /// keyless, and writes `<out>/PUBLISHED`: the one reference per binary a cell pulls on any arch.
 pub(crate) fn publish_index(root: &Path, out: &Path) -> Result<()> {
+    push_indexes(root, out, arch_tag, index_tag)
+}
+
+/// `cargo xtask release publish-signed-index <out>` (DEC-2026 item 3): only on a dispatch from
+/// `main`, after every arch's `release-signing-publish` job. As [`publish_index`], over each arch's
+/// [`signed_arch_tag`] image, pushed as [`signed_index_tag`].
+pub(crate) fn publish_signed_index(root: &Path, out: &Path) -> Result<()> {
+    push_indexes(root, out, signed_arch_tag, signed_index_tag)
+}
+
+/// For each release binary, reads each arch's image tagged `arch_tag` back from GHCR by the
+/// registry's own digest and size, pushes the OCI index over them as `index_tag`, checks the
+/// registry reports the index's digest, signs it keyless, and writes `<out>/PUBLISHED`.
+fn push_indexes(
+    root: &Path,
+    out: &Path,
+    arch_tag: fn(&str, Arch) -> String,
+    index_tag: fn(&str) -> String,
+) -> Result<()> {
     let paths = Paths::from_env(root)?;
     let tools = tools(&paths.cargo_home)?;
     let revision = git(root, &["rev-parse", "HEAD"])?;
@@ -927,6 +983,92 @@ pub(crate) fn publish_index(root: &Path, out: &Path) -> Result<()> {
     fs::write(out.join("PUBLISHED"), &published).context("writing PUBLISHED")?;
     eprint!("    published the index of {revision}:\n{published}");
     Ok(())
+}
+
+/// `cargo xtask release publish-signed <dist> <signatures> <out>` (E21-35, DEC-2026): only on a
+/// dispatch from `main`, where CI's per-arch `release-signing-publish` job runs it after
+/// `release-signing-check`, holding no release secret. [`signed_images`] checks every signature
+/// against the committed public half before anything is built, and only then does it sign in,
+/// push each image as [`signed_arch_tag`], sign its digest keyless, attest its SBOM and write
+/// `<out>/PUBLISHED`.
+pub(crate) fn publish_signed(
+    root: &Path,
+    dist: &Path,
+    signatures: &Path,
+    out: &Path,
+) -> Result<()> {
+    let paths = Paths::from_env(root)?;
+    let tools = tools(&paths.cargo_home)?;
+    let revision = git(root, &["rev-parse", "HEAD"])?;
+    let arch = Arch::host()?;
+    let images = signed_images(
+        &tools,
+        &root.join(RELEASE_PUBLIC_KEY),
+        dist,
+        signatures,
+        out,
+        arch,
+        &revision,
+    )?;
+    let registry = Registry::sign_in(&tools)?;
+    let mut published = String::new();
+    for (name, layout) in &images {
+        let tag = signed_arch_tag(&revision, arch);
+        published.push_str(&push_image(
+            &tools,
+            &registry,
+            dist,
+            out,
+            (name, layout),
+            &tag,
+            arch,
+        )?);
+    }
+    registry.sign_out()?;
+    fs::write(out.join("PUBLISHED"), &published).context("writing PUBLISHED")?;
+    eprint!("    published the release-signed images of {revision}:\n{published}");
+    Ok(())
+}
+
+/// The release-signed image of every binary `dist/SHA256SUMS` lists, for `arch`, built from commit
+/// `revision`, each with its `<name>.sig` layer and written as a layout to `<out>/images/<name>`,
+/// where the push reads it. Every binary must match its line, and every binary and `SHA256SUMS`
+/// itself must carry a signature in `signatures` that verifies against `key`, before any image is
+/// built or written, so a release the key did not sign is never pushed (DEC-2026).
+pub(crate) fn signed_images(
+    tools: &Path,
+    key: &Path,
+    dist: &Path,
+    signatures: &Path,
+    out: &Path,
+    arch: Arch,
+    revision: &str,
+) -> Result<Vec<(String, image::Layout)>> {
+    let sums_file = dist.join("SHA256SUMS");
+    let sums = parse_sums(
+        &fs::read_to_string(&sums_file)
+            .with_context(|| format!("reading {}", sums_file.display()))?,
+    )?;
+    for (name, hex) in &sums {
+        let binary = dist.join("bin").join(name);
+        ensure!(
+            sha256(&binary)? == *hex,
+            "{name} is not the binary SHA256SUMS lists"
+        );
+        verify_blob(tools, key, &binary, &signatures.join(format!("{name}.sig")))?;
+    }
+    verify_blob(tools, key, &sums_file, &signatures.join("SHA256SUMS.sig"))?;
+    sums.keys()
+        .map(|name| {
+            let binary =
+                fs::read(dist.join("bin").join(name)).with_context(|| format!("reading {name}"))?;
+            let signature = fs::read(signatures.join(format!("{name}.sig")))
+                .with_context(|| format!("reading {name}.sig"))?;
+            let layout = image::layout(name, arch.oci(), &binary, Some(&signature), revision);
+            image::write(&layout, &out.join("images").join(name))?;
+            Ok((name.clone(), layout))
+        })
+        .collect()
 }
 
 /// The charts a hosted cluster installs from `deploy/cell/charts/` (E21-58, DEC-2015 item 3).
@@ -1283,6 +1425,28 @@ mod tests {
         assert_eq!(
             rustflags(&paths()).replace("/work/a/mandate", "/elsewhere/b/src"),
             rustflags(&other)
+        );
+    }
+
+    /// What a release ships, exactly: the CLI, the agent daemon, the simulator the local cell's
+    /// drills run, the workspace API server, whose image a hosted cell runs as `images.api`, and
+    /// the three agent processes a hosted cell runs, the deployment manager, the agent runtime and
+    /// the account executor, each package building the binary of its name but the CLI's `mandate`
+    /// (DEC-971, DEC-2026).
+    #[test]
+    fn the_release_ships_exactly_these_binaries() {
+        assert_eq!(
+            BINARIES.as_slice(),
+            [
+                ("mandate-cli", "mandate"),
+                ("mandate-agentd", "mandate-agentd"),
+                ("mandate-rh-sim", "mandate-rh-sim"),
+                ("mandate-api-server", "mandate-api-server"),
+                ("mandate-deployd", "mandate-deployd"),
+                ("mandate-daemon", "mandate-daemon"),
+                ("mandate-executord", "mandate-executord"),
+            ]
+            .as_slice()
         );
     }
 
@@ -1750,8 +1914,14 @@ mod tests {
     /// The jobs that publish, one a runner of each arch and the index over them.
     const PUBLISH_JOBS: [&str; 3] = ["publish-amd64", "publish-arm64", "publish-index"];
 
+    /// The jobs that publish a hosted cell's release-signed images, on a dispatch (DEC-2026).
+    const SIGNED_PUBLISH_JOBS: [&str; 2] =
+        ["release-signing-publish", "release-signing-publish-index"];
+
     /// Only the publish jobs may write packages or mint an OIDC token for keyless signing, and
     /// they run only on a push to `main`: never from a pull request or a branch (ES-12, E21-35).
+    /// The release-signed publish jobs are the one other pair, pinned to a dispatch from `main` by
+    /// `the_signed_images_are_published_only_from_a_checked_dispatch`.
     /// Each arch publishes from a runner of its own arch, after its builds compared, and the index
     /// only after every arch has published (DEC-1060).
     #[test]
@@ -1759,7 +1929,9 @@ mod tests {
         let jobs = release_jobs()?;
         for (name, body) in &jobs {
             let writes = body.contains("packages: write") || body.contains("id-token: write");
-            assert_eq!(writes, PUBLISH_JOBS.contains(&name.as_str()), "{name}");
+            let publishes = PUBLISH_JOBS.contains(&name.as_str())
+                || SIGNED_PUBLISH_JOBS.contains(&name.as_str());
+            assert_eq!(writes, publishes, "{name}");
         }
         for name in PUBLISH_JOBS {
             let job = jobs
@@ -1807,6 +1979,29 @@ mod tests {
         for (name, body) in &jobs {
             let holds = body.contains("secrets.") || body.contains("environment:");
             assert_eq!(holds, name == "release-signing", "{name}");
+        }
+        let workflows = Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github/workflows");
+        for entry in fs::read_dir(&workflows)? {
+            let path = entry?.path();
+            let name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or_default()
+                .to_owned();
+            if name == "release.yml" {
+                continue;
+            }
+            let text = fs::read_to_string(&path)?;
+            assert!(
+                !text.contains("RELEASE_SIGNING") && !text.contains("release-signing"),
+                "{name} names the release key or its environment"
+            );
+            if name == "release-check.yml" {
+                assert!(
+                    !text.contains("secrets.") && !text.contains("environment:"),
+                    "release-check.yml, which a pull request runs, holds no secret"
+                );
+            }
         }
         for name in [
             "release-signing-build",
@@ -1943,6 +2138,86 @@ mod tests {
         Ok(())
     }
 
+    /// A hosted cell's images are published only on a dispatch from `main`, after
+    /// `release-signing-check` proved the run's signatures, by jobs that hold the run's own token
+    /// and no release secret, and that verify against the committed key again before any push
+    /// (DEC-2026 items 1 and 2). The push-only jobs never publish them.
+    #[test]
+    fn the_signed_images_are_published_only_from_a_checked_dispatch() -> Result<()> {
+        let jobs = release_jobs()?;
+        let dispatch = "    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}\n";
+        let token = "    permissions:\n      contents: read\n      packages: write\n      id-token: write\n    defaults:\n";
+        for (name, needs, run) in [
+            (
+                "release-signing-publish",
+                "    needs: [release-signing-check]\n",
+                "        run: cargo xtask release publish-signed dist signed/signatures signed-published\n",
+            ),
+            (
+                "release-signing-publish-index",
+                "    needs: [release-signing-publish]\n",
+                "        run: cargo xtask release publish-signed-index signed-published\n",
+            ),
+        ] {
+            let job = jobs
+                .get(name)
+                .with_context(|| format!("release.yml has no {name}"))?;
+            for line in [
+                dispatch,
+                token,
+                needs,
+                run,
+                "          GH_TOKEN: ${{ github.token }}\n",
+            ] {
+                assert!(job.contains(line), "{name} lacks {line:?}");
+            }
+        }
+        let publish = jobs
+            .get("release-signing-publish")
+            .context("no release-signing-publish")?;
+        for line in [
+            "          name: release-to-sign-${{ github.sha }}-${{ matrix.arch }}\n          path: dist\n",
+            "          name: release-signatures-${{ github.sha }}-${{ matrix.arch }}\n          path: signed\n",
+        ] {
+            assert!(
+                publish.contains(line),
+                "release-signing-publish lacks {line:?}"
+            );
+        }
+        let build = jobs
+            .get("release-signing-build")
+            .context("no release-signing-build")?;
+        assert!(
+            build.contains("            dist/sbom/\n"),
+            "the SBOMs are not handed on"
+        );
+        for (name, job) in &jobs {
+            let signed = job.contains("cargo xtask release publish-signed");
+            assert_eq!(
+                signed,
+                SIGNED_PUBLISH_JOBS.contains(&name.as_str()),
+                "{name}"
+            );
+            if signed {
+                assert!(job.contains(dispatch), "{name}");
+            }
+        }
+        Ok(())
+    }
+
+    /// A release-signed image and index are tagged apart from a push's `main-*` ones, so nothing
+    /// a push publishes can stand in for them (DEC-2026 items 3 and 4).
+    #[test]
+    fn the_signed_tags_are_apart_from_mains() {
+        assert_eq!(signed_arch_tag("abc", Arch::Amd64), "signed-abc-amd64");
+        assert_eq!(signed_arch_tag("abc", Arch::Arm64), "signed-abc-arm64");
+        assert_eq!(signed_index_tag("abc"), "signed-abc");
+        for arch in Arch::ALL {
+            assert_ne!(signed_arch_tag("abc", arch), arch_tag("abc", arch));
+        }
+        assert_ne!(signed_index_tag("abc"), index_tag("abc"));
+    }
+
     /// cosign runs with exactly `COSIGN_PASSWORD`, `HOME` and `PATH` in its environment, whatever
     /// else the job held (a name that is no identifier, a variable bash keeps read-only, a trace
     /// switch), with the password nowhere in its command line and neither secret in the signer's
@@ -1969,6 +2244,7 @@ mod tests {
             ),
         )?;
         let password = "the-password-is-not-an-argument";
+        let key = image::base64(b"stand-in key");
         let output = Command::new(&script)
             .current_dir(&dir)
             .env_clear()
@@ -1976,7 +2252,7 @@ mod tests {
             .env("DIGEST", sha256(&dir.join("dist/SHA256SUMS"))?)
             .env("COSIGN_URL", format!("file://{}", stand_in.display()))
             .env("COSIGN_SHA256", sha256(&stand_in)?)
-            .env("RELEASE_SIGNING_KEY", "c3RhbmQtaW4ga2V5")
+            .env("RELEASE_SIGNING_KEY", &key)
             .env("COSIGN_PASSWORD", password)
             .env("RUNNER_TEMP", dir.join("runner"))
             .env("LD_PRELOAD", "planted.so")
@@ -1996,7 +2272,7 @@ mod tests {
             "COSIGN_PASSWORD\nHOME\nPATH\n"
         );
         let stderr = String::from_utf8_lossy(&output.stderr);
-        for secret in [password, "c3RhbmQtaW4ga2V5", "stand-in key"] {
+        for secret in [password, key.as_str(), "stand-in key"] {
             assert!(
                 !stderr.contains(secret),
                 "stderr shows {secret:?}: {stderr}"
@@ -2016,8 +2292,10 @@ mod tests {
     /// a special builtin such as `set`, and it refuses any other exported function before it reads
     /// anything, so a planted `BASH_FUNC_echo%%` or `BASH_FUNC_set%%` can neither silence its
     /// `set +x +v` nor stand in for a check, and a planted `compgen` that lists nothing cannot hide
-    /// another, even beside a planted `unset` that would keep it (DEC-2024 item 4). No run reaches
-    /// the key.
+    /// another, even beside a planted `unset` that would keep it (DEC-2024 item 4). Every run is
+    /// handed what a signing needs, a stand-in cosign, a key and a password, and the control, with
+    /// nothing planted, signs all three files; each planted run stops with its own refusal on
+    /// stderr, never runs cosign and never reaches `RUNNER_TEMP` (DEC-2049 item 1).
     #[test]
     fn the_signer_refuses_exported_functions() -> Result<()> {
         let script =
@@ -2026,36 +2304,71 @@ mod tests {
             "mandate-xtask-signer-functions-{}",
             std::process::id()
         ));
+        let refused = "the environment defines shell functions; nothing is signed";
         let echo = ("BASH_FUNC_echo%%", "() { builtin echo planted; }");
         let compgen = ("BASH_FUNC_compgen%%", "() { :; }");
-        let cases: [&[(&str, &str)]; 4] = [
-            &[echo],
-            &[("BASH_FUNC_set%%", "() { builtin echo planted; }")],
-            &[compgen, echo],
-            &[("BASH_FUNC_unset%%", "() { :; }"), compgen, echo],
+        let cases: [(&[(&str, &str)], &str); 5] = [
+            (&[], ""),
+            (&[echo], refused),
+            (
+                &[("BASH_FUNC_set%%", "() { builtin echo planted; }")],
+                "`set': is a special builtin",
+            ),
+            (&[compgen, echo], refused),
+            (
+                &[("BASH_FUNC_unset%%", "() { :; }"), compgen, echo],
+                "`unset': is a special builtin",
+            ),
         ];
-        for planted in cases {
+        for (planted, refusal) in cases {
             let name = planted
                 .iter()
                 .map(|(n, _)| n.replace('%', ""))
                 .collect::<Vec<_>>()
                 .join("+");
+            let name = if name.is_empty() {
+                "control".to_owned()
+            } else {
+                name
+            };
             let dir = root.join(&name);
             let _ = fs::remove_dir_all(&dir);
             fs::create_dir_all(dir.join("dist/bin"))?;
             fs::write(dir.join("dist/bin/a"), "a")?;
             fs::write(dir.join("dist/bin/b"), "b")?;
             write_sums(&dir, SIGNER_SUMS)?;
+            let stand_in = dir.join("stand-in-cosign");
+            fs::write(&stand_in, "#!/bin/sh\necho signed >> cosign-runs\n")?;
             let output = Command::new(&script)
                 .current_dir(&dir)
                 .env_clear()
                 .env("PATH", "/usr/bin:/bin")
                 .env("DIGEST", sha256(&dir.join("dist/SHA256SUMS"))?)
+                .env("COSIGN_URL", format!("file://{}", stand_in.display()))
+                .env("COSIGN_SHA256", sha256(&stand_in)?)
+                .env("RELEASE_SIGNING_KEY", image::base64(b"stand-in key"))
+                .env("COSIGN_PASSWORD", "stand-in password")
                 .env("RUNNER_TEMP", dir.join("runner"))
                 .envs(planted.iter().copied())
                 .output()?;
             let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let runs = fs::read_to_string(dir.join("cosign-runs")).unwrap_or_default();
+            if planted.is_empty() {
+                assert!(
+                    output.status.success(),
+                    "control: the signer stopped: {stderr}"
+                );
+                assert_eq!(runs, "signed\n".repeat(3), "control: cosign runs");
+                continue;
+            }
             assert!(!output.status.success(), "{name}: the signer went on");
+            assert!(stderr.contains(refusal), "{name}: stderr is {stderr:?}");
+            assert!(
+                !stdout.contains("planted") && !stderr.contains("planted"),
+                "{name}: a planted function ran"
+            );
+            assert!(runs.is_empty(), "{name}: cosign ran");
             assert!(
                 !stdout.contains("OK"),
                 "{name}: the signer checked the copies"
@@ -2388,6 +2701,174 @@ mod tests {
                 .find(|line| line.starts_with(&format!("| `{}` |", tool.name)))
                 .with_context(|| format!("no registry row for {}", tool.name))?;
             assert!(row.contains(tool.version), "{}: {row}", tool.name);
+        }
+        Ok(())
+    }
+
+    /// One case of [`the_signed_images_refuse_a_release_the_key_did_not_sign`]: its name, what it
+    /// changes in the release [`signed_release`] wrote under the directory it is handed, and what
+    /// the refusal must name.
+    type SignedCase = (
+        &'static str,
+        fn(&Path) -> io::Result<()>,
+        &'static [&'static str],
+    );
+
+    /// Writes under `dir` a release `signed_images` accepts: `dist` holding `a` and `b` with their
+    /// `SHA256SUMS`, a signature for each and for `SHA256SUMS` in `signatures`, the public half in
+    /// `release.pub`, and in `tools` a stand-in cosign that records each call and verifies a
+    /// signature only when it starts `good` and the key holds `release key`. Returns the tools
+    /// directory and the key.
+    fn signed_release(dir: &Path) -> Result<(PathBuf, PathBuf)> {
+        let _ = fs::remove_dir_all(dir);
+        fs::create_dir_all(dir.join("dist/bin"))?;
+        fs::create_dir_all(dir.join("signatures"))?;
+        fs::create_dir_all(dir.join("tools"))?;
+        fs::write(dir.join("dist/bin/a"), "a")?;
+        fs::write(dir.join("dist/bin/b"), "b")?;
+        write_sums(dir, SIGNER_SUMS)?;
+        fs::write(dir.join("signatures/a.sig"), "good signature over a")?;
+        fs::write(dir.join("signatures/b.sig"), "good signature over b")?;
+        fs::write(
+            dir.join("signatures/SHA256SUMS.sig"),
+            "good signature over the sums",
+        )?;
+        let key = dir.join("release.pub");
+        fs::write(&key, "release key\n")?;
+        let cosign = dir.join("tools/cosign");
+        fs::write(
+            &cosign,
+            concat!(
+                "#!/bin/sh\n",
+                "printf '%s\\n' \"$*\" >> \"$(dirname \"$0\")/calls\"\n",
+                "[ \"$1\" = verify-blob ] && grep -qx 'release key' \"$4\" && grep -q '^good' \"$6\"\n",
+            ),
+        )?;
+        fs::set_permissions(&cosign, fs::Permissions::from_mode(0o755))?;
+        Ok((dir.join("tools"), key))
+    }
+
+    /// Each release-signed image holds exactly its binary and that binary's release signature,
+    /// byte for byte, as a runtime unpacks it, and every binary and `SHA256SUMS` was verified
+    /// against the committed key first (DEC-2026).
+    #[test]
+    fn the_signed_images_carry_each_binary_and_its_release_signature() -> Result<()> {
+        let dir = env::temp_dir().join(format!("mandate-xtask-signed-{}", std::process::id()));
+        let (tools, key) = signed_release(&dir)?;
+        let arch = Arch::host()?;
+        let images = signed_images(
+            &tools,
+            &key,
+            &dir.join("dist"),
+            &dir.join("signatures"),
+            &dir.join("out"),
+            arch,
+            "release",
+        )?;
+        let names: Vec<&str> = images.iter().map(|(name, _)| name.as_str()).collect();
+        assert_eq!(names, ["a", "b"]);
+        for (name, layout) in &images {
+            let unpacked = dir.join("unpacked").join(name);
+            let written = dir.join("out/images").join(name);
+            assert!(written.join("index.json").is_file(), "{name}: not written");
+            image::unpack(layout, &written, &unpacked.join("rootfs"))?;
+            let mut files: Vec<String> = fs::read_dir(unpacked.join("rootfs"))?
+                .map(|entry| Ok(entry?.file_name().to_string_lossy().into_owned()))
+                .collect::<io::Result<_>>()?;
+            files.sort();
+            assert_eq!(files, [name.clone(), format!("{name}.sig")], "{name}");
+            assert_eq!(
+                fs::read(unpacked.join("rootfs").join(name))?,
+                fs::read(dir.join("dist/bin").join(name))?,
+                "{name}: the binary"
+            );
+            assert_eq!(
+                fs::read(unpacked.join("rootfs").join(format!("{name}.sig")))?,
+                fs::read(dir.join("signatures").join(format!("{name}.sig")))?,
+                "{name}: the signature"
+            );
+        }
+        let calls = fs::read_to_string(tools.join("calls"))?;
+        let mut verified: Vec<&str> = calls
+            .lines()
+            .map(|call| {
+                assert!(
+                    call.starts_with("verify-blob ")
+                        && call.contains(&format!("--key {} ", key.display())),
+                    "{call}"
+                );
+                call.rsplit('/').next().unwrap_or_default()
+            })
+            .collect();
+        verified.sort_unstable();
+        assert_eq!(verified, ["SHA256SUMS", "a", "b"]);
+        Ok(())
+    }
+
+    /// A release the key did not sign builds no image: a signature by another key, a missing one,
+    /// one over `SHA256SUMS` that does not verify, or a binary `SHA256SUMS` does not list each
+    /// stops `signed_images` with a refusal naming it, and nothing is written under `out` or beside
+    /// the tools, so every check runs before any image is built and `publish-signed` never signs in
+    /// to the registry or pushes (DEC-2026).
+    #[test]
+    fn the_signed_images_refuse_a_release_the_key_did_not_sign() -> Result<()> {
+        let root = env::temp_dir().join(format!(
+            "mandate-xtask-signed-refusals-{}",
+            std::process::id()
+        ));
+        let cases: Vec<SignedCase> = vec![
+            (
+                "a's signature is not the key's",
+                |d| fs::write(d.join("signatures/a.sig"), "bad"),
+                &["verify-blob", "a.sig"],
+            ),
+            (
+                "b has no signature",
+                |d| fs::remove_file(d.join("signatures/b.sig")),
+                &["verify-blob", "b.sig"],
+            ),
+            (
+                "the sums' signature is not the key's",
+                |d| fs::write(d.join("signatures/SHA256SUMS.sig"), "bad"),
+                &["verify-blob", "SHA256SUMS.sig"],
+            ),
+            (
+                "b is not the binary SHA256SUMS lists",
+                |d| fs::write(d.join("dist/bin/b"), "x"),
+                &["b is not the binary SHA256SUMS lists"],
+            ),
+            (
+                "another key",
+                |d| fs::write(d.join("release.pub"), "another key\n"),
+                &["verify-blob", "/release.pub", "/signatures/a.sig"],
+            ),
+        ];
+        for (name, change, refusal) in cases {
+            let dir = root.join(name.replace(' ', "-"));
+            let (tools, key) = signed_release(&dir)?;
+            change(&dir)?;
+            let result = signed_images(
+                &tools,
+                &key,
+                &dir.join("dist"),
+                &dir.join("signatures"),
+                &dir.join("out"),
+                Arch::host()?,
+                "release",
+            );
+            let Err(err) = result else {
+                panic!("{name}: images were built");
+            };
+            let err = format!("{err:#}");
+            for part in refusal {
+                assert!(err.contains(part), "{name}: refused with {err:?}");
+            }
+            assert!(!dir.join("out").exists(), "{name}: an image was written");
+            let mut tools: Vec<String> = fs::read_dir(&tools)?
+                .map(|entry| Ok(entry?.file_name().to_string_lossy().into_owned()))
+                .collect::<io::Result<_>>()?;
+            tools.sort();
+            assert_eq!(tools, ["calls", "cosign"], "{name}: the tools directory");
         }
         Ok(())
     }

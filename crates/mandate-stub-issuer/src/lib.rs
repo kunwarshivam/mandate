@@ -17,12 +17,17 @@
 //! - [`issuer`]: the one P-256 key made at start and held in memory only, its key set, and the
 //!   ES256 access tokens it signs.
 //! - [`serve`]: the router, which answers only its own `Host` and sends no CORS header.
+//! - [`alpaca`]: the fixture Alpaca OAuth provider, its authorization page and token endpoint, served
+//!   only when started with its client ([DEC-2625](../../../docs/project/decisions/DEC-2625.md)).
 //!
-//! [`issuer`] and [`serve`] are compiled only with debug assertions: a build without them holds no
+//! [`issuer`], [`serve`], and [`alpaca`] are compiled only with debug assertions: a build without them holds no
 //! code that makes a key, signs a token, or serves a key set (DEC-2100 item 2). `xtask/layers.toml`
 //! lets no crate depend on this one.
 
 pub mod start;
+
+#[cfg(debug_assertions)]
+pub mod alpaca;
 
 #[cfg(debug_assertions)]
 pub mod issuer;

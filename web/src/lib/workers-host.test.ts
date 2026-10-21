@@ -115,7 +115,9 @@ describe("web/ runs on Cloudflare Workers through OpenNext, and nowhere else (DE
     const workflow = "../.github/workflows/web.yml";
     const yml = real(workflow);
     expect(yml).toContain("wrangler deploy --dry-run");
-    expect(hostingProblems(tree({ [workflow]: `${yml}\n      - run: npx wrangler deploy --dry-run --outdir .wrangler/dry-run\n` }))).toEqual([]);
+    expect(hostingProblems(tree({ [workflow]: `${yml}\n      - run: node_modules/.bin/wrangler deploy --dry-run --outdir .wrangler/dry-run\n` }))).toEqual([]);
+    expect(hostingProblems(tree({ [workflow]: `${yml}\n      - run: npx wrangler deploy --dry-run --outdir .wrangler/dry-run\n` }))).toEqual(only("Cloudflare command"));
+    expect(hostingProblems(tree({ [workflow]: `${yml}\n      - run: node_modules/.bin/wrangler deploy\n` }))).toEqual(only("Cloudflare command"));
     expect(hostingProblems(tree({ [workflow]: `${yml}\n      - run: npx wrangler deploy --dry-run --outdir dist\n` }))).toEqual(only("Cloudflare command"));
     expect(hostingProblems(tree({ [workflow]: `${yml}\n      - run: npx wrangler deploy\n` }))).toEqual(only("Cloudflare command"));
     expect(hostingProblems(tree({ "../.github/workflows/ci.yml": `${real("../.github/workflows/ci.yml")}\n      - run: npx wrangler@4 deploy\n` }))).toEqual(only("Cloudflare command"));
@@ -200,7 +202,8 @@ describe("only the deploy job deploys, from main, through the production environ
   });
 
   it("pending E21-38: lets only the last step deploy, after the build, reading the token and the account alone", () => {
-    expect(deployWith((y) => y.replace("      - run: npx wrangler deploy\n", "      - run: npx wrangler deploy --env preview\n"))).toEqual([expect.stringContaining("must end with"), expect.stringContaining("only the deploy step may read a secret"), expect.stringContaining("the build may read only"), expect.stringContaining("Cloudflare command")]);
+    expect(deployWith((y) => y.replace("      - run: node_modules/.bin/wrangler deploy\n", "      - run: npx wrangler deploy\n"))).toEqual([expect.stringContaining("must end with"), expect.stringContaining("only the deploy step may read a secret"), expect.stringContaining("the build may read only"), expect.stringContaining("Cloudflare command")]);
+    expect(deployWith((y) => y.replace("      - run: node_modules/.bin/wrangler deploy\n", "      - run: node_modules/.bin/wrangler deploy --env preview\n"))).toEqual([expect.stringContaining("must end with"), expect.stringContaining("only the deploy step may read a secret"), expect.stringContaining("the build may read only"), expect.stringContaining("Cloudflare command")]);
     expect(deployWith((y) => `${y}      - run: node scripts/workers.mjs size .wrangler/dry-run\n`)).toEqual(only("must end with"));
     expect(deployWith((y) => y.replace("      - run: npm run cf:build\n", "      - run: npm run build\n"))).toEqual(only("cf:build before"));
     expect(deployWith((y) => y.replace(BUILD_ENV, `${BUILD_ENV}          LEAK: \${{ secrets.CLOUDFLARE_API_TOKEN }}\n`))).toEqual(only("only the deploy step may read a secret"));

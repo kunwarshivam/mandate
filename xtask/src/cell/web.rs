@@ -16,9 +16,15 @@ use serde_json::Value;
 
 use super::{DEMO_APP_ORIGIN, DEMO_SUBJECT, LOCAL_ISSUER, WEB_URL, state};
 
-/// The local API as `web/` reaches it: `localhost`, so its `SameSite=Strict` cookie is same-site
-/// with the app origin [`DEMO_APP_ORIGIN`] (DEC-2406).
+/// The local API's port-forward on `localhost`, as `cargo xtask cell demo`'s own `web/` reaches it.
 const WEB_API_ORIGIN: &str = "http://localhost:8787";
+
+/// The API as the cell gesture's page reaches it: the https front `web/e2e-cell/tls-proxy.mjs`
+/// serves in front of [`WEB_API_ORIGIN`]. Chromium's schemeful same-site counts the https app origin
+/// [`DEMO_APP_ORIGIN`] and the plain-http port-forward as cross-site, so it never sends the API's
+/// `SameSite=Strict` session cookie back and every signed-in read answers 401; https on its own
+/// port is same-site with the page, and the API's https-only app origin is unchanged.
+const GESTURE_API_ORIGIN: &str = "https://localhost:8788";
 
 /// How `cargo xtask cell demo` runs `web/`: its npm script, where it serves, and the server-side
 /// settings it reads (`web/README.md`). Without sign-in it runs on its own fixtures at
@@ -324,6 +330,8 @@ pub fn kill_switch_from_web(workspace: &str, agent: Option<&str>) -> Result<WebG
                     .iter()
                     .map(|(n, v)| (*n, v.as_str())),
             )
+            .env("OWLHEAD_API_ORIGIN", GESTURE_API_ORIGIN)
+            .env("OWLHEAD_CELL_API_UPSTREAM", WEB_API_ORIGIN)
             .env("OWLHEAD_CELL_TLS_KEY", &key)
             .env("OWLHEAD_CELL_TLS_CERT", &cert)
             .env("OWLHEAD_CELL_RESULT", &result)
@@ -407,6 +415,25 @@ mod tests {
         assert!(
             WEB_API_ORIGIN.ends_with(&format!(":{API_LOCAL_PORT}")),
             "web/ reaches the API on the port the demo forwards"
+        );
+        let scheme_host = |origin: &'static str| origin.rsplit_once(':').map(|(sh, _)| sh);
+        assert_eq!(
+            scheme_host(GESTURE_API_ORIGIN),
+            scheme_host(DEMO_APP_ORIGIN),
+            "the gesture's API front shares the app origin's scheme and host, so the session cookie \
+             is same-site with the page"
+        );
+        assert_ne!(
+            GESTURE_API_ORIGIN, DEMO_APP_ORIGIN,
+            "the front has its own port"
+        );
+        let config = fs::read_to_string(crate::repo_root()?.join("web/playwright.cell.config.ts"))?;
+        assert!(
+            config.contains("node e2e-cell/tls-proxy.mjs ${API} ${UPSTREAM}")
+                && crate::repo_root()?
+                    .join("web/e2e-cell/tls-proxy.mjs")
+                    .is_file(),
+            "the gesture's Playwright run starts the front, from the origins the driver passes"
         );
         assert_eq!(
             LOCAL_ISSUER,

@@ -631,7 +631,7 @@ allowed_external = ["ring", "secrecy", "thiserror"]
 layer = 8
 safety_critical = true
 pure = false
-allowed_external = ["base64", "reqwest", "ring", "rustls", "secrecy", "serde_json", "thiserror", "tokio"]
+allowed_external = ["base64", "reqwest", "ring", "rustls", "rustix", "secrecy", "serde_json", "thiserror", "tokio"]
 
 [crates.mandate-alpaca]
 layer = 7
@@ -684,6 +684,17 @@ layer = 7
 safety_critical = true
 pure = true
 allowed_external = ["thiserror"]
+
+# The runtime's production ports (DEC-968 item 6, DEC-2605 row 20): the glue between the runtime's
+# ports and the deterministic crates, shared by the shell and the cell's runtime process, which may
+# not depend on the shell. Pure: every fact comes from its caller, and it reaches no executor,
+# broker, journal store or host.
+[crates.mandate-ports]
+layer = 7
+safety_critical = true
+pure = true
+allowed_external = ["thiserror"]
+forbidden_internal = ["mandate-shell", "mandate-executor", "mandate-alpaca", "mandate-robinhood", "mandate-mcp", "mandate-paper", "mandate-cli", "mandate-daemon", "mandate-journal-pg"]
 
 [crates.mandate-shell]
 layer = 8
@@ -750,12 +761,14 @@ forbidden_internal = ["mandate-shell", "mandate-executor", "mandate-alpaca", "ma
 # The account executor as a long-running process (E21-30, DEC-2003): one account's executor core
 # over mandate-store, with mandate-process's lifecycle and probes. It reads the runtime only through
 # the journal, so it may never reach the runtime's process, the shell, the paper runner, the MCP
-# client, the CLI, or the broker simulator; its broker is a port, and no host is named here.
+# client, the CLI, or the broker simulator; its broker is a port, and no host is named here. It is
+# the process that leases its connection's credential from mandate-vault (DEC-2306 item 2), which
+# is why it sits above it; the connector crates never take the vault.
 [crates.mandate-executord]
-layer = 8
+layer = 9
 safety_critical = true
 pure = false
-allowed_external = ["tokio"]
+allowed_external = ["secrecy", "tokio"]
 forbidden_internal = ["mandate-daemon", "mandate-agentd", "mandate-shell", "mandate-paper", "mandate-mcp", "mandate-cli", "mandate-rh-sim", "mandate-robinhood"]
 
 # The workspace scheduler process (E21-29, DEC-1010): the clock stream's single writer, over
@@ -765,11 +778,21 @@ forbidden_internal = ["mandate-daemon", "mandate-agentd", "mandate-shell", "mand
 # it never places, cancels, or sizes an order and never calls a broker or a runtime (workspace API
 # spec §1.4, `AGENTS.md` rule 12), so it may never reach the runtime, the executor, a connector,
 # the shell, the paper adapter, or the founder's CLI.
+# The token-exchange process (E10-13 slice 5b, DEC-821 item 2, DEC-2629): the one process with
+# the platform's client secret and the live token endpoint. It sits above mandate-connections, whose
+# exchange rules it runs, and no crate may depend on it, so no other process can send the request.
+[crates.mandate-token-exchange]
+layer = 7
+safety_critical = true
+pure = false
+allowed_external = ["secrecy"]
+allowed_dependents = []
+
 [crates.mandate-api-server]
 layer = 7
 safety_critical = true
 pure = false
-allowed_external = ["axum", "reqwest", "ring", "rustix", "rustls", "tokio"]
+allowed_external = ["axum", "base64", "reqwest", "ring", "rustix", "rustls", "secrecy", "tokio"]
 forbidden_internal = [
     "mandate-alpaca",
     "mandate-cli",

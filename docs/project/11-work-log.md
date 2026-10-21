@@ -35,6 +35,7 @@ claim issue or the decision file, not here.
 
 ## Sessions
 
+- **2026-10-19, the approval request.** The founder asked about the approval page after the gate decision was tightened. The action was display size, so the risk sat under Approve and Skip. It is now one line at the page title, and Skip stays the refusal (DEC-2409). `web/` only.
 - **2026-10-18, late evening: the founder's decisions, the demo's checks, staging's first
   modules.** The founder answered fourteen questions in the coordinator session, recorded verbatim
   in DEC-2605 (#1692 added rows 11 to 13, #1709 row 14): OpenTofu, DOKS and GitOps under a $150 a month cap,

@@ -3,16 +3,24 @@
 //! paper deployment read from the journal. Without the opt-in the process runs deny-all
 //! (DEC-2208 item 1).
 
+use std::cell::RefCell;
 use std::fmt;
 use std::path::Path;
+use std::rc::Rc;
 
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Digest, Key, Object, Value};
+use mandate_gateway::meter::{MeterStore, SharedMeter};
+use mandate_gateway::money::Usd6;
+use mandate_gateway::provider::SequentialIds;
 use mandate_journal::{Environment, StreamId};
+use mandate_num::Usd;
+use mandate_research::PolicyOverlay;
 use mandate_runtime::{EventDraft, ResearchConfig};
 use mandate_time::UtcNanos;
 
 use crate::deployment;
+use crate::meter::CellMeter;
 use crate::recorded::{Bundle, BundleError};
 use crate::runtime::{Refs, ResearchWiring};
 use crate::source::{CellSource, Rows, SourceFor};
@@ -122,8 +130,58 @@ pub fn opt_in(dir: &Path, deployment: &CellDeployment) -> Result<OptIn, CellErro
     })
 }
 
+/// The agent's daily research cap (DEC-2254 items 1 to 3): the mandate document's
+/// `behavior.research.cost_cap_usd_per_day` tightened by the research profile, the value and overlay
+/// the source hands the core, and zero for a mandate with no `behavior.research`.
+///
+/// # Errors
+/// [`CellError::Mandate`] with `mandate_document_unavailable` when the document gives no cap the
+/// gateway can hold.
+pub fn research_daily_cap(document: &Value) -> Result<Usd6, CellError> {
+    let unavailable = || CellError::Mandate("mandate_document_unavailable");
+    let research = document
+        .get("behavior")
+        .and_then(|behavior| behavior.get("research"))
+        .ok_or_else(unavailable)?;
+    if *research == Value::Null {
+        return Ok(Usd6::ZERO);
+    }
+    let cap = research
+        .get("cost_cap_usd_per_day")
+        .and_then(Value::as_str)
+        .and_then(|text| Usd::parse(text).ok())
+        .ok_or_else(unavailable)?;
+    let cap = PolicyOverlay::internal_research_profile().effective_cost_cap(cap);
+    Usd6::parse(&cap.to_string()).map_err(|_| unavailable())
+}
+
+/// The ids a workspace's meter writer opens its stream with, its `StreamOpened` the one record it
+/// gives an id of its own (DEC-2258 item 2): drawn from the stream's own name, so no two
+/// workspaces' streams open with one id, as the journal's event ids must not repeat across streams.
+pub fn meter_opened_ids(workspace: &str) -> SequentialIds {
+    let digest = Digest::of(format!("meter:{workspace}").as_bytes());
+    let (high, _) = digest.as_bytes().split_at(16);
+    SequentialIds::starting_at(u128::from_be_bytes(high.try_into().unwrap_or([0; 16])))
+}
+
+/// As [`research`], with the worker's gateway and the research source sharing `meter`, the
+/// workspace's journaled meter stream in a process given a journal (DEC-2259 item 1).
+///
+/// # Errors
+/// As [`research`].
+pub fn research_metered(
+    opted: OptIn,
+    rows: Box<dyn Rows>,
+    meter: Box<dyn MeterStore>,
+    artifacts: &Path,
+    now: Box<dyn FnMut() -> UtcNanos>,
+) -> Result<CellResearch, CellError> {
+    wired(opted, rows, meter, artifacts, now)
+}
+
 /// The research `opted` asks for, reading the streams through `rows` and the mandate documents and
-/// artifacts from the store at `artifacts`.
+/// artifacts from the store at `artifacts`, its meter in memory, for fixtures and tests (DEC-2259
+/// item 1).
 ///
 /// # Errors
 /// [`CellError`] when the artifact store, the deployment, its mandate document, or the worker cannot
@@ -134,7 +192,30 @@ pub fn research(
     artifacts: &Path,
     now: Box<dyn FnMut() -> UtcNanos>,
 ) -> Result<CellResearch, CellError> {
+    wired(opted, rows, Box::new(SharedMeter::new()), artifacts, now)
+}
+
+/// The research `opted` asks for, its worker's gateway and source sharing `meter`.
+fn wired(
+    opted: OptIn,
+    rows: Box<dyn Rows>,
+    meter: Box<dyn MeterStore>,
+    artifacts: &Path,
+    now: Box<dyn FnMut() -> UtcNanos>,
+) -> Result<CellResearch, CellError> {
     let OptIn { bundle, deployment } = opted;
+    let rows: Rc<dyn Rows> = Rc::from(rows);
+    let now = Rc::new(RefCell::new(now));
+    let clock = {
+        let now = Rc::clone(&now);
+        move || (now.borrow_mut())()
+    };
+    let who = SourceFor {
+        workspace: deployment.workspace.clone(),
+        agent: deployment.agent.clone(),
+        environment: deployment.environment,
+    };
+    let meter = CellMeter::over(meter, Rc::clone(&rows), who.clone(), Rc::new(clock.clone()));
     let open =
         || FsArtifactStore::open_existing(artifacts).map_err(|_| CellError::ArtifactsUnavailable);
     let control = StreamId::parse(&format!("ctl:{}", deployment.workspace))
@@ -162,7 +243,8 @@ pub fn research(
             member: "deadline_ms",
         })
     })?;
-    let worker = RecordedWorker::new(
+    let daily = research_daily_cap(&document)?;
+    let worker = RecordedWorker::capped(
         &bundle,
         WorkerFor {
             workspace: deployment.workspace.clone(),
@@ -170,19 +252,12 @@ pub fn research(
             description: description.clone(),
         },
         Box::new(StoreSink(open()?)),
-        now,
+        Box::new(clock),
+        meter.clone(),
+        daily,
     )
     .map_err(CellError::Worker)?;
-    let source = CellSource::new(
-        &bundle,
-        SourceFor {
-            workspace: deployment.workspace.clone(),
-            agent: deployment.agent.clone(),
-            environment: deployment.environment,
-        },
-        rows,
-        Box::new(open()?),
-    );
+    let source = CellSource::metered(&bundle, who, rows, Box::new(open()?), meter);
     let refs = ResearchRefs {
         mandate_version: version,
         model_version: pin.content_hash,

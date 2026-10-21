@@ -21,6 +21,7 @@ mandate-journal-pg.workspace = true
 mandate-liquidity.workspace = true
 mandate-marketdata.workspace = true
 mandate-num.workspace = true
+mandate-ports.workspace = true
 mandate-risk.workspace = true
 mandate-robinhood.workspace = true
 mandate-runtime.workspace = true

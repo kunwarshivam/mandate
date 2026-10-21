@@ -58,6 +58,7 @@ mod output;
 mod plan;
 mod ports;
 mod retrieve;
+mod turn;
 
 pub use backend::{
     Backend, GatewayParts, NoHostedTransport, RECORDED_KEY, Reason, RecordedKey, ResearchTransport,
@@ -68,10 +69,10 @@ pub use call::{
     UntrustedItem, call, render_inputs, treatment,
 };
 pub use dispatch::{Dispatch, DispatchScope, Dispatched, dispatch};
-pub use entry::{EntryError, RESEARCH_INPUTS, ResearchEntry, output_schema};
+pub use entry::{EntryError, RESEARCH_INPUTS, ResearchEntry, agentic_loop, output_schema};
 pub use error::ResearchRunError;
 pub use item::{
-    Allowlist, Bar, Filing, InstrumentFact, ItemId, ItemKind, NewsItem, SourceId, Symbol,
+    Allowlist, Bar, Filing, InstrumentFact, ItemId, ItemKind, NewsItem, Quote, SourceId, Symbol,
 };
 pub use mandate_gateway::registry::ModelRef as ModelPin;
 pub use output::{
@@ -80,7 +81,8 @@ pub use output::{
 };
 pub use plan::{RetrievalPlan, Scope};
 pub use ports::{
-    BarReader, FilingEntry, FilingReader, InstrumentReader, NewsReader, NewsText, ReadError,
-    Readers, TextQuery,
+    BarReader, FilingEntry, FilingReader, FilingText, InstrumentReader, NewsReader, NewsText,
+    ReadError, Readers, TextQuery,
 };
 pub use retrieve::{Drop, DropReason, Retrieval, RetrievedItem, retrieve};
+pub use turn::{EarlierTurn, TurnCall, TurnParts, call_turn};

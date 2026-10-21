@@ -62,6 +62,8 @@ pub mod http;
 pub mod profile;
 pub mod read;
 pub mod record;
+pub mod stream;
+pub mod stream_link;
 pub mod wire;
 
 pub use account_rules::{AccountRules, DeclaredRegime, alpaca as alpaca_account_rules};

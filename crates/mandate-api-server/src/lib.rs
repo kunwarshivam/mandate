@@ -33,7 +33,12 @@
 //! - [`writes`] also records resume, Stop, and an owner exit as the CLI records them, with step-up
 //!   forwarded only once the port verifies it, and [`status`] reports a command's phase from the
 //!   owning streams' direct causation (DEC-2102).
+//! - [`connect`]: the connect start, which commits the pending connection and issues the
+//!   single-use `state` the callback redeems (DEC-2623).
 //! - [`backtests`]: the backtest and evaluation reads' folds (DEC-1001, DEC-1002, DEC-1143).
+//! - [`journal_reads`]: the journal's audit reads, a stream's events page (§4.8.1, E12-6).
+//! - [`connections`]: the connections read's fold, references only (DEC-2620).
+//! - [`me`]: the caller's own session, outside every workspace path (§4.10, DEC-2113).
 //!
 //! It never places, cancels, or sizes an order, and never calls a broker or a runtime (§1.4):
 //! `xtask/layers.toml` keeps it from every crate that could.
@@ -44,11 +49,15 @@ pub mod clock;
 pub mod commands;
 pub mod config;
 pub mod confirm;
+pub mod connect;
+pub mod connections;
 pub mod documents;
 pub mod http;
 pub mod journal;
+pub mod journal_reads;
 pub mod keys;
 pub mod lifecycle;
+pub mod me;
 pub mod members;
 pub mod objects;
 pub mod reads;

@@ -11,6 +11,7 @@
 
 use mandate_canon::Value;
 use mandate_journal::StoredEvent;
+use mandate_num::{Qty, SignedQty};
 
 /// How many resolved approvals the inbox lists, most recently requested first (DEC-979 item 5).
 pub const RESOLVED_LISTED: usize = 100;
@@ -342,4 +343,123 @@ pub fn account_positions(account_rows: &[StoredEvent]) -> Vec<Value> {
         }
     }
     latest.into_values().collect()
+}
+
+/// The agent's orders on its account stream (`read-models/orders`, DEC-2111 item 3), in the order
+/// first submitted: each `client_order_id` whose `OrderSubmitted` names, as its `causation_id`, an
+/// `OrderRequestRecorded` for `agent_id` (journal spec §9.5 rule 45). The request is the first
+/// `OrderSubmitted`'s and its companion's; `state` and `filled_qty` are the last
+/// `OrderStateChanged`'s, `null` before any; `updated_at` is the order's last record's
+/// `recorded_at`. An order no companion names is no agent's, and is never listed.
+pub fn agent_orders(account: &[StoredEvent], agent_id: &str) -> Vec<Value> {
+    let mut companions: std::collections::BTreeMap<&str, Value> = std::collections::BTreeMap::new();
+    let mut orders: Vec<(String, Vec<(&'static str, Value)>)> = Vec::new();
+    for row in account {
+        let Some(event) = envelope(row) else {
+            continue;
+        };
+        let payload = event.get("payload").cloned().unwrap_or(Value::Null);
+        let member = |name: &str| payload.get(name).cloned().unwrap_or(Value::Null);
+        let order_id = text(&event, "payload.client_order_id").map(str::to_owned);
+        let known = order_id
+            .as_deref()
+            .and_then(|id| orders.iter().position(|(known, _)| known == id));
+        let recorded_at = Value::Str(row.recorded_at.clone());
+        match (row.event_type.as_str(), known) {
+            ("OrderRequestRecorded", _) if text(&event, "payload.agent_id") == Some(agent_id) => {
+                companions.insert(&row.event_id, payload.clone());
+            }
+            ("OrderSubmitted" | "OrderStateChanged", Some(at)) => {
+                if let Some((_, members)) = orders.get_mut(at) {
+                    if row.event_type == "OrderStateChanged" {
+                        set(members, "state", member("state"));
+                        set(members, "filled_qty", member("filled_qty"));
+                    }
+                    set(members, "updated_at", recorded_at);
+                }
+            }
+            ("OrderSubmitted", None) => {
+                let companion = text(&event, "causation_id").and_then(|id| companions.get(id));
+                if let (Some(id), Some(companion)) = (order_id, companion) {
+                    let request = |name: &str| companion.get(name).cloned().unwrap_or(Value::Null);
+                    let members = vec![
+                        ("client_order_id", Value::Str(id.clone())),
+                        ("intent_id", request("intent_id")),
+                        ("purpose", request("purpose")),
+                        ("instrument_id", member("instrument_id")),
+                        ("side", member("side")),
+                        ("type", member("type")),
+                        ("tif", member("tif")),
+                        ("qty", member("qty")),
+                        ("limit_price", member("limit_price")),
+                        ("stop_price", request("stop_price")),
+                        ("state", Value::Null),
+                        ("filled_qty", Value::Null),
+                        ("submitted_at", recorded_at.clone()),
+                        ("updated_at", recorded_at),
+                    ];
+                    orders.push((id, members));
+                }
+            }
+            _ => {}
+        }
+    }
+    orders
+        .into_iter()
+        .filter_map(|(_, members)| object(members))
+        .collect()
+}
+
+/// Replaces `name`'s value in `members`.
+fn set(members: &mut [(&'static str, Value)], name: &str, value: Value) {
+    if let Some((_, held)) = members.iter_mut().find(|(key, _)| *key == name) {
+        *held = value;
+    }
+}
+
+/// The agent's net filled quantity per instrument (`read-models/positions`, DEC-2111 item 4): the
+/// `FillApplied` and `LateFillApplied` records of its own orders, as `agent_orders` attributes
+/// them, buys adding and sells subtracting, in instrument order, leaving out an instrument that
+/// nets to zero. `cost_basis`, `risk_mark` and `protection` are `null` (DEC-2111 item 5). `None`
+/// when a fill of its own cannot be read, so no position is served from part of its fills.
+pub fn agent_positions(account: &[StoredEvent], agent_id: &str) -> Option<Vec<Value>> {
+    let owned: std::collections::BTreeSet<String> = agent_orders(account, agent_id)
+        .iter()
+        .filter_map(|order| order.get("client_order_id").and_then(Value::as_str))
+        .map(str::to_owned)
+        .collect();
+    let mut net: std::collections::BTreeMap<String, SignedQty> = std::collections::BTreeMap::new();
+    for row in account {
+        if !matches!(row.event_type.as_str(), "FillApplied" | "LateFillApplied") {
+            continue;
+        }
+        let event = envelope(row)?;
+        let owner = text(&event, "payload.client_order_id");
+        if !owner.is_some_and(|id| owned.contains(id)) {
+            continue;
+        }
+        let instrument = text(&event, "payload.instrument_id")?;
+        let qty = SignedQty::from(Qty::parse(text(&event, "payload.qty_gross")?).ok()?);
+        let signed = match text(&event, "payload.side")? {
+            "buy" => qty,
+            "sell" => qty.negated(),
+            _ => return None,
+        };
+        let held = net.entry(instrument.to_owned()).or_insert(SignedQty::ZERO);
+        *held = held.checked_add(signed).ok()?;
+    }
+    Some(
+        net.into_iter()
+            .filter(|(_, qty)| *qty != SignedQty::ZERO)
+            .filter_map(|(instrument, qty)| {
+                object(vec![
+                    ("instrument_id", Value::Str(instrument)),
+                    ("filled_qty", Value::Str(qty.to_string())),
+                    ("cost_basis", Value::Null),
+                    ("risk_mark", Value::Null),
+                    ("protection", Value::Null),
+                ])
+            })
+            .collect(),
+    )
 }

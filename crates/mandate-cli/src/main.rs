@@ -1,4 +1,4 @@
-use std::io;
+use std::io::{self, IsTerminal};
 use std::time::SystemTime;
 
 use anyhow::{Context, bail};
@@ -14,14 +14,16 @@ use mandate_cli::gestures::VersionCommand;
 use mandate_cli::identity::IdentityCommand;
 use mandate_cli::inbox::ApprovalsCommand;
 use mandate_cli::journal::JournalCommand;
+use mandate_cli::postgres::PgControlJournal;
 use mandate_cli::register::{ConfigCommand, ModelCommand};
 #[cfg(feature = "rh-sim")]
 use mandate_cli::sim_clock::from_env;
+use mandate_cli::step_up::StepUpCommand;
 use mandate_cli::vault::VaultCommand;
 use mandate_cli::workspace::WorkspaceCommand;
 use mandate_cli::{
     Cli, Command, artifact, backtest, brake, connection, db, download, evaluation, gestures,
-    identity, inbox, inspect, journal, owner, register, vault, workspace,
+    identity, inbox, inspect, journal, owner, register, step_up, vault, workspace,
 };
 use mandate_marketdata::client::{Client, TokioPause};
 use mandate_marketdata::http::{AlpacaDataHttp, Credentials};
@@ -162,6 +164,12 @@ fn main() -> anyhow::Result<()> {
         Command::Agent(AgentCommand::Exit(args)) => {
             owner::run_exit(&args, now()?, &mut io::stdout().lock())
         }
+        Command::Agent(AgentCommand::Acknowledge(args)) => {
+            owner::run_acknowledge(&args, now()?, &mut io::stdout().lock())
+        }
+        Command::Agent(AgentCommand::RequestAck(args)) => {
+            owner::run_request_ack(&args, now()?, &mut io::stdout().lock())
+        }
         Command::Vault(VaultCommand::Import(args)) => {
             let environment: Vec<(String, String)> = std::env::vars_os()
                 .map(|(k, v)| {
@@ -179,9 +187,25 @@ fn main() -> anyhow::Result<()> {
                 &mut io::stdout().lock(),
             )
         }
-        Command::Vault(VaultCommand::Provision(args)) => {
-            vault::run_provision(&args, &mut io::stdout().lock())
-        }
+        Command::Vault(VaultCommand::Put(args)) => vault::run_put(
+            &args,
+            &mut io::stdin().lock(),
+            vault::Terminals {
+                stdin: io::stdin().is_terminal(),
+                stdout: io::stdout().is_terminal(),
+            },
+            now()?.at,
+            &mut io::stdout().lock(),
+        ),
+        Command::Vault(VaultCommand::Provision(args)) => vault::run_provision(
+            &args,
+            &mut io::stdin().lock(),
+            vault::Terminals {
+                stdin: io::stdin().is_terminal(),
+                stdout: io::stdout().is_terminal(),
+            },
+            &mut io::stdout().lock(),
+        ),
         Command::Db(DbCommand::Migrate(args)) => {
             db::migrate(&args, &mut io::stdout().lock())?;
             Ok(())
@@ -191,6 +215,12 @@ fn main() -> anyhow::Result<()> {
         }
         Command::Evaluation(EvaluationCommand::Run(args)) => {
             evaluation::run_command(&args, now()?, &mut io::stdout().lock()).map(drop)
+        }
+        Command::StepUp(StepUpCommand::Confirm(args)) => {
+            let checked = step_up::check(&(&args).into())?;
+            let mut journal = PgControlJournal::open(&args.target)?;
+            let out = &mut io::stdout().lock();
+            step_up::run_confirm(&checked, &mut journal, now()?, out).map(drop)
         }
     }
 }

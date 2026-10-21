@@ -125,6 +125,22 @@ impl Challenges {
         held.insert(record.challenge_id().0.clone(), record.clone());
         Ok(record)
     }
+
+    /// The challenge held under `id`, expired or not: an expired challenge is still found here, so
+    /// a step-up presenting it is stale rather than missing ([DEC-2105] item 3).
+    ///
+    /// [DEC-2105]: ../../../docs/project/decisions/DEC-2105.md
+    pub fn held(&self, id: &str) -> Option<ChallengeRecord> {
+        let held = self.held.lock().unwrap_or_else(PoisonError::into_inner);
+        held.get(id).cloned()
+    }
+
+    /// Drops the challenge held under `id` once a grant verifies with it (DEC-2104 item 6), and
+    /// whether it was still held: a second grant racing the first finds it gone.
+    pub fn take(&self, id: &str) -> bool {
+        let mut held = self.held.lock().unwrap_or_else(PoisonError::into_inner);
+        held.remove(id).is_some()
+    }
 }
 
 /// `POST /v1/workspaces/{ws}/step-up/challenges` (DEC-2103 items 1 to 4).

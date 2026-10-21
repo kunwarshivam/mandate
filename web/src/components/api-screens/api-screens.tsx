@@ -339,7 +339,7 @@ export function ApiApproval({ approvalId }: { approvalId: string }) {
             <EnvironmentBadge environment={environment} />
           </div>
           <p className="text-muted-foreground">{agent ? <AgentName agent={agent} /> : <NotReported>Name not reported</NotReported>}</p>
-          <p className="text-hero">{line}</p>
+          <p className="text-h1 text-pretty">{line}</p>
         </header>
         <Panel well>
           <dl className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3">

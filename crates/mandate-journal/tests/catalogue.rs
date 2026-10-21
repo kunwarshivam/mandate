@@ -5,7 +5,7 @@ mod common;
 
 use common::{STREAM, T, edit, event_id, mark_draft};
 use mandate_canon::{Digest, Value, parse, to_canonical};
-use mandate_journal::{Draft, InvalidReason};
+use mandate_journal::{Draft, InvalidReason, StreamType, stream_event_types};
 
 const FEE: &str = "fee_config";
 const CAL: &str = "trading_calendar";
@@ -954,7 +954,7 @@ fn registered_schemas_accept_their_payloads() {
                 &[MAN],
                 &format!(
                     r#"{{"intent_id":"{intent}","agent_id":"agent_a","instrument_id":"i","side":"buy",
-                "type":"limit","tif":"day","qty":"10.0","limit_price":null,"purpose":"open"}}"#
+                "type":"limit","tif":"day","qty":"10.0","limit_price":"150","purpose":"open"}}"#
                 ),
             ),
         ),
@@ -1567,7 +1567,6 @@ fn the_anchor_and_segment_records_are_catalogued_and_closed_on_the_control_strea
 /// Journal spec v0.62 §9.29 (DEC-2104): `StepUpConfirmed` is on the control stream alone, with no
 /// configuration, closed there at schema version 1.
 #[test]
-#[ignore = "pending E9-4"]
 fn the_step_up_confirmation_is_catalogued_and_closed_on_the_control_stream() {
     closed_on_the_control_stream(&["StepUpConfirmed"]);
 }
@@ -1676,4 +1675,36 @@ fn closed_on_the_control_stream(event_types: &[&str]) {
         let want = (InvalidReason::UnknownSchema, "payload");
         assert_eq!((e.reason, e.path.as_str()), want, "{event_type} version 2");
     }
+}
+
+/// `stream_event_types` lists every account-stream type §9 places there, with the copies and the
+/// owner-exit confirmation (DEC-2040), and none that only another stream holds.
+#[test]
+fn stream_event_types_lists_the_account_streams_types_and_no_other() {
+    let account: Vec<&str> = stream_event_types(StreamType::Account).collect();
+    for (event_type, streams, _) in SPEC {
+        if streams.contains(&ACCT) {
+            assert!(account.contains(event_type), "{event_type} is missing");
+        }
+    }
+    for event_type in [
+        "OwnerConfirmationReceived",
+        "ConnectionChecked",
+        "OwnerAlertSent",
+    ] {
+        assert!(account.contains(&event_type), "{event_type} is missing");
+    }
+    for event_type in [
+        "ObservationRecorded",
+        "MandateConfirmed",
+        "ClockOffsetRecorded",
+        "MeterReserved",
+        "NoticeIssued",
+        "NotAnEvent",
+    ] {
+        assert!(!account.contains(&event_type), "{event_type} is listed");
+    }
+    let agent: Vec<&str> = stream_event_types(StreamType::Agent).collect();
+    assert!(agent.contains(&"ObservationRecorded") && agent.contains(&"KillSwitchActivated"));
+    assert!(!agent.contains(&"FillApplied"));
 }

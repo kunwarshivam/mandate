@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.1, not yet reviewed ([DEC-436](../project/decisions/DEC-436.md)). §4.6.1 adds the desk, the cited-record read, and the transcript view, and §4.3's approval read its explanation (E12-5, E19-15; [DEC-2240](../project/decisions/DEC-2240.md), agent readings; the disclaimer is [DEC-2241](../project/decisions/DEC-2241.md)'s placeholder, Proposed). Round 1 fixes applied. Items 1 to 16 and 19 to 21 of DEC-436 are agent readings; items 17 and 18 are Proposed and wait for the founder. §4.8.1 adds the audit read contracts (E12-6; [DEC-760](../project/decisions/DEC-760.md) to [DEC-767](../project/decisions/DEC-767.md), agent readings). §3.5, §4.5, and §5.6 add the revoke's step-up digests and its refusals (E10-13; [DEC-693](../project/decisions/DEC-693.md) and [DEC-698](../project/decisions/DEC-698.md), agent readings). §4.5's Connect row names the pending connection's `ConnectionRequested` and the `ConnectionRefused` that may close it (journal spec v0.32, [DEC-699](../project/decisions/DEC-699.md)). §4.8.1's Verification closes its refusal order, id, inputs, run order, and record on `VerificationRun` version 2, with an `incomplete` result for a token that cannot be proven (journal spec v0.36; [DEC-786](../project/decisions/DEC-786.md) to [DEC-788](../project/decisions/DEC-788.md), agent readings; [DEC-789](../project/decisions/DEC-789.md), the founder). §4.8.1's Inputs verify an anchor's prefix from genesis and bind it to the range's trusted start, or the range fails closed (journal spec v0.37; [DEC-892](../project/decisions/DEC-892.md), an agent reading). §4.8.1's run order compares each start or in-range segment's hot rows with its cold file, `segment_rows_mismatch` (journal spec v0.38; [DEC-894](../project/decisions/DEC-894.md), an agent reading). §4.2 and §4.7 add the backtest report's and the forward-paper evaluation's read shapes (E4-5, E17-8; [DEC-1001](../project/decisions/DEC-1001.md) and [DEC-1002](../project/decisions/DEC-1002.md), agent readings; their disclosures are named placeholders, [DEC-1003](../project/decisions/DEC-1003.md), Proposed). §3.11 adds the server process (its bind, environment, probes, drain, and browser sessions) and §3.5 widens the planned `busy` to a draining process (E21-31; [DEC-978](../project/decisions/DEC-978.md), agent readings, item 10 Proposed); §4.3 and §4.7 add the first read-model shapes, agents and approvals (E21-31, E10-10; [DEC-979](../project/decisions/DEC-979.md), an agent reading); §3.11 item 10 records pause and the kill switch as the CLI does (E21-31; [DEC-1007](../project/decisions/DEC-1007.md), agent readings, item 8 Proposed). §3.11 item 7 fixes the subject-link file at `/etc/mandate/subject-links` and refuses a path that does not itself name the file opened (E21-31; [DEC-1023](../project/decisions/DEC-1023.md), an agent reading). §3.11 item 2 lets a `dev` or `ci` cell point the issuer settings at the local stub issuer (E21-52; [DEC-2100](../project/decisions/DEC-2100.md), an agent reading). §3.11 items 11 and 12 serve versions, confirmation, deployment, resume, Stop, owner exit, acknowledgment, and command status (E10-11, E10-12; [DEC-2101](../project/decisions/DEC-2101.md), [DEC-2102](../project/decisions/DEC-2102.md), agent readings) |
+| **Status** | Draft v0.1, not yet reviewed ([DEC-436](../project/decisions/DEC-436.md)). §4.6.1 adds the desk, the cited-record read, and the transcript view, and §4.3's approval read its explanation (E12-5, E19-15; [DEC-2240](../project/decisions/DEC-2240.md), agent readings; the disclaimer is [DEC-2241](../project/decisions/DEC-2241.md)'s placeholder, Proposed). Round 1 fixes applied. Items 1 to 16 and 19 to 21 of DEC-436 are agent readings; items 17 and 18 are Proposed and wait for the founder. §4.8.1 adds the audit read contracts (E12-6; [DEC-760](../project/decisions/DEC-760.md) to [DEC-767](../project/decisions/DEC-767.md), agent readings). §3.5, §4.5, and §5.6 add the revoke's step-up digests and its refusals (E10-13; [DEC-693](../project/decisions/DEC-693.md) and [DEC-698](../project/decisions/DEC-698.md), agent readings). §4.5's Connect row names the pending connection's `ConnectionRequested` and the `ConnectionRefused` that may close it (journal spec v0.32, [DEC-699](../project/decisions/DEC-699.md)). §4.8.1's Verification closes its refusal order, id, inputs, run order, and record on `VerificationRun` version 2, with an `incomplete` result for a token that cannot be proven (journal spec v0.36; [DEC-786](../project/decisions/DEC-786.md) to [DEC-788](../project/decisions/DEC-788.md), agent readings; [DEC-789](../project/decisions/DEC-789.md), the founder). §4.8.1's Inputs verify an anchor's prefix from genesis and bind it to the range's trusted start, or the range fails closed (journal spec v0.37; [DEC-892](../project/decisions/DEC-892.md), an agent reading). §4.8.1's run order compares each start or in-range segment's hot rows with its cold file, `segment_rows_mismatch` (journal spec v0.38; [DEC-894](../project/decisions/DEC-894.md), an agent reading). §4.2 and §4.7 add the backtest report's and the forward-paper evaluation's read shapes (E4-5, E17-8; [DEC-1001](../project/decisions/DEC-1001.md) and [DEC-1002](../project/decisions/DEC-1002.md), agent readings; their disclosures are named placeholders, [DEC-1003](../project/decisions/DEC-1003.md), Proposed). §3.11 adds the server process (its bind, environment, probes, drain, and browser sessions) and §3.5 widens the planned `busy` to a draining process (E21-31; [DEC-978](../project/decisions/DEC-978.md), agent readings, item 10 Proposed); §4.3 and §4.7 add the first read-model shapes, agents and approvals (E21-31, E10-10; [DEC-979](../project/decisions/DEC-979.md), an agent reading); §3.11 item 10 records pause and the kill switch as the CLI does (E21-31; [DEC-1007](../project/decisions/DEC-1007.md), agent readings, item 8 Proposed). §3.11 item 7 fixes the subject-link file at `/etc/mandate/subject-links` and refuses a path that does not itself name the file opened (E21-31; [DEC-1023](../project/decisions/DEC-1023.md), an agent reading). §3.11 item 2 lets a `dev` or `ci` cell point the issuer settings at the local stub issuer (E21-52; [DEC-2100](../project/decisions/DEC-2100.md), an agent reading). §3.11 items 11 and 12 serve versions, confirmation, deployment, resume, Stop, owner exit, acknowledgment, and command status (E10-11, E10-12; [DEC-2101](../project/decisions/DEC-2101.md), [DEC-2102](../project/decisions/DEC-2102.md), agent readings). §4.10 names the caller's principal on one's own session and serves one's own memberships from a hosted deployment's control stream (E10-10; [DEC-2113](../project/decisions/DEC-2113.md), an agent reading). §3.6 adds the passkey registration challenge, enrolment, and list routes (E9-4; [DEC-2108](../project/decisions/DEC-2108.md), [DEC-2115](../project/decisions/DEC-2115.md), agent readings) |
 | **Implements** | [HLD §4](../HLD.md#workspace-deployment) (workspace control services), [§6 flows A and C](../HLD.md#6-key-flows), [§7](../HLD.md#7-logging-and-audit), [§8](../HLD.md#8-multi-tenancy-and-security); PRD FR-1.4, FR-2.1 to FR-2.4, FR-3.1 to FR-3.5, FR-4.4, FR-6.2 to FR-6.5, FR-7.1 to FR-7.5, FR-8.1 to FR-8.4; backlog E8, E10, E11, E12 |
 | **Depends on** | [Mandate spec](mandate.md) §2, §6, §7, §9, §10; [journal spec](journal.md) §2, §5, §7, §9, §11, §12; [infrastructure design](../design/infrastructure.md) §3.6, §9; [product experience brief](../product/09-product-experience.md) §3 to §5 |
 | **Siblings** | Identity, roles, sessions, and step-up ceremonies: the [identity spec](identity.md), gap 6. Notification delivery and approval deep links: the [notifications spec](notifications.md), gap 7. Broker connection flows: `docs/specs/connections.md` (gap 9) |
@@ -354,8 +354,9 @@ The ceremony belongs to the [identity spec](identity.md) (E9-4). The API's part:
   `step_up_challenge`: the session (the one 401, or `reduction_only` for a reduction-only session,
   identity spec §7.2 step 1 and §7.3), the CSRF mark, `Idempotency-Key`, the body
   (`commands/step-up-challenge-request`, strict), then the §3.7 row the kind needs; a principal
-  that may not perform the action gets that row's refusal and no challenge, and the two kinds of
-  `own` rows answer the one 404 until their own routes land. The challenge id is
+  that may not perform the action gets that row's refusal and no challenge, and
+  `notification_address`, the other `own` row's kind, answers the one 404 until its routes land;
+  `credential_enrol` is served for the passkey routes below. The challenge id is
   §3.4's derived id for the key, so a retry with the same action answers the same challenge and
   the same key with another action is `idempotency_conflict`. Only after the row is granted is a
   `live` workspace refused `live_unavailable`, so a principal without the row gets that row's
@@ -365,6 +366,46 @@ The ceremony belongs to the [identity spec](identity.md) (E9-4). The API's part:
   `action`, `issued_at`, and `expires_at`. Challenges are held in the server's memory, at most 32
   unexpired per principal and 4,096 in all (`rate_limited` past either), and never journaled
   when issued; a challenge the server no longer holds counts as missing.
+- The passkey routes ([DEC-2108](../project/decisions/DEC-2108.md) items 4 and 5,
+  [DEC-2115](../project/decisions/DEC-2115.md)) serve §3.7's row "Enrol or remove one's own
+  passkey", its `own` cell: a member acts on their own passkeys only, and no route names another
+  member's. The API calls a credential a passkey (`passkey_id`), since a response member's name
+  never says credential; it is journal spec §9.31's `credential_id`, the same unpadded base64url.
+  Each answers with `Cache-Control: no-store`, and the server never logs a body.
+  - `POST /v1/workspaces/{ws}/passkeys/registration-challenges`, operation name
+    `passkey_registration_challenge`: the session (the one 401, or `reduction_only`), the CSRF mark,
+    `Idempotency-Key`, the body (`commands/passkey-registration-challenge-request`, strict, empty),
+    the row, then a `live` workspace is refused `live_unavailable`. A member with no passkey on the
+    control stream whose session was opened more than 300 s ago is refused `step_up_stale`, since a
+    first enrolment's evidence is a fresh full session (DEC-2108 item 5); the client signs the member
+    in again. It answers `201` with `commands/passkey-registration-challenge`: `challenge_id` (§3.4's
+    derived id for the key), `webauthn_challenge` (32 bytes from the operating system's generator,
+    unpadded base64url), the deployment's `rp_id`, `user_handle` (the principal's 16 bytes),
+    `exclude` (the member's enrolled passkeys), `step_up_needed` (true when the member holds a
+    passkey), `issued_at`, and `expires_at`, 300 s later. A registration challenge is held in the
+    server's memory, bound to the principal and workspace, never journaled, and counted with the
+    step-up challenges under their limits (`rate_limited`).
+  - `POST /v1/workspaces/{ws}/passkeys`, operation name `passkey_enrol`: the same session, CSRF,
+    key, body (`commands/passkey-enrol-request`, strict), row, and `live` checks; then the
+    registration challenge: held, unexpired, and naming this principal and workspace, else
+    `invalid` at `/challenge_id`. The submit drops it whatever follows, so it is used at most once.
+    Then the step-up: with no passkey on the stream, `step_up` and `step_up_assertion` are null and
+    the session must have been opened within 300 s (`step_up_stale`); with one, the call carries
+    passkey step-up of kind `credential_enrol` whose action digest is the SHA-256 of
+    `{"op": "enrol", "registration": <challenge_id>}` in the journal's canonical form (journal spec
+    §4), judged in §3.5's order. Then `mandate_passkey::enrol` reads the response (attestation
+    `none`, this deployment's origin and RP ID, user verification), else `invalid`; a passkey id
+    the stream has ever enrolled is `invalid` at `/passkey_id`. It stores the public key's COSE
+    bytes as an artifact, commits `CredentialEnrolled` (with `StepUpAsserted` in its batch when
+    step-up was given, journal spec §9.32), and answers `201` with `commands/passkey-enrolled`. A
+    first passkey's `cool_off_ends` is 24 hours after the commit, and `CredentialEnrolled` raises
+    the member's `credential_added` notice (notifications spec), opaque ids only.
+  - `GET /v1/workspaces/{ws}/passkeys`, operation name `passkeys`: the member's passkeys the
+    control stream holds, enrolled and not removed, in enrolment order
+    (`read-models/passkeys`), with no step-up: a read of one's own opaque ids grants nothing.
+  - Removal, `POST /v1/workspaces/{ws}/passkeys/{passkey_id}/removal` with kind `credential_enrol`
+    and `{"op": "remove", "credential": <passkey_id>}` (DEC-2108 item 6), lands with its own story
+    slice; until then the route does not exist.
 - The evidence the call then carries is `{assertion_id, authenticated_at, method}`, the shape the
   journal records (journal spec §9.2). The API checks it is bound to the call's digest and unused,
   and records it. **Validity is judged by the stream owner** at the moment mandate spec §6.1 names;
@@ -461,6 +502,7 @@ How the API's operations map onto those rows:
 | One's own workspaces, `GET /v1/me/workspaces` (identity spec §4.5) | List one's own workspace memberships |
 | One's own notification channels (a push subscription): set, remove | Add or remove one's own notification address |
 | One's own notification channels: list | List one's own notification addresses |
+| One's own passkeys: registration challenge, enrol, list (§3.6) | Enrol or remove one's own passkey; the list needs no step-up (DEC-2115) |
 | Owner request, dry run, chat (§4.6) | Make an owner request; dry run of a request; chat thread with the agent. A client also needs the `request` or `dry_run` scope (§3.8) and has no chat |
 | The desk: send; read one's own thread, its cited and fallback records, and an owner run's transcript (§4.6.1) | Chat thread with the agent, the asking member only. An approval's explanation, its cited records, and an explain run's transcript: View agents, positions, decisions. (An ideation or monitoring run's transcript is §4.7's read model row.) |
 
@@ -847,13 +889,44 @@ asset class, side, quantity, limit, order dollars, and purpose, and version 2's
 | Operation | Method and path | Event | Notes |
 |---|---|---|---|
 | List, read connections | `GET /connections`, `GET /connections/{id}` | — | Opaque id, broker, environment, scopes, the 1× check, data profile, restrictions, agents granted, loss carry (O4). **References only**: no account number, key, or token (API-11) |
-| Connect | `POST /connections/oauth/start`, then the broker redirects to the fixed `GET /v1/oauth/alpaca/callback`, outside the workspace prefix because a registered redirect URI cannot carry a workspace id; the workspace comes from the single-use `state` | At start, `ConnectionRequested`, committed with the step-up challenge marked used (identity spec §7.2 step 5); then `ConnectionEstablished` (version 2) once the checks pass, or `ConnectionRefused` (occasion `connect`) on a failed check or the teardown. Each closes the request once; an owner's revoke of the pending id (`ConnectionRevoked`) closes it instead, and nothing further is journaled for that request (journal spec §9.8 rule 131, [DEC-699](../project/decisions/DEC-699.md) item 5) | Step-up before start. PKCE and a single-use `state`; the callback refuses a `state` that does not name a server-issued `env=paper` request for that workspace (DEC-821 item 3), writes the code straight to the vault, and calls no broker; the token-exchange process exchanges it and the executor runs the permission checks, and the API appends the event once their passing results are journaled (§1.4); scopes beyond trading reject the connection (FR-2.2). Flow details are the connections spec's |
+| Connect | `POST /connections/oauth/start`, then the broker redirects to the fixed `GET /v1/oauth/alpaca/callback`, outside the workspace prefix because a registered redirect URI cannot carry a workspace id; the workspace comes from the single-use `state` | At start, `ConnectionRequested`, committed with the step-up challenge marked used (identity spec §7.2 step 5); then `ConnectionEstablished` (version 2) once the checks pass, or `ConnectionRefused` (occasion `connect`) on a failed check or the teardown. Each closes the request once; an owner's revoke of the pending id (`ConnectionRevoked`) closes it instead, and nothing further is journaled for that request (journal spec §9.8 rule 131, [DEC-699](../project/decisions/DEC-699.md) item 5) | Step-up before start, its digest binding the token-breadth disclosure's document and version ([DEC-2621](../project/decisions/DEC-2621.md) item 4, amending [DEC-693](../project/decisions/DEC-693.md) items 1 and 2). PKCE and a single-use `state`; the callback refuses a `state` that does not name a server-issued `env=paper` request for that workspace (DEC-821 item 3), writes the code straight to the vault, and calls no broker; the token-exchange process exchanges it and the executor runs the permission checks, and the API appends the event once their passing results are journaled (§1.4); scopes beyond trading reject the connection (FR-2.2). Flow details are the connections spec's |
 | Revoke | `POST /connections/{id}/revoke` | `ConnectionRevoked` | Step-up, bound to §5.6's ordinary-revoke digest. Refused while any agent on it holds positions or is not stopped, or while the folds that say so cannot answer (below): without the connection nothing can exit or re-protect, so an ordinary revoke is not risk reduction. For a credential the owner believes is compromised, use the next row |
 | Revoke now, on compromise | `POST /connections/{id}/revoke` with `compromised: true` | `OwnerCommandIssued` (`kill_switch`, connection scope), then `ConnectionRevoked` (reason `compromised`, journal spec §9.10), in one batch | §5.6. Never waits on positions: the kill switch runs first in the same command, then the credential is revoked |
 | Policies | `GET`, `PUT /policies/workspace` | `PolicyChanged` | A value looser than its parent is refused naming the nearest ancestor (FR-1.5); the response lists agents made nonconforming (X1). Step-up |
 | Members | `GET /members`, `POST /invitations`, `PATCH`, `DELETE /members/{id}` | Identity spec's events (journal change) | Removing a member ends their sessions and tokens at once |
-| My workspaces | `GET /v1/me/workspaces` | — | (planned: E10-10) The signed-in user's own workspace memberships, at the principal's own scope and outside every workspace path: identity spec §4.5's *List one's own workspace memberships*, which [#811](https://github.com/kunwarshivam/mandate/pull/811) adds. Returns only the caller's memberships (API-9) |
+| My workspaces | `GET /v1/me/workspaces` | — | The signed-in user's own workspace memberships, at the principal's own scope and outside every workspace path: identity spec §4.5's *List one's own workspace memberships*, which [#811](https://github.com/kunwarshivam/mandate/pull/811) adds. Returns only the caller's memberships (API-9); served from a hosted deployment's control stream (§4.10, [DEC-2113](../project/decisions/DEC-2113.md)) |
 | Clients | `GET /clients`, `POST /clients`, `DELETE /clients/{id}` | `ClientConnected`, `ClientRevoked` (journal spec §9.10) | Create needs step-up and shows the scopes in words (E10-8); revoke needs none |
+
+**The connections read** ([DEC-2620](../project/decisions/DEC-2620.md)). `GET /connections` returns
+`read-models/connections`, every connection the control stream names, in the order its first record
+names it, and `GET /connections/{id}` returns `read-models/connection`, or `not_found` for an id the
+control stream does not name. Each is folded from the control stream alone (API-14), with its
+watermark in `as_of`: `connection_id`, `broker`, `environment`; `state` (`connecting` after
+`ConnectionRequested`, `established` after `ConnectionEstablished`, `refused` after a connect's
+`ConnectionRefused`, `revoked` after `ConnectionRevoked`; a later request, a rotation, and a
+`reconnect` or `reauthorize` refusal leave it as it was); `scopes`, the latest establishment's
+grant, `null` before one; `since`, when the record that set `state` was recorded; `refusal`, the
+connect refusal's `check` and `reason`, set exactly when `refused`; `revoked_reason`, version 2's
+`owner` or `compromised` when `revoked`, `null` for a version-1 revocation, which names none; and
+`agents`, those whose latest `AgentDeployed` is version 2, names it, and is not stopped. The
+journaled `account_ref`, `user`, and `step_up` are not served. The 1× check, the data profile, the
+restrictions, and the loss carry are planned as optional members. **(planned: E10-13)**
+
+**The connect start** ([DEC-2623](../project/decisions/DEC-2623.md)). `POST
+/connections/oauth/start` takes `commands/oauth-start-request`: `broker` (`alpaca`), `environment`,
+`disclosure` (the token-breadth disclosure's document and version, which the connect digest binds,
+[DEC-2621](../project/decisions/DEC-2621.md) item 4), and `step_up`. It answers `201` with
+`commands/oauth-start-response`: `authorization_url`, `expires_at`, and the pending
+`connection_id`. One code per response, in this order: §3.4's session, CSRF mark, key, and body
+checks; the `BrokerConnection` permission, and `live_unavailable` for a `live` workspace; `invalid`
+at `/disclosure` for a version other than the current one; §3.5's step-up codes; then
+`live_unavailable` for `environment` `live`, `journal_unavailable` for a control-stream fold that
+cannot answer, and `idempotency_conflict` for a request already open, an establishment, or a used
+`account_ref` under the key's derived ids. A refused start appends nothing. The `connection_id` and
+`account_ref` are derived from the key, so a retry names the same pending connection; while its
+`state` is held and unredeemed the retry answers the same `201`, and after that the key is spent
+(`idempotency_conflict`). The redirect URI is the deployment's own, an API setting, and a deployment
+that names no OAuth client answers `not_found`. **(planned: E10-13)**
 
 **The ordinary revoke's refusals** (`compromised` `false` or absent; [DEC-693](../project/decisions/DEC-693.md)
 items 6 and 7, [DEC-698](../project/decisions/DEC-698.md)). The API decides them from the journal's
@@ -982,7 +1055,18 @@ adds the account's holdings at its last reconciliation as `account_positions`, t
 `BrokerPositionObserved` per instrument on the account stream of the connection the document
 names (model and broker quantities, the mismatch flag, and when observed), `null` when that stream
 is not found. They are the account's, not the agent's: no journaled fold attributes holdings per
-agent yet. The account stream's watermark joins `as_of`. Limit usage (the ladder's rung, the day-trade count, headroom) is not
+agent yet. The account stream's watermark joins `as_of`.
+
+`GET /agents/{id}/orders` and `GET /agents/{id}/positions` return `read-models/orders` and
+`read-models/positions` ([DEC-2111](../project/decisions/DEC-2111.md)), from the account stream of
+the connection the deployed document names (`account_ref` `null`, and the lists empty, when it is
+not found). An order is the agent's when its `OrderRequestRecorded` names the agent: its request as
+first submitted, and `state` and `filled_qty` from the last `OrderStateChanged` (`null` before any;
+`unknown` served as unknown). `positions` is the net `filled_qty` of the agent's own fills per
+instrument, not the ledger's fold (an own fill that cannot be read is `journal_unavailable`, never
+skipped, [DEC-2112](../project/decisions/DEC-2112.md)); `cost_basis`, `risk_mark`, and `protection` are present and
+`null` until those folds are served. `account_positions` is the account's, as on the single agent
+read. Limit usage (the ladder's rung, the day-trade count, headroom) is not
 journaled yet and is not served; it joins with E6-4's risk records. The rest of D2 (restrictions,
 the floor, the universe) is planned as optional members.
 
@@ -1503,10 +1587,11 @@ workspace exists to name before it is authorized (identity spec §4.5, §6.4).
 
 | Operation | Method and path | Event | Notes |
 |---|---|---|---|
-| List one's own workspace memberships | `GET /v1/me/workspaces` | — | Authorized by the `self` row "List one's own workspace memberships" (identity spec §4.2): a full session of a user principal only. Returns the caller's `active` memberships as `{workspace_id, label, roles}` from the membership index, reading no workspace's data; absent and foreign workspaces look the same. A failed index read is `membership_unavailable` ([DEC-816](../project/decisions/DEC-816.md) item 1) |
+| One's own session | `GET /v1/me/session` | — | On the authentication plane, outside the matrix (identity spec §4.2, §4.5; DEC-816 item 7): reads only the caller's own session record and yields no context. Answers `{principal_id, kind, expires_at}` with `as_of` `[]`: the caller's own principal id, never a session reference, cookie, token, digest, subject, or issuer; `expires_at` is the earlier of the idle and absolute deadlines. A session an outage narrowed is refused `reduction_only`, and no live session gets the one 401. Shape: `read-models/session` ([DEC-2113](../project/decisions/DEC-2113.md)) |
+| List one's own workspace memberships | `GET /v1/me/workspaces` | — | Authorized by the `self` row "List one's own workspace memberships" (identity spec §4.2): a full session of a user principal only. Returns the caller's `active` memberships as `{workspace_id, label, roles}` from the membership index, reading no workspace's data; absent and foreign workspaces look the same. A failed index read is `membership_unavailable` ([DEC-816](../project/decisions/DEC-816.md) item 1). A hosted deployment's index is its control stream's membership fold; `label` is `null` until one is recorded; `as_of` is `[]`. Shape: `read-models/my-workspaces` ([DEC-2113](../project/decisions/DEC-2113.md)) |
 
-Owed to the identity spec's lanes, and listed so the prefix rule above is complete: `GET /v1/me/session`,
-`POST /v1/reduction-sessions/challenges`, and `POST /v1/reduction-sessions` (identity spec §6.4 route 2;
+Owed to the identity spec's lanes, and listed so the prefix rule above is complete:
+`POST /v1/reduction-sessions/challenges` and `POST /v1/reduction-sessions` (identity spec §6.4 route 2;
 they sit outside the matrix, DEC-816 item 7). Every failure of the last is the one answer, 401 `unauthenticated` (§3.5), with no distinguishing timing, and `GET /v1/oauth/alpaca/callback` (§4.5).
 
 | Operation | Method and path | Event | Notes |
@@ -2015,14 +2100,14 @@ risk-reducing call never consults one (API-7, API-8).
 | Approval service endpoints and delegation previews | **Planned** (E8-15) |
 | Connection endpoints | **Planned** (E10-13, with gap 9) |
 | Client tokens and scopes | **Planned** (E10-14, before E10-6) |
-| Read-model projections | **Planned** (E11-9) |
-| Journal queries, trace, exports over the API | **Planned** (E12-6); contracts in §4.8.1, served by the pure crate `mandate-audit` |
+| Read-model projections | **Partly served** (E11-9): agents and approvals (§4.3, §4.7, DEC-979), and an agent's orders and positions (§4.7, [DEC-2111](../project/decisions/DEC-2111.md)); the ledger, risk-mark, and protection folds are planned |
+| Journal queries, trace, exports over the API | **Partly served** (E12-6): a stream's events page and one event (§4.8.1); trace, exports, and verification over the API are planned, their contracts in §4.8.1, served by the pure crate `mandate-audit` |
 | The backtest report (`read-models/backtest`) and `BacktestRunRecorded` | **Specified** (DEC-1000, DEC-1001; journal spec v0.45 §9.18); the run is **planned** (E4-4), the record's registration and the route **planned** (E4-5) |
 | The forward-paper evaluation (`read-models/evaluation`) and `EvaluationRunRecorded` | **Specified** (DEC-1002; journal spec v0.45 §9.18); the pure scorer **exists** (`mandate_research::score`); the harness, the record's registration, and the route **planned** (E17-8) |
 | Journal events this spec needs: `MandateDraftSaved`, the compiler's invocation on the control stream, `MandateConfirmed`'s agent link, and `OwnerRequestSubmitted` | **Specified** (journal spec v0.21 §9.9, DEC-670); `mandate-journal` registration planned (E10-15) |
 | The `client` actor, `ConnectionRevoked`'s reason, and the client events | **Specified** (journal spec v0.22 §3 and §9.10, DEC-671); `mandate-journal` registration planned (E10-15) |
 | `hold_openings` and `lift_hold` | **Specified** (journal spec v0.23 §9.11, DEC-672); `mandate-journal` registration planned (E10-15) |
-| Sessions, roles, step-up ceremonies | **Planned** (E9, the identity spec) |
+| Sessions, roles, step-up ceremonies | **Partly served** (E9, the identity spec): browser sessions (§3.11 items 5 and 6), one's own session and memberships (§4.10, [DEC-2113](../project/decisions/DEC-2113.md)), and step-up challenges (§3.6, DEC-2103); member routes, role changes, and the passkey ceremony are planned |
 | Notification addresses (§4.11, §5.7) and `NotificationAddressChanged` | **Planned** (E8-14). Mounted once the API's authentication middleware lands and the journal spec change that writes the `NotificationAddressChanged` row (the L3 lane's journal spec v0.28 PR, §9.15) merges. Merge order: #811, #763, this change (#827), then #833. The push-service allowlist's decision is DEC-792 (this spec change, #827); the web client's mirror of its table is #833, which merges after #827. Accepted when: a canary scan of responses, problems, logs, metrics and the journal finds no endpoint, key, or endpoint hash; the append is failed at every step of §5.7's tables (API-3's test) and crash injection gives each stated outcome; a replay after a lost `202` returns it; a retry with a different body, once its event exists, answers the original outcome and writes nothing to the vault; before the event exists, with the entry present, it is `idempotency_conflict`; a retry racing the sweep ends with the entry present or `address_missing` recorded; inert and removed entries neither match an endpoint nor count to the limit; two concurrent PUTs of one endpoint, an eleventh address, and a double removal are each settled by the expected head; a PUT of an unreachable address's endpoint replaces it in one batch with no last send to the old address; a stream busy for 5 attempts answers `busy` without a second vault write or step-up judgment; deactivation removes every address in its own commit, under the acting principal; a foreign `address_ref` answers byte-for-byte as a random one; the shared allowlist table (DEC-792) passes; and a replayed or wrongly bound step-up is refused |
 | The relay's own allowlist check (DEC-792 item 3) | **Planned** (E20-8) |
 

@@ -11,7 +11,7 @@ use proptest::prelude::*;
 use secrecy::{ExposeSecret, SecretString};
 
 use crate::SourceError;
-use crate::credentials::{check_credential_dir, read_token_file, write_credentials};
+use crate::credentials::{check_credential_dir, read_token, read_token_file, write_credentials};
 use crate::openbao::RoleCredentials;
 use crate::policy::Identity;
 
@@ -525,4 +525,57 @@ proptest! {
             prop_assert_eq!(mode(&file), 0o600);
         }
     }
+}
+
+fn token_read(input: &[u8]) -> Result<String, SourceError> {
+    read_token(&mut &input[..]).map(|token| token.expose_secret().to_owned())
+}
+
+/// A piped token is read by the file's rules: the token alone, or with one trailing newline.
+#[test]
+fn a_piped_token_is_read_with_at_most_one_trailing_newline() {
+    assert_eq!(token_read(b"s.abc"), Ok("s.abc".to_owned()));
+    assert_eq!(token_read(b"s.abc\n"), Ok("s.abc".to_owned()));
+}
+
+/// An empty pipe, a second line, or a carriage return anywhere is refused.
+#[test]
+fn a_piped_token_that_is_empty_or_not_one_line_is_refused() {
+    for input in [
+        &b""[..],
+        b"\n",
+        b"s.abc\n\n",
+        b"s.abc\nmore",
+        b"s.abc\r\n",
+        b"s.a\rbc",
+        b"\ns.abc",
+    ] {
+        assert_eq!(
+            token_read(input),
+            Err(SourceError::CredentialFile),
+            "{:?}",
+            String::from_utf8_lossy(input)
+        );
+    }
+}
+
+/// A pipe holding more than 4096 bytes is refused, newline or not; 4096 is read.
+#[test]
+fn a_piped_token_longer_than_its_bound_is_refused() {
+    let longest = "a".repeat(4096);
+    assert_eq!(token_read(longest.as_bytes()), Ok(longest.clone()));
+    let with_newline = format!("{}\n", "a".repeat(4095));
+    assert_eq!(token_read(with_newline.as_bytes()), Ok("a".repeat(4095)));
+    for input in ["a".repeat(4097), format!("{longest}\n")] {
+        assert_eq!(
+            token_read(input.as_bytes()).map(|token| token.len()),
+            Err(SourceError::CredentialFile)
+        );
+    }
+}
+
+/// A pipe that is not UTF-8 is refused.
+#[test]
+fn a_piped_token_that_is_not_utf8_is_refused() {
+    assert_eq!(token_read(b"s.\xffabc"), Err(SourceError::CredentialFile));
 }

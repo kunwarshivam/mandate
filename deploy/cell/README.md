@@ -63,8 +63,10 @@ Each is a test in `deploy/tests/test_cell.py`, run with helm by `cargo xtask ci 
 - `MANDATE_DEPLOYMENT_TIER` on every process comes from the `deploymentTier` value alone:
   `production` unless a values file says otherwise, `ci` in the local cell, `dev` on hosted cell #1
   (DEC-971 item 2, [DEC-2001](../../docs/project/decisions/DEC-2001.md) item 6);
-- the cell's one ingress is a `cloudflared` pod dialing out to Cloudflare's tunnel edge, off in the
+- the cell's one ingress is `cloudflared` dialing out to Cloudflare's tunnel edge, off in the
   local cell: no Service, NodePort, LoadBalancer or Ingress, and the tunnel token a mounted file;
+  where the API runs, it runs as a second container of the API's pod and reaches the API's
+  loopback listener (DEC-2056);
 - no k3s-only, provider-only or cloud-only API: the k3s and managed renderings are identical, and
   k3d's differs only by the tunnel.
 - one shared artifact store (mandate documents, backtest reports), the claim `artifacts` at
@@ -108,13 +110,15 @@ Needs docker, plus k3d, helm and kubeconform at the versions in `.github/workflo
 
 ```bash
 cargo xtask cell up               # build the image, start k3d, install the operator, its backup plugin, the test store, journal-db, vault, workspace
-cargo xtask cell drill            # boot, journal, egress, compose, restart, kill-switch, admission, standby-down, archive
+cargo xtask cell drill            # boot, journal, egress, compose, restart, kill-switch, admission, standby-down, archive, executor
 cargo xtask cell drill --seeded   # each drill with its bug planted; fails if one still holds
 cargo xtask cell down
 cargo xtask ci cell               # what CI runs: chart checks, up, drills, seeded drills, demo --no-web
 cargo xtask ci cell-journal       # and beside it: up, then standby-down and archive, plain and seeded
 cargo xtask ci cell-failover      # and beside it: up, then restart (a failover with the standby), plain and seeded
-cargo xtask ci cell-kill-switch   # and beside it: up, then kill-switch, admission and vault, plain and seeded (DEC-2602, DEC-2022)
+cargo xtask ci cell-kill-switch   # and beside it: up, then kill-switch and admission, plain and seeded (DEC-2602)
+cargo xtask ci cell-executor      # and beside it: up, then executor, plain and seeded (DEC-2615, DEC-2035)
+cargo xtask ci cell-vault         # and beside it: up, then vault, plain and seeded (DEC-2616, DEC-2022)
 ```
 
 `cell up` is idempotent: it reuses a running cluster and upgrades the releases. kubectl is the one
@@ -237,6 +241,16 @@ another already pins ([DEC-2036](../../docs/project/decisions/DEC-2036.md)). CI'
 the scenario on every change (`cargo xtask ci cell-demo`). Behind a TLS-inspecting proxy, set
 `MANDATE_CELL_CA_BUNDLE` to the proxy's CA bundle first.
 
+For staging, `cargo xtask cell demo --scenario demo --dry-run --image <ref@sha256:...> --workspace
+<ULID> [--namespace <ns>]` renders the gestures' Job and its inputs' ConfigMap with `helm template`
+alone, from staging's values (`deploy/cell/values/managed.yaml`, then
+`deploy/gitops/clusters/staging/images.yaml`), in `ws-ws1` unless `--namespace` names another, and
+prints them one JSON object a line. It reads no kubeconfig, reaches no cluster and applies nothing.
+The image must be a release pinned by its digest, since staging admits only signed release images,
+and the workspace is the fixed one staging's API hosts. Running the demo against staging is a later
+slice: it needs staging's sign-in (the stub issuer is refused there) and a fresh agent per run in
+that one workspace.
+
 ### The drills
 
 | Drill | What holds | Its seeded bug |
@@ -251,10 +265,12 @@ the scenario on every change (`cargo xtask ci cell-demo`). Behind a TLS-inspecti
 | `standby-down` | With the synchronous standby fenced, an append neither commits nor becomes visible on the primary, and its Job ends on its deadline; once the standby is back and streams synchronously, a new append commits and every stream written verifies by journal spec §11 (OPS-2, E21-41) | The cluster's durability set to `preferred`, so the primary commits alone: `committed with the standby fenced` |
 | `vault` | `mandate vault provision` sets the cell's vault up (DEC-2022), then from a pod labelled as the executor each AppRole logs in and reads: a runtime nothing, an executor exactly its own connection's token and not `drill-other`'s, the model gateway its key; and no `mandate-*` policy holds `*` or `+`. It runs in `cell-kill-switch`, after the kill switch's drill | The runtime's policy rewritten to read every connection's token through `+`: the check must name `wildcard in mandate-runtime` |
 | `archive` | A closed WAL segment is reported archived by Postgres, a base backup completes, and Barman's own tools, reading the store with the archive's key, list the backup and fetch the segment back (E21-41) | The archive pointed at another bucket of the same store, which Postgres cannot tell: `not in the archive` |
+| `executor` | An agent deployed on a recorded paper connection, and the deployment manager starting that account's executor until its pod runs and its process answers `livez` (E21-30, [DEC-2035](../../docs/project/decisions/DEC-2035.md)). Not `readyz`: the executor is ready only after a scheduler tick, and the cell builds no scheduler yet, so none is ever journaled there. Three one-off Jobs: the executor's connect check on its in-process fixture broker, which prints the passing `ConnectionChecked`; the workspace opened and founded and the record's code shown; then the record committed and the demo's mandate registered, created, confirmed and deployed, so `AgentDeployed` is version 2 (journal spec §9.24 rule 201). No credential, no broker host | The connect check skipped, so the connection is never recorded and the agent deploys at version 1: `no executor pod` |
 
 A seeded run counts as caught only when its report names the planted bug's own symptom
 (`rehash_mismatch`, a live host reached, the deleted policy missing, `export_stream_empty`, the
-missing kill switch, a commit with the standby fenced, a segment not in the archive), never any
+missing kill switch, a commit with the standby fenced, a segment not in the archive, no executor
+pod), never any
 failure. `standby-down` and `archive` run in CI's `cell-journal` job and `restart`, which with the
 synchronous standby is a failover and the old primary's rejoin, in `cell-failover`, each beside
 `cell`, so each stays within ten minutes (DEC-464). A part of a drill that cannot run yet is reported

@@ -143,7 +143,6 @@ fn committed(fx: &Fixture, before: usize, by: &str, expected: &[&str], second: i
 /// §9.28, rule 239: an acknowledgment needing no independent user has §9.28's members, names no
 /// request, and names its own user as the requester, so a real journal accepts it.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_plain_acknowledgment_has_section_9_28s_members_and_a_journal_accepts_it() {
     let mut fx = Fixture::new();
     answer(
@@ -190,7 +189,6 @@ fn executor_case(name: &str) -> Value {
 /// acknowledgment of `reference/journal`'s `plain_under_overlay` case, whose oracle refuses its
 /// copy `not_independent` under a requiring overlay and lifts nothing.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_plain_acknowledgment_under_a_requiring_policy_is_the_one_the_executor_refuses() {
     let case = executor_case("plain_under_overlay");
     assert_eq!(
@@ -237,7 +235,6 @@ fn a_plain_acknowledgment_under_a_requiring_policy_is_the_one_the_executor_refus
 /// with nothing committed; with it, it commits one `OwnerAcknowledgmentRequested` that names the
 /// owner as the requester, requires an independent user, and carries step-up evidence.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_request_needs_the_code_and_names_its_owner_as_the_requester() {
     let mut fx = Fixture::new();
     let checker = user(CHECKER);
@@ -283,7 +280,6 @@ fn a_request_needs_the_code_and_names_its_owner_as_the_requester() {
 /// DEC-2512 item 2, rules 239 and 240: an acknowledgment of another user's request names it, copies
 /// its requester, requires an independent user, and names the acknowledging owner as `user`.
 #[test]
-#[ignore = "pending E8-3"]
 fn an_acknowledgment_of_another_users_request_names_it_and_copies_its_requester() {
     let mut fx = Fixture::new();
     let asked = answer(
@@ -311,7 +307,6 @@ fn an_acknowledgment_of_another_users_request_names_it_and_copies_its_requester(
 /// Rule 239, DEC-2512 items 2 and 4: a user never acknowledges their own request. The CLI refuses it
 /// `not_independent` and commits nothing.
 #[test]
-#[ignore = "pending E8-3"]
 fn acknowledging_your_own_request_is_refused_not_independent() {
     let mut fx = Fixture::new();
     let asked = answer(
@@ -332,7 +327,6 @@ fn acknowledging_your_own_request_is_refused_not_independent() {
 /// request, a request of another agent or another event, or a request an earlier acknowledgment
 /// already answered, is refused `request_invalid` and commits nothing.
 #[test]
-#[ignore = "pending E8-3"]
 fn an_acknowledgment_naming_no_matching_unspent_request_is_refused_request_invalid() {
     let mut fx = Fixture::new();
     let checker = user(CHECKER);
@@ -394,7 +388,6 @@ fn an_acknowledgment_naming_no_matching_unspent_request_is_refused_request_inval
 /// acknowledgment, and an earlier acknowledgment of another request, leave a request unspent, so
 /// its acknowledgment commits.
 #[test]
-#[ignore = "pending E8-3"]
 fn an_earlier_acknowledgment_does_not_spend_another_request() {
     let mut fx = Fixture::new();
     let checker = user(CHECKER);
@@ -439,11 +432,68 @@ fn an_earlier_acknowledgment_does_not_spend_another_request() {
     );
 }
 
+/// The #1822 review: a control-stream row the CLI cannot parse fails the acknowledgment closed,
+/// committing nothing, rather than being skipped, so an acknowledgment the CLI could not read never
+/// leaves its request looking unspent (rule 241).
+#[test]
+fn an_unreadable_control_row_refuses_an_acknowledgment_of_a_request() {
+    let mut fx = Fixture::new();
+    let asked = answer(
+        "request",
+        run(&mut fx, &user(CHECKER), AGENT, &request(42), ASKED_AT),
+    );
+    fx.journal.push_raw(
+        CONTROL,
+        "OwnerAcknowledged",
+        b"{\"payload\": {\"request\": ",
+    );
+    let before = rows(&fx).len();
+    let ack = acknowledge(42, Some(&asked.event_id));
+    let got = run(&mut fx, &owner(), AGENT, &ack, ASKED_AT + 5);
+    assert!(matches!(got, Err(ControlError::Journal(_))), "{got:?}");
+    assert_eq!(rows(&fx).len(), before, "nothing committed");
+}
+
+/// The #1822 review, nit 2: rule 239 is judged before rule 240, as §9.28 check 4 orders
+/// `not_independent` before `request_invalid` (the vectors' `independence_before_the_request`). The
+/// owner's own request of another agent or another event is refused `not_independent`.
+#[test]
+fn your_own_request_is_not_independent_before_it_is_another_agents_or_events() {
+    let mut fx = Fixture::new();
+    let other_agent = answer(
+        "request",
+        run(&mut fx, &owner(), OTHER_AGENT, &request(42), ASKED_AT),
+    );
+    let other_event = answer(
+        "request",
+        run(&mut fx, &owner(), AGENT, &request(43), ASKED_AT + 1),
+    );
+    let before = rows(&fx).len();
+    for (what, named) in [
+        ("another agent's", other_agent),
+        ("another event's", other_event),
+    ] {
+        assert_eq!(
+            run(
+                &mut fx,
+                &owner(),
+                AGENT,
+                &acknowledge(42, Some(&named.event_id)),
+                ASKED_AT + 5
+            ),
+            Err(ControlError::Refused {
+                reason: "not_independent"
+            }),
+            "{what}"
+        );
+        assert_eq!(rows(&fx).len(), before, "{what}: nothing committed");
+    }
+}
+
 /// DEC-2512 items 1 and 2: the code binds what the owner confirms. A request's code differs from an
 /// acknowledgment's of the same event, and an acknowledgment's code differs with the request it
 /// names, or none.
 #[test]
-#[ignore = "pending E8-3"]
 fn the_code_binds_the_request_an_acknowledgment_names() {
     let fx = Fixture::new();
     let of = |cmd: &Command| {

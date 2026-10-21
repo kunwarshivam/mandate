@@ -416,11 +416,6 @@ fn a_read_outside_the_data_universe_is_refused_whole() {
 fn reads_not_served_yet_read_nothing_and_answer_unavailable() {
     let fixture = with_bars(bars("AAPL", 5));
     for (tool, arguments) in [
-        (Tool::MarketQuote, r#"{"symbols":["AAPL"]}"#),
-        (
-            Tool::FilingsGet,
-            r#"{"item":"f-1","length":100,"offset":0}"#,
-        ),
         (Tool::MemoryPositions, "{}"),
         (Tool::MemoryTheses, r#"{"status":"active"}"#),
         (Tool::MemoryRuns, r#"{"limit":5}"#),

@@ -3,12 +3,13 @@
 //! ever an argument, an environment variable, or printed.
 
 use std::fs::{self, DirBuilder, File, OpenOptions, Permissions};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::path::Path;
 use std::process;
 
 use mandate_connections::record::ConnectionId;
+use secrecy::zeroize::Zeroize;
 use secrecy::{ExposeSecret, SecretString};
 
 use crate::SourceError;
@@ -168,9 +169,40 @@ pub fn read_token_file(path: &Path) -> Result<SecretString, SourceError> {
         return Err(SourceError::CredentialFile);
     }
     let text = fs::read_to_string(path).map_err(|_| SourceError::CredentialFile)?;
-    let token = text.strip_suffix('\n').unwrap_or(&text);
+    token_from(&text)
+}
+
+/// The token `text` holds: the token and at most one trailing newline, with no other line break
+/// or carriage return. Anything else is [`SourceError::CredentialFile`].
+fn token_from(text: &str) -> Result<SecretString, SourceError> {
+    let token = text.strip_suffix('\n').unwrap_or(text);
     if token.is_empty() || token.contains(['\n', '\r']) {
         return Err(SourceError::CredentialFile);
     }
     Ok(SecretString::from(token.to_owned()))
+}
+
+/// The most bytes [`read_token`] reads: an operator's token is far shorter.
+pub const TOKEN_MAX: u64 = 4096;
+
+/// Reads an operator's token from `input`, a pipe its caller owns, by the rules of
+/// [`read_token_file`]'s text: the token and at most one trailing newline. Input longer than
+/// [`TOKEN_MAX`] bytes, or not UTF-8, is [`SourceError::CredentialFile`] too; whatever was read
+/// of a refused input is zeroized before it is dropped.
+pub fn read_token(input: &mut impl Read) -> Result<SecretString, SourceError> {
+    let mut bytes = Vec::new();
+    let read = input
+        .take(TOKEN_MAX.saturating_add(1))
+        .read_to_end(&mut bytes);
+    if read.is_err() || u64::try_from(bytes.len()).map_or(true, |read| read > TOKEN_MAX) {
+        bytes.zeroize();
+        return Err(SourceError::CredentialFile);
+    }
+    match String::from_utf8(bytes) {
+        Ok(text) => token_from(SecretString::from(text).expose_secret()),
+        Err(invalid) => {
+            invalid.into_bytes().zeroize();
+            Err(SourceError::CredentialFile)
+        }
+    }
 }

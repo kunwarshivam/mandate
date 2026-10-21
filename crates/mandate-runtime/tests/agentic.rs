@@ -20,7 +20,9 @@ use mandate_gateway::tools::ToolCall as GatewayToolCall;
 use mandate_gateway::{CallRecord, Outcome};
 use mandate_journal::{Draft, Invalid};
 use mandate_research::{AssetId, WorkingUniverse};
-use mandate_research_run::agentic::{LoopBounds, OutputMode, Tool, ToolCallId, ToolOutcome};
+use mandate_research_run::agentic::{
+    LoopBounds, OutputMode, RunKind, Tool, ToolCallId, ToolOutcome,
+};
 use mandate_research_run::{Retrieval, retrieve};
 use mandate_runtime::{
     ActiveThesis, AgenticConfig, Command, DispatchRequest, DispatchedResult, Effect, EventDraft,
@@ -404,6 +406,11 @@ fn turn_one_follows_the_seed_s_observations_with_the_menu_and_the_run_s_ceiling(
     let world = world();
     let (run, seed) = seeded(&ports, &world);
     let turn = turn_of(&seed);
+    assert_eq!(
+        turn.kind,
+        RunKind::Ideate,
+        "the run's kind, for the turn's call"
+    );
     assert_eq!(turn.plan.turn, 1);
     assert_eq!(turn.plan.tools, agentic().ideate_menu);
     assert_eq!(turn.plan.spend_ceiling, agentic().cost_ceiling);
@@ -580,6 +587,11 @@ fn a_monitor_reply_carrying_a_thesis_uses_nothing_and_ends_the_run_error() {
         Some("monitor")
     );
     let turn = turn_of(&seed);
+    assert_eq!(
+        turn.kind,
+        RunKind::Monitor,
+        "the run's kind, for the turn's call"
+    );
     let before = run.lp.types().len();
     let record = reply(&run, &turn, &world, Vec::new(), Some(RESPONSE_AAPL));
     answered(&mut run, record, &ports, &world);
@@ -1401,4 +1413,133 @@ fn every_record_of_an_agentic_run_passes_the_journal_s_check() {
     ] {
         assert!(seen.contains(kind), "{kind} was checked: {seen:?}");
     }
+}
+
+fn refusal(run: &Run, secs: i64) -> ResearchInput {
+    ResearchInput::Refused {
+        run_id: run.run_id.clone(),
+        at: clock(secs),
+        error: mandate_gateway::RequestError::Tools,
+    }
+}
+
+fn starts_a_run(step: &ResearchStep) -> bool {
+    step.requests
+        .iter()
+        .any(|r| matches!(r, ResearchRequest::Start { .. }))
+}
+
+/// DEC-2261 item 1: the gateway's refusal of a turn ends the run `error` at once, with no record of
+/// the refused call, and asks the worker for nothing more.
+#[test]
+fn a_refused_turn_ends_the_run_error_with_no_record() {
+    let (ids, plan, view) = fixture();
+    let ports = ports(&ids, &AllowGate, &plan, &view);
+    let world = world();
+    let (mut run, seed) = seeded(&ports, &world);
+    turn_of(&seed);
+    let before = run.lp.types().len();
+    let input = refusal(&run, CUT_OFF + 20);
+    let step = go(&mut run.lp, input, &ports, &world);
+    assert_eq!(
+        run.lp.types()[before..],
+        ["RunSummaryRecorded", "RunEnded"],
+        "the end, and no ModelInvocationRecorded for a call the gateway never made"
+    );
+    assert_eq!(
+        payload_str(run.lp.events("RunEnded")[0], "reason"),
+        Some("error")
+    );
+    assert!(step.requests.is_empty(), "no turn follows: {step:?}");
+    assert!(run.lp.research.in_flight().is_none());
+}
+
+/// DEC-2261 item 2: a refused turn withdraws its pin, as a refused single call does: no run starts
+/// under it again, and a new version re-enables research.
+#[test]
+fn a_refused_turn_withdraws_its_pin_until_a_new_version() {
+    let (ids, plan, view) = fixture();
+    let ports = ports(&ids, &AllowGate, &plan, &view);
+    let mut world = world();
+    let (mut run, _) = seeded(&ports, &world);
+    let input = refusal(&run, CUT_OFF + 20);
+    go(&mut run.lp, input, &ports, &world);
+    let later = clock(CUT_OFF + 2 * i64::from(common::research::INTERVAL_S));
+    let withdrawn = go(&mut run.lp, ResearchInput::Poll(later), &ports, &world);
+    assert!(!starts_a_run(&withdrawn), "{withdrawn:?}");
+    if let Some(config) = world.config.as_mut() {
+        config.pin.model_version = "0.2.0".to_owned();
+    }
+    let repinned = go(
+        &mut run.lp,
+        ResearchInput::Poll(clock(later.secs() + 1)),
+        &ports,
+        &world,
+    );
+    assert!(starts_a_run(&repinned), "a new version re-enables research");
+}
+
+/// DEC-2261 item 3: a refusal while the run's reads are out, not its turn, is not interpreted, and
+/// the run stays as it was.
+#[test]
+fn a_refusal_while_the_reads_are_out_is_not_interpreted() {
+    let (ids, plan, view) = fixture();
+    let ports = ports(&ids, &AllowGate, &plan, &view);
+    let world = world();
+    let (mut run, seed) = seeded(&ports, &world);
+    let turn = turn_of(&seed);
+    let record = reply(
+        &run,
+        &turn,
+        &world,
+        vec![call(
+            0,
+            "news.search",
+            r#"{"symbols":["AAPL"],"terms":["services"]}"#,
+        )],
+        None,
+    );
+    let step = answered(&mut run, record, &ports, &world);
+    dispatch_of(&step);
+    let before = run.lp.types().len();
+    let input = refusal(&run, CUT_OFF + 25);
+    let refused = tried(&mut run.lp, input, &ports, &world);
+    assert!(
+        matches!(
+            refused,
+            Err(mandate_runtime::RuntimeError::NotInterpreted { .. })
+        ),
+        "{refused:?}"
+    );
+    assert_eq!(run.lp.types().len(), before, "nothing journaled");
+    assert_eq!(run.lp.research.in_flight(), Some(run.run_id.as_str()));
+}
+
+/// A refusal naming another run is not this run's, whatever phase this run is in.
+#[test]
+fn a_refusal_for_another_run_leaves_the_agentic_run_in_flight() {
+    let (ids, plan, view) = fixture();
+    let ports = ports(&ids, &AllowGate, &plan, &view);
+    let world = world();
+    let (mut run, _) = seeded(&ports, &world);
+    let before = run.lp.types().len();
+    let refused = tried(
+        &mut run.lp,
+        ResearchInput::Refused {
+            run_id: "01NOTTHISRUN".to_owned(),
+            at: clock(CUT_OFF + 20),
+            error: mandate_gateway::RequestError::Tools,
+        },
+        &ports,
+        &world,
+    );
+    assert!(
+        matches!(
+            refused,
+            Err(mandate_runtime::RuntimeError::NotInterpreted { .. })
+        ),
+        "{refused:?}"
+    );
+    assert_eq!(run.lp.types().len(), before);
+    assert_eq!(run.lp.research.in_flight(), Some(run.run_id.as_str()));
 }

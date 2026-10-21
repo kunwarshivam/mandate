@@ -37,11 +37,27 @@ resource "digitalocean_tag" "nodes" {
   name = "${var.name}-nodes"
 }
 
-resource "digitalocean_vpc" "this" {
-  name        = var.name
+# The VPC is named for its region and never destroyed by a plan (DEC-2054). DigitalOcean makes the
+# first VPC in a region that region's default and refuses to delete a default VPC, so staging's
+# first VPC, in nyc3, could not be replaced when the cluster moved to sfo2. It is forgotten below,
+# never destroyed, for the founder to delete by hand once it is no longer the default.
+resource "digitalocean_vpc" "west" {
+  name        = "${var.name}-${var.region}"
   region      = var.region
   ip_range    = var.ip_range
   description = "Managed by deploy/tofu (E21-56)."
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+removed {
+  from = digitalocean_vpc.this
+
+  lifecycle {
+    destroy = false
+  }
 }
 
 locals {
@@ -63,18 +79,18 @@ resource "digitalocean_firewall" "nodes" {
   inbound_rule {
     protocol         = "tcp"
     port_range       = "1-65535"
-    source_addresses = [digitalocean_vpc.this.ip_range]
+    source_addresses = [digitalocean_vpc.west.ip_range]
   }
 
   inbound_rule {
     protocol         = "udp"
     port_range       = "1-65535"
-    source_addresses = [digitalocean_vpc.this.ip_range]
+    source_addresses = [digitalocean_vpc.west.ip_range]
   }
 
   inbound_rule {
     protocol         = "icmp"
-    source_addresses = [digitalocean_vpc.this.ip_range]
+    source_addresses = [digitalocean_vpc.west.ip_range]
   }
 
   dynamic "outbound_rule" {
@@ -88,12 +104,12 @@ resource "digitalocean_firewall" "nodes" {
 
   outbound_rule {
     protocol              = "icmp"
-    destination_addresses = [digitalocean_vpc.this.ip_range]
+    destination_addresses = [digitalocean_vpc.west.ip_range]
   }
 }
 
 output "vpc_id" {
-  value = digitalocean_vpc.this.id
+  value = digitalocean_vpc.west.id
 }
 
 output "node_tag" {
@@ -101,5 +117,5 @@ output "node_tag" {
 }
 
 output "region" {
-  value = digitalocean_vpc.this.region
+  value = digitalocean_vpc.west.region
 }

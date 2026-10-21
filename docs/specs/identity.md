@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | v0.3 ([DEC-437](../project/decisions/DEC-437.md); v0.2 adds the readings code needs, [DEC-640](../project/decisions/DEC-640.md) to [DEC-643](../project/decisions/DEC-643.md), and [DEC-832](../project/decisions/DEC-832.md); v0.3 adds one's own memberships and session, one's own notification address, principal scope, who may obtain a step-up challenge, reduction-only sessions' workspaces, and `refresh_failed`, [DEC-816](../project/decisions/DEC-816.md)). [DEC-668](../project/decisions/DEC-668.md) item 1 narrows DEC-642 item 7's wording: §4.5's `mandate-tenant` also holds the ID values. Items 1 to 14 of DEC-437 are agent readings; item 15 is decided by the founder in [DEC-820](../project/decisions/DEC-820.md) and applied by DEC-640; DEC-642 item 10 (a failed membership read never refuses a risk-reducing operation) is accepted by the founder, 2026-10-08; items 16 to 21 are Proposed and wait for the founder |
+| **Status** | v0.4 ([DEC-437](../project/decisions/DEC-437.md); v0.2 adds the readings code needs, [DEC-640](../project/decisions/DEC-640.md) to [DEC-643](../project/decisions/DEC-643.md), and [DEC-832](../project/decisions/DEC-832.md); v0.3 adds one's own memberships and session, one's own notification address, principal scope, who may obtain a step-up challenge, reduction-only sessions' workspaces, and `refresh_failed`, [DEC-816](../project/decisions/DEC-816.md); v0.4 names the caller's own principal on one's own session and reads a hosted deployment's membership index from its control stream, [DEC-2113](../project/decisions/DEC-2113.md)). [DEC-668](../project/decisions/DEC-668.md) item 1 narrows DEC-642 item 7's wording: §4.5's `mandate-tenant` also holds the ID values. Items 1 to 14 of DEC-437 are agent readings; item 15 is decided by the founder in [DEC-820](../project/decisions/DEC-820.md) and applied by DEC-640; DEC-642 item 10 (a failed membership read never refuses a risk-reducing operation) is accepted by the founder, 2026-10-08; items 16 to 21 are Proposed and wait for the founder |
 | **Implements** | [HLD §4](../HLD.md#4-architecture) (org directory, workspace deployment, deployment modes) and [§8](../HLD.md#8-multi-tenancy-and-security); PRD [FR-1.1 to FR-1.6](../product/04-prd-v1.md#61-identity-and-tenancy); backlog E9 |
 | **Depends on** | [Mandate spec §4.3, V-047, §6.1, §6.4, §6.5](mandate.md#43-policy-hierarchy-dec-51-dec-98); [journal spec §2, §3, §6.4, §7](journal.md#3-event-envelope); [infrastructure design §5, OPS-6](../design/infrastructure.md#5-secrets-and-the-vault); [inference spec INF-9, INF-11](inference.md#2-invariants); [DEC-141](../project/04-decision-log.md#decisions), [DEC-211](../project/04-decision-log.md#decisions), [DEC-411](../project/decisions/DEC-411.md) |
 | **Read by** | The workspace services API spec (`docs/specs/workspace-api.md`, DEC-436), the notifications spec (`docs/specs/notifications.md`, DEC-438), and the threat model (`docs/security/threat-model.md`, DEC-439), all drafted in parallel. They take roles, principals, and step-up from here |
@@ -457,12 +457,18 @@ W's writer cannot write a row of workspace V. If the index
 cannot be read, the route is refused `membership_unavailable` (503); it is not a risk-reducing
 operation. Pause and the kill switch never wait on it: the specified fallback is route 2 (§6.4),
 whose answer and `GET /v1/me/session` name the workspaces it covers. A list the web app kept
-from an earlier read is only a convenience.
+from an earlier read is only a convenience. A deployment that hosts one workspace from its control
+stream (workspace API spec §3.11) keeps its index as that stream's membership fold, read at the
+request's instant; a `label` no event has recorded is `null` ([DEC-2113](../project/decisions/DEC-2113.md)
+items 4 and 5).
 
 **One's own session.** `GET /v1/me/session`, on the authentication plane (§4.2), answered for
 any session about itself only and reading
-only that session's record, answers `{kind, expires_at}` and, for a reduction-only session, the
-workspaces it covers (§6.4 route 2), each as `{workspace_id, label}`.
+only that session's record, answers `{principal_id, kind, expires_at}` and, for a reduction-only
+session, the workspaces it covers (§6.4 route 2), each as `{workspace_id, label}`. `principal_id` is
+the session's own principal, in the form the journal records as an actor's id; no session reference,
+token, digest, subject, or issuer is served. `expires_at` is the earlier of the idle and absolute
+deadlines (§6.2) ([DEC-2113](../project/decisions/DEC-2113.md) items 1 to 3).
 
 **`TenantContext`** ([DEC-642](../project/decisions/DEC-642.md)). Only the authorization step
 constructs one, and only when it authorizes a permission at a workspace's scope; an org-scope
@@ -1134,7 +1140,7 @@ the others are catalogued in journal §9 and close in their own change:
 | `MemberActivated` | member (opaque), the invitation accepted (or none for the founding grant), roles, cool-off end, method used |
 | `MemberRoleChanged` | member, roles added and removed, granting user, step-up evidence for a grant, cool-off end per added role |
 | `MemberDeactivated`, `MemberReactivated`, `MemberRemoved` | member, by whom, reason code; for `MemberReactivated`, step-up evidence and the cool-off end instead of a reason |
-| `CredentialEnrolled`, `CredentialRemoved` | member, credential (opaque reference, never the key), kind, enrolment cool-off end |
+| `CredentialEnrolled`, `CredentialRemoved` | member, credential (its id; the public key only as an artifact, never inline), kind, enrolment cool-off end, step-up; closed in [journal §9.31](journal.md#931-passkey-credentials-dec-2108) ([DEC-2108](../project/decisions/DEC-2108.md)) |
 | `SessionOpened` | member, session (opaque), method, device (opaque), `first_seen_device` (true when the principal has not used the device before); the subject event of the notifications spec's `new_device` kind |
 | `SessionRevoked` (reasons schema owed to E9-7) | member, session (opaque), reason (`sign_out`, `deactivated`, `deprovisioned`, `refresh_reuse`, `refresh_failed`, `expired`, `admin`; `expired` is a session ended by its idle or absolute limit, §6.2 and §6.4 route 1; `refresh_failed` is a refresh the provider answered with neither a grant nor a deprovision signal, §6.4 route 1; `deactivated` is a session closed because its principal's last membership that reached a scope in the deployment ended, §5.2 step 2); with `deprovisioned` (§11.1), the subject event of the notifications spec's `deprovisioned` kind |
 | `NotificationAddressChanged` | member, channel, action (`added`, `removed`), opaque address reference, step-up evidence for an add or a member's own removal (null when it rides a deactivation, §5.2); defined with lane L3's web-push routes (PR #827), the endpoint and keys only in the vault |

@@ -743,7 +743,7 @@ impl<'p> Drive<'p> {
             instrument: common::instrument(name),
             side,
             qty: qty(quantity),
-            limit: price(limit),
+            limit: Some(price(limit)),
             purpose,
             protection,
         }

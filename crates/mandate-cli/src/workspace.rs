@@ -8,7 +8,9 @@
 //! `MemberActivated` with reason `founding` that makes its owner a member with the owner bundle
 //! (identity spec §3.2, §4.3, ID-13; journal spec §9.12), through the one membership writer,
 //! `mandate_identity::found_workspace`. It is idempotent, so a Kubernetes Job may run it again:
-//! a re-run for the same member finds the grant, commits nothing, and succeeds.
+//! a re-run for the same member finds the grant, commits nothing, and succeeds. With `--open` it
+//! first opens a stream that holds no event, in `paper`, so a staging bootstrap Job founds a new
+//! workspace in one idempotent step (DEC-2114); a stream holding anything is never opened again.
 
 use std::io::Write;
 
@@ -20,7 +22,7 @@ use mandate_identity::{
     FoundingRefusal, MembershipEvent, MembershipRecord, PrincipalId, WriteError, control_entry,
     found_workspace,
 };
-use mandate_journal::{AppendOutcome, Environment, StreamId};
+use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId};
 use mandate_time::UtcNanos;
 
 use crate::control::{
@@ -52,6 +54,9 @@ pub struct FoundArgs {
     /// How the founder signs in: `passkey`, `oidc`, or `email_link` (identity spec §6.1).
     #[arg(long, value_name = "METHOD")]
     pub method: String,
+    /// Open the control stream first, in `paper`, when it holds no event (DEC-2114).
+    #[arg(long)]
+    pub open: bool,
     #[command(flatten)]
     pub target: JournalArgs,
 }
@@ -62,6 +67,8 @@ pub struct Founding<'a> {
     pub workspace: &'a str,
     pub member: &'a str,
     pub method: &'a str,
+    /// Whether a stream holding no event is opened, in `paper`, before the grant.
+    pub open: bool,
 }
 
 /// What `found` did: the `seq` of the founding grant, and whether this run committed it.
@@ -133,6 +140,7 @@ pub fn found(
         workspace: &args.workspace,
         member: &args.member,
         method: &args.method,
+        open: args.open,
     };
     checked(founding)?;
     let mut journal = PgControlJournal::open(&args.target)?;
@@ -162,7 +170,10 @@ pub fn found_in(
         environment: Environment::Paper,
     };
     let stream = control_stream(&owner)?;
-    let rows = journal.rows(&stream)?;
+    let mut rows = journal.rows(&stream)?;
+    if founding.open && rows.is_empty() {
+        rows = opened(journal, &owner, &stream, clock, report)?;
+    }
     let Some(opening) = rows.first() else {
         return Err(refused(FoundingRefusal::NotOpen.code()));
     };
@@ -213,6 +224,37 @@ pub fn found_in(
     };
     writeln!(report, "{line}").map_err(|e| ControlError::Journal(format!("the report: {e}")))?;
     Ok(Founded { seq, granted })
+}
+
+/// Opens `stream`, which held no event, as `owner`'s `paper` control stream at the clock's
+/// reading, prints it, and reads the stream again. A concurrent opening is the same event, derived
+/// at head 0, so it settles as found rather than opening twice.
+///
+/// # Errors
+/// As [`open_control_stream`], and the journal's error reading the stream.
+fn opened(
+    journal: &mut dyn ControlJournal,
+    owner: &Owner,
+    stream: &StreamId,
+    clock: &mut dyn FnMut() -> UtcNanos,
+    report: &mut dyn Write,
+) -> Result<Vec<StoredEvent>, ControlError> {
+    let at = clock();
+    let Submitted { event_id, seq } = open_control_stream(
+        journal,
+        owner,
+        Now {
+            at,
+            secs: at.secs(),
+        },
+    )?;
+    writeln!(
+        report,
+        "opened {} as event {event_id} at seq {seq}",
+        stream.as_str()
+    )
+    .map_err(|e| ControlError::Journal(format!("the report: {e}")))?;
+    journal.rows(stream)
 }
 
 const METHODS: [&str; 3] = ["passkey", "oidc", "email_link"];

@@ -93,6 +93,12 @@ DIGEST_HEX_FORM = re.compile(r"^[0-9a-f]{64}\Z")
 # §9.29 (DEC-2104 item 1): the code the web app shows for a challenge, normalized.
 CONFIRM_CODE = T("confirm_code")
 CONFIRM_CODE_FORM = re.compile(r"^[0-9A-HJKMNP-TV-Z]{8}\Z")
+# §9.31 (DEC-2108 item 2): a WebAuthn credential id as unpadded base64url, 16 to 1023 bytes, and the
+# authenticator's 32-bit signature counter.
+CREDENTIAL_ID = T("credential_id")
+CREDENTIAL_ID_FORM = re.compile(r"^[A-Za-z0-9_-]{22,1364}\Z")
+SIGN_COUNT = T("sign_count")
+SIGN_COUNT_MAX = 4294967295
 STREAM_SEGMENTS = {"acct": 3, "agent": 3, "ctl": 2, "clock": 2, "ntf": 2, "meter": 2}
 SOURCES = ("user_stated", "user_entered", "template_structure", "platform_proposed", "platform_default")
 STOP_REASONS = ("goal_complete", "profit_stop_reached", "end_date", "owner_stop")
@@ -519,6 +525,24 @@ SCHEMAS[("ctl", "StepUpConfirmed")] = rec(
     ("confirmed_at", INT),
 )
 
+# §9.31 v0.69 (DEC-2108): a member's passkeys with the workspace's relying party, the fold the API's
+# passkey verifier judges an assertion against.
+SCHEMAS[("ctl", "CredentialEnrolled")] = rec(
+    ("member", ULID),
+    ("kind", STR),
+    ("credential", CREDENTIAL_ID),
+    ("public_key", REF),
+    ("alg", one_of("es256", "eddsa")),
+    ("sign_count", SIGN_COUNT),
+    ("cool_off_ends", opt(TS)),
+    ("step_up", opt(STEP_UP)),
+)
+SCHEMAS[("ctl", "CredentialRemoved")] = rec(
+    ("member", ULID),
+    ("credential", CREDENTIAL_ID),
+    ("step_up", STEP_UP),
+)
+
 # §9.8 (DEC-800): a connection's history. The control stream's three records and the account
 # stream's three, with `ConnectionEstablished` at version 2 below, and the executor's copies of the
 # establishment and a rotation on the account stream.
@@ -556,6 +580,11 @@ SCHEMAS[("ctl", "ConnectionRefused")] = rec(
     ("user", STR),
     ("step_up", STEP_UP),
 )
+# §9.8 v0.68 (DEC-2621): how a version-2 request's credential is obtained, what an OAuth token may
+# also reach (U-A4 open, so only `may_reach`), and the one disclosure document rule 255 names.
+REQUEST_CREDENTIALS = ("oauth", "api_key")
+OTHER_ENVIRONMENT_REACH = ("may_reach",)
+BREADTH_DOCUMENT = "alpaca_oauth_token_breadth"
 # §9.8 v0.32 (DEC-694 item 4, DEC-699): the pending connection a connect starts with.
 SCHEMAS[("ctl", "ConnectionRequested")] = rec(
     ("connection_id", IDENT_T),
@@ -1208,6 +1237,7 @@ VERSIONED_VERSIONS: dict[tuple[str, str], tuple[int, ...]] = {
     ("acct", "OrderSubmitted"): (1, 2),
     ("acct", "OrderRequestRecorded"): (1,),
     ("acct", "ProtectionChanged"): (1,),
+    ("acct", "OwnerConfirmationReceived"): (1,),
     ("ctl", "ConnectionEstablished"): (1, 2),
     ("acct", "ConnectionEstablished"): (2,),
     ("ctl", "MandateConfirmed"): (1, 2),
@@ -1217,6 +1247,7 @@ VERSIONED_VERSIONS: dict[tuple[str, str], tuple[int, ...]] = {
     ("ctl", "VerificationRun"): (1, 2),
     ("ctl", "AgentDeployed"): (1, 2),
     ("acct", "MarkUpdated"): (1, 2),
+    ("ctl", "ConnectionRequested"): (1, 2),
 }
 # §9.30 (DEC-2305): `MarkUpdated` version 2 adds the risk mark's bid, its sanity verdict, and its
 # session to version 1's members, with `risk_clock` last; version 1 stays registered.
@@ -1251,6 +1282,17 @@ VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
     ("acct", "OrderSubmitted", 2): rec(*SUBMITTED_V1.fields, ("risk_clock", RISK_CLOCK)),
     ("acct", "OrderRequestRecorded", 1): COMPANION,
     ("acct", "ProtectionChanged", 1): PROTECTION_CHANGED,
+    ("acct", "OwnerConfirmationReceived", 1): rec(
+        ("intent_id", ULID),
+        ("instrument_id", STR),
+        ("qty", DEC),
+        ("bid", DEC),
+        ("bid_size", DEC),
+        ("floor", DEC),
+        ("expires_at", INT),
+        ("copied_from", ULID),
+        ("risk_clock", RISK_CLOCK),
+    ),
     ("ctl", "ConnectionEstablished", 2): ESTABLISHED_V2,
     ("acct", "ConnectionEstablished", 2): rec(*ESTABLISHED_V2.fields, ("risk_clock", RISK_CLOCK)),
     ("ctl", "MandateConfirmed", 2): CONFIRMED_V2,
@@ -1266,6 +1308,21 @@ VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
     ("ctl", "VerificationRun", 2): VERIFICATION_RUN_V2,
     # v0.51 §9.24 (DEC-1171): version 1's members, then the stored document's connection.
     ("ctl", "AgentDeployed", 2): rec(*SCHEMAS[("ctl", "AgentDeployed")].fields, ("connection_id", IDENT_T)),
+    # v0.68 §9.8 (DEC-2621): version 1's members, then how the credential is obtained and, for an
+    # OAuth connect, the token's possible breadth and the disclosure the owner confirmed.
+    ("ctl", "ConnectionRequested", 2): rec(
+        *SCHEMAS[("ctl", "ConnectionRequested")].fields,
+        ("credential", one_of(*REQUEST_CREDENTIALS)),
+        (
+            "breadth",
+            opt(
+                rec(
+                    ("other_environment", one_of(*OTHER_ENVIRONMENT_REACH)),
+                    ("disclosure", rec(("document", IDENT_T), ("version", STR))),
+                )
+            ),
+        ),
+    ),
 }
 
 # §9.6 (DEC-460) and v0.42 (DEC-942): the runtime's approval request. Version 2 is version 1 with
@@ -1466,10 +1523,19 @@ def payload_type_violations(ty: T, value, path: str, skip: frozenset[str]) -> li
             return [Violation("types", "schema", path)]
         ok = (value.startswith("pii_") and is_ulid(value[4:])) or "types.pii_ref" in skip
         return [] if ok else [Violation("types", "non_canonical", path)]
-    if ty.kind in ("pointer", "date", "asset_id", "stream_id", "digest", "limit_key", "confirm_code"):
+    if ty.kind == "sign_count":
+        whole = isinstance(value, int) and not isinstance(value, bool)
+        top = SIGN_COUNT_MAX * 2 if "types.sign_count_range" in skip else SIGN_COUNT_MAX
+        if whole and 0 <= value <= top:
+            return []
+        return [Violation("types", "schema", path)]
+    if ty.kind in ("pointer", "date", "asset_id", "stream_id", "digest", "limit_key", "confirm_code", "credential_id"):
         if not isinstance(value, str):
             return [Violation("types", "schema", path)]
-        if ty.kind == "confirm_code":
+        if ty.kind == "credential_id":
+            padless = len(value) % 4 != 1 or "types.credential_id_length" in skip
+            ok = bool(CREDENTIAL_ID_FORM.match(value)) and padless
+        elif ty.kind == "confirm_code":
             ok = bool(CONFIRM_CODE_FORM.match(value)) or (
                 "types.confirm_code_case" in skip and bool(CONFIRM_CODE_FORM.match(value.upper()))
             )
@@ -1654,6 +1720,20 @@ def risk_limit_violations(event_type: str, draft: dict, skip: frozenset[str]) ->
     return out
 
 
+# Identity spec §10.1's enrolment cool-off (DEC-2108 item 5).
+COOL_OFF_S = 86_400
+
+
+def later_by(start: str, end: str, seconds: int, skip: frozenset[str]) -> bool:
+    """Whether `end` is exactly `seconds` after `start`, to the nanosecond (rule 249)."""
+    if not (isinstance(end, str) and is_timestamp(end)):
+        return False
+    (start_at, start_ns), (end_at, end_ns) = parse_instant(start), parse_instant(end)
+    gap = (end_at - start_at).total_seconds()
+    same_fraction = start_ns == end_ns or "rule.249.fraction" in skip
+    return gap == seconds and same_fraction
+
+
 def rule_holds(name: str, holds: bool, skip: frozenset[str]) -> bool:
     """Whether rule `name` passes, a skipped rule passing."""
     return holds or f"rule.{name}" in skip
@@ -1694,6 +1774,42 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
             clauses.reverse()
         wrong = next((m for m, ok in clauses if not ok), None)
         rule("245", wrong is None, "schema", f"payload.{wrong}" if wrong else "")
+    if event_type == "ConnectionRequested" and draft["schema_version"] == 2:
+        oauth = p["credential"] == "oauth"
+        breadth = p["breadth"]
+        paired = (breadth is not None) == oauth or "rule.255.paired" in skip
+        alpaca = not oauth or p["broker"] == "alpaca" or "rule.255.broker" in skip
+        paper = not oauth or p["environment"] == "paper" or "rule.255.environment" in skip
+        document = (
+            breadth is None
+            or breadth["disclosure"]["document"] == BREADTH_DOCUMENT
+            or "rule.255.document" in skip
+        )
+        clauses = [
+            ("breadth", paired),
+            ("broker", alpaca),
+            ("environment", paper),
+            ("breadth.disclosure.document", document),
+        ]
+        if "order.rule_255_document_first" in skip:
+            clauses.reverse()
+        wrong = next((m for m, ok in clauses if not ok), None)
+        rule("255", wrong is None, "schema", f"payload.{wrong}" if wrong else "")
+    if event_type == "OwnerConfirmationReceived":
+        prices = ["qty", "bid", "bid_size", "floor", "expires_at"]
+        if "order.rule_247_floor_first" in skip:
+            prices.reverse()
+        zero_allowed = "boundary.rule_247_zero" in skip
+
+        def positive(member: str) -> bool:
+            raw = p[member]
+            value = Decimal(raw) if isinstance(raw, int) else normalize_decimal(raw)
+            if f"rule.247.{member}" in skip or value is None:
+                return True
+            return Decimal(value) >= 0 if zero_allowed else Decimal(value) > 0
+
+        wrong = next((m for m in prices if not positive(m)), None)
+        rule("247", wrong is None, "schema", f"payload.{wrong}" if wrong else "")
     if event_type == "StepUpConfirmed":
         rule("242.kind", p["action_kind"] == "approve", "schema", "payload.action_kind")
         rule("242.paper", draft["environment"] == "paper", "schema", "environment")
@@ -1702,6 +1818,24 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
             rule("242.principal", draft["actor"]["id"] == p["principal"], "schema", "actor.id")
         else:
             rule("242.user", False, "schema", "actor.kind")
+    if event_type in ("CredentialEnrolled", "CredentialRemoved"):
+        number = "249" if event_type == "CredentialEnrolled" else "250"
+        if event_type == "CredentialEnrolled":
+            rule("249.kind", p["kind"] == "passkey", "schema", "payload.kind")
+        if rule_holds(f"{number}.user", draft["actor"]["kind"] == "user", skip):
+            rule(f"{number}.member", draft["actor"]["id"] == p["member"], "schema", "actor.id")
+        else:
+            rule(f"{number}.user", False, "schema", "actor.kind")
+        step_up = p["step_up"]
+        if step_up is not None:
+            rule(f"{number}.passkey", step_up["method"] == "passkey", "schema", "payload.step_up.method")
+        if event_type == "CredentialEnrolled":
+            ends = p["cool_off_ends"]
+            if step_up is None:
+                due = ends is not None and later_by(draft["event_time"], ends, COOL_OFF_S, skip)
+            else:
+                due = ends is None or "rule.249.stepped_up_cools" in skip
+            rule("249.cool_off", due, "schema", "payload.cool_off_ends")
     if event_type == "MandateVersionCreated":
         paths = [(entry["path"] or "").encode() for entry in p["provenance"]]
         rule("17", ascending(paths), "non_canonical", "payload.provenance")

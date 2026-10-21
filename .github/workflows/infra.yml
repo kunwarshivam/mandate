@@ -80,7 +80,7 @@ jobs:
         run: rustup show active-toolchain || rustup toolchain install
       # Built here, with no secret in the environment, so no build script ever sees one.
       - id: build
-        run: cargo build --locked --package xtask
+        run: cargo build --locked --package xtask --package mandate-cli --bin xtask --bin mandate
       - run: target/debug/xtask infra
         env:
           MANDATE_INFRA_ENVIRONMENT: ${{ inputs.environment }}
@@ -91,6 +91,8 @@ jobs:
           TF_VAR_cloudflare_api_token: ${{ secrets.CF_INFRA_API_TOKEN }}
           TF_VAR_kube_api_allowed_addresses: ${{ secrets.KUBE_API_ALLOWED_CIDRS }}
           TF_VAR_access_allowed_emails: ${{ secrets.ACCESS_ALLOWED_EMAILS }}
+          MANDATE_OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          MANDATE_FOUNDER_OIDC_SUBJECT: ${{ secrets.FOUNDER_OIDC_SUBJECT }}
       # Runs however the step before ended, once the binary is built, with only the DigitalOcean
       # token and the founder's CIDRs: in staging it closes the control plane to every run's window
       # (DEC-2028 item 3), then it deletes every Spaces key minted for staging's or production's

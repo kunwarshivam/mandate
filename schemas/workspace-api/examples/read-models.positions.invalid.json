@@ -1,0 +1,140 @@
+[
+  {
+    "label": "an unknown top-level member",
+    "set": {
+      "/extra": 1
+    }
+  },
+  {
+    "label": "a missing as_of",
+    "remove": [
+      "/as_of"
+    ]
+  },
+  {
+    "label": "a malformed agent_id",
+    "set": {
+      "/agent_id": "a b"
+    }
+  },
+  {
+    "label": "a malformed account_ref",
+    "set": {
+      "/account_ref": "a b"
+    }
+  },
+  {
+    "label": "positions not an array",
+    "set": {
+      "/positions": {}
+    }
+  },
+  {
+    "label": "account_positions an object",
+    "set": {
+      "/account_positions": {}
+    }
+  },
+  {
+    "label": "an unknown position member",
+    "set": {
+      "/positions/0/extra": 1
+    }
+  },
+  {
+    "label": "an empty instrument_id",
+    "set": {
+      "/positions/0/instrument_id": ""
+    }
+  },
+  {
+    "label": "an instrument_id of 201 characters",
+    "set": {
+      "/positions/0/instrument_id": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    }
+  },
+  {
+    "label": "a numeric filled_qty",
+    "set": {
+      "/positions/0/filled_qty": 10
+    }
+  },
+  {
+    "label": "a cost_basis",
+    "set": {
+      "/positions/0/cost_basis": "5122.5"
+    }
+  },
+  {
+    "label": "a risk_mark",
+    "set": {
+      "/positions/0/risk_mark": "512"
+    }
+  },
+  {
+    "label": "a protection",
+    "set": {
+      "/positions/0/protection": {}
+    }
+  },
+  {
+    "label": "an account position missing broker_qty",
+    "remove": [
+      "/account_positions/0/broker_qty"
+    ]
+  },
+  {
+    "label": "a missing agent_id",
+    "remove": [
+      "/agent_id"
+    ]
+  },
+  {
+    "label": "a missing account_ref",
+    "remove": [
+      "/account_ref"
+    ]
+  },
+  {
+    "label": "a missing positions",
+    "remove": [
+      "/positions"
+    ]
+  },
+  {
+    "label": "a missing account_positions",
+    "remove": [
+      "/account_positions"
+    ]
+  },
+  {
+    "label": "a missing instrument_id",
+    "remove": [
+      "/positions/0/instrument_id"
+    ]
+  },
+  {
+    "label": "a missing filled_qty",
+    "remove": [
+      "/positions/0/filled_qty"
+    ]
+  },
+  {
+    "label": "a missing cost_basis",
+    "remove": [
+      "/positions/0/cost_basis"
+    ]
+  },
+  {
+    "label": "a missing risk_mark",
+    "remove": [
+      "/positions/0/risk_mark"
+    ]
+  },
+  {
+    "label": "a missing protection",
+    "remove": [
+      "/positions/0/protection"
+    ]
+  }
+]

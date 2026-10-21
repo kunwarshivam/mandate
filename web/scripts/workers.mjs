@@ -160,7 +160,7 @@ const DEPLOY_TRIGGERS = ["on:", "  push:", "    branches: [main]", "    paths:",
 /** The deploy job's condition, exactly: `main`, and the switch the founder sets once DEC-1005 is accepted (DEC-1005 item 7). */
 const DEPLOY_IF = "    if: github.ref == 'refs/heads/main' && vars.WEB_DEPLOY_ENABLED == 'true'";
 /** The one step that deploys, and the only secret and variables it may read (DEC-1005 items 2 and 3). */
-const DEPLOY_STEP = { run: "npx wrangler deploy", secrets: ["CLOUDFLARE_API_TOKEN"], vars: ["CLOUDFLARE_ACCOUNT_ID"] };
+const DEPLOY_STEP = { run: "node_modules/.bin/wrangler deploy", secrets: ["CLOUDFLARE_API_TOKEN"], vars: ["CLOUDFLARE_ACCOUNT_ID"] };
 /** The deploy workflow's top-level keys: nothing that sets an environment or defaults for every job. */
 const TOP_LEVEL = ["name", "on", "permissions", "concurrency", "jobs"];
 /** The variables the build may read: public values only, which Next inlines into the bundle (DEC-823 item 5). */
@@ -172,8 +172,11 @@ const PUBLIC_VARS = /^NEXT_PUBLIC_[A-Z0-9_]+$/;
  */
 const CLOUDFLARE_TOOL = /wrangler|opennext|cloudflare\//i;
 const HARMLESS = /\.wrangler\/dry-run\b|\bWRANGLER_SEND_METRICS\b/g;
-/** The only commands that may name a Cloudflare tool, exactly as written: the dry run and the Worker's build and preview scripts. */
-const ALLOWED_COMMANDS = ["npx wrangler deploy --dry-run --outdir .wrangler/dry-run", "opennextjs-cloudflare build", "opennextjs-cloudflare build && opennextjs-cloudflare preview"];
+/**
+ * The only commands that may name a Cloudflare tool, exactly as written: the dry run and the Worker's build and preview scripts.
+ * Wrangler runs from `node_modules/.bin`, where `npm ci` put the lockfile's version; `npx` would fetch one the lockfile does not hold.
+ */
+const ALLOWED_COMMANDS = ["node_modules/.bin/wrangler deploy --dry-run --outdir .wrangler/dry-run", "opennextjs-cloudflare build", "opennextjs-cloudflare build && opennextjs-cloudflare preview"];
 
 /**
  * One line for the first line of `lines` that names a Cloudflare tool and is not an allowed command

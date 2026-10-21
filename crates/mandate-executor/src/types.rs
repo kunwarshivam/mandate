@@ -195,6 +195,23 @@ pub struct OwnerConfirmation {
     pub step_up: String,
 }
 
+/// The owner's confirmation an owner's exit of one instrument is handed with: the bid, bid size,
+/// and floor confirmed on the agent stream's `OwnerExitRequested` the intent follows from, and that
+/// record's id. The executor journals it beside the intent as `OwnerConfirmationReceived` (journal
+/// spec §9.5, DEC-2040), and with it the exit may sell outside the regular session, priced from the
+/// confirmed bid and never below the floor (trading spec §5.5).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HandedConfirmation {
+    pub bid: Price,
+    pub bid_size: Qty,
+    pub floor: Price,
+    /// The instant from which it no longer applies: the step-up's `authenticated_at` plus 300 s,
+    /// judged against the core's journaled event time; at exactly this instant it has expired
+    /// (DEC-2040 item 7).
+    pub expires_at: RiskClock,
+    pub copied_from: EventId,
+}
+
 /// One sell or cancel an agent-scoped flatten asks for: this agent's orders by `client_order_id`,
 /// and exactly its sub-ledger quantity. There is no account-wide variant in this type
 /// (`AGENTS.md` rule 13).
@@ -226,7 +243,7 @@ pub enum IntentBody {
         instrument: InstrumentId,
         side: Side,
         qty: Qty,
-        limit: Price,
+        limit: Option<Price>,
         purpose: Purpose,
         /// The protective prices the order builder computed from the mandate's stop and
         /// take-profit distances (stream H, mandate spec §3's `protection`). The executor places
@@ -261,6 +278,10 @@ pub struct IntentHandoff {
     /// never the submission's (journal spec §9.1, DEC-389 item 3). A flatten has no proposal TIF.
     pub tif: Option<TimeInForce>,
     pub body: IntentBody,
+    /// The owner's confirmation, only for an owner's exit: refused as non-canonical on any other
+    /// purpose, with a bid size that is not positive, or under a limit below the floor
+    /// (DEC-2040 item 1).
+    pub confirmation: Option<HandedConfirmation>,
 }
 
 /// An order's internal state (trading-domain spec §5.7's diagram).

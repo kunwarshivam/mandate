@@ -16,6 +16,8 @@ fn every_error_has_its_stable_code() {
         (ConnectError::StateExpired, "state_expired"),
         (ConnectError::StateUserMismatch, "state_user_mismatch"),
         (ConnectError::StateReused, "state_reused"),
+        (ConnectError::RedirectUriInvalid, "redirect_uri_invalid"),
+        (ConnectError::TokenEntryInvalid, "token_entry_invalid"),
         (ConnectError::RequestRefused, "request_refused"),
         (ConnectError::ScopeMismatch, "scope_mismatch"),
         (ConnectError::TokenType, "token_type"),

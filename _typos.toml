@@ -14,6 +14,7 @@ extend-ignore-re = [
 marginable = "marginable"           # Alpaca's term (non_marginable_buying_power)
 caf = "caf"                         # "café" split by an escaped byte in journal vectors
 fpr = "fpr"                         # gpg --with-colons record type (fingerprint), deploy/
+unparseable = "unparseable"         # an accepted spelling, in Accepted DEC-2254, whose text cannot change (decisions README item 4)
 xdescribe = "xdescribe"             # Vitest's skipped-describe alias, refused by web/scripts/pending.mjs (DEC-750)
 xit = "xit"                         # Vitest's skipped-test alias, refused by web/scripts/pending.mjs (DEC-750)
 xtest = "xtest"                     # Vitest's skipped-test alias, refused by web/scripts/pending.mjs (DEC-750)

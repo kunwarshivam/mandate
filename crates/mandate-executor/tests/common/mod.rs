@@ -71,147 +71,174 @@ impl BindingGateSource for AllowingBindingGate {
         if !request.purpose.adds_risk() {
             return None;
         }
-        let asset = AssetId::new(request.instrument.as_str()).ok()?;
-        let at = UtcNanos::parse_rfc3339("2026-09-21T15:00:00Z").ok()?;
-        let quote_at = UtcNanos::parse_rfc3339("2026-09-21T14:59:59Z").ok()?;
-        let held = Qty::parse("1000000").ok()?;
-        let equity = Usd::parse("1000000000").ok()?;
-        let (asset_class, exchange) = if request.instrument.as_str() == FixedInstruments::CRYPTO {
-            (AssetClass::Crypto, None)
-        } else {
-            (AssetClass::UsEquity, Some(Exchange::Nasdaq))
-        };
-        let positions = BTreeMap::new();
-        let gate_agent = GateAgentId(1);
-        Some(BindingGateInput {
-            config_refs: BindingGateConfigRefs::complete(
-                format!("sha256:{}", "1".repeat(64)),
-                format!("sha256:{}", "2".repeat(64)),
-                format!("sha256:{}", "3".repeat(64)),
-                format!("sha256:{}", "4".repeat(64)),
-                VERSION,
-            ),
-            now: at,
-            config: GateConfig {
-                price_floor: Usd::parse("0.01").ok()?,
-                liquidity_floor_usd: Usd::ZERO,
-                crypto_liquidity_floor_usd: Usd::ZERO,
-                collar_liquid_threshold_usd: Usd::ZERO,
-                collar_liquid_x: Fraction::parse("0.5").ok()?,
-                collar_other_x: Fraction::parse("0.5").ok()?,
-                collar_crypto_x: Fraction::parse("0.5").ok()?,
-                collar_passive_band: Fraction::parse("0.5").ok()?,
-                opposite_fill_interval_s: 0,
-                min_resting_time_s: 0,
-                order_to_fill_max: u32::MAX,
-                order_to_fill_min_orders: u32::MAX,
-                order_size_participation: Fraction::parse("1").ok()?,
-                daily_participation: Fraction::parse("1").ok()?,
-                close_window_minutes: 0,
-                legacy_pdt_equity_threshold: Usd::ZERO,
-                etp_classification_max_age_s: u32::MAX,
-            },
-            mandate: ValidatedMandate::from_validated_parts(
-                RiskLimits {
-                    max_position_usd: equity,
-                    max_position_fraction: Fraction::parse("1").ok()?,
-                    max_order_usd: equity,
-                    max_gross_exposure_usd: equity,
-                    max_orders_per_day: u32::MAX,
-                    reentry_cooldown_s: 0,
-                    rebalance_band: Fraction::parse("1").ok()?,
-                    breach_confirm_s: 0,
-                    drawdown_ladder: Vec::new(),
-                },
-                GoalState::Running,
-                true,
-                true,
-            ),
-            risk: RiskSnapshot {
-                agent_equity: equity,
-                high_water_mark: equity,
-                day_start_equity: equity,
-                capital_base: equity,
-                inherited_loss: Usd::ZERO,
-                latched: BTreeSet::new(),
-                active_rungs: BTreeMap::new(),
-                size_factor: Ratio::parse("1").ok()?,
-                agent_mode: AgentMode::Normal,
-            },
-            account: AccountSnapshot {
-                account_type: AccountType::Margin,
-                state: GateAccountState::Active,
-                crypto_active: true,
-                regime: DayTradeRegime::IntradayMargin {
-                    maintenance_excess: equity,
-                },
-                equity,
-                prior_close_equity: equity,
-                model_buying_power: equity,
-                broker_buying_power: equity,
-                broker_non_marginable_buying_power: equity,
-                positions: positions.clone(),
-                market_values: BTreeMap::new(),
-                working_orders: BTreeMap::new(),
-                unknown_orders: BTreeSet::new(),
-                related_account_resting: BTreeMap::new(),
-            },
-            agent: AgentSnapshot {
-                agent: gate_agent,
-                mode: AgentMode::Normal,
-                instrument_restrictions: BTreeMap::new(),
-                positions,
-                market_values: BTreeMap::new(),
-                working_orders: BTreeSet::new(),
-                instrument_groups: BTreeMap::new(),
-                last_exit_fill_at: BTreeMap::new(),
-                orders_today: 0,
-                day_trades: DayTradeLedger::default(),
-            },
-            instrument: GateInstrumentSnapshot {
-                instrument: asset.clone(),
-                asset_class,
-                exchange,
-                status_active: true,
-                tradable: true,
-                fractionable: true,
-                ipo: false,
-                ptp_no_exception: false,
-                etp: EtpClass::Plain,
-                etp_classified_at: Some(at),
-                quote_currency: Some(QuoteCurrency::Usd),
-                prior_close: Some(request.limit),
-                median_dollar_volume_20d: Some(equity),
-                median_dollar_volume_30d: Some(equity),
-                min_order_size: Qty::parse("0.000000001").ok()?,
-                qty_increment: Qty::parse("0.000000001").ok()?,
-                halted: false,
-                status_feed_current: true,
-            },
-            market: MarketSnapshot {
-                quote: Some(SaneQuote {
-                    bid: request.limit,
-                    ask: request.limit,
-                    at: quote_at,
-                }),
-                last_trade: Some((request.limit, quote_at)),
-                trailing_5m_volume: Some(held),
-                adv_20d: Some(held),
-            },
-            conduct: ConductState::default(),
-            universe: WorkingUniverse::Known {
-                instruments: BTreeSet::from([asset.clone()]),
-                pinned: true,
-            },
-            asset,
-            gate_agent,
-            gate_client_order_id: GateOrderId(1),
-            owner_confirmed_bid: None,
-            fee_reservation: Usd::ZERO,
-            data_profile: "test".to_owned(),
-            feed: "test".to_owned(),
-        })
+        allowing_snapshot(request)
     }
+}
+
+/// [`AllowingBindingGate`]'s snapshot for an exit too, holding the quantity the exit sells, so a
+/// reducing order's gate decision is binding (DEC-2034 item 2): what an exit needs before it may
+/// go at the market (DEC-2037 item 4).
+pub struct BindingExits;
+
+impl BindingGateSource for BindingExits {
+    fn input(&self, request: &BindingGateRequest<'_>) -> Option<BindingGateInput> {
+        let mut input = allowing_snapshot(request)?;
+        input
+            .account
+            .positions
+            .insert(input.asset.clone(), request.qty);
+        input
+            .agent
+            .positions
+            .insert(input.asset.clone(), request.qty);
+        Some(input)
+    }
+}
+
+pub static BINDING_EXITS: BindingExits = BindingExits;
+
+/// A snapshot that lets `request` through every binding check.
+fn allowing_snapshot(request: &BindingGateRequest<'_>) -> Option<BindingGateInput> {
+    let asset = AssetId::new(request.instrument.as_str()).ok()?;
+    let at = UtcNanos::parse_rfc3339("2026-09-21T15:00:00Z").ok()?;
+    let quote_at = UtcNanos::parse_rfc3339("2026-09-21T14:59:59Z").ok()?;
+    let held = Qty::parse("1000000").ok()?;
+    let equity = Usd::parse("1000000000").ok()?;
+    let (asset_class, exchange) = if request.instrument.as_str() == FixedInstruments::CRYPTO {
+        (AssetClass::Crypto, None)
+    } else {
+        (AssetClass::UsEquity, Some(Exchange::Nasdaq))
+    };
+    let positions = BTreeMap::new();
+    let gate_agent = GateAgentId(1);
+    Some(BindingGateInput {
+        config_refs: BindingGateConfigRefs::complete(
+            format!("sha256:{}", "1".repeat(64)),
+            format!("sha256:{}", "2".repeat(64)),
+            format!("sha256:{}", "3".repeat(64)),
+            format!("sha256:{}", "4".repeat(64)),
+            VERSION,
+        ),
+        now: at,
+        config: GateConfig {
+            price_floor: Usd::parse("0.01").ok()?,
+            liquidity_floor_usd: Usd::ZERO,
+            crypto_liquidity_floor_usd: Usd::ZERO,
+            collar_liquid_threshold_usd: Usd::ZERO,
+            collar_liquid_x: Fraction::parse("0.5").ok()?,
+            collar_other_x: Fraction::parse("0.5").ok()?,
+            collar_crypto_x: Fraction::parse("0.5").ok()?,
+            collar_passive_band: Fraction::parse("0.5").ok()?,
+            opposite_fill_interval_s: 0,
+            min_resting_time_s: 0,
+            order_to_fill_max: u32::MAX,
+            order_to_fill_min_orders: u32::MAX,
+            order_size_participation: Fraction::parse("1").ok()?,
+            daily_participation: Fraction::parse("1").ok()?,
+            close_window_minutes: 0,
+            legacy_pdt_equity_threshold: Usd::ZERO,
+            etp_classification_max_age_s: u32::MAX,
+        },
+        mandate: ValidatedMandate::from_validated_parts(
+            RiskLimits {
+                max_position_usd: equity,
+                max_position_fraction: Fraction::parse("1").ok()?,
+                max_order_usd: equity,
+                max_gross_exposure_usd: equity,
+                max_orders_per_day: u32::MAX,
+                reentry_cooldown_s: 0,
+                rebalance_band: Fraction::parse("1").ok()?,
+                breach_confirm_s: 0,
+                drawdown_ladder: Vec::new(),
+            },
+            GoalState::Running,
+            true,
+            true,
+        ),
+        risk: RiskSnapshot {
+            agent_equity: equity,
+            high_water_mark: equity,
+            day_start_equity: equity,
+            capital_base: equity,
+            inherited_loss: Usd::ZERO,
+            latched: BTreeSet::new(),
+            active_rungs: BTreeMap::new(),
+            size_factor: Ratio::parse("1").ok()?,
+            agent_mode: AgentMode::Normal,
+        },
+        account: AccountSnapshot {
+            account_type: AccountType::Margin,
+            state: GateAccountState::Active,
+            crypto_active: true,
+            regime: DayTradeRegime::IntradayMargin {
+                maintenance_excess: equity,
+            },
+            equity,
+            prior_close_equity: equity,
+            model_buying_power: equity,
+            broker_buying_power: equity,
+            broker_non_marginable_buying_power: equity,
+            positions: positions.clone(),
+            market_values: BTreeMap::new(),
+            working_orders: BTreeMap::new(),
+            unknown_orders: BTreeSet::new(),
+            related_account_resting: BTreeMap::new(),
+        },
+        agent: AgentSnapshot {
+            agent: gate_agent,
+            mode: AgentMode::Normal,
+            instrument_restrictions: BTreeMap::new(),
+            positions,
+            market_values: BTreeMap::new(),
+            working_orders: BTreeSet::new(),
+            instrument_groups: BTreeMap::new(),
+            last_exit_fill_at: BTreeMap::new(),
+            orders_today: 0,
+            day_trades: DayTradeLedger::default(),
+        },
+        instrument: GateInstrumentSnapshot {
+            instrument: asset.clone(),
+            asset_class,
+            exchange,
+            status_active: true,
+            tradable: true,
+            fractionable: true,
+            ipo: false,
+            ptp_no_exception: false,
+            etp: EtpClass::Plain,
+            etp_classified_at: Some(at),
+            quote_currency: Some(QuoteCurrency::Usd),
+            prior_close: Some(request.limit),
+            median_dollar_volume_20d: Some(equity),
+            median_dollar_volume_30d: Some(equity),
+            min_order_size: Qty::parse("0.000000001").ok()?,
+            qty_increment: Qty::parse("0.000000001").ok()?,
+            halted: false,
+            status_feed_current: true,
+        },
+        market: MarketSnapshot {
+            quote: Some(SaneQuote {
+                bid: request.limit,
+                ask: request.limit,
+                at: quote_at,
+            }),
+            last_trade: Some((request.limit, quote_at)),
+            trailing_5m_volume: Some(held),
+            adv_20d: Some(held),
+        },
+        conduct: ConductState::default(),
+        universe: WorkingUniverse::Known {
+            instruments: BTreeSet::from([asset.clone()]),
+            pinned: true,
+        },
+        asset,
+        gate_agent,
+        gate_client_order_id: GateOrderId(1),
+        owner_confirmed_bid: None,
+        fee_reservation: Usd::ZERO,
+        data_profile: "test".to_owned(),
+        feed: "test".to_owned(),
+    })
 }
 
 pub static ALLOWING_BINDING_GATE: AllowingBindingGate = AllowingBindingGate;
@@ -627,6 +654,7 @@ pub fn handoff(intent: &str, who: &str, body: mandate_executor::IntentBody) -> I
         agent: agent(who),
         tif: Some(TimeInForce::Day),
         body,
+        confirmation: None,
     })
 }
 
@@ -638,7 +666,7 @@ pub fn opening(name: &str, quantity: &str, limit: &str) -> mandate_executor::Int
         instrument: instrument(name),
         side: Side::Buy,
         qty: qty(quantity),
-        limit: price(limit),
+        limit: Some(price(limit)),
         purpose: mandate_executor::Purpose::Open,
         protection: None,
     }
@@ -658,7 +686,7 @@ pub fn protected_opening(
         instrument: instrument(name),
         side: Side::Buy,
         qty: qty(quantity),
-        limit: price(limit),
+        limit: Some(price(limit)),
         purpose: mandate_executor::Purpose::Open,
         protection: Some(mandate_executor::ProtectionPrices {
             stop: price(stop),
@@ -701,7 +729,7 @@ pub fn risk_exit(name: &str, quantity: &str, limit: &str) -> mandate_executor::I
         instrument: instrument(name),
         side: Side::Sell,
         qty: qty(quantity),
-        limit: price(limit),
+        limit: Some(price(limit)),
         purpose: mandate_executor::Purpose::RiskExit,
         protection: None,
     }
@@ -713,7 +741,7 @@ pub fn discretionary_exit(name: &str, quantity: &str, limit: &str) -> mandate_ex
         instrument: instrument(name),
         side: Side::Sell,
         qty: qty(quantity),
-        limit: price(limit),
+        limit: Some(price(limit)),
         purpose: mandate_executor::Purpose::DiscretionaryExit,
         protection: None,
     }

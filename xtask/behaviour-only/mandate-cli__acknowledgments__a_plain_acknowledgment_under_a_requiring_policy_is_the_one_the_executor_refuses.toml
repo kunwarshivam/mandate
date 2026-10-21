@@ -1,9 +1,0 @@
-file = "crates/mandate-cli/tests/acknowledgments.rs"
-test = "a_plain_acknowledgment_under_a_requiring_policy_is_the_one_the_executor_refuses"
-reason = """
-DEC-2512 item 3 (journal spec §9.28): a plain `agent acknowledge` already commits, with DEC-279
-item 7's six members, so `Draft::parse` refuses it at `payload.requested_by` before the test
-compares it with the vectors' `plain_under_overlay` acknowledgment, the CLI's own answer rather
-than a stub's report. The implementation PR writes §9.28's nine members and deletes this file with
-the test's `#[ignore]` line.
-"""

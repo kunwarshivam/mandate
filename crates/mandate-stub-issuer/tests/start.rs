@@ -9,6 +9,7 @@ fn the_codes_are_the_decisions_names() {
     assert_eq!(Refused::NotBuilt.code(), "stub_issuer_not_built");
     assert_eq!(Refused::Tier.code(), "stub_issuer_tier");
     assert_eq!(Refused::Bind.code(), "stub_issuer_bind");
+    assert_eq!(Refused::Alpaca.code(), "stub_issuer_alpaca");
 }
 
 #[test]

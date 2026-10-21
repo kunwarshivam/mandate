@@ -38,7 +38,12 @@ OWN_CHARTS = {
     "mandate-backup-plugin-tls": "backup-plugin-tls",
     "mandate-journal-db": "journal-db",
     "mandate-workspace": "workspace",
+    "mandate-vault-server": "vault",
 }
+# The charts staging alone runs: the vault, whose production unseal is not decided (DEC-2021 item 6,
+# DEC-2051).
+STAGING_ONLY = {"mandate-vault-server"}
+VAULT_VALUES = ROOT / "deploy" / "cell" / "values" / "vault-staging.yaml"
 OWN_CHART_URL = "oci://ghcr.io/kunwarshivam/mandate/charts/"
 # The upstream charts and the digests whose chart layers are xtask/src/cell.rs's pinned tarballs.
 UPSTREAM_CHARTS = {
@@ -181,9 +186,9 @@ def render(release: dict, values: dict, tmp: Path) -> list[dict]:
     return [d for d in yaml.safe_load_all(done.stdout) if d]
 
 
-def sources_pinned(docs: list[dict]) -> list[str]:
+def sources_pinned(docs: list[dict], environment: str = "staging") -> list[str]:
     """Every chart comes by digest; the repository's own only once release.yml's signature on main
-    verifies; the upstream charts are exactly the pinned ones."""
+    verifies; the upstream charts are exactly the pinned ones; and only staging runs the vault."""
     problems = []
     sources = of_kind(docs, "OCIRepository")
     for name, source in sources.items():
@@ -192,6 +197,8 @@ def sources_pinned(docs: list[dict]) -> list[str]:
             problems.append(f"{name}: not pinned by digest alone: {spec.get('ref')}")
         if spec.get("layerSelector") != CHART_LAYER:
             problems.append(f"{name}: does not select the chart layer")
+        if name in STAGING_ONLY and environment != "staging":
+            problems.append(f"{name}: runs in staging alone (DEC-2051)")
         if name in OWN_CHARTS:
             if spec.get("url") != OWN_CHART_URL + name:
                 problems.append(f"{name}: url {spec.get('url')}")
@@ -205,7 +212,10 @@ def sources_pinned(docs: list[dict]) -> list[str]:
                 problems.append(f"{name}: not the pinned upstream chart")
         else:
             problems.append(f"{name}: an OCIRepository the hosted clusters do not run")
-    for name in set(OWN_CHARTS) | set(UPSTREAM_CHARTS):
+    expected = set(OWN_CHARTS) | set(UPSTREAM_CHARTS)
+    if environment != "staging":
+        expected -= STAGING_ONLY
+    for name in expected:
         if name not in sources:
             problems.append(f"{name}: missing")
     return problems
@@ -269,6 +279,37 @@ def endpoint_from_bootstrap(docs: list[dict]) -> list[str]:
     return problems
 
 
+def vault_release(docs: list[dict], environment: str = "staging") -> list[str]:
+    """Staging installs the vault with vault-staging.yaml unchanged, beside the workspace, never
+    waiting on a vault that stays sealed until the founder initializes it, and never pruned;
+    production installs none (DEC-2051)."""
+    release = of_kind(docs, "HelmRelease").get("vault")
+    if environment != "staging":
+        return [] if release is None else ["vault: runs in staging alone (DEC-2051)"]
+    if release is None:
+        return ["vault: missing"]
+    spec = release["spec"]
+    problems = []
+    if spec.get("chartRef") != {"kind": "OCIRepository", "name": "mandate-vault-server"}:
+        problems.append(f"vault: installs {spec.get('chartRef')}")
+    if (spec.get("targetNamespace"), spec.get("storageNamespace")) != ("ws-ws1", "ws-ws1"):
+        problems.append("vault: not beside the workspace in ws-ws1")
+    for phase in ("install", "upgrade"):
+        if (spec.get(phase) or {}).get("disableWait") is not True:
+            problems.append(f"vault: {phase} waits on a vault the founder has not initialized")
+    if spec.get("values") or spec.get("valuesFrom") != [
+        {"kind": "ConfigMap", "name": "vault-staging-values", "valuesKey": "values.yaml"}
+    ]:
+        problems.append(f"vault: values {spec.get('values')} {spec.get('valuesFrom')}")
+    source = of_kind(docs, "ConfigMap").get("vault-staging-values") or {"data": {}}
+    if yaml.safe_load(source["data"].get("values.yaml", "")) != yaml.safe_load(VAULT_VALUES.read_text()):
+        problems.append("vault: values are not deploy/cell/values/vault-staging.yaml")
+    annotations = release["metadata"].get("annotations") or {}
+    if {k: annotations.get(k) for k in PRUNE_DISABLED} != PRUNE_DISABLED:
+        problems.append("vault: prunable")
+    return problems
+
+
 def never_pruned(docs: list[dict]) -> list[str]:
     """Removing a namespace or the journal from git never deletes the journal's data: every
     namespace and the journal's release are unprunable, and the two the journal needs exist."""
@@ -296,6 +337,44 @@ def strings(value, path=""):
         yield path, value
 
 
+# A process image a hosted cluster names: a release binary's index under this repository's GHCR
+# path, by digest alone (DEC-2016, DEC-2026); `promote` writes only these.
+OWN_IMAGE = re.compile(r"ghcr\.io/kunwarshivam/mandate/mandate[a-z-]*@sha256:[0-9a-f]{64}")
+
+
+# A ULID, as the API server's org and workspace ids are (MANDATE_API_ORG, MANDATE_API_WORKSPACE).
+ULID = re.compile(r"[0-9A-HJKMNP-TV-Z]{26}")
+API_URLS = ("issuer", "jwksUrl", "appOrigin")
+
+
+def api_settings(values: dict[str, dict]) -> list[str]:
+    """No placeholder anywhere in a hosted workspace's values (`placeholder`, as in
+    `placeholder.invalid`, or the all-zero ULID); and once the API server's settings
+    are written, each is set: its org and workspace as ULIDs, its issuer, key set and app origin
+    over https, the key set under the issuer, and an audience."""
+    workspace = values.get("workspace", {})
+    problems = [
+        f"workspace: {path} is a placeholder"
+        for path, text in strings(workspace)
+        if "placeholder" in text.lower() or text == "0" * 26
+    ]
+    api = {key: str(value) for key, value in (workspace.get("api") or {}).items() if value}
+    named = (workspace.get("images") or {}).get("api")
+    if not named and not set(api) - {"subjectLinks"}:
+        return problems
+    for key in ("org", "workspace"):
+        if not ULID.fullmatch(api.get(key, "")):
+            problems.append(f"workspace: api.{key} is not a ULID")
+    for key in API_URLS:
+        if not api.get(key, "").startswith("https://"):
+            problems.append(f"workspace: api.{key} is not an https URL")
+    if not api.get("audience"):
+        problems.append("workspace: api.audience is not set")
+    if not api.get("jwksUrl", "").startswith(api.get("issuer", "") + "/"):
+        problems.append("workspace: api.jwksUrl is not the issuer's own key set")
+    return problems
+
+
 def values_policy(values: dict[str, dict], environment: str) -> list[str]:
     """No stub tier, no `live`, the paper environment, every image by digest, two journal instances
     on separate nodes."""
@@ -319,6 +398,8 @@ def values_policy(values: dict[str, dict], environment: str) -> list[str]:
             problems.append("workspace: the stub issuer is named")
         elif reference and not PINNED.search(reference):
             problems.append(f"workspace: image {image} not pinned by digest: {reference}")
+        elif reference and image != "postgres" and not OWN_IMAGE.fullmatch(reference):
+            problems.append(f"workspace: image {image} is not this repository's release: {reference}")
     for name in ("cnpg", "barman-cloud"):
         tree = values.get(name, {})
         for key in ("image", "sidecarImage"):
@@ -643,7 +724,17 @@ def test_each_admission_seeded_bug_is_caught(change, tmp_path):
 
 
 def test_sources_pinned(overlay):
-    assert sources_pinned(overlay[1]) == []
+    assert sources_pinned(overlay[1], overlay[0]) == []
+
+
+def test_vault_release(overlay):
+    assert vault_release(overlay[1], overlay[0]) == []
+
+
+def test_production_running_the_vault_is_caught(tmp_path):
+    docs = build("staging", FIXTURE, tmp_path)
+    assert sources_pinned(docs, "production") == ["mandate-vault-server: runs in staging alone (DEC-2051)"]
+    assert vault_release(docs, "production") == ["vault: runs in staging alone (DEC-2051)"]
 
 
 def test_releases_resolve(overlay):
@@ -660,6 +751,37 @@ def test_endpoint_from_bootstrap(overlay):
 
 def test_never_pruned(overlay):
     assert never_pruned(overlay[1]) == []
+
+
+def test_api_settings(overlay):
+    assert api_settings(overlay[2]) == []
+
+
+@pytest.mark.parametrize(
+    "api",
+    [
+        {"issuer": "https://placeholder.invalid"},
+        {"org": "0" * 26},
+        {"org": "01KDEM0000000000000000000R", "workspace": "ws1"},
+        {"issuer": "http://issuer.example"},
+        {"appOrigin": "https://app.example", "audience": ""},
+        {"jwksUrl": "https://other.example/jwks.json"},
+    ],
+)
+def test_each_api_settings_bug_is_caught(overlay, api):
+    good = {
+        "org": "01KDEM0000000000000000000R",
+        "workspace": "01KDEM0000000000000000000W",
+        "issuer": "https://issuer.example",
+        "audience": "authenticated",
+        "jwksUrl": "https://issuer.example/jwks.json",
+        "appOrigin": "https://app.example",
+    }
+    values = copy.deepcopy(overlay[2])
+    values["workspace"] = merge(values["workspace"], {"api": good})
+    assert api_settings(values) == []
+    values["workspace"] = merge(values["workspace"], {"api": api})
+    assert api_settings(values), f"api_settings missed {api}"
 
 
 def test_values_policy(overlay):
@@ -703,6 +825,171 @@ def test_rendered_objects_match_the_kubernetes_schemas(overlay, tmp_path):
 # What deploy/gitops/ may hold: the base, one overlay per hosted environment, the admission
 # policies, and the runbook. A
 # manifest anywhere else would be reconciled by nothing, or checked by nothing.
+# The external hosts each process may reach in a hosted cluster (DEC-2058), written out here from the
+# decision, not read from the overlay: infrastructure §3.1's external slots, as names. Alpaca's live
+# host is the token-exchange process's alone, for its one OAuth call (DEC-821 items 2 and 4, DEC-2059);
+# every other process trades on paper only (AGENTS.md rule 8).
+FQDN_EGRESS = {
+    "api": {"wyyxngmblqqokcvraflx.supabase.co"},
+    "control": {"wyyxngmblqqokcvraflx.supabase.co"},
+    "executor": {"paper-api.alpaca.markets"},
+    "data": {"data.alpaca.markets", "stream.data.alpaca.markets"},
+    "model-gateway": {"openrouter.ai"},
+    "token-exchange": {"api.alpaca.markets"},
+}
+LIVE_HOST = re.compile(r"(?<![\w.-])api\.alpaca\.markets\b", re.IGNORECASE)
+# Every kind that can grant egress, and the one a hosted overlay may hold: the chart renders its own
+# NetworkPolicies, which the overlay's build never holds, so any other here is a back door.
+EGRESS_KINDS = {"NetworkPolicy", "CiliumNetworkPolicy", "CiliumClusterwideNetworkPolicy"}
+KUBE_DNS = {"io.kubernetes.pod.namespace": "kube-system", "k8s-app": "kube-dns"}
+
+
+def fqdn_egress(docs: list[dict], hosts: dict[str, set[str]]) -> list[str]:
+    """Every CiliumNetworkPolicy in a hosted overlay lets exactly one process of the workspace reach
+    exactly its own hosts, by exact name on TCP 443, after asking the cluster DNS through Cilium's
+    proxy; nothing else, no ingress. Every process `hosts` names has one. Alpaca's live host appears
+    once at most, and only as an exact name in the one policy that selects the workspace's
+    token-exchange pods (DEC-2059)."""
+    problems = [
+        f"{d['kind']} {d['metadata']['name']} may grant egress"
+        for d in docs
+        if d["kind"] in EGRESS_KINDS
+        and not (
+            d["kind"] == "CiliumNetworkPolicy"
+            and d["apiVersion"] == "cilium.io/v2"
+            and d["metadata"]["name"]
+            in {f"egress-fqdn-{process}" for process in hosts}
+        )
+    ]
+    live = sum(len(LIVE_HOST.findall(str(d))) for d in docs)
+    granted = [
+        d
+        for d in docs
+        if d["kind"] == "CiliumNetworkPolicy"
+        and d["spec"].get("endpointSelector", {}).get("matchLabels")
+        == {"mandate.dev/workspace": "ws1", "mandate.dev/process": "token-exchange"}
+        and any(
+            f == {"matchName": "api.alpaca.markets"}
+            for r in d["spec"].get("egress", [])
+            for f in r.get("toFQDNs", [])
+        )
+    ]
+    if live != len(granted) or len(granted) > 1:
+        problems.append(f"api.alpaca.markets appears {live} times, granted to the token exchange {len(granted)} times")
+    seen = set()
+    for policy in [d for d in docs if d["kind"] == "CiliumNetworkPolicy"]:
+        name = policy["metadata"]["name"]
+        spec = policy["spec"]
+        selector = spec.get("endpointSelector", {}).get("matchLabels", {})
+        process = selector.get("mandate.dev/process")
+        if policy["apiVersion"] != "cilium.io/v2" or policy["metadata"].get("namespace") != "ws-ws1":
+            problems.append(f"{name} is not a cilium.io/v2 policy in ws-ws1")
+        if selector != {"mandate.dev/workspace": "ws1", "mandate.dev/process": process} or process not in hosts:
+            problems.append(f"{name} selects {selector}")
+            continue
+        seen.add(process)
+        if set(spec) != {"endpointSelector", "egress"}:
+            problems.append(f"{name} sets {sorted(set(spec) - {'endpointSelector', 'egress'})}")
+        dns_rule = {
+            "toEndpoints": [{"matchLabels": KUBE_DNS}],
+            "toPorts": [{"ports": [{"port": "53", "protocol": "ANY"}], "rules": {"dns": [{"matchPattern": "*"}]}}],
+        }
+        rules = spec.get("egress", [])
+        named = [r for r in rules if r != dns_rule]
+        if len(rules) - len(named) != 1 or len(named) != 1:
+            problems.append(f"{name} is not one DNS rule and one host rule")
+            continue
+        rule = named[0]
+        names = {str(f.get("matchName")).lower() for f in rule.get("toFQDNs", [])}
+        if set(rule) != {"toFQDNs", "toPorts"} or any(set(f) != {"matchName"} for f in rule.get("toFQDNs", [])):
+            problems.append(f"{name} reaches more than exact names: {rule}")
+        if rule.get("toPorts") != [{"ports": [{"port": "443", "protocol": "TCP"}]}]:
+            problems.append(f"{name} reaches ports {rule.get('toPorts')}")
+        if names != hosts[process]:
+            problems.append(f"{name} reaches {sorted(names)}, want {sorted(hosts[process])}")
+    if hosts and seen != set(hosts):
+        problems.append(f"FQDN policies for {sorted(seen)}, want {sorted(hosts)}")
+    return problems
+
+
+def test_fqdn_egress(overlay):
+    environment, docs, *_ = overlay
+    assert fqdn_egress(docs, FQDN_EGRESS if environment == "staging" and overlay[4] != FIXTURE else {}) == []
+
+
+def test_each_fqdn_egress_bug_is_caught(tmp_path):
+    docs = build("staging", GITOPS / "clusters" / "staging", tmp_path)
+    assert fqdn_egress(docs, FQDN_EGRESS) == []
+
+    def policy(process: str) -> dict:
+        return next(
+            d
+            for d in docs
+            if d["kind"] == "CiliumNetworkPolicy"
+            and d["spec"]["endpointSelector"]["matchLabels"]["mandate.dev/process"] == process
+        )
+
+    def clusterwide(rule: dict) -> dict:
+        return {
+            "apiVersion": "cilium.io/v2",
+            "kind": "CiliumClusterwideNetworkPolicy",
+            "metadata": {"name": "wide"},
+            "spec": {"endpointSelector": {}, "egress": [rule]},
+        }
+
+    def host_rule(process: str) -> dict:
+        return next(r for r in policy(process)["spec"]["egress"] if "toFQDNs" in r)
+
+    seeds = [
+        lambda: host_rule("executor")["toFQDNs"].append({"matchName": "api.alpaca.markets"}),
+        lambda: host_rule("data")["toFQDNs"].append({"matchPattern": "*.alpaca.markets"}),
+        lambda: host_rule("model-gateway")["toFQDNs"].append({"matchName": "paper-api.alpaca.markets"}),
+        lambda: host_rule("executor")["toPorts"][0]["ports"].append({"port": "80", "protocol": "TCP"}),
+        lambda: policy("api")["spec"]["egress"].append({"toCIDR": ["0.0.0.0/0"]}),
+        lambda: policy("api")["spec"]["endpointSelector"]["matchLabels"].update({"mandate.dev/process": "runtime"}),
+        lambda: policy("control")["spec"]["endpointSelector"]["matchLabels"].pop("mandate.dev/workspace"),
+        lambda: policy("data")["spec"].update(ingress=[{}]),
+        lambda: docs.remove(policy("model-gateway")),
+        lambda: host_rule("data")["toFQDNs"].append({"matchName": "api.alpaca.markets"}),
+        lambda: host_rule("token-exchange")["toFQDNs"].append({"matchName": "paper-api.alpaca.markets"}),
+        lambda: host_rule("token-exchange")["toPorts"][0]["ports"].append({"port": "80", "protocol": "TCP"}),
+        lambda: host_rule("token-exchange")["toFQDNs"].append({"matchPattern": "*.alpaca.markets"}),
+        lambda: policy("token-exchange")["spec"]["egress"].append({"toCIDR": ["0.0.0.0/0"]}),
+        lambda: policy("token-exchange")["spec"]["endpointSelector"]["matchLabels"].pop("mandate.dev/workspace"),
+        lambda: docs.append(
+            {
+                **copy.deepcopy(policy("token-exchange")),
+                "metadata": {"name": "egress-fqdn-token-exchange-ws2", "namespace": "ws-ws1"},
+                "spec": {
+                    **copy.deepcopy(policy("token-exchange")["spec"]),
+                    "endpointSelector": {
+                        "matchLabels": {"mandate.dev/workspace": "ws2", "mandate.dev/process": "token-exchange"}
+                    },
+                },
+            }
+        ),
+        lambda: docs.append({**copy.deepcopy(policy("token-exchange")), "metadata": {"name": "twice", "namespace": "ws-ws1"}}),
+        lambda: docs.append({"kind": "ConfigMap", "apiVersion": "v1", "metadata": {"name": "x"}, "data": {"h": "api.alpaca.markets"}}),
+        lambda: docs.append(clusterwide({"toEntities": ["world"]})),
+        lambda: docs.append(clusterwide({"toCIDR": ["0.0.0.0/0"]})),
+        lambda: docs.append(clusterwide({"toFQDNs": [{"matchPattern": "*"}]})),
+        lambda: docs.append(
+            {
+                "apiVersion": "networking.k8s.io/v1",
+                "kind": "NetworkPolicy",
+                "metadata": {"name": "wide", "namespace": "ws-ws1"},
+                "spec": {"podSelector": {}, "policyTypes": ["Egress"], "egress": [{"to": [{"ipBlock": {"cidr": "0.0.0.0/0"}}]}]},
+            }
+        ),
+        lambda: docs.append({"kind": "ConfigMap", "apiVersion": "v1", "metadata": {"name": "y"}, "data": {"h": "API.Alpaca.Markets"}}),
+    ]
+    pristine = copy.deepcopy(docs)
+    for seed in seeds:
+        docs[:] = copy.deepcopy(pristine)
+        seed()
+        assert fqdn_egress(docs, FQDN_EGRESS), seed
+
+
 GITOPS_ENTRIES = {"base", "clusters", "policies", "BOOTSTRAP.md"}
 
 
@@ -725,6 +1012,20 @@ def seeded(docs: list[dict], kind: str, name: str, change) -> list[dict]:
 DOC_BUGS = [
     (sources_pinned, "OCIRepository", "mandate-workspace", lambda d: d["spec"].update(ref={"tag": "latest"})),
     (sources_pinned, "OCIRepository", "mandate-journal-db", lambda d: d["spec"].pop("verify")),
+    (sources_pinned, "OCIRepository", "mandate-vault-server", lambda d: d["spec"].pop("verify")),
+    (vault_release, "HelmRelease", "vault", lambda d: d["spec"].pop("install")),
+    (vault_release, "HelmRelease", "vault", lambda d: d["spec"]["upgrade"].update(disableWait=False)),
+    (vault_release, "HelmRelease", "vault", lambda d: d["spec"].update(targetNamespace="vault")),
+    (vault_release, "HelmRelease", "vault", lambda d: d["metadata"].pop("annotations")),
+    (vault_release, "HelmRelease", "vault", lambda d: d["spec"].update(values={"seal": {"type": "shamir"}})),
+    (
+        vault_release,
+        "ConfigMap",
+        "vault-staging-values",
+        lambda d: d["data"].update(
+            {"values.yaml": d["data"]["values.yaml"].replace("staging-1", "staging-2")}
+        ),
+    ),
     (
         sources_pinned,
         "OCIRepository",
@@ -933,6 +1234,9 @@ def test_each_overlay_seeded_bug_is_caught(check, kind, name, change, tmp_path):
 
 
 VALUE_BUGS = [
+    ("workspace", {"images": {"mandate": "docker.io/library/busybox@sha256:" + "a" * 64}}),
+    ("workspace", {"images": {"api": "ghcr.io/kunwarshivam/mandate/mandate:signed-abc"}}),
+    ("workspace", {"images": {"runtime": "ghcr.io/someone/mandate/mandate@sha256:" + "a" * 64}}),
     ("workspace", {"deploymentTier": "dev"}),
     ("workspace", {"deploymentTier": "ci"}),
     ("workspace", {"environment": "live"}),

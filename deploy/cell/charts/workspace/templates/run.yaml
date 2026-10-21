@@ -42,7 +42,13 @@ spec:
 {{- end -}}
 {{- $root := . }}
 {{- if .Values.run.id }}
+{{- $named := .Values.run.process | default "control" }}
+{{- $runs := list }}
 {{- range (include "mandate.rendered" (dict "root" . "kind" "run") | fromJsonArray) }}
+{{- if eq .name $named }}{{ $runs = append $runs . }}{{ end }}
+{{- end }}
+{{- if not $runs }}{{ fail (printf "run.process %q is no run process this release renders" $named) }}{{ end }}
+{{- range $runs }}
 ---
 {{ include "mandate.emit" (include "mandate.run" (dict "root" $root "p" .)) }}
 {{- end }}

@@ -1,0 +1,27 @@
+[package]
+name = "mandate-ports"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "The runtime's production ports shared by the shell and the cell's runtime process: the decision contexts, the runtime's mandate view, the builder's sizing and classification, and the gate dry run over mandate-risk (DEC-968 item 6, DEC-2605 row 20)"
+
+[lints]
+workspace = true
+
+[dependencies]
+mandate-accounting.workspace = true
+mandate-builder.workspace = true
+mandate-canon.workspace = true
+mandate-domain.workspace = true
+mandate-journal.workspace = true
+mandate-num.workspace = true
+mandate-risk.workspace = true
+mandate-runtime.workspace = true
+mandate-spec.workspace = true
+mandate-time.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+serde_json.workspace = true

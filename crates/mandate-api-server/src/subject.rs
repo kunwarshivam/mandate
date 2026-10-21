@@ -81,12 +81,8 @@ pub trait NamesPrincipal: Send + Sync {
 }
 
 impl NamesPrincipal for Fixed {
-    #[expect(
-        clippy::todo,
-        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-    )]
-    fn names(&self, _principal: PrincipalId) -> Result<bool, LinkRefusal> {
-        todo!()
+    fn names(&self, principal: PrincipalId) -> Result<bool, LinkRefusal> {
+        names_at(Path::new(SUBJECT_LINKS), principal)
     }
 }
 
@@ -95,12 +91,9 @@ impl NamesPrincipal for Fixed {
 ///
 /// # Errors
 /// [`LinkRefusal`] but [`LinkRefusal::NotLinked`], in the order its variants are listed.
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
-pub fn names_at(_path: &Path, _principal: PrincipalId) -> Result<bool, LinkRefusal> {
-    todo!()
+pub fn names_at(path: &Path, principal: PrincipalId) -> Result<bool, LinkRefusal> {
+    let lines = lines_owned(path, [geteuid().as_raw(), ROOT])?;
+    Ok(lines.iter().any(|(_, named)| *named == principal))
 }
 
 /// The deployment's subject links: the file at [`SUBJECT_LINKS`] and no other, so no setting,
@@ -142,6 +135,20 @@ pub fn principal_owned(
     subject: &str,
     owners: [u32; 2],
 ) -> Result<PrincipalId, LinkRefusal> {
+    let wanted = digest(issuer, subject);
+    lines_owned(path, owners)?
+        .into_iter()
+        .find(|(digest, _)| *digest == wanted)
+        .map(|(_, principal)| principal)
+        .ok_or(LinkRefusal::NotLinked)
+}
+
+/// Every line of the file at `path`, as `(digest, principal)`, read with [`principal_owned`]'s
+/// checks: a file refused whole yields no line.
+///
+/// # Errors
+/// [`LinkRefusal`] but [`LinkRefusal::NotLinked`], in the order its variants are listed.
+fn lines_owned(path: &Path, owners: [u32; 2]) -> Result<Vec<(String, PrincipalId)>, LinkRefusal> {
     let metadata = fs::metadata(path).map_err(|_| LinkRefusal::Unreadable)?;
     if !metadata.is_file() {
         return Err(LinkRefusal::Unreadable);
@@ -161,10 +168,9 @@ pub fn principal_owned(
     let mut text = String::new();
     file.read_to_string(&mut text)
         .map_err(|_| LinkRefusal::Malformed)?;
-    let wanted = digest(issuer, subject);
     let body = text.strip_suffix('\n').unwrap_or(&text);
     let mut seen = BTreeSet::new();
-    let mut found = None;
+    let mut lines = Vec::new();
     for line in body.split('\n').filter(|_| !text.is_empty()) {
         let (digest, ulid) = line.split_once(' ').ok_or(LinkRefusal::Malformed)?;
         let hex = digest
@@ -180,9 +186,7 @@ pub fn principal_owned(
         if !seen.insert(digest) {
             return Err(LinkRefusal::Duplicate);
         }
-        if digest == wanted {
-            found = Some(principal);
-        }
+        lines.push((digest.to_owned(), principal));
     }
-    found.ok_or(LinkRefusal::NotLinked)
+    Ok(lines)
 }

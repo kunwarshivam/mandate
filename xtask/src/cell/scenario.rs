@@ -20,8 +20,8 @@ use sha2::{Digest, Sha256};
 use super::{
     API_LOCAL_PORT, API_PROCESS, CELL_REQUIRED_ENV, DEMO_OWNER, DEPLOY_MANAGER_PROCESS, NAMESPACE,
     NODE, WORKSPACE_CHART, api_image_tag, api_port_forward, helm, http, kubectl, open_session,
-    processes, render, reply_body, run_id, run_job, session_cookie, signed_in, stub_image_tag,
-    stub_token, tools_missing, up, web,
+    processes, render, render_with, reply_body, run_id, run_job, session_cookie, signed_in,
+    stub_image_tag, stub_token, template_args, tools_missing, up, web,
 };
 use crate::output;
 
@@ -390,7 +390,7 @@ pub fn code(canonical: &str) -> String {
     hex(&Sha256::digest(canonical.as_bytes()))[..8].to_owned()
 }
 
-fn confirm_code(version: &str) -> String {
+pub(super) fn confirm_code(version: &str) -> String {
     code(&format!(
         r#"{{"gesture":"mandate_confirm","mandate_version":"{version}"}}"#
     ))
@@ -419,7 +419,7 @@ fn exit_code(
     ))
 }
 
-fn deploy_code(agent: &str, version: &str) -> String {
+pub(super) fn deploy_code(agent: &str, version: &str) -> String {
     code(&format!(
         r#"{{"agent_id":"{agent}","gesture":"agent_deploy","mandate_version":"{version}"}}"#
     ))
@@ -1008,6 +1008,7 @@ pub fn gestures_job(
     all: &[&Gesture],
     configmap: &str,
     files: &[(&str, String)],
+    namespace: &str,
 ) -> Result<Vec<Value>> {
     let mut objects = rendered;
     let job = objects
@@ -1057,7 +1058,7 @@ pub fn gestures_job(
     objects.push(json!({
         "apiVersion": "v1",
         "kind": "ConfigMap",
-        "metadata": {"name": configmap, "namespace": NAMESPACE, "labels": labels},
+        "metadata": {"name": configmap, "namespace": namespace, "labels": labels},
         "data": data,
     }));
     Ok(objects)
@@ -1126,6 +1127,205 @@ fn backtest_inputs(root: &Path) -> Result<Vec<(String, String)>> {
     .collect()
 }
 
+/// The demo's inputs: its three envelopes, and every file the gestures' pod mounts at [`INPUTS`]
+/// under its path there (the envelopes, the instruments, the research recording and the backtest
+/// runner's demo inputs).
+pub struct DemoInputs {
+    mandate: Vec<u8>,
+    web_mandate: Vec<u8>,
+    research_mandate: Vec<u8>,
+    files: Vec<(String, String)>,
+}
+
+impl DemoInputs {
+    /// The three envelopes [`plan`] takes.
+    pub fn envelopes(&self) -> (&[u8], &[u8], &[u8]) {
+        (&self.mandate, &self.web_mandate, &self.research_mandate)
+    }
+
+    /// The mounted files, as [`gestures_job`] takes them.
+    pub fn files(&self) -> Vec<(&str, String)> {
+        self.files
+            .iter()
+            .map(|(path, content)| (path.as_str(), content.clone()))
+            .collect()
+    }
+}
+
+/// Reads the demo's inputs from the checkout.
+pub fn demo_inputs() -> Result<DemoInputs> {
+    let read = |path: &str| fs::read(path).with_context(|| format!("reading {path}"));
+    let text = |bytes: Vec<u8>, path: &str| {
+        String::from_utf8(bytes).with_context(|| format!("{path} is not UTF-8"))
+    };
+    let (mandate, web_mandate, research_mandate) = (
+        read(MANDATE_FILE)?,
+        read(WEB_MANDATE_FILE)?,
+        read(RESEARCH_MANDATE_FILE)?,
+    );
+    let files = [
+        ("mandate.json", text(mandate.clone(), MANDATE_FILE)?),
+        (
+            "instrument.json",
+            text(read(INSTRUMENT_FILE)?, INSTRUMENT_FILE)?,
+        ),
+        (
+            "web-mandate.json",
+            text(web_mandate.clone(), WEB_MANDATE_FILE)?,
+        ),
+        (
+            "web-instrument.json",
+            text(read(WEB_INSTRUMENT_FILE)?, WEB_INSTRUMENT_FILE)?,
+        ),
+        (
+            "research-mandate.json",
+            text(research_mandate.clone(), RESEARCH_MANDATE_FILE)?,
+        ),
+        (
+            "research.json",
+            text(read(RESEARCH_RECORDING_FILE)?, RESEARCH_RECORDING_FILE)?,
+        ),
+    ]
+    .into_iter()
+    .map(|(path, content)| (path.to_string(), content))
+    .chain(backtest_inputs(Path::new("."))?)
+    .collect();
+    Ok(DemoInputs {
+        mandate,
+        web_mandate,
+        research_mandate,
+        files,
+    })
+}
+
+/// The staging workspace's namespace, the one its overlay installs the workspace chart in
+/// (`deploy/gitops/base/workspace.yaml`).
+pub const STAGING_NAMESPACE: &str = "ws-ws1";
+
+/// The values staging's HelmRelease renders the workspace chart with, in its order: the managed
+/// cluster's, then staging's images and tier (`deploy/gitops/base/kustomization.yaml`,
+/// `deploy/gitops/clusters/staging/images.yaml`).
+pub const STAGING_VALUES: &[&str] = &[
+    "deploy/cell/values/managed.yaml",
+    "deploy/gitops/clusters/staging/images.yaml",
+];
+
+/// Where a dry run renders the demo's gestures for: a namespace, the released `mandate` image the
+/// gestures run, pinned by digest (staging admits only signed release images, DEC-2016), and the
+/// fixed workspace the cell's API hosts (the coordinator's option (a)). It names no kubeconfig:
+/// the dry run reaches no cluster.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Target {
+    pub namespace: String,
+    pub image: String,
+    pub workspace: String,
+}
+
+/// The target `--image <ref> --workspace <id> [--namespace <ns>]` names, [`STAGING_NAMESPACE`] by
+/// default. Refuses an image not pinned by a SHA-256 digest, a workspace that is not an opaque
+/// ULID (identity spec §3.1), an unknown or repeated flag, and a flag with no value.
+pub fn target_of(args: &[&str]) -> Result<Target> {
+    let mut given: BTreeMap<&str, &str> = BTreeMap::new();
+    let mut rest = args.iter();
+    while let Some(flag) = rest.next() {
+        if !["--namespace", "--image", "--workspace"].contains(flag) {
+            bail!("the dry run takes --image, --workspace and --namespace, not `{flag}`");
+        }
+        let value = rest
+            .next()
+            .with_context(|| format!("{flag} needs a value"))?;
+        if given.insert(flag, value).is_some() {
+            bail!("{flag} is given twice");
+        }
+    }
+    let image = given.get("--image").context("the dry run needs --image")?;
+    let pinned = image.split_once("@sha256:").is_some_and(|(name, digest)| {
+        !name.is_empty()
+            && digest.len() == 64
+            && digest
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    });
+    if !pinned {
+        bail!("--image {image} is not pinned by a SHA-256 digest");
+    }
+    let workspace = given
+        .get("--workspace")
+        .context("the dry run needs --workspace")?;
+    let crockford = |b: u8| b.is_ascii_digit() || (b.is_ascii_uppercase() && !b"ILOU".contains(&b));
+    if workspace.len() != 26 || !workspace.bytes().all(crockford) {
+        bail!("--workspace {workspace} is not a workspace's ULID");
+    }
+    Ok(Target {
+        namespace: given
+            .get("--namespace")
+            .unwrap_or(&STAGING_NAMESPACE)
+            .to_string(),
+        image: image.to_string(),
+        workspace: workspace.to_string(),
+    })
+}
+
+/// The `helm template` arguments a dry run renders the gestures' first container with for
+/// `target`: staging's values ([`STAGING_VALUES`]), the target's image as `images.mandate`, and no
+/// cluster lookup (the k3d cell's API-server egress comes from its own cluster, which a dry run
+/// never reads).
+pub fn dry_run_args(target: &Target, id: &str, first: &Gesture) -> Vec<String> {
+    template_args(
+        &target.namespace,
+        STAGING_VALUES,
+        &[format!("images.mandate={}", target.image)],
+        &[
+            format!("run.id=\"{id}\""),
+            format!("run.args={}", json!(first.args)),
+        ],
+        Some("templates/run.yaml"),
+    )
+}
+
+/// Every object of `objects`, in `namespace`: what a dry run prints, so the objects say where they
+/// would be applied.
+pub fn in_namespace(mut objects: Vec<Value>, namespace: &str) -> Vec<Value> {
+    for object in &mut objects {
+        object["metadata"]["namespace"] = json!(namespace);
+    }
+    objects
+}
+
+/// `cargo xtask cell demo --scenario <name> --dry-run <target>`: renders the demo's gestures' Job
+/// and its inputs' ConfigMap for `target` ([`target_of`]) with `helm template` and prints them, one
+/// JSON object a line, on stdout. It reads no kubeconfig, starts no cell, and applies nothing.
+pub fn dry_run(name: &str, args: &[&str]) -> Result<()> {
+    if !SCENARIOS.contains(&name) {
+        bail!(
+            "no scenario `{name}`; the scenarios are {}",
+            SCENARIOS.join(", ")
+        );
+    }
+    let target = target_of(args)?;
+    let id = run_id()?;
+    let inputs = demo_inputs()?;
+    let steps = plan(&target.workspace, inputs.envelopes());
+    let all = gestures(&steps);
+    let first = all.first().context("the scenario has no gesture")?;
+    let rendered = render_with(&dry_run_args(&target, &id, first))?;
+    let objects = gestures_job(
+        rendered,
+        &all,
+        &format!("demo-in-{id}"),
+        &inputs.files(),
+        &target.namespace,
+    )?;
+    for object in in_namespace(objects, &target.namespace) {
+        println!("{object}");
+    }
+    eprintln!(
+        "==> the demo's gestures, rendered for {} in workspace {} (dry run: nothing applied)",
+        target.namespace, target.workspace
+    );
+    Ok(())
+}
+
 /// `cargo xtask cell demo --scenario <name>`.
 pub fn run(name: &str) -> Result<()> {
     if !SCENARIOS.contains(&name) {
@@ -1143,18 +1343,8 @@ pub fn run(name: &str) -> Result<()> {
     if api_unaskable()?.is_none() {
         point_api(&workspace)?;
     }
-    let mandate = fs::read(MANDATE_FILE).with_context(|| format!("reading {MANDATE_FILE}"))?;
-    let instrument = fs::read_to_string(INSTRUMENT_FILE)
-        .with_context(|| format!("reading {INSTRUMENT_FILE}"))?;
-    let web_mandate =
-        fs::read(WEB_MANDATE_FILE).with_context(|| format!("reading {WEB_MANDATE_FILE}"))?;
-    let web_instrument = fs::read_to_string(WEB_INSTRUMENT_FILE)
-        .with_context(|| format!("reading {WEB_INSTRUMENT_FILE}"))?;
-    let research_mandate = fs::read(RESEARCH_MANDATE_FILE)
-        .with_context(|| format!("reading {RESEARCH_MANDATE_FILE}"))?;
-    let research_recording = fs::read_to_string(RESEARCH_RECORDING_FILE)
-        .with_context(|| format!("reading {RESEARCH_RECORDING_FILE}"))?;
-    let steps = plan(&workspace, (&mandate, &web_mandate, &research_mandate));
+    let inputs = demo_inputs()?;
+    let steps = plan(&workspace, inputs.envelopes());
     let all = gestures(&steps);
     let first = all.first().context("the scenario has no gesture")?;
     let rendered = render(
@@ -1164,28 +1354,8 @@ pub fn run(name: &str) -> Result<()> {
         ],
         Some("templates/run.yaml"),
     )?;
-    let files = [
-        (
-            "mandate.json".to_string(),
-            String::from_utf8(mandate).context("the mandate is not UTF-8")?,
-        ),
-        ("instrument.json".into(), instrument),
-        (
-            "web-mandate.json".into(),
-            String::from_utf8(web_mandate).context("the second mandate is not UTF-8")?,
-        ),
-        ("web-instrument.json".into(), web_instrument),
-        (
-            "research-mandate.json".into(),
-            String::from_utf8(research_mandate).context("the research mandate is not UTF-8")?,
-        ),
-        ("research.json".into(), research_recording),
-    ]
-    .into_iter()
-    .chain(backtest_inputs(Path::new("."))?)
-    .collect::<Vec<_>>();
-    let files: Vec<(&str, String)> = files.iter().map(|(p, c)| (p.as_str(), c.clone())).collect();
-    let objects = gestures_job(rendered, &all, &format!("demo-in-{id}"), &files)?;
+    let files = inputs.files();
+    let objects = gestures_job(rendered, &all, &format!("demo-in-{id}"), &files, NAMESPACE)?;
     eprintln!("==> the demo, end to end (paper and demo data only; local-cell results)");
     eprintln!("    workspace {workspace}, agent {AGENT}");
     let job = objects
@@ -1336,7 +1506,7 @@ fn api_unaskable() -> Result<Option<String>> {
 /// Deployments have rolled out, so no pod of an earlier run still serves another workspace; and
 /// any earlier `kubectl port-forward` to the API is stopped, so the checks never reach an old pod
 /// through it (`api_port_forward` would reuse a forward that still answers its 401).
-fn point_api(workspace: &str) -> Result<()> {
+pub(super) fn point_api(workspace: &str) -> Result<()> {
     let hosted = format!("api.workspace={workspace}");
     helm(&[
         "upgrade",
@@ -2794,6 +2964,155 @@ mod tests {
         })]
     }
 
+    const PINNED: &str = "ghcr.io/kunwarshivam/mandate/mandate@sha256:\
+                          0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    const STAGING_WORKSPACE: &str = "01KDEM0000000000000000000W";
+
+    /// A dry run's target: staging's namespace unless `--namespace` names another, the image pinned
+    /// by a SHA-256 digest, and the fixed workspace's ULID; anything else is refused, so a dry run
+    /// never renders a tag admission would refuse or a workspace the API does not host.
+    #[test]
+    fn a_dry_run_targets_a_pinned_image_and_a_workspace_ulid() {
+        let target = target_of(&["--image", PINNED, "--workspace", STAGING_WORKSPACE]).unwrap();
+        assert_eq!(
+            target,
+            Target {
+                namespace: STAGING_NAMESPACE.into(),
+                image: PINNED.into(),
+                workspace: STAGING_WORKSPACE.into(),
+            }
+        );
+        let other = target_of(&[
+            "--workspace",
+            STAGING_WORKSPACE,
+            "--namespace",
+            "ws-ws2",
+            "--image",
+            PINNED,
+        ])
+        .unwrap();
+        assert_eq!(other.namespace, "ws-ws2");
+        let tagged = "ghcr.io/kunwarshivam/mandate/mandate:latest";
+        let short = "ghcr.io/kunwarshivam/mandate/mandate@sha256:0123abcd";
+        let upper = PINNED.to_ascii_uppercase();
+        for refused in [
+            vec!["--workspace", STAGING_WORKSPACE],
+            vec!["--image", PINNED],
+            vec!["--image", tagged, "--workspace", STAGING_WORKSPACE],
+            vec!["--image", short, "--workspace", STAGING_WORKSPACE],
+            vec!["--image", &upper, "--workspace", STAGING_WORKSPACE],
+            vec![
+                "--image",
+                "@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                "--workspace",
+                STAGING_WORKSPACE,
+            ],
+            vec!["--image", PINNED, "--workspace", "ws1"],
+            vec![
+                "--image",
+                PINNED,
+                "--workspace",
+                "01KDEM000000000000000000OW",
+            ],
+            vec![
+                "--image",
+                PINNED,
+                "--workspace",
+                "01kdem0000000000000000000w",
+            ],
+            vec![
+                "--image",
+                PINNED,
+                "--workspace",
+                STAGING_WORKSPACE,
+                "--kubeconfig",
+                "k",
+            ],
+            vec![
+                "--image",
+                PINNED,
+                "--workspace",
+                STAGING_WORKSPACE,
+                "--image",
+                PINNED,
+            ],
+            vec!["--image", PINNED, "--workspace"],
+        ] {
+            assert!(target_of(&refused).is_err(), "{refused:?} is refused");
+        }
+    }
+
+    /// A dry run renders with staging's values in its HelmRelease's order, the target's namespace
+    /// and image, the first gesture as the run, and nothing read from a cluster: no API-server
+    /// egress, which only the k3d cell's own cluster answers.
+    #[test]
+    fn a_dry_run_renders_with_staging_values_and_reads_no_cluster() {
+        let target = target_of(&["--image", PINNED, "--workspace", STAGING_WORKSPACE]).unwrap();
+        let steps = planned(&target.workspace);
+        let all = gestures(&steps);
+        let args = dry_run_args(&target, "7", all[0]);
+        let expected: Vec<String> = [
+            "template",
+            "workspace",
+            WORKSPACE_CHART,
+            "--namespace",
+            STAGING_NAMESPACE,
+            "-f",
+            "deploy/cell/values/managed.yaml",
+            "-f",
+            "deploy/gitops/clusters/staging/images.yaml",
+            "--set",
+            &format!("images.mandate={PINNED}"),
+            "--set-json",
+            "run.id=\"7\"",
+            "--set-json",
+            &format!("run.args={}", json!(all[0].args)),
+            "--show-only",
+            "templates/run.yaml",
+        ]
+        .iter()
+        .map(|a| a.to_string())
+        .collect();
+        assert_eq!(args, expected);
+        assert!(
+            !args
+                .iter()
+                .any(|a| a.contains("kube-api") || a.contains("kubeconfig"))
+        );
+        for file in STAGING_VALUES {
+            assert!(
+                Path::new("..").join(file).is_file(),
+                "{file} is in the checkout"
+            );
+        }
+        assert!(
+            all[0]
+                .args
+                .windows(2)
+                .any(|w| w == ["--workspace", STAGING_WORKSPACE]),
+            "the gestures act on the target's workspace"
+        );
+    }
+
+    /// The inputs' ConfigMap is made in the namespace it is given, and a dry run prints every
+    /// object in the target's namespace.
+    #[test]
+    fn a_dry_run_prints_every_object_in_the_targets_namespace() {
+        let steps = planned("demo1");
+        let all = gestures(&steps);
+        let files = [("mandate.json", "{}".to_string())];
+        let objects = gestures_job(rendered(), &all, "demo-in-1", &files, "ws-ws2").unwrap();
+        let configmap = objects.iter().find(|o| o["kind"] == "ConfigMap").unwrap();
+        assert_eq!(configmap["metadata"]["namespace"], "ws-ws2");
+        let printed = in_namespace(objects, "ws-ws2");
+        assert!(printed.len() >= 2);
+        assert!(
+            printed
+                .iter()
+                .all(|o| o["metadata"]["namespace"] == "ws-ws2")
+        );
+    }
+
     /// The gestures run in one pod, in order, after the chart's own init containers: the egress
     /// gate first, so no gesture runs before the pod's egress is filtered.
     #[test]
@@ -2804,7 +3123,7 @@ mod tests {
             ("mandate.json", "{}".to_string()),
             ("backtest/bars.json", "{}".to_string()),
         ];
-        let objects = gestures_job(rendered(), &all, "demo-in-1", &files).unwrap();
+        let objects = gestures_job(rendered(), &all, "demo-in-1", &files, NAMESPACE).unwrap();
         let spec = &objects[0]["spec"]["template"]["spec"];
         let names: Vec<&str> = spec["initContainers"]
             .as_array()

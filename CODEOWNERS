@@ -74,6 +74,7 @@
 /crates/mandate-objectstore/ @kunwarshivam
 /crates/mandate-paper/      @kunwarshivam
 /crates/mandate-passkey/    @kunwarshivam
+/crates/mandate-ports/      @kunwarshivam
 /crates/mandate-process/    @kunwarshivam
 /crates/mandate-push-relay/ @kunwarshivam
 /crates/mandate-refcases/   @kunwarshivam
@@ -95,6 +96,7 @@
 /crates/mandate-stub-issuer/ @kunwarshivam
 /crates/mandate-tenant/     @kunwarshivam
 /crates/mandate-time/       @kunwarshivam
+/crates/mandate-token-exchange/ @kunwarshivam
 /crates/mandate-vault-local/ @kunwarshivam
 /crates/mandate-vault/      @kunwarshivam
 /crates/mandate-version-backtest/ @kunwarshivam

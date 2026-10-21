@@ -14,7 +14,9 @@ use mandate_approval::{
 };
 use mandate_canon::{Digest, Int, Key, Value, parse, to_canonical};
 use mandate_cli::control::{ControlError, ControlJournal, Ids, Now, Owner};
-use mandate_journal::{AppendOutcome, Environment, Head, StoredEvent, StreamId};
+use mandate_journal::{
+    AppendOutcome, Environment, Head, Invalid, InvalidReason, StoredEvent, StreamId,
+};
 use mandate_num::{Price, Qty, Signed};
 use mandate_time::UtcNanos;
 
@@ -213,6 +215,18 @@ pub fn code_of(content: &Value) -> String {
     Digest::of(&to_canonical(content)).to_hex()[..8].to_owned()
 }
 
+/// How the next append to an agent stream is answered instead of judged, as a journal that refuses
+/// the owner's claim would answer it; nothing is stored.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Refusal {
+    /// Another event is stored under the draft's id.
+    Conflict,
+    /// The journal's draft checks refuse the draft.
+    Invalid,
+    /// The journal cannot be reached: the append is an error.
+    Fails,
+}
+
 /// An in-memory journal that runs journal spec §5.1's idempotency, fencing and head check in that
 /// order, but validates no payload: `mandate-journal` registers no payload schema for an agent- or
 /// control-stream event yet, so its own journal refuses every event here as `UnknownSchema`
@@ -228,14 +242,22 @@ pub fn code_of(content: &Value) -> String {
 #[derive(Debug, Default)]
 pub struct Journal {
     streams: BTreeMap<String, (u64, Vec<StoredEvent>)>,
+    /// The answer to the next append to an agent stream, in place of judging it.
+    pub agent_refusal: Option<Refusal>,
+    /// Control-stream appends to answer with an error, storing nothing, as a journal that cannot
+    /// be reached would.
+    pub control_failures: u32,
     /// Appends to refuse as `Fenced`, taking a new epoch as another writer would.
     pub fence_next: u32,
     /// Appends before which another event lands at the current epoch, so the append is behind.
     pub behind_next: u32,
     /// Appends to commit and then answer `Ambiguous`.
     pub ambiguous_next: u32,
-    /// Drafts another writer commits just before the next control-stream append, after the
-    /// command has read the rows it decided on.
+    /// Control-stream appends to commit and then answer `HeadMismatch`, as a journal whose answer
+    /// reports a head another writer moved after the commit.
+    pub mismatch_after_commit: u32,
+    /// Drafts another writer commits just before the next append to the stream each names, after
+    /// the command has read the rows it decided on.
     pub land_before_next: Vec<Vec<u8>>,
     /// Commit the next control-stream append, answer it `Ambiguous`, and answer every later one
     /// `Unavailable`, until cleared.
@@ -344,8 +366,31 @@ impl ControlJournal for Journal {
                     .unwrap_or_default()
             })
             .collect();
+        if stream.as_str().starts_with("agent:")
+            && let Some(refusal) = self.agent_refusal.take()
+        {
+            return match refusal {
+                Refusal::Conflict => Ok(AppendOutcome::IdempotencyConflict { stored_seq: 1 }),
+                Refusal::Invalid => Ok(AppendOutcome::Invalid {
+                    draft: 0,
+                    error: Invalid {
+                        reason: InvalidReason::Schema,
+                        path: "actor.kind".to_owned(),
+                    },
+                }),
+                Refusal::Fails => Err(ControlError::Journal(
+                    "the agent stream cannot be written".to_owned(),
+                )),
+            };
+        }
         if stream.as_str() == CONTROL {
             self.attempts.push(ids.clone());
+            if self.control_failures > 0 {
+                self.control_failures -= 1;
+                return Err(ControlError::Journal(
+                    "the control stream cannot be written".to_owned(),
+                ));
+            }
             if self.lost_for_good && self.lost {
                 return Ok(AppendOutcome::Unavailable);
             }
@@ -373,8 +418,16 @@ impl ControlJournal for Journal {
                 current_epoch: state.0,
             });
         }
-        if stream.as_str() == CONTROL && !self.land_before_next.is_empty() {
-            let landed: Vec<Vec<u8>> = std::mem::take(&mut self.land_before_next);
+        let (landed, waiting): (Vec<Vec<u8>>, Vec<Vec<u8>>) =
+            std::mem::take(&mut self.land_before_next)
+                .into_iter()
+                .partition(|bytes| {
+                    parse(bytes).ok().is_some_and(|d| {
+                        d.get("stream_id").and_then(Value::as_str) == Some(stream.as_str())
+                    })
+                });
+        self.land_before_next = waiting;
+        if !landed.is_empty() {
             let refs: Vec<&[u8]> = landed.iter().map(Vec::as_slice).collect();
             self.store(stream, recorded_at, &refs)?;
         }
@@ -404,6 +457,14 @@ impl ControlJournal for Journal {
             });
         }
         let stored = self.store(stream, recorded_at, drafts)?;
+        if stream.as_str() == CONTROL && self.mismatch_after_commit > 0 {
+            self.mismatch_after_commit -= 1;
+            let head = self.head(stream)?;
+            return Ok(AppendOutcome::HeadMismatch {
+                actual_seq: head.seq,
+                actual_hash: head.hash,
+            });
+        }
         if self.lost_for_good && stream.as_str() == CONTROL {
             self.lost = true;
             return Ok(AppendOutcome::Ambiguous);
@@ -421,6 +482,30 @@ impl ControlJournal for Journal {
 }
 
 impl Journal {
+    /// Stores `bytes` as the next row of `stream_text` as they are, whether or not they parse: a
+    /// row the journal holds but no reader can decode.
+    pub fn push_raw(&mut self, stream_text: &str, event_type: &str, bytes: &[u8]) {
+        let s = stream(stream_text);
+        let head = self.head(&s).unwrap();
+        let row = StoredEvent {
+            stream_id: stream_text.to_owned(),
+            seq: head.seq + 1,
+            event_id: String::new(),
+            event_type: event_type.to_owned(),
+            schema_version: 1,
+            environment: "paper".to_owned(),
+            recorded_at: at(ASKED_AT).at.to_string(),
+            prev_hash: head.hash,
+            hash: Digest::of(bytes),
+            body: bytes.to_vec(),
+        };
+        self.streams
+            .entry(stream_text.to_owned())
+            .or_default()
+            .1
+            .push(row);
+    }
+
     /// Clears `lost_for_good`: the journal answers again.
     pub fn recover(&mut self) {
         self.lost_for_good = false;
