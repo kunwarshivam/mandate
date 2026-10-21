@@ -7911,6 +7911,17 @@ impl PipelineCommand {
             .collect()
     }
 
+    /// The token position of each of [`Self::command`]'s words, in the same order, so a word's
+    /// index there names its position here.
+    fn command_positions(&self) -> Vec<usize> {
+        self.words
+            .iter()
+            .skip(self.command_index())
+            .filter(|(word, quoted, at)| !self.redirection_word(word, *quoted, *at))
+            .map(|(_, _, at)| *at)
+            .collect()
+    }
+
     /// Whether a word belongs to a redirection rather than the command: unquoted, and holding
     /// `<` or `>`, or a descriptor (`2`, `{fd}`) right before a redirection's operator.
     fn redirection_word(&self, word: &str, quoted: bool, at: usize) -> bool {
@@ -8067,11 +8078,9 @@ fn pipeline_live_flag(
             }
         }
         let command_at = command
-            .words
-            .iter()
-            .filter(|(word, _, _)| !is_skipped_word(word))
-            .nth(named.len().saturating_sub(unwrapped_named.len()))
-            .map(|(_, _, at)| *at);
+            .command_positions()
+            .get(named.len().saturating_sub(unwrapped_named.len()))
+            .copied();
         let expanding_command_word = !ctx.quoted_reread
             && unwrapped_named.first().is_some_and(|word| {
                 word.starts_with(['$', '`'])
@@ -24338,6 +24347,37 @@ jq -r "$filter" "$src"
         assert_eq!(paths, [".github/workflows/docker-compose.yml"]);
         let problems = live_feature_problems(&live_policy(), &workspace(live_workspace()), &read)?;
         assert_eq!(problems.len(), 1, "{problems:?}");
+        Ok(())
+    }
+
+    /// A wrapped command word is judged against its own substitution, however many assignments
+    /// the wrapper takes: `env -i A=1 B=2 "$(dirname "$0")/x.sh"` runs the script beside this
+    /// one, and `env -i A=1 "$(cat cmd)/x.sh" "$(dirname "$0")/y.sh"` does not borrow the later
+    /// word's `dirname` (RS's finding on DEC-851 item 6's position lookup).
+    #[test]
+    fn a_wrapped_command_word_reads_its_own_substitution() -> Result<()> {
+        let policy = live_policy();
+        let meta = || workspace(live_workspace());
+        let read = |text: &str| {
+            let files = [ci_file(
+                ".github/scripts/build.sh",
+                &format!("set -e\n{text}\n"),
+            )];
+            live_feature_problems(&policy, &meta(), &files)
+        };
+        for text in [
+            "env -i A=1 B=2 \"$(dirname \"$0\")/x.sh\"",
+            "env -i A=1 \"$(dirname \"$0\")/x.sh\"",
+            "env A=1 B=2 C=3 \"$(dirname \"$0\")/x.sh\" --flag",
+        ] {
+            assert_eq!(read(text)?, Vec::<String>::new(), "{text}");
+        }
+        for text in [
+            "env -i A=1 \"$(cat cmd.txt)/x.sh\" \"$(dirname \"$0\")/y.sh\"",
+            "env -i A=1 B=2 \"$(cat cmd.txt)/x.sh\" a \"$(dirname \"$0\")/y.sh\"",
+        ] {
+            assert_eq!(read(text)?.len(), 1, "{text}");
+        }
         Ok(())
     }
 
