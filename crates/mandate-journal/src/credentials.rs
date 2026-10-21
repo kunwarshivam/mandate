@@ -134,7 +134,8 @@ fn rules_249(
         let at = event_time
             .and_then(Value::as_str)
             .and_then(|t| UtcNanos::parse(t).ok());
-        let owed = at.and_then(|t| UtcNanos::from_parts(t.secs().checked_add(DAY_SECS)?, t.nanos()).ok());
+        let owed =
+            at.and_then(|t| UtcNanos::from_parts(t.secs().checked_add(DAY_SECS)?, t.nanos()).ok());
         ensure(
             owed.is_some() && owed == instant(payload, "cool_off_ends"),
             "payload.cool_off_ends",
@@ -201,7 +202,10 @@ mod tests {
         assert!(credential_id(&"A".repeat(1364)), "1023 bytes: the longest");
 
         assert!(!credential_id(&ok[..21]), "21 characters: under the floor");
-        assert!(!credential_id(&"A".repeat(1366)), "1366 characters: over the ceiling");
+        assert!(
+            !credential_id(&"A".repeat(1366)),
+            "1366 characters: over the ceiling"
+        );
         assert!(
             !credential_id(&"A".repeat(25)),
             "25 characters: no unpadded base64url has a length of 1 modulo 4"
@@ -210,7 +214,10 @@ mod tests {
 
         let mut bad_alphabet = ok.to_owned();
         bad_alphabet.replace_range(7..8, "+");
-        assert!(!credential_id(&bad_alphabet), "`+` is base64's, not base64url's");
+        assert!(
+            !credential_id(&bad_alphabet),
+            "`+` is base64's, not base64url's"
+        );
 
         let mut too_long_and_bad = "A".repeat(1366);
         too_long_and_bad.replace_range(4..5, "+");
