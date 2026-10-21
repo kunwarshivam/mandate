@@ -1656,7 +1656,6 @@ fn summary_draft(run: &Run) -> (EventDraft, Option<String>) {
 /// DEC-2267 item 1, journal spec §9.23: the run summary names the instruments its reads returned
 /// items about by asset ID, the seed's instrument fact for each item's symbol.
 #[test]
-#[ignore = "pending E19-13"]
 fn a_run_summary_names_its_reads_instruments_by_asset_id() {
     let run = read_then_final(|run| bars_result(run, &[]));
     assert_eq!(instruments_read(&run), [AAPL]);
@@ -1665,7 +1664,6 @@ fn a_run_summary_names_its_reads_instruments_by_asset_id() {
 /// DEC-2267 item 2: a read item's symbol the seed has no instrument fact for is left out of the
 /// summary, mapped to nothing, while its `ObservationRecorded` keeps the symbol-derived id.
 #[test]
-#[ignore = "pending E19-13"]
 fn a_symbol_the_seed_does_not_map_is_left_out_and_its_observation_keeps_it() {
     let run = read_then_final(|run| bars_result(run, &["IBM"]));
     assert_eq!(
@@ -1688,7 +1686,6 @@ fn a_symbol_the_seed_does_not_map_is_left_out_and_its_observation_keeps_it() {
 /// DEC-2267 item 3, journal spec §9.23 and rule 181: every record of a run whose read returned
 /// items about instruments is one the journal's own schemas accept.
 #[test]
-#[ignore = "pending E19-13"]
 fn every_record_of_a_run_that_read_instruments_passes_the_journal_s_check() {
     let run = read_then_final(|run| bars_result(run, &["IBM"]));
     let mut failed = Vec::new();
