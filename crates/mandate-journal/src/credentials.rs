@@ -202,6 +202,16 @@ mod tests {
         assert!(credential_id(ok), "16 bytes: the base draft");
         assert!(credential_id(&"A".repeat(1364)), "1023 bytes: the longest");
 
+        for (class, sample) in [
+            ("an upper-case letter", "AAECAwQFBgcICQoLDA0ODw"),
+            ("a lower-case letter", "aaecAwQFBgcICQoLDA0ODw"),
+            ("a digit", "00ECAwQFBgcICQoLDA0ODw"),
+            ("a hyphen", "AA-CAwQFBgcICQoLDA0ODw"),
+            ("an underscore", "AA_CAwQFBgcICQoLDA0ODw"),
+        ] {
+            assert!(credential_id(sample), "{class} is in base64url's alphabet");
+        }
+
         assert!(!credential_id(&ok[..21]), "21 characters: under the floor");
         assert!(
             !credential_id(&"A".repeat(1366)),
