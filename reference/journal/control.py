@@ -93,6 +93,12 @@ DIGEST_HEX_FORM = re.compile(r"^[0-9a-f]{64}\Z")
 # §9.29 (DEC-2104 item 1): the code the web app shows for a challenge, normalized.
 CONFIRM_CODE = T("confirm_code")
 CONFIRM_CODE_FORM = re.compile(r"^[0-9A-HJKMNP-TV-Z]{8}\Z")
+# §9.31 (DEC-2108 item 2): a WebAuthn credential id as unpadded base64url, 16 to 1023 bytes, and the
+# authenticator's 32-bit signature counter.
+CREDENTIAL_ID = T("credential_id")
+CREDENTIAL_ID_FORM = re.compile(r"^[A-Za-z0-9_-]{22,1364}\Z")
+SIGN_COUNT = T("sign_count")
+SIGN_COUNT_MAX = 4294967295
 STREAM_SEGMENTS = {"acct": 3, "agent": 3, "ctl": 2, "clock": 2, "ntf": 2, "meter": 2}
 SOURCES = ("user_stated", "user_entered", "template_structure", "platform_proposed", "platform_default")
 STOP_REASONS = ("goal_complete", "profit_stop_reached", "end_date", "owner_stop")
@@ -517,6 +523,24 @@ SCHEMAS[("ctl", "StepUpConfirmed")] = rec(
     ("principal", ULID),
     ("code", CONFIRM_CODE),
     ("confirmed_at", INT),
+)
+
+# §9.31 v0.69 (DEC-2108): a member's passkeys with the workspace's relying party, the fold the API's
+# passkey verifier judges an assertion against.
+SCHEMAS[("ctl", "CredentialEnrolled")] = rec(
+    ("member", ULID),
+    ("kind", STR),
+    ("credential", CREDENTIAL_ID),
+    ("public_key", REF),
+    ("alg", one_of("es256", "eddsa")),
+    ("sign_count", SIGN_COUNT),
+    ("cool_off_ends", opt(TS)),
+    ("step_up", opt(STEP_UP)),
+)
+SCHEMAS[("ctl", "CredentialRemoved")] = rec(
+    ("member", ULID),
+    ("credential", CREDENTIAL_ID),
+    ("step_up", STEP_UP),
 )
 
 # §9.8 (DEC-800): a connection's history. The control stream's three records and the account
@@ -1499,10 +1523,19 @@ def payload_type_violations(ty: T, value, path: str, skip: frozenset[str]) -> li
             return [Violation("types", "schema", path)]
         ok = (value.startswith("pii_") and is_ulid(value[4:])) or "types.pii_ref" in skip
         return [] if ok else [Violation("types", "non_canonical", path)]
-    if ty.kind in ("pointer", "date", "asset_id", "stream_id", "digest", "limit_key", "confirm_code"):
+    if ty.kind == "sign_count":
+        whole = isinstance(value, int) and not isinstance(value, bool)
+        top = SIGN_COUNT_MAX * 2 if "types.sign_count_range" in skip else SIGN_COUNT_MAX
+        if whole and 0 <= value <= top:
+            return []
+        return [Violation("types", "schema", path)]
+    if ty.kind in ("pointer", "date", "asset_id", "stream_id", "digest", "limit_key", "confirm_code", "credential_id"):
         if not isinstance(value, str):
             return [Violation("types", "schema", path)]
-        if ty.kind == "confirm_code":
+        if ty.kind == "credential_id":
+            padless = len(value) % 4 != 1 or "types.credential_id_length" in skip
+            ok = bool(CREDENTIAL_ID_FORM.match(value)) and padless
+        elif ty.kind == "confirm_code":
             ok = bool(CONFIRM_CODE_FORM.match(value)) or (
                 "types.confirm_code_case" in skip and bool(CONFIRM_CODE_FORM.match(value.upper()))
             )
@@ -1687,6 +1720,20 @@ def risk_limit_violations(event_type: str, draft: dict, skip: frozenset[str]) ->
     return out
 
 
+# Identity spec §10.1's enrolment cool-off (DEC-2108 item 5).
+COOL_OFF_S = 86_400
+
+
+def later_by(start: str, end: str, seconds: int, skip: frozenset[str]) -> bool:
+    """Whether `end` is exactly `seconds` after `start`, to the nanosecond (rule 249)."""
+    if not (isinstance(end, str) and is_timestamp(end)):
+        return False
+    (start_at, start_ns), (end_at, end_ns) = parse_instant(start), parse_instant(end)
+    gap = (end_at - start_at).total_seconds()
+    same_fraction = start_ns == end_ns or "rule.249.fraction" in skip
+    return gap == seconds and same_fraction
+
+
 def rule_holds(name: str, holds: bool, skip: frozenset[str]) -> bool:
     """Whether rule `name` passes, a skipped rule passing."""
     return holds or f"rule.{name}" in skip
@@ -1771,6 +1818,24 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
             rule("242.principal", draft["actor"]["id"] == p["principal"], "schema", "actor.id")
         else:
             rule("242.user", False, "schema", "actor.kind")
+    if event_type in ("CredentialEnrolled", "CredentialRemoved"):
+        number = "249" if event_type == "CredentialEnrolled" else "250"
+        if event_type == "CredentialEnrolled":
+            rule("249.kind", p["kind"] == "passkey", "schema", "payload.kind")
+        if rule_holds(f"{number}.user", draft["actor"]["kind"] == "user", skip):
+            rule(f"{number}.member", draft["actor"]["id"] == p["member"], "schema", "actor.id")
+        else:
+            rule(f"{number}.user", False, "schema", "actor.kind")
+        step_up = p["step_up"]
+        if step_up is not None:
+            rule(f"{number}.passkey", step_up["method"] == "passkey", "schema", "payload.step_up.method")
+        if event_type == "CredentialEnrolled":
+            ends = p["cool_off_ends"]
+            if step_up is None:
+                due = ends is not None and later_by(draft["event_time"], ends, COOL_OFF_S, skip)
+            else:
+                due = ends is None or "rule.249.stepped_up_cools" in skip
+            rule("249.cool_off", due, "schema", "payload.cool_off_ends")
     if event_type == "MandateVersionCreated":
         paths = [(entry["path"] or "").encode() for entry in p["provenance"]]
         rule("17", ascending(paths), "non_canonical", "payload.provenance")

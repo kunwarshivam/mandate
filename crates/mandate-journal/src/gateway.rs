@@ -1,7 +1,8 @@
 //! The records journal spec v0.46 §9.19 closes for the model gateway (DEC-998, E15-8's code half,
 //! DEC-2201): the agent stream's `ModelInvocationRecorded`, with rules 146 to 152, and the meter
 //! stream `meter:{workspace_id}`'s `StreamOpened`, `MeterReserved`, and `MeterSettled`, with rules
-//! 154 to 157. Rules 153 and 158 are stream rules, [`stream_rule`]'s, which
+//! 154 to 157, and the same on the deployment meter stream `dmeter:{deployment_id}` (journal spec
+//! v0.53, DEC-2207), whose `StreamOpened` names its deployment. Rules 153 and 158 are stream rules, [`stream_rule`]'s, which
 //! [`crate::check_stream`] runs with the stream's earlier records. Every rule only refuses a draft.
 //!
 //! The control stream's `ModelInvocationRecorded` is the compiler's, [`crate::workspace`]'s; rules
@@ -38,7 +39,7 @@ const THESIS_REFUSALS: [&str; 4] = [
 /// agent stream's `ModelInvocationRecorded`.
 pub(crate) fn governs(stream: &StreamId, event_type: &str) -> bool {
     match stream.stream_type() {
-        StreamType::Meter => true,
+        StreamType::Meter | StreamType::DeploymentMeter => true,
         StreamType::Agent => event_type == INVOCATION,
         _ => false,
     }
@@ -54,8 +55,9 @@ pub(crate) fn schema(
     match (event_type, schema_version, stream) {
         (INVOCATION, 1, StreamType::Agent) => Some(&AGENT_INVOCATION),
         (OPENED, 1, StreamType::Meter) => Some(&METER_STREAM_OPENED),
-        (RESERVED, 1, StreamType::Meter) => Some(&METER_RESERVED),
-        (SETTLED, 1, StreamType::Meter) => Some(&METER_SETTLED),
+        (OPENED, 1, StreamType::DeploymentMeter) => Some(&DEPLOYMENT_METER_STREAM_OPENED),
+        (RESERVED, 1, StreamType::Meter | StreamType::DeploymentMeter) => Some(&METER_RESERVED),
+        (SETTLED, 1, StreamType::Meter | StreamType::DeploymentMeter) => Some(&METER_SETTLED),
         _ => None,
     }
 }
@@ -95,7 +97,7 @@ pub(crate) fn rules(
             }
             Ok(())
         }
-        (RESERVED, StreamType::Meter) => {
+        (RESERVED, StreamType::Meter | StreamType::DeploymentMeter) => {
             ensure(writer == "system", "actor.kind")?;
             ensure(
                 p.is_null("agent_id") == (p.text("purpose") == "compiler"),
@@ -106,7 +108,7 @@ pub(crate) fn rules(
                 "payload.max_cost_usd",
             )
         }
-        (SETTLED, StreamType::Meter) => {
+        (SETTLED, StreamType::Meter | StreamType::DeploymentMeter) => {
             ensure(writer == "system", "actor.kind")?;
             ensure(!p.text("cost_usd").starts_with('-'), "payload.cost_usd")?;
             if p.int("attempts") == 0 {
@@ -123,12 +125,18 @@ pub(crate) fn rules(
     }
 }
 
-/// Rule 154 (`stream_mismatch`): the meter stream's `StreamOpened` names its own stream.
+/// Rule 154 (`stream_mismatch`): a meter stream's `StreamOpened` names its own stream, the
+/// workspace's or the deployment's.
 pub(crate) fn subject(event_type: &str, stream: &StreamId, payload: &Value) -> Result<(), Invalid> {
-    if stream.stream_type() != StreamType::Meter || event_type != OPENED {
+    if event_type != OPENED {
         return Ok(());
     }
-    if format!("meter:{}", View(payload).text("workspace_id")) == stream.as_str() {
+    let named = match stream.stream_type() {
+        StreamType::Meter => format!("meter:{}", View(payload).text("workspace_id")),
+        StreamType::DeploymentMeter => format!("dmeter:{}", View(payload).text("deployment_id")),
+        _ => return Ok(()),
+    };
+    if named == stream.as_str() {
         Ok(())
     } else {
         Err(Invalid::new(InvalidReason::StreamMismatch, "stream_id"))
@@ -212,7 +220,7 @@ pub(crate) fn stream_rule(before: &[&Draft], draft: &Draft) -> Result<(), Invali
                 "payload.call_id",
             )
         }
-        (RESERVED, 1, StreamType::Meter) => {
+        (RESERVED, 1, StreamType::Meter | StreamType::DeploymentMeter) => {
             let mut reserved = before
                 .filter(|d| d.event_type() == RESERVED)
                 .map(payload_of);
@@ -221,7 +229,7 @@ pub(crate) fn stream_rule(before: &[&Draft], draft: &Draft) -> Result<(), Invali
                 "payload.call_id",
             )
         }
-        (SETTLED, 1, StreamType::Meter) => {
+        (SETTLED, 1, StreamType::Meter | StreamType::DeploymentMeter) => {
             let reservation = View(&mine).text("reservation");
             let mut reserved_call = None;
             let mut settled = BTreeSet::new();
@@ -408,6 +416,11 @@ static AGENT_INVOCATION: Ty = Ty::Record(&[
 static METER_STREAM_OPENED: Ty = Ty::Record(&[
     ("stream_type", Ty::OneOf(&["meter"])),
     ("workspace_id", Ty::Ident),
+]);
+
+static DEPLOYMENT_METER_STREAM_OPENED: Ty = Ty::Record(&[
+    ("stream_type", Ty::OneOf(&["deployment_meter"])),
+    ("deployment_id", Ty::Ident),
 ]);
 
 static METER_RESERVED: Ty = Ty::Record(&[

@@ -19,18 +19,21 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, anyhow};
 use clap::{Args, Subcommand, ValueEnum};
 use mandate_connections::record::ConnectionId;
+use mandate_time::UtcNanos;
 use mandate_vault::SourceError;
 use mandate_vault::credentials::{
     check_credential_dir, read_token, read_token_file, write_credentials,
 };
 use mandate_vault::kube::kube_secrets;
-use mandate_vault::openbao::{OpenBaoConfig, provision};
-use mandate_vault::policy::Mounts;
+use mandate_vault::openbao::{OpenBaoConfig, OpenBaoSource, provision};
+use mandate_vault::policy::{Identity, Mounts, PlatformSecret, SecretPath};
+use mandate_vault::source::SecretSource;
 use mandate_vault_local::VaultError;
 use mandate_vault_local::import::{import_client_secret, resolve_ids};
 use mandate_vault_local::startup::{Inputs, Role};
 use mandate_vault_local::store::open;
-use secrecy::ExposeSecret;
+use secrecy::zeroize::Zeroize;
+use secrecy::{ExposeSecret, SecretSlice, SecretString};
 
 /// Where the demo host keeps the vault (DEC-692 item 1).
 pub const DEFAULT_VAULT_DIR: &str = "/var/lib/owlhead/vault";
@@ -43,7 +46,37 @@ pub enum VaultCommand {
     /// Set an OpenBao vault up for the cell's connections and write each process's AppRole
     /// credentials, owner-only, into `--out`. The operator's token is read from a file.
     Provision(ProvisionArgs),
+    /// Write a platform secret into an OpenBao vault as the secret-import identity. Stdin holds
+    /// that identity's role id, its secret id, and the secret, one line each; none is ever an
+    /// argument (DEC-2020, DEC-2630).
+    Put(PutArgs),
 }
+
+#[derive(Debug, Args)]
+pub struct PutArgs {
+    /// Which platform secret stdin's last line is.
+    #[arg(value_enum)]
+    pub secret: PutSecret,
+    /// The vault's address, `https://host:port`.
+    #[arg(long)]
+    pub address: String,
+    /// The CA certificate (PEM) the vault's certificate must chain to.
+    #[arg(long)]
+    pub ca: PathBuf,
+}
+
+/// The platform secrets `vault put` writes (DEC-2020): each is written by the secret-import
+/// identity alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum PutSecret {
+    #[value(name = "model-provider-key")]
+    ModelProviderKey,
+    #[value(name = "email-credential")]
+    EmailCredential,
+}
+
+/// The most bytes `vault put` reads from stdin: two credentials and a secret are far shorter.
+pub const PUT_MAX: u64 = 16384;
 
 #[derive(Debug, Args)]
 pub struct ProvisionArgs {
@@ -81,7 +114,7 @@ pub struct ProvisionArgs {
 }
 
 /// Which of the process's standard streams are terminals, which `vault provision` refuses for its
-/// token and its Secrets.
+/// token and its Secrets, and `vault put` for the credentials and the secret it reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Terminals {
     pub stdin: bool,
@@ -157,6 +190,93 @@ pub fn run_import(
         .map_err(refused)?;
     import_client_secret(&vault, stdin).map_err(refused)?;
     writeln!(out, "the Alpaca OAuth client secret is in the vault")?;
+    Ok(())
+}
+
+/// Logs in as the secret-import identity with the role id and secret id on `stdin`'s first two
+/// lines, and writes the third, the secret, at `args.secret`'s path (DEC-2020), printing only
+/// which secret was written. Stdin is exactly three non-empty lines, the last newline optional,
+/// with no carriage return, at most [`PUT_MAX`] bytes, the last newline counted among them;
+/// anything else is refused `credential_file` before the vault is reached. A `stdin` that is a
+/// terminal is refused `config` before it is read, so nothing is typed where it echoes. A refusal
+/// names its reason code and carries no line of stdin. Its one line of output on success is shown
+/// only by a real vault: the CLI refuses the dev server CI runs (DEC-977 item 6), so staging's
+/// apply is where it is seen.
+pub fn run_put(
+    args: &PutArgs,
+    stdin: &mut impl Read,
+    terminals: Terminals,
+    now: UtcNanos,
+    out: &mut impl Write,
+) -> anyhow::Result<()> {
+    let refused = |e: SourceError| anyhow!("{e} ({})", e.code());
+    if terminals.stdin {
+        return Err(anyhow!(
+            "the credentials and the secret are read only from a pipe, never a terminal (config)"
+        ));
+    }
+    let mut bytes = Vec::new();
+    let read = stdin
+        .take(PUT_MAX.saturating_add(1))
+        .read_to_end(&mut bytes);
+    if read.is_err() || u64::try_from(bytes.len()).map_or(true, |read| read > PUT_MAX) {
+        bytes.zeroize();
+        return Err(refused(SourceError::CredentialFile));
+    }
+    let text = match String::from_utf8(bytes) {
+        Ok(text) => SecretString::from(text),
+        Err(invalid) => {
+            invalid.into_bytes().zeroize();
+            return Err(refused(SourceError::CredentialFile));
+        }
+    };
+    let body = text.expose_secret();
+    let lines: Vec<&str> = body
+        .strip_suffix('\n')
+        .unwrap_or(body)
+        .split('\n')
+        .collect();
+    let [role_id, secret_id, value] = lines.as_slice() else {
+        return Err(refused(SourceError::CredentialFile));
+    };
+    if [role_id, secret_id, value]
+        .iter()
+        .any(|line| line.is_empty() || line.contains('\r'))
+    {
+        return Err(refused(SourceError::CredentialFile));
+    }
+    let (path, name) = match args.secret {
+        PutSecret::ModelProviderKey => (PlatformSecret::ModelProviderKey, "model provider's key"),
+        PutSecret::EmailCredential => (PlatformSecret::EmailCredential, "email credential"),
+    };
+    let config = OpenBaoConfig {
+        address: args.address.clone(),
+        ca_pem: fs::read(&args.ca).map_err(|_| refused(SourceError::Config))?,
+        mounts: Mounts::default(),
+    };
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("starting the put's runtime")?;
+    runtime
+        .block_on(async {
+            let source = OpenBaoSource::login(
+                &config,
+                Identity::SecretImport,
+                role_id,
+                &SecretString::from((*secret_id).to_owned()),
+                now,
+            )
+            .await?;
+            source
+                .put(
+                    &SecretPath::Platform(path),
+                    &SecretSlice::from(value.as_bytes().to_vec()),
+                )
+                .await
+        })
+        .map_err(refused)?;
+    writeln!(out, "the {name} is in the vault")?;
     Ok(())
 }
 
