@@ -221,7 +221,6 @@ fn a_bundle_without_turns_scripts_none() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn the_agentic_fixture_reads_its_scripted_turns_in_order() {
     let loaded: Vec<Vec<(String, String)>> = agentic()
         .turns
@@ -233,7 +232,6 @@ fn the_agentic_fixture_reads_its_scripted_turns_in_order() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn turns_on_a_bundle_with_no_agentic_loop_refuse_the_load() {
     let loaded = load_edited("single", FIXTURE, |file| {
         file["turns"] = one_call("note", json!({"text": "a note"}));
@@ -242,7 +240,6 @@ fn turns_on_a_bundle_with_no_agentic_loop_refuse_the_load() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn a_script_the_entry_could_not_serve_refuses_the_load() {
     let max_per_turn: Vec<Json> = (0..5)
         .map(|_| json!({"name": "note", "arguments": {"text": "x"}}))
@@ -289,7 +286,6 @@ fn a_script_the_entry_could_not_serve_refuses_the_load() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn no_scripted_call_names_an_order_a_quantity_a_size_or_a_price() {
     let mut names = BTreeSet::new();
     for turn in &agentic().turns {
@@ -312,7 +308,6 @@ fn no_scripted_call_names_an_order_a_quantity_a_size_or_a_price() {
 }
 
 #[test]
-#[ignore = "pending E19-13"]
 fn each_turn_is_answered_with_its_scripted_calls_then_the_final_reply() {
     let shelf = Shelf::default();
     let (mut worker, items) = started(&shelf);
