@@ -22474,7 +22474,7 @@
   ]
  },
  "deployment_manager": {
-  "spec": "docs/specs/journal.md v0.48 §9.21 (DEC-1170)",
+  "spec": "docs/specs/journal.md v0.70 §9.21 (DEC-1170, DEC-1175)",
   "drafts": {
    "process_start_issued": {
     "envelope_version": 1,
@@ -23490,6 +23490,130 @@
      "reason": "schema",
      "path": "payload.window_seconds"
     }
+   },
+   {
+    "name": "ProcessStartIssued.exchange_restarted",
+    "clause": "rule 167: an exchange is requested at generation 1 only",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "payload.process",
+      "value": "token_exchange"
+     },
+     {
+      "path": "payload.subject",
+      "value": "conn_01J8Z2CONN000000000000C1"
+     },
+     {
+      "path": "payload.generation",
+      "value": 2
+     },
+     {
+      "path": "payload.cause",
+      "value": "requested"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cause"
+    }
+   },
+   {
+    "name": "ProcessStartIssued.exchange_deployed",
+    "clause": "rule 256: a token exchange is started as requested",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "payload.process",
+      "value": "token_exchange"
+     },
+     {
+      "path": "payload.subject",
+      "value": "conn_01J8Z2CONN000000000000C1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cause"
+    }
+   },
+   {
+    "name": "ProcessStartIssued.runtime_requested",
+    "clause": "rule 256: only a token exchange is requested",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "payload.cause",
+      "value": "requested"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cause"
+    }
+   },
+   {
+    "name": "ProcessStopIssued.exchange_stopped_for_an_agent",
+    "clause": "rule 256: a token exchange is stopped as its request closed",
+    "base_draft": "process_stop_issued",
+    "changes": [
+     {
+      "path": "payload.process",
+      "value": "token_exchange"
+     },
+     {
+      "path": "payload.subject",
+      "value": "conn_01J8Z2CONN000000000000C1"
+     },
+     {
+      "path": "payload.generation",
+      "value": 1
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cause"
+    }
+   },
+   {
+    "name": "ProcessStopIssued.runtime_stopped_as_closed",
+    "clause": "rule 256: only a token exchange stops as its request closed",
+    "base_draft": "process_stop_issued",
+    "changes": [
+     {
+      "path": "payload.cause",
+      "value": "request_closed"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cause"
+    }
+   },
+   {
+    "name": "ProcessCrashLooped.exchange_looped",
+    "clause": "§9.21 types: a token exchange never crash-loops",
+    "base_draft": "process_crash_looped",
+    "changes": [
+     {
+      "path": "payload.process",
+      "value": "token_exchange"
+     },
+     {
+      "path": "payload.subject",
+      "value": "conn_01J8Z2CONN000000000000C1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.process"
+    }
    }
   ],
   "valid_drafts": [
@@ -23637,6 +23761,54 @@
      {
       "path": "environment",
       "value": "live"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "ProcessStartIssued.token_exchange",
+    "clause": "rule 256: an OAuth connect's exchange, named by its connection",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "payload.process",
+      "value": "token_exchange"
+     },
+     {
+      "path": "payload.subject",
+      "value": "conn_01J8Z2CONN000000000000C1"
+     },
+     {
+      "path": "payload.cause",
+      "value": "requested"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "ProcessStopIssued.token_exchange_closed",
+    "clause": "rule 256: a running exchange stopped as its request closed",
+    "base_draft": "process_stop_issued",
+    "changes": [
+     {
+      "path": "payload.process",
+      "value": "token_exchange"
+     },
+     {
+      "path": "payload.subject",
+      "value": "conn_01J8Z2CONN000000000000C1"
+     },
+     {
+      "path": "payload.generation",
+      "value": 1
+     },
+     {
+      "path": "payload.cause",
+      "value": "request_closed"
      }
     ],
     "expect": {

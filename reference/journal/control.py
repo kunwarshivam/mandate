@@ -1126,17 +1126,20 @@ REQUIRED_REFS["EvaluationRunRecorded"] = ("rule_set",)
 # §9.21 v0.48 (DEC-1170): the deployment manager's records, written by workspace control services on
 # the control stream. No member is free text: IDs, enumerations, and integers only.
 DM_PROCESSES = ("runtime", "executor")
+# v0.70 (DEC-1175): an OAuth connect's token exchange is started once, stopped only when its request
+# closes, and never looped.
+DM_STARTED_PROCESSES = (*DM_PROCESSES, "token_exchange")
 SCHEMAS[("ctl", "ProcessStartIssued")] = rec(
-    ("process", one_of(*DM_PROCESSES)),
+    ("process", one_of(*DM_STARTED_PROCESSES)),
     ("subject", IDENT_T),
     ("generation", INT),
-    ("cause", one_of("deployed", "restart", "kill_switch")),
+    ("cause", one_of("deployed", "restart", "kill_switch", "requested")),
 )
 SCHEMAS[("ctl", "ProcessStopIssued")] = rec(
-    ("process", one_of(*DM_PROCESSES)),
+    ("process", one_of(*DM_STARTED_PROCESSES)),
     ("subject", IDENT_T),
     ("generation", INT),
-    ("cause", one_of("agent_stopped")),
+    ("cause", one_of("agent_stopped", "request_closed")),
 )
 SCHEMAS[("ctl", "ProcessCrashLooped")] = rec(
     ("process", one_of(*DM_PROCESSES)),
@@ -2780,7 +2783,7 @@ def backtest_violations(event_type: str, draft: dict, skip: frozenset[str]) -> l
 
 
 def deployment_manager_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
-    """§9.21's rules 165 to 168, on a well-typed payload, in number order."""
+    """§9.21's rules 165 to 168 and 256, on a well-typed payload, in number order."""
     if event_type not in DM_RECORDS:
         return []
     p = draft["payload"]
@@ -2794,10 +2797,16 @@ def deployment_manager_violations(event_type: str, draft: dict, skip: frozenset[
     rule("165", draft["actor"]["kind"] == "system", "actor.kind")
     rule("166", p["generation"] >= least, "payload.generation")
     if event_type == "ProcessStartIssued":
-        rule("167", (p["cause"] == "deployed") == (p["generation"] == 1), "payload.cause")
+        first = p["cause"] in ("deployed", "requested")
+        rule("167", first == (p["generation"] == 1), "payload.cause")
     if event_type == "ProcessCrashLooped":
         rule("168.restarts", p["restarts"] >= 1, "payload.restarts")
         rule("168.window", p["window_seconds"] >= 1, "payload.window_seconds")
+    exchange = p["process"] == "token_exchange"
+    if event_type == "ProcessStartIssued":
+        rule("256", (p["cause"] == "requested") == exchange, "payload.cause")
+    if event_type == "ProcessStopIssued":
+        rule("256.stop", (p["cause"] == "request_closed") == exchange, "payload.cause")
     return out
 
 
