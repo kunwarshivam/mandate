@@ -1341,6 +1341,24 @@ fn tofu_roots(tofu_dir: &Path) -> Result<Vec<PathBuf>> {
 
 /// The workflow that alone plans and applies the hosted environments (E21-56, DEC-2014).
 const INFRA_WORKFLOW: &str = ".github/workflows/infra.yml";
+/// `infra.yml`'s job's runner (DEC-2614): the runner the founder reserves for it, named by the
+/// repository variable `INFRA_RUNNER`, or GitHub's hosted runner while that is unset.
+const INFRA_RUNS_ON: &str = "${{ vars.INFRA_RUNNER || 'ubuntu-24.04' }}";
+/// The label of the runner reserved for `infra.yml` (DEC-2614). Only the repository variable
+/// holds it; no workflow may name it, nor `self-hosted`, nor the variable but `infra.yml`.
+const RESERVED_RUNNER_NAMES: [&str; 3] = ["mandate-infra", "self-hosted", "INFRA_RUNNER"];
+/// The runners every other job may run on, exactly as its `runs-on:` names them (DEC-2614):
+/// GitHub's hosted runners, directly, through a matrix of [`HOSTED_RUNNERS`], or through
+/// `codeql.yml`'s template expression, which picks between two hosted runners.
+const HOSTED_RUNS_ON: [&str; 5] = [
+    "ubuntu-24.04",
+    "ubuntu-24.04-arm",
+    "macos-14",
+    "${{ matrix.runner }}",
+    "${{ (matrix.language == 'swift' && 'macos-latest') || 'ubuntu-latest' }}",
+];
+/// The hosted runners a matrix's `runner:` may name (DEC-2614).
+const HOSTED_RUNNERS: [&str; 2] = ["ubuntu-24.04", "ubuntu-24.04-arm"];
 /// The one command `infra.yml`'s secret-holding step runs: the binary an earlier step built with
 /// no secret in its environment, so no build script runs beside one.
 const INFRA_RUN: &str = "target/debug/xtask infra";
@@ -2020,7 +2038,8 @@ fn infra_workflow_in(root: &Path) -> Result<()> {
             });
         }
     }
-    let problems = infra_workflow_problems(&files);
+    let mut problems = infra_workflow_problems(&files);
+    problems.extend(runner_problems(&files));
     if !problems.is_empty() {
         bail!("infra-workflow:\n  {}", problems.join("\n  "));
     }
@@ -2244,6 +2263,61 @@ fn guarded_word_problems(file: &CiFile) -> Vec<String> {
                 "{}:{number}: names `secrets` or `environment` on a line xtask's \
                  GUARDED_WORKFLOW_LINES has not reviewed (DEC-2014)",
                 file.path
+            ));
+        }
+    }
+    problems
+}
+
+/// Every job that could reach the runner reserved for `infra.yml` (DEC-2614): a `runs-on:` that
+/// is not one of [`HOSTED_RUNS_ON`] exactly, `infra.yml`'s own job aside, which must read
+/// [`INFRA_RUNS_ON`]; a matrix `runner:` that is not one of [`HOSTED_RUNNERS`]; and any line of a
+/// workflow but `infra.yml`, comments aside, that names one of [`RESERVED_RUNNER_NAMES`]. A
+/// repository's self-hosted runner takes any job that asks for its labels, a pull request's
+/// included, so the label is held in a variable and no other job may ask for it.
+fn runner_problems(files: &[CiFile]) -> Vec<String> {
+    let mut problems = Vec::new();
+    for file in files {
+        let infra = file.path == INFRA_WORKFLOW;
+        let mut infra_runs_on = 0_usize;
+        for (number, line) in (1_usize..).zip(file.text.lines()) {
+            let code = uncommented(line).trim();
+            if let Some(value) = code.strip_prefix("runs-on:").map(str::trim) {
+                if infra && value == INFRA_RUNS_ON {
+                    infra_runs_on = infra_runs_on.saturating_add(1);
+                } else if !HOSTED_RUNS_ON.contains(&value) {
+                    problems.push(format!(
+                        "{}:{number}: runs on `{value}`, which is not one of GitHub's hosted \
+                         runners this check lists; only {INFRA_WORKFLOW} may reach the reserved \
+                         runner (DEC-2614)",
+                        file.path
+                    ));
+                }
+            }
+            if let Some(value) = code.strip_prefix("runner:").map(str::trim)
+                && !HOSTED_RUNNERS.contains(&value)
+            {
+                problems.push(format!(
+                    "{}:{number}: a matrix runner `{value}` that is not one of GitHub's hosted \
+                     runners this check lists (DEC-2614)",
+                    file.path
+                ));
+            }
+            if !infra
+                && let Some(name) = RESERVED_RUNNER_NAMES
+                    .iter()
+                    .find(|name| code.contains(**name))
+            {
+                problems.push(format!(
+                    "{}:{number}: names `{name}`, which only {INFRA_WORKFLOW} may, so no other \
+                     job reaches the runner reserved for it (DEC-2614)",
+                    file.path
+                ));
+            }
+        }
+        if infra && infra_runs_on != 1 {
+            problems.push(format!(
+                "{INFRA_WORKFLOW}: its one job must run on `{INFRA_RUNS_ON}` (DEC-2614)"
             ));
         }
     }
@@ -11534,6 +11608,7 @@ mod tests {
         references_path, select, selection_in, source_references, tokens, withhold_web_demo,
     };
     use super::{CREDENTIAL_GUARD, CREDENTIAL_NAME_PARTS, rehearsal_live_run};
+    use super::{INFRA_RUNS_ON, runner_problems};
     use super::{ProcessGroups, process_group_problems};
     use super::{Resolve, ResolvedNode, cargo_resolve, resolved_live_problems};
     use super::{
@@ -17535,6 +17610,64 @@ mod tests {
                 "an unknown action is refused, with sha {named:?}: {refused}"
             );
         }
+        Ok(())
+    }
+
+    /// DEC-2614: the committed workflows pass the reserved-runner check, and each way a job could
+    /// reach that runner is named: a self-hosted or other unlisted `runs-on:`, a matrix runner off
+    /// the list, the reserved label or the variable named outside `infra.yml`, and `infra.yml`
+    /// running anywhere but on the variable.
+    #[test]
+    fn only_infra_may_reach_the_reserved_runner() -> Result<()> {
+        let root = repo_root()?;
+        let mut files = Vec::new();
+        for path in files_by_extension(&root.join(".github/workflows"), &["yml", "yaml"])? {
+            let relative = path
+                .strip_prefix(&root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .into_owned();
+            files.push(ci_file(&relative, &fs::read_to_string(&path)?));
+        }
+        assert_eq!(
+            runner_problems(&files),
+            Vec::<String>::new(),
+            "the committed workflows pass"
+        );
+        let job = |runs_on: &str| {
+            format!("jobs:\n  a:\n    runs-on: {runs_on}\n    steps:\n      - run: true\n")
+        };
+        for (path, text) in [
+            (".github/workflows/ci.yml", job("self-hosted")),
+            (
+                ".github/workflows/ci.yml",
+                job("[self-hosted, mandate-infra]"),
+            ),
+            (".github/workflows/ci.yml", job("mandate-infra")),
+            (".github/workflows/ci.yml", job("${{ vars.INFRA_RUNNER }}")),
+            (".github/workflows/ci.yml", job(INFRA_RUNS_ON)),
+            (".github/workflows/ci.yml", job("")),
+            (
+                ".github/workflows/ci.yml",
+                job("ubuntu-24.04") + "        runner: mandate-infra\n",
+            ),
+            (
+                ".github/workflows/ci.yml",
+                job("ubuntu-24.04") + "      - run: echo self-hosted\n",
+            ),
+            (INFRA_WORKFLOW, job("ubuntu-24.04")),
+            (INFRA_WORKFLOW, job("${{ vars.INFRA_RUNNER }}")),
+        ] {
+            assert!(
+                !runner_problems(&[ci_file(path, &text)]).is_empty(),
+                "{path} with {text:?} is refused"
+            );
+        }
+        assert_eq!(
+            runner_problems(&[ci_file(INFRA_WORKFLOW, &job(INFRA_RUNS_ON))]),
+            Vec::<String>::new(),
+            "infra.yml on the variable passes"
+        );
         Ok(())
     }
 

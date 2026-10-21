@@ -43,7 +43,9 @@ concurrency:
 jobs:
   tofu:
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-24.04
+    # DEC-2614: the runner the founder reserves for this job, by the repository variable
+    # INFRA_RUNNER, so it never queues behind CI; GitHub's hosted runner while that is unset.
+    runs-on: ${{ vars.INFRA_RUNNER || 'ubuntu-24.04' }}
     environment: infra-${{ inputs.environment }}
     # 45 minutes: a first DOKS cluster takes about ten; the cap clears a hung apply.
     timeout-minutes: 45
