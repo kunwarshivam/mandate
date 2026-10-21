@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/commands/reduction-session-challenge.schema.json",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../envelope.schema.json#/$defs/Envelope"
+    }
+  ],
+  "required": [
+    "challenge_id",
+    "webauthn_challenge",
+    "rp_id",
+    "issued_at",
+    "expires_at"
+  ],
+  "properties": {
+    "challenge_id": {
+      "$ref": "../common.schema.json#/$defs/EventId"
+    },
+    "webauthn_challenge": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$"
+    },
+    "rp_id": {
+      "$ref": "passkey-registration-challenge.schema.json#/properties/rp_id"
+    },
+    "issued_at": {
+      "$ref": "../common.schema.json#/$defs/Timestamp"
+    },
+    "expires_at": {
+      "$ref": "../common.schema.json#/$defs/Timestamp"
+    },
+    "as_of": {
+      "maxItems": 0
+    }
+  },
+  "description": "POST /v1/reduction-sessions/challenges' 201 (\u00a74.10 route 2, DEC-816 item 6, DEC-2117): a fresh challenge id, 32 random bytes as unpadded base64url, the deployment's RP ID, and the challenge's instants, 300 s apart. Nothing workspace-specific: no workspace, member, or passkey is named. Held in memory, used at most once, never journaled. as_of is empty: it reads no stream.",
+  "propertyNames": {
+    "not": {
+      "pattern": "([tT][oO][kK][eE][nN]|[sS][eE][cC][rR][eE][tT]|[pP][aA][sS][sS][wW][oO][rR][dD]|[pP][aA][sS][sS][pP][hH][rR][aA][sS][eE]|[cC][rR][eE][dD][eE][nN][tT][iI][aA][lL]|[aA][pP][iI]_[kK][eE][yY]|[pP][rR][iI][vV][aA][tT][eE]_[kK][eE][yY]|[aA][cC][cC][oO][uU][nN][tT]_[nN][uU][mM][bB][eE][rR]|[fF][iI][nN][gG][eE][rR][pP][rR][iI][nN][tT]|[vV][aA][uU][lL][tT])"
+    }
+  },
+  "unevaluatedProperties": false
+}

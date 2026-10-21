@@ -175,12 +175,12 @@ regexes = ['''^api:0123456789ab"$''']
 # exact values and only in the challenge responses' and the registration challenge's example files,
 # so another value there, or the same value anywhere else, is still reported.
 [[allowlists]]
-description = "Example WebAuthn challenges in the step-up and passkey challenge examples"
+description = "Example WebAuthn challenges in the step-up, passkey and reduction-session challenge examples"
 targetRules = ["generic-api-key"]
 condition = "AND"
-paths = ['''^schemas/workspace-api/examples/commands\.(?:step-up-challenge|passkey-registration-challenge)(?:\.valid|\.invalid)?\.json$''']
+paths = ['''^schemas/workspace-api/examples/commands\.(?:step-up-challenge|passkey-registration-challenge|reduction-session-challenge)(?:\.valid|\.invalid)?\.json$''']
 regexTarget = "match"
-regexes = ['''^webauthn_challenge": "(?:q83vEjRWeJCrze8SNFZ4kKvN7xI0VniQq83vEjRWeJ(?:A=?|B)|q83vEjRWeJCrze8SNFZ4kKvN7xI0VniQq83vEjRWe\+A|q83vEjRWeJCrze8SNFZ4kA)"$''']
+regexes = ['''^webauthn_challenge": "(?:q83vEjRWeJCrze8SNFZ4kKvN7xI0VniQq83vEjRWeJ(?:A=?|B)|q83vEjRWeJCrze8SNFZ4kKvN7xI0VniQq83vEjRWe\+A|q83vEjRWeJCrze8SNFZ4kKvN7xI0VniQq83vEjRWeA|q83vEjRWeJCrze8SNFZ4kA)"$''']
 
 # The passkey enrolment examples' `authenticator_data` values and the `credential` and
 # `public_key` sentinels the journal reference cases, the vault fixture and the API examples use
@@ -193,7 +193,7 @@ description = "Example passkey credentials and authenticator data"
 targetRules = ["generic-api-key"]
 condition = "AND"
 paths = [
-  '''^schemas/workspace-api/examples/(?:commands\.passkey-enrol-request(?:\.valid|\.invalid)?|envelope(?:\.valid|\.invalid)?)\.json$''',
+  '''^schemas/workspace-api/examples/(?:commands\.passkey-enrol-request(?:\.valid|\.invalid)?|commands\.reduction-session-request(?:\.valid|\.invalid)?|envelope(?:\.valid|\.invalid)?)\.json$''',
   '''^docs/specs/reference-cases/journal\.yaml$''',
   '''^fixtures/refcases/journal\.json$''',
   '''^reference/journal/credentials\.py$''',
@@ -201,6 +201,7 @@ paths = [
 regexTarget = "match"
 regexes = [
   '''^authenticator_data": "SZYN5YgOjGh0NBcPZHZgW4_krrmihjLHmVzzuoMdl2MFAAAABw"$''',
+  '''^authenticator_data": "SZYN5YgOjGh0NBcPZHZgW4_krrmihjLHmVzzuoMdl2MFAAAAAQ(?:==)?"$''',
   '''^credential: (?:AAECAwQFBgcICQoLDA0ODw|EBESExQVFhcYGRobHB0eHw)$''',
   '''^credential": "(?:AAECAwQFBgcICQoLDA0ODw|EBESExQVFhcYGRobHB0eHw)"$''',
   '''^(?:CREDENTIAL|OTHER_CREDENTIAL) = "(?:AAECAwQFBgcICQoLDA0ODw|EBESExQVFhcYGRobHB0eHw)"$''',

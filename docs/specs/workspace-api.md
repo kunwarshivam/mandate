@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.1, not yet reviewed ([DEC-436](../project/decisions/DEC-436.md)). §4.6.1 adds the desk, the cited-record read, and the transcript view, and §4.3's approval read its explanation (E12-5, E19-15; [DEC-2240](../project/decisions/DEC-2240.md), agent readings; the disclaimer is [DEC-2241](../project/decisions/DEC-2241.md)'s placeholder, Proposed). Round 1 fixes applied. Items 1 to 16 and 19 to 21 of DEC-436 are agent readings; items 17 and 18 are Proposed and wait for the founder. §4.8.1 adds the audit read contracts (E12-6; [DEC-760](../project/decisions/DEC-760.md) to [DEC-767](../project/decisions/DEC-767.md), agent readings). §3.5, §4.5, and §5.6 add the revoke's step-up digests and its refusals (E10-13; [DEC-693](../project/decisions/DEC-693.md) and [DEC-698](../project/decisions/DEC-698.md), agent readings). §4.5's Connect row names the pending connection's `ConnectionRequested` and the `ConnectionRefused` that may close it (journal spec v0.32, [DEC-699](../project/decisions/DEC-699.md)). §4.8.1's Verification closes its refusal order, id, inputs, run order, and record on `VerificationRun` version 2, with an `incomplete` result for a token that cannot be proven (journal spec v0.36; [DEC-786](../project/decisions/DEC-786.md) to [DEC-788](../project/decisions/DEC-788.md), agent readings; [DEC-789](../project/decisions/DEC-789.md), the founder). §4.8.1's Inputs verify an anchor's prefix from genesis and bind it to the range's trusted start, or the range fails closed (journal spec v0.37; [DEC-892](../project/decisions/DEC-892.md), an agent reading). §4.8.1's run order compares each start or in-range segment's hot rows with its cold file, `segment_rows_mismatch` (journal spec v0.38; [DEC-894](../project/decisions/DEC-894.md), an agent reading). §4.2 and §4.7 add the backtest report's and the forward-paper evaluation's read shapes (E4-5, E17-8; [DEC-1001](../project/decisions/DEC-1001.md) and [DEC-1002](../project/decisions/DEC-1002.md), agent readings; their disclosures are named placeholders, [DEC-1003](../project/decisions/DEC-1003.md), Proposed). §3.11 adds the server process (its bind, environment, probes, drain, and browser sessions) and §3.5 widens the planned `busy` to a draining process (E21-31; [DEC-978](../project/decisions/DEC-978.md), agent readings, item 10 Proposed); §4.3 and §4.7 add the first read-model shapes, agents and approvals (E21-31, E10-10; [DEC-979](../project/decisions/DEC-979.md), an agent reading); §3.11 item 10 records pause and the kill switch as the CLI does (E21-31; [DEC-1007](../project/decisions/DEC-1007.md), agent readings, item 8 Proposed). §3.11 item 7 fixes the subject-link file at `/etc/mandate/subject-links` and refuses a path that does not itself name the file opened (E21-31; [DEC-1023](../project/decisions/DEC-1023.md), an agent reading). §3.11 item 2 lets a `dev` or `ci` cell point the issuer settings at the local stub issuer (E21-52; [DEC-2100](../project/decisions/DEC-2100.md), an agent reading). §3.11 items 11 and 12 serve versions, confirmation, deployment, resume, Stop, owner exit, acknowledgment, and command status (E10-11, E10-12; [DEC-2101](../project/decisions/DEC-2101.md), [DEC-2102](../project/decisions/DEC-2102.md), agent readings). §4.10 names the caller's principal on one's own session and serves one's own memberships from a hosted deployment's control stream (E10-10; [DEC-2113](../project/decisions/DEC-2113.md), an agent reading). §3.6 adds the passkey registration challenge, enrolment, and list routes (E9-4; [DEC-2108](../project/decisions/DEC-2108.md), [DEC-2115](../project/decisions/DEC-2115.md), agent readings) |
+| **Status** | Draft v0.1, not yet reviewed ([DEC-436](../project/decisions/DEC-436.md)). §4.6.1 adds the desk, the cited-record read, and the transcript view, and §4.3's approval read its explanation (E12-5, E19-15; [DEC-2240](../project/decisions/DEC-2240.md), agent readings; the disclaimer is [DEC-2241](../project/decisions/DEC-2241.md)'s placeholder, Proposed). Round 1 fixes applied. Items 1 to 16 and 19 to 21 of DEC-436 are agent readings; items 17 and 18 are Proposed and wait for the founder. §4.8.1 adds the audit read contracts (E12-6; [DEC-760](../project/decisions/DEC-760.md) to [DEC-767](../project/decisions/DEC-767.md), agent readings). §3.5, §4.5, and §5.6 add the revoke's step-up digests and its refusals (E10-13; [DEC-693](../project/decisions/DEC-693.md) and [DEC-698](../project/decisions/DEC-698.md), agent readings). §4.5's Connect row names the pending connection's `ConnectionRequested` and the `ConnectionRefused` that may close it (journal spec v0.32, [DEC-699](../project/decisions/DEC-699.md)). §4.8.1's Verification closes its refusal order, id, inputs, run order, and record on `VerificationRun` version 2, with an `incomplete` result for a token that cannot be proven (journal spec v0.36; [DEC-786](../project/decisions/DEC-786.md) to [DEC-788](../project/decisions/DEC-788.md), agent readings; [DEC-789](../project/decisions/DEC-789.md), the founder). §4.8.1's Inputs verify an anchor's prefix from genesis and bind it to the range's trusted start, or the range fails closed (journal spec v0.37; [DEC-892](../project/decisions/DEC-892.md), an agent reading). §4.8.1's run order compares each start or in-range segment's hot rows with its cold file, `segment_rows_mismatch` (journal spec v0.38; [DEC-894](../project/decisions/DEC-894.md), an agent reading). §4.2 and §4.7 add the backtest report's and the forward-paper evaluation's read shapes (E4-5, E17-8; [DEC-1001](../project/decisions/DEC-1001.md) and [DEC-1002](../project/decisions/DEC-1002.md), agent readings; their disclosures are named placeholders, [DEC-1003](../project/decisions/DEC-1003.md), Proposed). §3.11 adds the server process (its bind, environment, probes, drain, and browser sessions) and §3.5 widens the planned `busy` to a draining process (E21-31; [DEC-978](../project/decisions/DEC-978.md), agent readings, item 10 Proposed); §4.3 and §4.7 add the first read-model shapes, agents and approvals (E21-31, E10-10; [DEC-979](../project/decisions/DEC-979.md), an agent reading); §3.11 item 10 records pause and the kill switch as the CLI does (E21-31; [DEC-1007](../project/decisions/DEC-1007.md), agent readings, item 8 Proposed). §3.11 item 7 fixes the subject-link file at `/etc/mandate/subject-links` and refuses a path that does not itself name the file opened (E21-31; [DEC-1023](../project/decisions/DEC-1023.md), an agent reading). §3.11 item 2 lets a `dev` or `ci` cell point the issuer settings at the local stub issuer (E21-52; [DEC-2100](../project/decisions/DEC-2100.md), an agent reading). §3.11 items 11 and 12 serve versions, confirmation, deployment, resume, Stop, owner exit, acknowledgment, and command status (E10-11, E10-12; [DEC-2101](../project/decisions/DEC-2101.md), [DEC-2102](../project/decisions/DEC-2102.md), agent readings). §4.10 names the caller's principal on one's own session and serves one's own memberships from a hosted deployment's control stream (E10-10; [DEC-2113](../project/decisions/DEC-2113.md), an agent reading). §3.6 adds the passkey registration challenge, enrolment, and list routes (E9-4; [DEC-2108](../project/decisions/DEC-2108.md), [DEC-2115](../project/decisions/DEC-2115.md), agent readings). §4.10 specifies route 2's reduction-session challenge and opening routes, their limits, the device cookie, and the session's reach (E9-1; [DEC-2117](../project/decisions/DEC-2117.md), an agent reading) |
 | **Implements** | [HLD §4](../HLD.md#workspace-deployment) (workspace control services), [§6 flows A and C](../HLD.md#6-key-flows), [§7](../HLD.md#7-logging-and-audit), [§8](../HLD.md#8-multi-tenancy-and-security); PRD FR-1.4, FR-2.1 to FR-2.4, FR-3.1 to FR-3.5, FR-4.4, FR-6.2 to FR-6.5, FR-7.1 to FR-7.5, FR-8.1 to FR-8.4; backlog E8, E10, E11, E12 |
 | **Depends on** | [Mandate spec](mandate.md) §2, §6, §7, §9, §10; [journal spec](journal.md) §2, §5, §7, §9, §11, §12; [infrastructure design](../design/infrastructure.md) §3.6, §9; [product experience brief](../product/09-product-experience.md) §3 to §5 |
 | **Siblings** | Identity, roles, sessions, and step-up ceremonies: the [identity spec](identity.md), gap 6. Notification delivery and approval deep links: the [notifications spec](notifications.md), gap 7. Broker connection flows: `docs/specs/connections.md` (gap 9) |
@@ -289,7 +289,7 @@ Errors are RFC 9457 problem documents with these members:
 | `live_unavailable` | 409 | A live environment operation before counsel signs off (rule 8, B5) |
 | `control_stream_frozen` | 503 | Journal spec §11 froze mandate and deployment changes; never sent for a risk-reducing call (API-7) |
 | `journal_unavailable` | 503 | Postgres cannot take the append; `effect: none`, `retryable: true` |
-| `rate_limited` | 429 | Over the principal's limit; never for an API-7 operation |
+| `rate_limited` | 429 | Over the principal's limit, or over the reduction-session challenge route's limits (§4.10 route 2 item 3); never for an API-7 operation |
 | `own_roles` | 403 | A role change grants or removes a role of its own author (identity spec ID-13, §4.5) |
 | `owner_role_reserved` | 403 | Someone other than an org owner grants or removes the org owner role (identity spec §4.5) |
 | `last_owner`, `last_admin` | 409 | The change leaves no `active` org owner or workspace admin (identity spec §5.2) |
@@ -561,7 +561,9 @@ per workspace deployment (item 6).
 2. **Environment.** Settings come from named variables: `MANDATE_API_DATABASE_URL`,
    `MANDATE_API_ISSUER`, `MANDATE_API_AUDIENCE`, `MANDATE_API_JWKS_URL`, `MANDATE_API_APP_ORIGIN`,
    and `MANDATE_API_WORKSPACE` and `MANDATE_API_ORG`: the one
-   workspace this deployment hosts and its organization, as ULIDs. Every other workspace in a path
+   workspace this deployment hosts and its organization, as ULIDs. `MANDATE_API_INGRESS_PEERS`,
+   optional, lists the ingress's own addresses, comma-separated, whose `X-Forwarded-For` route 2's
+   limits read (§4.10); unset, they key on the TCP peer alone. Every other workspace in a path
    is absent (API-9's 404), and the organization is what `authorize` checks the pair against;
    journal spec §9.12's records name neither. `MANDATE_DEPLOYMENT_TIER` is the deployment tier, read as every
    process reads it (`dev`, `ci`, `staging`, or `production`; no value or any other is
@@ -1591,8 +1593,76 @@ workspace exists to name before it is authorized (identity spec §4.5, §6.4).
 | List one's own workspace memberships | `GET /v1/me/workspaces` | — | Authorized by the `self` row "List one's own workspace memberships" (identity spec §4.2): a full session of a user principal only. Returns the caller's `active` memberships as `{workspace_id, label, roles}` from the membership index, reading no workspace's data; absent and foreign workspaces look the same. A failed index read is `membership_unavailable` ([DEC-816](../project/decisions/DEC-816.md) item 1). A hosted deployment's index is its control stream's membership fold; `label` is `null` until one is recorded; `as_of` is `[]`. Shape: `read-models/my-workspaces` ([DEC-2113](../project/decisions/DEC-2113.md)) |
 
 Owed to the identity spec's lanes, and listed so the prefix rule above is complete:
-`POST /v1/reduction-sessions/challenges` and `POST /v1/reduction-sessions` (identity spec §6.4 route 2;
-they sit outside the matrix, DEC-816 item 7). Every failure of the last is the one answer, 401 `unauthenticated` (§3.5), with no distinguishing timing, and `GET /v1/oauth/alpaca/callback` (§4.5).
+`GET /v1/oauth/alpaca/callback` (§4.5).
+
+**Route 2, the workspace-local passkey** (identity spec §6.4 route 2, DEC-816 item 6, DEC-834,
+[DEC-2117](../project/decisions/DEC-2117.md); planned, E9-1). Pause and the kill switch must work
+when sign-in does not, so a member opens a *reduction-only session* with a passkey the deployment
+already holds, with no identity provider, global control plane, or model involved. Both routes sit
+outside the matrix (DEC-816 item 7), are browser-only (`Origin` equal to the app origin and
+`X-Mandate-Request: 1`, else 403 `forbidden` before the body is read, as §3.11 item 5), answer with
+`Cache-Control: no-store`, and are never logged with their bodies.
+
+| Operation | Method and path | Event | Notes |
+|---|---|---|---|
+| Ask for a reduction-session challenge | `POST /v1/reduction-sessions/challenges` | — | Unauthenticated. Body `commands/reduction-session-challenge-request`, strict and empty; anything else is `invalid`. Answers `201` with `commands/reduction-session-challenge`: `challenge_id` (a fresh ULID), `webauthn_challenge` (32 bytes from the operating system's generator, unpadded base64url), the deployment's `rp_id`, `issued_at`, and `expires_at`, 300 s later. It reads nothing workspace-specific and returns nothing workspace-specific: no workspace, member, passkey list, or `allowCredentials`. The challenge is held in the server's memory and **never journaled**. Over item 3's limits it is 429 `rate_limited`, with `Retry-After` |
+| Open a reduction-only session | `POST /v1/reduction-sessions` | — | Body `commands/reduction-session-request`, strict: `challenge_id`, and the authenticator's `passkey_id`, `authenticator_data`, `client_data_json`, and `signature`. Answers `201` with `commands/reduction-session-opened`, `{kind: "reduction_only", expires_at, workspaces}`, and the §3.3 item 5 session cookie. **Every** refusal after the browser check is the one 401 (item 4) |
+
+1. **The challenge is single-use.** The assertion route takes the named challenge out of memory on
+   its first presentation, before anything else is judged and whatever follows, so a challenge is
+   presented at most once. A challenge that is unknown, expired, already presented, or whose bytes
+   are not the ones `client_data_json` signed fails.
+2. **What verifies.** The server looks the passkey up by `passkey_id` alone, among the passkeys the
+   control stream holds enrolled and not removed (journal spec §9.31), so a discoverable passkey
+   and a non-discoverable one whose id the client supplies both serve (DEC-833 keeps both).
+   `mandate_passkey::verify` judges the assertion against the challenge's bytes, this deployment's
+   origin and RP ID, and user verification. The session is refused when the passkey's member has
+   no `active` membership in the hosted workspace, or when the member's identity-provider subject
+   was refused by the provider since their last successful sign-in (route 1's deprovision signal).
+   An enrolment cool-off does not bar it: route 2 reaches only risk reduction (DEC-2117 item 6).
+3. **Limits** (DEC-834, the founder's; numbers by DEC-2117 item 3). A request is counted against
+   its address and its device:
+   - **Address:** the TCP peer of the API listener. When `MANDATE_API_INGRESS_PEERS` (§3.11 item
+     2) lists that peer, it is instead the last address in `X-Forwarded-For`, the one the ingress
+     appended. A forwarded header from any other peer is ignored (DEC-822 item 4). Unset behind an
+     ingress, every client shares one address budget, so a deployment behind one sets it.
+   - **Device:** the `__Host-mandate_device` cookie: 32 random bytes as unpadded base64url, `Secure`,
+     `HttpOnly`, `SameSite=Strict`, `Path=/` (the `__Host-` prefix requires it; every other route
+     ignores it), `Max-Age` 30 days. The challenge route sets it when the call carries none or one
+     of another shape. It is a random key and nothing else: it carries no workspace, member, principal, passkey, or session, the server never
+     links it to one, and it keeps only its SHA-256 digest, only as a limit key, only while that
+     key counts something. The assertion route never sets or clears it.
+   - **The challenge route** counts a challenge only while it is outstanding (issued, unexpired,
+     not yet presented): at most 4 per device, 32 per address, and 4,096 in all. Past any of them
+     it is 429 `rate_limited`, and `Retry-After` is the seconds until the binding count's oldest
+     challenge expires.
+   - **The assertion route** counts failed assertions only: at most 10 per device and 100 per
+     address in any 15 minutes. Over either, it still judges every request whose challenge is
+     outstanding, and consumes that challenge on its first presentation, so verification work stays
+     bounded by the challenge limits; a request naming no outstanding challenge fails without
+     verifying. **An assertion that verifies is never refused for a limit.**
+4. **No membership oracle.** Every refusal of `POST /v1/reduction-sessions` after the browser check
+   (an invalid body; an unknown, expired, or reused challenge; an unknown passkey id; a passkey
+   removed, or whose member is deactivated, removed, or deprovisioned; a bad signature; a wrong
+   origin or RP ID; any limit) is 401 `unauthenticated` with §3.5's one body: the same status, body,
+   and headers, no cookie set or cleared. For an unknown passkey the server judges the assertion
+   against a fixed decoy key of the same algorithm, so every refusal past the challenge costs one
+   verification and timing tells none apart.
+5. **The session.** The record is §3.11 item 5's, of kind `reduction_only`, for the passkey's
+   member, and counts toward that principal's 16. A session cookie presented with the call ends
+   that earlier session (`sign_out`) and is replaced. It lives **15 minutes from the opening,
+   absolute**: no idle limit, and it is **never refreshed or extended**; `POST
+   /v1/sessions/refresh` with it is refused `reduction_only` and keeps it, and nothing turns it
+   into a full session. Sessions live in memory as item 5's do.
+6. **Its reach.** It covers each workspace in which the member holds an `active` membership when it
+   opens (one, on a hosted deployment), with the roles in effect then as its snapshot, and
+   `workspaces` names them `{workspace_id, label}` (`label` as §4.10's memberships). In each, it
+   authorizes only pause and the kill switch at their scopes, and only where the snapshot's roles
+   grant them (identity spec §4.2's rows for the two). Every other route, owner exits, resume,
+   Stop, approvals, confirm, deploy, step-up, enrolment, and every workspace read included, is
+   refused `reduction_only`.
+   Membership events act on it as on any session (DEC-816 item 7). `GET /v1/me/session` answers it
+   with `kind: "reduction_only"`, its `expires_at`, and the same `workspaces`.
 
 | Operation | Method and path | Event | Notes |
 |---|---|---|---|
@@ -2107,7 +2177,7 @@ risk-reducing call never consults one (API-7, API-8).
 | Journal events this spec needs: `MandateDraftSaved`, the compiler's invocation on the control stream, `MandateConfirmed`'s agent link, and `OwnerRequestSubmitted` | **Specified** (journal spec v0.21 §9.9, DEC-670); `mandate-journal` registration planned (E10-15) |
 | The `client` actor, `ConnectionRevoked`'s reason, and the client events | **Specified** (journal spec v0.22 §3 and §9.10, DEC-671); `mandate-journal` registration planned (E10-15) |
 | `hold_openings` and `lift_hold` | **Specified** (journal spec v0.23 §9.11, DEC-672); `mandate-journal` registration planned (E10-15) |
-| Sessions, roles, step-up ceremonies | **Partly served** (E9, the identity spec): browser sessions (§3.11 items 5 and 6), one's own session and memberships (§4.10, [DEC-2113](../project/decisions/DEC-2113.md)), and step-up challenges (§3.6, DEC-2103); member routes, role changes, and the passkey ceremony are planned |
+| Sessions, roles, step-up ceremonies | **Partly served** (E9, the identity spec): browser sessions (§3.11 items 5 and 6), one's own session and memberships (§4.10, [DEC-2113](../project/decisions/DEC-2113.md)), and step-up challenges (§3.6, DEC-2103); member routes, role changes, the passkey ceremony, and route 2's reduction-only sessions (§4.10, [DEC-2117](../project/decisions/DEC-2117.md); E9-1) are planned |
 | Notification addresses (§4.11, §5.7) and `NotificationAddressChanged` | **Planned** (E8-14). Mounted once the API's authentication middleware lands and the journal spec change that writes the `NotificationAddressChanged` row (the L3 lane's journal spec v0.28 PR, §9.15) merges. Merge order: #811, #763, this change (#827), then #833. The push-service allowlist's decision is DEC-792 (this spec change, #827); the web client's mirror of its table is #833, which merges after #827. Accepted when: a canary scan of responses, problems, logs, metrics and the journal finds no endpoint, key, or endpoint hash; the append is failed at every step of §5.7's tables (API-3's test) and crash injection gives each stated outcome; a replay after a lost `202` returns it; a retry with a different body, once its event exists, answers the original outcome and writes nothing to the vault; before the event exists, with the entry present, it is `idempotency_conflict`; a retry racing the sweep ends with the entry present or `address_missing` recorded; inert and removed entries neither match an endpoint nor count to the limit; two concurrent PUTs of one endpoint, an eleventh address, and a double removal are each settled by the expected head; a PUT of an unreachable address's endpoint replaces it in one batch with no last send to the old address; a stream busy for 5 attempts answers `busy` without a second vault write or step-up judgment; deactivation removes every address in its own commit, under the acting principal; a foreign `address_ref` answers byte-for-byte as a random one; the shared allowlist table (DEC-792) passes; and a replayed or wrongly bound step-up is refused |
 | The relay's own allowlist check (DEC-792 item 3) | **Planned** (E20-8) |
 

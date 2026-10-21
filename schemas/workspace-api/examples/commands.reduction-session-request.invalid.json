@@ -1,0 +1,74 @@
+[
+  {
+    "label": "no challenge_id",
+    "remove": [
+      "/challenge_id"
+    ]
+  },
+  {
+    "label": "no passkey_id",
+    "remove": [
+      "/passkey_id"
+    ]
+  },
+  {
+    "label": "no authenticator_data",
+    "remove": [
+      "/authenticator_data"
+    ]
+  },
+  {
+    "label": "no client_data_json",
+    "remove": [
+      "/client_data_json"
+    ]
+  },
+  {
+    "label": "no signature",
+    "remove": [
+      "/signature"
+    ]
+  },
+  {
+    "label": "a challenge_id that is not a ULID",
+    "set": {
+      "/challenge_id": "challenge-1"
+    }
+  },
+  {
+    "label": "a passkey_id too short",
+    "set": {
+      "/passkey_id": "AA"
+    }
+  },
+  {
+    "label": "padded authenticator_data",
+    "set": {
+      "/authenticator_data": "SZYN5YgOjGh0NBcPZHZgW4_krrmihjLHmVzzuoMdl2MFAAAAAQ=="
+    }
+  },
+  {
+    "label": "padded client_data_json",
+    "set": {
+      "/client_data_json": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0In0="
+    }
+  },
+  {
+    "label": "a padded signature",
+    "set": {
+      "/signature": "MEUCIQDTGOTZQCbdLXgrAb9Se4MJr3OJmRpKOjlJKHEc4lMKNg=="
+    }
+  },
+  {
+    "label": "the workspace named",
+    "set": {
+      "/workspace_id": "01KDEM0000000000000000000W"
+    }
+  },
+  {
+    "label": "a user handle beside it",
+    "set": {
+      "/user_handle": "AZ_6Z2T4Vxa9QxbP2tQ7nA"
+    }
+  }
+]
