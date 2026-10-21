@@ -3285,6 +3285,25 @@ fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
         "  \"webauthn_challenge\": \"{}\",",
         concat!("zz3vEjRWeJCrze8SNFZ4kKvN7xI0", "VniQq83vEjRWeJA")
     );
+    let passkey_challenge =
+        "schemas/workspace-api/examples/commands.passkey-registration-challenge.json";
+    let passkey_challenge_allowed = challenge.clone();
+    let passkey_authenticator =
+        "schemas/workspace-api/examples/commands.passkey-enrol-request.json";
+    let authenticator_data = format!(
+        "  \"authenticator_data\": \"{}\",",
+        concat!("SZYN5YgOjGh0NBcPZHZgW4_krrmihjLHmVzz", "uoMdl2MFAAAABw")
+    );
+    let not_authenticator_data = format!(
+        "  \"authenticator_data\": \"{}\",",
+        concat!("TZYN5YgOjGh0NBcPZHZgW4_krrmihjLHmVzz", "uoMdl2MFAAAABw")
+    );
+    let journal_yaml = "docs/specs/reference-cases/journal.yaml";
+    let credential_line = format!("        credential: {}", "AAECAwQFBgcICQoLDA0ODw");
+    let not_credential_line = format!("        credential: {}", "ZZECAwQFBgcICQoLDA0ODw");
+    let stub_issuer = "crates/mandate-stub-issuer/tests/alpaca.rs";
+    let canary = format!("client_secret\", \"{}\"", "secret-canary-9f2b");
+    let not_canary = format!("client_secret\", \"{}\"", "zzcret-canary-9f2b");
     let built = format!("  \"api-key\": \"{page}\",");
     vec![
         (
@@ -3347,6 +3366,40 @@ fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
         (challenges.to_owned(), challenge.clone(), None),
         ("stray-challenge.json".to_owned(), challenge, generic),
         (challenges.to_owned(), not_challenge, generic),
+        (
+            passkey_challenge.to_owned(),
+            passkey_challenge_allowed,
+            None,
+        ),
+        (
+            "stray-passkey-challenge.json".to_owned(),
+            format!(
+                "  \"webauthn_challenge\": \"{}\",",
+                concat!("q83vEjRWeJCrze8SNFZ4kKvN7xI0", "VniQq83vEjRWeJA")
+            ),
+            generic,
+        ),
+        (
+            passkey_authenticator.to_owned(),
+            authenticator_data.clone(),
+            None,
+        ),
+        (
+            "stray-authenticator-data.json".to_owned(),
+            authenticator_data,
+            generic,
+        ),
+        (
+            passkey_authenticator.to_owned(),
+            not_authenticator_data,
+            generic,
+        ),
+        (journal_yaml.to_owned(), credential_line.clone(), None),
+        ("stray-credential.yaml".to_owned(), credential_line, generic),
+        (journal_yaml.to_owned(), not_credential_line, generic),
+        (stub_issuer.to_owned(), canary.clone(), None),
+        ("stray-canary.rs".to_owned(), canary, generic),
+        (stub_issuer.to_owned(), not_canary, generic),
     ]
 }
 
