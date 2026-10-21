@@ -29,6 +29,7 @@ use secrecy::{ExposeSecret, SecretSlice, SecretString};
 use serde_json::{Value, json};
 
 use crate::SourceError;
+use crate::kubernetes::service_account_name;
 use crate::lease::{LEASE_SECS, Lease, lease_times};
 use crate::policy::{
     Identity, Mounts, SecretPath, kv_path, openbao_policy, policy_name, role_name,
@@ -38,7 +39,7 @@ use crate::source::{GRANT_SECS, Grant, SecretSource};
 /// How long one request may take before the vault counts as unreachable.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 /// The longest an executor's token lives through renewals before it logs in again: 30 days.
-const EXECUTOR_TOKEN_MAX_SECS: i64 = 2_592_000;
+pub(crate) const EXECUTOR_TOKEN_MAX_SECS: i64 = 2_592_000;
 /// Whether this build may use a dev server: only this crate's own unit-test build, so no other
 /// crate's build, test or not, can turn it on (DEC-977 item 6).
 const ALLOW_DEV_SERVER: bool = cfg!(test);
@@ -222,6 +223,47 @@ impl fmt::Debug for OpenBaoSource {
     }
 }
 
+/// The Kubernetes auth login path of `identity`, a connection's executor or token exchange, and
+/// the role it logs in to: `auth/<its kind's mount>/login` and its ServiceAccount name, which
+/// names its role (DEC-2060 item 5). Any other identity is [`SourceError::Config`].
+pub fn kubernetes_login_path(
+    identity: &Identity,
+    mounts: &Mounts,
+) -> Result<(String, String), SourceError> {
+    let mount = match identity {
+        Identity::Executor(_) => &mounts.kubernetes_executor,
+        Identity::TokenExchange(_) => &mounts.kubernetes_exchange,
+        Identity::Api
+        | Identity::ConnectionManager
+        | Identity::Runtime
+        | Identity::SecretImport
+        | Identity::ModelGateway
+        | Identity::EmailSender => return Err(SourceError::Config),
+    };
+    Ok((
+        format!("auth/{mount}/login"),
+        service_account_name(identity)?,
+    ))
+}
+
+/// Whether the vault's answer to a Kubernetes auth login, its `auth` object, is `identity`'s own:
+/// the role it reached is the one named by its ServiceAccount, and the ServiceAccount the vault
+/// checked is that one. An answer without either is [`SourceError::Malformed`]; another's is
+/// [`SourceError::Denied`].
+pub fn kubernetes_login_verdict(
+    identity: &Identity,
+    auth: Option<&Value>,
+) -> Result<(), SourceError> {
+    let role = text(auth, "/metadata/role")?;
+    let account = text(auth, "/metadata/service_account_name")?;
+    let (_, own_role) = kubernetes_login_path(identity, &Mounts::default())?;
+    if role == own_role && account == service_account_name(identity)? {
+        Ok(())
+    } else {
+        Err(SourceError::Denied)
+    }
+}
+
 impl OpenBaoSource {
     /// Logs in as `identity` with its AppRole `role_id` and `secret_id` (read by the caller from
     /// mounted files, never the environment). The login is refused unless the role it reaches
@@ -237,6 +279,47 @@ impl OpenBaoSource {
             return Err(SourceError::Config);
         }
         Self::log_in(config, identity, role_id, secret_id, now).await
+    }
+
+    /// Logs in as `identity`, a connection's executor or token exchange, with the projected
+    /// ServiceAccount token `jwt` its pod was given (audience [`crate::kubernetes::AUDIENCE`],
+    /// read by the caller with [`crate::mounted::read_service_account_token`] at each login), on
+    /// its kind's Kubernetes auth mount, its role named by its connection id (DEC-2060). The vault
+    /// checks the token with the cluster on every login, and admits only the one ServiceAccount
+    /// the role binds. Any other identity is [`SourceError::Config`]; a login refused, or one that
+    /// reaches a role that is not `identity`'s own, is [`SourceError::Denied`]; a vault that cannot
+    /// reach the cluster is [`SourceError::Unavailable`]. The token is never logged, never put in
+    /// an error, and dropped once the login is done.
+    pub async fn login_kubernetes(
+        config: &OpenBaoConfig,
+        identity: Identity,
+        jwt: &SecretString,
+        now: UtcNanos,
+    ) -> Result<Self, SourceError> {
+        let (path, role) = kubernetes_login_path(&identity, &config.mounts)?;
+        let http = Http::new(config)?;
+        let status = http
+            .call(Method::GET, "sys/seal-status", None, None)
+            .await?
+            .ok_or(SourceError::Malformed)?;
+        seal_verdict(status.to_string().as_bytes(), ALLOW_DEV_SERVER)?;
+        let body = json!({ "role": role, "jwt": jwt.expose_secret() });
+        let answer = http.call(Method::POST, &path, None, Some(&body)).await?;
+        let auth = answer.as_ref().and_then(|answer| answer.get("auth"));
+        let token = SecretString::from(text(answer.as_ref(), "/auth/client_token")?.to_owned());
+        let ttl = seconds(answer.as_ref(), "/auth/lease_duration")?;
+        let session = Self {
+            identity,
+            http,
+            mounts: config.mounts.clone(),
+            token,
+            token_expires_at: Mutex::new(after(now, ttl)?),
+        };
+        if let Err(refused) = kubernetes_login_verdict(&session.identity, auth) {
+            let _ = session.revoke_token().await;
+            return Err(refused);
+        }
+        Ok(session)
     }
 
     /// The token exchange's session for the grant's connection, spending the grant. A grant
@@ -307,8 +390,8 @@ impl OpenBaoSource {
         self.http.call(method, path, Some(&self.token), body).await
     }
 
-    fn data_path(&self, path: &SecretPath) -> String {
-        format!("{}/data/{}", self.mounts.kv, kv_path(path))
+    fn data_path(&self, path: &SecretPath) -> Result<String, SourceError> {
+        Ok(format!("{}/data/{}", self.mounts.kv, kv_path(path)?))
     }
 
     fn token_expiry(&self) -> Result<UtcNanos, SourceError> {
@@ -325,7 +408,7 @@ impl OpenBaoSource {
     }
 
     async fn read_value(&self, path: &SecretPath) -> Result<Option<SecretSlice<u8>>, SourceError> {
-        let value = match self.call(Method::GET, &self.data_path(path), None).await {
+        let value = match self.call(Method::GET, &self.data_path(path)?, None).await {
             Ok(value) => value,
             Err(SourceError::Missing) => return Ok(None),
             Err(e) => return Err(e),
@@ -355,7 +438,7 @@ impl SecretSource for OpenBaoSource {
         let mut encoded = STANDARD.encode(secret.expose_secret());
         let body = json!({ "data": { "value": encoded } });
         encoded.zeroize();
-        self.call(Method::POST, &self.data_path(path), Some(&body))
+        self.call(Method::POST, &self.data_path(path)?, Some(&body))
             .await
             .map(drop)
     }
@@ -365,7 +448,7 @@ impl SecretSource for OpenBaoSource {
     }
 
     async fn delete(&self, path: &SecretPath) -> Result<(), SourceError> {
-        let metadata = format!("{}/metadata/{}", self.mounts.kv, kv_path(path));
+        let metadata = format!("{}/metadata/{}", self.mounts.kv, kv_path(path)?);
         match self.call(Method::DELETE, &metadata, None).await {
             Ok(_) | Err(SourceError::Missing) => Ok(()),
             Err(e) => Err(e),
@@ -565,7 +648,7 @@ pub async fn provision(
     let mut credentials = Vec::new();
     for identity in provisioned_identities(connections) {
         let policy = policy_name(&identity, mounts);
-        let hcl = openbao_policy(&identity, connections, mounts);
+        let hcl = openbao_policy(&identity, connections, mounts)?;
         http.call(
             Method::PUT,
             &format!("sys/policies/acl/{policy}"),

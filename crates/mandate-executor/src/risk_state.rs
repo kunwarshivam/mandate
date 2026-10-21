@@ -18,6 +18,7 @@
 use mandate_canon::{Object, Value, parse};
 use mandate_domain::{AgentMode, MarketSession};
 use mandate_journal::StoredEvent;
+use mandate_num::Price;
 use mandate_spec::SpecError;
 use mandate_spec::risk::{
     Input, Opening, Outcome, RiskEvent, RiskState, SessionClock, Snapshot, Step, risk_day,
@@ -112,6 +113,32 @@ fn reading(event_type: &str) -> Option<Reading> {
 /// A refusal to decide, which the fold fails closed on (DEC-2304 item 1).
 fn refused(_: SpecError) -> UnreadableCause {
     UnreadableCause::RefusedToDecide
+}
+
+/// Every session a version-2 mark may carry (journal spec §9.30).
+const SESSIONS: [MarketSession; 5] = [
+    MarketSession::Overnight,
+    MarketSession::PreMarket,
+    MarketSession::Regular,
+    MarketSession::AfterHours,
+    MarketSession::Crypto,
+];
+
+/// A payload's whole-second instant at `member`: the scheduler's `clock`, or a risk input's
+/// `risk_clock` (mandate spec §5.2). Anything else is undecodable.
+fn whole_second(payload: &Object, member: &str) -> Result<UtcNanos, UnreadableCause> {
+    payload
+        .get(member)
+        .and_then(Value::as_str)
+        .and_then(|instant| UtcNanos::parse(instant).ok())
+        .filter(|instant| instant.nanos() == 0)
+        .ok_or(UnreadableCause::Undecodable)
+}
+
+/// The bid a mark that is not sane steps with. Mandate spec §5.2 reads a bid from a sane mark only,
+/// so this price is never read; `Input::Mark` takes a price, and a not-sane mark may carry none.
+fn unread_bid() -> Result<Price, UnreadableCause> {
+    Price::parse("1").map_err(|_| UnreadableCause::Undecodable)
 }
 
 /// The trading calendar the fold steps the risk state on: §5.5's session seconds, and the session
@@ -221,8 +248,13 @@ pub struct AccountRiskFold<'c> {
     #[expect(dead_code, reason = "the fold steps the tripwires from E6-15 B2b on")]
     tripwires: TripwireState,
     view: RiskView,
-    /// The risk clock the risk state last stepped at, from which a tick crosses midnight.
+    /// The last tick's clock, or the opening instant before any tick, from which the next tick
+    /// crosses midnight. A mark does not move it (§5.4 starts the day at a tick).
     clock: UtcNanos,
+    /// The one instrument the risk state's position is (DEC-2308 item 4): the first a mark names.
+    /// `RiskState` holds a single position, so a row naming another instrument is one it cannot
+    /// step without moving this one's E on the other's price, and the view becomes unreadable.
+    instrument: Option<String>,
 }
 
 impl<'c> AccountRiskFold<'c> {
@@ -253,6 +285,7 @@ impl<'c> AccountRiskFold<'c> {
             tripwires,
             view,
             clock: opening.at,
+            instrument: None,
         })
     }
 
@@ -266,8 +299,7 @@ impl<'c> AccountRiskFold<'c> {
     ///
     /// # Errors
     /// [`ExecutorError::ForeignStream`] for a row on another stream: a caller's mistake, which
-    /// changes nothing. [`ExecutorError::Unimplemented`] for a version-2 `MarkUpdated` until E6-15
-    /// slice B2b reads it, which changes nothing either.
+    /// changes nothing.
     pub fn fold(&mut self, row: &StoredEvent) -> Result<Vec<RiskAppend>, ExecutorError> {
         if row.stream_id != self.stream {
             return Err(ExecutorError::ForeignStream {
@@ -280,9 +312,6 @@ impl<'c> AccountRiskFold<'c> {
         if head.checked_add(1) != Some(row.seq) {
             self.unreadable(UnreadableCause::SeqGap);
             return Ok(Vec::new());
-        }
-        if (row.event_type.as_str(), row.schema_version) == ("MarkUpdated", 2) {
-            return Self::mark(row);
         }
         match self.read(row) {
             Ok(appends) => {
@@ -299,8 +328,8 @@ impl<'c> AccountRiskFold<'c> {
         }
     }
 
-    /// Reads the row after the head: its body, its type and version, and, for a tick, the risk
-    /// state's steps.
+    /// Reads the row after the head: its body, its type and version, and, for a tick or a
+    /// version-2 mark, the risk state's steps.
     fn read(&mut self, row: &StoredEvent) -> Result<Vec<RiskAppend>, UnreadableCause> {
         let body = parse(&row.body).map_err(|_| UnreadableCause::Undecodable)?;
         let payload = body
@@ -311,15 +340,73 @@ impl<'c> AccountRiskFold<'c> {
             (None, _) => Err(UnreadableCause::UnfoldedEventType),
             (Some(Reading::Record), _) | (Some(Reading::Mark), 1) => Ok(Vec::new()),
             (Some(Reading::Tick), 1) => self.tick(row, payload),
+            (Some(Reading::Mark), 2) => self.mark(row, payload),
             (Some(_), _) => Err(UnreadableCause::UnknownSchemaVersion),
         }
     }
 
-    /// Steps a `MarkUpdated` at version 2 (journal spec §9.30, DEC-2305): its `bid`, `sane`, and
-    /// `session` become `Input::Mark` at its `risk_clock`, as mandate spec §5.2 reads a mark.
-    fn mark(row: &StoredEvent) -> Result<Vec<RiskAppend>, ExecutorError> {
-        let _ = row;
-        Err(ExecutorError::Unimplemented { story: "E6-15" })
+    /// Binds the fold to the first instrument a row names, and refuses to decide a row naming any
+    /// other (DEC-2308 item 4): openings wait, exits go on (`AGENTS.md` rule 13).
+    fn bind(&mut self, instrument: &str) -> Result<(), UnreadableCause> {
+        match &self.instrument {
+            Some(bound) if bound != instrument => Err(UnreadableCause::RefusedToDecide),
+            Some(_) => Ok(()),
+            None => {
+                self.instrument = Some(instrument.to_owned());
+                Ok(())
+            }
+        }
+    }
+
+    /// Steps a `MarkUpdated` at version 2 (journal spec §9.30, DEC-2305): its `bid` and `sane`
+    /// become `Input::Mark` at its `risk_clock`, in the `session` the record carries and never one
+    /// the calendar derives (DEC-2305 item 1), as mandate spec §5.2 reads a mark.
+    ///
+    /// A sane mark's `bid` is a positive price (rule 244). A mark that is not sane may carry any bid
+    /// or none, and §5.2 never reads one, so its step carries [`unread_bid`] instead.
+    ///
+    /// A mark never starts the risk day, and never moves the instant the next tick crosses midnight
+    /// from: §5.4 starts the day at the copied `ClockAdvanced` that crosses New York midnight, as the
+    /// reference cases do (MC-R13 steps a pre-market mark on the next day with E₀ unchanged and no
+    /// `RiskDayStarted`). So a mark past midnight is stepped against the closing day's E₀, and the
+    /// next tick still starts the new day.
+    fn mark(
+        &mut self,
+        row: &StoredEvent,
+        payload: &Object,
+    ) -> Result<Vec<RiskAppend>, UnreadableCause> {
+        let instrument = payload
+            .get("instrument_id")
+            .and_then(Value::as_str)
+            .ok_or(UnreadableCause::Undecodable)?;
+        self.bind(instrument)?;
+        let sane = match payload.get("sane") {
+            Some(Value::Bool(sane)) => *sane,
+            _ => return Err(UnreadableCause::Undecodable),
+        };
+        let bid = payload
+            .get("bid")
+            .filter(|bid| matches!(bid, Value::Str(_) | Value::Null))
+            .ok_or(UnreadableCause::Undecodable)?;
+        let bid = if sane {
+            bid.as_str()
+                .and_then(|bid| Price::parse(bid).ok())
+                .ok_or(UnreadableCause::Undecodable)?
+        } else {
+            unread_bid()?
+        };
+        let session = payload
+            .get("session")
+            .and_then(Value::as_str)
+            .and_then(|name| {
+                SESSIONS
+                    .into_iter()
+                    .find(|session| session.as_str() == name)
+            })
+            .ok_or(UnreadableCause::Undecodable)?;
+        let clock = whole_second(payload, "risk_clock")?;
+        let outcome = self.step(clock, session, Input::Mark { bid, sane })?;
+        self.records(row, clock, &outcome)
     }
 
     /// Steps a `ClockAdvanced` tick at its `clock` (DEC-2304 item 7). A tick that reaches the next
@@ -332,12 +419,7 @@ impl<'c> AccountRiskFold<'c> {
         row: &StoredEvent,
         payload: &Object,
     ) -> Result<Vec<RiskAppend>, UnreadableCause> {
-        let clock = payload
-            .get("clock")
-            .and_then(Value::as_str)
-            .and_then(|clock| UtcNanos::parse(clock).ok())
-            .filter(|clock| clock.nanos() == 0)
-            .ok_or(UnreadableCause::Undecodable)?;
+        let clock = whole_second(payload, "clock")?;
         let session = self.calendar.session(clock).map_err(refused)?;
         let mut appends = Vec::new();
         if clock >= risk_day(self.clock).map_err(refused)?.ends_at {

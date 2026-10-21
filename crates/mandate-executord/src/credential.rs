@@ -29,21 +29,17 @@ use mandate_store::Store;
 use mandate_time::UtcNanos;
 use mandate_vault::SourceError;
 use mandate_vault::lease::{Lease, LeaseKeeper};
+use mandate_vault::mounted::read_mounted;
 use mandate_vault::openbao::OpenBaoConfig;
-use mandate_vault::policy::Identity;
+use mandate_vault::policy::{Identity, Mounts};
 use mandate_vault::source::SecretSource;
 use secrecy::{ExposeSecret, SecretString};
 
 use crate::alpaca::AlpacaBroker;
-use crate::lease::{Held, Leased};
+use crate::lease::{Held, Leased, runtime};
 
-/// The code every stub of this story's tests PR returns, so every pending test fails at it
-/// (DEC-77); the implementation PR replaces the stubs and removes it.
-#[allow(
-    non_upper_case_globals,
-    reason = "the pending gate recognises a stub by the name `Unimplemented` (DEC-137)"
-)]
-pub const Unimplemented: &str = "unimplemented";
+/// The mounted file holding the vault's CA (DEC-2630).
+const VAULT_CA: &str = "ca.crt";
 
 /// Which broker the process runs over.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -156,8 +152,18 @@ pub fn paper_settings(
     flag: &dyn Fn(&str) -> Option<String>,
     fixture: bool,
 ) -> Result<Option<VaultMount>, &'static str> {
-    let _ = (flag, fixture);
-    Err(Unimplemented)
+    if broker_choice(flag("--broker").as_deref())? == BrokerChoice::Fixture {
+        return Ok(None);
+    }
+    if fixture {
+        return Err("broker_conflict");
+    }
+    let address = flag("--vault-address").ok_or("vault_address_missing")?;
+    let dir = flag("--vault-dir").ok_or("vault_dir_missing")?;
+    Ok(Some(VaultMount {
+        address,
+        dir: PathBuf::from(dir),
+    }))
 }
 
 /// The vault's configuration: `mount`'s address, the CA read whole from the mount's `ca.crt`, and
@@ -166,8 +172,12 @@ pub fn paper_settings(
 /// # Errors
 /// `vault_ca_unreadable` when the CA is not a mounted file the reader accepts.
 pub fn vault_config(mount: &VaultMount) -> Result<OpenBaoConfig, &'static str> {
-    let _ = mount;
-    Err(Unimplemented)
+    let ca = read_mounted(&mount.dir, VAULT_CA).map_err(|_| "vault_ca_unreadable")?;
+    Ok(OpenBaoConfig {
+        address: mount.address.clone(),
+        ca_pem: ca.expose_secret().as_bytes().to_vec(),
+        mounts: Mounts::default(),
+    })
 }
 
 /// The vault session of `connection`'s executor: `service_account_token` reads the pod's token
@@ -183,8 +193,8 @@ pub fn vault_login<V>(
     login: impl FnOnce(Identity, SecretString) -> Result<V, SourceError>,
     connection: &ConnectionId,
 ) -> Result<V, &'static str> {
-    let _ = (service_account_token, login, connection);
-    Err(Unimplemented)
+    let token = service_account_token().map_err(|_| "vault_credentials_unreadable")?;
+    login(Identity::Executor(connection.clone()), token).map_err(|_| "vault_login_failed")
 }
 
 /// How a renewed secret is read: as the access token.
@@ -201,8 +211,24 @@ pub fn paper_broker<V: SecretSource>(
     connection: &ConnectionId,
     now: UtcNanos,
 ) -> Result<(AlpacaBroker<AlpacaPaperHttp>, RunLease<V>), &'static str> {
-    let _ = (vault, connection, now);
-    Err(Unimplemented)
+    let runtime = runtime()?;
+    let lease = runtime
+        .block_on(vault.lease(connection, now))
+        .map_err(|_| "credential_unavailable")?;
+    let built = read_token(lease.secret.expose_secret())
+        .and_then(paper_transport)
+        .and_then(AlpacaBroker::new);
+    match built {
+        Ok(broker) => {
+            let read: TokenReader = read_token;
+            let leased = Leased::new(vault, LeaseKeeper::new(lease), read);
+            Ok((broker, RunLease::new(leased)))
+        }
+        Err(refused) => {
+            let _expires_unless_given_back = runtime.block_on(vault.revoke(lease));
+            Err(refused)
+        }
+    }
 }
 
 /// Whether the run goes on after a lease tick: only while the credential is unchanged.
@@ -211,8 +237,11 @@ pub fn paper_broker<V: SecretSource>(
 /// `credential_rotated`, `credential_lost`, or the tick's own refusal: each drains the process and
 /// stops it for its supervisor.
 pub fn lease_verdict(tick: Result<Held<AccessToken>, &'static str>) -> Result<(), &'static str> {
-    let _ = tick;
-    Err(Unimplemented)
+    match tick? {
+        Held::Unchanged => Ok(()),
+        Held::Rotated(_) => Err("credential_rotated"),
+        Held::Lost => Err("credential_lost"),
+    }
 }
 
 /// The lease a run holds its broker under, ticked once a pass until a tick stops the run.
@@ -232,12 +261,11 @@ impl<V: SecretSource> RunLease<V> {
 
     /// The code that stops the run, or `None` while it goes on: the first tick [`lease_verdict`]
     /// refuses gives it, and every later pass answers it again without asking the vault.
-    #[expect(
-        clippy::todo,
-        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-    )]
-    pub fn pass(&mut self, _now: UtcNanos) -> Option<&'static str> {
-        todo!()
+    pub fn pass(&mut self, now: UtcNanos) -> Option<&'static str> {
+        if self.stopped.is_none() {
+            self.stopped = lease_verdict(self.leased.tick(now)).err();
+        }
+        self.stopped
     }
 
     /// Gives the lease back to the vault when the run stops.
@@ -245,7 +273,6 @@ impl<V: SecretSource> RunLease<V> {
     /// # Errors
     /// `revoke_failed` when the vault does not take it back; it then expires.
     pub fn give_back(self) -> Result<(), &'static str> {
-        let _ = (self.leased, self.stopped);
-        Err(Unimplemented)
+        self.leased.revoke()
     }
 }

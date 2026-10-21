@@ -156,7 +156,6 @@ const ADDRESS: &str = "https://vault.ws-ws1.svc:8200";
 /// DEC-2306 item 1: no broker flag and `fixture` need no vault; `alpaca-paper` needs both the
 /// vault's address and its mount, and never runs over the in-memory journal.
 #[test]
-#[ignore = "pending E21-30"]
 fn the_flags_name_the_paper_run_and_its_vault() -> Result<(), Error> {
     assert_eq!(paper_settings(&flags(&[]), false)?, None);
     assert_eq!(
@@ -195,7 +194,6 @@ fn the_flags_name_the_paper_run_and_its_vault() -> Result<(), Error> {
 /// The vault's CA is the mount's `ca.crt`, read whole; a missing CA, or one group or others may
 /// read, is refused.
 #[test]
-#[ignore = "pending E21-30"]
 fn the_vault_ca_is_read_from_the_mount() -> Result<(), Error> {
     let dir = mount_dir()?;
     let mount = VaultMount {
@@ -217,7 +215,6 @@ fn the_vault_ca_is_read_from_the_mount() -> Result<(), Error> {
 /// executor: an unreadable token is refused without a dial, and a login the vault refuses is
 /// `vault_login_failed`.
 #[test]
-#[ignore = "pending E21-30"]
 fn the_login_reads_the_service_account_token_before_dialling() -> Result<(), Error> {
     let conn1 = ConnectionId::new("conn1")?;
     let dialled: RefCell<Vec<(Identity, String)>> = RefCell::new(Vec::new());
@@ -261,7 +258,6 @@ fn the_login_reads_the_service_account_token_before_dialling() -> Result<(), Err
 /// DEC-2306 items 2 and 3: the lease is taken on the checked connection, and the broker runs
 /// over its token, with nothing given back while the run holds it.
 #[test]
-#[ignore = "pending E21-30"]
 fn the_broker_runs_over_the_leased_token() -> Result<(), Error> {
     let (vault, calls) = script(Ok(entry(TOKEN)))?;
     let (broker, _leased) = paper_broker(vault, &ConnectionId::new("conn1")?, now()?)?;
@@ -274,7 +270,6 @@ fn the_broker_runs_over_the_leased_token() -> Result<(), Error> {
 /// A refused lease refuses the start; a lease whose secret is not a token entry, a key pair
 /// among them, is given back to the vault, then refuses the start.
 #[test]
-#[ignore = "pending E21-30"]
 fn a_refused_or_undecodable_lease_refuses_the_start() -> Result<(), Error> {
     let conn1 = ConnectionId::new("conn1")?;
     let (refused, calls) = script(Err(SourceError::Denied))?;
@@ -296,7 +291,6 @@ fn a_refused_or_undecodable_lease_refuses_the_start() -> Result<(), Error> {
 /// DEC-2306 item 3: only an unchanged credential keeps the run going; a rotated one, a lost one,
 /// and a tick that failed each stop it by their own code.
 #[test]
-#[ignore = "pending E21-30"]
 fn only_an_unchanged_credential_keeps_the_run_going() {
     assert_eq!(lease_verdict(Ok(Held::Unchanged)), Ok(()));
     let rotated = Held::Rotated(AccessToken(SecretString::from(TOKEN)));
@@ -311,7 +305,6 @@ fn only_an_unchanged_credential_keeps_the_run_going() {
 /// The run goes on while its lease holds, through a vault outage; the lease's expiry stops it,
 /// and every later pass gives the same code without asking the vault again.
 #[test]
-#[ignore = "pending E21-30"]
 fn the_run_lease_stops_the_run_once_and_for_good() -> Result<(), Error> {
     let (vault, calls) = script(Ok(entry(TOKEN)))?;
     let (_broker, mut lease) = paper_broker(vault, &ConnectionId::new("conn1")?, now()?)?;
@@ -333,7 +326,6 @@ fn the_run_lease_stops_the_run_once_and_for_good() -> Result<(), Error> {
 
 /// A stopped run gives its lease back.
 #[test]
-#[ignore = "pending E21-30"]
 fn a_stopped_run_gives_its_lease_back() -> Result<(), Error> {
     let (vault, calls) = script(Ok(entry(TOKEN)))?;
     let (_broker, lease): (_, RunLease<Script>) =
