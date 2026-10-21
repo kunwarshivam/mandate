@@ -5,6 +5,9 @@ use std::fs;
 use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::mpsc;
+use std::thread;
+use std::time::Duration;
 
 use mandate_connections::record::ConnectionId;
 use rustix::fs::{CWD, FileType, Mode, mknodat};
@@ -245,27 +248,53 @@ fn a_link_swapped_in_after_the_check_is_refused() {
     );
 }
 
+/// Runs `read` on another thread and fails the test if it has not answered within ten seconds,
+/// so a read that blocks on a pipe fails rather than hangs.
+fn within_ten_seconds(
+    read: impl FnOnce() -> Result<String, SourceError> + Send + 'static,
+) -> Result<String, SourceError> {
+    let (answer, answered) = mpsc::channel();
+    thread::spawn(move || drop(answer.send(read())));
+    answered
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the read blocked on a pipe")
+}
+
 /// A pipe swapped in for the checked file is refused without waiting for a writer.
 #[test]
 fn a_pipe_swapped_in_after_the_check_is_refused_without_blocking() {
     let dir = Fresh::new("swap-fifo");
     write(&dir.0.join("ca.crt"), "checked", 0o400);
-    let swap = |reached: &Path| {
-        fs::remove_file(reached).unwrap();
-        fifo(reached);
-    };
-    assert_eq!(
-        read_swapped(&dir.0, "ca.crt", &swap),
-        Err(SourceError::CredentialFile)
-    );
+    let path = dir.0.clone();
+    let answer = within_ten_seconds(move || {
+        let swap = |reached: &Path| {
+            fs::remove_file(reached).unwrap();
+            fifo(reached);
+        };
+        read_swapped(&path, "ca.crt", &swap)
+    });
+    assert_eq!(answer, Err(SourceError::CredentialFile));
 }
 
-/// An owner-only pipe at the name itself is refused, not read as empty.
+/// An owner-only pipe at the name itself is refused, not read as empty, without blocking.
 #[test]
 fn a_pipe_at_the_name_is_refused() {
     let dir = Fresh::new("fifo");
     fifo(&dir.0.join("ca.crt"));
-    assert_eq!(read(&dir.0, "ca.crt"), Err(SourceError::CredentialFile));
+    let path = dir.0.clone();
+    let answer = within_ten_seconds(move || read(&path, "ca.crt"));
+    assert_eq!(answer, Err(SourceError::CredentialFile));
+}
+
+/// A file of 65536 bytes is read; one byte more is refused, so a read is bounded.
+#[test]
+fn a_file_over_the_bound_is_refused() {
+    let dir = Fresh::new("bound");
+    let longest = "a".repeat(65536);
+    write(&dir.0.join("ca.crt"), &longest, 0o400);
+    assert_eq!(read(&dir.0, "ca.crt"), Ok(longest.clone()));
+    write(&dir.0.join("big.crt"), &format!("{longest}a"), 0o400);
+    assert_eq!(read(&dir.0, "big.crt"), Err(SourceError::CredentialFile));
 }
 
 /// A mode widened on the checked file before it is opened is judged on the handle and refused.

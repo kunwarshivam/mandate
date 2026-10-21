@@ -6,10 +6,11 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 
-use mandate_canon::{Digest, Value, parse};
+use mandate_canon::{Digest, Value, parse, to_canonical};
 use mandate_domain::{AssetClass, AssetId};
 use mandate_gateway::money::{PriceTable, TokenPrice, Usage, Usd6};
 use mandate_gateway::registry::{Endpoint, Locality, Registry, Reported, Route, Status};
+use mandate_gateway::schema::fits;
 use mandate_num::{Price, Qty};
 use mandate_research::{AllowlistVersion, SourceAllowlist, SourceId as AllowedSource};
 use mandate_research_run::{
@@ -37,6 +38,15 @@ pub enum BundleError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecordedReply {
     pub output: String,
+    pub latency_ms: u64,
+    pub usage: Usage,
+}
+
+/// One scripted tool-call reply of an agentic run's turn (DEC-2266): each call's declared tool
+/// name and canonical arguments, in reply order, its latency, and its usage.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScriptedTurn {
+    pub calls: Vec<(String, String)>,
     pub latency_ms: u64,
     pub usage: Usage,
 }
@@ -103,6 +113,9 @@ pub struct Bundle {
     pub workspace_cap: Usd6,
     pub deployment_cap: Usd6,
     pub reply: RecordedReply,
+    /// The scripted replies of an agentic run's turns before its final one, turn 1 first; empty
+    /// for a bundle with no `turns` (DEC-2266).
+    pub turns: Vec<ScriptedTurn>,
     pub plane: RecordedPlane,
     /// The recorded instruments halted at the bundle's as-of time (DEC-2214 item 1).
     pub halted: BTreeSet<AssetId>,
@@ -130,6 +143,12 @@ impl Bundle {
         let pinned = ResearchEntry::recorded(entry.value).map_err(|error| match error {
             EntryError::Member(member) => entry.malformed(member),
         })?;
+        let turns = research
+            .value
+            .get("turns")
+            .map(|turns| scripted(turns, &pinned))
+            .transpose()?
+            .unwrap_or_default();
         let slug = pinned.identity.model_name.clone();
         let reported_provider = endpoint.text("reported_provider")?;
         let prices = PriceTable::new(
@@ -191,6 +210,7 @@ impl Bundle {
                     cached: reply.int("cached_tokens")?,
                 },
             },
+            turns,
             plane,
             halted,
             allowlist,
@@ -410,6 +430,60 @@ impl Read {
             })
             .collect())
     }
+}
+
+/// `research.json`'s `turns` (DEC-2266): refused whole, `Malformed { member: "turns" }`, unless the
+/// entry names the agentic loop and every turn is one its gateway would accept, so no bundle a
+/// worker is built from scripts a call the entry does not declare.
+fn scripted(turns: &Value, entry: &ResearchEntry) -> Result<Vec<ScriptedTurn>, BundleError> {
+    let refused = BundleError::Malformed {
+        file: RESEARCH,
+        member: "turns",
+    };
+    let content = entry.content();
+    let (Some(agentic), Some(listed)) = (content.agentic(), turns.as_array()) else {
+        return Err(refused);
+    };
+    let bounds = agentic.loop_bounds;
+    if u32::try_from(listed.len()).map_or(true, |n| n >= bounds.max_turns) {
+        return Err(refused);
+    }
+    listed
+        .iter()
+        .map(|turn| {
+            let count = |member: &str| turn.get(member).and_then(Value::as_int);
+            let calls = turn.get("calls").and_then(Value::as_array)?;
+            let fits_turn = u32::try_from(calls.len())
+                .is_ok_and(|n| n > 0 && n <= bounds.max_tool_calls_per_turn);
+            if !fits_turn {
+                return None;
+            }
+            let calls = calls
+                .iter()
+                .map(|call| {
+                    let name = call.get("name").and_then(Value::as_str)?;
+                    let arguments = call.get("arguments")?;
+                    let declared = agentic.tool(name)?;
+                    fits(&declared.arguments, arguments).then(|| {
+                        (
+                            name.to_owned(),
+                            String::from_utf8_lossy(&to_canonical(arguments)).into_owned(),
+                        )
+                    })
+                })
+                .collect::<Option<Vec<_>>>()?;
+            Some(ScriptedTurn {
+                calls,
+                latency_ms: count("latency_ms")?,
+                usage: Usage {
+                    input: count("input_tokens")?,
+                    output: count("output_tokens")?,
+                    cached: count("cached_tokens")?,
+                },
+            })
+        })
+        .collect::<Option<Vec<_>>>()
+        .ok_or(refused)
 }
 
 /// The assets of the instruments `research.json`'s `halted_instruments` names by symbol, each one an

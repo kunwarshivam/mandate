@@ -186,6 +186,14 @@ pub(crate) fn rules(
     }
 }
 
+/// Whether the stream a record names is one of the envelope's workspace `workspace`'s, as
+/// [`crate::workspace_owns`] judges it: never by prefix, and never the deployment meter stream.
+fn in_workspace(workspace: Option<&str>, named: &str) -> bool {
+    workspace.is_some_and(|workspace| {
+        StreamId::parse(named).is_some_and(|stream| crate::workspace_owns(workspace, &stream))
+    })
+}
+
 /// Rule 107: at least one range, each in this workspace, with `from_seq` at least 1, `to_seq` at
 /// least `from_seq`, the genesis hash exactly before seq 1, and each after the first sorting after
 /// the one before it by stream, or within one stream starting past its end.
@@ -197,7 +205,7 @@ fn ranges_rule(ranges: &[Value], stream: &StreamId) -> Result<(), Invalid> {
         let at = |member: &str| format!("payload.ranges[{i}].{member}");
         let named = text(Some(range), "stream_id");
         let (from, to) = (seq(range, "from_seq"), seq(range, "to_seq"));
-        ensure(named.split(':').nth(1) == workspace, &at("stream_id"))?;
+        ensure(in_workspace(workspace, named), &at("stream_id"))?;
         ensure(from >= 1, &at("from_seq"))?;
         ensure(to >= from, &at("to_seq"))?;
         let genesis = text(Some(range), "prev_hash") == GENESIS;
@@ -286,7 +294,7 @@ fn anchor_rules(payload: &Value, stream: &StreamId, actor: Option<&Value>) -> Re
     for (i, leaf) in leaves.iter().enumerate() {
         let at = |member: &str| format!("payload.leaves[{i}].{member}");
         let named = text(Some(leaf), "stream_id");
-        ensure(named.split(':').nth(1) == workspace, &at("stream_id"))?;
+        ensure(in_workspace(workspace, named), &at("stream_id"))?;
         ensure(seq(leaf, "seq") >= 1, &at("seq"))?;
         if let Some(before) = previous {
             ensure(named > before, &at("stream_id"))?;
@@ -328,7 +336,7 @@ fn anchor_leaves(leaves: &[Value]) -> Option<Vec<crate::merkle::AnchorLeaf>> {
 fn segment_rules(payload: &Value, stream: &StreamId, actor: Option<&Value>) -> Result<(), Invalid> {
     let workspace = stream.as_str().split(':').nth(1);
     let named = text(Some(payload), "stream_id");
-    ensure(named.split(':').nth(1) == workspace, "payload.stream_id")?;
+    ensure(in_workspace(workspace, named), "payload.stream_id")?;
     let (first, last) = (seq(payload, "first_seq"), seq(payload, "last_seq"));
     ensure(first >= 1, "payload.first_seq")?;
     ensure(last >= first, "payload.last_seq")?;

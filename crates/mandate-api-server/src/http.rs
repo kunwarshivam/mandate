@@ -85,6 +85,9 @@ pub struct App {
     pub step_up: Arc<dyn StepUp>,
     /// The step-up challenges issued and not yet expired (DEC-2103 item 5).
     pub challenges: Arc<Challenges>,
+    /// The connect start's OAuth client and `state` values (DEC-2623); `None` when the deployment
+    /// offers no connect, and the start answers `not_found`.
+    pub connect: Option<Arc<crate::connect::Connect>>,
 }
 
 /// The API listener's router: every path answers the one 401 until its route lands (API-1).
@@ -203,6 +206,18 @@ pub fn api(app: App, drain: Arc<Drain>) -> Router {
         .route(
             "/v1/workspaces/{workspace}/step-up/challenges",
             post(challenges::challenge).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/connections",
+            get(routes::list_connections).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/connections/{connection}",
+            get(routes::one_connection).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/connections/oauth/start",
+            post(crate::connect::start).fallback(otherwise.clone()),
         )
         .route(
             "/v1/workspaces/{workspace}/agents/{agent}/go-live",

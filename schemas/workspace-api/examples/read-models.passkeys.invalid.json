@@ -1,0 +1,72 @@
+[
+  {
+    "label": "no passkeys",
+    "remove": [
+      "/passkeys"
+    ]
+  },
+  {
+    "label": "a passkey without its id",
+    "set": {
+      "/passkeys/0": {
+        "alg": "es256",
+        "enrolled_at": "2026-10-07T14:30:00.000000000Z",
+        "cool_off_ends": null
+      }
+    }
+  },
+  {
+    "label": "a passkey without its algorithm",
+    "set": {
+      "/passkeys/0/alg": null
+    }
+  },
+  {
+    "label": "an RSA passkey",
+    "set": {
+      "/passkeys/0/alg": "rs256"
+    }
+  },
+  {
+    "label": "a passkey without enrolled_at",
+    "remove": [
+      "/passkeys/0/enrolled_at"
+    ]
+  },
+  {
+    "label": "a passkey without cool_off_ends",
+    "remove": [
+      "/passkeys/0/cool_off_ends"
+    ]
+  },
+  {
+    "label": "a passkey's public key",
+    "set": {
+      "/passkeys/0/public_key": "pQECAyYgASFYIA"
+    }
+  },
+  {
+    "label": "a passkey's cool-off as text",
+    "set": {
+      "/passkeys/0/cool_off_ends": "soon"
+    }
+  },
+  {
+    "label": "an unlisted member",
+    "set": {
+      "/owner": "01JBH3BTZ8K2M4N6P8R0S2T4V0"
+    }
+  },
+  {
+    "label": "a passkey whose algorithm is removed",
+    "remove": [
+      "/passkeys/0/alg"
+    ]
+  },
+  {
+    "label": "a passkey with an algorithm outside the two",
+    "set": {
+      "/passkeys/0/alg": "mutant_value"
+    }
+  }
+]

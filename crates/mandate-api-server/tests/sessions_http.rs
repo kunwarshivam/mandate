@@ -90,6 +90,7 @@ fn fixture_with(keys: bool) -> Fixture {
         objects: None,
         step_up: Arc::new(mandate_api_server::stepup::Unbound),
         challenges: Arc::default(),
+        connect: None,
     };
     Fixture {
         addr: serve(http::api(app, Drain::new())),

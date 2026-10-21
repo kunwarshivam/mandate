@@ -123,6 +123,7 @@ fn api(
         objects: None,
         step_up: Arc::new(mandate_api_server::stepup::Unbound),
         challenges: Arc::default(),
+        connect: None,
     };
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a port");
     let addr = listener.local_addr().expect("its address");

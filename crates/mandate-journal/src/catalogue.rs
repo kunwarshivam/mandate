@@ -1,7 +1,7 @@
 //! The event catalogue (journal spec §9): which streams may hold each event type, and the
 //! `config_refs` keys each requires at append.
 
-use crate::StreamType::{self, Account, Agent, Control, Meter, Notice, Scheduler};
+use crate::StreamType::{self, Account, Agent, Control, DeploymentMeter, Meter, Notice, Scheduler};
 
 pub(crate) const FEE: &str = "fee_config";
 pub(crate) const CAL: &str = "trading_calendar";
@@ -173,8 +173,19 @@ pub(crate) const EVENT_TYPES: [&str; 127] = [
 /// (mandate spec §6.1); its payload schema is not closed yet (journal spec §9.1).
 pub(crate) fn lookup(event_type: &str) -> Option<Entry> {
     let e = match event_type {
-        "StreamOpened" => entry(&[Account, Agent, Control, Scheduler, Notice, Meter], NONE),
-        "MeterReserved" | "MeterSettled" => entry(&[Meter], NONE),
+        "StreamOpened" => entry(
+            &[
+                Account,
+                Agent,
+                Control,
+                Scheduler,
+                Notice,
+                Meter,
+                DeploymentMeter,
+            ],
+            NONE,
+        ),
+        "MeterReserved" | "MeterSettled" => entry(&[Meter, DeploymentMeter], NONE),
         "TradingDayStarted" | "ClockAdvanced" => entry(&[Account, Scheduler], NONE),
         "KillSwitchActivated" => entry(&[Account, Agent], NONE),
         "OwnerAcknowledged" | "OwnerAcknowledgmentRequested" => entry(&[Account, Control], NONE),

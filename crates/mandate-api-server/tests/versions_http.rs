@@ -154,6 +154,7 @@ fn built(port: Port, with_store: bool) -> Fixture {
         objects: with_store.then(|| Arc::clone(&store) as Arc<dyn ObjectStore>),
         step_up,
         challenges: Arc::default(),
+        connect: None,
     };
     let f = Fixture {
         addr: serve(http::api(app, Drain::new())),

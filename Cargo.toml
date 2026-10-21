@@ -69,6 +69,7 @@ mandate-shell-rh-sim = { path = "crates/mandate-shell-rh-sim", version = "0.0.0"
 mandate-spec = { path = "crates/mandate-spec", version = "0.0.0" }
 mandate-tenant = { path = "crates/mandate-tenant", version = "0.0.0" }
 mandate-time = { path = "crates/mandate-time", version = "0.0.0" }
+mandate-token-exchange = { path = "crates/mandate-token-exchange", version = "0.0.0" }
 mandate-version-backtest = { path = "crates/mandate-version-backtest", version = "0.0.0" }
 mandate-webpush = { path = "crates/mandate-webpush", version = "0.0.0" }
 aes-gcm = { version = "0.11.1", default-features = false, features = ["aes", "alloc"] }

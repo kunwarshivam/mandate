@@ -18,6 +18,10 @@ use crate::policy::{Identity, role_name};
 
 /// The permission bits of group and others, none of which a mounted file may carry.
 const OPEN_TO_OTHERS: u32 = 0o077;
+/// The most bytes a mounted file may hold: a role id, a secret id or a CA certificate is far
+/// shorter. The buffer is sized from the opened file's length, up to this, so the read never
+/// reallocates and leaves an unwiped copy behind.
+pub const MOUNTED_MAX: u64 = 65536;
 /// How a mounted file is opened: read-only (`O_RDONLY`, no bit of its own), never through a link at
 /// its last step, never waiting on a pipe, and not inherited by a child.
 const OPEN_FLAGS: OFlags = OFlags::NOFOLLOW
@@ -30,7 +34,8 @@ const OPEN_FLAGS: OFlags = OFlags::NOFOLLOW
 /// or an absolute target included, is [`SourceError::CredentialFile`]. The file is opened without
 /// following a link and without blocking, and its type, mode, device and inode are judged on the
 /// opened handle against the path checked, so a file, link, or pipe swapped in after the check is
-/// refused too. A partial read is zeroized before it is dropped.
+/// refused too. A file of more than [`MOUNTED_MAX`] bytes is refused. A partial read is zeroized
+/// before it is dropped.
 pub fn read_mounted(dir: &Path, name: &str) -> Result<SecretString, SourceError> {
     read_checked(dir, name, &|_| {})
 }
@@ -58,7 +63,7 @@ pub(crate) fn read_checked(
     }
     let checked = fs::symlink_metadata(&reached).map_err(refused)?;
     between(&reached);
-    let mut file = File::from(
+    let file = File::from(
         open(&reached, OPEN_FLAGS, Mode::empty()).map_err(|_| SourceError::CredentialFile)?,
     );
     let opened = file.metadata().map_err(refused)?;
@@ -68,8 +73,12 @@ pub(crate) fn read_checked(
     {
         return Err(SourceError::CredentialFile);
     }
-    let mut bytes = Vec::new();
-    if file.read_to_end(&mut bytes).is_err() {
+    let expected = opened.len().min(MOUNTED_MAX).saturating_add(1);
+    let mut bytes = Vec::with_capacity(usize::try_from(expected).unwrap_or(0));
+    let read = file
+        .take(MOUNTED_MAX.saturating_add(1))
+        .read_to_end(&mut bytes);
+    if read.is_err() || u64::try_from(bytes.len()).map_or(true, |read| read > MOUNTED_MAX) {
         bytes.zeroize();
         return Err(SourceError::CredentialFile);
     }

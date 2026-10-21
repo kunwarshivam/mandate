@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/read-models/passkeys.schema.json",
+  "description": "GET /passkeys (\u00a73.6, DEC-2108): the session's member's passkeys the control stream holds, enrolled and not removed, in enrolment order. as_of names the control stream. References only: never a public key (API-11).",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../envelope.schema.json#/$defs/Envelope"
+    }
+  ],
+  "required": [
+    "passkeys"
+  ],
+  "properties": {
+    "passkeys": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Passkey"
+      }
+    },
+    "as_of": {
+      "$ref": "../common.schema.json#/$defs/AsOf"
+    }
+  },
+  "$defs": {
+    "Passkey": {
+      "type": "object",
+      "required": [
+        "passkey_id",
+        "alg",
+        "enrolled_at",
+        "cool_off_ends"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "passkey_id": {
+          "$ref": "../common.schema.json#/$defs/PasskeyId"
+        },
+        "alg": {
+          "enum": [
+            "es256",
+            "eddsa"
+          ]
+        },
+        "enrolled_at": {
+          "$ref": "../common.schema.json#/$defs/Timestamp"
+        },
+        "cool_off_ends": {
+          "oneOf": [
+            {
+              "$ref": "../common.schema.json#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "propertyNames": {
+    "not": {
+      "pattern": "([tT][oO][kK][eE][nN]|[sS][eE][cC][rR][eE][tT]|[pP][aA][sS][sS][wW][oO][rR][dD]|[pP][aA][sS][sS][pP][hH][rR][aA][sS][eE]|[cC][rR][eE][dD][eE][nN][tT][iI][aA][lL]|[aA][pP][iI]_[kK][eE][yY]|[pP][rR][iI][vV][aA][tT][eE]_[kK][eE][yY]|[aA][cC][cC][oO][uU][nN][tT]_[nN][uU][mM][bB][eE][rR]|[fF][iI][nN][gG][eE][rR][pP][rR][iI][nN][tT]|[vV][aA][uU][lL][tT])"
+    }
+  },
+  "unevaluatedProperties": false
+}

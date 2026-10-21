@@ -267,11 +267,48 @@ fn a_connection_down_past_its_threshold_alerts_once() {
     assert_eq!(link.on(at(3 + DOWN_ALERT_S), LinkInput::Tick, 0), []);
     link.on(at(4 + DOWN_ALERT_S), LinkInput::Reconnecting, 0);
     subscribe(&mut link, 5 + DOWN_ALERT_S);
+    link.on(
+        at(5 + DOWN_ALERT_S),
+        frame(&[quote("AAPL"), status("AAPL"), quote("SPY"), status("SPY")]),
+        0,
+    );
+    assert_eq!(link.state(), LinkState::Live);
     link.on(at(6 + DOWN_ALERT_S), LinkInput::Lost, 0);
+    assert_eq!(
+        link.on(at(6 + 2 * DOWN_ALERT_S), LinkInput::Tick, 0),
+        [],
+        "the clock restarts at the new loss, not the first outage's"
+    );
     assert_eq!(
         link.on(at(7 + 2 * DOWN_ALERT_S), LinkInput::Tick, 0),
         [LinkAction::Alert("stream_down")],
-        "a new loss alerts again"
+        "live again, so a new loss alerts again"
+    );
+}
+
+#[test]
+fn a_flapping_link_that_never_goes_live_alerts_once() {
+    let mut link = fresh();
+    subscribe(&mut link, 0);
+    for n in 0..10 {
+        let lost = 1 + 10 * n;
+        link.on(at(lost), LinkInput::Lost, 0);
+        link.on(at(lost + 2), LinkInput::Reconnecting, 0);
+        subscribe(&mut link, lost + 3);
+        assert_eq!(link.state(), LinkState::Resyncing);
+        link.on(at(lost + 4), frame(&[quote("AAPL")]), 0);
+    }
+    let alerts: usize = (100..200)
+        .map(|secs| {
+            link.on(at(secs), LinkInput::Tick, 0)
+                .iter()
+                .filter(|a| **a == LinkAction::Alert("stream_down"))
+                .count()
+        })
+        .sum();
+    assert_eq!(
+        alerts, 1,
+        "a subscription that never resyncs ends no outage"
     );
 }
 
@@ -415,7 +452,7 @@ fn a_sustained_outage_alerts_once_however_many_reconnects_fail() {
     assert_eq!(
         link.on(at(200), LinkInput::Tick, 0),
         [],
-        "subscribed again: not down"
+        "alerted once already: never a second alert"
     );
 }
 

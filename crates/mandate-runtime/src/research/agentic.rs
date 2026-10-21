@@ -299,6 +299,7 @@ fn next_turn(
                 max_output_tokens: config.max_output_tokens,
                 observations: agentic.observations.iter().map(|id| id.0.clone()).collect(),
             },
+            kind: agentic.state.started().kind,
             plan,
             transcript: agentic.transcript.clone(),
         })));
