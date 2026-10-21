@@ -1,0 +1,4 @@
+[
+ {"asset_class": "us_equity", "asset_id": "7b4a1c2e-1111-4a2b-9c3d-000000000001", "eligible": true, "leveraged_or_inverse_etp": false, "symbol": "AAPL"},
+ {"asset_class": "us_equity", "asset_id": "7b4a1c2e-2222-4a2b-9c3d-000000000002", "eligible": true, "leveraged_or_inverse_etp": false, "symbol": "MSFT"}
+]
