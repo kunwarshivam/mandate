@@ -110,7 +110,6 @@ fn holds(alerts: &[Alert]) -> usize {
 /// appends succeed, and one again for the next outage, so a persistent outage is never silent and
 /// never floods (design §8.2, RB-07).
 #[test]
-#[ignore = "pending E21-26"]
 fn the_hold_raises_its_alert_once_an_outage() -> Result<(), Error> {
     let (journal, _broker, mut process) = owed_exit()?;
     journal.fail_next(&[Fault::Unavailable; DOWN]);
