@@ -245,6 +245,17 @@ pub(super) fn seeded(
     Ok(out)
 }
 
+/// Adds the asset IDs of the instruments a read's items are about to the run's `instruments_read`
+/// (journal spec §9.23, DEC-2267): each item's symbols resolved through the seed's instrument facts,
+/// a symbol the seed does not map left out. The item's `ObservationRecorded` keeps its own
+/// symbol-derived `instrument_id` either way.
+fn read_instruments(
+    _agentic: &mut Agentic,
+    _items: &[super::RetrievedObservation],
+) -> Result<(), RuntimeError> {
+    Err(RuntimeError::Unimplemented { story: "E19-13" })
+}
+
 /// Journals each item the run has not yet observed, in order, as `ObservationRecorded`, and returns
 /// the observation of every item given, new or not.
 fn observe(
@@ -612,12 +623,8 @@ pub(super) fn dispatched(
         let mut observations: Vec<&str> = named.iter().map(|id| id.0.as_str()).collect();
         observations.sort_unstable();
         observations.dedup();
-        for item in &result.items {
-            if let Some(instrument) = &item.observation.instrument_id {
-                agentic
-                    .instruments_read
-                    .insert(instrument.as_str().to_owned());
-            }
+        if !result.items.is_empty() {
+            read_instruments(agentic, &result.items)?;
         }
         journal_result(
             agentic,
