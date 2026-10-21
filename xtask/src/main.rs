@@ -12021,7 +12021,8 @@ mod tests {
                 "mandate-cp-site",
                 "mandate-deploy-manager",
                 "mandate-deployd",
-                "mandate-dispatcher"
+                "mandate-dispatcher",
+                "mandate-gatewayd"
             ]
         );
         assert_eq!(
