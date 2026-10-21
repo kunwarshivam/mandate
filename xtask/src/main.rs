@@ -2788,7 +2788,10 @@ struct Selection {
     /// whenever any crate those are built on changed.
     cell: bool,
     /// Whether `cell-demo-web` runs: the cell jobs do, or a path under `web/` other than its
-    /// Markdown changed, since the job drives `web/` against the cell (DEC-2609 item 5).
+    /// Markdown changed, since the job drives `web/` against the cell (DEC-2609 item 5). A pull
+    /// request's run then never starts it (DEC-2634), in [`selection_in`]: the job is in neither
+    /// `fast`'s nor `full`'s `needs`, so nothing requires it, and while its gesture was failing on
+    /// every run it made the whole `ci` run conclude `failure`, which is what the merge gate reads.
     cell_web: bool,
 }
 
@@ -3001,9 +3004,21 @@ fn selection_in(root: &Path, base: Option<&str>) -> Result<Selection> {
 
 /// The selection for this run, from the base [`base_ref`] chooses, said on stderr.
 fn selection() -> Result<Selection> {
-    let selected = selection_in(Path::new("."), base_ref()?.as_deref())?;
+    let mut selected = selection_in(Path::new("."), base_ref()?.as_deref())?;
+    withhold_web_demo(&mut selected, env::var("GITHUB_EVENT_NAME").ok().as_deref());
     eprintln!("    select: {}", selected.reasons());
     Ok(selected)
+}
+
+/// DEC-2634: a pull request's run withholds `cell-demo-web`. The job is in neither `fast`'s nor
+/// `full`'s `needs`, so no aggregate requires it, yet its `web/` gesture had failed on every run
+/// since it merged and made the whole `ci` run conclude `failure` — which the merge gate reads as
+/// "not green", blocking every merge. `main`'s own push, the nightly's dispatch and a local run
+/// keep it, where a failure is a finding rather than a merge blocker.
+fn withhold_web_demo(selected: &mut Selection, event: Option<&str>) {
+    if event == Some("pull_request") {
+        selected.cell_web = false;
+    }
 }
 
 /// `cargo xtask ci select`: the selection as `GITHUB_OUTPUT` lines on stdout, and as a table in
@@ -11473,7 +11488,7 @@ mod tests {
         BINARY_COUPLINGS, CrateGraph, MATRIX_LIMIT, RUNNER_CRATE, SWEEP_ROTATION,
         SWEEP_SHARD_MUTANTS, SweepPlan, Token, crate_graph, infra_commands,
         infra_workflow_problems, is_docs_path, literal_paths, nextest_args, normalized_join,
-        references_path, select, selection_in, source_references, tokens,
+        references_path, select, selection_in, source_references, tokens, withhold_web_demo,
     };
     use super::{CREDENTIAL_GUARD, CREDENTIAL_NAME_PARTS, rehearsal_live_run};
     use super::{ProcessGroups, process_group_problems};
@@ -17958,6 +17973,50 @@ mod tests {
         assert_eq!(both(&["crates/mandate-num/src/lib.rs"]), (false, false));
         let everything = select(None, &graph, &BTreeMap::new());
         assert!(everything.cell && everything.cell_web, "no base runs both");
+    }
+
+    /// DEC-2634: a pull request's run withholds `cell-demo-web`, which no aggregate requires and
+    /// whose `web/` gesture had never passed; every other run keeps it.
+    #[test]
+    fn a_pull_request_withholds_the_web_demo_that_no_aggregate_requires() {
+        let graph = sample_graph();
+        let changed: Vec<String> = ["web/src/app/page.tsx"]
+            .iter()
+            .map(|p| (*p).to_owned())
+            .collect();
+        let diff = select(Some(&changed), &graph, &BTreeMap::new());
+        assert!(
+            diff.cell_web,
+            "the diff alone still selects it, as DEC-2609 item 5 says"
+        );
+
+        let mut pull_request = select(Some(&changed), &graph, &BTreeMap::new());
+        withhold_web_demo(&mut pull_request, Some("pull_request"));
+        assert!(
+            !pull_request.cell_web,
+            "a pull request does not start it (DEC-2634)"
+        );
+
+        for event in [
+            None,
+            Some("push"),
+            Some("workflow_dispatch"),
+            Some("schedule"),
+        ] {
+            let mut selected = select(Some(&changed), &graph, &BTreeMap::new());
+            withhold_web_demo(&mut selected, event);
+            assert!(
+                selected.cell_web,
+                "only a pull request withholds it, not {event:?}"
+            );
+        }
+
+        let mut everything = select(None, &graph, &BTreeMap::new());
+        withhold_web_demo(&mut everything, Some("push"));
+        assert!(
+            everything.cell_web,
+            "main's own run selects everything including the web demo"
+        );
     }
 
     /// DEC-2609: the cell jobs start for a change to a crate any image package is built on, the
