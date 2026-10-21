@@ -606,16 +606,9 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                     self.journal_down = false;
                 }
                 Ran::InDoubt => {
-                    // The hold raises one opaque alert as an append first goes in doubt, and none
-                    // while it goes on, so a persistent outage is neither silent nor a flood
-                    // (E21-26, design §2.1 and §8.2, RB-07; `AGENTS.md` rule 6: a fixed key and
-                    // no subject, as `stream_unreadable` already is).
                     if !self.journal_down {
                         self.journal_down = true;
-                        alerts.push(Alert {
-                            key: "journal_unavailable",
-                            subject: None,
-                        });
+                        alerts.push(journal_unavailable());
                     }
                     self.pending = Some((input, at));
                     return false;
@@ -814,6 +807,16 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             fold(&mut self.state, &event).ok()?;
         }
         Some(self.account_head())
+    }
+}
+
+/// The alert an append going in doubt raises: one per outage, with a fixed key and no subject, so
+/// it discloses nothing but the fact that the executor is holding (`AGENTS.md` rule 6, E21-26,
+/// design §2.1 and §8.2, RB-07). `stream_unreadable` is the same shape.
+fn journal_unavailable() -> Alert {
+    Alert {
+        key: "journal_unavailable",
+        subject: None,
     }
 }
 
