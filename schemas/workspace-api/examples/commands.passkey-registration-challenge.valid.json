@@ -1,0 +1,29 @@
+[
+  {
+    "label": "a first enrolment: nothing to exclude, no step-up",
+    "set": {
+      "/exclude": []
+    }
+  },
+  {
+    "label": "no step-up needed",
+    "set": {
+      "/step_up_needed": false
+    }
+  },
+  {
+    "label": "the managed deployment's RP ID",
+    "set": {
+      "/rp_id": "app.owlhead.ai"
+    }
+  },
+  {
+    "label": "two passkeys to exclude",
+    "set": {
+      "/exclude": [
+        "AAECAwQFBgcICQoLDA0ODw",
+        "EBESExQVFhcYGRobHB0eHw"
+      ]
+    }
+  }
+]
