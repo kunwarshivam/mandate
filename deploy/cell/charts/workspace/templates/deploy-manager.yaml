@@ -63,11 +63,14 @@ DEC-2031). Its probes are processes.json's `probe`, as a Deployment's are (DEC-1
 `mandate-daemon probe` where the process names none. */ -}}
 {{- define "mandate.managedPod" -}}
 {{- $ctx := . -}}
-{{- $words := .p.probe | default (list "/usr/local/bin/mandate-daemon" "probe" "{probe}" "--probe" "/tmp/process.sock") -}}
+{{- $words := .p.probe | default (list "/mandate-daemon" "probe" "{probe}" "--probe" "/tmp/process.sock") -}}
 {{- $probe := dict "livez" (include "mandate.fill" (dict "root" $ctx.root "words" $words "probe" "livez") | fromJsonArray) "readyz" (include "mandate.fill" (dict "root" $ctx.root "words" $words "probe" "readyz") | fromJsonArray) -}}
 {{- $args := list "run" "--probe" "/tmp/process.sock" -}}
 {{- if and (eq .p.name "runtime") .root.Values.runtime.research -}}
 {{- $args = concat $args (list "--research" .root.Values.runtime.research) -}}
+{{- end -}}
+{{- if eq .p.name "executor" -}}
+{{- $args = concat $args (include "mandate.executorBroker" .root | fromJsonArray) -}}
 {{- end -}}
 {{- $container := include "mandate.container" (dict "root" .root "p" .p "name" .p.name "args" $args "probe" $probe) }}
 {{- fromYaml (include "mandate.pod" (dict "root" .root "p" .p "restartPolicy" "Never" "containers" $container)) | toJson }}
@@ -216,7 +219,7 @@ spec:
   template:
     {{- $args := list "run" "--workspace" (required "api.workspace, the hosted workspace's ULID whose control stream the manager reads, is required with images.deploy-manager" .root.Values.api.workspace) "--probe" "/tmp/process.sock" "--templates" "/etc/mandate/templates" }}
     {{- $mounts := "- {name: templates, mountPath: /etc/mandate/templates, readOnly: true}" }}
-    {{- $probe := dict "livez" (list "/usr/local/bin/mandate-deployd" "probe" "livez" "--probe" "/tmp/process.sock") "readyz" (list "/usr/local/bin/mandate-deployd" "probe" "readyz" "--probe" "/tmp/process.sock") }}
+    {{- $probe := dict "livez" (list "/mandate-deployd" "probe" "livez" "--probe" "/tmp/process.sock") "readyz" (list "/mandate-deployd" "probe" "readyz" "--probe" "/tmp/process.sock") }}
     {{- $container := include "mandate.container" (dict "root" .root "p" .p "name" .p.name "args" $args "mounts" $mounts "probe" $probe) }}
     {{- $volumes := printf "- {name: templates, configMap: {name: %q, defaultMode: 292}}" (printf "%s-templates" .p.name) }}
     {{- $annotations := dict "mandate.dev/templates-sha256" (toJson .templates | sha256sum) }}

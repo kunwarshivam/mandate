@@ -46,7 +46,8 @@ use mandate_research::{
     ValidatedMandate, WorkingUniverse, next_proposal_at,
 };
 use mandate_research_run::agentic::{
-    Code, EndReason, LoopBounds, OutputMode, Tool, ToolCall, ToolCallId, ToolOutcome, TurnPlan,
+    Code, EndReason, LoopBounds, OutputMode, RunKind, Tool, ToolCall, ToolCallId, ToolOutcome,
+    TurnPlan,
 };
 use mandate_research_run::{
     CallPlan, InstrumentFact, ItemId, ItemKind, ModelPin, OutputBounds, RetrievalPlan,
@@ -334,6 +335,8 @@ pub struct DispatchedResult {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TurnRequest {
     pub call: CallPlan,
+    /// The run's kind, fixed at its start (§6.9 step 1), which the turn's call names (DEC-2256).
+    pub kind: RunKind,
     pub plan: TurnPlan,
     pub transcript: Vec<TurnRef>,
 }
@@ -1234,11 +1237,17 @@ fn refused(
 /// and its pin is withdrawn as a refused single call's is. A refusal while no turn is out is not
 /// interpreted, and the run stays as it was.
 fn refused_turn(
-    _research: &mut ResearchState,
-    _run_id: &str,
-    _step: &mut Step<'_, '_>,
+    research: &mut ResearchState,
+    run_id: &str,
+    step: &mut Step<'_, '_>,
 ) -> Result<(), RuntimeError> {
-    Err(RuntimeError::Unimplemented { story: "E19-13" })
+    let Some(run) = research.run.take_if(|run| run.run_id == run_id) else {
+        return not_ours(research, run_id, "a refused turn");
+    };
+    let pin = run.pin.clone();
+    drive(research, run, step, agentic::refused)?;
+    research.withdrawn.insert(pin);
+    Ok(())
 }
 
 /// §7.3's treatment beyond "missing": an opaque operator alert, research disabled for a withdrawn

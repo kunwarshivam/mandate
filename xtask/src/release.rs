@@ -86,11 +86,17 @@ const TARGET_CC: &str = "gcc";
 /// loopback test double the local cell runs beside the executor (DEC-124), never a broker.
 /// `mandate-api-server` is the workspace API server a hosted cell runs as its chart's `api`
 /// process, so its image must be signed and published like the others (DEC-2026).
-pub(crate) const BINARIES: [(&str, &str); 4] = [
+/// `mandate-deployd`, `mandate-daemon` and `mandate-executord` are the deployment manager, the agent
+/// runtime and the account executor a hosted cell runs, released the same way. The runtime's image
+/// holds no recorded research bundle, which only the local cell's interim image carries (DEC-2246).
+pub(crate) const BINARIES: [(&str, &str); 7] = [
     ("mandate-cli", "mandate"),
     ("mandate-agentd", "mandate-agentd"),
     ("mandate-rh-sim", "mandate-rh-sim"),
     ("mandate-api-server", "mandate-api-server"),
+    ("mandate-deployd", "mandate-deployd"),
+    ("mandate-daemon", "mandate-daemon"),
+    ("mandate-executord", "mandate-executord"),
 ];
 
 /// Where `release build` keeps its own target directory, apart from the workspace's, because its
@@ -1423,8 +1429,10 @@ mod tests {
     }
 
     /// What a release ships, exactly: the CLI, the agent daemon, the simulator the local cell's
-    /// drills run, and the workspace API server, whose image a hosted cell runs as `images.api`,
-    /// each package building the binary of its name but the CLI's `mandate` (DEC-971, DEC-2026).
+    /// drills run, the workspace API server, whose image a hosted cell runs as `images.api`, and
+    /// the three agent processes a hosted cell runs, the deployment manager, the agent runtime and
+    /// the account executor, each package building the binary of its name but the CLI's `mandate`
+    /// (DEC-971, DEC-2026).
     #[test]
     fn the_release_ships_exactly_these_binaries() {
         assert_eq!(
@@ -1434,6 +1442,9 @@ mod tests {
                 ("mandate-agentd", "mandate-agentd"),
                 ("mandate-rh-sim", "mandate-rh-sim"),
                 ("mandate-api-server", "mandate-api-server"),
+                ("mandate-deployd", "mandate-deployd"),
+                ("mandate-daemon", "mandate-daemon"),
+                ("mandate-executord", "mandate-executord"),
             ]
             .as_slice()
         );

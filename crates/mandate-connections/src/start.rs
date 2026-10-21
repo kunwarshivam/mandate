@@ -240,6 +240,13 @@ impl PendingStates {
             .retain(|_, issued| now < expiry(issued.issued_at));
     }
 
+    /// Whether `state` is held and not expired at `now`, without spending it (DEC-2623 item 8).
+    pub fn holds(&self, state: &str, now: UtcNanos) -> bool {
+        self.issued
+            .get(state)
+            .is_some_and(|issued| now < expiry(issued.issued_at))
+    }
+
     /// How many `state` values are held.
     pub fn len(&self) -> usize {
         self.issued.len()

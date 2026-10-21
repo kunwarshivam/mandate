@@ -1,0 +1,104 @@
+[
+  {
+    "label": "another broker",
+    "set": {
+      "/broker": "robinhood"
+    }
+  },
+  {
+    "label": "a backtest environment",
+    "set": {
+      "/environment": "backtest"
+    }
+  },
+  {
+    "label": "a missing disclosure",
+    "remove": [
+      "/disclosure"
+    ]
+  },
+  {
+    "label": "a missing step_up",
+    "remove": [
+      "/step_up"
+    ]
+  },
+  {
+    "label": "a disclosure without a version",
+    "remove": [
+      "/disclosure/version"
+    ]
+  },
+  {
+    "label": "a version zero",
+    "set": {
+      "/disclosure/version": "0"
+    }
+  },
+  {
+    "label": "a version with a leading zero",
+    "set": {
+      "/disclosure/version": "01"
+    }
+  },
+  {
+    "label": "a version that is a number",
+    "set": {
+      "/disclosure/version": 1
+    }
+  },
+  {
+    "label": "an extra disclosure member",
+    "set": {
+      "/disclosure/text": "x"
+    }
+  },
+  {
+    "label": "a member naming a workspace",
+    "set": {
+      "/workspace_id": "ws_1"
+    }
+  },
+  {
+    "label": "a redirect member",
+    "set": {
+      "/redirect_uri": "https://evil.test/"
+    }
+  },
+  {
+    "label": "a state member",
+    "set": {
+      "/state": "s"
+    }
+  },
+  {
+    "label": "a missing broker",
+    "remove": [
+      "/broker"
+    ]
+  },
+  {
+    "label": "a missing environment",
+    "remove": [
+      "/environment"
+    ]
+  },
+  {
+    "label": "a broker no enum names",
+    "set": {
+      "/broker": "mutant_value"
+    }
+  },
+  {
+    "label": "an environment no enum names",
+    "set": {
+      "/environment": "mutant_value"
+    }
+  },
+  {
+    "label": "a disclosure without a document",
+    "remove": [
+      "/disclosure/document"
+    ]
+  }
+]
