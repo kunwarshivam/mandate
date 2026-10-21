@@ -8,17 +8,12 @@ use mandate_release::Tier;
 /// among them, so the URL can never reach Alpaca.
 const LOOPBACK: [&str; 3] = ["127.0.0.1", "[::1]", "localhost"];
 
-/// The one authority beside loopback a cell token URL may name, over plain `http` only: the cell's
-/// `oauth-fixture` pod (DEC-1176), its scheme, host, and port pinned (DEC-2633).
-const FIXTURE_POD: &str = "oauth-fixture:8091";
-
 /// Why a cell token URL is refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Refused {
     /// `MANDATE_DEPLOYMENT_TIER` is not `dev` or `ci`.
     Tier,
-    /// The URL is not `http` or `https` on a loopback host, or `http` on exactly the fixture pod's
-    /// authority, with a path and nothing else: no user
+    /// The URL is not `http` or `https` on a loopback host with a path and nothing else: no user
     /// information, query, or fragment, and never an Alpaca host.
     Url,
 }
@@ -64,15 +59,15 @@ pub fn parse(tier: Option<&str>, text: &str) -> Result<CellTokenUrl, Refused> {
     }
 }
 
-/// `http://` or `https://`, a [`LOOPBACK`] host with an optional port from 1 to 65535 (or
-/// `http://` and exactly [`FIXTURE_POD`], DEC-2633), and a
+/// `http://` or `https://`, a [`LOOPBACK`] host with an optional port from 1 to 65535, and a
 /// non-empty path of unreserved characters and `/`: nothing else, so no user information, query,
 /// or fragment.
 fn admitted(text: &str) -> bool {
-    let (plain, rest) = match (text.strip_prefix("http://"), text.strip_prefix("https://")) {
-        (Some(rest), _) => (true, rest),
-        (None, Some(rest)) => (false, rest),
-        (None, None) => return false,
+    let Some(rest) = text
+        .strip_prefix("http://")
+        .or_else(|| text.strip_prefix("https://"))
+    else {
+        return false;
     };
     let Some((authority, path)) = rest.split_once('/') else {
         return false;
@@ -100,6 +95,5 @@ fn admitted(text: &str) -> bool {
         && path
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~' | b'/'));
-    let fixture_pod = plain && authority == FIXTURE_POD;
-    (LOOPBACK.contains(&host) || fixture_pod) && port_ok && path_ok
+    LOOPBACK.contains(&host) && port_ok && path_ok
 }

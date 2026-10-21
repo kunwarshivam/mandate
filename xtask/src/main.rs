@@ -248,6 +248,15 @@ const E77_ATOMIC_PR: u64 = 598;
 const E77_ATOMIC_BRANCH: &str = "cursor/e77-complete-tracer-4832";
 const E77_ATOMIC_MARKER: &str = "ES-22-atomic-exception: E7-7 PR #598 (DEC-462)";
 
+/// Pull requests a DEC names as atomic exceptions to ES-22's split, each with the exact marker its
+/// description must carry (DEC-462's mechanism, DEC-2635's use of it). A pair whose spec change and
+/// `src` change are mutually red — the new reference cases are refused by the old parser, and the
+/// old reference cases by the new one — cannot be split at all, so it ships whole with a marker
+/// that names its own DEC. The list is finite and each entry is one PR: nothing here is a standing
+/// loosening, and deleting the entry restores the guard for that PR.
+const ATOMIC_EXCEPTIONS: [(u64, &str); 1] =
+    [(2022, "ES-22-atomic-exception: J1 PR #2022 (DEC-2635)")];
+
 /// The verification skill's map of features to code, tests, and commands (AGENTS.md): one Markdown
 /// file a feature, so a PR adding a feature adds a file and one changing a feature edits only
 /// that feature's file. The directory is the map; `cargo xtask feature-map --index` lists it.
@@ -7902,6 +7911,17 @@ impl PipelineCommand {
             .collect()
     }
 
+    /// The token position of each of [`Self::command`]'s words, in the same order, so a word's
+    /// index there names its position here.
+    fn command_positions(&self) -> Vec<usize> {
+        self.words
+            .iter()
+            .skip(self.command_index())
+            .filter(|(word, quoted, at)| !self.redirection_word(word, *quoted, *at))
+            .map(|(_, _, at)| *at)
+            .collect()
+    }
+
     /// Whether a word belongs to a redirection rather than the command: unquoted, and holding
     /// `<` or `>`, or a descriptor (`2`, `{fd}`) right before a redirection's operator.
     fn redirection_word(&self, word: &str, quoted: bool, at: usize) -> bool {
@@ -8058,11 +8078,9 @@ fn pipeline_live_flag(
             }
         }
         let command_at = command
-            .words
-            .iter()
-            .filter(|(word, _, _)| !is_skipped_word(word))
-            .nth(named.len().saturating_sub(unwrapped_named.len()))
-            .map(|(_, _, at)| *at);
+            .command_positions()
+            .get(named.len().saturating_sub(unwrapped_named.len()))
+            .copied();
         let expanding_command_word = !ctx.quoted_reread
             && unwrapped_named.first().is_some_and(|word| {
                 word.starts_with(['$', '`'])
@@ -11290,6 +11308,8 @@ fn spec_guard_problems_for_pr(
             eprintln!(
                 "    spec-guard: founder-approved E7-7 atomic exception applies to PR #598 (DEC-462)"
             );
+        } else if let Some(marker) = atomic_exception(pr_body, pr_number) {
+            eprintln!("    spec-guard: atomic exception applies ({marker})");
         } else {
             problems.push(format!("specs, schemas, or reference cases changed together with code ({} code files); split the change", code.len()));
         }
@@ -11313,6 +11333,17 @@ fn current_pr_number(root: &Path) -> Result<Option<u64>> {
 
 fn e77_atomic_exception(pr_body: &str, pr_number: Option<u64>) -> bool {
     pr_number == Some(E77_ATOMIC_PR) && pr_body.lines().any(|line| line.trim() == E77_ATOMIC_MARKER)
+}
+
+/// The marker [`ATOMIC_EXCEPTIONS`] names for `pr_number`, when the description carries it exactly
+/// on a line of its own (DEC-2635). Both the number and the marker must match, so a marker copied
+/// into another pull request's description does nothing.
+fn atomic_exception(pr_body: &str, pr_number: Option<u64>) -> Option<&'static str> {
+    let number = pr_number?;
+    ATOMIC_EXCEPTIONS
+        .iter()
+        .find(|(pr, marker)| *pr == number && pr_body.lines().any(|line| line.trim() == *marker))
+        .map(|(_, marker)| *marker)
 }
 
 /// The founder-owned reference-case status file (ADR-0001 ES-11).
@@ -11421,11 +11452,23 @@ fn classify<'a>(changed: impl Iterator<Item = &'a str>) -> (Vec<&'a str>, Vec<&'
     for file in changed {
         if PROTECTED_PATHS.iter().any(|p| file.starts_with(p)) {
             protected.push(file);
-        } else if CODE_PATHS.iter().any(|p| file.starts_with(p)) {
+        } else if CODE_PATHS.iter().any(|p| file.starts_with(p)) && !is_crate_tests_path(file) {
             code.push(file);
         }
     }
     (protected, code)
+}
+
+/// Whether `file` is a test of a crate rather than the code it tests: a `tests/` directory under a
+/// crate (`crates/<crate>/tests/…`), the crate-level integration tests, per DEC-917. Such a file
+/// alters no behaviour any spec describes, so ES-22's split guard lets it travel with the protected
+/// path it is the reproduction of. A `src/` file stays code wholesale, whatever `#[cfg(test)]`
+/// modules it holds inline, and so does `xtask/src/`; the classifier reads paths, never contents.
+fn is_crate_tests_path(file: &str) -> bool {
+    let mut segments = file.split('/');
+    segments.next() == Some("crates")
+        && segments.next().is_some_and(|krate| !krate.is_empty())
+        && segments.next() == Some("tests")
 }
 
 fn contains_dec_id(text: &str) -> bool {
@@ -11462,27 +11505,27 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::{
-        BEHAVIOUR_ONLY_DIR, BehaviourOnlyRow, BuildDir, CARGO_TARGET_DIR, CiFile, CratePolicy,
-        Dependency, FAST_JOB, FEATURE_MAP, FULL_JOB, INFRA_WORKFLOW, Layers, MUTANT_BUILD_PROFILE,
-        MUTANT_BUILD_TIMEOUT, MUTANT_SHARDS, MUTANT_TEST_TIMEOUT, MUTANTS_IN_PLACE, MUTANTS_OUT,
-        Metadata, MutantPlan, MutantShard, MutatedCrate, PR_JOBS, Package, PendingTest,
-        PendingTestRun, REFCASES, REHEARSAL, REHEARSAL_LIVE_JOB, REHEARSAL_TESTED, SCHEMA_CHECKERS,
-        SCHEMA_DIR, SCHEMA_SHARD_ENV, TEST_PARTITION_ENV, TEST_PARTS, TestOrder, TestOutcome,
-        USED_BY_DERIVED, UnmutatedSource, actionlint_workflows, backticked_paths, base_ref_in,
-        behaviour_only_rows, check_schedule, ci, ci_files, classify, codeowners_problems,
-        contains_dec_id, contains_word, decision_numbers, external_oracles, failure_cause,
-        feature_files, feature_map_problems, files_by_extension, first_panic_line,
-        forbidden_reached, gate_diff, gate_diff_path, generated_pending_markers, has_pending_tests,
-        is_pending_marker, is_stub_function, layer_problems, lint, listed_mutant_counts,
-        live_feature_problems, live_test_counts, metadata_in, mutant_verdicts, mutants,
-        mutants_args, mutants_job_cargo, mutants_outcome, mutants_plan, mutants_scheduled,
-        mutated_crates, names_a_stub, output_in, pending_nextest, pending_problems, pending_tests,
-        per_shard_value, plain_comment_lines, preflight_args, proptest_seeds_in, registry_problems,
-        registry_rows, rehearsal_runs, release_stub_refused, repo_root, schema_mutants,
-        shard_packages, shellcheck_scripts, simulator_harnesses, simulator_oracles,
-        spec_guard_problems, spec_guard_problems_for_pr, status_flip_problems, test_binary,
-        test_order_config, test_outcomes, unique_temp_path, unjudged_mutants, used_by, verdicts,
-        workspace_closure, workspace_packages,
+        ATOMIC_EXCEPTIONS, BEHAVIOUR_ONLY_DIR, BehaviourOnlyRow, BuildDir, CARGO_TARGET_DIR,
+        CiFile, CratePolicy, Dependency, FAST_JOB, FEATURE_MAP, FULL_JOB, INFRA_WORKFLOW, Layers,
+        MUTANT_BUILD_PROFILE, MUTANT_BUILD_TIMEOUT, MUTANT_SHARDS, MUTANT_TEST_TIMEOUT,
+        MUTANTS_IN_PLACE, MUTANTS_OUT, Metadata, MutantPlan, MutantShard, MutatedCrate, PR_JOBS,
+        Package, PendingTest, PendingTestRun, REFCASES, REHEARSAL, REHEARSAL_LIVE_JOB,
+        REHEARSAL_TESTED, SCHEMA_CHECKERS, SCHEMA_DIR, SCHEMA_SHARD_ENV, TEST_PARTITION_ENV,
+        TEST_PARTS, TestOrder, TestOutcome, USED_BY_DERIVED, UnmutatedSource, actionlint_workflows,
+        atomic_exception, backticked_paths, base_ref_in, behaviour_only_rows, check_schedule, ci,
+        ci_files, classify, codeowners_problems, contains_dec_id, contains_word, decision_numbers,
+        external_oracles, failure_cause, feature_files, feature_map_problems, files_by_extension,
+        first_panic_line, forbidden_reached, gate_diff, gate_diff_path, generated_pending_markers,
+        has_pending_tests, is_pending_marker, is_stub_function, layer_problems, lint,
+        listed_mutant_counts, live_feature_problems, live_test_counts, metadata_in,
+        mutant_verdicts, mutants, mutants_args, mutants_job_cargo, mutants_outcome, mutants_plan,
+        mutants_scheduled, mutated_crates, names_a_stub, output_in, pending_nextest,
+        pending_problems, pending_tests, per_shard_value, plain_comment_lines, preflight_args,
+        proptest_seeds_in, registry_problems, registry_rows, rehearsal_runs, release_stub_refused,
+        repo_root, schema_mutants, shard_packages, shellcheck_scripts, simulator_harnesses,
+        simulator_oracles, spec_guard_problems, spec_guard_problems_for_pr, status_flip_problems,
+        test_binary, test_order_config, test_outcomes, unique_temp_path, unjudged_mutants, used_by,
+        verdicts, workspace_closure, workspace_packages,
     };
     use super::{
         BINARY_COUPLINGS, CrateGraph, MATRIX_LIMIT, RUNNER_CRATE, SWEEP_ROTATION,
@@ -11987,7 +12030,8 @@ mod tests {
                 "mandate-cp-site",
                 "mandate-deploy-manager",
                 "mandate-deployd",
-                "mandate-dispatcher"
+                "mandate-dispatcher",
+                "mandate-gatewayd"
             ]
         );
         assert_eq!(
@@ -13193,6 +13237,72 @@ mod tests {
         assert_eq!(
             code,
             ["crates/mandate-journal/src/lib.rs", "xtask/src/main.rs"]
+        );
+    }
+
+    /// DEC-917: a crate's `tests/` directory holds tests, not the code ES-22's split guards. Such a
+    /// file travels with the protected path it reproduces; a `src/` file stays code wholesale, and
+    /// so does `xtask/src/`, whatever `#[cfg(test)]` modules either holds inline.
+    #[test]
+    fn a_crates_tests_directory_is_tests_not_code() {
+        let (protected, code) = classify(
+            [
+                "crates/mandate-journal/tests/credentials.rs",
+                "crates/mandate-api/tests/body_workspace.rs",
+                "crates/mandate-journal/src/lib.rs",
+                "crates/mandate-api/src/requests.rs",
+                "docs/specs/journal.md",
+                "schemas/workspace-api/examples/x.json",
+                "xtask/src/main.rs",
+                "xtask/tests/planned.rs",
+            ]
+            .into_iter(),
+        );
+        assert_eq!(
+            protected,
+            [
+                "docs/specs/journal.md",
+                "schemas/workspace-api/examples/x.json"
+            ]
+        );
+        assert_eq!(
+            code,
+            [
+                "crates/mandate-journal/src/lib.rs",
+                "crates/mandate-api/src/requests.rs",
+                "xtask/src/main.rs",
+            ],
+            "a src file and xtask/src stay code; a crate's tests do not"
+        );
+    }
+
+    /// DEC-2635: an atomic exception applies only to the pull request its entry names and only when
+    /// the description carries that entry's marker exactly on a line of its own. A marker copied
+    /// into another pull request, or a right number with the wrong text, does nothing.
+    #[test]
+    fn an_atomic_exception_needs_both_its_number_and_its_marker() {
+        let (pr, marker) = ATOMIC_EXCEPTIONS[0];
+        let body = format!("Some description.\n\n{marker}\n");
+        assert_eq!(atomic_exception(&body, Some(pr)), Some(marker));
+        assert_eq!(
+            atomic_exception(&body, Some(pr + 1)),
+            None,
+            "another pull request's description does not carry this exception"
+        );
+        assert_eq!(
+            atomic_exception("Some description.", Some(pr)),
+            None,
+            "the number alone is not an exception"
+        );
+        assert_eq!(
+            atomic_exception(&format!("{marker} trailing words"), Some(pr)),
+            None,
+            "the marker must stand alone on its line"
+        );
+        assert_eq!(
+            atomic_exception(&body, None),
+            None,
+            "a run outside a pull request matches no entry"
         );
     }
 
@@ -24237,6 +24347,37 @@ jq -r "$filter" "$src"
         assert_eq!(paths, [".github/workflows/docker-compose.yml"]);
         let problems = live_feature_problems(&live_policy(), &workspace(live_workspace()), &read)?;
         assert_eq!(problems.len(), 1, "{problems:?}");
+        Ok(())
+    }
+
+    /// A wrapped command word is judged against its own substitution, however many assignments
+    /// the wrapper takes: `env -i A=1 B=2 "$(dirname "$0")/x.sh"` runs the script beside this
+    /// one, and `env -i A=1 "$(cat cmd)/x.sh" "$(dirname "$0")/y.sh"` does not borrow the later
+    /// word's `dirname` (RS's finding on DEC-851 item 6's position lookup).
+    #[test]
+    fn a_wrapped_command_word_reads_its_own_substitution() -> Result<()> {
+        let policy = live_policy();
+        let meta = || workspace(live_workspace());
+        let read = |text: &str| {
+            let files = [ci_file(
+                ".github/scripts/build.sh",
+                &format!("set -e\n{text}\n"),
+            )];
+            live_feature_problems(&policy, &meta(), &files)
+        };
+        for text in [
+            "env -i A=1 B=2 \"$(dirname \"$0\")/x.sh\"",
+            "env -i A=1 \"$(dirname \"$0\")/x.sh\"",
+            "env A=1 B=2 C=3 \"$(dirname \"$0\")/x.sh\" --flag",
+        ] {
+            assert_eq!(read(text)?, Vec::<String>::new(), "{text}");
+        }
+        for text in [
+            "env -i A=1 \"$(cat cmd.txt)/x.sh\" \"$(dirname \"$0\")/y.sh\"",
+            "env -i A=1 B=2 \"$(cat cmd.txt)/x.sh\" a \"$(dirname \"$0\")/y.sh\"",
+        ] {
+            assert_eq!(read(text)?.len(), 1, "{text}");
+        }
         Ok(())
     }
 

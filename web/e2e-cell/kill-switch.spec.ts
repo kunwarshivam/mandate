@@ -16,6 +16,27 @@ const AGENT = process.env.OWLHEAD_CELL_AGENT ?? "";
 
 const write = (body: Record<string, string>) => writeFileSync(RESULT, JSON.stringify(body));
 
+/**
+ * One `GET` the page must make, and its answer, so a failure names what the API said rather than
+ * timing out silently. `waitForResponse` on `r.ok()` alone reports only that 30 s passed, which is
+ * what made this gesture's first failures unreadable (the tracker's `#975` remedy, one level up).
+ */
+const GET_TIMEOUT_MS = 20_000;
+
+async function detailAnswer(page: import("@playwright/test").Page, pathname: string, goto: string) {
+  let seen: { status: number; body: string } | null = null;
+  const answered = page
+    .waitForResponse((r) => r.request().method() === "GET" && new URL(r.url()).pathname === pathname, { timeout: GET_TIMEOUT_MS })
+    .catch(() => null);
+  await page.goto(goto);
+  const response = await answered;
+  if (response) {
+    const body = await response.text().catch(() => "");
+    seen = { status: response.status(), body: body.slice(0, 600) };
+  }
+  return seen;
+}
+
 test("the kill switch from web/, recorded through the API", async ({ page }) => {
   expect(RESULT, "the driver names where the result goes").not.toBe("");
   const agents = page.waitForResponse((r) => r.request().method() === "GET" && new URL(r.url()).pathname === `/v1/workspaces/${WORKSPACE}/agents` && r.ok());
@@ -26,9 +47,10 @@ test("the kill switch from web/, recorded through the API", async ({ page }) => 
   if (named?.mode === "stopped") return write({ error: `agent ${AGENT} is already stopped; web/'s kill switch screen offers nothing to confirm for a stopped agent` });
   const agent = named ?? listed.agents?.find((a) => a.mode !== "stopped");
   if (!agent) return write({ error: "no agent in the API's workspace to kill" });
-  const detail = page.waitForResponse((r) => r.request().method() === "GET" && new URL(r.url()).pathname === `/v1/workspaces/${WORKSPACE}/agents/${agent.agent_id}` && r.ok());
-  await page.goto(`/agents/${agent.agent_id}`);
-  await detail;
+  const detailPath = `/v1/workspaces/${WORKSPACE}/agents/${agent.agent_id}`;
+  const detail = await detailAnswer(page, detailPath, `/agents/${agent.agent_id}`);
+  if (!detail) return write({ error: `web/ made no GET ${detailPath} within ${GET_TIMEOUT_MS} ms` });
+  if (detail.status < 200 || detail.status >= 300) return write({ error: `the API answered ${detail.status} for ${detailPath}: ${detail.body}` });
   await expect(page.getByRole("main")).not.toBeEmpty();
   await page.getByRole("button", { name: "Stop", exact: true }).first().click();
   const sheet = page.getByRole("dialog", { name: /^Stop/ });
