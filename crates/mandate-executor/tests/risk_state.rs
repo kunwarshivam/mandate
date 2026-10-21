@@ -723,6 +723,102 @@ fn a_version_1_mark_is_no_verdict_and_moves_nothing() {
     assert!(snapshot.instrument_restrictions.is_empty(), "30 s is fresh");
 }
 
+/// `RiskState` holds one position, so a sane BTC/USD mark at 57990 moves MC-R20's E to
+/// 10000 + 0.1 × (57990 − 60000) = 9799, and a mark naming a second instrument is one the fold
+/// cannot step without pricing BTC's position at it (DEC-2308 item 4): the view becomes
+/// unreadable, holding openings and no exit.
+#[test]
+fn a_mark_for_a_second_instrument_makes_the_view_unreadable() {
+    let case = case("MC-R20");
+    let mandate = case_mandate(&case);
+    let mut fold = open_case(&case, &mandate, &Crypto);
+    let first = mark(
+        2,
+        "BTC/USD",
+        "2026-09-21T04:00:30.000000000Z",
+        "57990",
+        true,
+        "crypto",
+    );
+    assert_eq!(fold.fold(&first).unwrap(), vec![]);
+    let RiskView::Readable { snapshot, .. } = fold.view() else {
+        panic!("the first instrument's mark is readable: {:?}", fold.view());
+    };
+    assert_eq!(snapshot.agent_equity.to_string(), "9799");
+    let other = mark(
+        3,
+        "ETH/USD",
+        "2026-09-21T04:01:00.000000000Z",
+        "1",
+        true,
+        "crypto",
+    );
+    assert_eq!(fold.fold(&other).unwrap(), vec![]);
+    assert_eq!(
+        unreadable(fold.view()),
+        (UnreadableCause::RefusedToDecide, 2)
+    );
+    assert_eq!(fold.view().mode(), AgentMode::ExitsOnly);
+    assert!(fold.view().holds(OrderPath::Opening));
+    for path in EXITS.into_iter().chain([OrderPath::KillSwitch]) {
+        assert!(!fold.view().holds(path), "{path:?} is never held (rule 13)");
+    }
+}
+
+/// §5.2 never reads a not-sane mark's bid, so the same not-sane mark on a flat position with two
+/// different bids leaves two equal views.
+#[test]
+fn a_not_sane_marks_step_ignores_its_bid() {
+    let mandate = mandate();
+    let views: Vec<RiskView> = ["1", "99999"]
+        .into_iter()
+        .map(|bid| {
+            let mut fold = open(&mandate, &Wall);
+            let row = mark(
+                2,
+                "AAPL",
+                "2026-09-22T14:30:01.000000000Z",
+                bid,
+                false,
+                "regular",
+            );
+            assert_eq!(fold.fold(&row).unwrap(), vec![], "bid {bid}");
+            fold.view().clone()
+        })
+        .collect();
+    assert!(
+        matches!(views[0], RiskView::Readable { head: 2, .. }),
+        "{:?}",
+        views[0]
+    );
+    assert_eq!(views[0], views[1]);
+}
+
+/// MC-R20 opens at New York midnight on 2026-09-21 (04:00Z). A sane mark at 04:00:30Z the next day,
+/// with no tick between, starts no risk day: only a tick does (§5.4, DEC-2308 item 6).
+#[test]
+fn a_mark_past_new_york_midnight_with_no_tick_starts_no_risk_day() {
+    let case = case("MC-R20");
+    let mandate = case_mandate(&case);
+    let mut fold = open_case(&case, &mandate, &Crypto);
+    let late = mark(
+        2,
+        "BTC/USD",
+        "2026-09-22T04:00:30.000000000Z",
+        "57990",
+        true,
+        "crypto",
+    );
+    assert_eq!(fold.fold(&late).unwrap(), vec![]);
+    let RiskView::Readable { snapshot, head } = fold.view() else {
+        panic!("the mark is readable: {:?}", fold.view());
+    };
+    assert_eq!(
+        (snapshot.agent_equity.to_string(), *head),
+        ("9799".into(), 2)
+    );
+}
+
 #[test]
 fn a_mark_after_version_2_is_an_unknown_schema_version() {
     let mandate = mandate();
@@ -746,7 +842,6 @@ fn a_mark_after_version_2_is_an_unknown_schema_version() {
 /// MC-R20: sane crypto marks move E at any hour, and the tick at New York midnight starts the risk
 /// day from E (§5.4). Its first step, the risk day at the opening instant, is the opened state.
 #[test]
-#[ignore = "pending E6-15"]
 fn mc_r20_crypto_marks_and_ticks_fold_as_the_reference_case() {
     let case = case("MC-R20");
     let mandate = case_mandate(&case);
@@ -762,7 +857,6 @@ fn mc_r20_crypto_marks_and_ticks_fold_as_the_reference_case() {
 /// `InstrumentRestrictionChanged`, which B2b-2 writes. The case has no after-hours or overnight
 /// mark, a gap the E6-15 backlog entry records.
 #[test]
-#[ignore = "pending E6-15"]
 fn mc_r13_session_marks_leave_an_equitys_equity_as_the_reference_case() {
     let case = case("MC-R13");
     let (mandate, calendar) = (case_mandate(&case), nyse());

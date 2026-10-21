@@ -1497,15 +1497,25 @@ fn vault() -> Result<()> {
 const VAULT_DRILL_CONNECTIONS: [&str; 2] = ["demo-paper", "drill-other"];
 
 /// The vault drill's checks, `<role> <path>`, each with whether DEC-977 item 2's table (and
-/// DEC-2020's rows) lets that role read that KV path. Written out here, not read from the crate.
+/// DEC-2020's rows) lets that role read that KV path. Written out here, not read from the crate:
+/// a connection's entries are under `x` and its id's hex (DEC-2060 item 3), `x64656d6f2d7061706572`
+/// for `demo-paper` and `x6472696c6c2d6f74686572` for `drill-other`.
 const VAULT_DRILL_READS: [(&str, &str, bool); 13] = [
-    ("runtime", "connections/demo-paper/token", false),
-    ("runtime", "connections/drill-other/token", false),
+    ("runtime", "connections/x64656d6f2d7061706572/token", false),
+    (
+        "runtime",
+        "connections/x6472696c6c2d6f74686572/token",
+        false,
+    ),
     ("runtime", "platform/alpaca-oauth-client-secret", false),
-    ("executor-demo-paper", "connections/demo-paper/token", true),
     (
         "executor-demo-paper",
-        "connections/drill-other/token",
+        "connections/x64656d6f2d7061706572/token",
+        true,
+    ),
+    (
+        "executor-demo-paper",
+        "connections/x6472696c6c2d6f74686572/token",
         false,
     ),
     (
@@ -1515,23 +1525,31 @@ const VAULT_DRILL_READS: [(&str, &str, bool); 13] = [
     ),
     (
         "executor-drill-other",
-        "connections/drill-other/token",
+        "connections/x6472696c6c2d6f74686572/token",
         true,
     ),
     (
         "executor-drill-other",
-        "connections/demo-paper/token",
+        "connections/x64656d6f2d7061706572/token",
         false,
     ),
     ("model-gateway", "platform/model-provider-key", true),
-    ("model-gateway", "connections/demo-paper/token", false),
+    (
+        "model-gateway",
+        "connections/x64656d6f2d7061706572/token",
+        false,
+    ),
     (
         "model-gateway",
         "platform/alpaca-oauth-client-secret",
         false,
     ),
     ("model-gateway", "platform/email-credential", false),
-    ("executor-demo-paper", "connections/demo-paper/code", false),
+    (
+        "executor-demo-paper",
+        "connections/x64656d6f2d7061706572/code",
+        false,
+    ),
 ];
 
 /// How many `mandate-*` policies the drill's scan must have read: one per process type (the API,
@@ -1610,9 +1628,9 @@ fn vault_drill_script(seeded: bool) -> String {
     }
     let mut puts = String::new();
     for path in [
-        "connections/demo-paper/token",
-        "connections/drill-other/token",
-        "connections/demo-paper/code",
+        "connections/x64656d6f2d7061706572/token",
+        "connections/x6472696c6c2d6f74686572/token",
+        "connections/x64656d6f2d7061706572/code",
         "platform/alpaca-oauth-client-secret",
         "platform/model-provider-key",
         "platform/email-credential",
@@ -4963,19 +4981,19 @@ mod tests {
     #[test]
     fn the_vault_drill_judges_each_read_and_every_wildcard() {
         let expected = [
-            "runtime connections/demo-paper/token denied",
-            "runtime connections/drill-other/token denied",
+            "runtime connections/x64656d6f2d7061706572/token denied",
+            "runtime connections/x6472696c6c2d6f74686572/token denied",
             "runtime platform/alpaca-oauth-client-secret denied",
-            "executor-demo-paper connections/demo-paper/token allowed",
-            "executor-demo-paper connections/drill-other/token denied",
+            "executor-demo-paper connections/x64656d6f2d7061706572/token allowed",
+            "executor-demo-paper connections/x6472696c6c2d6f74686572/token denied",
             "executor-demo-paper platform/alpaca-oauth-client-secret denied",
-            "executor-drill-other connections/drill-other/token allowed",
-            "executor-drill-other connections/demo-paper/token denied",
+            "executor-drill-other connections/x6472696c6c2d6f74686572/token allowed",
+            "executor-drill-other connections/x64656d6f2d7061706572/token denied",
             "model-gateway platform/model-provider-key allowed",
-            "model-gateway connections/demo-paper/token denied",
+            "model-gateway connections/x64656d6f2d7061706572/token denied",
             "model-gateway platform/alpaca-oauth-client-secret denied",
             "model-gateway platform/email-credential denied",
-            "executor-demo-paper connections/demo-paper/code denied",
+            "executor-demo-paper connections/x64656d6f2d7061706572/code denied",
             "checked 10 mandate policies",
         ];
         let probe = |lines: &[&str]| -> String {
@@ -4995,25 +5013,27 @@ mod tests {
         let elsewhere = held.replace("/probe] ", "/provision] ");
         assert_eq!(vault_drill_problems(&elsewhere).len(), expected.len());
         let leaked = held.replace(
-            "runtime connections/demo-paper/token denied",
-            "runtime connections/demo-paper/token allowed",
+            "runtime connections/x64656d6f2d7061706572/token denied",
+            "runtime connections/x64656d6f2d7061706572/token allowed",
         );
         let wildcard = format!("{leaked}{}", probe(&["wildcard in mandate-runtime"]));
         let found = vault_drill_problems(&wildcard).join("\n");
         assert!(found.contains(Drill::Vault.seeded_symptom()), "{found}");
         assert!(
-            found.contains("want `runtime connections/demo-paper/token denied`"),
+            found.contains("want `runtime connections/x64656d6f2d7061706572/token denied`"),
             "{found}"
         );
         let twice = format!(
             "{held}{}",
-            probe(&["runtime connections/demo-paper/token allowed"])
+            probe(&["runtime connections/x64656d6f2d7061706572/token allowed"])
         );
         assert_eq!(
             vault_drill_problems(&twice),
-            ["want `runtime connections/demo-paper/token denied`, got \
-                 `runtime connections/demo-paper/token denied` and \
-                 `runtime connections/demo-paper/token allowed`"]
+            [
+                "want `runtime connections/x64656d6f2d7061706572/token denied`, got \
+                 `runtime connections/x64656d6f2d7061706572/token denied` and \
+                 `runtime connections/x64656d6f2d7061706572/token allowed`"
+            ]
         );
         let missing = probe(
             &expected
@@ -5045,8 +5065,8 @@ mod tests {
             ["want `checked 10 mandate policies`, got `no scan`"]
         );
         let errored = held.replace(
-            "executor-demo-paper connections/demo-paper/token allowed",
-            "executor-demo-paper connections/demo-paper/token error",
+            "executor-demo-paper connections/x64656d6f2d7061706572/token allowed",
+            "executor-demo-paper connections/x64656d6f2d7061706572/token error",
         );
         assert_eq!(vault_drill_problems(&errored).len(), 1);
         let plain = vault_drill_script(false);

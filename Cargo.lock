@@ -2083,6 +2083,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-gatewayd"
+version = "0.0.0"
+dependencies = [
+ "mandate-connections",
+ "mandate-gateway",
+ "mandate-journal",
+ "mandate-store",
+ "mandate-time",
+ "mandate-vault",
+ "proptest",
+ "secrecy",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "mandate-identity"
 version = "0.0.0"
 dependencies = [
@@ -2663,11 +2679,15 @@ dependencies = [
 name = "mandate-token-exchange"
 version = "0.0.0"
 dependencies = [
+ "axum",
  "mandate-canon",
  "mandate-connections",
  "mandate-release",
  "proptest",
+ "reqwest",
+ "rustls",
  "secrecy",
+ "tokio",
 ]
 
 [[package]]

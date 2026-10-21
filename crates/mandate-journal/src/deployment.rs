@@ -1,9 +1,10 @@
 //! The deployment manager's records journal spec v0.48 §9.21 closes at schema version 1
 //! (DEC-1170): the starts, stops, and crash loops of the processes it runs, on the workspace
-//! control stream, with consistency rules 165 to 168, each refusing at its member. No member is
-//! free text: IDs, closed enumerations, and integers only. Workspace control services write them as
-//! a `system` actor (rule 165). Every rule only refuses a draft, and none compares one record with
-//! another: a slot's generations are the writer's to order at this version.
+//! control stream, with consistency rules 165 to 168 and v0.70's rule 256 (DEC-1175), each
+//! refusing at its member. No member is free text: IDs, closed enumerations, and integers only.
+//! Workspace control services write them as a `system` actor (rule 165). Every rule only refuses a
+//! draft, and none compares one record with another: a slot's generations, and a token exchange's
+//! one start and its stop only on its request's close, are the writer's to order at this version.
 
 use mandate_canon::Value;
 
@@ -18,6 +19,9 @@ const LOOPED: &str = "ProcessCrashLooped";
 pub(crate) const CONTROL: [&str; 3] = [STARTED, STOPPED, LOOPED];
 
 const PROCESSES: &[&str] = &["runtime", "executor"];
+/// The processes a start or a stop may name: v0.70 adds an OAuth connect's token exchange, which is
+/// started once, stopped only when its request closes, and never looped (DEC-1175).
+const STARTED_PROCESSES: &[&str] = &["runtime", "executor", "token_exchange"];
 
 /// The §9.21 schema of `event_type` at `schema_version` on `stream`, or `None` when this module
 /// registers none there.
@@ -37,7 +41,7 @@ pub(crate) fn schema(
     }
 }
 
-/// Rules 165 to 168 on a payload its schema has normalized, in rule order: the first that fails
+/// Rules 165 to 168 and 256 on a payload its schema has normalized, in rule order: the first that fails
 /// is reported. `actor` is the envelope's.
 pub(crate) fn rules(
     event_type: &str,
@@ -55,13 +59,27 @@ pub(crate) fn rules(
     let int = |member: &str| payload.get(member).and_then(Value::as_int).unwrap_or(0);
     let generation = int("generation");
     ensure(generation >= 1, "payload.generation")?;
+    let text = |member: &str| payload.get(member).and_then(Value::as_str);
     if event_type == STARTED {
-        let deployed = payload.get("cause").and_then(Value::as_str) == Some("deployed");
-        ensure(deployed == (generation == 1), "payload.cause")?;
+        let first = matches!(text("cause"), Some("deployed" | "requested"));
+        ensure(first == (generation == 1), "payload.cause")?;
     }
     if event_type == LOOPED {
         ensure(int("restarts") >= 1, "payload.restarts")?;
         ensure(int("window_seconds") >= 1, "payload.window_seconds")?;
+    }
+    let exchange = text("process") == Some("token_exchange");
+    if event_type == STARTED {
+        ensure(
+            (text("cause") == Some("requested")) == exchange,
+            "payload.cause",
+        )?;
+    }
+    if event_type == STOPPED {
+        ensure(
+            (text("cause") == Some("request_closed")) == exchange,
+            "payload.cause",
+        )?;
     }
     Ok(())
 }
@@ -75,17 +93,20 @@ fn ensure(holds: bool, path: &str) -> Result<(), Invalid> {
 }
 
 static PROCESS_START_ISSUED: Ty = Ty::Record(&[
-    ("process", Ty::OneOf(PROCESSES)),
+    ("process", Ty::OneOf(STARTED_PROCESSES)),
     ("subject", Ty::Ident),
     ("generation", Ty::Int),
-    ("cause", Ty::OneOf(&["deployed", "restart", "kill_switch"])),
+    (
+        "cause",
+        Ty::OneOf(&["deployed", "restart", "kill_switch", "requested"]),
+    ),
 ]);
 
 static PROCESS_STOP_ISSUED: Ty = Ty::Record(&[
-    ("process", Ty::OneOf(PROCESSES)),
+    ("process", Ty::OneOf(STARTED_PROCESSES)),
     ("subject", Ty::Ident),
     ("generation", Ty::Int),
-    ("cause", Ty::OneOf(&["agent_stopped"])),
+    ("cause", Ty::OneOf(&["agent_stopped", "request_closed"])),
 ]);
 
 static PROCESS_CRASH_LOOPED: Ty = Ty::Record(&[

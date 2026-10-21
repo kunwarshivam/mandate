@@ -150,7 +150,7 @@ impl LocalSource {
                 KeyRef::new(ALPACA_CLIENT_SECRET_KEY_REF).map_err(|_| SourceError::Config)?,
             ),
             SecretPath::Platform(_) => {
-                Entry::client_secret(KeyRef::new(&kv_path(path)).map_err(|_| SourceError::Config)?)
+                Entry::client_secret(KeyRef::new(&kv_path(path)?).map_err(|_| SourceError::Config)?)
             }
         })
     }
