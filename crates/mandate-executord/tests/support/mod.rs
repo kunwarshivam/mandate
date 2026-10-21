@@ -17,11 +17,11 @@ use mandate_accounting::{AccountType, AssetClass, InstrumentId, Side};
 use mandate_canon::{Digest, Object, Value, parse};
 use mandate_domain::{CapabilityProfile, ProfileError};
 use mandate_executor::{
-    AccountRef, AccountScope, AgentId, BindingGateConfigRefs, BindingGateInput, BindingGateRequest,
-    BindingGateSource, BrokerAccount, BrokerOrder, BrokerOutcome, BrokerPosition, BrokerRequest,
-    BrokerUnknown, ConnectorError, EventId, ExecutorConfig, ExitTier, IdGen, InstrumentSnapshot,
-    MandateVersion, MandateView, ProtectionPrices, Purpose, Seq, WorkspaceId, WriterEpoch,
-    equity_bracket_prices,
+    AccountRef, AccountScope, ActivityCursor, AgentId, BindingGateConfigRefs, BindingGateInput,
+    BindingGateRequest, BindingGateSource, BrokerAccount, BrokerFill, BrokerOrder, BrokerOutcome,
+    BrokerPosition, BrokerRequest, BrokerUnknown, ConnectorError, EventId, ExecutorConfig,
+    ExitTier, FillId, IdGen, InstrumentSnapshot, MandateVersion, MandateView, ProtectionPrices,
+    Purpose, Seq, WorkspaceId, WriterEpoch, equity_bracket_prices,
 };
 use mandate_executord::{Broker, Config, ExecutorProcess, Protections, Unplanned, Wiring};
 use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId};
@@ -350,6 +350,8 @@ struct Books {
     seen: Vec<Seen>,
     orders: BTreeMap<String, BrokerOrder>,
     positions: Vec<BrokerPosition>,
+    /// The fills the account's activities report, in the order they executed.
+    fills: Vec<BrokerFill>,
     /// Requests answered `Unknown` after they took effect: the answer is lost on the way back.
     lose_answers: usize,
     /// Whether the account reads as blocked from trading (trading spec §7.3).
@@ -424,6 +426,40 @@ impl Paper {
             created_on: None,
         };
         books.orders.insert(client_order_id.to_owned(), order);
+        Ok(())
+    }
+
+    /// The order under `client_order_id` fills whole at `price`: the order reads as filled, the
+    /// position grows by its quantity, and the account's activities report the fill.
+    pub fn fill(&self, client_order_id: &str, price: &str) -> Result<(), Error> {
+        let mut books = self.books.borrow_mut();
+        let order = books
+            .orders
+            .get_mut(client_order_id)
+            .ok_or("no such order")?;
+        order.status = "filled".to_owned();
+        order.filled_qty = order.qty;
+        let fill = BrokerFill {
+            fill_id: FillId(format!("f-{}", order.broker_order_id)),
+            client_order_id: None,
+            broker_order_id: Some(order.broker_order_id.clone()),
+            instrument: order.instrument.clone(),
+            side: order.side,
+            qty: order.qty,
+            price: Price::parse(price)?,
+            fees: Usd::parse("0")?,
+            trade_date: mandate_time::Date::parse("2026-09-21")?,
+        };
+        let signed = match fill.side {
+            Side::Buy => SignedQty::parse(&fill.qty.to_string())?,
+            Side::Sell => SignedQty::parse(&format!("-{}", fill.qty))?,
+        };
+        books.positions.push(BrokerPosition {
+            instrument: fill.instrument.clone(),
+            qty: signed,
+            avg_entry_price: fill.price,
+        });
+        books.fills.push(fill);
         Ok(())
     }
 
@@ -516,10 +552,13 @@ fn answer(books: &mut Books, request: &BrokerRequest) -> Result<BrokerOutcome, C
             held.trading_blocked = books.blocked;
             BrokerOutcome::Account(held)
         }
-        BrokerRequest::ListActivities { since } => BrokerOutcome::Activities {
-            fills: Vec::new(),
-            cursor: since.clone(),
-        },
+        BrokerRequest::ListActivities { since } => {
+            let from = since.0.parse::<usize>().unwrap_or(0);
+            BrokerOutcome::Activities {
+                fills: books.fills.iter().skip(from).cloned().collect(),
+                cursor: ActivityCursor(books.fills.len().to_string()),
+            }
+        }
         _ => return Err(not_sent),
     })
 }

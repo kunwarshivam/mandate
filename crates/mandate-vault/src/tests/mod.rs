@@ -6,6 +6,7 @@ mod credentials;
 mod debug;
 mod errors;
 mod kube;
+mod kubernetes;
 mod lease;
 mod local_vault;
 mod mounted;

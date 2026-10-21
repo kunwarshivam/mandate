@@ -14,9 +14,16 @@
 //!
 //! - [`form`] writes the request's body: exactly the six members, each once.
 //! - [`response`] reads the answer: only a `200` JSON body, and only its three members.
+//! - [`http`] sends the request: one `POST`, HTTPS only to the pinned URL, no redirect followed.
+//! - `cell` (builds with debug assertions only) admits the token URL of the fixture provider a dev
+//!   or CI cell runs (DEC-2625), never an Alpaca host. A release build contains none of it.
 
 pub mod form;
+pub mod http;
 pub mod response;
+
+#[cfg(debug_assertions)]
+pub mod cell;
 
 #[cfg(test)]
 #[allow(
