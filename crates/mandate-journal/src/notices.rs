@@ -119,10 +119,6 @@ pub(crate) fn schema(
         (ALERT, 1, _) => Some(&OWNER_ALERT_SENT),
         (OPENED, 1, StreamType::Notice) => Some(&NOTICE_STREAM_OPENED),
         (ISSUED, 1, _) => Some(&NOTICE_ISSUED),
-        // v0.51 refuses a version-1 and a version-2 `NoticeAttempted` at `append` (DEC-2505
-        // item 1): a version-2 record on web push names no address, and one shape per fact keeps
-        // a writer from choosing the shape that says less. Both still replay through §11's
-        // per-event checks, which read no schema.
         (ATTEMPTED, 3, _) => Some(&NOTICE_ATTEMPTED_V3),
         (CHANGED, 1, StreamType::Control) => Some(&NOTIFICATION_ADDRESS_CHANGED),
         _ => None,
@@ -177,16 +173,6 @@ pub(crate) fn rules(
             ensure(attempt.is_some_and(|a| a >= 1), "payload.attempt")?;
             let status = text("status").unwrap_or_default();
             let reason = text("reason");
-            if schema_version >= 3 {
-                // Rule 216 comes before the arm's other reason checks, since it narrows which
-                // reasons the arm then reads: `address_retired` stops only an `abandoned` web-push
-                // attempt (v0.51, DEC-2505 item 1).
-                ensure(
-                    reason != Some("address_retired")
-                        || (status == "abandoned" && text("channel") == Some("web_push")),
-                    "payload.reason",
-                )?;
-            }
             let stopped = reason.is_some_and(|r| STOPS.contains(&r));
             let fits = match status {
                 "failed" => reason.is_some() && !stopped,
@@ -198,7 +184,8 @@ pub(crate) fn rules(
             ensure(
                 text("provider_message_id").is_some() == (status == "delivered" || receipt),
                 "payload.provider_message_id",
-            )?;            ensure(
+            )?;
+            ensure(
                 text("coalesced_into").is_none() || !QUIET.contains(&status),
                 "payload.coalesced_into",
             )?;
@@ -213,26 +200,19 @@ pub(crate) fn rules(
                 "payload.verdict",
             )?;
             if schema_version >= 3 {
-                // Rule 215: `address_ref` is non-null exactly on web push, and is then the only
-                // entry `pii_refs` lists. Rule 216: `address_retired` stops only an `abandoned`
-                // web-push attempt (v0.51, DEC-2505 item 1).
                 let address = text("address_ref");
-                ensure(
-                    address.is_some() == (text("channel") == Some("web_push")),
-                    "payload.address_ref",
-                )?;
+                let web_push = text("channel") == Some("web_push");
+                ensure(address.is_some() == web_push, "payload.address_ref")?;
                 ensure(
                     match address {
                         Some(address) => only_pii(pii_refs, address),
-                        None => pii_refs.is_some_and(|refs| {
-                            refs.as_array().is_some_and(<[Value]>::is_empty)
-                        }),
+                        None => pii_refs
+                            .is_some_and(|refs| refs.as_array().is_some_and(<[Value]>::is_empty)),
                     },
                     "pii_refs",
                 )?;
                 ensure(
-                    reason != Some("address_retired")
-                        || (status == "abandoned" && text("channel") == Some("web_push")),
+                    reason != Some("address_retired") || web_push,
                     "payload.reason",
                 )
             } else {
@@ -242,37 +222,16 @@ pub(crate) fn rules(
         CHANGED => {
             let action = text("action").unwrap_or_default();
             let address = text("address_ref").unwrap_or_default();
-            // Rule 210: an `added` names its address by its own `event_id`; a `removed` names the
-            // `added` that introduced it, so never its own id.
             let own = event_id.and_then(Value::as_str);
             ensure(
                 (action == "added" && own == Some(address))
                     || (action == "removed" && own != Some(address)),
                 "payload.address_ref",
             )?;
-            // Rule 211: `pii_refs` is exactly `[address_ref]`.
             ensure(only_pii(pii_refs, address), "pii_refs")?;
-            // Rule 212: an `added` carries step-up; a `user` actor who is the member, on an `added`
-            // and on a `removed` with step-up. A `removed` without one passes here and is the
-            // batch's (rule 214).
             let stepped = payload.get("step_up").is_some_and(|s| *s != Value::Null);
             ensure(action != "added" || stepped, "payload.step_up")?;
-            // Rule 212: the actor is a `user` for every record, and is the member on an `added`
-            // and on a `removed` with step-up. A `removed` without one rides a deactivation, whose
-            // actor the batch's rule 214 reads (v0.51, DEC-2505 item 1).
-            if action == "added" || stepped {
-                ensure(
-                    actor.and_then(|a| a.get("id")).and_then(Value::as_str) == text("member"),
-                    "payload.member",
-                )?;
-                ensure(
-                    actor.and_then(|a| a.get("kind")).and_then(Value::as_str) == Some("user"),
-                    "actor.kind",
-                )?;
-            }
-            if action != "removed" || stepped {
-                ensure(actor_is_user(actor), "actor.kind")?;
-            }
+            ensure(actor_is_user(actor), "actor.kind")?;
             if stepped {
                 let method = payload
                     .get("step_up")
@@ -284,6 +243,16 @@ pub(crate) fn rules(
                     "payload.step_up.method",
                 )?;
                 fresh_step_up(payload, event_time)?;
+            }
+            if action == "added" || stepped {
+                ensure(
+                    actor.and_then(|a| a.get("kind")).and_then(Value::as_str) == Some("user"),
+                    "actor.kind",
+                )?;
+                ensure(
+                    actor.and_then(|a| a.get("id")).and_then(Value::as_str) == text("member"),
+                    "payload.member",
+                )?;
             }
             Ok(())
         }
@@ -311,11 +280,13 @@ fn fresh_step_up(payload: &Value, event_time: Option<&Value>) -> Result<(), Inva
         .and_then(|t| mandate_time::UtcNanos::parse(t).ok());
     let fresh = match (at, event) {
         (Some(at), Some(event)) => {
-            let behind = event.secs() - at.secs();
-            match behind.cmp(&STEP_UP_WINDOW_SECS) {
-                std::cmp::Ordering::Less => true,
-                std::cmp::Ordering::Equal => event.nanos() >= at.nanos(),
-                std::cmp::Ordering::Greater => false,
+            if event.secs() < at.secs() || (event.secs() == at.secs() && event.nanos() < at.nanos())
+            {
+                false
+            } else {
+                let behind = event.secs().saturating_sub(at.secs());
+                behind < STEP_UP_WINDOW_SECS
+                    || (behind == STEP_UP_WINDOW_SECS && event.nanos() <= at.nanos())
             }
         }
         _ => false,
@@ -336,8 +307,9 @@ fn actor_is_user(actor: Option<&Value>) -> bool {
 /// Whether `pii_refs` is exactly the one entry `address`, which rules 211 and 215 require.
 fn only_pii(pii_refs: Option<&Value>, address: &str) -> bool {
     pii_refs.is_some_and(|refs| {
-        refs.as_array()
-            .is_some_and(|list| list.len() == 1 && list[0].as_str() == Some(address))
+        refs.as_array().is_some_and(|list| {
+            list.len() == 1 && list.first().and_then(Value::as_str) == Some(address)
+        })
     })
 }
 
@@ -395,21 +367,36 @@ pub(crate) fn check_batch(drafts: &[Draft]) -> Result<(), (usize, Invalid)> {
 
 /// Rule 214 over one batch (v0.51, DEC-2505 item 1), after rule 130:
 ///
-/// - (a) at most one `added` and one `removed`, of one member, with one step-up;
-/// - (b) each `added`, and a lone `removed`, is the subject of a `notification_address_changed`
-///   alert in the batch; a replacement's `removed` is the subject of none;
-/// - (c) every such alert names one of those records;
+/// - (a) at most one `added` and one `removed`, of one member, and every step-up the batch carries
+///   is the **same** assertion — a replacement's two records are authorized by one step-up;
+/// - (b) an `added` is always the subject of a `notification_address_changed` alert in the batch; a
+///   `removed` is unless it rides a replacement's `added`;
+/// - (c) every such alert names one of those records, and an alert of that kind with no address
+///   change in its batch at all is refused at its subject;
 /// - (d) no `removed` names an address twice or the batch's own `added`;
-/// - (e) a `removed` with no step-up rides a deactivation, which no batch here holds, so it is
-///   refused at the alert's path as the spec reports it.
+/// - (e) a `removed` with no step-up rides a deactivation, and no batch here holds one — so it is
+///   refused unless it names the batch's own `added`.
+///
+/// Every refusal is `schema` at `payload.address_ref`, but (c)'s at `payload.subject`, which is
+/// where the spec's own oracle places each.
 fn address_change_batch(drafts: &[Draft]) -> Result<(), (usize, Invalid)> {
     let changes: Vec<(usize, &Draft)> = drafts
         .iter()
         .enumerate()
         .filter(|(_, d)| d.event_type() == CHANGED)
         .collect();
+    let address_alerts: Vec<(usize, &Draft)> = drafts
+        .iter()
+        .enumerate()
+        .filter(|(_, d)| {
+            d.event_type() == ALERT && payload_text(d, "kind") == "notification_address_changed"
+        })
+        .collect();
     if changes.is_empty() {
-        return Ok(());
+        return match address_alerts.first() {
+            Some((i, _)) => Err((*i, Invalid::new(InvalidReason::Schema, "payload.subject"))),
+            None => Ok(()),
+        };
     }
     let address_of = |draft: &Draft| {
         draft
@@ -420,7 +407,9 @@ fn address_change_batch(drafts: &[Draft]) -> Result<(), (usize, Invalid)> {
             .unwrap_or_default()
             .to_owned()
     };
-    let (index, first) = changes[0];
+    let Some((index, first)) = changes.first().copied() else {
+        return Ok(());
+    };
     let member = payload_text(first, "member").to_owned();
     let added: Vec<&(usize, &Draft)> = changes
         .iter()
@@ -430,62 +419,86 @@ fn address_change_batch(drafts: &[Draft]) -> Result<(), (usize, Invalid)> {
         .iter()
         .filter(|(_, d)| payload_text(d, "action") == "removed")
         .collect();
-    let one_step_up = changes
-        .iter()
-        .map(|(_, d)| d.fields().get("payload").and_then(|p| p.get("step_up")))
-        .filter(|s| s.is_some_and(|v| *v != Value::Null))
-        .count();
-    if added.len() > 1 || removed.len() > 1 || one_step_up > 1 {
-        return Err((index, Invalid::new(InvalidReason::Schema, "payload.address_ref")));
+    if added.len() > 1 || removed.len() > 1 {
+        return Err((
+            index,
+            Invalid::new(InvalidReason::Schema, "payload.address_ref"),
+        ));
     }
     if changes
         .iter()
         .any(|(_, d)| payload_text(d, "member") != member)
     {
-        return Err((index, Invalid::new(InvalidReason::Schema, "payload.address_ref")));
+        return Err((
+            index,
+            Invalid::new(InvalidReason::Schema, "payload.address_ref"),
+        ));
     }
     let replacement = !added.is_empty() && !removed.is_empty();
+    let assertions: Vec<&str> = changes
+        .iter()
+        .filter_map(|(_, d)| {
+            d.fields()
+                .get("payload")
+                .and_then(|p| p.get("step_up"))
+                .filter(|v| **v != Value::Null)
+                .and_then(|s| s.get("assertion_id"))
+                .and_then(Value::as_str)
+        })
+        .collect();
+    if assertions.len() > 1 && assertions.windows(2).any(|w| matches!(w, [a, b] if a != b)) {
+        return Err((
+            index,
+            Invalid::new(InvalidReason::Schema, "payload.address_ref"),
+        ));
+    }
     let subject_of = |draft: &Draft| alerted(draft).map(str::to_owned);
     let alerts: Vec<(usize, String)> = drafts
         .iter()
         .enumerate()
-        .filter(|(_, d)| d.event_type() == ALERT && payload_text(d, "kind") == "notification_address_changed")
+        .filter(|(_, d)| {
+            d.event_type() == ALERT && payload_text(d, "kind") == "notification_address_changed"
+        })
         .filter_map(|(i, d)| subject_of(d).map(|s| (i, s)))
         .collect();
-    // (b): a lone `added` and a lone `removed` each need their alert; a replacement's two records
-    // ride each other, so neither is an alert's subject.
     for (i, draft) in &changes {
         let named = alerts.iter().any(|(_, s)| s == draft.event_id());
-        if named == replacement {
-            return Err((*i, Invalid::new(InvalidReason::Schema, "payload.address_ref")));
+        let wanted = payload_text(draft, "action") == "added" || !replacement;
+        if named != wanted {
+            return Err((
+                *i,
+                Invalid::new(InvalidReason::Schema, "payload.address_ref"),
+            ));
         }
     }
-    // (c): every such alert names one of the batch's records.
     for (i, subject) in &alerts {
         if !changes.iter().any(|(_, d)| d.event_id() == subject) {
             return Err((*i, Invalid::new(InvalidReason::Schema, "payload.subject")));
         }
     }
-    // (d): no `removed` names an address twice or the batch's own `added`.
     let added_address = added.first().map(|(_, d)| address_of(d));
-    let mut named: BTreeSet<String> = BTreeSet::new();
-    for (i, draft) in &removed {
-        let address = address_of(draft);
-        if Some(&address) == added_address.as_ref() || !named.insert(address) {
-            return Err((*i, Invalid::new(InvalidReason::Schema, "payload.address_ref")));
-        }
-    }
-    // (e): a `removed` with no step-up rides a deactivation, and no batch here holds one.
     for (i, draft) in &changes {
         let unstepped = draft
             .fields()
             .get("payload")
             .and_then(|p| p.get("step_up"))
             .is_none_or(|s| *s == Value::Null);
-        if payload_text(draft, "action") == "removed" && unstepped && !replacement {
-            let at = payload_text(draft, "address_ref");
-            let _ = at;
-            return Err((*i, Invalid::new(InvalidReason::Schema, "payload.address_ref")));
+        let rides = Some(&address_of(draft)) == added_address.as_ref();
+        if payload_text(draft, "action") == "removed" && unstepped && !rides {
+            return Err((
+                *i,
+                Invalid::new(InvalidReason::Schema, "payload.address_ref"),
+            ));
+        }
+    }
+    let mut named: BTreeSet<String> = BTreeSet::new();
+    for (i, draft) in &removed {
+        let address = address_of(draft);
+        if Some(&address) == added_address.as_ref() || !named.insert(address) {
+            return Err((
+                *i,
+                Invalid::new(InvalidReason::Schema, "payload.address_ref"),
+            ));
         }
     }
     Ok(())
@@ -584,8 +597,13 @@ static NOTIFICATION_ADDRESS_CHANGED: Ty = Ty::Record(&[
     ("step_up", Ty::Nullable(&crate::credentials::STEP_UP_RECORD)),
 ]);
 
-/// §9.15's `NoticeAttempted` at version 2, kept because a stored version-2 record still replays
-/// (v0.51 refuses them at `append` but reads them as `address_ref: null`).
+/// §9.15's `NoticeAttempted` at version 2. Not reachable from `schema` today: v0.51 refuses a
+/// version-2 record at `append` and reads it as `address_ref: null`, so the type is kept for the
+/// verifier's fold to read a stored record against rather than re-derived there.
+#[allow(
+    dead_code,
+    reason = "v0.51 refuses version 2 at append but a stored version-2 record still replays (DEC-2505 item 1)"
+)]
 static NOTICE_ATTEMPTED: Ty = Ty::Record(&[
     ("notice", Ty::Text(is_notice_id)),
     ("recipient", Ty::Ident),
@@ -662,7 +680,6 @@ static NOTICE_ATTEMPTED_V3: Ty = Ty::Record(&[
             "too_large",
             "recipient_not_permitted",
             "address_missing",
-            // §9.15's stop, only for an `abandoned` web-push attempt (rule 216).
             "address_retired",
             "bounced",
             "complained",
