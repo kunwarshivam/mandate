@@ -544,3 +544,16 @@ spec:
 {{- end -}}
 {{- end -}}
 {{- end -}}
+
+{{- /* The executor's broker flags (DEC-2306 item 1), as JSON: none for the fixture broker, and for
+`alpaca-paper` the paper host's, the vault's address, and the directory the vault's CA is mounted
+in. */ -}}
+{{- define "mandate.executorBroker" -}}
+{{- $e := .Values.executor -}}
+{{- if eq $e.broker "alpaca-paper" -}}
+{{- list "--broker" "alpaca-paper" "--vault-address" $e.vaultAddress "--vault-dir" "/run/mandate/vault" | toJson -}}
+{{- else -}}
+[]
+{{- end -}}
+{{- end -}}
+

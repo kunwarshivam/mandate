@@ -37,7 +37,7 @@ const MANAGED_BY: &str = "app.kubernetes.io/managed-by=mandate-deploy-manager";
 const SUBJECT: &str = "mandate.dev/subject";
 /// The executor's own probe, as its pod's `livez` probe runs it (`processes.json`, DEC-994 item 5).
 const LIVEZ: [&str; 5] = [
-    "/usr/local/bin/mandate-executord",
+    "/mandate-executord",
     "probe",
     "livez",
     "--probe",
