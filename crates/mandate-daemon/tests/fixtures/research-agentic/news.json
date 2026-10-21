@@ -1,0 +1,46 @@
+[
+ {
+  "age_s": 7200,
+  "headline": "Apple services revenue sets a quarterly record",
+  "item_id": "nw-aapl-services",
+  "licensed": false,
+  "link": "https://newswire.example/aapl-services",
+  "published_age_s": 7320,
+  "source": "src.newswire",
+  "summary": "The company reported services revenue above every prior quarter, with subscriptions growing in each region.",
+  "symbols": ["AAPL"]
+ },
+ {
+  "age_s": 3600,
+  "headline": "Suppliers report higher component orders from Apple",
+  "item_id": "w2-aapl-supply",
+  "licensed": false,
+  "link": "https://wiretwo.example/aapl-supply",
+  "published_age_s": 3600,
+  "source": "src.wire_two",
+  "summary": "Two suppliers said orders for the next quarter rose from the prior quarter.",
+  "symbols": ["AAPL"]
+ },
+ {
+  "age_s": 1800,
+  "headline": "Rumor: Apple to triple",
+  "item_id": "bl-aapl-rumor",
+  "licensed": false,
+  "link": "https://blog.example/aapl",
+  "published_age_s": 1800,
+  "source": "src.anonymous_blog",
+  "summary": "An anonymous post says the stock will triple.",
+  "symbols": ["AAPL"]
+ },
+ {
+  "age_s": 345600,
+  "headline": "Apple announces its developer conference dates",
+  "item_id": "nw-aapl-old",
+  "licensed": false,
+  "link": "https://newswire.example/aapl-old",
+  "published_age_s": 345600,
+  "source": "src.newswire",
+  "summary": "The conference runs for five days.",
+  "symbols": ["AAPL"]
+ }
+]

@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/commands/passkey-enrol-request.schema.json",
+  "type": "object",
+  "required": [
+    "challenge_id",
+    "passkey_id",
+    "attestation_object",
+    "client_data_json",
+    "step_up",
+    "step_up_assertion"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "challenge_id": {
+      "$ref": "../common.schema.json#/$defs/EventId"
+    },
+    "passkey_id": {
+      "$ref": "../common.schema.json#/$defs/PasskeyId"
+    },
+    "attestation_object": {
+      "$ref": "../common.schema.json#/$defs/Base64url"
+    },
+    "client_data_json": {
+      "$ref": "../common.schema.json#/$defs/Base64url"
+    },
+    "step_up": {
+      "oneOf": [
+        {
+          "$ref": "../envelope.schema.json#/$defs/StepUpEvidence"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "step_up_assertion": {
+      "oneOf": [
+        {
+          "$ref": "../envelope.schema.json#/$defs/StepUpAssertion"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "description": "POST /passkeys (\u00a73.6, DEC-2108 items 4 and 5): the authenticator's registration response for the registration challenge `challenge_id`. A member's first passkey carries no step-up; any later one carries passkey step-up of kind credential_enrol, its assertion beside it."
+}
