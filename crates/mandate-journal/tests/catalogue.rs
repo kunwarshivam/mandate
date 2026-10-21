@@ -1574,7 +1574,6 @@ fn the_step_up_confirmation_is_catalogued_and_closed_on_the_control_stream() {
 /// Journal spec v0.69 §9.31 (DEC-2108): `CredentialEnrolled` and `CredentialRemoved` are on the
 /// control stream alone, with no configuration, closed there at schema version 1.
 #[test]
-#[ignore = "pending E9-4"]
 fn the_credential_records_are_catalogued_and_closed_on_the_control_stream() {
     closed_on_the_control_stream(&["CredentialEnrolled", "CredentialRemoved"]);
 }
