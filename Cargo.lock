@@ -2663,11 +2663,15 @@ dependencies = [
 name = "mandate-token-exchange"
 version = "0.0.0"
 dependencies = [
+ "axum",
  "mandate-canon",
  "mandate-connections",
  "mandate-release",
  "proptest",
+ "reqwest",
+ "rustls",
  "secrecy",
+ "tokio",
 ]
 
 [[package]]
