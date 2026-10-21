@@ -128,6 +128,16 @@ fn any_body_within_its_bound_reads_back_as_itself() {
         .unwrap();
 }
 
+/// DEC-2265 item 2: the bounds are the ones DEC-2265 states — a 4 MiB request frame and a 24 MiB
+/// reply frame. Pinned as literals because every other test compares a length against the constant
+/// itself, so a constant that changed value would keep them all passing (the `*` → `/` mutant that
+/// turned 4 MiB into 0 survived exactly that way).
+#[test]
+fn the_frame_bounds_are_the_ones_the_decision_states() {
+    assert_eq!(MAX_REQUEST_FRAME, 4 * 1024 * 1024, "a 4 MiB request frame");
+    assert_eq!(MAX_REPLY_FRAME, 24 * 1024 * 1024, "a 24 MiB reply frame");
+}
+
 /// DEC-2265 item 2: a length one past its bound, or any longer, is refused having read only the
 /// four bytes of the length, so a peer cannot make either side read or hold an oversized body.
 #[test]
