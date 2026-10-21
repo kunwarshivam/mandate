@@ -52,7 +52,8 @@ fn own() -> String {
 }
 
 /// AU-1, §4.8.1 refusal step 4, DEC-760 item 1: another workspace's stream (`WS_B`'s, and one whose
-/// segment has `WS_A`'s as a prefix), an own stream that holds no event, and malformed ids are all
+/// segment has `WS_A`'s as a prefix), the deployment meter stream of `WS_A`'s own segment (journal
+/// spec v0.53 §2), an own stream that holds no event, and malformed ids are all
 /// the one `NotFound`, while the same request on an own stream that holds events is planned.
 #[test]
 fn foreign_absent_and_malformed_streams_refuse_alike() {
@@ -60,6 +61,7 @@ fn foreign_absent_and_malformed_streams_refuse_alike() {
     let refused = [
         (format!("acct:{}:ACCT1", text(WS_B)), Some(5)),
         (format!("acct:{w}0:ACCT1"), Some(5)),
+        (format!("dmeter:{w}"), Some(5)),
         (own(), None),
         (format!("acct:{w}"), Some(5)),
         (format!("acct:{w}:ACCT1:x"), Some(5)),

@@ -397,3 +397,31 @@ fn pruning_drops_only_the_expired_states() {
     states.prune(at(1300 + STATE_LIFETIME_SECS));
     assert!(states.is_empty());
 }
+
+#[test]
+fn holding_a_state_neither_spends_it_nor_outlives_it() {
+    let mut states = PendingStates::default();
+    begin_with(&mut states, "st-a", ("ws-a", "u1"), "verifier-a", 1000).unwrap();
+    assert!(states.holds("st-a", at(1000)), "held when issued");
+    assert!(
+        states.holds("st-a", at(1000 + STATE_LIFETIME_SECS - 1)),
+        "held to its last second"
+    );
+    assert!(
+        !states.holds("st-a", at(1000 + STATE_LIFETIME_SECS)),
+        "not held once expired"
+    );
+    assert!(
+        !states.holds("st-b", at(1000)),
+        "an unknown state is not held"
+    );
+    assert_eq!(
+        redeemed(&mut states, "st-a", "u1", 1001),
+        Ok(owned("ws-a", "u1", "verifier-a")),
+        "holding spends nothing"
+    );
+    assert!(
+        !states.holds("st-a", at(1001)),
+        "a redeemed state is not held"
+    );
+}

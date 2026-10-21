@@ -778,11 +778,21 @@ forbidden_internal = ["mandate-daemon", "mandate-agentd", "mandate-shell", "mand
 # it never places, cancels, or sizes an order and never calls a broker or a runtime (workspace API
 # spec §1.4, `AGENTS.md` rule 12), so it may never reach the runtime, the executor, a connector,
 # the shell, the paper adapter, or the founder's CLI.
+# The token-exchange process (E10-13 slice 5b, DEC-821 item 2, DEC-2629): the one process with
+# the platform's client secret and the live token endpoint. It sits above mandate-connections, whose
+# exchange rules it runs, and no crate may depend on it, so no other process can send the request.
+[crates.mandate-token-exchange]
+layer = 7
+safety_critical = true
+pure = false
+allowed_external = ["secrecy"]
+allowed_dependents = []
+
 [crates.mandate-api-server]
 layer = 7
 safety_critical = true
 pure = false
-allowed_external = ["axum", "reqwest", "ring", "rustix", "rustls", "tokio"]
+allowed_external = ["axum", "base64", "reqwest", "ring", "rustix", "rustls", "secrecy", "tokio"]
 forbidden_internal = [
     "mandate-alpaca",
     "mandate-cli",

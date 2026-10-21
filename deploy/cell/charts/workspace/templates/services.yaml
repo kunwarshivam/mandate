@@ -22,6 +22,9 @@ spec:
     {{- with .p.args }}
     {{- $_ := set $launch "args" (include "mandate.fill" (dict "root" $ctx.root "words" . "probe" "") | fromJsonArray) }}
     {{- end }}
+    {{- if eq .p.name "executor" }}
+    {{- $_ := set $launch "args" (concat ($launch.args | default list) (include "mandate.executorBroker" .root | fromJsonArray)) }}
+    {{- end }}
     {{- with .p.probe }}
     {{- $probe := dict "livez" (include "mandate.fill" (dict "root" $ctx.root "words" . "probe" "livez") | fromJsonArray) "readyz" (include "mandate.fill" (dict "root" $ctx.root "words" . "probe" "readyz") | fromJsonArray) }}
     {{- $_ := set $launch "probe" $probe }}

@@ -34,7 +34,6 @@ fn admin(f: &Fixture, body: &[u8]) -> (u16, ProblemCode) {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn the_session_then_the_key_then_the_body_are_checked_first() {
     let f = fixture("paper", true, true);
     let body = to_canonical(&base());
@@ -53,7 +52,6 @@ fn the_session_then_the_key_then_the_body_are_checked_first() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_member_without_the_permission_is_forbidden_and_a_stranger_finds_nothing() {
     let f = fixture("paper", true, true);
     let body = to_canonical(&base());
@@ -71,7 +69,6 @@ fn a_member_without_the_permission_is_forbidden_and_a_stranger_finds_nothing() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_live_workspace_is_refused_before_any_step_up() {
     let f = fixture("live", true, true);
     assert_eq!(
@@ -84,7 +81,6 @@ fn a_live_workspace_is_refused_before_any_step_up() {
 /// The role is checked before the workspace's environment: a viewer of a live workspace is
 /// forbidden, not told the workspace is live (§4.5).
 #[test]
-#[ignore = "pending E10-13"]
 fn a_viewer_of_a_live_workspace_is_forbidden_before_live_unavailable() {
     let f = fixture("live", true, true);
     let viewer = signed_in(&f, BOB);
@@ -100,7 +96,6 @@ fn a_viewer_of_a_live_workspace_is_forbidden_before_live_unavailable() {
 
 /// The workspace's environment is checked before the disclosure (§4.5).
 #[test]
-#[ignore = "pending E10-13"]
 fn a_live_workspace_is_live_unavailable_before_the_disclosure_is_read() {
     let f = fixture("live", true, true);
     let body = String::from_utf8(to_canonical(&base()))
@@ -114,7 +109,6 @@ fn a_live_workspace_is_live_unavailable_before_the_disclosure_is_read() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn another_disclosure_version_is_invalid_before_any_step_up() {
     let f = fixture("paper", true, true);
     let body = String::from_utf8(to_canonical(&base()))
@@ -129,7 +123,6 @@ fn another_disclosure_version_is_invalid_before_any_step_up() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_start_without_step_up_is_step_up_required_and_never_reaches_the_port() {
     let f = fixture("paper", true, true);
     assert_eq!(
@@ -140,7 +133,6 @@ fn a_start_without_step_up_is_step_up_required_and_never_reaches_the_port() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn evidence_the_port_refuses_answers_its_code_and_records_nothing() {
     let f = fixture("paper", true, false);
     assert_eq!(
@@ -152,7 +144,6 @@ fn evidence_the_port_refuses_answers_its_code_and_records_nothing() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_live_connection_is_refused_after_step_up_and_records_nothing() {
     let f = fixture("paper", true, true);
     assert_eq!(
@@ -168,7 +159,6 @@ fn a_live_connection_is_refused_after_step_up_and_records_nothing() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_control_stream_that_cannot_be_read_records_nothing() {
     let f = fixture("paper", true, true);
     f.journal
@@ -185,7 +175,6 @@ fn a_control_stream_that_cannot_be_read_records_nothing() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_deployment_that_offers_no_connect_answers_not_found() {
     let f = fixture("paper", false, true);
     assert_eq!(
@@ -210,7 +199,6 @@ fn requested(id: &str, account: &str) -> String {
 /// the connection, or a request or establishment of another connection with the derived account,
 /// is `idempotency_conflict` after step-up, and nothing is recorded (DEC-2623 item 6).
 #[test]
-#[ignore = "pending E10-13"]
 fn a_derived_id_the_control_stream_already_names_conflicts_after_step_up() {
     let connection = format!("conn_{}", derived("connect_connection"));
     let account = derived("connect_account");
@@ -251,7 +239,6 @@ fn a_derived_id_the_control_stream_already_names_conflicts_after_step_up() {
 /// its `account_ref`, journal spec §9) leaves the start unanswerable: after step-up, as §4.5
 /// places the fold, it is `journal_unavailable` and nothing is recorded.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_connection_row_the_fold_cannot_read_is_unavailable_after_step_up() {
     let rows = [
         (
@@ -285,7 +272,6 @@ fn a_connection_row_the_fold_cannot_read_is_unavailable_after_step_up() {
 /// A request of the derived connection closed by its refusal or revocation frees the id, and a
 /// refusal of another connection naming the derived account does not use it: the start commits.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_closed_request_frees_the_id_and_a_refusal_does_not_use_the_account() {
     let connection = format!("conn_{}", derived("connect_connection"));
     let account = derived("connect_account");
@@ -332,7 +318,6 @@ fn a_closed_request_frees_the_id_and_a_refusal_does_not_use_the_account() {
 /// A random source that fails after the commit answers `journal_unavailable`; the request stays
 /// recorded, open until its deadline's teardown closes it (connections spec §5.2 step 6).
 #[test]
-#[ignore = "pending E10-13"]
 fn a_random_source_that_fails_after_the_commit_answers_journal_unavailable() {
     let f = fixture_drawing("paper", true, true, 2);
     assert_eq!(

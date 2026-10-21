@@ -1,0 +1,56 @@
+[
+  {
+    "label": "no event_id",
+    "remove": [
+      "/event_id"
+    ]
+  },
+  {
+    "label": "no passkey_id",
+    "remove": [
+      "/passkey_id"
+    ]
+  },
+  {
+    "label": "no alg",
+    "remove": [
+      "/alg"
+    ]
+  },
+  {
+    "label": "no cool_off_ends",
+    "remove": [
+      "/cool_off_ends"
+    ]
+  },
+  {
+    "label": "an RSA key",
+    "set": {
+      "/alg": "rs256"
+    }
+  },
+  {
+    "label": "a cool-off end that is not an instant",
+    "set": {
+      "/cool_off_ends": "tomorrow"
+    }
+  },
+  {
+    "label": "the public key",
+    "set": {
+      "/public_key": "pQECAyYgASFYIA"
+    }
+  },
+  {
+    "label": "an unlisted member",
+    "set": {
+      "/sign_count": 0
+    }
+  },
+  {
+    "label": "an algorithm outside the two",
+    "set": {
+      "/alg": "mutant_value"
+    }
+  }
+]

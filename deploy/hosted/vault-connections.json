@@ -1,0 +1,4 @@
+{
+  "about": "The paper connections whose executor gets AppRole credentials in staging's vault (E21-32, DEC-2630): staging's apply provisions every one listed here, after its vault is initialized, as the Secret vault-approle-executor-<hex of the id> in ws-ws1. Connection ids are opaque and not secret. A connection made from the web waits for its id to be listed here and an apply, until the on-connect trigger lands (DEC-2630).",
+  "connections": []
+}

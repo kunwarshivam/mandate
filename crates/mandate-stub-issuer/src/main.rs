@@ -1,5 +1,6 @@
-//! `mandate-stub-issuer --bind <ip>:<port> [--audience <aud>]` (DEC-2100). Refusals are written to
-//! standard error as their code alone, and the process exits 2.
+//! `mandate-stub-issuer --bind <ip>:<port> [--audience <aud>] [--alpaca-client-id <id>
+//! --alpaca-client-secret-file <path> --alpaca-redirect-uri <uri>]` (DEC-2100, DEC-2625). Refusals
+//! are written to standard error as their code alone, and the process exits 2.
 
 use std::io::Write as _;
 use std::process::ExitCode;
@@ -34,13 +35,22 @@ mod started {
     use std::sync::Arc;
     use std::task::Poll;
 
+    use mandate_stub_issuer::alpaca::{Alpaca, Settings, settings};
     use mandate_stub_issuer::issuer::Issuer;
-    use mandate_stub_issuer::serve::serve;
+    use mandate_stub_issuer::serve::serve_with;
     use mandate_stub_issuer::start::{Refused, check};
+    use ring::rand::SystemRandom;
     use tokio::net::TcpListener;
     use tokio::signal::unix::{Signal, SignalKind, signal};
 
     use super::refuse;
+
+    /// The Alpaca provider's flags: the client id, the client secret's file, the redirect URI.
+    const ALPACA_FLAGS: [&str; 3] = [
+        "--alpaca-client-id",
+        "--alpaca-client-secret-file",
+        "--alpaca-redirect-uri",
+    ];
 
     /// The audience of the managed issuer's access tokens, used when none is given.
     const DEFAULT_AUDIENCE: &str = "authenticated";
@@ -61,13 +71,25 @@ mod started {
             Err(refused) => return refuse(refused),
         };
         let audience = value(&args, "--audience").unwrap_or(DEFAULT_AUDIENCE);
+        let [client_id, secret_file, redirect_uri] = ALPACA_FLAGS.map(|flag| value(&args, flag));
+        let alpaca = if [client_id, secret_file, redirect_uri]
+            .iter()
+            .any(Option::is_some)
+        {
+            match settings(client_id, secret_file, redirect_uri) {
+                Ok(alpaca) => alpaca,
+                Err(refused) => return refuse(refused),
+            }
+        } else {
+            None
+        };
         let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
         else {
             return ExitCode::from(FAILED);
         };
-        runtime.block_on(run(bind, audience))
+        runtime.block_on(run(bind, audience, alpaca))
     }
 
     /// The value after `name` in `args`.
@@ -77,7 +99,7 @@ mod started {
             .find_map(|(flag, value)| (flag == name).then_some(value.as_str()))
     }
 
-    async fn run(bind: SocketAddr, audience: &str) -> ExitCode {
+    async fn run(bind: SocketAddr, audience: &str, alpaca: Option<Settings>) -> ExitCode {
         let Ok(listener) = TcpListener::bind(bind).await else {
             return refuse(Refused::Bind);
         };
@@ -100,7 +122,9 @@ mod started {
         if announced.is_err() {
             return ExitCode::from(FAILED);
         }
-        match serve(listener, Arc::new(issuer), stopped(term, int)).await {
+        let alpaca =
+            alpaca.map(|settings| Arc::new(Alpaca::new(settings, Box::new(SystemRandom::new()))));
+        match serve_with(listener, Arc::new(issuer), alpaca, stopped(term, int)).await {
             Ok(()) => ExitCode::SUCCESS,
             Err(_) => ExitCode::from(FAILED),
         }
