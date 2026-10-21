@@ -106,15 +106,7 @@ fn rules_249(
         payload.get("kind").and_then(Value::as_str) == Some("passkey"),
         "payload.kind",
     )?;
-    // §9.31's `sign_count` is the authenticator's 32-bit counter, so anything past it is refused
-    // here rather than by the type: `Ty::Int` bounds nothing.
-    ensure(
-        payload
-            .get("sign_count")
-            .and_then(Value::as_int)
-            .is_some_and(|n| n <= u64::from(u32::MAX)),
-        "payload.sign_count",
-    )?;
+    ensure(counts_in_32_bits(payload), "payload.sign_count")?;
     own_record(payload, actor)?;
     let stepped = payload.get("step_up").is_some_and(|s| *s != Value::Null);
     if stepped {
@@ -170,6 +162,15 @@ fn own_record(payload: &Value, actor: Option<&Value>) -> Result<(), Invalid> {
             == payload.get("member").and_then(Value::as_str),
         "actor.id",
     )
+}
+
+/// §9.31's `sign_count` is the authenticator's 32-bit counter, so anything past it is refused by
+/// rule 249 rather than by the type: `Ty::Int` bounds nothing.
+fn counts_in_32_bits(payload: &Value) -> bool {
+    payload
+        .get("sign_count")
+        .and_then(Value::as_int)
+        .is_some_and(|n| n <= u64::from(u32::MAX))
 }
 
 fn instant(payload: &Value, member: &str) -> Option<UtcNanos> {
