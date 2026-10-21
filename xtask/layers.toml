@@ -129,6 +129,7 @@ workspace_services = [
     "mandate-deploy-manager",
     "mandate-deployd",
     "mandate-dispatcher",
+    "mandate-gatewayd",
 ]
 agent_process = [
     "mandate-agentd",
@@ -546,6 +547,18 @@ safety_critical = true
 pure = false
 allowed_external = ["reqwest", "rustls", "thiserror", "tokio"]
 forbidden_internal = ["mandate-spec", "mandate-journal", "mandate-builder", "mandate-risk", "mandate-executor", "mandate-runtime", "mandate-alpaca", "mandate-robinhood", "mandate-shell", "mandate-connections", "mandate-vault-local"]
+
+# The model-gateway service (E21-62, DEC-2257, DEC-2265): mandate-gateway over the HTTPS transport,
+# the journaled meter and the system clock, serving its one workspace's runtime one framed call at a
+# time. It reads the provider's key once from mandate-vault as the model gateway, which is why it
+# sits above it. A workspace service: it may never reach the order path, a mandate or policy
+# writer, a broker connector, or the agent processes (INF-5, INF-14, INF-16).
+[crates.mandate-gatewayd]
+layer = 9
+safety_critical = true
+pure = false
+allowed_external = ["secrecy", "thiserror"]
+forbidden_internal = ["mandate-spec", "mandate-builder", "mandate-risk", "mandate-executor", "mandate-runtime", "mandate-alpaca", "mandate-robinhood", "mandate-shell", "mandate-mcp", "mandate-paper", "mandate-cli"]
 
 [crates.mandate-marketdata]
 layer = 6
