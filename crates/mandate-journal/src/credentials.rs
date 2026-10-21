@@ -185,3 +185,38 @@ fn ensure(holds: bool, path: &str) -> Result<(), Invalid> {
         Err(Invalid::new(InvalidReason::Schema, path))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::credential_id;
+
+    /// §9.31's `credential_id` is four conditions, each refusing on its own. Pinned here because
+    /// the vectors exercise them one at a time, so no vector had a good alphabet with a bad length
+    /// — which is the case that tells `&&` from `||` in the predicate, and the mutation gate found
+    /// the `||` mutant surviving.
+    #[test]
+    fn a_credential_id_needs_every_clause_of_its_shape() {
+        let ok = "AAECAwQFBgcICQoLDA0ODw";
+        assert!(credential_id(ok), "16 bytes: the base draft");
+        assert!(credential_id(&"A".repeat(1364)), "1023 bytes: the longest");
+
+        assert!(!credential_id(&ok[..21]), "21 characters: under the floor");
+        assert!(!credential_id(&"A".repeat(1366)), "1366 characters: over the ceiling");
+        assert!(
+            !credential_id(&"A".repeat(25)),
+            "25 characters: no unpadded base64url has a length of 1 modulo 4"
+        );
+        assert!(!credential_id(&format!("{ok}=")), "padded");
+
+        let mut bad_alphabet = ok.to_owned();
+        bad_alphabet.replace_range(7..8, "+");
+        assert!(!credential_id(&bad_alphabet), "`+` is base64's, not base64url's");
+
+        let mut too_long_and_bad = "A".repeat(1366);
+        too_long_and_bad.replace_range(4..5, "+");
+        assert!(
+            !credential_id(&too_long_and_bad),
+            "a bad alphabet that is also too long: both clauses refuse it, so neither alone decides"
+        );
+    }
+}
