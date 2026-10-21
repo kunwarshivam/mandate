@@ -805,7 +805,7 @@ allowed_dependents = []
 layer = 7
 safety_critical = true
 pure = false
-allowed_external = ["axum", "reqwest", "ring", "rustix", "rustls", "tokio"]
+allowed_external = ["axum", "base64", "reqwest", "ring", "rustix", "rustls", "secrecy", "tokio"]
 forbidden_internal = [
     "mandate-alpaca",
     "mandate-cli",
