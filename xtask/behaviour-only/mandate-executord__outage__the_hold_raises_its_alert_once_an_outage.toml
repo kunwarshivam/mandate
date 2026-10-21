@@ -1,0 +1,8 @@
+file = "crates/mandate-executord/tests/outage.rs"
+test = "the_hold_raises_its_alert_once_an_outage"
+reason = """
+E21-26: the journal-outage hold already exists (an append in doubt keeps its input and sends
+nothing), so the test runs the real process and fails on its answer, no `journal_unavailable`
+alert, rather than at a stub: a stub in the append path would stop every outage test that already
+passes. The row goes when E21-26's implementation raises the alert.
+"""
