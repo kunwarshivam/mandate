@@ -141,7 +141,6 @@ fn connect(address: SocketAddr) -> TcpStream {
 /// DEC-2265 items 1 and 5: a request crosses the service whole to the one thread holding the
 /// gateway, and its reply comes back as itself; the log names the reply's code.
 #[test]
-#[ignore = "pending E21-62"]
 fn a_call_crosses_the_service_whole() {
     let server = running(limits(2_000, 4), Err(RequestError::ForeignWorkspace));
     let sent = request("hello");
@@ -158,7 +157,6 @@ fn a_call_crosses_the_service_whole() {
 /// DEC-2265 item 4: a peer that opens a connection and sends nothing is cut off at the service's
 /// timeout, and the slot it held serves the next call.
 #[test]
-#[ignore = "pending E21-62"]
 fn a_stalled_peer_is_cut_off_and_frees_its_slot() {
     let server = running(limits(200, 1), Err(RequestError::Tools));
     let mut stalled = connect(server.address);
@@ -177,7 +175,6 @@ fn a_stalled_peer_is_cut_off_and_frees_its_slot() {
 /// DEC-2265 item 2, E21-62: a connection past the cap is closed before any of it is read, and the
 /// gateway answers nothing for it; the cap counts open connections, so a call fits once one ends.
 #[test]
-#[ignore = "pending E21-62"]
 fn a_connection_past_the_cap_is_closed_unread() {
     let server = running(limits(1_500, 1), Err(RequestError::Tools));
     let holding = connect(server.address);
@@ -199,7 +196,6 @@ fn a_connection_past_the_cap_is_closed_unread() {
 /// DEC-2265 item 2: a length past the request bound is refused unread, and a body that is not a
 /// request is refused; neither reaches the gateway, and the connection closes with nothing written.
 #[test]
-#[ignore = "pending E21-62"]
 fn a_frame_past_its_bound_or_malformed_is_never_answered() {
     let server = running(limits(2_000, 4), Err(RequestError::Tools));
     let mut long = connect(server.address);
@@ -227,7 +223,6 @@ fn a_frame_past_its_bound_or_malformed_is_never_answered() {
 /// in a frame cut short shows in none of the service's log lines, while the log does record each
 /// exchange by its code.
 #[test]
-#[ignore = "pending E21-62"]
 fn the_canary_shows_in_no_log_line() {
     let server = running(limits(500, 4), Err(RequestError::Transcript));
     assert_eq!(
@@ -263,7 +258,6 @@ fn the_canary_shows_in_no_log_line() {
 
 /// E21-62: stopping the server ends its loop, and a connection after the stop is not served.
 #[test]
-#[ignore = "pending E21-62"]
 fn stopping_ends_the_loop() {
     let server = running(limits(500, 4), Err(RequestError::Tools));
     let address = server.address;

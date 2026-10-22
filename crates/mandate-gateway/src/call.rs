@@ -818,13 +818,18 @@ impl RequestError {
     ];
 
     /// The refusal's code: its name on the wire and in a log line.
-    #[expect(
-        clippy::todo,
-        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-    )]
     pub fn code(self) -> &'static str {
-        let _ = self;
-        todo!()
+        match self {
+            Self::ForeignWorkspace => "foreign_workspace",
+            Self::AgentPurpose => "agent_purpose",
+            Self::CallId => "call_id",
+            Self::UnknownModel => "unknown_model",
+            Self::HashMismatch => "hash_mismatch",
+            Self::NotAgentic => "not_agentic",
+            Self::RunKind => "run_kind",
+            Self::Tools => "tools",
+            Self::Transcript => "transcript",
+        }
     }
 }
 

@@ -437,7 +437,6 @@ fn listed(refusal: RequestError) -> usize {
 /// DEC-2265 items 5 and 9: every refusal is in `ALL` once, has its own snake_case code, the code the
 /// spec's errors name, and crosses the wire as itself under it.
 #[test]
-#[ignore = "pending E21-62"]
 fn every_refusal_has_its_own_code_and_crosses_the_wire_as_itself() {
     let expected = [
         "foreign_workspace",
