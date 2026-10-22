@@ -177,6 +177,55 @@ impl ExecutorVault {
     pub fn delete(&self, entry: &Entry) -> Result<(), VaultError> {
         unlink(&entry_path(&self.vault_dir, entry))
     }
+
+    /// Takes a code: renames it to a fresh name of 16 random bytes, reads and decrypts it there,
+    /// and unlinks it. The rename is atomic and never replaces an existing name, so of any number
+    /// of concurrent takers exactly one gets the code and the rest `None` (DEC-2628 item 2). An
+    /// entry this call cannot decrypt, such as one bound to another connection, is renamed back
+    /// and refused, so a wrong taker destroys nothing; it hides the code from the rightful taker
+    /// only for that moment.
+    #[expect(
+        clippy::todo,
+        reason = "E10-13's atomic take lands in the implementation PR"
+    )]
+    pub fn take_code(&self, _entry: &Entry) -> Result<Option<SecretSlice<u8>>, VaultError> {
+        todo!()
+    }
+
+    /// [`ExecutorVault::take_code`] into `taken`, which must not exist: an existing name there is
+    /// refused and left as it was.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "`take_code` calls it once the implementation PR lands"
+        )
+    )]
+    #[expect(
+        clippy::todo,
+        reason = "E10-13's atomic take lands in the implementation PR"
+    )]
+    pub(crate) fn take_code_into(
+        &self,
+        _entry: &Entry,
+        _taken: &Path,
+    ) -> Result<Option<SecretSlice<u8>>, VaultError> {
+        todo!()
+    }
+}
+
+/// Unlinks every name a take of `entry` left beside `path`, as a take that stopped between its
+/// rename and its unlink leaves one.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "both roles' `delete` call it once the implementation PR lands"
+    )
+)]
+#[expect(clippy::todo, reason = "E10-13's sweep lands in the implementation PR")]
+pub(crate) fn sweep_taken(_path: &Path, _entry: &Entry) -> Result<(), VaultError> {
+    todo!()
 }
 
 fn wrong_role(entry: &Entry) -> VaultError {

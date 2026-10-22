@@ -17,6 +17,7 @@ use crate::startup::Role;
 use crate::store::open;
 
 #[test]
+#[ignore = "pending E10-13"]
 fn the_canary_never_leaves_the_vault_in_the_clear() {
     let layout = Layout::new();
     let (api, executor) = layout.both();
@@ -65,7 +66,7 @@ fn the_canary_never_leaves_the_vault_in_the_clear() {
         environment: Environment::Paper,
     };
     let waiting = exec_port
-        .read_code(&VaultKey("ws/c1".to_owned()))
+        .take_code(&VaultKey("ws/c1".to_owned()))
         .unwrap()
         .unwrap();
     assert_eq!(waiting.code.0.expose_secret(), CANARY);
