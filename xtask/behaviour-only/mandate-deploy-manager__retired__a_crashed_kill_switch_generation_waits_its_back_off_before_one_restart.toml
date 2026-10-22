@@ -1,0 +1,6 @@
+file = "crates/mandate-deploy-manager/tests/retired.rs"
+test = "a_crashed_kill_switch_generation_waits_its_back_off_before_one_restart"
+reason = """
+DEC-2344 item 1 (E21-33): today's manager starts no kill-switch generation, so none crashes and none is restarted. So this test fails on the manager's own answer, not at a stub. The implementation PR (DEC-2344
+items 1 and 3) deletes this file with the test's `#[ignore]`.
+"""

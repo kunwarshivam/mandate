@@ -1,0 +1,6 @@
+file = "crates/mandate-deploy-manager/tests/retired.rs"
+test = "a_covering_switch_after_an_unapplied_loop_starts_a_new_run_that_can_loop_again"
+reason = """
+DEC-2344 item 1 (E21-33): today's manager starts no kill-switch run, so none loops and no later switch starts another. So this test fails on the manager's own answer, not at a stub. The implementation PR (DEC-2344
+items 1 and 3) deletes this file with the test's `#[ignore]`.
+"""
