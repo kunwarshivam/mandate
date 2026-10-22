@@ -3051,10 +3051,12 @@ enables `live` (ES-23, OPS-5).
     lane GO's pattern; and the manager's wait for `ConnectionRolesMade` before an exchange starts.
     *Accepted when:* a property test over requests, closes, revocations, executor starts and stops,
     crashes and vault refusals shows every record the provisioner journals keeps rules 262 and 263,
-    against an oracle rebuilt from the stream, with a revocation right after a kill switch and the
-    executor slow to apply it keeping the executor's role; and the manager starts no exchange before
-    its `ConnectionRolesMade`. Left: a sweep of roles whose connection is revoked and whose held
-    executor generation ended on its own (DEC-2344), which the manager does not journal.
+    against an oracle rebuilt from the stream, with no executor's role ever removed, a revocation
+    right after a kill switch among them; and the manager starts no exchange before its
+    `ConnectionRolesMade`. Left: a sweep of the executor's roles the provisioner never removes, one
+    per connection whose request closed without an establishment or that was revoked, once no
+    executor of its account runs; the manager does not journal a held generation's own exit
+    (DEC-2344), so the sweep needs a signal it does not have yet.
 - **E21-34 (Proposed, M8; SC; lane O4)** As an owner, I want the kill switch reachable in the cell
   with nothing running but Postgres, the executor and the broker, so that rule 13 holds when the
   web app, the API and the cell's tooling are down (design §3.6, OPS-4). *Accepted when:*

@@ -1175,7 +1175,7 @@ SCHEMAS[("ctl", "ConnectionRolesRefused")] = rec(
 )
 SCHEMAS[("ctl", "ConnectionRolesRemoved")] = rec(
     ("connection_id", IDENT_T),
-    ("role", one_of("executor", "token_exchange")),
+    ("role", one_of("token_exchange")),
     ("occasion", one_of("request_closed", "revoked")),
 )
 CR_RECORDS = ("ConnectionRolesMade", "ConnectionRolesRefused", "ConnectionRolesRemoved")

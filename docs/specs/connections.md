@@ -259,9 +259,9 @@ DEC-690 item 4; DEC-441 item 21). A live Alpaca OAuth connection needs a new dec
    roles (DEC-2630 item 7), makes both and journals `ConnectionRolesMade` (journal §9.33); the
    exchange starts only once that record is read (journal §9.21). A refusal
    (`ConnectionRolesRefused`, with an opaque alert) or no record starts nothing, and the connect ends
-   by its deadline (step 6). The provisioner removes both roles when the request closes without an
-   establishment, and on a revocation removes the exchange's at once and the executor's once no
-   generation of its executor is left running, so a kill switch can still be applied.
+   by its deadline (step 6). The provisioner removes the exchange's role when the request closes without
+   an establishment or the connection is revoked. It never removes the executor's, so a kill switch
+   can always be applied; the revocation destroys the executor's token instead.
 
    **The exchange.** The connection manager starts one token-exchange process for the pending
    connection; it serves that one exchange and stops (infrastructure §3.1, §3.5). It:

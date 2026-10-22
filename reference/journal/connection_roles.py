@@ -1,6 +1,7 @@
 """Journal spec v0.77 §9.33's reference vectors for the role provisioner's records (DEC-2350): the
 Kubernetes-auth roles one OAuth connect's token exchange and executor log in with, made on the
-request and removed when it closes without an establishment or the connection is revoked.
+request; the exchange's is removed when the request closes without an establishment or the
+connection is revoked, and the executor's never is.
 
 The schemas and rule 261 live in `control.py`, beside the other closed schemas, so one validator
 judges every record. Stream rules 262 and 263 need the stream, so they live here, as rule 254 does in
@@ -149,8 +150,17 @@ def rule_drafts() -> list[dict]:
 
 
 def invalid_drafts() -> list[dict]:
-    """Each draft breaks exactly one rule; together they cover every member type and rule 261."""
-    return [*member_drafts(), *rule_drafts()]
+    """Each draft breaks exactly one rule; together they cover every member type and rule 261, and
+    the executor's role, which is never removed (DEC-2350 item 3)."""
+    executor = invalid(
+        "of_the_executor",
+        "§9.33: the executor's role is never removed",
+        "ConnectionRolesRemoved",
+        [change("payload.role", "executor"), change("payload.occasion", "revoked")],
+        "non_canonical",
+        "payload.role",
+    )
+    return [*member_drafts(), *rule_drafts(), executor]
 
 
 def valid_drafts() -> list[dict]:
@@ -158,12 +168,6 @@ def valid_drafts() -> list[dict]:
     removed, refused = "ConnectionRolesRemoved", "ConnectionRolesRefused"
     return [
         valid("refused_by_the_vault", "§9.33: a role the vault refused", refused, [change("payload.reason", "role_refused")]),
-        valid(
-            "executor_on_revoke",
-            "§9.33: the executor's role, on a revocation",
-            removed,
-            [change("payload.role", "executor"), change("payload.occasion", "revoked")],
-        ),
         valid(
             "exchange_on_revoke",
             "§9.33: the exchange's role, on a revocation",
@@ -257,11 +261,10 @@ def stream_failure(records: list[dict], skip: frozenset[str] = frozenset()) -> i
     """The index of the first §9.33 record that breaks rule 262 or 263, or None."""
     requests: dict[str, dict] = {}
     answered: set[str] = set()
-    account_of: dict[str, str] = {}
-    gone: dict[str, set[str]] = {}
+    made_for: set[str] = set()
+    gone: set[str] = set()
     closed_requests: set[str] = set()
     revoked_connections: set[str] = set()
-    live: dict[str, set[int]] = {}
     for i, record in enumerate(records):
         t, p = record["event_type"], record["payload"]
         if t == "ConnectionRequested":
@@ -270,10 +273,6 @@ def stream_failure(records: list[dict], skip: frozenset[str] = frozenset()) -> i
             closed_requests.add(p["connection_id"])
         elif t == "ConnectionRevoked":
             revoked_connections.add(p["connection_id"])
-        elif t == "ProcessStartIssued" and p["process"] == "executor":
-            live.setdefault(p["subject"], set()).add(p["generation"])
-        elif t == "ProcessStopIssued" and p["process"] == "executor":
-            live.get(p["subject"], set()).discard(p["generation"])
         elif t in ("ConnectionRolesMade", "ConnectionRolesRefused"):
             request = requests.get(record["causation_id"])
             oauth = request is not None and request["schema_version"] == 2 and request["payload"].get("credential") == "oauth"
@@ -285,22 +284,19 @@ def stream_failure(records: list[dict], skip: frozenset[str] = frozenset()) -> i
                 return i
             answered.add(record["causation_id"])
             if t == "ConnectionRolesMade" and request is not None:
-                account_of[p["connection_id"]] = request["payload"]["account_ref"]
-                gone[p["connection_id"]] = set()
+                made_for.add(p["connection_id"])
+                gone.discard(p["connection_id"])
         elif t == "ConnectionRolesRemoved":
             connection = p["connection_id"]
-            if connection not in account_of and "stream.263.made" not in skip:
+            if connection not in made_for and "stream.263.made" not in skip:
                 return i
-            if p["role"] in gone.get(connection, set()) and "stream.263.once" not in skip:
+            if connection in gone and "stream.263.once" not in skip:
                 return i
             if p["occasion"] == "request_closed" and connection not in closed_requests and "stream.263.closed" not in skip:
                 return i
             if p["occasion"] == "revoked" and connection not in revoked_connections and "stream.263.revoked" not in skip:
                 return i
-            running = live.get(account_of.get(connection, ""), set())
-            if p["role"] == "executor" and p["occasion"] == "revoked" and running and "stream.263.executor" not in skip:
-                return i
-            gone.setdefault(connection, set()).add(p["role"])
+            gone.add(connection)
     return None
 
 
@@ -325,17 +321,16 @@ def stream_cases() -> list[dict]:
         case("two_requests", "rule 262: one per request, each its own", [oauth, other, made(2, oauth), made(3, other)], None),
         case(
             "removed_on_close",
-            "rule 263: both roles once the request closed",
-            [oauth, made(1, oauth), refusal, removed(4, refusal, "token_exchange", "request_closed"),
-             removed(5, refusal, "executor", "request_closed")],
+            "rule 263: the exchange's role once the request closed",
+            [oauth, made(1, oauth), refusal, removed(3, refusal, "token_exchange", "request_closed")],
             None,
         ),
         case("removed_never_made", "rule 263: after its roles were made", [oauth, refusal, removed(3, refusal, "token_exchange", "request_closed")], 2),
         case(
             "removed_twice",
-            "rule 263: each role once",
-            [oauth, made(1, oauth), refusal, removed(4, refusal, "token_exchange", "request_closed"),
-             removed(5, refusal, "token_exchange", "request_closed")],
+            "rule 263: at most once after its roles were made",
+            [oauth, made(1, oauth), refusal, removed(3, refusal, "token_exchange", "request_closed"),
+             removed(4, refusal, "token_exchange", "request_closed")],
             4,
         ),
         case(
@@ -352,42 +347,16 @@ def stream_cases() -> list[dict]:
         ),
         case(
             "revoked_exchange_at_once",
-            "rule 263: the exchange's role at once on a revocation",
+            "rule 263: the exchange's role at once on a revocation, its executor still running",
             [oauth, made(1, oauth), process(2, "start", 1), revocation, removed(4, revocation, "token_exchange", "revoked")],
             None,
         ),
         case(
-            "revoked_executor_while_it_runs",
-            "rule 263: the executor's role kept while its executor runs",
-            [oauth, made(1, oauth), process(2, "start", 1), revocation, removed(4, revocation, "executor", "revoked")],
+            "removed_twice_on_revoke",
+            "rule 263: at most once after its roles were made",
+            [oauth, made(1, oauth), revocation, removed(4, revocation, "token_exchange", "revoked"),
+             removed(5, revocation, "token_exchange", "revoked")],
             4,
-        ),
-        case(
-            "revoked_executor_after_its_stop",
-            "rule 263: the executor's role once its executor stopped",
-            [oauth, made(1, oauth), process(2, "start", 1), revocation, process(4, "stop", 1),
-             removed(5, revocation, "executor", "revoked")],
-            None,
-        ),
-        case(
-            "revoked_executor_restarted",
-            "rule 263: every generation stopped, a kill switch's start among them",
-            [oauth, made(1, oauth), process(2, "start", 1), revocation, process(4, "stop", 1), process(5, "start", 2),
-             removed(6, revocation, "executor", "revoked")],
-            6,
-        ),
-        case(
-            "revoked_executor_never_started",
-            "rule 263: an executor that never ran keeps nothing",
-            [oauth, made(1, oauth), revocation, removed(3, revocation, "executor", "revoked")],
-            None,
-        ),
-        case(
-            "revoked_another_accounts_executor_runs",
-            "rule 263: only its own account's executor keeps it",
-            [oauth, made(1, oauth), process(2, "start", 1, OTHER_ACCOUNT), revocation,
-             removed(4, revocation, "executor", "revoked")],
-            None,
         ),
     ]
 
@@ -440,22 +409,12 @@ def oracle(records: list[dict]) -> int | None:
             if not makes:
                 return i
             since = before[makes[-1]:]
-            if any(r["event_type"] == "ConnectionRolesRemoved" and r["payload"]["connection_id"] == connection
-                   and r["payload"]["role"] == p["role"] for r in since):
+            if any(r["event_type"] == "ConnectionRolesRemoved" and r["payload"]["connection_id"] == connection for r in since):
                 return i
             closers = {"request_closed": "ConnectionRefused", "revoked": "ConnectionRevoked"}
             if not any(r["event_type"] == closers[p["occasion"]] and r["payload"]["connection_id"] == connection
                        and (r["event_type"] == "ConnectionRevoked" or r["payload"].get("occasion") == "connect") for r in before):
                 return i
-            if p["role"] == "executor" and p["occasion"] == "revoked":
-                request = next(r for r in before if r["event_id"] == before[makes[-1]]["causation_id"])
-                account = request["payload"]["account_ref"]
-                ours = [r for r in before if r["event_type"] in ("ProcessStartIssued", "ProcessStopIssued")
-                        and r["payload"]["process"] == "executor" and r["payload"]["subject"] == account]
-                started = {r["payload"]["generation"] for r in ours if r["event_type"] == "ProcessStartIssued"}
-                stopped = {r["payload"]["generation"] for r in ours if r["event_type"] == "ProcessStopIssued"}
-                if started - stopped:
-                    return i
     return None
 
 
@@ -504,7 +463,6 @@ STREAM_MUTANTS = (
     "stream.263.once",
     "stream.263.closed",
     "stream.263.revoked",
-    "stream.263.executor",
 )
 
 
@@ -551,9 +509,9 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
             mutated(lambda s: case(s, "streams", "made")["records"][1].update(actor=dict(USER))),
         ),
         (
-            "a stream case lets a running executor's role go",
+            "a stream case lets a removal repeat",
             "streams.rule",
-            mutated(lambda s: case(s, "streams", "revoked_executor_while_it_runs").update(expect={"outcome": "Valid"})),
+            mutated(lambda s: case(s, "streams", "removed_twice").update(expect={"outcome": "Valid"})),
         ),
     ]
 

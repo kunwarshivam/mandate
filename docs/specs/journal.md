@@ -18,7 +18,8 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   exchange and executor log in with Kubernetes-auth roles made per connection (DEC-2060), which
   only the provisioner may make. Rule 261 holds every record to a system actor and a cause; stream
   rules 262 and 263, the provisioner's and failing closed in the verifier's fold, tie each record to
-  its request and keep the executor's role until no generation of its executor runs. §9.21's token
+  its request and let it remove only the token exchange's role, never the executor's, so a kill
+  switch's start can always log in. §9.21's token
   exchange is started only once its request's `ConnectionRolesMade` is read, so a connect whose
   roles were never made, or were refused, starts nothing and ends by its deadline. The new
   `connection_roles` section holds the vectors; no existing member, rule, or vector changes.
@@ -6062,7 +6063,7 @@ made for that connection alone and bound to its ServiceAccount (DEC-2060, infras
 (DEC-2630 item 7), makes both when it reads a version-2 `ConnectionRequested` with `credential`
 `oauth`, and journals the outcome; the deployment manager starts the exchange only once the roles
 are made (§9.21). When the request closes without an establishment, and when the connection is
-revoked, the provisioner removes them.
+revoked, the provisioner removes the token exchange's; it never removes the executor's.
 
 **`ConnectionRolesMade`**: both roles of one connect's connection exist.
 
@@ -6077,12 +6078,12 @@ revoked, the provisioner removes them.
 | `connection_id` | `id` | The request's connection |
 | `reason` | `vault_unavailable` \| `role_refused` | The vault could not be reached in time, or it refused a role |
 
-**`ConnectionRolesRemoved`**: one role of a connection was removed.
+**`ConnectionRolesRemoved`**: the token exchange's role of a connection was removed.
 
 | Member | Type | Meaning |
 |---|---|---|
 | `connection_id` | `id` | The connection |
-| `role` | `executor` \| `token_exchange` | Which role |
+| `role` | `token_exchange` | The role removed: only the exchange's, since the executor's is never removed (DEC-2350 item 3) |
 | `occasion` | `request_closed` \| `revoked` | The request closed without an establishment, or the connection was revoked |
 
 A `ConnectionRolesMade` or `ConnectionRolesRefused` names its request's `ConnectionRequested` as its
@@ -6101,20 +6102,18 @@ fold:
 262. A `ConnectionRolesMade` or `ConnectionRolesRefused` follows the version-2 `ConnectionRequested`
      with `credential` `oauth` its `causation_id` names, of the same `connection_id`
      (`payload.connection_id`), and no two of either name one request (`causation_id`).
-263. A `ConnectionRolesRemoved` follows its connection's `ConnectionRolesMade`, and names each role
-     at most once after it (`payload.role`):
+263. A `ConnectionRolesRemoved` follows its connection's `ConnectionRolesMade`, at most once after
+     it (`payload.role`):
      - with `occasion` `request_closed`, only after a `ConnectionRefused` with occasion `connect`
        closed the request (`payload.occasion`);
      - with `occasion` `revoked`, only after the connection's `ConnectionRevoked`
-       (`payload.occasion`);
-     - for the `executor` role on a revocation, only once no generation of the executor of the
-       request's `account_ref` that a `ProcessStartIssued` started is left without its
-       `ProcessStopIssued` (`payload.role`). An executor still running, a kill switch's to apply
-       among them (DEC-2343, DEC-2344), keeps its role, so it can always log in again to apply
-       it; its token is what a revocation destroys.
+       (`payload.occasion`).
 
-The token exchange's role is removed at once on either occasion. A connect that the API
-established keeps both roles for its connection's life. Rule 131's "nothing further is journaled"
+The token exchange's role is removed at once on either occasion. The executor's role is never
+removed: an executor started for any reason, a kill switch's to apply among them (DEC-2343,
+DEC-2344), can always log in, and a revocation destroys its token instead, so the role grants only a
+read of a token that no longer exists. A connect that the API established keeps both roles for its
+connection's life. Rule 131's "nothing further is journaled"
 for a request a revocation closed concerns the request's own records; a removal is the
 provisioner's.
 
