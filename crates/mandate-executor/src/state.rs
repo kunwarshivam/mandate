@@ -663,7 +663,11 @@ impl ExecutorState {
     /// member is read for fill attribution alone.
     #[doc(hidden)]
     pub fn without_broker_ids(&self) -> Self {
-        self.clone()
+        let mut state = self.clone();
+        for detail in state.details.values_mut() {
+            detail.broker_ids.clear();
+        }
+        state
     }
 
     pub fn started(&self) -> bool {
