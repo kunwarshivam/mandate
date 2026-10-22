@@ -13243,8 +13243,8 @@ retirements:
       outcome: Invalid
       rule: rule 266
       index: 3
-  - name: a_pause_naming_it
-    clause: 'rule 266: only a resume or a stop ends it'
+  - name: a_workspace_resume
+    clause: 'rule 266: only a command scoped to this agent ends it'
     records:
     - envelope_version: 1
       environment: paper
@@ -13279,13 +13279,13 @@ retirements:
         subject: 01J8Z5RH951000000000000000
         kind: retirement_held
         owner_command: null
-    - event_id: 01J8Z5RHX11000000000000000
+    - event_id: 01J8Z5RHX13000000000000000
       event_type: OwnerCommandIssued
       causation_id: null
       config_refs: {}
       payload:
-        command: pause
-        scope: agent
+        command: resume
+        scope: workspace
         subject: agent_a
     - envelope_version: 1
       environment: paper
@@ -13324,8 +13324,8 @@ retirements:
       outcome: Invalid
       rule: rule 266
       index: 3
-  - name: another_agents_version
-    clause: 'rule 266: only a version applied to this agent moves it'
+  - name: a_pause_naming_it
+    clause: 'rule 266: only a resume or a stop ends it'
     records:
     - envelope_version: 1
       environment: paper
@@ -13360,14 +13360,14 @@ retirements:
         subject: 01J8Z5RH953000000000000000
         kind: retirement_held
         owner_command: null
-    - event_id: 01J8Z5RHX12000000000000000
-      event_type: MandateVersionApplied
+    - event_id: 01J8Z5RHX11000000000000000
+      event_type: OwnerCommandIssued
       causation_id: null
       config_refs: {}
       payload:
-        agent_id: agent_other
-        new_version: sha256:2222222222222222222222222222222222222222222222222222222222222222
-        result: applied
+        command: pause
+        scope: agent
+        subject: agent_a
     - envelope_version: 1
       environment: paper
       event_id: 01J8Z5RH954000000000000000
@@ -13399,6 +13399,87 @@ retirements:
       config_refs: {}
       payload:
         subject: 01J8Z5RH954000000000000000
+        kind: retirement_held
+        owner_command: null
+    expect:
+      outcome: Invalid
+      rule: rule 266
+      index: 3
+  - name: another_agents_version
+    clause: 'rule 266: only a version applied to this agent moves it'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z5RH955000000000000000
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: RetirementHeld
+      schema_version: 1
+      event_time: '2026-09-22T15:00:00.000000000Z'
+      clock_source: scheduler
+      causation_id: 01J8Z5RH0A000000000000000S
+      correlation_id: null
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:1111111111111111111111111111111111111111111111111111111111111111
+      payload:
+        held_since: '2026-09-21T15:00:00.000000000Z'
+        period: 1
+        waiting_on:
+        - position
+        risk_clock: '2026-09-22T15:00:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - event_id: 01J8Z5RHA55000000000000000
+      event_type: OwnerAlertSent
+      causation_id: 01J8Z5RH955000000000000000
+      config_refs: {}
+      payload:
+        subject: 01J8Z5RH955000000000000000
+        kind: retirement_held
+        owner_command: null
+    - event_id: 01J8Z5RHX12000000000000000
+      event_type: MandateVersionApplied
+      causation_id: null
+      config_refs: {}
+      payload:
+        agent_id: agent_other
+        new_version: sha256:2222222222222222222222222222222222222222222222222222222222222222
+        result: applied
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z5RH956000000000000000
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: RetirementHeld
+      schema_version: 1
+      event_time: '2026-09-22T15:00:00.000000000Z'
+      clock_source: scheduler
+      causation_id: 01J8Z5RH0B000000000000000M
+      correlation_id: null
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:1111111111111111111111111111111111111111111111111111111111111111
+      payload:
+        held_since: '2026-09-21T15:00:00.000000000Z'
+        period: 1
+        waiting_on:
+        - position
+        risk_clock: '2026-09-22T15:00:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - event_id: 01J8Z5RHA56000000000000000
+      event_type: OwnerAlertSent
+      causation_id: 01J8Z5RH956000000000000000
+      config_refs: {}
+      payload:
+        subject: 01J8Z5RH956000000000000000
         kind: retirement_held
         owner_command: null
     expect:
@@ -13448,7 +13529,7 @@ retirements:
     records:
     - envelope_version: 1
       environment: paper
-      event_id: 01J8Z5RH955000000000000000
+      event_id: 01J8Z5RH957000000000000000
       stream_id: agent:ws_01J8Z2:agent_a
       event_type: RetirementHeld
       schema_version: 1
@@ -13471,12 +13552,12 @@ retirements:
         risk_clock: '2026-09-22T15:00:00.000000000Z'
       artifact_refs: []
       pii_refs: []
-    - event_id: 01J8Z5RHA55000000000000000
+    - event_id: 01J8Z5RHA57000000000000000
       event_type: OwnerAlertSent
-      causation_id: 01J8Z5RH955000000000000000
+      causation_id: 01J8Z5RH957000000000000000
       config_refs: {}
       payload:
-        subject: 01J8Z5RH955000000000000000
+        subject: 01J8Z5RH957000000000000000
         kind: retirement_held
         owner_command: null
     - event_id: 01J8Z5RH330000000000000000

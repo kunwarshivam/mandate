@@ -20,7 +20,7 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   day apart, and none after the retirement ends at its own `AgentStopped` or an owner's resume or
   stop, a version applied moving the sequence on or ending it for a new cause;
   §9.15's closed set of kinds gains `retirement_held` (safety), 34 to 35. The `retirements` vectors
-  are new: 24 invalid and 5 valid drafts and 27 streams, judged by the reference fold and an
+  are new: 24 invalid and 5 valid drafts and 28 streams, judged by the reference fold and an
   independent oracle, with 16 validator, 10 stream, and 5 vector mutants caught. **Versions and
   numbers:** v0.77 and rules 261 to 263 are #2278's (§9.33), and rule 264 #2294's, so this takes
   v0.79, §9.34, and rules 265 and 266, and renumbers at merge if that order changes.
@@ -6150,17 +6150,27 @@ attributed to the agent and no working order of its own (§9.2's `AgentStopped`,
 - **It keeps writing in every agent mode,** `paused` and `stopped` included: a kill switch or a
   hold during the wait is when the owner most needs to hear that the agent still holds something.
 - **One sequence per agent.** A second cause while a sequence is open starts nothing, and the
-  first cause's sequence continues (rule 266).
+  first cause's sequence continues (rule 266), with one exception: an owner's Stop. Its
+  `OwnerCommandIssued` ends the open sequence, and the Stop is the cause of its own, from 1.
+  Repeated Stops each begin a new sequence; the owner is engaged, so the extra alerts are
+  acceptable.
 - **The sequence ends with the retirement, read from records already journaled**, all of this
   agent's own: its `AgentStopped`, or an owner's `OwnerCommandIssued` scoped to the agent with
   `command` `resume` or `stop` (control stream). No `RetirementHeld` of that cause follows. A
   `MandateVersionApplied` with `result` `applied` for the agent (account stream) ends nothing by
-  itself, since a version may leave the agent retiring: the next record either goes on under the
-  new version, unbroken, or, if the version cancelled that retirement and the agent retires again,
-  begins a new cause from 1. A version that cancelled it with no new retirement leaves the runtime
-  writing nothing more (the writer's rule). A redeploy is a new agent id on its own stream
+  itself. A version **cancels** the retirement when its cause no longer holds under the new
+  version's own fields: a passed `end_date` moved ahead, a `profit_stop` level the agent no longer
+  reaches, or an `on_complete` changed away from what retired it. A version that does not cancel
+  it leaves the runtime writing the same sequence under the new version. One that cancels it
+  leaves the runtime writing nothing more of that cause (the writer's rule), and if the agent
+  retires again, the new cause begins its own sequence from 1. So an applied version can add
+  alerts, never silence one. A redeploy is a new agent id on its own stream
   ([DEC-1173](../project/decisions/DEC-1173.md)), so nothing carries over to it.
 - **A restarted runtime folds its stream first**, so it never writes a period twice.
+- **A silent sequence is a verifier finding.** An open sequence with no `RetirementHeld` for more
+  than 48 hours of risk clock and no end is not refused at append, since a down runtime writes
+  nothing; the verifier reports it as `retirement_held_silent` for the agent, so a writer that
+  stopped while the agent still held something is seen.
 
 **`RetirementHeld`** (agent stream; `config_refs` names `mandate_version`)
 
@@ -6196,8 +6206,8 @@ position, instrument, or quantity (`AGENTS.md` rule 6).
 
 **Vectors.** The `retirements` section of the reference cases: a base draft, an invalid draft for
 every member type and for each part of rule 265, valid drafts for a late period, both values, a
-working order alone, and period 3, and 27 streams for rule 266, among them days down and a burst
-after them, a second cause while one holds, each kind of end, another agent's end, a pause, a
+working order alone, and period 3, and 28 streams for rule 266, among them days down and a burst
+after them, a second cause while one holds, each kind of end, another agent's end, a workspace resume, a pause, a
 version that leaves it retiring and one that is rejected, and a record without its alert. The
 reference fold and an independent oracle, which reads the ends itself and walks each segment's
 consecutive records, agree on every stream, and each check is shown catching its seeded bug.

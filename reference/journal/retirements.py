@@ -243,6 +243,13 @@ def ended(kind: str, index: int, agent: str = AGENT_ID, command: str = "resume",
     }
 
 
+def workspace_resume(index: int) -> dict:
+    """An owner's resume of the whole workspace, which names no agent and so ends no sequence."""
+    record = ended("OwnerCommandIssued", index)
+    record["payload"] = {"command": "resume", "scope": "workspace", "subject": AGENT_ID}
+    return record
+
+
 def stream_failure(records: list[dict], skip: frozenset[str] = frozenset()) -> int | None:
     """Rule 266 folded once, over the agent stream with the records that end or move a retirement,
     in commit order. One sequence is open at a time; its records run 1, 2, ... under one cause and
@@ -400,6 +407,12 @@ def stream_cases() -> list[dict]:
             "another_agents_resume",
             "rule 266: only a command naming this agent ends it",
             [h(1), ended("OwnerCommandIssued", 10, agent=OTHER_AGENT), h(1, cause=LIMIT)],
+            3,
+        ),
+        case(
+            "a_workspace_resume",
+            "rule 266: only a command scoped to this agent ends it",
+            [h(1), workspace_resume(13), h(1, cause=LIMIT)],
             3,
         ),
         case(
