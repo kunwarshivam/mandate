@@ -590,6 +590,12 @@ the spec invariants (DP-n) its tests cover.
     refuses at deploy a mandate whose `universe.max_instruments` exceeds 1 until the multi-instrument
     risk state lands, and B2b-2 adds the held-position version of the not-sane-bid test, which a flat
     position cannot exercise.
+  - **Follow-up ([DEC-2313](decisions/DEC-2313.md) items 2 and 3):** the mark and fill writers (slice C,
+    E7) journal canonical asset ids in `instrument_id`, with a writer-side test, and B2b-2b's tests
+    cover a flat opening bound by a mark to a non-canonical id and then held through a fill.
+  - **Follow-up (slice C, the #2120 review):** slice C's caller treats an `Err` from
+    `AccountRiskFold::open` as an unreadable view, at least `exits_only`, never as "no risk state",
+    and reads the view, not a `fold` error, after the view becomes unreadable.
   - **Follow-up ([DEC-2305](decisions/DEC-2305.md)):** a last-trade risk mark (trading spec §8.2,
     "in-session and fresh") needs a `MarkUpdated` version 3 or a new member before any writer uses
     one. Version 2 records a quote's bid only, so until then no last-trade mark updates E, which
@@ -1715,6 +1721,17 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   them. *Accepted when:* `AgentCommand` carries `pause` and `kill`, wired to that code; an agent
   kill touches only its own scope (rule 13); and a test runs each command through the binary
   against the journal. No agent starts on the L2 host before this lands.
+- **E10-21 (Must, M8, before an Alpaca OAuth connect on staging; SC)** As the owner, I want a
+  closed connect request to leave no authorization code or token in the vault, so that a code the
+  callback wrote just before a revoke or the deadline teardown is never exchanged, and a token an
+  exchange wrote just before the close is never used ([DEC-2626](decisions/DEC-2626.md) item 3,
+  the residual window). *Accepted when:* the revoke of a pending connection and the deadline
+  teardown each delete the connection's code entry and any token entry after journaling the
+  close; where Alpaca offers token revocation, the token is revoked at Alpaca before it is
+  deleted, and the revocation is journaled with opaque ids only; a failed delete or revocation is
+  retried until it succeeds or the entry is absent; and tests show a code written between the
+  callback's open-request check and its vault write, and a token an exchange wrote after the
+  close, both gone once the close is journaled.
 
 ### E11 Web app: dashboard and controls
 
@@ -3354,6 +3371,19 @@ enables `live` (ES-23, OPS-5).
     workflow from the `infra-staging` environment secret;
   - egress to OpenRouter's host is open for the model-gateway pod alone;
   - every test and CI job uses recorded responses only.
+
+  *Follow-ups, outside the acceptance above:*
+  - **An earlier turn's response by reference.** An agentic request carries each earlier turn's
+    provider response as hex, so a single 2 MiB response fills the 4 MiB request frame and a longer
+    run is refused `too_long` before any spend. Carry an earlier turn's response by its artifact
+    digest, not inline. Don't raise the frame bound, since a bigger bound widens what any peer may
+    make the service read (DEC-2265 item 1).
+  - **A deadline per frame.** The serve loop's socket timeout bounds each read, not the whole
+    frame, so a peer sending one byte at a time holds its slot past the timeout. Give each frame a
+    total deadline.
+  - **Wipe the provider key when dropped.** `ProviderKey` holds a plain `String` (DEC-2326 item 5).
+    Hold it in a type that zeroizes on drop, adding `secrecy` to `mandate-gateway`'s allowed
+    dependencies.
 
 ## Won't (v1)
 

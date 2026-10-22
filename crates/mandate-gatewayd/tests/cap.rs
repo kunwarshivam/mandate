@@ -3,11 +3,11 @@
 //! no deployment, each document that does not read refused with its code, and a version change read
 //! again while an unchanged one is not.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_canon::Digest;
 use mandate_gateway::money::Usd6;
-use mandate_gatewayd::cap::{CapError, DailyCaps, Deployment, deployment, research_cap};
+use mandate_gatewayd::cap::{CapError, DailyCaps, Deployment, agents, deployment, research_cap};
 use mandate_journal::{ArtifactRef, Environment, StoredEvent};
 use proptest::prelude::*;
 use proptest::test_runner::{Config, TestRunner};
@@ -327,4 +327,66 @@ fn any_cap_is_read_as_itself_or_refused_above_the_monthly_cap() {
             Ok(())
         })
         .unwrap();
+}
+
+/// DEC-2272 item 4: the agents the start reads caps for are those an `AgentDeployed` in this
+/// environment names, stopped since or not; another environment's deployments and the stream's
+/// other records name none.
+#[test]
+fn the_agents_are_those_deployed_in_this_environment() {
+    let mut world = World::default();
+    let version = world.stored(with_cap("5"));
+    world.deployed(&version);
+    world.deployed_in("agent-b", &version, "paper");
+    world.stopped("agent-b");
+    world.deployed_in("agent-live", &version, "live");
+    let seq = world.next();
+    world.control.push(row(
+        seq,
+        "MandateVersionCreated",
+        "paper",
+        r#"{"mandate_version":"v"}"#,
+    ));
+    assert_eq!(
+        agents(&world.control, Environment::Paper),
+        Ok(BTreeSet::from([AGENT.to_owned(), "agent-b".to_owned()]))
+    );
+    world.control.push(row(
+        world.next(),
+        "AgentDeployed",
+        "paper",
+        r#"{"mandate_version":"v"}"#,
+    ));
+    assert_eq!(
+        agents(&world.control, Environment::Paper),
+        Err(CapError::ControlUnreadable)
+    );
+}
+
+/// DEC-2272 item 3, the coordinator's bound: an agent never deployed, or stopped since, is read as
+/// a cap of zero and held no longer, so the caps held count deployed agents alone.
+#[test]
+fn a_never_deployed_or_stopped_agent_is_not_held() {
+    let mut world = World::default();
+    let mut caps = DailyCaps::new(Environment::Paper, monthly());
+    for n in 0..20 {
+        assert_eq!(
+            caps.current(&world.control, &format!("ghost_{n}"), &world.store),
+            Ok(Usd6::ZERO)
+        );
+    }
+    assert_eq!(caps.held(), 0, "never deployed");
+    let version = world.stored(with_cap("5"));
+    world.deployed(&version);
+    assert_eq!(
+        caps.current(&world.control, AGENT, &world.store),
+        Ok(usd("5"))
+    );
+    assert_eq!(caps.held(), 1);
+    world.stopped(AGENT);
+    assert_eq!(
+        caps.current(&world.control, AGENT, &world.store),
+        Ok(Usd6::ZERO)
+    );
+    assert_eq!(caps.held(), 0, "stopped since");
 }
