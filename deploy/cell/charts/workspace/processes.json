@@ -98,7 +98,7 @@
       "row": "Role provisioner, one per workspace (DEC-2350, DEC-2630 item 7): Postgres and the vault only. It makes each OAuth connect's Kubernetes-auth roles and removes the token exchange's, logged in by its own AppRole, and journals each on the control stream; it holds no service-account token and no broker credential. Kubernetes only, since its roles bind the workspace's ServiceAccounts, so it is not in the Compose file",
       "kind": "service",
       "image": "role-provisioner",
-      "built": false,
+      "built": true,
       "compose": false,
       "db_role": "mandate_role_provisioner",
       "guaranteed": false,
