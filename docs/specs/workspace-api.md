@@ -106,7 +106,7 @@ and checks the property with an oracle of its own (`AGENTS.md`, "Independent ora
 | **API-1** | **Authenticated.** Every call except the liveness probe and a CORS preflight (§3.3 item 5) carries a valid session or token; `POST /v1/sessions` carries the access token it exchanges (§3.11). Without one the API returns 401, reveals no data, and says nothing about whether the resource exists. The three browser-only session routes of §4.10 check `Origin` and `X-Mandate-Request` first, and refuse a failure 403 `forbidden` before any cookie or token is read | A route table test: every registered route, called without credentials, returns 401 with the same body; the three session routes return that 403 without `Origin` and the same 401 with it |
 | **API-2** | **Authorized on the server.** Each operation checks the principal's role in the workspace (§3.7) and, for a client, its scope (§3.8), on the server, before any read or write. The web app's role checks (`web/src/lib/roles.tsx`) are never authority | A matrix test: every route × every role and client scope, with the expected 403 or success from §3.7, computed from the table, not from the handler |
 | **API-3** | **Journal before effect.** Every call that can change what an agent, connection, policy, member, client, or approval may do commits its control-stream event (`Committed` or `AlreadyCommitted`, journal spec §5.1), with the caller's identity in `actor`, before it reports success and before anything acts on it. The API writes no agent or account stream | Fault injection: fail the append at every step; no stream owner ever sees an effect without its control-stream cause, and no response says `recorded` without a committed event |
-| **API-4** | **Idempotent.** Every mutating call carries an `Idempotency-Key`. The same principal, operation, and key always resolve to the same control-stream event. A repeat with the same body returns the first outcome; a different body returns 409 `idempotency_conflict`. Nothing is committed twice | Fuzz: random retries, duplicate submits, lost responses, and concurrent repeats; an independent counter of control-stream events per key never exceeds one |
+| **API-4** | **Idempotent.** Every mutating call except route 2's two POSTs (§4.10) carries an `Idempotency-Key`. The same principal, operation, and key always resolve to the same control-stream event. A repeat with the same body returns the first outcome; a different body returns 409 `idempotency_conflict`. Nothing is committed twice | Fuzz: random retries, duplicate submits, lost responses, and concurrent repeats; an independent counter of control-stream events per key never exceeds one |
 | **API-5** | **The envelope changes only by a confirmed version.** No call changes an envelope field of a deployed agent except confirming a mandate version, by a **user** with the role for it. The server computes the classification itself (mandate spec §9.2) and requires step-up when it is risk-increasing; a client's claimed classification is never used (rule 11) | Fuzz random envelope edits through every operation; an oracle that diffs the confirmed documents shows every change came through a `MandateConfirmed` by a user, with step-up whenever its own §9.2 verdict is increasing |
 | **API-6** | **A client is owner input, never the owner.** A client token reaches only the operations of §3.8. `requested_by` is set from the authenticated channel and never read from a request body (mandate spec §6.2 step 5a). A body naming `requested_by`, or any member its schema does not name, is refused `invalid` and journals nothing on a strict operation; on an API-7-lenient operation (§5) the member is dropped and listed in `dropped`, and the command still commits (DEC-681 item 6, DEC-682 item 27). A client can never confirm a version, answer an approval, create, widen, or pick a delegation, connect or revoke a connection, change a member, policy, or client, export, or use pause, resume, Stop, release, owner exit, acknowledgment, or the kill switch (DEC-141, DEC-185, DEC-191) | The route matrix for the client principal; a test that a client's owner request carrying `requested_by: owner` is refused `invalid` and commits nothing, and that a client's hold carrying it returns `202` with `dropped: ["/requested_by"]` and is journaled as `client` |
 | **API-7** | **Risk reduction is never blocked by the API.** Pause, holding new openings, the kill switch at any scope (including the kill-switch half of a revoke on compromise, §5.6), an owner exit, Skip on an approval, ending a delegation, and away mode (the **API-7 operations**) are refused only for a failed authentication (including the CSRF check of §3.3 item 1), a role that may not act, a failed session-record read, or a malformed request. Never for a rate limit, a quota, a failed membership read (`membership_unavailable`: identity spec §4.5 authorizes them from the session's roles snapshot instead, and the event records `membership_unverified: true`), a stale or missing read model, missing step-up (except where mandate spec §6.1 requires it, below), a runtime, model, market-data, or global-control-plane outage, a pending approval, or a frozen control stream (journal spec §11). A kill switch or owner exit without valid step-up is still recorded and still stops or routes (mandate spec §6.1, DEC-158 option (c)) | A test per operation with every one of those conditions injected; each still commits its event. Resume, Stop, and acknowledgment are not risk reduction and may be refused without step-up, as mandate spec §6.1 says |
@@ -226,7 +226,7 @@ Owned by the [identity spec](identity.md). What the API requires of it:
 
 ### 3.4 Idempotency
 
-Every mutating call carries `Idempotency-Key`: 16 to 64 characters from `[A-Za-z0-9_-]`, chosen by
+Every mutating call except route 2's two POSTs (§4.10) carries `Idempotency-Key`: 16 to 64 characters from `[A-Za-z0-9_-]`, chosen by
 the client per user gesture. The API derives the control-stream `event_id` from it (DEC-436 item 4,
 DEC-681 item 5), and a client can compute the same id before it sends the call:
 
@@ -1673,17 +1673,19 @@ id and is used once, so a retried opening asks for a new challenge.
      presented it, for 300 s after it failed: at most 10 per device and 100 per address are kept.
      This limit only counts and reports (DEC-653 item 3, the founder's reading): no answer depends
      on it, it refuses no challenge and no assertion, and reaching it raises the operator alert
-     `reduction_failures_over_limit`, an opaque code naming no address, device, member, or passkey.
+     `reduction_failures_over_limit` (infrastructure design §8.2), an opaque code with generic text
+     naming no address, device, member, or passkey (rule 6).
      Verification work stays bounded by the challenge limits, since only an outstanding challenge
      reaches the verifier, once; a request naming none fails without verifying. **An assertion that
      verifies is never refused for a limit.**
    - **Bounded memory.** Besides the 4,096 outstanding challenges, failures are kept for at most
      65,536 addresses and devices in all, the oldest dropped first. Dropping one changes no answer,
-     since failures only report. Both bounds are owed to the gate itself by S2's gate change
-     (E9-1): `mandate_authn`'s `ReductionLimits` gains `max_outstanding` (4,096), past which it
-     refuses a challenge with its one refusal, and `max_failure_keys` (65,536), evicting the oldest
-     failure key first. Until that lands, the route holds the 4,096 bound itself and the gate holds
-     only its per-key limits.
+     since failures only report. These bounds are owed to the gate itself by S2's gate change
+     (E9-1): `mandate_authn`'s `ReductionLimits` gains `max_outstanding` (4,096) and `reserve`
+     (3,072), past which it refuses a challenge with its one refusal as above, and
+     `max_failure_keys` (65,536), evicting the oldest failure key first. Until that lands, the
+     challenge route holds the 4,096 bound and the reserve itself, in front of the gate, and the
+     gate holds only its per-key limits.
 4. **No membership oracle, by structure.** Every refusal of `POST /v1/reduction-sessions` after the
    browser check (an invalid body; an unknown, expired, or reused challenge; an unknown passkey id;
    a passkey removed, or whose member is deactivated, removed, or deprovisioned; a bad signature; a
@@ -1692,8 +1694,10 @@ id and is used once, so a retried opening asks for a new challenge.
    steps whatever it names:
    - the passkey lookup reads the whole fold and does not stop at a match;
    - the signature is verified first, before anything is judged: against the passkey's key, or,
-     for an unknown passkey, against a fixed decoy key of the algorithm the request's
-     authenticator data names, or a fixed one when it names none the server supports;
+     for an unknown passkey, against a fixed decoy key chosen by the signature's encoding, since
+     an assertion's authenticator data names no algorithm: an ECDSA signature's DER structure is
+     verified against the ES256 decoy, 64 raw bytes against the Ed25519 decoy, and any other
+     shape against the ES256 decoy;
    - the membership and provider-refusal lookups always run, against a fixed decoy principal when
      the passkey is unknown;
    - only then are the results judged, together.
@@ -1726,7 +1730,9 @@ id and is used once, so a retried opening asks for a new challenge.
    opening's, each workspace carries the ids the session may act on there, read from the control
    stream at the answer: `agent_ids`, the agents it may pause or kill switch, and
    `connection_ids`, the connections it may kill switch, so a session that reads nothing else can
-   name its scope. They are opaque ids, as every read returns them.
+   name its scope. They are opaque ids, as every read returns them. A read of them that fails
+   answers empty lists, never a refusal (DEC-642 item 10): empty means unknown or none, and the
+   web app then falls back to the ids it last held.
 
 | Operation | Method and path | Event | Notes |
 |---|---|---|---|
