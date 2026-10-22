@@ -6158,11 +6158,14 @@ attributed to the agent and no working order of its own (§9.2's `AgentStopped`,
   agent's own: its `AgentStopped`, or an owner's `OwnerCommandIssued` scoped to the agent with
   `command` `resume` or `stop` (control stream). No `RetirementHeld` of that cause follows. A
   `MandateVersionApplied` with `result` `applied` for the agent (account stream) ends nothing by
-  itself. A version **cancels** the retirement when, from the cause record's and the new version's
-  own fields alone, the cause no longer holds: for `profit_stop`, a new `profit_level` above the
-  breach value the cause's `RiskLimitTriggered` recorded; for a passed `end_date`, a new `end_date`
-  after the cause's date; for a goal's `release`, an `on_complete` changed from the one that
-  retired it. The agent's current return is never read, so a dip below the level never cancels a
+  itself. A version **cancels** the retirement when, from records a verifier replays, the cause no
+  longer holds. For `profit_stop`, the cause is a `RiskLimitTriggered` (§9.27), and the version
+  cancels it with a new `profit_level` above the return at the trigger, (`agent_equity` −
+  `capital_base`) / `capital_base` from that record's snapshot (mandate spec §5). For a passed
+  `end_date` (a `GoalCompleted`, reason `end_date`) or a goal's `release` (a `GoalCompleted`,
+  `on_complete` `release`), it compares the `end_date` or `on_complete` of the version applied
+  (its `new_version`) with those of the version the sequence's first record names in
+  `config_refs.mandate_version`: a later `end_date`, or a changed `on_complete`, cancels it. The agent's current return is never read, so a dip below the level never cancels a
   retirement whose exits are unfilled. A version that does not cancel
   it leaves the runtime writing the same sequence under the new version. One that cancels it
   leaves the runtime writing nothing more of that cause (the writer's rule), and if the agent

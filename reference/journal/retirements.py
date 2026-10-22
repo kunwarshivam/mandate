@@ -18,6 +18,8 @@ from common import change, delete, digest_strings, epoch_seconds
 from control import (
     AGENT_STREAM,
     RUNTIME,
+    SCHEMAS,
+    payload_type_violations,
     STREAM,
     check_of,
     draft_for,
@@ -436,78 +438,120 @@ def stream_cases() -> list[dict]:
 # --------------------------------------------------------------------------- the silent finding
 
 
-def cancels(cause: dict, version: dict, skip: frozenset[str] = frozenset()) -> bool:
-    """Whether a version applied cancels the retirement its cause began, from the cause record's
-    and the new version's own fields alone: a `profit_stop` whose new `profit_level` is above the
-    breach value the cause recorded, a passed `end_date` moved past the cause's date, or an
-    `on_complete` changed from the one that retired it. The agent's current return is never read,
-    so a dip never cancels a retirement whose exits are unfilled."""
-    fields = version["payload"]["mandate"]
-    if cause["kind"] == "profit_stop":
-        raised = Decimal(fields["profit_level"]) > Decimal(cause["breach_value"])
+def breach_return(cause: dict) -> Decimal:
+    """The return at a `profit_stop` trigger, from its `RiskLimitTriggered` snapshot (§9.27):
+    (`agent_equity` - `capital_base`) / `capital_base`, the quantity mandate spec §5 compares with
+    `profit_level`."""
+    p = cause["payload"]
+    base = Decimal(p["capital_base"])
+    return (Decimal(p["agent_equity"]) - base) / base
+
+
+def cancels(cause: dict, held_under: dict, new: dict, skip: frozenset[str] = frozenset()) -> bool:
+    """Whether a version applied cancels the retirement its cause began, from records alone: the
+    cause record, the mandate version the sequence's first record names in
+    `config_refs.mandate_version` (`held_under`), and the applied version's `new_version` (`new`),
+    both replayable. A `profit_stop` (`RiskLimitTriggered`) is cancelled by a new `profit_level`
+    above the return at its trigger; a passed `end_date` (`GoalCompleted`, reason `end_date`) by a
+    new `end_date` after the one it was held under; a goal's `release` by a changed `on_complete`.
+    The agent's current return is never read, so a dip never cancels a retirement whose exits are
+    unfilled."""
+    p = cause["payload"]
+    if cause["event_type"] == "RiskLimitTriggered":
+        raised = Decimal(new["profit_level"]) > breach_return(cause)
         return raised or "silence.profit" in skip
-    if cause["kind"] == "end_date":
-        return fields["end_date"] > cause["date"]
-    return fields["on_complete"] != cause["on_complete"]
+    if p.get("reason") == "end_date":
+        return new["end_date"] > held_under["end_date"]
+    return new["on_complete"] != held_under["on_complete"]
 
 
-def silent(cause: dict, records: list[dict], now: str, skip: frozenset[str] = frozenset()) -> bool:
+def silent(case: dict, skip: frozenset[str] = frozenset()) -> bool:
     """The verifier's `retirement_held_silent` finding at risk clock `now`: the sequence's last
     `RetirementHeld` is more than 48 hours old, with no end and no version that cancels it since."""
+    mandates, cause = case["mandates"], case["cause"]
     last = None
-    for record in records:
+    held_under = None
+    for record in case["records"]:
         t = record["event_type"]
         if t == "RetirementHeld":
             last = epoch_seconds(record["payload"]["risk_clock"])
+            held_under = held_under or mandates[record["config_refs"]["mandate_version"]]
         elif last is not None and t in ("AgentStopped", "OwnerCommandIssued"):
             last = None
         elif last is not None and t == "MandateVersionApplied" and "silence.cancel" not in skip:
-            if cancels(cause, record, skip):
+            if cancels(cause, held_under, mandates[record["payload"]["new_version"]], skip):
                 last = None
-    return last is not None and epoch_seconds(now) - last > 2 * DAY
+    return last is not None and epoch_seconds(case["now"]) - last > 2 * DAY
 
 
-def version(level: str = "0.10", end_date: str = "2026-09-21", on_complete: str = "release") -> dict:
+def risk_limit_triggered(equity: str, base: str) -> dict:
+    """A `profit_stop` trigger in §9.27's shape: the snapshot, the limit, its action."""
+    return {
+        "event_type": "RiskLimitTriggered",
+        "event_id": STOP,
+        "payload": {
+            "agent_id": AGENT_ID, "agent_equity": equity, "high_water_mark": equity, "drawdown": "0",
+            "day_start_equity": equity, "capital_base": base, "inherited_loss": "0", "net_contributed": base,
+            "limit": "profit_stop", "action": "exits_only", "reason": None, "breach_time_s": None,
+            "metric": None, "threshold": None, "value": None, "risk_clock": SINCE,
+        },
+    }
+
+
+def goal_completed(reason: str | None, on_complete: str | None) -> dict:
+    """A goal's completion in §9.27's shape."""
+    return {
+        "event_type": "GoalCompleted",
+        "event_id": LIMIT,
+        "payload": {"agent_id": AGENT_ID, "reason": reason, "then": on_complete, "on_complete": on_complete,
+                    "risk_clock": SINCE},
+    }
+
+
+def version(index: int) -> dict:
     return {
         "event_type": "MandateVersionApplied",
-        "payload": {"agent_id": AGENT_ID, "new_version": NEWER, "result": "applied",
-                    "mandate": {"profit_level": level, "end_date": end_date, "on_complete": on_complete}},
+        "event_id": f"01J8Z5RHV{index:02d}".ljust(26, "0"),
+        "payload": {"agent_id": AGENT_ID, "new_version": NEWER, "result": "applied"},
     }
 
 
 def silence_cases() -> list[dict]:
-    stop = {"kind": "profit_stop", "breach_value": "0.12"}
-    end = {"kind": "end_date", "date": "2026-09-21"}
-    goal = {"kind": "on_complete", "on_complete": "release"}
-    first = held(1)
+    held_under = {"profit_level": "0.10", "end_date": "2026-09-21", "on_complete": "release"}
+    stop = risk_limit_triggered("11200", "10000")
+    end = goal_completed("end_date", None)
+    goal = goal_completed(None, "release")
 
-    def case(name, clause, cause, records, now, is_silent):
-        return {"name": name, "clause": clause, "cause": cause, "records": records, "now": now, "silent": is_silent}
+    def case(name, clause, cause, records, now, is_silent, newer=None):
+        mandates = {BOUND: held_under, NEWER: {**held_under, **(newer or {})}}
+        return {"name": name, "clause": clause, "cause": cause, "mandates": mandates, "records": records,
+                "now": now, "silent": is_silent}
 
+    first = held(1, cause=STOP)
     return [
         case("held_and_writing", "§9.34: a record within 48 hours is no silence", stop, [first], clock(2 * DAY), False),
         case("silent", "§9.34: more than 48 hours with no record and no end", stop, [first], clock(3 * DAY + 1), True),
         case("ended", "§9.34: an end is no silence", stop, [first, ended("AgentStopped", 20)], clock(5 * DAY), False),
         case(
             "cancelled_by_a_raised_level",
-            "§9.34: a version whose profit_level is above the breach value cancels it",
-            stop, [first, version(level="0.15")], clock(5 * DAY), False,
+            "§9.34: a profit_level above the return at the trigger, (E - C) / C = 0.12, cancels it",
+            stop, [first, version(1)], clock(5 * DAY), False, {"profit_level": "0.15"},
         ),
         case(
             "a_level_still_breached",
-            "§9.34: a level at or below the breach value cancels nothing, whatever the return since",
-            stop, [first, version(level="0.12")], clock(5 * DAY), True,
+            "§9.34: a level at the return at the trigger cancels nothing, whatever the return since",
+            stop, [first, version(2)], clock(5 * DAY), True, {"profit_level": "0.12"},
         ),
         case(
             "cancelled_by_a_later_end_date",
-            "§9.34: an end_date moved past the cause's cancels it",
-            end, [first, version(end_date="2026-10-21")], clock(5 * DAY), False,
+            "§9.34: an end_date after the one it was held under cancels it",
+            end, [first, version(3)], clock(5 * DAY), False, {"end_date": "2026-10-21"},
         ),
-        case("the_same_end_date", "§9.34: the same end_date cancels nothing", end, [first, version()], clock(5 * DAY), True),
+        case("the_same_end_date", "§9.34: the same end_date cancels nothing", end, [first, version(4)], clock(5 * DAY), True),
         case(
             "cancelled_by_on_complete",
-            "§9.34: an on_complete changed from the one that retired it cancels it",
-            goal, [first, version(on_complete="stop")], clock(5 * DAY), False,
+            "§9.34: an on_complete changed from the one it was held under cancels it",
+            goal, [first, version(5)], clock(5 * DAY), False, {"on_complete": "hold_protected"},
         ),
     ]
 
@@ -590,7 +634,11 @@ def check_section(section: dict) -> list[str]:
     """Every failure, so seeded bugs can be shown caught."""
     problems = []
     for case in section["silence"]:
-        got = silent(case["cause"], case["records"], case["now"])
+        cause = case["cause"]
+        shape = payload_type_violations(SCHEMAS[("acct", cause["event_type"])], cause["payload"], "payload", frozenset())
+        if shape:
+            problems.append(found("silence", f"{case['name']}: the cause is not a §9.27 record: {shape}"))
+        got = silent(case)
         if got != case["silent"]:
             problems.append(found("silence", f"{case['name']}: expected silent {case['silent']}, got {got}"))
     for name, draft in section["drafts"].items():
@@ -696,7 +744,7 @@ def run_mutants(section: dict) -> list[str]:
             escaped.append(f"retirement stream mutant {mutant}")
     for mutant in SILENCE_MUTANTS:
         skip = frozenset([mutant])
-        if all(silent(c["cause"], c["records"], c["now"], skip) == c["silent"] for c in section["silence"]):
+        if all(silent(c, skip) == c["silent"] for c in section["silence"]):
             escaped.append(f"retirement silence mutant {mutant}")
     registered = vector_mutants(section)
     for check in ORACLE_CHECKS:

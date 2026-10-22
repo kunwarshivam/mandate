@@ -20486,8 +20486,38 @@
     "name": "held_and_writing",
     "clause": "§9.34: a record within 48 hours is no silence",
     "cause": {
-     "kind": "profit_stop",
-     "breach_value": "0.12"
+     "event_type": "RiskLimitTriggered",
+     "event_id": "01J8Z5RH0A000000000000000S",
+     "payload": {
+      "agent_id": "agent_a",
+      "agent_equity": "11200",
+      "high_water_mark": "11200",
+      "drawdown": "0",
+      "day_start_equity": "11200",
+      "capital_base": "10000",
+      "inherited_loss": "0",
+      "net_contributed": "10000",
+      "limit": "profit_stop",
+      "action": "exits_only",
+      "reason": null,
+      "breach_time_s": null,
+      "metric": null,
+      "threshold": null,
+      "value": null,
+      "risk_clock": "2026-09-21T15:00:00.000000000Z"
+     }
+    },
+    "mandates": {
+     "sha256:1111111111111111111111111111111111111111111111111111111111111111": {
+      "profit_level": "0.10",
+      "end_date": "2026-09-21",
+      "on_complete": "release"
+     },
+     "sha256:2222222222222222222222222222222222222222222222222222222222222222": {
+      "profit_level": "0.10",
+      "end_date": "2026-09-21",
+      "on_complete": "release"
+     }
     },
     "records": [
      {
@@ -20529,8 +20559,38 @@
     "name": "silent",
     "clause": "§9.34: more than 48 hours with no record and no end",
     "cause": {
-     "kind": "profit_stop",
-     "breach_value": "0.12"
+     "event_type": "RiskLimitTriggered",
+     "event_id": "01J8Z5RH0A000000000000000S",
+     "payload": {
+      "agent_id": "agent_a",
+      "agent_equity": "11200",
+      "high_water_mark": "11200",
+      "drawdown": "0",
+      "day_start_equity": "11200",
+      "capital_base": "10000",
+      "inherited_loss": "0",
+      "net_contributed": "10000",
+      "limit": "profit_stop",
+      "action": "exits_only",
+      "reason": null,
+      "breach_time_s": null,
+      "metric": null,
+      "threshold": null,
+      "value": null,
+      "risk_clock": "2026-09-21T15:00:00.000000000Z"
+     }
+    },
+    "mandates": {
+     "sha256:1111111111111111111111111111111111111111111111111111111111111111": {
+      "profit_level": "0.10",
+      "end_date": "2026-09-21",
+      "on_complete": "release"
+     },
+     "sha256:2222222222222222222222222222222222222222222222222222222222222222": {
+      "profit_level": "0.10",
+      "end_date": "2026-09-21",
+      "on_complete": "release"
+     }
     },
     "records": [
      {
@@ -20572,8 +20632,38 @@
     "name": "ended",
     "clause": "§9.34: an end is no silence",
     "cause": {
-     "kind": "profit_stop",
-     "breach_value": "0.12"
+     "event_type": "RiskLimitTriggered",
+     "event_id": "01J8Z5RH0A000000000000000S",
+     "payload": {
+      "agent_id": "agent_a",
+      "agent_equity": "11200",
+      "high_water_mark": "11200",
+      "drawdown": "0",
+      "day_start_equity": "11200",
+      "capital_base": "10000",
+      "inherited_loss": "0",
+      "net_contributed": "10000",
+      "limit": "profit_stop",
+      "action": "exits_only",
+      "reason": null,
+      "breach_time_s": null,
+      "metric": null,
+      "threshold": null,
+      "value": null,
+      "risk_clock": "2026-09-21T15:00:00.000000000Z"
+     }
+    },
+    "mandates": {
+     "sha256:1111111111111111111111111111111111111111111111111111111111111111": {
+      "profit_level": "0.10",
+      "end_date": "2026-09-21",
+      "on_complete": "release"
+     },
+     "sha256:2222222222222222222222222222222222222222222222222222222222222222": {
+      "profit_level": "0.10",
+      "end_date": "2026-09-21",
+      "on_complete": "release"
+     }
     },
     "records": [
      {
@@ -20622,10 +20712,40 @@
    },
    {
     "name": "cancelled_by_a_raised_level",
-    "clause": "§9.34: a version whose profit_level is above the breach value cancels it",
+    "clause": "§9.34: a profit_level above the return at the trigger, (E - C) / C = 0.12, cancels it",
     "cause": {
-     "kind": "profit_stop",
-     "breach_value": "0.12"
+     "event_type": "RiskLimitTriggered",
+     "event_id": "01J8Z5RH0A000000000000000S",
+     "payload": {
+      "agent_id": "agent_a",
+      "agent_equity": "11200",
+      "high_water_mark": "11200",
+      "drawdown": "0",
+      "day_start_equity": "11200",
+      "capital_base": "10000",
+      "inherited_loss": "0",
+      "net_contributed": "10000",
+      "limit": "profit_stop",
+      "action": "exits_only",
+      "reason": null,
+      "breach_time_s": null,
+      "metric": null,
+      "threshold": null,
+      "value": null,
+      "risk_clock": "2026-09-21T15:00:00.000000000Z"
+     }
+    },
+    "mandates": {
+     "sha256:1111111111111111111111111111111111111111111111111111111111111111": {
+      "profit_level": "0.10",
+      "end_date": "2026-09-21",
+      "on_complete": "release"
+     },
+     "sha256:2222222222222222222222222222222222222222222222222222222222222222": {
+      "profit_level": "0.15",
+      "end_date": "2026-09-21",
+      "on_complete": "release"
+     }
     },
     "records": [
      {
@@ -20661,15 +20781,11 @@
      },
      {
       "event_type": "MandateVersionApplied",
+      "event_id": "01J8Z5RHV01000000000000000",
       "payload": {
        "agent_id": "agent_a",
        "new_version": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
-       "result": "applied",
-       "mandate": {
-        "profit_level": "0.15",
-        "end_date": "2026-09-21",
-        "on_complete": "release"
-       }
+       "result": "applied"
       }
      }
     ],
@@ -20678,10 +20794,40 @@
    },
    {
     "name": "a_level_still_breached",
-    "clause": "§9.34: a level at or below the breach value cancels nothing, whatever the return since",
+    "clause": "§9.34: a level at the return at the trigger cancels nothing, whatever the return since",
     "cause": {
-     "kind": "profit_stop",
-     "breach_value": "0.12"
+     "event_type": "RiskLimitTriggered",
+     "event_id": "01J8Z5RH0A000000000000000S",
+     "payload": {
+      "agent_id": "agent_a",
+      "agent_equity": "11200",
+      "high_water_mark": "11200",
+      "drawdown": "0",
+      "day_start_equity": "11200",
+      "capital_base": "10000",
+      "inherited_loss": "0",
+      "net_contributed": "10000",
+      "limit": "profit_stop",
+      "action": "exits_only",
+      "reason": null,
+      "breach_time_s": null,
+      "metric": null,
+      "threshold": null,
+      "value": null,
+      "risk_clock": "2026-09-21T15:00:00.000000000Z"
+     }
+    },
+    "mandates": {
+     "sha256:1111111111111111111111111111111111111111111111111111111111111111": {
+      "profit_level": "0.10",
+      "end_date": "2026-09-21",
+      "on_complete": "release"
+     },
+     "sha256:2222222222222222222222222222222222222222222222222222222222222222": {
+      "profit_level": "0.12",
+      "end_date": "2026-09-21",
+      "on_complete": "release"
+     }
     },
     "records": [
      {
@@ -20717,15 +20863,11 @@
      },
      {
       "event_type": "MandateVersionApplied",
+      "event_id": "01J8Z5RHV02000000000000000",
       "payload": {
        "agent_id": "agent_a",
        "new_version": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
-       "result": "applied",
-       "mandate": {
-        "profit_level": "0.12",
-        "end_date": "2026-09-21",
-        "on_complete": "release"
-       }
+       "result": "applied"
       }
      }
     ],
@@ -20734,10 +20876,29 @@
    },
    {
     "name": "cancelled_by_a_later_end_date",
-    "clause": "§9.34: an end_date moved past the cause's cancels it",
+    "clause": "§9.34: an end_date after the one it was held under cancels it",
     "cause": {
-     "kind": "end_date",
-     "date": "2026-09-21"
+     "event_type": "GoalCompleted",
+     "event_id": "01J8Z5RH0B000000000000000M",
+     "payload": {
+      "agent_id": "agent_a",
+      "reason": "end_date",
+      "then": null,
+      "on_complete": null,
+      "risk_clock": "2026-09-21T15:00:00.000000000Z"
+     }
+    },
+    "mandates": {
+     "sha256:1111111111111111111111111111111111111111111111111111111111111111": {
+      "profit_level": "0.10",
+      "end_date": "2026-09-21",
+      "on_complete": "release"
+     },
+     "sha256:2222222222222222222222222222222222222222222222222222222222222222": {
+      "profit_level": "0.10",
+      "end_date": "2026-10-21",
+      "on_complete": "release"
+     }
     },
     "records": [
      {
@@ -20773,15 +20934,11 @@
      },
      {
       "event_type": "MandateVersionApplied",
+      "event_id": "01J8Z5RHV03000000000000000",
       "payload": {
        "agent_id": "agent_a",
        "new_version": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
-       "result": "applied",
-       "mandate": {
-        "profit_level": "0.10",
-        "end_date": "2026-10-21",
-        "on_complete": "release"
-       }
+       "result": "applied"
       }
      }
     ],
@@ -20792,8 +20949,27 @@
     "name": "the_same_end_date",
     "clause": "§9.34: the same end_date cancels nothing",
     "cause": {
-     "kind": "end_date",
-     "date": "2026-09-21"
+     "event_type": "GoalCompleted",
+     "event_id": "01J8Z5RH0B000000000000000M",
+     "payload": {
+      "agent_id": "agent_a",
+      "reason": "end_date",
+      "then": null,
+      "on_complete": null,
+      "risk_clock": "2026-09-21T15:00:00.000000000Z"
+     }
+    },
+    "mandates": {
+     "sha256:1111111111111111111111111111111111111111111111111111111111111111": {
+      "profit_level": "0.10",
+      "end_date": "2026-09-21",
+      "on_complete": "release"
+     },
+     "sha256:2222222222222222222222222222222222222222222222222222222222222222": {
+      "profit_level": "0.10",
+      "end_date": "2026-09-21",
+      "on_complete": "release"
+     }
     },
     "records": [
      {
@@ -20829,15 +21005,11 @@
      },
      {
       "event_type": "MandateVersionApplied",
+      "event_id": "01J8Z5RHV04000000000000000",
       "payload": {
        "agent_id": "agent_a",
        "new_version": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
-       "result": "applied",
-       "mandate": {
-        "profit_level": "0.10",
-        "end_date": "2026-09-21",
-        "on_complete": "release"
-       }
+       "result": "applied"
       }
      }
     ],
@@ -20846,10 +21018,29 @@
    },
    {
     "name": "cancelled_by_on_complete",
-    "clause": "§9.34: an on_complete changed from the one that retired it cancels it",
+    "clause": "§9.34: an on_complete changed from the one it was held under cancels it",
     "cause": {
-     "kind": "on_complete",
-     "on_complete": "release"
+     "event_type": "GoalCompleted",
+     "event_id": "01J8Z5RH0B000000000000000M",
+     "payload": {
+      "agent_id": "agent_a",
+      "reason": null,
+      "then": "release",
+      "on_complete": "release",
+      "risk_clock": "2026-09-21T15:00:00.000000000Z"
+     }
+    },
+    "mandates": {
+     "sha256:1111111111111111111111111111111111111111111111111111111111111111": {
+      "profit_level": "0.10",
+      "end_date": "2026-09-21",
+      "on_complete": "release"
+     },
+     "sha256:2222222222222222222222222222222222222222222222222222222222222222": {
+      "profit_level": "0.10",
+      "end_date": "2026-09-21",
+      "on_complete": "hold_protected"
+     }
     },
     "records": [
      {
@@ -20885,15 +21076,11 @@
      },
      {
       "event_type": "MandateVersionApplied",
+      "event_id": "01J8Z5RHV05000000000000000",
       "payload": {
        "agent_id": "agent_a",
        "new_version": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
-       "result": "applied",
-       "mandate": {
-        "profit_level": "0.10",
-        "end_date": "2026-09-21",
-        "on_complete": "stop"
-       }
+       "result": "applied"
       }
      }
     ],
