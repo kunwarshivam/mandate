@@ -586,6 +586,10 @@ the spec invariants (DP-n) its tests cover.
     journals the New York midnight tick before any post-midnight mark (writer-side test), and once
     MC-R13 gains its tick step the fold fails closed on a post-midnight mark with no tick. And
     `Input::Mark { bid: Option<Price> }` replaces the fold's placeholder bid for a not-sane mark.
+  - **Follow-up ([DEC-2310](decisions/DEC-2310.md) items 3 and 4, the #2007 review):** slice C
+    refuses at deploy a mandate whose `universe.max_instruments` exceeds 1 until the multi-instrument
+    risk state lands, and B2b-2 adds the held-position version of the not-sane-bid test, which a flat
+    position cannot exercise.
   - **Follow-up ([DEC-2305](decisions/DEC-2305.md)):** a last-trade risk mark (trading spec §8.2,
     "in-session and fresh") needs a `MarkUpdated` version 3 or a new member before any writer uses
     one. Version 2 records a quote's bid only, so until then no last-trade mark updates E, which

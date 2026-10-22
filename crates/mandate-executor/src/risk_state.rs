@@ -251,27 +251,41 @@ pub struct AccountRiskFold<'c> {
     /// The last tick's clock, or the opening instant before any tick, from which the next tick
     /// crosses midnight. A mark does not move it (§5.4 starts the day at a tick).
     clock: UtcNanos,
-    /// The one instrument the risk state's position is (DEC-2308 item 4): the first a mark names.
-    /// `RiskState` holds a single position, so a row naming another instrument is one it cannot
-    /// step without moving this one's E on the other's price, and the view becomes unreadable.
+    /// The one instrument the risk state's position is (DEC-2310 item 1): the opening's, or the first
+    /// a mark names when the opening is flat. `RiskState` holds a single position, so a row naming
+    /// another instrument is one it cannot step without moving this one's E on the other's price,
+    /// and the view becomes unreadable. Ids are compared exactly, as the journal's canonical asset
+    /// ids.
     instrument: Option<String>,
 }
 
 impl<'c> AccountRiskFold<'c> {
     /// Opens the fold for `agent` on `stream` after the row at `head`, with the risk state at
-    /// `opening` (mandate spec §5.2) and the tripwire state folded so far.
+    /// `opening` (mandate spec §5.2) and the tripwire state folded so far. `instrument` is the
+    /// position's instrument, which the fold binds at once (DEC-2310 item 1): a held opening must
+    /// name it, so no first mark can name another and move E, and so must a fold opened past seq 1,
+    /// since a row before `head` may have bound it.
     ///
     /// # Errors
-    /// Whatever `RiskState::open` refuses.
+    /// Whatever `RiskState::open` refuses, and `invalid_input` for a held opening, or an opening
+    /// after seq 1, that names no instrument.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "each is one of the fold's independent inputs, none derivable from another"
+    )]
     pub fn open(
         stream: &str,
         head: u64,
         agent: &str,
         mandate: &ValidatedMandate,
         opening: &Opening,
+        instrument: Option<&str>,
         calendar: &'c dyn RiskCalendar,
         tripwires: TripwireState,
     ) -> Result<Self, SpecError> {
+        if instrument.is_none() && (!opening.position_qty.is_zero() || head > 1) {
+            return Err(SpecError::InvalidInput { what: "instrument" });
+        }
         let risk = RiskState::open(mandate, opening, calendar)?;
         let view = RiskView::Readable {
             snapshot: Box::new(risk.snapshot().clone()),
@@ -285,7 +299,7 @@ impl<'c> AccountRiskFold<'c> {
             tripwires,
             view,
             clock: opening.at,
-            instrument: None,
+            instrument: instrument.map(str::to_owned),
         })
     }
 
