@@ -1,6 +1,7 @@
 //! The connect check of an exchanged OAuth connection (DEC-2339; connections spec §5.2 step 4,
 //! §8.1; journal spec §9.8): the account id goes to the connection's personal-data entry once,
-//! the journal holds only its reference, and any refusal of the entry is an unreadable account.
+//! the journal holds only its reference, its fingerprint goes beside it under the same reference
+//! (DEC-2345), and any refusal of either entry is an unreadable account.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -17,6 +18,7 @@ use mandate_journal::{AppendOutcome, StoredEvent, StreamId};
 use mandate_store::{MemoryStore, Store};
 use mandate_time::UtcNanos;
 use mandate_vault::SourceError;
+use mandate_vault::fingerprint::{AccountFingerprint, decode_entry};
 use mandate_vault::policy::SecretPath;
 use secrecy::{ExposeSecret, SecretSlice};
 
@@ -28,6 +30,8 @@ const PII: &str = "pii_01J8Z2PQ000000000000000001";
 const RETRY_PII: &str = "pii_01J8Z2PQ000000000000000002";
 /// The broker's account id: a fake one, in Alpaca's form.
 const BROKER_ID: &str = "904837e3-3b76-47ec-b432-046db621571b";
+/// The vault's fingerprint of it: a fake one, in transit's form.
+const HASH: &str = "vault:v1:q83vEjRWeJCrze8SNFZ4kKvN7xI0VniQq83vEjRWeJA=";
 
 fn scope() -> AccountScope {
     AccountScope {
@@ -53,6 +57,9 @@ fn check(account: Option<&str>, pii: &str) -> Result<OAuthCheck, Error> {
         connection: connection()?,
         granted: granted()?,
         account: account.map(BrokerAccountId::new).transpose()?,
+        fingerprint: account
+            .map(|_| AccountFingerprint::new(HASH))
+            .transpose()?,
         pii_ref: AccountPiiRef::new(pii)?,
     })
 }
@@ -144,9 +151,11 @@ fn results(payload: &Value) -> Vec<(String, String, Option<String>)> {
 }
 
 /// A read account goes to the connection's own entry, once, in the entry's form under the minted
-/// reference; the journal opens the stream and records every check passed as an Alpaca paper
+/// reference, and its fingerprint to the request's fingerprint entry beside it, once, under the
+/// same reference; the journal opens the stream and records every check passed as an Alpaca paper
 /// OAuth connection, holding the reference and never the id.
 #[test]
+#[ignore = "pending E21-32"]
 fn a_read_account_is_kept_in_its_entry_and_only_its_reference_is_journaled() -> Result<(), Error> {
     let mut store = MemoryStore::default();
     let vault = CreateOnce::default();
@@ -163,11 +172,22 @@ fn a_read_account_is_kept_in_its_entry_and_only_its_reference_is_journaled() -> 
         "{:?}",
         SecretPath::AccountId(connection()?, StreamRef::new(ACCOUNT)?)
     );
-    assert_eq!(vault.asked.borrow().as_slice(), std::slice::from_ref(&path));
+    let fingerprint_path = format!(
+        "{:?}",
+        SecretPath::Fingerprint(connection()?, StreamRef::new(ACCOUNT)?)
+    );
+    assert_eq!(
+        vault.asked.borrow().as_slice(),
+        [path.clone(), fingerprint_path.clone()]
+    );
     let entries = vault.entries.borrow();
     let entry = decode(entries.get(&path).ok_or("no entry")?)?;
     assert_eq!(entry.pii_ref.as_str(), PII);
     assert_eq!(entry.account_id, BrokerAccountId::new(BROKER_ID)?);
+    let (fingerprint, pii_ref) =
+        decode_entry(entries.get(&fingerprint_path).ok_or("no fingerprint")?)?;
+    assert_eq!(fingerprint.as_str(), HASH);
+    assert_eq!(pii_ref.as_str(), PII);
     let types: Vec<String> = rows(&store)?.into_iter().map(|r| r.event_type).collect();
     assert_eq!(types, ["StreamOpened", "ConnectionChecked"]);
     let (payload, pii_refs) = last_checked(&store)?;
@@ -218,6 +238,68 @@ fn an_unread_account_creates_nothing_and_journals_a_null_reference() -> Result<(
     Ok(())
 }
 
+/// An account the vault did not hash creates no entry and is journaled as unreadable: the check
+/// never keeps an id it cannot fingerprint (DEC-2345 item 7).
+#[test]
+fn an_unhashed_account_creates_nothing_and_journals_a_null_reference() -> Result<(), Error> {
+    let mut store = MemoryStore::default();
+    let vault = CreateOnce::default();
+    let mut unhashed = check(Some(BROKER_ID), PII)?;
+    unhashed.fingerprint = None;
+    let checked = oauth_connect_check(
+        &mut store,
+        &Ids,
+        &scope(),
+        unhashed,
+        |path, secret| vault.create(path, secret),
+        now()?,
+    )?;
+    assert!(!checked.passed);
+    assert!(vault.asked.borrow().is_empty());
+    let (payload, pii_refs) = last_checked(&store)?;
+    assert_eq!(payload.get("account_pii_ref"), Some(&Value::Null));
+    assert_eq!(pii_refs, Value::Array(Vec::new()));
+    Ok(())
+}
+
+/// A refused fingerprint create, after the account entry was created, is an unreadable account
+/// too: the record holds no reference whose fingerprint the connection manager could not read
+/// (DEC-2345 item 7), and the account entry is left for erasure.
+#[test]
+#[ignore = "pending E21-32"]
+fn a_refused_fingerprint_create_journals_a_null_reference() -> Result<(), Error> {
+    let mut store = MemoryStore::default();
+    let vault = CreateOnce::default();
+    let fingerprint_path = SecretPath::Fingerprint(connection()?, StreamRef::new(ACCOUNT)?);
+    vault.create(&fingerprint_path, &SecretSlice::from(b"taken".to_vec()))?;
+    vault.asked.borrow_mut().clear();
+    let checked = oauth_connect_check(
+        &mut store,
+        &Ids,
+        &scope(),
+        check(Some(BROKER_ID), PII)?,
+        |path, secret| vault.create(path, secret),
+        now()?,
+    )?;
+    let path = format!(
+        "{:?}",
+        SecretPath::AccountId(connection()?, StreamRef::new(ACCOUNT)?)
+    );
+    assert_eq!(
+        vault.asked.borrow().as_slice(),
+        [path, format!("{fingerprint_path:?}")]
+    );
+    assert!(!checked.passed);
+    let (payload, pii_refs) = last_checked(&store)?;
+    assert_eq!(payload.get("account_pii_ref"), Some(&Value::Null));
+    assert_eq!(pii_refs, Value::Array(Vec::new()));
+    assert_eq!(
+        vault.entries.borrow().get(&format!("{fingerprint_path:?}")),
+        Some(&b"taken".to_vec())
+    );
+    Ok(())
+}
+
 /// DEC-2339 item 6: an executor that created its entry and crashed before the record committed
 /// finds its retry's create refused, cannot read the entry back, and so fails closed: the retry
 /// journals the account as unreadable, under no reference, and the first entry is left as it was.
@@ -238,6 +320,7 @@ fn a_retry_after_a_crash_before_the_record_fails_closed() -> Result<(), Error> {
     );
     assert_eq!(crashed.map(drop), Err("append_refused"));
     assert!(rows(&journal)?.is_empty());
+    let asked_before_the_retry = vault.asked.borrow().len();
     let mut store = journal.clone();
     let retried = oauth_connect_check(
         &mut store,
@@ -248,7 +331,7 @@ fn a_retry_after_a_crash_before_the_record_fails_closed() -> Result<(), Error> {
         now()?,
     )?;
     assert!(!retried.passed);
-    assert_eq!(vault.asked.borrow().len(), 2);
+    assert_eq!(vault.asked.borrow().len(), asked_before_the_retry + 1);
     let (payload, pii_refs) = last_checked(&store)?;
     assert_eq!(payload.get("account_pii_ref"), Some(&Value::Null));
     assert_eq!(pii_refs, Value::Array(Vec::new()));

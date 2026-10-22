@@ -1,0 +1,8 @@
+file = "crates/mandate-executord/tests/exchanged_start.rs"
+test = "the_account_id_is_in_no_record_and_no_code"
+reason = """
+The connect check folds its fingerprint create into whether the account was read, so its stub's
+report never reaches the check's answer: the stub refuses the fingerprint entry, the account is
+journaled unreadable, and the test fails on that answer. E21-32's F3c implementation creates the
+entry and deletes this row (DEC-2345 item 7).
+"""

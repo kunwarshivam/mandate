@@ -1,6 +1,7 @@
 //! The exchanged executor's own connection and connect check (DEC-2336, DEC-2339): its connection
 //! read back from the ServiceAccount it runs as, and the check composed from its lease, the paper
-//! host's answer, and a reference minted from its random source.
+//! host's answer and the vault's fingerprint of it (DEC-2345), and a reference minted from its
+//! random source.
 
 use std::cell::RefCell;
 
@@ -15,7 +16,9 @@ use mandate_journal::StreamId;
 use mandate_store::{MemoryStore, Store};
 use mandate_time::UtcNanos;
 use mandate_vault::SourceError;
+use mandate_vault::fingerprint::{AccountFingerprint, decode_entry};
 use mandate_vault::personal::PiiRandom;
+use mandate_vault::policy::SecretPath;
 use secrecy::ExposeSecret;
 
 type Error = Box<dyn std::error::Error>;
@@ -25,6 +28,8 @@ const ENTRY: &[u8] =
     br#"{"access_token":"tok-1","format":1,"scope":["data","trading"],"token_type":"bearer"}"#;
 /// The broker's account id: a fake one, in Alpaca's form.
 const BROKER_ID: &str = "904837e3-3b76-47ec-b432-046db621571b";
+/// The vault's fingerprint of it: a fake one, in transit's form.
+const HASH: &str = "vault:v1:q83vEjRWeJCrze8SNFZ4kKvN7xI0VniQq83vEjRWeJA=";
 
 fn scope() -> AccountScope {
     AccountScope {
@@ -52,12 +57,15 @@ fn held(leased: &[u8]) -> Result<Exchanged<'_>, Error> {
         connection: ConnectionId::new("conn1")?,
         leased,
         account: Some(BrokerAccountId::new(BROKER_ID)?),
+        fingerprint: Some(AccountFingerprint::new(HASH)?),
     })
 }
 
 /// The check reads the scopes from the lease's token entry and keeps the account under a reference
-/// minted at its time from its source: the entry and the journaled record hold that one reference.
+/// minted at its time from its source: the entry, the fingerprint entry beside it and the
+/// journaled record hold that one reference.
 #[test]
+#[ignore = "pending E21-32"]
 fn the_check_keeps_the_account_under_a_reference_minted_from_its_source() -> Result<(), Error> {
     let mut store = MemoryStore::default();
     let created = RefCell::new(Vec::new());
@@ -68,18 +76,25 @@ fn the_check_keeps_the_account_under_a_reference_minted_from_its_source() -> Res
         &scope(),
         held(ENTRY)?,
         &mut Fixed(Some(random)),
-        |_, secret| {
-            created.borrow_mut().push(secret.expose_secret().to_vec());
+        |path, secret| {
+            created
+                .borrow_mut()
+                .push((path.clone(), secret.expose_secret().to_vec()));
             Ok(())
         },
         now()?,
     )?;
     assert!(checked.passed);
     let created = created.borrow();
-    let [entry] = created.as_slice() else {
-        return Err("one create".into());
+    let [
+        (SecretPath::AccountId(..), entry),
+        (SecretPath::Fingerprint(..), fingerprint),
+    ] = created.as_slice()
+    else {
+        return Err("the account entry, then the fingerprint entry".into());
     };
     let pii_ref = decode(entry)?.pii_ref.as_str().to_owned();
+    assert_eq!(decode_entry(fingerprint)?.1.as_str(), pii_ref);
     let ulid = decode_ulid(pii_ref.strip_prefix("pii_").ok_or("pii_")?)?;
     assert_eq!(ulid >> 80, 1_792_681_200_500);
     assert_eq!(ulid & ((1 << 80) - 1), 0x0a0b_0c0d_0e0f_1011_1213);

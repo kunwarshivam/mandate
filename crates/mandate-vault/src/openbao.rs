@@ -22,6 +22,7 @@ use std::time::Duration;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
+use mandate_connections::account_entry::BrokerAccountId;
 use mandate_connections::record::{AccountPiiRef, AccountRef, ConnectionId};
 use mandate_time::UtcNanos;
 use reqwest::{Certificate, Method, StatusCode, redirect};
@@ -642,29 +643,6 @@ impl OpenBaoSource {
 }
 
 impl OpenBaoSource {
-    /// The fingerprint of the broker account id `account` under the deployment's key, by transit's
-    /// HMAC
-    /// (`<transit>/hmac/account-fingerprint`): asked by a connection's executor alone, at its
-    /// connect (DEC-2345 item 2). The key never leaves the vault, and the id is sent only to it.
-    ///
-    /// # Errors
-    /// [`SourceError::Denied`] for any identity but an executor, the vault's refusals, and
-    /// [`SourceError::Malformed`] for an answer that is not a fingerprint.
-    pub async fn hmac_account(
-        &self,
-        account: &SecretString,
-    ) -> Result<AccountFingerprint, SourceError> {
-        if !matches!(self.identity, Identity::Executor(_)) {
-            return Err(SourceError::Denied);
-        }
-        let mut input = STANDARD.encode(account.expose_secret());
-        let body = json!({ "input": input });
-        input.zeroize();
-        let path = format!("{}/hmac/{FINGERPRINT_KEY}", self.mounts.transit);
-        let answer = self.call(Method::POST, &path, Some(&body)).await?;
-        AccountFingerprint::new(text(answer.as_ref(), "/data/hmac")?)
-    }
-
     /// The fingerprint and reference of the request `account` of `connection`, from the
     /// fingerprint entry its executor wrote at connect: asked by the connection manager, which
     /// must find the reference equal to the journaled `account_pii_ref` before it uses the hash
@@ -842,6 +820,28 @@ fn unavailable(_: SourceError) -> FingerprintError {
 impl SecretSource for OpenBaoSource {
     fn identity(&self) -> &Identity {
         &self.identity
+    }
+
+    /// The fingerprint of the broker account id `account` under the deployment's key, by transit's
+    /// HMAC (`<transit>/hmac/account-fingerprint`): asked by a connection's executor alone, at its
+    /// connect (DEC-2345 item 2). The key never leaves the vault, and the id is sent only to it.
+    ///
+    /// # Errors
+    /// [`SourceError::Denied`] for any identity but an executor, the vault's refusals, and
+    /// [`SourceError::Malformed`] for an answer that is not a fingerprint.
+    async fn hmac_account(
+        &self,
+        account: &BrokerAccountId,
+    ) -> Result<AccountFingerprint, SourceError> {
+        if !matches!(self.identity, Identity::Executor(_)) {
+            return Err(SourceError::Denied);
+        }
+        let mut input = STANDARD.encode(account.secret().expose_secret());
+        let body = json!({ "input": input });
+        input.zeroize();
+        let path = format!("{}/hmac/{FINGERPRINT_KEY}", self.mounts.transit);
+        let answer = self.call(Method::POST, &path, Some(&body)).await?;
+        AccountFingerprint::new(text(answer.as_ref(), "/data/hmac")?)
     }
 
     /// A check-and-set write at version 0, which the vault takes only where no version is there,

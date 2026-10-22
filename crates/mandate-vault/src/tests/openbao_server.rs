@@ -35,6 +35,7 @@ use crate::openbao::{
 };
 use crate::policy::{Identity, Mounts, SecretPath, kv_path, openbao_policy, role_name};
 use crate::source::{Grant, SecretSource};
+use mandate_connections::account_entry::BrokerAccountId;
 use mandate_connections::record::{AccountPiiRef, AccountRef, ConnectionId};
 use mandate_time::UtcNanos;
 use reqwest::{Certificate, Method};
@@ -1035,7 +1036,7 @@ async fn an_executor_creates_its_own_account_entry_once_and_no_identity_reads_it
 #[tokio::test(flavor = "current_thread")]
 async fn only_an_executor_hashes_an_account_under_the_vaults_key() {
     let ca = include_bytes!("fixtures/isrg-root-x1.pem").to_vec();
-    let id = |text: &str| SecretString::from(text.to_owned());
+    let id = |text: &str| BrokerAccountId::new(text).unwrap();
     let unreachable = OpenBaoSource::from_token(
         &nowhere(ca),
         Identity::Executor(c("c1")),
@@ -1151,7 +1152,7 @@ fn request(n: u8) -> AccountRef {
 async fn fingerprinted(bao: &Bao, connection: &str, n: u8, now: UtcNanos) -> AccountFingerprint {
     let executor = executor_of(bao, connection, now).await;
     let fingerprint = executor
-        .hmac_account(&SecretString::from("acct-1".to_owned()))
+        .hmac_account(&BrokerAccountId::new("acct-1").unwrap())
         .await
         .unwrap();
     let pii_ref = AccountPiiRef::new(&format!("pii_01J8Z2PQ00000000000000000{n}")).unwrap();
