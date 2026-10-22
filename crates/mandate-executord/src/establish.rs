@@ -8,14 +8,18 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use mandate_canon::Object;
+use mandate_canon::{Key, Object, Value};
 use mandate_executor::{
     AccountScope, BindingGateInput, BindingGateRequest, BindingGateSource, EventDraft, EventId,
 };
 use mandate_journal::{Environment, StoredEvent};
 use mandate_time::UtcNanos;
 
-use crate::credential::Unimplemented;
+use crate::follow::folded;
+
+const ESTABLISHED: &str = "ConnectionEstablished";
+const REFUSED: &str = "ConnectionRefused";
+const REVOKED: &str = "ConnectionRevoked";
 
 /// The control stream's establishment the executor copies: its event id, which the copy names as
 /// its `causation_id`, and its payload's members.
@@ -57,8 +61,67 @@ pub fn establishment(
     scope: &AccountScope,
     environment: Environment,
 ) -> Result<Establishment, &'static str> {
-    let _ = (account, control, scope, environment);
-    Err(Unimplemented)
+    let unreadable = "connection_record_unreadable";
+    if account.iter().any(|row| row.event_type == ESTABLISHED) {
+        return Ok(Establishment::Established);
+    }
+    let mut latest = None;
+    for row in account
+        .iter()
+        .filter(|row| row.event_type == "ConnectionChecked")
+    {
+        let event = folded(row).map_err(|_| unreadable)?;
+        let member = |name: &str| event.payload.get(name).and_then(Value::as_str);
+        let connection = member("connection_id").ok_or(unreadable)?.to_owned();
+        if member("occasion").ok_or(unreadable)? == "connect" {
+            let passed = matches!(
+                event.payload.get("results"),
+                Some(Value::Array(results)) if !results.is_empty()
+                    && results
+                        .iter()
+                        .all(|result| result.get("result").and_then(Value::as_str) == Some("passed"))
+            );
+            latest = Some((row.event_id.clone(), connection, passed));
+        }
+    }
+    let Some((check, connection, passed)) = latest else {
+        return Ok(Establishment::Connecting);
+    };
+    let mut due = None;
+    let mut closed = false;
+    for row in control
+        .iter()
+        .filter(|row| row.environment == environment.as_str())
+        .filter(|row| matches!(row.event_type.as_str(), ESTABLISHED | REFUSED | REVOKED))
+    {
+        let event = folded(row).map_err(|_| unreadable)?;
+        let member = |name: &str| event.payload.get(name).and_then(Value::as_str);
+        if member("connection_id").ok_or(unreadable)? != connection {
+            continue;
+        }
+        match (row.event_type.as_str(), row.schema_version) {
+            (REFUSED, _) => closed |= member("occasion").ok_or(unreadable)? == "connect",
+            (REVOKED, _) => closed = true,
+            (_, 2)
+                if event.causation_id.as_ref().map(|id| id.0.as_str()) == Some(check.as_str())
+                    && member("account_ref") == Some(scope.account.0.as_str()) =>
+            {
+                let Value::Object(members) = &event.payload else {
+                    return Err(unreadable);
+                };
+                due = Some(ToCopy {
+                    original: EventId(row.event_id.clone()),
+                    members: members.clone(),
+                });
+            }
+            _ => {}
+        }
+    }
+    Ok(match (closed, passed, due) {
+        (true, _, _) => Establishment::Closed,
+        (false, true, Some(due)) => Establishment::ToCopy(due),
+        _ => Establishment::Connecting,
+    })
 }
 
 /// The copy of `copy` with id `event_id` at `now`: `ConnectionEstablished` version 2 on the
@@ -73,8 +136,22 @@ pub fn copy_draft(
     event_id: EventId,
     now: UtcNanos,
 ) -> Result<EventDraft, &'static str> {
-    let _ = (copy, event_id, now);
-    Err(Unimplemented)
+    let refused = "copy_refused";
+    let key = Key::new("risk_clock").map_err(|_| refused)?;
+    if copy.members.contains_key(&key) {
+        return Err(refused);
+    }
+    let clock = UtcNanos::from_parts(now.secs(), 0).map_err(|_| refused)?;
+    let mut members = copy.members.clone();
+    members.insert(key, Value::Str(clock.to_string()));
+    Ok(EventDraft {
+        event_id,
+        event_type: ESTABLISHED.to_owned(),
+        schema_version: 2,
+        config_refs: Object::new(),
+        causation_id: Some(copy.original.clone()),
+        payload: Value::Object(members),
+    })
 }
 
 /// Whether openings may reach the binding gate: shut while the account stream is connecting, and
