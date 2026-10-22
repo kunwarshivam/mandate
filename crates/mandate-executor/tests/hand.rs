@@ -5620,6 +5620,79 @@ fn protection_the_cancel_all_cancels_opens_a_bounded_alerted_interval() {
     assert!(sent.is_empty(), "nothing placed or sold: {sent:?}");
 }
 
+/// The interval protection's loss opens is the closing instrument's own, whatever other
+/// instrument has one open (DEC-2333 item 3): with an AAPL bracket partly filled, its interval
+/// open, the BTC stop the cancel-all cancels still starts BTC's interval.
+#[test]
+#[ignore = "pending E7-4"]
+fn another_instruments_open_interval_does_not_hide_the_closing_ones_start() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL, BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (mut shell, stop) = crypto_stop_account(&ports);
+    shell.run(Input::Market(quote(AAPL, "150", "150.1", 20)), &ports);
+    let submitted = shell.run(
+        handoff(
+            OTHER_INTENT,
+            common::AGENT,
+            protected_opening(AAPL, "100", "150", "140", Some("170")),
+        ),
+        &ports,
+    );
+    let entry = submitted
+        .submissions()
+        .first()
+        .map(|o| o.client_order_id.as_str().to_owned())
+        .expect("the AAPL bracket is sent");
+    shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+            "b-2",
+            Some(&entry),
+            AAPL,
+            Side::Buy,
+            "100",
+            "60",
+            "partially_filled",
+        ))),
+        &ports,
+    );
+    shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Fill(broker_fill(
+            "f-aapl-1",
+            Some(&entry),
+            "60",
+            "150",
+        ))),
+        &ports,
+    );
+    shell.run(account_switch(Initiator::Owner), &ports);
+
+    let cancelled = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(stop("canceled"))),
+        &ports,
+    );
+
+    let started: Vec<_> = cancelled
+        .drafts
+        .iter()
+        .filter(|d| {
+            d.event_type == "ProtectionChanged"
+                && d.payload
+                    .get("action")
+                    .and_then(mandate_canon::Value::as_str)
+                    == Some("unprotected_start")
+        })
+        .filter_map(|d| {
+            d.payload
+                .get("instrument_id")
+                .and_then(mandate_canon::Value::as_str)
+        })
+        .collect();
+    assert_eq!(started, vec![BTC], "BTC's own interval starts");
+}
+
 /// A mode lifted after the account switch, as the account stream copies it: `agent` back to
 /// `normal` from `restriction`, citing the control-stream record that lifted it.
 fn lifted(shell: &mut Shell, agent: &str, restriction: &str) {
