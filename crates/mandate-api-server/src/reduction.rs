@@ -9,22 +9,32 @@
 //! `__Host-mandate_device` cookie, keyed only by its SHA-256. [`limits`] are DEC-2117 item 3's
 //! numbers for `mandate_authn`'s gate (DEC-653).
 
+use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv6Addr};
 use std::num::NonZeroU32;
+use std::sync::Mutex;
 
 use axum::http::HeaderMap;
 use axum::http::header::COOKIE;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use mandate_authn::ReductionLimits;
+use mandate_authn::{ClientKey, ReductionGate, ReductionLimits, Unauthenticated};
 use mandate_canon::encode_ulid;
 use mandate_time::UtcNanos;
 use ring::digest::{SHA256, digest};
 
 use crate::config::StartRefusal;
+use crate::session::{OsRandom, Random};
 
 /// The device cookie's name (§4.10 route 2 item 3).
 pub const DEVICE_COOKIE: &str = "__Host-mandate_device";
+
+/// The most challenges outstanding in all (DEC-2117 item 3).
+pub const CHALLENGES_IN_ALL: usize = 4_096;
+
+/// Past this many outstanding, an address that already holds one gets no more, so the last 1,024
+/// go one per address (DEC-2119 item 11).
+pub const RESERVE_FROM: usize = 3_072;
 
 /// The setting naming the ingress's own addresses (§3.11 item 2).
 pub const INGRESS_PEERS: &str = "MANDATE_API_INGRESS_PEERS";
@@ -156,4 +166,71 @@ pub fn challenge_id(issued_at: UtcNanos, bytes: &[u8; 32]) -> String {
         .copied()
         .collect();
     encode_ulid(u128::from_be_bytes(raw.try_into().unwrap_or_default()))
+}
+
+/// A challenge the store issued.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Issued {
+    pub challenge_id: String,
+    /// The address that asked for it, which the reserve counts.
+    pub address: String,
+    pub bytes: [u8; 32],
+    pub issued_at: UtcNanos,
+    pub expires_at: UtcNanos,
+}
+
+/// The gate, the challenges outstanding by id, the ingress peers, and the generator the challenge
+/// bytes and device cookies come from. A lock a panic poisoned is taken as it stands, so a
+/// failure elsewhere never closes route 2 (rule 13); the store's own guard is always the
+/// outstanding map before the gate.
+pub struct Reduction {
+    gate: Mutex<ReductionGate>,
+    outstanding: Mutex<BTreeMap<String, Issued>>,
+    ingress: Vec<IpAddr>,
+    random: Box<dyn Random>,
+}
+
+impl Reduction {
+    /// A store with nothing outstanding, behind `ingress`, drawing from `random`.
+    pub fn new(ingress: Vec<IpAddr>, random: Box<dyn Random>) -> Self {
+        Self {
+            gate: Mutex::new(ReductionGate::new(limits())),
+            outstanding: Mutex::new(BTreeMap::new()),
+            ingress,
+            random,
+        }
+    }
+
+    /// The ingress peers the store reads forwarded addresses from.
+    pub fn ingress(&self) -> &[IpAddr] {
+        &self.ingress
+    }
+
+    /// Issues a challenge for `client` at `now`: fresh bytes, held until `now` plus 300 s. Refused
+    /// when the gate refuses, when [`CHALLENGES_IN_ALL`] are outstanding, past [`RESERVE_FROM`]
+    /// when `client`'s address already holds one, when the id is already held, or when the
+    /// generator fails.
+    #[expect(
+        clippy::todo,
+        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+    )]
+    pub fn issue(&self, client: &ClientKey, now: UtcNanos) -> Result<Issued, Unauthenticated> {
+        let _ = (client, now, &self.gate, &self.outstanding, &self.random);
+        todo!()
+    }
+
+    /// Fresh device cookie bytes, unpadded base64url.
+    #[expect(
+        clippy::todo,
+        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+    )]
+    pub fn new_device(&self) -> Result<String, Unauthenticated> {
+        todo!()
+    }
+}
+
+impl Default for Reduction {
+    fn default() -> Self {
+        Self::new(Vec::new(), Box::new(OsRandom::new()))
+    }
 }
