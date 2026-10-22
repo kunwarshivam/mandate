@@ -14,15 +14,18 @@ use mandate_connections::checks::{AccountRead, CheckInput, Granted, Occasion, ru
 use mandate_connections::grant::GrantedScopes;
 use mandate_connections::record::{AccountPiiRef, AuthKind, Broker, ConnectionId, Environment};
 use mandate_connections::token_entry;
+use mandate_connections::vault::AccessToken;
 use mandate_executor::{AccountScope, IdGen};
 use mandate_store::Store;
 use mandate_time::UtcNanos;
 use mandate_vault::SourceError;
 use mandate_vault::personal::{PiiRandom, mint_pii_ref};
 use mandate_vault::policy::SecretPath;
+use mandate_vault::source::SecretSource;
 use secrecy::{ExposeSecret, SecretSlice};
 
 use crate::connect::{Checked, journal_check};
+use crate::credential::Unimplemented;
 
 /// What the OAuth connect check is given: the connection, the scopes its token entry was stored
 /// with, the account id the paper host answered (`None` when it could not be read), and the
@@ -144,4 +147,41 @@ pub fn exchanged_check<S: Store>(
         create,
         now,
     )
+}
+
+/// What the exchanged executor starts with: its connection, the vault session it logged in as,
+/// the paper host's account read, which is handed the leased access token, and its random source.
+pub struct Start<'a, V, A> {
+    pub connection: &'a ConnectionId,
+    pub vault: &'a V,
+    pub account: A,
+    pub random: &'a mut dyn PiiRandom,
+}
+
+/// The exchanged executor's start (DEC-2339; connections spec §5.2 step 4). While the account
+/// stream in `scope` holds no `connect` check, it leases the connection's secret from the vault,
+/// hands the account read the access token that lease holds, runs [`exchanged_check`] over the
+/// lease's own bytes, creating the entry through the vault, and gives the lease back; it answers
+/// the check. A stream that already holds a `connect` check, passed or failed, runs none and
+/// answers `None`, so a refused connect is never run again into a second create.
+///
+/// # Errors
+/// `connection_record_unreadable` for a check record that does not read,
+/// `credential_unavailable` when the vault refuses the lease, and [`exchanged_check`]'s codes,
+/// `entropy_unavailable` among them: each refuses the start before any create, and none names
+/// the secret or the id.
+pub fn exchanged_start<S, V, A>(
+    store: &mut S,
+    ids: &dyn IdGen,
+    scope: &AccountScope,
+    start: Start<'_, V, A>,
+    now: UtcNanos,
+) -> Result<Option<Checked>, &'static str>
+where
+    S: Store,
+    V: SecretSource,
+    A: FnOnce(AccessToken) -> Option<BrokerAccountId>,
+{
+    let _ = (store, ids, scope, start, now);
+    Err(Unimplemented)
 }

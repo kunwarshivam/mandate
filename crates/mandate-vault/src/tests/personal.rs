@@ -77,6 +77,21 @@ fn a_failed_source_mints_nothing() {
     );
 }
 
+/// A time before the epoch has no millisecond the ULID's unsigned 48 bits can hold, so it mints
+/// nothing, rather than a reference at its distance from the epoch.
+#[test]
+#[ignore = "pending E21-32"]
+fn a_time_before_the_epoch_mints_nothing() {
+    for (secs, nanos) in [(-1, 0), (-1, 999_999_999), (-62_135_596_800, 0)] {
+        assert_eq!(
+            minted(secs, nanos, [0; 10]),
+            Err(SourceError::Malformed),
+            "{secs}.{nanos:09}"
+        );
+    }
+    assert!(minted(0, 0, [0; 10]).is_ok());
+}
+
 /// The operating system's references are in the form, at their millisecond, and no two of many
 /// are alike.
 #[test]
