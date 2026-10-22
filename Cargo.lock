@@ -2701,7 +2701,6 @@ name = "mandate-vault"
 version = "0.0.0"
 dependencies = [
  "base64 0.22.1",
- "mandate-canon",
  "mandate-connections",
  "mandate-time",
  "mandate-vault-local",

@@ -78,16 +78,19 @@ impl CreateOnce {
 }
 
 /// A journal that loses every append, as a process that crashes after the entry is created and
-/// before its record commits.
-struct Crashing(MemoryStore);
+/// before its record commits; with `owned` false it cannot give the stream at all.
+struct Losing {
+    journal: MemoryStore,
+    owned: bool,
+}
 
-impl Store for Crashing {
+impl Store for Losing {
     fn take_ownership(&mut self, stream: &StreamId) -> Option<u64> {
-        self.0.take_ownership(stream)
+        self.journal.take_ownership(stream).filter(|_| self.owned)
     }
 
     fn rows(&self, stream: &StreamId) -> Option<Vec<StoredEvent>> {
-        self.0.rows(stream)
+        self.journal.rows(stream)
     }
 
     fn append(
@@ -222,7 +225,10 @@ fn a_retry_after_a_crash_before_the_record_fails_closed() -> Result<(), Error> {
     let journal = MemoryStore::default();
     let vault = CreateOnce::default();
     let crashed = oauth_connect_check(
-        &mut Crashing(journal.clone()),
+        &mut Losing {
+            journal: journal.clone(),
+            owned: true,
+        },
         &Ids,
         &scope(),
         check(Some(BROKER_ID), PII)?,
@@ -298,28 +304,12 @@ fn every_refused_create_journals_a_null_reference() -> Result<(), Error> {
 #[test]
 #[ignore = "pending E21-32"]
 fn nothing_is_created_before_the_stream_is_taken() -> Result<(), Error> {
-    struct Unanswering;
-    impl Store for Unanswering {
-        fn take_ownership(&mut self, _stream: &StreamId) -> Option<u64> {
-            None
-        }
-        fn rows(&self, _stream: &StreamId) -> Option<Vec<StoredEvent>> {
-            None
-        }
-        fn append(
-            &mut self,
-            _stream: &StreamId,
-            _expected_head: u64,
-            current_epoch: u64,
-            _recorded_at: UtcNanos,
-            _drafts: &[Vec<u8>],
-        ) -> AppendOutcome {
-            AppendOutcome::Fenced { current_epoch }
-        }
-    }
     let vault = CreateOnce::default();
     let refused = oauth_connect_check(
-        &mut Unanswering,
+        &mut Losing {
+            journal: MemoryStore::default(),
+            owned: false,
+        },
         &Ids,
         &scope(),
         check(Some(BROKER_ID), PII)?,
