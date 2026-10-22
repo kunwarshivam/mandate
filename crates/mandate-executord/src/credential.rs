@@ -222,6 +222,26 @@ pub fn subject_account(
     }
 }
 
+/// The connection whose executor the pod runs as: `configured`, the pod's [`SUBJECT_ACCOUNT_ENV`],
+/// read back from its lowercase hex, and kept only when [`subject_account`] then holds for it, so
+/// an upper-case digit, an odd length or bytes that are no connection id are refused (DEC-2336,
+/// DEC-2339). A manager-started executor names no connection otherwise, so this is its own.
+///
+/// # Errors
+/// `executor_subject_account` for anything but one connection's own ServiceAccount name.
+pub fn subject_connection(configured: Option<String>) -> Result<ConnectionId, &'static str> {
+    let _ = configured;
+    Err(Unimplemented)
+}
+
+/// The report of a function E21-32 has not implemented yet, which its pending tests fail on
+/// (DEC-77); the implementation PR replaces the stub and removes it.
+#[allow(
+    non_upper_case_globals,
+    reason = "the pending gate recognises a stub by the name `Unimplemented` (DEC-137)"
+)]
+pub const Unimplemented: &str = "unimplemented";
+
 /// The variable the workspace chart sets to the namespace the deployment manager creates the
 /// executor's pod in (lane D1, K2).
 pub const WORKSPACE_NAMESPACE_ENV: &str = "MANDATE_WORKSPACE_NAMESPACE";
