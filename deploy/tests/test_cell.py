@@ -999,6 +999,18 @@ def approle_copied(docs: list[dict]) -> list[str]:
                 problems.append(f"{name}/{c['name']} copies an AppRole Secret into {sorted(into)}, not memory alone")
             if any(m["name"] in held and not m.get("readOnly") for m in mounts):
                 problems.append(f"{name}/{c['name']} mounts an AppRole Secret writable")
+        everyone = spec.get("containers", []) + spec.get("initContainers", [])
+        for volume in held:
+            by = [c["name"] for c in everyone if volume in {m["name"] for m in c.get("volumeMounts", [])}]
+            if len(by) > 1:
+                problems.append(f"{name}: the AppRole volume {volume} is mounted by {by}, not its one copy")
+        for c in copies:
+            if not held & {m["name"] for m in c.get("volumeMounts", [])}:
+                continue
+            for target in {m["name"] for m in c.get("volumeMounts", []) if not m.get("readOnly")}:
+                others = [(o["name"], m.get("readOnly", False), o in copies) for o in everyone if o is not c for m in o.get("volumeMounts", []) if m["name"] == target]
+                if len(others) > 1 or any(not read_only or init for _, read_only, init in others):
+                    problems.append(f"{name}: the copied credentials in {target} are mounted by {others}, not one reader read-only")
     return problems
 
 
@@ -1021,6 +1033,8 @@ def test_no_process_reads_an_approle_secret_where_it_is_mounted():
     ]
     for kind, name, seed in seeds:
         assert approle_copied(mutate(on, name, kind, seed)), (name, seed)
+    for where, volume in (("containers", "vault"), ("containers", "vault-sources"), ("initContainers", "vault-sources"), ("initContainers", "vault")):
+        assert approle_copied(mutate(on, "api", "Deployment", lambda w: beside_api(w, where, volume))), (where, volume)
 
 
 def vault_rule(policy: dict) -> dict:
