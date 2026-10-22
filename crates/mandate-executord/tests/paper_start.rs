@@ -15,7 +15,8 @@ use mandate_connections::record::ConnectionId;
 use mandate_connections::vault::AccessToken;
 use mandate_executord::Broker;
 use mandate_executord::credential::{
-    RunLease, VaultMount, lease_verdict, paper_broker, paper_settings, vault_config, vault_login,
+    RunLease, VaultMount, WORKSPACE_NAMESPACE_ENV, lease_verdict, paper_broker, paper_settings,
+    vault_config, vault_login, workspace_namespace,
 };
 use mandate_executord::lease::Held;
 use mandate_time::UtcNanos;
@@ -333,4 +334,41 @@ fn a_stopped_run_gives_its_lease_back() -> Result<(), Error> {
     lease.give_back()?;
     assert_eq!(calls.borrow().revoked, [entry(TOKEN)]);
     Ok(())
+}
+
+/// The login is held to the namespace the chart configured, which must be set and equal the pod's
+/// own: a missing or empty one is refused before the pod's namespace is read, and one the pod
+/// does not share, or a pod namespace that cannot be read, refuses the start.
+#[test]
+#[ignore = "pending E21-32"]
+fn the_login_is_held_to_the_charts_namespace_when_the_pod_shares_it() {
+    assert_eq!(WORKSPACE_NAMESPACE_ENV, "MANDATE_WORKSPACE_NAMESPACE");
+    let pod = || Ok("ws-ws1".to_owned());
+    assert_eq!(
+        workspace_namespace(Some("ws-ws1".to_owned()), pod),
+        Ok("ws-ws1".to_owned())
+    );
+    for configured in [None, Some(String::new())] {
+        let read = std::cell::Cell::new(false);
+        let answer = workspace_namespace(configured.clone(), || {
+            read.set(true);
+            Ok("ws-ws1".to_owned())
+        });
+        assert_eq!(answer, Err("workspace_namespace_missing"), "{configured:?}");
+        assert!(!read.get(), "{configured:?}: the pod's namespace was read");
+    }
+    for configured in ["ws-ws2", "WS-WS1", "ws-ws1 ", "kube-system", "ws-ws1\n"] {
+        assert_eq!(
+            workspace_namespace(Some(configured.to_owned()), pod),
+            Err("workspace_namespace_mismatch"),
+            "{configured:?}"
+        );
+    }
+    for unreadable in [SourceError::CredentialFile, SourceError::Config] {
+        assert_eq!(
+            workspace_namespace(Some("ws-ws1".to_owned()), || Err(unreadable.clone())),
+            Err("vault_credentials_unreadable"),
+            "{unreadable:?}"
+        );
+    }
 }
