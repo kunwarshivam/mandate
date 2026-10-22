@@ -537,9 +537,9 @@ const PROTECTION_ACTIONS: &[&str] = &[
 /// §9.5's rules 41 to 44 on a well-typed `ProtectionChanged`, each clause in the order §9.5 gives
 /// it and reported at the member it names (DEC-446 item 6): 41's two lists, 42's quantity, 43's
 /// prices, then 44's remaining members from `intent_id` to `acknowledged`, each at its own member
-/// in the table's order, and last version 2's `unprotected_fraction`: only on `unprotected_start`
-/// and `placed`, and strictly between 0 and 1 (journal spec v0.72, DEC-2312). A version-1 record
-/// has no such member, which reads as null.
+/// in the table's order, and last version 2's `unprotected_fraction`: only on `unprotected_start`,
+/// `placed` and `unprotected_end`, and strictly between 0 and 1 (journal spec v0.72, DEC-2312,
+/// DEC-2315). A version-1 record has no such member, which reads as null.
 fn protection_changed_rules(p: Payload<'_>) -> Result<(), Invalid> {
     let schema = InvalidReason::Schema;
     let action = p.text("action");
@@ -616,7 +616,7 @@ fn protection_changed_rules(p: Payload<'_>) -> Result<(), Invalid> {
     if has("unprotected_fraction") {
         let fraction = p.text("unprotected_fraction");
         ensure(
-            named(&["unprotected_start", "placed"]) && below_one_share(fraction),
+            named(&["unprotected_start", "placed", "unprotected_end"]) && below_one_share(fraction),
             schema,
             "payload.unprotected_fraction",
         )?;
