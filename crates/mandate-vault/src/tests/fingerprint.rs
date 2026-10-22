@@ -261,7 +261,7 @@ fn the_entry_holds_the_fingerprint_and_reference_alone() {
         format!(r#"{{"fingerprint":"{HASH}","format":1}}"#),
         format!(r#"{{"fingerprint":"{HASH}","format":1,"pii_ref":"{PII}","account":"x"}}"#),
         format!(r#"{{"fingerprint":"vault:v1:abc","format":1,"pii_ref":"{PII}"}}"#),
-        format!(r#"{{"fingerprint":"{HASH}","format":1,"pii_ref":"pii_x"}}"#),
+        format!(r#"{{"fingerprint":"{HASH}","format":1,"pii_ref":""}}"#),
         format!(r#"{{"format":1,"fingerprint":"{HASH}","pii_ref":"{PII}"}}"#),
     ] {
         assert_eq!(
