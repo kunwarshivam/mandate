@@ -231,9 +231,12 @@ async fn serve(
     router: axum::Router,
     stop: impl Future<Output = ()> + Send + 'static,
 ) -> io::Result<()> {
-    axum::serve(listener, router)
-        .with_graceful_shutdown(stop)
-        .await
+    axum::serve(
+        listener,
+        router.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(stop)
+    .await
 }
 
 /// What ends the wait for SIGTERM: the signal, or a listener that stopped on its own.
@@ -288,6 +291,7 @@ async fn run(args: Args, start: Start) -> io::Result<()> {
         step_up: Arc::new(step_up),
         challenges,
         connect: None,
+        reduction: Arc::default(),
     };
     let api = spawn_listener(
         serve(
