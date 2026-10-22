@@ -71,7 +71,7 @@ fn an_account_id_is_printable_ascii_needing_no_escape() {
 /// Only format 1's exact bytes decode: another format, a member missing or added, reordered or
 /// spaced members, an escape, a reference that is not `pii_` and a ULID, or no JSON at all.
 #[test]
-fn only_the_entrys_exact_bytes_decode() {
+fn only_an_entry_in_its_exact_form_decodes() {
     for bytes in [
         String::new(),
         "{}".to_owned(),
