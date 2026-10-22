@@ -41,7 +41,6 @@ fn session(identity: Identity) -> OpenBaoSource {
 /// identity is refused `role_refused` before the vault is reached, whatever its policy would
 /// answer, and the provisioner's goes on to the vault.
 #[tokio::test]
-#[ignore = "pending E21-33"]
 async fn only_the_provisioners_session_makes_or_removes_roles() {
     let connection = ConnectionId::new("c1").unwrap();
     for identity in [
