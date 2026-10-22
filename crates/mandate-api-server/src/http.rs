@@ -125,6 +125,10 @@ pub fn api(app: App, drain: Arc<Drain>) -> Router {
             post(reduction::challenge).fallback(otherwise.clone()),
         )
         .route(
+            "/v1/reduction-sessions",
+            post(reduction::open).fallback(otherwise.clone()),
+        )
+        .route(
             "/v1/me/session",
             get(me::session).fallback(otherwise.clone()),
         )

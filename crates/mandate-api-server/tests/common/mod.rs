@@ -4,6 +4,7 @@
 #![allow(dead_code, reason = "each test file uses part of the shared helpers")]
 
 pub mod control;
+pub mod passkey;
 
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};

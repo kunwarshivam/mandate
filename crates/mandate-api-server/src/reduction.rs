@@ -12,6 +12,7 @@
 use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::num::NonZeroU32;
+use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use axum::body::Bytes;
@@ -206,6 +207,8 @@ pub struct Reduction {
     outstanding: Mutex<BTreeMap<String, Issued>>,
     ingress: Vec<IpAddr>,
     random: Box<dyn Random>,
+    /// How many `reduction_failures_over_limit` alerts this process has raised.
+    alerts: AtomicU64,
 }
 
 impl Reduction {
@@ -216,7 +219,30 @@ impl Reduction {
             outstanding: Mutex::new(BTreeMap::new()),
             ingress,
             random,
+            alerts: AtomicU64::new(0),
         }
+    }
+
+    /// Raises the operator alert `reduction_failures_over_limit` once: its opaque code on standard
+    /// error, naming no address, device, member, or passkey (rule 6), and one more in
+    /// [`Reduction::alerts_raised`].
+    #[expect(
+        clippy::todo,
+        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+    )]
+    pub fn alerted(&self) {
+        let _ = &self.alerts;
+        todo!()
+    }
+
+    /// How many `reduction_failures_over_limit` alerts this process has raised, for the tests and
+    /// a future metric.
+    #[expect(
+        clippy::todo,
+        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+    )]
+    pub fn alerts_raised(&self) -> u64 {
+        todo!()
     }
 
     /// The ingress peers the store reads forwarded addresses from.
@@ -390,4 +416,25 @@ pub async fn challenge(
         headers.insert(SET_COOKIE, cookie);
     }
     response
+}
+
+/// `POST /v1/reduction-sessions` (§4.10 route 2): 403 `forbidden` without the browser marks;
+/// otherwise the named challenge is taken out first, the assertion judged
+/// ([`crate::opening::judge`]), the presentation settled with the gate, and on an opening `201`
+/// with `commands/reduction-session-opened` and the session cookie, ending a session the call
+/// presented. Every refusal after the browser check, an invalid body included, is the one 401
+/// with the same headers, no cookie set or cleared, and nothing ended. Both answers carry
+/// `Cache-Control: no-store`.
+#[expect(
+    clippy::todo,
+    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+)]
+pub async fn open(
+    State(app): State<Arc<App>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let _ = (app, peer, headers, body);
+    todo!()
 }
