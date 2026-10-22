@@ -9,6 +9,8 @@
 //! one role per connection, bound to exactly that ServiceAccount in exactly that namespace, with
 //! the one policy, audience and lifetimes pinned.
 
+use std::net::SocketAddrV4;
+
 use serde_json::{Value, json};
 
 use crate::SourceError;
@@ -247,6 +249,15 @@ pub fn role_request(
 pub struct KubernetesAuth {
     pub host: String,
     pub ca_pem: Option<String>,
+}
+
+/// The API server's address in `host`, which must be exactly `https://`, an IPv4 address and a
+/// port from 1 to 65535, written the one way [`SocketAddrV4`] writes it: the vault sends its own
+/// ServiceAccount token there on every TokenReview, so a name, userinfo, a path, a query, a
+/// fragment, whitespace, a leading zero or a missing port is [`SourceError::Config`].
+pub fn api_server_address(host: &str) -> Result<SocketAddrV4, SourceError> {
+    let _ = host;
+    Err(SourceError::Unimplemented { story: "E21-32" })
 }
 
 /// The requests that set both Kubernetes auth mounts up, executor's first: for each, enabling
