@@ -18,10 +18,10 @@ use common::{ManualClock, MemJournal, Reply, WORKSPACE, at, hosted, send, serve}
 use mandate_api_server::config::{SESSION_KEY_FILE, read_session_key};
 use mandate_api_server::http::{self, App, Settings};
 use mandate_api_server::lifecycle::Drain;
-use mandate_api_server::reduction::{self, CHALLENGES_IN_ALL, DEVICE_COOKIE, Reduction};
+use mandate_api_server::reduction::{self, DEVICE_COOKIE, Reduction};
 use mandate_api_server::session::{OsRandom, Random, Sessions, Unauthenticated};
 use mandate_api_server::token::{FixedKeys, Issuer};
-use mandate_authn::{Algorithm, ClientKey, IssuerConfig};
+use mandate_authn::{Algorithm, IssuerConfig};
 use mandate_canon::{Value, parse};
 
 const APP: &str = "https://app.owlhead.test";
@@ -40,15 +40,6 @@ impl Random for Counting {
     }
 }
 
-/// A generator whose every draw fails.
-struct Failing;
-
-impl Random for Failing {
-    fn fill(&self, _out: &mut [u8]) -> Result<(), Unauthenticated> {
-        Err(Unauthenticated)
-    }
-}
-
 /// A generator that draws distinct 32-byte values for as long as a test needs, distinct in their
 /// first eight bytes too.
 #[derive(Default)]
@@ -64,30 +55,8 @@ impl Random for Wide {
     }
 }
 
-/// A generator whose draws differ only past their first ten bytes, so two drawn in one
-/// millisecond share a challenge id.
-#[derive(Default)]
-struct SharedPrefix(Mutex<u64>);
-
-impl Random for SharedPrefix {
-    fn fill(&self, out: &mut [u8]) -> Result<(), Unauthenticated> {
-        let mut n = self.0.lock().expect("unpoisoned");
-        *n += 1;
-        out.iter_mut().for_each(|b| *b = 0x5a);
-        out[24..].copy_from_slice(&n.to_be_bytes());
-        Ok(())
-    }
-}
-
 fn ip(text: &str) -> IpAddr {
     text.parse().expect("an address")
-}
-
-fn client(address: &str, device: &str) -> ClientKey {
-    ClientKey {
-        address: address.to_owned(),
-        device: device.to_owned(),
-    }
 }
 
 struct Fixture {
