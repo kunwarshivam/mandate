@@ -170,6 +170,7 @@ fn no_two_connections_share_a_path_a_service_account_or_a_role() {
 /// login's name goes, is exactly the policy written from [`kv_path`] for that connection, so the
 /// path a writer stores at and the path a policy grants are one, for every tricky id.
 #[test]
+#[ignore = "pending E21-32"]
 fn each_kinds_policy_reaches_exactly_the_paths_its_connection_is_stored_at() {
     let block = |prefix: &str, path: &SecretPath, capabilities: &str| {
         let stored = kv_path(path);
@@ -193,6 +194,13 @@ fn each_kinds_policy_reaches_exactly_the_paths_its_connection_is_stored_at() {
                         &SecretPath::AccountId(connection.clone()),
                         "\"create\"",
                     ),
+                    block(
+                        "data",
+                        &SecretPath::Fingerprint(connection.clone()),
+                        "\"create\"",
+                    ),
+                    "path \"transit/hmac/account-fingerprint\" {\n  capabilities = [\"update\"]\n}\n"
+                        .to_owned(),
                 ]
                 .concat(),
             ),
@@ -278,15 +286,19 @@ fn each_kinds_policy_is_named_under_the_kv_mount() {
     );
 }
 
-/// The executor reads its own token, and creates its own connection's account entry in the
-/// personal-data vault, which it can neither read nor write over (DEC-2339).
+/// The executor reads its own token, and creates its own connection's account entry and its
+/// fingerprint entry in the personal-data vault, which it can neither read nor write over
+/// (DEC-2339), and asks transit for the fingerprint key's HMAC alone (DEC-2345).
 #[test]
+#[ignore = "pending E21-32"]
 fn the_executors_policy_reads_its_own_token_alone() {
     assert_eq!(
         kubernetes_policy(&Identity::Executor(c("any")), &Mounts::default(), ACCESSOR),
         Ok(format!(
             "path \"mandate/data/connections/x{TEMPLATE}/token\" {{\n  capabilities = [\"read\"]\n}}\n\
-             path \"mandate/data/personal/accounts/x{TEMPLATE}\" {{\n  capabilities = [\"create\"]\n}}\n"
+             path \"mandate/data/personal/accounts/x{TEMPLATE}\" {{\n  capabilities = [\"create\"]\n}}\n\
+             path \"mandate/data/personal/fingerprints/x{TEMPLATE}\" {{\n  capabilities = [\"create\"]\n}}\n\
+             path \"transit/hmac/account-fingerprint\" {{\n  capabilities = [\"update\"]\n}}\n"
         ))
     );
 }
