@@ -124,7 +124,6 @@ fn api(
         objects: None,
         step_up: Arc::new(mandate_api_server::stepup::Unbound),
         challenges: Arc::default(),
-        reduction: Arc::new(Reduction::new(Vec::new(), Box::new(OsRandom::new()))),
         connect: None,
         reduction: Arc::new(Reduction::new(Vec::new(), Box::new(OsRandom::new()))),
     };
