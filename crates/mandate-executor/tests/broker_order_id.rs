@@ -201,9 +201,9 @@ fn each_order_of_a_replacement_carries_its_own_broker_id() {
 }
 
 /// The fold reads the member only to attribute a fill that names no `client_order_id` (§9.16 v0.80,
-/// DEC-2353): a stream replays to the same orders, positions, reservations, fills, modes,
-/// unprotected intervals and account state whatever `broker_order_id` each `OrderStateChanged`
-/// carries, and without it, as version 1 wrote it. A journaled fill keeps its attribution.
+/// DEC-2353): a stream replays to the same state, every field but the broker ids kept for that
+/// attribution, whatever `broker_order_id` each `OrderStateChanged` carries, and without it, as
+/// version 1 wrote it. A journaled fill keeps its attribution.
 #[test]
 fn the_fold_reads_the_brokers_order_id_for_nothing_else() {
     let fixture = Fixture::new();
@@ -235,6 +235,16 @@ fn the_fold_reads_the_brokers_order_id_for_nothing_else() {
         .filter(|e| e.event_type == "OrderStateChanged")
         .count();
     assert!(changes >= 2, "the stream holds order state changes");
+    assert_eq!(
+        without.without_broker_ids().orders(),
+        without.orders(),
+        "forgetting the broker ids keeps every other field"
+    );
+    assert_ne!(
+        without.without_broker_ids(),
+        ExecutorState::new(scope()),
+        "and is not an empty state"
+    );
     let ids = prop::collection::vec(prop::option::of("[a-z0-9-]{1,12}"), 1..64);
     let mut runner = TestRunner::new(Config {
         cases: 32,
@@ -246,16 +256,7 @@ fn the_fold_reads_the_brokers_order_id_for_nothing_else() {
             let id = ids.get(n % ids.len()).cloned().flatten();
             Some(id.map_or(Value::Null, Value::Str))
         });
-        prop_assert_eq!(with.orders(), without.orders());
-        prop_assert_eq!(with.positions(), without.positions());
-        prop_assert_eq!(with.reservations(), without.reservations());
-        prop_assert_eq!(with.fills(), without.fills());
-        prop_assert_eq!(with.modes(), without.modes());
-        prop_assert_eq!(
-            with.unprotected_intervals(),
-            without.unprotected_intervals()
-        );
-        prop_assert_eq!(with.account_state(), without.account_state());
+        prop_assert_eq!(with.without_broker_ids(), without.without_broker_ids());
         Ok(())
     });
     assert!(outcome.is_ok(), "{outcome:?}");
