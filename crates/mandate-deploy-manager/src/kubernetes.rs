@@ -427,7 +427,7 @@ fn same_account(found: &Value, made: &Value) -> bool {
     let empty = |member: &str| {
         found
             .get(member)
-            .is_none_or(|v| v.is_null() || v.as_array().is_some_and(Vec::is_empty))
+            .is_none_or(|v| v.as_array().is_some_and(Vec::is_empty))
     };
     labelled
         && found.get("automountServiceAccountToken") == Some(&Value::Bool(false))

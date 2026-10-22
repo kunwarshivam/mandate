@@ -607,6 +607,19 @@ fn an_existing_account_is_used_only_if_it_is_the_one_the_manager_makes() {
             ("POST".to_owned(), "/api/v1/namespaces/cell/pods".to_owned()),
         ]
     );
+    let mut listed_empty = shape.clone();
+    listed_empty["secrets"] = json!([]);
+    listed_empty["imagePullSecrets"] = json!([]);
+    let (api, _) = server(vec![
+        (409, "{}".to_owned()),
+        (200, listed_empty.to_string()),
+        (201, "{}".to_owned()),
+    ]);
+    assert_eq!(
+        block_on(adapter(api).start(&exchange(), 1, lifetime)),
+        Ok(()),
+        "an empty list of Secrets holds none"
+    );
     let mut altered: Vec<(&str, Value)> = Vec::new();
     let mut with = |name: &'static str, change: &dyn Fn(&mut Value)| {
         let mut other = shape.clone();
