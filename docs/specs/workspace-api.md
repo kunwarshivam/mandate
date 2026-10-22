@@ -377,7 +377,7 @@ The ceremony belongs to the [identity spec](identity.md) (E9-4). The API's part:
     `Idempotency-Key`, the body (`commands/passkey-registration-challenge-request`, strict, empty),
     the row, then a `live` workspace is refused `live_unavailable`. A member with no passkey on the
     control stream whose session was opened more than 300 s ago is refused `step_up_stale` with one
-    violation at `/session`, since a first enrolment's evidence is a fresh full session (DEC-2108
+    violation, `{path: "/session", code: "step_up_stale"}`, since a first enrolment's evidence is a fresh full session (DEC-2108
     item 5); the client signs the member in again. It answers `201` with `commands/passkey-registration-challenge`: `challenge_id` (§3.4's
     derived id for the key), `webauthn_challenge` (32 bytes from the operating system's generator,
     unpadded base64url), the deployment's `rp_id`, `user_handle` (the principal's 16 bytes),
@@ -388,7 +388,10 @@ The ceremony belongs to the [identity spec](identity.md) (E9-4). The API's part:
     key answers it unchanged; once a submit has dropped it or it has expired, the same key is
     `idempotency_conflict` and never revives it, and the client asks again under a new key
     ([DEC-2118](../project/decisions/DEC-2118.md) item 1, a deliberate exception to API-4, since
-    nothing was journaled). So the step-up digest below always names the challenge the member's
+    nothing was journaled). The server keeps each dropped or expired challenge's id as a tombstone,
+    in memory for 24 hours, at most 64 per principal, the oldest dropped first. After a restart or
+    an eviction, a same-key retry is answered with a fresh challenge (DEC-2118 item 1 says why that
+    is safe). So the step-up digest below always names the challenge the member's
     authenticator answers.
   - `POST /v1/workspaces/{ws}/passkeys`, operation name `passkey_enrol`: the same session, CSRF,
     key, body (`commands/passkey-enrol-request`, strict), row, and `live` checks; then the
