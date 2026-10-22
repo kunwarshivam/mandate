@@ -1,0 +1,8 @@
+file = "crates/mandate-executord/tests/completed.rs"
+test = "a_refused_connect_lets_it_exit"
+reason = """
+The executor process asks nothing at the end of its pass until E7-4's exit predicate (DEC-2347
+item 3) lands, so it keeps running where the test expects it to exit `completed` once the
+connect closes: it fails on the process's state, not at a stub. The implementation PR deletes
+this row.
+"""

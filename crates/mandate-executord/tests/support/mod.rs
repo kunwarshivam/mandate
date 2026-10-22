@@ -924,6 +924,77 @@ pub fn revoke(
     )
 }
 
+/// The control stream's `ConnectionRequested` of an OAuth connect of `connection` for `account`
+/// (journal spec §9.8), with the members the executor reads.
+pub fn requested(
+    journal: &Journal,
+    id: &str,
+    connection: &str,
+    account: &str,
+) -> Result<(), Error> {
+    journal.write(
+        CONTROL_STREAM,
+        id,
+        "ConnectionRequested",
+        1,
+        None,
+        object(vec![
+            ("account_ref", text(account)),
+            ("connection_id", text(connection)),
+            ("environment", text("paper")),
+        ])?,
+    )
+}
+
+/// The manager's `ProcessStartIssued` of `account`'s executor on its connect's token exchange's
+/// success, cause `exchanged` (journal spec §9.21, DEC-2335).
+pub fn exchanged(journal: &Journal, id: &str, account: &str) -> Result<(), Error> {
+    start_issued(journal, id, "executor", account, "exchanged")
+}
+
+/// The manager's `ProcessStartIssued` of `process` for `subject`, at generation 1, for `cause`.
+pub fn start_issued(
+    journal: &Journal,
+    id: &str,
+    process: &str,
+    subject: &str,
+    cause: &str,
+) -> Result<(), Error> {
+    journal.write(
+        CONTROL_STREAM,
+        id,
+        "ProcessStartIssued",
+        1,
+        None,
+        object(vec![
+            ("cause", text(cause)),
+            (
+                "generation",
+                Value::Int(mandate_canon::Int::new(1).ok_or("generation")?),
+            ),
+            ("process", text(process)),
+            ("subject", text(subject)),
+        ])?,
+    )
+}
+
+/// The control stream's `ConnectionRefused` of `connection`'s connect, by a teardown.
+pub fn refused(journal: &Journal, id: &str, connection: &str) -> Result<(), Error> {
+    journal.write(
+        CONTROL_STREAM,
+        id,
+        "ConnectionRefused",
+        1,
+        None,
+        object(vec![
+            ("check", Value::Null),
+            ("connection_id", text(connection)),
+            ("occasion", text("connect")),
+            ("reason", text("timeout")),
+        ])?,
+    )
+}
+
 /// The control stream's `AgentStopped` of `agent`.
 pub fn stopped(journal: &Journal, id: &str, agent: &str) -> Result<(), Error> {
     journal.write(
