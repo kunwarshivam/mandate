@@ -5956,7 +5956,8 @@ fn a_close_is_asked_again_only_on_a_later_read_showing_it_still_held() {
 
 /// BTC's unprotected interval ends on its close (DEC-2337 item 4): the close is journaled, and its
 /// fill, which names no order of ours, leaves nothing held, so the interval journals
-/// `unprotected_end` after the `AccountCloseRequested`.
+/// `unprotected_end` after the `AccountCloseRequested`: the last end, since the entry's own interval
+/// ended before the switch.
 #[test]
 #[ignore = "pending E7-4"]
 fn the_interval_ends_once_the_close_leaves_nothing_held() {
@@ -5987,7 +5988,7 @@ fn the_interval_ends_once_the_close_leaves_nothing_held() {
         .account_journal
         .iter()
         .position(|e| e.event_type == "AccountCloseRequested");
-    let end = shell.account_journal.iter().position(|e| {
+    let end = shell.account_journal.iter().rposition(|e| {
         e.event_type == "ProtectionChanged"
             && e.payload
                 .get("action")
