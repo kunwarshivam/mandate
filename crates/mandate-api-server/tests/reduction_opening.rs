@@ -242,7 +242,6 @@ fn opened_for_alice() -> Option<Opened> {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_held_passkey_whose_member_signed_in_and_reaches_the_workspace_opens_for_them() {
     for signer in [Signer::es256(), Signer::ed25519()] {
         let world = World::new(&signer);
@@ -280,7 +279,6 @@ fn refused(name: &str, world: &World, passkey_id: &str, assertion: &(Vec<u8>, Ve
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn every_other_request_opens_nothing() {
     let signer = Signer::es256();
     let good = signer.assert(&CHALLENGE);
@@ -395,7 +393,6 @@ fn every_other_request_opens_nothing() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn an_assertion_the_decoys_secret_signs_never_opens_even_for_a_member_named_like_the_decoy() {
     let signer = Signer::es256();
     let mut world = World::new(&signer);
@@ -422,7 +419,6 @@ fn an_assertion_the_decoys_secret_signs_never_opens_even_for_a_member_named_like
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_membership_reaches_the_workspace_while_active_or_cooling_off() {
     let mut rows = Rows::opened();
     let operator = BTreeSet::from([Role::Operator]);

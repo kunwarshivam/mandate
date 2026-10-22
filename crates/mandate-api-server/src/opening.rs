@@ -14,14 +14,15 @@
 //! [DEC-2324]: ../../../docs/project/decisions/DEC-2324.md
 
 use mandate_authn::SubjectStanding;
-use mandate_identity::{MembershipRecord, PrincipalId};
-use mandate_journal::ArtifactSource;
-use mandate_passkey::credentials::CredentialRecord;
-use mandate_passkey::{Challenge, RelyingParty};
+use mandate_identity::{LookupFailed, MembershipRecord, PrincipalId};
+use mandate_journal::{ArtifactRef, ArtifactSource, get_artifact};
+use mandate_passkey::credentials::{CredentialFold, CredentialRecord, Enrolment, PasskeyAlg};
+use mandate_passkey::reduction::{cose_key, decoy_for, verify_reduction};
+use mandate_passkey::{Assertion, Challenge, PublicKey, RelyingParty};
 use mandate_time::UtcNanos;
 
-use crate::members::Hosted;
-use crate::standing::Standings;
+use crate::members::{ControlLookup, Hosted};
+use crate::standing::{Standings, interim_refuses};
 
 /// The principal the membership and standing lookups run for when the passkey is unknown, so
 /// they cost the same: the greatest ULID, which no principal is minted as.
@@ -70,10 +71,6 @@ pub struct Opened {
 /// [DEC-2319]'s interim does not refuse them; `None` otherwise, after the same steps.
 ///
 /// [DEC-2319]: ../../../docs/project/decisions/DEC-2319.md
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
 pub fn judge(
     rp: &RelyingParty,
     challenge: &Challenge,
@@ -81,6 +78,45 @@ pub fn judge(
     reads: &Reads<'_>,
     now: UtcNanos,
 ) -> Option<Opened> {
-    let _ = (rp, challenge, presented, reads, now);
-    todo!()
+    let fold = CredentialFold::new(reads.credentials.unwrap_or_default().iter().cloned());
+    let held = fold.held(presented.passkey_id);
+    let key = resolve(held, reads.keys);
+    let assertion = Assertion {
+        credential_id: &[],
+        authenticator_data: presented.authenticator_data,
+        client_data_json: presented.client_data_json,
+        signature: presented.signature,
+    };
+    let checked_against = key.as_ref().unwrap_or(decoy_for(presented.signature));
+    let verified = verify_reduction(rp, challenge, checked_against, &assertion).is_ok();
+    let member = held.map_or(DECOY_MEMBER, |enrolment| enrolment.member);
+    let records = reads.memberships.map(<[MembershipRecord]>::to_vec);
+    let lookup = ControlLookup::new(reads.hosted, records.ok_or(LookupFailed), now);
+    let reaches = lookup.reaches(member) == Ok(true);
+    let standing = reads.standings.standing(member);
+    let refused = interim_refuses(standing, reads.memberships.unwrap_or_default(), member);
+    (key.is_some() && verified && reaches && !refused).then_some(Opened { member, standing })
 }
+
+/// The key `held` names, read from `keys` and parsed, when it is the algorithm the enrolment
+/// recorded; `None` otherwise. The store is read for every request, a decoy reference when no
+/// passkey is held, so whether one is held costs no difference in reads.
+fn resolve(
+    held: Option<&Enrolment>,
+    keys: Option<&(dyn ArtifactSource + Send + Sync)>,
+) -> Option<PublicKey> {
+    let named = held.and_then(|enrolment| ArtifactRef::parse(&enrolment.public_key));
+    let reference = named.unwrap_or_else(|| ArtifactRef::of(DECOY_KEY_BYTES));
+    let bytes = keys.and_then(|keys| get_artifact(keys, &reference).ok());
+    let key = cose_key(&bytes?).ok()?;
+    let recorded = match (&key, held?.alg) {
+        (PublicKey::Es256 { .. }, PasskeyAlg::Es256) => true,
+        (PublicKey::Ed25519 { .. }, PasskeyAlg::EdDsa) => true,
+        (PublicKey::Es256 { .. }, PasskeyAlg::EdDsa) | (PublicKey::Ed25519 { .. }, _) => false,
+    };
+    recorded.then_some(key)
+}
+
+/// The bytes whose reference an unknown passkey's read asks the store for: no key is stored as
+/// them, so the read finds nothing.
+const DECOY_KEY_BYTES: &[u8] = b"route 2: no passkey is held";

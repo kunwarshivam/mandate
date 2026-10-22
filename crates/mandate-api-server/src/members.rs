@@ -218,13 +218,12 @@ impl ControlLookup {
     ///
     /// # Errors
     /// [`LookupFailed`] when the control stream's records cannot be read or folded.
-    #[expect(
-        clippy::todo,
-        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-    )]
     pub fn reaches(&self, member: PrincipalId) -> Result<bool, LookupFailed> {
-        let _ = member;
-        todo!()
+        let fold = self.fold()?;
+        Ok(matches!(
+            fold.state(member, self.now),
+            Some(MembershipState::Active | MembershipState::CoolingOff)
+        ))
     }
 
     /// The hosted workspace's scope.
