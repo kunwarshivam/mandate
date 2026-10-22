@@ -103,8 +103,7 @@ pub const STREAM_RULE_TYPES: [&str; 12] = [
 
 /// Whether a draft of `batch` is judged by a stream rule (journal spec §9.19 rules 153 and 158,
 /// the invalidation's rule 187, the run records' rules 173 to 183, §9.5's rule 260), so `append`
-/// reads the stream's
-/// earlier records of [`STREAM_RULE_TYPES`] to judge it.
+/// reads the stream's earlier records of [`STREAM_RULE_TYPES`] to judge it.
 pub fn reads_stream(batch: &[Draft]) -> bool {
     batch.iter().any(|draft| {
         matches!(

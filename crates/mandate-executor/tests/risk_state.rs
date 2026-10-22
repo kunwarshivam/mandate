@@ -310,7 +310,6 @@ fn a_row_the_fold_does_not_read_advances_its_head() {
 /// risk fold reads and acts on nowhere: the view stays readable with its snapshot unchanged, only
 /// its head advances, and nothing is appended.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_close_request_leaves_the_risk_view_readable_and_unchanged() {
     let mandate = mandate();
     let mut fold = open(&mandate, &Wall);

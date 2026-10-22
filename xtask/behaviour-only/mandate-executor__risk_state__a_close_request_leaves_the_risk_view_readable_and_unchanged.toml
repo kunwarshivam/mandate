@@ -1,8 +1,0 @@
-file = "crates/mandate-executor/tests/risk_state.rs"
-test = "a_close_request_leaves_the_risk_view_readable_and_unchanged"
-reason = """
-Neither mandate-journal's catalogue nor the risk fold's account-stream table reads
-`AccountCloseRequested` yet (journal spec v0.75 §9.5, DEC-2337), so the fold turns the view
-unreadable rather than stopping at a stub. The E7-4 implementation PR that registers it deletes
-this row.
-"""
