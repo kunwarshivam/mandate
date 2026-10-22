@@ -408,7 +408,6 @@ fn a_recording_s_run_cap_is_read_when_it_records_one() {
 /// DEC-2268 items 2 and 3: an agentic bundle's research is the core's loop over the entry, and the
 /// single-call bundle's stays single-call.
 #[test]
-#[ignore = "pending E19-13"]
 fn an_agentic_bundle_s_research_runs_the_entry_s_loop() {
     let bundle = Bundle::load(Path::new(AGENTIC)).unwrap();
     assert_eq!(agentic_config(&bundle), Ok(expected_loop()));
@@ -422,7 +421,6 @@ fn an_agentic_bundle_s_research_runs_the_entry_s_loop() {
 
 /// DEC-2268 item 3: no menu holds a tool that acts, and only declared tools are offered.
 #[test]
-#[ignore = "pending E19-13"]
 fn neither_menu_offers_an_action_or_an_undeclared_tool() {
     let bundle = Bundle::load(Path::new(AGENTIC)).unwrap();
     let config = agentic_config(&bundle).unwrap_or_else(|e| panic!("{e:?}"));
@@ -437,7 +435,6 @@ fn neither_menu_offers_an_action_or_an_undeclared_tool() {
 /// DEC-2268 item 4 and §6.11: an agentic bundle that records no run cap is refused at the opt-in,
 /// before any store, worker or call, so no agentic run starts without one.
 #[test]
-#[ignore = "pending E19-13"]
 fn an_agentic_bundle_without_a_run_cap_is_refused_at_the_opt_in() {
     let dir = agentic_edited("no-cap", |file| {
         file["caps"].as_object_mut().unwrap().remove("run_usd");
