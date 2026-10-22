@@ -189,7 +189,10 @@ impl ExecutorVault {
     /// of concurrent takers exactly one gets the code and the rest `None` (DEC-2628 item 2). An
     /// entry this call cannot decrypt, such as one bound to another connection, is renamed back
     /// and refused, so a wrong taker destroys nothing; it hides the code from the rightful taker
-    /// only for that moment.
+    /// only for that moment. The rename back never replaces a code written meanwhile
+    /// ([`put_back`]). A delete whose sweep unlinks the take name while a take is reading it fails
+    /// the take closed: the take finds nothing and answers `None`, which the exchange reads as
+    /// `CodeMissing`.
     pub fn take_code(&self, entry: &Entry) -> Result<Option<SecretSlice<u8>>, VaultError> {
         let path = entry_path(&self.vault_dir, entry);
         let taken = taken_path(&path, entry)?;
@@ -221,7 +224,7 @@ impl ExecutorVault {
         match read {
             Ok(secret) => unlink(&taken).map(|()| secret),
             Err(error) => {
-                let _restored = fs::rename(&taken, &path);
+                put_back(&taken, &path);
                 Err(error)
             }
         }
@@ -231,19 +234,12 @@ impl ExecutorVault {
 /// Renames a refused take at `taken` back to `path`, never replacing a code the API wrote there
 /// meanwhile: when one was, that newer code stays and the refused entry is unlinked. A rename that
 /// fails otherwise leaves the refused entry under its take name, for the next delete's sweep.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "`take_code_into` calls it once the implementation PR lands"
-    )
-)]
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
-pub(crate) fn put_back(_taken: &Path, _path: &Path) {
-    todo!()
+pub(crate) fn put_back(taken: &Path, path: &Path) {
+    if let Err(rustix::io::Errno::EXIST) =
+        renameat_with(CWD, taken, CWD, path, RenameFlags::NOREPLACE)
+    {
+        let _swept_by_the_next_delete_if_this_fails = unlink(taken);
+    }
 }
 
 /// The prefix of every name a take of `entry` uses.

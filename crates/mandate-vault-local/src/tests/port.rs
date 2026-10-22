@@ -406,7 +406,6 @@ fn a_sweep_that_cannot_list_the_directory_is_refused() {
 
 /// A refused take is put back where it was taken from, and leaves no take name behind.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_refused_take_is_put_back() {
     let layout = Layout::new();
     let path = layout.file(&code("ws/c1", "c1"));
@@ -421,7 +420,6 @@ fn a_refused_take_is_put_back() {
 /// that take's put-back: the fresh code stays for the rightful taker, and the refused entry is
 /// unlinked.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_put_back_never_replaces_a_code_written_meanwhile() {
     let layout = Layout::new();
     let (api, executor) = layout.both();
