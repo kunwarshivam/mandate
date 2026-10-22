@@ -4,6 +4,11 @@
 [tool.uv.workspace]
 members = ["mandate_tools", "research_spike"]
 
+[tool.uv]
+# cel-python (deploy/tests' CEL evaluation, DEC-1177) asks for PyYAML 6.0.2 or later, which only
+# adds wheels over 6.0.1; the workspace keeps the reference's 6.0.1 (mandate_tools).
+override-dependencies = ["pyyaml==6.0.1"]
+
 [tool.uv.sources]
 mandate-tools = { workspace = true }
 research-spike = { workspace = true }
@@ -12,6 +17,7 @@ research-spike = { workspace = true }
 dev = [
     "mandate-tools",
     "research-spike",
+    "cel-python==0.5.0",
     "pytest==9.1.1",
     "ruff==0.16.9",
 ]

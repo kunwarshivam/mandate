@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use axum::body::Body;
 use axum::extract::rejection::PathRejection;
 use axum::extract::{Path, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header};
 use axum::response::Response;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -19,6 +19,7 @@ use mandate_api::requests::{Environment as Wire, OauthStartRequest};
 use mandate_api::wire::decode;
 use mandate_authn::Request;
 use mandate_canon::{Digest, Value, parse};
+use mandate_connections::ConnectError;
 use mandate_connections::manager::{
     AccountRefFold, IdFold, StartFacts, StartPlan, StartRefusal, StartRequest, StepUpCheck,
     oauth_connect_digest, plan_start,
@@ -27,6 +28,7 @@ use mandate_connections::record::{AccountRef, Broker, ConnectionId, Environment}
 use mandate_connections::start::{
     Binding, Environment as Bound, OAuthClient, PendingStates, PkceVerifier, STATE_LIFETIME_SECS,
 };
+use mandate_connections::vault::AuthorizationCode;
 use mandate_identity::{Permission, StepUpActionKind};
 use mandate_journal::StoredEvent;
 use mandate_time::UtcNanos;
@@ -35,8 +37,10 @@ use secrecy::SecretString;
 use crate::backtests::paper;
 use crate::commands::{Event, Settled, Writer, envelope};
 use crate::http::{App, invalid, problem, problem_body};
-use crate::routes::{Reader, Refused, Unreadable, authorized, enveloped, path_refused, string};
-use crate::session::Random;
+use crate::routes::{
+    self, Reader, Refused, Unreadable, authorized, enveloped, path_refused, string,
+};
+use crate::session::{Authenticated, Random};
 use crate::stepup::{Action, Judged, journaled};
 use crate::versions::object;
 use crate::writes::{
@@ -63,14 +67,30 @@ pub const ACCOUNT_OPERATION: &str = "connect_account";
 /// How many bytes the `state` and the PKCE verifier each draw (DEC-2623 item 7).
 pub const RANDOM_BYTES: usize = 32;
 
+/// Where the callback writes a redeemed code and its verifier: the API's vault port, which may
+/// write only codes (DEC-2626 item 4, DEC-2628 item 1).
+pub trait CodeVault: Send + Sync {
+    /// Writes `code` and `verifier` as one entry for `binding`'s connection and environment.
+    fn put_code(
+        &self,
+        binding: &Binding,
+        code: AuthorizationCode,
+        verifier: PkceVerifier,
+    ) -> Result<(), ConnectError>;
+}
+
 /// What a deployment that offers a connect holds: its registered OAuth client, the `state`
-/// values issued and not yet redeemed, and the random source they are drawn from (DEC-2623 items
-/// 2, 4 and 7).
+/// values issued and not yet redeemed, the random source they are drawn from (DEC-2623 items
+/// 2, 4 and 7), and the vault port the callback writes codes through (DEC-2626 item 4).
 pub struct Connect {
     pub client: OAuthClient,
     pub states: Mutex<PendingStates>,
     pub random: Box<dyn Random>,
+    pub codes: Arc<dyn CodeVault>,
     /// Each start's `201`, by its event id, for a retry while its `state` is held (item 8).
+    /// Like `states`, it lives in this process's memory, which holds only while the API runs one
+    /// replica (item 4). A start locks `answered` and then `states`, never the reverse; the
+    /// callback locks `states` alone, so the two never wait on each other in a cycle.
     answered: Mutex<BTreeMap<String, Answered>>,
 }
 
@@ -84,11 +104,12 @@ struct Answered {
 }
 
 impl Connect {
-    pub fn new(client: OAuthClient, random: Box<dyn Random>) -> Self {
+    pub fn new(client: OAuthClient, random: Box<dyn Random>, codes: Arc<dyn CodeVault>) -> Self {
         Self {
             client,
             states: Mutex::new(PendingStates::default()),
             random,
+            codes,
             answered: Mutex::default(),
         }
     }
@@ -107,6 +128,161 @@ pub async fn start(
     started(&app, &headers, &workspace, body)
         .await
         .unwrap_or_else(|refusal| *refusal)
+}
+
+/// `GET /v1/oauth/alpaca/callback` (DEC-2626): redeems the `state` for the session's user and
+/// writes the code and verifier to the vault for a request still open; every outcome past the
+/// session is a `303` that carries neither the code nor the outcome.
+pub async fn callback(State(app): State<Arc<App>>, headers: HeaderMap, uri: Uri) -> Response {
+    let Some(connect) = app.connect.clone() else {
+        return private(Refused::NotFound.response());
+    };
+    let (admitted, now) = match routes::session(&app, &headers, Request::Other) {
+        Ok(admitted) => admitted,
+        Err(refused) => return private(refused.response()),
+    };
+    let named = redeemed(&app, &connect, &admitted, now, uri.query().unwrap_or("")).await;
+    let origin = &app.settings.app_origin;
+    let location = match named {
+        Some(connection) => format!("{origin}/connections/{}", connection.as_str()),
+        None => format!("{origin}/connections"),
+    };
+    see_other(&location)
+}
+
+/// The longest code the callback accepts, in bytes (DEC-2626 item 2.4).
+pub const MAX_CODE_BYTES: usize = 512;
+
+/// Reads the query and redeems its `state` for the session's user, then writes the code for a
+/// request still open. Returns the connection the redeemed `state` named, which the redirect
+/// names whatever was written; `None` when no `state` was redeemed.
+async fn redeemed(
+    app: &App,
+    connect: &Connect,
+    admitted: &Authenticated,
+    now: UtcNanos,
+    query: &str,
+) -> Option<ConnectionId> {
+    let pairs = form_pairs(query)?;
+    let state = String::from_utf8(only(&pairs, "state")?.to_vec()).ok()?;
+    let user = admitted.principal.to_ulid_text().ok()?;
+    let redeemed = connect
+        .states
+        .lock()
+        .ok()?
+        .redeem(&state, &user, now)
+        .ok()?;
+    let connection = redeemed.binding.connection_id.clone();
+    let code = if pairs.iter().any(|(name, _)| name == b"error") {
+        None
+    } else {
+        only(&pairs, "code").and_then(code_text)
+    };
+    if let Some(code) = code
+        && still_open(app, admitted, now, &redeemed.binding).await
+    {
+        let _failed_write_is_closed_by_the_teardown: Result<(), ConnectError> =
+            connect.codes.put_code(
+                &redeemed.binding,
+                AuthorizationCode(SecretString::from(code)),
+                redeemed.verifier,
+            );
+    }
+    Some(connection)
+}
+
+/// The query's pairs, each name and value decoded as `application/x-www-form-urlencoded`
+/// (`+` is a space, `%XX` a byte); `None` for any malformed escape, so nothing is redeemed.
+fn form_pairs(query: &str) -> Option<Vec<(Vec<u8>, Vec<u8>)>> {
+    query
+        .split('&')
+        .filter(|pair| !pair.is_empty())
+        .map(|pair| {
+            let (name, value) = pair.split_once('=').unwrap_or((pair, ""));
+            Some((form_decoded(name)?, form_decoded(value)?))
+        })
+        .collect()
+}
+
+fn form_decoded(text: &str) -> Option<Vec<u8>> {
+    let mut out = Vec::with_capacity(text.len());
+    let mut bytes = text.bytes();
+    while let Some(byte) = bytes.next() {
+        out.push(match byte {
+            b'+' => b' ',
+            b'%' => {
+                let digits = [bytes.next()?, bytes.next()?];
+                if !digits.iter().all(u8::is_ascii_hexdigit) {
+                    return None;
+                }
+                u8::from_str_radix(std::str::from_utf8(&digits).ok()?, 16).ok()?
+            }
+            other => other,
+        });
+    }
+    Some(out)
+}
+
+/// The value of `name` when the query carries it exactly once.
+fn only<'q>(pairs: &'q [(Vec<u8>, Vec<u8>)], name: &str) -> Option<&'q [u8]> {
+    let mut values = pairs
+        .iter()
+        .filter(|(n, _)| n == name.as_bytes())
+        .map(|(_, value)| value.as_slice());
+    match (values.next(), values.next()) {
+        (Some(value), None) => Some(value),
+        _ => None,
+    }
+}
+
+/// A code is 1 to [`MAX_CODE_BYTES`] bytes of visible ASCII (DEC-2626 item 2.4).
+fn code_text(value: &[u8]) -> Option<String> {
+    let visible = (1..=MAX_CODE_BYTES).contains(&value.len())
+        && value.iter().all(|byte| (b'!'..=b'~').contains(byte));
+    visible
+        .then(|| String::from_utf8(value.to_vec()).ok())
+        .flatten()
+}
+
+/// Whether the session's user still holds the broker-connection permission in the binding's
+/// workspace, which must be the hosted one, and the control stream that check reads still holds
+/// the connection's request open; an unreadable or unfoldable stream is not (DEC-2626 item 3).
+async fn still_open(app: &App, admitted: &Authenticated, now: UtcNanos, binding: &Binding) -> bool {
+    let Ok(reader) = authorized(
+        app,
+        admitted,
+        now,
+        &binding.workspace_id,
+        Permission::BrokerConnection,
+        Unreadable::Command,
+    )
+    .await
+    else {
+        return false;
+    };
+    facts(&reader.control, binding.connection_id.as_str(), "").id == IdFold::RequestOpen
+}
+
+/// A `303` to `location` (DEC-2626 item 6).
+fn see_other(location: &str) -> Response {
+    let Ok(location) = HeaderValue::from_str(location) else {
+        return private(Refused::JournalUnavailable.response());
+    };
+    let mut response = Response::new(Body::empty());
+    *response.status_mut() = StatusCode::SEE_OTHER;
+    response.headers_mut().insert(header::LOCATION, location);
+    private(response)
+}
+
+/// Marks an answer of the callback neither cached nor sent onward with the code in its URL.
+fn private(mut response: Response) -> Response {
+    let headers = response.headers_mut();
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    headers.insert(
+        header::REFERRER_POLICY,
+        HeaderValue::from_static("no-referrer"),
+    );
+    response
 }
 
 async fn started(

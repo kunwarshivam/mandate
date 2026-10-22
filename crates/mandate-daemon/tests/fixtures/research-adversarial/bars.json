@@ -1,0 +1,7 @@
+[
+ {"age_s": 172800, "close": "221.4", "high": "222.5", "low": "220.1", "open": "220.8", "symbol": "AAPL", "volume": "51234000"},
+ {"age_s": 86400, "close": "222", "high": "223.1", "low": "220.7", "open": "221.4", "symbol": "AAPL", "volume": "50112000"},
+ {"age_s": 172800, "close": "415.2", "high": "417", "low": "413.8", "open": "414.1", "symbol": "MSFT", "volume": "20311000"},
+ {"age_s": 86400, "close": "416.9", "high": "418.2", "low": "414.9", "open": "415.2", "symbol": "MSFT", "volume": "19870000"},
+ {"age_s": 86400, "close": "987.654", "high": "990.1", "low": "980.2", "open": "981.3", "symbol": "TSLA", "volume": "31415926"}
+]
