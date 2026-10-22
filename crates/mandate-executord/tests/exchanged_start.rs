@@ -10,6 +10,7 @@ use std::rc::Rc;
 use mandate_canon::{Value, parse};
 use mandate_connections::account_entry::BrokerAccountId;
 use mandate_connections::grant::check_scope;
+use mandate_connections::record::AccountRef as StreamRef;
 use mandate_connections::record::{AccountPiiRef, ConnectionId};
 use mandate_connections::vault::AccessToken;
 use mandate_executor::{AccountRef, AccountScope, WorkspaceId};
@@ -224,7 +225,10 @@ fn a_fresh_stream_is_checked_once_over_the_lease_which_is_given_back() -> Result
     assert_eq!(calls.revoked, 1);
     assert_eq!(
         calls.created,
-        [format!("{:?}", SecretPath::AccountId(connection()?))]
+        [format!(
+            "{:?}",
+            SecretPath::AccountId(connection()?, StreamRef::new("01J8Z2ACCT0000000000000001")?)
+        )]
     );
     let passed = |check: &str| (check.to_owned(), "passed".to_owned());
     assert_eq!(
