@@ -33,7 +33,6 @@ fn decoded(bytes: &[u8]) -> Result<(String, String), ConnectError> {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn the_entry_is_exactly_its_canonical_form() {
     let entry = encode(&code(CODE), &verifier(VERIFIER)).unwrap();
     assert_eq!(entry.expose_secret(), ENTRY);
@@ -45,7 +44,6 @@ fn the_entry_is_exactly_its_canonical_form() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn an_entry_decodes_to_its_code_and_verifier() {
     assert_eq!(
         decoded(ENTRY.as_bytes()),
@@ -54,7 +52,6 @@ fn an_entry_decodes_to_its_code_and_verifier() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn every_other_form_is_refused() {
     let short = "v".repeat(MIN_VERIFIER_LEN - 1);
     let long = "v".repeat(MAX_VERIFIER_LEN + 1);
@@ -96,7 +93,6 @@ fn every_other_form_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn the_bounds_of_each_value_are_held() {
     let codes = ["c".to_owned(), "c".repeat(MAX_CODE_LEN)];
     let verifiers = ["v".repeat(MIN_VERIFIER_LEN), "v".repeat(MAX_VERIFIER_LEN)];
@@ -115,7 +111,6 @@ fn the_bounds_of_each_value_are_held() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_value_outside_the_form_is_never_written() {
     let long_code = "c".repeat(MAX_CODE_LEN + 1);
     for text in [
@@ -153,7 +148,6 @@ fn a_value_outside_the_form_is_never_written() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_refusal_and_a_decoded_entry_name_nothing_of_the_code_or_verifier() {
     let refusal = decode(ENTRY.replace(r#""format":1"#, r#""format":2"#).as_bytes()).unwrap_err();
     let entry = decode(ENTRY.as_bytes()).unwrap();
@@ -172,7 +166,6 @@ fn a_refusal_and_a_decoded_entry_name_nothing_of_the_code_or_verifier() {
 /// Every code and verifier of the form round-trip, and their entry is canonical JSON, checked by
 /// the journal's own canonicalizer, an implementation the codec does not use.
 #[test]
-#[ignore = "pending E10-13"]
 fn every_value_of_the_form_round_trips_as_canonical_json() {
     let code_chars: Vec<char> = ('!'..='~').filter(|c| !matches!(c, '"' | '\\')).collect();
     let verifier_chars: Vec<char> = ('!'..='~')
@@ -204,7 +197,6 @@ fn every_value_of_the_form_round_trips_as_canonical_json() {
 /// Any bytes the codec did not write are refused, or decode to values that write back to exactly
 /// those bytes: the entry has one byte form.
 #[test]
-#[ignore = "pending E10-13"]
 fn any_bytes_that_decode_are_their_own_encoding() {
     let strategy = prop::collection::vec(any::<u8>(), 0..160);
     TestRunner::new(Config::with_cases(512))

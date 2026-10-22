@@ -11,7 +11,7 @@
 //! form around the two values, so nothing else is copied out, and those only into
 //! [`secrecy::SecretString`]s (OPS-1).
 
-use secrecy::SecretString;
+use secrecy::{ExposeSecret, SecretString};
 
 use crate::ConnectError;
 use crate::start::PkceVerifier;
@@ -29,19 +29,47 @@ pub const MIN_VERIFIER_LEN: usize = 43;
 /// The longest verifier RFC 7636 §4.1 allows.
 pub const MAX_VERIFIER_LEN: usize = 128;
 
+/// The entry's bytes before the code.
+const BEFORE: &str = r#"{"code":""#;
+
+/// The entry's bytes between the code and the verifier.
+const BETWEEN: &str = r#"","format":1,"verifier":""#;
+
+/// The entry's bytes after the verifier.
+const AFTER: &str = r#""}"#;
+
+/// Whether `code` is 1 to [`MAX_CODE_LEN`] bytes from `!` to `~`, none of them `"` or `\`.
+fn code_in_form(code: &str) -> bool {
+    (1..=MAX_CODE_LEN).contains(&code.len())
+        && code
+            .bytes()
+            .all(|b| (b'!'..=b'~').contains(&b) && b != b'"' && b != b'\\')
+}
+
+/// Whether `verifier` is [`MIN_VERIFIER_LEN`] to [`MAX_VERIFIER_LEN`] unreserved characters.
+fn verifier_in_form(verifier: &str) -> bool {
+    (MIN_VERIFIER_LEN..=MAX_VERIFIER_LEN).contains(&verifier.len())
+        && verifier
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~'))
+}
+
 /// The entry for `code` and `verifier`.
 ///
 /// # Errors
 /// [`ConnectError::CodeEntryInvalid`] for a code or verifier outside the entry's form.
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
 pub fn encode(
-    _code: &AuthorizationCode,
-    _verifier: &PkceVerifier,
+    code: &AuthorizationCode,
+    verifier: &PkceVerifier,
 ) -> Result<SecretString, ConnectError> {
-    todo!()
+    let code = code.0.expose_secret();
+    let verifier = verifier.0.expose_secret();
+    if !code_in_form(code) || !verifier_in_form(verifier) {
+        return Err(ConnectError::CodeEntryInvalid);
+    }
+    Ok(SecretString::from(format!(
+        "{BEFORE}{code}{BETWEEN}{verifier}{AFTER}"
+    )))
 }
 
 /// The code and verifier of an entry's bytes.
@@ -49,10 +77,16 @@ pub fn encode(
 /// # Errors
 /// [`ConnectError::CodeEntryInvalid`] for any bytes but format 1's exact form; the error names
 /// nothing of the bytes.
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
-pub fn decode(_bytes: &[u8]) -> Result<WaitingCode, ConnectError> {
-    todo!()
+pub fn decode(bytes: &[u8]) -> Result<WaitingCode, ConnectError> {
+    let (code, verifier) = std::str::from_utf8(bytes)
+        .ok()
+        .and_then(|text| text.strip_prefix(BEFORE))
+        .and_then(|rest| rest.strip_suffix(AFTER))
+        .and_then(|rest| rest.split_once(BETWEEN))
+        .filter(|(code, verifier)| code_in_form(code) && verifier_in_form(verifier))
+        .ok_or(ConnectError::CodeEntryInvalid)?;
+    Ok(WaitingCode {
+        code: AuthorizationCode(SecretString::from(code.to_owned())),
+        verifier: PkceVerifier(SecretString::from(verifier.to_owned())),
+    })
 }
