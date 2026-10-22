@@ -814,6 +814,15 @@ def api_vault(docs: list[dict], on: bool) -> list[str]:
         copies = [c for c in spec.get("initContainers", []) if c["name"] == "vault-credentials"]
         mounts = {m["mountPath"]: m for m in api.get("volumeMounts", [])}
         labels = w["spec"]["template"]["metadata"]["labels"]
+        holders = sorted(
+            (m["name"], c["name"], m.get("readOnly", False))
+            for c in spec.get("containers", []) + spec.get("initContainers", [])
+            for m in c.get("volumeMounts", [])
+            if m["name"] in ("vault", "vault-sources")
+        )
+        wanted = [("vault", "api", True), ("vault", "vault-credentials", False), ("vault-sources", "vault-credentials", True)]
+        if holders != (wanted if on else []):
+            problems.append(f"the api pod's vault volumes are mounted by {holders}")
         rules = policies(docs)["egress-api"]["spec"]["egress"]
         if any("to" not in r or "ports" not in r for r in rules):
             problems.append(f"an api egress rule names no peer or no port, so it reaches the vault: {rules}")
@@ -857,6 +866,16 @@ def api_vault(docs: list[dict], on: bool) -> list[str]:
     if holders != ([("Deployment", "api")] if on else []):
         problems.append(f"the api's AppRole is named by {holders}")
     return problems
+
+
+def beside_api(w: dict, where: str, volume: str) -> None:
+    """A copy of the api container, hardened as it is, added to the api pod's `where` with only its
+    mounts changed: `volume` read-only and nothing else."""
+    spec = pod_spec(w)
+    other = copy.deepcopy(next(c for c in spec["containers"] if c["name"] == "api"))
+    other["name"] = "beside"
+    other["volumeMounts"] = [{"name": volume, "mountPath": "/run/beside", "readOnly": True}]
+    spec.setdefault(where, []).append(other)
 
 
 def api_vault_address(labels: dict) -> str:
@@ -916,6 +935,10 @@ def test_the_api_is_bound_to_the_vault_only_with_its_binding():
     for kind, seed in seeds:
         name = "api" if kind == "Deployment" else "egress-api"
         assert api_vault(mutate(on, name, kind, seed), on=True), seed
+    for where, volume in (("containers", "vault"), ("containers", "vault-sources"), ("initContainers", "vault-sources")):
+        assert api_vault(mutate(on, "api", "Deployment", lambda w: beside_api(w, where, volume)), on=True), (where, volume)
+    off_volumes = lambda w: (pod_spec(w).setdefault("volumes", []).append({"name": "vault", "emptyDir": {"medium": "Memory"}}), beside_api(w, "containers", "vault"))
+    assert api_vault(mutate(off, "api", "Deployment", off_volumes), on=False), "a vault volume mounted while off is caught"
     widened = [
         lambda p: next(r for r in p["spec"]["egress"] if any(q["port"] == 443 for q in r["ports"]))["to"].append({"podSelector": {}}),
         lambda p: p["spec"]["egress"].pop(),
