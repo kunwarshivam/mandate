@@ -445,9 +445,14 @@ fn device_cookie(n: u32) -> String {
 #[test]
 #[ignore = "pending E9-1"]
 fn ten_bad_presentations_from_one_device_raise_the_alert_once() {
-    let f = fixture(&Signer::es256(), true);
+    let signer = Signer::es256();
+    let f = fixture(&signer, true);
     for i in 1..=12_u64 {
-        assert_eq!(bad(&f, Some(DEVICE.to_owned()), None).status, 401);
+        let (id, bytes) = challenge(&f);
+        let mut forged = signer.assert(&bytes);
+        forged.2[12] ^= 1;
+        let reply = present(&f, &[], &request(&id, CREDENTIAL, &forged));
+        assert_eq!(reply.status, 401, "a real challenge, a bad signature");
         assert_eq!(
             f.reduction.alerts_raised(),
             u64::from(i >= 10),
