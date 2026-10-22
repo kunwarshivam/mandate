@@ -3042,6 +3042,20 @@ enables `live` (ES-23, OPS-5).
     pass while its request has time left, making and deleting its account each time; a retry
     bound or backoff is left. Open until R1 lands: DEC-2332 items 4 to 6 (the environment pin, the
     vault CA, the exchange's launch).
+  - From DEC-2336 item 2 (K2a): a reconnect that reuses its `account_ref` (connections spec
+    CN-12) starts no executor for its connect, since that account's executor already used
+    generation 1 and rule 167 holds `exchanged` to it, so the connect fails by its deadline until a
+    reconnect start is specified (a new cause, or `exchanged` at the next generation). This reaches
+    the staging reconnect path.
+  - K2b, after K2a: the executor's `<hex>` account, its vault-token volume and vault CA,
+    `MANDATE_WORKSPACE_NAMESPACE` among the manager's names, the pod-policy pin of the executor's
+    account, and the Kubernetes adapter reporting a pod's `Succeeded` as its own phase; until then
+    the adapter reports it `Exited`, so no connect's executor starts in the cell.
+  - Lane V2, a dependency of K2b (DEC-2336 risks): `mandate-executord` refuses to start unless
+    `MANDATE_SUBJECT_ACCOUNT` is the lowercase hex of its connection id's bytes, beside #2196's
+    namespace check, as DEC-1177 item 6 has the token exchange do.
+  - After K2b: the chart's Deployment executor moves from `default` to its connection's `<hex>`
+    account, once the manager owns every executor.
 - **E21-34 (Proposed, M8; SC; lane O4)** As an owner, I want the kill switch reachable in the cell
   with nothing running but Postgres, the executor and the broker, so that rule 13 holds when the
   web app, the API and the cell's tooling are down (design §3.6, OPS-4). *Accepted when:*

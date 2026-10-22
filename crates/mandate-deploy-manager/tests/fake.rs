@@ -87,3 +87,35 @@ fn refused_and_unavailable_effects_change_nothing() {
     assert_eq!(fake.live(&a), 1);
     assert_eq!(fake.calls().len(), 1);
 }
+
+#[test]
+fn a_success_moves_only_its_slots_running_instance_and_is_stopped_and_collected_as_an_exit() {
+    let a = Slot::token_exchange("conn_a");
+    let b = Slot::token_exchange("conn_b");
+    let c = Slot::token_exchange("conn_c");
+    let mut fake = Fake::new();
+    for slot in [&a, &b, &c] {
+        block_on(fake.start(slot, 1, None)).unwrap();
+    }
+    fake.lose_node(&c);
+    fake.succeed(&a);
+    fake.succeed(&c);
+    assert_eq!(
+        phases(&fake),
+        vec![
+            (a.clone(), 1, Phase::Succeeded),
+            (b.clone(), 1, Phase::Running { ready: false }),
+            (c.clone(), 1, Phase::Unknown)
+        ],
+        "a lost node's instance cannot be seen to succeed"
+    );
+    assert_eq!(fake.live(&a), 0, "a succeeded instance is not live");
+    assert!(!Phase::Succeeded.live() && !Phase::Exited.live());
+    block_on(fake.stop(&a, 1)).unwrap();
+    assert!(phases(&fake).iter().all(|(slot, _, _)| *slot != a));
+    block_on(fake.start(&a, 2, None)).unwrap();
+    fake.succeed(&a);
+    fake.crash(&b);
+    fake.collect();
+    assert_eq!(phases(&fake), vec![(c, 1, Phase::Unknown)]);
+}

@@ -1,0 +1,7 @@
+file = "crates/mandate-deploy-manager/tests/connect.rs"
+test = "a_deployed_agent_keeps_the_executor_through_a_revocation_and_its_stop_is_agent_stopped"
+reason = """
+E21-33 K2a (DEC-2336) changes the manager's fold and decision, which have no stub form: today's
+manager reads a succeeded token exchange as an exit and never starts the connect's executor, so the
+test fails on that behaviour. K2a's implementation PR deletes this row with the test's ignore line.
+"""
