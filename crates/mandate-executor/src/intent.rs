@@ -504,7 +504,8 @@ fn submit(
 /// bracket at exactly those prices, an add where protection already rests included, which is a new
 /// bracket beside it and never a replacement of it (DEC-346 item 1). An entry with no prices goes
 /// plain, and an exit never carries a bracket. A crypto entry is never a bracket (§5.4: simple
-/// orders only); its stop-limit is slice 5's. On a profile that offers no bracket (§5.2's
+/// orders only); its stop-limit is placed once it has filled, as a plain entry's is
+/// ([`crate::protection::settle`]). On a profile that offers no bracket (§5.2's
 /// Robinhood table) the entry goes plain whatever its prices, and its stop-limit is placed once it
 /// has filled ([`crate::protection::settle`], DEC-966 item 2). On a profile that does, an equity
 /// entry with a stop and no take-profit has no bracket to go as, and answers slice 5's stub rather

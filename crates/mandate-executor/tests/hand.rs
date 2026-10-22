@@ -4177,7 +4177,6 @@ fn net_of_taker_fee(bought: &str) -> String {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn a_crypto_position_carries_one_stop_limit_for_the_whole_position() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[BTC]);
@@ -4354,7 +4353,6 @@ fn a_crypto_add_is_a_limit_ioc_inside_the_sequence() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn a_crypto_stop_limit_is_re_placed_for_the_new_net_quantity() {
     const BOUGHT: &str = "0.123456789";
     let ids = TestIds;
