@@ -4,11 +4,11 @@
 //!
 //! **No membership oracle, by structure.** Every request runs the same steps whatever it names:
 //! the whole passkey fold is replayed and looked up by the passkey id; the signature is verified
-//! by `mandate_passkey::reduction::verify_reduction` against the passkey's key, or, for an unknown
-//! passkey or a key that does not resolve, parse, or match its recorded algorithm, against the
-//! decoy its signature's encoding picks; the membership lookup and [DEC-2319]'s interim standing
-//! run for the passkey's member, or for [`DECOY_MEMBER`]; and only then are the results judged,
-//! together. A decoy's answer is never accepted.
+//! by `mandate_passkey::reduction::verify_reduction`, which makes one ES256 and one Ed25519 check
+//! on every call, with the passkey's key, or with `None` for an unknown passkey or a key that does
+//! not resolve, parse, or match its recorded algorithm ([DEC-2324] item 4); the membership lookup
+//! and [DEC-2319]'s interim standing run for the passkey's member, or for [`DECOY_MEMBER`]; and
+//! only then are the results judged, together. A decoy's check never answers.
 //!
 //! [DEC-2319]: ../../../docs/project/decisions/DEC-2319.md
 //! [DEC-2324]: ../../../docs/project/decisions/DEC-2324.md
