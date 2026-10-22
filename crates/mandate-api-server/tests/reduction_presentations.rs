@@ -40,7 +40,6 @@ fn client(address: &str, device: &str) -> ClientKey {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_challenge_is_taken_once_and_never_after_it_expires() {
     let store = store();
     let who = client("198.51.100.1", "d1");
@@ -75,7 +74,6 @@ fn a_challenge_is_taken_once_and_never_after_it_expires() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_settled_challenge_frees_its_slot_whatever_the_outcome() {
     let store = store();
     let who = client("198.51.100.2", "d2");
@@ -102,7 +100,6 @@ fn a_settled_challenge_frees_its_slot_whatever_the_outcome() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn failures_count_only_when_nothing_opened_and_the_limit_raises_the_alert_once() {
     let store = store();
     let member = client("198.51.100.3", "laptop");
@@ -142,7 +139,6 @@ fn failures_count_only_when_nothing_opened_and_the_limit_raises_the_alert_once()
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn refused_presentations_of_taken_challenges_count_and_the_tenth_raises_the_alert() {
     let store = store();
     let guesser = client("198.51.100.4", "guesser");
@@ -174,7 +170,6 @@ fn refused_presentations_of_taken_challenges_count_and_the_tenth_raises_the_aler
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn an_address_reaches_its_limit_at_its_hundredth_failure_across_devices() {
     let store = store();
     let raised: Vec<bool> = (0..104)
