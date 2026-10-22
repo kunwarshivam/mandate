@@ -346,14 +346,8 @@ pub fn ci_drills(job: &str, drills: &[Drill]) -> Result<()> {
 }
 
 /// The Kubernetes API's address for a rendering with no cluster to read it from: k3s's
-/// `kubernetes` Service, the first address of its default service range. Set key by key, so a
-/// values file's `kubeApi.enabled` (the vault's staging values, DEC-2062) survives.
-const KUBE_API_RENDERED: [&str; 4] = [
-    "--set-json",
-    r#"kubeApi.cidrs=["10.43.0.1/32"]"#,
-    "--set-json",
-    "kubeApi.ports=[443]",
-];
+/// `kubernetes` Service, the first address of its default service range.
+const KUBE_API_RENDERED: &str = r#"kubeApi={"cidrs":["10.43.0.1/32"],"ports":[443]}"#;
 
 /// helm lint and a strict schema check of every rendering of every chart, then the charts'
 /// invariant tests, which render them themselves (deploy/tests/).
@@ -381,8 +375,8 @@ pub fn chart_checks() -> Result<()> {
         if !values.is_empty() {
             args.extend(["-f", values]);
         }
-        if chart == JOURNAL_CHART || chart == VAULT_CHART {
-            args.extend(KUBE_API_RENDERED);
+        if chart == JOURNAL_CHART {
+            args.extend(["--set-json", KUBE_API_RENDERED]);
         }
         let mut lint = vec!["lint", "--strict"];
         lint.extend(&args);
