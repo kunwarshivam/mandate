@@ -116,6 +116,9 @@ const DEMO_RESEARCH_FILES: [&str; 5] = [
     "instruments.json",
 ];
 const EXECUTOR_DOCKERFILE: &str = "deploy/cell/images/executor.Dockerfile";
+/// The token-exchange process's image (DEC-1175), which the deployment manager starts once per
+/// OAuth connect.
+const EXCHANGE_DOCKERFILE: &str = "deploy/cell/images/token-exchange.Dockerfile";
 /// Where the cell keeps what it derives: the kubeconfig, the downloaded operator chart, and the
 /// image build context. Under `target/`, so nothing derived is ever committed.
 const STATE: &str = "target/cell";
@@ -580,14 +583,19 @@ const RUNNER: &str = "mandate-backtest-runner";
 
 /// The packages [`build_binary`] always builds for the cell's images, the backtest runner among
 /// them.
-const BUILT_PACKAGES: [&str; 6] = [
+const BUILT_PACKAGES: [&str; 7] = [
     "mandate-cli",
     RUNNER,
     "mandate-api-server",
     "mandate-daemon",
     "mandate-deployd",
     "mandate-executord",
+    EXCHANGE_PACKAGE,
 ];
+
+/// The token exchange's package (DEC-1175), a dev-profile build like the rest, so its cell token
+/// URL compiles in (DEC-2633).
+const EXCHANGE_PACKAGE: &str = "mandate-token-exchange";
 
 /// The stub issuer's package, which [`build_binary`] adds once [`stub_ready`].
 const STUB_PACKAGE: &str = "mandate-stub-issuer";
@@ -595,13 +603,14 @@ const STUB_PACKAGE: &str = "mandate-stub-issuer";
 /// Every package whose binary the cell's images can hold: what [`build_binary`] builds. A change
 /// that reaches none of them, and no path under `deploy/`, cannot change what a cell job runs, so
 /// `cargo xtask ci select` starts the cell jobs only for one that does (DEC-2609).
-pub const IMAGE_PACKAGES: [&str; 7] = [
+pub const IMAGE_PACKAGES: [&str; 8] = [
     BUILT_PACKAGES[0],
     BUILT_PACKAGES[1],
     BUILT_PACKAGES[2],
     BUILT_PACKAGES[3],
     BUILT_PACKAGES[4],
     BUILT_PACKAGES[5],
+    BUILT_PACKAGES[6],
     STUB_PACKAGE,
 ];
 
@@ -779,6 +788,34 @@ fn executor_image() -> Result<Option<String>> {
     local_tag("executor", &["mandate-executord"]).map(Some)
 }
 
+/// The cell's `token-exchange` image, this checkout's build of `mandate-token-exchange`: none
+/// without the deployment manager, the one process that starts it, as for the manager itself.
+fn exchange_image() -> Result<Option<String>> {
+    if deploy_manager_image_tag()?.is_none() {
+        return Ok(None);
+    }
+    local_tag("token-exchange", &[EXCHANGE_PACKAGE]).map(Some)
+}
+
+/// The fixture OAuth app the cell's API, token exchange and fixture provider share (DEC-1176 item
+/// 6): a fixed fake client id, and the API's callback through the port-forward the browser uses.
+const FIXTURE_CLIENT_ID: &str = "cell-fixture-client";
+const FIXTURE_REDIRECT_URI: &str = "http://127.0.0.1:8080/v1/oauth/alpaca/callback";
+
+/// The fixture provider's settings (DEC-1176): on only when the cell runs both the stub issuer,
+/// whose image the fixture runs, and the token exchange, the one process that reaches it; else
+/// none, so the chart renders no fixture.
+fn fixture_values(stub: Option<&str>, exchange: Option<&str>) -> Vec<String> {
+    if stub.is_none() || exchange.is_none() {
+        return Vec::new();
+    }
+    vec![
+        "oauthFixture.enabled=true".to_owned(),
+        format!("alpacaOAuth.clientId={FIXTURE_CLIENT_ID}"),
+        format!("alpacaOAuth.redirectUri={FIXTURE_REDIRECT_URI}"),
+    ]
+}
+
 /// The `images.*` settings for the images this cell runs, so `up` and every render agree.
 fn image_sets() -> Result<Vec<String>> {
     let mut sets = vec![
@@ -789,7 +826,13 @@ fn image_sets() -> Result<Vec<String>> {
             deploy_manager_image_tag()?.unwrap_or_default()
         ),
     ];
-    sets.extend(signin_values(stub_image_tag()?.as_deref()));
+    let stub = stub_image_tag()?;
+    let exchange = exchange_image()?;
+    sets.extend(signin_values(stub.as_deref()));
+    if let Some(exchange) = &exchange {
+        sets.push(format!("images.token-exchange={exchange}"));
+    }
+    sets.extend(fixture_values(stub.as_deref(), exchange.as_deref()));
     if let Some(runtime) = runtime_image()? {
         sets.push(format!("images.runtime={runtime}"));
     }
@@ -814,6 +857,7 @@ pub fn up() -> Result<()> {
     let runtime = runtime_image()?;
     let executor = executor_image()?;
     let stub = stub_image_tag()?;
+    let exchange = exchange_image()?;
     if source == ImageSource::Build {
         let runner = static_binary(RUNNER);
         build_image(&image, IMAGE_DOCKERFILE, "mandate", &[(&runner, RUNNER)])?;
@@ -831,6 +875,9 @@ pub fn up() -> Result<()> {
     }
     if let Some(stub) = &stub {
         build_image(stub, STUB_DOCKERFILE, "mandate-stub-issuer", &[])?;
+    }
+    if let Some(exchange) = &exchange {
+        build_image(exchange, EXCHANGE_DOCKERFILE, EXCHANGE_PACKAGE, &[])?;
     }
     if let Some(manager) = &manager {
         build_image(manager, DEPLOY_MANAGER_DOCKERFILE, "mandate-deployd", &[])?;
@@ -853,6 +900,7 @@ pub fn up() -> Result<()> {
         runtime.as_ref(),
         executor.as_ref(),
         stub.as_ref(),
+        exchange.as_ref(),
         manager.as_ref(),
     ]
     .into_iter()
@@ -5120,6 +5168,27 @@ mod tests {
         );
         let stdin = client_secret_seed_stdin("fake-root", "ZmFrZS1jbGllbnQtc2VjcmV0");
         assert_eq!(stdin, "fake-root\nZmFrZS1jbGllbnQtc2VjcmV0");
+    }
+
+    /// The fixture renders only where the cell runs both the stub, whose image it runs, and the
+    /// exchange, the one process that reaches it; then it takes the cell's fake client and the
+    /// API's loopback callback, which the chart's schema admits.
+    #[test]
+    fn the_fixture_is_on_only_with_the_stub_and_the_exchange() {
+        assert!(fixture_values(None, None).is_empty());
+        assert!(fixture_values(Some("mandate.local/stub-issuer:a"), None).is_empty());
+        assert!(fixture_values(None, Some("mandate.local/token-exchange:a")).is_empty());
+        assert_eq!(
+            fixture_values(
+                Some("mandate.local/stub-issuer:a"),
+                Some("mandate.local/token-exchange:a")
+            ),
+            [
+                "oauthFixture.enabled=true",
+                "alpacaOAuth.clientId=cell-fixture-client",
+                "alpacaOAuth.redirectUri=http://127.0.0.1:8080/v1/oauth/alpaca/callback",
+            ]
+        );
     }
 
     /// The fixture client's Secret holds its one key as written, in the cell's namespace, and its
