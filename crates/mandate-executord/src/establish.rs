@@ -229,3 +229,18 @@ pub fn pass<S: Store, B: Broker>(
     let _ = (process, gate, scope, environment, now);
     Err(Unimplemented)
 }
+
+/// What the executor's loop last printed on stderr of its gate, so each code is printed once per
+/// change and a gate that stays closed does not flood the log.
+#[derive(Debug, Default)]
+pub struct GateReport(Option<&'static str>);
+
+impl GateReport {
+    /// The code to print for a pass that answered `outcome`: `connection_closed` for a closed
+    /// connection and the pass's own code for an error, unless it is the code printed last;
+    /// nothing while open or connecting, which a later code is printed after again.
+    pub fn changed(&mut self, outcome: Result<Connected, &'static str>) -> Option<&'static str> {
+        let _ = (&self.0, outcome);
+        Some(Unimplemented)
+    }
+}

@@ -16,7 +16,7 @@ use mandate_executor::{
 use mandate_executord::alpaca::AlpacaBroker;
 use mandate_executord::connect::connect_check;
 use mandate_executord::establish::{
-    Connected, Establishment, OpeningGate, ToCopy, copy_draft, establishment, pass,
+    Connected, Establishment, GateReport, OpeningGate, ToCopy, copy_draft, establishment, pass,
 };
 use mandate_executord::fixture::Ids;
 use mandate_executord::paper::FixturePaper;
@@ -929,4 +929,42 @@ fn an_unreadable_record_keeps_the_gate_shut_and_every_exit_going() -> Result<(),
     );
     assert_eq!(journal.received(), ["01JINTENT0000000000000000C"]);
     Ok(())
+}
+
+/// Item 4's log: a closed or unreadable connection's code is printed when it starts and again
+/// only after it changed, never once per pass, and nothing is printed while open or connecting.
+#[test]
+#[ignore = "pending E21-32"]
+fn the_gate_reports_each_code_once_per_change() {
+    let mut report = GateReport::default();
+    let printed: Vec<_> = [
+        Ok(Connected::Connecting),
+        Ok(Connected::Closed),
+        Ok(Connected::Closed),
+        Err("connection_record_unreadable"),
+        Err("connection_record_unreadable"),
+        Err("stream_unavailable"),
+        Ok(Connected::Connecting),
+        Ok(Connected::Closed),
+        Ok(Connected::Open),
+        Ok(Connected::Open),
+    ]
+    .into_iter()
+    .map(|outcome| report.changed(outcome))
+    .collect();
+    assert_eq!(
+        printed,
+        [
+            None,
+            Some("connection_closed"),
+            None,
+            Some("connection_record_unreadable"),
+            None,
+            Some("stream_unavailable"),
+            None,
+            Some("connection_closed"),
+            None,
+            None,
+        ]
+    );
 }
