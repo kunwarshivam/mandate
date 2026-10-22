@@ -2090,6 +2090,8 @@ dependencies = [
  "mandate-connections",
  "mandate-gateway",
  "mandate-journal",
+ "mandate-num",
+ "mandate-research",
  "mandate-store",
  "mandate-time",
  "mandate-vault",

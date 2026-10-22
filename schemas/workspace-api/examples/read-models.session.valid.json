@@ -6,7 +6,9 @@
       "/workspaces": [
         {
           "workspace_id": "ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y",
-          "label": "Paper desk"
+          "label": "Paper desk",
+          "agent_ids": [],
+          "connection_ids": []
         }
       ]
     }
@@ -18,7 +20,27 @@
       "/workspaces": [
         {
           "workspace_id": "ws_1",
-          "label": null
+          "label": null,
+          "agent_ids": [],
+          "connection_ids": []
+        }
+      ]
+    }
+  },
+  {
+    "label": "a covered workspace with its agents and connections",
+    "set": {
+      "/kind": "reduction_only",
+      "/workspaces": [
+        {
+          "workspace_id": "01KDEM0000000000000000000W",
+          "label": null,
+          "agent_ids": [
+            "01KDEM00000000000000000AG1"
+          ],
+          "connection_ids": [
+            "01KDEM00000000000000000CN1"
+          ]
         }
       ]
     }
