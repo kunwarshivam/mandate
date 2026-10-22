@@ -17,7 +17,7 @@ use mandate_authn::SubjectStanding;
 use mandate_identity::{LookupFailed, MembershipRecord, PrincipalId};
 use mandate_journal::{ArtifactRef, ArtifactSource, get_artifact};
 use mandate_passkey::credentials::{CredentialFold, CredentialRecord, Enrolment, PasskeyAlg};
-use mandate_passkey::reduction::{cose_key, decoy_for, verify_reduction};
+use mandate_passkey::reduction::{cose_key, verify_reduction};
 use mandate_passkey::{Assertion, Challenge, PublicKey, RelyingParty};
 use mandate_time::UtcNanos;
 
@@ -87,8 +87,7 @@ pub fn judge(
         client_data_json: presented.client_data_json,
         signature: presented.signature,
     };
-    let checked_against = key.as_ref().unwrap_or(decoy_for(presented.signature));
-    let verified = verify_reduction(rp, challenge, checked_against, &assertion).is_ok();
+    let verified = verify_reduction(rp, challenge, key.as_ref(), &assertion).is_ok();
     let member = held.map_or(DECOY_MEMBER, |enrolment| enrolment.member);
     let records = reads.memberships.map(<[MembershipRecord]>::to_vec);
     let lookup = ControlLookup::new(reads.hosted, records.ok_or(LookupFailed), now);
