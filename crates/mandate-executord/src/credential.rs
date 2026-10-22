@@ -197,6 +197,33 @@ pub fn vault_login<V>(
     login(Identity::Executor(connection.clone()), token).map_err(|_| "vault_login_failed")
 }
 
+/// The report of a function E21-32 has not implemented yet, which its pending tests fail on
+/// (DEC-77); the implementation PR replaces the stub and removes it.
+#[allow(
+    non_upper_case_globals,
+    reason = "the pending gate recognises a stub by the name `Unimplemented` (DEC-137)"
+)]
+pub const Unimplemented: &str = "unimplemented";
+
+/// The variable the deployment manager sets to the ServiceAccount its pod runs as (DEC-2336).
+pub const SUBJECT_ACCOUNT_ENV: &str = "MANDATE_SUBJECT_ACCOUNT";
+
+/// Whether `configured`, the pod's [`SUBJECT_ACCOUNT_ENV`], is exactly the ServiceAccount
+/// `connection`'s executor runs as, its id's bytes in lowercase hex, as
+/// [`mandate_vault::kubernetes::service_account_name`] builds it (DEC-2060 item 2). Admission pins
+/// the name's form but cannot compute the hex, so the executor checks it before it logs in, as
+/// the token exchange does (DEC-1177 item 6, DEC-2336).
+///
+/// # Errors
+/// `executor_subject_account` when `configured` is absent, empty or any other name.
+pub fn subject_account(
+    configured: Option<String>,
+    connection: &ConnectionId,
+) -> Result<(), &'static str> {
+    let _ = (configured, connection);
+    Err(Unimplemented)
+}
+
 /// The variable the workspace chart sets to the namespace the deployment manager creates the
 /// executor's pod in (lane D1, K2).
 pub const WORKSPACE_NAMESPACE_ENV: &str = "MANDATE_WORKSPACE_NAMESPACE";
