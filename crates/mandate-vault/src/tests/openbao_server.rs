@@ -1171,7 +1171,7 @@ async fn provisioning_fails_on_a_fingerprint_key_that_can_leave_the_vault() {
         };
         for (path, body) in steps {
             let path = path.replace("{transit}", &config.mounts.transit);
-            operator_request(
+            operator_call(
                 &address,
                 &ca_pem,
                 &operator,
