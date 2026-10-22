@@ -28,10 +28,10 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   `kill_switch_unapplied` (safety, after `kill_switch`), 33 kinds to 34: the deployment manager's
   `OwnerAlertSent` for its own unapplied crash loop (notifications spec §3.2, DEC-2344 item 1).
   Stream rule 264 holds the kind to that subject, which the control stream alone shows: no record
-  gains a member. The new `kill_switch_unapplied` vectors are 16 control streams, a deployment
-  and retirement during the run, an agent wanting it at the loop, a stop, a new run after a loop,
-  and a runtime's loop among them, judged by the fold and an independent oracle, with 6 stream and
-  2 vector mutants caught. **Versions and
+  gains a member. The new `kill_switch_unapplied` vectors are 20 control streams, a deployment
+  and retirement during the run, an agent wanting it at the loop, a connect, a revoked connection,
+  a stop, a new run after a loop, and a runtime's and an exchange's loop among them, judged by the
+  fold and an independent oracle, with 6 stream and 2 vector mutants caught. **Versions and
   numbers:** v0.77 is held by #2278 (DEC-2350) and lane V2's #2292 and #2293 stacked on it, and
   rules 261 to 263 by #2278, so this takes v0.78 and rule 264, and renumbers at merge if
   that order changes.
@@ -4142,7 +4142,9 @@ does `address_retired`, which records only that the address left the set.
      `ProcessStartIssued` with cause `kill_switch` journaled while every such deployment already
      had its `AgentStopped`, until a later start of the executor with cause `deployed`,
      `requested`, or `exchanged`, or a `ProcessStopIssued` of it: the manager journals a stop only
-     for a generation it does not hold. So a deployment and retirement while the run goes on leave
+     for a generation it does not hold. A connect's `ConnectionRequested` neither holds nor frees a
+     run, and a deployment on a connection revoked since still counts until its `AgentStopped`.
+     So a deployment and retirement while the run goes on leave
      it held and unstopped (DEC-2344 item 3); a loop while an agent wants the executor is an
      ordinary one, `crash_loop` alone; and a later covering switch's start after an unapplied loop
      begins a new run, whose own loop is unapplied too ([DEC-2344](../project/decisions/DEC-2344.md)

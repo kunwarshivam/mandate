@@ -87,6 +87,29 @@ def alert(index: int, subject: dict, kind: str = "kill_switch_unapplied") -> dic
     }
 
 
+def requested(index: int, connection: str = CONNECTION) -> dict:
+    """An OAuth connect's request, which rule 264 does not read: only agents hold or free a run."""
+    return {
+        "event_id": event_id(index),
+        "event_type": "ConnectionRequested",
+        "schema_version": 2,
+        "causation_id": None,
+        "payload": {"connection_id": connection, "account_ref": ACCOUNT},
+    }
+
+
+def revoked(index: int, connection: str = CONNECTION) -> dict:
+    """A revocation, which rule 264 does not read: a deployment on the connection counts until its
+    `AgentStopped`."""
+    return {
+        "event_id": event_id(index),
+        "event_type": "ConnectionRevoked",
+        "schema_version": 1,
+        "causation_id": None,
+        "payload": {"connection_id": connection},
+    }
+
+
 def stop(index: int, generation: int, account: str = ACCOUNT) -> dict:
     return {
         "event_id": event_id(index),
@@ -235,6 +258,30 @@ def stream_cases() -> list[dict]:
             "rule 264 reads only `kill_switch_unapplied`",
             [est, first, start(2, "restart", 2), looped(3, 2)],
             None,
+        ),
+        case(
+            "switched_during_a_connect",
+            "rule 264: a connect's request wants the executor but holds and frees nothing",
+            [est, first, requested(13), switched, start(3, "restart", 3), looped(4, 3), alert(5, looped(4, 3))],
+            None,
+        ),
+        case(
+            "redeployed_then_retired",
+            "rule 264: a deployment and that agent's retirement during the run leave it held",
+            [est, first, switched, deployed(13), start(3, "restart", 3), stopped(14, 13), looped(4, 3), alert(5, looped(4, 3))],
+            None,
+        ),
+        case(
+            "an_exchange_loop",
+            "rule 264: a token exchange's loop is never an unapplied one",
+            [est, first, switched, looped(3, 2, process="token_exchange"), alert(4, looped(3, 2, process="token_exchange"))],
+            4,
+        ),
+        case(
+            "deployed_on_a_revoked_connection",
+            "rule 264: a deployment on a connection revoked since still wants the executor until its stop",
+            [est, first, switched, deployed(13), revoked(14), start(3, "restart", 3), looped(4, 3), alert(5, looped(4, 3))],
+            7,
         ),
         case(
             "cleared_by_a_request",
