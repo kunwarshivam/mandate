@@ -26,7 +26,9 @@ use mandate_vault::credentials::{
 };
 use mandate_vault::kube::kube_secrets;
 use mandate_vault::kubernetes::{KubernetesAuth, kubernetes_mount_requests};
-use mandate_vault::openbao::{OpenBaoConfig, OpenBaoSource, RoleCredentials, provision};
+use mandate_vault::openbao::{
+    OpenBaoConfig, OpenBaoSource, RoleCredentials, provision, provision_kubernetes_auth,
+};
 use mandate_vault::policy::{Identity, Mounts, PlatformSecret, SecretPath};
 use mandate_vault::source::SecretSource;
 use mandate_vault_local::VaultError;
@@ -103,7 +105,7 @@ pub struct ProvisionArgs {
     /// The directory the credentials are written to, made with mode 0700 when absent.
     #[arg(
         long,
-        required_unless_present = "secrets_namespace",
+        required_unless_present_any = ["secrets_namespace", "kubernetes_only"],
         conflicts_with = "secrets_namespace"
     )]
     pub out: Option<PathBuf>,
@@ -117,6 +119,15 @@ pub struct ProvisionArgs {
     /// DEC-2062). Required with `--secrets-namespace`, the cluster's path; `--out` may omit it.
     #[arg(long)]
     pub kubernetes_host: Option<String>,
+    /// Set Kubernetes auth alone up, at `--kubernetes-host`, on a vault already provisioned: no
+    /// AppRole role is touched and no secret id minted, so no credential in use is rotated, and
+    /// nothing is printed. It takes no connection, `--out` or `--secrets-namespace`.
+    #[arg(
+        long,
+        requires = "kubernetes_host",
+        conflicts_with_all = ["out", "secrets_namespace", "connections"]
+    )]
+    pub kubernetes_only: bool,
 }
 
 /// The Kubernetes auth `--kubernetes-host` asks for: the API server at `host`, with no CA, so the
@@ -371,6 +382,12 @@ pub fn run_provision(
         .enable_all()
         .build()
         .context("starting the provisioning's runtime")?;
+    if args.kubernetes_only {
+        let auth = kubernetes.ok_or_else(|| refused(SourceError::Config))?;
+        return runtime
+            .block_on(provision_kubernetes_auth(&config, &operator, &auth))
+            .map_err(refused);
+    }
     let credentials = runtime
         .block_on(provision(
             &config,

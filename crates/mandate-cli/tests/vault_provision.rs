@@ -434,3 +434,100 @@ fn provisioning_to_files_needs_no_kubernetes_host() {
         "files with no Kubernetes host",
     );
 }
+
+/// Runs `mandate vault provision --kubernetes-only` with the token file, and `extra` after it.
+fn kubernetes_only(address: &str, token: &Path, extra: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_mandate"))
+        .args(["vault", "provision", "--address", address, "--ca"])
+        .arg(ca())
+        .arg("--operator-token-file")
+        .arg(token)
+        .arg("--kubernetes-only")
+        .args(extra)
+        .env_clear()
+        .output()
+        .expect("the CLI runs")
+}
+
+/// `--kubernetes-only` names its host and takes no connection, `--out` or `--secrets-namespace`:
+/// clap refuses each before the token is read or any vault reached.
+#[test]
+fn kubernetes_alone_needs_a_host_and_takes_no_connection_out_or_namespace() {
+    let token = token_file(CANARY, 0o600);
+    let out = fresh("out");
+    let _removed = Removed(vec![token.clone(), out.clone()]);
+    let host = ["--kubernetes-host", "https://10.43.0.1:443"];
+    let out_arg = out.display().to_string();
+    for (extra, case) in [
+        (vec![], "no host"),
+        (
+            [&host[..], &["--connection", "c1"]].concat(),
+            "a connection",
+        ),
+        ([&host[..], &["--out", out_arg.as_str()]].concat(), "an out"),
+        (
+            [&host[..], &["--secrets-namespace", "ws-ws1"]].concat(),
+            "a namespace",
+        ),
+    ] {
+        let output = kubernetes_only(NOWHERE, &token, &extra);
+        assert_eq!(output.status.code(), Some(2), "{case}: {}", stderr(&output));
+        assert!(output.stdout.is_empty(), "{case}");
+        assert!(!stderr(&output).contains(CANARY), "{case}");
+        assert!(!out.exists(), "{case}");
+    }
+}
+
+/// With its host, `--kubernetes-only` checks the host as provisioning does, then reaches the
+/// vault, so a vault no one answers for is an outage, and it prints nothing.
+#[test]
+#[ignore = "pending E21-32"]
+fn kubernetes_alone_checks_its_host_and_reaches_the_vault() {
+    let token = token_file(CANARY, 0o600);
+    let out = fresh("out");
+    let _removed = Removed(vec![token.clone(), out.clone()]);
+    for host in ["https://u:p@10.43.0.1:443", "http://10.43.0.1:443"] {
+        let output = kubernetes_only(NOWHERE, &token, &["--kubernetes-host", host]);
+        refused(&output, "config", &out, host);
+    }
+    let output = kubernetes_only(
+        NOWHERE,
+        &token,
+        &["--kubernetes-host", "https://10.43.0.1:443"],
+    );
+    refused(&output, "unavailable", &out, "an unreachable vault");
+}
+
+/// On the dev server, which runs in no pod, Kubernetes auth alone is refused as provisioning's
+/// is, `denied`, printing nothing; what it sets up on a vault given a CA, and that it mints no
+/// secret id, is `mandate-vault`'s own server test.
+#[test]
+#[ignore = "pending E21-32"]
+fn kubernetes_alone_on_the_dev_server_is_refused_outside_a_pod() {
+    kubernetes_alone_checks_its_host_and_reaches_the_vault();
+    let Some((address, ca, operator)) = server() else {
+        return;
+    };
+    let token = token_file(fs::read_to_string(operator).unwrap().trim(), 0o600);
+    let out = fresh("out");
+    let _removed = Removed(vec![token.clone(), out.clone()]);
+    let output = Command::new(env!("CARGO_BIN_EXE_mandate"))
+        .args(["vault", "provision", "--address", &address, "--ca"])
+        .arg(&ca)
+        .arg("--operator-token-file")
+        .arg(&token)
+        .args([
+            "--kubernetes-only",
+            "--kubernetes-host",
+            "https://127.0.0.1:6443",
+        ])
+        .env_clear()
+        .output()
+        .expect("the CLI runs");
+    refused(
+        &output,
+        "denied",
+        &out,
+        "Kubernetes auth alone outside a pod",
+    );
+}
