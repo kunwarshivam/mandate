@@ -1,0 +1,9 @@
+file = "crates/mandate-api-server/tests/reduction_sessions_http.rs"
+test = "the_opening_and_me_session_name_what_the_session_may_act_on"
+reason = """
+The opening answer and GET /v1/me/session are served today: the first names empty agent_ids and
+connection_ids, the "unknown" §4.10 item 6 allows, and the second refuses a route-2 session
+reduction_only. So this test fails on their current answers rather than at a stub; stubbing either
+handler would stop every other route-2 and session test. The row goes with the implementation PR
+that serves opening::reach in both.
+"""

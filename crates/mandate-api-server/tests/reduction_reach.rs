@@ -47,12 +47,17 @@ fn connection(rows: &mut Rows, kind: &str, version: u64, secs: i64, id: &str) {
 /// The hosted workspace with three connections (established, still connecting, revoked) and three
 /// agents (two live, one stopped), and ALICE holding `roles`.
 fn workspace(roles: &[Role]) -> Rows {
+    workspace_of(ALICE, roles)
+}
+
+/// The hosted workspace of [`workspace`], with `holder` holding `roles` instead of ALICE.
+fn workspace_of(holder: PrincipalId, roles: &[Role]) -> Rows {
     let mut rows = Rows::opened();
     rows.hosted(
         "MemberActivated",
         T0 - 1_000,
         activation(
-            ALICE,
+            holder,
             &BTreeSet::from_iter(roles.iter().copied()),
             T0 - 1_000,
         ),
@@ -97,6 +102,30 @@ fn an_operator_reaches_every_live_agent_and_established_connection() {
             "{role:?}: no stopped agent, no connection still connecting or revoked"
         );
     }
+}
+
+#[test]
+fn the_reach_follows_the_member_asked_about() {
+    let bob = PrincipalId(8);
+    let mut rows = workspace_of(bob, &[Role::Operator]);
+    rows.hosted(
+        "MemberActivated",
+        T0 - 990,
+        activation(ALICE, &BTreeSet::from([Role::Viewer]), T0 - 990),
+    );
+    assert_eq!(
+        reach_of(&rows, bob),
+        Reach {
+            agent_ids: ids(&["agt_one", "agt_two"]),
+            connection_ids: ids(&["conn_live"]),
+        },
+        "an operator other than ALICE"
+    );
+    assert_eq!(
+        reach_of(&rows, ALICE),
+        Reach::default(),
+        "the viewer beside them"
+    );
 }
 
 #[test]
