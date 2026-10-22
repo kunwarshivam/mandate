@@ -86,7 +86,7 @@ DEC-2031). Its probes are processes.json's `probe`, as a Deployment's are (DEC-1
 {{- $command := list -}}
 {{- if .p.one_shot -}}
 {{- $command = .p.command | default list -}}
-{{- $args = .p.args | default list -}}
+{{- $args = include "mandate.fill" (dict "root" .root "words" (.p.args | default list) "probe" "") | fromJsonArray -}}
 {{- $probe = dict -}}
 {{- end -}}
 {{- $container := include "mandate.container" (dict "root" .root "p" .p "name" .p.name "command" $command "args" $args "probe" $probe) }}
@@ -128,6 +128,9 @@ object.spec.containers.all(c, {{ . }}) && (!has(object.spec.initContainers) || o
 {{- $secrets := dict }}
 {{- $claims := dict }}
 {{- $projected := dict }}
+{{- $env := dict }}
+{{- $maps := dict }}
+{{- $added := dict }}
 {{- range $file, $text := .templates }}
 {{- $name := trimSuffix ".json" $file }}
 {{- $pod := fromJson $text }}
@@ -139,12 +142,37 @@ object.spec.containers.all(c, {{ . }}) && (!has(object.spec.initContainers) || o
 {{- end }}
 {{- $_ := set $images $name ($own | uniq | sortAlpha) }}
 {{- $_ := set $commands $name $launches }}
+{{- $fixed := dict }}
+{{- $named := dict }}
+{{- range ($pod.spec.initContainers | default list) }}
+{{- $entries := list }}
+{{- range (.env | default list) }}
+{{- $entries = append $entries (printf "%s=%s" .name (.value | default "")) }}
+{{- end }}
+{{- $_ := set $fixed .name $entries }}
+{{- $_ := set $named .name list }}
+{{- end }}
+{{- range $pod.spec.containers }}
+{{- $entries := list }}
+{{- range (.env | default list) }}
+{{- $entries = append $entries (printf "%s=%s" .name (.value | default "")) }}
+{{- end }}
+{{- $_ := set $fixed .name $entries }}
+{{- $_ := set $named .name (ternary (list "MANDATE_WORKSPACE" "MANDATE_PROCESS" "MANDATE_SUBJECT" "MANDATE_GENERATION" "MANDATE_SUBJECT_ACCOUNT") (list "MANDATE_WORKSPACE" "MANDATE_PROCESS" "MANDATE_SUBJECT" "MANDATE_GENERATION") (eq $name "token-exchange")) }}
+{{- end }}
+{{- $_ := set $env $name $fixed }}
+{{- $_ := set $added $name $named }}
 {{- $mounted := list }}
+{{- $trusted := list }}
 {{- $read := list }}
 {{- $tokens := list }}
 {{- range ($pod.spec.volumes | default list) }}
 {{- if .secret }}
 {{- $mounted = append $mounted .secret.secretName }}
+{{- end }}
+{{- if .configMap }}
+{{- $item := first .configMap.items }}
+{{- $trusted = append $trusted (printf "%s|%v|%s=%s" .configMap.name .configMap.defaultMode $item.key $item.path) }}
 {{- end }}
 {{- if and .persistentVolumeClaim .persistentVolumeClaim.readOnly }}
 {{- $read = append $read .persistentVolumeClaim.claimName }}
@@ -166,6 +194,7 @@ object.spec.containers.all(c, {{ . }}) && (!has(object.spec.initContainers) || o
 {{- end }}
 {{- end }}
 {{- $_ := set $secrets $name ($mounted | uniq | sortAlpha) }}
+{{- $_ := set $maps $name $trusted }}
 {{- $_ := set $claims $name ($read | uniq | sortAlpha) }}
 {{- $_ := set $projected $name $tokens }}
 {{- end }}
@@ -204,6 +233,12 @@ spec:
       expression: '{{ $projected | toJson }}'
     - name: egress
       expression: '{{ .egress | toJson }}'
+    - name: configMaps
+      expression: '{{ $maps | toJson }}'
+    - name: env
+      expression: '{{ $env | toJson | replace "'" "''" }}'
+    - name: added
+      expression: '{{ $added | toJson }}'
   validations:
     - expression: 'has(object.spec.automountServiceAccountToken) && object.spec.automountServiceAccountToken == false'
       reason: Forbidden
@@ -235,9 +270,12 @@ spec:
     - expression: 'size(object.spec.containers) + (has(object.spec.initContainers) ? size(object.spec.initContainers) : 0) == size(variables.commands[variables.process]) && {{ include "mandate.everyContainer" "c.name in variables.commands[variables.process] && variables.commands[variables.process][c.name] == [has(c.command) ? c.command : [], has(c.args) ? c.args : []]" }}'
       reason: Forbidden
       message: a pod the deployment manager makes runs exactly its own process's commands and arguments
-    - expression: '!has(object.spec.volumes) || object.spec.volumes.all(v, has(v.emptyDir) || (has(v.secret) && v.secret.secretName in variables.secrets[variables.process]) || (has(v.persistentVolumeClaim) && v.persistentVolumeClaim.claimName in variables.claims[variables.process] && has(v.persistentVolumeClaim.readOnly) && v.persistentVolumeClaim.readOnly == true) || (has(v.projected) && size(v.projected.sources) == 2 && has(v.projected.sources[0].serviceAccountToken) && !has(v.projected.sources[0].secret) && !has(v.projected.sources[0].configMap) && !has(v.projected.sources[0].downwardAPI) && !has(v.projected.sources[0].clusterTrustBundle) && has(v.projected.sources[0].serviceAccountToken.audience) && has(v.projected.sources[0].serviceAccountToken.expirationSeconds) && has(v.projected.sources[1].downwardAPI) && !has(v.projected.sources[1].secret) && !has(v.projected.sources[1].configMap) && !has(v.projected.sources[1].serviceAccountToken) && !has(v.projected.sources[1].clusterTrustBundle) && has(v.projected.sources[1].downwardAPI.items) && size(v.projected.sources[1].downwardAPI.items) == 1 && has(v.projected.sources[1].downwardAPI.items[0].fieldRef) && !has(v.projected.sources[1].downwardAPI.items[0].mode) && !has(v.projected.sources[1].downwardAPI.items[0].resourceFieldRef) && (v.projected.sources[0].serviceAccountToken.audience + "|" + string(v.projected.sources[0].serviceAccountToken.expirationSeconds) + "|" + (has(v.projected.sources[0].serviceAccountToken.path) ? v.projected.sources[0].serviceAccountToken.path : "") + "|" + (has(v.projected.defaultMode) ? string(v.projected.defaultMode) : "") + "|" + v.projected.sources[1].downwardAPI.items[0].path + "=" + v.projected.sources[1].downwardAPI.items[0].fieldRef.fieldPath) in variables.projected[variables.process]))'
+    - expression: '!has(object.spec.volumes) || object.spec.volumes.all(v, has(v.emptyDir) || (has(v.secret) && v.secret.secretName in variables.secrets[variables.process]) || (has(v.configMap) && (!has(v.configMap.optional) || v.configMap.optional == false) && has(v.configMap.items) && size(v.configMap.items) == 1 && !has(v.configMap.items[0].mode) && (v.configMap.name + "|" + (has(v.configMap.defaultMode) ? string(v.configMap.defaultMode) : "") + "|" + v.configMap.items[0].key + "=" + v.configMap.items[0].path) in variables.configMaps[variables.process]) || (has(v.persistentVolumeClaim) && v.persistentVolumeClaim.claimName in variables.claims[variables.process] && has(v.persistentVolumeClaim.readOnly) && v.persistentVolumeClaim.readOnly == true) || (has(v.projected) && size(v.projected.sources) == 2 && has(v.projected.sources[0].serviceAccountToken) && !has(v.projected.sources[0].secret) && !has(v.projected.sources[0].configMap) && !has(v.projected.sources[0].downwardAPI) && !has(v.projected.sources[0].clusterTrustBundle) && has(v.projected.sources[0].serviceAccountToken.audience) && has(v.projected.sources[0].serviceAccountToken.expirationSeconds) && has(v.projected.sources[1].downwardAPI) && !has(v.projected.sources[1].secret) && !has(v.projected.sources[1].configMap) && !has(v.projected.sources[1].serviceAccountToken) && !has(v.projected.sources[1].clusterTrustBundle) && has(v.projected.sources[1].downwardAPI.items) && size(v.projected.sources[1].downwardAPI.items) == 1 && has(v.projected.sources[1].downwardAPI.items[0].fieldRef) && !has(v.projected.sources[1].downwardAPI.items[0].mode) && !has(v.projected.sources[1].downwardAPI.items[0].resourceFieldRef) && (v.projected.sources[0].serviceAccountToken.audience + "|" + string(v.projected.sources[0].serviceAccountToken.expirationSeconds) + "|" + (has(v.projected.sources[0].serviceAccountToken.path) ? v.projected.sources[0].serviceAccountToken.path : "") + "|" + (has(v.projected.defaultMode) ? string(v.projected.defaultMode) : "") + "|" + v.projected.sources[1].downwardAPI.items[0].path + "=" + v.projected.sources[1].downwardAPI.items[0].fieldRef.fieldPath) in variables.projected[variables.process]))'
       reason: Forbidden
-      message: a pod the deployment manager makes mounts only memory, its own process's Secrets and projected token, or its claims read-only
+      message: a pod the deployment manager makes mounts only memory, its own process's Secrets, vault CA and projected token, or its claims read-only
+    - expression: '{{ include "mandate.everyContainer" "c.name in variables.env[variables.process] && (has(c.env) ? size(c.env) : 0) == size(variables.env[variables.process][c.name]) + size(variables.added[variables.process][c.name]) && variables.env[variables.process][c.name].all(f, has(c.env) && c.env.exists(e, e.name + \"=\" + (has(e.value) ? e.value : \"\") == f)) && variables.added[variables.process][c.name].all(n, has(c.env) && size(c.env.filter(e, e.name == n)) == 1)" }}'
+      reason: Forbidden
+      message: every container of a pod the deployment manager makes has exactly its template's environment, and the manager's own names once each
     - expression: '!has(object.spec.imagePullSecrets) && {{ include "mandate.everyContainer" "!has(c.envFrom) && (!has(c.env) || c.env.all(e, !has(e.valueFrom)))" }}'
       reason: Forbidden
       message: a pod the deployment manager makes reads no Secret through its environment or a pull secret
