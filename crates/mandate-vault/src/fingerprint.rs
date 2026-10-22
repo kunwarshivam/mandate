@@ -9,9 +9,13 @@
 use std::fmt;
 
 use mandate_connections::record::{AccountPiiRef, ConnectionId};
-use secrecy::SecretSlice;
+use secrecy::{ExposeSecret, SecretSlice};
+use serde_json::Value;
 
 use crate::SourceError;
+
+/// The version of the fingerprint entry's form.
+const ENTRY_FORMAT: u8 = 1;
 
 /// The transit key the fingerprint is computed under: HMAC-SHA256, never exportable.
 pub const FINGERPRINT_KEY: &str = "account-fingerprint";
@@ -85,13 +89,19 @@ pub enum FingerprintError {
 /// computed beside, in one canonical form, `{"fingerprint":…,"format":1,"pii_ref":…}`.
 ///
 /// # Errors
-/// Never for the two values in their forms; the result keeps the stub's place until E21-32 lands.
+/// [`SourceError::Malformed`] if either value cannot be written as JSON text, which neither form
+/// allows.
 pub fn encode_entry(
     fingerprint: &AccountFingerprint,
     pii_ref: &AccountPiiRef,
 ) -> Result<SecretSlice<u8>, SourceError> {
-    let _ = (fingerprint, pii_ref);
-    Err(SourceError::Unimplemented { story: "E21-32" })
+    let text = |value: &str| serde_json::to_string(value).map_err(|_| SourceError::Malformed);
+    let entry = format!(
+        "{{\"fingerprint\":{},\"format\":{ENTRY_FORMAT},\"pii_ref\":{}}}",
+        text(fingerprint.as_str())?,
+        text(pii_ref.as_str())?
+    );
+    Ok(SecretSlice::from(entry.into_bytes()))
 }
 
 /// The fingerprint and reference a fingerprint entry holds, by its one reader.
@@ -100,6 +110,16 @@ pub fn encode_entry(
 /// [`SourceError::Malformed`] for bytes that are not [`encode_entry`]'s form, exactly; it names
 /// nothing of them.
 pub fn decode_entry(bytes: &[u8]) -> Result<(AccountFingerprint, AccountPiiRef), SourceError> {
-    let _ = bytes;
-    Err(SourceError::Unimplemented { story: "E21-32" })
+    let malformed = SourceError::Malformed;
+    let value: Value = serde_json::from_slice(bytes).map_err(|_| malformed.clone())?;
+    let member = |name: &str| value.get(name).and_then(Value::as_str);
+    let fingerprint = AccountFingerprint::new(member("fingerprint").ok_or(malformed.clone())?)?;
+    let pii_ref = AccountPiiRef::new(member("pii_ref").ok_or(malformed.clone())?)
+        .map_err(|_| malformed.clone())?;
+    let again = encode_entry(&fingerprint, &pii_ref)?;
+    if again.expose_secret() == bytes {
+        Ok((fingerprint, pii_ref))
+    } else {
+        Err(malformed)
+    }
 }

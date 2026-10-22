@@ -29,7 +29,7 @@ use secrecy::{ExposeSecret, SecretSlice, SecretString};
 use serde_json::{Value, json};
 
 use crate::SourceError;
-use crate::fingerprint::AccountFingerprint;
+use crate::fingerprint::{AccountFingerprint, FINGERPRINT_KEY};
 use crate::kubernetes::{
     KubernetesAuth, kubernetes_mount_requests, kubernetes_policy, kubernetes_policy_name,
     mount_accessor, service_account_name,
@@ -371,8 +371,12 @@ pub fn seal_verdict(body: &[u8], allow_dev: bool) -> Result<(), SourceError> {
 /// # Errors
 /// [`SourceError::Config`] for any other answer.
 pub fn transit_mount_verdict(answer: Option<&Value>) -> Result<(), SourceError> {
-    let _ = answer;
-    Err(SourceError::Unimplemented { story: "E21-32" })
+    let transit = answer.and_then(|mount| mount.pointer("/data/type")) == Some(&json!("transit"));
+    if transit {
+        Ok(())
+    } else {
+        Err(SourceError::Config)
+    }
 }
 
 /// Whether a fingerprint key already there, from its `<transit>/keys/<key>` answer, is as
@@ -383,8 +387,14 @@ pub fn transit_mount_verdict(answer: Option<&Value>) -> Result<(), SourceError> 
 /// # Errors
 /// [`SourceError::Config`] for any other answer.
 pub fn fingerprint_key_verdict(answer: Option<&Value>) -> Result<(), SourceError> {
-    let _ = answer;
-    Err(SourceError::Unimplemented { story: "E21-32" })
+    let never = |field: &str| {
+        answer.and_then(|key| key.pointer(&format!("/data/{field}"))) == Some(&json!(false))
+    };
+    if never("exportable") && never("deletion_allowed") && never("allow_plaintext_backup") {
+        Ok(())
+    } else {
+        Err(SourceError::Config)
+    }
 }
 
 /// Whether provisioning must create the fingerprint key, from its `GET <transit>/keys/<key>`:
@@ -395,8 +405,11 @@ pub fn fingerprint_key_verdict(answer: Option<&Value>) -> Result<(), SourceError
 /// # Errors
 /// The GET's own refusal, other than [`SourceError::Missing`], and [`fingerprint_key_verdict`]'s.
 pub fn key_needs_creating(found: &Result<Option<Value>, SourceError>) -> Result<bool, SourceError> {
-    let _ = found;
-    Err(SourceError::Unimplemented { story: "E21-32" })
+    match found {
+        Ok(key) => fingerprint_key_verdict(key.as_ref()).map(|()| false),
+        Err(SourceError::Missing) => Ok(true),
+        Err(e) => Err(e.clone()),
+    }
 }
 
 /// A logged-in session as one identity.
@@ -686,8 +699,18 @@ impl OpenBaoSource {
         &self,
         account: &SecretString,
     ) -> Result<AccountFingerprint, SourceError> {
-        let _ = account;
-        Err(SourceError::Unimplemented { story: "E21-32" })
+        if !matches!(self.identity, Identity::Executor(_)) {
+            return Err(SourceError::Denied);
+        }
+        let mut input = STANDARD.encode(account.expose_secret());
+        let mut body = json!({ "input": input });
+        input.zeroize();
+        let path = format!("{}/hmac/{FINGERPRINT_KEY}", self.mounts.transit);
+        let answer = self.call(Method::POST, &path, Some(&body)).await;
+        if let Some(Value::String(sent)) = body.get_mut("input") {
+            sent.zeroize();
+        }
+        AccountFingerprint::new(text(answer?.as_ref(), "/data/hmac")?)
     }
 }
 
@@ -976,8 +999,50 @@ pub async fn provision_kubernetes_auth(
     provision_kubernetes(&http, Some(operator_token), &config.mounts, auth).await
 }
 
-/// Sets a vault up for `connections`, with an operator's token: the KV v2 mount, the AppRole
-/// auth method, one policy and one role per identity, and a secret id for every identity but the
+/// The fingerprint key and registry (DEC-2345): the transit mount, its key, never exportable nor
+/// deletable, and the registry entry made to take only check-and-set writes.
+async fn provision_fingerprints(
+    http: &Http,
+    token: Option<&SecretString>,
+    mounts: &Mounts,
+) -> Result<(), SourceError> {
+    let transit = format!("sys/mounts/{}", mounts.transit);
+    if http.call(Method::GET, &transit, token, None).await.is_err() {
+        http.call(
+            Method::POST,
+            &transit,
+            token,
+            Some(&json!({ "type": "transit" })),
+        )
+        .await?;
+    }
+    let mount = http.call(Method::GET, &transit, token, None).await?;
+    transit_mount_verdict(mount.as_ref())?;
+    let key = format!("{}/keys/{FINGERPRINT_KEY}", mounts.transit);
+    if key_needs_creating(&http.call(Method::GET, &key, token, None).await)? {
+        http.call(
+            Method::POST,
+            &key,
+            token,
+            Some(&json!({ "exportable": false })),
+        )
+        .await?;
+        let made = http.call(Method::GET, &key, token, None).await?;
+        fingerprint_key_verdict(made.as_ref())?;
+    }
+    let claims = format!("{}/metadata/{}", mounts.kv, kv_path(&SecretPath::Claims)?);
+    http.call(
+        Method::POST,
+        &claims,
+        token,
+        Some(&json!({ "cas_required": true })),
+    )
+    .await
+    .map(drop)
+}
+
+/// Sets a vault up for `connections`, with an operator's token: the KV v2 mount, the fingerprint
+/// key and registry ([`provision_fingerprints`]), the AppRole auth method, one policy and one role per identity, and a secret id for every identity but the
 /// token exchanges, whose secret ids are grants; and, given `kubernetes`, both Kubernetes auth
 /// mounts and their templated policies. Running it again rewrites the policies and roles, so
 /// adding a connection is running it with the longer list.
@@ -1008,6 +1073,7 @@ pub async fn provision(
         )
         .await?;
     }
+    provision_fingerprints(&http, token, mounts).await?;
     let auth_mounted = http
         .call(
             Method::GET,

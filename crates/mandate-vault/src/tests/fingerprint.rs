@@ -244,7 +244,6 @@ const PII: &str = "pii_01J8Z2PQ000000000000000001";
 /// The fingerprint entry holds the fingerprint and the reference alone, in one canonical form, and
 /// its reader takes that form and nothing else.
 #[test]
-#[ignore = "pending E21-32"]
 fn the_entry_holds_the_fingerprint_and_reference_alone() {
     let fingerprint = AccountFingerprint::new(HASH).unwrap();
     let pii_ref = AccountPiiRef::new(PII).unwrap();

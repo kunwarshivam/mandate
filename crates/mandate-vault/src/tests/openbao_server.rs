@@ -1032,7 +1032,6 @@ async fn an_executor_creates_its_own_account_entry_once_and_no_identity_reads_it
 /// to the same fingerprint for every connection and another id to another. A vault nobody answers
 /// for is an outage, checked first.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending E21-32"]
 async fn only_an_executor_hashes_an_account_under_the_vaults_key() {
     let ca = include_bytes!("fixtures/isrg-root-x1.pem").to_vec();
     let id = |text: &str| SecretString::from(text.to_owned());
@@ -1105,7 +1104,6 @@ async fn only_an_executor_hashes_an_account_under_the_vaults_key() {
 /// `Config`. The pure verdicts are checked first, so a run with no server still fails until they
 /// hold.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending E21-32"]
 async fn provisioning_fails_on_a_fingerprint_key_that_can_leave_the_vault() {
     let kept = json!({ "data": {
         "exportable": false, "deletion_allowed": false, "allow_plaintext_backup": false,
