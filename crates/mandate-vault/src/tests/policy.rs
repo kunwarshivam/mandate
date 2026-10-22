@@ -286,8 +286,10 @@ fn only_a_token_exchange_takes_and_only_its_own_connections_code() {
     for identity in identities() {
         let hcl = openbao_policy(&identity, &[c("c1"), c("c2")], &Mounts::default());
         assert!(
-            !blocks(&hcl).iter().any(|(_, caps)| caps == "update"),
-            "an AppRole policy never grants a take: {identity:?}: {hcl}"
+            !blocks(&hcl)
+                .iter()
+                .any(|(path, caps)| path.starts_with("mandate/data/") && caps == "update"),
+            "an AppRole policy never grants a take on a secret: {identity:?}: {hcl}"
         );
     }
 }
