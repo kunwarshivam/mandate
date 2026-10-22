@@ -335,6 +335,23 @@ pub fn kubernetes_namespace_verdict(
 }
 
 impl OpenBaoSource {
+    /// A session as `identity` that never logged in, for unit tests of the checks that refuse
+    /// before the vault is reached: its token is empty, so any call that does reach a vault is
+    /// refused there.
+    #[cfg(test)]
+    pub(crate) fn unlogged(
+        config: &OpenBaoConfig,
+        identity: Identity,
+    ) -> Result<Self, SourceError> {
+        Ok(Self {
+            identity,
+            http: Http::new(config)?,
+            mounts: config.mounts.clone(),
+            token: SecretString::from(String::new()),
+            token_expires_at: Mutex::new(UtcNanos::EPOCH),
+        })
+    }
+
     /// Logs in as `identity` with its AppRole `role_id` and `secret_id` (read by the caller from
     /// mounted files, never the environment). The login is refused unless the role it reaches
     /// is `identity`'s own. The token exchange logs in with [`OpenBaoSource::login_with_grant`].
