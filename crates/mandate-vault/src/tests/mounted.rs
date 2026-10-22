@@ -490,10 +490,27 @@ fn the_ca_reader_reads_ca_crt_alone_inside_its_mount() {
     assert_eq!(read_mounted_ca(&over.0), Err(SourceError::CredentialFile));
 }
 
-/// A secret file keeps the owner-only rule at the modes the CA may have: a role id, a secret id,
-/// or any file the mounted reader reads, at 0440 or 0444, is refused.
+/// A secret file keeps the owner-only rule at the modes the CA may have: AppRole credentials, or
+/// any file the mounted reader reads, at 0440 (what an `fsGroup` makes of a 0400 Secret), 0444 or
+/// 0404 are refused, and read at 0400 and 0600, so a Secret mounted under an `fsGroup` must be
+/// copied to an owner-only file first (DEC-2340).
 #[test]
 fn a_secret_at_a_ca_mode_is_still_refused() {
+    for mode in [0o400, 0o600] {
+        let dir = Fresh::new("secret-owner");
+        kubelet(
+            &dir.0,
+            &[
+                ("executor-c1.role-id", "role-1", mode),
+                ("executor-c1.secret-id", "secret-1", mode),
+            ],
+        );
+        assert_eq!(
+            credentials(&dir.0, &executor()),
+            Ok(("role-1".to_owned(), "secret-1".to_owned())),
+            "{mode:o}"
+        );
+    }
     for mode in [0o440, 0o444, 0o404] {
         let dir = Fresh::new("secret-public");
         kubelet(
