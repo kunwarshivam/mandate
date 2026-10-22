@@ -65,51 +65,58 @@ impl<T: Transport, S: MeterStore, C: Clock> Service<T, S, C> {
     /// The first [`CapError`] met; the service then does not start.
     pub fn ready(&mut self) -> Result<(), CapError> {
         let rows = self.control.rows().ok_or(CapError::ControlUnreadable)?;
-        for agent in cap::agents(&rows, self.caps.environment())? {
-            let daily = self.caps.current(&rows, &agent, self.artifacts.as_ref())?;
-            if self.caps.holds(&agent) {
-                self.gateway
-                    .meter_mut()
-                    .set_research_daily(&agent, Some(daily))
-                    .map_err(|_| CapError::DocumentUnavailable)?;
-            } else {
-                self.gateway.meter_mut().clear_research_daily(&agent);
-            }
+        let deployed = cap::deployed_agents(&rows, self.caps.environment())?;
+        self.caps.retain(&deployed);
+        self.gateway.meter_mut().retain_research_daily(&deployed);
+        for agent in &deployed {
+            let daily = self.caps.current(&rows, agent, self.artifacts.as_ref())?;
+            self.gateway
+                .meter_mut()
+                .set_research_daily(agent, Some(daily))
+                .map_err(|_| CapError::DocumentUnavailable)?;
         }
         Ok(())
     }
 
     /// The gateway's reply to `request`, a research call of this workspace's held first to its
-    /// agent's cap as the control stream names it now. A deployed agent's cap that does not read
-    /// marks it unread, refused `meter_unavailable`; an agent not deployed, or not known to have
-    /// been, is cleared, refused `budget_exhausted`, so the meter holds deployed agents alone. A cap
-    /// the meter will not take leaves the agent marked unread, so that refusal needs nothing more.
+    /// agent's cap as the control stream names it now. Every control read that succeeds prunes what
+    /// is held to the agents deployed now; an agent outside them has nothing read or set, and the
+    /// meter refuses it `budget_exhausted`. A deployed agent's cap that does not read, or a control
+    /// stream that does not, marks a known agent unread, refused `meter_unavailable`. So what the
+    /// service holds is bounded by the agents deployed, whatever names its callers send.
     pub fn answer(&mut self, request: &CallRequest) -> Reply {
         if request.purpose == Purpose::Research
             && request.workspace_id == self.workspace
             && let Some(agent) = request.agent_id.as_deref()
         {
-            let read = self
-                .control
-                .rows()
+            let rows = self.control.rows();
+            let deployed = rows
+                .as_deref()
                 .ok_or(CapError::ControlUnreadable)
-                .and_then(|rows| self.caps.current(&rows, agent, self.artifacts.as_ref()));
+                .and_then(|rows| cap::deployed_agents(rows, self.caps.environment()));
             let known = self
                 .gateway
                 .meter()
                 .caps()
                 .research_agents()
                 .contains(agent);
-            let meter = self.gateway.meter_mut();
-            match read {
-                Ok(daily) if self.caps.holds(agent) => {
-                    let _unread_when_above_the_budget =
-                        meter.set_research_daily(agent, Some(daily));
+            match (rows, deployed) {
+                (Some(rows), Ok(deployed)) => {
+                    self.caps.retain(&deployed);
+                    self.gateway.meter_mut().retain_research_daily(&deployed);
+                    if deployed.contains(agent) {
+                        let daily = self
+                            .caps
+                            .current(&rows, agent, self.artifacts.as_ref())
+                            .ok();
+                        let _unread_when_unreadable_or_above_the_budget =
+                            self.gateway.meter_mut().set_research_daily(agent, daily);
+                    }
                 }
-                Err(_) if known => {
-                    let _marked_unread = meter.set_research_daily(agent, None);
+                _ if known => {
+                    let _marked_unread = self.gateway.meter_mut().set_research_daily(agent, None);
                 }
-                Ok(_) | Err(_) => meter.clear_research_daily(agent),
+                _ => {}
             }
         }
         self.gateway.call(request)

@@ -450,7 +450,6 @@ fn unknown_agent_names_leave_the_held_caps_unchanged() {
 /// agents deployed now, so an agent stopped since leaves no entry even when it never calls again,
 /// and the counts stay at the deployed count after calls from many unique names.
 #[test]
-#[ignore = "pending E21-62"]
 fn every_control_read_prunes_what_is_held_to_the_deployed_agents() {
     let world = World::new();
     world.deploy(AGENT, &world.version("5"));
