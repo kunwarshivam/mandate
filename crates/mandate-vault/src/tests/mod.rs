@@ -15,4 +15,5 @@ mod openbao;
 mod openbao_server;
 mod platform;
 mod policy;
+mod registry;
 mod take;

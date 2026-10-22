@@ -6,70 +6,17 @@
 //!
 //! [`Identity::ConnectionManager`]: mandate_vault::policy::Identity::ConnectionManager
 
-use std::future::Future;
 use std::sync::Arc;
 
 use mandate_connections::manager::RequestMembers;
-use mandate_connections::record::{AccountPiiRef, AccountRef, ConnectionId};
-use mandate_vault::fingerprint::{AccountFingerprint, Claim, FingerprintError};
-use mandate_vault::openbao::OpenBaoSource;
+use mandate_connections::record::{AccountRef, ConnectionId};
+use mandate_vault::fingerprint::{Claim, ManagerFingerprints};
 use mandate_vault::policy::Identity;
 use mandate_vault::source::SecretSource;
 
 use crate::clock::Clock;
 use crate::finish::{Fingerprints, Judged, Judging, ReleaseFailed, Released};
 use crate::vault_codes::ApiLogin;
-
-/// The connection manager's fingerprint operations on its vault session (DEC-2345 items 3
-/// and 4).
-pub trait ManagerSession: SecretSource {
-    /// The fingerprint and reference of the request `account` of `connection`.
-    fn fingerprint(
-        &self,
-        connection: &ConnectionId,
-        account: &AccountRef,
-    ) -> impl Future<Output = Result<(AccountFingerprint, AccountPiiRef), FingerprintError>>;
-
-    /// Claims `fingerprint` for `connection` in the registry.
-    fn claim(
-        &self,
-        connection: &ConnectionId,
-        fingerprint: &AccountFingerprint,
-    ) -> impl Future<Output = Result<Claim, FingerprintError>>;
-
-    /// Gives back the claim of the request `account` of `connection`, when it holds it.
-    fn release(
-        &self,
-        connection: &ConnectionId,
-        account: &AccountRef,
-    ) -> impl Future<Output = Result<(), FingerprintError>>;
-}
-
-impl ManagerSession for OpenBaoSource {
-    async fn fingerprint(
-        &self,
-        connection: &ConnectionId,
-        account: &AccountRef,
-    ) -> Result<(AccountFingerprint, AccountPiiRef), FingerprintError> {
-        Self::fingerprint(self, connection, account).await
-    }
-
-    async fn claim(
-        &self,
-        connection: &ConnectionId,
-        fingerprint: &AccountFingerprint,
-    ) -> Result<Claim, FingerprintError> {
-        Self::claim(self, connection, fingerprint).await
-    }
-
-    async fn release(
-        &self,
-        connection: &ConnectionId,
-        account: &AccountRef,
-    ) -> Result<(), FingerprintError> {
-        Self::release(self, connection, account).await
-    }
-}
 
 /// The [`Fingerprints`] the finish pass judges and releases through: a fresh login for each call,
 /// made off the async runtime, as the teardown's.
@@ -81,7 +28,7 @@ pub struct VaultFingerprints<L> {
 impl<L> Fingerprints for VaultFingerprints<L>
 where
     L: ApiLogin + 'static,
-    L::Session: ManagerSession,
+    L::Session: ManagerFingerprints,
 {
     fn judge<'a>(&'a self, request: &'a RequestMembers, account_pii_ref: &'a str) -> Judging<'a> {
         let login = Arc::clone(&self.login);
@@ -154,7 +101,7 @@ async fn session<L: ApiLogin>(login: &L, clock: &dyn Clock) -> Result<L::Session
 
 /// Checks 3 and 4 for the request `account` of `connection`: its fingerprint entry, whose
 /// reference must be the check's `pii_ref`, then a claim of its hash (DEC-2345 items 3 and 4).
-async fn judged<S: ManagerSession>(
+async fn judged<S: ManagerFingerprints>(
     session: &S,
     connection: &ConnectionId,
     account: &AccountRef,
