@@ -114,6 +114,10 @@ pub fn api(app: App, drain: Arc<Drain>) -> Router {
             delete(end_session).fallback(otherwise.clone()),
         )
         .route(
+            "/v1/oauth/alpaca/callback",
+            get(crate::connect::callback).fallback(otherwise.clone()),
+        )
+        .route(
             "/v1/me/session",
             get(me::session).fallback(otherwise.clone()),
         )

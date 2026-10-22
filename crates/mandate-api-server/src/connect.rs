@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use axum::body::Body;
 use axum::extract::rejection::PathRejection;
 use axum::extract::{Path, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::Response;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -19,6 +19,7 @@ use mandate_api::requests::{Environment as Wire, OauthStartRequest};
 use mandate_api::wire::decode;
 use mandate_authn::Request;
 use mandate_canon::{Digest, Value, parse};
+use mandate_connections::ConnectError;
 use mandate_connections::manager::{
     AccountRefFold, IdFold, StartFacts, StartPlan, StartRefusal, StartRequest, StepUpCheck,
     oauth_connect_digest, plan_start,
@@ -27,6 +28,7 @@ use mandate_connections::record::{AccountRef, Broker, ConnectionId, Environment}
 use mandate_connections::start::{
     Binding, Environment as Bound, OAuthClient, PendingStates, PkceVerifier, STATE_LIFETIME_SECS,
 };
+use mandate_connections::vault::AuthorizationCode;
 use mandate_identity::{Permission, StepUpActionKind};
 use mandate_journal::StoredEvent;
 use mandate_time::UtcNanos;
@@ -63,13 +65,26 @@ pub const ACCOUNT_OPERATION: &str = "connect_account";
 /// How many bytes the `state` and the PKCE verifier each draw (DEC-2623 item 7).
 pub const RANDOM_BYTES: usize = 32;
 
+/// Where the callback writes a redeemed code and its verifier: the API's vault port, which may
+/// write only codes (DEC-2626 item 4, DEC-2628 item 1).
+pub trait CodeVault: Send + Sync {
+    /// Writes `code` and `verifier` as one entry for `binding`'s connection and environment.
+    fn put_code(
+        &self,
+        binding: &Binding,
+        code: AuthorizationCode,
+        verifier: PkceVerifier,
+    ) -> Result<(), ConnectError>;
+}
+
 /// What a deployment that offers a connect holds: its registered OAuth client, the `state`
-/// values issued and not yet redeemed, and the random source they are drawn from (DEC-2623 items
-/// 2, 4 and 7).
+/// values issued and not yet redeemed, the random source they are drawn from (DEC-2623 items
+/// 2, 4 and 7), and the vault port the callback writes codes through (DEC-2626 item 4).
 pub struct Connect {
     pub client: OAuthClient,
     pub states: Mutex<PendingStates>,
     pub random: Box<dyn Random>,
+    pub codes: Arc<dyn CodeVault>,
     /// Each start's `201`, by its event id, for a retry while its `state` is held (item 8).
     answered: Mutex<BTreeMap<String, Answered>>,
 }
@@ -84,11 +99,12 @@ struct Answered {
 }
 
 impl Connect {
-    pub fn new(client: OAuthClient, random: Box<dyn Random>) -> Self {
+    pub fn new(client: OAuthClient, random: Box<dyn Random>, codes: Arc<dyn CodeVault>) -> Self {
         Self {
             client,
             states: Mutex::new(PendingStates::default()),
             random,
+            codes,
             answered: Mutex::default(),
         }
     }
@@ -107,6 +123,17 @@ pub async fn start(
     started(&app, &headers, &workspace, body)
         .await
         .unwrap_or_else(|refusal| *refusal)
+}
+
+/// `GET /v1/oauth/alpaca/callback` (DEC-2626): redeems the `state` for the session's user and
+/// writes the code and verifier to the vault for a request still open; every outcome past the
+/// session is a `303` that carries neither the code nor the outcome.
+#[expect(
+    clippy::todo,
+    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+)]
+pub async fn callback(State(_app): State<Arc<App>>, _headers: HeaderMap, _uri: Uri) -> Response {
+    todo!()
 }
 
 async fn started(
