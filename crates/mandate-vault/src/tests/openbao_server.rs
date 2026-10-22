@@ -123,6 +123,36 @@ impl Bao {
         .await
     }
 
+    /// A token under the exchange's templated policy with `connection`'s ServiceAccount put in,
+    /// as a Kubernetes login would give, for a server with no Kubernetes API to review a token.
+    async fn take_token(&self, connection: &ConnectionId) -> SecretString {
+        let identity = Identity::TokenExchange(connection.clone());
+        let mounts = &self.config.mounts;
+        let template = "{{identity.entity.aliases.auth_take.metadata.service_account_name}}";
+        let account = service_account_name(&identity).unwrap();
+        let hcl = kubernetes_policy(&identity, mounts, "auth_take")
+            .unwrap()
+            .replace(template, &account);
+        let name = format!(
+            "{}-take-{account}",
+            kubernetes_policy_name(&identity, mounts).unwrap()
+        );
+        self.operator(
+            Method::PUT,
+            &format!("sys/policies/acl/{name}"),
+            Some(json!({"policy": hcl})),
+        )
+        .await;
+        let made = self
+            .operator(
+                Method::POST,
+                "auth/token/create",
+                Some(json!({"policies": [name], "no_default_policy": true, "ttl": "600s"})),
+            )
+            .await;
+        SecretString::from(made["auth"]["client_token"].as_str().unwrap().to_owned())
+    }
+
     async fn new() -> Option<Self> {
         let (address, ca_pem, operator) = server()?;
         let n = NEXT.fetch_add(1, Ordering::Relaxed);
@@ -169,30 +199,7 @@ impl Harness for Bao {
     /// makes a token holding only that policy.
     async fn taker(&self, connection: &ConnectionId, now: UtcNanos) -> OpenBaoSource {
         let identity = Identity::TokenExchange(connection.clone());
-        let mounts = &self.config.mounts;
-        let template = "{{identity.entity.aliases.auth_take.metadata.service_account_name}}";
-        let account = service_account_name(&identity).unwrap();
-        let hcl = kubernetes_policy(&identity, mounts, "auth_take")
-            .unwrap()
-            .replace(template, &account);
-        let name = format!(
-            "{}-take-{account}",
-            kubernetes_policy_name(&identity, mounts).unwrap()
-        );
-        self.operator(
-            Method::PUT,
-            &format!("sys/policies/acl/{name}"),
-            Some(json!({"policy": hcl})),
-        )
-        .await;
-        let made = self
-            .operator(
-                Method::POST,
-                "auth/token/create",
-                Some(json!({"policies": [name], "no_default_policy": true, "ttl": "600s"})),
-            )
-            .await;
-        let token = SecretString::from(made["auth"]["client_token"].as_str().unwrap().to_owned());
+        let token = self.take_token(connection).await;
         OpenBaoSource::from_token(&self.config, identity, token, at(now.secs() + 600)).unwrap()
     }
 
@@ -568,7 +575,8 @@ async fn a_tombstone_is_never_taken_or_read_as_a_code() {
     assert!(matches!(taker.read(&code).await, Ok(None)));
 }
 
-/// DEC-2061 item 4: once a code is taken no version of it is left, the one taken included.
+/// DEC-2061 item 4: once a code is taken no version of it is left, the one taken included, and
+/// its version count is kept (DEC-2321).
 #[tokio::test(flavor = "current_thread")]
 #[ignore = "pending E21-32"]
 async fn after_a_take_no_version_of_the_code_is_left() {
@@ -595,6 +603,57 @@ async fn after_a_take_no_version_of_the_code_is_left() {
             .await;
         assert!(left["data"].is_null(), "{version}: {left}");
     }
+    let metadata = format!(
+        "{}/metadata/{}",
+        bao.config.mounts.kv,
+        kv_path(&code).unwrap()
+    );
+    let kept = bao.operator(Method::GET, &metadata, None).await;
+    assert_eq!(kept["data"]["current_version"].as_u64(), Some(2), "{kept}");
+}
+
+/// DEC-2321: a take keeps the code's version count, so a taker that read version 1 and stalled
+/// cannot overwrite a code stored after the take by a re-connect, and that code is taken whole.
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "pending E21-32"]
+async fn a_stalled_taker_never_overwrites_a_code_stored_after_a_take() {
+    an_unreachable_take_is_an_outage().await;
+    let Some(bao) = Bao::new().await else {
+        return;
+    };
+    let now = at(1_000_000);
+    let code = SecretPath::Code(c("c1"));
+    let api = bao.source(Identity::Api, now).await;
+    api.put(&code, &conformance::secret("code-1"))
+        .await
+        .unwrap();
+    let data = format!("{}/data/{}", bao.config.mounts.kv, kv_path(&code).unwrap());
+    let stalled_read = bao.operator(Method::GET, &data, None).await;
+    let stalled_version = stalled_read["data"]["metadata"]["version"]
+        .as_u64()
+        .unwrap();
+    let taker = bao.taker(&c("c1"), now).await;
+    assert_eq!(
+        conformance::taken(&taker, "c1").await,
+        Ok(Some("code-1".to_owned()))
+    );
+    api.put(&code, &conformance::secret("code-2"))
+        .await
+        .unwrap();
+    let stalled = operator_call(
+        &bao.address,
+        &bao.config.ca_pem,
+        &bao.take_token(&c("c1")).await,
+        Method::POST,
+        &data,
+        Some(json!({"options": {"cas": stalled_version}, "data": {"taken": true}})),
+    )
+    .await;
+    assert!(stalled["errors"].is_array(), "{stalled}");
+    assert_eq!(
+        conformance::taken(&taker, "c1").await,
+        Ok(Some("code-2".to_owned()))
+    );
 }
 
 /// DEC-2061 item 2: an exchange whose policy lacks the take, the AppRole one, reads its code but
