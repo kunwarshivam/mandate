@@ -221,28 +221,22 @@ impl ExecutorVault {
         match read {
             Ok(secret) => unlink(&taken).map(|()| secret),
             Err(error) => {
-                let _restored = fs::rename(&taken, &path);
+                discard_refused_take(&taken);
                 Err(error)
             }
         }
     }
 }
 
-/// Renames a refused take at `taken` back to `path`, never replacing a code the API wrote there
-/// meanwhile: when one was, that newer code stays and the refused entry is unlinked. A rename that
-/// fails otherwise leaves the refused entry under its take name, for the next delete's sweep.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "`take_code_into` calls it once the implementation PR lands"
-    )
-)]
+/// Unlinks a refused take at `taken` and never renames it back: the entry may have been
+/// superseded by a fresh code, and even taken and consumed, since the take, so a put-back could
+/// return a code a later run already replaced. The rightful run finds no code and loses the
+/// connect, which fails closed; a failed unlink leaves the name for the next delete's sweep.
 #[expect(
     clippy::todo,
     reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
 )]
-pub(crate) fn put_back(_taken: &Path, _path: &Path) {
+pub(crate) fn discard_refused_take(_taken: &Path) {
     todo!()
 }
 
