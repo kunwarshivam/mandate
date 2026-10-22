@@ -1,0 +1,7 @@
+file = "crates/mandate-executord/tests/completed.rs"
+test = "a_kill_switch_sells_the_lots_a_broker_id_fill_bought"
+reason = """
+Until E7-4's broker-id attribution (DEC-2353) lands, the paper broker's fill, naming only the
+broker's order id, is applied unattributed, so the agent's kill switch sells nothing: the test
+fails on that answer, not at a stub. The implementation PR deletes this row.
+"""

@@ -5,6 +5,8 @@
 
 mod support;
 
+use mandate_accounting::Side;
+use mandate_executor::BrokerRequest;
 use mandate_process::{Exit, State};
 use support::{
     ACCOUNT, ACCOUNT_STREAM, AGENT, CONNECTION, CONTROL_STREAM, Error, Journal, NOON, OPENED,
@@ -386,5 +388,31 @@ fn lane_d1s_probe_keeps_it_running() -> Result<(), Error> {
         "{:?}",
         process.lifecycle().state()
     );
+    Ok(())
+}
+
+/// DEC-2353, rule 13, end to end: the paper broker's fill names only the broker's order id, as
+/// Alpaca's does, yet it is the agent's, so the agent's kill switch sells exactly those 10 shares.
+#[test]
+#[ignore = "pending E7-4"]
+fn a_kill_switch_sells_the_lots_a_broker_id_fill_bought() -> Result<(), Error> {
+    let journal = deployed()?;
+    journal.seed(ACCOUNT_STREAM, OPENED)?;
+    let broker = Paper::new(&journal);
+    broker.resting(OPENING, "AAPL", "10", "150")?;
+    broker.fill(OPENING, "150")?;
+    let mut process = start(&journal, &broker)?;
+    process.step(at(NOON)?);
+    kill(&journal, AGENT, SWITCH)?;
+    process.step(at(NOON)?);
+    let sold: Vec<String> = broker
+        .seen()
+        .into_iter()
+        .filter_map(|seen| match seen.request {
+            BrokerRequest::Submit(order) if order.side == Side::Sell => Some(order.qty.to_string()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(sold, ["10"]);
     Ok(())
 }

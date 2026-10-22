@@ -4939,6 +4939,144 @@ fn only_the_agent_whose_buy_filled_holds_lots() {
     assert_eq!(shell.state.holds_lots(&agent(OTHER_AGENT)), Ok(false));
 }
 
+/// A reconciliation whose broker reports one fill of 10 AAPL at 150 naming only the broker's order
+/// id `broker`, as Alpaca's `FILL` activity does, lists no open order (a filled order is not open),
+/// and holds `held` AAPL.
+fn fill_by_broker_id(
+    shell: &mut Shell,
+    ports: &mandate_executor::Ports<'_>,
+    broker: &str,
+    held: &str,
+) -> common::Ran {
+    let mut taken = snapshot(shell.head().0, ReconcileReason::Startup);
+    let mut fill = broker_fill("f-1", None, "10", "150");
+    fill.broker_order_id = Some(broker.to_owned());
+    taken.fills = vec![fill];
+    taken.positions = vec![broker_position(AAPL, held)];
+    shell.run(Input::BrokerSnapshot(taken), ports)
+}
+
+/// The agent's switch after a quote, and the quantities of the sells it sends.
+fn switch_sells(shell: &mut Shell, ports: &mandate_executor::Ports<'_>) -> Vec<String> {
+    shell.run(Input::Market(quote(AAPL, "155", "155.1", 20)), ports);
+    let ran = shell.run(
+        Input::Command(Command::KillSwitch {
+            scope: KillScope::Agent(agent(common::AGENT)),
+            initiator: Initiator::Owner,
+            confirmation: Some(owner_confirmation()),
+            cause: None,
+        }),
+        ports,
+    );
+    ran.submissions()
+        .into_iter()
+        .filter(|order| order.side == Side::Sell)
+        .map(|order| order.qty.to_string())
+        .collect()
+}
+
+/// DEC-2353 item 2: a fill naming only the broker's order id the order's acknowledgment journaled
+/// is that order's, so its quantity is applied to it and the agent holds the lots.
+#[test]
+#[ignore = "pending E7-4"]
+fn a_fill_naming_only_the_broker_id_is_its_orders() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = reconciling(&ports);
+    let id = accepted_order(&mut shell, &ports, INTENT);
+    let ran = fill_by_broker_id(&mut shell, &ports, "b-1", "10");
+    let applied = ran.draft("FillApplied").expect("the fill is applied");
+    assert_eq!(
+        applied.payload.get("client_order_id"),
+        Some(&text(&id)),
+        "{:?}",
+        ran.draft_types()
+    );
+    assert!(!ran.draft_types().contains(&"ExternalActivityIngested"));
+    let order = shell.state.orders().values().next().expect("the order");
+    assert_eq!(order.filled_qty, qty("10"));
+    assert_eq!(shell.state.holds_lots(&agent(common::AGENT)), Ok(true));
+}
+
+/// DEC-2353, rule 13: once the broker-id fill is the agent's, its kill switch sells exactly it.
+#[test]
+#[ignore = "pending E7-4"]
+fn the_agents_switch_sells_the_lots_a_broker_id_fill_bought() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = reconciling(&ports);
+    accepted_order(&mut shell, &ports, INTENT);
+    fill_by_broker_id(&mut shell, &ports, "b-1", "10");
+    assert_eq!(switch_sells(&mut shell, &ports), ["10"]);
+}
+
+/// DEC-2353 invariant 4: the broker id is folded from the journaled acknowledgment, so after a
+/// restart the fill is still the order's.
+#[test]
+#[ignore = "pending E7-4"]
+fn a_broker_id_fill_is_the_orders_after_a_restart() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = reconciling(&ports);
+    let id = accepted_order(&mut shell, &ports, INTENT);
+    let (mut restarted, _) = shell.restart(&ports);
+    let ran = fill_by_broker_id(&mut restarted, &ports, "b-1", "10");
+    let applied = ran.draft("FillApplied").expect("the fill is applied");
+    assert_eq!(applied.payload.get("client_order_id"), Some(&text(&id)));
+}
+
+/// DEC-2353 item 3, invariant 3: a fill whose broker id no order's records carry, or two orders'
+/// records carry, is no agent's. It is external activity, every agent goes `exits_only`, and the
+/// agent's switch sells none of it.
+#[test]
+fn a_fill_whose_broker_id_names_no_one_order_stays_external() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    for two_orders in [false, true] {
+        let mut shell = reconciling(&ports);
+        accepted_order(&mut shell, &ports, INTENT);
+        let broker = if two_orders {
+            accepted_order(&mut shell, &ports, OTHER_INTENT);
+            "b-1"
+        } else {
+            "b-unknown"
+        };
+        let ran = fill_by_broker_id(&mut shell, &ports, broker, "10");
+        assert!(
+            ran.draft_types().contains(&"ExternalActivityIngested"),
+            "two orders: {two_orders}, {:?}",
+            ran.draft_types()
+        );
+        assert_eq!(
+            ran.draft("FillApplied")
+                .and_then(|applied| applied.payload.get("client_order_id")),
+            None,
+            "two orders: {two_orders}"
+        );
+        assert_eq!(
+            shell.state.effective_mode(&agent(common::AGENT)),
+            Mode::ExitsOnly,
+            "two orders: {two_orders}"
+        );
+        assert!(
+            switch_sells(&mut shell, &ports).is_empty(),
+            "two orders: {two_orders}"
+        );
+    }
+}
+
 /// The agent's buy the broker reports filled, after a reconciliation, with its fill naming no order.
 fn filled_without_its_fill(fills: Vec<mandate_executor::BrokerFill>, held: &str) -> Shell {
     let ids = TestIds;
