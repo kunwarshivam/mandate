@@ -52,6 +52,9 @@ pub enum SecretPath {
     Token(ConnectionId),
     /// The platform's OAuth client secret.
     ClientSecret,
+    /// A connection's broker account id and its random reference, in the personal-data vault,
+    /// outside `connections/` so no revoke deletes it (DEC-2339).
+    AccountId(ConnectionId),
     /// A secret of the platform's own that one process type reads (DEC-2020).
     Platform(PlatformSecret),
 }
@@ -101,6 +104,9 @@ pub enum Access {
     /// (DEC-2061). Only the Kubernetes-auth exchange's templated policy grants it; the AppRole
     /// policies, retired with that exchange, never do.
     Take,
+    /// Write an entry that is not there, never overwrite or read one: a connection's executor's
+    /// one write of its account id to the personal-data vault (DEC-2339).
+    Create,
 }
 
 /// Whether `identity` may `access` `path`: the table above.
@@ -203,6 +209,7 @@ pub fn kv_path(path: &SecretPath) -> Result<String, SourceError> {
         SecretPath::Code(c) => format!("connections/{}/code", connection_segment(c)?),
         SecretPath::Token(c) => format!("connections/{}/token", connection_segment(c)?),
         SecretPath::ClientSecret => "platform/alpaca-oauth-client-secret".to_owned(),
+        SecretPath::AccountId(c) => format!("personal/accounts/{}", connection_segment(c)?),
         SecretPath::Platform(PlatformSecret::ModelProviderKey) => {
             "platform/model-provider-key".to_owned()
         }

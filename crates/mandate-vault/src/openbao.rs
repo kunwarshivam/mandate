@@ -642,6 +642,13 @@ impl SecretSource for OpenBaoSource {
         &self.identity
     }
 
+    /// A check-and-set write at version 0, which the vault takes only where no version is there,
+    /// after the client-side check of [`Access::Create`].
+    async fn create(&self, path: &SecretPath, secret: &SecretSlice<u8>) -> Result<(), SourceError> {
+        let _ = (path, secret);
+        Err(SourceError::Unimplemented { story: "E21-32" })
+    }
+
     /// Reads the code with its version, overwrites that version alone with a tombstone, destroys
     /// the version read and deletes the tombstone's version alone, keeping the metadata so the
     /// version count never restarts and a code stored since is never hidden (DEC-2321): a taker

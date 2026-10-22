@@ -1,0 +1,8 @@
+file = "crates/mandate-vault/src/tests/policy.rs"
+test = "the_table_allows_exactly_the_matrix"
+reason = """
+DEC-2339 adds the account entry's two grants, the executor's create on its own and the connection
+manager's read. `allows` is already built, so this test sees the table without them, not a stub's
+report. It still runs and fails, and the implementation half deletes this file with its `#[ignore]`
+line.
+"""

@@ -35,7 +35,7 @@ use crate::source::{Grant, SecretSource};
 use mandate_connections::record::ConnectionId;
 use mandate_time::UtcNanos;
 use reqwest::{Certificate, Method};
-use secrecy::{ExposeSecret, SecretString};
+use secrecy::{ExposeSecret, SecretSlice, SecretString};
 use serde_json::{Value, json};
 use tokio::io::copy_bidirectional;
 use tokio::net::{TcpListener, TcpStream};
@@ -128,7 +128,14 @@ impl Bao {
     /// A token under the exchange's templated policy with `connection`'s ServiceAccount put in,
     /// as a Kubernetes login would give, for a server with no Kubernetes API to review a token.
     async fn take_token(&self, connection: &ConnectionId) -> SecretString {
-        let identity = Identity::TokenExchange(connection.clone());
+        self.kubernetes_token(&Identity::TokenExchange(connection.clone()))
+            .await
+    }
+
+    /// A token under `identity`'s kind's templated policy with its ServiceAccount put in, as a
+    /// Kubernetes login would give.
+    async fn kubernetes_token(&self, identity: &Identity) -> SecretString {
+        let identity = identity.clone();
         let mounts = &self.config.mounts;
         let template = "{{identity.entity.aliases.auth_take.metadata.service_account_name}}";
         let account = service_account_name(&identity).unwrap();
@@ -918,4 +925,79 @@ async fn the_exchanges_update_never_creates_a_code() {
         Err(SourceError::Denied)
     );
     assert_eq!(conformance::taken(&taker, "c1").await, Ok(None));
+}
+
+/// DEC-2339 on a real vault: a connection's executor, under its own templated policy, creates its
+/// account entry once and can neither read it nor write it again, nor create another connection's;
+/// the connection manager reads it; and deleting the connection's code and token, as a revoke
+/// does, leaves it. A vault nobody answers for is an outage, checked first.
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "pending E21-32"]
+async fn an_executor_creates_its_own_account_entry_once_and_only_the_manager_reads_it() {
+    let ca = include_bytes!("fixtures/isrg-root-x1.pem").to_vec();
+    let unreachable = OpenBaoSource::from_token(
+        &nowhere(ca),
+        Identity::Executor(c("c1")),
+        SecretString::from("unused".to_owned()),
+        at(1_000_600),
+    )
+    .unwrap();
+    let account = SecretPath::AccountId(c("c1"));
+    assert_eq!(
+        unreachable
+            .create(&account, &conformance::secret("acct-1"))
+            .await,
+        Err(SourceError::Unavailable)
+    );
+    let Some(bao) = Bao::new().await else {
+        return;
+    };
+    let now = at(1_000_000);
+    let executor = OpenBaoSource::from_token(
+        &bao.config,
+        Identity::Executor(c("c1")),
+        bao.kubernetes_token(&Identity::Executor(c("c1"))).await,
+        at(now.secs() + 600),
+    )
+    .unwrap();
+    assert_eq!(
+        executor
+            .create(&account, &conformance::secret("acct-1"))
+            .await,
+        Ok(())
+    );
+    assert_eq!(
+        executor
+            .create(&account, &conformance::secret("acct-2"))
+            .await,
+        Err(SourceError::Denied)
+    );
+    assert!(matches!(
+        executor.read(&account).await,
+        Err(SourceError::Denied)
+    ));
+    assert_eq!(
+        executor
+            .create(
+                &SecretPath::AccountId(c("c2")),
+                &conformance::secret("acct-other")
+            )
+            .await,
+        Err(SourceError::Denied)
+    );
+    let manager = bao.source(Identity::ConnectionManager, now).await;
+    let read = |found: Result<Option<SecretSlice<u8>>, SourceError>| {
+        found.map(|value| value.map(|v| String::from_utf8(v.expose_secret().to_vec()).unwrap()))
+    };
+    assert_eq!(
+        read(manager.read(&account).await),
+        Ok(Some("acct-1".to_owned()))
+    );
+    for revoked in [SecretPath::Code(c("c1")), SecretPath::Token(c("c1"))] {
+        assert_eq!(manager.delete(&revoked).await, Ok(()));
+    }
+    assert_eq!(
+        read(manager.read(&account).await),
+        Ok(Some("acct-1".to_owned()))
+    );
 }

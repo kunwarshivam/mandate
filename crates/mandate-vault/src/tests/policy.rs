@@ -40,13 +40,15 @@ fn paths() -> Vec<SecretPath> {
         SecretPath::Code(c("c2")),
         SecretPath::Token(c("c2")),
         SecretPath::ClientSecret,
+        SecretPath::AccountId(c("c1")),
+        SecretPath::AccountId(c("c2")),
     ]
 }
 
 /// The oracle: every allowed triple, written out from infrastructure §5.2; anything else is
 /// refused.
 fn expected() -> Vec<(Identity, Access, SecretPath)> {
-    use Access::{Delete, Read, Write};
+    use Access::{Create, Delete, Read, Write};
     let mut out = Vec::new();
     for id in ["c1", "c2"] {
         out.push((Identity::Api, Write, SecretPath::Code(c(id))));
@@ -58,7 +60,17 @@ fn expected() -> Vec<(Identity, Access, SecretPath)> {
             Delete,
             SecretPath::Token(c(id)),
         ));
+        out.push((
+            Identity::ConnectionManager,
+            Read,
+            SecretPath::AccountId(c(id)),
+        ));
     }
+    out.push((
+        Identity::Executor(c("c1")),
+        Create,
+        SecretPath::AccountId(c("c1")),
+    ));
     let exchange = Identity::TokenExchange(c("c1"));
     out.push((exchange.clone(), Read, SecretPath::Code(c("c1"))));
     out.push((exchange.clone(), Delete, SecretPath::Code(c("c1"))));
@@ -73,11 +85,14 @@ fn expected() -> Vec<(Identity, Access, SecretPath)> {
     out
 }
 
+/// DEC-2339: the account entry is created only by its own connection's executor, read only by the
+/// connection manager, and written over or deleted by no one.
 #[test]
+#[ignore = "pending E21-32"]
 fn the_table_allows_exactly_the_matrix() {
     let expected = expected();
     for identity in identities() {
-        for access in [Access::Read, Access::Write, Access::Delete] {
+        for access in [Access::Read, Access::Write, Access::Delete, Access::Create] {
             for path in paths() {
                 let want = expected
                     .iter()
@@ -214,6 +229,7 @@ fn each_policy_is_the_table_with_no_wildcard() {
                     Access::Write => ("data", "create,update"),
                     Access::Delete => ("metadata", "delete"),
                     Access::Take => ("data", "update"),
+                    Access::Create => ("data", "create"),
                 };
                 let want = format!("mandate/{prefix}/{}", kv_path(&path));
                 let present = got.iter().any(|(p, c)| p == &want && c == caps);
@@ -290,5 +306,25 @@ fn only_a_token_exchange_takes_and_only_its_own_connections_code() {
                 .any(|(path, caps)| path.starts_with("mandate/data/") && caps == "update"),
             "an AppRole policy never grants a take on a secret: {identity:?}: {hcl}"
         );
+    }
+}
+
+/// DEC-2339: a connection's account entry is kept under `personal/`, outside every path of the
+/// connection's code and token, which are all a revoke deletes, and no identity may delete it.
+#[test]
+fn the_account_entry_is_kept_outside_every_path_a_revoke_deletes() {
+    for id in ["c1", "c2", "x6331"] {
+        let account = kv_path(&SecretPath::AccountId(c(id)));
+        let segment = crate::policy::connection_segment(&c(id)).unwrap();
+        assert_eq!(account, format!("personal/accounts/{segment}"), "{id}");
+        for kept in [SecretPath::Code(c(id)), SecretPath::Token(c(id))] {
+            assert!(!kv_path(&kept).starts_with("personal/"), "{id}");
+        }
+        for identity in identities() {
+            assert!(
+                !allows(&identity, Access::Delete, &SecretPath::AccountId(c(id))),
+                "{identity:?} {id}"
+            );
+        }
     }
 }
