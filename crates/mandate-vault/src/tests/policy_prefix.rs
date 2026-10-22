@@ -5,6 +5,8 @@
 
 use mandate_connections::record::ConnectionId;
 
+use mandate_connections::record::AccountRef;
+
 use crate::policy::{Access, Identity, Mounts, SecretPath, allows};
 
 fn c(id: &str) -> ConnectionId {
@@ -46,6 +48,7 @@ fn grants(hcl: &str, access: Access, path: &SecretPath) -> bool {
         Access::Write => ("data", "create,update"),
         Access::Delete => ("metadata", "delete"),
         Access::Take => ("data", "update"),
+        Access::Create => ("data", "create"),
     };
     let secret = format!("mandate/{prefix}/{}", kv_path(path));
     blocks(hcl)
@@ -76,6 +79,9 @@ const API_PREFIX: [(&str, &str); 3] = [
     ("mandate/metadata/connections/+/code", "delete"),
     ("mandate/metadata/connections/+/token", "delete"),
 ];
+/// The one `+` that reads: the connection manager's of each request's account fingerprint, a
+/// pseudonymous hash and no credential (DEC-2345).
+const FINGERPRINT_READ: (&str, &str) = ("mandate/data/personal/fingerprints/+/+", "read");
 const MANAGER_PREFIX: [(&str, &str); 2] = [
     ("mandate/metadata/connections/+/code", "delete"),
     ("mandate/metadata/connections/+/token", "delete"),
@@ -133,9 +139,10 @@ fn no_wildcard_reads_and_none_outside_the_api_and_the_manager() {
         let hcl = openbao_policy(&identity, &[c("c1"), c("c2")]);
         assert!(!hcl.contains('*'), "no `*`, ever: {identity:?}: {hcl}");
         for (path, caps) in blocks(&hcl).into_iter().filter(|(p, _)| p.contains('+')) {
+            let manager = [MANAGER_PREFIX[0], MANAGER_PREFIX[1], FINGERPRINT_READ];
             let allowed: &[(&str, &str)] = match identity {
                 Identity::Api => &API_PREFIX,
-                Identity::ConnectionManager => &MANAGER_PREFIX,
+                Identity::ConnectionManager => &manager,
                 _ => &[],
             };
             assert!(
@@ -143,8 +150,10 @@ fn no_wildcard_reads_and_none_outside_the_api_and_the_manager() {
                 "{identity:?} holds `+` on {path} [{caps}]: {hcl}"
             );
             assert!(
-                !caps.contains("read") && !caps.contains("list"),
-                "a `+` never reads or lists: {identity:?} {path}"
+                !caps.contains("list")
+                    && (!caps.contains("read")
+                        || (path.as_str(), caps.as_str()) == FINGERPRINT_READ),
+                "a `+` never lists, and reads only the manager's fingerprints, never a credential: {identity:?} {path}"
             );
         }
     }
@@ -163,10 +172,19 @@ fn the_templated_policies_stay_exact() {
             "auth_kubernetes_0a1b",
         )
         .unwrap();
-        assert!(
-            !hcl.contains('*') && !hcl.contains('+'),
-            "{identity:?}: {hcl}"
-        );
+        assert!(!hcl.contains('*'), "{identity:?}: {hcl}");
+        for (path, caps) in blocks(&hcl).into_iter().filter(|(p, _)| p.contains('+')) {
+            assert!(
+                caps == "create"
+                    && path
+                        .split('/')
+                        .rev()
+                        .nth(1)
+                        .is_some_and(|own| own.starts_with("x{{"))
+                    && path.ends_with("/+"),
+                "a templated `+` only creates a last segment under the login's own name (DEC-2345): {identity:?} {path} [{caps}]"
+            );
+        }
     }
 }
 
@@ -181,4 +199,47 @@ fn the_pattern_reader_names_any_one_segment_for_a_plus_and_nothing_else() {
     assert!(!names("a/+/b", "a/x1/c"));
     assert!(names("a/x1/b", "a/x1/b"));
     assert!(!names("a/x1/b", "a/x2/b"));
+}
+
+fn account(text: &str) -> AccountRef {
+    AccountRef::new(text).unwrap()
+}
+
+#[test]
+fn only_the_manager_reads_any_requests_fingerprint_and_nothing_beside_it() {
+    let requests = [
+        (c("c9"), account("01J8Z2ACCT00000000000000A1")),
+        (
+            c("conn_01J8Z2NEW0000000000000A1"),
+            account("01J8Z2ACCT00000000000000B7"),
+        ),
+    ];
+    for identity in identities() {
+        let hcl = openbao_policy(&identity, &[c("c1")]);
+        for (connection, account) in &requests {
+            let path = SecretPath::Fingerprint(connection.clone(), account.clone());
+            assert_eq!(
+                grants(&hcl, Access::Read, &path),
+                allows(&identity, Access::Read, &path),
+                "{identity:?} {path:?}: {hcl}"
+            );
+        }
+        let fixed = [
+            "mandate/data/personal/claims",
+            "mandate/data/fingerprints/rotating",
+        ];
+        for (pattern, _) in blocks(&hcl).into_iter().filter(|(p, _)| p.contains('+')) {
+            assert!(
+                fixed.iter().all(|f| !names(&pattern, f)),
+                "a `+` names neither the claims nor the marker: {identity:?} {pattern}"
+            );
+        }
+    }
+    let manager = openbao_policy(&Identity::ConnectionManager, &[]);
+    assert!(
+        blocks(&manager)
+            .iter()
+            .any(|(p, caps)| (p.as_str(), caps.as_str()) == FINGERPRINT_READ),
+        "{manager}"
+    );
 }
