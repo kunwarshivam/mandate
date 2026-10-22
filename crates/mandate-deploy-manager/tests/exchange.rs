@@ -43,6 +43,7 @@ fn starts(m: &mut Manager) -> Vec<(u64, Option<Duration>)> {
                 slot,
                 generation,
                 lifetime,
+                ..
             } if *slot == exchange() => Some((*generation, *lifetime)),
             _ => None,
         })
@@ -55,7 +56,9 @@ fn stops(m: &mut Manager) -> Vec<u64> {
         .calls()
         .iter()
         .filter_map(|c| match c {
-            Call::Stop { slot, generation } if *slot == exchange() => Some(*generation),
+            Call::Stop {
+                slot, generation, ..
+            } if *slot == exchange() => Some(*generation),
             _ => None,
         })
         .collect()

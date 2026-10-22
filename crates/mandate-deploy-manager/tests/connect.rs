@@ -50,6 +50,7 @@ fn starts(m: &mut Manager) -> Vec<u64> {
                 slot,
                 generation,
                 lifetime,
+                ..
             } if *slot == executor() => {
                 assert_eq!(*lifetime, None, "an executor runs until it is stopped");
                 Some(*generation)
@@ -65,7 +66,9 @@ fn stops(m: &mut Manager) -> Vec<u64> {
         .calls()
         .iter()
         .filter_map(|c| match c {
-            Call::Stop { slot, generation } if *slot == executor() => Some(*generation),
+            Call::Stop {
+                slot, generation, ..
+            } if *slot == executor() => Some(*generation),
             _ => None,
         })
         .collect()

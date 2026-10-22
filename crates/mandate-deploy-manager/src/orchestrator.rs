@@ -39,6 +39,16 @@ pub struct Instance {
     pub phase: Phase,
 }
 
+/// What a start needs beside its slot and generation: a token exchange's `lifetime`, which its
+/// request has left, and an executor's `connection`, whose own account it runs as (DEC-2060). A
+/// standing process has no lifetime; a runtime and a token exchange name no connection here, an
+/// exchange's being its subject.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Launch {
+    pub lifetime: Option<Duration>,
+    pub connection: Option<String>,
+}
+
 /// An effect, performed only after its record is committed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Effect {
@@ -61,18 +71,20 @@ pub trait Orchestrator {
     fn observe(&mut self) -> impl Future<Output = Result<Vec<Instance>, Unavailable>>;
     /// Creates `generation` of `slot`, which the orchestrator must never restart on its own. A token
     /// exchange is given the `lifetime` its request has left and ends by it; a standing process is
-    /// given none.
+    /// given none. An executor is given its connection, whose account it runs as.
     fn start(
         &mut self,
         slot: &Slot,
         generation: u64,
-        lifetime: Option<Duration>,
+        launch: &Launch,
     ) -> impl Future<Output = Result<(), Unavailable>>;
-    /// Asks `generation` of `slot` to stop, by the process's own drain (design §7.3).
+    /// Asks `generation` of `slot` to stop, by the process's own drain (design §7.3). An executor's
+    /// stop names its connection, so the account it ran as goes with it.
     fn stop(
         &mut self,
         slot: &Slot,
         generation: u64,
+        connection: Option<&str>,
     ) -> impl Future<Output = Result<(), Unavailable>>;
 }
 

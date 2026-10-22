@@ -34,5 +34,7 @@ pub mod record;
 pub use control::{Cause, Fact, Process, Scope, Slot, StopCause};
 pub use driver::{ControlJournal, Deployer, Halt, Identity};
 pub use manager::{Decision, Manager, backoff};
-pub use orchestrator::{Alerts, Effect, Instance, OperatorAlert, Orchestrator, Phase, Unavailable};
+pub use orchestrator::{
+    Alerts, Effect, Instance, Launch, OperatorAlert, Orchestrator, Phase, Unavailable,
+};
 pub use record::Record;

@@ -1,0 +1,8 @@
+file = "crates/mandate-deploy-manager/tests/kubernetes.rs"
+test = "an_executor_without_its_connection_starts_nothing"
+reason = """
+E21-33 K2b (DEC-2336 items 7 and 10) changes the Kubernetes adapter, which has no stub form: today's
+adapter runs an executor as `default`, ignores its connection and reads a succeeded pod as an exit,
+so the test fails on that behaviour. K2b's implementation PR deletes this row with the test's ignore
+line.
+"""
