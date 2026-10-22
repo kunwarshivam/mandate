@@ -4240,8 +4240,9 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
 - **E7-4 (executor process), from the review of [DEC-2343](decisions/DEC-2343.md), a follow-on
   tightening:** an opening an agent proposed while deployed on another account is handed here once
   the agent is deployed back on this account, unless the core abandons it as too old. Hold any
-  proposal older than the agent's latest deployment on this account, read in the agent stream's
-  order against that deployment.
+  proposal older than the agent's latest deployment on this account; the agent stream's rows have
+  no order against the control stream's, so how to tell "older" (event time, or a deployment
+  marker the runtime writes on the agent stream) is the follow-on's to decide.
 - **E7-4 (deployment manager and executor), from [DEC-2343](decisions/DEC-2343.md) Not covered
   here:** lane D1's [DEC-2344](decisions/DEC-2344.md) starts the executor for a kill switch that
   covers only stopped agents, and the executor exits 0 once no agent it follows is desired and every
