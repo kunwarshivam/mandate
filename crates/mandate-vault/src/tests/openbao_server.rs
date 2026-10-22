@@ -1326,6 +1326,49 @@ async fn the_manager_claims_each_fingerprint_for_one_connection() {
     );
 }
 
+/// Review F-b: a release whose fingerprint entry is there but does not read answers
+/// `Unavailable`, and the claim is kept, so a release never reports success while the account
+/// stays claimed by a connection that can no longer give it back. A vault nobody answers for is an
+/// outage, checked first.
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "pending E21-32"]
+async fn a_release_over_an_unreadable_entry_fails_closed() {
+    let ca = include_bytes!("fixtures/isrg-root-x1.pem").to_vec();
+    let unreachable = OpenBaoSource::from_token(
+        &nowhere(ca),
+        Identity::ConnectionManager,
+        SecretString::from("unused".to_owned()),
+        at(1_000_600),
+    )
+    .unwrap();
+    assert_eq!(
+        unreachable.release(&c("c1"), &request(1)).await,
+        Err(FingerprintError::Unavailable)
+    );
+    let Some(bao) = Bao::new().await else {
+        return;
+    };
+    let now = at(1_000_000);
+    let held = fingerprinted(&bao, "c1", 1, now).await;
+    let manager = fingerprint_manager(&bao, now).await;
+    assert_eq!(manager.claim(&c("c1"), &held).await, Ok(Claim::Claimed));
+    let entry = kv_path(&SecretPath::Fingerprint(c("c1"), request(1))).unwrap();
+    bao.operator(
+        Method::POST,
+        &format!("{}/data/{entry}", bao.config.mounts.kv),
+        Some(json!({"data": {"value": "bm90IGFuIGVudHJ5"}})),
+    )
+    .await;
+    assert_eq!(
+        manager.release(&c("c1"), &request(1)).await,
+        Err(FingerprintError::Unavailable)
+    );
+    assert_eq!(
+        manager.claim(&c("c2"), &held).await,
+        Ok(Claim::HeldBy(c("c1")))
+    );
+}
+
 /// DEC-2345 item 4: of two concurrent claims of one fingerprint, exactly one wins, and the other
 /// answers `HeldBy` the winner, never both `Claimed`.
 #[tokio::test(flavor = "current_thread")]
