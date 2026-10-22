@@ -14,9 +14,6 @@ pub enum RoleRefusal {
     VaultUnavailable,
     /// The vault refused the role, or the request for it could not be formed.
     RoleRefused,
-    /// The report of an operation E21-33 has not implemented yet (DEC-77); the implementation
-    /// removes it.
-    Unimplemented { story: &'static str },
 }
 
 impl RoleRefusal {
@@ -25,7 +22,7 @@ impl RoleRefusal {
     pub fn reason(self) -> &'static str {
         match self {
             Self::VaultUnavailable => "vault_unavailable",
-            Self::RoleRefused | Self::Unimplemented { .. } => "role_refused",
+            Self::RoleRefused => "role_refused",
         }
     }
 
@@ -33,8 +30,10 @@ impl RoleRefusal {
     /// refusal, a denied or malformed request among them, refuses the role.
     #[must_use]
     pub fn of(error: &SourceError) -> Self {
-        let _ = error;
-        Self::Unimplemented { story: "E21-33" }
+        match error {
+            SourceError::Unavailable | SourceError::Sealed => Self::VaultUnavailable,
+            _ => Self::RoleRefused,
+        }
     }
 }
 

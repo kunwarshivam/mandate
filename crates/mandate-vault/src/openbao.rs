@@ -510,8 +510,17 @@ impl RoleProvisioner for OpenBaoSource {
         connection: &ConnectionId,
         namespace: &str,
     ) -> Result<(), RoleRefusal> {
-        let _ = (connection, namespace, role_request);
-        Err(RoleRefusal::Unimplemented { story: "E21-33" })
+        for identity in [
+            Identity::Executor(connection.clone()),
+            Identity::TokenExchange(connection.clone()),
+        ] {
+            let (path, body) = role_request(&identity, &self.mounts, namespace)
+                .map_err(|e| RoleRefusal::of(&e))?;
+            self.call(Method::POST, &path, Some(&body))
+                .await
+                .map_err(|e| RoleRefusal::of(&e))?;
+        }
+        Ok(())
     }
 
     async fn remove_exchange_role(
@@ -519,8 +528,16 @@ impl RoleProvisioner for OpenBaoSource {
         connection: &ConnectionId,
         namespace: &str,
     ) -> Result<(), RoleRefusal> {
-        let _ = (connection, namespace);
-        Err(RoleRefusal::Unimplemented { story: "E21-33" })
+        let (path, _) = role_request(
+            &Identity::TokenExchange(connection.clone()),
+            &self.mounts,
+            namespace,
+        )
+        .map_err(|e| RoleRefusal::of(&e))?;
+        match self.call(Method::DELETE, &path, None).await {
+            Ok(_) | Err(SourceError::Missing) => Ok(()),
+            Err(e) => Err(RoleRefusal::of(&e)),
+        }
     }
 }
 

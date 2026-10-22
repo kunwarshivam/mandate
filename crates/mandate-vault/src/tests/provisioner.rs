@@ -6,7 +6,6 @@ use crate::SourceError;
 use crate::provisioner::RoleRefusal;
 
 #[test]
-#[ignore = "pending E21-33"]
 fn every_vault_error_is_one_of_the_two_reasons() {
     for (error, refusal) in [
         (SourceError::Unavailable, RoleRefusal::VaultUnavailable),
