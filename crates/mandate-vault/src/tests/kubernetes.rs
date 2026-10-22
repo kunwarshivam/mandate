@@ -139,7 +139,6 @@ fn no_executors_name_is_ever_an_exchanges() {
 /// No two of the tricky ids share a stored path, a ServiceAccount or a role, across both kinds,
 /// even with case folded, as OpenBao folds role and policy names.
 #[test]
-#[ignore = "pending E21-33"]
 fn no_two_connections_share_a_path_a_service_account_or_a_role() {
     let ids = tricky();
     let (mut paths, mut names, mut roles) = (BTreeSet::new(), BTreeSet::new(), BTreeSet::new());
@@ -171,7 +170,6 @@ fn no_two_connections_share_a_path_a_service_account_or_a_role() {
 /// login's name goes, is exactly the policy written from [`kv_path`] for that connection, so the
 /// path a writer stores at and the path a policy grants are one, for every tricky id.
 #[test]
-#[ignore = "pending E21-33"]
 fn each_kinds_policy_reaches_exactly_the_paths_its_connection_is_stored_at() {
     let block = |prefix: &str, path: &SecretPath, capabilities: &str| {
         let stored = kv_path(path);
@@ -344,7 +342,6 @@ fn no_platform_identity_has_a_kubernetes_policy() {
 /// and every one but the ServiceAccount's name pinned; it may remove a token exchange's role and
 /// never an executor's (DEC-2350 items 3 and 5).
 #[test]
-#[ignore = "pending E21-33"]
 fn the_provisioners_policy_requires_every_parameter_and_pins_all_but_the_name() {
     let block = |mount: &str, caps: &str, namespace: &str, policy: &str, ttl: &str, max: &str| {
         format!(
@@ -428,7 +425,6 @@ fn mounts_or_a_namespace_that_are_not_plain_names_are_refused() {
 }
 
 #[test]
-#[ignore = "pending E21-33"]
 fn an_executors_role_is_named_by_and_binds_exactly_its_service_account() {
     assert_eq!(
         role_request(&Identity::Executor(c("c1")), &Mounts::default(), NAMESPACE),
@@ -449,7 +445,6 @@ fn an_executors_role_is_named_by_and_binds_exactly_its_service_account() {
 }
 
 #[test]
-#[ignore = "pending E21-33"]
 fn an_exchanges_role_is_named_by_and_binds_exactly_its_service_account() {
     assert_eq!(
         role_request(
@@ -478,7 +473,6 @@ fn an_exchanges_role_is_named_by_and_binds_exactly_its_service_account() {
 /// since OpenBao's pin refuses an array however it is filled (DEC-2350 item 5). The oracle reads
 /// the policy's text, not the code that wrote it.
 #[test]
-#[ignore = "pending E21-33"]
 fn every_role_request_is_one_the_provisioners_policy_allows() {
     let written = provisioner_policy(&Mounts::default(), NAMESPACE);
     assert!(written.is_ok(), "{written:?}");
@@ -530,7 +524,6 @@ fn every_role_request_is_one_the_provisioners_policy_allows() {
 /// no policy, token, secret or `sys/` path, and each block's capabilities exactly, `delete` on the
 /// token exchange's alone (DEC-2350 item 5). The oracle parses the policy's text.
 #[test]
-#[ignore = "pending E21-33"]
 fn the_provisioners_plus_reaches_only_the_two_role_paths() {
     let mounts = Mounts {
         kv: "kv-x".to_owned(),
