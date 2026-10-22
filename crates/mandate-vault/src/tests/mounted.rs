@@ -446,7 +446,6 @@ const PEM: &str = "-----BEGIN CERTIFICATE-----\nAAAA\nBBBB\n-----END CERTIFICATE
 /// A CA behind the kubelet's links is read whole at every mode a ConfigMap mounts it with, none
 /// of which lets a group or others write: 0444, 0440 under an `fsGroup`, and owner-only (DEC-2340).
 #[test]
-#[ignore = "pending E21-32"]
 fn a_ca_is_read_at_every_mode_no_other_may_write() {
     assert_eq!(CA_FILE, "ca.crt");
     for mode in [0o444, 0o440, 0o404, 0o400, 0o644, 0o600] {
@@ -458,7 +457,6 @@ fn a_ca_is_read_at_every_mode_no_other_may_write() {
 
 /// A CA a group or others may write is refused, whatever its read bits.
 #[test]
-#[ignore = "pending E21-32"]
 fn a_ca_others_may_write_is_refused() {
     for mode in [0o446, 0o466, 0o464, 0o646, 0o664, 0o666, 0o642, 0o622] {
         let dir = Fresh::new("ca-writable");
@@ -474,7 +472,6 @@ fn a_ca_others_may_write_is_refused() {
 /// The CA reader reads `ca.crt` alone, inside its mount, by the mounted reader's other rules: a
 /// missing CA, a link out of the mount, a key beside it, and a file over the bound are refused.
 #[test]
-#[ignore = "pending E21-32"]
 fn the_ca_reader_reads_ca_crt_alone_inside_its_mount() {
     let keyed = Fresh::new("ca-keyed");
     kubelet(&keyed.0, &[("tls.key", PEM, 0o444)]);
@@ -542,7 +539,6 @@ fn vault_ca_modes(chart: &str) -> Vec<u32> {
 /// with the group read bit an `fsGroup` adds, so a chart mode the reader refuses fails here, not
 /// on a cluster (DEC-2340).
 #[test]
-#[ignore = "pending E21-32"]
 fn the_ca_is_read_at_the_mode_the_chart_mounts_it_with() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let chart = fs::read_to_string(root.join(CHART_HELPERS)).unwrap();

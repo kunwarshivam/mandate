@@ -1,7 +1,0 @@
-file = "crates/mandate-executord/tests/paper_start.rs"
-test = "the_vault_ca_is_read_from_the_mount"
-reason = """
-`vault_config` maps every refusal of `mandate_vault::mounted::read_mounted_ca`, its stub's
-included, to `vault_ca_unreadable`, so the test fails on that answer at the 0444 CA rather than
-showing the stub's report. The row goes when E21-32's `read_mounted_ca` lands (DEC-2340).
-"""

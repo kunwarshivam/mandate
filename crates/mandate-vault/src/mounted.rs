@@ -115,8 +115,8 @@ pub const CA_FILE: &str = "ca.crt";
 /// way: a role id, a secret id or a key keeps [`read_mounted`]'s owner-only rule. Anything else is
 /// [`SourceError::CredentialFile`].
 pub fn read_mounted_ca(dir: &Path) -> Result<String, SourceError> {
-    let _ = dir;
-    Err(SourceError::Unimplemented { story: "E21-32" })
+    read_bounded(dir, CA_FILE, &|_| {}, WRITABLE_BY_OTHERS, MOUNTED_MAX)
+        .map(|ca| ca.expose_secret().to_owned())
 }
 
 /// Where a connection's executor or token exchange finds its projected ServiceAccount token, the

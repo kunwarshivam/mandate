@@ -198,7 +198,6 @@ fn the_flags_name_the_paper_run_and_its_vault() -> Result<(), Error> {
 /// under an `fsGroup`, 0440 (DEC-2340); a missing CA, or one group or others may write, is
 /// refused.
 #[test]
-#[ignore = "pending E21-32"]
 fn the_vault_ca_is_read_from_the_mount() -> Result<(), Error> {
     let dir = mount_dir()?;
     let mount = VaultMount {
