@@ -12,7 +12,9 @@
 use mandate_connections::account_entry::{BrokerAccountId, encode};
 use mandate_connections::checks::{AccountRead, CheckInput, Granted, Occasion, run};
 use mandate_connections::grant::GrantedScopes;
-use mandate_connections::record::{AccountPiiRef, AuthKind, Broker, ConnectionId, Environment};
+use mandate_connections::record::{
+    AccountPiiRef, AccountRef, AuthKind, Broker, ConnectionId, Environment,
+};
 use mandate_connections::token_entry;
 use mandate_executor::{AccountScope, IdGen};
 use mandate_store::Store;
@@ -58,10 +60,11 @@ pub fn oauth_connect_check<S: Store>(
         pii_ref,
     } = check;
     journal_check(store, ids, scope, now, || {
-        let stored = account.is_some_and(|id| {
+        let request = AccountRef::new(&scope.account.0).ok();
+        let stored = account.zip(request).is_some_and(|(id, request)| {
             encode(&pii_ref, &id).is_ok_and(|entry| {
                 let bytes = SecretSlice::from(entry.expose_secret().as_bytes().to_vec());
-                create(&SecretPath::AccountId(connection.clone()), &bytes).is_ok()
+                create(&SecretPath::AccountId(connection.clone(), request), &bytes).is_ok()
             })
         });
         let account = if stored {
