@@ -171,11 +171,12 @@ impl Harness for Bao {
         let identity = Identity::TokenExchange(connection.clone());
         let mounts = &self.config.mounts;
         let template = "{{identity.entity.aliases.auth_take.metadata.service_account_name}}";
+        let account = service_account_name(&identity).unwrap();
         let hcl = kubernetes_policy(&identity, mounts, "auth_take")
             .unwrap()
-            .replace(template, &service_account_name(&identity).unwrap());
+            .replace(template, &account);
         let name = format!(
-            "{}-take",
+            "{}-take-{account}",
             kubernetes_policy_name(&identity, mounts).unwrap()
         );
         self.operator(
