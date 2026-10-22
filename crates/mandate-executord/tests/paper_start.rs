@@ -340,7 +340,6 @@ fn a_stopped_run_gives_its_lease_back() -> Result<(), Error> {
 /// own: a missing or empty one is refused before the pod's namespace is read, and one the pod
 /// does not share, or a pod namespace that cannot be read, refuses the start.
 #[test]
-#[ignore = "pending E21-32"]
 fn the_login_is_held_to_the_charts_namespace_when_the_pod_shares_it() {
     assert_eq!(WORKSPACE_NAMESPACE_ENV, "MANDATE_WORKSPACE_NAMESPACE");
     let pod = || Ok("ws-ws1".to_owned());
