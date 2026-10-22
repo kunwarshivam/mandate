@@ -1143,7 +1143,7 @@ VAULT_CA_MOUNT = {"name": "vault-ca", "mountPath": "/run/mandate/vault", "readOn
 def vault_ca_mounts(docs: list[dict], want: set[str]) -> list[str]:
     """The vault's CA certificate alone (the vault chart's ConfigMap `vault-ca`, never its key), at
     /run/mandate/vault read-only, in exactly the processes of `want`, managed or standing
-    (DEC-1177 item 13)."""
+    (DEC-2332 item 5)."""
     problems = []
     every = [*managed_pods(docs), *(w for w in workloads(docs) if w["kind"] == "Deployment")]
     for w in every:

@@ -16,9 +16,11 @@ projected vault token and namespace and, read-only, the claims it mounts read-on
 DEC-1016), and no Secret through the environment or a pull secret; the manager's, a templated
 process's and this workspace's labels; and exactly that process's egress labels. So a pod labelled
 as one process cannot run another's image, command or credentials: the token exchange, the one
-process that reaches the live token host, runs its own image and launch only. Residual: what it
-does not check (resources, affinity, other labels, the environment's other plain values, and
-whether a token exchange's `x` account is its own connection's hex, which CEL cannot compute and
+process that reaches the live token host, runs its own image and launch only. Each container's
+environment is exactly its template's, names and values, and the manager's own names once each,
+and a process that reaches the vault mounts the vault's CA alone (DEC-2332 items 4 and 5).
+Residual: what it does not check (resources, affinity, other labels, the values of the manager's
+own names, and whether a token exchange's `x` account is its own connection's hex, which CEL cannot compute and
 the exchange checks itself), so a pod inside the bound can still do what that process's image and
 role can. Every runtime and executor it starts is a bare pod from the templates
 below, which are exactly the pods the chart would build for those processes (their security

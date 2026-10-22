@@ -615,7 +615,7 @@ spec:
 `alpaca-paper` the paper host's, the vault's address, and the directory the vault's CA is mounted
 in. */ -}}
 {{- /* Whether process `p` trusts the vault: the vault chart's CA certificate alone, the
-ConfigMap `vault-ca`, read-only at /run/mandate/vault (DEC-1177 item 13): a `vault_ca` process's,
+ConfigMap `vault-ca`, read-only at /run/mandate/vault (DEC-2332 item 5): a `vault_ca` process's,
 the executor's only when its broker reaches the vault. */ -}}
 {{- define "mandate.vaultCa" -}}
 {{- if and .p.vault_ca (or (ne .p.name "executor") (eq .root.Values.executor.broker "alpaca-paper")) -}}true{{- end -}}
