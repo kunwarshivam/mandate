@@ -35,6 +35,7 @@ fn a_loopback_url_with_a_path_and_nothing_else_is_admitted_as_given() {
         "http://localhost:8899/alpaca/oauth/token",
         "https://localhost/alpaca/oauth/token",
         "http://127.0.0.1/t",
+        "http://oauth-fixture:8091/alpaca/oauth/token",
     ];
     for text in admitted {
         assert_eq!(
@@ -107,4 +108,38 @@ fn any_other_url_is_refused() {
 fn each_refusal_has_its_stable_code() {
     assert_eq!(Refused::Tier.code(), "token_exchange_cell_tier");
     assert_eq!(Refused::Url.code(), "token_exchange_cell_url");
+}
+
+/// Beside loopback, only the cell's fixture pod is admitted, and only as `http`, that exact
+/// name, and that exact port (DEC-2633): no other single-label name, spelling, port, or scheme.
+#[test]
+fn only_the_fixture_pod_s_exact_authority_is_admitted_beside_loopback() {
+    let refused = [
+        "https://oauth-fixture:8091/alpaca/oauth/token",
+        "http://oauth-fixture/alpaca/oauth/token",
+        "http://oauth-fixture:8092/alpaca/oauth/token",
+        "http://oauth-fixture:80/alpaca/oauth/token",
+        "http://oauth-fixture:08091/alpaca/oauth/token",
+        "http://oauth-fixture.:8091/alpaca/oauth/token",
+        "http://OAUTH-FIXTURE:8091/alpaca/oauth/token",
+        "http://Oauth-Fixture:8091/alpaca/oauth/token",
+        "http://oauth-fixtures:8091/alpaca/oauth/token",
+        "http://fixture:8091/alpaca/oauth/token",
+        "http://stub-issuer:8091/alpaca/oauth/token",
+        "http://oauth-fixture.ws-ws1.svc:8091/alpaca/oauth/token",
+        "http://oauth-fixture.alpaca.markets:8091/alpaca/oauth/token",
+        "http://user@oauth-fixture:8091/alpaca/oauth/token",
+        "http://oauth-fixture:8091",
+        "http://oauth-fixture:8091/alpaca/oauth/token?x",
+    ];
+    for text in refused {
+        assert_eq!(parse(Some("dev"), text), Err(Refused::Url), "{text:?}");
+    }
+    for tier in [None, Some("staging"), Some("production")] {
+        assert_eq!(
+            parse(tier, "http://oauth-fixture:8091/alpaca/oauth/token"),
+            Err(Refused::Tier),
+            "{tier:?}"
+        );
+    }
 }
