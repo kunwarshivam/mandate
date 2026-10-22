@@ -182,6 +182,9 @@ struct Followed {
     proposals: Vec<(AgentId, Proposal)>,
     unreadable: bool,
     all_stopped: bool,
+    /// Whether every followed agent's stream parsed and read: one that did not may hold a switch,
+    /// so it holds the exit (DEC-2347 item 3.3).
+    all_read: bool,
 }
 
 impl<S: Store, B: Broker> ExecutorProcess<S, B> {
@@ -316,6 +319,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             proposals: proposed,
             unreadable,
             all_stopped,
+            all_read,
         }) = self.switches(now, &mut alerts)
         else {
             return alerts;
@@ -345,7 +349,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                 return alerts;
             }
         }
-        if nothing_read && all_stopped && self.owes_nothing() {
+        if nothing_read && all_read && all_stopped && self.owes_nothing() {
             self.lifecycle.observe(now, Lifecycled::Completed);
         }
         alerts
@@ -468,11 +472,14 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         let mut pending = Vec::new();
         let mut proposed = Vec::new();
         let mut unreadable = false;
+        let mut all_read = true;
         for agent in following.agents.keys().cloned() {
             let Some(stream) = StreamId::parse(&format!("agent:{workspace}:{}", agent.0)) else {
+                all_read = false;
                 continue;
             };
             let Some(rows) = self.follow(&stream, alerts) else {
+                all_read = false;
                 continue;
             };
             let read: Result<Vec<_>, _> = rows
@@ -537,6 +544,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             proposals: proposed,
             unreadable,
             all_stopped: following.all_stopped() && !following.connecting(),
+            all_read,
         })
     }
 

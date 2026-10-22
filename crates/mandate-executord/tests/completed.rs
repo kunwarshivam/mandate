@@ -238,7 +238,6 @@ fn only_this_executors_exchanged_start_holds_it() -> Result<(), Error> {
 /// it keeps the executor running, not failed; once it reads, the switch applies and the executor
 /// then exits.
 #[test]
-#[ignore = "pending E7-4"]
 fn an_unreadable_agent_stream_keeps_it_running() -> Result<(), Error> {
     let journal = deployed()?;
     stopped(&journal, "c3", AGENT)?;
