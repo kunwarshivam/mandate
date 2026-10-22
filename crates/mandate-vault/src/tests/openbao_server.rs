@@ -171,11 +171,12 @@ impl Harness for Bao {
         let identity = Identity::TokenExchange(connection.clone());
         let mounts = &self.config.mounts;
         let template = "{{identity.entity.aliases.auth_take.metadata.service_account_name}}";
+        let account = service_account_name(&identity).unwrap();
         let hcl = kubernetes_policy(&identity, mounts, "auth_take")
             .unwrap()
-            .replace(template, &service_account_name(&identity).unwrap());
+            .replace(template, &account);
         let name = format!(
-            "{}-take",
+            "{}-take-{account}",
             kubernetes_policy_name(&identity, mounts).unwrap()
         );
         self.operator(
@@ -531,7 +532,6 @@ async fn an_unreachable_take_is_an_outage() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending E21-32"]
 async fn a_code_is_taken_once_and_only_by_its_own_exchange() {
     an_unreachable_take_is_an_outage().await;
     if let Some(bao) = Bao::new().await {
@@ -540,7 +540,6 @@ async fn a_code_is_taken_once_and_only_by_its_own_exchange() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending E21-32"]
 async fn of_two_racing_takers_exactly_one_gets_the_code() {
     an_unreachable_take_is_an_outage().await;
     if let Some(bao) = Bao::new().await {
@@ -551,7 +550,6 @@ async fn of_two_racing_takers_exactly_one_gets_the_code() {
 /// DEC-2061 item 4: a tombstone that a taker stopped between its overwrite and its delete left
 /// behind is never a code, to a take or to a read.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending E21-32"]
 async fn a_tombstone_is_never_taken_or_read_as_a_code() {
     an_unreachable_take_is_an_outage().await;
     let Some(bao) = Bao::new().await else {
@@ -568,7 +566,6 @@ async fn a_tombstone_is_never_taken_or_read_as_a_code() {
 
 /// DEC-2061 item 4: once a code is taken no version of it is left, the one taken included.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending E21-32"]
 async fn after_a_take_no_version_of_the_code_is_left() {
     an_unreachable_take_is_an_outage().await;
     let Some(bao) = Bao::new().await else {

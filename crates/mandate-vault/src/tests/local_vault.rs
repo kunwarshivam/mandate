@@ -312,13 +312,11 @@ async fn no_debug_or_refusal_shows_a_platform_secret() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending E21-32"]
 async fn a_code_is_taken_once_and_only_by_its_own_exchange() {
     conformance::a_code_is_taken_once_and_only_by_its_own_exchange(&Local::new()).await;
 }
 
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending E21-32"]
 async fn of_two_racing_takers_exactly_one_gets_the_code() {
     conformance::of_two_racing_takers_exactly_one_gets_the_code(&Local::new()).await;
 }

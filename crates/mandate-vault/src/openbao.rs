@@ -35,7 +35,7 @@ use crate::kubernetes::{
 };
 use crate::lease::{LEASE_SECS, Lease, lease_times};
 use crate::policy::{
-    Identity, Mounts, SecretPath, kv_path, openbao_policy, policy_name, role_name,
+    Access, Identity, Mounts, SecretPath, kv_path, openbao_policy, policy_name, require, role_name,
 };
 use crate::source::{GRANT_SECS, Grant, SecretSource};
 
@@ -133,34 +133,73 @@ impl Http {
         parsed(bytes)
     }
 
-    /// A Kubernetes login to `/v1/<path>` for `role`: as [`Http::call`], except that a refusal's
-    /// body is read, for [`kubernetes_login_refusal`], and then wiped like any other.
+    /// A Kubernetes login to `/v1/<path>` for `role`, its refusal judged by
+    /// [`kubernetes_login_refusal`].
     async fn login(
         &self,
         path: &str,
         body: &Value,
         role: &str,
     ) -> Result<Option<Value>, SourceError> {
-        let response = self
+        self.post_judged(path, None, body, |status, answer| {
+            kubernetes_login_refusal(status, answer, role)
+        })
+        .await
+    }
+
+    /// A `POST` to `/v1/<path>`: as [`Http::call`], except that a refusal's body is read, for
+    /// `judge`, and then wiped like any other.
+    async fn post_judged(
+        &self,
+        path: &str,
+        token: Option<&SecretString>,
+        body: &Value,
+        judge: impl FnOnce(u16, &[u8]) -> Result<(), SourceError>,
+    ) -> Result<Option<Value>, SourceError> {
+        let mut request = self
             .client
             .post(format!("{}/v1/{path}", self.address))
             .header("Content-Type", "application/json")
-            .body(body.to_string())
-            .send()
-            .await
-            .map_err(|_| SourceError::Unavailable)?;
+            .body(body.to_string());
+        if let Some(token) = token {
+            request = request.header("X-Vault-Token", token.expose_secret());
+        }
+        let response = request.send().await.map_err(|_| SourceError::Unavailable)?;
         let status = response.status();
         let mut bytes = response
             .bytes()
             .await
             .map_err(|_| SourceError::Unavailable)?
             .to_vec();
-        if let Err(refused) = kubernetes_login_refusal(status.as_u16(), &bytes, role) {
+        if let Err(refused) = judge(status.as_u16(), &bytes) {
             bytes.zeroize();
             return Err(refused);
         }
         parsed(bytes)
     }
+}
+
+/// The marker a take overwrites a code with (DEC-2061 item 4), never a code.
+const TOMBSTONE: &str = "taken";
+
+/// Whether the vault's answer to a KV read is a tombstone a take left.
+fn tombstoned(answer: Option<&Value>) -> bool {
+    answer.and_then(|a| a.pointer(&format!("/data/data/{TOMBSTONE}"))) == Some(&Value::Bool(true))
+}
+
+/// The refusal a check-and-set write's answer means: [`refusal`]'s, except that a 400 whose one
+/// error is that the version moved on is [`SourceError::Missing`], since another taker got the
+/// code first.
+fn cas_refusal(status: u16, body: &[u8]) -> Result<(), SourceError> {
+    let moved = json!(["check-and-set parameter did not match the current version"]);
+    let lost = status == 400
+        && serde_json::from_slice::<Value>(body)
+            .ok()
+            .is_some_and(|answer| answer.get("errors") == Some(&moved));
+    if lost {
+        return Err(SourceError::Missing);
+    }
+    refusal(StatusCode::from_u16(status).map_err(|_| SourceError::Unavailable)?)
 }
 
 /// The JSON in `bytes`, or `None` when there are none; the bytes are wiped either way.
@@ -506,6 +545,9 @@ impl OpenBaoSource {
             Err(SourceError::Missing) => return Ok(None),
             Err(e) => return Err(e),
         };
+        if tombstoned(value.as_ref()) {
+            return Ok(None);
+        }
         let encoded = text(value.as_ref(), "/data/data/value")?;
         STANDARD
             .decode(encoded)
@@ -534,8 +576,40 @@ impl SecretSource for OpenBaoSource {
         &self,
         connection: &ConnectionId,
     ) -> Result<Option<SecretSlice<u8>>, SourceError> {
-        let _ = connection;
-        Err(SourceError::Unimplemented { story: "E21-32" })
+        let path = SecretPath::Code(connection.clone());
+        require(&self.identity, Access::Take, &path)?;
+        let data = self.data_path(&path)?;
+        let read = match self.call(Method::GET, &data, None).await {
+            Ok(read) => read,
+            Err(SourceError::Missing) => return Ok(None),
+            Err(e) => return Err(e),
+        };
+        if tombstoned(read.as_ref()) {
+            return Ok(None);
+        }
+        let version = read
+            .as_ref()
+            .and_then(|r| r.pointer("/data/metadata/version"))
+            .and_then(Value::as_u64)
+            .ok_or(SourceError::Malformed)?;
+        let code = STANDARD
+            .decode(text(read.as_ref(), "/data/data/value")?)
+            .map_err(|_| SourceError::Malformed)?;
+        let body = json!({ "options": { "cas": version }, "data": { TOMBSTONE: true } });
+        let overwrite = self
+            .http
+            .post_judged(&data, Some(&self.token), &body, cas_refusal)
+            .await;
+        match overwrite {
+            Ok(_) => {}
+            Err(SourceError::Missing) => return Ok(None),
+            Err(e) => return Err(e),
+        }
+        let metadata = format!("{}/metadata/{}", self.mounts.kv, kv_path(&path)?);
+        match self.call(Method::DELETE, &metadata, None).await {
+            Ok(_) | Err(SourceError::Missing) => Ok(Some(SecretSlice::from(code))),
+            Err(e) => Err(e),
+        }
     }
 
     async fn put(&self, path: &SecretPath, secret: &SecretSlice<u8>) -> Result<(), SourceError> {

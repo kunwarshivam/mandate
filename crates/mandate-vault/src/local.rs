@@ -195,8 +195,10 @@ impl SecretSource for LocalSource {
         &self,
         connection: &ConnectionId,
     ) -> Result<Option<SecretSlice<u8>>, SourceError> {
-        let _ = connection;
-        Err(SourceError::Unimplemented { story: "E21-32" })
+        let path = SecretPath::Code(connection.clone());
+        require(&self.identity, Access::Take, &path)?;
+        let entry = self.entry(&path)?;
+        self.executor()?.take_code(&entry).map_err(from_vault)
     }
 
     async fn put(&self, path: &SecretPath, secret: &SecretSlice<u8>) -> Result<(), SourceError> {
