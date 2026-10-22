@@ -4,15 +4,19 @@
 //!
 //! [`verify`](crate::verify) returns at the first check that fails, before the signature, and
 //! compares the backup-eligible flag with the stored credential's, so a held passkey with another
-//! flag would fail sooner than an unknown one checked against a decoy. [`verify_reduction`]
-//! instead verifies the signature first and always, then judges the client data and the
-//! authenticator data, and only then answers. It compares no credential id (the caller looked the
-//! key up by it), no backup-eligible flag (journal spec §9.31 records none, so nothing holds one
-//! to compare; where it comes from stays open, as [DEC-2121]'s follow-ups say), and no counter
-//! (route 2 neither reads nor advances it).
+//! flag would fail sooner than an unknown one. [`verify_reduction`] instead verifies the signature
+//! first and always, then judges the client data and the authenticator data, and only then
+//! answers. It compares no credential id (the caller looked the key up by it), no backup-eligible
+//! flag (journal spec §9.31 records none, so nothing holds one to compare; where it comes from
+//! stays open, as [DEC-2121]'s follow-ups say), and no counter (route 2 neither reads nor advances
+//! it).
 //!
-//! For an unknown passkey, or a key that does not resolve or parse, the caller checks the
-//! assertion against [`decoy_for`] its signature: the same work, whose answer it never accepts.
+//! **Constant work.** `ring` refuses a signature of the wrong shape for its algorithm without any
+//! arithmetic, so checking only the held key's algorithm would tell a held key, and its
+//! algorithm, from an unknown one by time ([DEC-2324] item 4). Every call therefore runs exactly
+//! one ES256 and one Ed25519 check over the same message and signature, ES256 first: the held key
+//! for its own algorithm and the other algorithm's decoy for the other, or both decoys when no key
+//! is held. Only the held key's check answers; with no key the signature never verifies.
 //!
 //! [DEC-2121]: ../../../docs/project/decisions/DEC-2121.md
 //! [DEC-2324]: ../../../docs/project/decisions/DEC-2324.md
@@ -24,8 +28,7 @@ use crate::client_data::{self, Ceremony};
 use crate::{Assertion, Challenge, PublicKey, Refusal, RelyingParty, cbor, cose};
 
 /// The ES256 decoy: the P-256 base point, a valid key, so checking a signature against it costs
-/// a full verification. Its private key is 1, so anyone can sign for it; the caller never accepts
-/// what a decoy answers.
+/// a full verification. Its private key is 1, so anyone can sign for it; its check never answers.
 pub const DECOY_ES256: PublicKey = PublicKey::Es256 {
     x: [
         0x6b, 0x17, 0xd1, 0xf2, 0xe1, 0x2c, 0x42, 0x47, 0xf8, 0xbc, 0xe6, 0xe5, 0x63, 0xa4, 0x40,
@@ -49,41 +52,22 @@ pub const DECOY_ED25519: PublicKey = PublicKey::Ed25519 {
     ],
 };
 
-/// An Ed25519 signature's length.
-const ED25519_SIGNATURE_LEN: usize = 64;
-
-/// The DER tags of a `SEQUENCE` and an `INTEGER`.
-const SEQUENCE: u8 = 0x30;
-const INTEGER: u8 = 0x02;
-
-/// Whether `signature` is a DER `SEQUENCE` of exactly two `INTEGER`s, an ECDSA signature's shape,
-/// with short-form lengths, as every P-256 signature has.
-fn ecdsa_der(signature: &[u8]) -> bool {
-    let [SEQUENCE, len, body @ ..] = signature else {
-        return false;
-    };
-    usize::from(*len) == body.len() && integer(body).and_then(integer) == Some(&[][..])
+/// One signature check: whether `signature` over `message` verifies under `key`. The crate's own
+/// is [`RingCheck`]; a test may count the checks a call makes through
+/// [`verify_reduction_with`].
+pub trait SignatureCheck {
+    /// # Errors
+    /// [`Refusal::SignatureInvalid`] for a signature that does not verify under `key`.
+    fn check(&self, key: &PublicKey, message: &[u8], signature: &[u8]) -> Result<(), Refusal>;
 }
 
-/// What follows one DER `INTEGER` at the front of `input`, or `None` when none is there.
-fn integer(input: &[u8]) -> Option<&[u8]> {
-    let [INTEGER, len, rest @ ..] = input else {
-        return None;
-    };
-    rest.get(usize::from(*len)..)
-}
+/// The signature check through `ring`, the one [`verify_reduction`] uses.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RingCheck;
 
-/// The decoy for an assertion whose passkey is unknown, chosen by its signature's encoding, since
-/// an assertion's authenticator data names no algorithm (§4.10 item 4): an ECDSA signature's DER
-/// structure, a SEQUENCE of two INTEGERs, is tried first and gets [`DECOY_ES256`]; any other 64
-/// bytes get [`DECOY_ED25519`]; any other shape gets [`DECOY_ES256`].
-pub fn decoy_for(signature: &[u8]) -> &'static PublicKey {
-    if ecdsa_der(signature) {
-        &DECOY_ES256
-    } else if signature.len() == ED25519_SIGNATURE_LEN {
-        &DECOY_ED25519
-    } else {
-        &DECOY_ES256
+impl SignatureCheck for RingCheck {
+    fn check(&self, key: &PublicKey, message: &[u8], signature: &[u8]) -> Result<(), Refusal> {
+        cose::verify(key, message, signature)
     }
 }
 
@@ -98,25 +82,51 @@ pub fn cose_key(bytes: &[u8]) -> Result<PublicKey, Refusal> {
     cose::public_key(&key)
 }
 
-/// Judges `assertion` for route 2 against `challenge`, `rp`, and `key`: the passkey's own key,
-/// or the [`decoy_for`] its signature. The signature over the authenticator data and the client
-/// data's SHA-256 is verified first, whatever else is wrong; then the client data (a `get`
-/// ceremony, the challenge, the origin, not cross-origin) and the authenticator data (no attested
-/// credential, the RP ID hash, user presence and verification, consistent backup flags) are
-/// judged. A bad signature is the answer whenever it is bad.
+/// Judges `assertion` for route 2 against `challenge`, `rp`, and `key`, the passkey's own key, or
+/// `None` for an unknown passkey or a key that does not resolve or parse. One ES256 and one
+/// Ed25519 check run over the signature, whatever `key` is (the module's constant work); then the
+/// client data (a `get` ceremony, the challenge, the origin, not cross-origin) and the
+/// authenticator data (no attested credential, the RP ID hash, user presence and verification,
+/// consistent backup flags) are judged. A bad signature is the answer whenever it is bad, and with
+/// no key it always is.
 ///
 /// # Errors
-/// [`Refusal::SignatureInvalid`] for a signature that does not verify; otherwise the client
-/// data's refusal, then the authenticator data's.
+/// [`Refusal::SignatureInvalid`] for a signature that does not verify under `key`, or no `key`;
+/// otherwise the client data's refusal, then the authenticator data's.
 pub fn verify_reduction(
     rp: &RelyingParty,
     challenge: &Challenge,
-    key: &PublicKey,
+    key: Option<&PublicKey>,
+    assertion: &Assertion<'_>,
+) -> Result<(), Refusal> {
+    verify_reduction_with(&RingCheck, rp, challenge, key, assertion)
+}
+
+/// [`verify_reduction`] with its two signature checks made through `check`.
+///
+/// # Errors
+/// As [`verify_reduction`].
+pub fn verify_reduction_with(
+    check: &impl SignatureCheck,
+    rp: &RelyingParty,
+    challenge: &Challenge,
+    key: Option<&PublicKey>,
     assertion: &Assertion<'_>,
 ) -> Result<(), Refusal> {
     let client_data_hash = Digest::of(assertion.client_data_json);
     let message = [assertion.authenticator_data, client_data_hash.as_bytes()].concat();
-    let signed = cose::verify(key, &message, assertion.signature);
+    let (es256, ed25519) = match key {
+        Some(held @ PublicKey::Es256 { .. }) => (held, &DECOY_ED25519),
+        Some(held @ PublicKey::Ed25519 { .. }) => (&DECOY_ES256, held),
+        None => (&DECOY_ES256, &DECOY_ED25519),
+    };
+    let es256_signed = check.check(es256, &message, assertion.signature);
+    let ed25519_signed = check.check(ed25519, &message, assertion.signature);
+    let signed = match key {
+        Some(PublicKey::Es256 { .. }) => es256_signed,
+        Some(PublicKey::Ed25519 { .. }) => ed25519_signed,
+        None => Err(Refusal::SignatureInvalid),
+    };
     let client_data = client_data::check(assertion.client_data_json, Ceremony::Get, rp, challenge);
     let authenticator_data = AuthData::parse(assertion.authenticator_data).and_then(|parsed| {
         if parsed.attested.is_some() {
