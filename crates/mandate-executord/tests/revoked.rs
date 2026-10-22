@@ -136,7 +136,9 @@ fn a_revoked_agents_later_copy_is_applied() -> Result<(), Error> {
 }
 
 /// A revoked agent's opening is not handed and its exit is; established again, its next opening is
-/// handed (DEC-2343 item 1).
+/// handed (DEC-2343 item 1). An opening proposed while revoked may be handed once established again:
+/// the agent stream's rows have no order against the control stream's, and the core abandons an
+/// intent too old to submit.
 #[test]
 #[ignore = "pending E7-4"]
 fn a_revoked_agents_opening_is_not_handed_and_its_exit_is() -> Result<(), Error> {
@@ -155,11 +157,6 @@ fn a_revoked_agents_opening_is_not_handed_and_its_exit_is() -> Result<(), Error>
     assert!(
         journal.received().contains(&LATER_OPEN.to_owned()),
         "established again, its openings are handed: {:?}",
-        journal.received()
-    );
-    assert!(
-        !journal.received().contains(&OPEN.to_owned()),
-        "the opening proposed while revoked is never handed: {:?}",
         journal.received()
     );
     Ok(())
