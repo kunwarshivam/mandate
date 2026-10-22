@@ -1351,8 +1351,8 @@ after U-A1 to U-A5 are recorded.
   *`key_id` in §5.7* ([DEC-2120](decisions/DEC-2120.md) item 5): workspace API §5.7's "The vault's
   part" lists what an entry holds without the VAPID `key_id` that DEC-2503 item 5 stores there; add
   it, with the note that it is the workspace's current key id and so outside the step-up digest.
-  *Active addresses and the fold-error case in the specs* (DEC-2123, from
-  DEC-2120 item 9; one spec-only PR, ES-22, raised by the L2 lead): workspace API §4.11 ("Active
+  *Active addresses and the fold-error case in the specs* (a spec-only PR, ES-22, DEC-2123,
+  reserved in that PR; from DEC-2120 item 9, raised by the L2 lead): workspace API §4.11 ("Active
   addresses" and "Deactivation") and §5.7's sweep text (the sweep erases only on positive evidence
   from a fold that succeeded, keeps the entry and raises one opaque operator alert otherwise, and
   waits a 7-day grace for an address dead only because a membership ended), identity spec §5.2
