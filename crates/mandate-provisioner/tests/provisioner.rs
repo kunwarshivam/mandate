@@ -502,3 +502,181 @@ fn the_plan_owes_exactly_what_the_valid_streams_record() {
         }
     }
 }
+
+/// A synthetic control-stream row: `event_type` at `schema_version`, its `payload`, and its
+/// `causation_id` when it names one; the plan reads nothing else.
+fn row(
+    seq: u64,
+    event_type: &str,
+    schema_version: u64,
+    payload: &str,
+    cause: Option<&str>,
+) -> StoredEvent {
+    let cause = cause.map_or("null".to_owned(), |c| format!("\"{c}\""));
+    let body = format!(r#"{{"causation_id":{cause},"payload":{payload}}}"#);
+    StoredEvent {
+        stream_id: identity().stream(),
+        seq,
+        event_id: format!("01J8Z4CS{seq:018}"),
+        event_type: event_type.to_owned(),
+        schema_version,
+        environment: "paper".to_owned(),
+        recorded_at: at(0).to_string(),
+        prev_hash: Digest::of(b""),
+        hash: Digest::of(b""),
+        body: body.into_bytes(),
+    }
+}
+
+fn opened() -> StoredEvent {
+    let mut opened = row(1, "StreamOpened", 1, "{}", None);
+    opened.body = b"{}".to_vec();
+    opened
+}
+
+fn id(seq: u64) -> String {
+    format!("01J8Z4CS{seq:018}")
+}
+
+fn owes(rows: &[StoredEvent]) -> Vec<Step> {
+    plan(rows).unwrap().steps
+}
+
+/// Only a version-2 request with `credential` `oauth` is owed roles; an API-key request and a
+/// version-1 one are not.
+#[test]
+#[ignore = "pending E21-33"]
+fn only_a_version_2_oauth_request_is_owed_roles() {
+    let oauth = r#"{"connection_id":"c1","credential":"oauth"}"#;
+    let api_key = r#"{"connection_id":"c1","credential":"api_key"}"#;
+    assert_eq!(
+        owes(&[opened(), row(2, "ConnectionRequested", 2, oauth, None)]),
+        [Step::Make {
+            connection: "c1".to_owned(),
+            request: id(2)
+        }]
+    );
+    for (version, payload) in [(2, api_key), (1, oauth)] {
+        assert!(
+            owes(&[
+                opened(),
+                row(2, "ConnectionRequested", version, payload, None)
+            ])
+            .is_empty(),
+            "version {version}: {payload}"
+        );
+    }
+}
+
+/// A request refused or revoked before it is answered is owed nothing; another connection's
+/// request is still owed, and a refusal of any occasion but `connect` closes nothing.
+#[test]
+#[ignore = "pending E21-33"]
+fn a_close_before_the_answer_ends_only_its_own_connections_request() {
+    let requested = |seq, connection: &str| {
+        row(
+            seq,
+            "ConnectionRequested",
+            2,
+            &format!(r#"{{"connection_id":"{connection}","credential":"oauth"}}"#),
+            None,
+        )
+    };
+    let refused = |seq, connection: &str, occasion: &str| {
+        row(
+            seq,
+            "ConnectionRefused",
+            1,
+            &format!(r#"{{"connection_id":"{connection}","occasion":"{occasion}"}}"#),
+            None,
+        )
+    };
+    let make = |connection: &str, seq| Step::Make {
+        connection: connection.to_owned(),
+        request: id(seq),
+    };
+    assert_eq!(
+        owes(&[
+            opened(),
+            requested(2, "c1"),
+            requested(3, "c2"),
+            refused(4, "c1", "connect")
+        ]),
+        [make("c2", 3)]
+    );
+    assert_eq!(
+        owes(&[
+            opened(),
+            requested(2, "c1"),
+            row(3, "ConnectionRevoked", 1, r#"{"connection_id":"c1"}"#, None)
+        ]),
+        []
+    );
+    assert_eq!(
+        owes(&[opened(), requested(2, "c1"), refused(3, "c1", "reconnect")]),
+        [make("c1", 2)]
+    );
+}
+
+/// Each connection's made roles are its own: a later connection's roles made, or another's
+/// removed, keep the first's, and its close is owed a removal for it alone; a refusal of another
+/// occasion is no close.
+#[test]
+#[ignore = "pending E21-33"]
+fn each_connections_made_roles_are_its_own() {
+    let requested = |seq, connection: &str| {
+        row(
+            seq,
+            "ConnectionRequested",
+            2,
+            &format!(r#"{{"connection_id":"{connection}","credential":"oauth"}}"#),
+            None,
+        )
+    };
+    let made = |seq, connection: &str, request| {
+        row(
+            seq,
+            "ConnectionRolesMade",
+            1,
+            &format!(r#"{{"connection_id":"{connection}"}}"#),
+            Some(&id(request)),
+        )
+    };
+    let refused = |seq, connection: &str, occasion: &str| {
+        row(
+            seq,
+            "ConnectionRefused",
+            1,
+            &format!(r#"{{"connection_id":"{connection}","occasion":"{occasion}"}}"#),
+            None,
+        )
+    };
+    let remove = |connection: &str, seq| Step::Remove {
+        connection: connection.to_owned(),
+        cause: id(seq),
+        occasion: Occasion::RequestClosed,
+    };
+    let both = vec![
+        opened(),
+        requested(2, "c1"),
+        requested(3, "c2"),
+        made(4, "c1", 2),
+        made(5, "c2", 3),
+    ];
+    let mut first_closed = both.clone();
+    first_closed.push(refused(6, "c1", "connect"));
+    assert_eq!(owes(&first_closed), [remove("c1", 6)]);
+    let mut first_removed = first_closed.clone();
+    first_removed.push(row(
+        7,
+        "ConnectionRolesRemoved",
+        1,
+        r#"{"connection_id":"c1","role":"token_exchange","occasion":"request_closed"}"#,
+        Some(&id(6)),
+    ));
+    first_removed.push(refused(8, "c2", "connect"));
+    assert_eq!(owes(&first_removed), [remove("c2", 8)]);
+    let mut not_a_close = both;
+    not_a_close.push(refused(6, "c1", "reauthorize"));
+    assert_eq!(owes(&not_a_close), []);
+}
