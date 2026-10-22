@@ -617,7 +617,6 @@ fn an_existing_fingerprint_key_must_never_leave_the_vault() {
 /// only when it passes the verdict, and any other refusal of the GET fails provisioning, so a
 /// transient error never lets an exportable key through unverified (review F1, round 2).
 #[test]
-#[ignore = "pending E21-32"]
 fn only_a_missing_fingerprint_key_is_created_and_any_other_error_fails() {
     let kept = json!({ "data": {
         "exportable": false, "deletion_allowed": false, "allow_plaintext_backup": false,
