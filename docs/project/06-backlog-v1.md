@@ -4252,6 +4252,12 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   A2b:** the exit's `owes_nothing` reads agent-scoped work only; once the account-scope switch
   lands, an account switch still closing (`closing_all`) keeps the executor running too, with a
   test.
+- **E7-4 (kill switch sizing), from [DEC-2347](decisions/DEC-2347.md) item 9, rule 13:** a buy
+  the broker reports filled whose fill named no order (Alpaca's fill activity names only the
+  broker's order id, so the reconciliation applies it unattributed) leaves nothing in `kill.rs`'s
+  `sub_ledger`, so the agent's kill switch sells none of those shares. Attribute such a fill to the
+  order through the broker's order id (DEC-955 item 3), with a test that the switch then sells the
+  agent's whole position.
 - **E6-4 (executor fold), from [DEC-2347](decisions/DEC-2347.md) item 8:** when the executor's fold
   interprets `PositionReleased`, the released quantity leaves the agent's sub-ledger (`kill.rs`'s
   `sub_ledger`, read by the kill switch and by `ExecutorState::holds_lots`), so the switch sells
