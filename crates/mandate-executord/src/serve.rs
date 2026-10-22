@@ -8,6 +8,7 @@
 use std::time::Duration;
 
 use mandate_process::probe::Status;
+use mandate_process::{Snapshot, State};
 use mandate_store::Store;
 use mandate_time::UtcNanos;
 
@@ -36,6 +37,22 @@ pub enum Waited {
     Ready,
     /// SIGTERM arrived first: nothing was started, so nothing is owed.
     Stopped,
+    /// The connection was refused or revoked before its copy, and no agent is deployed on the
+    /// account: nothing was started and nothing is owed, so the executor ends cleanly (DEC-2346
+    /// item 2, DEC-2347's agentless executor).
+    Closed,
+}
+
+/// How long a start may take, from the process's first instant to the wait's first pass (the
+/// vault login, the exchanged check and the lease), before the probe reports it stalled and the
+/// kubelet restarts it.
+pub const STARTUP: Duration = Duration::from_secs(120);
+
+/// What the probe reads while the executor starts: starting, and live only for [`STARTUP`] from
+/// `now`, so a start that hangs is restarted rather than held live forever.
+pub fn starting(now: UtcNanos) -> Snapshot {
+    let _ = now;
+    Snapshot::unbounded(State::Starting)
 }
 
 /// DEC-2346: before the process starts, waits until the account stream in `config`'s scope is
@@ -45,7 +62,8 @@ pub enum Waited {
 /// owes no exit or protective order (`AGENTS.md` rule 13).
 ///
 /// # Errors
-/// `connection_closed` for a connection refused or revoked before its copy, the establishment's
+/// `connection_closed` for a connection refused or revoked before its copy while an agent is
+/// deployed on the account ([`Waited::Closed`] when none is), the establishment's
 /// own code for a record that does not read, `stream_unavailable` for a stream that cannot be
 /// read, and the lease's code when its tick stops the run: each exits before anything started.
 pub fn wait<S: Store>(
