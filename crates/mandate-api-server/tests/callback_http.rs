@@ -302,7 +302,6 @@ fn a_failed_vault_write_still_redirects_and_appends_nothing() {
 /// Through the API's real vault port (DEC-2338 item 3), whose write runs a runtime of its own: the
 /// callback calls it off the server's runtime, and the code reaches the vault as format 1's entry.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_callback_writes_through_the_vault_port_off_the_server_s_runtime() {
     let script = support_vault::Script::new(Identity::Api);
     let vault = VaultCodes {

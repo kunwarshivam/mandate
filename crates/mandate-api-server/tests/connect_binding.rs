@@ -70,7 +70,6 @@ fn named(binding: Result<ConnectBinding, StartRefusal>) -> Vec<&'static str> {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn with_no_connect_setting_there_is_no_connect_and_nothing_to_say() {
     for tier in [Tier::Dev, Tier::Ci, Tier::Staging, Tier::Production] {
         let binding = bind(tier, &BTreeMap::new()).expect("no refusal");
@@ -80,7 +79,6 @@ fn with_no_connect_setting_there_is_no_connect_and_nothing_to_say() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn with_every_setting_valid_the_connect_is_bound_to_them() {
     let dir = vault_dir(Some(0o600));
     let binding = bind(Tier::Staging, &all(&dir)).expect("no refusal");
@@ -104,7 +102,6 @@ fn with_every_setting_valid_the_connect_is_bound_to_them() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn each_missing_setting_alone_is_named_and_binds_nothing() {
     let dir = vault_dir(Some(0o600));
     for missing in CONNECT_SETTINGS {
@@ -115,7 +112,6 @@ fn each_missing_setting_alone_is_named_and_binds_nothing() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn each_invalid_setting_is_named_and_binds_nothing() {
     let dir = vault_dir(Some(0o600));
     let not_utf8 = || OsString::from_vec(b"a\xff".to_vec());
@@ -162,7 +158,6 @@ fn each_invalid_setting_is_named_and_binds_nothing() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn several_missing_settings_are_named_in_order_on_one_line_without_any_value() {
     let dir = vault_dir(Some(0o600));
     let mut vars = all(&dir);
@@ -187,7 +182,6 @@ fn several_missing_settings_are_named_in_order_on_one_line_without_any_value() {
 /// The authorization page's gate comes first: a URL set where it may not be refuses the start
 /// whatever the connect settings say, none of them set included (item 5, DEC-2633 item 3).
 #[test]
-#[ignore = "pending E10-13"]
 fn an_authorize_url_set_where_it_may_not_be_still_refuses_the_start() {
     let dir = vault_dir(Some(0o600));
     let page = OsString::from("http://127.0.0.1:8091/alpaca/oauth/authorize");
@@ -205,7 +199,6 @@ fn an_authorize_url_set_where_it_may_not_be_still_refuses_the_start() {
 /// A dev or CI cell's page reaches the bound connect.
 #[cfg(debug_assertions)]
 #[test]
-#[ignore = "pending E10-13"]
 fn a_dev_or_ci_cell_binds_its_fixture_page() {
     let dir = vault_dir(Some(0o600));
     let page = "http://oauth-fixture:8091/alpaca/oauth/authorize";
