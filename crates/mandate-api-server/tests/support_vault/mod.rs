@@ -7,11 +7,12 @@
 use std::sync::{Arc, Mutex};
 
 use mandate_api_server::vault_codes::ApiLogin;
-use mandate_api_server::vault_fingerprints::ManagerSession;
 use mandate_connections::record::{AccountPiiRef, AccountRef, ConnectionId};
 use mandate_time::UtcNanos;
 use mandate_vault::SourceError;
-use mandate_vault::fingerprint::{AccountFingerprint, Claim, FingerprintError};
+use mandate_vault::fingerprint::{
+    AccountFingerprint, Claim, FingerprintError, ManagerFingerprints,
+};
 use mandate_vault::lease::Lease;
 use mandate_vault::policy::{Identity, SecretPath};
 use mandate_vault::source::{Grant, SecretSource};
@@ -163,7 +164,7 @@ impl Session {
     }
 }
 
-impl ManagerSession for Session {
+impl ManagerFingerprints for Session {
     async fn fingerprint(
         &self,
         connection: &ConnectionId,
