@@ -189,6 +189,16 @@ impl SecretSource for LocalSource {
         &self.identity
     }
 
+    /// Takes the code through the local vault's own take (DEC-2628 item 2), after the policy
+    /// check.
+    async fn take_code(
+        &self,
+        connection: &ConnectionId,
+    ) -> Result<Option<SecretSlice<u8>>, SourceError> {
+        let _ = connection;
+        Err(SourceError::Unimplemented { story: "E21-32" })
+    }
+
     async fn put(&self, path: &SecretPath, secret: &SecretSlice<u8>) -> Result<(), SourceError> {
         require(&self.identity, Access::Write, path)?;
         let entry = self.entry(path)?;

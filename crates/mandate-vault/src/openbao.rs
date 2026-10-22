@@ -208,6 +208,35 @@ pub fn kubernetes_login_refusal(status: u16, body: &[u8], role: &str) -> Result<
     refusal(StatusCode::from_u16(status).map_err(|_| SourceError::Unavailable)?)
 }
 
+/// The refusal a check-and-set overwrite's answer means, its status and its body: [`refusal`]'s,
+/// except that a 400 whose one error is that the version moved on is [`SourceError::Missing`],
+/// since another taker got the code first. No part of the body reaches the error.
+pub(crate) fn cas_refusal(status: u16, body: &[u8]) -> Result<(), SourceError> {
+    let _ = (status, body);
+    Err(SourceError::Unimplemented { story: "E21-32" })
+}
+
+/// What a read of the code a take is about to overwrite says: no code, or a tombstone a take left,
+/// is `None`; otherwise the code's version and its bytes, held as a secret from the moment they are
+/// decoded, so a lost race or an error wipes them. A read with no version or no value, or whose
+/// value is not base64, is [`SourceError::Malformed`]; any other refusal is the read's own.
+pub(crate) fn taken_read(
+    read: Result<Option<Value>, SourceError>,
+) -> Result<Option<(u64, SecretSlice<u8>)>, SourceError> {
+    let _ = read;
+    Err(SourceError::Unimplemented { story: "E21-32" })
+}
+
+/// What the read again after a refused overwrite means: the code gone is a race another taker
+/// won, `None`; a code still there is one this taker may not take, [`SourceError::Denied`]; a read
+/// that fails is that failure.
+pub(crate) fn lost_or_denied_verdict(
+    reread: Result<Option<Value>, SourceError>,
+) -> Result<Option<SecretSlice<u8>>, SourceError> {
+    let _ = reread;
+    Err(SourceError::Unimplemented { story: "E21-32" })
+}
+
 /// The string at `pointer` in `value`.
 fn text<'a>(value: Option<&'a Value>, pointer: &str) -> Result<&'a str, SourceError> {
     value
@@ -266,6 +295,26 @@ pub struct OpenBaoSource {
     mounts: Mounts,
     token: SecretString,
     token_expires_at: Mutex<UtcNanos>,
+}
+
+impl OpenBaoSource {
+    /// A session over `token`, which the test's operator made with the policy it gives: the one
+    /// way to hold the Kubernetes-auth exchange's policy without a cluster to check a login.
+    #[cfg(test)]
+    pub(crate) fn from_token(
+        config: &OpenBaoConfig,
+        identity: Identity,
+        token: SecretString,
+        expires_at: UtcNanos,
+    ) -> Result<Self, SourceError> {
+        Ok(Self {
+            identity,
+            http: Http::new(config)?,
+            mounts: config.mounts.clone(),
+            token,
+            token_expires_at: Mutex::new(expires_at),
+        })
+    }
 }
 
 impl fmt::Debug for OpenBaoSource {
@@ -505,6 +554,17 @@ impl OpenBaoSource {
 impl SecretSource for OpenBaoSource {
     fn identity(&self) -> &Identity {
         &self.identity
+    }
+
+    /// Reads the code with its version, overwrites that version alone with a tombstone, then
+    /// deletes every version: a taker whose overwrite loses, or that reads a tombstone or no code,
+    /// gets `None`.
+    async fn take_code(
+        &self,
+        connection: &ConnectionId,
+    ) -> Result<Option<SecretSlice<u8>>, SourceError> {
+        let _ = (connection, cas_refusal, taken_read, lost_or_denied_verdict);
+        Err(SourceError::Unimplemented { story: "E21-32" })
     }
 
     async fn put(&self, path: &SecretPath, secret: &SecretSlice<u8>) -> Result<(), SourceError> {
