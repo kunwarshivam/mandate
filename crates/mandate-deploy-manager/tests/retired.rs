@@ -268,13 +268,20 @@ fn the_last_retirement_does_not_stop_an_executor_with_a_switch_it_has_not_answer
         "the switch that came before the retirement keeps it up"
     );
     m.orchestrator().fake.succeed(&ex(ACCOUNT));
-    for s in 400..800 {
+    tick(&mut m, 400);
+    assert_eq!(
+        starts(&mut m, &ex(ACCOUNT)),
+        vec![1, 2],
+        "a successful end answers only the switches committed before its start, so one more start"
+    );
+    m.orchestrator().fake.succeed(&ex(ACCOUNT));
+    for s in 401..800 {
         tick(&mut m, s);
     }
     assert_eq!(
         starts(&mut m, &ex(ACCOUNT)),
-        vec![1],
-        "and once it ends on its own nothing starts it again"
+        vec![1, 2],
+        "and once that start ends nothing starts it again"
     );
     clean(&mut m);
 }
@@ -325,7 +332,8 @@ struct Oracle {
     /// The accounts whose executor has an instance that may run, by the oracle's own count of the
     /// starts, stops, ends, and crashes it saw.
     live: BTreeSet<&'static str>,
-    /// Per account, the switches that covered its executor since its last start.
+    /// Per account, the switches that covered its executor since its last start: only a start
+    /// after them answers them, never a successful end (journal spec §9.21, v0.76).
     pending: BTreeMap<&'static str, BTreeSet<String>>,
     /// The accounts whose executor, no agent wanting it, crashed and has not been started since.
     crashed: BTreeSet<&'static str>,
@@ -460,7 +468,6 @@ fn check(ops: &[Op]) -> Result<(), TestCaseError> {
                 let account = ACCOUNTS[*j];
                 if !oracle.wanted(account) && oracle.live.remove(account) {
                     m.orchestrator().fake.succeed(&ex(account));
-                    oracle.pending.remove(account);
                     oracle.unapplied_if_looped.remove(account);
                 }
             }
