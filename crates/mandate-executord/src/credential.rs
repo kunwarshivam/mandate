@@ -267,6 +267,14 @@ pub fn subject_connection(configured: Option<String>) -> Result<ConnectionId, &'
     Ok(connection)
 }
 
+/// The report of a function E21-32 has not implemented yet, which its pending tests fail on
+/// (DEC-77); the implementation PR replaces the stubs and removes it.
+#[allow(
+    non_upper_case_globals,
+    reason = "the pending gate recognises a stub by the name `Unimplemented` (DEC-137)"
+)]
+pub const Unimplemented: &str = "unimplemented";
+
 /// The variable the workspace chart sets to the namespace the deployment manager creates the
 /// executor's pod in (lane D1, K2).
 pub const WORKSPACE_NAMESPACE_ENV: &str = "MANDATE_WORKSPACE_NAMESPACE";
