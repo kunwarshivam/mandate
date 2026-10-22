@@ -11,8 +11,8 @@ use serde_json::{Value, json};
 
 use crate::SourceError;
 use crate::kubernetes::{
-    kubernetes_policy, kubernetes_policy_name, provisioner_policy, role_request,
-    service_account_name,
+    KubernetesAuth, kubernetes_mount_requests, kubernetes_policy, kubernetes_policy_name,
+    mount_accessor, provisioner_policy, role_request, service_account_name,
 };
 use crate::policy::{Identity, Mounts, SecretPath, connection_segment, kv_path};
 
@@ -513,4 +513,138 @@ fn every_role_request_is_one_the_provisioners_policy_allows() {
             }
         }
     }
+}
+
+/// A CA certificate's shape, enough for the checks here; the server test passes a real one.
+const PEM: &str = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n";
+
+/// Both mounts are enabled as `kubernetes` and configured with the API server's address, the CA
+/// only where one is given, executor's first.
+#[test]
+fn both_kubernetes_mounts_are_enabled_and_pointed_at_the_api_server() {
+    let in_cluster = KubernetesAuth {
+        host: "https://10.43.0.1:443".to_owned(),
+        ca_pem: None,
+    };
+    assert_eq!(
+        kubernetes_mount_requests(&Mounts::default(), &in_cluster),
+        Ok(vec![
+            (
+                "sys/auth/kubernetes-executor".to_owned(),
+                json!({"type": "kubernetes"})
+            ),
+            (
+                "auth/kubernetes-executor/config".to_owned(),
+                json!({"kubernetes_host": "https://10.43.0.1:443"})
+            ),
+            (
+                "sys/auth/kubernetes-exchange".to_owned(),
+                json!({"type": "kubernetes"})
+            ),
+            (
+                "auth/kubernetes-exchange/config".to_owned(),
+                json!({"kubernetes_host": "https://10.43.0.1:443"})
+            ),
+        ])
+    );
+    let outside = KubernetesAuth {
+        host: "https://127.0.0.1:6443".to_owned(),
+        ca_pem: Some(PEM.to_owned()),
+    };
+    let requests = kubernetes_mount_requests(&Mounts::default(), &outside);
+    assert!(requests.is_ok(), "{requests:?}");
+    let configs: Vec<Value> = requests
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|(path, _)| path.ends_with("/config"))
+        .map(|(_, body)| body)
+        .collect();
+    assert_eq!(
+        configs,
+        vec![json!({"kubernetes_host": "https://127.0.0.1:6443", "kubernetes_ca_cert": PEM}); 2]
+    );
+}
+
+#[test]
+fn a_plain_address_a_bad_ca_or_a_bad_mount_sets_nothing_up() {
+    let fine = KubernetesAuth {
+        host: "https://10.43.0.1:443".to_owned(),
+        ca_pem: None,
+    };
+    let fine_requests = kubernetes_mount_requests(&Mounts::default(), &fine);
+    assert!(fine_requests.is_ok(), "{fine_requests:?}");
+    for host in ["http://10.43.0.1:443", "", "https://", "10.43.0.1:443"] {
+        let auth = KubernetesAuth {
+            host: host.to_owned(),
+            ca_pem: None,
+        };
+        assert_eq!(
+            kubernetes_mount_requests(&Mounts::default(), &auth),
+            Err(SourceError::Config),
+            "{host:?}"
+        );
+    }
+    for ca in [
+        "",
+        "not a certificate",
+        "-----BEGIN CERTIFICATE-----\nMIIB\n",
+    ] {
+        let auth = KubernetesAuth {
+            host: fine.host.clone(),
+            ca_pem: Some(ca.to_owned()),
+        };
+        assert_eq!(
+            kubernetes_mount_requests(&Mounts::default(), &auth),
+            Err(SourceError::Config),
+            "{ca:?}"
+        );
+    }
+    for broken in [
+        Mounts {
+            kubernetes_executor: "a/b".to_owned(),
+            ..Mounts::default()
+        },
+        Mounts {
+            kubernetes_exchange: String::new(),
+            ..Mounts::default()
+        },
+    ] {
+        assert_eq!(
+            kubernetes_mount_requests(&broken, &fine),
+            Err(SourceError::Config),
+            "{broken:?}"
+        );
+    }
+}
+
+/// The accessor is read from `sys/auth`'s `data`, where each mount is keyed with its trailing
+/// slash; one missing or able to end a template is refused.
+#[test]
+fn a_mounts_accessor_is_read_from_the_vaults_list_and_must_be_plain() {
+    let listed = json!({
+        "data": {
+            "kubernetes-executor/": {"type": "kubernetes", "accessor": "auth_kubernetes_1f88c709"},
+            "kubernetes-exchange/": {"type": "kubernetes", "accessor": "auth_kubernetes_2a7b"},
+            "evil/": {"type": "kubernetes", "accessor": "auth}}x"}
+        }
+    });
+    assert_eq!(
+        mount_accessor(Some(&listed), "kubernetes-executor"),
+        Ok("auth_kubernetes_1f88c709".to_owned())
+    );
+    assert_eq!(
+        mount_accessor(Some(&listed), "kubernetes-exchange"),
+        Ok("auth_kubernetes_2a7b".to_owned())
+    );
+    for mount in ["evil", "approle", "kubernetes-executor/"] {
+        assert_eq!(
+            mount_accessor(Some(&listed), mount),
+            Err(SourceError::Malformed),
+            "{mount}"
+        );
+    }
+    assert_eq!(
+        mount_accessor(None, "kubernetes-executor"),
+        Err(SourceError::Malformed)
+    );
 }

@@ -7,6 +7,8 @@ use std::os::unix::ffi::OsStrExt;
 use std::process::{Command, Output};
 
 const CONNECTION: &str = "conn_01JB3K6F0C9R2V7N4M8Q1T5W50";
+/// [`CONNECTION`]'s ServiceAccount, computed by hand.
+const ACCOUNT: &str = "x636f6e6e5f30314a42334b3646304339523256374e344d3851315435573530";
 
 /// Runs the binary with `vars` alone in its environment.
 fn run(vars: &[(&str, &str)]) -> Output {
@@ -64,8 +66,44 @@ fn a_token_url_that_is_not_utf8_refuses_the_start() {
 #[test]
 fn a_missing_subject_refuses_the_start() {
     refused_with(
-        &run(&[("MANDATE_DEPLOYMENT_TIER", "dev")]),
+        &run(&[
+            ("MANDATE_DEPLOYMENT_TIER", "dev"),
+            ("MANDATE_PROCESS", "token_exchange"),
+        ]),
         "token_exchange_subject",
+    );
+}
+
+/// A pod started as any process but the token exchange refuses before it reads anything else
+/// but the token URL (DEC-1175 item 1).
+#[test]
+fn any_process_but_the_token_exchange_refuses_the_start() {
+    for process in ["executor", "runtime", ""] {
+        refused_with(
+            &run(&[
+                ("MANDATE_DEPLOYMENT_TIER", "dev"),
+                ("MANDATE_PROCESS", process),
+                ("MANDATE_SUBJECT", CONNECTION),
+            ]),
+            "token_exchange_process",
+        );
+    }
+}
+
+/// A pod running as another connection's ServiceAccount refuses before it reads its client.
+#[test]
+fn a_pod_on_another_connection_s_account_refuses_the_start() {
+    refused_with(
+        &run(&[
+            ("MANDATE_DEPLOYMENT_TIER", "dev"),
+            ("MANDATE_PROCESS", "token_exchange"),
+            ("MANDATE_SUBJECT", CONNECTION),
+            (
+                "MANDATE_SUBJECT_ACCOUNT",
+                "x636f6e6e5f30314a42334b3646304339523256374e344d3851315435573531",
+            ),
+        ]),
+        "token_exchange_subject_account",
     );
 }
 
@@ -74,6 +112,13 @@ fn a_start_that_passes_its_checks_does_not_yet_exchange() {
     let output = run(&[
         ("MANDATE_SUBJECT", CONNECTION),
         ("MANDATE_DEPLOYMENT_TIER", "dev"),
+        ("MANDATE_PROCESS", "token_exchange"),
+        ("MANDATE_SUBJECT_ACCOUNT", ACCOUNT),
+        ("MANDATE_ALPACA_CLIENT_ID", "PKTESTCLIENT01"),
+        (
+            "MANDATE_ALPACA_REDIRECT_URI",
+            "http://127.0.0.1:8080/v1/oauth/alpaca/callback",
+        ),
         (
             "MANDATE_TOKEN_URL",
             "http://127.0.0.1:8091/alpaca/oauth/token",
