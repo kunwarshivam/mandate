@@ -4964,7 +4964,7 @@ fn an_agent_kill_switch_sells_exactly_the_sub_ledger_quantity() {
 }
 
 #[test]
-fn an_account_kill_switch_uses_cancel_all_and_close_position() {
+fn an_account_kill_switch_uses_cancel_all() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
     let instruments = FixedInstruments;
@@ -5164,29 +5164,24 @@ fn an_account_kill_switch_applies_every_agents_mode_before_its_cancel_all() {
     }
 }
 
-/// After the account switch's cancel-all, the protection it cancelled is never placed again: the
-/// broker's close-position sells those shares, and a stop resting beside it would sell them twice
-/// (§5.4, `AGENTS.md` rule 12). Here the stop-limit the executor placed after a crypto entry's
-/// fill, acknowledged, is cancelled by the cancel-all; the cancel is folded, and nothing protective
-/// is sent, in that step or the next.
-#[test]
-fn an_account_kill_switch_never_re_places_the_protection_its_cancel_all_cancelled() {
-    let ids = TestIds;
-    let mandates = FixedMandate::covering(&[BTC]);
-    let instruments = FixedInstruments;
-    let config = config();
-    let ports = ports(&ids, &mandates, &instruments, &config);
+/// A crypto position whose stop-limit the executor placed after its entry filled, acknowledged by
+/// the broker, in the regular session: protection the fold knows as an order with its request,
+/// which `re_cover` would place again once cancelled. Answers the shell and the stop as the broker
+/// describes it in `status`.
+fn crypto_stop_account(
+    ports: &mandate_executor::Ports<'_>,
+) -> (Shell, impl Fn(&str) -> mandate_executor::BrokerOrder) {
     let mut shell = started();
     shell.fold_one(&stream_opened()).expect("folds");
-    let mut shell = shell.restart_ready(&ports);
-    shell.run(Input::Market(quote(BTC, "60000", "60010", 20)), &ports);
+    let mut shell = shell.restart_ready(ports);
+    shell.run(Input::Market(quote(BTC, "60000", "60010", 20)), ports);
     let submitted = shell.run(
         handoff(
             INTENT,
             common::AGENT,
             protected_opening(BTC, "0.5", "60000", "54000", None),
         ),
-        &ports,
+        ports,
     );
     let entry = submitted
         .submissions()
@@ -5203,33 +5198,163 @@ fn an_account_kill_switch_never_re_places_the_protection_its_cancel_all_cancelle
             "0.5",
             "filled",
         ))),
-        &ports,
+        ports,
     );
     let filled = shell.run(
         Input::BrokerUpdate(BrokerUpdate::Fill(btc_fill(&entry, "0.5"))),
-        &ports,
+        ports,
     );
-    let stop = filled
+    let (id, size) = filled
         .submissions()
         .into_iter()
         .find(|o| o.purpose == Purpose::Protective)
         .map(|o| (o.client_order_id.as_str().to_owned(), o.qty.to_string()))
         .expect("the stop-limit is placed");
-    let resting = |status: &str| {
-        Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
-            "b-stop",
-            Some(&stop.0),
-            BTC,
-            Side::Sell,
-            &stop.1,
-            "0",
-            status,
-        )))
-    };
-    shell.run(resting("new"), &ports);
+    let stop =
+        move |status: &str| broker_order("b-stop", Some(&id), BTC, Side::Sell, &size, "0", status);
+    shell.run(Input::BrokerUpdate(BrokerUpdate::Order(stop("new"))), ports);
+    (shell, stop)
+}
+
+/// §5.5's cancel → confirm → close (DEC-2333 items 1 and 2): the account switch's step sends the
+/// cancel-all and nothing else. No order is cancelled by its id beside it, and no close-position
+/// goes before the cancel-all is confirmed, so no sell still working can fill beside a close.
+#[test]
+fn an_account_kill_switch_cancels_nothing_by_id_and_closes_nothing_before_its_cancel_all_is_confirmed()
+ {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL, BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = two_agent_account(&ports);
+
+    let ran = shell.run(account_switch(Initiator::Owner), &ports);
+
+    let sent: Vec<&BrokerRequest> = ran.requests.iter().collect();
+    assert!(
+        matches!(sent[..], [BrokerRequest::CancelAll(_)]),
+        "the cancel-all alone: {sent:?}"
+    );
+}
+
+/// The cancel-all is confirmed by the broker's answer and then a fresh read of its open orders
+/// (DEC-2333 item 2): once the broker accepts it, the executor lists the account's open orders,
+/// and still closes nothing until that read answers.
+#[test]
+fn an_accepted_cancel_all_is_confirmed_by_reading_the_open_orders() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL, BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = two_agent_account(&ports);
     shell.run(account_switch(Initiator::Owner), &ports);
 
-    let cancelled = shell.run(resting("canceled"), &ports);
+    let accepted = shell.run(
+        Input::Broker(Ok(BrokerOutcome::AccountWideAccepted)),
+        &ports,
+    );
+
+    assert!(
+        matches!(accepted.requests[..], [BrokerRequest::ListOpenOrders]),
+        "one open-orders read, and no close yet: {:?}",
+        accepted.requests
+    );
+}
+
+/// A cancel-all whose answer is lost is never sent again without its own idempotency key
+/// (DEC-2333 item 3): the executor reads the open orders by listing instead, in that step and on
+/// every step after it, and closes nothing meanwhile.
+#[test]
+fn a_lost_cancel_all_answer_is_read_by_listing_and_never_resent() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL, BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = two_agent_account(&ports);
+    shell.run(account_switch(Initiator::Owner), &ports);
+
+    let lost = shell.run(Input::Broker(Err(BrokerUnknown::Timeout)), &ports);
+    let later = shell.run(Input::Market(quote(AAPL, "155", "155.1", 30)), &ports);
+
+    assert!(
+        lost.requests
+            .iter()
+            .any(|r| matches!(r, BrokerRequest::ListOpenOrders)),
+        "the lost answer is read by listing the open orders: {:?}",
+        lost.requests
+    );
+    let after: Vec<&BrokerRequest> = lost.requests.iter().chain(&later.requests).collect();
+    assert!(
+        !after.iter().any(|r| matches!(
+            r,
+            BrokerRequest::CancelAll(_) | BrokerRequest::ClosePosition(..)
+        )),
+        "never a second cancel-all, and no close before a read confirms: {after:?}"
+    );
+}
+
+/// A sell the open-orders read shows still working after the cancel-all is cancelled by its own id
+/// (DEC-2333 item 3), and that instrument closes nothing until the cancel is confirmed.
+#[test]
+fn a_sell_still_working_after_the_cancel_all_is_cancelled_by_its_id() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (mut shell, stop) = crypto_stop_account(&ports);
+    shell.run(account_switch(Initiator::Owner), &ports);
+    shell.run(
+        Input::Broker(Ok(BrokerOutcome::AccountWideAccepted)),
+        &ports,
+    );
+
+    let read = shell.run(
+        Input::Broker(Ok(BrokerOutcome::OpenOrders(vec![stop("new")]))),
+        &ports,
+    );
+
+    let working = stop("new").client_order_id;
+    assert!(
+        read.requests.iter().any(|r| matches!(
+            r,
+            BrokerRequest::Cancel { client_order_id }
+                if Some(client_order_id.as_str()) == working.as_deref()
+        )),
+        "the stop still working is cancelled by its id: {:?}",
+        read.requests
+    );
+    assert!(
+        !read
+            .requests
+            .iter()
+            .any(|r| matches!(r, BrokerRequest::ClosePosition(..))),
+        "and its instrument does not close beside it: {:?}",
+        read.requests
+    );
+}
+
+/// The protection the cancel-all cancelled is never placed again while the switch waits for its
+/// close (DEC-2333 item 5; §5.4, `AGENTS.md` rule 12): without a guard the executor re-places this
+/// crypto stop-limit, which would sell the same coins twice once the close-position goes. The
+/// cancel is folded, and nothing protective is sent, in that step or the next.
+#[test]
+fn an_account_kill_switch_never_re_places_the_protection_its_cancel_all_cancelled() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (mut shell, stop) = crypto_stop_account(&ports);
+    shell.run(account_switch(Initiator::Owner), &ports);
+
+    let cancelled = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(stop("canceled"))),
+        &ports,
+    );
     let later = shell.run(Input::Market(quote(BTC, "60000", "60010", 40)), &ports);
 
     let protective: Vec<_> = cancelled
@@ -5241,7 +5366,7 @@ fn an_account_kill_switch_never_re_places_the_protection_its_cancel_all_cancelle
         .collect();
     assert!(
         protective.is_empty(),
-        "no protection re-placed beside the close-position: {protective:?}"
+        "no protection re-placed while the switch closes: {protective:?}"
     );
 }
 
@@ -5273,55 +5398,6 @@ fn an_account_kill_switch_replays_after_a_restart() {
             "{holder} stays stopped after the replay"
         );
     }
-}
-
-/// §5.5's close for the account scope: the broker's close-position endpoint, once for each held
-/// instrument whoever holds it, crypto included, after the cancel-all; never a cancel by id beside
-/// it and never an order of the executor's own (DEC-485 item 1).
-#[test]
-fn an_account_kill_switch_closes_each_held_instrument_once_after_its_cancel_all() {
-    let ids = TestIds;
-    let mandates = FixedMandate::covering(&[AAPL, BTC]);
-    let instruments = FixedInstruments;
-    let config = config();
-    let ports = ports(&ids, &mandates, &instruments, &config);
-    let mut shell = two_agent_account(&ports);
-
-    let ran = shell.run(account_switch(Initiator::Owner), &ports);
-
-    let cancel_all = ran
-        .requests
-        .iter()
-        .position(|r| matches!(r, BrokerRequest::CancelAll(_)))
-        .expect("the cancel-all goes");
-    let closes: Vec<(usize, &str)> = ran
-        .requests
-        .iter()
-        .enumerate()
-        .filter_map(|(at, r)| match r {
-            BrokerRequest::ClosePosition(_, instrument) => Some((at, instrument.as_str())),
-            _ => None,
-        })
-        .collect();
-    let mut closed: Vec<&str> = closes.iter().map(|(_, name)| *name).collect();
-    closed.sort_unstable();
-    assert_eq!(
-        closed,
-        vec![AAPL, BTC],
-        "one close-position per held instrument"
-    );
-    assert!(
-        closes.iter().all(|(at, _)| *at > cancel_all),
-        "each after the cancel-all: {:?}",
-        ran.requests
-    );
-    assert!(
-        !ran.requests
-            .iter()
-            .any(|r| matches!(r, BrokerRequest::Cancel { .. } | BrokerRequest::Submit(_))),
-        "no cancel by id and no order of its own beside the account-wide endpoints: {:?}",
-        ran.requests
-    );
 }
 
 /// The account switch is journaled before anything is sent (`AGENTS.md` rule 5): one
