@@ -34,6 +34,7 @@
 
 pub mod credentials;
 pub mod error;
+pub mod fingerprint;
 pub mod kube;
 pub mod kubernetes;
 pub mod lease;
