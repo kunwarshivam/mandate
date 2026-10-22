@@ -18,8 +18,9 @@
 
 use std::path::PathBuf;
 
-use mandate_alpaca::{AlpacaPaperHttp, Credentials};
+use mandate_alpaca::{AlpacaPaperHttp, Credentials, TradingTransport};
 use mandate_canon::{Value, parse};
+use mandate_connections::account_entry::BrokerAccountId;
 use mandate_connections::record::ConnectionId;
 use mandate_connections::token_entry::decode;
 use mandate_connections::vault::AccessToken;
@@ -105,6 +106,21 @@ pub fn checked_connection<S: Store>(
         .ok_or("connection_record_unreadable")
 }
 
+/// [`checked_connection`], when it is `own`, the connection the executor runs as: a run never
+/// leases a connection whose check another connection's executor wrote.
+///
+/// # Errors
+/// [`checked_connection`]'s codes, and `connection_mismatch` for a checked connection that is
+/// not `own`.
+pub fn own_checked_connection<S: Store>(
+    store: &S,
+    scope: &AccountScope,
+    own: &ConnectionId,
+) -> Result<ConnectionId, &'static str> {
+    let _ = (store, scope, own);
+    Err(Unimplemented)
+}
+
 /// The access token a leased secret holds: DEC-2624's token entry, decoded by its one reader.
 ///
 /// # Errors
@@ -134,6 +150,18 @@ pub fn paper_token(
 /// `transport_unavailable` when the HTTPS client cannot be built.
 pub fn paper_transport(token: AccessToken) -> Result<AlpacaPaperHttp, &'static str> {
     AlpacaPaperHttp::new(Credentials::bearer(token.0)).map_err(|_| "transport_unavailable")
+}
+
+/// The broker's own id of the account `transport` reaches, by `mandate-alpaca`'s one read of it
+/// (`GET /v2/account`'s `id`), for the exchanged executor's connect check (connections spec §5.2
+/// step 4, DEC-2339).
+///
+/// # Errors
+/// `account_unreadable` when the host does not answer it, or `runtime_unavailable`; neither
+/// names the id.
+pub fn paper_account<T: TradingTransport>(transport: T) -> Result<BrokerAccountId, &'static str> {
+    let _ = transport;
+    Err(Unimplemented)
 }
 
 /// Where the vault is and where its CA is mounted: `--vault-address` and `--vault-dir`.
@@ -249,6 +277,14 @@ pub fn subject_connection(configured: Option<String>) -> Result<ConnectionId, &'
     subject_account(Some(text), &connection)?;
     Ok(connection)
 }
+
+/// The report of a function E21-32 has not implemented yet, which its pending tests fail on
+/// (DEC-77); the implementation PR replaces the stubs and removes it.
+#[allow(
+    non_upper_case_globals,
+    reason = "the pending gate recognises a stub by the name `Unimplemented` (DEC-137)"
+)]
+pub const Unimplemented: &str = "unimplemented";
 
 /// The variable the workspace chart sets to the namespace the deployment manager creates the
 /// executor's pod in (lane D1, K2).
