@@ -188,10 +188,9 @@ fn each_kinds_policy_reaches_exactly_the_paths_its_connection_is_stored_at() {
                 Identity::Executor(connection.clone()),
                 [
                     block("data", &token, "\"read\""),
-                    block(
-                        "data",
-                        &SecretPath::AccountId(connection.clone()),
-                        "\"create\"",
+                    format!(
+                        "path \"mandate/data/personal/accounts/{}/+\" {{\n  capabilities = [\"create\"]\n}}\n",
+                        connection_segment(&connection).unwrap_or_default()
                     ),
                 ]
                 .concat(),
@@ -286,9 +285,46 @@ fn the_executors_policy_reads_its_own_token_alone() {
         kubernetes_policy(&Identity::Executor(c("any")), &Mounts::default(), ACCESSOR),
         Ok(format!(
             "path \"mandate/data/connections/x{TEMPLATE}/token\" {{\n  capabilities = [\"read\"]\n}}\n\
-             path \"mandate/data/personal/accounts/x{TEMPLATE}\" {{\n  capabilities = [\"create\"]\n}}\n"
+             path \"mandate/data/personal/accounts/x{TEMPLATE}/+\" {{\n  capabilities = [\"create\"]\n}}\n"
         ))
     );
+}
+
+/// DEC-2339 item 1's one deliberate exception to spelling every path out: the executor's create of
+/// its account entries ends in `+`, one segment below its own connection's templated segment, and
+/// creates only, so a request again on the connection to another account stream (DEC-699) has its
+/// own entry. No other path of a templated policy holds `+` or `*`.
+#[test]
+#[ignore = "pending E21-32"]
+fn the_executors_one_wildcard_is_below_its_own_account_entries() {
+    let wildcards = |policy: &str| -> Vec<(String, String)> {
+        policy
+            .split("path \"")
+            .skip(1)
+            .filter_map(|block| {
+                let (path, rest) = block.split_once('"')?;
+                let caps = rest.split_once('[')?.1.split_once(']')?.0;
+                (path.contains('+') || path.contains('*'))
+                    .then(|| (path.to_owned(), caps.replace([' ', '"'], "")))
+            })
+            .collect()
+    };
+    let executor =
+        kubernetes_policy(&Identity::Executor(c("any")), &Mounts::default(), ACCESSOR).unwrap();
+    assert_eq!(
+        wildcards(&executor),
+        [(
+            format!("mandate/data/personal/accounts/x{TEMPLATE}/+"),
+            "create".to_owned()
+        )]
+    );
+    let exchange = kubernetes_policy(
+        &Identity::TokenExchange(c("any")),
+        &Mounts::default(),
+        ACCESSOR,
+    )
+    .unwrap();
+    assert!(wildcards(&exchange).is_empty(), "{exchange}");
 }
 
 /// The exchange's code block reads and updates, the update being its take (DEC-2061); it destroys

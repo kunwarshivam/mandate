@@ -1,0 +1,7 @@
+file = "crates/mandate-vault/src/tests/kubernetes.rs"
+test = "the_executors_one_wildcard_is_below_its_own_account_entries"
+reason = """
+The executor's templated policy is already implemented and renders no account entry block, so the
+test fails on that answer, not at a stub. E21-32's V implementation adds the create below the
+executor's own connection (DEC-2339 item 1) and deletes this row.
+"""
