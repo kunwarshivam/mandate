@@ -976,3 +976,45 @@ fn a_meter_requiring_daily_caps_refuses_an_unknown_agent_and_stores_nothing() {
         "a cleared agent is refused as an unknown one"
     );
 }
+
+/// DEC-2272 item 3: keeping the deployed agents drops every other agent's daily cap and unread
+/// mark, and leaves the deployed ones as they were.
+#[test]
+#[ignore = "pending E21-62"]
+fn retaining_the_deployed_agents_drops_every_other_cap_and_mark() {
+    let mut meter = Meter::new(MemoryMeter::new(), common::caps(), common::deployment());
+    meter.require_research_daily();
+    meter
+        .set_research_daily("a", Some(Usd6::parse("1").unwrap()))
+        .unwrap();
+    meter
+        .set_research_daily("b", Some(Usd6::parse("1").unwrap()))
+        .unwrap();
+    meter.set_research_daily("c", None).unwrap();
+    meter.set_research_daily("d", None).unwrap();
+    meter.retain_research_daily(&BTreeSet::from(["a".to_owned(), "c".to_owned()]));
+    assert_eq!(
+        meter.caps().research_agents(),
+        BTreeSet::from(["a".to_owned(), "c".to_owned()])
+    );
+    assert!(
+        meter
+            .reserve(reservation(1, Some("a"), Purpose::Research, "0.1", day(5)))
+            .is_ok(),
+        "a kept cap still admits"
+    );
+    assert_eq!(
+        meter.reserve(reservation(2, Some("b"), Purpose::Research, "0.1", day(5))),
+        Err(MeterRefusal::BudgetExhausted),
+        "a dropped cap is refused as an unknown agent"
+    );
+    assert_eq!(
+        meter.reserve(reservation(3, Some("c"), Purpose::Research, "0.1", day(5))),
+        Err(MeterRefusal::Unavailable),
+        "a kept mark still refuses"
+    );
+    assert_eq!(
+        meter.reserve(reservation(4, Some("d"), Purpose::Research, "0.1", day(5))),
+        Err(MeterRefusal::BudgetExhausted)
+    );
+}

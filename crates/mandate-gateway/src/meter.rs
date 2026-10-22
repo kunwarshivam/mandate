@@ -636,6 +636,17 @@ impl<S: MeterStore> Meter<S> {
         todo!()
     }
 
+    /// Keeps the research daily caps and unread marks of `deployed` alone, dropping every other
+    /// agent's, so a stop or a redeploy leaves nothing behind (DEC-2272 item 3).
+    #[expect(
+        clippy::todo,
+        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+    )]
+    pub fn retain_research_daily(&mut self, deployed: &BTreeSet<String>) {
+        let _ = (&mut self.caps, deployed);
+        todo!()
+    }
+
     /// Drops `agent`'s research daily cap and unread mark, for an agent no longer deployed.
     #[expect(
         clippy::todo,
