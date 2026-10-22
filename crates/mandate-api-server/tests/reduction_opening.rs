@@ -369,10 +369,29 @@ fn every_other_request_opens_nothing() {
         enrolled(ALICE, CREDENTIAL, &signer.cose_key(), "eddsa"),
     );
     refused(
-        "a key of another algorithm than recorded",
+        "an ES256 key recorded as eddsa",
         &mislabelled,
         CREDENTIAL,
         &good,
+    );
+    let ed25519 = Signer::ed25519();
+    let mut recorded_es256 = World::new(&ed25519);
+    recorded_es256.rows = Rows::opened();
+    recorded_es256.rows.hosted(
+        "MemberActivated",
+        T0 - 1_000,
+        activation(ALICE, &BTreeSet::from([Role::Operator]), T0 - 1_000),
+    );
+    recorded_es256.rows.hosted(
+        "CredentialEnrolled",
+        T0 - 900,
+        enrolled(ALICE, CREDENTIAL, &ed25519.cose_key(), "es256"),
+    );
+    refused(
+        "an Ed25519 key recorded as es256",
+        &recorded_es256,
+        CREDENTIAL,
+        &ed25519.assert(&CHALLENGE),
     );
     let mut unread = World::new(&signer);
     unread.unreadable_credentials = true;

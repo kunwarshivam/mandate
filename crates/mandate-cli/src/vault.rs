@@ -337,7 +337,7 @@ pub fn run_provision(
         .build()
         .context("starting the provisioning's runtime")?;
     let credentials = runtime
-        .block_on(provision(&config, &operator, &connections))
+        .block_on(provision(&config, &operator, &connections, None))
         .map_err(refused)?;
     match (&args.out, &args.secrets_namespace) {
         (Some(dir), _) => {
