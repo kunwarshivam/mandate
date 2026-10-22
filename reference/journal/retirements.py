@@ -460,9 +460,13 @@ def cancels(cause: dict, held_under: dict, new: dict, skip: frozenset[str] = fro
     if cause["event_type"] == "RiskLimitTriggered":
         raised = Decimal(new["profit_level"]) > breach_return(cause)
         return raised or "silence.profit" in skip
-    if p.get("reason") == "end_date":
+    if cause["event_type"] != "GoalCompleted":
+        return False
+    if p["reason"] == "end_date":
         return new["end_date"] > held_under["end_date"]
-    return new["on_complete"] != held_under["on_complete"]
+    if p["on_complete"] == "release" or "silence.release" in skip:
+        return new["on_complete"] != held_under["on_complete"]
+    return False
 
 
 def silent(case: dict, skip: frozenset[str] = frozenset()) -> bool:
@@ -548,6 +552,19 @@ def silence_cases() -> list[dict]:
             end, [first, version(3)], clock(5 * DAY), False, {"end_date": "2026-10-21"},
         ),
         case("the_same_end_date", "§9.34: the same end_date cancels nothing", end, [first, version(4)], clock(5 * DAY), True),
+        case(
+            "an_owners_stop_and_a_changed_on_complete",
+            "§9.34: no version cancels an owner's Stop, so a changed on_complete leaves it silent",
+            {"event_type": "OwnerCommandIssued", "event_id": STOP,
+             "payload": {"command": "stop", "scope": "agent", "subject": AGENT_ID}},
+            [first, version(6)], clock(5 * DAY), True, {"on_complete": "hold_protected"},
+        ),
+        case(
+            "a_target_qty_completion_and_a_changed_on_complete",
+            "§9.34: no version cancels a `target_qty` completion",
+            goal_completed("target_qty", "hold_protected"),
+            [first, version(7)], clock(5 * DAY), True, {"on_complete": "disarm_ladder"},
+        ),
         case(
             "cancelled_by_on_complete",
             "§9.34: an on_complete changed from the one it was held under cancels it",
@@ -635,7 +652,8 @@ def check_section(section: dict) -> list[str]:
     problems = []
     for case in section["silence"]:
         cause = case["cause"]
-        shape = payload_type_violations(SCHEMAS[("acct", cause["event_type"])], cause["payload"], "payload", frozenset())
+        schema = SCHEMAS.get(("acct", cause["event_type"]))
+        shape = [] if schema is None else payload_type_violations(schema, cause["payload"], "payload", frozenset())
         if shape:
             problems.append(found("silence", f"{case['name']}: the cause is not a §9.27 record: {shape}"))
         got = silent(case)
@@ -679,7 +697,7 @@ VALIDATOR_MUTANTS = (
     *(f"loose.payload.{member}" for member, _, _, _ in MEMBER_CASES),
     *(f"nullable.payload.{member}" for member in NULLED),
 )
-SILENCE_MUTANTS = ("silence.cancel", "silence.profit")
+SILENCE_MUTANTS = ("silence.cancel", "silence.profit", "silence.release")
 STREAM_MUTANTS = tuple(f"stream.266.{part}" for part in ("own", "end", "subject", "alert", "finished", "period", "one", "since", "version", "spacing"))
 
 

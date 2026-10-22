@@ -21017,6 +21017,146 @@
     "silent": true
    },
    {
+    "name": "an_owners_stop_and_a_changed_on_complete",
+    "clause": "§9.34: no version cancels an owner's Stop, so a changed on_complete leaves it silent",
+    "cause": {
+     "event_type": "OwnerCommandIssued",
+     "event_id": "01J8Z5RH0A000000000000000S",
+     "payload": {
+      "command": "stop",
+      "scope": "agent",
+      "subject": "agent_a"
+     }
+    },
+    "mandates": {
+     "sha256:1111111111111111111111111111111111111111111111111111111111111111": {
+      "profit_level": "0.10",
+      "end_date": "2026-09-21",
+      "on_complete": "release"
+     },
+     "sha256:2222222222222222222222222222222222222222222222222222222222222222": {
+      "profit_level": "0.10",
+      "end_date": "2026-09-21",
+      "on_complete": "hold_protected"
+     }
+    },
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z5RH21S000000000000000",
+      "stream_id": "agent:ws_01J8Z2:agent_a",
+      "event_type": "RetirementHeld",
+      "schema_version": 1,
+      "event_time": "2026-09-22T15:00:00.000000000Z",
+      "clock_source": "scheduler",
+      "causation_id": "01J8Z5RH0A000000000000000S",
+      "correlation_id": null,
+      "actor": {
+       "kind": "agent",
+       "id": "agent_a",
+       "version": "0.1.0",
+       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "config_refs": {
+       "mandate_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "payload": {
+       "held_since": "2026-09-21T15:00:00.000000000Z",
+       "period": 1,
+       "waiting_on": [
+        "position"
+       ],
+       "risk_clock": "2026-09-22T15:00:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "event_type": "MandateVersionApplied",
+      "event_id": "01J8Z5RHV06000000000000000",
+      "payload": {
+       "agent_id": "agent_a",
+       "new_version": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+       "result": "applied"
+      }
+     }
+    ],
+    "now": "2026-09-26T15:00:00.000000000Z",
+    "silent": true
+   },
+   {
+    "name": "a_target_qty_completion_and_a_changed_on_complete",
+    "clause": "§9.34: no version cancels a `target_qty` completion",
+    "cause": {
+     "event_type": "GoalCompleted",
+     "event_id": "01J8Z5RH0B000000000000000M",
+     "payload": {
+      "agent_id": "agent_a",
+      "reason": "target_qty",
+      "then": "hold_protected",
+      "on_complete": "hold_protected",
+      "risk_clock": "2026-09-21T15:00:00.000000000Z"
+     }
+    },
+    "mandates": {
+     "sha256:1111111111111111111111111111111111111111111111111111111111111111": {
+      "profit_level": "0.10",
+      "end_date": "2026-09-21",
+      "on_complete": "release"
+     },
+     "sha256:2222222222222222222222222222222222222222222222222222222222222222": {
+      "profit_level": "0.10",
+      "end_date": "2026-09-21",
+      "on_complete": "disarm_ladder"
+     }
+    },
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z5RH21S000000000000000",
+      "stream_id": "agent:ws_01J8Z2:agent_a",
+      "event_type": "RetirementHeld",
+      "schema_version": 1,
+      "event_time": "2026-09-22T15:00:00.000000000Z",
+      "clock_source": "scheduler",
+      "causation_id": "01J8Z5RH0A000000000000000S",
+      "correlation_id": null,
+      "actor": {
+       "kind": "agent",
+       "id": "agent_a",
+       "version": "0.1.0",
+       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "config_refs": {
+       "mandate_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "payload": {
+       "held_since": "2026-09-21T15:00:00.000000000Z",
+       "period": 1,
+       "waiting_on": [
+        "position"
+       ],
+       "risk_clock": "2026-09-22T15:00:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "event_type": "MandateVersionApplied",
+      "event_id": "01J8Z5RHV07000000000000000",
+      "payload": {
+       "agent_id": "agent_a",
+       "new_version": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+       "result": "applied"
+      }
+     }
+    ],
+    "now": "2026-09-26T15:00:00.000000000Z",
+    "silent": true
+   },
+   {
     "name": "cancelled_by_on_complete",
     "clause": "§9.34: an on_complete changed from the one it was held under cancels it",
     "cause": {
