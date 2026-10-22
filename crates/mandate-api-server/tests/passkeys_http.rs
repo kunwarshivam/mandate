@@ -54,7 +54,31 @@ struct Fixture {
     addr: std::net::SocketAddr,
     journal: Arc<MemJournal>,
     sessions: Arc<Sessions>,
-    clock: Arc<common::ManualClock>,
+    clock: Arc<NanoClock>,
+}
+
+/// The server's clock, settable to the nanosecond, so a window's end is tested at its exact
+/// instant and one nanosecond past it.
+struct NanoClock(Mutex<UtcNanos>);
+
+impl NanoClock {
+    fn set(&self, secs: i64) {
+        self.set_at(at(secs));
+    }
+
+    fn set_at(&self, now: UtcNanos) {
+        *self.0.lock().expect("unpoisoned") = now;
+    }
+
+    fn now_at(&self) -> UtcNanos {
+        *self.0.lock().expect("unpoisoned")
+    }
+}
+
+impl mandate_api_server::clock::Clock for NanoClock {
+    fn now(&self) -> Option<UtcNanos> {
+        Some(self.now_at())
+    }
 }
 
 static DIRS: Mutex<u32> = Mutex::new(0);
@@ -92,7 +116,7 @@ fn fixture(rows: &Rows, challenges: Challenges) -> Fixture {
         &[Algorithm::Es256],
     )
     .expect("the issuer");
-    let clock = common::ManualClock::at(T0);
+    let clock = Arc::new(NanoClock(Mutex::new(at(T0))));
     let app = App {
         settings: Settings {
             app_origin: APP.to_owned(),
@@ -189,7 +213,7 @@ fn enrol(rows: Rows, member: &str, passkey: &str, recorded: i64) -> Rows {
 
 fn signed_in(f: &Fixture, who: &str) -> String {
     f.sessions
-        .open(id(who), SUBJECT.to_owned(), None, at(f.clock.secs()))
+        .open(id(who), SUBJECT.to_owned(), None, f.clock.now_at())
         .expect("opened")
         .value()
         .to_owned()
@@ -477,6 +501,57 @@ fn a_member_with_no_passkey_past_three_hundred_seconds_from_sign_in_is_stale_aft
     let fresh = signed_in(&f, ALICE);
     issued(&ask(&f, &fresh, KEY_2));
     nothing_journaled(&f, &rows);
+}
+
+/// The 300 s are instants, not whole seconds: a sign-in at T0.0 is fresh at T0+300.0 and stale
+/// one nanosecond later (DEC-2115 item 2, DEC-2124 item 4).
+#[test]
+#[ignore = "pending E9-4"]
+fn the_first_enrolment_window_ends_at_its_exact_instant() {
+    let rows = opened();
+    let f = plain(&rows);
+    let cookie = signed_in(&f, ALICE);
+    let cookie = refreshed(&f, &cookie, T0 + 200);
+    f.clock.set(T0 + FRESH_S);
+    issued(&ask(&f, &cookie, KEY));
+    for nanos in [1, 900_000_000] {
+        f.clock
+            .set_at(UtcNanos::from_parts(T0 + FRESH_S, nanos).expect("a time"));
+        refused(
+            &ask(&f, &cookie, &format!("late-key-{nanos:09}")),
+            401,
+            ProblemCode::StepUpStale,
+        );
+    }
+    nothing_journaled(&f, &rows);
+}
+
+/// A tombstone ages from the challenge's expiry, not from when the store next looked: with no
+/// request between the expiry E and E + 1 h, the key is still a conflict at E + 24 h - 1 s and
+/// issues fresh bytes at E + 24 h (DEC-2118 item 1).
+#[test]
+#[ignore = "pending E9-4"]
+fn a_tombstone_ages_from_the_expiry_however_late_the_store_sees_it() {
+    let alice = encode_ulid(id(ALICE).0);
+    let rows = enrol(opened(), &alice, PASSKEY_A, T0 - 100);
+    let f = plain(&rows);
+    let cookie = signed_in(&f, ALICE);
+    issued(&ask(&f, &cookie, KEY));
+    let expiry = T0 + FRESH_S;
+    for (secs, conflict) in [
+        (expiry + 3_600, true),
+        (expiry + TOMBSTONE_S - 1, true),
+        (expiry + TOMBSTONE_S, false),
+    ] {
+        f.clock.set(secs);
+        let cookie = signed_in(&f, ALICE);
+        let reply = ask(&f, &cookie, KEY);
+        if conflict {
+            refused(&reply, 409, ProblemCode::IdempotencyConflict);
+        } else {
+            issued(&reply);
+        }
+    }
 }
 
 #[test]
