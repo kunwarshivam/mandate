@@ -968,11 +968,15 @@ POD_KINDS = {"Deployment", "Job", "CronJob", "StatefulSet", "DaemonSet", "Replic
 
 def other_pods(docs: list[dict]) -> list[dict]:
     """The pod templates of every kind but the workspace's own (Deployments, Jobs, managed pods),
-    each shaped as a workload: a CronJob's job template's, and the rest's own."""
+    each shaped as a workload: a bare Pod's own spec, a CronJob's job template's, and the rest's own."""
+    shaped = {
+        "Pod": lambda d: {"template": {"metadata": d["metadata"], "spec": d["spec"]}},
+        "CronJob": lambda d: d["spec"]["jobTemplate"]["spec"],
+    }
     return [
-        {"kind": d["kind"], "metadata": d["metadata"], "spec": d["spec"]["jobTemplate"]["spec"] if d["kind"] == "CronJob" else d["spec"]}
+        {"kind": d["kind"], "metadata": d["metadata"], "spec": shaped.get(d["kind"], lambda d: d["spec"])(d)}
         for d in docs
-        if d["kind"] in POD_KINDS - {"Deployment", "Job"}
+        if d["kind"] in POD_KINDS - {"Deployment", "Job"} or d["kind"] == "Pod"
     ]
 
 
@@ -1070,6 +1074,9 @@ def test_no_process_reads_an_approle_secret_where_it_is_mounted():
         if kind == "CronJob":
             escaped["spec"] = {"jobTemplate": {"spec": escaped["spec"]}}
         assert approle_copied([d for d in on if d["metadata"]["name"] != "scheduler"] + [escaped]), kind
+    bare = {"kind": "Pod", "metadata": {"name": "bare"}, "spec": copy.deepcopy(pod_spec(leaked))}
+    assert approle_copied(on + [bare]), "a bare Pod is read"
+    assert not any(d["kind"] == "Pod" for d in on), "the workspace runs no bare Pod"
     for where, volume in (("containers", "vault"), ("containers", "vault-sources"), ("initContainers", "vault-sources"), ("initContainers", "vault")):
         assert approle_copied(mutate(on, "api", "Deployment", lambda w: beside_api(w, where, volume))), (where, volume)
 
