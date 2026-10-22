@@ -114,7 +114,11 @@ pub fn allows(identity: &Identity, access: Access, path: &SecretPath) -> bool {
         )
         | (Identity::TokenExchange(_), Access::Read, SecretPath::ClientSecret)
         | (Identity::SecretImport, Access::Write, SecretPath::ClientSecret) => true,
-        (Identity::TokenExchange(own), Access::Read | Access::Delete, SecretPath::Code(c))
+        (
+            Identity::TokenExchange(own),
+            Access::Read | Access::Delete | Access::Take,
+            SecretPath::Code(c),
+        )
         | (Identity::TokenExchange(own), Access::Write, SecretPath::Token(c))
         | (Identity::Executor(own), Access::Read, SecretPath::Token(c)) => own == c,
         (identity, Access::Read, SecretPath::Platform(secret)) => {

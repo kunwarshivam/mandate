@@ -269,7 +269,6 @@ fn the_manager_may_issue_and_revoke_only_exchange_grants() {
 /// DEC-2061: only a connection's token exchange may take, and only its own connection's code: no
 /// other identity, no other connection's code, and no token or secret.
 #[test]
-#[ignore = "pending E21-32"]
 fn only_a_token_exchange_takes_and_only_its_own_connections_code() {
     let exchange = Identity::TokenExchange(c("c1"));
     assert!(allows(&exchange, Access::Take, &SecretPath::Code(c("c1"))));

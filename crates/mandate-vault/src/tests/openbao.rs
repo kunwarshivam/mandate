@@ -389,7 +389,6 @@ fn a_missing_role_is_its_own_refusal_and_every_other_answer_keeps_its_meaning() 
 /// The ServiceAccount the vault checked must be in the workspace's namespace, exactly; an answer
 /// that does not say is malformed.
 #[test]
-#[ignore = "pending E21-32"]
 fn a_kubernetes_login_is_accepted_only_in_the_workspaces_namespace() {
     let auth = |namespace: Value| json!({"metadata": {"service_account_namespace": namespace}});
     assert_eq!(

@@ -325,8 +325,11 @@ pub fn kubernetes_namespace_verdict(
     auth: Option<&Value>,
     namespace: &str,
 ) -> Result<(), SourceError> {
-    let _ = (auth, namespace);
-    Err(SourceError::Unimplemented { story: "E21-32" })
+    if text(auth, "/metadata/service_account_namespace")? == namespace {
+        Ok(())
+    } else {
+        Err(SourceError::Denied)
+    }
 }
 
 impl OpenBaoSource {

@@ -398,7 +398,6 @@ fn a_projected_token_outside_its_directory_or_missing_is_refused() {
 /// The namespace the downward API projects beside the token is read, by the token's rules, and
 /// must be a Kubernetes label of at most 64 bytes.
 #[test]
-#[ignore = "pending E21-32"]
 fn the_projected_namespace_is_read_by_the_tokens_rules() {
     let dir = Fresh::new("sa-namespace");
     kubelet(

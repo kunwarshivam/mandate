@@ -169,7 +169,6 @@ fn no_two_connections_share_a_path_a_service_account_or_a_role() {
 /// login's name goes, is exactly the policy written from [`kv_path`] for that connection, so the
 /// path a writer stores at and the path a policy grants are one, for every tricky id.
 #[test]
-#[ignore = "pending E21-32"]
 fn each_kinds_policy_reaches_exactly_the_paths_its_connection_is_stored_at() {
     let block = |prefix: &str, path: &SecretPath, capabilities: &str| {
         let stored = kv_path(path);
@@ -282,7 +281,6 @@ fn the_executors_policy_reads_its_own_token_alone() {
 /// The exchange's code block reads and updates, the update being its take (DEC-2061), and never
 /// creates: `create` would let it write a code where none is.
 #[test]
-#[ignore = "pending E21-32"]
 fn the_exchanges_policy_writes_its_token_and_reads_takes_and_deletes_its_code() {
     assert_eq!(
         kubernetes_policy(
