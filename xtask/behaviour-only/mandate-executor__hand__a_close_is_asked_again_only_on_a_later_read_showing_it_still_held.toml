@@ -1,5 +1,5 @@
 file = "crates/mandate-executor/tests/hand.rs"
-test = "a_journaled_close_is_never_resent_after_a_restart"
+test = "a_close_is_asked_again_only_on_a_later_read_showing_it_still_held"
 reason = """
 The account kill switch's close step (DEC-2337, journal v0.75's `AccountCloseRequested`) is
 A1b's: on A1a the executor sends no close-position and journals no close record, so the test fails

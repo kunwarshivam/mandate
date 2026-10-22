@@ -5878,40 +5878,80 @@ fn a_close_is_journaled_before_it_is_sent() {
         (Some(BTC.to_owned()), held, Some(switch)),
         "BTC, the quantity held, and the switch"
     );
+    assert_eq!(
+        journaled
+            .payload
+            .get("attempt")
+            .and_then(mandate_canon::Value::as_int),
+        Some(1),
+        "the first request"
+    );
 }
 
-/// A journaled close is read as sent (DEC-2337 item 3): after a restart, the startup read finds
-/// BTC still held and clear, and no close-position goes again under the same switch.
+/// A journaled close is read as sent, and asked again only on a later read (DEC-2337 item 3): a
+/// restart resends nothing; a read taken before the request shows nothing new; a read taken after
+/// it, showing BTC still held with nothing of ours working, journals `attempt` 2 before the
+/// close-position goes again.
 #[test]
 #[ignore = "pending E7-4"]
-fn a_journaled_close_is_never_resent_after_a_restart() {
+fn a_close_is_asked_again_only_on_a_later_read_showing_it_still_held() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[BTC]);
     let instruments = FixedInstruments;
     let config = config();
     let ports = ports(&ids, &mandates, &instruments, &config);
-    let (shell, _, read) = closed_btc(&ports);
-    assert!(
-        read.requests
+    let (shell, _, _) = closed_btc(&ports);
+    let requested = shell
+        .account_journal
+        .iter()
+        .find(|e| e.event_type == "AccountCloseRequested")
+        .map(|e| e.seq.0)
+        .expect("the first request is journaled");
+    let held = shell
+        .state
+        .positions()
+        .get(&instrument(BTC))
+        .map(ToString::to_string)
+        .unwrap_or_default();
+    let read = |head: u64| {
+        let mut taken = snapshot(head, ReconcileReason::Startup);
+        taken.positions = vec![broker_position(BTC, &held)];
+        Input::BrokerSnapshot(taken)
+    };
+    let closes = |ran: &common::Ran| {
+        ran.requests
             .iter()
-            .any(|r| matches!(r, BrokerRequest::ClosePosition(..))),
-        "the close went before the restart: {:?}",
-        read.requests
-    );
+            .filter(|r| matches!(r, BrokerRequest::ClosePosition(..)))
+            .count()
+    };
 
     let (mut restarted, started) = shell.restart(&ports);
-    let again = restarted.run(
-        Input::BrokerSnapshot(snapshot(restarted.head().0, ReconcileReason::Startup)),
-        &ports,
-    );
+    let stale = restarted.run(read(requested - 1), &ports);
+    let fresh = restarted.run(read(restarted.head().0), &ports);
 
-    let resent: Vec<&BrokerRequest> = started
-        .requests
+    assert_eq!(
+        (closes(&started), closes(&stale)),
+        (0, 0),
+        "nothing again before a read taken after the request"
+    );
+    let attempt = fresh.draft("AccountCloseRequested").and_then(|d| {
+        d.payload
+            .get("attempt")
+            .and_then(mandate_canon::Value::as_int)
+    });
+    assert_eq!(attempt, Some(2), "the re-request is attempt 2");
+    let record = fresh
+        .effects
         .iter()
-        .chain(&again.requests)
-        .filter(|r| matches!(r, BrokerRequest::ClosePosition(..)))
-        .collect();
-    assert!(resent.is_empty(), "never closed again: {resent:?}");
+        .position(|e| matches!(e, Effect::Journal(d) if d.event_type == "AccountCloseRequested"));
+    let close = fresh
+        .effects
+        .iter()
+        .position(|e| matches!(e, Effect::Broker(BrokerRequest::ClosePosition(..))));
+    assert!(
+        record.is_some() && close.is_some() && record < close,
+        "journaled before it goes again: record at {record:?}, close at {close:?}"
+    );
 }
 
 /// BTC's unprotected interval ends on its close (DEC-2337 item 4): the close is journaled, and its
