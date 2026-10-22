@@ -208,6 +208,12 @@ fn a_forwarded_address_counts_only_from_a_listed_ingress_peer() {
         "203.0.113.9",
         "walked from the right past every listed peer"
     );
+    let mapped = headers(&[("x-forwarded-for", "::ffff:203.0.113.9")]);
+    assert_eq!(
+        reduction::address(loopback, &mapped, &ingress),
+        "203.0.113.9",
+        "a forwarded IPv4-mapped address counts as its IPv4 address, never as ::/64"
+    );
     let only = headers(&[("x-forwarded-for", "127.0.0.1")]);
     assert_eq!(reduction::address(loopback, &only, &ingress), "127.0.0.1");
     assert_eq!(
