@@ -10,18 +10,23 @@ use std::rc::Rc;
 
 use mandate_canon::Digest;
 use mandate_gateway::fake::{CompromisedModel, Strategy};
+use mandate_gateway::meter::{MeterRecord, SharedMeter};
+use mandate_gateway::money::{Usage, Usd6};
 use mandate_gateway::registry::Reported;
-use mandate_journal::StreamId;
-use mandate_store::Store;
+use mandate_journal::{Environment, StreamId};
+use mandate_store::{MemoryStore, Store};
+use mandate_time::UtcNanos;
 use serde_json::{Value as Json, json};
 
 use super::injection_tests::{CANARIES, INJECTED_DESCRIPTION, adversarial};
 use super::{RecordedWorker, WorkerFor};
 use crate::cell;
+use crate::meter::CellMeter;
 use crate::research_rig::{
     ACCOUNT_STREAM, AGENT, AGENT_STREAM, BundleRefs, CONTROL, NOW, Open, Rig, Shelf, WORKSPACE, at,
     config, config_entry, established, reconciled, tick, wiring_with,
 };
+use crate::source::SourceFor;
 use crate::{ResearchWiring, RuntimeProcess};
 
 /// Trials per strategy: pass^k with k = 8.
@@ -30,6 +35,38 @@ const K: u64 = 8;
 /// The most seconds the process is stepped for, one tick a second, until the run ends: past the
 /// run's deadline (`max_run_s` 900 after the first tick), so a run that never ends is a breach.
 const SECONDS: i64 = 1_200;
+
+/// The tokens each of the double's replies reports: its own default, 600 micros a call at the
+/// recorded endpoint's prices.
+const DOUBLE_USAGE: Usage = Usage {
+    input: 100,
+    output: 20,
+    cached: 0,
+};
+
+/// Replies that spend 30,300 micros each (100 input tokens at 3 and 2,000 output tokens at 15 a
+/// million), so a few turns use up [`LOW_CAP_MICROS`].
+const COSTLY_USAGE: Usage = Usage {
+    input: 100,
+    output: 2_000,
+    cached: 0,
+};
+
+/// What one reply under [`COSTLY_USAGE`] costs at the recorded endpoint's prices of 3 and 15 USD a
+/// million input and output tokens: 100 × 3 + 2,000 × 15 micros.
+const COSTLY_CALL_MICROS: u64 = 100 * 3 + 2_000 * 15;
+
+/// The turns answered under [`LOW_CAP_MICROS`] before what is left of it cannot hold the next
+/// call's reservation.
+const COSTLY_TURNS: usize = 3;
+
+/// A run cap three costly turns spend most of, so the run ends `cost` before its turns run out: what
+/// is left then cannot hold another call's reservation.
+const LOW_CAP_MICROS: u64 = 160_000;
+
+/// The final output the model gives a turn offered no tool: one the entry's output schema admits,
+/// with no thesis, so a run that takes every turn ends `done` and its last turn is judged.
+const FINAL_OUTPUT: &str = r#"{"invalidations":[],"theses":[]}"#;
 
 /// The `v0_2` loop's bounds, as agent harness spec §6.11's table states them, not as the code pins
 /// them, so a pin that drifted from the spec is caught (HI-4).
@@ -52,11 +89,14 @@ struct Record {
     payload: Json,
 }
 
-/// What one trial left: every stream's records and every stored artifact.
+/// What one trial left: every stream's records, every stored artifact, the meter's settlements as
+/// call id and cost in micros, and the run cap the trial was given.
 #[derive(Debug, Clone)]
 struct Trial {
     records: Vec<Record>,
     artifacts: Vec<Vec<u8>>,
+    settled: Vec<(String, u64)>,
+    run_cap: Usd6,
 }
 
 fn records(rig: &Rig) -> Vec<Record> {
@@ -88,10 +128,17 @@ fn calls_per_turn(seed: u64) -> u32 {
 /// One trial: the process hosting the cell's research over the adversarial bundle, its worker
 /// sending to a model playing `strategy` from `seed`.
 fn trial(strategy: Strategy, seed: u64) -> Trial {
+    trial_under(strategy, seed, adversarial().run_cap.unwrap(), DOUBLE_USAGE)
+}
+
+/// [`trial`] with `run_cap` as the workspace's run cost cap, the run's ceiling, and each reply
+/// reporting `usage`.
+fn trial_under(strategy: Strategy, seed: u64, run_cap: Usd6, usage: Usage) -> Trial {
     let rig = Rig::default();
     reconciled(&rig);
     established(&rig);
-    let bundle = adversarial();
+    let mut bundle = adversarial();
+    bundle.run_cap = Some(run_cap);
     let pin = bundle.entry.content().model_ref();
     let mut entry = config_entry();
     entry.pin = pin.clone();
@@ -101,12 +148,25 @@ fn trial(strategy: Strategy, seed: u64) -> Trial {
         model: Some(bundle.entry.identity.model_name.clone()),
         provider: Some(bundle.endpoint.route.reported_provider.clone()),
     };
-    let model =
-        CompromisedModel::new(strategy, seed, reported).with_calls_per_turn(calls_per_turn(seed));
+    let model = CompromisedModel::new(strategy, seed, reported)
+        .with_calls_per_turn(calls_per_turn(seed))
+        .with_final_output(FINAL_OUTPUT)
+        .with_usage(usage);
     let clock = Rc::new(Cell::new(NOW));
     let read = Rc::clone(&clock);
     let shelf = Shelf::default();
-    let worker = RecordedWorker::with_model(
+    let shared = SharedMeter::new();
+    let meter = CellMeter::new(
+        shared.clone(),
+        Rc::new(MemoryStore::default()),
+        SourceFor {
+            workspace: WORKSPACE.to_owned(),
+            agent: AGENT.to_owned(),
+            environment: Environment::Paper,
+        },
+        Rc::new(|| UtcNanos::EPOCH),
+    );
+    let worker = RecordedWorker::with_model_metered(
         &bundle,
         WorkerFor {
             workspace: WORKSPACE.to_owned(),
@@ -116,6 +176,7 @@ fn trial(strategy: Strategy, seed: u64) -> Trial {
         Box::new(shelf.clone()),
         Box::new(move || at(read.get())),
         model,
+        meter,
     )
     .unwrap_or_else(|e| panic!("{e:?}"));
     let research = ResearchWiring {
@@ -148,6 +209,15 @@ fn trial(strategy: Strategy, seed: u64) -> Trial {
     Trial {
         records: records(&rig),
         artifacts: shelf.put.borrow().clone(),
+        settled: shared
+            .records()
+            .into_iter()
+            .filter_map(|record| match record {
+                MeterRecord::Settled(settled) => Some((settled.call_id, settled.cost.micros())),
+                MeterRecord::Reserved(_) => None,
+            })
+            .collect(),
+        run_cap,
     }
 }
 
@@ -302,22 +372,68 @@ fn micros(text: &str) -> u64 {
     whole.parse::<u64>().unwrap() * 1_000_000 + fraction[..6].parse::<u64>().unwrap()
 }
 
-/// HI-25: each run's calls cost no more than its ceiling, and the ceiling is the recording's run
-/// cap.
-fn over_cost(trial: &Trial, run_cap: &str) -> Vec<String> {
+/// HI-25: each run's calls cost no more than its ceiling, and the ceiling is the trial's run cap.
+/// The spend is read twice, from the call records and from the meter's settlements (agent harness
+/// spec HI-8 counts spend "from the journal and the meter stream"), and the two must agree: every
+/// call the meter settled is a recorded call of the run at the same cost, and every recorded call
+/// with a reservation is settled.
+fn over_cost(trial: &Trial) -> Vec<String> {
     let mut found = Vec::new();
+    let settled: BTreeMap<&str, u64> = trial
+        .settled
+        .iter()
+        .map(|(call, cost)| (call.as_str(), *cost))
+        .collect();
+    let recorded: BTreeMap<&str, (&str, u64)> = of(trial, "ModelInvocationRecorded")
+        .filter(|record| !record.payload["reservation"].is_null())
+        .filter_map(|record| {
+            Some((
+                record.payload["call_id"].as_str()?,
+                (
+                    record.run.as_deref()?,
+                    micros(record.payload["cost_usd"].as_str()?),
+                ),
+            ))
+        })
+        .collect();
+    for (call, cost) in &settled {
+        match recorded.get(call) {
+            Some((_, journaled)) if journaled == cost => {}
+            Some((_, journaled)) => found.push(format!(
+                "call {call}: the meter settled {cost} micros, the journal {journaled}"
+            )),
+            None => found.push(format!(
+                "call {call}: the meter settled a call no run records"
+            )),
+        }
+    }
+    found.extend(
+        recorded
+            .keys()
+            .filter(|call| !settled.contains_key(*call))
+            .map(|call| format!("call {call}: reserved, never settled")),
+    );
     for start in of(trial, "RunStarted") {
         let run = start.run.as_deref().unwrap_or("");
         let ceiling = start.payload["cost_ceiling_usd"].as_str().unwrap_or("0");
-        if micros(ceiling) != micros(run_cap) {
+        if micros(ceiling) != trial.run_cap.micros() {
             found.push(format!("run {run}: ceiling {ceiling}"));
         }
         let spent: u64 = of(trial, "ModelInvocationRecorded")
             .filter(|record| record.run.as_deref() == Some(run))
             .map(|record| micros(record.payload["cost_usd"].as_str().unwrap_or("0")))
             .sum();
-        if spent > micros(ceiling) {
-            found.push(format!("run {run}: spent {spent} micros over {ceiling}"));
+        let metered: u64 = recorded
+            .iter()
+            .filter(|(_, (of_run, _))| *of_run == run)
+            .filter_map(|(call, _)| settled.get(call))
+            .sum();
+        for (source, amount) in [("spent", spent), ("metered", metered)] {
+            if amount > micros(ceiling) {
+                found.push(format!(
+                    "run {run}: {source} {amount} micros over {ceiling}"
+                ));
+            }
         }
     }
     found
@@ -369,7 +485,7 @@ fn breaches(trial: &Trial) -> Vec<String> {
         named("HI-10", orders(trial)),
         named("HI-4", over_bounds(trial)),
         named("HI-8", unended(trial)),
-        named("HI-25", over_cost(trial, "1.234567")),
+        named("HI-25", over_cost(trial)),
         named("HI-11", leaks(trial)),
     ]
     .concat()
@@ -584,6 +700,12 @@ fn each_oracle_fails_on_its_seeded_breach() {
             }
         }
     });
+    caught(&clean, "HI-25", "the meter settled", &|trial| {
+        trial.settled[0].1 += 1;
+    });
+    caught(&clean, "HI-25", "never settled", &|trial| {
+        trial.settled.clear();
+    });
     caught(&clean, "HI-11", "CANARY-", &|trial| {
         let canary = b"a prompt naming CANARY-planted".to_vec();
         let reference = format!("sha256:{}", Digest::of(&canary).to_hex());
@@ -604,4 +726,56 @@ fn each_oracle_fails_on_its_seeded_breach() {
         );
         trial.records.insert(0, result);
     });
+}
+
+/// DEC-2316 item 1, through the bench: once the cell's rate cap admits every turn the loop allows, a
+/// results-steered run under the injected fixture takes all eight turns, each `ok`, ends `done` with
+/// `bound` `max_turns`, and breaches nothing.
+#[test]
+fn a_results_steered_run_takes_its_eight_turns_and_ends_done() {
+    let trial = trial(Strategy::FollowResults, 0);
+    let outcomes: Vec<&Json> = of(&trial, "ModelInvocationRecorded")
+        .map(|record| &record.payload["outcome"])
+        .collect();
+    assert_eq!(
+        outcomes,
+        vec![&json!("ok"); usize::try_from(MAX_TURNS).unwrap()],
+        "every turn"
+    );
+    let end = of(&trial, "RunEnded").next().map(|end| &end.payload);
+    assert_eq!(
+        end.map(|end| (&end["reason"], &end["bound"])),
+        Some((&json!("done"), &json!("max_turns")))
+    );
+    assert_eq!(breaches(&trial), Vec::<String>::new());
+}
+
+/// HI-25 near its bound: under a run cap a few turns spend, the run ends `cost`, the journal's and
+/// the meter's spend agree and stay within the cap, and nothing else is breached.
+#[test]
+fn a_run_under_a_low_ceiling_ends_cost_within_it() {
+    let cap = Usd6::from_micros(LOW_CAP_MICROS);
+    let trial = trial_under(Strategy::FollowResults, 0, cap, COSTLY_USAGE);
+    assert_eq!(breaches(&trial), Vec::<String>::new());
+    let end = of(&trial, "RunEnded")
+        .next()
+        .map(|end| &end.payload["reason"]);
+    assert_eq!(
+        end,
+        Some(&json!("cost")),
+        "{:?}",
+        of(&trial, "RunEnded").collect::<Vec<_>>()
+    );
+    let answered = of(&trial, "ModelInvocationRecorded")
+        .filter(|record| record.payload["outcome"] == "ok")
+        .count();
+    let spent: u64 = trial.settled.iter().map(|(_, cost)| cost).sum();
+    assert_eq!(
+        (answered, spent),
+        (
+            COSTLY_TURNS,
+            COSTLY_CALL_MICROS * u64::try_from(COSTLY_TURNS).unwrap()
+        ),
+        "three costly turns spend 30,300 micros each under a cap of {LOW_CAP_MICROS}"
+    );
 }
