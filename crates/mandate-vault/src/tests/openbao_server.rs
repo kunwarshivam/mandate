@@ -1172,16 +1172,38 @@ async fn provisioning_fails_on_a_fingerprint_key_that_can_leave_the_vault() {
         };
         for (path, body) in steps {
             let path = path.replace("{transit}", &config.mounts.transit);
-            operator_call(
-                &address,
-                &ca_pem,
-                &operator,
-                Method::POST,
-                &path,
-                Some(body),
-            )
-            .await;
+            let mut set_up = false;
+            for _ in 0..50 {
+                let answer = operator_call(
+                    &address,
+                    &ca_pem,
+                    &operator,
+                    Method::POST,
+                    &path,
+                    Some(body.clone()),
+                )
+                .await;
+                if answer.get("errors").is_none() {
+                    set_up = true;
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+            assert!(set_up, "{case}: {path} was never set up");
         }
+        let key = operator_call(
+            &address,
+            &ca_pem,
+            &operator,
+            Method::GET,
+            &format!("{}/keys/{FINGERPRINT_KEY}", config.mounts.transit),
+            None,
+        )
+        .await;
+        let planted = key.pointer("/data/exportable") == Some(&json!(true))
+            || key.pointer("/data/deletion_allowed") == Some(&json!(true))
+            || case == "another engine";
+        assert!(planted, "{case}: the set-up left {key}");
         assert_eq!(
             provision(&config, &operator, &[c("c1")], None)
                 .await
