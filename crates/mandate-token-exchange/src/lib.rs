@@ -17,12 +17,15 @@
 //! - [`http`] sends the request: one `POST`, HTTPS only to the pinned URL, no redirect followed.
 //! - [`startup`] reads the process's settings, refusing a token URL a release build or a tier
 //!   other than `dev` or `ci` is given (DEC-2633 item 2).
+//! - [`run`] runs the exchange after the start checks: the client secret first, then the take,
+//!   the one request and the token write.
 //! - `cell` (builds with debug assertions only) admits the token URL of the fixture provider a dev
 //!   or CI cell runs (DEC-2625), never an Alpaca host. A release build contains none of it.
 
 pub mod form;
 pub mod http;
 pub mod response;
+pub mod run;
 pub mod startup;
 
 #[cfg(debug_assertions)]
