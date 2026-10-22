@@ -230,17 +230,25 @@ pub fn subject_account(
 /// # Errors
 /// `executor_subject_account` for anything but one connection's own ServiceAccount name.
 pub fn subject_connection(configured: Option<String>) -> Result<ConnectionId, &'static str> {
-    let _ = configured;
-    Err(Unimplemented)
+    let refused = "executor_subject_account";
+    let text = configured.ok_or(refused)?;
+    let bytes = text
+        .as_bytes()
+        .chunks(2)
+        .map(|pair| {
+            std::str::from_utf8(pair)
+                .ok()
+                .and_then(|digits| u8::from_str_radix(digits, 16).ok())
+        })
+        .collect::<Option<Vec<u8>>>()
+        .ok_or(refused)?;
+    let connection = String::from_utf8(bytes)
+        .ok()
+        .and_then(|id| ConnectionId::new(&id).ok())
+        .ok_or(refused)?;
+    subject_account(Some(text), &connection)?;
+    Ok(connection)
 }
-
-/// The report of a function E21-32 has not implemented yet, which its pending tests fail on
-/// (DEC-77); the implementation PR replaces the stub and removes it.
-#[allow(
-    non_upper_case_globals,
-    reason = "the pending gate recognises a stub by the name `Unimplemented` (DEC-137)"
-)]
-pub const Unimplemented: &str = "unimplemented";
 
 /// The variable the workspace chart sets to the namespace the deployment manager creates the
 /// executor's pod in (lane D1, K2).

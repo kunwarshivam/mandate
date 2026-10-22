@@ -35,7 +35,6 @@ fn millis(pii_ref: &str) -> u128 {
 /// A reference is `pii_` and the ULID of the millisecond and the source's 80 bits, most
 /// significant first, as the journal's `PiiRef` type reads it.
 #[test]
-#[ignore = "pending E21-32"]
 fn a_reference_is_pii_and_the_ulid_of_its_millisecond_and_random_bits() {
     let random = [0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x10, 0x32];
     let text = minted(1_760_000_000, 123_456_789, random).unwrap();
@@ -56,7 +55,6 @@ fn a_reference_is_pii_and_the_ulid_of_its_millisecond_and_random_bits() {
 /// The millisecond is the time's whole milliseconds, never rounded up, and the last time a
 /// timestamp holds, the end of 9999, fits the ULID's 48 bits.
 #[test]
-#[ignore = "pending E21-32"]
 fn the_millisecond_is_truncated_and_every_time_fits() {
     for (secs, nanos, want) in [
         (1, 0, 1_000),
@@ -72,7 +70,6 @@ fn the_millisecond_is_truncated_and_every_time_fits() {
 
 /// A source that cannot fill mints nothing.
 #[test]
-#[ignore = "pending E21-32"]
 fn a_failed_source_mints_nothing() {
     assert_eq!(
         mint_pii_ref(at(1, 0), &mut Fixed(None)).map(|p| p.as_str().to_owned()),
@@ -83,7 +80,6 @@ fn a_failed_source_mints_nothing() {
 /// The operating system's references are in the form, at their millisecond, and no two of many
 /// are alike.
 #[test]
-#[ignore = "pending E21-32"]
 fn the_operating_systems_references_are_fresh() {
     let now = at(1_760_000_000, 5_000_000);
     let minted: BTreeSet<String> = (0..64)
