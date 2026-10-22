@@ -7,10 +7,10 @@ mod support;
 
 use mandate_process::{Exit, State};
 use support::{
-    ACCOUNT, ACCOUNT_STREAM, AGENT, CONNECTION, Error, Journal, NOON, OPENED, OPENING,
-    OTHER_ACCOUNT, OTHER_AGENT, OTHER_CONNECTION, Paper, agent_stream, at, connect, deploy,
-    deployed, exchanged, kill, kill_command, refused, requested, revoke, start, start_issued,
-    stopped, tick,
+    ACCOUNT, ACCOUNT_STREAM, AGENT, CONNECTION, CONTROL_STREAM, Error, Journal, NOON, OPENED,
+    OPENING, OTHER_ACCOUNT, OTHER_AGENT, OTHER_CONNECTION, Paper, agent_stream, at, connect,
+    deploy, deployed, exchanged, kill, kill_command, refused, requested, revoke, start,
+    start_issued, stopped, tick,
 };
 
 const COMMAND: &str = "01JCMD000000000000000000AA";
@@ -257,6 +257,33 @@ fn an_agentless_account_whose_connection_is_revoked_lets_it_exit() -> Result<(),
     tick(&journal, "t1", NOON)?;
     let broker = Paper::new(&journal);
     let mut process = start(&journal, &broker)?;
+    process.step(at(NOON)?);
+    assert_eq!(process.lifecycle().state(), COMPLETED);
+    Ok(())
+}
+
+/// Item 3.2 with 3.3: an agentless executor whose connection closed still keeps running while the
+/// control stream, the only stream it follows, does not read, and exits once it reads.
+#[test]
+#[ignore = "pending E7-4"]
+fn an_agentless_executor_waits_for_its_control_stream_to_read() -> Result<(), Error> {
+    let journal = Journal::default();
+    connect(&journal, "c1", CONNECTION, ACCOUNT)?;
+    revoke(&journal, "c2", CONNECTION, true)?;
+    kill_command(&journal, COMMAND, "connection", CONNECTION)?;
+    tick(&journal, "t1", NOON)?;
+    journal.unreadable(CONTROL_STREAM);
+    let broker = Paper::new(&journal);
+    let mut process = start(&journal, &broker)?;
+    for _ in 0..3 {
+        process.step(at(NOON)?);
+    }
+    assert!(
+        !matches!(process.lifecycle().state(), State::Exited(_)),
+        "{:?}",
+        process.lifecycle().state()
+    );
+    journal.readable(CONTROL_STREAM);
     process.step(at(NOON)?);
     assert_eq!(process.lifecycle().state(), COMPLETED);
     Ok(())

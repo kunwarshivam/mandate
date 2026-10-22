@@ -1,0 +1,8 @@
+file = "crates/mandate-executord/tests/completed.rs"
+test = "an_agentless_executor_waits_for_its_control_stream_to_read"
+reason = """
+The executor process asks nothing at the end of its pass until E7-4's exit predicate (DEC-2347
+item 3) lands, so it keeps running where the test expects it to exit `completed` once the
+control stream reads: it fails on the process's state, not at a stub. The implementation PR
+deletes this row.
+"""
