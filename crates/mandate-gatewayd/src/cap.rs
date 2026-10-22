@@ -6,8 +6,11 @@
 
 use std::collections::BTreeMap;
 
+use mandate_canon::{Value, parse};
 use mandate_gateway::money::Usd6;
-use mandate_journal::{ArtifactSource, Environment, StoredEvent};
+use mandate_journal::{ArtifactRef, ArtifactSource, Environment, StoredEvent, get_artifact};
+use mandate_num::Usd;
+use mandate_research::PolicyOverlay;
 
 /// Why an agent's cap could not be read. Each names only its code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -22,13 +25,12 @@ pub enum CapError {
 
 impl CapError {
     /// The code the start exits with, or a call's refusal is logged under.
-    #[expect(
-        clippy::todo,
-        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-    )]
     pub fn code(self) -> &'static str {
-        let _ = self;
-        todo!()
+        match self {
+            Self::ControlUnreadable => "control_unreadable",
+            Self::DocumentUnavailable => "mandate_document_unavailable",
+            Self::EnvironmentMismatch => "mandate_environment_mismatch",
+        }
     }
 }
 
@@ -45,17 +47,28 @@ pub enum Deployment {
 ///
 /// # Errors
 /// [`CapError::ControlUnreadable`] for a deployment record whose body does not read.
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
 pub fn deployment(
     control: &[StoredEvent],
     agent: &str,
     environment: Environment,
 ) -> Result<Deployment, CapError> {
-    let _ = (control, agent, environment);
-    todo!()
+    for row in control.iter().rev().filter(|row| {
+        row.environment == environment.as_str()
+            && matches!(row.event_type.as_str(), "AgentDeployed" | "AgentStopped")
+    }) {
+        let body = parse(&row.body).map_err(|_| CapError::ControlUnreadable)?;
+        let payload = body.get("payload").ok_or(CapError::ControlUnreadable)?;
+        let named = text(payload, "agent_id").ok_or(CapError::ControlUnreadable)?;
+        if named != agent {
+            continue;
+        }
+        if row.event_type == "AgentStopped" {
+            return Ok(Deployment::NotDeployed);
+        }
+        let version = text(payload, "mandate_version").ok_or(CapError::ControlUnreadable)?;
+        return Ok(Deployment::Deployed(version.to_owned()));
+    }
+    Ok(Deployment::NotDeployed)
 }
 
 /// The cap `deployment` gives (DEC-2268 items 1 to 4): zero when not deployed or when the
@@ -65,18 +78,38 @@ pub fn deployment(
 /// [`CapError::DocumentUnavailable`] for an artifact that is missing, does not hash to its
 /// reference or does not parse, a cap missing, malformed, beyond `Usd6` or above
 /// `workspace_monthly`; [`CapError::EnvironmentMismatch`] for another environment's document.
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
 pub fn research_cap(
     deployment: &Deployment,
     environment: Environment,
     store: &dyn ArtifactSource,
     workspace_monthly: Usd6,
 ) -> Result<Usd6, CapError> {
-    let _ = (deployment, environment, store, workspace_monthly);
-    todo!()
+    let Deployment::Deployed(version) = deployment else {
+        return Ok(Usd6::ZERO);
+    };
+    let unavailable = CapError::DocumentUnavailable;
+    let document = ArtifactRef::parse(version)
+        .and_then(|reference| get_artifact(store, &reference).ok())
+        .and_then(|bytes| parse(&bytes).ok())
+        .ok_or(unavailable)?;
+    if text(&document, "environment") != Some(environment.as_str()) {
+        return Err(CapError::EnvironmentMismatch);
+    }
+    let research = document
+        .get("behavior")
+        .and_then(|behavior| behavior.get("research"))
+        .ok_or(unavailable)?;
+    if *research == Value::Null {
+        return Ok(Usd6::ZERO);
+    }
+    let cap = text(research, "cost_cap_usd_per_day")
+        .and_then(|text| Usd::parse(text).ok())
+        .ok_or(unavailable)?;
+    let cap = PolicyOverlay::internal_research_profile().effective_cost_cap(cap);
+    Usd6::parse(&cap.to_string())
+        .ok()
+        .filter(|cap| *cap <= workspace_monthly)
+        .ok_or(unavailable)
 }
 
 /// Each agent's cap with the deployment it was read from, read again whenever the control stream
@@ -89,13 +122,12 @@ pub struct DailyCaps {
 }
 
 impl DailyCaps {
-    #[expect(
-        clippy::todo,
-        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-    )]
     pub fn new(environment: Environment, workspace_monthly: Usd6) -> Self {
-        let _ = (environment, workspace_monthly);
-        todo!()
+        Self {
+            environment,
+            workspace_monthly,
+            held: BTreeMap::new(),
+        }
     }
 
     /// `agent`'s cap for the deployment `control` names now: the one held when it is unchanged,
@@ -104,24 +136,29 @@ impl DailyCaps {
     ///
     /// # Errors
     /// As [`deployment`] and [`research_cap`].
-    #[expect(
-        clippy::todo,
-        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-    )]
     pub fn current(
         &mut self,
         control: &[StoredEvent],
         agent: &str,
         store: &dyn ArtifactSource,
     ) -> Result<Usd6, CapError> {
-        let _ = (
-            control,
-            agent,
-            store,
-            &self.environment,
-            self.workspace_monthly,
-            &self.held,
-        );
-        todo!()
+        let read = deployment(control, agent, self.environment).and_then(|now| {
+            match self.held.get(agent) {
+                Some((held, cap)) if *held == now => Ok(*cap),
+                _ => research_cap(&now, self.environment, store, self.workspace_monthly).inspect(
+                    |&cap| {
+                        self.held.insert(agent.to_owned(), (now, cap));
+                    },
+                ),
+            }
+        });
+        if read.is_err() {
+            self.held.remove(agent);
+        }
+        read
     }
+}
+
+fn text<'a>(value: &'a Value, member: &str) -> Option<&'a str> {
+    value.get(member).and_then(Value::as_str)
 }
