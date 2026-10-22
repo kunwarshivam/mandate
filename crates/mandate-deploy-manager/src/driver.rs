@@ -152,7 +152,13 @@ impl<J: ControlJournal, O: Orchestrator, A: Alerts> Deployer<J, O, A> {
     async fn perform(&mut self, effect: Effect) {
         match effect {
             Effect::Start { slot, generation } => {
-                if self.orchestrator.start(&slot, generation).await.is_ok() {
+                let no_request_starts_an_exchange_yet = None;
+                if self
+                    .orchestrator
+                    .start(&slot, generation, no_request_starts_an_exchange_yet)
+                    .await
+                    .is_ok()
+                {
                     self.manager.launched(&slot, generation);
                 }
             }

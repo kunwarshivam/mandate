@@ -11,11 +11,15 @@ use std::net::TcpListener;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Duration;
 
 use common::block_on;
 use mandate_canon::Digest;
+use mandate_connections::record::ConnectionId;
 use mandate_deploy_manager::kubernetes::{InCluster, Kubernetes, MAX_BODY, SetupError};
 use mandate_deploy_manager::{Instance, Orchestrator, Phase, Process, Slot, Unavailable};
+use mandate_vault::kubernetes::service_account_name;
+use mandate_vault::policy::Identity;
 use serde_json::{Value, json};
 
 #[derive(Debug, Clone)]
@@ -89,6 +93,16 @@ fn template() -> Value {
     })
 }
 
+fn exchange_template() -> Value {
+    json!({
+        "metadata": {"labels": {"app.kubernetes.io/name": "token-exchange", "mandate.dev/workspace": "ws1"}},
+        "spec": {
+            "restartPolicy": "Never",
+            "containers": [{"name": "token-exchange", "image": "exchange@sha256:00", "command": ["/usr/local/bin/mandate-token-exchange"]}]
+        }
+    })
+}
+
 fn client() -> reqwest::Client {
     let _ = rustls::crypto::ring::default_provider().install_default();
     reqwest::Client::builder().no_proxy().build().unwrap()
@@ -98,6 +112,7 @@ fn adapter(api: String) -> Kubernetes {
     let templates = BTreeMap::from([
         (Process::Runtime, template()),
         (Process::Executor, template()),
+        (Process::TokenExchange, exchange_template()),
     ]);
     Kubernetes::with_client(
         client(),
@@ -219,13 +234,13 @@ fn a_start_creates_a_bare_pod_the_orchestrator_never_restarts() {
     ]);
     let mut k = adapter(api);
     let slot = Slot::runtime("Agent_A");
-    assert_eq!(block_on(k.start(&slot, 7)), Ok(()));
+    assert_eq!(block_on(k.start(&slot, 7, None)), Ok(()));
     assert_eq!(
-        block_on(k.start(&slot, 7)),
+        block_on(k.start(&slot, 7, None)),
         Ok(()),
         "already created is done"
     );
-    assert_eq!(block_on(k.start(&slot, 7)), Err(Unavailable));
+    assert_eq!(block_on(k.start(&slot, 7, None)), Err(Unavailable));
     let seen = seen.lock().unwrap();
     assert_eq!(
         (seen[0].method.as_str(), seen[0].path.as_str()),
@@ -288,7 +303,11 @@ fn a_start_creates_a_bare_pod_the_orchestrator_never_restarts() {
         ]
     );
     let values: Vec<&str> = env.iter().map(|e| e["value"].as_str().unwrap()).collect();
-    assert_eq!(values, ["1", "ws_01J8Z2", "runtime", "Agent_A", "7"]);
+    assert_eq!(
+        values,
+        ["1", "ws_01J8Z2", "runtime", "Agent_A", "7"],
+        "a runtime names no account: it runs as the default one"
+    );
 }
 
 #[test]
@@ -307,7 +326,7 @@ fn a_container_without_an_environment_gets_one() {
         BTreeMap::from([(Process::Executor, bare)]),
     )
     .unwrap();
-    let pod = k.manifest(&Slot::executor("acct_1"), 1).unwrap();
+    let pod = k.manifest(&Slot::executor("acct_1"), 1, None).unwrap();
     assert_eq!(
         pod["spec"]["containers"][0]["env"]
             .as_array()
@@ -322,7 +341,7 @@ fn a_container_without_an_environment_gets_one() {
             .starts_with("mandate-ex-")
     );
     assert_eq!(
-        k.manifest(&Slot::runtime("agent_a"), 1),
+        k.manifest(&Slot::runtime("agent_a"), 1, None),
         None,
         "no template, no pod"
     );
@@ -336,6 +355,7 @@ fn pod_names_differ_by_workspace_subject_and_generation() {
         k.pod_name(&Slot::runtime("agent_a"), 2),
         k.pod_name(&Slot::runtime("agent_b"), 1),
         k.pod_name(&Slot::executor("agent_a"), 1),
+        k.pod_name(&Slot::token_exchange("agent_a"), 1),
     ];
     for (i, a) in names.iter().enumerate() {
         for b in &names[i + 1..] {
@@ -443,4 +463,240 @@ fn an_answer_longer_than_the_bound_is_unavailable() {
         "exactly the bound is read"
     );
     assert_eq!(block_on(k.observe()), Err(Unavailable));
+}
+
+const CONNECTION: &str = "conn_01J8Z2AB";
+
+fn exchange() -> Slot {
+    Slot::token_exchange(CONNECTION)
+}
+
+/// The account DEC-2060 names for the exchange of [`CONNECTION`]: `x` and its bytes in hex.
+fn exchange_account() -> String {
+    let hex: String = CONNECTION.bytes().map(|b| format!("{b:02x}")).collect();
+    format!("x{hex}")
+}
+
+#[test]
+fn the_exchanges_account_is_the_one_the_vaults_role_is_named_for() {
+    let k = adapter("http://127.0.0.1:1".to_owned());
+    let connection = ConnectionId::new(CONNECTION).unwrap();
+    assert_eq!(
+        k.account_name(&exchange()),
+        Some(service_account_name(&Identity::TokenExchange(connection)).unwrap())
+    );
+    assert_eq!(k.account_name(&exchange()), Some(exchange_account()));
+    assert_eq!(
+        k.account_name(&Slot::runtime("agent_a")),
+        None,
+        "a runtime runs as the namespace's default account"
+    );
+}
+
+#[test]
+fn an_exchanges_start_creates_its_account_then_its_pod_ended_by_its_deadline() {
+    let (api, seen) = server(vec![(201, "{}".to_owned()), (201, "{}".to_owned())]);
+    let mut k = adapter(api);
+    let lifetime = Duration::from_millis(599_900);
+    assert_eq!(block_on(k.start(&exchange(), 1, Some(lifetime))), Ok(()));
+    let seen = seen.lock().unwrap();
+    assert_eq!(seen.len(), 2);
+    assert_eq!(
+        (seen[0].method.as_str(), seen[0].path.as_str()),
+        ("POST", "/api/v1/namespaces/cell/serviceaccounts"),
+        "the account exists before the pod that names it"
+    );
+    let account: Value = serde_json::from_str(&seen[0].body).unwrap();
+    assert_eq!(
+        account,
+        json!({
+            "apiVersion": "v1",
+            "kind": "ServiceAccount",
+            "metadata": {
+                "name": exchange_account(),
+                "labels": {
+                    "app.kubernetes.io/managed-by": "mandate-deploy-manager",
+                    "mandate.dev/workspace": "ws1",
+                    "mandate.dev/process": "token-exchange"
+                }
+            },
+            "automountServiceAccountToken": false
+        }),
+        "no token mounted, no Secret, and the labels the accounts policy admits"
+    );
+    assert_eq!(
+        (seen[1].method.as_str(), seen[1].path.as_str()),
+        ("POST", "/api/v1/namespaces/cell/pods")
+    );
+    let pod: Value = serde_json::from_str(&seen[1].body).unwrap();
+    assert_eq!(
+        pod["spec"]["serviceAccountName"],
+        exchange_account().as_str()
+    );
+    assert_eq!(
+        pod["spec"]["activeDeadlineSeconds"], 599,
+        "whole seconds, rounded down, so the pod never outlives its request"
+    );
+    assert_eq!(pod["spec"]["restartPolicy"], "Never");
+    assert_eq!(
+        pod["metadata"]["labels"]["mandate.dev/process"],
+        "token-exchange"
+    );
+    let name = pod["metadata"]["name"].as_str().unwrap();
+    assert_eq!(name, k.pod_name(&exchange(), 1));
+    assert!(
+        name.starts_with("mandate-tx-") && name.ends_with("-g1"),
+        "{name}"
+    );
+    let env: BTreeMap<&str, &str> = pod["spec"]["containers"][0]["env"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| (e["name"].as_str().unwrap(), e["value"].as_str().unwrap()))
+        .collect();
+    assert_eq!(env["MANDATE_PROCESS"], "token_exchange");
+    assert_eq!(env["MANDATE_SUBJECT"], CONNECTION);
+    assert_eq!(
+        env["MANDATE_SUBJECT_ACCOUNT"],
+        exchange_account(),
+        "its account named beside its connection, which admission and the exchange check"
+    );
+    assert_eq!(
+        pod["spec"]["containers"][0]["command"],
+        json!(["/usr/local/bin/mandate-token-exchange"]),
+        "the chart's pinned launch is kept"
+    );
+}
+
+#[test]
+fn an_account_already_made_is_kept_and_one_not_made_starts_no_pod() {
+    let (api, seen) = server(vec![
+        (409, "{}".to_owned()),
+        (201, "{}".to_owned()),
+        (500, "{}".to_owned()),
+    ]);
+    let mut k = adapter(api);
+    let lifetime = Some(Duration::from_secs(300));
+    assert_eq!(block_on(k.start(&exchange(), 1, lifetime)), Ok(()));
+    assert_eq!(
+        block_on(k.start(&exchange(), 1, lifetime)),
+        Err(Unavailable)
+    );
+    let seen = seen.lock().unwrap();
+    let asked: Vec<&str> = seen.iter().map(|s| s.path.as_str()).collect();
+    assert_eq!(
+        asked,
+        [
+            "/api/v1/namespaces/cell/serviceaccounts",
+            "/api/v1/namespaces/cell/pods",
+            "/api/v1/namespaces/cell/serviceaccounts",
+        ],
+        "no pod is asked for while its account may not exist"
+    );
+}
+
+#[test]
+fn only_an_exchange_takes_a_lifetime_and_it_always_takes_one_of_a_second_or_more() {
+    let k = adapter("http://127.0.0.1:1".to_owned());
+    assert_eq!(k.manifest(&exchange(), 1, None), None);
+    assert_eq!(
+        k.manifest(&exchange(), 1, Some(Duration::from_millis(999))),
+        None,
+        "a deadline already reached starts nothing"
+    );
+    assert!(
+        k.manifest(&exchange(), 1, Some(Duration::from_secs(1)))
+            .is_some()
+    );
+    assert_eq!(
+        k.manifest(&Slot::runtime("agent_a"), 1, Some(Duration::from_secs(60))),
+        None,
+        "a standing process is never given a deadline"
+    );
+    let (api, seen) = server(Vec::new());
+    let mut k = adapter(api);
+    assert_eq!(block_on(k.start(&exchange(), 1, None)), Err(Unavailable));
+    assert!(seen.lock().unwrap().is_empty(), "nothing is created for it");
+}
+
+#[test]
+fn an_exchanges_stop_deletes_its_account_then_its_pod_and_a_failure_keeps_the_pod() {
+    let (api, seen) = server(vec![
+        (200, "{}".to_owned()),
+        (200, "{}".to_owned()),
+        (404, "{}".to_owned()),
+        (404, "{}".to_owned()),
+        (500, "{}".to_owned()),
+    ]);
+    let mut k = adapter(api);
+    assert_eq!(block_on(k.stop(&exchange(), 1)), Ok(()));
+    assert_eq!(
+        block_on(k.stop(&exchange(), 1)),
+        Ok(()),
+        "both already gone"
+    );
+    assert_eq!(block_on(k.stop(&exchange(), 1)), Err(Unavailable));
+    let seen = seen.lock().unwrap();
+    let asked: Vec<(&str, String)> = seen
+        .iter()
+        .map(|s| (s.method.as_str(), s.path.clone()))
+        .collect();
+    let account = (
+        "DELETE",
+        format!(
+            "/api/v1/namespaces/cell/serviceaccounts/{}",
+            exchange_account()
+        ),
+    );
+    let pod = (
+        "DELETE",
+        format!(
+            "/api/v1/namespaces/cell/pods/{}",
+            k.pod_name(&exchange(), 1)
+        ),
+    );
+    assert_eq!(
+        asked,
+        [account.clone(), pod.clone(), account.clone(), pod, account],
+        "an account it could not delete leaves the pod listed, so the stop is asked again"
+    );
+}
+
+#[test]
+fn an_exchanges_pod_is_listed_by_the_charts_process_name() {
+    let list = json!({"items": [
+        pod("token-exchange", CONNECTION, "1", "Running", false, false),
+    ]});
+    let (api, _) = server(vec![(200, list.to_string())]);
+    assert_eq!(
+        block_on(adapter(api).observe()),
+        Ok(vec![Instance {
+            slot: exchange(),
+            generation: 1,
+            phase: Phase::Running { ready: false },
+        }])
+    );
+    let journal_spelling = json!({"items": [
+        pod("token_exchange", CONNECTION, "1", "Running", false, false),
+    ]});
+    let (api, _) = server(vec![(200, journal_spelling.to_string())]);
+    assert_eq!(
+        block_on(adapter(api).observe()),
+        Err(Unavailable),
+        "the label is the chart's name, never the journal's code"
+    );
+}
+
+#[test]
+fn each_process_reads_back_from_its_journal_code_and_from_its_chart_label() {
+    for process in [Process::Runtime, Process::Executor, Process::TokenExchange] {
+        assert_eq!(Process::parse(process.code()), Some(process));
+        assert_eq!(Process::from_label(process.label()), Some(process));
+    }
+    assert_eq!(
+        Process::parse("token_exchange"),
+        Some(Process::TokenExchange)
+    );
+    assert_eq!(Process::parse("token-exchange"), None);
+    assert_eq!(Process::from_label("token_exchange"), None);
 }
