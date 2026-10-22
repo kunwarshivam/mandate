@@ -855,7 +855,6 @@ fn crash_until_looped(m: &mut Manager, journal: &Journal, account: &str, mut sec
 /// generation runs makes the executor wanted again, so a later crash loop of it is an ordinary one:
 /// `crash_loop`, never `kill_switch_unapplied`, and a restarted manager agrees.
 #[test]
-#[ignore = "pending E21-33"]
 fn a_redeploy_after_a_kill_switch_run_makes_a_later_crash_loop_an_ordinary_one() {
     let journal = Journal::new();
     let mut m = manager(
@@ -903,7 +902,6 @@ fn a_redeploy_after_a_kill_switch_run_makes_a_later_crash_loop_an_ordinary_one()
 /// new run, which is restarted after a crash like the first; its own loop is a second
 /// `ProcessCrashLooped` and a second `kill_switch_unapplied`.
 #[test]
-#[ignore = "pending E21-33"]
 fn a_covering_switch_after_an_unapplied_loop_starts_a_new_run_that_can_loop_again() {
     let journal = Journal::new();
     let mut m = retired(&journal);
@@ -946,7 +944,6 @@ fn a_covering_switch_after_an_unapplied_loop_starts_a_new_run_that_can_loop_agai
 /// DEC-2344 item 1: a crashed generation a switch started waits the usual back-off before its
 /// restart, as a wanted one does.
 #[test]
-#[ignore = "pending E21-33"]
 fn a_crashed_kill_switch_generation_waits_its_back_off_before_one_restart() {
     let journal = Journal::new();
     let mut m = retired(&journal);

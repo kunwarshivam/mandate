@@ -83,7 +83,9 @@ struct SlotState {
     /// The current generation was started for a kill switch while the slot was not desired, or
     /// restarts one that was (DEC-2344 item 1): only an executor's can be, since only an executor is
     /// started when not desired. The manager never stops it: it ends by its own exit, and only a
-    /// crash is restarted.
+    /// crash is restarted. Such a start begins a new run: the last run's restarts, crash loop, and
+    /// alert are behind it, so a later switch after an unapplied loop is tried, and reported, again.
+    /// A deployment on the account clears it (`resume`), so a later loop is an ordinary one.
     held: bool,
     /// For an executor: its crash loop was journaled while `held`, so a switch is unapplied and its
     /// alert is [`KILL_SWITCH_UNAPPLIED`].
@@ -284,7 +286,15 @@ impl Manager {
                             state.held = false;
                         }
                         Cause::Restart => state.restarts.push(*at),
-                        Cause::KillSwitch => state.held = held,
+                        Cause::KillSwitch => {
+                            state.held = held;
+                            if held {
+                                state.restarts.clear();
+                                state.looped = false;
+                                state.alerted = false;
+                                state.unapplied = false;
+                            }
+                        }
                     }
                 }
             }
