@@ -4252,6 +4252,11 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   A2b:** the exit's `owes_nothing` reads agent-scoped work only; once the account-scope switch
   lands, an account switch still closing (`closing_all`) keeps the executor running too, with a
   test.
+- **E6-4 (executor fold), from [DEC-2347](decisions/DEC-2347.md) item 8:** when the executor's fold
+  interprets `PositionReleased`, the released quantity leaves the agent's sub-ledger (`kill.rs`'s
+  `sub_ledger`, read by the kill switch and by `ExecutorState::holds_lots`), so the switch sells
+  none of the owner's shares and the exit's item 3.6 no longer waits on them. Tests: released lots
+  let the executor exit `completed`; unreleased lots still hold it.
 - **E7-4 slices 5 and 6's tests correction (stream K), from #286 round 1 (minor 2):**
   `properties::no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding` counts a cancel as
   outstanding until the order is terminal, abandoned or its protection cancelled, so it would fail on
