@@ -31,7 +31,7 @@ use serde_json::{Value, json};
 
 use crate::SourceError;
 use crate::fingerprint::{
-    AccountFingerprint, Claim, FINGERPRINT_KEY, FingerprintError, decode_entry,
+    AccountFingerprint, Claim, FINGERPRINT_KEY, FingerprintError, ManagerFingerprints, decode_entry,
 };
 use crate::kubernetes::{
     KubernetesAuth, kubernetes_mount_requests, kubernetes_policy, kubernetes_policy_name,
@@ -799,6 +799,35 @@ impl OpenBaoSource {
 
 /// The version of the registry's form.
 const CLAIMS_FORMAT: u8 = 1;
+
+impl ManagerFingerprints for OpenBaoSource {
+    async fn fingerprint(
+        &self,
+        connection: &ConnectionId,
+        account: &AccountRef,
+    ) -> Result<(AccountFingerprint, AccountPiiRef), FingerprintError> {
+        let _ = (connection, account);
+        Err(FingerprintError::Unimplemented { story: "E21-32" })
+    }
+
+    async fn claim(
+        &self,
+        connection: &ConnectionId,
+        fingerprint: &AccountFingerprint,
+    ) -> Result<Claim, FingerprintError> {
+        let _ = (connection, fingerprint);
+        Err(FingerprintError::Unimplemented { story: "E21-32" })
+    }
+
+    async fn release(
+        &self,
+        connection: &ConnectionId,
+        account: &AccountRef,
+    ) -> Result<(), FingerprintError> {
+        let _ = (connection, account);
+        Err(FingerprintError::Unimplemented { story: "E21-32" })
+    }
+}
 
 impl Registry for OpenBaoSource {
     /// The registry entry, by check-and-set's version; an empty one at version 0 where there is

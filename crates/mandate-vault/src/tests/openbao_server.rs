@@ -24,7 +24,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use super::conformance::{self, Harness, at, c};
 use crate::SourceError;
 use crate::fingerprint::{
-    AccountFingerprint, Claim, FINGERPRINT_KEY, FingerprintError, encode_entry,
+    AccountFingerprint, Claim, FINGERPRINT_KEY, FingerprintError, ManagerFingerprints, encode_entry,
 };
 use crate::kubernetes::{
     KubernetesAuth, kubernetes_mount_requests, kubernetes_policy, kubernetes_policy_name,
@@ -1365,6 +1365,76 @@ async fn a_release_over_an_unreadable_entry_fails_closed() {
         manager.claim(&c("c2"), &held).await,
         Ok(Claim::HeldBy(c("c1")))
     );
+}
+
+/// The manager's three operations through [`ManagerFingerprints`], as the connect's callers drive
+/// them: the fingerprint read, a claim, a release that frees it for the next connection. A vault
+/// nobody answers for is an outage, checked first.
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "pending E21-32"]
+async fn the_managers_operations_run_through_its_trait() {
+    async fn connect<M: ManagerFingerprints>(
+        manager: &M,
+        connection: &ConnectionId,
+        account: &AccountRef,
+    ) -> Result<Claim, FingerprintError> {
+        let (fingerprint, _) = manager.fingerprint(connection, account).await?;
+        manager.claim(connection, &fingerprint).await
+    }
+    let ca = include_bytes!("fixtures/isrg-root-x1.pem").to_vec();
+    let unreachable = OpenBaoSource::from_token(
+        &nowhere(ca),
+        Identity::ConnectionManager,
+        SecretString::from("unused".to_owned()),
+        at(1_000_600),
+    )
+    .unwrap();
+    assert_eq!(
+        connect(&unreachable, &c("c1"), &request(1)).await,
+        Err(FingerprintError::Unavailable)
+    );
+    assert_eq!(
+        ManagerFingerprints::release(&unreachable, &c("c1"), &request(1)).await,
+        Err(FingerprintError::Unavailable)
+    );
+    let Some(bao) = Bao::new().await else {
+        return;
+    };
+    let now = at(1_000_000);
+    fingerprinted(&bao, "c1", 1, now).await;
+    fingerprinted(&bao, "c2", 2, now).await;
+    let manager = fingerprint_manager(&bao, now).await;
+    assert_eq!(
+        connect(&manager, &c("c1"), &request(1)).await,
+        Ok(Claim::Claimed)
+    );
+    assert_eq!(
+        connect(&manager, &c("c2"), &request(2)).await,
+        Ok(Claim::HeldBy(c("c1")))
+    );
+    assert_eq!(
+        ManagerFingerprints::release(&manager, &c("c1"), &request(1)).await,
+        Ok(())
+    );
+    assert_eq!(
+        connect(&manager, &c("c2"), &request(2)).await,
+        Ok(Claim::Claimed)
+    );
+}
+
+/// Deleting a connection's code or token where there is none changes nothing and answers `Ok`, so
+/// a revoke that runs again, or one of a connection that never stored a token, never fails.
+#[tokio::test(flavor = "current_thread")]
+async fn deleting_an_absent_entry_answers_ok() {
+    let Some(bao) = Bao::new().await else {
+        return;
+    };
+    let now = at(1_000_000);
+    let manager = bao.source(Identity::ConnectionManager, now).await;
+    for path in [SecretPath::Code(c("c2")), SecretPath::Token(c("c2"))] {
+        assert_eq!(manager.delete(&path).await, Ok(()), "{path:?}");
+        assert_eq!(manager.delete(&path).await, Ok(()), "{path:?}");
+    }
 }
 
 /// DEC-2345 item 4: of two concurrent claims of one fingerprint, exactly one wins, and the other
