@@ -399,6 +399,7 @@ async fn operator_call(
     path: &str,
     body: Option<Value>,
 ) -> Value {
+    let _already_installed = rustls::crypto::ring::default_provider().install_default();
     let mut request = reqwest::Client::builder()
         .add_root_certificate(Certificate::from_pem(ca_pem).unwrap())
         .build()
@@ -594,4 +595,90 @@ async fn after_a_take_no_version_of_the_code_is_left() {
             .await;
         assert!(left["data"].is_null(), "{version}: {left}");
     }
+}
+
+/// DEC-2061 item 2: an exchange whose policy lacks the take, the AppRole one, reads its code but
+/// is refused the overwrite, and the code is left for a taker that may take it.
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "pending E21-32"]
+async fn an_exchange_without_the_take_is_refused_and_leaves_the_code() {
+    an_unreachable_take_is_an_outage().await;
+    let Some(bao) = Bao::new().await else {
+        return;
+    };
+    let now = at(1_000_000);
+    bao.source(Identity::Api, now)
+        .await
+        .put(&SecretPath::Code(c("c1")), &conformance::secret("code-1"))
+        .await
+        .unwrap();
+    let manager = bao.source(Identity::ConnectionManager, now).await;
+    let grant = manager.issue_grant(&c("c1"), now).await.unwrap();
+    let approle = bao.exchange(&grant, now).await.unwrap();
+    assert_eq!(
+        conformance::taken(&approle, "c1").await,
+        Err(SourceError::Denied)
+    );
+    let taker = bao.taker(&c("c1"), now).await;
+    assert_eq!(
+        conformance::taken(&taker, "c1").await,
+        Ok(Some("code-1".to_owned()))
+    );
+}
+
+/// Provisioning writes each policy whole: a policy someone else left under a provisioned name is
+/// replaced, not kept.
+#[tokio::test(flavor = "current_thread")]
+async fn provisioning_replaces_a_policy_left_under_its_name() {
+    let Some((address, ca_pem, operator)) = server() else {
+        return;
+    };
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    let suffix = format!("{}-{n}", std::process::id());
+    let config = OpenBaoConfig {
+        address: address.clone(),
+        ca_pem: ca_pem.clone(),
+        mounts: Mounts {
+            kv: format!("kv-{suffix}"),
+            auth: format!("approle-{suffix}"),
+            kubernetes_executor: format!("kubernetes-executor-{suffix}"),
+            kubernetes_exchange: format!("kubernetes-exchange-{suffix}"),
+        },
+    };
+    let exchange = Identity::TokenExchange(c("c1"));
+    let name = kubernetes_policy_name(&exchange, &config.mounts).unwrap();
+    let planted = "path \"secret/*\" {\n  capabilities = [\"read\"]\n}\n";
+    operator_call(
+        &address,
+        &ca_pem,
+        &operator,
+        Method::PUT,
+        &format!("sys/policies/acl/{name}"),
+        Some(json!({"policy": planted})),
+    )
+    .await;
+    let auth = KubernetesAuth {
+        host: "https://127.0.0.1:6443".to_owned(),
+        ca_pem: Some(String::from_utf8(ca_pem.clone()).unwrap()),
+    };
+    provision(&config, &operator, &[c("c1")], Some(&auth))
+        .await
+        .unwrap();
+    let stored = operator_get(
+        &address,
+        &ca_pem,
+        &operator,
+        &format!("sys/policies/acl/{name}"),
+    )
+    .await;
+    let listed = operator_get(&address, &ca_pem, &operator, "sys/auth").await;
+    let accessor = mount_accessor(Some(&listed), &config.mounts.kubernetes_exchange).unwrap();
+    assert_eq!(
+        stored["data"]["policy"].as_str(),
+        Some(
+            kubernetes_policy(&exchange, &config.mounts, &accessor)
+                .unwrap()
+                .as_str()
+        )
+    );
 }

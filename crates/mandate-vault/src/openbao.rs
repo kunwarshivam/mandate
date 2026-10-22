@@ -208,6 +208,14 @@ pub fn kubernetes_login_refusal(status: u16, body: &[u8], role: &str) -> Result<
     refusal(StatusCode::from_u16(status).map_err(|_| SourceError::Unavailable)?)
 }
 
+/// The refusal a check-and-set overwrite's answer means, its status and its body: [`refusal`]'s,
+/// except that a 400 whose one error is that the version moved on is [`SourceError::Missing`],
+/// since another taker got the code first. No part of the body reaches the error.
+pub(crate) fn cas_refusal(status: u16, body: &[u8]) -> Result<(), SourceError> {
+    let _ = (status, body);
+    Err(SourceError::Unimplemented { story: "E21-32" })
+}
+
 /// The string at `pointer` in `value`.
 fn text<'a>(value: Option<&'a Value>, pointer: &str) -> Result<&'a str, SourceError> {
     value
@@ -534,7 +542,7 @@ impl SecretSource for OpenBaoSource {
         &self,
         connection: &ConnectionId,
     ) -> Result<Option<SecretSlice<u8>>, SourceError> {
-        let _ = connection;
+        let _ = (connection, cas_refusal);
         Err(SourceError::Unimplemented { story: "E21-32" })
     }
 
