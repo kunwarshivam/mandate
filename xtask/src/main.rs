@@ -712,12 +712,22 @@ fn rehearsal_runs(
 /// build: every workspace crate that declares it (DEC-922, DEC-963, DEC-962 item 2).
 const REHEARSAL_TESTED: [&str; 3] = ["mandate-mcp", "mandate-paper", "mandate-cli"];
 
+/// The workspace's nextest settings, under `xtask/` rather than nextest's default `.config/`, a
+/// top-level directory whose name the outside-path scan reads in any `.config` field access
+/// (DEC-2325).
+const NEXTEST_CONFIG: &str = "xtask/nextest.toml";
+
 /// The arguments of the workspace's nextest run over `packages`, or the whole workspace when
 /// there are none to scope it to (DEC-1190): every test of them or, with `partition` (`K/N`, `1
 /// <= K <= N`, plain decimal), nextest's counted `K`th of `N` shards, which together run every
-/// test once (DEC-871).
+/// test once (DEC-871). Every run reads [`NEXTEST_CONFIG`], so its longest tests start first
+/// (DEC-2325).
 fn nextest_args(partition: Option<&str>, packages: Option<&[String]>) -> Result<Vec<String>> {
-    let mut args: Vec<String> = ["nextest", "run"].map(String::from).to_vec();
+    let config = repo_root()?.join(NEXTEST_CONFIG);
+    let mut args: Vec<String> = ["nextest", "run", "--config-file"]
+        .map(String::from)
+        .to_vec();
+    args.push(config.to_string_lossy().into_owned());
     match packages {
         None => args.push("--workspace".to_owned()),
         Some(packages) => {
@@ -16802,14 +16812,22 @@ mod tests {
     #[test]
     fn the_nextest_partition_is_checked() -> Result<()> {
         let plain = super::nextest_args(None, None)?;
+        let config = repo_root()?.join(super::NEXTEST_CONFIG);
+        assert!(
+            config.is_file(),
+            "{} is the nextest config",
+            config.display()
+        );
         assert_eq!(
             plain,
             [
-                "nextest",
-                "run",
-                "--workspace",
-                "--locked",
-                "--no-tests=pass"
+                "nextest".to_owned(),
+                "run".to_owned(),
+                "--config-file".to_owned(),
+                config.to_string_lossy().into_owned(),
+                "--workspace".to_owned(),
+                "--locked".to_owned(),
+                "--no-tests=pass".to_owned(),
             ]
         );
         for (partition, shard) in [
