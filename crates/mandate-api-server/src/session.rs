@@ -24,6 +24,7 @@ use ring::rand::{SecureRandom, SystemRandom};
 use ring::{digest, hmac};
 
 use crate::config::SessionKey;
+use crate::standing::Standings;
 
 /// The session cookie's name (§3.3 item 5): host-only, `Secure`, `HttpOnly`, `SameSite=Strict`.
 pub const COOKIE_NAME: &str = "__Host-mandate_session";
@@ -152,6 +153,8 @@ pub struct Sessions {
     random: Box<dyn Random>,
     limits: Result<SessionLimits, SessionRefusal>,
     store: Mutex<Store>,
+    /// Each principal's last sign-in, route 2's interim standing (DEC-2319 item 2).
+    standings: Standings,
 }
 
 impl Sessions {
@@ -165,6 +168,7 @@ impl Sessions {
                 opened: 0,
                 entries: BTreeMap::new(),
             }),
+            standings: Standings::new(),
         }
     }
 
@@ -208,6 +212,7 @@ impl Sessions {
             previous: None,
         };
         self.insert(id, entry, replaced, now)?;
+        self.standings.signed_in(principal, now);
         Ok(self.encode(&id, &secret))
     }
 
@@ -475,13 +480,8 @@ impl Sessions {
     /// reduction-only session is not a sign-in, and a refused open records nothing.
     ///
     /// [DEC-2319]: ../../../docs/project/decisions/DEC-2319.md
-    #[expect(
-        clippy::todo,
-        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-    )]
     pub fn standing(&self, member: PrincipalId) -> SubjectStanding {
-        let _ = member;
-        todo!()
+        self.standings.standing(member)
     }
 
     /// How many sessions are held, for the tests' independent count.
