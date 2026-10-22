@@ -488,6 +488,14 @@ fn a_read_before_a_take_is_the_codes_version_and_bytes_or_no_code() {
         !shown.contains(canary) && !shown.contains(&encoded),
         "{shown}"
     );
+    for padded in ["abc", "abcd", "abcde", "a"] {
+        let found = json!({"data": {"data": {"value": STANDARD.encode(padded)}, "metadata": {"version": 1}}});
+        assert_eq!(
+            read_code(Ok(Some(found))),
+            Ok(Some((1, padded.to_owned()))),
+            "{padded:?}"
+        );
+    }
     assert_eq!(read_code(Err(SourceError::Missing)), Ok(None));
     let tombstone = json!({"data": {"data": {"taken": true}, "metadata": {"version": 4}}});
     assert_eq!(read_code(Ok(Some(tombstone))), Ok(None));
@@ -496,6 +504,9 @@ fn a_read_before_a_take_is_the_codes_version_and_bytes_or_no_code() {
         json!({"data": {"data": {"value": encoded}, "metadata": {"version": "3"}}}),
         json!({"data": {"data": {}, "metadata": {"version": 3}}}),
         json!({"data": {"data": {"value": "not base64!"}, "metadata": {"version": 3}}}),
+        json!({"data": {"data": {"value": "YWJj="}, "metadata": {"version": 3}}}),
+        json!({"data": {"data": {"value": "YWJ"}, "metadata": {"version": 3}}}),
+        json!({"data": {"data": {"value": "Y==="}, "metadata": {"version": 3}}}),
         json!({"data": {"data": {"taken": false, "value": 7}, "metadata": {"version": 3}}}),
     ] {
         let read = taken_read(Ok(Some(malformed.clone())));
