@@ -514,7 +514,6 @@ fn a_refused_connection_is_closed_and_stays_shut() -> Result<(), Error> {
 /// Rules 3 and 13: a connection record that does not read is ambiguity, so the pass answers its
 /// code, opens nothing and stops nothing; the process goes on taking every exit.
 #[test]
-#[ignore = "pending E21-32"]
 fn an_unreadable_record_keeps_the_gate_shut_and_every_exit_going() -> Result<(), Error> {
     let journal = deployed()?;
     opened(&journal)?;

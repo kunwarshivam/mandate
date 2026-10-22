@@ -29,9 +29,10 @@
 //! lease, a lost or rotated credential drains the process, and the lease is given back when it
 //! stops ([`credential`]). It runs the fixture wiring ([`fixture`]), which admits no opening, behind
 //! journal rule 68's gate: until its account stream holds its establishment's copy, which each pass
-//! writes once it is due, no opening reaches the binding gate, and a connection refused or revoked
-//! before it drains the process ([`establish`], DEC-2341). This is the one place the host clock is
-//! read (ES-05).
+//! writes once it is due, no opening reaches the binding gate. A connection refused or revoked
+//! before it, or a record that does not read, is reported once and keeps the gate shut, never
+//! stopping the process, so every exit still goes until the manager stops it ([`establish`],
+//! DEC-2341 item 4). This is the one place the host clock is read (ES-05).
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -257,12 +258,9 @@ fn serve_on<S: Store, B: Broker>(
     let mut process = ExecutorProcess::start(store, broker, wiring, &config, host_now());
     let status = Status::new(process.lifecycle().snapshot());
     probe::serve(socket, status.clone(), host_now).map_err(|_| "probe_socket_unavailable")?;
-    let mut gate_stop = None;
+    let mut reported = None;
     loop {
-        let stop = lease
-            .as_deref_mut()
-            .and_then(|held| held.pass(host_now()))
-            .or(gate_stop);
+        let stop = lease.as_deref_mut().and_then(|held| held.pass(host_now()));
         let terminated = stop.is_some() || terminate.load(Ordering::SeqCst);
         if terminated {
             process.drain(host_now());
@@ -279,7 +277,7 @@ fn serve_on<S: Store, B: Broker>(
             return Err(stop.unwrap_or("drain_unfinished"));
         }
         process.step(host_now());
-        gate_stop = match pass(
+        let gated = match pass(
             &mut process,
             &gate,
             &config.scope,
@@ -287,9 +285,13 @@ fn serve_on<S: Store, B: Broker>(
             host_now(),
         ) {
             Ok(Connected::Closed) => Some("connection_closed"),
-            Ok(Connected::Open | Connected::Connecting) | Err("stream_unavailable") => None,
+            Ok(Connected::Open | Connected::Connecting) => None,
             Err(code) => Some(code),
         };
+        if gated.is_some() && gated != reported {
+            eprintln!("{}", gated.unwrap_or_default());
+        }
+        reported = gated;
         status.publish(process.lifecycle().snapshot());
         thread::sleep(PASS);
     }
