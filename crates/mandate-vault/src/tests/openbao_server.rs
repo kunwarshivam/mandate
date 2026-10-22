@@ -430,6 +430,7 @@ async fn provisioning_sets_both_kubernetes_mounts_up_with_their_templated_polici
         &config,
         Identity::Executor(c("c1")),
         &SecretString::from("x.y.z".to_owned()),
+        "ws-ws1",
         at(1_000_000),
     )
     .await;

@@ -146,7 +146,11 @@ pub fn kubernetes_policy(
         )),
         Identity::TokenExchange(_) => Ok([
             block("data", &kv_path(&SecretPath::ClientSecret)?, "\"read\""),
-            block("data", &format!("connections/{own}/code"), "\"read\""),
+            block(
+                "data",
+                &format!("connections/{own}/code"),
+                "\"read\", \"update\"",
+            ),
             block("metadata", &format!("connections/{own}/code"), "\"delete\""),
             block(
                 "data",

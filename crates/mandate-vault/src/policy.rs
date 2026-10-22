@@ -6,7 +6,7 @@
 //! |---|---|---|---|
 //! | API | — | every connection's code | every connection's code and token |
 //! | Connection manager | — | — | every connection's code and token; it also issues and revokes token-exchange grants |
-//! | Token exchange for `c` (through a grant) | `c`'s code, the client secret | `c`'s token | `c`'s code |
+//! | Token exchange for `c` | `c`'s code, the client secret | `c`'s token, and `c`'s code only as [`Access::Take`] (DEC-2061) | `c`'s code |
 //! | Executor for `c` | `c`'s token, as a lease | — | — |
 //! | Runtime | — | — | — |
 //! | Secret import | — | the client secret, the platform's own secrets | — |
@@ -96,6 +96,11 @@ pub enum Access {
     Read,
     Write,
     Delete,
+    /// Overwrite an entry that is there, never create one: the token exchange's check-and-set
+    /// tombstone on its own connection's code, which makes taking the code single use
+    /// (DEC-2061). Only the Kubernetes-auth exchange's templated policy grants it; the AppRole
+    /// policies, retired with that exchange, never do.
+    Take,
 }
 
 /// Whether `identity` may `access` `path`: the table above.
@@ -109,7 +114,11 @@ pub fn allows(identity: &Identity, access: Access, path: &SecretPath) -> bool {
         )
         | (Identity::TokenExchange(_), Access::Read, SecretPath::ClientSecret)
         | (Identity::SecretImport, Access::Write, SecretPath::ClientSecret) => true,
-        (Identity::TokenExchange(own), Access::Read | Access::Delete, SecretPath::Code(c))
+        (
+            Identity::TokenExchange(own),
+            Access::Read | Access::Delete | Access::Take,
+            SecretPath::Code(c),
+        )
         | (Identity::TokenExchange(own), Access::Write, SecretPath::Token(c))
         | (Identity::Executor(own), Access::Read, SecretPath::Token(c)) => own == c,
         (identity, Access::Read, SecretPath::Platform(secret)) => {

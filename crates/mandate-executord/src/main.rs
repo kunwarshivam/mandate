@@ -52,7 +52,9 @@ use mandate_process::State;
 use mandate_process::probe::{self, Probe, Status};
 use mandate_store::{MemoryStore, PgStore, Store};
 use mandate_time::UtcNanos;
-use mandate_vault::mounted::{SERVICE_ACCOUNT_TOKEN_DIR, read_service_account_token};
+use mandate_vault::mounted::{
+    SERVICE_ACCOUNT_TOKEN_DIR, read_service_account_namespace, read_service_account_token,
+};
 use mandate_vault::openbao::OpenBaoSource;
 use tokio::signal::unix::{SignalKind, signal};
 
@@ -211,6 +213,8 @@ fn leased_broker(
         .enable_all()
         .build()
         .map_err(|_| "runtime_unavailable")?;
+    let namespace = read_service_account_namespace(Path::new(SERVICE_ACCOUNT_TOKEN_DIR))
+        .map_err(|_| "vault_credentials_unreadable")?;
     let vault = vault_login(
         || read_service_account_token(Path::new(SERVICE_ACCOUNT_TOKEN_DIR)),
         |identity, jwt| {
@@ -218,6 +222,7 @@ fn leased_broker(
                 &config,
                 identity,
                 &jwt,
+                &namespace,
                 host_now(),
             ))
         },

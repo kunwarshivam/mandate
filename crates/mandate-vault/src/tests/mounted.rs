@@ -15,7 +15,8 @@ use secrecy::ExposeSecret;
 
 use crate::SourceError;
 use crate::mounted::{
-    read_checked, read_mounted, read_mounted_credentials, read_service_account_token,
+    read_checked, read_mounted, read_mounted_credentials, read_service_account_namespace,
+    read_service_account_token,
 };
 use crate::policy::Identity;
 
@@ -392,4 +393,50 @@ fn a_projected_token_outside_its_directory_or_missing_is_refused() {
     assert_eq!(token(&dir), Err(SourceError::CredentialFile));
     let empty = Fresh::new("sa-missing");
     assert_eq!(token(&empty.0), Err(SourceError::CredentialFile));
+}
+
+/// The namespace the downward API projects beside the token is read, by the token's rules, and
+/// must be a Kubernetes label of at most 64 bytes.
+#[test]
+fn the_projected_namespace_is_read_by_the_tokens_rules() {
+    let dir = Fresh::new("sa-namespace");
+    kubelet(
+        &dir.0,
+        &[("token", "h.c.s", 0o644), ("namespace", "ws-ws1", 0o644)],
+    );
+    assert_eq!(
+        read_service_account_namespace(&dir.0),
+        Ok("ws-ws1".to_owned())
+    );
+    let longest = format!("a{}", "b".repeat(62));
+    for (text, want) in [
+        ("ws-ws1\n", Ok("ws-ws1".to_owned())),
+        (longest.as_str(), Ok(longest.clone())),
+        ("", Err(SourceError::CredentialFile)),
+        ("WS-WS1", Err(SourceError::CredentialFile)),
+        ("ws_ws1", Err(SourceError::CredentialFile)),
+        ("ws-ws1\nmore", Err(SourceError::CredentialFile)),
+        ("-ws", Err(SourceError::CredentialFile)),
+    ] {
+        let dir = Fresh::new("sa-namespace-text");
+        write(&dir.0.join("namespace"), text, 0o644);
+        assert_eq!(read_service_account_namespace(&dir.0), want, "{text:?}");
+    }
+    let over = Fresh::new("sa-namespace-over");
+    write(&over.0.join("namespace"), &"a".repeat(65), 0o644);
+    assert_eq!(
+        read_service_account_namespace(&over.0),
+        Err(SourceError::CredentialFile)
+    );
+    let writable = Fresh::new("sa-namespace-mode");
+    write(&writable.0.join("namespace"), "ws-ws1", 0o666);
+    assert_eq!(
+        read_service_account_namespace(&writable.0),
+        Err(SourceError::CredentialFile)
+    );
+    let missing = Fresh::new("sa-namespace-missing");
+    assert_eq!(
+        read_service_account_namespace(&missing.0),
+        Err(SourceError::CredentialFile)
+    );
 }
