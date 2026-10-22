@@ -31,7 +31,7 @@ pub mod manager;
 pub mod orchestrator;
 pub mod record;
 
-pub use control::{Cause, Fact, Process, Scope, Slot};
+pub use control::{Cause, Fact, Process, Scope, Slot, StopCause};
 pub use driver::{ControlJournal, Deployer, Halt, Identity};
 pub use manager::{Decision, Manager, backoff};
 pub use orchestrator::{Alerts, Effect, Instance, OperatorAlert, Orchestrator, Phase, Unavailable};

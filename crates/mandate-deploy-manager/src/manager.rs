@@ -7,9 +7,9 @@ use std::time::Duration;
 use mandate_process::{CRASH_LOOP_WINDOW, crash_loop};
 use mandate_time::UtcNanos;
 
-use crate::control::{Cause, Fact, Process, Scope, Slot};
+use crate::control::{Cause, Fact, Process, Scope, Slot, StopCause};
 use crate::orchestrator::{
-    CRASH_LOOP, DEPLOYMENT_UNCONNECTED, DEPLOYMENT_UNREAD, Effect, Instance,
+    CRASH_LOOP, DEPLOYMENT_UNCONNECTED, DEPLOYMENT_UNREAD, Effect, Instance, Phase,
 };
 use crate::record::Record;
 
@@ -38,11 +38,16 @@ pub enum Decision {
     Retry(Effect),
 }
 
-/// A connection's OAuth request: its token exchange's deadline, and whether a record closed it.
+/// A connection's OAuth request: its token exchange's deadline, whether a record closed it, its
+/// account, whether its executor's `exchanged` start is journaled, and whether a refusal or a
+/// revocation ended the connection since (DEC-2335).
 #[derive(Debug, Clone)]
 struct Request {
     deadline: UtcNanos,
     closed: bool,
+    account: String,
+    exchanged: bool,
+    ended: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -69,6 +74,9 @@ struct SlotState {
     awaiting_launch: bool,
     /// This manager raised the crash-loop alert for the slot.
     alerted: bool,
+    /// For an executor: the last record that took a reason to want it away was its connection's
+    /// refusal or revocation, not an agent's stop, so its stop's cause is `connection_closed`.
+    connection_closed: bool,
     down_since: Option<UtcNanos>,
 }
 
@@ -97,6 +105,8 @@ pub struct Manager {
     requests: BTreeMap<String, Request>,
     /// Every connection a record closed a request of, so a request read after one starts nothing.
     closed: BTreeSet<String>,
+    /// Every connection refused or revoked, so a request read after one wants no executor.
+    ended: BTreeSet<String>,
 }
 
 impl Manager {
@@ -127,23 +137,33 @@ impl Manager {
             Fact::Revoked { connection } => {
                 self.established.remove(connection);
                 self.close(connection);
+                self.end(connection);
             }
             Fact::Requested {
                 connection,
+                account,
                 deadline,
             } => {
                 let closed = self.closed.contains(connection);
+                let ended = self.ended.contains(connection);
                 self.requests
                     .entry(connection.clone())
                     .or_insert_with(|| Request {
                         deadline: *deadline,
                         closed,
+                        account: account.clone(),
+                        exchanged: false,
+                        ended,
                     });
                 self.slots
                     .entry(Slot::token_exchange(connection))
                     .or_default();
             }
             Fact::RequestClosed { connection } => self.close(connection),
+            Fact::Refused { connection } => {
+                self.close(connection);
+                self.end(connection);
+            }
             Fact::DeployedUnread { agent } => {
                 if !self.agents.contains_key(agent) && !self.stopped.contains(agent) {
                     self.unread.entry(agent.clone()).or_insert(false);
@@ -183,12 +203,16 @@ impl Manager {
                 self.stopped.insert(agent.clone());
                 self.unread.remove(agent);
                 self.unconnected.remove(agent);
-                let account = self.agents.get_mut(agent).map(|known| {
+                let account = self.agents.get_mut(agent).and_then(|known| {
+                    let was_running = !known.stopped;
                     known.stopped = true;
-                    known.account.clone()
+                    was_running.then(|| known.account.clone())
                 });
                 if let Some(account) = account {
                     let executor = Slot::executor(&account);
+                    if let Some(state) = self.slots.get_mut(&executor) {
+                        state.connection_closed = false;
+                    }
                     if !self.desired(&executor) {
                         self.resume(&executor);
                     }
@@ -215,6 +239,13 @@ impl Manager {
                 cause,
                 at,
             } => {
+                if *cause == Cause::Exchanged {
+                    for request in self.requests.values_mut() {
+                        if request.account == slot.subject {
+                            request.exchanged = true;
+                        }
+                    }
+                }
                 let state = self.slots.entry(slot.clone()).or_default();
                 if *generation > state.generation {
                     state.generation = *generation;
@@ -223,7 +254,9 @@ impl Manager {
                     state.awaiting_launch = false;
                     state.down_since = None;
                     match cause {
-                        Cause::Deployed | Cause::Requested => state.restarts.clear(),
+                        Cause::Deployed | Cause::Requested | Cause::Exchanged => {
+                            state.restarts.clear();
+                        }
                         Cause::Restart => state.restarts.push(*at),
                         Cause::KillSwitch => {}
                     }
@@ -246,6 +279,33 @@ impl Manager {
         if let Some(request) = self.requests.get_mut(connection) {
             request.closed = true;
         }
+    }
+
+    /// Ends `connection`'s connect: its executor is no longer wanted for it, and if that executor
+    /// was started for it, its stop's cause is `connection_closed` (DEC-2335).
+    fn end(&mut self, connection: &str) {
+        self.ended.insert(connection.to_owned());
+        let Some(request) = self.requests.get_mut(connection) else {
+            return;
+        };
+        request.ended = true;
+        if request.exchanged
+            && let Some(state) = self.slots.get_mut(&Slot::executor(&request.account))
+        {
+            state.connection_closed = true;
+        }
+    }
+
+    /// The `exchanged` start of the executor of `connection`'s account, once its token exchange
+    /// succeeded: only while its request is open, and only if that executor never ran, since rule
+    /// 167 holds `exchanged` to generation 1.
+    fn exchanged(&self, connection: &str) -> Option<Decision> {
+        let request = self.requests.get(connection)?;
+        let executor = Slot::executor(&request.account);
+        if request.closed || request.exchanged || self.slots.contains_key(&executor) {
+            return None;
+        }
+        Some(start(&executor, 1, Cause::Exchanged, None))
     }
 
     /// What a token exchange's request has left at `now`, which its pod is given to end by; `None`
@@ -305,10 +365,14 @@ impl Manager {
                 .agents
                 .get(&slot.subject)
                 .is_some_and(|agent| !agent.stopped),
-            Process::Executor => self
-                .agents
-                .values()
-                .any(|agent| !agent.stopped && agent.account == slot.subject),
+            Process::Executor => {
+                self.agents
+                    .values()
+                    .any(|agent| !agent.stopped && agent.account == slot.subject)
+                    || self.requests.values().any(|request| {
+                        request.exchanged && !request.ended && request.account == slot.subject
+                    })
+            }
             Process::TokenExchange => self
                 .requests
                 .get(&slot.subject)
@@ -329,6 +393,10 @@ impl Manager {
             }
             (Scope::Connection(connection), Process::Executor) => {
                 connected(connection) == Some(slot.subject.as_str())
+                    || self
+                        .requests
+                        .get(connection)
+                        .is_some_and(|request| request.account == slot.subject)
             }
             (Scope::Connection(connection), Process::Runtime) => {
                 account_of(&slot.subject).is_some_and(|a| connected(connection) == Some(a))
@@ -357,6 +425,12 @@ impl Manager {
             *reported = true;
             decisions.push(Decision::Retry(Effect::Alert(DEPLOYMENT_UNCONNECTED)));
         }
+        let succeeded: Vec<String> = observed
+            .iter()
+            .filter(|i| i.phase == Phase::Succeeded && i.slot.process == Process::TokenExchange)
+            .map(|i| i.slot.subject.clone())
+            .collect();
+        decisions.extend(succeeded.iter().filter_map(|c| self.exchanged(c)));
         let slots: Vec<Slot> = self.slots.keys().cloned().collect();
         decisions.extend(slots.into_iter().filter_map(|slot| {
             let desired = self.desired(&slot);
@@ -382,6 +456,10 @@ fn step(
     let live = instances.iter().find(|i| i.phase.live());
     if !desired {
         let generation = live?.generation;
+        let cause = match slot.process {
+            Process::Executor if state.connection_closed => StopCause::ConnectionClosed,
+            _ => StopCause::AgentStopped,
+        };
         return Some(if state.stopping.contains(&generation) {
             Decision::Retry(Effect::Stop {
                 slot: slot.clone(),
@@ -391,6 +469,7 @@ fn step(
             Decision::Journal(Record::Stop {
                 slot: slot.clone(),
                 generation,
+                cause,
             })
         });
     }
@@ -470,6 +549,7 @@ fn exchange_step(
             Decision::Journal(Record::Stop {
                 slot: slot.clone(),
                 generation,
+                cause: StopCause::RequestClosed,
             })
         });
     }
