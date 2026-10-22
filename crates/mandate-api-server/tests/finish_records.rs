@@ -78,7 +78,6 @@ fn step_up() -> Value {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn an_establishment_is_version_2_caused_by_the_passing_check() {
     let draft = admitted(&drafted(&established(), Some(CHECK), WORKSPACE, now()).unwrap());
     assert_eq!(draft["event_type"], "ConnectionEstablished");
@@ -103,7 +102,6 @@ fn an_establishment_is_version_2_caused_by_the_passing_check() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn the_finish_writes_as_the_connection_manager() {
     let draft = admitted(&drafted(&established(), Some(CHECK), WORKSPACE, now()).unwrap());
     assert_eq!(draft["actor"]["kind"], "system");
@@ -113,7 +111,6 @@ fn the_finish_writes_as_the_connection_manager() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_refusal_carries_its_check_reason_and_the_request_s_members() {
     let draft = admitted(
         &drafted(
@@ -145,7 +142,6 @@ fn a_refusal_carries_its_check_reason_and_the_request_s_members() {
 
 /// A teardown, check 3 and check 4 refuse uncaused; check 4 names the holder (rules 54, 55, 65).
 #[test]
-#[ignore = "pending E10-13"]
 fn the_uncaused_refusals_are_admitted() {
     for (effect, existing) in [
         (refused(None, "timeout", None), Value::Null),
@@ -170,7 +166,6 @@ fn the_uncaused_refusals_are_admitted() {
 
 /// The journal's check is a real oracle here: a teardown given a cause breaks rule 65.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_caused_teardown_is_one_the_journal_refuses() {
     let draft = drafted(
         &refused(None, "timeout", None),
@@ -183,7 +178,6 @@ fn a_caused_teardown_is_one_the_journal_refuses() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn the_event_id_is_the_request_s_own() {
     let first = event_id(&members(ACCOUNT)).unwrap();
     assert!(is_ulid(&first), "{first}");
@@ -203,7 +197,6 @@ fn the_event_id_is_the_request_s_own() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn the_finish_never_drafts_a_request() {
     assert_eq!(
         drafted(
