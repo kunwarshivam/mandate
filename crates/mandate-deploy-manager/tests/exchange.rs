@@ -211,6 +211,34 @@ fn a_start_whose_answer_was_lost_is_not_asked_again_once_its_pod_is_listed() {
 }
 
 #[test]
+fn a_closed_request_sweeps_the_account_of_an_exchange_whose_pod_never_ran() {
+    let (journal, mut m) = requested_at(0);
+    m.orchestrator().fake.refuse_effects = true;
+    tick(&mut m, 1);
+    journal.services(&revoked(CONNECTION), at(2));
+    tick(&mut m, 3);
+    m.orchestrator().fake.refuse_effects = false;
+    tick(&mut m, 4);
+    tick(&mut m, 5);
+    assert_eq!(records(&journal), [start_record(), stop_record()]);
+    assert_eq!(
+        stops(&mut m),
+        [1],
+        "its account is deleted, though no pod was ever listed, and once is enough"
+    );
+    let mut m = restart(m);
+    tick(&mut m, 6);
+    tick(&mut m, 7);
+    assert_eq!(
+        stops(&mut m),
+        [1, 1],
+        "a restarted manager asks once more, as it cannot know the first stop landed"
+    );
+    assert_eq!(records(&journal), [start_record(), stop_record()]);
+    clean(&mut m);
+}
+
+#[test]
 fn each_record_that_closes_the_request_stops_its_exchange_journaled_first() {
     let closers = [
         ("established", established(CONNECTION, ACCOUNT)),
@@ -431,6 +459,15 @@ fn check(seen: &Observed) -> Result<(), String> {
                 "{connection}: left running after its request closed"
             ));
         }
+        let swept = seen
+            .calls
+            .iter()
+            .any(|c| matches!(c, Call::Stop { slot: s, .. } if *s == slot));
+        if seen.effects && closed.is_some() && !started.is_empty() && !swept {
+            return Err(format!(
+                "{connection}: its account kept after its request closed"
+            ));
+        }
         if let Some((_, at)) = requested
             && seen.effects
             && closed.is_none()
@@ -554,7 +591,7 @@ fn every_check_of_the_exchange_oracle_catches_its_seeded_bug() {
             seen.rows[i].recorded_at = at(700).to_string();
         }
     };
-    let cases: [(&[Op], Tamper, &str); 7] = [
+    let cases: [(&[Op], Tamper, &str); 8] = [
         (&opened, Box::new(start_again), "started twice"),
         (
             &closed,
@@ -566,6 +603,11 @@ fn every_check_of_the_exchange_oracle_catches_its_seeded_bug() {
             "started outside its request",
         ),
         (&opened, Box::new(late), "past its deadline"),
+        (
+            &closed,
+            Box::new(|seen| seen.calls.retain(|c| !matches!(c, Call::Stop { .. }))),
+            "its account kept",
+        ),
         (
             &opened,
             Box::new(|seen| {
