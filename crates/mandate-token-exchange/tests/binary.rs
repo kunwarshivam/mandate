@@ -158,7 +158,6 @@ fn vault_dir(name: &str, with_ca: bool) -> std::path::PathBuf {
 /// A start that passes its settings needs exactly `run --vault-address <https> --vault-dir <abs>`
 /// (DEC-2330 item 3); anything else refuses before the vault.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_start_without_exactly_its_arguments_refuses() {
     let dir = vault_dir("arguments", true);
     let dir = dir.to_str().expect("UTF-8");
@@ -221,7 +220,6 @@ fn the_settings_are_judged_before_the_arguments() {
 /// With its settings and arguments, the process logs in before anything else; with no CA, or no
 /// ServiceAccount token to log in with, the login fails, exit 4, and nothing is exchanged.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_vault_that_cannot_be_logged_in_to_ends_the_run() {
     for (name, with_ca) in [("no-ca", false), ("ca", true)] {
         let dir = vault_dir(name, with_ca);

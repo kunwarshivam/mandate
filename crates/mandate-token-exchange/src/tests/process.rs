@@ -41,7 +41,6 @@ fn dir(name: &str, with_ca: bool) -> PathBuf {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn exactly_the_pinned_arguments_are_admitted() {
     assert_eq!(
         args(&[
@@ -108,7 +107,6 @@ fn exactly_the_pinned_arguments_are_admitted() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn each_failure_has_its_stable_code() {
     assert_eq!(ARGUMENTS_REFUSED, "token_exchange_arguments");
     assert_eq!(VAULT_REFUSED, "token_exchange_vault");
@@ -122,7 +120,6 @@ fn each_failure_has_its_stable_code() {
 /// The login reads the CA, then the ServiceAccount files, before it dials; a missing one is the
 /// file's refusal and no vault is reached.
 #[test]
-#[ignore = "pending E10-13"]
 fn the_login_reads_its_files_before_it_dials() {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -145,7 +142,6 @@ fn the_login_reads_its_files_before_it_dials() {
 
 /// Without a login there is no exchange: the failure is the vault's.
 #[test]
-#[ignore = "pending E10-13"]
 fn without_a_login_nothing_is_exchanged() {
     let settings = Settings {
         connection: ConnectionId::new(CONNECTION).unwrap(),
@@ -170,7 +166,6 @@ fn without_a_login_nothing_is_exchanged() {
 /// The process reads a real time for its login: after 2026-01-01, and never `None` on a host
 /// whose clock runs.
 #[test]
-#[ignore = "pending E10-13"]
 fn the_wall_clock_is_read() {
     let read = now().expect("a time");
     assert!(
