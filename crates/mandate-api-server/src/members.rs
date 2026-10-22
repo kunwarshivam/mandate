@@ -213,6 +213,20 @@ impl ControlLookup {
         )
     }
 
+    /// Whether `member`'s membership of the hosted workspace reaches it at the lookup's instant:
+    /// `active` or `cooling_off` (identity spec §5.1), as route 2 requires (§4.10 route 2 item 2).
+    ///
+    /// # Errors
+    /// [`LookupFailed`] when the control stream's records cannot be read or folded.
+    #[expect(
+        clippy::todo,
+        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+    )]
+    pub fn reaches(&self, member: PrincipalId) -> Result<bool, LookupFailed> {
+        let _ = member;
+        todo!()
+    }
+
     /// The hosted workspace's scope.
     fn scope(&self) -> Scope {
         Scope::Workspace {

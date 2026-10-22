@@ -1,0 +1,462 @@
+//! Route 2's judge (§4.10 route 2 items 2 and 4, DEC-2324 item 5, DEC-2319 item 2; E9-1 S2b-3a):
+//! a held passkey whose member signed in and reaches the hosted workspace opens; every other
+//! request, including one whose signature the decoy's published secret made, opens nothing.
+
+mod common;
+
+use std::collections::{BTreeMap, BTreeSet};
+
+use common::control::{Rows, T0, activation, change, member};
+use common::{at, hosted};
+use mandate_api_server::members::{ControlLookup, credential_records, membership_records};
+use mandate_api_server::opening::{DECOY_MEMBER, Opened, Presented, Reads, judge};
+use mandate_api_server::standing::Standings;
+use mandate_authn::SubjectStanding;
+use mandate_canon::{Digest, encode_ulid};
+use mandate_identity::{LookupFailed, PrincipalId, Role};
+use mandate_passkey::{Challenge, RelyingParty};
+use ring::digest::{SHA256, digest};
+use ring::rand::SystemRandom;
+use ring::signature::{ECDSA_P256_SHA256_ASN1_SIGNING, EcdsaKeyPair, Ed25519KeyPair, KeyPair};
+use serde_json::{Value as Json, json};
+
+const ALICE: PrincipalId = PrincipalId(7);
+const BOB: PrincipalId = PrincipalId(8);
+const CREDENTIAL: &str = "AAECAwQFBgcICQoLDA0ODw";
+const STRANGER: &str = "EBESExQVFhcYGRobHB0eHw";
+const CHALLENGE: [u8; 32] = [0x42; 32];
+const UP_UV: u8 = 0x05;
+
+fn rp() -> RelyingParty {
+    RelyingParty {
+        rp_id: "app.example".to_owned(),
+        origin: "https://app.example".to_owned(),
+    }
+}
+
+fn sha256(bytes: &[u8]) -> Vec<u8> {
+    digest(&SHA256, bytes).as_ref().to_vec()
+}
+
+fn b64url(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let mut out = String::new();
+    for chunk in bytes.chunks(3) {
+        let byte = |i: usize| u32::from(chunk.get(i).copied().unwrap_or(0));
+        let n = (byte(0) << 16) | (byte(1) << 8) | byte(2);
+        for i in 0..=chunk.len() {
+            out.push(char::from(ALPHABET[((n >> (18 - 6 * i)) & 63) as usize]));
+        }
+    }
+    out
+}
+
+/// A software authenticator: one key, its COSE_Key, and §9.31's name for its algorithm.
+enum Signer {
+    Es256(EcdsaKeyPair),
+    Ed25519(Ed25519KeyPair),
+}
+
+impl Signer {
+    fn es256() -> Self {
+        let rng = SystemRandom::new();
+        let pkcs8 = EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, &rng).unwrap();
+        Self::Es256(
+            EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, pkcs8.as_ref(), &rng)
+                .unwrap(),
+        )
+    }
+
+    fn ed25519() -> Self {
+        let pkcs8 = Ed25519KeyPair::generate_pkcs8(&SystemRandom::new()).unwrap();
+        Self::Ed25519(Ed25519KeyPair::from_pkcs8(pkcs8.as_ref()).unwrap())
+    }
+
+    /// The two decoys' signers, from their published secrets (DEC-2324 item 4).
+    fn decoys() -> [Self; 2] {
+        let mut one = [0; 32];
+        one[31] = 1;
+        let base_point = hex_bytes(
+            "046b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c2964fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5",
+        );
+        let p256 = EcdsaKeyPair::from_private_key_and_public_key(
+            &ECDSA_P256_SHA256_ASN1_SIGNING,
+            &one,
+            &base_point,
+            &SystemRandom::new(),
+        )
+        .unwrap();
+        let ed25519 = Ed25519KeyPair::from_seed_and_public_key(
+            &hex_bytes("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60"),
+            &hex_bytes("d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a"),
+        )
+        .unwrap();
+        [Self::Es256(p256), Self::Ed25519(ed25519)]
+    }
+
+    fn alg(&self) -> &'static str {
+        match self {
+            Self::Es256(_) => "es256",
+            Self::Ed25519(_) => "eddsa",
+        }
+    }
+
+    fn cose_key(&self) -> Vec<u8> {
+        match self {
+            Self::Es256(key) => {
+                let point = key.public_key().as_ref();
+                let mut out = vec![0xa5, 0x01, 0x02, 0x03, 0x26, 0x20, 0x01, 0x21, 0x58, 0x20];
+                out.extend_from_slice(&point[1..33]);
+                out.extend_from_slice(&[0x22, 0x58, 0x20]);
+                out.extend_from_slice(&point[33..65]);
+                out
+            }
+            Self::Ed25519(key) => {
+                let mut out = vec![0xa4, 0x01, 0x01, 0x03, 0x27, 0x20, 0x06, 0x21, 0x58, 0x20];
+                out.extend_from_slice(key.public_key().as_ref());
+                out
+            }
+        }
+    }
+
+    fn sign(&self, message: &[u8]) -> Vec<u8> {
+        match self {
+            Self::Es256(key) => key
+                .sign(&SystemRandom::new(), message)
+                .unwrap()
+                .as_ref()
+                .to_vec(),
+            Self::Ed25519(key) => key.sign(message).as_ref().to_vec(),
+        }
+    }
+
+    /// An assertion over `challenge` for `rp()`: authenticator data, client data, signature.
+    fn assert(&self, challenge: &[u8]) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
+        let authenticator_data = [sha256(b"app.example"), vec![UP_UV], vec![0, 0, 0, 9]].concat();
+        let client_data_json = format!(
+            r#"{{"type":"webauthn.get","challenge":"{}","origin":"https://app.example","crossOrigin":false}}"#,
+            b64url(challenge)
+        )
+        .into_bytes();
+        let signature =
+            self.sign(&[authenticator_data.clone(), sha256(&client_data_json)].concat());
+        (authenticator_data, client_data_json, signature)
+    }
+}
+
+fn hex_bytes(text: &str) -> Vec<u8> {
+    (0..text.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&text[i..i + 2], 16).unwrap())
+        .collect()
+}
+
+fn enrolled(member: PrincipalId, credential: &str, key: &[u8], alg: &str) -> Json {
+    json!({
+        "member": encode_ulid(member.0), "kind": "passkey", "credential": credential,
+        "public_key": format!("sha256:{}", Digest::of(key)), "alg": alg, "sign_count": 0,
+        "cool_off_ends": "2030-01-01T00:00:00.000000000Z", "step_up": null,
+    })
+}
+
+fn removed(member: PrincipalId, credential: &str) -> Json {
+    json!({
+        "member": encode_ulid(member.0), "credential": credential,
+        "step_up": {"assertion_id": "01JAA3P4A000000000000000S1", "authenticated_at": "2026-10-19T15:00:05.250000000Z", "method": "passkey"},
+    })
+}
+
+/// A hosted workspace where ALICE is an active operator who enrolled `signer` as CREDENTIAL and
+/// signed in on this process at T0 - 500.
+struct World {
+    rows: Rows,
+    keys: Option<BTreeMap<Digest, Vec<u8>>>,
+    standings: Standings,
+    unreadable_credentials: bool,
+    unreadable_memberships: bool,
+}
+
+impl World {
+    fn new(signer: &Signer) -> Self {
+        let mut rows = Rows::opened();
+        let operator = BTreeSet::from([Role::Operator]);
+        rows.hosted(
+            "MemberActivated",
+            T0 - 1_000,
+            activation(ALICE, &operator, T0 - 1_000),
+        );
+        let key = signer.cose_key();
+        rows.hosted(
+            "CredentialEnrolled",
+            T0 - 900,
+            enrolled(ALICE, CREDENTIAL, &key, signer.alg()),
+        );
+        let standings = Standings::new();
+        standings.signed_in(ALICE, at(T0 - 500));
+        Self {
+            rows,
+            keys: Some(BTreeMap::from([(Digest::of(&key), key)])),
+            standings,
+            unreadable_credentials: false,
+            unreadable_memberships: false,
+        }
+    }
+
+    fn judge(&self, passkey_id: &str, assertion: &(Vec<u8>, Vec<u8>, Vec<u8>)) -> Option<Opened> {
+        let credentials = credential_records(hosted().workspace, &self.rows.rows).unwrap();
+        let memberships = membership_records(hosted().workspace, &self.rows.rows).unwrap();
+        let reads = Reads {
+            hosted: hosted(),
+            credentials: (!self.unreadable_credentials).then_some(credentials.as_slice()),
+            memberships: (!self.unreadable_memberships).then_some(memberships.as_slice()),
+            standings: &self.standings,
+            keys: self
+                .keys
+                .as_ref()
+                .map(|keys| keys as &(dyn mandate_journal::ArtifactSource + Send + Sync)),
+        };
+        let presented = Presented {
+            passkey_id,
+            authenticator_data: &assertion.0,
+            client_data_json: &assertion.1,
+            signature: &assertion.2,
+        };
+        judge(
+            &rp(),
+            &Challenge::new(&CHALLENGE).unwrap(),
+            &presented,
+            &reads,
+            at(T0),
+        )
+    }
+}
+
+fn opened_for_alice() -> Option<Opened> {
+    Some(Opened {
+        member: ALICE,
+        standing: SubjectStanding {
+            last_sign_in: Some(at(T0 - 500)),
+            last_deprovision: None,
+        },
+    })
+}
+
+#[test]
+#[ignore = "pending E9-1"]
+fn a_held_passkey_whose_member_signed_in_and_reaches_the_workspace_opens_for_them() {
+    for signer in [Signer::es256(), Signer::ed25519()] {
+        let world = World::new(&signer);
+        assert_eq!(
+            world.judge(CREDENTIAL, &signer.assert(&CHALLENGE)),
+            opened_for_alice(),
+            "{}",
+            signer.alg()
+        );
+    }
+    let signer = Signer::es256();
+    let mut cooling = World::new(&signer);
+    cooling.rows = Rows::opened();
+    let key = signer.cose_key();
+    cooling.rows.hosted(
+        "MemberActivated",
+        T0 - 1_000,
+        activation(ALICE, &BTreeSet::from([Role::Operator]), T0 + 1_000),
+    );
+    cooling.rows.hosted(
+        "CredentialEnrolled",
+        T0 - 900,
+        enrolled(ALICE, CREDENTIAL, &key, "es256"),
+    );
+    assert_eq!(
+        cooling.judge(CREDENTIAL, &signer.assert(&CHALLENGE)),
+        opened_for_alice(),
+        "a cooling-off membership and a cooling-off passkey can pause and kill switch"
+    );
+}
+
+/// Asserts `world` opens nothing for `assertion` naming `passkey_id`.
+fn refused(name: &str, world: &World, passkey_id: &str, assertion: &(Vec<u8>, Vec<u8>, Vec<u8>)) {
+    assert_eq!(world.judge(passkey_id, assertion), None, "{name}");
+}
+
+#[test]
+#[ignore = "pending E9-1"]
+fn every_other_request_opens_nothing() {
+    let signer = Signer::es256();
+    let good = signer.assert(&CHALLENGE);
+    let world = World::new(&signer);
+    refused("an unknown passkey id", &world, STRANGER, &good);
+    let mut forged = good.clone();
+    forged.2[12] ^= 1;
+    refused("a bad signature", &world, CREDENTIAL, &forged);
+    refused(
+        "another challenge",
+        &world,
+        CREDENTIAL,
+        &signer.assert(&[0x43; 32]),
+    );
+    refused(
+        "another passkey's signature",
+        &world,
+        CREDENTIAL,
+        &Signer::es256().assert(&CHALLENGE),
+    );
+    let mut gone = World::new(&signer);
+    gone.rows
+        .hosted("CredentialRemoved", T0 - 800, removed(ALICE, CREDENTIAL));
+    refused("a removed passkey", &gone, CREDENTIAL, &good);
+    let mut deactivated = World::new(&signer);
+    deactivated
+        .rows
+        .hosted("MemberDeactivated", T0 - 600, member(ALICE));
+    deactivated.standings.signed_in(ALICE, at(T0 - 100));
+    refused("a deactivated member", &deactivated, CREDENTIAL, &good);
+    let mut stranger = World::new(&signer);
+    stranger.rows.hosted(
+        "CredentialEnrolled",
+        T0 - 850,
+        enrolled(BOB, STRANGER, &signer.cose_key(), "es256"),
+    );
+    stranger.standings.signed_in(BOB, at(T0 - 500));
+    refused("a member of no workspace", &stranger, STRANGER, &good);
+    let mut unseen = World::new(&signer);
+    unseen.standings = Standings::new();
+    refused(
+        "no sign-in since the process started",
+        &unseen,
+        CREDENTIAL,
+        &good,
+    );
+    let mut changed = World::new(&signer);
+    changed.rows.hosted(
+        "MemberRoleChanged",
+        T0 - 100,
+        change(
+            ALICE,
+            &BTreeMap::from([(Role::Approver, T0 + 100)]),
+            &BTreeSet::new(),
+        ),
+    );
+    refused(
+        "a membership record since the sign-in",
+        &changed,
+        CREDENTIAL,
+        &good,
+    );
+    let mut keyless = World::new(&signer);
+    keyless.keys = Some(BTreeMap::new());
+    refused("a key artifact not stored", &keyless, CREDENTIAL, &good);
+    keyless.keys = None;
+    refused("no key store", &keyless, CREDENTIAL, &good);
+    let mut corrupt = World::new(&signer);
+    if let Some(keys) = corrupt.keys.as_mut() {
+        keys.values_mut().for_each(|key| key[12] ^= 1);
+    }
+    refused(
+        "a key whose bytes do not hash to their reference",
+        &corrupt,
+        CREDENTIAL,
+        &good,
+    );
+    let mut mislabelled = World::new(&signer);
+    mislabelled.rows = Rows::opened();
+    mislabelled.rows.hosted(
+        "MemberActivated",
+        T0 - 1_000,
+        activation(ALICE, &BTreeSet::from([Role::Operator]), T0 - 1_000),
+    );
+    mislabelled.rows.hosted(
+        "CredentialEnrolled",
+        T0 - 900,
+        enrolled(ALICE, CREDENTIAL, &signer.cose_key(), "eddsa"),
+    );
+    refused(
+        "a key of another algorithm than recorded",
+        &mislabelled,
+        CREDENTIAL,
+        &good,
+    );
+    let mut unread = World::new(&signer);
+    unread.unreadable_credentials = true;
+    refused(
+        "passkey records that could not be read",
+        &unread,
+        CREDENTIAL,
+        &good,
+    );
+    let mut unmembered = World::new(&signer);
+    unmembered.unreadable_memberships = true;
+    refused(
+        "membership records that could not be read",
+        &unmembered,
+        CREDENTIAL,
+        &good,
+    );
+}
+
+#[test]
+#[ignore = "pending E9-1"]
+fn an_assertion_the_decoys_secret_signs_never_opens_even_for_a_member_named_like_the_decoy() {
+    let signer = Signer::es256();
+    let mut world = World::new(&signer);
+    world.rows.hosted(
+        "MemberActivated",
+        T0 - 990,
+        activation(DECOY_MEMBER, &BTreeSet::from([Role::Operator]), T0 - 990),
+    );
+    world.standings.signed_in(DECOY_MEMBER, at(T0 - 500));
+    for decoy in Signer::decoys() {
+        let assertion = decoy.assert(&CHALLENGE);
+        assert_eq!(
+            world.judge(STRANGER, &assertion),
+            None,
+            "{}: the decoy verified, and an unknown passkey still opens nothing",
+            decoy.alg()
+        );
+    }
+    assert_eq!(
+        world.judge(CREDENTIAL, &signer.assert(&CHALLENGE)),
+        opened_for_alice(),
+        "the same world opens for the held passkey"
+    );
+}
+
+#[test]
+#[ignore = "pending E9-1"]
+fn a_membership_reaches_the_workspace_while_active_or_cooling_off() {
+    let mut rows = Rows::opened();
+    let operator = BTreeSet::from([Role::Operator]);
+    rows.hosted(
+        "MemberActivated",
+        T0 - 100,
+        activation(ALICE, &operator, T0 - 100),
+    );
+    rows.hosted(
+        "MemberActivated",
+        T0 - 90,
+        activation(BOB, &operator, T0 + 100),
+    );
+    let deactivated = PrincipalId(9);
+    rows.hosted(
+        "MemberActivated",
+        T0 - 80,
+        activation(deactivated, &operator, T0 - 80),
+    );
+    rows.hosted("MemberDeactivated", T0 - 70, member(deactivated));
+    let gone = PrincipalId(10);
+    rows.hosted(
+        "MemberActivated",
+        T0 - 60,
+        activation(gone, &operator, T0 - 60),
+    );
+    rows.hosted("MemberDeactivated", T0 - 50, member(gone));
+    rows.hosted("MemberRemoved", T0 - 40, member(gone));
+    let lookup = rows.lookup(T0);
+    assert_eq!(lookup.reaches(ALICE), Ok(true), "active");
+    assert_eq!(lookup.reaches(BOB), Ok(true), "cooling off");
+    assert_eq!(lookup.reaches(deactivated), Ok(false), "deactivated");
+    assert_eq!(lookup.reaches(gone), Ok(false), "removed");
+    assert_eq!(lookup.reaches(PrincipalId(11)), Ok(false), "never a member");
+    let failed = ControlLookup::new(hosted(), Err(LookupFailed), at(T0));
+    assert_eq!(failed.reaches(ALICE), Err(LookupFailed));
+}
