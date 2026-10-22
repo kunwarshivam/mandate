@@ -162,6 +162,10 @@ pub struct ExecutorProcess<S, B> {
     /// [`held`]; asked again every pass, and never a stop, so the exits behind them still go
     /// (`AGENTS.md` rule 13).
     held: BTreeSet<String>,
+    /// Whether the last append was in doubt, so the hold it raises is alerted once per outage and
+    /// never floods (E21-26, design §2.1 and §8.2, RB-07). Cleared by the next commit, so the
+    /// following outage raises it again.
+    journal_down: bool,
     /// Each followed agent's deployed mandate version, from its `AgentDeployed`, which the core's
     /// mandate port answers with (DEC-2034 item 1).
     deployed: BTreeMap<AgentId, MandateVersion>,
@@ -202,6 +206,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             reconcile: false,
             unreadable: BTreeSet::new(),
             held: BTreeSet::new(),
+            journal_down: false,
             deployed: BTreeMap::new(),
             max_chain: config.max_chain,
             written_at: now,
@@ -597,8 +602,14 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         }
         if !drafts.is_empty() {
             match self.journal(now, &drafts) {
-                Ran::Committed => {}
+                Ran::Committed => {
+                    self.journal_down = false;
+                }
                 Ran::InDoubt => {
+                    if !self.journal_down {
+                        self.journal_down = true;
+                        alerts.push(journal_unavailable());
+                    }
                     self.pending = Some((input, at));
                     return false;
                 }
@@ -796,6 +807,16 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             fold(&mut self.state, &event).ok()?;
         }
         Some(self.account_head())
+    }
+}
+
+/// The alert an append going in doubt raises: one per outage, with a fixed key and no subject, so
+/// it discloses nothing but the fact that the executor is holding (`AGENTS.md` rule 6, E21-26,
+/// design §2.1 and §8.2, RB-07). `stream_unreadable` is the same shape.
+fn journal_unavailable() -> Alert {
+    Alert {
+        key: "journal_unavailable",
+        subject: None,
     }
 }
 

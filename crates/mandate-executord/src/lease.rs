@@ -18,7 +18,7 @@ use tokio::runtime::Runtime;
 
 /// A current-thread runtime to drive one vault call: the process is not async, and the call
 /// holds nothing a later pass needs.
-fn runtime() -> Result<Runtime, &'static str> {
+pub(crate) fn runtime() -> Result<Runtime, &'static str> {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()

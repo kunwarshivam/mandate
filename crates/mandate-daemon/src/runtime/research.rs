@@ -4,7 +4,7 @@
 
 use std::collections::{BTreeSet, VecDeque};
 
-use mandate_canon::Object;
+use mandate_canon::{Digest, Object};
 use mandate_journal::{AppendOutcome, Environment, StreamId};
 use mandate_process::Input as Lifecycled;
 use mandate_research::{
@@ -60,6 +60,13 @@ pub trait ResearchWorker {
 /// the batch that names them. Whether the bytes are stored.
 pub trait ArtifactSink {
     fn put(&mut self, bytes: &[u8]) -> bool;
+
+    /// The bytes stored under `digest`, checked against it, or `None` when the sink gives none: a
+    /// sink that only stores gives none, so a turn whose transcript it holds is answered nothing
+    /// (DEC-2264).
+    fn get(&self, _digest: &Digest) -> Option<Vec<u8>> {
+        None
+    }
 }
 
 /// One deployment's research, as its wiring gives it (DEC-2208 item 2).

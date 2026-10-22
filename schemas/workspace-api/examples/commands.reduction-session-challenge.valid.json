@@ -1,0 +1,14 @@
+[
+  {
+    "label": "the managed deployment's RP ID",
+    "set": {
+      "/rp_id": "app.owlhead.ai"
+    }
+  },
+  {
+    "label": "a challenge ending in a zero bit pattern",
+    "set": {
+      "/webauthn_challenge": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    }
+  }
+]

@@ -35,6 +35,7 @@
 pub mod budgets;
 pub mod call;
 pub mod fake;
+pub mod frame;
 pub mod guard;
 pub mod kinds;
 pub mod meter;
@@ -46,6 +47,7 @@ pub mod record;
 pub mod registry;
 pub mod schema;
 pub mod tools;
+pub mod wire;
 
 pub use call::{CallRequest, Gateway, RateCaps, RequestError, Settings};
 pub use kinds::{KeyOwner, Outcome, Purpose};

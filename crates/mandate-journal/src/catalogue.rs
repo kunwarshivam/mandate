@@ -1,7 +1,7 @@
 //! The event catalogue (journal spec §9): which streams may hold each event type, and the
 //! `config_refs` keys each requires at append.
 
-use crate::StreamType::{self, Account, Agent, Control, Meter, Notice, Scheduler};
+use crate::StreamType::{self, Account, Agent, Control, DeploymentMeter, Meter, Notice, Scheduler};
 
 pub(crate) const FEE: &str = "fee_config";
 pub(crate) const CAL: &str = "trading_calendar";
@@ -35,7 +35,7 @@ const NONE: &[&str] = &[];
 
 /// Every event type [`lookup`] admits, in its order. The test below reads `lookup`'s source, so
 /// a type added there and not here fails the build's tests.
-pub(crate) const EVENT_TYPES: [&str; 127] = [
+pub(crate) const EVENT_TYPES: [&str; 129] = [
     "StreamOpened",
     "MeterReserved",
     "MeterSettled",
@@ -151,6 +151,8 @@ pub(crate) const EVENT_TYPES: [&str; 127] = [
     "ProcessStartIssued",
     "ProcessStopIssued",
     "ProcessCrashLooped",
+    "CredentialEnrolled",
+    "CredentialRemoved",
     "ConnectionEstablished",
     "ConnectionCredentialRotated",
     "ConnectionRefused",
@@ -173,8 +175,19 @@ pub(crate) const EVENT_TYPES: [&str; 127] = [
 /// (mandate spec §6.1); its payload schema is not closed yet (journal spec §9.1).
 pub(crate) fn lookup(event_type: &str) -> Option<Entry> {
     let e = match event_type {
-        "StreamOpened" => entry(&[Account, Agent, Control, Scheduler, Notice, Meter], NONE),
-        "MeterReserved" | "MeterSettled" => entry(&[Meter], NONE),
+        "StreamOpened" => entry(
+            &[
+                Account,
+                Agent,
+                Control,
+                Scheduler,
+                Notice,
+                Meter,
+                DeploymentMeter,
+            ],
+            NONE,
+        ),
+        "MeterReserved" | "MeterSettled" => entry(&[Meter, DeploymentMeter], NONE),
         "TradingDayStarted" | "ClockAdvanced" => entry(&[Account, Scheduler], NONE),
         "KillSwitchActivated" => entry(&[Account, Agent], NONE),
         "OwnerAcknowledged" | "OwnerAcknowledgmentRequested" => entry(&[Account, Control], NONE),
@@ -275,7 +288,9 @@ pub(crate) fn lookup(event_type: &str) -> Option<Entry> {
         | "ControlPlaneMessageRefused"
         | "ProcessStartIssued"
         | "ProcessStopIssued"
-        | "ProcessCrashLooped" => entry(CONTROL, NONE),
+        | "ProcessCrashLooped"
+        | "CredentialEnrolled"
+        | "CredentialRemoved" => entry(CONTROL, NONE),
 
         "ConnectionEstablished" | "ConnectionCredentialRotated" => entry(&[Control, Account], NONE),
         "ConnectionRefused" | "ConnectionRequested" => entry(CONTROL, NONE),

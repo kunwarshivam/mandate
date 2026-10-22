@@ -70,5 +70,35 @@
     "set": {
       "/state": "s"
     }
+  },
+  {
+    "label": "a missing broker",
+    "remove": [
+      "/broker"
+    ]
+  },
+  {
+    "label": "a missing environment",
+    "remove": [
+      "/environment"
+    ]
+  },
+  {
+    "label": "a broker no enum names",
+    "set": {
+      "/broker": "mutant_value"
+    }
+  },
+  {
+    "label": "an environment no enum names",
+    "set": {
+      "/environment": "mutant_value"
+    }
+  },
+  {
+    "label": "a disclosure without a document",
+    "remove": [
+      "/disclosure/document"
+    ]
   }
 ]

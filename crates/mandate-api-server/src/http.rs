@@ -208,6 +208,14 @@ pub fn api(app: App, drain: Arc<Drain>) -> Router {
             post(challenges::challenge).fallback(otherwise.clone()),
         )
         .route(
+            "/v1/workspaces/{workspace}/connections",
+            get(routes::list_connections).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/connections/{connection}",
+            get(routes::one_connection).fallback(otherwise.clone()),
+        )
+        .route(
             "/v1/workspaces/{workspace}/connections/oauth/start",
             post(crate::connect::start).fallback(otherwise.clone()),
         )

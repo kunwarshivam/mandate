@@ -656,7 +656,9 @@ fn non_canonical_and_column_mismatch_rows_fail_at_their_positions() {
 /// so no per-event check can tell them from the range's own), a sibling stream's of the same
 /// workspace, one row of another stream among the range's own, and rows whose `stream_id` does
 /// not parse all refuse the run the one `NotFound` (DEC-760 item 4's shape), before any position
-/// is judged and with nothing recorded; the range's own rows still walk.
+/// is judged and with nothing recorded, as does a run of the deployment meter stream of the
+/// workspace's own segment, no workspace's (journal spec v0.53 §2); the range's own rows still
+/// walk.
 #[test]
 fn rows_of_another_stream_refuse_the_run_alike() {
     let (own_rows, own_hashes) = clean_chain(&own(), 3);
@@ -688,6 +690,20 @@ fn rows_of_another_stream_refuse_the_run_alike() {
         let got = own_walked((1, Some(6)), &snap(6, Vec::new(), rows));
         assert_eq!(got, Err(NOT_FOUND), "{name}");
     }
+    let deployment = format!("dmeter:{}", text(WS_A));
+    let walked = run_of(
+        &deployment,
+        (1, Some(6)),
+        StartRequest::Genesis,
+        &snap(6, Vec::new(), clean_chain(&deployment, 6).0),
+        &answered_by_nothing(),
+        &by_user(),
+    );
+    assert_eq!(
+        walked.err(),
+        Some(NOT_FOUND),
+        "the deployment meter stream of the workspace's own segment"
+    );
     let (whole, whole_hashes) = clean_chain(&own(), 6);
     let walked = own_walked((1, Some(6)), &snap(6, Vec::new(), whole));
     assert_eq!(

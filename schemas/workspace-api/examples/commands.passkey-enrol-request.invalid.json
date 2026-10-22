@@ -1,0 +1,68 @@
+[
+  {
+    "label": "no challenge_id",
+    "remove": [
+      "/challenge_id"
+    ]
+  },
+  {
+    "label": "no passkey_id",
+    "remove": [
+      "/passkey_id"
+    ]
+  },
+  {
+    "label": "no attestation_object",
+    "remove": [
+      "/attestation_object"
+    ]
+  },
+  {
+    "label": "no client_data_json",
+    "remove": [
+      "/client_data_json"
+    ]
+  },
+  {
+    "label": "no step_up",
+    "remove": [
+      "/step_up"
+    ]
+  },
+  {
+    "label": "no step_up_assertion",
+    "remove": [
+      "/step_up_assertion"
+    ]
+  },
+  {
+    "label": "a padded attestation",
+    "set": {
+      "/attestation_object": "o2NmbXRk="
+    }
+  },
+  {
+    "label": "a standard-alphabet client data",
+    "set": {
+      "/client_data_json": "eyJ0+XBl"
+    }
+  },
+  {
+    "label": "a passkey id of 15 bytes",
+    "set": {
+      "/passkey_id": "AAECAwQFBgcICQoLDA0O"
+    }
+  },
+  {
+    "label": "an unlisted member",
+    "set": {
+      "/user_handle": "AZ_6Z2T4Vxa9QxbP2tQ7nA"
+    }
+  },
+  {
+    "label": "an assertion of another shape",
+    "set": {
+      "/step_up_assertion": "AAEC"
+    }
+  }
+]
