@@ -915,7 +915,6 @@ fn an_agent_whose_cap_did_not_read_is_refused_unavailable_and_reserves_nothing()
 /// call of an agent it holds nothing for `BudgetExhausted`, as a cap of zero would, and stores
 /// nothing for it; only agents set by name are held, and a cleared one is held no longer.
 #[test]
-#[ignore = "pending E21-62"]
 fn a_meter_requiring_daily_caps_refuses_an_unknown_agent_and_stores_nothing() {
     let mut meter = Meter::new(MemoryMeter::new(), common::caps(), common::deployment());
     meter.require_research_daily();

@@ -391,6 +391,7 @@ pub struct Caps {
     agent_monthly_default: Usd6,
     research_daily: BTreeMap<String, Usd6>,
     research_unreadable: BTreeSet<String>,
+    research_daily_required: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -409,6 +410,7 @@ impl Caps {
             agent_monthly_default: workspace_monthly,
             research_daily: BTreeMap::new(),
             research_unreadable: BTreeSet::new(),
+            research_daily_required: false,
         }
     }
 
@@ -452,13 +454,12 @@ impl Caps {
 
     /// The agents with a research daily cap set or marked unread: on a meter that requires a daily
     /// cap, only agents set one by name are here, so the set grows with nothing a caller sends.
-    #[expect(
-        clippy::todo,
-        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-    )]
     pub fn research_agents(&self) -> BTreeSet<String> {
-        let _ = self;
-        todo!()
+        self.research_daily
+            .keys()
+            .chain(&self.research_unreadable)
+            .cloned()
+            .collect()
     }
 
     /// Every cap a call of `agent` for `purpose` on `day` must fit under, with its scope and
@@ -624,23 +625,14 @@ impl<S: MeterStore> Meter<S> {
     /// From now on, a research call of an agent with neither a daily cap nor an unread mark is
     /// refused `BudgetExhausted`, as a cap of zero would refuse it, with nothing stored for the
     /// agent (DEC-2272 item 3): the service's meter, whose callers name agents it never set.
-    #[expect(
-        clippy::todo,
-        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-    )]
     pub fn require_research_daily(&mut self) {
-        let _ = &mut self.caps;
-        todo!()
+        self.caps.research_daily_required = true;
     }
 
     /// Drops `agent`'s research daily cap and unread mark, for an agent no longer deployed.
-    #[expect(
-        clippy::todo,
-        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-    )]
     pub fn clear_research_daily(&mut self, agent: &str) {
-        let _ = (&mut self.caps, agent);
-        todo!()
+        self.caps.research_daily.remove(agent);
+        self.caps.research_unreadable.remove(agent);
     }
 
     /// Replaces `agent`'s research daily cap on a running meter (DEC-2272 item 5): `Some` sets it,
@@ -670,15 +662,18 @@ impl<S: MeterStore> Meter<S> {
     /// the copy; then the workspace's own reservation is appended (DEC-2207 item 4). A store that
     /// cannot be read or appended to refuses; a workspace append that fails after the copy leaves
     /// the copy open, an orphan that only over-counts. A research call of an agent whose daily cap
-    /// is marked unread is refused `Unavailable` before anything is read or appended.
+    /// is marked unread is refused `Unavailable`, and on a meter requiring daily caps one with no cap
+    /// is refused `BudgetExhausted`, before anything is read or appended.
     pub fn reserve(&mut self, reservation: Reservation) -> Result<Reservation, MeterRefusal> {
         if reservation.purpose == Purpose::Research
-            && reservation
-                .agent_id
-                .as_deref()
-                .is_some_and(|agent| self.caps.research_unreadable(agent))
+            && let Some(agent) = reservation.agent_id.as_deref()
         {
-            return Err(MeterRefusal::Unavailable);
+            if self.caps.research_unreadable(agent) {
+                return Err(MeterRefusal::Unavailable);
+            }
+            if self.caps.research_daily_required && !self.caps.research_daily.contains_key(agent) {
+                return Err(MeterRefusal::BudgetExhausted);
+            }
         }
         let records = self.store.read().map_err(|_| MeterRefusal::Unavailable)?;
         let caps = self.caps.applying(

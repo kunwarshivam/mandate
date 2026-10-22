@@ -397,7 +397,6 @@ fn the_start_holds_each_deployed_agent_s_cap() {
 /// reads or not, so what the service holds is bounded by the deployed agents alone; a stopped
 /// agent is held no longer.
 #[test]
-#[ignore = "pending E21-62"]
 fn unknown_agent_names_leave_the_held_caps_unchanged() {
     let world = World::new();
     world.deploy(AGENT, &world.version("5"));

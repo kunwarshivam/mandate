@@ -154,13 +154,13 @@ impl DailyCaps {
 
     /// How many agents' caps are held: only deployed agents' (DEC-2272 item 3), so the count grows
     /// with nothing a caller sends.
-    #[expect(
-        clippy::todo,
-        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-    )]
     pub fn held(&self) -> usize {
-        let _ = &self.held;
-        todo!()
+        self.held.len()
+    }
+
+    /// Whether a cap is held for `agent`, which is so only while it is deployed.
+    pub fn holds(&self, agent: &str) -> bool {
+        self.held.contains_key(agent)
     }
 
     /// The environment whose deployments the caps are read for.
@@ -169,7 +169,7 @@ impl DailyCaps {
     }
 
     /// `agent`'s cap for the deployment `control` names now: the one held when it is unchanged,
-    /// else read again. A read that fails drops what was held, so the agent has no cap to use
+    /// else read again, and zero, holding nothing, for an agent not deployed. A read that fails drops what was held, so the agent has no cap to use
     /// until a read succeeds.
     ///
     /// # Errors
@@ -181,6 +181,10 @@ impl DailyCaps {
         store: &dyn ArtifactSource,
     ) -> Result<Usd6, CapError> {
         let read = deployment(control, agent, self.environment).and_then(|now| {
+            if now == Deployment::NotDeployed {
+                self.held.remove(agent);
+                return Ok(Usd6::ZERO);
+            }
             match self.held.get(agent) {
                 Some((held, cap)) if *held == now => Ok(*cap),
                 _ => research_cap(&now, self.environment, store, self.workspace_monthly).inspect(

@@ -366,7 +366,6 @@ fn the_agents_are_those_deployed_in_this_environment() {
 /// DEC-2272 item 3, the coordinator's bound: an agent never deployed, or stopped since, is read as
 /// a cap of zero and held no longer, so the caps held count deployed agents alone.
 #[test]
-#[ignore = "pending E21-62"]
 fn a_never_deployed_or_stopped_agent_is_not_held() {
     let mut world = World::default();
     let mut caps = DailyCaps::new(Environment::Paper, monthly());
