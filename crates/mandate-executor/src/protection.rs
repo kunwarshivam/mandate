@@ -14339,6 +14339,10 @@ mod closed_form {
     ) -> Result<(), ExecutorError> {
         let mut expected = Object::new();
         let version = crate::batch::schema_version("ProtectionChanged");
+        assert!(
+            matches!(version, 1 | 2),
+            "§9.5 registers `ProtectionChanged` at versions 1 and 2 only, not {version}"
+        );
         let mut members: Vec<&str> = MEMBERS.split_whitespace().collect();
         assert_eq!(
             members.len(),
