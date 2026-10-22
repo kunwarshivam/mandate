@@ -682,3 +682,22 @@ async fn provisioning_replaces_a_policy_left_under_its_name() {
         )
     );
 }
+
+/// DEC-2061 item 2: the exchange's update on its code never creates one, so where no code is
+/// its write is refused and leaves nothing to take.
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "pending E21-32"]
+async fn the_exchanges_update_never_creates_a_code() {
+    an_unreachable_take_is_an_outage().await;
+    let Some(bao) = Bao::new().await else {
+        return;
+    };
+    let taker = bao.taker(&c("c1"), at(1_000_000)).await;
+    assert_eq!(
+        taker
+            .put(&SecretPath::Code(c("c1")), &conformance::secret("planted"))
+            .await,
+        Err(SourceError::Denied)
+    );
+    assert_eq!(conformance::taken(&taker, "c1").await, Ok(None));
+}
