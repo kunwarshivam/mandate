@@ -19,6 +19,8 @@
 //!   other than `dev` or `ci` is given (DEC-2633 item 2).
 //! - [`run`] runs the exchange after the start checks: the client secret first, then the take,
 //!   the one request and the token write.
+//! - [`vault`] is the vault, as the connection's exchange: the client secret, the take of the code
+//!   entry, and the token entry's write (DEC-2330).
 //! - `cell` (builds with debug assertions only) admits the token URL of the fixture provider a dev
 //!   or CI cell runs (DEC-2625), never an Alpaca host. A release build contains none of it.
 
@@ -27,6 +29,7 @@ pub mod http;
 pub mod response;
 pub mod run;
 pub mod startup;
+pub mod vault;
 
 #[cfg(debug_assertions)]
 pub mod cell;

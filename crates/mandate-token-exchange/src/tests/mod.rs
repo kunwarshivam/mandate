@@ -4,6 +4,7 @@
 mod form;
 mod response;
 mod run;
+mod vault;
 
 #[cfg(debug_assertions)]
 mod cell;
