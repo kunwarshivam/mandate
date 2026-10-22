@@ -475,8 +475,8 @@ async fn request_as(
 /// DEC-2350 items 1, 3 and 5 on a real vault: provisioning with the workspace's namespace makes
 /// the role provisioner's AppRole, its policy [`provisioner_policy`] exactly. Logged in as it, the
 /// provisioner makes a connection's executor role and token-exchange role as
-/// [`role_request`] asks, bound to that namespace and policy; it is refused a role in another
-/// namespace, a pinned parameter sent as an array, the removal of an executor's role, a policy and
+/// [`role_request`] asks, bound to that namespace and policy, and reads neither; it is refused a
+/// role in another namespace, a pinned parameter sent as an array, the removal of an executor's role, a policy and
 /// a secret; and it removes the token exchange's role, once and again, which changes nothing.
 /// The pure policy and request are checked first, so a run with no server still fails until they
 /// hold.
@@ -567,6 +567,8 @@ async fn the_provisioner_makes_both_roles_and_removes_only_the_exchanges() {
         let (path, body) = role_request(identity, mounts, "ws-ws1").unwrap();
         let (status, answer) = as_provisioner(Method::POST, path.clone(), Some(body)).await;
         assert_eq!(status, 204, "{identity:?}: {answer}");
+        let (status, _) = as_provisioner(Method::GET, path.clone(), None).await;
+        assert_eq!(status, 403, "{identity:?}: the provisioner reads no role");
         let (status, made) = as_operator(path).await;
         assert_eq!(status, 200, "{identity:?}");
         assert_eq!(
