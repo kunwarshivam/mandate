@@ -4996,7 +4996,6 @@ fn a_filled_buy_whose_fill_named_no_order_still_holds_lots() {
 /// DEC-2347 item 3.6 (the review of #2270): a buy that filled 5 of its 10 and then ended canceled
 /// or expired, its fill naming no order, still holds the 5 the account holds.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_partly_filled_buy_that_ended_with_its_fill_named_no_order_still_holds_lots() {
     for status in ["canceled", "expired"] {
         let fill = broker_fill("f-1", None, "5", "150");
