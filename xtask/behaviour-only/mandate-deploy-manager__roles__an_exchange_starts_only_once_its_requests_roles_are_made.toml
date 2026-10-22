@@ -1,6 +1,0 @@
-file = "crates/mandate-deploy-manager/tests/roles.rs"
-test = "an_exchange_starts_only_once_its_requests_roles_are_made"
-reason = """
-The manager's exchange start is a fold over the control stream with no seam to stub:
-the manager starts a token exchange on its request alone, before any `ConnectionRolesMade`. E21-33's S6 (DEC-2350) reads it and deletes this row.
-"""

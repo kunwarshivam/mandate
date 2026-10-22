@@ -1,6 +1,0 @@
-file = "crates/mandate-deploy-manager/tests/roles.rs"
-test = "a_made_for_another_request_starts_nothing"
-reason = """
-The manager's exchange start is a fold over the control stream with no seam to stub:
-the manager starts a token exchange without reading which request a `ConnectionRolesMade` answers. E21-33's S6 (DEC-2350) reads it and deletes this row.
-"""

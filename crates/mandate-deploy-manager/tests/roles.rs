@@ -68,7 +68,6 @@ fn requesting() -> (Journal, Manager) {
 }
 
 #[test]
-#[ignore = "pending E21-33"]
 fn an_exchange_starts_only_once_its_requests_roles_are_made() {
     let (journal, mut m) = requesting();
     for secs in [1, 2, 30] {
@@ -90,7 +89,6 @@ fn an_exchange_starts_only_once_its_requests_roles_are_made() {
 }
 
 #[test]
-#[ignore = "pending E21-33"]
 fn refused_or_absent_roles_start_nothing_and_the_connect_ends_at_its_deadline() {
     for refusal in [Some("vault_unavailable"), Some("role_refused"), None] {
         let (journal, mut m) = requesting();
@@ -109,7 +107,6 @@ fn refused_or_absent_roles_start_nothing_and_the_connect_ends_at_its_deadline() 
 }
 
 #[test]
-#[ignore = "pending E21-33"]
 fn a_made_for_another_request_starts_nothing() {
     let (journal, mut m) = requesting();
     let other = request_id("conn_01J8Z2OTHER");

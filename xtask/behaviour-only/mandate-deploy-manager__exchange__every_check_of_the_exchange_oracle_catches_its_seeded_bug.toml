@@ -1,6 +1,0 @@
-file = "crates/mandate-deploy-manager/tests/exchange.rs"
-test = "every_check_of_the_exchange_oracle_catches_its_seeded_bug"
-reason = """
-The manager's exchange start is a fold over the control stream with no seam to stub:
-its untampered runs start the exchange on the request alone, a pass before the `ConnectionRolesMade`, which the oracle now refuses. E21-33's S6 (DEC-2350) reads it and deletes this row.
-"""

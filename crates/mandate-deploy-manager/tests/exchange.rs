@@ -578,7 +578,6 @@ fn run_tampered(ops: &[Op], tamper: impl Fn(&mut Observed)) -> Result<(), String
 }
 
 #[test]
-#[ignore = "pending E21-33"]
 fn an_exchange_runs_once_inside_its_request_and_never_outlives_its_closing() {
     let mut runner = TestRunner::new(ProptestConfig {
         cases: 256,
@@ -597,7 +596,6 @@ type Tamper = Box<dyn Fn(&mut Observed)>;
 
 /// Each check of the oracle fails on the bug seeded for it, before it is trusted.
 #[test]
-#[ignore = "pending E21-33"]
 fn every_check_of_the_exchange_oracle_catches_its_seeded_bug() {
     let opened = [Op::Request(0), Op::MakeRoles(0), Op::Advance(1)];
     let closed = [
