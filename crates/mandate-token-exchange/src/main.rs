@@ -23,7 +23,7 @@ fn refuse(refused: StartRefused) -> ExitCode {
 }
 
 fn main() -> ExitCode {
-    match settings(|name| std::env::var(name).ok()) {
+    match settings(|name| std::env::var_os(name)) {
         Err(refused) => refuse(refused),
         Ok(_settings) => {
             let _ = writeln!(std::io::stderr().lock(), "{NOT_YET_EXCHANGING_CODE}");

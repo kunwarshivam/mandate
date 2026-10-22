@@ -5,6 +5,8 @@
 //! has no code that could follow one, so it refuses to start whenever `MANDATE_TOKEN_URL` is set at
 //! all. A debug build admits one only through [`crate::cell::parse`], in the `dev` and `ci` tiers.
 
+use std::ffi::{OsStr, OsString};
+
 use mandate_connections::record::ConnectionId;
 
 #[cfg(debug_assertions)]
@@ -60,7 +62,8 @@ impl StartRefused {
     }
 }
 
-/// The settings `var` gives, the token URL judged before the subject.
+/// The settings `var` gives, read as the process's environment is: raw, so a value that is not
+/// UTF-8 is still a value set. The token URL is judged before the subject.
 ///
 /// # Errors
 /// [`endpoint`]'s refusal first, then [`StartRefused::Subject`].
@@ -68,7 +71,7 @@ impl StartRefused {
     clippy::todo,
     reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
 )]
-pub fn settings(_var: impl Fn(&str) -> Option<String>) -> Result<Settings, StartRefused> {
+pub fn settings(_var: impl Fn(&str) -> Option<OsString>) -> Result<Settings, StartRefused> {
     todo!()
 }
 
@@ -77,11 +80,12 @@ pub fn settings(_var: impl Fn(&str) -> Option<String>) -> Result<Settings, Start
 ///
 /// # Errors
 /// [`StartRefused::Cell`] in a debug build for a token URL [`crate::cell::parse`] refuses;
-/// [`StartRefused::TokenUrlInRelease`] in any other build for any token URL, even an empty one.
+/// [`StartRefused::TokenUrlInRelease`] in any other build for any token URL, even an empty one or
+/// one that is not UTF-8.
 #[expect(
     clippy::todo,
     reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
 )]
-pub fn endpoint(_tier: Option<&str>, _token_url: Option<&str>) -> Result<Endpoint, StartRefused> {
+pub fn endpoint(_tier: Option<&str>, _token_url: Option<&OsStr>) -> Result<Endpoint, StartRefused> {
     todo!()
 }
