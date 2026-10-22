@@ -58,7 +58,6 @@ fn held(leased: &[u8]) -> Result<Exchanged<'_>, Error> {
 /// The check reads the scopes from the lease's token entry and keeps the account under a reference
 /// minted at its time from its source: the entry and the journaled record hold that one reference.
 #[test]
-#[ignore = "pending E21-32"]
 fn the_check_keeps_the_account_under_a_reference_minted_from_its_source() -> Result<(), Error> {
     let mut store = MemoryStore::default();
     let created = RefCell::new(Vec::new());
@@ -101,7 +100,6 @@ fn the_check_keeps_the_account_under_a_reference_minted_from_its_source() -> Res
 /// A lease that holds no token entry, or a source that cannot fill, stops the check before any
 /// create or record, naming neither the secret nor the id.
 #[test]
-#[ignore = "pending E21-32"]
 fn a_bad_lease_or_a_failed_source_creates_and_journals_nothing() -> Result<(), Error> {
     for (leased, random, want) in [
         (&b"tok-1"[..], Some([0; 10]), "credential_malformed"),
@@ -136,7 +134,6 @@ fn a_bad_lease_or_a_failed_source_creates_and_journals_nothing() -> Result<(), E
 /// The pod's ServiceAccount, its connection id's bytes in lowercase hex, reads back as that
 /// connection, for every id form.
 #[test]
-#[ignore = "pending E21-32"]
 fn the_subject_account_reads_back_as_its_connection() -> Result<(), Error> {
     for id in ["c1", "conn1", "01J8Z2CONN0000000000000001", "a_b-C"] {
         let hex: String = id.bytes().map(|b| format!("{b:02x}")).collect();
@@ -152,7 +149,6 @@ fn the_subject_account_reads_back_as_its_connection() -> Result<(), Error> {
 /// Anything but one connection's own name is refused: none, empty, upper-case digits, an odd
 /// length, a character that is no hex digit, and bytes that are no connection id.
 #[test]
-#[ignore = "pending E21-32"]
 fn any_other_subject_account_is_refused() {
     for configured in [
         None,

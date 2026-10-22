@@ -18,12 +18,11 @@ use mandate_executor::{AccountScope, IdGen};
 use mandate_store::Store;
 use mandate_time::UtcNanos;
 use mandate_vault::SourceError;
-use mandate_vault::personal::PiiRandom;
+use mandate_vault::personal::{PiiRandom, mint_pii_ref};
 use mandate_vault::policy::SecretPath;
 use secrecy::{ExposeSecret, SecretSlice};
 
 use crate::connect::{Checked, journal_check};
-use crate::credential::Unimplemented;
 
 /// What the OAuth connect check is given: the connection, the scopes its token entry was stored
 /// with, the account id the paper host answered (`None` when it could not be read), and the
@@ -125,6 +124,24 @@ pub fn exchanged_check<S: Store>(
     create: impl FnOnce(&SecretPath, &SecretSlice<u8>) -> Result<(), SourceError>,
     now: UtcNanos,
 ) -> Result<Checked, &'static str> {
-    let _ = (store, ids, scope, held, random, create, now);
-    Err(Unimplemented)
+    let Exchanged {
+        connection,
+        leased,
+        account,
+    } = held;
+    let granted = leased_scopes(leased)?;
+    let pii_ref = mint_pii_ref(now, random).map_err(|_| "entropy_unavailable")?;
+    oauth_connect_check(
+        store,
+        ids,
+        scope,
+        OAuthCheck {
+            connection,
+            granted,
+            account,
+            pii_ref,
+        },
+        create,
+        now,
+    )
 }

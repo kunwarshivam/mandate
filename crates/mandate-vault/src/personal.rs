@@ -3,8 +3,10 @@
 //! derives the account id from (journal spec §6.4). The randomness is the caller's source, the
 //! operating system's ([`OsRandom`]) in a process and a fixed one in a test.
 
+use mandate_canon::encode_ulid;
 use mandate_connections::record::AccountPiiRef;
 use mandate_time::UtcNanos;
+use ring::rand::{SecureRandom, SystemRandom};
 
 use crate::SourceError;
 
@@ -23,8 +25,9 @@ pub struct OsRandom;
 
 impl PiiRandom for OsRandom {
     fn fill(&mut self, bytes: &mut [u8; 10]) -> Result<(), SourceError> {
-        let _ = bytes;
-        Err(SourceError::Unimplemented { story: "E21-32" })
+        SystemRandom::new()
+            .fill(bytes)
+            .map_err(|_| SourceError::Unavailable)
     }
 }
 
@@ -38,6 +41,17 @@ pub fn mint_pii_ref(
     now: UtcNanos,
     random: &mut dyn PiiRandom,
 ) -> Result<AccountPiiRef, SourceError> {
-    let _ = (now, random);
-    Err(SourceError::Unimplemented { story: "E21-32" })
+    let mut bits = [0_u8; 10];
+    random.fill(&mut bits)?;
+    let millis = now
+        .secs()
+        .unsigned_abs()
+        .saturating_mul(1000)
+        .saturating_add(u64::from(now.nanos() / 1_000_000))
+        .to_be_bytes();
+    let mut ulid = [0_u8; 16];
+    ulid[..6].copy_from_slice(&millis[2..]);
+    ulid[6..].copy_from_slice(&bits);
+    AccountPiiRef::new(&format!("pii_{}", encode_ulid(u128::from_be_bytes(ulid))))
+        .map_err(|_| SourceError::Malformed)
 }
