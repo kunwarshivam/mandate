@@ -636,7 +636,6 @@ fn the_failure_key_whose_latest_failure_is_oldest_goes_first_an_address_before_a
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_key_failing_now_outlives_an_idle_one_whatever_its_earliest_failure() {
     let address = |a: &str| client(a, "never-seen");
     let mut steering = Bench::bounded((9, 9), (2, 9), (9, 9, 3));
@@ -703,7 +702,6 @@ fn bound_cost(keys: u32) -> std::time::Duration {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn the_cost_of_a_failure_does_not_grow_with_the_keys_held() {
     let (few, many) = (bound_cost(256), bound_cost(16_384));
     assert!(
