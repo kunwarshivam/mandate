@@ -274,7 +274,6 @@ fn every_draft_parses_as_its_record_with_the_steps_own_event_id() {
 /// A version-2 OAuth request gets both its roles made and one `ConnectionRolesMade` naming it, and
 /// a second pass does nothing more.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending E21-33"]
 async fn a_request_gets_its_roles_once() {
     let stream = Stream::opened();
     for record in world("made") {
@@ -294,7 +293,6 @@ async fn a_request_gets_its_roles_once() {
 /// A refused or slow vault refuses the request with its reason and raises the opaque alert, and no
 /// later pass makes the roles for it again.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending E21-33"]
 async fn a_refusal_or_a_slow_vault_is_journaled_once_and_alerted() {
     for (vault, reason) in [
         (
@@ -338,7 +336,6 @@ async fn a_refusal_or_a_slow_vault_is_journaled_once_and_alerted() {
 /// revoked, the exchange's role is removed once, for that closer, with its occasion; the executor's
 /// is never removed: the vault is asked to remove the exchange's alone.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending E21-33"]
 async fn a_close_or_a_revocation_removes_only_the_exchanges_role_once() {
     for (case, occasion) in [
         ("removed_on_close", "request_closed"),
@@ -383,7 +380,6 @@ async fn a_close_or_a_revocation_removes_only_the_exchanges_role_once() {
 /// A journal that is down after the vault made the roles leaves the step to the next pass, which
 /// makes them again, with nothing changed, and records them once.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending E21-33"]
 async fn a_step_the_journal_missed_is_done_again_and_recorded_once() {
     let stream = Stream::opened();
     for record in world("made") {
@@ -406,7 +402,6 @@ async fn a_step_the_journal_missed_is_done_again_and_recorded_once() {
 /// and its append, the same step's or another's. The provisioner reads the stream again, records
 /// what is still owed, and no record is lost or written twice.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending E21-33"]
 async fn two_writers_racing_lose_no_record_and_write_none_twice() {
     let records = world("two_requests");
     let (first, second) = (&records[0], &records[1]);
@@ -443,7 +438,6 @@ async fn two_writers_racing_lose_no_record_and_write_none_twice() {
 
 /// A stream with no `StreamOpened` gives no record its environment, so nothing is done.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending E21-33"]
 async fn an_unopened_stream_does_nothing() {
     let stream = Stream::default();
     for record in world("made") {
@@ -458,7 +452,6 @@ async fn an_unopened_stream_does_nothing() {
 /// with the provisioner's records in it, nothing is owed; without them, exactly the steps those
 /// records answer are, in the stream's order, and never an executor's removal, which no step is.
 #[test]
-#[ignore = "pending E21-33"]
 fn the_plan_owes_exactly_what_the_valid_streams_record() {
     let section = section();
     for case in section.get("streams").and_then(Value::as_array).unwrap() {

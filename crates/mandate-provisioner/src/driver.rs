@@ -2,9 +2,14 @@
 
 use std::time::Duration;
 
+use mandate_connections::record::ConnectionId;
 use mandate_deploy_manager::{Alerts, ControlJournal, Identity, OperatorAlert};
+use mandate_journal::AppendOutcome;
 use mandate_time::UtcNanos;
-use mandate_vault::provisioner::RoleProvisioner;
+use mandate_vault::provisioner::{RoleProvisioner, RoleRefusal};
+
+use crate::plan::{Step, plan};
+use crate::record::{Outcome, draft};
 
 /// How long the vault has to make one connect's roles before the request is refused as
 /// `vault_unavailable` (coordinator, 2026-10-22). The connect then ends by its own deadline, and
@@ -31,9 +36,6 @@ pub enum Halt {
     Refused { event_type: &'static str },
     /// The control stream has no `StreamOpened` yet, so no record can name its environment.
     NotOpened,
-    /// The report of a pass E21-33 has not implemented yet (DEC-77); the implementation removes
-    /// it.
-    Unimplemented { story: &'static str },
 }
 
 /// The provisioner with its ports, for the workspace `namespace` its roles bind.
@@ -84,7 +86,82 @@ impl<J: ControlJournal, V: RoleProvisioner, A: Alerts> Provisioner<J, V, A> {
     /// [`Halt`], after which every record committed stays committed and the next pass picks up
     /// the rest.
     pub async fn tick(&mut self, now: UtcNanos) -> Result<(), Halt> {
-        let _ = (now, &self.identity, &self.namespace, self.deadline);
-        Err(Halt::Unimplemented { story: "E21-33" })
+        let mut skipped: Vec<Step> = Vec::new();
+        let mut moved: usize = 0;
+        loop {
+            let rows = self
+                .journal
+                .rows_after(0)
+                .await
+                .map_err(|_| Halt::Journal)?;
+            let Ok(owed) = plan(&rows);
+            let environment = owed.environment.ok_or(Halt::NotOpened)?;
+            let Some(step) = owed.steps.into_iter().find(|s| !skipped.contains(s)) else {
+                return Ok(());
+            };
+            let Some(outcome) = self.perform(&step).await else {
+                self.alerts.raise(ROLES_REFUSED);
+                skipped.push(step);
+                continue;
+            };
+            let record = draft(&self.identity, &step, outcome, &environment, now);
+            match self
+                .journal
+                .append(&record, now)
+                .await
+                .map_err(|_| Halt::Journal)?
+            {
+                AppendOutcome::Committed(_) | AppendOutcome::AlreadyCommitted(_) => {
+                    if matches!(outcome, Outcome::Refused(_)) {
+                        self.alerts.raise(ROLES_REFUSED);
+                    }
+                }
+                AppendOutcome::HeadMismatch { .. }
+                | AppendOutcome::IdempotencyConflict { .. }
+                | AppendOutcome::Fenced { .. } => {
+                    moved = moved.saturating_add(1);
+                    if moved >= APPEND_TRIES {
+                        return Err(Halt::Journal);
+                    }
+                }
+                AppendOutcome::Invalid { .. } => {
+                    return Err(Halt::Refused {
+                        event_type: outcome.event_type(),
+                    });
+                }
+                AppendOutcome::Unavailable | AppendOutcome::Ambiguous => return Err(Halt::Journal),
+            }
+        }
+    }
+
+    /// `step` on the vault within the deadline: the roles made or refused, or the exchange's
+    /// removed. A removal the vault does not do in time is `None`: there is no record of a
+    /// removal refused, and the next pass removes it again.
+    async fn perform(&self, step: &Step) -> Option<Outcome> {
+        match step {
+            Step::Make { connection, .. } => {
+                let made = match ConnectionId::new(connection) {
+                    Ok(id) => tokio::time::timeout(
+                        self.deadline,
+                        self.vault.make_roles(&id, &self.namespace),
+                    )
+                    .await
+                    .unwrap_or(Err(RoleRefusal::VaultUnavailable)),
+                    Err(_) => Err(RoleRefusal::RoleRefused),
+                };
+                Some(made.map_or_else(Outcome::Refused, |()| Outcome::Made))
+            }
+            Step::Remove { connection, .. } => {
+                let id = ConnectionId::new(connection).ok()?;
+                tokio::time::timeout(
+                    self.deadline,
+                    self.vault.remove_exchange_role(&id, &self.namespace),
+                )
+                .await
+                .ok()?
+                .ok()
+                .map(|()| Outcome::Removed)
+            }
+        }
     }
 }
