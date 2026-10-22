@@ -4519,6 +4519,12 @@ fn a_fractional_position_protects_the_whole_shares_and_discloses_the_fraction() 
         qty("10"),
         "only the whole shares: a fractional leg is not allowed in an OCO or a bracket (§5.2)"
     );
+    assert_eq!(
+        protective.oco.as_ref().map(|legs| legs.qty),
+        Some(qty("10")),
+        "on Alpaca one OCO at the entry's prices, both legs for the whole ten, never the 0.4 \
+         (DEC-2312 item 2)"
+    );
     let disclosed = ran
         .draft("ProtectionChanged")
         .and_then(|d| d.payload.get("unprotected_fraction"))
