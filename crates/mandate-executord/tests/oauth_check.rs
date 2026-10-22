@@ -306,6 +306,45 @@ fn every_refused_create_journals_a_null_reference() -> Result<(), Error> {
     Ok(())
 }
 
+/// A scope whose account is not an account stream's reference names no entry: the check creates
+/// nothing, and journals the account as unreadable under no reference, rather than an entry at
+/// some other path.
+#[test]
+#[ignore = "pending E21-32"]
+fn an_account_that_is_no_stream_reference_creates_nothing() -> Result<(), Error> {
+    let mut store = MemoryStore::default();
+    let vault = CreateOnce::default();
+    let scope = AccountScope {
+        account: AccountRef("acct1".to_owned()),
+        workspace: WorkspaceId("ws1".to_owned()),
+    };
+    let checked = oauth_connect_check(
+        &mut store,
+        &Ids,
+        &scope,
+        check(Some(BROKER_ID), PII)?,
+        |path, secret| vault.create(path, secret),
+        now()?,
+    )?;
+    assert!(!checked.passed);
+    assert!(vault.asked.borrow().is_empty());
+    let stream = StreamId::parse("acct:ws1:acct1").ok_or("stream")?;
+    let rows = store.rows(&stream).ok_or("rows")?;
+    let row = rows
+        .iter()
+        .rev()
+        .find(|row| row.event_type == "ConnectionChecked")
+        .ok_or("no ConnectionChecked")?;
+    let payload = parse(&row.body)?.get("payload").cloned().ok_or("payload")?;
+    assert_eq!(payload.get("account_pii_ref"), Some(&Value::Null));
+    assert!(results(&payload).contains(&(
+        "account".to_owned(),
+        "failed".to_owned(),
+        Some("account_unreadable".to_owned())
+    )));
+    Ok(())
+}
+
 /// The entry is created only once the account stream is this writer's: a journal that cannot give
 /// the stream stops the check before any create.
 #[test]
