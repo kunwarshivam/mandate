@@ -26,6 +26,7 @@ use crate::lifecycle::{Drain, Lifecycle};
 use crate::me;
 use crate::members::{Hosted, ParseMembers};
 use crate::objects::ObjectStore;
+use crate::reduction::{self, Reduction};
 use crate::routes;
 use crate::session::{Answer, COOKIE_MAX_AGE_S, COOKIE_NAME, Sessions};
 use crate::status;
@@ -88,6 +89,8 @@ pub struct App {
     /// The connect start's OAuth client and `state` values (DEC-2623); `None` when the deployment
     /// offers no connect, and the start answers `not_found`.
     pub connect: Option<Arc<crate::connect::Connect>>,
+    /// Route 2's challenges, limits, and ingress peers (DEC-2117, DEC-2119).
+    pub reduction: Arc<Reduction>,
 }
 
 /// The API listener's router: every path answers the one 401 until its route lands (API-1).
@@ -116,6 +119,10 @@ pub fn api(app: App, drain: Arc<Drain>) -> Router {
         .route(
             "/v1/oauth/alpaca/callback",
             get(crate::connect::callback).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/reduction-sessions/challenges",
+            post(reduction::challenge).fallback(otherwise.clone()),
         )
         .route(
             "/v1/me/session",
@@ -250,7 +257,7 @@ pub(crate) fn browser(headers: &HeaderMap, app_origin: &str) -> bool {
 }
 
 /// The 403 a failed [`browser`] check answers, before any cookie or token is read.
-fn forbidden() -> Response {
+pub(crate) fn forbidden() -> Response {
     problem(StatusCode::FORBIDDEN, problem_body(ProblemCode::Forbidden))
 }
 

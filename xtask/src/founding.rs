@@ -213,8 +213,13 @@ fn configmap(text: &str) -> String {
 }
 
 /// The secrets the infra step's own environment holds under a `MANDATE_` name, each read once by
-/// the step that needs it and handed on only on a child's standard input (DEC-2114, DEC-2630).
-pub(crate) const STEP_SECRETS: [&str; 2] = [SUBJECT_VAR, "MANDATE_OPENROUTER_API_KEY"];
+/// the step that needs it and handed on only on a child's standard input (DEC-2114, DEC-2630,
+/// DEC-2636).
+pub(crate) const STEP_SECRETS: [&str; 3] = [
+    SUBJECT_VAR,
+    "MANDATE_OPENROUTER_API_KEY",
+    "MANDATE_ALPACA_OAUTH_CLIENT_SECRET",
+];
 
 /// `command` with none of [`STEP_SECRETS`] in its environment, for a child that inherits the
 /// step's environment rather than starting from an empty one.

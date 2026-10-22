@@ -10,7 +10,7 @@
 
 use core::fmt;
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
 use mandate_canon::{Digest, Value};
@@ -390,6 +390,8 @@ pub struct Caps {
     agent_monthly: BTreeMap<String, Usd6>,
     agent_monthly_default: Usd6,
     research_daily: BTreeMap<String, Usd6>,
+    research_unreadable: BTreeSet<String>,
+    research_daily_required: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -407,6 +409,8 @@ impl Caps {
             agent_monthly: BTreeMap::new(),
             agent_monthly_default: workspace_monthly,
             research_daily: BTreeMap::new(),
+            research_unreadable: BTreeSet::new(),
+            research_daily_required: false,
         }
     }
 
@@ -440,6 +444,22 @@ impl Caps {
         }
         self.research_daily.insert(agent.to_owned(), cap);
         Ok(self)
+    }
+
+    /// Whether `agent`'s research daily cap is marked as one that did not read, so its research
+    /// calls are refused `Unavailable` (DEC-2272 item 5).
+    pub fn research_unreadable(&self, agent: &str) -> bool {
+        self.research_unreadable.contains(agent)
+    }
+
+    /// The agents with a research daily cap set or marked unread: on a meter that requires a daily
+    /// cap, only agents set one by name are here, so the set grows with nothing a caller sends.
+    pub fn research_agents(&self) -> BTreeSet<String> {
+        self.research_daily
+            .keys()
+            .chain(&self.research_unreadable)
+            .cloned()
+            .collect()
     }
 
     /// Every cap a call of `agent` for `purpose` on `day` must fit under, with its scope and
@@ -602,13 +622,59 @@ impl<S: MeterStore> Meter<S> {
         &self.caps
     }
 
+    /// From now on, a research call of an agent with neither a daily cap nor an unread mark is
+    /// refused `BudgetExhausted`, as a cap of zero would refuse it, with nothing stored for the
+    /// agent (DEC-2272 item 3): the service's meter, whose callers name agents it never set.
+    pub fn require_research_daily(&mut self) {
+        self.caps.research_daily_required = true;
+    }
+
+    /// Drops `agent`'s research daily cap and unread mark, for an agent no longer deployed.
+    pub fn clear_research_daily(&mut self, agent: &str) {
+        self.caps.research_daily.remove(agent);
+        self.caps.research_unreadable.remove(agent);
+    }
+
+    /// Replaces `agent`'s research daily cap on a running meter (DEC-2272 item 5): `Some` sets it,
+    /// at most the workspace's monthly budget; `None` marks it unread, so the agent's research calls
+    /// are refused `Unavailable`, reserving nothing, until a cap is set again.
+    ///
+    /// # Errors
+    /// [`CapError::AboveWorkspace`] for a cap above the workspace's monthly budget, which leaves the
+    /// agent marked unread rather than holding its earlier cap.
+    pub fn set_research_daily(&mut self, agent: &str, cap: Option<Usd6>) -> Result<(), CapError> {
+        self.caps.research_daily.remove(agent);
+        self.caps.research_unreadable.insert(agent.to_owned());
+        let Some(cap) = cap else {
+            return Ok(());
+        };
+        if cap > self.caps.workspace_monthly {
+            return Err(CapError::AboveWorkspace);
+        }
+        self.caps.research_unreadable.remove(agent);
+        self.caps.research_daily.insert(agent.to_owned(), cap);
+        Ok(())
+    }
+
     /// Appends `reservation` only if, for every cap that applies, spend plus its maximum is at
     /// most the cap (inference spec §7.3), the deployment's included. The workspace's caps are
     /// checked first with nothing appended; then the deployment's writer checks its cap and appends
     /// the copy; then the workspace's own reservation is appended (DEC-2207 item 4). A store that
     /// cannot be read or appended to refuses; a workspace append that fails after the copy leaves
-    /// the copy open, an orphan that only over-counts.
+    /// the copy open, an orphan that only over-counts. A research call of an agent whose daily cap
+    /// is marked unread is refused `Unavailable`, and on a meter requiring daily caps one with no cap
+    /// is refused `BudgetExhausted`, before anything is read or appended.
     pub fn reserve(&mut self, reservation: Reservation) -> Result<Reservation, MeterRefusal> {
+        if reservation.purpose == Purpose::Research
+            && let Some(agent) = reservation.agent_id.as_deref()
+        {
+            if self.caps.research_unreadable(agent) {
+                return Err(MeterRefusal::Unavailable);
+            }
+            if self.caps.research_daily_required && !self.caps.research_daily.contains_key(agent) {
+                return Err(MeterRefusal::BudgetExhausted);
+            }
+        }
         let records = self.store.read().map_err(|_| MeterRefusal::Unavailable)?;
         let caps = self.caps.applying(
             reservation.agent_id.as_deref(),

@@ -51,7 +51,7 @@ app.kubernetes.io/component: {{ .p.name | quote }}
 mandate.dev/workspace: {{ .root.Values.workspace | quote }}
 mandate.dev/environment: {{ .root.Values.environment | quote }}
 mandate.dev/process: {{ .p.name | quote }}
-{{- if .p.colocate }}
+{{- if include "mandate.colocated" . }}
 mandate.dev/colocate: "true"
 {{- end }}
 {{- range .p.egress }}
@@ -96,11 +96,12 @@ capabilities:
 The workspace's shared artifact store (mandate documents, backtest reports): one claim, at one
 fixed path. Who may write it is fixed here, by process type, not a value, so no value widens it:
 the control runs write ("rw"); the API server only reads, but its pod lays the store out before it
-starts ("seed": the pod's volume is writable, the server's own mount is not); the runtime and the
-deployment manager read ("ro"); every other process has no store at all.
+starts ("seed": the pod's volume is writable, the server's own mount is not); the runtime, the
+deployment manager and the model gateway, for each agent's research cap (DEC-2272), read ("ro");
+every other process has no store at all.
 */}}
 {{- define "mandate.artifactsRole" -}}
-{{- $access := dict "api" "seed" "control" "rw" "runtime" "ro" "deploy-manager" "ro" -}}
+{{- $access := dict "api" "seed" "control" "rw" "runtime" "ro" "deploy-manager" "ro" "model-gateway" "ro" -}}
 {{- get $access .p.name -}}
 {{- end -}}
 
@@ -125,6 +126,20 @@ no pod ever names a claim that is not there.
 {{- if include "mandate.artifactsClaimed" .root -}}
 {{- include "mandate.artifactsRole" . -}}
 {{- end -}}
+{{- end -}}
+
+{{/*
+"true" when process `p`'s pod must share a node with the workspace's other colocated pods: the
+processes colocated for latency (their `colocate`, §3.2), and every pod that mounts the artifact
+store, whose claim is ReadWriteOnce, so it attaches to one node at a time (DEC-2273). One group, not
+two: a reader that had to join both the store's node and its colocated peers' could find them on
+different nodes and never schedule. The first such pod goes where the scheduler puts it, since it
+matches its own required affinity; every later one, the API server's after a Recreate among them,
+follows. So a node's loss takes the whole group down together, until the store moves to a class that
+attaches to many nodes or to the object store (E21-40).
+*/}}
+{{- define "mandate.colocated" -}}
+{{- if or .p.colocate (include "mandate.artifactsAccess" .) -}}true{{- end -}}
 {{- end -}}
 
 {{- define "mandate.artifactsPath" -}}/var/lib/mandate/artifacts{{- end -}}
@@ -173,6 +188,16 @@ start without them (AGENTS.md rule 3).
   value: /tmp
 - name: MANDATE_DEPLOYMENT_TIER
   value: {{ .root.Values.deploymentTier | quote }}
+{{- if has .p.name (list "api" "token-exchange") }}
+{{- with .root.Values.alpacaOAuth.clientId }}
+- name: MANDATE_ALPACA_CLIENT_ID
+  value: {{ . | quote }}
+{{- end }}
+{{- with .root.Values.alpacaOAuth.redirectUri }}
+- name: MANDATE_ALPACA_REDIRECT_URI
+  value: {{ . | quote }}
+{{- end }}
+{{- end }}
 {{- if include "mandate.artifactsAccess" . }}
 - name: {{ ternary "MANDATE_API_ARTIFACTS" "MANDATE_ARTIFACTS" (eq .p.name "api") }}
   value: {{ include "mandate.artifactsPath" . | quote }}
@@ -286,7 +311,7 @@ spec:
     fsGroup: 65532
     seccompProfile:
       type: RuntimeDefault
-  {{- if $p.colocate }}
+  {{- if include "mandate.colocated" . }}
   affinity:
     podAffinity:
       requiredDuringSchedulingIgnoredDuringExecution:

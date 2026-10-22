@@ -46,13 +46,16 @@ const REVOKE: [&str; 3] = [
     "BAO_TOKEN=\"$(cat)\" exec bao token revoke -self",
 ];
 
+/// `mandate vault put <secret>`, given the secret's name and its standard input.
+pub(crate) type Put<'a> = &'a dyn Fn(&str, &str) -> Result<(bool, String)>;
+
 /// What the step needs: `kubectl` against staging, and `mandate vault provision` and `mandate vault
 /// put` run against the vault with the given standard input, each answering whether it succeeded
 /// and what it printed: the Secrets, or one status line.
 pub(crate) struct Steps<'a> {
     pub(crate) kubectl: Kubectl<'a>,
     pub(crate) provision: &'a dyn Fn(&str) -> Result<(bool, String)>,
-    pub(crate) put: &'a dyn Fn(&str) -> Result<(bool, String)>,
+    pub(crate) put: Put<'a>,
 }
 
 /// The name of an executor's Secret, as `mandate_vault::kube::secret_name` writes it: the
@@ -421,9 +424,15 @@ pub(crate) fn provision_command(connections: &[String]) -> Vec<String> {
     command
 }
 
-/// The arguments of `mandate vault put model-provider-key`, its credentials and the key on stdin.
-pub(crate) fn put_command() -> Vec<String> {
-    ["put", "model-provider-key"].map(str::to_owned).to_vec()
+/// The `mandate vault put` name of the model provider's key (DEC-2630).
+pub(crate) const MODEL_KEY_SECRET: &str = "model-provider-key";
+
+/// The `mandate vault put` name of the Alpaca OAuth client secret (DEC-2636).
+pub(crate) const ALPACA_CLIENT_SECRET: &str = "alpaca-oauth-client-secret";
+
+/// The arguments of `mandate vault put <secret>`, its credentials and the secret on stdin.
+pub(crate) fn put_command(secret: &str) -> Vec<String> {
+    ["put", secret].map(str::to_owned).to_vec()
 }
 
 /// The secret-import identity's credentials from its Secret, its secret id masked as it is read,
@@ -451,14 +460,16 @@ fn secret_import(steps: &Steps<'_>) -> Result<String> {
     Ok(lines)
 }
 
-/// Provisions staging's vault for `connections` unless every Secret is already there, then, when
-/// `model_key` is not empty, writes it as the model provider's key through the secret-import
-/// identity on every run, so a rotation is the secret replaced and the apply run again; answers
-/// the status words to print.
+/// Provisions staging's vault for `connections` unless every Secret is already there, then writes
+/// each of `model_key` (DEC-2630) and `alpaca_client_secret` (DEC-2636) that is not empty through
+/// the secret-import identity on every run, so a rotation is the secret replaced and the apply run
+/// again; an empty one is left as the vault holds it, never deleted. Answers the status words to
+/// print.
 pub(crate) fn vault_provision(
     steps: &Steps<'_>,
     connections: &[&str],
     model_key: &str,
+    alpaca_client_secret: &str,
 ) -> Result<Vec<&'static str>> {
     let mut words = Vec::new();
     if provisioned(steps, connections)? {
@@ -478,15 +489,41 @@ pub(crate) fn vault_provision(
             "root token: revoked",
         ]);
     }
-    if model_key.is_empty() {
-        words.push("model provider key: not set");
-    } else {
-        let credentials = secret_import(steps)?;
-        let (written, _) = (steps.put)(&format!("{credentials}\n{model_key}\n"))?;
-        ensure!(written, "writing the model provider's key failed");
-        words.push("model provider key: written");
-    }
+    words.push(import(
+        steps,
+        MODEL_KEY_SECRET,
+        model_key,
+        ["model provider key: not set", "model provider key: written"],
+    )?);
+    words.push(import(
+        steps,
+        ALPACA_CLIENT_SECRET,
+        alpaca_client_secret,
+        [
+            "alpaca oauth client secret: not set",
+            "alpaca oauth client secret: written",
+        ],
+    )?);
     Ok(words)
+}
+
+/// Writes `value` as `secret` through the secret-import identity, its credentials and the value on
+/// the CLI's stdin alone, unless it is empty; answers `words`' first when it is, its second once
+/// written, and fails the step when the write fails.
+fn import(
+    steps: &Steps<'_>,
+    secret: &str,
+    value: &str,
+    words: [&'static str; 2],
+) -> Result<&'static str> {
+    let [not_set, written] = words;
+    if value.is_empty() {
+        return Ok(not_set);
+    }
+    let credentials = secret_import(steps)?;
+    let (done, _) = (steps.put)(secret, &format!("{credentials}\n{value}\n"))?;
+    ensure!(done, "writing {secret} failed");
+    Ok(written)
 }
 
 #[cfg(test)]
@@ -505,6 +542,7 @@ mod tests {
     const LIST: &str = r#"{"apiVersion":"v1","kind":"List","items":[{"secret":"id-1"}]}"#;
     const IMPORT: &str = "import-role\nimport-secret-id";
     const MODEL_KEY: &str = "model-key-canary";
+    const CLIENT_SECRET: &str = "alpaca-client-secret-canary";
 
     fn encoded_root() -> String {
         let xored: Vec<u8> = ROOT.bytes().zip(OTP.bytes()).map(|(t, p)| t ^ p).collect();
@@ -524,6 +562,7 @@ mod tests {
         revoke_fails: bool,
         revoke_spawn_failures: Cell<u32>,
         model_key: &'static str,
+        client_secret: &'static str,
         calls: RefCell<Vec<(Vec<String>, Option<String>)>>,
         provisioned_with: RefCell<Vec<String>>,
         put_with: RefCell<Vec<String>>,
@@ -581,8 +620,8 @@ mod tests {
                 self.provisioned_with.borrow_mut().push(stdin.to_owned());
                 Ok((!self.provision_fails, LIST.to_owned()))
             };
-            let put = |stdin: &str| {
-                self.put_with.borrow_mut().push(stdin.to_owned());
+            let put = |secret: &str, stdin: &str| {
+                self.put_with.borrow_mut().push(format!("{secret}:{stdin}"));
                 Ok((!self.put_fails, String::new()))
             };
             vault_provision(
@@ -593,6 +632,7 @@ mod tests {
                 },
                 connections,
                 self.model_key,
+                self.client_secret,
             )
         }
 
@@ -678,7 +718,11 @@ mod tests {
         };
         assert_eq!(
             fake.run(&["c1"])?,
-            ["credentials: present", "model provider key: not set"]
+            [
+                "credentials: present",
+                "model provider key: not set",
+                "alpaca oauth client secret: not set"
+            ]
         );
         assert_eq!(fake.calls.borrow().len(), 1);
         assert!(fake.provisioned_with.borrow().is_empty());
@@ -702,7 +746,8 @@ mod tests {
                 "root token: generated",
                 "credentials: provisioned",
                 "root token: revoked",
-                "model provider key: not set"
+                "model provider key: not set",
+                "alpaca oauth client secret: not set"
             ]
         );
         let updates = fake.calls_with("sys/generate-root/update");
@@ -808,11 +853,15 @@ mod tests {
         };
         assert_eq!(
             fake.run(&["c1"])?,
-            ["credentials: present", "model provider key: written"]
+            [
+                "credentials: present",
+                "model provider key: written",
+                "alpaca oauth client secret: not set"
+            ]
         );
         assert_eq!(
             *fake.put_with.borrow(),
-            [format!("{IMPORT}\n{MODEL_KEY}\n")]
+            [format!("model-provider-key:{IMPORT}\n{MODEL_KEY}\n")]
         );
         for (args, _) in fake.calls.borrow().iter() {
             assert!(!args.iter().any(|arg| arg.contains(MODEL_KEY)), "{args:?}");
@@ -847,6 +896,81 @@ mod tests {
         assert!(fake.run(&[]).is_err());
     }
 
+    /// A client secret set is written through the secret-import identity on every run, apart from
+    /// the model key, its credentials and the secret on the CLI's stdin alone (DEC-2636).
+    #[test]
+    fn a_set_client_secret_is_written_on_every_run() -> Result<()> {
+        let fake = Fake {
+            present: all_present(&["c1"]),
+            client_secret: CLIENT_SECRET,
+            ..Fake::default()
+        };
+        assert_eq!(
+            fake.run(&["c1"])?,
+            [
+                "credentials: present",
+                "model provider key: not set",
+                "alpaca oauth client secret: written"
+            ]
+        );
+        assert_eq!(
+            *fake.put_with.borrow(),
+            [format!(
+                "alpaca-oauth-client-secret:{IMPORT}\n{CLIENT_SECRET}\n"
+            )]
+        );
+        for (args, _) in fake.calls.borrow().iter() {
+            assert!(
+                !args.iter().any(|arg| arg.contains(CLIENT_SECRET)),
+                "{args:?}"
+            );
+        }
+        let both = Fake {
+            model_key: MODEL_KEY,
+            client_secret: CLIENT_SECRET,
+            ..Fake::default()
+        };
+        both.run(&["c1"])?;
+        assert_eq!(
+            *both.put_with.borrow(),
+            [
+                format!("model-provider-key:{IMPORT}\n{MODEL_KEY}\n"),
+                format!("alpaca-oauth-client-secret:{IMPORT}\n{CLIENT_SECRET}\n"),
+            ]
+        );
+        assert!(both.revoked());
+        Ok(())
+    }
+
+    #[test]
+    fn an_unset_client_secret_writes_nothing() -> Result<()> {
+        let fake = Fake {
+            present: all_present(&[]),
+            model_key: MODEL_KEY,
+            ..Fake::default()
+        };
+        fake.run(&[])?;
+        assert!(
+            fake.put_with
+                .borrow()
+                .iter()
+                .all(|put| !put.starts_with("alpaca-oauth-client-secret:")),
+            "nothing is written, and nothing deleted, for an unset secret"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_failed_client_secret_put_fails_the_step() {
+        let fake = Fake {
+            present: all_present(&[]),
+            client_secret: CLIENT_SECRET,
+            put_fails: true,
+            ..Fake::default()
+        };
+        assert!(fake.run(&[]).is_err());
+    }
+
     #[test]
     fn the_commands_are_the_clis() {
         assert_eq!(
@@ -860,7 +984,11 @@ mod tests {
                 "c1"
             ]
         );
-        assert_eq!(put_command(), ["put", "model-provider-key"]);
+        assert_eq!(put_command(MODEL_KEY_SECRET), ["put", "model-provider-key"]);
+        assert_eq!(
+            put_command(ALPACA_CLIENT_SECRET),
+            ["put", "alpaca-oauth-client-secret"]
+        );
     }
 
     /// A generation that completes with a token the pad cannot decode fails saying the token may
