@@ -94,7 +94,6 @@ fn searched(bundle: &Bundle, terms: &[&str]) -> Vec<String> {
 }
 
 #[test]
-#[ignore = "pending E19-16"]
 fn a_search_keeps_exactly_the_items_every_term_matches() {
     let bundle = Bundle::load(Path::new(FIXTURE)).unwrap();
     for terms in [
@@ -163,7 +162,6 @@ fn vocabulary() -> Vec<String> {
 /// every ordered pair of them, and every two adjacent words of a headline or of a summary as one
 /// phrase: each search keeps what the oracle keeps.
 #[test]
-#[ignore = "pending E19-16"]
 fn every_word_pair_and_phrase_of_the_recording_keeps_what_the_oracle_keeps() {
     let bundle = Bundle::load(Path::new(FIXTURE)).unwrap();
     let words = vocabulary();
@@ -198,7 +196,6 @@ fn every_word_pair_and_phrase_of_the_recording_keeps_what_the_oracle_keeps() {
 }
 
 #[test]
-#[ignore = "pending E19-16"]
 fn a_get_answers_a_recorded_item_s_stored_text_at_its_age() {
     let bundle = Bundle::load(Path::new(FIXTURE)).unwrap();
     for row in rows() {
@@ -223,7 +220,6 @@ fn a_get_answers_a_recorded_item_s_stored_text_at_its_age() {
 }
 
 #[test]
-#[ignore = "pending E19-16"]
 fn a_get_for_an_item_the_recording_lacks_or_another_allowlist_answers_nothing() {
     let bundle = Bundle::load(Path::new(FIXTURE)).unwrap();
     let missing = ItemId::new("nw-not-recorded").unwrap();

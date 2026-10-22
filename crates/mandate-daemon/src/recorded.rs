@@ -6,16 +6,17 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 
-use mandate_canon::{Digest, Value, parse, to_canonical};
+use mandate_canon::{Digest, Value, parse};
 use mandate_domain::{AssetClass, AssetId};
-use mandate_gateway::money::{PriceTable, TokenPrice, Usage, Usd6};
-use mandate_gateway::registry::{Endpoint, Locality, Registry, Reported, Route, Status};
-use mandate_gateway::schema::fits;
+use mandate_gateway::money::Usd6;
+use mandate_gateway::registry::{Endpoint, Registry, Reported};
 use mandate_num::{Price, Qty};
 use mandate_research::{AllowlistVersion, SourceAllowlist, SourceId as AllowedSource};
+use mandate_research_run::recorded::{self, RecordedError, RecordedModel};
+pub use mandate_research_run::recorded::{RecordedReply, ScriptedTurn};
 use mandate_research_run::{
-    Bar, BarReader, EntryError, Filing, FilingReader, InstrumentFact, InstrumentReader, ItemId,
-    NewsItem, NewsReader, ReadError, ResearchEntry, SourceId, Symbol, TextQuery,
+    Bar, BarReader, Filing, FilingReader, InstrumentFact, InstrumentReader, ItemId, NewsItem,
+    NewsReader, NewsText, ReadError, ResearchEntry, SourceId, Symbol, TextQuery,
 };
 use mandate_time::UtcNanos;
 
@@ -32,23 +33,6 @@ pub enum BundleError {
     },
     /// The gateway's registry refused the entry or its endpoint.
     Unregistered,
-}
-
-/// The model's one recorded reply: the output text the fake replays, its latency, and its usage.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RecordedReply {
-    pub output: String,
-    pub latency_ms: u64,
-    pub usage: Usage,
-}
-
-/// One scripted tool-call reply of an agentic run's turn (DEC-2266): each call's declared tool
-/// name and canonical arguments, in reply order, its latency, and its usage.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ScriptedTurn {
-    pub calls: Vec<(String, String)>,
-    pub latency_ms: u64,
-    pub usage: Usage,
 }
 
 /// One recorded daily bar, known `age_s` seconds before the read's cut-off.
@@ -101,6 +85,9 @@ pub struct RecordedPlane {
     pub news: Vec<RecordedNews>,
     pub filings: Vec<RecordedFiling>,
     pub instruments: Vec<InstrumentFact>,
+    /// The source allowlist version the items were recorded under, the only one a get answers
+    /// (data-plane spec §4.6).
+    pub allowlist_version: u32,
 }
 
 /// The cell's recorded research.
@@ -139,28 +126,15 @@ impl Bundle {
     /// [`BundleError`] when a file is missing or unreadable, or a member is missing or invalid.
     pub fn load(dir: &Path) -> Result<Self, BundleError> {
         let research = Doc::read(dir, RESEARCH)?;
-        let entry = research.member("entry")?;
-        let endpoint = research.member("endpoint")?;
-        let caps = research.member("caps")?;
-        let reply = research.member("reply")?;
-        let pinned = ResearchEntry::recorded(entry.value).map_err(|error| match error {
-            EntryError::Member(member) => entry.malformed(member),
+        let model = RecordedModel::read(&research.value).map_err(|error| match error {
+            RecordedError::Malformed(member) => BundleError::Malformed {
+                file: RESEARCH,
+                member,
+            },
+            RecordedError::Unregistered => BundleError::Unregistered,
         })?;
-        let turns = research
-            .value
-            .get("turns")
-            .map(|turns| scripted(turns, &pinned))
-            .transpose()?
-            .unwrap_or_default();
-        let slug = pinned.identity.model_name.clone();
-        let reported_provider = endpoint.text("reported_provider")?;
-        let prices = PriceTable::new(
-            endpoint.per_million("input_per_million")?,
-            endpoint.per_million("output_per_million")?,
-            endpoint.per_million("cached_per_million")?,
-            Digest::of(endpoint.text("price_table")?.as_bytes()),
-        )
-        .map_err(|_| endpoint.malformed("cached_per_million"))?;
+        let caps = research.member("caps")?;
+        let allowlist = allowlist(&research)?;
         let plane = RecordedPlane {
             bars: Doc::read(dir, BARS)?
                 .rows()?
@@ -182,26 +156,13 @@ impl Bundle {
                 .iter()
                 .map(instrument)
                 .collect::<Result<_, _>>()?,
+            allowlist_version: allowlist.version.0,
         };
         let halted = halts(&research, &plane.instruments)?;
-        let allowlist = allowlist(&research)?;
         Ok(Self {
-            entry: pinned,
-            endpoint: Endpoint {
-                id: endpoint.text("id")?.to_owned(),
-                host: endpoint.text("host")?.to_owned(),
-                region: endpoint.text("region")?.to_owned(),
-                locality: Locality::Hosted,
-                route: Route {
-                    upstream: endpoint.text("upstream")?.to_owned(),
-                    reported_provider: reported_provider.to_owned(),
-                },
-                prices,
-            },
-            probe: Reported {
-                model: Some(slug),
-                provider: Some(reported_provider.to_owned()),
-            },
+            entry: model.entry,
+            endpoint: model.endpoint,
+            probe: model.probe,
             workspace_cap: caps.usd6("workspace_monthly_usd")?,
             deployment_cap: caps.usd6("deployment_usd")?,
             run_cap: caps
@@ -209,16 +170,8 @@ impl Bundle {
                 .get("run_usd")
                 .map(|_| caps.usd6("run_usd"))
                 .transpose()?,
-            reply: RecordedReply {
-                output: reply.text("output")?.to_owned(),
-                latency_ms: reply.int("latency_ms")?,
-                usage: Usage {
-                    input: reply.int("input_tokens")?,
-                    output: reply.int("output_tokens")?,
-                    cached: reply.int("cached_tokens")?,
-                },
-            },
-            turns,
+            reply: model.reply,
+            turns: model.turns,
             plane,
             halted,
             allowlist,
@@ -230,23 +183,8 @@ impl Bundle {
     /// # Errors
     /// [`BundleError::Unregistered`] when the registry refuses the entry or the endpoint.
     pub fn registry(&self) -> Result<Registry, BundleError> {
-        let content = self.entry.content();
-        let pin = content.model_ref();
-        let mut registry = Registry::new();
-        registry
-            .register(content)
-            .map_err(|_| BundleError::Unregistered)?;
-        registry
-            .add_endpoint(
-                &pin,
-                self.endpoint.clone(),
-                std::slice::from_ref(&self.probe),
-            )
-            .map_err(|_| BundleError::Unregistered)?;
-        registry
-            .set_status(&pin, Status::Offered)
-            .map_err(|_| BundleError::Unregistered)?;
-        Ok(registry)
+        recorded::registry(&self.entry, &self.endpoint, &self.probe)
+            .map_err(|_| BundleError::Unregistered)
     }
 }
 
@@ -282,29 +220,87 @@ impl BarReader for RecordedPlane {
     }
 }
 
+impl RecordedNews {
+    /// The item as a read at `cut_off` gives it, at its age before the cut-off.
+    fn at(&self, cut_off: UtcNanos) -> Option<NewsItem> {
+        Some(NewsItem {
+            item_id: self.item_id.clone(),
+            source: self.source.clone(),
+            symbols: self.symbols.clone(),
+            knowledge_at: before(cut_off, self.age_s)?,
+            published_at: before(cut_off, self.published_age_s)?,
+            headline: self.headline.clone(),
+            summary: self.summary.clone(),
+            link: self.link.clone(),
+            content_hash: Digest::of_parts(&[self.headline.as_bytes(), self.summary.as_bytes()]),
+            licensed: self.licensed,
+        })
+    }
+
+    /// Whether every one of `terms` is in the stored headline or the stored summary, a phrase inside
+    /// one field (data-plane spec §4.6, DEC-2327 item 1).
+    fn matches(&self, terms: &[String]) -> bool {
+        terms
+            .iter()
+            .all(|term| holds_term(&self.headline, term) || holds_term(&self.summary, term))
+    }
+}
+
+/// `term` in `text`, case-folded, as a whole word or phrase: bounded at each end by the text's edge
+/// or by a character that is not an ASCII letter or digit (data-plane spec §4.6). It is matched
+/// here, inside the plane, and sent nowhere (HI-28).
+fn holds_term(text: &str, term: &str) -> bool {
+    let text = text.to_ascii_lowercase();
+    let term = term.to_ascii_lowercase();
+    if term.is_empty() {
+        return false;
+    }
+    let is_word = |c: Option<char>| c.is_some_and(|c| c.is_ascii_alphanumeric());
+    text.match_indices(&term).any(|(start, found)| {
+        let end = start.saturating_add(found.len());
+        let before_ok = !is_word(text.get(..start).and_then(|t| t.chars().next_back()));
+        let after_ok = !is_word(text.get(end..).and_then(|t| t.chars().next()));
+        before_ok && after_ok
+    })
+}
+
 impl NewsReader for RecordedPlane {
     fn news(&self, query: &TextQuery) -> Result<Vec<NewsItem>, ReadError> {
         Ok(self
             .news
             .iter()
-            .filter_map(|item| {
-                Some(NewsItem {
-                    item_id: item.item_id.clone(),
-                    source: item.source.clone(),
-                    symbols: item.symbols.clone(),
-                    knowledge_at: before(query.cut_off, item.age_s)?,
-                    published_at: before(query.cut_off, item.published_age_s)?,
-                    headline: item.headline.clone(),
-                    summary: item.summary.clone(),
-                    link: item.link.clone(),
-                    content_hash: Digest::of_parts(&[
-                        item.headline.as_bytes(),
-                        item.summary.as_bytes(),
-                    ]),
-                    licensed: item.licensed,
-                })
-            })
+            .filter_map(|item| item.at(query.cut_off))
             .collect())
+    }
+
+    fn search(&self, query: &TextQuery, terms: &[String]) -> Result<Vec<NewsItem>, ReadError> {
+        Ok(self
+            .news
+            .iter()
+            .filter(|item| item.matches(terms))
+            .filter_map(|item| item.at(query.cut_off))
+            .collect())
+    }
+
+    /// The recorded item's stored text, its headline and summary, at its age before `cut_off`, for
+    /// the allowlist version the recording holds alone.
+    fn news_text(
+        &self,
+        item: &ItemId,
+        cut_off: UtcNanos,
+        allowlist_version: u32,
+    ) -> Result<NewsText, ReadError> {
+        if allowlist_version != self.allowlist_version {
+            return Err(ReadError::Unavailable);
+        }
+        let recorded = self
+            .news
+            .iter()
+            .find(|recorded| recorded.item_id == *item)
+            .ok_or(ReadError::Unavailable)?;
+        let text = format!("{}\n\n{}", recorded.headline, recorded.summary);
+        let item = recorded.at(cut_off).ok_or(ReadError::Unavailable)?;
+        Ok(NewsText { item, text })
     }
 }
 
@@ -400,10 +396,6 @@ impl Doc<'_> {
         Usd6::parse(self.text(member)?).map_err(|_| self.malformed(member))
     }
 
-    fn per_million(&self, member: &'static str) -> Result<TokenPrice, BundleError> {
-        self.usd6(member).map(TokenPrice::per_million)
-    }
-
     fn price(&self, member: &'static str) -> Result<Price, BundleError> {
         Price::parse(self.text(member)?).map_err(|_| self.malformed(member))
     }
@@ -438,60 +430,6 @@ impl Read {
             })
             .collect())
     }
-}
-
-/// `research.json`'s `turns` (DEC-2266): refused whole, `Malformed { member: "turns" }`, unless the
-/// entry names the agentic loop and every turn is one its gateway would accept, so no bundle a
-/// worker is built from scripts a call the entry does not declare.
-fn scripted(turns: &Value, entry: &ResearchEntry) -> Result<Vec<ScriptedTurn>, BundleError> {
-    let refused = BundleError::Malformed {
-        file: RESEARCH,
-        member: "turns",
-    };
-    let content = entry.content();
-    let (Some(agentic), Some(listed)) = (content.agentic(), turns.as_array()) else {
-        return Err(refused);
-    };
-    let bounds = agentic.loop_bounds;
-    if u32::try_from(listed.len()).map_or(true, |n| n >= bounds.max_turns) {
-        return Err(refused);
-    }
-    listed
-        .iter()
-        .map(|turn| {
-            let count = |member: &str| turn.get(member).and_then(Value::as_int);
-            let calls = turn.get("calls").and_then(Value::as_array)?;
-            let fits_turn = u32::try_from(calls.len())
-                .is_ok_and(|n| n > 0 && n <= bounds.max_tool_calls_per_turn);
-            if !fits_turn {
-                return None;
-            }
-            let calls = calls
-                .iter()
-                .map(|call| {
-                    let name = call.get("name").and_then(Value::as_str)?;
-                    let arguments = call.get("arguments")?;
-                    let declared = agentic.tool(name)?;
-                    fits(&declared.arguments, arguments).then(|| {
-                        (
-                            name.to_owned(),
-                            String::from_utf8_lossy(&to_canonical(arguments)).into_owned(),
-                        )
-                    })
-                })
-                .collect::<Option<Vec<_>>>()?;
-            Some(ScriptedTurn {
-                calls,
-                latency_ms: count("latency_ms")?,
-                usage: Usage {
-                    input: count("input_tokens")?,
-                    output: count("output_tokens")?,
-                    cached: count("cached_tokens")?,
-                },
-            })
-        })
-        .collect::<Option<Vec<_>>>()
-        .ok_or(refused)
 }
 
 /// The assets of the instruments `research.json`'s `halted_instruments` names by symbol, each one an
