@@ -163,10 +163,19 @@ fn the_templated_policies_stay_exact() {
             "auth_kubernetes_0a1b",
         )
         .unwrap();
-        assert!(
-            !hcl.contains('*') && !hcl.contains('+'),
-            "{identity:?}: {hcl}"
-        );
+        assert!(!hcl.contains('*'), "{identity:?}: {hcl}");
+        for (path, caps) in blocks(&hcl).into_iter().filter(|(p, _)| p.contains('+')) {
+            assert!(
+                caps == "create"
+                    && path
+                        .split('/')
+                        .rev()
+                        .nth(1)
+                        .is_some_and(|own| own.starts_with("x{{"))
+                    && path.ends_with("/+"),
+                "a templated `+` only creates a last segment under the login's own name (DEC-2345): {identity:?} {path} [{caps}]"
+            );
+        }
     }
 }
 
