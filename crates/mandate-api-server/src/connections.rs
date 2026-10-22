@@ -77,6 +77,11 @@ fn granted(event: &Value) -> Option<Vec<String>> {
 }
 
 /// Every connection the control stream names, in the order its first record names it.
+///
+/// A row that does not parse, or lacks a member the fold reads, is skipped and the rest are
+/// folded. The read shows what the stream says and decides nothing. The connect start's fold
+/// (`connect::facts`) refuses instead, because a write must not act on a stream it cannot answer
+/// for.
 pub fn connections(control: &[StoredEvent]) -> Vec<ConnectionView> {
     let mut views: Vec<ConnectionView> = Vec::new();
     let mut deployments: Vec<(String, Option<String>, bool)> = Vec::new();
