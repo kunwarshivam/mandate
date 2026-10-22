@@ -192,7 +192,8 @@ fn each_kinds_policy_reaches_exactly_the_paths_its_connection_is_stored_at() {
                 Identity::TokenExchange(connection.clone()),
                 [
                     block("data", &SecretPath::ClientSecret, "\"read\""),
-                    block("data", &code, "\"read\", \"update\", \"delete\""),
+                    block("data", &code, "\"read\", \"update\""),
+                    block("delete", &code, "\"update\""),
                     block("destroy", &code, "\"update\""),
                     block("data", &token, "\"create\", \"update\""),
                 ]
@@ -279,9 +280,10 @@ fn the_executors_policy_reads_its_own_token_alone() {
     );
 }
 
-/// The exchange's code block reads, updates and deletes, the update being its take (DEC-2061) and
-/// the delete the tombstone's; it destroys the version it took (DEC-2321); and it never creates:
-/// `create` would let it write a code where none is.
+/// The exchange's code block reads and updates, the update being its take (DEC-2061); it destroys
+/// the version it took and soft-deletes its tombstone's version alone, by the `destroy` and
+/// `delete` endpoints (DEC-2321); and it never creates: `create` would let it write a code where
+/// none is.
 #[test]
 #[ignore = "pending E21-32"]
 fn the_exchanges_policy_writes_its_token_and_reads_takes_and_deletes_its_code() {
@@ -293,7 +295,8 @@ fn the_exchanges_policy_writes_its_token_and_reads_takes_and_deletes_its_code() 
         ),
         Ok(format!(
             "path \"mandate/data/platform/alpaca-oauth-client-secret\" {{\n  capabilities = [\"read\"]\n}}\n\
-             path \"mandate/data/connections/{TEMPLATE}/code\" {{\n  capabilities = [\"read\", \"update\", \"delete\"]\n}}\n\
+             path \"mandate/data/connections/{TEMPLATE}/code\" {{\n  capabilities = [\"read\", \"update\"]\n}}\n\
+             path \"mandate/delete/connections/{TEMPLATE}/code\" {{\n  capabilities = [\"update\"]\n}}\n\
              path \"mandate/destroy/connections/{TEMPLATE}/code\" {{\n  capabilities = [\"update\"]\n}}\n\
              path \"mandate/data/connections/{TEMPLATE}/token\" {{\n  capabilities = [\"create\", \"update\"]\n}}\n"
         ))
