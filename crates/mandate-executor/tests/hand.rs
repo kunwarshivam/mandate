@@ -5848,6 +5848,7 @@ fn a_close_is_journaled_before_it_is_sent() {
     let config = config();
     let ports = ports(&ids, &mandates, &instruments, &config);
     let (shell, switch, read, _) = closed_btc(&ports);
+    let switch_id = switch.clone();
 
     let record = read
         .effects
@@ -5879,7 +5880,7 @@ fn a_close_is_journaled_before_it_is_sent() {
             field("qty"),
             field("kill_switch_event")
         ),
-        (Some(BTC.to_owned()), held, Some(switch)),
+        (Some(BTC.to_owned()), held, Some(switch.clone())),
         "BTC, the quantity held, and the switch"
     );
     assert_eq!(
@@ -5889,6 +5890,21 @@ fn a_close_is_journaled_before_it_is_sent() {
             .and_then(mandate_canon::Value::as_int),
         Some(1),
         "the first request"
+    );
+    let named = shell
+        .account_journal
+        .iter()
+        .find(|e| e.event_id.0 == switch_id)
+        .filter(|e| e.event_type == "KillSwitchActivated")
+        .and_then(|e| {
+            e.payload
+                .get("closes")
+                .and_then(mandate_canon::Value::as_array)
+        })
+        .is_some_and(|closes| closes.iter().any(|name| name.as_str() == Some(BTC)));
+    assert!(
+        named,
+        "the switch it names lists BTC in its closes (DEC-2337 item 5, until rule-checked)"
     );
 }
 
