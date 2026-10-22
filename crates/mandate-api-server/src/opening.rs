@@ -15,7 +15,7 @@
 
 use mandate_authn::SubjectStanding;
 use mandate_identity::{LookupFailed, MembershipRecord, PrincipalId};
-use mandate_journal::{ArtifactRef, ArtifactSource, get_artifact};
+use mandate_journal::{ArtifactRef, ArtifactSource, StoredEvent, get_artifact};
 use mandate_passkey::credentials::{CredentialFold, CredentialRecord, Enrolment, PasskeyAlg};
 use mandate_passkey::reduction::{cose_key, verify_reduction};
 use mandate_passkey::{Assertion, Challenge, PublicKey, RelyingParty};
@@ -131,3 +131,32 @@ const DECOY_COSE_KEY: [u8; 77] = [
 /// The bytes whose reference an unknown passkey's read asks the store for: no key is stored as
 /// them, so the read finds nothing.
 const DECOY_KEY_BYTES: &[u8] = b"route 2: no passkey is held";
+
+/// What a reduction-only session may act on in the hosted workspace (§4.10 route 2 item 6): the
+/// agents it may pause or kill switch, and the connections it may kill switch, as opaque ids.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Reach {
+    pub agent_ids: Vec<String>,
+    pub connection_ids: Vec<String>,
+}
+
+/// `member`'s reach at `now`, read from the hosted control stream's `control` rows and its
+/// membership `records`: every agent deployed and not stopped, in first-deployment order, when
+/// the member's roles grant pause or the agent kill switch; every connection established and not
+/// revoked, in the order the stream first names it, when they grant the connection kill switch.
+/// Each is authorized as a reduction-only session of the member would be. A read that failed
+/// answers empty lists, never a refusal (DEC-642 item 10).
+#[expect(
+    clippy::todo,
+    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+)]
+pub fn reach(
+    hosted: Hosted,
+    control: &[StoredEvent],
+    records: Result<Vec<MembershipRecord>, LookupFailed>,
+    member: PrincipalId,
+    now: UtcNanos,
+) -> Reach {
+    let _ = (hosted, control, records, member, now);
+    todo!()
+}
