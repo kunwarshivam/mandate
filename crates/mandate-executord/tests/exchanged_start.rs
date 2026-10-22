@@ -228,8 +228,8 @@ fn started(
 }
 
 /// A fresh stream is checked once, over the lease on the executor's own connection: the account
-/// read is handed the lease's token, the id it read is hashed once, the account entry and then the
-/// fingerprint entry are created once each, the record holds every check passed, and the lease is
+/// read is handed the lease's token, the id it read is hashed once, the fingerprint entry and then
+/// the account entry are created once each, the record holds every check passed, and the lease is
 /// given back.
 #[test]
 #[ignore = "pending E21-32"]
@@ -250,9 +250,9 @@ fn a_fresh_stream_is_checked_once_over_the_lease_which_is_given_back() -> Result
         [
             format!(
                 "{:?}",
-                SecretPath::AccountId(connection()?, request.clone())
+                SecretPath::Fingerprint(connection()?, request.clone())
             ),
-            format!("{:?}", SecretPath::Fingerprint(connection()?, request)),
+            format!("{:?}", SecretPath::AccountId(connection()?, request)),
         ]
     );
     let passed = |check: &str| (check.to_owned(), "passed".to_owned());

@@ -148,9 +148,9 @@ fn results(payload: &Value) -> Vec<(String, String, Option<String>)> {
     }
 }
 
-/// A read account goes to the connection's own entry, once, in the entry's form under the minted
-/// reference, and its fingerprint to the request's fingerprint entry beside it, once, under the
-/// same reference; the journal opens the stream and records every check passed as an Alpaca paper
+/// A read account's fingerprint goes to the request's fingerprint entry, once, under the minted
+/// reference, and then the account to the connection's own entry beside it, once, in the entry's
+/// form under the same reference; the journal opens the stream and records every check passed as an Alpaca paper
 /// OAuth connection, holding the reference and never the id.
 #[test]
 #[ignore = "pending E21-32"]
@@ -176,7 +176,7 @@ fn a_read_account_is_kept_in_its_entry_and_only_its_reference_is_journaled() -> 
     );
     assert_eq!(
         vault.asked.borrow().as_slice(),
-        [path.clone(), fingerprint_path.clone()]
+        [fingerprint_path.clone(), path.clone()]
     );
     let entries = vault.entries.borrow();
     let entry = decode(entries.get(&path).ok_or("no entry")?)?;
@@ -260,12 +260,11 @@ fn an_unhashed_account_creates_nothing_and_journals_a_null_reference() -> Result
     Ok(())
 }
 
-/// A refused fingerprint create, after the account entry was created, is an unreadable account
-/// too: the record holds no reference whose fingerprint the connection manager could not read
-/// (DEC-2345 item 7), and the account entry is left for erasure.
+/// A refused fingerprint create, the first of the two, is an unreadable account that creates no
+/// account entry: the id is never kept where its fingerprint is not (DEC-2345 item 7).
 #[test]
 #[ignore = "pending E21-32"]
-fn a_refused_fingerprint_create_journals_a_null_reference() -> Result<(), Error> {
+fn a_refused_fingerprint_create_keeps_no_account_id() -> Result<(), Error> {
     let mut store = MemoryStore::default();
     let vault = CreateOnce::default();
     let fingerprint_path = SecretPath::Fingerprint(connection()?, StreamRef::new(ACCOUNT)?);
@@ -285,8 +284,9 @@ fn a_refused_fingerprint_create_journals_a_null_reference() -> Result<(), Error>
     );
     assert_eq!(
         vault.asked.borrow().as_slice(),
-        [path, format!("{fingerprint_path:?}")]
+        [format!("{fingerprint_path:?}")]
     );
+    assert!(!vault.entries.borrow().contains_key(&path));
     assert!(!checked.passed);
     let (payload, pii_refs) = last_checked(&store)?;
     assert_eq!(payload.get("account_pii_ref"), Some(&Value::Null));
@@ -298,10 +298,48 @@ fn a_refused_fingerprint_create_journals_a_null_reference() -> Result<(), Error>
     Ok(())
 }
 
+/// A refused account create, after the fingerprint entry was created, is an unreadable account
+/// too, and what is left is the pseudonymous hash alone, for erasure (DEC-2345 items 5 and 7).
+#[test]
+#[ignore = "pending E21-32"]
+fn a_refused_account_create_leaves_only_the_fingerprint() -> Result<(), Error> {
+    let mut store = MemoryStore::default();
+    let vault = CreateOnce::default();
+    let path = SecretPath::AccountId(connection()?, StreamRef::new(ACCOUNT)?);
+    vault.create(&path, &SecretSlice::from(b"taken".to_vec()))?;
+    vault.asked.borrow_mut().clear();
+    let checked = oauth_connect_check(
+        &mut store,
+        &Ids,
+        &scope(),
+        check(Some(BROKER_ID), PII)?,
+        |path, secret| vault.create(path, secret),
+        now()?,
+    )?;
+    let fingerprint_path = format!(
+        "{:?}",
+        SecretPath::Fingerprint(connection()?, StreamRef::new(ACCOUNT)?)
+    );
+    assert_eq!(
+        vault.asked.borrow().as_slice(),
+        [fingerprint_path.clone(), format!("{path:?}")]
+    );
+    assert!(!checked.passed);
+    let (payload, pii_refs) = last_checked(&store)?;
+    assert_eq!(payload.get("account_pii_ref"), Some(&Value::Null));
+    assert_eq!(pii_refs, Value::Array(Vec::new()));
+    let entries = vault.entries.borrow();
+    let (fingerprint, _) = decode_entry(entries.get(&fingerprint_path).ok_or("no fingerprint")?)?;
+    assert_eq!(fingerprint.as_str(), HASH);
+    assert_eq!(entries.get(&format!("{path:?}")), Some(&b"taken".to_vec()));
+    Ok(())
+}
+
 /// DEC-2339 item 6: an executor that created its entry and crashed before the record committed
 /// finds its retry's create refused, cannot read the entry back, and so fails closed: the retry
 /// journals the account as unreadable, under no reference, and the first entry is left as it was.
 #[test]
+#[ignore = "pending E21-32"]
 fn a_retry_after_a_crash_before_the_record_fails_closed() -> Result<(), Error> {
     let journal = MemoryStore::default();
     let vault = CreateOnce::default();
