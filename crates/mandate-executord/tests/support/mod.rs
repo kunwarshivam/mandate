@@ -147,6 +147,19 @@ impl Journal {
             .collect()
     }
 
+    /// Each agent switch the account stream records, as the agent and the record it copies.
+    pub fn applications(&self) -> Vec<(String, String)> {
+        self.payloads("KillSwitchActivated")
+            .iter()
+            .filter_map(|p| {
+                Some((
+                    p.get("subject")?.as_str()?.to_owned(),
+                    p.get("copied_from")?.as_str()?.to_owned(),
+                ))
+            })
+            .collect()
+    }
+
     /// The intents the account stream received, by the `intent_id` each `IntentReceived` names.
     pub fn received(&self) -> Vec<String> {
         self.payloads("IntentReceived")
@@ -854,6 +867,84 @@ pub fn kill_by(journal: &Journal, agent: &str, id: &str, initiator: &str) -> Res
             ("mode_event", Value::Null),
             ("scope", text("agent")),
             ("subject", text(agent)),
+        ])?,
+    )
+}
+
+/// The control stream's `OwnerCommandIssued` of a kill switch of `scope` (`connection` or
+/// `workspace`) and `subject` (journal spec §9.1, workspace API §5.6).
+pub fn kill_command(journal: &Journal, id: &str, scope: &str, subject: &str) -> Result<(), Error> {
+    journal.write(
+        CONTROL_STREAM,
+        id,
+        "OwnerCommandIssued",
+        1,
+        None,
+        object(vec![
+            ("command", text("kill_switch")),
+            ("scope", text(scope)),
+            ("subject", text(subject)),
+            ("step_up", Value::Null),
+            ("user", text("usr_owner")),
+        ])?,
+    )
+}
+
+/// The control stream's `ConnectionRevoked` of `connection`, ordinary or compromised.
+pub fn revoke(
+    journal: &Journal,
+    id: &str,
+    connection: &str,
+    compromised: bool,
+) -> Result<(), Error> {
+    journal.write(
+        CONTROL_STREAM,
+        id,
+        "ConnectionRevoked",
+        1,
+        None,
+        object(vec![
+            ("connection_id", text(connection)),
+            (
+                "reason",
+                text(if compromised { "compromised" } else { "owner" }),
+            ),
+        ])?,
+    )
+}
+
+/// The control stream's `AgentStopped` of `agent`.
+pub fn stopped(journal: &Journal, id: &str, agent: &str) -> Result<(), Error> {
+    journal.write(
+        CONTROL_STREAM,
+        id,
+        "AgentStopped",
+        1,
+        None,
+        object(vec![("agent_id", text(agent))])?,
+    )
+}
+
+/// The runtime's copy on `agent`'s stream of the kill-switch command `command`, at its scope.
+pub fn copy_of(
+    journal: &Journal,
+    agent: &str,
+    id: &str,
+    command: &str,
+    scope: &str,
+    subject: &str,
+) -> Result<(), Error> {
+    journal.write(
+        &agent_stream(agent),
+        id,
+        "KillSwitchActivated",
+        1,
+        Some(command),
+        object(vec![
+            ("initiator", text("owner")),
+            ("mode_event", Value::Null),
+            ("scope", text(scope)),
+            ("subject", text(subject)),
         ])?,
     )
 }
