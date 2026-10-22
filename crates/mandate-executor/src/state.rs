@@ -233,6 +233,10 @@ pub(crate) struct OrderDetail {
     /// left to cover, from the `ProtectionChanged placed` or `unprotected_end` that names it as
     /// `bracket`. Each entry is protected once (§5.4, DEC-346 item 4).
     pub(crate) bracket_placed: bool,
+    /// The gross quantity of each fill applied to the order, in journal order: a crypto buy
+    /// withholds each fill's fee rounded on its own (§6.3), so the stop-limit after it is sized
+    /// net of each fill's fee, never of their sum's (DEC-349 item 2).
+    pub(crate) fill_qtys: Vec<Qty>,
 }
 
 /// An adoption on the journal (`OrderStateChanged` with `adopted`) whose `CompensatingEvent` has
