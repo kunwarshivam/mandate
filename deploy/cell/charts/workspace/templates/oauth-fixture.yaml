@@ -6,9 +6,9 @@ only this workspace's token-exchange pods on 8091 and allows it no egress at all
 browser reaches it as it reaches the API, through `kubectl port-forward`, with `oauth-fixture`
 resolved to loopback, so its `Host` header is the one the fixture answers. The stub compares that
 header alone, never an absolute-form request target's authority.
-Its client secret is the Secret `oauth-fixture-client`, key `client-secret`, made once and kept
-across upgrades; `cargo xtask cell up` seeds the same value into the cell's vault for the token
-exchange (lane V2, #2197). It is mounted group-readable for fsGroup, as every Secret here is, and
+Its client secret is the Secret `oauth-fixture-client`, key `client-secret`, which the chart does
+not make (DEC-822 item 4): `cargo xtask cell up` makes it once, before this release, and seeds the
+same value into the cell's vault for the token exchange (lane V2, #2197). It is mounted group-readable for fsGroup, as every Secret here is, and
 copied by an init container to a memory-backed directory as 0600, since the stub refuses a client
 secret file any group can read (DEC-2625 item 2).
 Rendered only with `oauthFixture.enabled`, which any tier but dev or ci refuses, whether or not
@@ -118,26 +118,6 @@ spec:
         - {protocol: TCP, port: 8091}
   egress: []
 {{- end -}}
-{{- define "mandate.oauthFixtureSecret" -}}
-{{- $found := lookup "v1" "Secret" .root.Release.Namespace "oauth-fixture-client" -}}
-{{- $secret := "" -}}
-{{- if and $found $found.data (hasKey $found.data "client-secret") -}}
-{{- $secret = index $found.data "client-secret" -}}
-{{- else -}}
-{{- $secret = randAlphaNum 48 | b64enc -}}
-{{- end -}}
-apiVersion: v1
-kind: Secret
-metadata:
-  name: oauth-fixture-client
-  labels:
-    {{- include "mandate.labels" . | nindent 4 }}
-  annotations:
-    helm.sh/resource-policy: keep
-type: Opaque
-data:
-  client-secret: {{ $secret | quote }}
-{{- end -}}
 {{- if include "mandate.oauthFixtureOn" . }}
 {{- $ctx := dict "root" . "p" (include "mandate.oauthFixtureProcess" . | fromJson) }}
 ---
@@ -146,6 +126,4 @@ data:
 {{ include "mandate.emit" (include "mandate.oauthFixtureService" $ctx) }}
 ---
 {{ include "mandate.emit" (include "mandate.oauthFixturePolicy" $ctx) }}
----
-{{ include "mandate.emit" (include "mandate.oauthFixtureSecret" $ctx) }}
 {{- end }}

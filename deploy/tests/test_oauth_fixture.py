@@ -1,7 +1,8 @@
 """The fixture OAuth provider of a dev or ci cell (DEC-1176), on what the workspace chart renders.
 
 With `oauthFixture.enabled` in a dev or ci tier, and only there, the chart renders the `oauth-fixture`
-Deployment, its Service and its policy, and the client Secret; the stub issuer's image runs as the
+Deployment, its Service and its policy, and mounts the client Secret `cargo xtask cell up` makes,
+since the chart makes none (DEC-822 item 4); the stub issuer's image runs as the
 Alpaca provider alone, answering one public host; it reaches nothing, and only this workspace's
 token exchange reaches it, whose token URL and `token-host` egress name it and nothing else. Any other
 tier refuses the setting, in the schema and in the chart, whether or not the stub's image is named.
@@ -63,7 +64,6 @@ OBJECTS = {
     ("Deployment", "oauth-fixture"),
     ("Service", "oauth-fixture"),
     ("NetworkPolicy", "oauth-fixture"),
-    ("Secret", "oauth-fixture-client"),
 }
 BASE = (
     "-f",
@@ -278,8 +278,6 @@ SEEDED = [
         ).update(value="staging"),
     ),
     ("Service", "oauth-fixture", lambda s: s["spec"].update(type="NodePort")),
-    ("Secret", "oauth-fixture-client", lambda s: s["data"].update({"tls.key": "eA=="})),
-    ("Secret", "oauth-fixture-client", lambda s: s["metadata"]["annotations"].pop("helm.sh/resource-policy")),
 ]
 
 
@@ -305,11 +303,16 @@ def test_each_seeded_bug_is_caught():
         ),
     ):
         assert oauth_fixture(mutate(docs, "token-exchange", "Pod", change), on=True), "missed a token URL bug"
-    gone = [d for d in docs if not (d["kind"] == "Deployment" and d["metadata"]["name"] == "oauth-fixture")]
-    assert secrets_as_files(gone), "the fixture's Secret without its pod is caught"
+    made = {
+        "apiVersion": "v1",
+        "kind": "Secret",
+        "metadata": {"name": "oauth-fixture-client"},
+        "type": "Opaque",
+        "data": {"client-secret": "eA=="},
+    }
+    assert oauth_fixture([*docs, made], on=True), "the client Secret made by the chart is caught (DEC-822 item 4)"
     off = render_all()
-    stray = copy.deepcopy(next(d for d in docs if d["kind"] == "Secret"))
-    assert secrets_as_files([*off, stray]), "the fixture's Secret in a render without the fixture is caught"
+    stray = copy.deepcopy(next(d for d in docs if d["kind"] == "Service" and d["metadata"]["name"] == "oauth-fixture"))
     assert oauth_fixture([*off, stray], on=False), "an object of a fixture that is off is caught"
     on_with_url_off = mutate(
         off,

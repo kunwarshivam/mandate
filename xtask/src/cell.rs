@@ -923,6 +923,7 @@ pub fn up() -> Result<()> {
     ])?;
     eprintln!("    journal: failure domains: {}", domain.trim());
     vault()?;
+    fixture_client_secret()?;
     if stub.is_some() {
         demo_links(&image)?;
     }
@@ -1508,8 +1509,9 @@ fn vault() -> Result<()> {
     Ok(())
 }
 
-/// The Secret the workspace chart makes in a dev or ci cell for the `oauth-fixture` pod, and its
-/// key, which holds the fake Alpaca OAuth client secret as plain text (DEC-1176 item 6).
+/// The Secret the local cell makes for the `oauth-fixture` pod, which the workspace chart only
+/// mounts, and its key, which holds the fake Alpaca OAuth client secret as plain text (DEC-1176
+/// item 6; the chart makes no Secret, DEC-822 item 4).
 const FIXTURE_CLIENT_SECRET: &str = "oauth-fixture-client";
 const FIXTURE_CLIENT_SECRET_KEY: &str = "client-secret";
 
@@ -1528,11 +1530,62 @@ fn client_secret_seed_stdin(root: &str, encoded: &str) -> String {
     format!("{root}\n{encoded}")
 }
 
+/// The length of the fixture client's fake secret, in random bytes, written as hex.
+const FIXTURE_CLIENT_SECRET_BYTES: usize = 32;
+
+/// Makes [`FIXTURE_CLIENT_SECRET`] once, before the workspace release whose `oauth-fixture` pod
+/// mounts it, and keeps one already made, so the pod and the vault's seed agree across every
+/// `cell up` (DEC-1176 item 6). Its value is a fake client's, random bytes in hex, which no real
+/// provider knows; it reaches no argument, since kubectl reads the object from stdin.
+fn fixture_client_secret() -> Result<()> {
+    let found = kubectl(&[
+        "get",
+        "secret",
+        FIXTURE_CLIENT_SECRET,
+        "--namespace",
+        NAMESPACE,
+        "--ignore-not-found",
+        "-o",
+        "name",
+    ])?;
+    if !found.trim().is_empty() {
+        eprintln!("    oauth-fixture: its client secret is kept");
+        return Ok(());
+    }
+    let mut bytes = [0u8; FIXTURE_CLIENT_SECRET_BYTES];
+    fs::File::open("/dev/urandom")
+        .and_then(|mut random| random.read_exact(&mut bytes))
+        .context("reading /dev/urandom")?;
+    apply(&[fixture_client_secret_object(&hex_of(&bytes))])?;
+    eprintln!("    oauth-fixture: its client secret is made");
+    Ok(())
+}
+
+/// The fixture client's Secret holding `value` at its one key.
+fn fixture_client_secret_object(value: &str) -> Value {
+    json!({
+        "apiVersion": "v1",
+        "kind": "Secret",
+        "metadata": {
+            "name": FIXTURE_CLIENT_SECRET,
+            "namespace": NAMESPACE,
+            "labels": {"app.kubernetes.io/name": "mandate-cell", "mandate.dev/process": "oauth-fixture"}
+        },
+        "type": "Opaque",
+        "stringData": {FIXTURE_CLIENT_SECRET_KEY: value}
+    })
+}
+
+/// `bytes` in lowercase hex, two digits each.
+fn hex_of(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
 /// Seeds a dev or ci cell's vault with the fake client secret the `oauth-fixture` pod checks, read
-/// from [`FIXTURE_CLIENT_SECRET`] once the workspace release, which makes it, is installed, so
-/// the token exchange redeems the fixture's codes (DEC-1176 item 6, DEC-2636). Only the local
-/// cell runs it, with its fake root token; the chart makes the Secret only in a dev or ci cell, so
-/// a release without it is told so and the vault is left as it is. The value is never decoded.
+/// from [`FIXTURE_CLIENT_SECRET`] once the workspace release is installed, so the token exchange
+/// redeems the fixture's codes (DEC-1176 item 6, DEC-2636). Only the local cell runs it, with its
+/// fake root token; a cell without the Secret is told so and the vault is left as it is. The value
+/// is never decoded.
 fn seed_client_secret() -> Result<()> {
     let jsonpath = format!("jsonpath={{.data.{FIXTURE_CLIENT_SECRET_KEY}}}");
     let encoded = kubectl(&[
@@ -5069,23 +5122,46 @@ mod tests {
         assert_eq!(stdin, "fake-root\nZmFrZS1jbGllbnQtc2VjcmV0");
     }
 
-    /// The cell seeds the client secret only once the workspace release, which makes its Secret,
-    /// is installed.
+    /// The fixture client's Secret holds its one key as written, in the cell's namespace, and its
+    /// value is hex.
     #[test]
-    fn the_client_secret_is_seeded_after_the_workspace_release() {
+    fn the_fixture_client_secret_is_one_key_in_the_cells_namespace() {
+        let made = fixture_client_secret_object("ab01");
+        assert_eq!(made["metadata"]["name"], "oauth-fixture-client");
+        assert_eq!(made["metadata"]["namespace"], NAMESPACE);
+        assert_eq!(made["type"], "Opaque");
+        assert_eq!(made["stringData"], json!({"client-secret": "ab01"}));
+        assert!(made.get("data").is_none());
+        assert_eq!(hex_of(&[0, 1, 0xab, 0xff]), "0001abff");
+        assert_eq!(FIXTURE_CLIENT_SECRET_BYTES, 32);
+    }
+
+    /// The cell makes the fixture's Secret before the workspace release that mounts it, and seeds
+    /// the vault from it only once that release is installed.
+    #[test]
+    fn the_client_secret_is_made_before_and_seeded_after_the_workspace_release() {
         let source = include_str!("cell.rs");
         let up = source
             .split("pub fn up() -> Result<()> {")
             .nth(1)
             .and_then(|rest| rest.split("\n}\n").next())
             .unwrap_or_default();
+        let made = up
+            .find("    fixture_client_secret()?;")
+            .unwrap_or(usize::MAX);
+        let install = up.find("let installed = helm(&install);").unwrap_or(0);
         let installed = up.find("    installed?;").unwrap_or(usize::MAX);
         let seeded = up.find("    seed_client_secret()?;").unwrap_or(0);
+        assert!(
+            made < install,
+            "the Secret is made before the workspace install"
+        );
         assert!(
             installed < seeded,
             "the seed runs after the workspace install"
         );
         assert_eq!(up.matches("seed_client_secret()").count(), 1);
+        assert_eq!(up.matches("fixture_client_secret()").count(), 1);
     }
 
     /// The vault drill passes only these answers, written out here rather than built from
