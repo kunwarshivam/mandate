@@ -397,6 +397,21 @@ pub fn fingerprint_key_verdict(answer: Option<&Value>) -> Result<(), SourceError
     }
 }
 
+/// Whether provisioning must create the fingerprint key, from its `GET <transit>/keys/<key>`:
+/// only a 404 is a key that is not there, `true`; a key that is there must pass
+/// [`fingerprint_key_verdict`], `false`. Any other refusal fails provisioning, so a transient
+/// error never lets an existing key go unverified (review F1, round 2).
+///
+/// # Errors
+/// The GET's own refusal, other than [`SourceError::Missing`], and [`fingerprint_key_verdict`]'s.
+pub fn key_needs_creating(found: &Result<Option<Value>, SourceError>) -> Result<bool, SourceError> {
+    match found {
+        Ok(key) => fingerprint_key_verdict(key.as_ref()).map(|()| false),
+        Err(SourceError::Missing) => Ok(true),
+        Err(e) => Err(e.clone()),
+    }
+}
+
 /// A logged-in session as one identity.
 pub struct OpenBaoSource {
     identity: Identity,
@@ -1044,30 +1059,28 @@ async fn provision_fingerprints(
     mounts: &Mounts,
 ) -> Result<(), SourceError> {
     let transit = format!("sys/mounts/{}", mounts.transit);
-    match http.call(Method::GET, &transit, token, None).await {
-        Ok(mount) => transit_mount_verdict(mount.as_ref())?,
-        Err(_) => {
-            http.call(
-                Method::POST,
-                &transit,
-                token,
-                Some(&json!({ "type": "transit" })),
-            )
-            .await?;
-        }
+    if http.call(Method::GET, &transit, token, None).await.is_err() {
+        http.call(
+            Method::POST,
+            &transit,
+            token,
+            Some(&json!({ "type": "transit" })),
+        )
+        .await?;
     }
+    let mount = http.call(Method::GET, &transit, token, None).await?;
+    transit_mount_verdict(mount.as_ref())?;
     let key = format!("{}/keys/{FINGERPRINT_KEY}", mounts.transit);
-    match http.call(Method::GET, &key, token, None).await {
-        Ok(found) => fingerprint_key_verdict(found.as_ref())?,
-        Err(_) => {
-            http.call(
-                Method::POST,
-                &key,
-                token,
-                Some(&json!({ "exportable": false })),
-            )
-            .await?;
-        }
+    if key_needs_creating(&http.call(Method::GET, &key, token, None).await)? {
+        http.call(
+            Method::POST,
+            &key,
+            token,
+            Some(&json!({ "exportable": false })),
+        )
+        .await?;
+        let made = http.call(Method::GET, &key, token, None).await?;
+        fingerprint_key_verdict(made.as_ref())?;
     }
     let claims = format!("{}/metadata/{}", mounts.kv, kv_path(&SecretPath::Claims)?);
     http.call(
