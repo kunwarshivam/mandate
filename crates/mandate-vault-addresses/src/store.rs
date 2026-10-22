@@ -124,7 +124,52 @@ pub enum Erasure {
     Absent,
 }
 
-/// The workspace API's handle (DEC-2120 item 7). Every operation names its workspace.
+/// The workspace API's handle (DEC-2120 item 7). Every operation names its workspace. Each call
+/// below compiles, so each `compile_fail` test on [`AddressReader`] fails only for want of the method:
+///
+/// ```no_run
+/// use mandate_vault_addresses::*;
+/// use secrecy::SecretString;
+///
+/// #[allow(unused_variables, reason = "one signature for every call")]
+/// fn put_if_absent(store: &AddressWriter, w: &WorkspaceId, r: &AddressRef, m: &MemberId, e: &NewEntry, x: &SecretString, v: Version, t: UnixNanos) -> Result<Put, AddressError> {
+///     store.put_if_absent(w, r, e, t)
+/// }
+///
+/// #[allow(unused_variables, reason = "one signature for every call")]
+/// fn put_again(store: &AddressWriter, w: &WorkspaceId, r: &AddressRef, m: &MemberId, e: &NewEntry, x: &SecretString, v: Version, t: UnixNanos) -> Result<Version, AddressError> {
+///     store.put_again(w, r, e, t)
+/// }
+///
+/// #[allow(unused_variables, reason = "one signature for every call")]
+/// fn entries_holding(store: &AddressWriter, w: &WorkspaceId, r: &AddressRef, m: &MemberId, e: &NewEntry, x: &SecretString, v: Version, t: UnixNanos) -> Result<Vec<Held>, AddressError> {
+///     store.entries_holding(w, m, x)
+/// }
+///
+/// #[allow(unused_variables, reason = "one signature for every call")]
+/// fn compare_and_delete(store: &AddressWriter, w: &WorkspaceId, r: &AddressRef, m: &MemberId, e: &NewEntry, x: &SecretString, v: Version, t: UnixNanos) -> Result<Deletion, AddressError> {
+///     store.compare_and_delete(w, r, v)
+/// }
+///
+/// #[allow(unused_variables, reason = "one signature for every call")]
+/// fn inert_older_than(store: &AddressWriter, w: &WorkspaceId, r: &AddressRef, m: &MemberId, e: &NewEntry, x: &SecretString, v: Version, t: UnixNanos) -> Result<Vec<Written>, AddressError> {
+///     store.inert_older_than(w, t, t)
+/// }
+///
+/// #[allow(unused_variables, reason = "one signature for every call")]
+/// fn erase(store: &AddressWriter, w: &WorkspaceId, r: &AddressRef, m: &MemberId, e: &NewEntry, x: &SecretString, v: Version, t: UnixNanos) -> Result<Erasure, AddressError> {
+///     store.erase(w, r)
+/// }
+///
+/// #[allow(unused_variables, reason = "one signature for every call")]
+/// fn purge_workspace(store: &AddressWriter, w: &WorkspaceId, r: &AddressRef, m: &MemberId, e: &NewEntry, x: &SecretString, v: Version, t: UnixNanos) -> Result<(), AddressError> {
+///     store.purge_workspace(w)
+/// }
+///
+/// fn same(store: AddressWriter) -> AddressWriter {
+///     store.into()
+/// }
+/// ```
 #[derive(Debug)]
 pub struct AddressWriter {
     _sealed: (),
@@ -206,8 +251,88 @@ impl AddressWriter {
     }
 }
 
-/// The dispatcher's handle: one read for one send, and nothing else (DEC-2120 item 7). It has no
-/// write, delete, erase, purge, or list method, and no conversion into an [`AddressWriter`].
+/// The dispatcher's handle: one read for one send, and nothing else (DEC-2120 item 7).
+///
+/// It has no write, delete, erase, purge, or list method, and no conversion into an
+/// [`AddressWriter`]; each block is [`AddressWriter`]'s compiling call on this type:
+///
+/// ```compile_fail
+/// use mandate_vault_addresses::*;
+/// use secrecy::SecretString;
+///
+/// #[allow(unused_variables, reason = "one signature for every call")]
+/// fn put_if_absent(store: &AddressReader, w: &WorkspaceId, r: &AddressRef, m: &MemberId, e: &NewEntry, x: &SecretString, v: Version, t: UnixNanos) -> Result<Put, AddressError> {
+///     store.put_if_absent(w, r, e, t)
+/// }
+/// ```
+///
+/// ```compile_fail
+/// use mandate_vault_addresses::*;
+/// use secrecy::SecretString;
+///
+/// #[allow(unused_variables, reason = "one signature for every call")]
+/// fn put_again(store: &AddressReader, w: &WorkspaceId, r: &AddressRef, m: &MemberId, e: &NewEntry, x: &SecretString, v: Version, t: UnixNanos) -> Result<Version, AddressError> {
+///     store.put_again(w, r, e, t)
+/// }
+/// ```
+///
+/// ```compile_fail
+/// use mandate_vault_addresses::*;
+/// use secrecy::SecretString;
+///
+/// #[allow(unused_variables, reason = "one signature for every call")]
+/// fn entries_holding(store: &AddressReader, w: &WorkspaceId, r: &AddressRef, m: &MemberId, e: &NewEntry, x: &SecretString, v: Version, t: UnixNanos) -> Result<Vec<Held>, AddressError> {
+///     store.entries_holding(w, m, x)
+/// }
+/// ```
+///
+/// ```compile_fail
+/// use mandate_vault_addresses::*;
+/// use secrecy::SecretString;
+///
+/// #[allow(unused_variables, reason = "one signature for every call")]
+/// fn compare_and_delete(store: &AddressReader, w: &WorkspaceId, r: &AddressRef, m: &MemberId, e: &NewEntry, x: &SecretString, v: Version, t: UnixNanos) -> Result<Deletion, AddressError> {
+///     store.compare_and_delete(w, r, v)
+/// }
+/// ```
+///
+/// ```compile_fail
+/// use mandate_vault_addresses::*;
+/// use secrecy::SecretString;
+///
+/// #[allow(unused_variables, reason = "one signature for every call")]
+/// fn inert_older_than(store: &AddressReader, w: &WorkspaceId, r: &AddressRef, m: &MemberId, e: &NewEntry, x: &SecretString, v: Version, t: UnixNanos) -> Result<Vec<Written>, AddressError> {
+///     store.inert_older_than(w, t, t)
+/// }
+/// ```
+///
+/// ```compile_fail
+/// use mandate_vault_addresses::*;
+/// use secrecy::SecretString;
+///
+/// #[allow(unused_variables, reason = "one signature for every call")]
+/// fn erase(store: &AddressReader, w: &WorkspaceId, r: &AddressRef, m: &MemberId, e: &NewEntry, x: &SecretString, v: Version, t: UnixNanos) -> Result<Erasure, AddressError> {
+///     store.erase(w, r)
+/// }
+/// ```
+///
+/// ```compile_fail
+/// use mandate_vault_addresses::*;
+/// use secrecy::SecretString;
+///
+/// #[allow(unused_variables, reason = "one signature for every call")]
+/// fn purge_workspace(store: &AddressReader, w: &WorkspaceId, r: &AddressRef, m: &MemberId, e: &NewEntry, x: &SecretString, v: Version, t: UnixNanos) -> Result<(), AddressError> {
+///     store.purge_workspace(w)
+/// }
+/// ```
+///
+/// ```compile_fail
+/// use mandate_vault_addresses::{AddressReader, AddressWriter};
+///
+/// fn upgrade(store: AddressReader) -> AddressWriter {
+///     store.into()
+/// }
+/// ```
 #[derive(Debug)]
 pub struct AddressReader {
     _sealed: (),
