@@ -325,3 +325,25 @@ def test_each_seeded_bug_is_caught():
         ),
     )
     assert oauth_fixture(on_with_url_off, on=False), "a token URL with the fixture off is caught"
+
+
+def test_a_token_url_is_admitted_by_its_one_fixture_value_alone():
+    """`MANDATE_TOKEN_URL` names an address, so the secret-name check admits it, but only at the
+    fixture's one URL: any other value still reads as a secret (DEC-1176 item 5)."""
+    docs = render_all(*ON)
+    assert secrets_as_files(docs) == []
+    for value in (
+        "https://api.alpaca.markets/oauth/token",
+        "http://oauth-fixture:8091/alpaca/oauth/token?secret=x",
+        "http://user:pass@oauth-fixture:8091/alpaca/oauth/token",
+        "",
+    ):
+        changed = mutate(
+            docs,
+            "token-exchange",
+            "Pod",
+            lambda w, value=value: next(
+                e for e in pod_spec(w)["containers"][0]["env"] if e["name"] == "MANDATE_TOKEN_URL"
+            ).update(value=value),
+        )
+        assert secrets_as_files(changed), value
