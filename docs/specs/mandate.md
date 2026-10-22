@@ -23,9 +23,11 @@ builder, versioning, change classification, and the records kept.
 - **v0.9 ([DEC-2344](../project/decisions/DEC-2344.md), an agent reading under
   [DEC-176](../project/04-decision-log.md#decisions)):** §3.1 states when an agent that ran may be
   retired: only once the account stream's fold shows no position attributed to it and no working
-  order of its own. `profit_stop` and a passed `end_date` retire once their exits have filled, not
-  as soon as they are sent, and `release` once its protective cancels are confirmed. It only delays
-  a record that ends the agent, so no limit, exit, or kill switch loosens.
+  order of its own, working being every non-terminal state of trading spec §5.7. `profit_stop` and
+  a passed `end_date` retire once their exits have filled, not as soon as they are sent; `release`
+  and "stop and release" cancel every working order of the agent's and retire once every cancel is
+  confirmed. A retirement that cannot end raises `retirement_held`. It only delays a record that
+  ends the agent, so no limit, exit, or kill switch loosens.
 - **v0.7, amended ([DEC-942](../project/decisions/DEC-942.md), Accepted by the founder on
   2026-10-17):** §6.4's content object gains one key, `execution`, present only when the
   order builder produced an execution plan for the asked order. It holds that plan (asset class,
@@ -479,7 +481,7 @@ it. `null` means no end.
 |---|---|
 | `hold_protected` | **Holding:** restriction `goal_complete` (mode `exits_only`); protection and every risk limit stay armed |
 | `disarm_ladder` | Holding, but the drawdown ladder and daily loss are disarmed; protection and the lifetime floor stay armed |
-| `release` | The agent cancels its protective orders, the ledger records `PositionReleased`, the positions become the owner's external holdings, claims are released, and once the cancels are confirmed the agent retires (`AgentStopped`, reason `goal_complete`), carrying its net dollar loss to the connection as any retirement does (§5.7, [DEC-270](../project/04-decision-log.md#decisions)) |
+| `release` | The agent cancels every working order of its own (protective orders, exits, and any other), the ledger records `PositionReleased`, the positions become the owner's external holdings, claims are released, and once every cancel is confirmed the agent retires (`AgentStopped`, reason `goal_complete`), carrying its net dollar loss to the connection as any retirement does (§5.7, [DEC-270](../project/04-decision-log.md#decisions)) |
 
 - **Holding:** the owner is alerted when it starts. The owner can later release (step-up; journaled
   as `PositionReleased`, including the warning shown that the positions will be unprotected) or
@@ -487,13 +489,24 @@ it. `null` means no end.
   spec §13).
 - **Retirement leaves nothing of the agent's** ([DEC-2344](../project/decisions/DEC-2344.md)). A
   runtime writes `AgentStopped` for an agent that ran only once the account stream's fold shows no
-  position attributed to the agent and no working order of its own: none open, none `Unknown`
-  (trading spec §5.7). That is after its exits fill (`profit_stop`, and any goal whose `end_date`
-  passes), after `PositionReleased` and the confirmed cancels of its protective orders (`release`),
-  and, for the owner's Stop, under DEC-136's flat-or-release precondition. Until then the agent is
-  not retired: it keeps those exits running and every kill switch covers it as any running agent.
-  An agent no process ran holds nothing, so the service that retires it (journal spec §9.21,
+  position attributed to the agent and no working order of its own. **Working** is every
+  non-terminal state of trading spec §5.7 (`Intent`, `Submitting`, `Accepted`, `PartiallyFilled`,
+  `PendingCancel`, `PendingReplace`, `Unknown`); the terminal ones are `Filled`, `Canceled`,
+  `Rejected`, `Expired`, `Replaced`, and `Abandoned`. That is after its exits fill (`profit_stop`,
+  and any goal whose `end_date` passes); for `release` and the owner's "stop and release"
+  (DEC-136), after `PositionReleased` and the confirmed cancel of every working order of its own,
+  protective orders, exits, and any other; and, for the owner's Stop, under DEC-136's
+  flat-or-release precondition. A cancel not yet confirmed keeps the agent un-retired: trading spec
+  §5.7's pending-cancel rule and DEC-2302's resend and alert end it. Until then the agent is not
+  retired: it keeps those exits and cancels running and every kill switch covers it as any running
+  agent. An agent no process ran holds nothing, so the service that retires it (journal spec §9.21,
   [DEC-2039](../project/decisions/DEC-2039.md)) reads no fold.
+  - **When it cannot end.** An exit that can never fill, or an order that stays `Unknown`, keeps the
+    agent un-retired. The owner's ways out are a release (the positions become the owner's), the
+    kill switch, or the operator's reconciliation of the `Unknown` order (trading spec §11). It is
+    never silent: a retirement that has waited 24 hours raises the opaque alert
+    `retirement_held` (`AGENTS.md` rule 6) to the owner and the operator, and again each 24 hours
+    while it waits.
 
 ### 3.2 Strategy fields: what is not in the document (DEC-97)
 
