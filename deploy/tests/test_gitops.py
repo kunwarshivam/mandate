@@ -1482,3 +1482,26 @@ def test_pins_are_read_per_key():
     assert ("images.mandate", "ghcr.io/x@sha256:" + "a" * 64) in found
     assert {key for key, _ in found} >= {"mandate-workspace", "mandate-journal-db", "images.mandate"}
     assert all(ANY_DIGEST.fullmatch(digest) for key, digest in found if not key.startswith("images."))
+
+
+TOFU_STAGING = ROOT / "deploy" / "tofu" / "environments" / "staging" / "main.tf"
+
+
+def staging_redirect_problems(overlay: str, main_tf: str) -> list[str]:
+    """DEC-2636: staging's Alpaca OAuth redirect URI is the callback on the API host staging's
+    OpenTofu root names, so a host rename cannot silently break the callback."""
+    named = re.search(r'^\s*api_hostname\s*=\s*"([^"]+)"', main_tf, re.M)
+    if not named:
+        return ["staging's main.tf names no api_hostname"]
+    uri = (yaml.safe_load(overlay)["spec"]["values"].get("alpacaOAuth") or {}).get("redirectUri", "")
+    expected = f"https://{named.group(1)}/v1/oauth/alpaca/callback"
+    return [] if uri == expected else [f"staging's redirect URI {uri!r} is not {expected!r}"]
+
+
+def test_staging_s_alpaca_redirect_uri_is_on_its_api_host():
+    overlay = (GITOPS / "clusters" / "staging" / "workspace.yaml").read_text()
+    main_tf = TOFU_STAGING.read_text()
+    assert staging_redirect_problems(overlay, main_tf) == []
+    assert staging_redirect_problems(overlay, main_tf.replace("api-staging.owlhead.ai", "api-stage.owlhead.ai"))
+    assert staging_redirect_problems(overlay.replace("api-staging.owlhead.ai", "api.owlhead.ai"), main_tf)
+    assert staging_redirect_problems(overlay, main_tf.replace("api_hostname", "api_host"))
