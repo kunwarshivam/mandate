@@ -15,6 +15,7 @@ mandate-gateway.workspace = true
 mandate-journal.workspace = true
 mandate-num.workspace = true
 mandate-research.workspace = true
+mandate-research-run.workspace = true
 mandate-store.workspace = true
 mandate-vault.workspace = true
 secrecy.workspace = true

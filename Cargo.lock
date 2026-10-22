@@ -2094,6 +2094,7 @@ dependencies = [
  "mandate-journal",
  "mandate-num",
  "mandate-research",
+ "mandate-research-run",
  "mandate-store",
  "mandate-time",
  "mandate-vault",
