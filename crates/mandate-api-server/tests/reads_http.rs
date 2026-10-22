@@ -86,6 +86,7 @@ fn fixture_with(
         step_up: Arc::new(mandate_api_server::stepup::Unbound),
         challenges: Arc::default(),
         connect: None,
+        reduction: Arc::default(),
     };
     Fixture {
         addr: serve(http::api(app, Drain::new())),

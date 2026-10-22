@@ -158,6 +158,7 @@ const FULL_JOB: &[&str] = &[
     "objectstore",
     "tofu",
     "stub-release",
+    "exchange-release",
 ];
 const PR_JOBS: &[&str] = &[
     "lint",
@@ -173,6 +174,7 @@ const PR_JOBS: &[&str] = &[
     "openbao",
     "objectstore",
     "stub-release",
+    "exchange-release",
     "mutants",
     "schema-mutants",
     "cell",
@@ -511,6 +513,7 @@ fn ci(job: &str) -> Result<()> {
         "objectstore" => objectstore(),
         "tofu" => tofu_checks(),
         "stub-release" => stub_release(),
+        "exchange-release" => exchange_release(),
         "mutants" => mutants(Path::new("."), base_ref()?.as_deref()),
         "mutants-costs" => mutant_costs::ci(),
         "sweep" => sweep(Path::new(".")),
@@ -832,6 +835,114 @@ fn stub_release() -> Result<()> {
         eprintln!("    stub-release: {STUB_ISSUER} is not affected (DEC-1190)");
         return Ok(());
     }
+    let output = released(
+        STUB_ISSUER,
+        &["--bind", "127.0.0.1:8899"],
+        &[("MANDATE_DEPLOYMENT_TIER", "dev")],
+    )?
+    .with_context(|| {
+        format!(
+            "the release build of {STUB_ISSUER} kept running instead of refusing: it holds an \
+             issuer (DEC-2100 item 2)"
+        )
+    })?;
+    release_stub_refused(&output)
+}
+
+/// The token-exchange process's crate and binary (E10-13 slice 5b-3, DEC-2633).
+const TOKEN_EXCHANGE: &str = "mandate-token-exchange";
+
+/// All the release token exchange may write, to standard error, when it is given a token URL
+/// (DEC-2633 item 2).
+const TOKEN_URL_IN_RELEASE: &str = "token_exchange_token_url_in_release\n";
+
+/// DEC-2633 item 2: a build without debug assertions refuses to start when `MANDATE_TOKEN_URL` is
+/// set at all. Builds the exchange with `--release` once, only when the diff selects its crate
+/// (DEC-1190), and runs it as a cell would: a dev tier with a token URL its debug build admits, a
+/// dev tier with an empty one, and a production tier with one. Each run must be
+/// [`release_exchange_refused`]. It first refuses an environment that turns debug assertions back
+/// on in the release profile (DEC-2322), which would make the build it checks not the one
+/// the image ships.
+fn exchange_release() -> Result<()> {
+    if !selection()?.crates.contains(TOKEN_EXCHANGE) {
+        eprintln!("    exchange-release: {TOKEN_EXCHANGE} is not affected (DEC-1190)");
+        return Ok(());
+    }
+    release_profile_untouched(|name| env::var(name).ok())?;
+    for (tier, url) in [
+        ("dev", "http://127.0.0.1:8091/alpaca/oauth/token"),
+        ("dev", ""),
+        ("production", "http://127.0.0.1:8091/alpaca/oauth/token"),
+    ] {
+        let output = released(
+            TOKEN_EXCHANGE,
+            &[],
+            &[
+                ("MANDATE_DEPLOYMENT_TIER", tier),
+                ("MANDATE_SUBJECT", "conn_01JB3K6F0C9R2V7N4M8Q1T5W50"),
+                ("MANDATE_TOKEN_URL", url),
+            ],
+        )?
+        .with_context(|| {
+            format!(
+                "the release build of {TOKEN_EXCHANGE} kept running instead of refusing its \
+                 token URL in tier {tier} (DEC-2633 item 2)"
+            )
+        })?;
+        release_exchange_refused(&output)
+            .with_context(|| format!("tier {tier}, token URL {url:?}"))?;
+    }
+    Ok(())
+}
+
+/// DEC-2322: the release profile's debug assertions stay off. Refuses an environment that
+/// sets `CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS` at all, or passes `debug-assertions` through
+/// `RUSTFLAGS` or `CARGO_ENCODED_RUSTFLAGS`.
+fn release_profile_untouched(var: impl Fn(&str) -> Option<String>) -> Result<()> {
+    if var("CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS").is_some() {
+        bail!(
+            "CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS is set: the release build must keep debug \
+             assertions off (DEC-2322)"
+        );
+    }
+    for name in ["RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS"] {
+        if var(name).is_some_and(|flags| flags.contains("debug-assertions")) {
+            bail!(
+                "{name} names debug-assertions: the release build must keep them off \
+                 (DEC-2322)"
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Whether a release exchange's run is DEC-2633 item 2's refusal: exit 2,
+/// [`TOKEN_URL_IN_RELEASE`] alone on standard error, and nothing on standard output.
+fn release_exchange_refused(output: &std::process::Output) -> Result<()> {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if output.status.code() != Some(2)
+        || stderr != TOKEN_URL_IN_RELEASE
+        || !output.stdout.is_empty()
+    {
+        bail!(
+            "the release build of {TOKEN_EXCHANGE} must exit 2 writing only \
+             {TOKEN_URL_IN_RELEASE:?} to standard error (DEC-2633 item 2); it exited {} with \
+             stdout {:?} and stderr {stderr:?}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+    Ok(())
+}
+
+/// Builds `package`'s binary of the same name with `--release`, runs it with `args` and only
+/// `envs` in its environment, and returns its output once it exits; `None` when it is still
+/// running after [`STUB_RELEASE_WAITS`] waits of 20 ms, and it is killed.
+fn released(
+    package: &str,
+    args: &[&str],
+    envs: &[(&str, &str)],
+) -> Result<Option<std::process::Output>> {
     sh(
         "cargo",
         &[
@@ -839,9 +950,9 @@ fn stub_release() -> Result<()> {
             "--locked",
             "--release",
             "--package",
-            STUB_ISSUER,
+            package,
             "--bin",
-            STUB_ISSUER,
+            package,
         ],
     )?;
     let meta: serde_json::Value = serde_json::from_str(&output_in(
@@ -853,14 +964,18 @@ fn stub_release() -> Result<()> {
     let target = meta["target_directory"]
         .as_str()
         .context("cargo metadata names no target directory")?;
-    let binary = Path::new(target).join("release").join(STUB_ISSUER);
+    let binary = Path::new(target).join("release").join(package);
+    let shown: Vec<String> = envs.iter().map(|(k, v)| format!("{k}={v}")).collect();
     eprintln!(
-        "    $ MANDATE_DEPLOYMENT_TIER=dev {} --bind 127.0.0.1:8899",
-        binary.display()
+        "    $ {} {} {}",
+        shown.join(" "),
+        binary.display(),
+        args.join(" ")
     );
     let mut child = Command::new(&binary)
-        .args(["--bind", "127.0.0.1:8899"])
-        .env("MANDATE_DEPLOYMENT_TIER", "dev")
+        .args(args)
+        .env_clear()
+        .envs(envs.iter().copied())
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -878,13 +993,7 @@ fn stub_release() -> Result<()> {
         child.kill()?;
     }
     let output = child.wait_with_output()?;
-    if !exited {
-        bail!(
-            "the release build of {STUB_ISSUER} kept running instead of refusing: it holds an \
-             issuer (DEC-2100 item 2)"
-        );
-    }
-    release_stub_refused(&output)
+    Ok(exited.then_some(output))
 }
 
 /// Whether a release stub's run is DEC-2100 item 2's refusal: exit 2, [`STUB_NOT_BUILT`] alone on
@@ -1365,8 +1474,9 @@ const INFRA_CLOSE_SECRETS: [&str; 2] = ["DIGITAL_OCEAN_API_KEY", "KUBE_API_ALLOW
 /// secrets, since GitHub prints a variable in a step's environment in the public log (DEC-2030
 /// items 2 and 6). The model provider's key, staging's alone, goes to the vault on the CLI's
 /// stdin under a `MANDATE_` name, never `TF_VAR_`, so OpenTofu never reads it (DEC-2630). So does
-/// the founder's identity-provider subject, staging's alone, to the built CLI's stdin (DEC-2114).
-const INFRA_SECRETS: [&str; 7] = [
+/// the founder's identity-provider subject, staging's alone, to the built CLI's stdin (DEC-2114),
+/// and the Alpaca OAuth client secret, staging's alone, to the vault like the model key (DEC-2636).
+const INFRA_SECRETS: [&str; 8] = [
     "DIGITAL_OCEAN_API_KEY",
     "CF_INFRA_API_TOKEN",
     "TOFU_STATE_PASSPHRASE",
@@ -1374,7 +1484,11 @@ const INFRA_SECRETS: [&str; 7] = [
     "KUBE_API_ALLOWED_CIDRS",
     "OPENROUTER_API_KEY",
     "FOUNDER_OIDC_SUBJECT",
+    "ALPACA_OAUTH_CLIENT_SECRET",
 ];
+/// The infra step's environment variable holding the Alpaca OAuth client secret (DEC-2636).
+const ALPACA_CLIENT_SECRET_VAR: &str = "MANDATE_ALPACA_OAUTH_CLIENT_SECRET";
+
 /// The list inputs `infra.yml` hands OpenTofu as JSON, which `infra` leaves out of `tofu`'s
 /// environment when blank or empty, so a root with a default takes it and a root without one
 /// fails on the missing variable by name, never on `""`, which is no list (DEC-2030 item 3).
@@ -1736,6 +1850,10 @@ fn bootstrap_staging(tofu: &dyn Fn(&[String]) -> Command, chdir: &str, run: &str
     if !model_key.is_empty() {
         mask::add_mask(&model_key);
     }
+    let alpaca_client_secret = env::var(ALPACA_CLIENT_SECRET_VAR).unwrap_or_default();
+    if !alpaca_client_secret.is_empty() {
+        mask::add_mask(&alpaca_client_secret);
+    }
     let founder_subject = env::var(founding::SUBJECT_VAR).unwrap_or_default();
     if !founder_subject.is_empty() {
         mask::add_mask(&founder_subject);
@@ -1820,10 +1938,11 @@ fn bootstrap_staging(tofu: &dyn Fn(&[String]) -> Command, chdir: &str, run: &str
             provision: &|stdin| {
                 in_vault_cli(&vault_provision::provision_command(&connections), stdin)
             },
-            put: &|stdin| in_vault_cli(&vault_provision::put_command(), stdin),
+            put: &|secret, stdin| in_vault_cli(&vault_provision::put_command(secret), stdin),
         },
         &listed,
         &model_key,
+        &alpaca_client_secret,
     )?;
     for word in words {
         eprintln!("    vault-provision: {word} (DEC-2630)");
@@ -2166,6 +2285,10 @@ const GUARDED_WORKFLOW_LINES: &[(&str, &str)] = &[
     (
         INFRA_WORKFLOW,
         "MANDATE_FOUNDER_OIDC_SUBJECT: ${{ secrets.FOUNDER_OIDC_SUBJECT }}",
+    ),
+    (
+        INFRA_WORKFLOW,
+        "MANDATE_ALPACA_OAUTH_CLIENT_SECRET: ${{ secrets.ALPACA_OAUTH_CLIENT_SECRET }}",
     ),
 ];
 
@@ -5679,6 +5802,7 @@ const READ_ENV_NAMES: &[&str] = &[
     "MANDATE_INFRA_SHA",
     "MANDATE_OPENROUTER_API_KEY",
     "MANDATE_FOUNDER_OIDC_SUBJECT",
+    "MANDATE_ALPACA_OAUTH_CLIENT_SECRET",
     "MANDATE_TOFU_REQUIRED",
     "DIGITALOCEAN_TOKEN",
     "TF_VAR_state_passphrase",
@@ -11521,11 +11645,12 @@ mod tests {
         mutant_verdicts, mutants, mutants_args, mutants_job_cargo, mutants_outcome, mutants_plan,
         mutants_scheduled, mutated_crates, names_a_stub, output_in, pending_nextest,
         pending_problems, pending_tests, per_shard_value, plain_comment_lines, preflight_args,
-        proptest_seeds_in, registry_problems, registry_rows, rehearsal_runs, release_stub_refused,
-        repo_root, schema_mutants, shard_packages, shellcheck_scripts, simulator_harnesses,
-        simulator_oracles, spec_guard_problems, spec_guard_problems_for_pr, status_flip_problems,
-        test_binary, test_order_config, test_outcomes, unique_temp_path, unjudged_mutants, used_by,
-        verdicts, workspace_closure, workspace_packages,
+        proptest_seeds_in, registry_problems, registry_rows, rehearsal_runs,
+        release_exchange_refused, release_profile_untouched, release_stub_refused, repo_root,
+        schema_mutants, shard_packages, shellcheck_scripts, simulator_harnesses, simulator_oracles,
+        spec_guard_problems, spec_guard_problems_for_pr, status_flip_problems, test_binary,
+        test_order_config, test_outcomes, unique_temp_path, unjudged_mutants, used_by, verdicts,
+        workspace_closure, workspace_packages,
     };
     use super::{
         BINARY_COUPLINGS, CrateGraph, MATRIX_LIMIT, RUNNER_CRATE, SWEEP_ROTATION,
@@ -12654,6 +12779,68 @@ mod tests {
             );
         }
         assert!(FULL_JOB.contains(&"stub-release") && PR_JOBS.contains(&"stub-release"));
+    }
+
+    /// DEC-2633 item 2: `exchange-release` accepts only exit 2 with
+    /// `token_exchange_token_url_in_release` alone on standard error, and runs in `full` and in
+    /// `check`.
+    #[test]
+    fn the_release_exchange_check_accepts_only_the_lone_refusal() {
+        let run = |code: i32, stdout: &str, stderr: &str| std::process::Output {
+            status: ExitStatus::from_raw(code << 8),
+            stdout: stdout.as_bytes().to_vec(),
+            stderr: stderr.as_bytes().to_vec(),
+        };
+        let refusal = "token_exchange_token_url_in_release\n";
+        assert!(release_exchange_refused(&run(2, "", refusal)).is_ok());
+        for (code, stdout, stderr) in [
+            (0, "", refusal),
+            (3, "", refusal),
+            (2, "x\n", refusal),
+            (
+                2,
+                "",
+                "token_exchange_token_url_in_release\ntoken_exchange_token_url_in_release\n",
+            ),
+            (2, "", "token_exchange_cell_tier\n"),
+            (2, "", "token_exchange_token_url_in_release"),
+            (3, "", "token_exchange_not_yet_exchanging\n"),
+            (2, "", ""),
+        ] {
+            assert!(
+                release_exchange_refused(&run(code, stdout, stderr)).is_err(),
+                "{code} {stdout:?} {stderr:?}"
+            );
+        }
+        assert!(FULL_JOB.contains(&"exchange-release") && PR_JOBS.contains(&"exchange-release"));
+    }
+
+    /// DEC-2322: `exchange-release` refuses an environment that turns the release profile's
+    /// debug assertions back on, and accepts one that leaves them alone.
+    #[test]
+    fn the_release_exchange_check_refuses_debug_assertions_turned_on() {
+        let with = |pairs: &'static [(&'static str, &'static str)]| {
+            move |name: &str| {
+                pairs
+                    .iter()
+                    .find(|(key, _)| *key == name)
+                    .map(|(_, value)| (*value).to_owned())
+            }
+        };
+        assert!(release_profile_untouched(with(&[])).is_ok());
+        assert!(release_profile_untouched(with(&[("RUSTFLAGS", "-C target-cpu=native")])).is_ok());
+        for refused in [
+            &[("CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS", "true")][..],
+            &[("CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS", "false")][..],
+            &[("RUSTFLAGS", "-C debug-assertions")][..],
+            &[("RUSTFLAGS", "-Cdebug-assertions=on")][..],
+            &[("CARGO_ENCODED_RUSTFLAGS", "-C\u{1f}debug-assertions")][..],
+        ] {
+            assert!(
+                release_profile_untouched(with(refused)).is_err(),
+                "{refused:?}"
+            );
+        }
     }
 
     /// DEC-931: every package built on a mutated one stays unoptimised, so a mutant rebuilds only

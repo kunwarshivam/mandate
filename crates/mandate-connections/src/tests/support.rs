@@ -39,6 +39,9 @@ pub struct FixtureVault {
     codes: BTreeMap<VaultKey, WaitingCode>,
     tokens: BTreeMap<VaultKey, (AccessToken, GrantedScopes)>,
     pub ops: Vec<&'static str>,
+    /// The operation that fails with `vault_unavailable`, as a run that stops there would: it is
+    /// recorded in `ops`, and changes nothing.
+    pub failing: Option<&'static str>,
 }
 
 impl FixtureVault {
@@ -76,6 +79,16 @@ impl FixtureVault {
             .filter(|op| op.starts_with("put_"))
             .collect()
     }
+
+    /// Records `op`, failing it when it is the `failing` one.
+    fn record(&mut self, op: &'static str) -> Result<(), ConnectError> {
+        self.ops.push(op);
+        if self.failing == Some(op) {
+            Err(ConnectError::VaultUnavailable)
+        } else {
+            Ok(())
+        }
+    }
 }
 
 impl Vault for FixtureVault {
@@ -85,18 +98,15 @@ impl Vault for FixtureVault {
         code: AuthorizationCode,
         verifier: PkceVerifier,
     ) -> Result<(), ConnectError> {
-        self.ops.push("put_code");
+        self.record("put_code")?;
         self.codes
             .insert(key.clone(), WaitingCode { code, verifier });
         Ok(())
     }
 
-    fn read_code(&mut self, key: &VaultKey) -> Result<Option<WaitingCode>, ConnectError> {
-        self.ops.push("read_code");
-        Ok(self.codes.get(key).map(|waiting| WaitingCode {
-            code: AuthorizationCode(SecretString::from(waiting.code.0.expose_secret())),
-            verifier: PkceVerifier(SecretString::from(waiting.verifier.0.expose_secret())),
-        }))
+    fn take_code(&mut self, key: &VaultKey) -> Result<Option<WaitingCode>, ConnectError> {
+        self.record("take_code")?;
+        Ok(self.codes.remove(key))
     }
 
     fn put_token(
@@ -105,19 +115,19 @@ impl Vault for FixtureVault {
         token: AccessToken,
         scopes: &GrantedScopes,
     ) -> Result<(), ConnectError> {
-        self.ops.push("put_token");
+        self.record("put_token")?;
         self.tokens.insert(key.clone(), (token, scopes.clone()));
         Ok(())
     }
 
     fn delete_code(&mut self, key: &VaultKey) -> Result<(), ConnectError> {
-        self.ops.push("delete_code");
+        self.record("delete_code")?;
         self.codes.remove(key);
         Ok(())
     }
 
     fn delete(&mut self, key: &VaultKey) -> Result<(), ConnectError> {
-        self.ops.push("delete");
+        self.record("delete")?;
         self.codes.remove(key);
         self.tokens.remove(key);
         Ok(())

@@ -69,6 +69,7 @@ spec:
       labels:
         {{- include "vault.labels" . | nindent 8 }}
     spec:
+      serviceAccountName: vault
       automountServiceAccountToken: false
       enableServiceLinks: false
       securityContext:
@@ -110,6 +111,9 @@ spec:
             {{- if eq .Values.seal.type "static" }}
             - {name: seal, mountPath: /openbao/seal, readOnly: true}
             {{- end }}
+            {{- if .Values.kubeApi.enabled }}
+            - {name: kube-api-token, mountPath: /var/run/secrets/kubernetes.io/serviceaccount, readOnly: true}
+            {{- end }}
       volumes:
         - name: config
           configMap:
@@ -127,6 +131,19 @@ spec:
             defaultMode: 0440
             items:
               - {key: key, path: key}
+        {{- end }}
+        {{- if .Values.kubeApi.enabled }}
+        - name: kube-api-token
+          projected:
+            defaultMode: 0440
+            sources:
+              - serviceAccountToken:
+                  path: token
+                  expirationSeconds: 3600
+              - configMap:
+                  name: kube-root-ca.crt
+                  items:
+                    - {key: ca.crt, path: ca.crt}
         {{- end }}
   volumeClaimTemplates:
     - metadata:
@@ -235,6 +252,43 @@ spec:
   egress: []
   {{- end }}
 {{- end -}}
+{{- /*
+The vault's own ServiceAccount, which mounts no token by itself. With Kubernetes auth on, the pod
+projects one short-lived token of it, for the API server's default audience, at the path OpenBao
+reads, owner- and group-read as the other mounts are, so the pod's fsGroup reads it, and the account may review other pods' tokens, `system:auth-delegator` and nothing more
+(DEC-2062): no `token_reviewer_jwt` is stored, so OpenBao rereads the rotating token.
+*/ -}}
+{{- define "vault.account" -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vault
+  labels:
+    {{- include "vault.labels" . | nindent 4 }}
+automountServiceAccountToken: false
+{{- end -}}
+{{- define "vault.reviewer" -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ printf "vault-token-review-%s" .Release.Namespace | quote }}
+  labels:
+    {{- include "vault.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:auth-delegator
+subjects:
+  - kind: ServiceAccount
+    name: vault
+    namespace: {{ .Release.Namespace | quote }}
+{{- end -}}
+---
+{{ include "vault.emit" (include "vault.account" .) }}
+{{- if .Values.kubeApi.enabled }}
+---
+{{ include "vault.emit" (include "vault.reviewer" .) }}
+{{- end }}
 ---
 {{ include "vault.emit" (include "vault.config" .) }}
 ---
