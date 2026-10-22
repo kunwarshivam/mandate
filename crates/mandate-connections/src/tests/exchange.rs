@@ -3,6 +3,8 @@
 
 use std::collections::BTreeSet;
 
+use proptest::prelude::*;
+use proptest::test_runner::TestRunner;
 use secrecy::SecretString;
 
 use super::support::{
@@ -83,8 +85,8 @@ fn a_paper_exchange_sends_the_one_live_token_request_and_stores_only_the_token()
     assert!(!vault.has_code(), "the code and verifier are deleted");
     assert_eq!(
         vault.ops,
-        ["read_code", "put_token", "delete_code"],
-        "read once, store the token, then delete the code and verifier"
+        ["take_code", "put_token"],
+        "take the code and verifier in one step, then store the token (DEC-2628 item 2)"
     );
     assert_eq!(
         run(Environment::Paper, &mut vault, &mut provider),
@@ -102,7 +104,7 @@ fn with_no_code_waiting_nothing_is_sent_or_written() {
         Err(ConnectError::CodeMissing)
     );
     assert!(provider.calls.is_empty());
-    assert_eq!(vault.ops.first(), Some(&"read_code"));
+    assert_eq!(vault.ops.first(), Some(&"take_code"));
     assert_eq!(vault.writes(), Vec::<&str>::new());
     assert_eq!(vault.token(), None);
     assert!(!vault.has_code());
@@ -134,10 +136,13 @@ fn a_refused_grant_stores_no_token_and_deletes_the_entry() {
         );
         assert_eq!(vault.token(), None, "{refusal:?}");
         assert_eq!(provider.calls.len(), 1, "never retried: {refusal:?}");
-        assert_eq!(vault.ops, ["read_code", "delete"], "{refusal:?}");
+        assert_eq!(
+            vault.ops,
+            ["take_code"],
+            "taken before the request, so nothing is left to delete: {refusal:?}"
+        );
         assert_eq!(vault.writes(), Vec::<&str>::new(), "{refusal:?}");
         assert!(!vault.has_code(), "{refusal:?}");
-        assert_eq!(vault.ops.last(), Some(&"delete"), "{refusal:?}");
     }
 }
 
@@ -191,4 +196,118 @@ fn the_exchange_sends_the_redirect_uri_the_deployment_registered() {
         sent,
         vec!["https://api-staging.owlhead.ai/v1/oauth/alpaca/callback"]
     );
+}
+
+/// A run whose take fails sends nothing: the code is sent only once it is gone from
+/// the vault, so a later run is the first to send it (DEC-2628 item 2).
+#[test]
+fn a_code_that_cannot_be_taken_is_never_sent() {
+    let mut vault = FixtureVault::with_code();
+    vault.failing = Some("take_code");
+    let mut provider = FixtureProvider::granting("bearer", "trading data");
+    assert_eq!(
+        run(Environment::Paper, &mut vault, &mut provider),
+        Err(ConnectError::VaultUnavailable)
+    );
+    assert!(provider.calls.is_empty(), "nothing sent before the take");
+    assert_eq!(vault.token(), None);
+    vault.failing = None;
+    assert!(run(Environment::Paper, &mut vault, &mut provider).is_ok());
+    assert_eq!(
+        provider.calls.len(),
+        1,
+        "the code is sent once, by the run that took it"
+    );
+}
+
+/// A run that stops after taking the code and before its request is answered loses the
+/// connect: nothing is stored, and a rerun finds no code and sends nothing. The request stays open
+/// for the deadline teardown (connections spec §5.2 step 6; `manager`'s teardown tests).
+#[test]
+fn a_run_lost_after_the_take_leaves_nothing_for_a_rerun_to_send() {
+    let mut vault = FixtureVault::with_code();
+    let mut provider = FixtureProvider {
+        answer: Err(ConnectError::EndpointFailed),
+        calls: Vec::new(),
+    };
+    assert_eq!(
+        run(Environment::Paper, &mut vault, &mut provider),
+        Err(ConnectError::EndpointFailed)
+    );
+    assert!(!vault.has_code());
+    provider.answer = Ok(("bearer", "trading data"));
+    assert_eq!(
+        run(Environment::Paper, &mut vault, &mut provider),
+        Err(ConnectError::CodeMissing)
+    );
+    assert_eq!(provider.calls.len(), 1, "no second exchange");
+    assert_eq!(vault.token(), None);
+}
+
+/// A run that stops after its request is answered and before the token is stored loses the
+/// connect too: no token, no code, and a rerun sends nothing.
+#[test]
+fn a_run_lost_after_the_request_and_before_the_token_never_exchanges_again() {
+    let mut vault = FixtureVault::with_code();
+    vault.failing = Some("put_token");
+    let mut provider = FixtureProvider::granting("bearer", "trading data");
+    assert_eq!(
+        run(Environment::Paper, &mut vault, &mut provider),
+        Err(ConnectError::VaultUnavailable)
+    );
+    assert_eq!(provider.calls.len(), 1);
+    assert!(!vault.has_code(), "taken before the request");
+    vault.failing = None;
+    assert_eq!(
+        run(Environment::Paper, &mut vault, &mut provider),
+        Err(ConnectError::CodeMissing)
+    );
+    assert_eq!(provider.calls.len(), 1, "no second exchange");
+    assert_eq!(vault.token(), None);
+}
+
+/// One run of the exchange: the vault operation that fails, if any, and whether the endpoint
+/// answers with a grant.
+fn runs() -> impl Strategy<Value = Vec<(Option<&'static str>, bool)>> {
+    let failing = prop_oneof![Just(None), Just(Some("take_code")), Just(Some("put_token")),];
+    prop::collection::vec((failing, any::<bool>()), 1..6)
+}
+
+/// Over any sequence of runs, each stopping anywhere, the code is sent at most once and only by a
+/// run that took it first, a token is stored only by a run that returned it, and no run after
+/// the code is taken sends anything. The oracle follows the code by its own state, not by the
+/// exchange's order (DEC-2628 item 2).
+#[test]
+fn over_any_sequence_of_stopped_runs_the_code_is_sent_at_most_once() {
+    TestRunner::deterministic()
+        .run(&runs(), |schedule| {
+            let mut vault = FixtureVault::with_code();
+            let mut provider = FixtureProvider::granting("bearer", "trading data");
+            let mut code_waiting = true;
+            let mut sent = 0_usize;
+            let mut stored = false;
+            for (failing, grants) in schedule {
+                vault.failing = failing;
+                provider.answer = if grants {
+                    Ok(("bearer", "trading data"))
+                } else {
+                    Err(ConnectError::EndpointFailed)
+                };
+                let result = run(Environment::Paper, &mut vault, &mut provider);
+                let consumed = code_waiting && failing != Some("take_code");
+                if consumed {
+                    code_waiting = false;
+                    sent += 1;
+                }
+                let stores = consumed && grants && failing != Some("put_token");
+                stored |= stores;
+                prop_assert_eq!(result.is_ok(), stores);
+                prop_assert_eq!(provider.calls.len(), sent);
+                prop_assert!(sent <= 1);
+                prop_assert_eq!(vault.has_code(), code_waiting);
+                prop_assert_eq!(vault.token().is_some(), stored);
+            }
+            Ok(())
+        })
+        .unwrap();
 }

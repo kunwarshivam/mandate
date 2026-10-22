@@ -87,6 +87,7 @@ fn fixture() -> Fixture {
         step_up: Arc::new(mandate_api_server::stepup::Unbound),
         challenges: Arc::default(),
         connect: None,
+        reduction: Arc::default(),
     };
     Fixture {
         addr: serve(http::api(app, Drain::new())),
@@ -344,6 +345,34 @@ fn without_a_live_session_both_reads_are_the_one_401() {
         assert_eq!(reply.body, one, "{path}");
         let reply = get(&f, &path, Some("not-a-session"));
         assert_eq!(reply.status, 401, "{path}");
+    }
+}
+
+/// A client's credential never reaches either read: the routes admit only a session, so a
+/// bearer token, with or without a cookie that is not a session, is the one 401 and reads nothing
+/// (DEC-2631 item 1; §3.8 gives a client's `read` scope no connections).
+#[test]
+fn a_client_credential_is_the_one_401_for_both_reads() {
+    let f = fixture();
+    seed(&f);
+    let one = send(f.addr, "GET", "/nowhere", &[], b"").body;
+    let token =
+        "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJjbGllbnQtMSIsInNjb3BlIjoicmVhZCJ9.c2ln";
+    let bearer = format!("Bearer {token}");
+    for path in [ws("/connections"), ws(&format!("/connections/{C1}"))] {
+        for cookie in [None, Some(format!("{COOKIE_NAME}=not-a-session"))] {
+            let mut headers = vec![("Origin", APP), ("Authorization", bearer.as_str())];
+            if let Some(cookie) = cookie.as_deref() {
+                headers.push(("Cookie", cookie));
+            }
+            let reply = send(f.addr, "GET", &path, &headers, b"");
+            assert_eq!(reply.status, 401, "{path} {cookie:?}");
+            assert_eq!(reply.body, one, "{path} {cookie:?}");
+            assert!(
+                !String::from_utf8_lossy(&reply.body).contains(C1),
+                "{path} {cookie:?}"
+            );
+        }
     }
 }
 

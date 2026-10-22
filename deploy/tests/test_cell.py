@@ -187,13 +187,21 @@ def one_workload_per_process(docs: list[dict], run_process: str = "control") -> 
     return problems
 
 
+def mounts_the_store(workload: dict) -> bool:
+    return any(
+        v.get("persistentVolumeClaim", {}).get("claimName") == "artifacts" for v in pod_spec(workload).get("volumes", [])
+    )
+
+
 def colocated(docs: list[dict]) -> list[str]:
-    """A workspace's executors, runtimes and data service share a node by required pod affinity (§3.2)."""
+    """A workspace's executors, runtimes and data service share a node by required pod affinity (§3.2),
+    and so does every pod that mounts the artifact store, a ReadWriteOnce claim, as one group
+    (DEC-2273): the store's mounts are read from each pod's volumes, not from the chart's helper."""
     problems = []
     for w in workloads(docs):
         affinity = pod_spec(w).get("affinity", {}).get("podAffinity", {})
         terms = affinity.get("requiredDuringSchedulingIgnoredDuringExecution", [])
-        want = owner(w)["colocate"]
+        want = owner(w)["colocate"] or mounts_the_store(w)
         good = [
             t
             for t in terms
@@ -209,6 +217,9 @@ def colocated(docs: list[dict]) -> list[str]:
     for name in ("runtime", "executor", "data"):
         if not process(name)["colocate"]:
             problems.append(f"{name} is not colocated")
+    mounting = {w["metadata"]["labels"]["mandate.dev/process"] for w in workloads(docs) if mounts_the_store(w)}
+    if mounting and not {"api", "model-gateway"} <= mounting:
+        problems.append(f"the store's mounts are {sorted(mounting)}, without the API server or the model gateway")
     return problems
 
 
@@ -746,6 +757,23 @@ def test_api_contained():
     for refused in ("api.org=", "api.workspace=", "api.jwksUrl=http://issuer.example/jwks"):
         args = ["-f", str(CELL / "values" / "k3d.yaml"), *every_image(), "--set", refused]
         assert helm(CHART, *args).returncode != 0, refused
+
+
+def api_env(rendered: list[dict]) -> dict[str, str]:
+    """The api container's environment, name to value."""
+    return {e["name"]: e.get("value", "") for e in first_container(owner_workload(rendered)).get("env", [])}
+
+
+def test_ingress_peers_are_exact_addresses_set_only_when_named():
+    """Route 2's ingress peers (workspace API spec §4.10, DEC-2119 item 11): no variable when the
+    list is empty, the comma-joined list otherwise, and only exact addresses admitted, IPv4 with
+    each octet 0 to 255, IPv6, or IPv4-mapped IPv6."""
+    assert "MANDATE_API_INGRESS_PEERS" not in api_env(render_all())
+    peers = render_all("--set-json", 'api.ingressPeers=["127.0.0.1","::ffff:127.0.0.1","::1"]')
+    assert api_env(peers)["MANDATE_API_INGRESS_PEERS"] == "127.0.0.1,::ffff:127.0.0.1,::1"
+    base = ["-f", str(CELL / "values" / "k3d.yaml"), *every_image()]
+    for refused in ('["999.1.1.1"]', '["256.0.0.1"]', '["10.0.0.0/8"]', '["localhost"]', '["127.0.0.1","127.0.0.1"]'):
+        assert helm(CHART, *base, "--set-json", f"api.ingressPeers={refused}").returncode != 0, refused
 
 
 FOUNDER = "01KDEM0000000000000000000F"
@@ -1826,6 +1854,14 @@ def manager_gate(docs: list[dict]) -> dict:
 SEEDED = [
     (one_workload_per_process, lambda d: [x for x in d if x["metadata"]["name"] != "scheduler"]),
     (colocated, lambda d: mutate(d, "executor", "Pod", lambda w: pod_spec(w).pop("affinity"))),
+    (colocated, lambda d: mutate(d, "api", "Deployment", lambda w: pod_spec(w).pop("affinity"))),
+    (colocated, lambda d: mutate(d, "model-gateway", "Deployment", lambda w: pod_spec(w).pop("affinity"))),
+    (
+        colocated,
+        lambda d: mutate(
+            d, "control-t1", "Job", lambda w: w["spec"]["template"]["metadata"]["labels"].pop("mandate.dev/colocate")
+        ),
+    ),
     (
         guaranteed,
         lambda d: mutate(

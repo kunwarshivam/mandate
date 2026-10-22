@@ -2086,9 +2086,12 @@ dependencies = [
 name = "mandate-gatewayd"
 version = "0.0.0"
 dependencies = [
+ "mandate-canon",
  "mandate-connections",
  "mandate-gateway",
  "mandate-journal",
+ "mandate-num",
+ "mandate-research",
  "mandate-store",
  "mandate-time",
  "mandate-vault",
@@ -2716,6 +2719,7 @@ dependencies = [
  "mandate-connections",
  "proptest",
  "ring",
+ "rustix",
  "secrecy",
  "thiserror",
 ]
