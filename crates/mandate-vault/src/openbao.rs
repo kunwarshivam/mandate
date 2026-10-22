@@ -247,6 +247,47 @@ pub fn kubernetes_login_refusal(status: u16, body: &[u8], role: &str) -> Result<
     refusal(StatusCode::from_u16(status).map_err(|_| SourceError::Unavailable)?)
 }
 
+/// What a read of the code a take is about to overwrite says: no code, or a tombstone a take left,
+/// is `None`; otherwise the code's version and its bytes, held as a secret from the moment they are
+/// decoded, so a lost race or an error wipes them. A read with no version or no value, or whose
+/// value is not base64, is [`SourceError::Malformed`]; any other refusal is the read's own.
+pub(crate) fn taken_read(
+    read: Result<Option<Value>, SourceError>,
+) -> Result<Option<(u64, SecretSlice<u8>)>, SourceError> {
+    let read = match read {
+        Ok(read) => read,
+        Err(SourceError::Missing) => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    if tombstoned(read.as_ref()) {
+        return Ok(None);
+    }
+    let version = read
+        .as_ref()
+        .and_then(|r| r.pointer("/data/metadata/version"))
+        .and_then(Value::as_u64)
+        .ok_or(SourceError::Malformed)?;
+    let code = SecretSlice::from(
+        STANDARD
+            .decode(text(read.as_ref(), "/data/data/value")?)
+            .map_err(|_| SourceError::Malformed)?,
+    );
+    Ok(Some((version, code)))
+}
+
+/// What the read again after a refused overwrite means: the code gone is a race another taker
+/// won, `None`; a code still there is one this taker may not take, [`SourceError::Denied`]; a read
+/// that fails is that failure.
+pub(crate) fn lost_or_denied_verdict(
+    reread: Result<Option<Value>, SourceError>,
+) -> Result<Option<SecretSlice<u8>>, SourceError> {
+    match reread {
+        Err(SourceError::Missing) => Ok(None),
+        Ok(_) => Err(SourceError::Denied),
+        Err(e) => Err(e),
+    }
+}
+
 /// The string at `pointer` in `value`.
 fn text<'a>(value: Option<&'a Value>, pointer: &str) -> Result<&'a str, SourceError> {
     value
@@ -560,11 +601,7 @@ impl OpenBaoSource {
     /// version is checked: that is a lost race, and `None`, but only if the code is gone when read
     /// again. A code still there means the taker may not take it: [`SourceError::Denied`].
     async fn lost_or_denied(&self, data: &str) -> Result<Option<SecretSlice<u8>>, SourceError> {
-        match self.call(Method::GET, data, None).await {
-            Err(SourceError::Missing) => Ok(None),
-            Ok(_) => Err(SourceError::Denied),
-            Err(e) => Err(e),
-        }
+        lost_or_denied_verdict(self.call(Method::GET, data, None).await)
     }
 
     fn role_path(&self, connection: &ConnectionId) -> String {
@@ -591,22 +628,9 @@ impl SecretSource for OpenBaoSource {
         let path = SecretPath::Code(connection.clone());
         require(&self.identity, Access::Take, &path)?;
         let data = self.data_path(&path)?;
-        let read = match self.call(Method::GET, &data, None).await {
-            Ok(read) => read,
-            Err(SourceError::Missing) => return Ok(None),
-            Err(e) => return Err(e),
-        };
-        if tombstoned(read.as_ref()) {
+        let Some((version, code)) = taken_read(self.call(Method::GET, &data, None).await)? else {
             return Ok(None);
-        }
-        let version = read
-            .as_ref()
-            .and_then(|r| r.pointer("/data/metadata/version"))
-            .and_then(Value::as_u64)
-            .ok_or(SourceError::Malformed)?;
-        let code = STANDARD
-            .decode(text(read.as_ref(), "/data/data/value")?)
-            .map_err(|_| SourceError::Malformed)?;
+        };
         let body = json!({ "options": { "cas": version }, "data": { TOMBSTONE: true } });
         let overwrite = self
             .http
@@ -620,7 +644,7 @@ impl SecretSource for OpenBaoSource {
         }
         let metadata = format!("{}/metadata/{}", self.mounts.kv, kv_path(&path)?);
         match self.call(Method::DELETE, &metadata, None).await {
-            Ok(_) | Err(SourceError::Missing) => Ok(Some(SecretSlice::from(code))),
+            Ok(_) | Err(SourceError::Missing) => Ok(Some(code)),
             Err(e) => Err(e),
         }
     }
