@@ -833,7 +833,6 @@ fn the_passes_wait_while_the_clock_cannot_be_read() {
 /// DEC-2348 item 2: a release that fails leaves its request uncleared, so the next pass deletes
 /// and releases it again, until the release succeeds; then nothing more.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_release_that_fails_is_retried_until_it_succeeds() {
     let (journal, deletes, raised, releases, mut finisher) = recorded();
     request(&journal, A, 2, "oauth");
@@ -859,7 +858,6 @@ fn a_release_that_fails_is_retried_until_it_succeeds() {
 /// DEC-2348 items 1 and 2: a release that keeps failing at or past the deadline raises the
 /// stalled alert once, as a delete that keeps failing does.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_release_that_keeps_failing_raises_one_alert_past_the_deadline() {
     let (journal, _, raised, releases, mut finisher) = recorded();
     request(&journal, A, 2, "oauth");

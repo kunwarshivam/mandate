@@ -192,9 +192,9 @@ impl<F: Fingerprints, T: Teardown, A: Alerts> Finisher<F, T, A> {
         Ok(())
     }
 
-    /// Deletes the entries of `connection`'s request on `account_ref` unless they were deleted
-    /// since the process started, then releases its fingerprint; a delete that fails at `now`
-    /// past `deadline` is [`Self::stalled`].
+    /// Deletes the entries of `connection`'s request on `account_ref` unless it was cleared since
+    /// the process started, then releases its fingerprint; it is cleared once both succeed, and a
+    /// delete or release that fails at `now` past `deadline` is [`Self::stalled`].
     async fn clear(
         &mut self,
         connection: ConnectionId,
@@ -206,9 +206,13 @@ impl<F: Fingerprints, T: Teardown, A: Alerts> Finisher<F, T, A> {
         if self.cleared.contains(&closed) {
             return;
         }
-        if self.teardown.delete(&closed.0).await.is_ok() {
-            let _failed_release_not_yet_retried =
-                self.fingerprints.release(&closed.0, &closed.1).await;
+        if self.teardown.delete(&closed.0).await.is_ok()
+            && self
+                .fingerprints
+                .release(&closed.0, &closed.1)
+                .await
+                .is_ok()
+        {
             self.cleared.insert(closed);
         } else {
             self.stalled(closed, deadline, now);

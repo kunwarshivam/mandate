@@ -1,8 +1,0 @@
-file = "crates/mandate-api-server/tests/finish_pass.rs"
-test = "a_release_that_keeps_failing_raises_one_alert_past_the_deadline"
-reason = """
-DEC-2348: W1's pass is implemented, and in it a closed request is cleared once its deletes
-succeed, whatever its release answers, so this test fails on that behaviour rather than at a
-stub. The implementation PR holds the request until its release succeeds, and deletes this file
-with the test's `#[ignore]` line.
-"""
