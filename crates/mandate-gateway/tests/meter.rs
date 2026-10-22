@@ -812,7 +812,6 @@ fn any_meter_record_reads_back_from_its_payload() {
 /// DEC-2272 item 5: a daily cap replaced on a running meter binds the next reservation, lowered or
 /// raised, and only the agent it names.
 #[test]
-#[ignore = "pending E21-62"]
 fn a_replaced_research_daily_cap_binds_the_next_reservation() {
     let caps = common::caps()
         .with_research_daily("a", Usd6::parse("1").unwrap())
@@ -855,7 +854,6 @@ fn a_replaced_research_daily_cap_binds_the_next_reservation() {
 /// reserving nothing on either stream, while its other calls and other agents' are untouched; a
 /// cap set again lifts it, and a cap above the workspace's budget leaves it unread.
 #[test]
-#[ignore = "pending E21-62"]
 fn an_agent_whose_cap_did_not_read_is_refused_unavailable_and_reserves_nothing() {
     let caps = common::caps()
         .with_research_daily("a", Usd6::parse("1").unwrap())

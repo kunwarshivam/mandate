@@ -333,7 +333,6 @@ fn any_cap_is_read_as_itself_or_refused_above_the_monthly_cap() {
 /// environment names, stopped since or not; another environment's deployments and the stream's
 /// other records name none.
 #[test]
-#[ignore = "pending E21-62"]
 fn the_agents_are_those_deployed_in_this_environment() {
     let mut world = World::default();
     let version = world.stored(with_cap("5"));

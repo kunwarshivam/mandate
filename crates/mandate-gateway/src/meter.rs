@@ -10,7 +10,7 @@
 
 use core::fmt;
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
 use mandate_canon::{Digest, Value};
@@ -390,6 +390,7 @@ pub struct Caps {
     agent_monthly: BTreeMap<String, Usd6>,
     agent_monthly_default: Usd6,
     research_daily: BTreeMap<String, Usd6>,
+    research_unreadable: BTreeSet<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -407,6 +408,7 @@ impl Caps {
             agent_monthly: BTreeMap::new(),
             agent_monthly_default: workspace_monthly,
             research_daily: BTreeMap::new(),
+            research_unreadable: BTreeSet::new(),
         }
     }
 
@@ -444,13 +446,8 @@ impl Caps {
 
     /// Whether `agent`'s research daily cap is marked as one that did not read, so its research
     /// calls are refused `Unavailable` (DEC-2272 item 5).
-    #[expect(
-        clippy::todo,
-        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-    )]
     pub fn research_unreadable(&self, agent: &str) -> bool {
-        let _ = (self, agent);
-        todo!()
+        self.research_unreadable.contains(agent)
     }
 
     /// Every cap a call of `agent` for `purpose` on `day` must fit under, with its scope and
@@ -620,13 +617,18 @@ impl<S: MeterStore> Meter<S> {
     /// # Errors
     /// [`CapError::AboveWorkspace`] for a cap above the workspace's monthly budget, which leaves the
     /// agent marked unread rather than holding its earlier cap.
-    #[expect(
-        clippy::todo,
-        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-    )]
     pub fn set_research_daily(&mut self, agent: &str, cap: Option<Usd6>) -> Result<(), CapError> {
-        let _ = (&mut self.caps, agent, cap);
-        todo!()
+        self.caps.research_daily.remove(agent);
+        self.caps.research_unreadable.insert(agent.to_owned());
+        let Some(cap) = cap else {
+            return Ok(());
+        };
+        if cap > self.caps.workspace_monthly {
+            return Err(CapError::AboveWorkspace);
+        }
+        self.caps.research_unreadable.remove(agent);
+        self.caps.research_daily.insert(agent.to_owned(), cap);
+        Ok(())
     }
 
     /// Appends `reservation` only if, for every cap that applies, spend plus its maximum is at
@@ -634,8 +636,17 @@ impl<S: MeterStore> Meter<S> {
     /// checked first with nothing appended; then the deployment's writer checks its cap and appends
     /// the copy; then the workspace's own reservation is appended (DEC-2207 item 4). A store that
     /// cannot be read or appended to refuses; a workspace append that fails after the copy leaves
-    /// the copy open, an orphan that only over-counts.
+    /// the copy open, an orphan that only over-counts. A research call of an agent whose daily cap
+    /// is marked unread is refused `Unavailable` before anything is read or appended.
     pub fn reserve(&mut self, reservation: Reservation) -> Result<Reservation, MeterRefusal> {
+        if reservation.purpose == Purpose::Research
+            && reservation
+                .agent_id
+                .as_deref()
+                .is_some_and(|agent| self.caps.research_unreadable(agent))
+        {
+            return Err(MeterRefusal::Unavailable);
+        }
         let records = self.store.read().map_err(|_| MeterRefusal::Unavailable)?;
         let caps = self.caps.applying(
             reservation.agent_id.as_deref(),

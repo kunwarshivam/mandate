@@ -4,13 +4,14 @@
 //! marks the agent unread, and the gateway refuses its research call `meter_unavailable`, reserving
 //! and sending nothing. Every other request reaches the gateway as it came.
 
+use mandate_gateway::kinds::Purpose;
 use mandate_gateway::meter::MeterStore;
 use mandate_gateway::provider::{Clock, Transport};
 use mandate_gateway::wire::Reply;
 use mandate_gateway::{CallRequest, Gateway};
 use mandate_journal::{ArtifactSource, Environment, StoredEvent};
 
-use crate::cap::{CapError, DailyCaps};
+use crate::cap::{self, CapError, DailyCaps};
 
 /// The workspace's control stream as the service reads it, `None` when it cannot be read.
 pub trait Control {
@@ -26,10 +27,6 @@ pub struct Service<T, S, C> {
     artifacts: Box<dyn ArtifactSource>,
 }
 
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
 impl<T: Transport, S: MeterStore, C: Clock> Service<T, S, C> {
     /// The service for `workspace` in `environment`, reading caps under the gateway's own monthly
     /// budget.
@@ -40,13 +37,18 @@ impl<T: Transport, S: MeterStore, C: Clock> Service<T, S, C> {
         control: Box<dyn Control>,
         artifacts: Box<dyn ArtifactSource>,
     ) -> Self {
-        let _ = (workspace, environment, gateway, control, artifacts);
-        todo!()
+        let caps = DailyCaps::new(environment, gateway.meter().caps().workspace_monthly());
+        Self {
+            workspace: workspace.to_owned(),
+            gateway,
+            caps,
+            control,
+            artifacts,
+        }
     }
 
     pub fn gateway(&self) -> &Gateway<T, S, C> {
-        let _ = (&self.workspace, &self.caps, &self.control, &self.artifacts);
-        todo!()
+        &self.gateway
     }
 
     /// The start's check (DEC-2272 item 4): the control stream reads, and so does the cap of every
@@ -55,15 +57,34 @@ impl<T: Transport, S: MeterStore, C: Clock> Service<T, S, C> {
     /// # Errors
     /// The first [`CapError`] met; the service then does not start.
     pub fn ready(&mut self) -> Result<(), CapError> {
-        let _ = &mut self.gateway;
-        todo!()
+        let rows = self.control.rows().ok_or(CapError::ControlUnreadable)?;
+        for agent in cap::agents(&rows, self.caps.environment())? {
+            let daily = self.caps.current(&rows, &agent, self.artifacts.as_ref())?;
+            self.gateway
+                .meter_mut()
+                .set_research_daily(&agent, Some(daily))
+                .map_err(|_| CapError::DocumentUnavailable)?;
+        }
+        Ok(())
     }
 
     /// The gateway's reply to `request`, a research call of this workspace's held first to its
     /// agent's cap as the control stream names it now. A cap the meter will not take leaves the agent
     /// marked unread, so that refusal needs nothing more here.
     pub fn answer(&mut self, request: &CallRequest) -> Reply {
-        let _ = request;
-        todo!()
+        if request.purpose == Purpose::Research
+            && request.workspace_id == self.workspace
+            && let Some(agent) = request.agent_id.as_deref()
+        {
+            let daily = self
+                .control
+                .rows()
+                .ok_or(CapError::ControlUnreadable)
+                .and_then(|rows| self.caps.current(&rows, agent, self.artifacts.as_ref()))
+                .ok();
+            let _unread_when_above_the_budget =
+                self.gateway.meter_mut().set_research_daily(agent, daily);
+        }
+        self.gateway.call(request)
     }
 }

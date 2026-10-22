@@ -76,16 +76,21 @@ pub fn deployment(
 ///
 /// # Errors
 /// [`CapError::ControlUnreadable`] for an `AgentDeployed` whose body does not read.
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
 pub fn agents(
     control: &[StoredEvent],
     environment: Environment,
 ) -> Result<BTreeSet<String>, CapError> {
-    let _ = (control, environment);
-    todo!()
+    control
+        .iter()
+        .filter(|row| row.environment == environment.as_str() && row.event_type == "AgentDeployed")
+        .map(|row| {
+            let body = parse(&row.body).map_err(|_| CapError::ControlUnreadable)?;
+            body.get("payload")
+                .and_then(|payload| text(payload, "agent_id"))
+                .map(str::to_owned)
+                .ok_or(CapError::ControlUnreadable)
+        })
+        .collect()
 }
 
 /// The cap `deployment` gives (DEC-2272 items 1 to 4): zero when not deployed or when the

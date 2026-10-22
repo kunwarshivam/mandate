@@ -263,7 +263,6 @@ fn reserved(service: &TestService) -> usize {
 /// arrives. A cap below the call's maximum refuses it `budget_exhausted` with nothing reserved; a
 /// version deployed since with a higher cap admits the next call.
 #[test]
-#[ignore = "pending E21-62"]
 fn a_research_call_is_held_to_the_cap_of_the_version_deployed_now() {
     let world = World::new();
     world.deploy(AGENT, &world.version("0.001"));
@@ -297,7 +296,6 @@ fn a_research_call_is_held_to_the_cap_of_the_version_deployed_now() {
 /// nothing reserved, whether the control stream is down or the deployed document is missing, and
 /// never falls back on the cap read before.
 #[test]
-#[ignore = "pending E21-62"]
 fn a_cap_that_does_not_read_refuses_meter_unavailable_and_reserves_nothing() {
     let world = World::new();
     world.deploy(AGENT, &world.version("5"));
@@ -326,7 +324,6 @@ fn a_cap_that_does_not_read_refuses_meter_unavailable_and_reserves_nothing() {
 /// DEC-2272 item 6, INF-9: only this workspace's research calls are read for; another purpose or a
 /// foreign workspace's request reaches the gateway as it came, with no control read.
 #[test]
-#[ignore = "pending E21-62"]
 fn only_this_workspace_s_research_calls_read_the_cap() {
     let world = World::new();
     let (mut service, model) = world.service();
@@ -349,7 +346,6 @@ fn only_this_workspace_s_research_calls_read_the_cap() {
 /// deployed has a cap that reads, a document whose hash differs from its journaled version
 /// included; with no agents deployed, it starts.
 #[test]
-#[ignore = "pending E21-62"]
 fn the_start_refuses_unless_every_deployed_agent_s_cap_reads() {
     let world = World::new();
     assert_eq!(world.service().0.ready(), Ok(()), "no agents deployed");
@@ -376,7 +372,6 @@ fn the_start_refuses_unless_every_deployed_agent_s_cap_reads() {
 
 /// DEC-2272 item 4: the caps the start reads are the ones its first calls are held to.
 #[test]
-#[ignore = "pending E21-62"]
 fn the_start_holds_each_deployed_agent_s_cap() {
     let world = World::new();
     world.deploy(AGENT, &world.version("0.001"));
