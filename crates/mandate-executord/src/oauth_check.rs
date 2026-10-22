@@ -173,8 +173,8 @@ pub struct Start<'a, V, A> {
 /// answers `None`, so a refused connect is never run again into a second create.
 ///
 /// # Errors
-/// `connection_record_unreadable` for a check record that does not read,
-/// `credential_unavailable` when the vault refuses the lease, and [`exchanged_check`]'s codes,
+/// `stream_unavailable` for an account stream that cannot be read, `connection_record_unreadable`
+/// for a check record that does not read, `credential_unavailable` when the vault refuses the lease, and [`exchanged_check`]'s codes,
 /// `entropy_unavailable` among them: each refuses the start before any create, and none names
 /// the secret or the id.
 pub fn exchanged_start<S, V, A>(
@@ -221,14 +221,15 @@ where
 /// Whether the account stream in `scope` holds a `ConnectionChecked` of occasion `connect`.
 ///
 /// # Errors
-/// `connection_record_unreadable` for a check record that does not read.
+/// `stream_unavailable` for a stream that cannot be read, which is never taken for one with no
+/// check, and `connection_record_unreadable` for a check record that does not read.
 fn connect_checked<S: Store>(store: &S, scope: &AccountScope) -> Result<bool, &'static str> {
     let unreadable = "connection_record_unreadable";
     let stream = StreamId::parse(&format!("acct:{}:{}", scope.workspace.0, scope.account.0))
         .ok_or("stream_unavailable")?;
     for row in store
         .rows(&stream)
-        .unwrap_or_default()
+        .ok_or("stream_unavailable")?
         .iter()
         .filter(|row| row.event_type == "ConnectionChecked")
     {

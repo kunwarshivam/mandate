@@ -4,7 +4,7 @@
 //! so no refusal is retried into a second create. The vault here is scripted, and nothing dials a
 //! host.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use mandate_canon::{Value, parse};
@@ -18,7 +18,7 @@ use mandate_executord::credential::paper_account;
 use mandate_executord::fixture::Ids;
 use mandate_executord::oauth_check::{OAuthCheck, Start, exchanged_start, oauth_connect_check};
 use mandate_executord::paper::FixturePaper;
-use mandate_journal::{StoredEvent, StreamId};
+use mandate_journal::{AppendOutcome, StoredEvent, StreamId};
 use mandate_store::{MemoryStore, Store};
 use mandate_time::UtcNanos;
 use mandate_vault::SourceError;
@@ -396,5 +396,86 @@ fn the_account_id_is_in_no_record_and_no_code() -> Result<(), Error> {
 fn the_account_is_read_from_the_paper_host() -> Result<(), Error> {
     let id = paper_account(FixturePaper::new(now()?))?;
     assert_eq!(id, BrokerAccountId::new("fixture")?);
+    Ok(())
+}
+
+/// A journal whose first `reads` reads of a stream fail, as a store that cannot be read for a
+/// moment does.
+struct Blind {
+    journal: MemoryStore,
+    reads: Cell<usize>,
+}
+
+impl Store for Blind {
+    fn take_ownership(&mut self, stream: &StreamId) -> Option<u64> {
+        self.journal.take_ownership(stream)
+    }
+
+    fn rows(&self, stream: &StreamId) -> Option<Vec<StoredEvent>> {
+        let left = self.reads.get();
+        if left > 0 {
+            self.reads.set(left - 1);
+            return None;
+        }
+        self.journal.rows(stream)
+    }
+
+    fn append(
+        &mut self,
+        stream: &StreamId,
+        expected_head: u64,
+        current_epoch: u64,
+        recorded_at: UtcNanos,
+        drafts: &[Vec<u8>],
+    ) -> AppendOutcome {
+        self.journal
+            .append(stream, expected_head, current_epoch, recorded_at, drafts)
+    }
+}
+
+/// A stream the start cannot read is never taken for one with no check: a refused connect stays
+/// refused through a moment the journal cannot be read, with no lease, no create and no append.
+#[test]
+fn an_unreadable_stream_refuses_the_start() -> Result<(), Error> {
+    let mut journal = MemoryStore::default();
+    oauth_connect_check(
+        &mut journal,
+        &Ids,
+        &scope(),
+        OAuthCheck {
+            connection: connection()?,
+            granted: check_scope("trading data")?,
+            account: None,
+            pii_ref: AccountPiiRef::new("pii_01J8Z2PQ000000000000000001")?,
+        },
+        |_, _| Ok(()),
+        now()?,
+    )?;
+    let before = rows(&journal).len();
+    let mut blind = Blind {
+        journal: journal.clone(),
+        reads: Cell::new(1),
+    };
+    let (session, calls) = Session::new(Ok(full()))?;
+    let connection = connection()?;
+    let answer = exchanged_start(
+        &mut blind,
+        &Ids,
+        &scope(),
+        Start {
+            connection: &connection,
+            vault: &session,
+            account: |_: AccessToken| BrokerAccountId::new(BROKER_ID).ok(),
+            random: &mut Fixed(true),
+        },
+        now()?,
+    );
+    assert_eq!(
+        answer.map(|checked| checked.is_some()),
+        Err("stream_unavailable")
+    );
+    let calls = calls.borrow();
+    assert!(calls.leased.is_empty() && calls.created.is_empty());
+    assert_eq!(rows(&journal).len(), before);
     Ok(())
 }
