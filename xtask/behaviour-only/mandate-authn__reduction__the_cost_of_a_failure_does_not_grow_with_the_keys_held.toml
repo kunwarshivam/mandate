@@ -1,0 +1,8 @@
+file = "crates/mandate-authn/tests/reduction.rs"
+test = "the_cost_of_a_failure_does_not_grow_with_the_keys_held"
+reason = """
+The bound on failure keys (DEC-2119 item 4) is a new field of ReductionLimits that the existing
+gate does not yet read, so this test fails on the gate's current answer rather than at a stub:
+stubbing ReductionGate::present would stop every existing route-2 test. The row goes with the
+implementation PR that makes the gate read it.
+"""

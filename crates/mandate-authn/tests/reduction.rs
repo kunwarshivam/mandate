@@ -638,3 +638,80 @@ fn the_failure_key_whose_latest_failure_is_oldest_goes_first_an_address_before_a
         );
     }
 }
+
+#[test]
+#[ignore = "pending E9-1"]
+fn a_key_failing_now_outlives_an_idle_one_whatever_its_earliest_failure() {
+    let address = |a: &str| client(a, "never-seen");
+    let mut steering = Bench::bounded((9, 9), (2, 9), (9, 9, 3));
+    let (active, idle) = (client("a", "d"), client("b", "d"));
+    assert_eq!(steering.present(&active, 100, 0, true), REFUSED);
+    assert_eq!(steering.present(&idle, 101, S, true), REFUSED);
+    assert_eq!(steering.present(&idle, 102, 2 * S, true), REFUSED);
+    assert_eq!(steering.present(&active, 103, 3 * S, true), REFUSED);
+    assert_eq!(
+        steering.present(&client("c", "d"), 104, 4 * S, true),
+        REFUSED
+    );
+    assert!(
+        steering.reached(&address("a"), 4 * S),
+        "the key failing at 3 s is kept, though its first failure, at 0 s, is the earliest held"
+    );
+    assert!(
+        !steering.reached(&address("b"), 4 * S),
+        "the key whose latest failure, at 2 s, is oldest goes"
+    );
+    let mut lapsed = Bench::bounded((9, 9), (2, 9), (9, 9, 3));
+    assert_eq!(lapsed.present(&active, 110, 0, true), REFUSED);
+    assert_eq!(lapsed.present(&idle, 111, 305 * S, true), REFUSED);
+    assert_eq!(lapsed.present(&idle, 112, 308 * S, true), REFUSED);
+    assert_eq!(lapsed.present(&active, 113, 310 * S, true), REFUSED);
+    assert_eq!(
+        lapsed.present(&client("c", "d"), 114, 315 * S, true),
+        REFUSED
+    );
+    assert!(
+        !lapsed.reached(&address("b"), 315 * S),
+        "a lapsed failure does not make its key look oldest"
+    );
+    assert_eq!(lapsed.present(&active, 115, 320 * S, true), REFUSED);
+    assert!(
+        lapsed.reached(&address("a"), 320 * S),
+        "the key kept still holds its failure at 310 s"
+    );
+}
+
+/// The least time, over five runs, that 1,000 failures from fresh clients take at a gate already
+/// holding `keys` failure keys, its bound. A test of cost reads the wall clock; the gate itself
+/// never does.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the review of #2131 (B2) asks for a coarse bound on a failure's cost, which only elapsed time measures"
+)]
+fn bound_cost(keys: u32) -> std::time::Duration {
+    (0..5)
+        .map(|_| {
+            let mut bench = Bench::bounded((9, 9), (9, 9), (9, 9, keys));
+            let mut fail = |i: u32| {
+                let who = client(&format!("a{i}"), &format!("d{i}"));
+                let ns = i64::from(i) * 1_000;
+                assert_eq!(bench.present(&who, 0, ns, true), REFUSED);
+            };
+            (0..keys / 2).for_each(&mut fail);
+            let started = std::time::Instant::now();
+            (keys / 2..keys / 2 + 1_000).for_each(&mut fail);
+            started.elapsed()
+        })
+        .min()
+        .unwrap()
+}
+
+#[test]
+#[ignore = "pending E9-1"]
+fn the_cost_of_a_failure_does_not_grow_with_the_keys_held() {
+    let (few, many) = (bound_cost(256), bound_cost(16_384));
+    assert!(
+        many < few * 8,
+        "64 times the keys cost {many:?} against {few:?}: a failure scans the keys it holds"
+    );
+}
