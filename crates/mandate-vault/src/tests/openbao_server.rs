@@ -1371,7 +1371,6 @@ async fn a_release_over_an_unreadable_entry_fails_closed() {
 /// them: the fingerprint read, a claim, a release that frees it for the next connection. A vault
 /// nobody answers for is an outage, checked first.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending E21-32"]
 async fn the_managers_operations_run_through_its_trait() {
     async fn connect<M: ManagerFingerprints>(
         manager: &M,

@@ -702,66 +702,6 @@ impl OpenBaoSource {
         AccountFingerprint::new(text(answer?.as_ref(), "/data/hmac")?)
     }
 
-    /// The fingerprint and reference of the request `account` of `connection`, from the
-    /// fingerprint entry its executor wrote at connect: asked by the connection manager, which
-    /// must find the reference equal to the journaled `account_pii_ref` before it uses the hash
-    /// (DEC-2345 item 3).
-    ///
-    /// # Errors
-    /// [`FingerprintError::Rotating`] while the key rotates, [`FingerprintError::Missing`] for no
-    /// entry, or one that does not read, and [`FingerprintError::Unavailable`] for an outage or a
-    /// refused session.
-    pub async fn fingerprint(
-        &self,
-        connection: &ConnectionId,
-        account: &AccountRef,
-    ) -> Result<(AccountFingerprint, AccountPiiRef), FingerprintError> {
-        if self.rotating().await? {
-            return Err(FingerprintError::Rotating);
-        }
-        self.fingerprint_entry(connection, account).await
-    }
-
-    /// Claims `fingerprint` for `connection` in the registry, by check-and-set on the version read:
-    /// [`Claim::Claimed`] when it is now this connection's or was already, and
-    /// [`Claim::HeldBy`] another connection that holds it. Of two concurrent claims one wins, and
-    /// the other reads it again and answers `HeldBy` the winner (DEC-2345 item 4).
-    ///
-    /// # Errors
-    /// [`FingerprintError::Rotating`] while the key rotates, and
-    /// [`FingerprintError::Unavailable`] for an outage, a refused session, or a registry that
-    /// keeps moving under it.
-    pub async fn claim(
-        &self,
-        connection: &ConnectionId,
-        fingerprint: &AccountFingerprint,
-    ) -> Result<Claim, FingerprintError> {
-        if self.rotating().await? {
-            return Err(FingerprintError::Rotating);
-        }
-        claim_in(self, connection, fingerprint).await
-    }
-
-    /// Gives back the claim of the request `account` of `connection`, when it holds it: on a
-    /// refusal and on a revoke. A connection with no fingerprint entry, or that holds no claim,
-    /// changes nothing, so a release is idempotent and a non-holder's deletes nothing.
-    ///
-    /// # Errors
-    /// [`FingerprintError::Unavailable`] for an outage, a refused session, or a registry that
-    /// keeps moving under it.
-    pub async fn release(
-        &self,
-        connection: &ConnectionId,
-        account: &AccountRef,
-    ) -> Result<(), FingerprintError> {
-        let Some(entry) = self.fingerprint_bytes(connection, account).await? else {
-            return Ok(());
-        };
-        let (fingerprint, _) =
-            decode_entry(entry.expose_secret()).map_err(|_| FingerprintError::Unavailable)?;
-        release_in(self, connection, &fingerprint).await
-    }
-
     /// Whether the marker that the fingerprint key rotates is there.
     async fn rotating(&self) -> Result<bool, FingerprintError> {
         require(&self.identity, Access::Read, &SecretPath::Rotating).map_err(unavailable)?;
@@ -806,8 +746,10 @@ impl ManagerFingerprints for OpenBaoSource {
         connection: &ConnectionId,
         account: &AccountRef,
     ) -> Result<(AccountFingerprint, AccountPiiRef), FingerprintError> {
-        let _ = (connection, account);
-        Err(FingerprintError::Unimplemented { story: "E21-32" })
+        if self.rotating().await? {
+            return Err(FingerprintError::Rotating);
+        }
+        self.fingerprint_entry(connection, account).await
     }
 
     async fn claim(
@@ -815,8 +757,10 @@ impl ManagerFingerprints for OpenBaoSource {
         connection: &ConnectionId,
         fingerprint: &AccountFingerprint,
     ) -> Result<Claim, FingerprintError> {
-        let _ = (connection, fingerprint);
-        Err(FingerprintError::Unimplemented { story: "E21-32" })
+        if self.rotating().await? {
+            return Err(FingerprintError::Rotating);
+        }
+        claim_in(self, connection, fingerprint).await
     }
 
     async fn release(
@@ -824,8 +768,12 @@ impl ManagerFingerprints for OpenBaoSource {
         connection: &ConnectionId,
         account: &AccountRef,
     ) -> Result<(), FingerprintError> {
-        let _ = (connection, account);
-        Err(FingerprintError::Unimplemented { story: "E21-32" })
+        let Some(entry) = self.fingerprint_bytes(connection, account).await? else {
+            return Ok(());
+        };
+        let (fingerprint, _) =
+            decode_entry(entry.expose_secret()).map_err(|_| FingerprintError::Unavailable)?;
+        release_in(self, connection, &fingerprint).await
     }
 }
 
