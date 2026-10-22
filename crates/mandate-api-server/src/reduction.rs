@@ -10,11 +10,14 @@
 //! numbers for `mandate_authn`'s gate (DEC-653).
 
 use std::collections::BTreeMap;
-use std::net::{IpAddr, Ipv6Addr};
+use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::num::NonZeroU32;
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError};
 
+use axum::body::Bytes;
+use axum::extract::{ConnectInfo, State};
 use axum::http::HeaderMap;
+use axum::response::Response;
 use axum::http::header::COOKIE;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -24,10 +27,14 @@ use mandate_time::UtcNanos;
 use ring::digest::{SHA256, digest};
 
 use crate::config::StartRefusal;
+use crate::http::App;
 use crate::session::{OsRandom, Random};
 
 /// The device cookie's name (§4.10 route 2 item 3).
 pub const DEVICE_COOKIE: &str = "__Host-mandate_device";
+
+/// How long a browser keeps the device cookie: 30 days, in seconds.
+pub const DEVICE_MAX_AGE_S: i64 = 2_592_000;
 
 /// The most challenges outstanding in all (DEC-2117 item 3).
 pub const CHALLENGES_IN_ALL: usize = 4_096;
@@ -259,4 +266,22 @@ impl Default for Reduction {
     fn default() -> Self {
         Self::new(Vec::new(), Box::new(OsRandom::new()))
     }
+}
+
+/// `POST /v1/reduction-sessions/challenges` (§4.10 route 2): 403 `forbidden` without the browser
+/// marks, `invalid` for any body but `{}`, the one 401 over a limit, else `201` with
+/// `commands/reduction-session-challenge`, `Cache-Control: no-store`, and a device cookie when
+/// the call carried none.
+#[expect(
+    clippy::todo,
+    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+)]
+pub async fn challenge(
+    State(app): State<Arc<App>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let _ = (app, peer, headers, body, DEVICE_MAX_AGE_S);
+    todo!()
 }
