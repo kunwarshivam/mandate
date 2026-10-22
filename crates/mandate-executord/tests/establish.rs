@@ -522,7 +522,6 @@ fn an_increase_is_held_while_shut_and_decided_once_open() -> Result<(), Error> {
 /// against its registered schemas and rules, an account stream opened by a passed `connect`
 /// check commits the copy `copy_draft` writes as the next record.
 #[test]
-#[ignore = "pending E21-32"]
 fn the_journal_admits_the_copy() -> Result<(), Error> {
     const ULID_ACCOUNT: &str = "01J8Z2ACCT0000000000000001";
     let mut store = MemoryStore::default();
