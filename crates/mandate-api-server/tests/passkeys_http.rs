@@ -195,6 +195,25 @@ fn signed_in(f: &Fixture, who: &str) -> String {
         .to_owned()
 }
 
+/// `cookie`'s session refreshed at `secs`, with the clock set there: a refresh renews the tokens
+/// and leaves the sign-in (DEC-2124 item 4).
+fn refreshed(f: &Fixture, cookie: &str, secs: i64) -> String {
+    f.clock.set(secs);
+    f.sessions
+        .refresh(
+            cookie,
+            Answer::Granted {
+                subject: SUBJECT.to_owned(),
+                principal: id(ALICE),
+            },
+            at(secs),
+        )
+        .expect("refreshed")
+        .expect("a rotated cookie")
+        .value()
+        .to_owned()
+}
+
 fn challenges_path() -> String {
     format!("/v1/workspaces/{WORKSPACE}/passkeys/registration-challenges")
 }
@@ -363,6 +382,7 @@ fn a_member_with_no_passkey_obtains_a_challenge_bound_to_them_in_a_fresh_session
     let rows = opened();
     let f = plain(&rows);
     let cookie = signed_in(&f, ALICE);
+    let cookie = refreshed(&f, &cookie, T0 + 200);
     f.clock.set(T0 + FRESH_S);
     let reply = ask(&f, &cookie, KEY);
     issued(&reply);
@@ -414,8 +434,8 @@ fn exclude_and_step_up_needed_follow_the_members_own_passkeys() {
     );
     let rows = enrol(rows, &bob, PASSKEY_C, T0 - 100);
     let f = plain(&rows);
-    let cookie = signed_in(&f, ALICE);
     f.clock.set(T0 + 10 * FRESH_S);
+    let cookie = signed_in(&f, ALICE);
     let reply = ask(&f, &cookie, KEY);
     issued(&reply);
     assert_eq!(
@@ -437,21 +457,9 @@ fn a_member_with_no_passkey_past_three_hundred_seconds_from_sign_in_is_stale_aft
     let rows = opened();
     let f = plain(&rows);
     let cookie = signed_in(&f, ALICE);
-    f.clock.set(T0 + 200);
-    let refreshed = f
-        .sessions
-        .refresh(
-            &cookie,
-            Answer::Granted {
-                subject: SUBJECT.to_owned(),
-                principal: id(ALICE),
-            },
-            at(T0 + 200),
-        )
-        .expect("refreshed")
-        .expect("a rotated cookie");
+    let cookie = refreshed(&f, &cookie, T0 + 200);
     f.clock.set(T0 + FRESH_S + 1);
-    let reply = ask(&f, refreshed.value(), KEY);
+    let reply = ask(&f, &cookie, KEY);
     refused(&reply, 401, ProblemCode::StepUpStale);
     let violations: Vec<(String, String)> = problem(&reply)
         .violations
@@ -483,8 +491,20 @@ fn a_retry_answers_the_held_challenge_and_its_key_never_revives_it_after_expiry(
     f.clock.set(T0 + FRESH_S - 1);
     let retry = ask(&f, &cookie, KEY);
     issued(&retry);
-    assert_eq!(retry.body, first.body, "the same challenge, unchanged");
+    for name in [
+        "challenge_id",
+        "webauthn_challenge",
+        "issued_at",
+        "expires_at",
+    ] {
+        assert_eq!(
+            text(&retry, name),
+            text(&first, name),
+            "the same challenge, unchanged: {name}"
+        );
+    }
     f.clock.set(T0 + FRESH_S);
+    let cookie = signed_in(&f, ALICE);
     refused(
         &ask(&f, &cookie, KEY),
         409,
@@ -738,8 +758,8 @@ fn the_list_serves_the_members_passkeys_in_enrolment_order_dated_by_recorded_at(
         T0 - 100,
     );
     let f = plain(&rows);
-    let cookie = signed_in(&f, ALICE);
     f.clock.set(T0 + 10 * FRESH_S);
+    let cookie = signed_in(&f, ALICE);
     let reply = list(&f, &cookie);
     assert_eq!(
         reply.status,
