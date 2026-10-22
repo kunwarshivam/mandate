@@ -266,7 +266,8 @@ impl ResearchWorker for Hands {
     }
 }
 
-/// An artifact store that keeps what it is given, logs each put, and can refuse.
+/// An artifact store that keeps what it is given, logs each put, gives it back by its digest, and
+/// can refuse.
 #[derive(Clone, Default)]
 struct Shelf {
     put: Rc<RefCell<Vec<Vec<u8>>>>,
@@ -282,6 +283,14 @@ impl ArtifactSink for Shelf {
         self.log.borrow_mut().push("put".to_owned());
         self.put.borrow_mut().push(bytes.to_vec());
         true
+    }
+
+    fn get(&self, digest: &Digest) -> Option<Vec<u8>> {
+        self.put
+            .borrow()
+            .iter()
+            .find(|bytes| Digest::of(bytes) == *digest)
+            .cloned()
     }
 }
 
@@ -1150,6 +1159,149 @@ fn the_recorded_worker_s_answers_never_reach_the_order_path() {
         kinds(&rig)
     );
     assert_eq!(count(&rig, "ThesisProposed"), 1, "{:?}", kinds(&rig));
+    for stream in [AGENT_STREAM, ACCOUNT_STREAM, CONTROL] {
+        let rows = rig.journal.rows(&StreamId::parse(stream).unwrap()).unwrap();
+        let orders: Vec<_> = rows
+            .iter()
+            .map(|row| row.event_type.as_str())
+            .filter(|kind| kind.starts_with("Order"))
+            .collect();
+        assert!(orders.is_empty(), "{stream}: {orders:?}");
+    }
+}
+
+/// The daemon's agentic fixture bundle (DEC-2266, DEC-2268).
+const AGENTIC_BUNDLE: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/research-agentic"
+);
+
+/// The agentic fixture's scripted calls, counted from its `research.json` here rather than through
+/// the loader: one per call of every scripted turn.
+fn scripted_calls() -> (usize, usize) {
+    let file: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(Path::new(AGENTIC_BUNDLE).join("research.json")).unwrap(),
+    )
+    .unwrap();
+    let turns = file["turns"].as_array().unwrap();
+    let calls = turns
+        .iter()
+        .map(|turn| turn["calls"].as_array().unwrap().len())
+        .sum();
+    (turns.len(), calls)
+}
+
+/// DEC-2268 item 5, agent harness spec §6.9 and HI-24, and `AGENTS.md` rule 4: the cell's worker
+/// over an agentic bundle, wired into the process with the bundle's loop, runs the scripted turns
+/// to the final output. Every turn is journaled: each reply's `ModelInvocationRecorded` heads its
+/// calls' `ToolCallRecorded`, each call's `ToolResultRecorded` follows before the next turn, and the
+/// run ends `done` after the final reply is judged. No stream holds an order event.
+#[test]
+fn an_agentic_run_journals_every_turn_through_to_its_end() {
+    let rig = Rig::default();
+    reconciled(&rig);
+    established(&rig);
+    let bundle = Bundle::load(Path::new(AGENTIC_BUNDLE)).unwrap();
+    let pin = bundle.entry.content().model_ref();
+    let mut entry = config_entry();
+    entry.pin = pin.clone();
+    entry.agentic = Some(cell::agentic_config(&bundle).unwrap_or_else(|e| panic!("{e:?}")));
+    let clock = Rc::new(Cell::new(NOW));
+    let read = Rc::clone(&clock);
+    let who = WorkerFor {
+        workspace: WORKSPACE.to_owned(),
+        agent: AGENT.to_owned(),
+        description: entry.description.clone(),
+    };
+    let shelf = Shelf::default();
+    let worker = RecordedWorker::new(
+        &bundle,
+        who,
+        Box::new(shelf.clone()),
+        Box::new(move || at(read.get())),
+    )
+    .unwrap();
+    let research = ResearchWiring {
+        config: entry,
+        source: Box::new(Open::default()),
+        worker: Box::new(worker),
+        artifacts: Box::new(shelf),
+    };
+    let mut process = RuntimeProcess::start(
+        rig.clone(),
+        wiring_with(Some(research), Box::new(BundleRefs(pin.content_hash))),
+        &config(),
+        at(NOW),
+    );
+    for second in 60..90 {
+        tick(&rig, NOW + second);
+        clock.set(NOW + second);
+        process.step(at(NOW + second));
+    }
+    let (scripted, calls) = scripted_calls();
+    let journaled = kinds(&rig);
+    let run: Vec<&str> = journaled
+        .iter()
+        .map(String::as_str)
+        .filter(|kind| {
+            matches!(
+                *kind,
+                "RunStarted"
+                    | "ModelInvocationRecorded"
+                    | "ToolCallRecorded"
+                    | "ToolResultRecorded"
+                    | "RunSummaryRecorded"
+                    | "RunEnded"
+            )
+        })
+        .collect();
+    assert_eq!(run.first(), Some(&"RunStarted"), "{journaled:?}");
+    assert_eq!(
+        count(&rig, "ModelInvocationRecorded"),
+        scripted + 1,
+        "every scripted turn and the final one: {journaled:?}"
+    );
+    assert_eq!(count(&rig, "ToolCallRecorded"), calls, "{journaled:?}");
+    assert_eq!(count(&rig, "ToolResultRecorded"), calls, "{journaled:?}");
+    let invocations: Vec<usize> = run
+        .iter()
+        .enumerate()
+        .filter(|(_, kind)| **kind == "ModelInvocationRecorded")
+        .map(|(index, _)| index)
+        .collect();
+    for pair in invocations.windows(2) {
+        let between = &run[pair[0] + 1..pair[1]];
+        let asked = between.iter().filter(|k| **k == "ToolCallRecorded").count();
+        let answered = between
+            .iter()
+            .filter(|k| **k == "ToolResultRecorded")
+            .count();
+        assert!(asked > 0, "a scripted turn asks for calls: {run:?}");
+        assert_eq!(
+            asked, answered,
+            "every call answered before the next turn: {run:?}"
+        );
+    }
+    assert_eq!(
+        run[run.len() - 2..],
+        ["RunSummaryRecorded", "RunEnded"],
+        "{run:?}"
+    );
+    let ended = rig
+        .journal
+        .rows(&StreamId::parse(AGENT_STREAM).unwrap())
+        .unwrap()
+        .into_iter()
+        .rfind(|row| row.event_type == "RunEnded")
+        .unwrap();
+    let body = parse(&ended.body).unwrap();
+    assert_eq!(
+        body.get("payload")
+            .and_then(|payload| payload.get("reason"))
+            .and_then(Value::as_str),
+        Some("done"),
+        "{body:?}"
+    );
     for stream in [AGENT_STREAM, ACCOUNT_STREAM, CONTROL] {
         let rows = rig.journal.rows(&StreamId::parse(stream).unwrap()).unwrap();
         let orders: Vec<_> = rows
