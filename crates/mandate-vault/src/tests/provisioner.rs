@@ -10,7 +10,6 @@ use crate::policy::{Identity, Mounts};
 use crate::provisioner::{RoleProvisioner, RoleRefusal};
 
 #[test]
-#[ignore = "pending E21-33"]
 fn every_vault_error_is_one_of_the_two_reasons() {
     for (error, refusal) in [
         (SourceError::Unavailable, RoleRefusal::VaultUnavailable),
@@ -42,7 +41,6 @@ fn session(identity: Identity) -> OpenBaoSource {
 /// identity is refused `role_refused` before the vault is reached, whatever its policy would
 /// answer, and the provisioner's goes on to the vault.
 #[tokio::test]
-#[ignore = "pending E21-33"]
 async fn only_the_provisioners_session_makes_or_removes_roles() {
     let connection = ConnectionId::new("c1").unwrap();
     for identity in [

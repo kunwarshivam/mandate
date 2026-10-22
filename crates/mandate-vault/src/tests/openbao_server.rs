@@ -621,7 +621,6 @@ async fn the_provisioner_makes_both_roles_and_removes_only_the_exchanges() {
 /// role, and so is another namespace. The refusals' mapping is checked first, so a run with no
 /// server still fails until it holds.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending E21-33"]
 async fn the_provisioner_makes_a_connections_roles_and_removes_only_the_exchanges() {
     assert_eq!(
         RoleRefusal::of(&SourceError::Unavailable),

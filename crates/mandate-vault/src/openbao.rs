@@ -521,23 +521,57 @@ impl OpenBaoSource {
     }
 }
 
+impl OpenBaoSource {
+    /// Refuses `role_refused`, before the vault is reached, a role operation from any session but
+    /// the provisioner's own (DEC-2350 item 5), whatever its policy would answer.
+    fn provisioner_only(&self) -> Result<(), RoleRefusal> {
+        if self.identity == Identity::Provisioner {
+            Ok(())
+        } else {
+            Err(RoleRefusal::RoleRefused)
+        }
+    }
+}
+
 impl RoleProvisioner for OpenBaoSource {
     async fn make_roles(
         &self,
         connection: &ConnectionId,
         namespace: &str,
     ) -> Result<(), RoleRefusal> {
-        let _ = (connection, namespace, role_request);
-        Err(RoleRefusal::Unimplemented { story: "E21-33" })
+        self.provisioner_only()?;
+        for identity in [
+            Identity::Executor(connection.clone()),
+            Identity::TokenExchange(connection.clone()),
+        ] {
+            let (path, body) = role_request(&identity, &self.mounts, namespace)
+                .map_err(|e| RoleRefusal::of(&e))?;
+            self.call(Method::POST, &path, Some(&body))
+                .await
+                .map_err(|e| RoleRefusal::of(&e))?;
+        }
+        Ok(())
     }
 
+    /// OpenBao answers a DELETE of a role that is not there 204, so an absent role is `Ok` from
+    /// the call itself. `Missing` (404) comes only when the auth mount is absent, and then no
+    /// role can exist under it either, so it is `Ok` too: nothing is left for the exchange.
     async fn remove_exchange_role(
         &self,
         connection: &ConnectionId,
         namespace: &str,
     ) -> Result<(), RoleRefusal> {
-        let _ = (connection, namespace);
-        Err(RoleRefusal::Unimplemented { story: "E21-33" })
+        self.provisioner_only()?;
+        let (path, _) = role_request(
+            &Identity::TokenExchange(connection.clone()),
+            &self.mounts,
+            namespace,
+        )
+        .map_err(|e| RoleRefusal::of(&e))?;
+        match self.call(Method::DELETE, &path, None).await {
+            Ok(_) | Err(SourceError::Missing) => Ok(()),
+            Err(e) => Err(RoleRefusal::of(&e)),
+        }
     }
 }
 
