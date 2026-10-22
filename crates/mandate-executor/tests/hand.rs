@@ -5378,6 +5378,203 @@ fn an_account_kill_switch_never_re_places_the_protection_its_cancel_all_cancelle
     );
 }
 
+/// A mode lifted after the account switch, as the account stream copies it: `agent` back to
+/// `normal` from `restriction`, citing the control-stream record that lifted it.
+fn lifted(shell: &mut Shell, agent: &str, restriction: &str) {
+    let lift = copied(
+        ACCOUNT_STREAM,
+        shell.head().0.saturating_add(1),
+        "AgentModeApplied",
+        with_clock(
+            &[
+                ("agent", text(agent)),
+                ("to", text("normal")),
+                ("restriction", text(restriction)),
+            ],
+            30,
+        ),
+        &EventId(format!("{CLOCK_STREAM}-21")),
+    );
+    shell.fold_one(&lift).expect("the lift folds");
+}
+
+/// Whether a stop the broker cancels after the account switch, and a lift of `restriction` for
+/// `agent`, is placed again: what decides whether the switch still guards its instrument.
+fn re_placed_after(agent: &str, restriction: &str) -> bool {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (mut shell, stop) = crypto_stop_account(&ports);
+    shell.run(account_switch(Initiator::Owner), &ports);
+    lifted(&mut shell, agent, restriction);
+    let cancelled = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(stop("canceled"))),
+        &ports,
+    );
+    cancelled
+        .submissions()
+        .into_iter()
+        .any(|o| o.purpose == Purpose::Protective)
+}
+
+/// Lifting the account's kill switch, `*`'s `kill_switch` restriction, ends the switch's guard:
+/// a stop the broker cancels afterwards is placed again, as it would be with no switch (§5.4,
+/// DEC-2333 item 5).
+#[test]
+#[ignore = "pending E7-4"]
+fn lifting_the_account_kill_switch_protects_the_position_again() {
+    assert!(
+        re_placed_after("*", "kill_switch"),
+        "once the account's kill switch is lifted, lost protection is placed again"
+    );
+}
+
+/// Only the account's own kill-switch lift ends the guard: one agent's kill switch lifted, or
+/// another restriction of every agent lifted, leaves the account switch's close unfinished, and
+/// nothing is placed beside it (DEC-2333 item 5, rule 12).
+#[test]
+#[ignore = "pending E7-4"]
+fn only_the_account_kill_switch_lift_ends_its_guard() {
+    for (agent, restriction) in [(common::AGENT, "kill_switch"), ("*", "daily_loss")] {
+        assert!(
+            !re_placed_after(agent, restriction),
+            "{agent}'s {restriction} lifted: the account switch still guards its instrument"
+        );
+    }
+}
+
+/// The account switch closes only what is held: an instrument bought and sold back to flat, with
+/// no fresh quote, is neither named in `closes` nor holds the switch back for want of a market
+/// (§5.5, DEC-2333 item 1).
+#[test]
+#[ignore = "pending E7-4"]
+fn an_account_kill_switch_passes_over_a_flat_instrument() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL, CPHC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = started();
+    shell.fold_one(&stream_opened()).expect("folds");
+    for event in protected_position_events(2) {
+        shell
+            .fold_one(&event)
+            .expect("the protected position folds");
+    }
+    held_by(&mut shell, 6, common::AGENT, CPHC, "5", "md-flat-buy");
+    for fact in [
+        event(
+            ACCOUNT_STREAM,
+            9,
+            "OrderSubmitted",
+            with_clock(
+                &[
+                    ("client_order_id", text("md-flat-sell")),
+                    ("agent", text(common::AGENT)),
+                    ("instrument", text(CPHC)),
+                    ("side", text("sell")),
+                    ("qty", text("5")),
+                    ("limit", text("100")),
+                ],
+                12,
+            ),
+        ),
+        event(
+            ACCOUNT_STREAM,
+            10,
+            "FillApplied",
+            with_clock(
+                &[
+                    ("fill_id", text("f-md-flat-sell")),
+                    ("client_order_id", text("md-flat-sell")),
+                    ("instrument", text(CPHC)),
+                    ("side", text("sell")),
+                    ("qty_gross", text("5")),
+                    ("price", text("100")),
+                ],
+                12,
+            ),
+        ),
+        event(
+            ACCOUNT_STREAM,
+            11,
+            "OrderStateChanged",
+            with_clock(
+                &[
+                    ("client_order_id", text("md-flat-sell")),
+                    ("state", text("filled")),
+                ],
+                12,
+            ),
+        ),
+    ] {
+        shell.fold_one(&fact).expect("the round trip folds");
+    }
+    let mut shell = shell.restart_ready(&ports);
+    shell.run(Input::Market(quote(AAPL, "155", "155.1", 20)), &ports);
+
+    let ran = shell.run(account_switch(Initiator::Owner), &ports);
+
+    let closes: Vec<&str> = ran
+        .draft("KillSwitchActivated")
+        .expect("the switch goes, CPHC's missing quote notwithstanding")
+        .payload
+        .get("closes")
+        .and_then(mandate_canon::Value::as_array)
+        .map(|names| {
+            names
+                .iter()
+                .filter_map(mandate_canon::Value::as_str)
+                .collect()
+        })
+        .unwrap_or_default();
+    assert_eq!(closes, vec![AAPL], "only the held instrument");
+}
+
+/// Any order of ours the open-orders read shows still working after the cancel-all is cancelled
+/// by its own id, a buy as much as a sell: a buy left working would add the risk the switch exists
+/// to remove (DEC-2333 item 3).
+#[test]
+#[ignore = "pending E7-4"]
+fn a_buy_still_working_after_the_cancel_all_is_cancelled_by_its_id() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL, CPHC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (mut shell, buy) = protected_position_with_a_resting_buy(&ports);
+    shell.run(Input::Market(quote(AAPL, "155", "155.1", 20)), &ports);
+    shell.run(account_switch(Initiator::Owner), &ports);
+    shell.run(
+        Input::Broker(Ok(BrokerOutcome::AccountWideAccepted)),
+        &ports,
+    );
+
+    let read = shell.run(
+        Input::Broker(Ok(BrokerOutcome::OpenOrders(vec![broker_order(
+            "b-buy",
+            Some(&buy),
+            AAPL,
+            Side::Buy,
+            "10",
+            "0",
+            "new",
+        )]))),
+        &ports,
+    );
+
+    assert!(
+        read.requests.iter().any(|r| matches!(
+            r,
+            BrokerRequest::Cancel { client_order_id } if client_order_id.as_str() == buy
+        )),
+        "the buy still working is cancelled by its id: {:?}",
+        read.requests
+    );
+}
+
 /// The account switch's records replay (ES-21): a restart folds every record it journaled, the
 /// account-scoped `KillSwitchActivated` included, and every agent stays held under its mode.
 #[test]
