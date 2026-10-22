@@ -1,0 +1,34 @@
+[
+  {
+    "label": "a labelled workspace",
+    "set": {
+      "/workspaces": [
+        {
+          "workspace_id": "01KDEM0000000000000000000W",
+          "label": "Paper",
+          "agent_ids": [],
+          "connection_ids": []
+        }
+      ]
+    }
+  },
+  {
+    "label": "two workspaces",
+    "set": {
+      "/workspaces": [
+        {
+          "workspace_id": "01KDEM0000000000000000000W",
+          "label": null,
+          "agent_ids": [],
+          "connection_ids": []
+        },
+        {
+          "workspace_id": "01KDEM0000000000000000000X",
+          "label": "Live",
+          "agent_ids": [],
+          "connection_ids": []
+        }
+      ]
+    }
+  }
+]

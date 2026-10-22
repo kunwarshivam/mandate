@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.1, not yet reviewed ([DEC-436](../project/decisions/DEC-436.md)). §4.6.1 adds the desk, the cited-record read, and the transcript view, and §4.3's approval read its explanation (E12-5, E19-15; [DEC-2240](../project/decisions/DEC-2240.md), agent readings; the disclaimer is [DEC-2241](../project/decisions/DEC-2241.md)'s placeholder, Proposed). Round 1 fixes applied. Items 1 to 16 and 19 to 21 of DEC-436 are agent readings; items 17 and 18 are Proposed and wait for the founder. §4.8.1 adds the audit read contracts (E12-6; [DEC-760](../project/decisions/DEC-760.md) to [DEC-767](../project/decisions/DEC-767.md), agent readings). §3.5, §4.5, and §5.6 add the revoke's step-up digests and its refusals (E10-13; [DEC-693](../project/decisions/DEC-693.md) and [DEC-698](../project/decisions/DEC-698.md), agent readings). §4.5's Connect row names the pending connection's `ConnectionRequested` and the `ConnectionRefused` that may close it (journal spec v0.32, [DEC-699](../project/decisions/DEC-699.md)). §4.8.1's Verification closes its refusal order, id, inputs, run order, and record on `VerificationRun` version 2, with an `incomplete` result for a token that cannot be proven (journal spec v0.36; [DEC-786](../project/decisions/DEC-786.md) to [DEC-788](../project/decisions/DEC-788.md), agent readings; [DEC-789](../project/decisions/DEC-789.md), the founder). §4.8.1's Inputs verify an anchor's prefix from genesis and bind it to the range's trusted start, or the range fails closed (journal spec v0.37; [DEC-892](../project/decisions/DEC-892.md), an agent reading). §4.8.1's run order compares each start or in-range segment's hot rows with its cold file, `segment_rows_mismatch` (journal spec v0.38; [DEC-894](../project/decisions/DEC-894.md), an agent reading). §4.2 and §4.7 add the backtest report's and the forward-paper evaluation's read shapes (E4-5, E17-8; [DEC-1001](../project/decisions/DEC-1001.md) and [DEC-1002](../project/decisions/DEC-1002.md), agent readings; their disclosures are named placeholders, [DEC-1003](../project/decisions/DEC-1003.md), Proposed). §3.11 adds the server process (its bind, environment, probes, drain, and browser sessions) and §3.5 widens the planned `busy` to a draining process (E21-31; [DEC-978](../project/decisions/DEC-978.md), agent readings, item 10 Proposed); §4.3 and §4.7 add the first read-model shapes, agents and approvals (E21-31, E10-10; [DEC-979](../project/decisions/DEC-979.md), an agent reading); §3.11 item 10 records pause and the kill switch as the CLI does (E21-31; [DEC-1007](../project/decisions/DEC-1007.md), agent readings, item 8 Proposed). §3.11 item 7 fixes the subject-link file at `/etc/mandate/subject-links` and refuses a path that does not itself name the file opened (E21-31; [DEC-1023](../project/decisions/DEC-1023.md), an agent reading). §3.11 item 2 lets a `dev` or `ci` cell point the issuer settings at the local stub issuer (E21-52; [DEC-2100](../project/decisions/DEC-2100.md), an agent reading). §3.11 items 11 and 12 serve versions, confirmation, deployment, resume, Stop, owner exit, acknowledgment, and command status (E10-11, E10-12; [DEC-2101](../project/decisions/DEC-2101.md), [DEC-2102](../project/decisions/DEC-2102.md), agent readings). §4.10 names the caller's principal on one's own session and serves one's own memberships from a hosted deployment's control stream (E10-10; [DEC-2113](../project/decisions/DEC-2113.md), an agent reading) |
+| **Status** | Draft v0.1, not yet reviewed ([DEC-436](../project/decisions/DEC-436.md)). §4.6.1 adds the desk, the cited-record read, and the transcript view, and §4.3's approval read its explanation (E12-5, E19-15; [DEC-2240](../project/decisions/DEC-2240.md), agent readings; the disclaimer is [DEC-2241](../project/decisions/DEC-2241.md)'s placeholder, Proposed). Round 1 fixes applied. Items 1 to 16 and 19 to 21 of DEC-436 are agent readings; items 17 and 18 are Proposed and wait for the founder. §4.8.1 adds the audit read contracts (E12-6; [DEC-760](../project/decisions/DEC-760.md) to [DEC-767](../project/decisions/DEC-767.md), agent readings). §3.5, §4.5, and §5.6 add the revoke's step-up digests and its refusals (E10-13; [DEC-693](../project/decisions/DEC-693.md) and [DEC-698](../project/decisions/DEC-698.md), agent readings). §4.5's Connect row names the pending connection's `ConnectionRequested` and the `ConnectionRefused` that may close it (journal spec v0.32, [DEC-699](../project/decisions/DEC-699.md)). §4.8.1's Verification closes its refusal order, id, inputs, run order, and record on `VerificationRun` version 2, with an `incomplete` result for a token that cannot be proven (journal spec v0.36; [DEC-786](../project/decisions/DEC-786.md) to [DEC-788](../project/decisions/DEC-788.md), agent readings; [DEC-789](../project/decisions/DEC-789.md), the founder). §4.8.1's Inputs verify an anchor's prefix from genesis and bind it to the range's trusted start, or the range fails closed (journal spec v0.37; [DEC-892](../project/decisions/DEC-892.md), an agent reading). §4.8.1's run order compares each start or in-range segment's hot rows with its cold file, `segment_rows_mismatch` (journal spec v0.38; [DEC-894](../project/decisions/DEC-894.md), an agent reading). §4.2 and §4.7 add the backtest report's and the forward-paper evaluation's read shapes (E4-5, E17-8; [DEC-1001](../project/decisions/DEC-1001.md) and [DEC-1002](../project/decisions/DEC-1002.md), agent readings; their disclosures are named placeholders, [DEC-1003](../project/decisions/DEC-1003.md), Proposed). §3.11 adds the server process (its bind, environment, probes, drain, and browser sessions) and §3.5 widens the planned `busy` to a draining process (E21-31; [DEC-978](../project/decisions/DEC-978.md), agent readings, item 10 Proposed); §4.3 and §4.7 add the first read-model shapes, agents and approvals (E21-31, E10-10; [DEC-979](../project/decisions/DEC-979.md), an agent reading); §3.11 item 10 records pause and the kill switch as the CLI does (E21-31; [DEC-1007](../project/decisions/DEC-1007.md), agent readings, item 8 Proposed). §3.11 item 7 fixes the subject-link file at `/etc/mandate/subject-links` and refuses a path that does not itself name the file opened (E21-31; [DEC-1023](../project/decisions/DEC-1023.md), an agent reading). §3.11 item 2 lets a `dev` or `ci` cell point the issuer settings at the local stub issuer (E21-52; [DEC-2100](../project/decisions/DEC-2100.md), an agent reading). §3.11 items 11 and 12 serve versions, confirmation, deployment, resume, Stop, owner exit, acknowledgment, and command status (E10-11, E10-12; [DEC-2101](../project/decisions/DEC-2101.md), [DEC-2102](../project/decisions/DEC-2102.md), agent readings). §4.10 names the caller's principal on one's own session and serves one's own memberships from a hosted deployment's control stream (E10-10; [DEC-2113](../project/decisions/DEC-2113.md), an agent reading). §3.6 adds the passkey registration challenge, enrolment, and list routes (E9-4; [DEC-2108](../project/decisions/DEC-2108.md), [DEC-2115](../project/decisions/DEC-2115.md), agent readings), and settles a retried registration challenge, the passkey id's shape, the step-up pair, and the stale first enrolment ([DEC-2118](../project/decisions/DEC-2118.md), agent readings). §4.10 specifies route 2's reduction-session challenge and opening routes, their limits, the device cookie, and the session's reach (E9-1; [DEC-2117](../project/decisions/DEC-2117.md), an agent reading). §4.10 route 2's challenge limits answer the one 401 and its failure limit only reports, as DEC-653 item 3 says (E9-1; [DEC-2119](../project/decisions/DEC-2119.md), an agent reading) |
 | **Implements** | [HLD §4](../HLD.md#workspace-deployment) (workspace control services), [§6 flows A and C](../HLD.md#6-key-flows), [§7](../HLD.md#7-logging-and-audit), [§8](../HLD.md#8-multi-tenancy-and-security); PRD FR-1.4, FR-2.1 to FR-2.4, FR-3.1 to FR-3.5, FR-4.4, FR-6.2 to FR-6.5, FR-7.1 to FR-7.5, FR-8.1 to FR-8.4; backlog E8, E10, E11, E12 |
 | **Depends on** | [Mandate spec](mandate.md) §2, §6, §7, §9, §10; [journal spec](journal.md) §2, §5, §7, §9, §11, §12; [infrastructure design](../design/infrastructure.md) §3.6, §9; [product experience brief](../product/09-product-experience.md) §3 to §5 |
 | **Siblings** | Identity, roles, sessions, and step-up ceremonies: the [identity spec](identity.md), gap 6. Notification delivery and approval deep links: the [notifications spec](notifications.md), gap 7. Broker connection flows: `docs/specs/connections.md` (gap 9) |
@@ -106,7 +106,7 @@ and checks the property with an oracle of its own (`AGENTS.md`, "Independent ora
 | **API-1** | **Authenticated.** Every call except the liveness probe and a CORS preflight (§3.3 item 5) carries a valid session or token; `POST /v1/sessions` carries the access token it exchanges (§3.11). Without one the API returns 401, reveals no data, and says nothing about whether the resource exists. The three browser-only session routes of §4.10 check `Origin` and `X-Mandate-Request` first, and refuse a failure 403 `forbidden` before any cookie or token is read | A route table test: every registered route, called without credentials, returns 401 with the same body; the three session routes return that 403 without `Origin` and the same 401 with it |
 | **API-2** | **Authorized on the server.** Each operation checks the principal's role in the workspace (§3.7) and, for a client, its scope (§3.8), on the server, before any read or write. The web app's role checks (`web/src/lib/roles.tsx`) are never authority | A matrix test: every route × every role and client scope, with the expected 403 or success from §3.7, computed from the table, not from the handler |
 | **API-3** | **Journal before effect.** Every call that can change what an agent, connection, policy, member, client, or approval may do commits its control-stream event (`Committed` or `AlreadyCommitted`, journal spec §5.1), with the caller's identity in `actor`, before it reports success and before anything acts on it. The API writes no agent or account stream | Fault injection: fail the append at every step; no stream owner ever sees an effect without its control-stream cause, and no response says `recorded` without a committed event |
-| **API-4** | **Idempotent.** Every mutating call carries an `Idempotency-Key`. The same principal, operation, and key always resolve to the same control-stream event. A repeat with the same body returns the first outcome; a different body returns 409 `idempotency_conflict`. Nothing is committed twice | Fuzz: random retries, duplicate submits, lost responses, and concurrent repeats; an independent counter of control-stream events per key never exceeds one |
+| **API-4** | **Idempotent.** Every mutating call except route 2's two POSTs (§4.10) carries an `Idempotency-Key`. The same principal, operation, and key always resolve to the same control-stream event. A repeat with the same body returns the first outcome; a different body returns 409 `idempotency_conflict`. Nothing is committed twice | Fuzz: random retries, duplicate submits, lost responses, and concurrent repeats; an independent counter of control-stream events per key never exceeds one |
 | **API-5** | **The envelope changes only by a confirmed version.** No call changes an envelope field of a deployed agent except confirming a mandate version, by a **user** with the role for it. The server computes the classification itself (mandate spec §9.2) and requires step-up when it is risk-increasing; a client's claimed classification is never used (rule 11) | Fuzz random envelope edits through every operation; an oracle that diffs the confirmed documents shows every change came through a `MandateConfirmed` by a user, with step-up whenever its own §9.2 verdict is increasing |
 | **API-6** | **A client is owner input, never the owner.** A client token reaches only the operations of §3.8. `requested_by` is set from the authenticated channel and never read from a request body (mandate spec §6.2 step 5a). A body naming `requested_by`, or any member its schema does not name, is refused `invalid` and journals nothing on a strict operation; on an API-7-lenient operation (§5) the member is dropped and listed in `dropped`, and the command still commits (DEC-681 item 6, DEC-682 item 27). A client can never confirm a version, answer an approval, create, widen, or pick a delegation, connect or revoke a connection, change a member, policy, or client, export, or use pause, resume, Stop, release, owner exit, acknowledgment, or the kill switch (DEC-141, DEC-185, DEC-191) | The route matrix for the client principal; a test that a client's owner request carrying `requested_by: owner` is refused `invalid` and commits nothing, and that a client's hold carrying it returns `202` with `dropped: ["/requested_by"]` and is journaled as `client` |
 | **API-7** | **Risk reduction is never blocked by the API.** Pause, holding new openings, the kill switch at any scope (including the kill-switch half of a revoke on compromise, §5.6), an owner exit, Skip on an approval, ending a delegation, and away mode (the **API-7 operations**) are refused only for a failed authentication (including the CSRF check of §3.3 item 1), a role that may not act, a failed session-record read, or a malformed request. Never for a rate limit, a quota, a failed membership read (`membership_unavailable`: identity spec §4.5 authorizes them from the session's roles snapshot instead, and the event records `membership_unverified: true`), a stale or missing read model, missing step-up (except where mandate spec §6.1 requires it, below), a runtime, model, market-data, or global-control-plane outage, a pending approval, or a frozen control stream (journal spec §11). A kill switch or owner exit without valid step-up is still recorded and still stops or routes (mandate spec §6.1, DEC-158 option (c)) | A test per operation with every one of those conditions injected; each still commits its event. Resume, Stop, and acknowledgment are not risk reduction and may be refused without step-up, as mandate spec §6.1 says |
@@ -226,7 +226,7 @@ Owned by the [identity spec](identity.md). What the API requires of it:
 
 ### 3.4 Idempotency
 
-Every mutating call carries `Idempotency-Key`: 16 to 64 characters from `[A-Za-z0-9_-]`, chosen by
+Every mutating call except route 2's two POSTs (§4.10) carries `Idempotency-Key`: 16 to 64 characters from `[A-Za-z0-9_-]`, chosen by
 the client per user gesture. The API derives the control-stream `event_id` from it (DEC-436 item 4,
 DEC-681 item 5), and a client can compute the same id before it sends the call:
 
@@ -282,7 +282,7 @@ Errors are RFC 9457 problem documents with these members:
 | `classification_changed` | 409 | The server's classification differs from the one the confirmation screen showed, or the screen's `screen_digest` is no longer the server's (§3.11 item 11); the client reloads the screen |
 | `step_up_required` | 401 | A call that needs step-up presents no evidence at all (§3.6, DEC-686) |
 | `step_up_missing` | 401 | Evidence is presented but does not count: its challenge is unknown, its credential is not the principal's or is in its enrolment cool-off, or its assertion does not verify (identity spec §7.2 steps 4 and 6) |
-| `step_up_stale` | 401 | The challenge has expired, or is presented before its `issued_at` |
+| `step_up_stale` | 401 | The challenge has expired, or is presented before its `issued_at`; or a first passkey enrolment's session was opened more than 300 s before (§3.6), which alone carries one violation at `/session` ([DEC-2118](../project/decisions/DEC-2118.md) item 4) |
 | `step_up_reused` | 401 | The challenge was already used |
 | `step_up_method` | 401 | The method is not allowed in this environment: `cli_confirm` in `live` (identity spec §7.3) |
 | `step_up_mismatch` | 401 | The challenge names another principal, workspace, action kind, or action digest |
@@ -354,8 +354,9 @@ The ceremony belongs to the [identity spec](identity.md) (E9-4). The API's part:
   `step_up_challenge`: the session (the one 401, or `reduction_only` for a reduction-only session,
   identity spec §7.2 step 1 and §7.3), the CSRF mark, `Idempotency-Key`, the body
   (`commands/step-up-challenge-request`, strict), then the §3.7 row the kind needs; a principal
-  that may not perform the action gets that row's refusal and no challenge, and the two kinds of
-  `own` rows answer the one 404 until their own routes land. The challenge id is
+  that may not perform the action gets that row's refusal and no challenge, and
+  `notification_address`, the other `own` row's kind, answers the one 404 until its routes land;
+  `credential_enrol` is served for the passkey routes below. The challenge id is
   §3.4's derived id for the key, so a retry with the same action answers the same challenge and
   the same key with another action is `idempotency_conflict`. Only after the row is granted is a
   `live` workspace refused `live_unavailable`, so a principal without the row gets that row's
@@ -365,6 +366,55 @@ The ceremony belongs to the [identity spec](identity.md) (E9-4). The API's part:
   `action`, `issued_at`, and `expires_at`. Challenges are held in the server's memory, at most 32
   unexpired per principal and 4,096 in all (`rate_limited` past either), and never journaled
   when issued; a challenge the server no longer holds counts as missing.
+- The passkey routes ([DEC-2108](../project/decisions/DEC-2108.md) items 4 and 5,
+  [DEC-2115](../project/decisions/DEC-2115.md)) serve §3.7's row "Enrol or remove one's own
+  passkey", its `own` cell: a member acts on their own passkeys only, and no route names another
+  member's. The API calls a credential a passkey (`passkey_id`), since a response member's name
+  never says credential; it is journal spec §9.31's `credential_id`, the same unpadded base64url.
+  Each answers with `Cache-Control: no-store`, and the server never logs a body.
+  - `POST /v1/workspaces/{ws}/passkeys/registration-challenges`, operation name
+    `passkey_registration_challenge`: the session (the one 401, or `reduction_only`), the CSRF mark,
+    `Idempotency-Key`, the body (`commands/passkey-registration-challenge-request`, strict, empty),
+    the row, then a `live` workspace is refused `live_unavailable`. A member with no passkey on the
+    control stream whose session was opened more than 300 s ago is refused `step_up_stale` with one
+    violation, `{path: "/session", code: "step_up_stale"}`, since a first enrolment's evidence is a fresh full session (DEC-2108
+    item 5); the client signs the member in again. It answers `201` with `commands/passkey-registration-challenge`: `challenge_id` (§3.4's
+    derived id for the key), `webauthn_challenge` (32 bytes from the operating system's generator,
+    unpadded base64url), the deployment's `rp_id`, `user_handle` (the principal's 16 bytes),
+    `exclude` (the member's enrolled passkeys), `step_up_needed` (true when the member holds a
+    passkey), `issued_at`, and `expires_at`, 300 s later. A registration challenge is held in the
+    server's memory, bound to the principal and workspace, never journaled, and counted with the
+    step-up challenges under their limits (`rate_limited`). While it is held, a retry with the same
+    key answers it unchanged; once a submit has dropped it or it has expired, the same key is
+    `idempotency_conflict` and never revives it, and the client asks again under a new key
+    ([DEC-2118](../project/decisions/DEC-2118.md) item 1, a deliberate exception to API-4, since
+    nothing was journaled). The server keeps each dropped or expired challenge's id as a tombstone,
+    in memory for 24 hours, at most 64 per principal, the oldest dropped first. After a restart or
+    an eviction, a same-key retry is answered with a fresh challenge (DEC-2118 item 1 says why that
+    is safe). So the step-up digest below always names the challenge the member's
+    authenticator answers.
+  - `POST /v1/workspaces/{ws}/passkeys`, operation name `passkey_enrol`: the same session, CSRF,
+    key, body (`commands/passkey-enrol-request`, strict), row, and `live` checks; then the
+    registration challenge: held, unexpired, and naming this principal and workspace, else
+    `invalid` at `/challenge_id`. The submit drops it whatever follows, so it is used at most once.
+    Then the step-up: with no passkey on the stream, `step_up` and `step_up_assertion` are null and
+    the session must have been opened within 300 s (`step_up_stale` at `/session`); with one, the call carries
+    passkey step-up of kind `credential_enrol` whose action digest is the SHA-256 of
+    `{"op": "enrol", "registration": <challenge_id>}` in the journal's canonical form (journal spec
+    §4), judged in §3.5's order. Then `mandate_passkey::enrol` reads the response (attestation
+    `none`, this deployment's origin and RP ID, user verification), else `invalid`; a passkey id
+    the stream has ever enrolled is `invalid` too, with no violation path, so the answer never says
+    another member's authenticator was enrolled (DEC-2118 item 5). It stores the public key's COSE
+    bytes as an artifact, commits `CredentialEnrolled` (with `StepUpAsserted` in its batch when
+    step-up was given, journal spec §9.32 **(planned: E9-4)**), and answers `201` with `commands/passkey-enrolled`. A
+    first passkey's `cool_off_ends` is 24 hours after the commit, and `CredentialEnrolled` raises
+    the member's `credential_added` notice (notifications spec), opaque ids only.
+  - `GET /v1/workspaces/{ws}/passkeys`, operation name `passkeys`: the member's passkeys the
+    control stream holds, enrolled and not removed, in enrolment order
+    (`read-models/passkeys`), with no step-up: a read of one's own opaque ids grants nothing.
+  - Removal, `POST /v1/workspaces/{ws}/passkeys/{passkey_id}/removal` with kind `credential_enrol`
+    and `{"op": "remove", "credential": <passkey_id>}` (DEC-2108 item 6), lands with its own story
+    slice; until then the route does not exist.
 - The evidence the call then carries is `{assertion_id, authenticated_at, method}`, the shape the
   journal records (journal spec §9.2). The API checks it is bound to the call's digest and unused,
   and records it. **Validity is judged by the stream owner** at the moment mandate spec §6.1 names;
@@ -461,6 +511,7 @@ How the API's operations map onto those rows:
 | One's own workspaces, `GET /v1/me/workspaces` (identity spec §4.5) | List one's own workspace memberships |
 | One's own notification channels (a push subscription): set, remove | Add or remove one's own notification address |
 | One's own notification channels: list | List one's own notification addresses |
+| One's own passkeys: registration challenge, enrol, list (§3.6) | Enrol or remove one's own passkey; the list needs no step-up (DEC-2115) |
 | Owner request, dry run, chat (§4.6) | Make an owner request; dry run of a request; chat thread with the agent. A client also needs the `request` or `dry_run` scope (§3.8) and has no chat |
 | The desk: send; read one's own thread, its cited and fallback records, and an owner run's transcript (§4.6.1) | Chat thread with the agent, the asking member only. An approval's explanation, its cited records, and an explain run's transcript: View agents, positions, decisions. (An ideation or monitoring run's transcript is §4.7's read model row.) |
 
@@ -519,7 +570,10 @@ per workspace deployment (item 6).
 2. **Environment.** Settings come from named variables: `MANDATE_API_DATABASE_URL`,
    `MANDATE_API_ISSUER`, `MANDATE_API_AUDIENCE`, `MANDATE_API_JWKS_URL`, `MANDATE_API_APP_ORIGIN`,
    and `MANDATE_API_WORKSPACE` and `MANDATE_API_ORG`: the one
-   workspace this deployment hosts and its organization, as ULIDs. Every other workspace in a path
+   workspace this deployment hosts and its organization, as ULIDs. `MANDATE_API_INGRESS_PEERS`,
+   optional, lists the ingress's own addresses, comma-separated, whose `X-Forwarded-For` route 2's
+   limits read (§4.10): exact IPv4 or IPv6 addresses, no ranges; any other entry refuses the start.
+   Unset, the limits key on the TCP peer alone. Every other workspace in a path
    is absent (API-9's 404), and the organization is what `authorize` checks the pair against;
    journal spec §9.12's records name neither. `MANDATE_DEPLOYMENT_TIER` is the deployment tier, read as every
    process reads it (`dev`, `ci`, `staging`, or `production`; no value or any other is
@@ -1549,8 +1603,138 @@ workspace exists to name before it is authorized (identity spec §4.5, §6.4).
 | List one's own workspace memberships | `GET /v1/me/workspaces` | — | Authorized by the `self` row "List one's own workspace memberships" (identity spec §4.2): a full session of a user principal only. Returns the caller's `active` memberships as `{workspace_id, label, roles}` from the membership index, reading no workspace's data; absent and foreign workspaces look the same. A failed index read is `membership_unavailable` ([DEC-816](../project/decisions/DEC-816.md) item 1). A hosted deployment's index is its control stream's membership fold; `label` is `null` until one is recorded; `as_of` is `[]`. Shape: `read-models/my-workspaces` ([DEC-2113](../project/decisions/DEC-2113.md)) |
 
 Owed to the identity spec's lanes, and listed so the prefix rule above is complete:
-`POST /v1/reduction-sessions/challenges` and `POST /v1/reduction-sessions` (identity spec §6.4 route 2;
-they sit outside the matrix, DEC-816 item 7). Every failure of the last is the one answer, 401 `unauthenticated` (§3.5), with no distinguishing timing, and `GET /v1/oauth/alpaca/callback` (§4.5).
+`GET /v1/oauth/alpaca/callback` (§4.5).
+
+**Route 2, the workspace-local passkey** (identity spec §6.4 route 2, DEC-816 item 6, DEC-834,
+[DEC-2117](../project/decisions/DEC-2117.md), [DEC-2119](../project/decisions/DEC-2119.md);
+planned, E9-1). Pause and the kill switch must work when sign-in does not, so a member opens a
+*reduction-only session* with a passkey the deployment already holds, with no identity provider,
+global control plane, or model involved. Both routes sit outside the matrix (DEC-816 item 7), are
+browser-only (`Origin` equal to the app origin and `X-Mandate-Request: 1`, else 403 `forbidden`
+before the body is read, as §3.11 item 5), answer with `Cache-Control: no-store`, and are never
+logged with their bodies. Both are exempt from `Idempotency-Key` (§3.4): each challenge has a fresh
+id and is used once, so a retried opening asks for a new challenge.
+
+| Operation | Method and path | Event | Notes |
+|---|---|---|---|
+| Ask for a reduction-session challenge | `POST /v1/reduction-sessions/challenges` | — | Unauthenticated. Body `commands/reduction-session-challenge-request`, strict and empty; anything else is `invalid`. Answers `201` with `commands/reduction-session-challenge`: `challenge_id` (a fresh ULID), `webauthn_challenge` (32 bytes from the operating system's generator, unpadded base64url), the deployment's `rp_id`, `issued_at`, and `expires_at`, 300 s later. It reads nothing workspace-specific and returns nothing workspace-specific: no workspace, member, passkey list, or `allowCredentials`. The challenge is held in the server's memory and **never journaled**. Over item 3's limits it is the one 401, so no refusal tells a limit from anything else (DEC-653 item 3, DEC-2119) |
+| Open a reduction-only session | `POST /v1/reduction-sessions` | `SessionOpened` (item 5) | Body `commands/reduction-session-request`, strict: `challenge_id`, and the authenticator's `passkey_id`, `authenticator_data`, `client_data_json`, and `signature`. Answers `201` with `commands/reduction-session-opened`, `{kind: "reduction_only", expires_at, workspaces}`, and the §3.3 item 5 session cookie. **Every** refusal after the browser check is the one 401 (item 4) |
+
+1. **The challenge is single-use.** The assertion route takes the named challenge out of memory on
+   its first presentation, before anything else is judged and whatever follows, so a challenge is
+   presented at most once. A challenge that is unknown, expired, already presented, or whose bytes
+   are not the ones `client_data_json` signed fails.
+2. **What verifies.** The server looks the passkey up by `passkey_id` alone, among the passkeys the
+   control stream holds enrolled and not removed (journal spec §9.31), so a discoverable passkey
+   and a non-discoverable one whose id the client supplies both serve (DEC-833 keeps both).
+   `mandate_passkey::verify` judges the assertion against the challenge's bytes, this deployment's
+   origin and RP ID, and user verification. Route 2 neither reads nor advances the passkey's
+   signature counter; detecting a cloned authenticator is out of its scope. The session is refused
+   when the passkey's member holds no membership that reaches the hosted workspace (`active` or
+   `cooling_off`, identity spec §5.1), or when the member's identity-provider subject was refused by
+   the provider since their last successful sign-in (route 1's deprovision signal). An enrolment
+   cool-off does not bar it: a cooling-off passkey can pause and kill switch (identity spec §10.1).
+3. **Limits** (DEC-834, the founder's; DEC-653; numbers by DEC-2117 item 3 and DEC-2119). A request
+   is counted against its address and its device:
+   - **Address:** the TCP peer of the API listener. Only when the peer is one
+     `MANDATE_API_INGRESS_PEERS` (§3.11 item 2) lists does the server read `X-Forwarded-For`: its
+     lines are joined into one list in order, and it is walked from the right, skipping every
+     entry that is itself a listed peer; the first other entry is the address. A missing header, an
+     entry that is not an address, or a list holding only listed peers falls back to the TCP peer.
+     A forwarded header from any other peer is ignored, so a request that did not come through the
+     ingress cannot claim an address (DEC-822 item 7). Peers are matched exactly. An IPv4-mapped
+     IPv6 address (`::ffff:a.b.c.d`), whether the peer's or a forwarded one, is read as its
+     embedded IPv4 address everywhere, so it counts as that IPv4 address; an IPv4 address counts
+     as itself. Only a native IPv6 address counts as its /64 prefix, so one client cannot rotate
+     addresses within it to escape its budget; a client holding a /56 or a /48 can still rotate
+     across its /64s, a residual the global cap below bounds. Unset behind an ingress, every client
+     shares one address budget, so a deployment behind one sets it.
+   - **Device:** the `__Host-mandate_device` cookie: 32 bytes from the operating system's generator
+     as unpadded base64url, `Secure`, `HttpOnly`, `SameSite=Strict`, `Path=/` (the `__Host-` prefix
+     requires it; every other route ignores it), `Max-Age` 30 days. The challenge route sets it when
+     the call carries none or one of another shape. It is a random key and nothing else: it carries
+     no workspace, member, principal, passkey, or session, the server never links it to one, and it
+     keeps only its SHA-256 digest, only as a limit key, only while that key counts something. The
+     assertion route never sets or clears it. A browser keeps no `Secure` cookie from a plain
+     `http` origin, so a dev or ci cell served that way gets a fresh device on every call: the
+     device limit does not bind there, by intent, and the address limit is the bound.
+   - **The challenge route** counts a challenge only while it is outstanding (issued, unexpired,
+     not yet presented), against the address and device that asked for it: at most 4 per device
+     and 32 per address. In all it holds at most 4,096, and the last 1,024 are a reserve: once
+     3,072 are outstanding, an address that already holds one gets no more, so the rest go one per
+     address. Past any of these it answers the one 401, as every other refusal of route 2 does
+     (DEC-653 item 3). **Residual:** 96 addresses at their 32 each fill the first 3,072, and 1,024
+     more distinct addresses take the reserve, so a flood from about 1,120 distinct addresses
+     (IPv6 /64s, which one /48 holds many times over) that re-asks whenever a slot frees can hold
+     every slot while it lasts. A member who asks then gets the one 401, and waits for a slot,
+     uses another network, the host CLI (route 3) where there is one, or route 1 once the provider
+     answers.
+   - **The assertion route** counts each failed assertion against the address and device that
+     presented it, for 300 s after it failed: at most 10 per device and 100 per address are kept.
+     This limit only counts and reports (DEC-653 item 3, the founder's reading): no answer depends
+     on it, it refuses no challenge and no assertion, and reaching it raises the operator alert
+     `reduction_failures_over_limit` (infrastructure design §8.2), an opaque code with generic text
+     naming no address, device, member, or passkey (rule 6).
+     Verification work stays bounded by the challenge limits, since only an outstanding challenge
+     reaches the verifier, once; a request naming none fails without verifying. **An assertion that
+     verifies is never refused for a limit.**
+   - **Bounded memory.** Besides the 4,096 outstanding challenges, failures are kept for at most
+     65,536 addresses and devices in all, the oldest dropped first. Dropping one changes no answer,
+     since failures only report. These bounds are owed to the gate itself by S2's gate change
+     (E9-1): `mandate_authn`'s `ReductionLimits` gains `max_outstanding` (4,096) and `reserve`
+     (3,072), past which it refuses a challenge with its one refusal as above, and
+     `max_failure_keys` (65,536), evicting the oldest failure key first. Until that lands, the
+     challenge route holds the 4,096 bound and the reserve itself, in front of the gate, and the
+     gate holds only its per-key limits.
+4. **No membership oracle, by structure.** Every refusal of `POST /v1/reduction-sessions` after the
+   browser check (an invalid body; an unknown, expired, or reused challenge; an unknown passkey id;
+   a passkey removed, or whose member is deactivated, removed, or deprovisioned; a bad signature; a
+   wrong origin or RP ID; any limit) is 401 `unauthenticated` with §3.5's one body: the same status,
+   body, and headers, no cookie set or cleared. Past the challenge, every request runs the same
+   steps whatever it names:
+   - the passkey lookup reads the whole fold and does not stop at a match;
+   - the signature is verified first, before anything is judged, by exactly one ES256 and one
+     Ed25519 check over the same signature, ES256 first, whatever the request names: the
+     passkey's key for its own algorithm and a fixed decoy key for the other, or both decoys
+     when the passkey is unknown or its key does not resolve, since a check of the wrong shape
+     costs no arithmetic and checking one algorithm alone would tell a held key, and its
+     algorithm, by time ([DEC-2324](../project/decisions/DEC-2324.md)); only the held key's check
+     answers, and a decoy's never does;
+   - the membership and provider-refusal lookups always run, against a fixed decoy principal when
+     the passkey is unknown;
+   - only then are the results judged, together.
+   So for any request that reaches it, timing tells no membership or passkey state apart. A
+   challenge-level refusal (an unknown, expired, or reused challenge) costs no verification and is
+   distinguishable by timing; it tells nothing about any member, which is all identity spec §6.4's
+   timing claim covers.
+5. **The session.** The record is §3.11 item 5's, of kind `reduction_only`, for the passkey's
+   member, and counts toward that principal's 16. It also stores that route 2 opened it, a marker
+   no answer ever exposes. A session cookie presented with the call ends that earlier session
+   (`sign_out`) and is replaced, only once the assertion verifies; a refused call ends nothing. It
+   lives **15 minutes from the opening, absolute**: no idle limit, and it is **never refreshed or
+   extended**. `POST /v1/sessions/refresh` refuses a route-2 session `reduction_only` and keeps it,
+   even when the provider answers, so nothing turns it into a full session; a session an outage
+   narrowed (route 1) is still restored by a granted refresh (DEC-816 item 8). Sessions live in
+   memory as item 5's do. Opening one commits `SessionOpened` (identity spec §12.1) with the method
+   `passkey_local` once the journal registers that event; until then it journals nothing.
+6. **Its reach.** It covers each workspace in which the member holds a membership that reaches its
+   scope (`active` or `cooling_off`, identity spec §5.1) when it opens (one, on a hosted
+   deployment), with the roles in effect then, as identity spec §8.3 allows, as its snapshot. In
+   each, it authorizes only pause and the kill switch at their scopes, and only where the
+   snapshot's roles grant them (identity spec §4.2's rows for the two), and sign-out
+   (`DELETE /v1/sessions/current`). The kill switch is the stop alone: its privileges beyond the
+   stop need step-up, and the step-up challenge route refuses this session `reduction_only` (§3.6),
+   so a kill switch it sends is routed without them, as §5.4 routes any kill switch without valid
+   step-up. Every other route, owner exits, resume, Stop, approvals, confirm, deploy, step-up,
+   enrolment, and every workspace read included, is refused `reduction_only`. Membership events
+   act on it as on any session (DEC-816 item 7). `GET /v1/me/session` answers it with `kind:
+   "reduction_only"`, its `expires_at`, and the same `workspaces`. In both that answer and the
+   opening's, each workspace carries the ids the session may act on there, read from the control
+   stream at the answer: `agent_ids`, the agents it may pause or kill switch, and
+   `connection_ids`, the connections it may kill switch, so a session that reads nothing else can
+   name its scope. They are opaque ids, as every read returns them. A read of them that fails
+   answers empty lists, never a refusal (DEC-642 item 10): empty means unknown or none, and the
+   web app then falls back to the ids it last held.
 
 | Operation | Method and path | Event | Notes |
 |---|---|---|---|
@@ -2065,7 +2249,7 @@ risk-reducing call never consults one (API-7, API-8).
 | Journal events this spec needs: `MandateDraftSaved`, the compiler's invocation on the control stream, `MandateConfirmed`'s agent link, and `OwnerRequestSubmitted` | **Specified** (journal spec v0.21 §9.9, DEC-670); `mandate-journal` registration planned (E10-15) |
 | The `client` actor, `ConnectionRevoked`'s reason, and the client events | **Specified** (journal spec v0.22 §3 and §9.10, DEC-671); `mandate-journal` registration planned (E10-15) |
 | `hold_openings` and `lift_hold` | **Specified** (journal spec v0.23 §9.11, DEC-672); `mandate-journal` registration planned (E10-15) |
-| Sessions, roles, step-up ceremonies | **Partly served** (E9, the identity spec): browser sessions (§3.11 items 5 and 6), one's own session and memberships (§4.10, [DEC-2113](../project/decisions/DEC-2113.md)), and step-up challenges (§3.6, DEC-2103); member routes, role changes, and the passkey ceremony are planned |
+| Sessions, roles, step-up ceremonies | **Partly served** (E9, the identity spec): browser sessions (§3.11 items 5 and 6), one's own session and memberships (§4.10, [DEC-2113](../project/decisions/DEC-2113.md)), and step-up challenges (§3.6, DEC-2103); member routes, role changes, the passkey ceremony, and route 2's reduction-only sessions (§4.10, [DEC-2117](../project/decisions/DEC-2117.md); E9-1) are planned |
 | Notification addresses (§4.11, §5.7) and `NotificationAddressChanged` | **Planned** (E8-14). Mounted once the API's authentication middleware lands and the journal spec change that writes the `NotificationAddressChanged` row (the L3 lane's journal spec v0.28 PR, §9.15) merges. Merge order: #811, #763, this change (#827), then #833. The push-service allowlist's decision is DEC-792 (this spec change, #827); the web client's mirror of its table is #833, which merges after #827. Accepted when: a canary scan of responses, problems, logs, metrics and the journal finds no endpoint, key, or endpoint hash; the append is failed at every step of §5.7's tables (API-3's test) and crash injection gives each stated outcome; a replay after a lost `202` returns it; a retry with a different body, once its event exists, answers the original outcome and writes nothing to the vault; before the event exists, with the entry present, it is `idempotency_conflict`; a retry racing the sweep ends with the entry present or `address_missing` recorded; inert and removed entries neither match an endpoint nor count to the limit; two concurrent PUTs of one endpoint, an eleventh address, and a double removal are each settled by the expected head; a PUT of an unreachable address's endpoint replaces it in one batch with no last send to the old address; a stream busy for 5 attempts answers `busy` without a second vault write or step-up judgment; deactivation removes every address in its own commit, under the acting principal; a foreign `address_ref` answers byte-for-byte as a random one; the shared allowlist table (DEC-792) passes; and a replayed or wrongly bound step-up is refused |
 | The relay's own allowlist check (DEC-792 item 3) | **Planned** (E20-8) |
 

@@ -14,7 +14,10 @@ use rustix::fs::{CWD, FileType, Mode, mknodat};
 use secrecy::ExposeSecret;
 
 use crate::SourceError;
-use crate::mounted::{read_checked, read_mounted, read_mounted_credentials};
+use crate::mounted::{
+    read_checked, read_mounted, read_mounted_credentials, read_service_account_namespace,
+    read_service_account_token,
+};
 use crate::policy::Identity;
 
 static NEXT: AtomicU32 = AtomicU32::new(0);
@@ -331,6 +334,109 @@ fn a_link_to_the_same_file_swapped_in_after_the_check_is_refused() {
     };
     assert_eq!(
         read_swapped(&dir.0, "ca.crt", &swap),
+        Err(SourceError::CredentialFile)
+    );
+}
+
+fn token(dir: &Path) -> Result<String, SourceError> {
+    read_service_account_token(dir).map(|value| value.expose_secret().to_owned())
+}
+
+/// A projected token behind the kubelet's links, readable by all as the kubelet writes it, is
+/// read, its trailing newline dropped.
+#[test]
+fn a_projected_token_readable_by_all_is_read() {
+    let dir = Fresh::new("sa-token");
+    kubelet(&dir.0, &[("token", "header.claims.signature\n", 0o644)]);
+    assert_eq!(token(&dir.0), Ok("header.claims.signature".to_owned()));
+}
+
+/// A token anyone else may write is refused, whatever its read bits.
+#[test]
+fn a_projected_token_others_may_write_is_refused() {
+    for mode in [0o646, 0o664, 0o666, 0o662] {
+        let dir = Fresh::new("sa-mode");
+        kubelet(&dir.0, &[("token", "h.c.s", mode)]);
+        assert_eq!(token(&dir.0), Err(SourceError::CredentialFile), "{mode:o}");
+    }
+}
+
+#[test]
+fn a_projected_token_that_is_not_one_line_is_refused() {
+    for text in ["", "\n", "h.c.s\nmore", "h.c.s\r\n", "h.c.s\n\n"] {
+        let dir = Fresh::new("sa-lines");
+        write(&dir.0.join("token"), text, 0o644);
+        assert_eq!(token(&dir.0), Err(SourceError::CredentialFile), "{text:?}");
+    }
+}
+
+/// A token of 16384 bytes is read; one byte more is refused.
+#[test]
+fn a_projected_token_over_its_bound_is_refused() {
+    let dir = Fresh::new("sa-bound");
+    let longest = "a".repeat(16384);
+    write(&dir.0.join("token"), &longest, 0o644);
+    assert_eq!(token(&dir.0), Ok(longest.clone()));
+    let over = Fresh::new("sa-over");
+    write(&over.0.join("token"), &format!("{longest}a"), 0o644);
+    assert_eq!(token(&over.0), Err(SourceError::CredentialFile));
+}
+
+/// The token is found only inside its directory: a link out, or no token at all, is refused.
+#[test]
+fn a_projected_token_outside_its_directory_or_missing_is_refused() {
+    let parent = Fresh::new("sa-parent");
+    let dir = parent.0.join("mount");
+    fs::create_dir(&dir).unwrap();
+    write(&parent.0.join("token"), "h.c.s", 0o644);
+    symlink("../token", dir.join("token")).unwrap();
+    assert_eq!(token(&dir), Err(SourceError::CredentialFile));
+    let empty = Fresh::new("sa-missing");
+    assert_eq!(token(&empty.0), Err(SourceError::CredentialFile));
+}
+
+/// The namespace the downward API projects beside the token is read, by the token's rules, and
+/// must be a Kubernetes label of at most 64 bytes.
+#[test]
+fn the_projected_namespace_is_read_by_the_tokens_rules() {
+    let dir = Fresh::new("sa-namespace");
+    kubelet(
+        &dir.0,
+        &[("token", "h.c.s", 0o644), ("namespace", "ws-ws1", 0o644)],
+    );
+    assert_eq!(
+        read_service_account_namespace(&dir.0),
+        Ok("ws-ws1".to_owned())
+    );
+    let longest = format!("a{}", "b".repeat(62));
+    for (text, want) in [
+        ("ws-ws1\n", Ok("ws-ws1".to_owned())),
+        (longest.as_str(), Ok(longest.clone())),
+        ("", Err(SourceError::CredentialFile)),
+        ("WS-WS1", Err(SourceError::CredentialFile)),
+        ("ws_ws1", Err(SourceError::CredentialFile)),
+        ("ws-ws1\nmore", Err(SourceError::CredentialFile)),
+        ("-ws", Err(SourceError::CredentialFile)),
+    ] {
+        let dir = Fresh::new("sa-namespace-text");
+        write(&dir.0.join("namespace"), text, 0o644);
+        assert_eq!(read_service_account_namespace(&dir.0), want, "{text:?}");
+    }
+    let over = Fresh::new("sa-namespace-over");
+    write(&over.0.join("namespace"), &"a".repeat(65), 0o644);
+    assert_eq!(
+        read_service_account_namespace(&over.0),
+        Err(SourceError::CredentialFile)
+    );
+    let writable = Fresh::new("sa-namespace-mode");
+    write(&writable.0.join("namespace"), "ws-ws1", 0o666);
+    assert_eq!(
+        read_service_account_namespace(&writable.0),
+        Err(SourceError::CredentialFile)
+    );
+    let missing = Fresh::new("sa-namespace-missing");
+    assert_eq!(
+        read_service_account_namespace(&missing.0),
         Err(SourceError::CredentialFile)
     );
 }

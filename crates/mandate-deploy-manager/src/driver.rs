@@ -128,7 +128,7 @@ impl<J: ControlJournal, O: Orchestrator, A: Alerts> Deployer<J, O, A> {
                     record.effect()
                 }
             };
-            self.perform(effect).await;
+            self.perform(effect, now).await;
         }
         Ok(())
     }
@@ -149,15 +149,23 @@ impl<J: ControlJournal, O: Orchestrator, A: Alerts> Deployer<J, O, A> {
         Ok(())
     }
 
-    async fn perform(&mut self, effect: Effect) {
+    async fn perform(&mut self, effect: Effect, now: UtcNanos) {
         match effect {
             Effect::Start { slot, generation } => {
-                if self.orchestrator.start(&slot, generation).await.is_ok() {
+                let lifetime = self.manager.lifetime(&slot, now);
+                if self
+                    .orchestrator
+                    .start(&slot, generation, lifetime)
+                    .await
+                    .is_ok()
+                {
                     self.manager.launched(&slot, generation);
                 }
             }
             Effect::Stop { slot, generation } => {
-                let _retried_next_pass = self.orchestrator.stop(&slot, generation).await;
+                if self.orchestrator.stop(&slot, generation).await.is_ok() {
+                    self.manager.stopped(&slot, generation);
+                }
             }
             Effect::Alert(alert) => self.alerts.raise(alert),
         }

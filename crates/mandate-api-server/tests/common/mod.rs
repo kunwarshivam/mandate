@@ -60,7 +60,12 @@ pub fn serve(router: Router) -> SocketAddr {
                 .expect("a loopback port");
             tx.send(listener.local_addr().expect("its address"))
                 .expect("the test is waiting");
-            axum::serve(listener, router).await.expect("serving");
+            axum::serve(
+                listener,
+                router.into_make_service_with_connect_info::<SocketAddr>(),
+            )
+            .await
+            .expect("serving");
         });
     });
     rx.recv_timeout(Duration::from_secs(10))
@@ -305,6 +310,8 @@ pub enum Scripted {
     RaceSame,
     /// Another command lands under the same id first: `IdempotencyConflict`.
     RaceOther,
+    /// A concurrent copy of the same call, identical, lands first: `AlreadyCommitted`.
+    RaceIdentical,
     /// The draft is refused: `Invalid`.
     Invalid,
     /// Nothing written: the call fails (`JournalUnavailable`).
@@ -473,6 +480,10 @@ impl mandate_api_server::journal::Journal for MemJournal {
                 Ok(AppendOutcome::IdempotencyConflict {
                     stored_seq: row.seq,
                 })
+            }
+            Some(Scripted::RaceIdentical) => {
+                let row = self.store(stream, recorded_at, draft);
+                Ok(AppendOutcome::AlreadyCommitted(vec![row]))
             }
             Some(Scripted::Invalid) => Ok(AppendOutcome::Invalid {
                 draft: 0,

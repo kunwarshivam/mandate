@@ -6,7 +6,7 @@
 //! |---|---|---|---|
 //! | API | — | every connection's code | every connection's code and token |
 //! | Connection manager | — | — | every connection's code and token; it also issues and revokes token-exchange grants |
-//! | Token exchange for `c` (through a grant) | `c`'s code, the client secret | `c`'s token | `c`'s code |
+//! | Token exchange for `c` | `c`'s code, the client secret | `c`'s token, and `c`'s code only as [`Access::Take`] (DEC-2061) | `c`'s code |
 //! | Executor for `c` | `c`'s token, as a lease | — | — |
 //! | Runtime | — | — | — |
 //! | Secret import | — | the client secret, the platform's own secrets | — |
@@ -96,6 +96,11 @@ pub enum Access {
     Read,
     Write,
     Delete,
+    /// Overwrite an entry that is there, never create one: the token exchange's check-and-set
+    /// tombstone on its own connection's code, which makes taking the code single use
+    /// (DEC-2061). Only the Kubernetes-auth exchange's templated policy grants it; the AppRole
+    /// policies, retired with that exchange, never do.
+    Take,
 }
 
 /// Whether `identity` may `access` `path`: the table above.
@@ -109,7 +114,11 @@ pub fn allows(identity: &Identity, access: Access, path: &SecretPath) -> bool {
         )
         | (Identity::TokenExchange(_), Access::Read, SecretPath::ClientSecret)
         | (Identity::SecretImport, Access::Write, SecretPath::ClientSecret) => true,
-        (Identity::TokenExchange(own), Access::Read | Access::Delete, SecretPath::Code(c))
+        (
+            Identity::TokenExchange(own),
+            Access::Read | Access::Delete | Access::Take,
+            SecretPath::Code(c),
+        )
         | (Identity::TokenExchange(own), Access::Write, SecretPath::Token(c))
         | (Identity::Executor(own), Access::Read, SecretPath::Token(c)) => own == c,
         (identity, Access::Read, SecretPath::Platform(secret)) => {
@@ -128,14 +137,20 @@ pub fn allows(identity: &Identity, access: Access, path: &SecretPath) -> bool {
 pub struct Mounts {
     pub kv: String,
     pub auth: String,
+    /// The Kubernetes auth mount a connection's executor logs in on (DEC-2060).
+    pub kubernetes_executor: String,
+    /// The Kubernetes auth mount a connection's token exchange logs in on (DEC-2060).
+    pub kubernetes_exchange: String,
 }
 
 impl Default for Mounts {
-    /// `mandate` and `approle`, the cell's.
+    /// `mandate`, `approle`, `kubernetes-executor` and `kubernetes-exchange`, the cell's.
     fn default() -> Self {
         Self {
             kv: "mandate".to_owned(),
             auth: "approle".to_owned(),
+            kubernetes_executor: "kubernetes-executor".to_owned(),
+            kubernetes_exchange: "kubernetes-exchange".to_owned(),
         }
     }
 }
@@ -159,11 +174,34 @@ pub fn role_name(identity: &Identity) -> String {
     }
 }
 
+/// `connection`'s bytes in lowercase hexadecimal: a valid Kubernetes object name and path segment
+/// for every id, and, being lowercase, never one OpenBao folds into another's, as it folds role
+/// and policy names (DEC-2060).
+pub(crate) fn connection_hex(connection: &ConnectionId) -> String {
+    connection
+        .as_str()
+        .bytes()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+/// The one segment a connection's entries are stored under, `connections/<segment>/`: `x` and
+/// [`connection_hex`], the token exchange's ServiceAccount name, so the templated policies of
+/// both kinds reach exactly the path every writer and reader uses, and no two ids, whatever
+/// their case, share it (DEC-2060).
+pub fn connection_segment(connection: &ConnectionId) -> Result<String, SourceError> {
+    Ok(format!("{SEGMENT_PREFIX}{}", connection_hex(connection)))
+}
+
+/// What comes before the hex in [`connection_segment`], and so before the executor's
+/// ServiceAccount name in its templated policy.
+pub(crate) const SEGMENT_PREFIX: &str = "x";
+
 /// The path of `path` under the mount, without the mount and the `data/` or `metadata/` prefix.
-pub fn kv_path(path: &SecretPath) -> String {
-    match path {
-        SecretPath::Code(c) => format!("connections/{}/code", c.as_str()),
-        SecretPath::Token(c) => format!("connections/{}/token", c.as_str()),
+pub fn kv_path(path: &SecretPath) -> Result<String, SourceError> {
+    Ok(match path {
+        SecretPath::Code(c) => format!("connections/{}/code", connection_segment(c)?),
+        SecretPath::Token(c) => format!("connections/{}/token", connection_segment(c)?),
         SecretPath::ClientSecret => "platform/alpaca-oauth-client-secret".to_owned(),
         SecretPath::Platform(PlatformSecret::ModelProviderKey) => {
             "platform/model-provider-key".to_owned()
@@ -171,7 +209,7 @@ pub fn kv_path(path: &SecretPath) -> String {
         SecretPath::Platform(PlatformSecret::EmailCredential) => {
             "platform/email-credential".to_owned()
         }
-    }
+    })
 }
 
 /// The OpenBao policy of `identity`, given every connection the cell holds, in HCL. Each path is
@@ -181,7 +219,7 @@ pub fn openbao_policy(
     identity: &Identity,
     connections: &[ConnectionId],
     mounts: &Mounts,
-) -> String {
+) -> Result<String, SourceError> {
     let mut paths: Vec<SecretPath> = vec![SecretPath::ClientSecret];
     paths.extend(PlatformSecret::ALL.map(SecretPath::Platform));
     for connection in connections {
@@ -199,7 +237,7 @@ pub fn openbao_policy(
                 hcl.push_str(&format!(
                     "path \"{}/{prefix}/{}\" {{\n  capabilities = [{capabilities}]\n}}\n",
                     mounts.kv,
-                    kv_path(path)
+                    kv_path(path)?
                 ));
             }
         }
@@ -222,7 +260,7 @@ pub fn openbao_policy(
     if hcl.is_empty() {
         hcl.push_str("# This identity reads, writes, and deletes nothing (infrastructure §5.2).\n");
     }
-    hcl
+    Ok(hcl)
 }
 
 /// Refuses as [`SourceError::Denied`] what [`allows`] does not allow.

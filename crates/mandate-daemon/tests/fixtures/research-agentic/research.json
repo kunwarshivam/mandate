@@ -1,0 +1,88 @@
+{
+ "allowlist": {
+  "sources": [
+   "src.newswire",
+   "src.wire_two"
+  ],
+  "version": 3
+ },
+ "caps": {
+  "deployment_usd": "20",
+  "run_usd": "1.5",
+  "workspace_monthly_usd": "50"
+ },
+ "endpoint": {
+  "cached_per_million": "0.3",
+  "host": "openrouter.ai",
+  "id": "openrouter:anthropic",
+  "input_per_million": "3",
+  "output_per_million": "15",
+  "price_table": "openrouter anthropic price table 1",
+  "region": "us",
+  "reported_provider": "Anthropic",
+  "upstream": "anthropic"
+ },
+ "entry": {
+  "agentic": "v0_2",
+  "deadline_ms": 120000,
+  "max_output_tokens": 4096,
+  "model_id": "llm.research_agent",
+  "model_name": "anthropic/claude-sonnet-4.5",
+  "model_version": "0.1.0",
+  "provider": "anthropic",
+  "seed": 7,
+  "snapshot": "claude-sonnet-4-5-20250929"
+ },
+ "halted_instruments": [],
+ "reply": {
+  "cached_tokens": 0,
+  "input_tokens": 1800,
+  "latency_ms": 0,
+  "output": "{\"theses\":[{\"instrument\":\"AAPL\",\"direction\":\"long\",\"conviction\":\"0.8\",\"confidence\":\"0.7\",\"horizon_s\":432000,\"thesis\":\"Record services revenue and higher supplier orders point to continued demand over the next week.\",\"invalidation\":\"Services growth reverses, or suppliers cut orders.\",\"evidence\":[\"nw-aapl-services\",\"w2-aapl-supply\"]}],\"invalidations\":[]}",
+  "output_tokens": 220
+ },
+ "turns": [
+  {
+   "cached_tokens": 0,
+   "calls": [
+    {
+     "arguments": {
+      "count": 5,
+      "symbol": "AAPL"
+     },
+     "name": "market.bars"
+    },
+    {
+     "arguments": {
+      "limit": 5,
+      "symbols": [
+       "AAPL"
+      ],
+      "terms": [
+       "services"
+      ],
+      "window_h": 48
+     },
+     "name": "news.search"
+    }
+   ],
+   "input_tokens": 1200,
+   "latency_ms": 0,
+   "output_tokens": 60
+  },
+  {
+   "cached_tokens": 0,
+   "calls": [
+    {
+     "arguments": {
+      "text": "services revenue and supplier orders both point up"
+     },
+     "name": "note"
+    }
+   ],
+   "input_tokens": 1600,
+   "latency_ms": 0,
+   "output_tokens": 40
+  }
+ ]
+}

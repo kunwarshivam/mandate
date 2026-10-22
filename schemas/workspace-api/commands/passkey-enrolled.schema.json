@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/commands/passkey-enrolled.schema.json",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../envelope.schema.json#/$defs/Envelope"
+    }
+  ],
+  "required": [
+    "event_id",
+    "passkey_id",
+    "alg",
+    "cool_off_ends"
+  ],
+  "properties": {
+    "event_id": {
+      "$ref": "../common.schema.json#/$defs/EventId"
+    },
+    "passkey_id": {
+      "$ref": "../common.schema.json#/$defs/PasskeyId"
+    },
+    "alg": {
+      "enum": [
+        "es256",
+        "eddsa"
+      ]
+    },
+    "cool_off_ends": {
+      "oneOf": [
+        {
+          "$ref": "../common.schema.json#/$defs/Timestamp"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "description": "POST /passkeys' 201 (\u00a73.6, DEC-2108): the CredentialEnrolled committed (journal spec \u00a79.31), the passkey, its algorithm, and when it may first step up, or null for at once.",
+  "propertyNames": {
+    "not": {
+      "pattern": "([tT][oO][kK][eE][nN]|[sS][eE][cC][rR][eE][tT]|[pP][aA][sS][sS][wW][oO][rR][dD]|[pP][aA][sS][sS][pP][hH][rR][aA][sS][eE]|[cC][rR][eE][dD][eE][nN][tT][iI][aA][lL]|[aA][pP][iI]_[kK][eE][yY]|[pP][rR][iI][vV][aA][tT][eE]_[kK][eE][yY]|[aA][cC][cC][oO][uU][nN][tT]_[nN][uU][mM][bB][eE][rR]|[fF][iI][nN][gG][eE][rR][pP][rR][iI][nN][tT]|[vV][aA][uU][lL][tT])"
+    }
+  },
+  "unevaluatedProperties": false
+}

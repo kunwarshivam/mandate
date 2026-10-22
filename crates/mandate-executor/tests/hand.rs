@@ -4177,7 +4177,6 @@ fn net_of_taker_fee(bought: &str) -> String {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn a_crypto_position_carries_one_stop_limit_for_the_whole_position() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[BTC]);
@@ -4228,7 +4227,7 @@ fn a_crypto_position_carries_one_stop_limit_for_the_whole_position() {
         protection.qty,
         qty("0.49875"),
         "for the whole position, less the 0.00125 its buy withholds as the taker fee, the larger \
-         rate: a stop-limit never outlasts the position once that fee posts (RC-07, RC-20)"
+         rate: a stop-limit never outlasts the position once that fee posts (RC-07)"
     );
     assert_eq!(
         protection.tif,
@@ -4354,7 +4353,6 @@ fn a_crypto_add_is_a_limit_ioc_inside_the_sequence() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn a_crypto_stop_limit_is_re_placed_for_the_new_net_quantity() {
     const BOUGHT: &str = "0.123456789";
     let ids = TestIds;
@@ -4410,6 +4408,191 @@ fn a_crypto_stop_limit_is_re_placed_for_the_new_net_quantity() {
         qty(&net_of_taker_fee(BOUGHT)),
         "the whole position net of a fee that rounds at the ninth place, half up: 0.123456789 \
          less round(0.000308641972, 9, half_up) = 0.000308642 (§6.3, DEC-349 item 2)"
+    );
+}
+
+/// What two or more crypto buy fills hold once each fill's taker fee is withheld, each rounded on
+/// its own as §6.3 rounds a fill's fee, summed in whole nano-units by [`net_of_taker_fee`]'s own
+/// arithmetic, never the crate's.
+fn net_of_taker_fees(fills: &[&str]) -> String {
+    let nanos = |text: &str| -> u128 {
+        let (whole, fraction) = text.split_once('.').unwrap_or((text, ""));
+        format!("{whole}{fraction:0<9}")
+            .parse()
+            .unwrap_or_else(|e| panic!("{text}: {e}"))
+    };
+    let net: u128 = fills
+        .iter()
+        .map(|fill| nanos(&net_of_taker_fee(fill)))
+        .sum();
+    let text = format!("{}.{:09}", net / 1_000_000_000, net % 1_000_000_000);
+    text.trim_end_matches('0').trim_end_matches('.').to_owned()
+}
+
+/// §6.3 rounds each crypto fill's fee on its own, so the stop-limit after an entry filled in parts
+/// is the sum of each fill net of its own fee, never the sum net of one fee on the total: two fills
+/// of 0.1000002 at 25 bps hold 0.099750199 each, 0.199500398 together, where one rounding over
+/// 0.2000004 would cover 0.199500399, a nano-unit more than is held, which the broker refuses
+/// (`AGENTS.md` rule 12; DEC-349 item 2).
+#[test]
+fn a_crypto_stop_limit_nets_each_fills_own_fee() {
+    const FILL: &str = "0.1000002";
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = started();
+    shell.fold_one(&stream_opened()).expect("folds");
+    let mut shell = shell.restart_ready(&ports);
+    shell.run(Input::Market(quote(BTC, "60000", "60010", 20)), &ports);
+    let submitted = shell.run(
+        handoff(
+            INTENT,
+            common::AGENT,
+            protected_opening(BTC, "0.2000004", "60000", "54000", None),
+        ),
+        &ports,
+    );
+    let id = submitted
+        .submissions()
+        .first()
+        .map(|o| o.client_order_id.as_str().to_owned())
+        .expect("the crypto entry is sent");
+    shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+            "b-1",
+            Some(&id),
+            BTC,
+            Side::Buy,
+            "0.2000004",
+            "0.2000004",
+            "filled",
+        ))),
+        &ports,
+    );
+    let mut stops = Vec::new();
+    for fill in ["f-btc-1", "f-btc-2"] {
+        let ran = shell.run(
+            Input::BrokerUpdate(BrokerUpdate::Fill(mandate_executor::BrokerFill {
+                instrument: instrument(BTC),
+                ..broker_fill(fill, Some(&id), FILL, "60000")
+            })),
+            &ports,
+        );
+        stops.extend(
+            ran.submissions()
+                .into_iter()
+                .filter(|o| o.order_type == mandate_executor::OrderType::StopLimit)
+                .map(|o| o.qty),
+        );
+    }
+
+    assert_eq!(
+        net_of_taker_fees(&[FILL, FILL]),
+        "0.199500398",
+        "the oracle: each fill holds 0.1000002 less round(0.00025000050, 9, half_up) = 0.000250001"
+    );
+    assert_eq!(
+        stops,
+        vec![qty(&net_of_taker_fees(&[FILL, FILL]))],
+        "one stop-limit, once both fills are applied, for the sum of each fill net of its own fee"
+    );
+}
+
+/// A profile that lists an OCO for crypto, beside the one stop-limit, in every quantity form: the
+/// shape crypto protection must never take whatever a profile offers (§5.4: simple orders only).
+fn crypto_oco_profile() -> mandate_domain::CapabilityProfile {
+    use mandate_domain::{
+        AssetClass, Cell, Idempotency, MarketSession, OrderType as Kind, ProtectionForm,
+        QuantityForm, Retry, Row, TimeInForce as Tif,
+    };
+    let cell = |order_type, quantity_form, forms: &[ProtectionForm]| Cell {
+        order_type,
+        quantity_form,
+        times_in_force: [Tif::Gtc, Tif::Ioc].into_iter().collect(),
+        protection_forms: forms.iter().copied().collect(),
+    };
+    let mut cells = Vec::new();
+    for form in [QuantityForm::Whole, QuantityForm::Fractional] {
+        cells.push(cell(Kind::Limit, form, &[ProtectionForm::Oco]));
+        cells.push(cell(Kind::StopLimit, form, &[ProtectionForm::StopLimit]));
+    }
+    let row = Row {
+        asset_class: AssetClass::Crypto,
+        session: MarketSession::Crypto,
+        cells,
+    };
+    let idempotency = Idempotency {
+        client_order_id: true,
+        retry: Retry::Unknown,
+        query_by_client_order_id: true,
+    };
+    mandate_domain::CapabilityProfile::new(1, vec![row], idempotency).expect("a valid profile")
+}
+
+/// §5.4 gives crypto simple orders only: its protection is one GTC stop-limit even under a profile
+/// that lists an OCO for crypto, and even for an entry that carries a take-profit (DEC-36).
+#[test]
+fn a_crypto_position_never_takes_an_oco_even_where_the_profile_lists_one() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = started();
+    shell.fold_one(&stream_opened()).expect("folds");
+    shell.profile = Some(crypto_oco_profile());
+    let mut shell = shell.restart_ready(&ports);
+    shell.run(Input::Market(quote(BTC, "60000", "60010", 20)), &ports);
+    let submitted = shell.run(
+        handoff(
+            INTENT,
+            common::AGENT,
+            protected_opening(BTC, "0.5", "60000", "54000", Some("70000")),
+        ),
+        &ports,
+    );
+    let id = submitted
+        .submissions()
+        .first()
+        .map(|o| o.client_order_id.as_str().to_owned())
+        .expect("the crypto entry is sent");
+    assert!(
+        submitted
+            .submissions()
+            .iter()
+            .all(|o| o.bracket.is_none() && o.oco.is_none()),
+        "the entry is never a bracket"
+    );
+    shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+            "b-1",
+            Some(&id),
+            BTC,
+            Side::Buy,
+            "0.5",
+            "0.5",
+            "filled",
+        ))),
+        &ports,
+    );
+    let ran = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Fill(btc_fill(&id, "0.5"))),
+        &ports,
+    );
+
+    let protective: Vec<_> = ran
+        .submissions()
+        .into_iter()
+        .filter(|o| o.purpose == Purpose::Protective)
+        .collect();
+    assert_eq!(protective.len(), 1, "one protective order: {protective:?}");
+    assert!(
+        protective.iter().all(|o| o.oco.is_none()
+            && o.bracket.is_none()
+            && o.order_type == mandate_executor::OrderType::StopLimit),
+        "a stop-limit, never an OCO: {protective:?}"
     );
 }
 

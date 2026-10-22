@@ -158,6 +158,7 @@ const FULL_JOB: &[&str] = &[
     "objectstore",
     "tofu",
     "stub-release",
+    "exchange-release",
 ];
 const PR_JOBS: &[&str] = &[
     "lint",
@@ -173,6 +174,7 @@ const PR_JOBS: &[&str] = &[
     "openbao",
     "objectstore",
     "stub-release",
+    "exchange-release",
     "mutants",
     "schema-mutants",
     "cell",
@@ -247,6 +249,15 @@ const PR_NUMBER: &str = "MANDATE_PR_NUMBER";
 const E77_ATOMIC_PR: u64 = 598;
 const E77_ATOMIC_BRANCH: &str = "cursor/e77-complete-tracer-4832";
 const E77_ATOMIC_MARKER: &str = "ES-22-atomic-exception: E7-7 PR #598 (DEC-462)";
+
+/// Pull requests a DEC names as atomic exceptions to ES-22's split, each with the exact marker its
+/// description must carry (DEC-462's mechanism, DEC-2635's use of it). A pair whose spec change and
+/// `src` change are mutually red — the new reference cases are refused by the old parser, and the
+/// old reference cases by the new one — cannot be split at all, so it ships whole with a marker
+/// that names its own DEC. The list is finite and each entry is one PR: nothing here is a standing
+/// loosening, and deleting the entry restores the guard for that PR.
+const ATOMIC_EXCEPTIONS: [(u64, &str); 1] =
+    [(2022, "ES-22-atomic-exception: J1 PR #2022 (DEC-2635)")];
 
 /// The verification skill's map of features to code, tests, and commands (AGENTS.md): one Markdown
 /// file a feature, so a PR adding a feature adds a file and one changing a feature edits only
@@ -502,6 +513,7 @@ fn ci(job: &str) -> Result<()> {
         "objectstore" => objectstore(),
         "tofu" => tofu_checks(),
         "stub-release" => stub_release(),
+        "exchange-release" => exchange_release(),
         "mutants" => mutants(Path::new("."), base_ref()?.as_deref()),
         "mutants-costs" => mutant_costs::ci(),
         "sweep" => sweep(Path::new(".")),
@@ -823,6 +835,114 @@ fn stub_release() -> Result<()> {
         eprintln!("    stub-release: {STUB_ISSUER} is not affected (DEC-1190)");
         return Ok(());
     }
+    let output = released(
+        STUB_ISSUER,
+        &["--bind", "127.0.0.1:8899"],
+        &[("MANDATE_DEPLOYMENT_TIER", "dev")],
+    )?
+    .with_context(|| {
+        format!(
+            "the release build of {STUB_ISSUER} kept running instead of refusing: it holds an \
+             issuer (DEC-2100 item 2)"
+        )
+    })?;
+    release_stub_refused(&output)
+}
+
+/// The token-exchange process's crate and binary (E10-13 slice 5b-3, DEC-2633).
+const TOKEN_EXCHANGE: &str = "mandate-token-exchange";
+
+/// All the release token exchange may write, to standard error, when it is given a token URL
+/// (DEC-2633 item 2).
+const TOKEN_URL_IN_RELEASE: &str = "token_exchange_token_url_in_release\n";
+
+/// DEC-2633 item 2: a build without debug assertions refuses to start when `MANDATE_TOKEN_URL` is
+/// set at all. Builds the exchange with `--release` once, only when the diff selects its crate
+/// (DEC-1190), and runs it as a cell would: a dev tier with a token URL its debug build admits, a
+/// dev tier with an empty one, and a production tier with one. Each run must be
+/// [`release_exchange_refused`]. It first refuses an environment that turns debug assertions back
+/// on in the release profile (DEC-2322), which would make the build it checks not the one
+/// the image ships.
+fn exchange_release() -> Result<()> {
+    if !selection()?.crates.contains(TOKEN_EXCHANGE) {
+        eprintln!("    exchange-release: {TOKEN_EXCHANGE} is not affected (DEC-1190)");
+        return Ok(());
+    }
+    release_profile_untouched(|name| env::var(name).ok())?;
+    for (tier, url) in [
+        ("dev", "http://127.0.0.1:8091/alpaca/oauth/token"),
+        ("dev", ""),
+        ("production", "http://127.0.0.1:8091/alpaca/oauth/token"),
+    ] {
+        let output = released(
+            TOKEN_EXCHANGE,
+            &[],
+            &[
+                ("MANDATE_DEPLOYMENT_TIER", tier),
+                ("MANDATE_SUBJECT", "conn_01JB3K6F0C9R2V7N4M8Q1T5W50"),
+                ("MANDATE_TOKEN_URL", url),
+            ],
+        )?
+        .with_context(|| {
+            format!(
+                "the release build of {TOKEN_EXCHANGE} kept running instead of refusing its \
+                 token URL in tier {tier} (DEC-2633 item 2)"
+            )
+        })?;
+        release_exchange_refused(&output)
+            .with_context(|| format!("tier {tier}, token URL {url:?}"))?;
+    }
+    Ok(())
+}
+
+/// DEC-2322: the release profile's debug assertions stay off. Refuses an environment that
+/// sets `CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS` at all, or passes `debug-assertions` through
+/// `RUSTFLAGS` or `CARGO_ENCODED_RUSTFLAGS`.
+fn release_profile_untouched(var: impl Fn(&str) -> Option<String>) -> Result<()> {
+    if var("CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS").is_some() {
+        bail!(
+            "CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS is set: the release build must keep debug \
+             assertions off (DEC-2322)"
+        );
+    }
+    for name in ["RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS"] {
+        if var(name).is_some_and(|flags| flags.contains("debug-assertions")) {
+            bail!(
+                "{name} names debug-assertions: the release build must keep them off \
+                 (DEC-2322)"
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Whether a release exchange's run is DEC-2633 item 2's refusal: exit 2,
+/// [`TOKEN_URL_IN_RELEASE`] alone on standard error, and nothing on standard output.
+fn release_exchange_refused(output: &std::process::Output) -> Result<()> {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if output.status.code() != Some(2)
+        || stderr != TOKEN_URL_IN_RELEASE
+        || !output.stdout.is_empty()
+    {
+        bail!(
+            "the release build of {TOKEN_EXCHANGE} must exit 2 writing only \
+             {TOKEN_URL_IN_RELEASE:?} to standard error (DEC-2633 item 2); it exited {} with \
+             stdout {:?} and stderr {stderr:?}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+    Ok(())
+}
+
+/// Builds `package`'s binary of the same name with `--release`, runs it with `args` and only
+/// `envs` in its environment, and returns its output once it exits; `None` when it is still
+/// running after [`STUB_RELEASE_WAITS`] waits of 20 ms, and it is killed.
+fn released(
+    package: &str,
+    args: &[&str],
+    envs: &[(&str, &str)],
+) -> Result<Option<std::process::Output>> {
     sh(
         "cargo",
         &[
@@ -830,9 +950,9 @@ fn stub_release() -> Result<()> {
             "--locked",
             "--release",
             "--package",
-            STUB_ISSUER,
+            package,
             "--bin",
-            STUB_ISSUER,
+            package,
         ],
     )?;
     let meta: serde_json::Value = serde_json::from_str(&output_in(
@@ -844,14 +964,18 @@ fn stub_release() -> Result<()> {
     let target = meta["target_directory"]
         .as_str()
         .context("cargo metadata names no target directory")?;
-    let binary = Path::new(target).join("release").join(STUB_ISSUER);
+    let binary = Path::new(target).join("release").join(package);
+    let shown: Vec<String> = envs.iter().map(|(k, v)| format!("{k}={v}")).collect();
     eprintln!(
-        "    $ MANDATE_DEPLOYMENT_TIER=dev {} --bind 127.0.0.1:8899",
-        binary.display()
+        "    $ {} {} {}",
+        shown.join(" "),
+        binary.display(),
+        args.join(" ")
     );
     let mut child = Command::new(&binary)
-        .args(["--bind", "127.0.0.1:8899"])
-        .env("MANDATE_DEPLOYMENT_TIER", "dev")
+        .args(args)
+        .env_clear()
+        .envs(envs.iter().copied())
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -869,13 +993,7 @@ fn stub_release() -> Result<()> {
         child.kill()?;
     }
     let output = child.wait_with_output()?;
-    if !exited {
-        bail!(
-            "the release build of {STUB_ISSUER} kept running instead of refusing: it holds an \
-             issuer (DEC-2100 item 2)"
-        );
-    }
-    release_stub_refused(&output)
+    Ok(exited.then_some(output))
 }
 
 /// Whether a release stub's run is DEC-2100 item 2's refusal: exit 2, [`STUB_NOT_BUILT`] alone on
@@ -1356,8 +1474,9 @@ const INFRA_CLOSE_SECRETS: [&str; 2] = ["DIGITAL_OCEAN_API_KEY", "KUBE_API_ALLOW
 /// secrets, since GitHub prints a variable in a step's environment in the public log (DEC-2030
 /// items 2 and 6). The model provider's key, staging's alone, goes to the vault on the CLI's
 /// stdin under a `MANDATE_` name, never `TF_VAR_`, so OpenTofu never reads it (DEC-2630). So does
-/// the founder's identity-provider subject, staging's alone, to the built CLI's stdin (DEC-2114).
-const INFRA_SECRETS: [&str; 7] = [
+/// the founder's identity-provider subject, staging's alone, to the built CLI's stdin (DEC-2114),
+/// and the Alpaca OAuth client secret, staging's alone, to the vault like the model key (DEC-2636).
+const INFRA_SECRETS: [&str; 8] = [
     "DIGITAL_OCEAN_API_KEY",
     "CF_INFRA_API_TOKEN",
     "TOFU_STATE_PASSPHRASE",
@@ -1365,7 +1484,11 @@ const INFRA_SECRETS: [&str; 7] = [
     "KUBE_API_ALLOWED_CIDRS",
     "OPENROUTER_API_KEY",
     "FOUNDER_OIDC_SUBJECT",
+    "ALPACA_OAUTH_CLIENT_SECRET",
 ];
+/// The infra step's environment variable holding the Alpaca OAuth client secret (DEC-2636).
+const ALPACA_CLIENT_SECRET_VAR: &str = "MANDATE_ALPACA_OAUTH_CLIENT_SECRET";
+
 /// The list inputs `infra.yml` hands OpenTofu as JSON, which `infra` leaves out of `tofu`'s
 /// environment when blank or empty, so a root with a default takes it and a root without one
 /// fails on the missing variable by name, never on `""`, which is no list (DEC-2030 item 3).
@@ -1727,6 +1850,10 @@ fn bootstrap_staging(tofu: &dyn Fn(&[String]) -> Command, chdir: &str, run: &str
     if !model_key.is_empty() {
         mask::add_mask(&model_key);
     }
+    let alpaca_client_secret = env::var(ALPACA_CLIENT_SECRET_VAR).unwrap_or_default();
+    if !alpaca_client_secret.is_empty() {
+        mask::add_mask(&alpaca_client_secret);
+    }
     let founder_subject = env::var(founding::SUBJECT_VAR).unwrap_or_default();
     if !founder_subject.is_empty() {
         mask::add_mask(&founder_subject);
@@ -1808,13 +1935,12 @@ fn bootstrap_staging(tofu: &dyn Fn(&[String]) -> Command, chdir: &str, run: &str
     let words = vault_provision::vault_provision(
         &vault_provision::Steps {
             kubectl: &in_cluster,
-            provision: &|stdin| {
-                in_vault_cli(&vault_provision::provision_command(&connections), stdin)
-            },
-            put: &|stdin| in_vault_cli(&vault_provision::put_command(), stdin),
+            provision: &|command, stdin| in_vault_cli(command, stdin),
+            put: &|secret, stdin| in_vault_cli(&vault_provision::put_command(secret), stdin),
         },
         &listed,
         &model_key,
+        &alpaca_client_secret,
     )?;
     for word in words {
         eprintln!("    vault-provision: {word} (DEC-2630)");
@@ -2157,6 +2283,10 @@ const GUARDED_WORKFLOW_LINES: &[(&str, &str)] = &[
     (
         INFRA_WORKFLOW,
         "MANDATE_FOUNDER_OIDC_SUBJECT: ${{ secrets.FOUNDER_OIDC_SUBJECT }}",
+    ),
+    (
+        INFRA_WORKFLOW,
+        "MANDATE_ALPACA_OAUTH_CLIENT_SECRET: ${{ secrets.ALPACA_OAUTH_CLIENT_SECRET }}",
     ),
 ];
 
@@ -2788,7 +2918,10 @@ struct Selection {
     /// whenever any crate those are built on changed.
     cell: bool,
     /// Whether `cell-demo-web` runs: the cell jobs do, or a path under `web/` other than its
-    /// Markdown changed, since the job drives `web/` against the cell (DEC-2609 item 5).
+    /// Markdown changed, since the job drives `web/` against the cell (DEC-2609 item 5). A pull
+    /// request's run then never starts it (DEC-2634), in [`selection_in`]: the job is in neither
+    /// `fast`'s nor `full`'s `needs`, so nothing requires it, and while its gesture was failing on
+    /// every run it made the whole `ci` run conclude `failure`, which is what the merge gate reads.
     cell_web: bool,
 }
 
@@ -3001,9 +3134,21 @@ fn selection_in(root: &Path, base: Option<&str>) -> Result<Selection> {
 
 /// The selection for this run, from the base [`base_ref`] chooses, said on stderr.
 fn selection() -> Result<Selection> {
-    let selected = selection_in(Path::new("."), base_ref()?.as_deref())?;
+    let mut selected = selection_in(Path::new("."), base_ref()?.as_deref())?;
+    withhold_web_demo(&mut selected, env::var("GITHUB_EVENT_NAME").ok().as_deref());
     eprintln!("    select: {}", selected.reasons());
     Ok(selected)
+}
+
+/// DEC-2634: a pull request's run withholds `cell-demo-web`. The job is in neither `fast`'s nor
+/// `full`'s `needs`, so no aggregate requires it, yet its `web/` gesture had failed on every run
+/// since it merged and made the whole `ci` run conclude `failure` — which the merge gate reads as
+/// "not green", blocking every merge. `main`'s own push, the nightly's dispatch and a local run
+/// keep it, where a failure is a finding rather than a merge blocker.
+fn withhold_web_demo(selected: &mut Selection, event: Option<&str>) {
+    if event == Some("pull_request") {
+        selected.cell_web = false;
+    }
 }
 
 /// `cargo xtask ci select`: the selection as `GITHUB_OUTPUT` lines on stdout, and as a table in
@@ -3285,6 +3430,25 @@ fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
         "  \"webauthn_challenge\": \"{}\",",
         concat!("zz3vEjRWeJCrze8SNFZ4kKvN7xI0", "VniQq83vEjRWeJA")
     );
+    let passkey_challenge =
+        "schemas/workspace-api/examples/commands.passkey-registration-challenge.json";
+    let passkey_challenge_allowed = challenge.clone();
+    let passkey_authenticator =
+        "schemas/workspace-api/examples/commands.passkey-enrol-request.json";
+    let authenticator_data = format!(
+        "  \"authenticator_data\": \"{}\",",
+        concat!("SZYN5YgOjGh0NBcPZHZgW4_krrmihjLHmVzz", "uoMdl2MFAAAABw")
+    );
+    let not_authenticator_data = format!(
+        "  \"authenticator_data\": \"{}\",",
+        concat!("TZYN5YgOjGh0NBcPZHZgW4_krrmihjLHmVzz", "uoMdl2MFAAAABw")
+    );
+    let journal_yaml = "docs/specs/reference-cases/journal.yaml";
+    let credential_line = format!("        credential: {}", "AAECAwQFBgcICQoLDA0ODw");
+    let not_credential_line = format!("        credential: {}", "ZZECAwQFBgcICQoLDA0ODw");
+    let stub_issuer = "crates/mandate-stub-issuer/tests/alpaca.rs";
+    let canary = format!("client_secret\", \"{}\"", "secret-canary-9f2b");
+    let not_canary = format!("client_secret\", \"{}\"", "zzcret-canary-9f2b");
     let built = format!("  \"api-key\": \"{page}\",");
     vec![
         (
@@ -3347,6 +3511,40 @@ fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
         (challenges.to_owned(), challenge.clone(), None),
         ("stray-challenge.json".to_owned(), challenge, generic),
         (challenges.to_owned(), not_challenge, generic),
+        (
+            passkey_challenge.to_owned(),
+            passkey_challenge_allowed,
+            None,
+        ),
+        (
+            "stray-passkey-challenge.json".to_owned(),
+            format!(
+                "  \"webauthn_challenge\": \"{}\",",
+                concat!("q83vEjRWeJCrze8SNFZ4kKvN7xI0", "VniQq83vEjRWeJA")
+            ),
+            generic,
+        ),
+        (
+            passkey_authenticator.to_owned(),
+            authenticator_data.clone(),
+            None,
+        ),
+        (
+            "stray-authenticator-data.json".to_owned(),
+            authenticator_data,
+            generic,
+        ),
+        (
+            passkey_authenticator.to_owned(),
+            not_authenticator_data,
+            generic,
+        ),
+        (journal_yaml.to_owned(), credential_line.clone(), None),
+        ("stray-credential.yaml".to_owned(), credential_line, generic),
+        (journal_yaml.to_owned(), not_credential_line, generic),
+        (stub_issuer.to_owned(), canary.clone(), None),
+        ("stray-canary.rs".to_owned(), canary, generic),
+        (stub_issuer.to_owned(), not_canary, generic),
     ]
 }
 
@@ -5602,6 +5800,7 @@ const READ_ENV_NAMES: &[&str] = &[
     "MANDATE_INFRA_SHA",
     "MANDATE_OPENROUTER_API_KEY",
     "MANDATE_FOUNDER_OIDC_SUBJECT",
+    "MANDATE_ALPACA_OAUTH_CLIENT_SECRET",
     "MANDATE_TOFU_REQUIRED",
     "DIGITALOCEAN_TOKEN",
     "TF_VAR_state_passphrase",
@@ -7834,6 +8033,17 @@ impl PipelineCommand {
             .collect()
     }
 
+    /// The token position of each of [`Self::command`]'s words, in the same order, so a word's
+    /// index there names its position here.
+    fn command_positions(&self) -> Vec<usize> {
+        self.words
+            .iter()
+            .skip(self.command_index())
+            .filter(|(word, quoted, at)| !self.redirection_word(word, *quoted, *at))
+            .map(|(_, _, at)| *at)
+            .collect()
+    }
+
     /// Whether a word belongs to a redirection rather than the command: unquoted, and holding
     /// `<` or `>`, or a descriptor (`2`, `{fd}`) right before a redirection's operator.
     fn redirection_word(&self, word: &str, quoted: bool, at: usize) -> bool {
@@ -7990,11 +8200,9 @@ fn pipeline_live_flag(
             }
         }
         let command_at = command
-            .words
-            .iter()
-            .filter(|(word, _, _)| !is_skipped_word(word))
-            .nth(named.len().saturating_sub(unwrapped_named.len()))
-            .map(|(_, _, at)| *at);
+            .command_positions()
+            .get(named.len().saturating_sub(unwrapped_named.len()))
+            .copied();
         let expanding_command_word = !ctx.quoted_reread
             && unwrapped_named.first().is_some_and(|word| {
                 word.starts_with(['$', '`'])
@@ -11222,6 +11430,8 @@ fn spec_guard_problems_for_pr(
             eprintln!(
                 "    spec-guard: founder-approved E7-7 atomic exception applies to PR #598 (DEC-462)"
             );
+        } else if let Some(marker) = atomic_exception(pr_body, pr_number) {
+            eprintln!("    spec-guard: atomic exception applies ({marker})");
         } else {
             problems.push(format!("specs, schemas, or reference cases changed together with code ({} code files); split the change", code.len()));
         }
@@ -11245,6 +11455,17 @@ fn current_pr_number(root: &Path) -> Result<Option<u64>> {
 
 fn e77_atomic_exception(pr_body: &str, pr_number: Option<u64>) -> bool {
     pr_number == Some(E77_ATOMIC_PR) && pr_body.lines().any(|line| line.trim() == E77_ATOMIC_MARKER)
+}
+
+/// The marker [`ATOMIC_EXCEPTIONS`] names for `pr_number`, when the description carries it exactly
+/// on a line of its own (DEC-2635). Both the number and the marker must match, so a marker copied
+/// into another pull request's description does nothing.
+fn atomic_exception(pr_body: &str, pr_number: Option<u64>) -> Option<&'static str> {
+    let number = pr_number?;
+    ATOMIC_EXCEPTIONS
+        .iter()
+        .find(|(pr, marker)| *pr == number && pr_body.lines().any(|line| line.trim() == *marker))
+        .map(|(_, marker)| *marker)
 }
 
 /// The founder-owned reference-case status file (ADR-0001 ES-11).
@@ -11353,11 +11574,23 @@ fn classify<'a>(changed: impl Iterator<Item = &'a str>) -> (Vec<&'a str>, Vec<&'
     for file in changed {
         if PROTECTED_PATHS.iter().any(|p| file.starts_with(p)) {
             protected.push(file);
-        } else if CODE_PATHS.iter().any(|p| file.starts_with(p)) {
+        } else if CODE_PATHS.iter().any(|p| file.starts_with(p)) && !is_crate_tests_path(file) {
             code.push(file);
         }
     }
     (protected, code)
+}
+
+/// Whether `file` is a test of a crate rather than the code it tests: a `tests/` directory under a
+/// crate (`crates/<crate>/tests/…`), the crate-level integration tests, per DEC-917. Such a file
+/// alters no behaviour any spec describes, so ES-22's split guard lets it travel with the protected
+/// path it is the reproduction of. A `src/` file stays code wholesale, whatever `#[cfg(test)]`
+/// modules it holds inline, and so does `xtask/src/`; the classifier reads paths, never contents.
+fn is_crate_tests_path(file: &str) -> bool {
+    let mut segments = file.split('/');
+    segments.next() == Some("crates")
+        && segments.next().is_some_and(|krate| !krate.is_empty())
+        && segments.next() == Some("tests")
 }
 
 fn contains_dec_id(text: &str) -> bool {
@@ -11394,24 +11627,25 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::{
-        BEHAVIOUR_ONLY_DIR, BehaviourOnlyRow, BuildDir, CARGO_TARGET_DIR, CiFile, CratePolicy,
-        Dependency, FAST_JOB, FEATURE_MAP, FULL_JOB, INFRA_WORKFLOW, Layers, MUTANT_BUILD_PROFILE,
-        MUTANT_BUILD_TIMEOUT, MUTANT_SHARDS, MUTANT_TEST_TIMEOUT, MUTANTS_IN_PLACE, MUTANTS_OUT,
-        Metadata, MutantPlan, MutantShard, MutatedCrate, PR_JOBS, Package, PendingTest,
-        PendingTestRun, REFCASES, REHEARSAL, REHEARSAL_LIVE_JOB, REHEARSAL_TESTED, SCHEMA_CHECKERS,
-        SCHEMA_DIR, SCHEMA_SHARD_ENV, TEST_PARTITION_ENV, TEST_PARTS, TestOrder, TestOutcome,
-        USED_BY_DERIVED, UnmutatedSource, actionlint_workflows, backticked_paths, base_ref_in,
-        behaviour_only_rows, check_schedule, ci, ci_files, classify, codeowners_problems,
-        contains_dec_id, contains_word, decision_numbers, external_oracles, failure_cause,
-        feature_files, feature_map_problems, files_by_extension, first_panic_line,
-        forbidden_reached, gate_diff, gate_diff_path, generated_pending_markers, has_pending_tests,
-        is_pending_marker, is_stub_function, layer_problems, lint, listed_mutant_counts,
-        live_feature_problems, live_test_counts, metadata_in, mutant_verdicts, mutants,
-        mutants_args, mutants_job_cargo, mutants_outcome, mutants_plan, mutants_scheduled,
-        mutated_crates, names_a_stub, output_in, pending_nextest, pending_problems, pending_tests,
-        per_shard_value, plain_comment_lines, preflight_args, proptest_seeds_in, registry_problems,
-        registry_rows, rehearsal_runs, release_stub_refused, repo_root, schema_mutants,
-        shard_packages, shellcheck_scripts, simulator_harnesses, simulator_oracles,
+        ATOMIC_EXCEPTIONS, BEHAVIOUR_ONLY_DIR, BehaviourOnlyRow, BuildDir, CARGO_TARGET_DIR,
+        CiFile, CratePolicy, Dependency, FAST_JOB, FEATURE_MAP, FULL_JOB, INFRA_WORKFLOW, Layers,
+        MUTANT_BUILD_PROFILE, MUTANT_BUILD_TIMEOUT, MUTANT_SHARDS, MUTANT_TEST_TIMEOUT,
+        MUTANTS_IN_PLACE, MUTANTS_OUT, Metadata, MutantPlan, MutantShard, MutatedCrate, PR_JOBS,
+        Package, PendingTest, PendingTestRun, REFCASES, REHEARSAL, REHEARSAL_LIVE_JOB,
+        REHEARSAL_TESTED, SCHEMA_CHECKERS, SCHEMA_DIR, SCHEMA_SHARD_ENV, TEST_PARTITION_ENV,
+        TEST_PARTS, TestOrder, TestOutcome, USED_BY_DERIVED, UnmutatedSource, actionlint_workflows,
+        atomic_exception, backticked_paths, base_ref_in, behaviour_only_rows, check_schedule, ci,
+        ci_files, classify, codeowners_problems, contains_dec_id, contains_word, decision_numbers,
+        external_oracles, failure_cause, feature_files, feature_map_problems, files_by_extension,
+        first_panic_line, forbidden_reached, gate_diff, gate_diff_path, generated_pending_markers,
+        has_pending_tests, is_pending_marker, is_stub_function, layer_problems, lint,
+        listed_mutant_counts, live_feature_problems, live_test_counts, metadata_in,
+        mutant_verdicts, mutants, mutants_args, mutants_job_cargo, mutants_outcome, mutants_plan,
+        mutants_scheduled, mutated_crates, names_a_stub, output_in, pending_nextest,
+        pending_problems, pending_tests, per_shard_value, plain_comment_lines, preflight_args,
+        proptest_seeds_in, registry_problems, registry_rows, rehearsal_runs,
+        release_exchange_refused, release_profile_untouched, release_stub_refused, repo_root,
+        schema_mutants, shard_packages, shellcheck_scripts, simulator_harnesses, simulator_oracles,
         spec_guard_problems, spec_guard_problems_for_pr, status_flip_problems, test_binary,
         test_order_config, test_outcomes, unique_temp_path, unjudged_mutants, used_by, verdicts,
         workspace_closure, workspace_packages,
@@ -11420,7 +11654,7 @@ mod tests {
         BINARY_COUPLINGS, CrateGraph, MATRIX_LIMIT, RUNNER_CRATE, SWEEP_ROTATION,
         SWEEP_SHARD_MUTANTS, SweepPlan, Token, crate_graph, infra_commands,
         infra_workflow_problems, is_docs_path, literal_paths, nextest_args, normalized_join,
-        references_path, select, selection_in, source_references, tokens,
+        references_path, select, selection_in, source_references, tokens, withhold_web_demo,
     };
     use super::{CREDENTIAL_GUARD, CREDENTIAL_NAME_PARTS, rehearsal_live_run};
     use super::{ProcessGroups, process_group_problems};
@@ -11919,7 +12153,8 @@ mod tests {
                 "mandate-cp-site",
                 "mandate-deploy-manager",
                 "mandate-deployd",
-                "mandate-dispatcher"
+                "mandate-dispatcher",
+                "mandate-gatewayd"
             ]
         );
         assert_eq!(
@@ -12544,6 +12779,68 @@ mod tests {
         assert!(FULL_JOB.contains(&"stub-release") && PR_JOBS.contains(&"stub-release"));
     }
 
+    /// DEC-2633 item 2: `exchange-release` accepts only exit 2 with
+    /// `token_exchange_token_url_in_release` alone on standard error, and runs in `full` and in
+    /// `check`.
+    #[test]
+    fn the_release_exchange_check_accepts_only_the_lone_refusal() {
+        let run = |code: i32, stdout: &str, stderr: &str| std::process::Output {
+            status: ExitStatus::from_raw(code << 8),
+            stdout: stdout.as_bytes().to_vec(),
+            stderr: stderr.as_bytes().to_vec(),
+        };
+        let refusal = "token_exchange_token_url_in_release\n";
+        assert!(release_exchange_refused(&run(2, "", refusal)).is_ok());
+        for (code, stdout, stderr) in [
+            (0, "", refusal),
+            (3, "", refusal),
+            (2, "x\n", refusal),
+            (
+                2,
+                "",
+                "token_exchange_token_url_in_release\ntoken_exchange_token_url_in_release\n",
+            ),
+            (2, "", "token_exchange_cell_tier\n"),
+            (2, "", "token_exchange_token_url_in_release"),
+            (3, "", "token_exchange_not_yet_exchanging\n"),
+            (2, "", ""),
+        ] {
+            assert!(
+                release_exchange_refused(&run(code, stdout, stderr)).is_err(),
+                "{code} {stdout:?} {stderr:?}"
+            );
+        }
+        assert!(FULL_JOB.contains(&"exchange-release") && PR_JOBS.contains(&"exchange-release"));
+    }
+
+    /// DEC-2322: `exchange-release` refuses an environment that turns the release profile's
+    /// debug assertions back on, and accepts one that leaves them alone.
+    #[test]
+    fn the_release_exchange_check_refuses_debug_assertions_turned_on() {
+        let with = |pairs: &'static [(&'static str, &'static str)]| {
+            move |name: &str| {
+                pairs
+                    .iter()
+                    .find(|(key, _)| *key == name)
+                    .map(|(_, value)| (*value).to_owned())
+            }
+        };
+        assert!(release_profile_untouched(with(&[])).is_ok());
+        assert!(release_profile_untouched(with(&[("RUSTFLAGS", "-C target-cpu=native")])).is_ok());
+        for refused in [
+            &[("CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS", "true")][..],
+            &[("CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS", "false")][..],
+            &[("RUSTFLAGS", "-C debug-assertions")][..],
+            &[("RUSTFLAGS", "-Cdebug-assertions=on")][..],
+            &[("CARGO_ENCODED_RUSTFLAGS", "-C\u{1f}debug-assertions")][..],
+        ] {
+            assert!(
+                release_profile_untouched(with(refused)).is_err(),
+                "{refused:?}"
+            );
+        }
+    }
+
     /// DEC-931: every package built on a mutated one stays unoptimised, so a mutant rebuilds only
     /// what it rebuilt before at the cost it had; the layers under it and every package beside it
     /// are optimised. Shown on a fixture graph and on the repository's own: a `mandate-executor`
@@ -13125,6 +13422,72 @@ mod tests {
         assert_eq!(
             code,
             ["crates/mandate-journal/src/lib.rs", "xtask/src/main.rs"]
+        );
+    }
+
+    /// DEC-917: a crate's `tests/` directory holds tests, not the code ES-22's split guards. Such a
+    /// file travels with the protected path it reproduces; a `src/` file stays code wholesale, and
+    /// so does `xtask/src/`, whatever `#[cfg(test)]` modules either holds inline.
+    #[test]
+    fn a_crates_tests_directory_is_tests_not_code() {
+        let (protected, code) = classify(
+            [
+                "crates/mandate-journal/tests/credentials.rs",
+                "crates/mandate-api/tests/body_workspace.rs",
+                "crates/mandate-journal/src/lib.rs",
+                "crates/mandate-api/src/requests.rs",
+                "docs/specs/journal.md",
+                "schemas/workspace-api/examples/x.json",
+                "xtask/src/main.rs",
+                "xtask/tests/planned.rs",
+            ]
+            .into_iter(),
+        );
+        assert_eq!(
+            protected,
+            [
+                "docs/specs/journal.md",
+                "schemas/workspace-api/examples/x.json"
+            ]
+        );
+        assert_eq!(
+            code,
+            [
+                "crates/mandate-journal/src/lib.rs",
+                "crates/mandate-api/src/requests.rs",
+                "xtask/src/main.rs",
+            ],
+            "a src file and xtask/src stay code; a crate's tests do not"
+        );
+    }
+
+    /// DEC-2635: an atomic exception applies only to the pull request its entry names and only when
+    /// the description carries that entry's marker exactly on a line of its own. A marker copied
+    /// into another pull request, or a right number with the wrong text, does nothing.
+    #[test]
+    fn an_atomic_exception_needs_both_its_number_and_its_marker() {
+        let (pr, marker) = ATOMIC_EXCEPTIONS[0];
+        let body = format!("Some description.\n\n{marker}\n");
+        assert_eq!(atomic_exception(&body, Some(pr)), Some(marker));
+        assert_eq!(
+            atomic_exception(&body, Some(pr + 1)),
+            None,
+            "another pull request's description does not carry this exception"
+        );
+        assert_eq!(
+            atomic_exception("Some description.", Some(pr)),
+            None,
+            "the number alone is not an exception"
+        );
+        assert_eq!(
+            atomic_exception(&format!("{marker} trailing words"), Some(pr)),
+            None,
+            "the marker must stand alone on its line"
+        );
+        assert_eq!(
+            atomic_exception(&body, None),
+            None,
+            "a run outside a pull request matches no entry"
         );
     }
 
@@ -17905,6 +18268,50 @@ mod tests {
         assert_eq!(both(&["crates/mandate-num/src/lib.rs"]), (false, false));
         let everything = select(None, &graph, &BTreeMap::new());
         assert!(everything.cell && everything.cell_web, "no base runs both");
+    }
+
+    /// DEC-2634: a pull request's run withholds `cell-demo-web`, which no aggregate requires and
+    /// whose `web/` gesture had never passed; every other run keeps it.
+    #[test]
+    fn a_pull_request_withholds_the_web_demo_that_no_aggregate_requires() {
+        let graph = sample_graph();
+        let changed: Vec<String> = ["web/src/app/page.tsx"]
+            .iter()
+            .map(|p| (*p).to_owned())
+            .collect();
+        let diff = select(Some(&changed), &graph, &BTreeMap::new());
+        assert!(
+            diff.cell_web,
+            "the diff alone still selects it, as DEC-2609 item 5 says"
+        );
+
+        let mut pull_request = select(Some(&changed), &graph, &BTreeMap::new());
+        withhold_web_demo(&mut pull_request, Some("pull_request"));
+        assert!(
+            !pull_request.cell_web,
+            "a pull request does not start it (DEC-2634)"
+        );
+
+        for event in [
+            None,
+            Some("push"),
+            Some("workflow_dispatch"),
+            Some("schedule"),
+        ] {
+            let mut selected = select(Some(&changed), &graph, &BTreeMap::new());
+            withhold_web_demo(&mut selected, event);
+            assert!(
+                selected.cell_web,
+                "only a pull request withholds it, not {event:?}"
+            );
+        }
+
+        let mut everything = select(None, &graph, &BTreeMap::new());
+        withhold_web_demo(&mut everything, Some("push"));
+        assert!(
+            everything.cell_web,
+            "main's own run selects everything including the web demo"
+        );
     }
 
     /// DEC-2609: the cell jobs start for a change to a crate any image package is built on, the
@@ -24125,6 +24532,37 @@ jq -r "$filter" "$src"
         assert_eq!(paths, [".github/workflows/docker-compose.yml"]);
         let problems = live_feature_problems(&live_policy(), &workspace(live_workspace()), &read)?;
         assert_eq!(problems.len(), 1, "{problems:?}");
+        Ok(())
+    }
+
+    /// A wrapped command word is judged against its own substitution, however many assignments
+    /// the wrapper takes: `env -i A=1 B=2 "$(dirname "$0")/x.sh"` runs the script beside this
+    /// one, and `env -i A=1 "$(cat cmd)/x.sh" "$(dirname "$0")/y.sh"` does not borrow the later
+    /// word's `dirname` (RS's finding on DEC-851 item 6's position lookup).
+    #[test]
+    fn a_wrapped_command_word_reads_its_own_substitution() -> Result<()> {
+        let policy = live_policy();
+        let meta = || workspace(live_workspace());
+        let read = |text: &str| {
+            let files = [ci_file(
+                ".github/scripts/build.sh",
+                &format!("set -e\n{text}\n"),
+            )];
+            live_feature_problems(&policy, &meta(), &files)
+        };
+        for text in [
+            "env -i A=1 B=2 \"$(dirname \"$0\")/x.sh\"",
+            "env -i A=1 \"$(dirname \"$0\")/x.sh\"",
+            "env A=1 B=2 C=3 \"$(dirname \"$0\")/x.sh\" --flag",
+        ] {
+            assert_eq!(read(text)?, Vec::<String>::new(), "{text}");
+        }
+        for text in [
+            "env -i A=1 \"$(cat cmd.txt)/x.sh\" \"$(dirname \"$0\")/y.sh\"",
+            "env -i A=1 B=2 \"$(cat cmd.txt)/x.sh\" a \"$(dirname \"$0\")/y.sh\"",
+        ] {
+            assert_eq!(read(text)?.len(), 1, "{text}");
+        }
         Ok(())
     }
 

@@ -4,9 +4,19 @@
 use mandate_connections::record::ConnectionId;
 
 use crate::policy::{
-    Access, Identity, Mounts, PlatformSecret, SecretPath, allows, kv_path, openbao_policy,
-    policy_name, role_name,
+    Access, Identity, Mounts, PlatformSecret, SecretPath, allows, policy_name, role_name,
 };
+
+/// [`crate::policy::kv_path`], which fails only for an id it cannot place; every id here is one it
+/// places.
+fn kv_path(path: &SecretPath) -> String {
+    crate::policy::kv_path(path).unwrap()
+}
+
+/// [`crate::policy::openbao_policy`], which fails only where [`kv_path`] does.
+fn openbao_policy(identity: &Identity, connections: &[ConnectionId], mounts: &Mounts) -> String {
+    crate::policy::openbao_policy(identity, connections, mounts).unwrap()
+}
 
 fn c(id: &str) -> ConnectionId {
     ConnectionId::new(id).unwrap()
@@ -108,8 +118,6 @@ fn names_and_paths_are_pinned() {
     assert_eq!(role_name(&Identity::Executor(c("c-2"))), "executor-c-2");
     assert_eq!(role_name(&Identity::Runtime), "runtime");
     assert_eq!(role_name(&Identity::SecretImport), "secret-import");
-    assert_eq!(kv_path(&SecretPath::Code(c("c1"))), "connections/c1/code");
-    assert_eq!(kv_path(&SecretPath::Token(c("c1"))), "connections/c1/token");
     assert_eq!(
         kv_path(&SecretPath::ClientSecret),
         "platform/alpaca-oauth-client-secret"
@@ -117,6 +125,7 @@ fn names_and_paths_are_pinned() {
     let other = Mounts {
         kv: "kv9".to_owned(),
         auth: "ar9".to_owned(),
+        ..Mounts::default()
     };
     assert_eq!(
         policy_name(&Identity::Api, &Mounts::default()),
@@ -128,7 +137,10 @@ fn names_and_paths_are_pinned() {
     );
     let hcl = openbao_policy(&Identity::ConnectionManager, &[c("c1")], &other);
     assert!(
-        hcl.contains("path \"kv9/metadata/connections/c1/token\""),
+        hcl.contains(&format!(
+            "path \"kv9/metadata/{}\"",
+            kv_path(&SecretPath::Token(c("c1")))
+        )),
         "{hcl}"
     );
     assert!(
@@ -201,6 +213,7 @@ fn each_policy_is_the_table_with_no_wildcard() {
                     Access::Read => ("data", "read"),
                     Access::Write => ("data", "create,update"),
                     Access::Delete => ("metadata", "delete"),
+                    Access::Take => ("data", "update"),
                 };
                 let want = format!("mandate/{prefix}/{}", kv_path(&path));
                 let present = got.iter().any(|(p, c)| p == &want && c == caps);
@@ -250,5 +263,32 @@ fn the_manager_may_issue_and_revoke_only_exchange_grants() {
             let hcl = openbao_policy(&identity, &[c("c1")], &Mounts::default());
             assert!(!hcl.contains("auth/"), "{identity:?}: {hcl}");
         }
+    }
+}
+
+/// DEC-2061: only a connection's token exchange may take, and only its own connection's code: no
+/// other identity, no other connection's code, and no token or secret.
+#[test]
+fn only_a_token_exchange_takes_and_only_its_own_connections_code() {
+    let exchange = Identity::TokenExchange(c("c1"));
+    assert!(allows(&exchange, Access::Take, &SecretPath::Code(c("c1"))));
+    for identity in identities() {
+        for path in paths() {
+            let want = identity == exchange && path == SecretPath::Code(c("c1"));
+            assert_eq!(
+                allows(&identity, Access::Take, &path),
+                want,
+                "{identity:?} {path:?}"
+            );
+        }
+    }
+    for identity in identities() {
+        let hcl = openbao_policy(&identity, &[c("c1"), c("c2")], &Mounts::default());
+        assert!(
+            !blocks(&hcl)
+                .iter()
+                .any(|(path, caps)| path.starts_with("mandate/data/") && caps == "update"),
+            "an AppRole policy never grants a take on a secret: {identity:?}: {hcl}"
+        );
     }
 }

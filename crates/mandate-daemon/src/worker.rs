@@ -1,5 +1,6 @@
 //! The cell's research worker (DEC-2210 item 3): retrieval over the recorded plane, and the one
-//! call through the gateway over its recorded fake, the only transport this type can name. It
+//! call through the gateway over its recorded fake, the only transport a constructor outside this
+//! crate's tests can name (DEC-2269). It
 //! stores every artifact an answer names before it keeps the answer, and stamps each answer with
 //! the risk clock of the pass it is handed in.
 
@@ -8,14 +9,14 @@ use std::rc::Rc;
 
 use mandate_canon::Digest;
 use mandate_domain::AssetClass;
-use mandate_gateway::fake::{Recorded, RecordedTransport};
+use mandate_gateway::fake::{Recorded, RecordedTransport, openrouter_reply};
 use mandate_gateway::guard::GuardContext;
 use mandate_gateway::meter::{Caps, DeploymentMeter, MemoryMeter, Meter, SharedMeter};
 use mandate_gateway::money::Usd6;
 use mandate_gateway::openrouter::OpenRouter;
 use mandate_gateway::policy::EndpointPolicy;
-use mandate_gateway::provider::{Clock, Delivery, ManualClock, SequentialIds};
-use mandate_gateway::registry::Locality;
+use mandate_gateway::provider::{Clock, Delivery, ManualClock, SequentialIds, Transport};
+use mandate_gateway::registry::{Locality, Reported};
 use mandate_gateway::{CallRecord, Gateway, RateCaps, RequestError, Settings};
 use mandate_journal::{ArtifactRef, ArtifactStore, Environment, get_artifact};
 use mandate_research::{AssetClass as EnvelopeClass, WorkingUniverse};
@@ -33,7 +34,7 @@ use mandate_store::MemoryStore;
 use mandate_time::UtcNanos;
 
 use crate::meter::CellMeter;
-use crate::recorded::{Bundle, BundleError, RecordedPlane, RecordedReply};
+use crate::recorded::{Bundle, BundleError, RecordedPlane, RecordedReply, ScriptedTurn};
 use crate::runtime::{ArtifactSink, ResearchParts, ResearchWorker};
 use crate::source::SourceFor;
 
@@ -90,12 +91,25 @@ pub struct WorkerFor {
     pub description: String,
 }
 
-/// The gateway's request rate for the cell: a one-shot run makes one call per research interval,
-/// so a small fixed cap never binds it and bounds a fault that would call again.
-const RATE: RateCaps = RateCaps {
-    per_workspace: 6,
-    per_agent: 6,
-};
+/// The cell gateway's calls a minute for the whole workspace, fixed whatever the entry pins: it
+/// bounds a fault that would call again however many turns an entry's loop allows (DEC-2316).
+const WORKSPACE_RATE: u32 = 12;
+
+/// The calls a minute an agent may make beyond the turns one run of its entry may take, so a run
+/// that uses every turn its loop allows is never cut by the rate cap (DEC-2316).
+const RATE_MARGIN: u32 = 2;
+
+/// The gateway's request rate for the cell's agent (DEC-2316): the turns one run may take, the
+/// agentic loop's pinned `max_turns` or one for a one-shot entry, and [`RATE_MARGIN`] beyond them,
+/// under the fixed [`WORKSPACE_RATE`]. A run's own bounds and cost ceiling still bind it; the cap
+/// bounds only a fault that would call again.
+fn rate(bounds: Option<&LoopBounds>) -> RateCaps {
+    let turns = bounds.map_or(1, |bounds| bounds.max_turns);
+    RateCaps {
+        per_workspace: WORKSPACE_RATE,
+        per_agent: turns.saturating_add(RATE_MARGIN),
+    }
+}
 
 /// An answer kept until the core is handed it, without the risk clock it is handed at.
 enum Ready {
@@ -128,12 +142,17 @@ struct Run {
     dispatched: bool,
 }
 
-/// The cell's worker.
-pub struct RecordedWorker {
-    gateway: Gateway<RecordedTransport, CellMeter, ManualClock>,
+/// The cell's worker, over the recorded fake. A worker over another transport is built only by
+/// this crate's tests (DEC-2269).
+pub struct RecordedWorker<T: Transport = RecordedTransport> {
+    gateway: Gateway<T, CellMeter, ManualClock>,
+    /// Hands the transport the recorded reply for the next call alone; a model double that writes
+    /// its own replies ignores it.
+    prime: fn(&mut T, Recorded),
     plane: RecordedPlane,
     plan: RetrievalPlan,
     reply: RecordedReply,
+    turns: Vec<ScriptedTurn>,
     slug: String,
     provider: String,
     workspace: String,
@@ -159,16 +178,7 @@ impl RecordedWorker {
         sink: Box<dyn ArtifactSink>,
         now: Box<dyn FnMut() -> UtcNanos>,
     ) -> Result<Self, WorkerError> {
-        let meter = CellMeter::new(
-            SharedMeter::new(),
-            Rc::new(MemoryStore::default()),
-            SourceFor {
-                workspace: who.workspace.clone(),
-                agent: who.agent.clone(),
-                environment: Environment::Paper,
-            },
-            Rc::new(|| UtcNanos::EPOCH),
-        );
+        let meter = own_meter(&who);
         Self::metered(bundle, who, sink, now, meter)
     }
 
@@ -186,10 +196,34 @@ impl RecordedWorker {
         meter: CellMeter,
     ) -> Result<Self, WorkerError> {
         let caps = Caps::new(bundle.workspace_cap);
-        Self::built(bundle, who, sink, now, meter, caps)
+        Self::built(bundle, who, sink, now, meter, caps, recorded())
     }
 
-    /// The worker whose gateway meters through `meter` under `caps` and the bundle's deployment cap.
+    /// As [`RecordedWorker::metered`], with the gateway refusing `budget_exhausted` any research call
+    /// whose reservation would take the agent's spend for the risk day past `daily` (DEC-2254 item
+    /// 4): nothing is reserved and nothing is sent.
+    ///
+    /// # Errors
+    /// As [`RecordedWorker::new`], and [`WorkerError::DailyCapAboveWorkspace`] when `daily` is above
+    /// the bundle's workspace budget.
+    pub fn capped(
+        bundle: &Bundle,
+        who: WorkerFor,
+        sink: Box<dyn ArtifactSink>,
+        now: Box<dyn FnMut() -> UtcNanos>,
+        meter: CellMeter,
+        daily: Usd6,
+    ) -> Result<Self, WorkerError> {
+        let caps = Caps::new(bundle.workspace_cap)
+            .with_research_daily(&who.agent, daily)
+            .map_err(|_| WorkerError::DailyCapAboveWorkspace)?;
+        Self::built(bundle, who, sink, now, meter, caps, recorded())
+    }
+}
+
+impl<T: Transport> RecordedWorker<T> {
+    /// The worker whose gateway sends through `transport`, primed by `prime`, and meters through
+    /// `meter` under `caps` and the bundle's deployment cap.
     fn built(
         bundle: &Bundle,
         who: WorkerFor,
@@ -197,6 +231,7 @@ impl RecordedWorker {
         mut now: Box<dyn FnMut() -> UtcNanos>,
         meter: CellMeter,
         caps: Caps,
+        (transport, prime): (T, fn(&mut T, Recorded)),
     ) -> Result<Self, WorkerError> {
         let settings = Settings {
             workspace_id: who.workspace.clone(),
@@ -206,7 +241,7 @@ impl RecordedWorker {
                 None,
             ),
             guard: GuardContext::default(),
-            rate: RATE,
+            rate: rate(bundle.entry.agentic.as_ref()),
         };
         let start = now();
         let ids = |offset: u128| {
@@ -228,7 +263,7 @@ impl RecordedWorker {
             settings,
             bundle.registry().map_err(WorkerError::Bundle)?,
             Box::new(OpenRouter),
-            RecordedTransport::new(),
+            transport,
             Box::new(RecordedKey),
             meter,
             ManualClock::at(start),
@@ -236,9 +271,11 @@ impl RecordedWorker {
         );
         Ok(Self {
             gateway,
+            prime,
             plane: bundle.plane.clone(),
             plan: bundle.entry.plan,
             reply: bundle.reply.clone(),
+            turns: bundle.turns.clone(),
             slug: bundle.entry.identity.model_name.clone(),
             provider: bundle.endpoint.route.reported_provider.clone(),
             workspace: who.workspace,
@@ -250,27 +287,6 @@ impl RecordedWorker {
             ready: Vec::new(),
             bounds: bundle.entry.agentic,
         })
-    }
-
-    /// As [`RecordedWorker::metered`], with the gateway refusing `budget_exhausted` any research call
-    /// whose reservation would take the agent's spend for the risk day past `daily` (DEC-2254 item
-    /// 4): nothing is reserved and nothing is sent.
-    ///
-    /// # Errors
-    /// As [`RecordedWorker::new`], and [`WorkerError::DailyCapAboveWorkspace`] when `daily` is above
-    /// the bundle's workspace budget.
-    pub fn capped(
-        bundle: &Bundle,
-        who: WorkerFor,
-        sink: Box<dyn ArtifactSink>,
-        now: Box<dyn FnMut() -> UtcNanos>,
-        meter: CellMeter,
-        daily: Usd6,
-    ) -> Result<Self, WorkerError> {
-        let caps = Caps::new(bundle.workspace_cap)
-            .with_research_daily(&who.agent, daily)
-            .map_err(|_| WorkerError::DailyCapAboveWorkspace)?;
-        Self::built(bundle, who, sink, now, meter, caps)
     }
 
     /// The worker, running a dispatch within `bounds`, the agentic entry's pinned `loop_bounds`
@@ -406,7 +422,7 @@ impl RecordedWorker {
             })
             .collect::<Option<Vec<_>>>()
             .ok_or(TurnError::Missing)?;
-        self.script_reply();
+        self.script_reply(Some(request.plan.turn));
         let Some(run) = self.runs.get_mut(&run_id) else {
             return Err(TurnError::NotStarted);
         };
@@ -477,7 +493,7 @@ impl RecordedWorker {
     }
 }
 
-impl RecordedWorker {
+impl<T: Transport> RecordedWorker<T> {
     /// What the call tells the model besides the items: the data universe, the envelope's asset
     /// classes and instrument cap, the working universe and active theses by symbol, and nothing
     /// held (no position read reaches the cell's research).
@@ -530,7 +546,7 @@ impl RecordedWorker {
         if !self.runs.contains_key(&plan.run_id) {
             return;
         }
-        self.script_reply();
+        self.script_reply(None);
         let Some(run) = self.runs.get_mut(&plan.run_id) else {
             return;
         };
@@ -557,26 +573,53 @@ impl RecordedWorker {
         }
     }
 
-    /// Moves the gateway's clock to now and scripts the recorded reply for the next call alone: a
-    /// reply left by a call that was never sent (one not built, or refused before sending) is
-    /// cleared first.
-    fn script_reply(&mut self) {
+    /// Moves the gateway's clock to now and scripts the recorded reply for the next call alone: an
+    /// agentic run's turn n its scripted turn n, and the single call and every turn past the script
+    /// the final reply (DEC-2266). A reply left by a call that was never sent (one not built, or
+    /// refused before sending) is cleared first.
+    fn script_reply(&mut self, turn: Option<u32>) {
         let now = (self.now)();
         self.gateway.clock_mut().wait_until(now);
-        self.gateway.transport_mut().clear_script();
-        self.gateway.transport_mut().script(vec![Recorded {
-            latency_ms: self.reply.latency_ms,
-            delivery: Delivery::Response {
-                status: 200,
-                body: recorded_reply(
+        let scripted = turn
+            .and_then(|turn| turn.checked_sub(1))
+            .and_then(|index| self.turns.get(usize::try_from(index).ok()?));
+        let (latency_ms, body) = match scripted {
+            Some(scripted) => {
+                let calls: Vec<(&str, &str)> = scripted
+                    .calls
+                    .iter()
+                    .map(|(name, arguments)| (name.as_str(), arguments.as_str()))
+                    .collect();
+                let reported = Reported {
+                    model: Some(self.slug.clone()),
+                    provider: Some(self.provider.clone()),
+                };
+                (
+                    scripted.latency_ms,
+                    openrouter_reply(None, &calls, &reported, scripted.usage),
+                )
+            }
+            None => (
+                self.reply.latency_ms,
+                recorded_reply(
                     &self.reply.output,
                     &self.slug,
                     &self.provider,
                     self.reply.usage,
                 ),
-                retry_after_ms: None,
+            ),
+        };
+        (self.prime)(
+            self.gateway.transport_mut(),
+            Recorded {
+                latency_ms,
+                delivery: Delivery::Response {
+                    status: 200,
+                    body,
+                    retry_after_ms: None,
+                },
             },
-        }]);
+        );
     }
 
     fn cancel(&mut self, run_id: &str) {
@@ -590,7 +633,7 @@ impl RecordedWorker {
     }
 }
 
-impl ResearchWorker for RecordedWorker {
+impl<T: Transport> ResearchWorker for RecordedWorker<T> {
     fn hand(&mut self, request: &ResearchRequest, parts: &ResearchParts) {
         match request {
             ResearchRequest::Start { run_id, cut_off } => self.start(run_id, *cut_off, parts),
@@ -623,6 +666,95 @@ impl ResearchWorker for RecordedWorker {
             })
             .collect()
     }
+}
+
+#[cfg(test)]
+impl<T: Transport> RecordedWorker<T> {
+    /// The worker over `bundle` sending every call to `model`, a double that writes its own replies
+    /// (DEC-2269): it is never handed the bundle's recorded reply or script. Only this crate's tests
+    /// can build one, so no caller outside them names a model transport.
+    pub(crate) fn with_model(
+        bundle: &Bundle,
+        who: WorkerFor,
+        sink: Box<dyn ArtifactSink>,
+        now: Box<dyn FnMut() -> UtcNanos>,
+        model: T,
+    ) -> Result<Self, WorkerError> {
+        let meter = own_meter(&who);
+        Self::with_model_metered(bundle, who, sink, now, model, meter)
+    }
+
+    /// As [`RecordedWorker::with_model`], metering through `meter`, whose records a test reads.
+    pub(crate) fn with_model_metered(
+        bundle: &Bundle,
+        who: WorkerFor,
+        sink: Box<dyn ArtifactSink>,
+        now: Box<dyn FnMut() -> UtcNanos>,
+        model: T,
+        meter: CellMeter,
+    ) -> Result<Self, WorkerError> {
+        let caps = Caps::new(bundle.workspace_cap);
+        Self::built(bundle, who, sink, now, meter, caps, (model, |_, _| {}))
+    }
+
+    pub(crate) fn transport(&self) -> &T {
+        self.gateway.transport()
+    }
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    reason = "ADR-0001 ES-09 excepts tests from the safety-critical denies"
+)]
+mod model_tests;
+
+#[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    reason = "ADR-0001 ES-09 excepts tests from the safety-critical denies"
+)]
+mod injection_tests;
+
+#[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    reason = "ADR-0001 ES-09 excepts tests from the safety-critical denies"
+)]
+mod bench_tests;
+
+/// The recorded fake, primed by replacing any reply a call never sent took with `reply`.
+fn recorded() -> (RecordedTransport, fn(&mut RecordedTransport, Recorded)) {
+    (RecordedTransport::new(), |transport, reply| {
+        transport.clear_script();
+        transport.script(vec![reply]);
+    })
+}
+
+/// A meter of the worker's own, never held, over an empty agent stream.
+fn own_meter(who: &WorkerFor) -> CellMeter {
+    CellMeter::new(
+        SharedMeter::new(),
+        Rc::new(MemoryStore::default()),
+        SourceFor {
+            workspace: who.workspace.clone(),
+            agent: who.agent.clone(),
+            environment: Environment::Paper,
+        },
+        Rc::new(|| UtcNanos::EPOCH),
+    )
 }
 
 /// The artifact store as a research sink: each put is content-addressed, and stored only when the

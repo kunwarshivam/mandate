@@ -4,11 +4,13 @@ use crate::SourceError;
 use reqwest::StatusCode;
 
 use mandate_connections::record::ConnectionId;
-use serde_json::json;
+use mandate_time::UtcNanos;
+use serde_json::{Value, json};
 
 use crate::openbao::{
-    OpenBaoConfig, provision, provisioned_identities, refusal, role_settings, seal_verdict,
-    secret_id_identities,
+    OpenBaoConfig, OpenBaoSource, kubernetes_login_path, kubernetes_login_refusal,
+    kubernetes_login_verdict, kubernetes_namespace_verdict, provision, provisioned_identities,
+    refusal, role_settings, seal_verdict, secret_id_identities,
 };
 use crate::policy::{Identity, Mounts};
 use secrecy::SecretString;
@@ -176,9 +178,243 @@ async fn provisioning_an_unreachable_vault_is_an_outage() {
         mounts: Mounts::default(),
     };
     let token = SecretString::from("operator".to_owned());
-    let provisioned = provision(&config, &token, &[ConnectionId::new("c1").unwrap()]).await;
+    let provisioned = provision(&config, &token, &[ConnectionId::new("c1").unwrap()], None).await;
     assert_eq!(
         provisioned.map(|credentials| credentials.len()),
         Err(SourceError::Unavailable)
+    );
+}
+
+fn unreachable() -> OpenBaoConfig {
+    OpenBaoConfig {
+        address: "https://127.0.0.1:9".to_owned(),
+        ca_pem: include_bytes!("fixtures/isrg-root-x1.pem").to_vec(),
+        mounts: Mounts::default(),
+    }
+}
+
+/// The workspace's namespace.
+const NAMESPACE: &str = "ws-ws1";
+
+const JWT: &str = "canary-3e91-projected-service-account-token-do-not-print";
+
+fn at_start() -> UtcNanos {
+    UtcNanos::from_parts(1_800_000_000, 0).unwrap()
+}
+
+/// Only a connection's executor or token exchange logs in with Kubernetes auth; any other
+/// identity is refused before the vault is reached.
+#[tokio::test(flavor = "current_thread")]
+async fn only_a_connections_processes_log_in_with_kubernetes_auth() {
+    for identity in [
+        Identity::Api,
+        Identity::ConnectionManager,
+        Identity::Runtime,
+        Identity::SecretImport,
+        Identity::ModelGateway,
+        Identity::EmailSender,
+    ] {
+        let login = OpenBaoSource::login_kubernetes(
+            &unreachable(),
+            identity.clone(),
+            &SecretString::from(JWT.to_owned()),
+            NAMESPACE,
+            at_start(),
+        )
+        .await;
+        assert_eq!(login.map(|_| ()), Err(SourceError::Config), "{identity:?}");
+    }
+}
+
+/// An executor's and an exchange's login reach the vault: one nobody answers for is an outage,
+/// and neither the outage nor its `Debug` shows the token.
+#[tokio::test(flavor = "current_thread")]
+async fn a_kubernetes_login_to_an_unreachable_vault_is_an_outage_that_shows_no_token() {
+    for identity in [
+        Identity::Executor(ConnectionId::new("c1").unwrap()),
+        Identity::TokenExchange(ConnectionId::new("c1").unwrap()),
+    ] {
+        let login = OpenBaoSource::login_kubernetes(
+            &unreachable(),
+            identity.clone(),
+            &SecretString::from(JWT.to_owned()),
+            NAMESPACE,
+            at_start(),
+        )
+        .await;
+        let shown = format!("{login:?}");
+        assert!(!shown.contains(JWT), "{shown}");
+        assert_eq!(
+            login.map(|_| ()),
+            Err(SourceError::Unavailable),
+            "{identity:?}"
+        );
+    }
+}
+
+#[test]
+fn each_kind_logs_in_on_its_own_mount_to_the_role_named_by_its_service_account() {
+    let c1 = ConnectionId::new("c1").unwrap();
+    assert_eq!(
+        kubernetes_login_path(&Identity::Executor(c1.clone()), &Mounts::default()),
+        Ok((
+            "auth/kubernetes-executor/login".to_owned(),
+            "6331".to_owned()
+        ))
+    );
+    assert_eq!(
+        kubernetes_login_path(&Identity::TokenExchange(c1), &Mounts::default()),
+        Ok((
+            "auth/kubernetes-exchange/login".to_owned(),
+            "x6331".to_owned()
+        ))
+    );
+    assert_eq!(
+        kubernetes_login_path(
+            &Identity::Executor(ConnectionId::new("Ab").unwrap()),
+            &Mounts::default()
+        ),
+        Ok((
+            "auth/kubernetes-executor/login".to_owned(),
+            "4162".to_owned()
+        ))
+    );
+    assert_eq!(
+        kubernetes_login_path(&Identity::ModelGateway, &Mounts::default()),
+        Err(SourceError::Config)
+    );
+}
+
+/// A login is the identity's own only when the vault reached the role named by its own
+/// ServiceAccount, for that account; another role, another account, or an answer missing either
+/// is refused.
+#[test]
+fn a_kubernetes_login_is_accepted_only_for_its_own_role_and_account() {
+    let executor = Identity::Executor(ConnectionId::new("c1").unwrap());
+    let exchange = Identity::TokenExchange(ConnectionId::new("c1").unwrap());
+    let auth = |role: &str, account: &str| json!({"metadata": {"role": role, "service_account_name": account}});
+    assert_eq!(
+        kubernetes_login_verdict(&executor, Some(&auth("6331", "6331"))),
+        Ok(())
+    );
+    assert_eq!(
+        kubernetes_login_verdict(&exchange, Some(&auth("x6331", "x6331"))),
+        Ok(())
+    );
+    for (identity, answer) in [
+        (&executor, auth("c1", "6331")),
+        (&executor, auth("6332", "6331")),
+        (&executor, auth("6331", "6332")),
+        (&executor, auth("6331", "x6331")),
+        (&executor, auth("x6331", "x6331")),
+        (&exchange, auth("x6331", "6331")),
+        (&exchange, auth("6331", "x6331")),
+        (&exchange, auth("X6331", "x6331")),
+    ] {
+        assert_eq!(
+            kubernetes_login_verdict(identity, Some(&answer)),
+            Err(SourceError::Denied),
+            "{answer}"
+        );
+    }
+    for answer in [
+        json!({"metadata": {"role": "6331"}}),
+        json!({"metadata": {"service_account_name": "6331"}}),
+        json!({"metadata": {"role": 7, "service_account_name": "6331"}}),
+        json!({}),
+    ] {
+        assert_eq!(
+            kubernetes_login_verdict(&executor, Some(&answer)),
+            Err(SourceError::Malformed),
+            "{answer}"
+        );
+    }
+    assert_eq!(
+        kubernetes_login_verdict(&executor, None),
+        Err(SourceError::Malformed)
+    );
+}
+
+/// A Kubernetes login's refusal is `refusal`'s, except that the vault saying the login's own role
+/// does not exist is `RoleMissing`, which a process may wait out; a missing role named otherwise,
+/// another 400, or a body that is not the vault's error list is still `Denied`.
+#[test]
+fn a_missing_role_is_its_own_refusal_and_every_other_answer_keeps_its_meaning() {
+    let missing = br#"{"errors":["invalid role name \"6331\""]}"#;
+    assert_eq!(
+        kubernetes_login_refusal(400, missing, "6331"),
+        Err(SourceError::RoleMissing)
+    );
+    assert_eq!(kubernetes_login_refusal(200, missing, "6331"), Ok(()));
+    for (status, body, want) in [
+        (400_u16, &missing[..], SourceError::RoleMissing),
+        (403, &missing[..], SourceError::Denied),
+        (500, &missing[..], SourceError::Unavailable),
+        (503, &missing[..], SourceError::Sealed),
+        (404, &missing[..], SourceError::Missing),
+        (
+            400,
+            br#"{"errors":["invalid role name \"6332\""]}"#,
+            SourceError::Denied,
+        ),
+        (
+            400,
+            br#"{"errors":["invalid role name \"6331\"","more"]}"#,
+            SourceError::Denied,
+        ),
+        (
+            400,
+            br#"{"errors":["permission denied"]}"#,
+            SourceError::Denied,
+        ),
+        (
+            400,
+            br#"{"errors":"invalid role name \"6331\""}"#,
+            SourceError::Denied,
+        ),
+        (400, b"invalid role name \"6331\"", SourceError::Denied),
+        (400, b"", SourceError::Denied),
+    ] {
+        assert_eq!(
+            kubernetes_login_refusal(status, body, "6331"),
+            Err(want),
+            "{status} {}",
+            String::from_utf8_lossy(body)
+        );
+    }
+    let shown = format!("{:?}", kubernetes_login_refusal(400, missing, "6331"));
+    assert!(!shown.contains("6331"), "{shown}");
+}
+
+/// The ServiceAccount the vault checked must be in the workspace's namespace, exactly; an answer
+/// that does not say is malformed.
+#[test]
+fn a_kubernetes_login_is_accepted_only_in_the_workspaces_namespace() {
+    let auth = |namespace: Value| json!({"metadata": {"service_account_namespace": namespace}});
+    assert_eq!(
+        kubernetes_namespace_verdict(Some(&auth(json!("ws-ws1"))), NAMESPACE),
+        Ok(())
+    );
+    for other in ["ws-ws2", "WS-WS1", "ws-ws1 ", "", "kube-system"] {
+        assert_eq!(
+            kubernetes_namespace_verdict(Some(&auth(json!(other))), NAMESPACE),
+            Err(SourceError::Denied),
+            "{other:?}"
+        );
+    }
+    for answer in [
+        json!({"metadata": {}}),
+        json!({"metadata": {"service_account_namespace": 7}}),
+        json!({}),
+    ] {
+        assert_eq!(
+            kubernetes_namespace_verdict(Some(&answer), NAMESPACE),
+            Err(SourceError::Malformed),
+            "{answer}"
+        );
+    }
+    assert_eq!(
+        kubernetes_namespace_verdict(None, NAMESPACE),
+        Err(SourceError::Malformed)
     );
 }

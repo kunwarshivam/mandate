@@ -13,13 +13,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_canon::{Digest, Value, to_canonical};
+use mandate_domain::AssetId;
 use mandate_gateway::{CallRecord, Outcome};
 use mandate_research::WorkingUniverse;
 use mandate_research_run::agentic::{
     Bound, Code, EndReason, OutputMode, ReplyInput, RunKind, RunStart, RunState, Tool, ToolCall,
     ToolCallId, ToolClass, ToolOutcome, ToolResult,
 };
-use mandate_research_run::{CallPlan, ItemId, ItemKind};
+use mandate_research_run::{CallPlan, ItemId, ItemKind, Symbol};
 use mandate_time::UtcNanos;
 
 use super::{
@@ -243,6 +244,39 @@ pub(super) fn seeded(
     let mut out = Out::default();
     next_turn(run, agentic, config, state, now, batch, &mut out)?;
     Ok(out)
+}
+
+/// Adds the asset IDs of the instruments a read's items are about to the run's `instruments_read`
+/// (journal spec §9.23, DEC-2267): each item's symbols resolved through the seed's instrument facts,
+/// a symbol the seed does not map left out. The item's `ObservationRecorded` keeps its own
+/// symbol-derived `instrument_id` either way.
+///
+/// The facts are the run's own `Instrument` items: retrieval emits one per symbol in scope beside
+/// the reads about it (`retrieve`'s `covered` set), so the map is what the seed resolved and nothing
+/// is looked up afresh here. A symbol with no `Instrument` item — the vector's `IBM`, which the seed
+/// has no fact for — resolves to nothing and stays out of the summary.
+fn read_instruments(
+    agentic: &mut Agentic,
+    items: &[super::RetrievedObservation],
+) -> Result<(), RuntimeError> {
+    let by_symbol: BTreeMap<&Symbol, &AssetId> = agentic
+        .items
+        .iter()
+        .filter_map(|facts| {
+            let fact = facts.instrument.as_ref()?;
+            Some((&fact.symbol, &fact.asset_id))
+        })
+        .collect();
+    let mut read: BTreeSet<String> = BTreeSet::new();
+    for item in items {
+        for symbol in &item.item.symbols {
+            if let Some(asset) = by_symbol.get(symbol) {
+                read.insert(asset.to_string());
+            }
+        }
+    }
+    agentic.instruments_read.extend(read);
+    Ok(())
 }
 
 /// Journals each item the run has not yet observed, in order, as `ObservationRecorded`, and returns
@@ -612,12 +646,8 @@ pub(super) fn dispatched(
         let mut observations: Vec<&str> = named.iter().map(|id| id.0.as_str()).collect();
         observations.sort_unstable();
         observations.dedup();
-        for item in &result.items {
-            if let Some(instrument) = &item.observation.instrument_id {
-                agentic
-                    .instruments_read
-                    .insert(instrument.as_str().to_owned());
-            }
+        if !result.items.is_empty() {
+            read_instruments(agentic, &result.items)?;
         }
         journal_result(
             agentic,

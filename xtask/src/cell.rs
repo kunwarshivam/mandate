@@ -18,7 +18,7 @@ use std::process::{Command, Stdio};
 use std::thread::sleep;
 use std::time::Duration;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, bail, ensure};
 use serde_json::{Value, json};
 use sha2::Digest;
 
@@ -348,6 +348,10 @@ pub fn ci_drills(job: &str, drills: &[Drill]) -> Result<()> {
 /// The Kubernetes API's address for a rendering with no cluster to read it from: k3s's
 /// `kubernetes` Service, the first address of its default service range.
 const KUBE_API_RENDERED: &str = r#"kubeApi={"cidrs":["10.43.0.1/32"],"ports":[443]}"#;
+/// The same address for the vault's staging values, set key by key: a whole `kubeApi` map would
+/// replace theirs, `enabled: true` included, and so render no route to the API server at all.
+const KUBE_API_RENDERED_KEYS: [&str; 2] =
+    [r#"kubeApi.cidrs=["10.43.0.1/32"]"#, "kubeApi.ports=[443]"];
 
 /// helm lint and a strict schema check of every rendering of every chart, then the charts'
 /// invariant tests, which render them themselves (deploy/tests/).
@@ -377,6 +381,11 @@ pub fn chart_checks() -> Result<()> {
         }
         if chart == JOURNAL_CHART {
             args.extend(["--set-json", KUBE_API_RENDERED]);
+        }
+        if values == VAULT_STAGING_VALUES {
+            for key in KUBE_API_RENDERED_KEYS {
+                args.extend(["--set-json", key]);
+            }
         }
         let mut lint = vec!["lint", "--strict"];
         lint.extend(&args);
@@ -941,6 +950,7 @@ pub fn up() -> Result<()> {
         api_diagnosis();
     }
     installed?;
+    seed_client_secret()?;
     eprintln!("    cell: up; `cargo xtask cell drill` runs the drills");
     Ok(())
 }
@@ -1371,6 +1381,13 @@ fn vault_state(status: &str) -> Result<VaultState> {
 /// its exit: `bao status` exits 2 for a sealed vault. Its output is never printed, since `operator
 /// init`'s holds the unseal key and the root token.
 fn bao(args: &[&str], stdin: &[u8]) -> Result<(bool, String)> {
+    let mut command = vec!["bao"];
+    command.extend_from_slice(args);
+    in_vault_pod(&command, stdin)
+}
+
+/// `command` in the vault's pod, as [`bao`] runs `bao`.
+fn in_vault_pod(command: &[&str], stdin: &[u8]) -> Result<(bool, String)> {
     let mut full = vec![
         "exec",
         "-i",
@@ -1382,9 +1399,8 @@ fn bao(args: &[&str], stdin: &[u8]) -> Result<(bool, String)> {
         NAMESPACE,
         VAULT_POD,
         "--",
-        "bao",
     ];
-    full.extend_from_slice(args);
+    full.extend_from_slice(command);
     let mut child = Command::new("docker")
         .args(&full)
         .stdin(Stdio::piped())
@@ -1492,20 +1508,86 @@ fn vault() -> Result<()> {
     Ok(())
 }
 
+/// The Secret the workspace chart makes in a dev or ci cell for the `oauth-fixture` pod, and its
+/// key, which holds the fake Alpaca OAuth client secret as plain text (DEC-1176 item 6).
+const FIXTURE_CLIENT_SECRET: &str = "oauth-fixture-client";
+const FIXTURE_CLIENT_SECRET_KEY: &str = "client-secret";
+
+/// The script that writes the fixture's client secret into the vault at the client secret's own
+/// path (`SecretPath::ClientSecret`, DEC-2636), in the pod, from stdin alone: the root token is
+/// its first line, read by `read` so no more of stdin is taken, and the value, already base64 as
+/// the vault stores it, is the rest, `value=-`. The KV v2 mount is enabled first when the vault
+/// is not provisioned yet, as provisioning would enable it. Neither ever reaches an argument.
+const CLIENT_SECRET_SEED: &str = "read -r BAO_TOKEN && export BAO_TOKEN && \
+     { bao secrets list -format=json | grep -q '\"mandate/\"' || \
+       bao secrets enable -path=mandate -version=2 kv >/dev/null; } && \
+     exec bao kv put -mount=mandate platform/alpaca-oauth-client-secret value=- >/dev/null";
+
+/// [`CLIENT_SECRET_SEED`]'s stdin: the root token, then the value as the Secret's data holds it.
+fn client_secret_seed_stdin(root: &str, encoded: &str) -> String {
+    format!("{root}\n{encoded}")
+}
+
+/// Seeds a dev or ci cell's vault with the fake client secret the `oauth-fixture` pod checks, read
+/// from [`FIXTURE_CLIENT_SECRET`] once the workspace release, which makes it, is installed, so
+/// the token exchange redeems the fixture's codes (DEC-1176 item 6, DEC-2636). Only the local
+/// cell runs it, with its fake root token; the chart makes the Secret only in a dev or ci cell, so
+/// a release without it is told so and the vault is left as it is. The value is never decoded.
+fn seed_client_secret() -> Result<()> {
+    let jsonpath = format!("jsonpath={{.data.{FIXTURE_CLIENT_SECRET_KEY}}}");
+    let encoded = kubectl(&[
+        "get",
+        "secret",
+        FIXTURE_CLIENT_SECRET,
+        "--namespace",
+        NAMESPACE,
+        "--ignore-not-found",
+        "-o",
+        &jsonpath,
+    ])?;
+    let encoded = encoded.trim();
+    if encoded.is_empty() {
+        eprintln!("    vault: no {FIXTURE_CLIENT_SECRET} Secret, so no client secret is seeded");
+        return Ok(());
+    }
+    let init = fs::read_to_string(state()?.join(VAULT_INIT)).context("reading the vault's init")?;
+    let init: Value = serde_json::from_str(&init).context("reading the vault's init")?;
+    let root = init["root_token"]
+        .as_str()
+        .context("the vault's init holds no root token")?;
+    let (seeded, _) = in_vault_pod(
+        &["sh", "-c", CLIENT_SECRET_SEED],
+        client_secret_seed_stdin(root, encoded).as_bytes(),
+    )?;
+    ensure!(seeded, "seeding the vault's client secret failed");
+    eprintln!("    vault: the fixture's client secret is seeded");
+    Ok(())
+}
+
 /// The connections the vault drill provisions: the cell's demo connection and one other, so an
 /// executor's reach to a connection not its own is tried.
 const VAULT_DRILL_CONNECTIONS: [&str; 2] = ["demo-paper", "drill-other"];
 
 /// The vault drill's checks, `<role> <path>`, each with whether DEC-977 item 2's table (and
-/// DEC-2020's rows) lets that role read that KV path. Written out here, not read from the crate.
+/// DEC-2020's rows) lets that role read that KV path. Written out here, not read from the crate:
+/// a connection's entries are under `x` and its id's hex (DEC-2060 item 3), `x64656d6f2d7061706572`
+/// for `demo-paper` and `x6472696c6c2d6f74686572` for `drill-other`.
 const VAULT_DRILL_READS: [(&str, &str, bool); 13] = [
-    ("runtime", "connections/demo-paper/token", false),
-    ("runtime", "connections/drill-other/token", false),
+    ("runtime", "connections/x64656d6f2d7061706572/token", false),
+    (
+        "runtime",
+        "connections/x6472696c6c2d6f74686572/token",
+        false,
+    ),
     ("runtime", "platform/alpaca-oauth-client-secret", false),
-    ("executor-demo-paper", "connections/demo-paper/token", true),
     (
         "executor-demo-paper",
-        "connections/drill-other/token",
+        "connections/x64656d6f2d7061706572/token",
+        true,
+    ),
+    (
+        "executor-demo-paper",
+        "connections/x6472696c6c2d6f74686572/token",
         false,
     ),
     (
@@ -1515,23 +1597,31 @@ const VAULT_DRILL_READS: [(&str, &str, bool); 13] = [
     ),
     (
         "executor-drill-other",
-        "connections/drill-other/token",
+        "connections/x6472696c6c2d6f74686572/token",
         true,
     ),
     (
         "executor-drill-other",
-        "connections/demo-paper/token",
+        "connections/x64656d6f2d7061706572/token",
         false,
     ),
     ("model-gateway", "platform/model-provider-key", true),
-    ("model-gateway", "connections/demo-paper/token", false),
+    (
+        "model-gateway",
+        "connections/x64656d6f2d7061706572/token",
+        false,
+    ),
     (
         "model-gateway",
         "platform/alpaca-oauth-client-secret",
         false,
     ),
     ("model-gateway", "platform/email-credential", false),
-    ("executor-demo-paper", "connections/demo-paper/code", false),
+    (
+        "executor-demo-paper",
+        "connections/x64656d6f2d7061706572/code",
+        false,
+    ),
 ];
 
 /// How many `mandate-*` policies the drill's scan must have read: one per process type (the API,
@@ -1610,9 +1700,9 @@ fn vault_drill_script(seeded: bool) -> String {
     }
     let mut puts = String::new();
     for path in [
-        "connections/demo-paper/token",
-        "connections/drill-other/token",
-        "connections/demo-paper/code",
+        "connections/x64656d6f2d7061706572/token",
+        "connections/x6472696c6c2d6f74686572/token",
+        "connections/x64656d6f2d7061706572/code",
         "platform/alpaca-oauth-client-secret",
         "platform/model-provider-key",
         "platform/email-credential",
@@ -4956,6 +5046,48 @@ mod tests {
 
     use super::*;
 
+    /// The fixture's client secret is written at the client secret's own path in the `mandate`
+    /// mount, from stdin alone: the root token is read as its first line and the value is the
+    /// rest, already base64, so neither reaches an argument, and nothing is printed.
+    #[test]
+    fn the_client_secret_seed_reads_its_token_and_value_from_stdin_alone() {
+        assert_eq!(FIXTURE_CLIENT_SECRET, "oauth-fixture-client");
+        assert_eq!(FIXTURE_CLIENT_SECRET_KEY, "client-secret");
+        assert!(CLIENT_SECRET_SEED.starts_with("read -r BAO_TOKEN && export BAO_TOKEN && "));
+        assert!(CLIENT_SECRET_SEED.ends_with(
+            "exec bao kv put -mount=mandate platform/alpaca-oauth-client-secret value=- >/dev/null"
+        ));
+        assert!(
+            CLIENT_SECRET_SEED
+                .contains("bao secrets enable -path=mandate -version=2 kv >/dev/null")
+        );
+        assert!(
+            !CLIENT_SECRET_SEED.contains('$'),
+            "no variable reaches an argument"
+        );
+        let stdin = client_secret_seed_stdin("fake-root", "ZmFrZS1jbGllbnQtc2VjcmV0");
+        assert_eq!(stdin, "fake-root\nZmFrZS1jbGllbnQtc2VjcmV0");
+    }
+
+    /// The cell seeds the client secret only once the workspace release, which makes its Secret,
+    /// is installed.
+    #[test]
+    fn the_client_secret_is_seeded_after_the_workspace_release() {
+        let source = include_str!("cell.rs");
+        let up = source
+            .split("pub fn up() -> Result<()> {")
+            .nth(1)
+            .and_then(|rest| rest.split("\n}\n").next())
+            .unwrap_or_default();
+        let installed = up.find("    installed?;").unwrap_or(usize::MAX);
+        let seeded = up.find("    seed_client_secret()?;").unwrap_or(0);
+        assert!(
+            installed < seeded,
+            "the seed runs after the workspace install"
+        );
+        assert_eq!(up.matches("seed_client_secret()").count(), 1);
+    }
+
     /// The vault drill passes only these answers, written out here rather than built from
     /// [`VAULT_DRILL_READS`]: one line per read, every read as written, no wildcard, and a scan of
     /// every `mandate-*` policy. A second line for a read, a missing or failed scan, an error, or a
@@ -4963,19 +5095,19 @@ mod tests {
     #[test]
     fn the_vault_drill_judges_each_read_and_every_wildcard() {
         let expected = [
-            "runtime connections/demo-paper/token denied",
-            "runtime connections/drill-other/token denied",
+            "runtime connections/x64656d6f2d7061706572/token denied",
+            "runtime connections/x6472696c6c2d6f74686572/token denied",
             "runtime platform/alpaca-oauth-client-secret denied",
-            "executor-demo-paper connections/demo-paper/token allowed",
-            "executor-demo-paper connections/drill-other/token denied",
+            "executor-demo-paper connections/x64656d6f2d7061706572/token allowed",
+            "executor-demo-paper connections/x6472696c6c2d6f74686572/token denied",
             "executor-demo-paper platform/alpaca-oauth-client-secret denied",
-            "executor-drill-other connections/drill-other/token allowed",
-            "executor-drill-other connections/demo-paper/token denied",
+            "executor-drill-other connections/x6472696c6c2d6f74686572/token allowed",
+            "executor-drill-other connections/x64656d6f2d7061706572/token denied",
             "model-gateway platform/model-provider-key allowed",
-            "model-gateway connections/demo-paper/token denied",
+            "model-gateway connections/x64656d6f2d7061706572/token denied",
             "model-gateway platform/alpaca-oauth-client-secret denied",
             "model-gateway platform/email-credential denied",
-            "executor-demo-paper connections/demo-paper/code denied",
+            "executor-demo-paper connections/x64656d6f2d7061706572/code denied",
             "checked 10 mandate policies",
         ];
         let probe = |lines: &[&str]| -> String {
@@ -4995,25 +5127,27 @@ mod tests {
         let elsewhere = held.replace("/probe] ", "/provision] ");
         assert_eq!(vault_drill_problems(&elsewhere).len(), expected.len());
         let leaked = held.replace(
-            "runtime connections/demo-paper/token denied",
-            "runtime connections/demo-paper/token allowed",
+            "runtime connections/x64656d6f2d7061706572/token denied",
+            "runtime connections/x64656d6f2d7061706572/token allowed",
         );
         let wildcard = format!("{leaked}{}", probe(&["wildcard in mandate-runtime"]));
         let found = vault_drill_problems(&wildcard).join("\n");
         assert!(found.contains(Drill::Vault.seeded_symptom()), "{found}");
         assert!(
-            found.contains("want `runtime connections/demo-paper/token denied`"),
+            found.contains("want `runtime connections/x64656d6f2d7061706572/token denied`"),
             "{found}"
         );
         let twice = format!(
             "{held}{}",
-            probe(&["runtime connections/demo-paper/token allowed"])
+            probe(&["runtime connections/x64656d6f2d7061706572/token allowed"])
         );
         assert_eq!(
             vault_drill_problems(&twice),
-            ["want `runtime connections/demo-paper/token denied`, got \
-                 `runtime connections/demo-paper/token denied` and \
-                 `runtime connections/demo-paper/token allowed`"]
+            [
+                "want `runtime connections/x64656d6f2d7061706572/token denied`, got \
+                 `runtime connections/x64656d6f2d7061706572/token denied` and \
+                 `runtime connections/x64656d6f2d7061706572/token allowed`"
+            ]
         );
         let missing = probe(
             &expected
@@ -5045,8 +5179,8 @@ mod tests {
             ["want `checked 10 mandate policies`, got `no scan`"]
         );
         let errored = held.replace(
-            "executor-demo-paper connections/demo-paper/token allowed",
-            "executor-demo-paper connections/demo-paper/token error",
+            "executor-demo-paper connections/x64656d6f2d7061706572/token allowed",
+            "executor-demo-paper connections/x64656d6f2d7061706572/token error",
         );
         assert_eq!(vault_drill_problems(&errored).len(), 1);
         let plain = vault_drill_script(false);

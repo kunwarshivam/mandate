@@ -1,0 +1,9 @@
+[
+  {
+    "label": "a first passkey: no step-up, no assertion",
+    "set": {
+      "/step_up": null,
+      "/step_up_assertion": null
+    }
+  }
+]

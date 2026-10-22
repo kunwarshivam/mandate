@@ -1687,6 +1687,7 @@ name = "mandate-api-server"
 version = "0.0.0"
 dependencies = [
  "axum",
+ "base64 0.22.1",
  "mandate-api",
  "mandate-artifacts-fs",
  "mandate-authn",
@@ -1707,6 +1708,7 @@ dependencies = [
  "ring",
  "rustix",
  "rustls",
+ "secrecy",
  "serde_json",
  "tokio",
 ]
@@ -1937,9 +1939,11 @@ name = "mandate-deploy-manager"
 version = "0.0.0"
 dependencies = [
  "mandate-canon",
+ "mandate-connections",
  "mandate-journal",
  "mandate-process",
  "mandate-time",
+ "mandate-vault",
  "proptest",
  "reqwest",
  "rustls",
@@ -2076,6 +2080,25 @@ dependencies = [
  "reqwest",
  "rustls",
  "serde_json",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "mandate-gatewayd"
+version = "0.0.0"
+dependencies = [
+ "mandate-canon",
+ "mandate-connections",
+ "mandate-gateway",
+ "mandate-journal",
+ "mandate-num",
+ "mandate-research",
+ "mandate-store",
+ "mandate-time",
+ "mandate-vault",
+ "proptest",
+ "secrecy",
  "thiserror",
  "tokio",
 ]
@@ -2661,11 +2684,15 @@ dependencies = [
 name = "mandate-token-exchange"
 version = "0.0.0"
 dependencies = [
+ "axum",
  "mandate-canon",
  "mandate-connections",
  "mandate-release",
  "proptest",
+ "reqwest",
+ "rustls",
  "secrecy",
+ "tokio",
 ]
 
 [[package]]
@@ -2694,6 +2721,7 @@ dependencies = [
  "mandate-connections",
  "proptest",
  "ring",
+ "rustix",
  "secrecy",
  "thiserror",
 ]
@@ -3396,9 +3424,9 @@ checksum = "eec689c0bc40ff2458a5977b6619cb718087084a18e02a131c599b62d05e1a5f"
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.15"
+version = "0.103.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3c3cf1d8b1e7d4927e2d154c3fcb02979afb9939629c62cd9048d4f07b60ac2"
+checksum = "4443b1b6d39d7c663139942cc4558262562d2c84123bb6282ef177009ca8b281"
 dependencies = [
  "ring",
  "rustls-pki-types",

@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/commands/reduction-session-opened.schema.json",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../envelope.schema.json#/$defs/Envelope"
+    }
+  ],
+  "required": [
+    "kind",
+    "expires_at",
+    "workspaces"
+  ],
+  "properties": {
+    "kind": {
+      "const": "reduction_only"
+    },
+    "expires_at": {
+      "$ref": "../common.schema.json#/$defs/Timestamp"
+    },
+    "workspaces": {
+      "$ref": "../read-models/session.schema.json#/properties/workspaces"
+    },
+    "as_of": {
+      "maxItems": 0
+    }
+  },
+  "description": "POST /v1/reduction-sessions' 201 (\u00a74.10 route 2, DEC-816 item 6, DEC-2117), beside the session cookie: the session's kind, its absolute expiry 15 minutes after the opening, never extended, and the workspaces it covers as {workspace_id, label}. It names no principal, passkey, cookie, or token. as_of is empty: it reads no stream the caller may see.",
+  "propertyNames": {
+    "not": {
+      "pattern": "([tT][oO][kK][eE][nN]|[sS][eE][cC][rR][eE][tT]|[pP][aA][sS][sS][wW][oO][rR][dD]|[pP][aA][sS][sS][pP][hH][rR][aA][sS][eE]|[cC][rR][eE][dD][eE][nN][tT][iI][aA][lL]|[aA][pP][iI]_[kK][eE][yY]|[pP][rR][iI][vV][aA][tT][eE]_[kK][eE][yY]|[aA][cC][cC][oO][uU][nN][tT]_[nN][uU][mM][bB][eE][rR]|[fF][iI][nN][gG][eE][rR][pP][rR][iI][nN][tT]|[vV][aA][uU][lL][tT])"
+    }
+  },
+  "unevaluatedProperties": false
+}

@@ -82,6 +82,19 @@
         "event_id": { "$ref": "#/$defs/EventId" },
         "artifact": { "type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$" }
       }
+    },
+    "Base64url": {
+      "description": "Unpadded base64url (RFC 4648 §5): a WebAuthn authenticator's bytes as the browser encodes them (DEC-2108 items 4 and 7), at most 8192 characters.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]+$",
+      "maxLength": 8192
+    },
+    "PasskeyId": {
+      "description": "A passkey's WebAuthn credential id as unpadded base64url: 16 to 1023 bytes, 22 to 1364 characters, and never a length whose remainder by 4 is 1, which no byte string encodes to (journal spec §9.31 `credential_id`; DEC-2108, DEC-2118 item 2).",
+      "type": "string",
+      "minLength": 22,
+      "maxLength": 1364,
+      "pattern": "^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-]{2,3})?$"
     }
   }
 }

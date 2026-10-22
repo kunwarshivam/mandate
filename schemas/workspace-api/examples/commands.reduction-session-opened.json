@@ -1,0 +1,16 @@
+{
+  "api_version": "v1",
+  "build": "sha256:abababababababababababababababababababababababababababababababab",
+  "served_at": "2026-10-19T17:30:00.000000000Z",
+  "as_of": [],
+  "kind": "reduction_only",
+  "expires_at": "2026-10-19T17:45:00.000000000Z",
+  "workspaces": [
+    {
+      "workspace_id": "01KDEM0000000000000000000W",
+      "label": null,
+      "agent_ids": [],
+      "connection_ids": []
+    }
+  ]
+}
