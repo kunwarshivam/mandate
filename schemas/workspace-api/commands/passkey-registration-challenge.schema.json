@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/commands/passkey-registration-challenge.schema.json",
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../envelope.schema.json#/$defs/Envelope"
+    }
+  ],
+  "required": [
+    "challenge_id",
+    "webauthn_challenge",
+    "rp_id",
+    "user_handle",
+    "exclude",
+    "step_up_needed",
+    "issued_at",
+    "expires_at"
+  ],
+  "properties": {
+    "challenge_id": {
+      "$ref": "../common.schema.json#/$defs/EventId"
+    },
+    "webauthn_challenge": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$"
+    },
+    "rp_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$",
+      "maxLength": 253
+    },
+    "user_handle": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{21}[AQgw]$"
+    },
+    "exclude": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "../common.schema.json#/$defs/PasskeyId"
+      }
+    },
+    "step_up_needed": {
+      "type": "boolean"
+    },
+    "issued_at": {
+      "$ref": "../common.schema.json#/$defs/Timestamp"
+    },
+    "expires_at": {
+      "$ref": "../common.schema.json#/$defs/Timestamp"
+    }
+  },
+  "description": "POST /passkeys/registration-challenges' 201 (\u00a73.6, DEC-2108 item 4): 32 random bytes as unpadded base64url, the deployment's RP ID, the user handle (the principal's 16 bytes), the member's enrolled passkeys to exclude, whether the enrolment needs passkey step-up (DEC-2108 item 5), and the challenge's instants. Reads the control stream for the member's passkeys.",
+  "propertyNames": {
+    "not": {
+      "pattern": "([tT][oO][kK][eE][nN]|[sS][eE][cC][rR][eE][tT]|[pP][aA][sS][sS][wW][oO][rR][dD]|[pP][aA][sS][sS][pP][hH][rR][aA][sS][eE]|[cC][rR][eE][dD][eE][nN][tT][iI][aA][lL]|[aA][pP][iI]_[kK][eE][yY]|[pP][rR][iI][vV][aA][tT][eE]_[kK][eE][yY]|[aA][cC][cC][oO][uU][nN][tT]_[nN][uU][mM][bB][eE][rR]|[fF][iI][nN][gG][eE][rR][pP][rR][iI][nN][tT]|[vV][aA][uU][lL][tT])"
+    }
+  },
+  "unevaluatedProperties": false
+}

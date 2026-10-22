@@ -1,0 +1,133 @@
+[
+  {
+    "label": "no challenge_id",
+    "remove": [
+      "/challenge_id"
+    ]
+  },
+  {
+    "label": "no webauthn_challenge",
+    "remove": [
+      "/webauthn_challenge"
+    ]
+  },
+  {
+    "label": "no rp_id",
+    "remove": [
+      "/rp_id"
+    ]
+  },
+  {
+    "label": "no user_handle",
+    "remove": [
+      "/user_handle"
+    ]
+  },
+  {
+    "label": "no exclude",
+    "remove": [
+      "/exclude"
+    ]
+  },
+  {
+    "label": "no step_up_needed",
+    "remove": [
+      "/step_up_needed"
+    ]
+  },
+  {
+    "label": "no issued_at",
+    "remove": [
+      "/issued_at"
+    ]
+  },
+  {
+    "label": "no expires_at",
+    "remove": [
+      "/expires_at"
+    ]
+  },
+  {
+    "label": "a padded webauthn_challenge",
+    "set": {
+      "/webauthn_challenge": "q83vEjRWeJCrze8SNFZ4kKvN7xI0VniQq83vEjRWeJA="
+    }
+  },
+  {
+    "label": "a webauthn_challenge with bits past 256",
+    "set": {
+      "/webauthn_challenge": "q83vEjRWeJCrze8SNFZ4kKvN7xI0VniQq83vEjRWeJB"
+    }
+  },
+  {
+    "label": "an rp_id with a scheme",
+    "set": {
+      "/rp_id": "https://app-staging.owlhead.ai"
+    }
+  },
+  {
+    "label": "an rp_id that is one label",
+    "set": {
+      "/rp_id": "localhost"
+    }
+  },
+  {
+    "label": "an upper-case rp_id",
+    "set": {
+      "/rp_id": "App-Staging.owlhead.ai"
+    }
+  },
+  {
+    "label": "an rp_id past 253 characters",
+    "set": {
+      "/rp_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.ai"
+    }
+  },
+  {
+    "label": "a user handle of 15 bytes",
+    "set": {
+      "/user_handle": "AZ_6Z2T4Vxa9QxbP2tQ7"
+    }
+  },
+  {
+    "label": "a user handle with bits past 128",
+    "set": {
+      "/user_handle": "AZ_6Z2T4Vxa9QxbP2tQ7nB"
+    }
+  },
+  {
+    "label": "an excluded passkey twice",
+    "set": {
+      "/exclude": [
+        "AAECAwQFBgcICQoLDA0ODw",
+        "AAECAwQFBgcICQoLDA0ODw"
+      ]
+    }
+  },
+  {
+    "label": "an excluded passkey that is not an id",
+    "set": {
+      "/exclude": [
+        "AA"
+      ]
+    }
+  },
+  {
+    "label": "step_up_needed as text",
+    "set": {
+      "/step_up_needed": "true"
+    }
+  },
+  {
+    "label": "a member named for a secret",
+    "set": {
+      "/credential_id": "AAECAwQFBgcICQoLDA0ODw"
+    }
+  },
+  {
+    "label": "an unlisted member",
+    "set": {
+      "/user_name": "owner"
+    }
+  }
+]

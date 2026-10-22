@@ -35,7 +35,7 @@ const NONE: &[&str] = &[];
 
 /// Every event type [`lookup`] admits, in its order. The test below reads `lookup`'s source, so
 /// a type added there and not here fails the build's tests.
-pub(crate) const EVENT_TYPES: [&str; 127] = [
+pub(crate) const EVENT_TYPES: [&str; 129] = [
     "StreamOpened",
     "MeterReserved",
     "MeterSettled",
@@ -151,6 +151,8 @@ pub(crate) const EVENT_TYPES: [&str; 127] = [
     "ProcessStartIssued",
     "ProcessStopIssued",
     "ProcessCrashLooped",
+    "CredentialEnrolled",
+    "CredentialRemoved",
     "ConnectionEstablished",
     "ConnectionCredentialRotated",
     "ConnectionRefused",
@@ -286,7 +288,9 @@ pub(crate) fn lookup(event_type: &str) -> Option<Entry> {
         | "ControlPlaneMessageRefused"
         | "ProcessStartIssued"
         | "ProcessStopIssued"
-        | "ProcessCrashLooped" => entry(CONTROL, NONE),
+        | "ProcessCrashLooped"
+        | "CredentialEnrolled"
+        | "CredentialRemoved" => entry(CONTROL, NONE),
 
         "ConnectionEstablished" | "ConnectionCredentialRotated" => entry(&[Control, Account], NONE),
         "ConnectionRefused" | "ConnectionRequested" => entry(CONTROL, NONE),

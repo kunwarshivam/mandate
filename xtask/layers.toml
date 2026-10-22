@@ -129,6 +129,7 @@ workspace_services = [
     "mandate-deploy-manager",
     "mandate-deployd",
     "mandate-dispatcher",
+    "mandate-gatewayd",
 ]
 agent_process = [
     "mandate-agentd",
@@ -547,6 +548,18 @@ pure = false
 allowed_external = ["reqwest", "rustls", "thiserror", "tokio"]
 forbidden_internal = ["mandate-spec", "mandate-journal", "mandate-builder", "mandate-risk", "mandate-executor", "mandate-runtime", "mandate-alpaca", "mandate-robinhood", "mandate-shell", "mandate-connections", "mandate-vault-local"]
 
+# The model-gateway service (E21-62, DEC-2257, DEC-2265): mandate-gateway over the HTTPS transport,
+# the journaled meter and the system clock, serving its one workspace's runtime one framed call at a
+# time. It reads the provider's key once from mandate-vault as the model gateway, which is why it
+# sits above it. A workspace service: it may never reach the order path, a mandate or policy
+# writer, a broker connector, or the agent processes (INF-5, INF-14, INF-16).
+[crates.mandate-gatewayd]
+layer = 9
+safety_critical = true
+pure = false
+allowed_external = ["secrecy", "thiserror"]
+forbidden_internal = ["mandate-spec", "mandate-builder", "mandate-risk", "mandate-executor", "mandate-runtime", "mandate-alpaca", "mandate-robinhood", "mandate-shell", "mandate-mcp", "mandate-paper", "mandate-cli"]
+
 [crates.mandate-marketdata]
 layer = 6
 safety_critical = false
@@ -771,13 +784,6 @@ pure = false
 allowed_external = ["secrecy", "tokio"]
 forbidden_internal = ["mandate-daemon", "mandate-agentd", "mandate-shell", "mandate-paper", "mandate-mcp", "mandate-cli", "mandate-rh-sim", "mandate-robinhood"]
 
-# The workspace scheduler process (E21-29, DEC-1010): the clock stream's single writer, over
-# mandate-store, with mandate-process's lifecycle and probes. tokio drives the Postgres journal
-# The workspace API server (E21-31, DEC-978): the one door into a workspace deployment for people
-# and their tools. It records owner input on the control stream and serves reads from the journal;
-# it never places, cancels, or sizes an order and never calls a broker or a runtime (workspace API
-# spec §1.4, `AGENTS.md` rule 12), so it may never reach the runtime, the executor, a connector,
-# the shell, the paper adapter, or the founder's CLI.
 # The token-exchange process (E10-13 slice 5b, DEC-821 item 2, DEC-2629): the one process with
 # the platform's client secret and the live token endpoint. It sits above mandate-connections, whose
 # exchange rules it runs, and no crate may depend on it, so no other process can send the request.
@@ -785,14 +791,21 @@ forbidden_internal = ["mandate-daemon", "mandate-agentd", "mandate-shell", "mand
 layer = 7
 safety_critical = true
 pure = false
-allowed_external = ["secrecy"]
+allowed_external = ["reqwest", "rustls", "secrecy", "tokio"]
 allowed_dependents = []
 
+# The workspace scheduler process (E21-29, DEC-1010): the clock stream's single writer, over
+# mandate-store, with mandate-process's lifecycle and probes. tokio drives the Postgres journal
+# The workspace API server (E21-31, DEC-978): the one door into a workspace deployment for people
+# and their tools. It records owner input on the control stream and serves reads from the journal;
+# it never places, cancels, or sizes an order and never calls a broker or a runtime (workspace API
+# spec §1.4, `AGENTS.md` rule 12), so it may never reach the runtime, the executor, a connector,
+# the shell, the paper adapter, or the founder's CLI.
 [crates.mandate-api-server]
 layer = 7
 safety_critical = true
 pure = false
-allowed_external = ["axum", "reqwest", "ring", "rustix", "rustls", "tokio"]
+allowed_external = ["axum", "base64", "reqwest", "ring", "rustix", "rustls", "secrecy", "tokio"]
 forbidden_internal = [
     "mandate-alpaca",
     "mandate-cli",

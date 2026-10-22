@@ -1,7 +1,8 @@
 //! The vault's token entry for an Alpaca OAuth connection, format 1
 //! ([DEC-2624](../../../docs/project/decisions/DEC-2624.md)): the bytes the token-exchange process
-//! writes at `connections/{connection_id}/token` and the connection's executor reads through its
-//! lease. They are exactly the canonical JSON (journal spec §4)
+//! writes at `connections/x<hex>/token`, the connection id's hex after an `x`
+//! ([DEC-2060](../../../docs/project/decisions/DEC-2060.md) item 3), and the connection's executor
+//! reads through its lease. They are exactly the canonical JSON (journal spec §4)
 //!
 //! `{"access_token":"<token>","format":1,"scope":["data","trading"],"token_type":"bearer"}`
 //!

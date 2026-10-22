@@ -4,7 +4,7 @@
 |---|---|
 | **Owner** | The coordinating agent session; the founder reviews |
 | **Status** | Living document, one page. Updated at the end of every working session |
-| **Last updated** | 2026-10-19, the approval request's action is the page title, so the risk sits with Approve and Skip (DEC-2409). 2026-10-18 late evening (main at #1709): the founder's fourteen decisions of the day are recorded in [DEC-2605](decisions/DEC-2605.md); the demo cell checks sign-in, the signed-in reads, the backtest and the kill switch (E2E slices 4 to 7); the hosted infrastructure's first modules merged (IAC, GO, V2); release signing's key is compiled in (#1689) |
+| **Last updated** | 2026-10-21, session close: an autonomous coordinator session repaired `main`'s four red gates (DEC-2632), took `cell-demo-web` off the per-PR path so merges could resume at all (DEC-2634), and landed seventeen PRs across lanes LV, X, V2, L1, TW, AH, I2 and D1. DEC-917 and DEC-2635 narrow ES-22's split guard for a crate's `tests/` directory and for J1. The M5, M6 and M8 rows, the Next list and the log were trued |
 
 Where the project stands, what is waiting on whom, and what comes next, on one page. How the work
 ran, with every PR number, lives in [11-work-log.md](11-work-log.md). Plans live in
@@ -55,9 +55,15 @@ row 14): an approved PR merges right after its independent review, without waiti
 3. **The demo, 2026-10-26**: staging up on DOKS (IAC, GO, V2, RS); in the scenario, web/'s kill
    switch (W2, #1666), step-up (L1, #1698), the runtime started from the account (D1, #1704), the
    executor in the cell (X, #1694, #1702), research in the cell (I2, AH).
-4. **E6-15** (lane TW): the risk state read by the runtime and the shell gate, slices A and B now.
+4. **E6-15** (lane TW): slice B2b-1 landed (#2007, the fold reads version-2 marks and binds to one
+   instrument); what remains is the runtime and shell gate reading it, slice C, whose timing is the
+   founder's.
 5. **M7's remainder** (lane M7) and **the backtest and evaluation runs** (lane LV on claim #1463:
    the evaluation run append, then E4-4 slice 2).
+6. **The lanes whose tests halves landed 2026-10-21** pick up their implementations: E21-62's
+   framed exchange and gateway key are whole (#2038, #2047); E21-30's executor start is whole
+   (#2008, #2009); E9-4 S3.1 (#2043) and E19-13 slice 3e (#2050) need their implementations, and
+   E9-1 route 2's S0 spec (#2041) needs its routes.
 6. **Then** L2's workspace API queue, M4's safety-critical half, as before.
 
 Streams that touch different crates run in parallel; reviews and merges run one at a time.

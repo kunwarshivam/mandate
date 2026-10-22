@@ -1,9 +1,9 @@
-"""Journal spec v0.48 §9.21's reference vectors for the deployment manager's records (DEC-1170):
-the starts, stops, and crash loops of the processes it runs, written by workspace control services
-on the control stream before each takes effect.
+"""Journal spec v0.48 §9.21's reference vectors for the deployment manager's records (DEC-1170), with
+v0.70's token exchange (DEC-1175): the starts, stops, and crash loops of the processes it runs,
+written by workspace control services on the control stream before each takes effect.
 
-The schemas and rules 165 to 168 live in `control.py`, beside the other closed schemas, so one
-validator judges every record. This module builds the `deployment_manager` section: a base draft of
+The schemas and rules 165 to 168 and 256 live in `control.py`, beside the other closed schemas, so
+one validator judges every record. This module builds the `deployment_manager` section: a base draft of
 each record, an invalid draft for every member type and every rule, and valid drafts for the cases
 a rule might be misread to refuse. Its own oracle reads the base drafts' payloads directly, without
 the validator, and every seeded bug is shown caught.
@@ -35,10 +35,11 @@ from control import (
     valid as control_valid,
 )
 
-SPEC = "docs/specs/journal.md v0.48 §9.21 (DEC-1170)"
+SPEC = "docs/specs/journal.md v0.70 §9.21 (DEC-1170, DEC-1175)"
 AT = "2026-10-17T15:00:00.000000000Z"
 ACCOUNT = "01J8Z2ACCT00000000000000A1"
 CAUSE = "01J8Z3P2A000000000000000Q3"
+CONNECTION = "conn_01J8Z2CONN000000000000C1"
 OPAQUE = re.compile(r"^[A-Za-z0-9_-]{1,64}\Z")
 
 PAYLOADS: dict[str, dict] = {
@@ -221,6 +222,63 @@ def rule_drafts() -> list[dict]:
             "schema",
             "payload.window_seconds",
         ),
+        invalid(
+            "exchange_restarted",
+            "rule 167: an exchange is requested at generation 1 only",
+            start,
+            [
+                change("payload.process", "token_exchange"),
+                change("payload.subject", CONNECTION),
+                change("payload.generation", 2),
+                change("payload.cause", "requested"),
+            ],
+            "schema",
+            "payload.cause",
+        ),
+        invalid(
+            "exchange_deployed",
+            "rule 256: a token exchange is started as requested",
+            start,
+            [change("payload.process", "token_exchange"), change("payload.subject", CONNECTION)],
+            "schema",
+            "payload.cause",
+        ),
+        invalid(
+            "runtime_requested",
+            "rule 256: only a token exchange is requested",
+            start,
+            [change("payload.cause", "requested")],
+            "schema",
+            "payload.cause",
+        ),
+        invalid(
+            "exchange_stopped_for_an_agent",
+            "rule 256: a token exchange is stopped as its request closed",
+            "ProcessStopIssued",
+            [
+                change("payload.process", "token_exchange"),
+                change("payload.subject", CONNECTION),
+                change("payload.generation", 1),
+            ],
+            "schema",
+            "payload.cause",
+        ),
+        invalid(
+            "runtime_stopped_as_closed",
+            "rule 256: only a token exchange stops as its request closed",
+            "ProcessStopIssued",
+            [change("payload.cause", "request_closed")],
+            "schema",
+            "payload.cause",
+        ),
+        invalid(
+            "exchange_looped",
+            "§9.21 types: a token exchange never crash-loops",
+            "ProcessCrashLooped",
+            [change("payload.process", "token_exchange"), change("payload.subject", CONNECTION)],
+            "non_canonical",
+            "payload.process",
+        ),
     ]
     return out
 
@@ -273,6 +331,27 @@ def valid_drafts() -> list[dict]:
             [change("payload.process", "runtime"), change("payload.subject", AGENT)],
         ),
         valid("live", "§9.21: either environment", start, [change("environment", "live")]),
+        valid(
+            "token_exchange",
+            "rule 256: an OAuth connect's exchange, named by its connection",
+            start,
+            [
+                change("payload.process", "token_exchange"),
+                change("payload.subject", CONNECTION),
+                change("payload.cause", "requested"),
+            ],
+        ),
+        valid(
+            "token_exchange_closed",
+            "rule 256: a running exchange stopped as its request closed",
+            "ProcessStopIssued",
+            [
+                change("payload.process", "token_exchange"),
+                change("payload.subject", CONNECTION),
+                change("payload.generation", 1),
+                change("payload.cause", "request_closed"),
+            ],
+        ),
     ]
 
 
@@ -346,6 +425,8 @@ VALIDATOR_MUTANTS = (
     "rule.167",
     "rule.168.restarts",
     "rule.168.window",
+    "rule.256",
+    "rule.256.stop",
 )
 
 
@@ -387,6 +468,15 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
             mutated(
                 lambda s: case(s, "invalid_drafts", "ProcessStartIssued.deployed_twice")["expect"].update(
                     path="payload.generation"
+                )
+            ),
+        ),
+        (
+            "a valid exchange is started as deployed",
+            "valid_drafts",
+            mutated(
+                lambda s: case(s, "valid_drafts", "ProcessStartIssued.token_exchange")["changes"].append(
+                    change("payload.cause", "deployed")
                 )
             ),
         ),
