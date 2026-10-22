@@ -29,12 +29,15 @@ pub trait ApiLogin: Send + Sync {
     fn login(&self, now: UtcNanos) -> impl Future<Output = Result<Self::Session, SourceError>>;
 }
 
-/// The deployment's login: the AppRole role id and secret id read from the mounted files
-/// `api.role-id` and `api.secret-id` in `dir` at each login, never from the environment or argv.
+/// The deployment's login as `identity`: the AppRole role id and secret id read from that
+/// identity's mounted files in `dir` (`api.role-id` and `api.secret-id` for [`Identity::Api`],
+/// `connection-manager.*` for [`Identity::ConnectionManager`]) at each login, never from the
+/// environment or argv.
 #[derive(Debug, Clone)]
 pub struct OpenBaoLogin {
     pub config: OpenBaoConfig,
     pub dir: PathBuf,
+    pub identity: Identity,
 }
 
 impl ApiLogin for OpenBaoLogin {

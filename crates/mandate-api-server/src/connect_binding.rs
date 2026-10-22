@@ -12,7 +12,7 @@ use mandate_connections::start::{Authorizer, ClientId, OAuthClient, RedirectUri}
 use mandate_release::startup::Tier;
 use mandate_vault::mounted::read_mounted;
 use mandate_vault::openbao::OpenBaoConfig;
-use mandate_vault::policy::Mounts;
+use mandate_vault::policy::{Identity, Mounts};
 use secrecy::ExposeSecret;
 
 use crate::clock::Clock;
@@ -20,6 +20,7 @@ use crate::config::{AUTHORIZE_URL, StartRefusal, authorize_page};
 use crate::connect::Connect;
 use crate::session::Random;
 use crate::vault_codes::{OpenBaoLogin, VaultCodes};
+use crate::vault_fingerprints::VaultFingerprints;
 use crate::vault_teardown::VaultTeardown;
 
 /// The platform's registered OAuth client id.
@@ -118,6 +119,7 @@ pub fn connect_binding(
                         mounts: Mounts::default(),
                     },
                     dir,
+                    identity: Identity::Api,
                 },
             })))
         }
@@ -162,11 +164,8 @@ fn ca_pem(dir: &Path) -> Option<Vec<u8>> {
         .map(|pem| pem.expose_secret().as_bytes().to_vec())
 }
 
-/// The connect `binding` binds: for [`ConnectBinding::On`], its page and client, states drawn from
-/// `random`, and codes written through the vault as the API's identity at `clock`'s time; `None`
-/// otherwise.
-/// The finish's teardown for a bound connect, over its own copy of the connect's vault login;
-/// `None` for no connect and an incomplete one (DEC-2348 item 3).
+/// The finish's teardown for a bound connect, over its own copy of the connect's vault login as
+/// the connection manager; `None` for no connect and an incomplete one (DEC-2348 item 3).
 pub fn teardown(
     binding: &ConnectBinding,
     clock: Arc<dyn Clock>,
@@ -180,6 +179,22 @@ pub fn teardown(
     }
 }
 
+/// The finish's fingerprint port for a bound connect, over its own copy of the connect's vault
+/// login as the connection manager; `None` for no connect and an incomplete one (DEC-2348 item 4).
+#[expect(
+    clippy::todo,
+    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+)]
+pub fn fingerprints(
+    _binding: &ConnectBinding,
+    _clock: Arc<dyn Clock>,
+) -> Option<VaultFingerprints<OpenBaoLogin>> {
+    todo!()
+}
+
+/// The connect `binding` binds: for [`ConnectBinding::On`], its page and client, states drawn from
+/// `random`, and codes written through the vault as the API's identity at `clock`'s time; `None`
+/// otherwise.
 pub fn bound(
     binding: ConnectBinding,
     random: Box<dyn Random>,

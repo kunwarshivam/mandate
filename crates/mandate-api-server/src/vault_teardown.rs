@@ -1,15 +1,14 @@
 //! The connect finish's teardown over the vault ([DEC-2348](../../../docs/project/decisions/DEC-2348.md)
-//! item 3): it deletes a connection's code and token as [`Identity::Api`], whose policy allows
-//! those deletes and nothing else, and counts an absent entry as deleted.
+//! item 3): it deletes a connection's code and token as [`Identity::ConnectionManager`], the
+//! finish's own identity (DEC-694 item 2), and counts an absent entry as deleted.
 
 use std::sync::Arc;
 
 use mandate_connections::record::ConnectionId;
-
-use crate::clock::Clock;
 use mandate_vault::policy::{Identity, SecretPath};
 use mandate_vault::source::SecretSource;
 
+use crate::clock::Clock;
 use crate::finish_pass::{DeleteFailed, Deleted, Teardown};
 use crate::vault_codes::ApiLogin;
 

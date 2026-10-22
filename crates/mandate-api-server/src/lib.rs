@@ -83,6 +83,7 @@ pub mod stepup;
 pub mod subject;
 pub mod token;
 pub mod vault_codes;
+pub mod vault_fingerprints;
 pub mod vault_teardown;
 pub mod version_routes;
 pub mod versions;

@@ -1,5 +1,5 @@
-//! The connect finish's teardown over the vault (DEC-2348 item 3): one fresh login as the API at
-//! the clock's time, then a delete of the connection's code and of its token, made off the async
+//! The connect finish's teardown over the vault (DEC-2348 item 3): one fresh login as the
+//! connection manager at the clock's time, then a delete of the connection's code and of its token, made off the async
 //! runtime; anything else deletes nothing or fails the teardown, which the pass retries.
 
 mod common;
@@ -42,13 +42,14 @@ fn with(script: Script) -> Arc<Script> {
     Arc::new(script)
 }
 
-fn api() -> Script {
-    Arc::into_inner(Script::new(Identity::Api)).expect("one owner")
+fn manager() -> Script {
+    Arc::into_inner(Script::new(Identity::ConnectionManager)).expect("one owner")
 }
 
 #[test]
-fn the_teardown_deletes_the_code_then_the_token_as_the_api() {
-    let script = Script::new(Identity::Api);
+#[ignore = "pending E10-13"]
+fn the_teardown_deletes_the_code_then_the_token_as_the_connection_manager() {
+    let script = Script::new(Identity::ConnectionManager);
     assert_eq!(deleted(&script, ManualClock::at(NOW)), Ok(()));
     assert_eq!(script.logins(), [at(NOW)], "one fresh login");
     assert_eq!(
@@ -61,6 +62,7 @@ fn the_teardown_deletes_the_code_then_the_token_as_the_api() {
 }
 
 #[test]
+#[ignore = "pending E10-13"]
 fn a_failed_delete_still_deletes_the_other_and_fails() {
     for failing in [
         SecretPath::Code(connection()),
@@ -68,7 +70,7 @@ fn a_failed_delete_still_deletes_the_other_and_fails() {
     ] {
         let script = with(Script {
             delete_fails_on: Some(failing.clone()),
-            ..api()
+            ..manager()
         });
         assert_eq!(
             deleted(&script, ManualClock::at(NOW)),
@@ -95,7 +97,7 @@ fn a_login_that_fails_deletes_nothing() {
     ] {
         let script = with(Script {
             login_fails: Some(refused.clone()),
-            ..api()
+            ..manager()
         });
         assert_eq!(
             deleted(&script, ManualClock::at(NOW)),
@@ -106,10 +108,12 @@ fn a_login_that_fails_deletes_nothing() {
     }
 }
 
-/// Only the API's identity may delete codes and tokens; a session holding another is not used.
+/// The teardown deletes as the connection manager alone (DEC-694 item 2); a session holding
+/// another identity, the API's among them, is not used.
 #[test]
-fn a_session_that_is_not_the_api_s_deletes_nothing() {
-    let script = Script::new(Identity::ConnectionManager);
+#[ignore = "pending E10-13"]
+fn a_session_that_is_not_the_connection_manager_s_deletes_nothing() {
+    let script = Script::new(Identity::Api);
     assert_eq!(deleted(&script, ManualClock::at(NOW)), Err(DeleteFailed));
     assert_eq!(script.logins(), [at(NOW)]);
     assert!(script.calls().is_empty());
@@ -126,7 +130,7 @@ impl Clock for NoClock {
 
 #[test]
 fn a_clock_that_cannot_be_read_deletes_nothing() {
-    let script = Script::new(Identity::Api);
+    let script = Script::new(Identity::ConnectionManager);
     assert_eq!(deleted(&script, Arc::new(NoClock)), Err(DeleteFailed));
     assert!(script.logins().is_empty());
     assert!(script.calls().is_empty());

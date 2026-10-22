@@ -1,0 +1,7 @@
+file = "crates/mandate-api-server/tests/connect_binding.rs"
+test = "only_a_bound_connect_has_a_teardown"
+reason = """
+DEC-2348 items 3 and 4: W2's `teardown` copies the connect's login as the API, so this test fails on
+that behaviour rather than at a stub. The implementation PR copies it as the connection manager, and
+deletes this file with the test's `#[ignore]` line.
+"""

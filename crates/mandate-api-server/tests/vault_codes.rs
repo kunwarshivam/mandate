@@ -5,11 +5,12 @@
 mod common;
 mod support_vault;
 
+use std::os::unix::fs::PermissionsExt;
 use std::sync::Arc;
 
 use mandate_api_server::clock::Clock;
 use mandate_api_server::connect::CodeVault;
-use mandate_api_server::vault_codes::{OpenBaoLogin, VaultCodes};
+use mandate_api_server::vault_codes::{ApiLogin, OpenBaoLogin, VaultCodes};
 use mandate_connections::ConnectError;
 use mandate_connections::code_entry::{self, encode};
 use mandate_connections::record::ConnectionId;
@@ -222,6 +223,7 @@ fn a_deployment_login_without_its_mounted_credentials_writes_nothing() {
                 mounts: Mounts::default(),
             },
             dir,
+            identity: Identity::Api,
         },
         clock: ManualClock::at(T0) as Arc<dyn Clock>,
     };
@@ -264,5 +266,52 @@ fn the_api_s_vault_identity_writes_codes_and_reads_no_token() {
             (Access::Delete, SecretPath::Token(c)),
             (Access::Delete, SecretPath::Token(o)),
         ]
+    );
+}
+
+/// DEC-2348 item 3: a login reads the mounted pair of its own identity. A directory that holds the
+/// connection manager's pair alone gets the manager's login past its credentials, to the vault,
+/// and refuses the API's for its missing files.
+#[test]
+#[ignore = "pending E10-13"]
+fn a_login_reads_the_mounted_pair_of_its_own_identity() {
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
+        "mandate-api-server-vault-login-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("a directory");
+    for (name, value) in [
+        ("connection-manager.role-id", "role\n"),
+        ("connection-manager.secret-id", "secret\n"),
+    ] {
+        let file = dir.join(name);
+        std::fs::write(&file, value).expect("a credential");
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).expect("mode");
+    }
+    let login = |identity| OpenBaoLogin {
+        config: OpenBaoConfig {
+            address: "https://127.0.0.1:1".to_owned(),
+            ca_pem: Vec::new(),
+            mounts: Mounts::default(),
+        },
+        dir: dir.clone(),
+        identity,
+    };
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("a runtime");
+    let manager = runtime.block_on(login(Identity::ConnectionManager).login(at(T0)));
+    assert!(
+        !matches!(manager, Err(SourceError::CredentialFile)),
+        "the manager's pair is read: {:?}",
+        manager.err()
+    );
+    let api = runtime.block_on(login(Identity::Api).login(at(T0)));
+    assert!(
+        matches!(api, Err(SourceError::CredentialFile)),
+        "no API pair: {:?}",
+        api.err()
     );
 }

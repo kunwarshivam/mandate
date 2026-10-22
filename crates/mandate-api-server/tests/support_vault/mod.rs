@@ -7,9 +7,11 @@
 use std::sync::{Arc, Mutex};
 
 use mandate_api_server::vault_codes::ApiLogin;
-use mandate_connections::record::ConnectionId;
+use mandate_api_server::vault_fingerprints::ManagerSession;
+use mandate_connections::record::{AccountPiiRef, AccountRef, ConnectionId};
 use mandate_time::UtcNanos;
 use mandate_vault::SourceError;
+use mandate_vault::fingerprint::{AccountFingerprint, Claim, FingerprintError};
 use mandate_vault::lease::Lease;
 use mandate_vault::policy::{Identity, SecretPath};
 use mandate_vault::source::{Grant, SecretSource};
@@ -20,6 +22,9 @@ use secrecy::{ExposeSecret, SecretSlice};
 pub enum Call {
     Put(SecretPath, Vec<u8>),
     Delete(SecretPath),
+    Fingerprint(ConnectionId, AccountRef),
+    Claim(ConnectionId, AccountFingerprint),
+    Release(ConnectionId, AccountRef),
     Other(&'static str),
 }
 
@@ -34,6 +39,12 @@ pub struct Script {
     pub put_fails: Option<SourceError>,
     /// A `delete` of this path fails as unavailable.
     pub delete_fails_on: Option<SecretPath>,
+    /// What a `fingerprint` answers; `Missing` when unset.
+    pub fingerprint: Option<Result<(AccountFingerprint, AccountPiiRef), FingerprintError>>,
+    /// What a `claim` answers; `Claimed` when unset.
+    pub claim: Option<Result<Claim, FingerprintError>>,
+    /// A `release` fails with this.
+    pub release_fails: Option<FingerprintError>,
     pub logins: Mutex<Vec<UtcNanos>>,
     pub calls: Mutex<Vec<Call>>,
 }
@@ -45,6 +56,9 @@ impl Script {
             login_fails: None,
             put_fails: None,
             delete_fails_on: None,
+            fingerprint: None,
+            claim: None,
+            release_fails: None,
             logins: Mutex::default(),
             calls: Mutex::default(),
         })
@@ -140,5 +154,43 @@ impl SecretSource for Session {
 
     async fn revoke_grant(&self, _: &Grant) -> Result<(), SourceError> {
         self.other("revoke_grant")
+    }
+}
+
+impl Session {
+    fn record(&self, call: Call) {
+        self.0.calls.lock().expect("unpoisoned").push(call);
+    }
+}
+
+impl ManagerSession for Session {
+    async fn fingerprint(
+        &self,
+        connection: &ConnectionId,
+        account: &AccountRef,
+    ) -> Result<(AccountFingerprint, AccountPiiRef), FingerprintError> {
+        self.record(Call::Fingerprint(connection.clone(), account.clone()));
+        self.0
+            .fingerprint
+            .clone()
+            .unwrap_or(Err(FingerprintError::Missing))
+    }
+
+    async fn claim(
+        &self,
+        connection: &ConnectionId,
+        fingerprint: &AccountFingerprint,
+    ) -> Result<Claim, FingerprintError> {
+        self.record(Call::Claim(connection.clone(), fingerprint.clone()));
+        self.0.claim.clone().unwrap_or(Ok(Claim::Claimed))
+    }
+
+    async fn release(
+        &self,
+        connection: &ConnectionId,
+        account: &AccountRef,
+    ) -> Result<(), FingerprintError> {
+        self.record(Call::Release(connection.clone(), account.clone()));
+        self.0.release_fails.clone().map_or(Ok(()), Err)
     }
 }
