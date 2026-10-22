@@ -55,28 +55,31 @@ pub trait Alerts: Send + Sync {
 pub struct LineAlerts<W>(pub Mutex<W>);
 
 impl<W: Write + Send> Alerts for LineAlerts<W> {
-    #[expect(
-        clippy::todo,
-        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-    )]
-    fn raise(&self, _code: &'static str, _runbook: &'static str) {
-        todo!()
+    fn raise(&self, code: &'static str, runbook: &'static str) {
+        if let Ok(mut writer) = self.0.lock() {
+            let _unwritten_alert_is_not_retried =
+                writeln!(writer, "operator_alert {code} {runbook}");
+        }
     }
 }
 
 /// Runs a pass at the clock's time every `every`, for as long as the process runs; a clock that
 /// cannot be read skips that pass, and a pass that cannot read the journal waits for the next.
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
-pub async fn passes<F, T, A>(_finisher: Finisher<F, T, A>, _clock: Arc<dyn Clock>, _every: Duration)
-where
+pub async fn passes<F, T, A>(
+    mut finisher: Finisher<F, T, A>,
+    clock: Arc<dyn Clock>,
+    every: Duration,
+) where
     F: Fingerprints,
     T: Teardown,
     A: Alerts,
 {
-    todo!()
+    loop {
+        if let Some(now) = clock.now() {
+            let _waits_for_the_next_pass = finisher.pass(now).await;
+        }
+        tokio::time::sleep(every).await;
+    }
 }
 
 /// The pass over one workspace's connects, and what it remembers between passes.

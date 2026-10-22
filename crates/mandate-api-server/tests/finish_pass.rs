@@ -720,7 +720,6 @@ impl Write for Written {
 
 /// DEC-2348 item 3: one line per alert, its code and runbook and nothing else.
 #[test]
-#[ignore = "pending E10-13"]
 fn an_alert_is_written_as_one_line_with_its_code_and_runbook() {
     let written = Written::default();
     let alerts = LineAlerts(Mutex::new(written.clone()));
@@ -747,7 +746,6 @@ fn run_passes<F: Fingerprints>(finisher: Pass<F>, clock: Arc<dyn Clock>, every: 
 
 /// DEC-2342 item 10: the passes finish a connect at the clock's time.
 #[test]
-#[ignore = "pending E10-13"]
 fn the_passes_finish_a_connect_at_the_clock_s_time() {
     let (journal, _, finisher) = finisher(Unbacked);
     request(&journal, A, 2, "oauth");
@@ -758,7 +756,6 @@ fn the_passes_finish_a_connect_at_the_clock_s_time() {
 
 /// Each pass waits its period: within one period, one pass.
 #[test]
-#[ignore = "pending E10-13"]
 fn each_pass_waits_its_period() {
     let (journal, deletes, finisher) = finisher(Unbacked);
     request(&journal, A, 2, "oauth");
@@ -783,7 +780,6 @@ impl Clock for NoClock {
 
 /// A clock that cannot be read skips the pass: nothing is read, deleted or appended.
 #[test]
-#[ignore = "pending E10-13"]
 fn the_passes_wait_while_the_clock_cannot_be_read() {
     let (journal, deletes, finisher) = finisher(Unbacked);
     request(&journal, A, 2, "oauth");

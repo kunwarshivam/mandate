@@ -243,7 +243,6 @@ fn only_a_bound_connect_is_offered() {
 /// DEC-2348 item 3: a bound connect's teardown logs in as the connect does, over its own copy of
 /// the login; no connect and an incomplete one have none.
 #[test]
-#[ignore = "pending E10-13"]
 fn only_a_bound_connect_has_a_teardown() {
     let clock = || Arc::new(SystemClock) as Arc<dyn Clock>;
     let dir = vault_dir(Some(0o600));

@@ -167,15 +167,17 @@ fn ca_pem(dir: &Path) -> Option<Vec<u8>> {
 /// otherwise.
 /// The finish's teardown for a bound connect, over its own copy of the connect's vault login;
 /// `None` for no connect and an incomplete one (DEC-2348 item 3).
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
 pub fn teardown(
-    _binding: &ConnectBinding,
-    _clock: Arc<dyn Clock>,
+    binding: &ConnectBinding,
+    clock: Arc<dyn Clock>,
 ) -> Option<VaultTeardown<OpenBaoLogin>> {
-    todo!()
+    match binding {
+        ConnectBinding::On(bound) => Some(VaultTeardown {
+            login: Arc::new(bound.login.clone()),
+            clock,
+        }),
+        ConnectBinding::Off | ConnectBinding::Incomplete(_) => None,
+    }
 }
 
 pub fn bound(

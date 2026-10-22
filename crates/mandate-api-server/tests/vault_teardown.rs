@@ -47,7 +47,6 @@ fn api() -> Script {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn the_teardown_deletes_the_code_then_the_token_as_the_api() {
     let script = Script::new(Identity::Api);
     assert_eq!(deleted(&script, ManualClock::at(NOW)), Ok(()));
@@ -62,7 +61,6 @@ fn the_teardown_deletes_the_code_then_the_token_as_the_api() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_failed_delete_still_deletes_the_other_and_fails() {
     for failing in [
         SecretPath::Code(connection()),
@@ -88,7 +86,6 @@ fn a_failed_delete_still_deletes_the_other_and_fails() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_login_that_fails_deletes_nothing() {
     for refused in [
         SourceError::Unavailable,
@@ -111,7 +108,6 @@ fn a_login_that_fails_deletes_nothing() {
 
 /// Only the API's identity may delete codes and tokens; a session holding another is not used.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_session_that_is_not_the_api_s_deletes_nothing() {
     let script = Script::new(Identity::ConnectionManager);
     assert_eq!(deleted(&script, ManualClock::at(NOW)), Err(DeleteFailed));
@@ -129,7 +125,6 @@ impl Clock for NoClock {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_clock_that_cannot_be_read_deletes_nothing() {
     let script = Script::new(Identity::Api);
     assert_eq!(deleted(&script, Arc::new(NoClock)), Err(DeleteFailed));

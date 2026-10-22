@@ -32,7 +32,7 @@ use std::io;
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::process::ExitCode;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use mandate_api_server::challenges::Challenges;
@@ -44,7 +44,9 @@ use mandate_api_server::config::{
     read_session_key,
 };
 use mandate_api_server::confirm::CliConfirm;
-use mandate_api_server::connect_binding::{ConnectBinding, bound, connect_binding};
+use mandate_api_server::connect_binding::{ConnectBinding, bound, connect_binding, teardown};
+use mandate_api_server::finish::Unbacked;
+use mandate_api_server::finish_pass::{Finisher, LineAlerts, PASS_SECS, passes};
 use mandate_api_server::http::{self, App, Settings};
 use mandate_api_server::journal::{Journal, JournalUnavailable, Postgres};
 use mandate_api_server::keys::{FetchedKeys, REFETCH};
@@ -278,6 +280,29 @@ async fn run(args: Args, start: Start) -> io::Result<()> {
             tokio::time::sleep(REFETCH).await;
         }
     });
+    if let Some(teardown) = teardown(&start.connect, Arc::new(SystemClock)) {
+        let journal: Arc<dyn Journal> = Arc::new(Postgres(
+            PgJournal::from_dsn(&start.database_url)
+                .map_err(|_| io::Error::other("the journal's connection settings are refused"))?,
+        ));
+        let workspace = start
+            .hosted
+            .workspace
+            .to_ulid_text()
+            .map_err(|_| io::Error::other("the workspace id is refused"))?;
+        let finisher = Finisher::new(
+            journal,
+            Unbacked,
+            teardown,
+            LineAlerts(Mutex::new(io::stderr())),
+            workspace,
+        );
+        tokio::spawn(passes(
+            finisher,
+            Arc::new(SystemClock),
+            Duration::from_secs(PASS_SECS),
+        ));
+    }
     let challenges = Arc::new(Challenges::default());
     let step_up = CliConfirm {
         challenges: Arc::clone(&challenges),
