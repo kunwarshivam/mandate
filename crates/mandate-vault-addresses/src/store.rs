@@ -25,6 +25,15 @@ impl WorkspaceId {
     }
 }
 
+#[cfg(test)]
+impl AddressRef {
+    /// A reference that skips [`AddressRef::parse`], for the error-vocabulary test while parsing
+    /// is still a stub.
+    pub(crate) fn unchecked(text: &str) -> Self {
+        Self(text.to_owned())
+    }
+}
+
 impl AddressRef {
     /// A canonical ULID: 26 characters of upper-case Crockford base32, the first at most `7`.
     pub fn parse(_text: &str) -> Result<Self, AddressError> {
@@ -98,12 +107,20 @@ pub struct Written {
     pub written_at: UnixNanos,
 }
 
-/// The answer to [`AddressWriter::compare_and_delete`] and [`AddressWriter::erase`].
+/// The answer to [`AddressWriter::compare_and_delete`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Deletion {
     Deleted,
     /// A later write bumped the version; the entry stays.
     Stale,
+    Absent,
+}
+
+/// The answer to [`AddressWriter::erase`], which deletes whatever the version, so it is never
+/// stale.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Erasure {
+    Erased,
     Absent,
 }
 
@@ -174,12 +191,12 @@ impl AddressWriter {
     }
 
     /// Deletes the entry whatever its version, for the redaction or erasure its event's
-    /// `pii_refs` drive (journal spec §6.4): [`Deletion::Deleted`] or [`Deletion::Absent`].
+    /// `pii_refs` drive (journal spec §6.4).
     pub fn erase(
         &self,
         _workspace: &WorkspaceId,
         _address_ref: &AddressRef,
-    ) -> Result<Deletion, AddressError> {
+    ) -> Result<Erasure, AddressError> {
         Err(AddressError::Unimplemented { story: "E8-14" })
     }
 

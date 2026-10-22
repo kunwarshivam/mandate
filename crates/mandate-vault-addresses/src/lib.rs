@@ -18,11 +18,13 @@
 //!   and deletes entries.
 //! - The dispatcher (`owlhead_notify`) opens an [`AddressReader`], which reads one entry for one
 //!   send and only for the member it belongs to. It has no write method, and the filesystem
-//!   (`2750` directories, `0640` entries) gives that user no write permission either.
+//!   (`2710` directories, which it can pass through but not list, and `0640` entries) gives that
+//!   user no write permission either.
 //!
-//! Both load the one key, `vault-address-key`, from `$CREDENTIALS_DIRECTORY` and refuse to open
-//! on any other arrangement ([`startup`]). No endpoint, key, digest, or hash reaches an error, a
-//! `Display`, or a `Debug` output (DEC-2120 item 5).
+//! Both load the current key, `vault-address-key`, and during a rotation the previous key,
+//! `vault-address-key-previous`, from `$CREDENTIALS_DIRECTORY`, and refuse to open on any other
+//! arrangement ([`startup`]). No endpoint, key, digest, or hash reaches an error, a `Display`, or a
+//! `Debug` output (DEC-2120 item 8).
 
 pub mod error;
 pub mod startup;
@@ -30,8 +32,8 @@ pub mod store;
 
 pub use error::{AddressError, EntryFault};
 pub use store::{
-    AddressReader, AddressRef, AddressWriter, Deletion, Held, MemberId, NewEntry, PushKeys, Put,
-    SendEntry, UnixNanos, Version, WorkspaceId, Written,
+    AddressReader, AddressRef, AddressWriter, Deletion, Erasure, Held, MemberId, NewEntry,
+    PushKeys, Put, SendEntry, UnixNanos, Version, WorkspaceId, Written,
 };
 
 #[cfg(test)]

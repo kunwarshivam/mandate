@@ -1,5 +1,5 @@
 //! Why an operation failed. Every variant carries opaque ids only: never an endpoint, a key, a
-//! digest, a hash, or a path's contents (DEC-2120 item 5).
+//! digest, a hash, or a path's contents (DEC-2120 item 8).
 
 use std::io::ErrorKind;
 
