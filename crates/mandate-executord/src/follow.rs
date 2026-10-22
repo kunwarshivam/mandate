@@ -88,7 +88,8 @@ struct KillCommand {
     agent: Option<AgentId>,
 }
 
-/// Reads [`Following`] from the control stream.
+/// Reads [`Following`] from the control stream. `control` must hold the stream's rows in `seq`
+/// order: which deployments a kill-switch command covers is the deployments read before it.
 ///
 /// # Errors
 /// [`Unreadable`] for a deployment, connection, or kill-switch command record whose members do not
