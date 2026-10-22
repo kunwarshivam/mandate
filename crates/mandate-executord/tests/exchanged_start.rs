@@ -13,8 +13,10 @@ use mandate_connections::grant::check_scope;
 use mandate_connections::record::{AccountPiiRef, ConnectionId};
 use mandate_connections::vault::AccessToken;
 use mandate_executor::{AccountRef, AccountScope, WorkspaceId};
+use mandate_executord::credential::paper_account;
 use mandate_executord::fixture::Ids;
 use mandate_executord::oauth_check::{OAuthCheck, Start, exchanged_start, oauth_connect_check};
+use mandate_executord::paper::FixturePaper;
 use mandate_journal::{StoredEvent, StreamId};
 use mandate_store::{MemoryStore, Store};
 use mandate_time::UtcNanos;
@@ -378,5 +380,15 @@ fn the_account_id_is_in_no_record_and_no_code() -> Result<(), Error> {
             assert!(!body.contains(TOKEN), "{}", row.event_type);
         }
     }
+    Ok(())
+}
+
+/// The account read the binary hands the leased token to reads the paper host's own id of the
+/// account, over `mandate-alpaca`'s client.
+#[test]
+#[ignore = "pending E21-32"]
+fn the_account_is_read_from_the_paper_host() -> Result<(), Error> {
+    let id = paper_account(FixturePaper::new(now()?))?;
+    assert_eq!(id, BrokerAccountId::new("fixture")?);
     Ok(())
 }

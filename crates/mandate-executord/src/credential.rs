@@ -18,8 +18,9 @@
 
 use std::path::PathBuf;
 
-use mandate_alpaca::{AlpacaPaperHttp, Credentials};
+use mandate_alpaca::{AlpacaPaperHttp, Credentials, TradingTransport};
 use mandate_canon::{Value, parse};
+use mandate_connections::account_entry::BrokerAccountId;
 use mandate_connections::record::ConnectionId;
 use mandate_connections::token_entry::decode;
 use mandate_connections::vault::AccessToken;
@@ -134,6 +135,18 @@ pub fn paper_token(
 /// `transport_unavailable` when the HTTPS client cannot be built.
 pub fn paper_transport(token: AccessToken) -> Result<AlpacaPaperHttp, &'static str> {
     AlpacaPaperHttp::new(Credentials::bearer(token.0)).map_err(|_| "transport_unavailable")
+}
+
+/// The broker's own id of the account `transport` reaches, by `mandate-alpaca`'s one read of it
+/// (`GET /v2/account`'s `id`), for the exchanged executor's connect check (connections spec §5.2
+/// step 4, DEC-2339).
+///
+/// # Errors
+/// `account_unreadable` when the host does not answer it, or `runtime_unavailable`; neither
+/// names the id.
+pub fn paper_account<T: TradingTransport>(transport: T) -> Result<BrokerAccountId, &'static str> {
+    let _ = transport;
+    Err(Unimplemented)
 }
 
 /// Where the vault is and where its CA is mounted: `--vault-address` and `--vault-dir`.
