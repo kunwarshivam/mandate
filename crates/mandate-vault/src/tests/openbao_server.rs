@@ -932,7 +932,6 @@ async fn the_exchanges_update_never_creates_a_code() {
 /// the connection manager reads it; and deleting the connection's code and token, as a revoke
 /// does, leaves it. A vault nobody answers for is an outage, checked first.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending E21-32"]
 async fn an_executor_creates_its_own_account_entry_once_and_only_the_manager_reads_it() {
     let ca = include_bytes!("fixtures/isrg-root-x1.pem").to_vec();
     let unreachable = OpenBaoSource::from_token(

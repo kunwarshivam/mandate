@@ -88,7 +88,6 @@ fn expected() -> Vec<(Identity, Access, SecretPath)> {
 /// DEC-2339: the account entry is created only by its own connection's executor, read only by the
 /// connection manager, and written over or deleted by no one.
 #[test]
-#[ignore = "pending E21-32"]
 fn the_table_allows_exactly_the_matrix() {
     let expected = expected();
     for identity in identities() {

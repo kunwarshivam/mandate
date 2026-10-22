@@ -1,8 +1,0 @@
-file = "crates/mandate-vault/src/tests/kubernetes.rs"
-test = "each_kinds_policy_reaches_exactly_the_paths_its_connection_is_stored_at"
-reason = """
-DEC-2339 gives a connection's executor `create` on its own account entry in the personal-data
-vault. `kubernetes_policy` is already built, so this test sees the policy without that block, not
-a stub's report. It still runs and fails, and the implementation half deletes this file with its
-`#[ignore]` line.
-"""
