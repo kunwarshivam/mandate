@@ -74385,34 +74385,33 @@ step_up_assertions:
       environment: paper
       event_id: 01JAA3P4A000000000000000E2
       stream_id: ctl:ws_01J8Z2
-      event_type: MemberInvited
+      event_type: ApprovalResponseSubmitted
       schema_version: 1
-      event_time: '2026-10-05T14:00:00.000000000Z'
+      event_time: '2026-09-21T13:00:00.000000000Z'
       clock_source: local
       causation_id: null
       correlation_id: null
       actor:
         kind: user
-        id: 01J8Z4M0AD0000000000000AD1
+        id: user_owner_01
         version: '1'
         build: null
       config_refs: {}
       payload:
-        invitation: 01J8Z4M0C00000000000000N01
-        roles:
-        - approver
-        - viewer
-        invited_by: 01J8Z4M0AD0000000000000AD1
+        agent: agent_a
+        approval: 01J8Z3P0A000000000000000Q1
+        verdict: approved
+        content_hash: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        submitted_at: 1790000000
         step_up:
-          assertion_id: assert_admin_01
-          authenticated_at: '2026-10-05T13:59:30.000000000Z'
+          assertion_id: assert_owner_02
+          authenticated_at: 1789999990
           method: cli_confirm
-        invited_at: '2026-10-05T14:00:00.000000000Z'
-        expires_at: '2026-10-12T14:00:00.000000000Z'
-        session_ref: session_invited
-      artifact_refs: []
-      pii_refs:
-      - pii_invitee_address_01
+        responder: user_owner_01
+        role: approver
+      artifact_refs:
+      - sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      pii_refs: []
     - envelope_version: 1
       environment: paper
       event_id: 01JAA3P4A000000000000000S1
@@ -74425,7 +74424,7 @@ step_up_assertions:
       correlation_id: null
       actor:
         kind: user
-        id: 01J8Z4M0AD0000000000000AD1
+        id: user_owner_01
         version: '1'
         build: null
       config_refs: {}

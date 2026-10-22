@@ -13,8 +13,8 @@ from __future__ import annotations
 
 import copy
 
+import approval
 import credentials
-import membership
 from common import change, delete, digest_strings
 from control import (
     STREAM,
@@ -140,10 +140,10 @@ def removal(event_id: str = CAUSE, actor: str = MEMBER) -> dict:
 
 
 def non_passkey_grant() -> dict:
-    """A control-stream event whose step-up is not a passkey's, valid by its own rules: §9.12's
-    `MemberInvited`, its evidence's method changed."""
-    draft = copy.deepcopy(next(d for d in membership.base_drafts().values() if d["payload"].get("step_up")))
-    draft["payload"]["step_up"]["method"] = "cli_confirm"
+    """A control-stream event whose step-up is not a passkey's, valid by its own rules and one the
+    journal registers: §9.6's `ApprovalResponseSubmitted` in paper with `cli_confirm` evidence."""
+    draft = copy.deepcopy(approval.base_drafts()["answer_approved"])
+    assert draft["payload"]["step_up"]["method"] == "cli_confirm"
     draft["event_id"] = CAUSE
     return draft
 

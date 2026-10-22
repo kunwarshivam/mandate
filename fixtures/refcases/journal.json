@@ -116378,6 +116378,38 @@
     }
    },
    {
+    "name": "version_1_with_backup_eligible.true",
+    "clause": "§9.31: `backup_eligible` is version 2's only",
+    "base_draft": "first_enrolled",
+    "changes": [
+     {
+      "path": "payload.backup_eligible",
+      "value": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.backup_eligible"
+    }
+   },
+   {
+    "name": "version_1_with_backup_eligible.false",
+    "clause": "§9.31: `backup_eligible` is version 2's only",
+    "base_draft": "first_enrolled",
+    "changes": [
+     {
+      "path": "payload.backup_eligible",
+      "value": false
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.backup_eligible"
+    }
+   },
+   {
     "name": "removed_at_version_2",
     "clause": "§9.31: closed at schema version 1 only",
     "base_draft": "removed",
@@ -117319,13 +117351,146 @@
     }
    },
    {
+    "name": "extra",
+    "clause": "§9.31 version 2: closed",
+    "base_draft": "first_enrolled",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "lost"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "another_kind",
+    "clause": "rule 249: the one kind is `passkey` (version 2)",
+    "base_draft": "first_enrolled",
+    "changes": [
+     {
+      "path": "payload.kind",
+      "value": "recovery_code"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.kind"
+    }
+   },
+   {
+    "name": "enrolled_by_a_system",
+    "clause": "rule 249: the actor is a user (version 2)",
+    "base_draft": "first_enrolled",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "system",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      }
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "enrolled_for_another",
+    "clause": "rule 249: the actor is the member (version 2)",
+    "base_draft": "first_enrolled",
+    "changes": [
+     {
+      "path": "actor.id",
+      "value": "01JAA2N0A000000000000000P2"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.id"
+    }
+   },
+   {
+    "name": "enrolled_with_cli_confirm",
+    "clause": "rule 249: a passkey step-up (version 2)",
+    "base_draft": "stepped_up_enrolled",
+    "changes": [
+     {
+      "path": "payload.step_up.method",
+      "value": "cli_confirm"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.step_up.method"
+    }
+   },
+   {
     "name": "first_without_cool_off",
-    "clause": "rule 249 at version 2: a first enrolment cools off",
+    "clause": "rule 249: a first enrolment cools off (version 2)",
     "base_draft": "first_enrolled",
     "changes": [
      {
       "path": "payload.cool_off_ends",
       "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cool_off_ends"
+    }
+   },
+   {
+    "name": "first_cools_a_second_short",
+    "clause": "rule 249: exactly 86 400 s (version 2)",
+    "base_draft": "first_enrolled",
+    "changes": [
+     {
+      "path": "payload.cool_off_ends",
+      "value": "2026-10-20T15:00:04.250000000Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cool_off_ends"
+    }
+   },
+   {
+    "name": "first_cools_from_the_whole_second",
+    "clause": "rule 249: to the nanosecond (version 2)",
+    "base_draft": "first_enrolled",
+    "changes": [
+     {
+      "path": "payload.cool_off_ends",
+      "value": "2026-10-20T15:00:05.000000000Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cool_off_ends"
+    }
+   },
+   {
+    "name": "stepped_up_cools_off",
+    "clause": "rule 249: one stepped up never cools off (version 2)",
+    "base_draft": "stepped_up_enrolled",
+    "changes": [
+     {
+      "path": "payload.cool_off_ends",
+      "value": "2026-10-20T15:00:05.250000000Z"
      }
     ],
     "expect": {
@@ -117344,6 +117509,98 @@
      {
       "path": "payload.backup_eligible",
       "value": true
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "eddsa",
+    "clause": "§9.31 `passkey_alg` (version 2)",
+    "base_draft": "first_enrolled",
+    "changes": [
+     {
+      "path": "payload.alg",
+      "value": "eddsa"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "kept_counter",
+    "clause": "§9.31 `sign_count`: the top of 32 bits (version 2)",
+    "base_draft": "first_enrolled",
+    "changes": [
+     {
+      "path": "payload.sign_count",
+      "value": 4294967295
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "shortest_id",
+    "clause": "§9.31 `credential_id`: 16 bytes (version 2)",
+    "base_draft": "first_enrolled",
+    "changes": [
+     {
+      "path": "payload.credential",
+      "value": "EBESExQVFhcYGRobHB0eHw"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "longest_id",
+    "clause": "§9.31 `credential_id`: 1023 bytes (version 2)",
+    "base_draft": "first_enrolled",
+    "changes": [
+     {
+      "path": "payload.credential",
+      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "another_member_as_its_own_actor",
+    "clause": "rules 249 and 250: a member enrols for itself (version 2)",
+    "base_draft": "first_enrolled",
+    "changes": [
+     {
+      "path": "payload.member",
+      "value": "01JAA2N0A000000000000000P2"
+     },
+     {
+      "path": "actor.id",
+      "value": "01JAA2N0A000000000000000P2"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "whole_second",
+    "clause": "rule 249: a whole-second enrolment cools off from its whole second (version 2)",
+    "base_draft": "first_enrolled",
+    "changes": [
+     {
+      "path": "event_time",
+      "value": "2026-10-19T15:00:05.000000000Z"
+     },
+     {
+      "path": "payload.cool_off_ends",
+      "value": "2026-10-20T15:00:05.000000000Z"
      }
     ],
     "expect": {
@@ -118380,39 +118637,37 @@
       "environment": "paper",
       "event_id": "01JAA3P4A000000000000000E2",
       "stream_id": "ctl:ws_01J8Z2",
-      "event_type": "MemberInvited",
+      "event_type": "ApprovalResponseSubmitted",
       "schema_version": 1,
-      "event_time": "2026-10-05T14:00:00.000000000Z",
+      "event_time": "2026-09-21T13:00:00.000000000Z",
       "clock_source": "local",
       "causation_id": null,
       "correlation_id": null,
       "actor": {
        "kind": "user",
-       "id": "01J8Z4M0AD0000000000000AD1",
+       "id": "user_owner_01",
        "version": "1",
        "build": null
       },
       "config_refs": {},
       "payload": {
-       "invitation": "01J8Z4M0C00000000000000N01",
-       "roles": [
-        "approver",
-        "viewer"
-       ],
-       "invited_by": "01J8Z4M0AD0000000000000AD1",
+       "agent": "agent_a",
+       "approval": "01J8Z3P0A000000000000000Q1",
+       "verdict": "approved",
+       "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+       "submitted_at": 1790000000,
        "step_up": {
-        "assertion_id": "assert_admin_01",
-        "authenticated_at": "2026-10-05T13:59:30.000000000Z",
+        "assertion_id": "assert_owner_02",
+        "authenticated_at": 1789999990,
         "method": "cli_confirm"
        },
-       "invited_at": "2026-10-05T14:00:00.000000000Z",
-       "expires_at": "2026-10-12T14:00:00.000000000Z",
-       "session_ref": "session_invited"
+       "responder": "user_owner_01",
+       "role": "approver"
       },
-      "artifact_refs": [],
-      "pii_refs": [
-       "pii_invitee_address_01"
-      ]
+      "artifact_refs": [
+       "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      ],
+      "pii_refs": []
      },
      {
       "envelope_version": 1,
@@ -118427,7 +118682,7 @@
       "correlation_id": null,
       "actor": {
        "kind": "user",
-       "id": "01J8Z4M0AD0000000000000AD1",
+       "id": "user_owner_01",
        "version": "1",
        "build": null
       },
@@ -118796,6 +119051,77 @@
     }
    },
    {
+    "name": "first_kept",
+    "clause": "rule 254: from 0 at enrolment to 1, the first count kept",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000E1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "CredentialEnrolled",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "member": "01JAA2N0A000000000000000P1",
+       "kind": "passkey",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "public_key": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+       "alg": "es256",
+       "sign_count": 0,
+       "cool_off_ends": "2026-10-20T15:00:05.250000000Z",
+       "step_up": null
+      },
+      "artifact_refs": [
+       "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H1",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 1,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
     "name": "equal_to_enrolment",
     "clause": "rule 254: not equal",
     "records": [
@@ -119041,46 +119367,6 @@
      "outcome": "Invalid",
      "rule": "254",
      "index": 1
-    }
-   },
-   {
-    "name": "never_enrolled",
-    "clause": "rule 254: an enrolled credential",
-    "records": [
-     {
-      "envelope_version": 1,
-      "environment": "paper",
-      "event_id": "01JAA3P4A000000000000000S1",
-      "stream_id": "ctl:ws_01J8Z2",
-      "event_type": "StepUpAsserted",
-      "schema_version": 1,
-      "event_time": "2026-10-19T15:00:05.250000000Z",
-      "clock_source": "local",
-      "causation_id": "01JAA3P4A000000000000000E2",
-      "correlation_id": null,
-      "actor": {
-       "kind": "user",
-       "id": "01JAA2N0A000000000000000P1",
-       "version": "1",
-       "build": null
-      },
-      "config_refs": {},
-      "payload": {
-       "challenge": "01JAA3P0A000000000000000H1",
-       "credential": "AAECAwQFBgcICQoLDA0ODw",
-       "sign_count": 7,
-       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
-      },
-      "artifact_refs": [
-       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
-      ],
-      "pii_refs": []
-     }
-    ],
-    "expect": {
-     "outcome": "Invalid",
-     "rule": "254",
-     "index": 0
     }
    },
    {
@@ -119359,6 +119645,990 @@
      "outcome": "Invalid",
      "rule": "254",
      "index": 2
+    }
+   },
+   {
+    "name": "never_enrolled",
+    "clause": "rule 254: an enrolled credential",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H1",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 7,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "rule": "254",
+     "index": 0
+    }
+   },
+   {
+    "name": "rising_v2",
+    "clause": "rule 254: above the last (a version 2 enrolment)",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000E1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "CredentialEnrolled",
+      "schema_version": 2,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "member": "01JAA2N0A000000000000000P1",
+       "kind": "passkey",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "public_key": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+       "alg": "es256",
+       "sign_count": 5,
+       "cool_off_ends": "2026-10-20T15:00:05.250000000Z",
+       "step_up": null,
+       "backup_eligible": false
+      },
+      "artifact_refs": [
+       "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H1",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 6,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S2",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H2",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 9,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "not_kept_v2",
+    "clause": "rule 254: 0 on both sides (a version 2 enrolment)",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000E1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "CredentialEnrolled",
+      "schema_version": 2,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "member": "01JAA2N0A000000000000000P1",
+       "kind": "passkey",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "public_key": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+       "alg": "es256",
+       "sign_count": 0,
+       "cool_off_ends": "2026-10-20T15:00:05.250000000Z",
+       "step_up": null,
+       "backup_eligible": false
+      },
+      "artifact_refs": [
+       "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H1",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 0,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S2",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H2",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 0,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "first_kept_v2",
+    "clause": "rule 254: from 0 at enrolment to 1, the first count kept (a version 2 enrolment)",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000E1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "CredentialEnrolled",
+      "schema_version": 2,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "member": "01JAA2N0A000000000000000P1",
+       "kind": "passkey",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "public_key": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+       "alg": "es256",
+       "sign_count": 0,
+       "cool_off_ends": "2026-10-20T15:00:05.250000000Z",
+       "step_up": null,
+       "backup_eligible": false
+      },
+      "artifact_refs": [
+       "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H1",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 1,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "equal_to_enrolment_v2",
+    "clause": "rule 254: not equal (a version 2 enrolment)",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000E1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "CredentialEnrolled",
+      "schema_version": 2,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "member": "01JAA2N0A000000000000000P1",
+       "kind": "passkey",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "public_key": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+       "alg": "es256",
+       "sign_count": 5,
+       "cool_off_ends": "2026-10-20T15:00:05.250000000Z",
+       "step_up": null,
+       "backup_eligible": false
+      },
+      "artifact_refs": [
+       "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H1",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 5,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "rule": "254",
+     "index": 1
+    }
+   },
+   {
+    "name": "below_the_last_v2",
+    "clause": "rule 254: never backwards (a version 2 enrolment)",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000E1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "CredentialEnrolled",
+      "schema_version": 2,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "member": "01JAA2N0A000000000000000P1",
+       "kind": "passkey",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "public_key": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+       "alg": "es256",
+       "sign_count": 5,
+       "cool_off_ends": "2026-10-20T15:00:05.250000000Z",
+       "step_up": null,
+       "backup_eligible": false
+      },
+      "artifact_refs": [
+       "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H1",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 9,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S2",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H2",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 8,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "rule": "254",
+     "index": 2
+    }
+   },
+   {
+    "name": "zero_after_kept_v2",
+    "clause": "rule 254: 0 only when never kept (a version 2 enrolment)",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000E1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "CredentialEnrolled",
+      "schema_version": 2,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "member": "01JAA2N0A000000000000000P1",
+       "kind": "passkey",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "public_key": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+       "alg": "es256",
+       "sign_count": 5,
+       "cool_off_ends": "2026-10-20T15:00:05.250000000Z",
+       "step_up": null,
+       "backup_eligible": false
+      },
+      "artifact_refs": [
+       "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H1",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 0,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "rule": "254",
+     "index": 1
+    }
+   },
+   {
+    "name": "another_members_v2",
+    "clause": "rule 254: the actor's own (a version 2 enrolment)",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000E1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "CredentialEnrolled",
+      "schema_version": 2,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "member": "01JAA2N0A000000000000000P1",
+       "kind": "passkey",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "public_key": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+       "alg": "es256",
+       "sign_count": 5,
+       "cool_off_ends": "2026-10-20T15:00:05.250000000Z",
+       "step_up": null,
+       "backup_eligible": false
+      },
+      "artifact_refs": [
+       "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P2",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H1",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 6,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "rule": "254",
+     "index": 1
+    }
+   },
+   {
+    "name": "after_removal_v2",
+    "clause": "rule 254: not removed (a version 2 enrolment)",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000E1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "CredentialEnrolled",
+      "schema_version": 2,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "member": "01JAA2N0A000000000000000P1",
+       "kind": "passkey",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "public_key": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+       "alg": "es256",
+       "sign_count": 5,
+       "cool_off_ends": "2026-10-20T15:00:05.250000000Z",
+       "step_up": null,
+       "backup_eligible": false
+      },
+      "artifact_refs": [
+       "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000E2",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "CredentialRemoved",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "member": "01JAA2N0A000000000000000P1",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "step_up": {
+        "assertion_id": "01JAA3P0A000000000000000H1",
+        "authenticated_at": "2026-10-19T15:00:05.250000000Z",
+        "method": "passkey"
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H1",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 6,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "rule": "254",
+     "index": 2
+    }
+   },
+   {
+    "name": "challenge_twice_v2",
+    "clause": "rule 254: one assertion per challenge (a version 2 enrolment)",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000E1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "CredentialEnrolled",
+      "schema_version": 2,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "member": "01JAA2N0A000000000000000P1",
+       "kind": "passkey",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "public_key": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+       "alg": "es256",
+       "sign_count": 5,
+       "cool_off_ends": "2026-10-20T15:00:05.250000000Z",
+       "step_up": null,
+       "backup_eligible": false
+      },
+      "artifact_refs": [
+       "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H1",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 6,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S2",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H1",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 9,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "rule": "254",
+     "index": 2
+    }
+   },
+   {
+    "name": "version_1_then_version_2",
+    "clause": "rule 254: each credential's own counter, whichever version enrolled it",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000E1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "CredentialEnrolled",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "member": "01JAA2N0A000000000000000P1",
+       "kind": "passkey",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "public_key": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+       "alg": "es256",
+       "sign_count": 5,
+       "cool_off_ends": "2026-10-20T15:00:05.250000000Z",
+       "step_up": null
+      },
+      "artifact_refs": [
+       "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S3",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "CredentialEnrolled",
+      "schema_version": 2,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "member": "01JAA2N0A000000000000000P1",
+       "kind": "passkey",
+       "credential": "EBESExQVFhcYGRobHB0eHw",
+       "public_key": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+       "alg": "es256",
+       "sign_count": 3,
+       "cool_off_ends": null,
+       "step_up": {
+        "assertion_id": "01JAA3P0A000000000000000H1",
+        "authenticated_at": "2026-10-19T15:00:05.250000000Z",
+        "method": "passkey"
+       },
+       "backup_eligible": false
+      },
+      "artifact_refs": [
+       "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H1",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 6,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S2",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H2",
+       "credential": "EBESExQVFhcYGRobHB0eHw",
+       "sign_count": 4,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
     }
    }
   ]
