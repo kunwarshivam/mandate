@@ -179,7 +179,7 @@ jobs:
       - run: cargo xtask ci spec-guard
         if: steps.change.outputs.docs_only != 'true'
 
-  # DEC-871. The workspace's nextest run, in nextest's counted partitions: each shard builds every
+  # DEC-871, DEC-2325. The workspace's nextest run, in nextest's counted partitions: each shard builds every
   # test binary and runs its quarter of the tests, and together they run every test once. The shards
   # and `fast-pending` build the same test profile, so they share one cache, which only the first
   # shard saves.
