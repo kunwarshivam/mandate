@@ -196,6 +196,18 @@ fn the_event_id_is_the_request_s_own() {
     assert_eq!(refusal["event_id"], first, "whichever record closes it");
 }
 
+/// The derivation's known vector, computed outside the crate: the ULID of the first 128 bits of
+/// the SHA-256 of `{"account_ref":"01JB3K6F0C9R2V7N4M8Q1T5W60","connection_id":
+/// "conn_01JB3K6F0C9R2V7N4M8Q1T5W50","operation":"connect_finish"}`. A retried finish, after a
+/// restart or a deploy, must write the same event id, so the derivation never drifts.
+#[test]
+fn the_event_id_matches_its_known_vector() {
+    assert_eq!(
+        event_id(&members(ACCOUNT)).unwrap(),
+        "3YDBVFBYB1Z871QCDAYQ1DYF81"
+    );
+}
+
 #[test]
 fn the_finish_never_drafts_a_request() {
     assert_eq!(
