@@ -63,7 +63,6 @@ fn draft(section: &Value, case: &Value) -> Vec<u8> {
 /// strictly between 0 and 1, and a whole position discloses none. The version-1 base still parses
 /// at version 1 (§8: version 1 is never edited and stays registered).
 #[test]
-#[ignore = "pending E7-4"]
 fn every_version_2_base_and_valid_draft_parses_at_version_2() {
     let section = section();
     let drafts = section.get("drafts").and_then(Value::as_object).unwrap();
@@ -112,7 +111,6 @@ fn every_version_2_base_and_valid_draft_parses_at_version_2() {
 /// `cancelled`, an end or a passive start, a fraction of 0, below 0, of 1 or above 1 (rule 44), and
 /// a fraction on version 1, which has no such member (§8).
 #[test]
-#[ignore = "pending E7-4"]
 fn every_invalid_fraction_draft_is_refused_at_its_path() {
     let section = section();
     let invalid = list(&section, "invalid_drafts");
