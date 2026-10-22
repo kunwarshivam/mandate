@@ -455,8 +455,9 @@ fn the_first_pass_copies_a_due_establishment_once_and_opens() -> Result<(), Erro
 }
 
 /// Item 4 and rule 13: a connection refused or revoked before its copy is closed, and the gate
-/// stays shut; the pass stops nothing, so the process goes on taking every exit, and no opening,
-/// until the manager stops it.
+/// stays shut; the pass stops nothing, so the process goes on running, and after a refusal it
+/// still takes every exit and no opening, until the manager stops it. (A revoked connection's
+/// agents are no longer followed at all, by `follow::agents_of`, so none of theirs is received.)
 #[test]
 fn a_refused_connection_is_closed_and_stays_shut() -> Result<(), Error> {
     for event_type in ["ConnectionRefused", "ConnectionRevoked"] {
@@ -502,30 +503,33 @@ fn a_refused_connection_is_closed_and_stays_shut() -> Result<(), Error> {
             !matches!(process.lifecycle().state(), State::Exited(_)),
             "{event_type}"
         );
-        assert_eq!(
-            journal.received(),
-            ["01JINTENT0000000000000000C"],
-            "{event_type}"
-        );
+        let exits: &[&str] = if event_type == "ConnectionRefused" {
+            &["01JINTENT0000000000000000C"]
+        } else {
+            &[]
+        };
+        assert_eq!(journal.received(), exits, "{event_type}");
     }
     Ok(())
 }
 
-/// Rules 3 and 13: a connection record that does not read is ambiguity, so the pass answers its
-/// code, opens nothing and stops nothing; the process goes on taking every exit.
+/// Rules 3 and 13: a connection record that does not read, here a refusal naming no connection, is
+/// ambiguity, so the pass answers its code, copies nothing, opens nothing and stops nothing; the
+/// process goes on taking every exit.
 #[test]
 fn an_unreadable_record_keeps_the_gate_shut_and_every_exit_going() -> Result<(), Error> {
     let journal = deployed()?;
     opened(&journal)?;
+    check(&journal, CHECK, CONNECTION, "connect", "passed")?;
+    establish(&journal, ESTABLISHED, 2, Some(CHECK), CONNECTION, ACCOUNT)?;
     journal.write(
-        ACCOUNT_STREAM,
-        CHECK,
-        "ConnectionChecked",
+        CONTROL_STREAM,
+        "r1",
+        "ConnectionRefused",
         1,
         None,
         object(vec![("occasion", text("connect"))])?,
     )?;
-    establish(&journal, ESTABLISHED, 2, Some(CHECK), CONNECTION, ACCOUNT)?;
     let broker = Paper::new(&journal);
     let gate = OpeningGate::default();
     let mut process = start_wired(
