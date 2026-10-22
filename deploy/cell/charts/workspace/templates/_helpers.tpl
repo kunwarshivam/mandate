@@ -377,6 +377,11 @@ spec:
               audience: mandate-vault
               expirationSeconds: 600
               path: token
+          - downwardAPI:
+              items:
+                - path: namespace
+                  fieldRef:
+                    fieldPath: metadata.namespace
     {{- end }}
     {{- with .volumes }}
     {{- . | nindent 4 }}
