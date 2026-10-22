@@ -17,7 +17,11 @@ pub enum Phase {
     /// Exited, and never restarted by the orchestrator itself.
     Exited,
     /// Exited successfully, and never restarted by the orchestrator itself: a token exchange that
-    /// wrote its connection's token (DEC-2336 item 1).
+    /// wrote its connection's token (DEC-2336 item 1), or an executor started for a kill switch
+    /// that ended once nothing was left to apply (DEC-2344 item 1). An orchestrator keeps a finished
+    /// instance listed with this phase until the manager has read it: one it drops sooner reads as
+    /// gone, which the manager takes for a crash, so a kill-switch generation that ended well would
+    /// be restarted and could raise a false `kill_switch_unapplied`.
     Succeeded,
     /// Neither running nor exited as far as the orchestrator can tell (a lost node, or a stop in
     /// progress): it may still be running, so it counts as live.

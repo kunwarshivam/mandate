@@ -6,6 +6,11 @@
 //! the process's identity. A token exchange also runs as its connection's own ServiceAccount, which
 //! the adapter makes just before the pod and deletes just before deleting it, and ends by its request's
 //! deadline (DEC-1175 item 4, DEC-1177 items 4, 6 and 11).
+//!
+//! A finished pod stays listed with its phase until the manager deletes it, as the orchestrator
+//! port requires of [`Phase::Succeeded`]: a bare pod has no `ttlSecondsAfterFinished` (a Job's), the
+//! chart makes no Job for a managed process, and the cluster's terminated-pod garbage collection
+//! starts only past its threshold (12500 pods by default), far beyond what one workspace leaves.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
