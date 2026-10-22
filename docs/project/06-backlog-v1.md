@@ -1333,6 +1333,44 @@ after U-A1 to U-A5 are recorded.
   egress requires it (spec §4.6, DEC-438 item 13). *Accepted when:* payloads are encrypted to the
   subscription; the relay refuses ciphertext over 512 bytes and stores none; NT-1's canary test
   passes on relay and push-service captures; a relay outage changes no trading state (NT-9).
+  *The dispatcher's user* ([DEC-2120](decisions/DEC-2120.md) item 1): the dispatcher's unit runs
+  as `owlhead_notify`, in no other service's group, loads only `vault-address-key` (and
+  `vault-address-key-previous` during a rotation) with `LoadCredential=`, and the host setup
+  creates `addresses/` as `owlhead_api:owlhead_notify` `2710`; owed by the change that deploys the
+  dispatcher on the demo host.
+  *Address-key re-seal* ([DEC-2120](decisions/DEC-2120.md) item 6): an offline tool, run as
+  `owlhead_api`, the one user that can write entries. For each entry under the previous key it
+  takes the workspace's lock, opens the body, re-seals it under the current key with its
+  `endpoint_hash` recomputed under the current key's subkey, and replaces the entry only while its
+  `version` is still the one it read, bumping it as every write does. It reports how many entries
+  remain under each `key_version`. The previous key retires only when the re-seal tool reports
+  zero entries under its `key_version`. It stays loaded for at least 30 days; the 30 days are a
+  minimum, not a deadline. A rotation is refused while any entry remains under the previous key,
+  so the one slot never holds two retiring keys and no entry is orphaned. The first rotation is
+  blocked until the re-seal tool exists. After a compromise of the previous key, it is dropped at
+  once, without waiting for the re-seal. After a compromise of the current key, a new key is
+  installed at once as the current key, the compromised one becomes the previous key, and the
+  older previous key, if any, is dropped at once. Every entry still under a dropped key is then a
+  `RetiredKey` fault, which the dispatcher records as `address_missing` and which raises
+  `channel_lost`, and those members set their addresses again. The tool never erases. It lists
+  each entry it cannot open (a file check, a header, or a seal that fails) by workspace id and
+  `address_ref` in its report, exits non-zero, and raises one operator alert carrying those opaque
+  ids only. Such an entry counts as remaining under its key, so it blocks the previous key's
+  retirement and the next rotation until an operator erases it by `address_ref` (the writer's
+  `erase`). One corrupt entry therefore blocks rotation loudly, never silently.
+  *`key_id` in §5.7* ([DEC-2120](decisions/DEC-2120.md) item 5): workspace API §5.7's "The vault's
+  part" lists what an entry holds without the VAPID `key_id` that DEC-2503 item 5 stores there; add
+  it, with the note that it is the workspace's current key id and so outside the step-up digest.
+  *Active addresses and the fold-error case in the specs* (a spec-only PR, ES-22, DEC-2123,
+  reserved in that PR; from DEC-2120 item 9, raised by the L2 lead): workspace API §4.11 ("Active
+  addresses" and "Deactivation") and §5.7's sweep text (the sweep erases only on positive evidence
+  from a fold that succeeded, keeps the entry and raises one opaque operator alert otherwise, and
+  waits a 7-day grace for an address dead only because a membership ended), identity spec §5.2
+  step 3 (the removals may be absent when the fold fails; the deactivation commits with one opaque
+  operator alert), and journal §9.15's active set (an address is active only when its `added`
+  follows the member's latest `MemberActivated` or `MemberReactivated` with no
+  `MemberDeactivated` or `MemberRemoved` after it, and no matching `removed` follows the `added`).
+  L3 reviews §9.15 and L1 reviews §5.2. Until it lands, the code follows DEC-2120 item 9.
 - **E8-16 (Should, M7)** As a reviewer, I want the minors of the notifications spec's round 1
   ([#558](https://github.com/kunwarshivam/mandate/pull/558); freeze rule) fixed in the spec:
   - HLD §6 flow C step 4 still says "an escalation chain (push → SMS → phone call)"; align it with
@@ -1436,6 +1474,21 @@ story buys a service, and none uses a real identity-provider account in tests (s
   append `Member*` records directly. It is `mandate_identity::write_membership`, pure, over the
   `ControlStream` compare-and-append port the workspace store implements on the journal
   ([DEC-646](decisions/DEC-646.md)).
+  *Push addresses on deactivation* ([DEC-2120](decisions/DEC-2120.md) item 9, from E8-14): when a
+  deactivation or removal ends a membership, the writer appends a `removed`
+  `NotificationAddressChanged` for each of the member's active addresses in the workspace inside
+  its own commit, with the deactivation's actor, `null` step-up, and no `OwnerAlertSent`
+  (workspace API §4.11, DEC-795 item 5, journal rule 214). It computes them with
+  `mandate_identity::removals_on_deactivation(&deactivation, active_refs)`, which E8-14's slice A2
+  adds, where `active_refs` is the output of L3's one fold (`ActiveAddresses` in `mandate-notify`)
+  for that member, in add order, read at the same control-stream head the batch appends with as
+  `expected_head`; it touches no vault. A fold error never blocks the deactivation (coordinator
+  ruling): the writer commits the `MemberDeactivated` or `MemberRemoved` without the removals and
+  raises one operator alert with opaque ids only, and a test of the writer must pin that path.
+  Under DEC-2120 item 9's serving definition, the member's addresses stop being active when the
+  deactivation commits, with or without the removals, so the dispatcher sends them nothing; the
+  sweep erases their entries on positive evidence (the start followed by the membership's end),
+  after a 7-day grace.
 - **E9-8 (Must, M8; SC)** As a workspace owner, I want my data unreachable from any other workspace.
   *Accepted when:* data APIs take only a `TenantContext` the authorization step constructs, with
   compile-fail tests for a bare workspace ID; and cross-workspace attack tests fail at the API, row-level
@@ -2930,6 +2983,11 @@ enables `live` (ES-23, OPS-5).
   and roles in the cell, each process's secret id as a mounted file, and the egress drill's vault
   probe; the audit device; the metrics and journal parts of the canary scan once either carries a
   vault operation.
+  *Address path* ([DEC-2120](decisions/DEC-2120.md) item 10, from E8-14): `SecretPath::Address`, an
+  OpenBao backend for the web-push address store behind `mandate-vault-addresses`'
+  `AddressWriter` and read-only `AddressReader`, keeping DEC-2120's per-workspace namespace, the
+  member bound to each entry, and the dispatcher's read-only access in the backend's policy. Until
+  it lands, the demo host and the cell use the local store.
 - **E21-33 (Proposed, M8; SC; lane D1; journal spec first if needed)** As an owner, I want a
   deployment manager that keeps each deployed agent's processes running and leaves a crash-looping
   agent paused, so that my agent is managed without anyone watching (design §3.4, §11 "Bad
