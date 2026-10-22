@@ -7,13 +7,15 @@ use std::ffi::OsString;
 use std::os::unix::ffi::OsStringExt;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
+use mandate_api_server::clock::{Clock, SystemClock};
 use mandate_api_server::config::{AUTHORIZE_URL, StartRefusal};
 use mandate_api_server::connect_binding::{
-    CLIENT_ID, CONNECT_SETTINGS, ConnectBinding, REDIRECT_URI, VAULT_ADDRESS, VAULT_DIR,
+    CLIENT_ID, CONNECT_SETTINGS, ConnectBinding, REDIRECT_URI, VAULT_ADDRESS, VAULT_DIR, bound,
     connect_binding,
 };
+use mandate_api_server::session::OsRandom;
 use mandate_connections::start::{AuthorizePage, ClientId, RedirectUri};
 use mandate_release::startup::Tier;
 use mandate_vault::policy::Mounts;
@@ -216,5 +218,32 @@ fn a_dev_or_ci_cell_binds_its_fixture_page() {
             panic!("a bound connect in {tier:?}")
         };
         assert_eq!(bound.authorizer.page.as_str(), page);
+    }
+}
+
+/// Only a bound connect starts one, with the page and client it was bound to; no connect and an
+/// incomplete one leave the deployment offering none (DEC-2626 item 7).
+#[test]
+#[ignore = "pending E10-13"]
+fn only_a_bound_connect_is_offered() {
+    let clock = || Arc::new(SystemClock) as Arc<dyn Clock>;
+    let dir = vault_dir(Some(0o600));
+    let binding = bind(Tier::Staging, &all(&dir)).expect("no refusal");
+    let ConnectBinding::On(expected) = &binding else {
+        panic!("a bound connect")
+    };
+    let authorizer = expected.authorizer.clone();
+    let connect = bound(binding, Box::new(OsRandom::new()), clock()).expect("a connect");
+    assert_eq!(connect.authorizer, authorizer);
+    let mut incomplete = all(&dir);
+    incomplete.remove(VAULT_DIR);
+    for binding in [
+        bind(Tier::Staging, &BTreeMap::new()).expect("no refusal"),
+        bind(Tier::Staging, &incomplete).expect("no refusal"),
+    ] {
+        assert!(
+            bound(binding, Box::new(OsRandom::new()), clock()).is_none(),
+            "no connect"
+        );
     }
 }

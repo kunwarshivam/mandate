@@ -5,11 +5,15 @@
 //! ([`crate::config::authorize_page`], on [`crate::config::AUTHORIZE_URL`]) is judged first and still refuses the start.
 
 use std::ffi::OsString;
+use std::sync::Arc;
 
 use mandate_connections::start::Authorizer;
 use mandate_release::startup::Tier;
 
+use crate::clock::Clock;
 use crate::config::StartRefusal;
+use crate::connect::Connect;
+use crate::session::Random;
 use crate::vault_codes::OpenBaoLogin;
 
 /// The platform's registered OAuth client id.
@@ -75,5 +79,20 @@ pub fn connect_binding(
     _tier: Tier,
     _var: impl Fn(&str) -> Option<OsString>,
 ) -> Result<ConnectBinding, StartRefusal> {
+    todo!()
+}
+
+/// The connect `binding` binds: for [`ConnectBinding::On`], its page and client, states drawn from
+/// `random`, and codes written through the vault as the API's identity at `clock`'s time; `None`
+/// otherwise.
+#[expect(
+    clippy::todo,
+    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+)]
+pub fn bound(
+    _binding: ConnectBinding,
+    _random: Box<dyn Random>,
+    _clock: Arc<dyn Clock>,
+) -> Option<Arc<Connect>> {
     todo!()
 }
