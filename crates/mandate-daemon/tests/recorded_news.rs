@@ -1,6 +1,7 @@
 //! The cell's recorded plane serves `news.search` and `news.get` (backlog E19-16; data-plane spec
 //! §4.6; agent harness spec §6.10 and HI-28). A search keeps exactly the items whose stored headline
-//! and summary hold every term, case-folded, as a whole word or phrase, and never anything else. A
+//! or summary holds each term, case-folded, as a whole word or phrase within that one field, and
+//! never anything else. A
 //! get answers one recorded item's stored text, stamped at its age before the cut-off. The oracle
 //! reads the fixture's files and matches terms with its own scanner, not the plane's.
 
@@ -9,7 +10,7 @@ use std::fs;
 use std::path::Path;
 
 use mandate_daemon::recorded::Bundle;
-use mandate_research_run::{ItemId, NewsReader, TextQuery};
+use mandate_research_run::{ItemId, NewsReader, ReadError, TextQuery};
 use mandate_time::UtcNanos;
 use serde_json::Value as Json;
 
@@ -64,13 +65,15 @@ fn holds(text: &str, term: &str) -> bool {
     false
 }
 
-/// The item ids the fixture holds whose headline and summary hold every term, in file order.
+/// The item ids the fixture holds for which every term is in the headline or in the summary, a
+/// phrase inside one field and never across the two (DEC-2327 item 1), in file order.
 fn expected(terms: &[&str]) -> Vec<String> {
     rows()
         .iter()
         .filter(|row| {
-            let stored = format!("{} {}", text_of(row, "headline"), text_of(row, "summary"));
-            terms.iter().all(|term| holds(&stored, term))
+            terms.iter().all(|term| {
+                holds(&text_of(row, "headline"), term) || holds(&text_of(row, "summary"), term)
+            })
         })
         .map(|row| text_of(row, "item_id"))
         .collect()
@@ -103,6 +106,13 @@ fn a_search_keeps_exactly_the_items_every_term_matches() {
         vec!["record", "quarter"],
         vec!["apple", "orders"],
         vec!["triple"],
+        vec!["triple."],
+        vec!["region."],
+        vec!["five-days"],
+        vec!["record the"],
+        vec!["triple an"],
+        vec!["ervices"],
+        vec!["vices"],
         vec![],
     ] {
         assert_eq!(
@@ -116,9 +126,20 @@ fn a_search_keeps_exactly_the_items_every_term_matches() {
         ["nw-aapl-services"],
         "the oracle itself agrees with the fixture's text"
     );
+    for part in ["serv", "ervices", "vices"] {
+        assert!(
+            searched(&bundle, &[part]).is_empty(),
+            "a part of a word, at either end, is no match: {part}"
+        );
+    }
     assert!(
-        searched(&bundle, &["serv"]).is_empty(),
-        "a part of a word is no match"
+        searched(&bundle, &["record the"]).is_empty(),
+        "a phrase across the headline and the summary is no match"
+    );
+    assert_eq!(
+        searched(&bundle, &["region."]),
+        ["nw-aapl-services"],
+        "a term may hold a period"
     );
 }
 
@@ -134,13 +155,13 @@ fn vocabulary() -> Vec<String> {
                 .collect::<Vec<_>>()
         })
         .collect();
-    words.extend(["tesla", "quart", "apples"].map(str::to_owned));
+    words.extend(["tesla", "quart", "apples", "ervices", "vices"].map(str::to_owned));
     words.into_iter().collect()
 }
 
-/// Every word the recording holds and three it does not, alone, every ordered pair of them, and
-/// every two adjacent words of a recorded text as one phrase: each search keeps what the oracle
-/// keeps.
+/// Every word the recording holds and five it does not (suffixes and stems among them), alone,
+/// every ordered pair of them, and every two adjacent words of a headline or of a summary as one
+/// phrase: each search keeps what the oracle keeps.
 #[test]
 #[ignore = "pending E19-16"]
 fn every_word_pair_and_phrase_of_the_recording_keeps_what_the_oracle_keeps() {
@@ -153,12 +174,14 @@ fn every_word_pair_and_phrase_of_the_recording_keeps_what_the_oracle_keeps() {
         }
     }
     for row in rows() {
-        let stored = format!("{} {}", text_of(&row, "headline"), text_of(&row, "summary"));
-        let spoken: Vec<&str> = stored
-            .split(|c: char| !c.is_ascii_alphanumeric())
-            .filter(|word| !word.is_empty())
-            .collect();
-        cases.extend(spoken.windows(2).map(|pair| vec![pair.join(" ")]));
+        for field in ["headline", "summary"] {
+            let stored = text_of(&row, field);
+            let spoken: Vec<&str> = stored
+                .split(|c: char| !c.is_ascii_alphanumeric())
+                .filter(|word| !word.is_empty())
+                .collect();
+            cases.extend(spoken.windows(2).map(|pair| vec![pair.join(" ")]));
+        }
     }
     let mut matched = 0;
     for terms in &cases {
@@ -204,10 +227,20 @@ fn a_get_answers_a_recorded_item_s_stored_text_at_its_age() {
 fn a_get_for_an_item_the_recording_lacks_or_another_allowlist_answers_nothing() {
     let bundle = Bundle::load(Path::new(FIXTURE)).unwrap();
     let missing = ItemId::new("nw-not-recorded").unwrap();
-    assert!(bundle.plane.news_text(&missing, at(CUT_OFF), 3).is_err());
+    assert_eq!(
+        bundle
+            .plane
+            .news_text(&missing, at(CUT_OFF), 3)
+            .map(|t| t.text),
+        Err(ReadError::Unavailable)
+    );
     let recorded = ItemId::new("nw-aapl-services").unwrap();
-    assert!(
-        bundle.plane.news_text(&recorded, at(CUT_OFF), 4).is_err(),
+    assert_eq!(
+        bundle
+            .plane
+            .news_text(&recorded, at(CUT_OFF), 4)
+            .map(|t| t.text),
+        Err(ReadError::Unavailable),
         "the recording holds allowlist version 3 alone"
     );
     assert!(
