@@ -307,28 +307,6 @@ pub fn openbao_policy(
     Ok(hcl)
 }
 
-/// The connection manager's `read` of each request's fingerprint entry, in HCL, one block per
-/// request spelled out: the provisioner adds it to the manager's policy when the request is made
-/// (DEC-2345, DEC-2349), as no policy can name an entry before its request exists.
-///
-/// # Errors
-/// [`kv_path`]'s.
-pub fn fingerprint_reads(
-    requests: &[(ConnectionId, AccountRef)],
-    mounts: &Mounts,
-) -> Result<String, SourceError> {
-    let mut hcl = String::new();
-    for (connection, account) in requests {
-        let path = SecretPath::Fingerprint(connection.clone(), account.clone());
-        hcl.push_str(&format!(
-            "path \"{}/data/{}\" {{\n  capabilities = [\"read\"]\n}}\n",
-            mounts.kv,
-            kv_path(&path)?
-        ));
-    }
-    Ok(hcl)
-}
-
 /// Refuses as [`SourceError::Denied`] what [`allows`] does not allow.
 pub fn require(identity: &Identity, access: Access, path: &SecretPath) -> Result<(), SourceError> {
     if allows(identity, access, path) {

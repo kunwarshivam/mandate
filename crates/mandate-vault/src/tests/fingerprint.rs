@@ -8,9 +8,7 @@ use mandate_connections::record::{AccountRef, ConnectionId};
 use crate::SourceError;
 use crate::fingerprint::{AccountFingerprint, FINGERPRINT_KEY};
 use crate::kubernetes::kubernetes_policy;
-use crate::policy::{
-    Access, Identity, Mounts, SecretPath, allows, fingerprint_reads, kv_path, openbao_policy,
-};
+use crate::policy::{Access, Identity, Mounts, SecretPath, allows, kv_path, openbao_policy};
 
 /// A transit HMAC-SHA256 output: `vault:v1:` and 44 characters of base64.
 const HASH: &str = "vault:v1:q83vEjRWeJCrze8SNFZ4kKvN7xI0VniQq83vEjRWeJA=";
@@ -179,8 +177,8 @@ const FINGERPRINT_PREFIXES: [&str; 4] = [
 
 /// The connection manager's generated policy reads and changes the one registry entry by
 /// check-and-set and reads the marker, each path spelled out; no other identity's generated policy
-/// names any of them, or transit. Its read of each request's fingerprint is added per request
-/// ([`fingerprint_reads`]).
+/// names any of them, or transit. Its read of each request's fingerprint entry is DEC-2349's
+/// one-segment prefix grant, `personal/fingerprints/+/+`, which that decision's policy renders.
 #[test]
 fn the_managers_policy_reads_each_fingerprint_and_changes_the_registry() {
     let connections = [c("c1"), c("c2")];
@@ -201,26 +199,6 @@ fn the_managers_policy_reads_each_fingerprint_and_changes_the_registry() {
         };
         assert_eq!(got, want, "{identity:?}: {hcl}");
     }
-}
-
-/// The connection manager reads each request's fingerprint entry, spelled out under the request's
-/// connection and account stream, and nothing else: one block per request, no wildcard.
-#[test]
-fn the_manager_reads_each_requests_fingerprint_spelled_out() {
-    let requests = [(c("c1"), a(1)), (c("c1"), a(2)), (c("c2"), a(1))];
-    let hcl = fingerprint_reads(&requests, &Mounts::default()).unwrap();
-    let block = |id: &str, n: u8| {
-        format!(
-            "path \"mandate/data/personal/fingerprints/{}/01J8Z2ACCT000000000000000{n}\" {{\n  capabilities = [\"read\"]\n}}\n",
-            crate::policy::connection_segment(&c(id)).unwrap()
-        )
-    };
-    assert_eq!(
-        hcl,
-        [block("c1", 1), block("c1", 2), block("c2", 1)].concat()
-    );
-    assert!(!hcl.contains('+') && !hcl.contains('*'), "{hcl}");
-    assert_eq!(fingerprint_reads(&[], &Mounts::default()).unwrap(), "");
 }
 
 /// The executor's templated policy creates its own connection's fingerprint entry and updates
