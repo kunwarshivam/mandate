@@ -21017,6 +21017,88 @@
     "silent": true
    },
    {
+    "name": "a_drawdown_trigger_and_a_changed_profit_level",
+    "clause": "§9.34: only a profit_stop trigger is cancelled by its level; another limit's, whose return is negative, never",
+    "cause": {
+     "event_type": "RiskLimitTriggered",
+     "event_id": "01J8Z5RH0A000000000000000S",
+     "payload": {
+      "agent_id": "agent_a",
+      "agent_equity": "8000",
+      "high_water_mark": "8000",
+      "drawdown": "0",
+      "day_start_equity": "8000",
+      "capital_base": "10000",
+      "inherited_loss": "0",
+      "net_contributed": "10000",
+      "limit": "drawdown_ladder[0]",
+      "action": "exits_only",
+      "reason": null,
+      "breach_time_s": null,
+      "metric": null,
+      "threshold": null,
+      "value": null,
+      "risk_clock": "2026-09-21T15:00:00.000000000Z"
+     }
+    },
+    "mandates": {
+     "sha256:1111111111111111111111111111111111111111111111111111111111111111": {
+      "profit_level": "0.10",
+      "end_date": "2026-09-21",
+      "on_complete": "release"
+     },
+     "sha256:2222222222222222222222222222222222222222222222222222222222222222": {
+      "profit_level": "0.05",
+      "end_date": "2026-09-21",
+      "on_complete": "release"
+     }
+    },
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z5RH21S000000000000000",
+      "stream_id": "agent:ws_01J8Z2:agent_a",
+      "event_type": "RetirementHeld",
+      "schema_version": 1,
+      "event_time": "2026-09-22T15:00:00.000000000Z",
+      "clock_source": "scheduler",
+      "causation_id": "01J8Z5RH0A000000000000000S",
+      "correlation_id": null,
+      "actor": {
+       "kind": "agent",
+       "id": "agent_a",
+       "version": "0.1.0",
+       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "config_refs": {
+       "mandate_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "payload": {
+       "held_since": "2026-09-21T15:00:00.000000000Z",
+       "period": 1,
+       "waiting_on": [
+        "position"
+       ],
+       "risk_clock": "2026-09-22T15:00:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "event_type": "MandateVersionApplied",
+      "event_id": "01J8Z5RHV08000000000000000",
+      "payload": {
+       "agent_id": "agent_a",
+       "new_version": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+       "result": "applied"
+      }
+     }
+    ],
+    "now": "2026-09-26T15:00:00.000000000Z",
+    "silent": true
+   },
+   {
     "name": "an_owners_stop_and_a_changed_on_complete",
     "clause": "§9.34: no version cancels an owner's Stop, so a changed on_complete leaves it silent",
     "cause": {

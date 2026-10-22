@@ -458,6 +458,8 @@ def cancels(cause: dict, held_under: dict, new: dict, skip: frozenset[str] = fro
     unfilled."""
     p = cause["payload"]
     if cause["event_type"] == "RiskLimitTriggered":
+        if p["limit"] != "profit_stop" and "silence.limit" not in skip:
+            return False
         raised = Decimal(new["profit_level"]) > breach_return(cause)
         return raised or "silence.profit" in skip
     if cause["event_type"] != "GoalCompleted":
@@ -488,15 +490,15 @@ def silent(case: dict, skip: frozenset[str] = frozenset()) -> bool:
     return last is not None and epoch_seconds(case["now"]) - last > 2 * DAY
 
 
-def risk_limit_triggered(equity: str, base: str) -> dict:
-    """A `profit_stop` trigger in §9.27's shape: the snapshot, the limit, its action."""
+def risk_limit_triggered(equity: str, base: str, limit: str = "profit_stop") -> dict:
+    """A limit's trigger in §9.27's shape: the snapshot, the limit, its action."""
     return {
         "event_type": "RiskLimitTriggered",
         "event_id": STOP,
         "payload": {
             "agent_id": AGENT_ID, "agent_equity": equity, "high_water_mark": equity, "drawdown": "0",
             "day_start_equity": equity, "capital_base": base, "inherited_loss": "0", "net_contributed": base,
-            "limit": "profit_stop", "action": "exits_only", "reason": None, "breach_time_s": None,
+            "limit": limit, "action": "exits_only", "reason": None, "breach_time_s": None,
             "metric": None, "threshold": None, "value": None, "risk_clock": SINCE,
         },
     }
@@ -552,6 +554,12 @@ def silence_cases() -> list[dict]:
             end, [first, version(3)], clock(5 * DAY), False, {"end_date": "2026-10-21"},
         ),
         case("the_same_end_date", "§9.34: the same end_date cancels nothing", end, [first, version(4)], clock(5 * DAY), True),
+        case(
+            "a_drawdown_trigger_and_a_changed_profit_level",
+            "§9.34: only a profit_stop trigger is cancelled by its level; another limit's, whose return is negative, never",
+            risk_limit_triggered("8000", "10000", "drawdown_ladder[0]"),
+            [first, version(8)], clock(5 * DAY), True, {"profit_level": "0.05"},
+        ),
         case(
             "an_owners_stop_and_a_changed_on_complete",
             "§9.34: no version cancels an owner's Stop, so a changed on_complete leaves it silent",
@@ -697,7 +705,7 @@ VALIDATOR_MUTANTS = (
     *(f"loose.payload.{member}" for member, _, _, _ in MEMBER_CASES),
     *(f"nullable.payload.{member}" for member in NULLED),
 )
-SILENCE_MUTANTS = ("silence.cancel", "silence.profit", "silence.release")
+SILENCE_MUTANTS = ("silence.cancel", "silence.profit", "silence.release", "silence.limit")
 STREAM_MUTANTS = tuple(f"stream.266.{part}" for part in ("own", "end", "subject", "alert", "finished", "period", "one", "since", "version", "spacing"))
 
 
