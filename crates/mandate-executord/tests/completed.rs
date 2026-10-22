@@ -205,10 +205,12 @@ fn a_refused_connect_lets_it_exit() -> Result<(), Error> {
     Ok(())
 }
 
-/// Item 3.1 with 3.7: a connect's executor with no agent never exits `completed`, connecting,
-/// established, or after its connection is revoked; the manager stops it (DEC-2335 item 4).
+/// Item 3.2 (lane D1's deadlock finding): a connect's executor with no agent keeps running while
+/// its connect is open, connecting or established, and exits once its connection is revoked, since
+/// the manager holds its stop while a switch may still want it (DEC-2344 item 3).
 #[test]
-fn a_connects_executor_with_no_agent_never_exits_completed() -> Result<(), Error> {
+#[ignore = "pending E7-4"]
+fn an_agentless_connects_executor_exits_once_its_connection_is_revoked() -> Result<(), Error> {
     let journal = Journal::default();
     requested(&journal, "c0", CONNECTION, ACCOUNT)?;
     exchanged(&journal, "c1", ACCOUNT)?;
@@ -216,11 +218,47 @@ fn a_connects_executor_with_no_agent_never_exits_completed() -> Result<(), Error
     let broker = Paper::new(&journal);
     let mut process = start(&journal, &broker)?;
     process.step(at(NOON)?);
+    assert_eq!(process.lifecycle().state(), State::Ready, "connecting");
     connect(&journal, "c2", CONNECTION, ACCOUNT)?;
     process.step(at(NOON)?);
+    assert_eq!(process.lifecycle().state(), State::Ready, "established");
     revoke(&journal, "c3", CONNECTION, false)?;
     process.step(at(NOON)?);
-    assert_eq!(process.lifecycle().state(), State::Ready);
+    assert_eq!(process.lifecycle().state(), COMPLETED);
+    Ok(())
+}
+
+/// Item 3.2: an agentless connect refused at its connect lets its executor exit.
+#[test]
+#[ignore = "pending E7-4"]
+fn an_agentless_connect_refused_lets_its_executor_exit() -> Result<(), Error> {
+    let journal = Journal::default();
+    requested(&journal, "c0", CONNECTION, ACCOUNT)?;
+    exchanged(&journal, "c1", ACCOUNT)?;
+    tick(&journal, "t1", NOON)?;
+    let broker = Paper::new(&journal);
+    let mut process = start(&journal, &broker)?;
+    process.step(at(NOON)?);
+    assert_eq!(process.lifecycle().state(), State::Ready, "connecting");
+    refused(&journal, "c2", CONNECTION)?;
+    process.step(at(NOON)?);
+    assert_eq!(process.lifecycle().state(), COMPLETED);
+    Ok(())
+}
+
+/// Item 3.2: an executor started for a kill switch on an account whose only connection, with no
+/// agent ever deployed, is revoked exits too (DEC-2344's kill-switch start).
+#[test]
+#[ignore = "pending E7-4"]
+fn an_agentless_account_whose_connection_is_revoked_lets_it_exit() -> Result<(), Error> {
+    let journal = Journal::default();
+    connect(&journal, "c1", CONNECTION, ACCOUNT)?;
+    revoke(&journal, "c2", CONNECTION, true)?;
+    tick(&journal, "t1", NOON)?;
+    let broker = Paper::new(&journal);
+    let mut process = start(&journal, &broker)?;
+    process.step(at(NOON)?);
+    assert_eq!(process.lifecycle().state(), COMPLETED);
     Ok(())
 }
 
