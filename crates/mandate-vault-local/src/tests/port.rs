@@ -12,7 +12,7 @@ use super::fixtures::{code, conn, token};
 use super::layout::Layout;
 use crate::VaultError;
 use crate::port::{ApiPort, ExecutorPort};
-use crate::store::sweep_taken;
+use crate::store::{put_back, sweep_taken};
 
 fn key() -> VaultKey {
     VaultKey("ws/c1".to_owned())
@@ -402,4 +402,48 @@ fn a_sweep_that_cannot_list_the_directory_is_refused() {
         sweep_taken(&dir.join(entry.file_name()), &entry),
         Err(VaultError::Io)
     );
+}
+
+/// A refused take is put back where it was taken from, and leaves no take name behind.
+#[test]
+#[ignore = "pending E10-13"]
+fn a_refused_take_is_put_back() {
+    let layout = Layout::new();
+    let path = layout.file(&code("ws/c1", "c1"));
+    let taken = path.with_file_name("put-back.taken-00");
+    std::fs::write(&taken, b"refused").unwrap();
+    put_back(&taken, &path);
+    assert_eq!(std::fs::read(&path).unwrap(), b"refused");
+    assert!(!taken.exists());
+}
+
+/// A fresh code the API writes while a wrong-binding take holds the entry is never replaced by
+/// that take's put-back: the fresh code stays for the rightful taker, and the refused entry is
+/// unlinked.
+#[test]
+#[ignore = "pending E10-13"]
+fn a_put_back_never_replaces_a_code_written_meanwhile() {
+    let layout = Layout::new();
+    let (api, executor) = layout.both();
+    let entry = code("ws/c1", "c1");
+    let path = layout.file(&entry);
+    let taken = path.with_file_name("put-back.taken-01");
+    std::fs::write(&taken, b"refused").unwrap();
+    let mut api_port = ApiPort {
+        vault: &api,
+        connection_id: conn("c1"),
+        environment: Environment::Paper,
+    };
+    api_port
+        .put_code(&key(), code_secret("fresh"), verifier("fresh-verifier"))
+        .unwrap();
+    put_back(&taken, &path);
+    assert!(!taken.exists(), "the refused entry is unlinked");
+    let mut exec_port = ExecutorPort {
+        vault: &executor,
+        connection_id: conn("c1"),
+        environment: Environment::Paper,
+    };
+    let waiting = exec_port.take_code(&key()).unwrap().unwrap();
+    assert_eq!(waiting.code.0.expose_secret(), "fresh");
 }

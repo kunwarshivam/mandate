@@ -228,6 +228,24 @@ impl ExecutorVault {
     }
 }
 
+/// Renames a refused take at `taken` back to `path`, never replacing a code the API wrote there
+/// meanwhile: when one was, that newer code stays and the refused entry is unlinked. A rename that
+/// fails otherwise leaves the refused entry under its take name, for the next delete's sweep.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "`take_code_into` calls it once the implementation PR lands"
+    )
+)]
+#[expect(
+    clippy::todo,
+    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+)]
+pub(crate) fn put_back(_taken: &Path, _path: &Path) {
+    todo!()
+}
+
 /// The prefix of every name a take of `entry` uses.
 fn taken_prefix(entry: &Entry) -> String {
     format!("{}.taken-", entry.file_name())
