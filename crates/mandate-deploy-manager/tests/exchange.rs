@@ -654,8 +654,9 @@ fn every_check_of_the_exchange_oracle_catches_its_seeded_bug() {
         (
             &opened,
             Box::new(|seen| {
-                let again = seen.calls[0].clone();
-                seen.calls.push(again);
+                if let Some(again) = seen.calls.first().cloned() {
+                    seen.calls.push(again);
+                }
             }),
             "launched twice",
         ),
