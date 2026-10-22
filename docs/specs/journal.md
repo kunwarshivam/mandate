@@ -23,8 +23,10 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
     backup-eligible flag, which the step-up verifier holds every later assertion to. Version 1
     stays registered and unchanged, the API writes version 2 only, and the verifier never counts a
     version 1 credential, which carries no flag. It adds a member and loosens nothing (DEC-176).
-    The `credential_enrolled_v2` section holds its vectors. The `credentials` section's
-    version-refusal case moves from version 2 to version 3.
+    The `credential_enrolled_v2` section holds its vectors, every rule-249 clause read again at
+    version 2 among them. The `credentials` section's version-refusal case moves from version 2 to
+    version 3, and a version 1 enrolment carrying `backup_eligible` is refused there as `schema`.
+    The fold reads version 2 before anything writes it (DEC-2122 item 5).
 - **v0.70 ([DEC-1175](../project/decisions/DEC-1175.md); DEC-2627, claim #1901):** §9.21 admits the
   deployment manager's start of an OAuth connect's token exchange, and its stop when the request
   closes: `ProcessStartIssued`'s and `ProcessStopIssued`'s `process` add `token_exchange`, named by
@@ -5912,7 +5914,9 @@ members, with `backup_eligible` after `sign_count`.
 flag is journaled rather than read back from the authenticator. Version 1 stays registered and
 unchanged, and rule 249 reads both versions alike. The API writes version 2 only. A version 1
 credential carries no flag, so the verifier never counts it for step-up. No deployment holds a
-version 1 `CredentialEnrolled`. The `credential_enrolled_v2` section holds version 2's vectors; the
+version 1 `CredentialEnrolled`. Every reader of the credentials (the verifier's fold and route 2's
+lookup, DEC-2121) reads version 2 before any writer appends one, so a version 2 row never makes
+the fold unbuildable ([DEC-2122](../project/decisions/DEC-2122.md) item 5). The `credential_enrolled_v2` section holds version 2's vectors; the
 `credentials` section stays version 1's.
 
 **`CredentialRemoved`**: a member removed one of their passkeys.

@@ -208,6 +208,9 @@ def invalid_drafts() -> list[dict]:
         *member_drafts(),
         *rule_drafts(),
         invalid("enrolled_at_version_3", "§9.31: closed at schema versions 1 and 2", FIRST, [change("schema_version", 3)], "unknown_schema", "payload"),
+        *(invalid(f"version_1_with_backup_eligible.{value}".lower(), "§9.31: `backup_eligible` is version 2's only", FIRST,
+                  [change("payload.backup_eligible", value)], "schema", "payload.backup_eligible")
+          for value in (True, False)),
         invalid("removed_at_version_2", "§9.31: closed at schema version 1 only", REMOVED, [change("schema_version", 2)], "unknown_schema", "payload"),
     ]
 
@@ -461,19 +464,30 @@ def v2_base_drafts() -> dict[str, dict]:
 
 
 def v2_invalid_drafts() -> list[dict]:
-    """`backup_eligible` of every wrong kind and absent, and rule 249 still read at version 2."""
+    """`backup_eligible` of every wrong kind and absent, the record closed, and every clause of
+    rule 249 that version 1's enrolments are refused by, read again at version 2."""
     path = "payload.backup_eligible"
+    rule_249 = [
+        {**copy.deepcopy(case), "clause": case["clause"] + " (version 2)"}
+        for case in rule_drafts()
+        if case["base_draft"] in (FIRST, STEPPED)
+    ]
     return [
         *(invalid(f"backup_eligible.{name}", "§9.31 version 2: `backup_eligible` is a boolean", FIRST, [change(path, value)], "schema", path)
           for name, value in (("text", "true"), ("integer", 1), ("null", None))),
         invalid("backup_eligible.missing", "§9.31 version 2: `backup_eligible` is required", FIRST, [delete(path)], "schema", path),
-        invalid("first_without_cool_off", "rule 249 at version 2: a first enrolment cools off", FIRST,
-                [change("payload.cool_off_ends", None)], "schema", "payload.cool_off_ends"),
+        invalid("extra", "§9.31 version 2: closed", FIRST, [change("payload.reason", "lost")], "schema", "payload.reason"),
+        *rule_249,
     ]
 
 
 def v2_valid_drafts() -> list[dict]:
-    return [valid("backup_eligible", "§9.31 version 2: a backup-eligible passkey", STEPPED, [change("payload.backup_eligible", True)])]
+    """A backup-eligible passkey, and every enrolment version 1 admits, admitted again at version 2."""
+    return [
+        valid("backup_eligible", "§9.31 version 2: a backup-eligible passkey", STEPPED, [change("payload.backup_eligible", True)]),
+        *({**copy.deepcopy(case), "clause": case["clause"] + " (version 2)"}
+          for case in valid_drafts() if case["base_draft"] in (FIRST, STEPPED)),
+    ]
 
 
 def found_v2(check: str, message: str) -> str:
@@ -501,7 +515,13 @@ def check_v2_section(section: dict) -> list[str]:
     return problems
 
 
-V2_VALIDATOR_MUTANTS = ("versions.credential_enrolled_v2", "loose.payload.backup_eligible", "record.missing")
+V2_VALIDATOR_MUTANTS = (
+    "versions.credential_enrolled_v2",
+    "loose.payload.backup_eligible",
+    "record.missing",
+    "record.extra",
+    "rule.249.v2_cool_off_only",
+)
 
 
 def run_v2_mutants(section: dict) -> list[str]:

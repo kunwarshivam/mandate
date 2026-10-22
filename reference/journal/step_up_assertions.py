@@ -253,21 +253,49 @@ def stream_cases() -> list[dict]:
         expect = {"outcome": "Valid"} if index is None else {"outcome": "Invalid", "rule": "254", "index": index}
         return {"name": name, "clause": clause, "records": records, "expect": expect}
 
-    def enrolled(count: int) -> dict:
-        record = credentials.enrolled()
-        record["payload"]["sign_count"] = count
-        return record
+    def at_version(version: int):
+        def enrolled(count: int) -> dict:
+            record = credentials.enrolled_v2() if version == 2 else credentials.enrolled()
+            record["payload"]["sign_count"] = count
+            return record
 
+        return enrolled
+
+    def cases(enrolled, suffix: str, note: str) -> list[dict]:
+        return [
+            case(f"rising{suffix}", f"rule 254: above the last{note}",
+                 [enrolled(5), asserted(sign_count=6), asserted(LATER, challenge=OTHER_CHALLENGE, sign_count=9)], None),
+            case(f"not_kept{suffix}", f"rule 254: 0 on both sides{note}",
+                 [enrolled(0), asserted(sign_count=0), asserted(LATER, challenge=OTHER_CHALLENGE, sign_count=0)], None),
+            case(f"first_kept{suffix}", f"rule 254: from 0 at enrolment to 1, the first count kept{note}",
+                 [enrolled(0), asserted(sign_count=1)], None),
+            case(f"equal_to_enrolment{suffix}", f"rule 254: not equal{note}", [enrolled(5), asserted(sign_count=5)], 1),
+            case(f"below_the_last{suffix}", f"rule 254: never backwards{note}",
+                 [enrolled(5), asserted(sign_count=9), asserted(LATER, challenge=OTHER_CHALLENGE, sign_count=8)], 2),
+            case(f"zero_after_kept{suffix}", f"rule 254: 0 only when never kept{note}", [enrolled(5), asserted(sign_count=0)], 1),
+            case(f"another_members{suffix}", f"rule 254: the actor's own{note}",
+                 [enrolled(5), asserted(sign_count=6, actor=OTHER_MEMBER)], 1),
+            case(f"after_removal{suffix}", f"rule 254: not removed{note}",
+                 [enrolled(5), credentials.removed(), asserted(sign_count=6)], 2),
+            case(f"challenge_twice{suffix}", f"rule 254: one assertion per challenge{note}",
+                 [enrolled(5), asserted(sign_count=6), asserted(LATER, sign_count=9)], 2),
+        ]
+
+    other_v2 = credentials.enrolled_v2(stepped=True)
+    other_v2["event_id"] = THIRD
+    other_v2["payload"]["credential"] = OTHER_CREDENTIAL
+    other_v2["payload"]["sign_count"] = 3
+    mixed = [
+        at_version(1)(5),
+        other_v2,
+        asserted(sign_count=6),
+        asserted(LATER, challenge=OTHER_CHALLENGE, credential=OTHER_CREDENTIAL, sign_count=4),
+    ]
     return [
-        case("rising", "rule 254: above the last", [enrolled(5), asserted(sign_count=6), asserted(LATER, challenge=OTHER_CHALLENGE, sign_count=9)], None),
-        case("not_kept", "rule 254: 0 on both sides", [enrolled(0), asserted(sign_count=0), asserted(LATER, challenge=OTHER_CHALLENGE, sign_count=0)], None),
-        case("equal_to_enrolment", "rule 254: not equal", [enrolled(5), asserted(sign_count=5)], 1),
-        case("below_the_last", "rule 254: never backwards", [enrolled(5), asserted(sign_count=9), asserted(LATER, challenge=OTHER_CHALLENGE, sign_count=8)], 2),
-        case("zero_after_kept", "rule 254: 0 only when never kept", [enrolled(5), asserted(sign_count=0)], 1),
+        *cases(at_version(1), "", ""),
         case("never_enrolled", "rule 254: an enrolled credential", [asserted()], 0),
-        case("another_members", "rule 254: the actor's own", [enrolled(5), asserted(sign_count=6, actor=OTHER_MEMBER)], 1),
-        case("after_removal", "rule 254: not removed", [enrolled(5), credentials.removed(), asserted(sign_count=6)], 2),
-        case("challenge_twice", "rule 254: one assertion per challenge", [enrolled(5), asserted(sign_count=6), asserted(LATER, sign_count=9)], 2),
+        *cases(at_version(2), "_v2", " (a version 2 enrolment)"),
+        case("version_1_then_version_2", "rule 254: each credential's own counter, whichever version enrolled it", mixed, None),
     ]
 
 

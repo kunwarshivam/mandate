@@ -1842,14 +1842,18 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
             rule("242.user", False, "schema", "actor.kind")
     if event_type in ("CredentialEnrolled", "CredentialRemoved"):
         number = "249" if event_type == "CredentialEnrolled" else "250"
-        if event_type == "CredentialEnrolled":
+        # A seeded bug: version 2 read by the cool-off clause alone (DEC-2122).
+        cool_off_only = draft["schema_version"] == 2 and "rule.249.v2_cool_off_only" in skip
+        if event_type == "CredentialEnrolled" and not cool_off_only:
             rule("249.kind", p["kind"] == "passkey", "schema", "payload.kind")
-        if rule_holds(f"{number}.user", draft["actor"]["kind"] == "user", skip):
+        if cool_off_only:
+            pass
+        elif rule_holds(f"{number}.user", draft["actor"]["kind"] == "user", skip):
             rule(f"{number}.member", draft["actor"]["id"] == p["member"], "schema", "actor.id")
         else:
             rule(f"{number}.user", False, "schema", "actor.kind")
         step_up = p["step_up"]
-        if step_up is not None:
+        if step_up is not None and not cool_off_only:
             rule(f"{number}.passkey", step_up["method"] == "passkey", "schema", "payload.step_up.method")
         if event_type == "CredentialEnrolled":
             ends = p["cool_off_ends"]
