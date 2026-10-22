@@ -306,6 +306,41 @@ fn a_row_the_fold_does_not_read_advances_its_head() {
     assert_eq!(readable_head(fold.view()), 3);
 }
 
+/// A close request of the account kill switch (journal spec v0.75 §9.5, DEC-2337) is a record the
+/// risk fold reads and acts on nowhere: the view stays readable with its snapshot unchanged, only
+/// its head advances, and nothing is appended.
+#[test]
+#[ignore = "pending E7-4"]
+fn a_close_request_leaves_the_risk_view_readable_and_unchanged() {
+    let mandate = mandate();
+    let mut fold = open(&mandate, &Wall);
+    let RiskView::Readable {
+        snapshot: before, ..
+    } = fold.view().clone()
+    else {
+        panic!("the opened view is readable");
+    };
+    let close = row(
+        2,
+        "AccountCloseRequested",
+        1,
+        r#"{"instrument_id":"AAPL","qty":"10","kill_switch_event":"01J8Z4C0000000000000000000",
+        "attempt":1,"risk_clock":"2026-09-22T14:30:01.000000000Z"}"#,
+    );
+
+    assert_eq!(fold.fold(&close).unwrap(), Vec::<RiskAppend>::new());
+    match fold.view() {
+        RiskView::Readable { snapshot, head } => {
+            assert_eq!(
+                (snapshot, *head),
+                (&before, 2),
+                "unchanged, at the close's seq"
+            );
+        }
+        other => panic!("the view stays readable: {other:?}"),
+    }
+}
+
 #[test]
 fn a_seq_gap_makes_the_view_unreadable() {
     let mandate = mandate();
