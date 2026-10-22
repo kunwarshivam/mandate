@@ -64,5 +64,17 @@
     "set": {
       "/step_up_assertion": "AAEC"
     }
+  },
+  {
+    "label": "a step-up without its assertion",
+    "set": {
+      "/step_up_assertion": null
+    }
+  },
+  {
+    "label": "an assertion without its step-up",
+    "set": {
+      "/step_up": null
+    }
   }
 ]

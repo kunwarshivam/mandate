@@ -10,7 +10,12 @@ description = "The model-gateway service: mandate-gateway over the HTTPS transpo
 workspace = true
 
 [dependencies]
+mandate-canon.workspace = true
 mandate-gateway.workspace = true
+mandate-journal.workspace = true
+mandate-num.workspace = true
+mandate-research.workspace = true
+mandate-store.workspace = true
 mandate-vault.workspace = true
 secrecy.workspace = true
 thiserror.workspace = true
@@ -18,8 +23,6 @@ thiserror.workspace = true
 [dev-dependencies]
 mandate-canon.workspace = true
 mandate-connections.workspace = true
-mandate-store.workspace = true
-mandate-journal.workspace = true
 mandate-time.workspace = true
 proptest.workspace = true
 tokio = { workspace = true, features = ["rt"] }

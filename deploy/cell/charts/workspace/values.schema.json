@@ -20,7 +20,8 @@
     "api",
     "artifacts",
     "founding",
-    "executor"
+    "executor",
+    "alpacaOAuth"
   ],
   "properties": {
     "workspace": {
@@ -437,7 +438,8 @@
         "audience",
         "jwksUrl",
         "appOrigin",
-        "subjectLinks"
+        "subjectLinks",
+        "ingressPeers"
       ],
       "properties": {
         "org": {
@@ -474,6 +476,15 @@
           "type": "string",
           "pattern": "^$|^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$",
           "description": "The ConfigMap whose `subject-links` key is mounted at /etc/mandate/subject-links (DEC-1023); empty mounts none, and every sign-in is refused"
+        },
+        "ingressPeers": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\\.){3}(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])$|^[0-9a-f:]*:[0-9a-f:]*$|^[0-9a-f:]*:((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\\.){3}(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])$"
+          },
+          "description": "MANDATE_API_INGRESS_PEERS: the ingress's own exact addresses, IPv4 (each octet 0 to 255), IPv6, or IPv4-mapped IPv6, from which alone route 2's limits read X-Forwarded-For (workspace API spec §4.10, DEC-2117 item 4); empty reads none"
         }
       }
     },
@@ -518,6 +529,27 @@
           "description": "The founder's principal, an opaque ULID (identity spec §3.1), or empty when founding is off",
           "type": "string",
           "pattern": "^([0-7][0-9A-HJKMNP-TV-Z]{25})?$"
+        }
+      }
+    },
+    "alpacaOAuth": {
+      "description": "The paper Alpaca OAuth app's public settings (DEC-2636), rendered into the API and the token exchange only. No secret: the client secret is the vault's.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "clientId",
+        "redirectUri"
+      ],
+      "properties": {
+        "clientId": {
+          "type": "string",
+          "pattern": "^$|^[A-Za-z0-9._-]{1,128}$",
+          "description": "MANDATE_ALPACA_CLIENT_ID"
+        },
+        "redirectUri": {
+          "type": "string",
+          "pattern": "^$|^https://[a-z0-9.-]+(:[0-9]+)?/v1/oauth/alpaca/callback$|^http://(127\\.0\\.0\\.1|localhost|\\[::1\\])(:[0-9]+)?/v1/oauth/alpaca/callback$",
+          "description": "MANDATE_ALPACA_REDIRECT_URI: the callback on this deployment's API host (DEC-2623 item 2)"
         }
       }
     }

@@ -60,7 +60,12 @@ pub fn serve(router: Router) -> SocketAddr {
                 .expect("a loopback port");
             tx.send(listener.local_addr().expect("its address"))
                 .expect("the test is waiting");
-            axum::serve(listener, router).await.expect("serving");
+            axum::serve(
+                listener,
+                router.into_make_service_with_connect_info::<SocketAddr>(),
+            )
+            .await
+            .expect("serving");
         });
     });
     rx.recv_timeout(Duration::from_secs(10))
