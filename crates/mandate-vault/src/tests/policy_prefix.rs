@@ -85,7 +85,6 @@ const MANAGER_PREFIX: [(&str, &str); 2] = [
 ];
 
 #[test]
-#[ignore = "pending E21-33"]
 fn the_api_and_the_manager_reach_a_connection_no_provisioning_named() {
     for listed in [vec![], vec![c("c1")], vec![c("c1"), c("c2")]] {
         for identity in [Identity::Api, Identity::ConnectionManager] {
@@ -109,7 +108,6 @@ fn the_api_and_the_manager_reach_a_connection_no_provisioning_named() {
 }
 
 #[test]
-#[ignore = "pending E21-33"]
 fn the_connection_blocks_are_the_prefixes_alone_whatever_is_listed() {
     for listed in [vec![], vec![c("c1")], vec![c("c1"), c("c2"), c("c3")]] {
         for (identity, want) in [

@@ -1,8 +1,0 @@
-file = "crates/mandate-vault/src/tests/policy_prefix.rs"
-test = "the_connection_blocks_are_the_prefixes_alone_whatever_is_listed"
-reason = """
-DEC-2349 (E21-33): `openbao_policy` is implemented, and today it spells out each connection's code
-and token paths for the connections given to `provision` alone, so this test fails on its own
-answer for a connection no provisioning named, not at a stub. The implementation PR deletes this
-file with the test's `#[ignore]`.
-"""

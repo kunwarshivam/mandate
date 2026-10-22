@@ -137,10 +137,7 @@ fn names_and_paths_are_pinned() {
     );
     let hcl = openbao_policy(&Identity::ConnectionManager, &[c("c1")], &other);
     assert!(
-        hcl.contains(&format!(
-            "path \"kv9/metadata/{}\"",
-            kv_path(&SecretPath::Token(c("c1")))
-        )),
+        hcl.contains("path \"kv9/metadata/connections/+/token\""),
         "{hcl}"
     );
     assert!(
@@ -164,8 +161,10 @@ fn blocks(hcl: &str) -> Vec<(String, String)> {
     out
 }
 
+/// Every policy is the table with no wildcard, but the Api's and the connection manager's
+/// one-segment `+` on their connection paths (DEC-2349), which `policy_prefix` pins.
 #[test]
-fn each_policy_is_the_table_with_no_wildcard() {
+fn each_policy_is_the_table_with_no_wildcard_beyond_dec_2349s() {
     let connections = [c("c1"), c("c2")];
     let platform_paths: Vec<String> = PlatformSecret::ALL
         .iter()
@@ -173,11 +172,15 @@ fn each_policy_is_the_table_with_no_wildcard() {
         .collect();
     for identity in identities() {
         let hcl = openbao_policy(&identity, &connections, &Mounts::default());
+        let prefixed = matches!(identity, Identity::Api | Identity::ConnectionManager);
         assert!(
-            !hcl.contains('*') && !hcl.contains('+'),
+            !hcl.contains('*') && (prefixed || !hcl.contains('+')),
             "{identity:?}: {hcl}"
         );
-        let got = blocks(&hcl);
+        let got: Vec<(String, String)> = blocks(&hcl)
+            .into_iter()
+            .filter(|(p, _)| !p.contains('+'))
+            .collect();
         let data_blocks = got
             .iter()
             .filter(|(p, _)| p.starts_with("mandate/") && !platform_paths.contains(p))
@@ -186,6 +189,7 @@ fn each_policy_is_the_table_with_no_wildcard() {
             .iter()
             .flat_map(|a| paths().into_iter().map(move |p| (*a, p)))
             .filter(|(a, p)| allows(&identity, *a, p))
+            .filter(|(_, p)| !prefixed || *p == SecretPath::ClientSecret)
             .count();
         assert_eq!(
             data_blocks, allowed,
@@ -215,6 +219,9 @@ fn each_policy_is_the_table_with_no_wildcard() {
                     Access::Delete => ("metadata", "delete"),
                     Access::Take => ("data", "update"),
                 };
+                if prefixed && path != SecretPath::ClientSecret {
+                    continue;
+                }
                 let want = format!("mandate/{prefix}/{}", kv_path(&path));
                 let present = got.iter().any(|(p, c)| p == &want && c == caps);
                 assert_eq!(
