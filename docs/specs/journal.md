@@ -20,13 +20,14 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   rule, or vector changes, since a control-stream check does not read the account stream. It only
   delays a record that ends an agent.
   - **§9.21: an executor no agent wants.** A covering kill switch gives such an executor one
-    `kill_switch` start; a start answers a switch only when committed after it, as does the
-    executor's `KillSwitchActivated` for it, and a generation that ends with success answers only
+    `kill_switch` start; only a start committed after a switch answers it, since the manager reads
+    only the control stream, and a generation that ends with success answers only
     the switches committed before its start. A batch start's `causation_id` is the first switch it
     answers. The manager journals no stop for a generation a switch keeps: it ends by its own exit,
     so `ProcessStopIssued`'s causes are unchanged. A crash loop first raises
-    `kill_switch_unapplied`. No member, rule, or vector changes: each only adds a start in answer to
-    a kill switch or delays a stop.
+    `kill_switch_unapplied`, and "Which fact is the pause" starts a crash-looped slot once for the
+    covering switches not yet answered. No member, rule, or vector changes: each only adds a start
+    in answer to a kill switch or delays a stop.
   - **Versions.** Versions follow the coordinator's assignment: v0.72 is lane LV's
     `ProtectionChanged` version 2 (DEC-2312), v0.73 lane L2's active-address definition
     (DEC-2123), v0.74 lane D1's `exchanged` start (DEC-2335), and v0.75 lane LV's
@@ -4861,7 +4862,7 @@ pod is replaced. The orchestrator restarts nothing on its own, so every restart 
 start whose `cause` is `kill_switch` is not counted.
 
 **Which fact is the pause.** `ProcessCrashLooped`. After it the manager starts the slot again only
-for a kill switch, once per `OwnerCommandIssued` with `kill_switch` whose scope covers it, and
+for a kill switch, once for the covering switches not yet answered (v0.76), and
 raises one opaque operator alert (design §8.2, RB-14). Nothing at this version ends the pause but
 the agent's `AgentStopped`, or for an executor every agent of its account stopped (DEC-1170 item
 3). An `AgentStopped` is final: no record here follows it for that agent's runtime, whether or
@@ -4914,10 +4915,11 @@ switch never goes unread:
 - **The start.** An executor slot that no deployed agent wants, with no instance that may run, gets
   one `kill_switch` start for the covering switches it has not answered, whether or not its crash
   loop is journaled; each later covering switch that finds it down gets one more.
-- **What answers a switch.** A start committed after the switch, or the executor's journaled
-  `KillSwitchActivated` for it. A generation that ends with success answers only the switches
-  committed before its own start; the manager reads every covering switch committed since as not
-  answered and starts the executor again for it.
+- **What answers a switch.** Only a start committed after it: the manager reads only the control
+  stream, so it answers by starts alone, never by the executor's `KillSwitchActivated`. A
+  generation that ends with success answers only the switches committed before its own start; the
+  manager reads every covering switch committed since as not answered and starts the executor
+  again for it.
 - **The held stop.** The manager journals no `ProcessStopIssued` for an executor generation that a
   covering switch reached and has not seen answered, nor for one a `kill_switch` start made while
   no agent wanted it: that generation ends by its own exit, with success once no agent of the
