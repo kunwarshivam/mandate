@@ -606,3 +606,35 @@ fn failure_keys_are_bounded_and_the_oldest_is_dropped_first() {
         "dropping a key changes no answer"
     );
 }
+
+#[test]
+#[ignore = "pending E9-1"]
+fn the_failure_key_whose_latest_failure_is_oldest_goes_first_an_address_before_a_device() {
+    let address = |a: &str| client(a, "never-seen");
+    let device = |d: &str| client("never-seen", d);
+    let mut tie = Bench::bounded((9, 9), (1, 1), (9, 9, 1));
+    assert_eq!(tie.present(&client("a1", "d1"), 100, 0, true), REFUSED);
+    assert!(
+        !tie.reached(&address("a1"), 0),
+        "at a tie the address goes first"
+    );
+    assert!(tie.reached(&device("d1"), 0), "and the device stays");
+    let mut older = Bench::bounded((9, 9), (1, 1), (9, 9, 2));
+    assert_eq!(older.present(&client("a1", "d1"), 101, 0, true), REFUSED);
+    assert_eq!(older.present(&client("a1", "d2"), 102, S, true), REFUSED);
+    assert!(
+        !older.reached(&device("d1"), S),
+        "the device whose latest failure is oldest goes"
+    );
+    assert!(older.reached(&address("a1"), S), "not the newer address");
+    assert!(older.reached(&device("d2"), S));
+    let mut exact = Bench::bounded((9, 9), (1, 1), (9, 9, 4));
+    assert_eq!(exact.present(&client("a1", "d1"), 103, 0, true), REFUSED);
+    assert_eq!(exact.present(&client("a2", "d2"), 104, S, true), REFUSED);
+    for key in [address("a1"), device("d1"), address("a2"), device("d2")] {
+        assert!(
+            exact.reached(&key, S),
+            "at the bound every key is kept: {key:?}"
+        );
+    }
+}
