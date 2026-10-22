@@ -232,7 +232,6 @@ fn started(
 /// fingerprint entry are created once each, the record holds every check passed, and the lease is
 /// given back.
 #[test]
-#[ignore = "pending E21-32"]
 fn a_fresh_stream_is_checked_once_over_the_lease_which_is_given_back() -> Result<(), Error> {
     let mut store = MemoryStore::default();
     let (session, calls) = Session::new(Ok(full()))?;
@@ -405,7 +404,6 @@ type Route = (
 /// Item (b): on every route, passed or refused, no journaled row holds the account id, and no code
 /// the start answers does, so the stderr line the binary prints from it cannot either.
 #[test]
-#[ignore = "pending E21-32"]
 fn the_account_id_is_in_no_record_and_no_code() -> Result<(), Error> {
     let routes: [Route; 5] = [
         (full(), Ok(()), Ok(()), true, Ok(Some(true))),

@@ -128,15 +128,11 @@ fn fingerprinted(
     fingerprint: &AccountFingerprint,
     pii_ref: &AccountPiiRef,
 ) -> Result<(), SourceError> {
-    let _ = (
-        create,
-        connection,
-        request,
-        fingerprint,
-        pii_ref,
-        encode_entry,
-    );
-    Err(SourceError::Unimplemented { story: "E21-32" })
+    let entry = encode_entry(fingerprint, pii_ref)?;
+    create(
+        &SecretPath::Fingerprint(connection.clone(), request),
+        &entry,
+    )
 }
 
 /// The scopes a leased secret's token entry was stored with (DEC-2624), by its one reader.

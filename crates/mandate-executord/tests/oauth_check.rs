@@ -153,7 +153,6 @@ fn results(payload: &Value) -> Vec<(String, String, Option<String>)> {
 /// same reference; the journal opens the stream and records every check passed as an Alpaca paper
 /// OAuth connection, holding the reference and never the id.
 #[test]
-#[ignore = "pending E21-32"]
 fn a_read_account_is_kept_in_its_entry_and_only_its_reference_is_journaled() -> Result<(), Error> {
     let mut store = MemoryStore::default();
     let vault = CreateOnce::default();
@@ -264,7 +263,6 @@ fn an_unhashed_account_creates_nothing_and_journals_a_null_reference() -> Result
 /// too: the record holds no reference whose fingerprint the connection manager could not read
 /// (DEC-2345 item 7), and the account entry is left for erasure.
 #[test]
-#[ignore = "pending E21-32"]
 fn a_refused_fingerprint_create_journals_a_null_reference() -> Result<(), Error> {
     let mut store = MemoryStore::default();
     let vault = CreateOnce::default();

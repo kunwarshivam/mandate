@@ -65,7 +65,6 @@ fn held(leased: &[u8]) -> Result<Exchanged<'_>, Error> {
 /// minted at its time from its source: the entry, the fingerprint entry beside it and the
 /// journaled record hold that one reference.
 #[test]
-#[ignore = "pending E21-32"]
 fn the_check_keeps_the_account_under_a_reference_minted_from_its_source() -> Result<(), Error> {
     let mut store = MemoryStore::default();
     let created = RefCell::new(Vec::new());

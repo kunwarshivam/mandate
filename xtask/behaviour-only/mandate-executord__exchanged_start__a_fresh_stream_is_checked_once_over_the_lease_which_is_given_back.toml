@@ -1,8 +1,0 @@
-file = "crates/mandate-executord/tests/exchanged_start.rs"
-test = "a_fresh_stream_is_checked_once_over_the_lease_which_is_given_back"
-reason = """
-The connect check folds its fingerprint create into whether the account was read, so its stub's
-report never reaches the check's answer: the stub refuses the fingerprint entry, the account is
-journaled unreadable, and the test fails on that answer. E21-32's F3c implementation creates the
-entry and deletes this row (DEC-2345 item 7).
-"""
