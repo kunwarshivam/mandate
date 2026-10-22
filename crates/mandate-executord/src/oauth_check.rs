@@ -12,7 +12,9 @@
 use mandate_connections::account_entry::{BrokerAccountId, encode};
 use mandate_connections::checks::{AccountRead, CheckInput, Granted, Occasion, run};
 use mandate_connections::grant::GrantedScopes;
-use mandate_connections::record::{AccountPiiRef, AuthKind, Broker, ConnectionId, Environment};
+use mandate_connections::record::{
+    AccountPiiRef, AccountRef, AuthKind, Broker, ConnectionId, Environment,
+};
 use mandate_connections::token_entry;
 use mandate_executor::{AccountScope, IdGen};
 use mandate_store::Store;
@@ -36,7 +38,7 @@ pub struct OAuthCheck {
 }
 
 /// Runs `check` for the account in `scope` at `now`: once the account stream is this writer's, an
-/// account read is written by `create` to the connection's [`SecretPath::AccountId`] entry, in
+/// account read is written by `create` to this request's [`SecretPath::AccountId`] entry, in
 /// [`mandate_connections::account_entry::encode`]'s form, and the checks run as an Alpaca paper
 /// OAuth connection. The account is read only when `create` stored the entry; an unread account
 /// never calls it, and any refusal of it is an unreadable account.
@@ -59,10 +61,11 @@ pub fn oauth_connect_check<S: Store>(
         pii_ref,
     } = check;
     journal_check(store, ids, scope, now, || {
-        let stored = account.is_some_and(|id| {
+        let request = AccountRef::new(&scope.account.0).ok();
+        let stored = account.zip(request).is_some_and(|(id, request)| {
             encode(&pii_ref, &id).is_ok_and(|entry| {
                 let bytes = SecretSlice::from(entry.expose_secret().as_bytes().to_vec());
-                create(&SecretPath::AccountId(connection.clone()), &bytes).is_ok()
+                create(&SecretPath::AccountId(connection.clone(), request), &bytes).is_ok()
             })
         });
         let account = if stored {
