@@ -119,7 +119,6 @@ fn a_stopped_agents_switch_is_applied_from_the_command_once_revoked() -> Result<
 /// A stopped agent's kill switch with no revocation (DEC-2343 item 3): no runtime runs to copy it,
 /// so the executor applies it from the command, whether the stop came before the command or after.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_stopped_agents_switch_is_applied_from_the_command_with_no_revocation() -> Result<(), Error> {
     for stopped_first in [true, false] {
         let journal = deployed()?;
@@ -164,7 +163,6 @@ fn a_stopped_agents_copy_applied_first_is_not_read_again_from_the_command() -> R
 /// One command is applied to each agent it covers, once each (`ExecutorState::applied_for`): the
 /// first agent's switch does not count for the second.
 #[test]
-#[ignore = "pending E7-4"]
 fn one_command_is_applied_to_each_agent_it_covers() -> Result<(), Error> {
     let journal = deployed()?;
     deploy(&journal, "c3", OTHER_AGENT, CONNECTION)?;

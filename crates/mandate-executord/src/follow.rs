@@ -68,6 +68,8 @@ pub struct Following {
     revocations: BTreeMap<String, Vec<u64>>,
     /// The kill-switch commands of connection or workspace scope, in control-stream order.
     commands: Vec<KillCommand>,
+    /// The agents with an `AgentStopped`, whose runtime no longer runs to copy a kill switch.
+    stopped: BTreeSet<AgentId>,
 }
 
 /// An `OwnerCommandIssued` `kill_switch` the executor may read itself (DEC-2343 item 3): its
@@ -94,6 +96,7 @@ pub fn agents_of(
     let mut deployed: BTreeMap<String, Vec<(u64, String, String)>> = BTreeMap::new();
     let mut revocations: BTreeMap<String, Vec<u64>> = BTreeMap::new();
     let mut commands = Vec::new();
+    let mut stopped = BTreeSet::new();
     for row in control
         .iter()
         .filter(|row| row.environment == environment.as_str())
@@ -160,12 +163,16 @@ pub fn agents_of(
                     connection,
                 });
             }
+            ("AgentStopped", _) => {
+                stopped.insert(AgentId(text("agent_id")?));
+            }
             _ => {
                 text("agent_id")?;
             }
         }
     }
     let mut following = Following {
+        stopped,
         revocations: revocations
             .into_iter()
             .filter(|(connection, _)| ours.contains(connection))
@@ -205,14 +212,16 @@ impl Following {
     /// The kill-switch commands the executor applies itself to `agent` (DEC-2343 item 3), in
     /// control-stream order: each command of its connection's or the workspace's scope issued
     /// after the agent was deployed on one of this account's connections it names, when one of
-    /// those connections is revoked at or after the command. Every other covered agent waits for
-    /// the runtime's copy, which carries the owner's confirmation.
+    /// those connections is revoked at or after the command, or the agent has an `AgentStopped`, so
+    /// no runtime will copy it. Every other covered agent waits for the runtime's copy, which
+    /// carries the owner's confirmation.
     pub fn commands_for(&self, agent: &AgentId) -> Vec<EventId> {
         let deployments = self
             .deployments
             .get(agent)
             .map(Vec::as_slice)
             .unwrap_or_default();
+        let stopped = self.stopped.contains(agent);
         self.commands
             .iter()
             .filter(|command| {
@@ -222,10 +231,11 @@ impl Following {
                             .connection
                             .as_ref()
                             .is_none_or(|named| named == connection)
-                        && self
-                            .revocations
-                            .get(connection)
-                            .is_some_and(|seqs| seqs.iter().any(|seq| *seq >= command.seq))
+                        && (stopped
+                            || self
+                                .revocations
+                                .get(connection)
+                                .is_some_and(|seqs| seqs.iter().any(|seq| *seq >= command.seq)))
                 })
             })
             .map(|command| command.id.clone())
