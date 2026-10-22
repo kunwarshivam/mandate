@@ -166,8 +166,8 @@ fn the_decoy_is_chosen_by_the_signatures_encoding_der_first() {
     let es256 = Authenticator::new(Alg::Es256);
     let signature = es256.sign(b"anything");
     assert_eq!(decoy_for(&signature), &DECOY_ES256, "an ECDSA signature");
-    assert_eq!(der(30, 30).len(), 64);
-    assert_eq!(decoy_for(&der(30, 30)), &DECOY_ES256, "64 bytes of DER");
+    assert_eq!(der(29, 29).len(), 64);
+    assert_eq!(decoy_for(&der(29, 29)), &DECOY_ES256, "64 bytes of DER");
     for (r, s) in [(32, 32), (33, 33), (1, 1), (33, 31)] {
         assert_eq!(decoy_for(&der(r, s)), &DECOY_ES256, "DER of {r} and {s}");
     }
@@ -186,22 +186,23 @@ fn the_decoy_is_chosen_by_the_signatures_encoding_der_first() {
             "{len} raw bytes are any other shape"
         );
     }
-    let mut trailing = der(30, 29);
+    let mut trailing = der(29, 28);
     trailing.push(0);
+    assert_eq!(trailing.len(), 64);
     assert_eq!(
         decoy_for(&trailing),
         &DECOY_ED25519,
         "64 bytes of DER with a trailing byte are not DER"
     );
-    let mut past_the_end = der(30, 30);
-    past_the_end[3] = 40;
+    let mut past_the_end = der(29, 29);
+    past_the_end[3] = 70;
     assert_eq!(
         decoy_for(&past_the_end),
         &DECOY_ED25519,
         "64 bytes whose inner length runs past the end are not DER"
     );
-    let mut not_an_integer = der(30, 30);
-    not_an_integer[34] = 0x04;
+    let mut not_an_integer = der(29, 29);
+    not_an_integer[33] = 0x04;
     assert_eq!(
         decoy_for(&not_an_integer),
         &DECOY_ED25519,
