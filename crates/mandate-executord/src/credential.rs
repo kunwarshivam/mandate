@@ -119,8 +119,12 @@ pub fn own_checked_connection<S: Store>(
     scope: &AccountScope,
     own: &ConnectionId,
 ) -> Result<ConnectionId, &'static str> {
-    let _ = (store, scope, own);
-    Err(Unimplemented)
+    let checked = checked_connection(store, scope)?;
+    if checked == *own {
+        Ok(checked)
+    } else {
+        Err("connection_mismatch")
+    }
 }
 
 /// The access token a leased secret holds: DEC-2624's token entry, decoded by its one reader.
