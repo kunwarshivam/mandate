@@ -1046,7 +1046,6 @@ fn mc_r13_session_marks_leave_an_equitys_equity_as_the_reference_case() {
 /// that tick between steps 2 and 3: E₀ becomes step 2's E, 10000, the E₀ every later step expects,
 /// and nothing else moves (30 regular-session seconds have passed since the last sane mark).
 #[test]
-#[ignore = "pending E6-15"]
 fn mc_r13_session_and_insane_marks_fold_as_the_reference_case() {
     let case = case("MC-R13");
     let (mandate, calendar) = (case_mandate(&case), nyse());
@@ -1070,7 +1069,6 @@ fn mc_r13_session_and_insane_marks_fold_as_the_reference_case() {
 /// MC-R01's ladder reaches `paused`, and a row the fold cannot read after it keeps `paused`, which
 /// holds every exit and protective order and never the kill switch (DEC-2304 item 3).
 #[test]
-#[ignore = "pending E6-15"]
 fn an_unreadable_view_after_mc_r01s_paused_stays_paused() {
     let case = case("MC-R01");
     let (mandate, calendar) = (case_mandate(&case), nyse());
@@ -1098,7 +1096,6 @@ fn an_unreadable_view_after_mc_r01s_paused_stays_paused() {
 /// carries a breach time of 0 s: `breach_confirm_s` is 0, a scale rung has no confirmation, and no
 /// rung is breached at the start of the interval before the mark that triggers it (§5.2, §5.6).
 #[test]
-#[ignore = "pending E6-15"]
 fn a_flatten_and_pause_rung_returns_agent_mode_applied_and_nothing_that_acts() {
     let case = case("MC-R01");
     let (mandate, calendar) = (case_mandate(&case), nyse());
@@ -1136,7 +1133,6 @@ fn a_flatten_and_pause_rung_returns_agent_mode_applied_and_nothing_that_acts() {
 /// opens holding 100 shares, so a mark that is not sane sets `stale_mark` at once (§5.2), and the
 /// one record is this, member for member.
 #[test]
-#[ignore = "pending E6-15"]
 fn an_instrument_restriction_names_the_marks_instrument_as_written() {
     let case = case("MC-R13");
     let (mandate, calendar) = (case_mandate(&case), nyse());
@@ -1161,7 +1157,6 @@ fn an_instrument_restriction_names_the_marks_instrument_as_written() {
 /// not-sane mark with two bids gives equal records and equal views. E stays at the allocation, 10000,
 /// and the mark sets `stale_mark` at once, which B2b-2 writes.
 #[test]
-#[ignore = "pending E6-15"]
 fn a_not_sane_marks_step_ignores_its_bid_on_a_held_position() {
     let case = case("MC-R20");
     let mandate = case_mandate(&case);
@@ -1189,7 +1184,6 @@ fn a_not_sane_marks_step_ignores_its_bid_on_a_held_position() {
 /// held MC-R20 opening on the symbol, or on the asset ID in uppercase, is refused, and on the asset
 /// ID as the journal writes it is opened.
 #[test]
-#[ignore = "pending E6-15"]
 fn an_opening_on_an_instrument_that_is_not_a_canonical_asset_id_is_refused() {
     let case = case("MC-R20");
     let mandate = case_mandate(&case);
