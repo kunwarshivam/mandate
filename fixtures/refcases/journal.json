@@ -13596,7 +13596,7 @@
   ]
  },
  "protection_fraction": {
-  "spec": "docs/specs/journal.md v0.72 §9.5 rule 44 (DEC-2312)",
+  "spec": "docs/specs/journal.md v0.72 §9.5 rule 44 (DEC-2312, DEC-2315)",
   "drafts": {
    "placed_v1": {
     "envelope_version": 1,
@@ -13730,7 +13730,7 @@
   "invalid_drafts": [
    {
     "name": "fraction_on_cancelled",
-    "clause": "rule 44: only a start and a placement disclose a fraction",
+    "clause": "rule 44: only a start, a placement and an end disclose a fraction",
     "base_draft": "placed",
     "changes": [
      {
@@ -13761,8 +13761,8 @@
     }
    },
    {
-    "name": "fraction_on_an_end",
-    "clause": "rule 44: an end discloses no fraction",
+    "name": "fraction_on_intended",
+    "clause": "rule 44: intended discloses no fraction",
     "base_draft": "start",
     "changes": [
      {
@@ -13786,8 +13786,60 @@
       "value": null
      },
      {
+      "path": "payload.orders",
+      "value": []
+     },
+     {
+      "path": "payload.replacing",
+      "value": null
+     },
+     {
       "path": "payload.action",
-      "value": "unprotected_end"
+      "value": "intended"
+     },
+     {
+      "path": "payload.intent_id",
+      "value": "01J8ZT90A000000000000000P1"
+     },
+     {
+      "path": "payload.stop",
+      "value": "139"
+     },
+     {
+      "path": "payload.unprotected_fraction",
+      "value": "0.4"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.unprotected_fraction"
+    }
+   },
+   {
+    "name": "fraction_on_watchdog",
+    "clause": "rule 44: watchdog discloses no fraction",
+    "base_draft": "start",
+    "changes": [
+     {
+      "path": "payload.stop",
+      "value": null
+     },
+     {
+      "path": "payload.take_profit",
+      "value": null
+     },
+     {
+      "path": "payload.intent_id",
+      "value": null
+     },
+     {
+      "path": "payload.entry",
+      "value": null
+     },
+     {
+      "path": "payload.agent_id",
+      "value": null
      },
      {
       "path": "payload.orders",
@@ -13796,6 +13848,258 @@
      {
       "path": "payload.replacing",
       "value": null
+     },
+     {
+      "path": "payload.action",
+      "value": "watchdog"
+     },
+     {
+      "path": "payload.unprotected_fraction",
+      "value": "0.4"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.unprotected_fraction"
+    }
+   },
+   {
+    "name": "fraction_on_exit_unpriced",
+    "clause": "rule 44: exit_unpriced discloses no fraction",
+    "base_draft": "start",
+    "changes": [
+     {
+      "path": "payload.stop",
+      "value": null
+     },
+     {
+      "path": "payload.take_profit",
+      "value": null
+     },
+     {
+      "path": "payload.intent_id",
+      "value": null
+     },
+     {
+      "path": "payload.entry",
+      "value": null
+     },
+     {
+      "path": "payload.agent_id",
+      "value": null
+     },
+     {
+      "path": "payload.orders",
+      "value": []
+     },
+     {
+      "path": "payload.replacing",
+      "value": null
+     },
+     {
+      "path": "payload.action",
+      "value": "exit_unpriced"
+     },
+     {
+      "path": "payload.unprotected_fraction",
+      "value": "0.4"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.unprotected_fraction"
+    }
+   },
+   {
+    "name": "fraction_on_ladder_floor",
+    "clause": "rule 44: ladder_floor discloses no fraction",
+    "base_draft": "start",
+    "changes": [
+     {
+      "path": "payload.stop",
+      "value": null
+     },
+     {
+      "path": "payload.take_profit",
+      "value": null
+     },
+     {
+      "path": "payload.intent_id",
+      "value": null
+     },
+     {
+      "path": "payload.entry",
+      "value": null
+     },
+     {
+      "path": "payload.agent_id",
+      "value": null
+     },
+     {
+      "path": "payload.orders",
+      "value": []
+     },
+     {
+      "path": "payload.replacing",
+      "value": null
+     },
+     {
+      "path": "payload.action",
+      "value": "ladder_floor"
+     },
+     {
+      "path": "payload.unprotected_fraction",
+      "value": "0.4"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.unprotected_fraction"
+    }
+   },
+   {
+    "name": "fraction_on_expiry_unreplaceable",
+    "clause": "rule 44: expiry_unreplaceable discloses no fraction",
+    "base_draft": "start",
+    "changes": [
+     {
+      "path": "payload.stop",
+      "value": null
+     },
+     {
+      "path": "payload.take_profit",
+      "value": null
+     },
+     {
+      "path": "payload.intent_id",
+      "value": null
+     },
+     {
+      "path": "payload.entry",
+      "value": null
+     },
+     {
+      "path": "payload.agent_id",
+      "value": null
+     },
+     {
+      "path": "payload.orders",
+      "value": []
+     },
+     {
+      "path": "payload.replacing",
+      "value": null
+     },
+     {
+      "path": "payload.action",
+      "value": "expiry_unreplaceable"
+     },
+     {
+      "path": "payload.unprotected_fraction",
+      "value": "0.4"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.unprotected_fraction"
+    }
+   },
+   {
+    "name": "fraction_on_rung_short",
+    "clause": "rule 44: rung_short discloses no fraction",
+    "base_draft": "start",
+    "changes": [
+     {
+      "path": "payload.stop",
+      "value": null
+     },
+     {
+      "path": "payload.take_profit",
+      "value": null
+     },
+     {
+      "path": "payload.intent_id",
+      "value": null
+     },
+     {
+      "path": "payload.entry",
+      "value": null
+     },
+     {
+      "path": "payload.agent_id",
+      "value": null
+     },
+     {
+      "path": "payload.orders",
+      "value": []
+     },
+     {
+      "path": "payload.replacing",
+      "value": null
+     },
+     {
+      "path": "payload.action",
+      "value": "rung_short"
+     },
+     {
+      "path": "payload.intent_id",
+      "value": "01J8ZT90A000000000000000P1"
+     },
+     {
+      "path": "payload.sent",
+      "value": "2"
+     },
+     {
+      "path": "payload.unprotected_fraction",
+      "value": "0.4"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.unprotected_fraction"
+    }
+   },
+   {
+    "name": "fraction_on_interval_limit",
+    "clause": "rule 44: interval_limit discloses no fraction",
+    "base_draft": "start",
+    "changes": [
+     {
+      "path": "payload.stop",
+      "value": null
+     },
+     {
+      "path": "payload.take_profit",
+      "value": null
+     },
+     {
+      "path": "payload.intent_id",
+      "value": null
+     },
+     {
+      "path": "payload.entry",
+      "value": null
+     },
+     {
+      "path": "payload.agent_id",
+      "value": null
+     },
+     {
+      "path": "payload.orders",
+      "value": []
+     },
+     {
+      "path": "payload.replacing",
+      "value": null
+     },
+     {
+      "path": "payload.action",
+      "value": "interval_limit"
      },
      {
       "path": "payload.unprotected_fraction",
@@ -13939,6 +14243,54 @@
      "reason": "schema",
      "path": "payload.unprotected_fraction"
     }
+   },
+   {
+    "name": "fraction_a_json_number",
+    "clause": "§9.1 decimal: a JSON number is not a decimal",
+    "base_draft": "placed",
+    "changes": [
+     {
+      "path": "payload.unprotected_fraction",
+      "value": 1
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.unprotected_fraction"
+    }
+   },
+   {
+    "name": "fraction_not_a_number",
+    "clause": "§9.1 decimal",
+    "base_draft": "placed",
+    "changes": [
+     {
+      "path": "payload.unprotected_fraction",
+      "value": "abc"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.unprotected_fraction"
+    }
+   },
+   {
+    "name": "one_share_in_exponent_form",
+    "clause": "rule 44 on the normalized decimal: 1e0 is one share",
+    "base_draft": "placed",
+    "changes": [
+     {
+      "path": "payload.unprotected_fraction",
+      "value": "1e0"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.unprotected_fraction"
+    }
    }
   ],
   "valid_drafts": [
@@ -14066,6 +14418,70 @@
      {
       "path": "payload.bracket",
       "value": "md-01J8ZT90A000000000000000P1"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "fraction_in_exponent_form",
+    "clause": "§4.6: an exponent form is normalized on the way in, 4e-1 is 0.4",
+    "base_draft": "placed",
+    "changes": [
+     {
+      "path": "payload.unprotected_fraction",
+      "value": "4e-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "fraction_on_the_end",
+    "clause": "rule 44: the end discloses the final fraction of a position built from several fills (DEC-2315)",
+    "base_draft": "start",
+    "changes": [
+     {
+      "path": "payload.stop",
+      "value": null
+     },
+     {
+      "path": "payload.take_profit",
+      "value": null
+     },
+     {
+      "path": "payload.intent_id",
+      "value": null
+     },
+     {
+      "path": "payload.entry",
+      "value": null
+     },
+     {
+      "path": "payload.agent_id",
+      "value": null
+     },
+     {
+      "path": "payload.action",
+      "value": "unprotected_end"
+     },
+     {
+      "path": "payload.orders",
+      "value": []
+     },
+     {
+      "path": "payload.replacing",
+      "value": null
+     },
+     {
+      "path": "payload.bracket",
+      "value": "md-01J8ZT90A000000000000000P1"
+     },
+     {
+      "path": "payload.unprotected_fraction",
+      "value": "0.4"
      }
     ],
     "expect": {
