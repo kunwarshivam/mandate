@@ -216,6 +216,27 @@ pub(crate) fn cas_refusal(status: u16, body: &[u8]) -> Result<(), SourceError> {
     Err(SourceError::Unimplemented { story: "E21-32" })
 }
 
+/// What a read of the code a take is about to overwrite says: no code, or a tombstone a take left,
+/// is `None`; otherwise the code's version and its bytes, held as a secret from the moment they are
+/// decoded, so a lost race or an error wipes them. A read with no version or no value, or whose
+/// value is not base64, is [`SourceError::Malformed`]; any other refusal is the read's own.
+pub(crate) fn taken_read(
+    read: Result<Option<Value>, SourceError>,
+) -> Result<Option<(u64, SecretSlice<u8>)>, SourceError> {
+    let _ = read;
+    Err(SourceError::Unimplemented { story: "E21-32" })
+}
+
+/// What the read again after a refused overwrite means: the code gone is a race another taker
+/// won, `None`; a code still there is one this taker may not take, [`SourceError::Denied`]; a read
+/// that fails is that failure.
+pub(crate) fn lost_or_denied_verdict(
+    reread: Result<Option<Value>, SourceError>,
+) -> Result<Option<SecretSlice<u8>>, SourceError> {
+    let _ = reread;
+    Err(SourceError::Unimplemented { story: "E21-32" })
+}
+
 /// The string at `pointer` in `value`.
 fn text<'a>(value: Option<&'a Value>, pointer: &str) -> Result<&'a str, SourceError> {
     value
@@ -542,7 +563,7 @@ impl SecretSource for OpenBaoSource {
         &self,
         connection: &ConnectionId,
     ) -> Result<Option<SecretSlice<u8>>, SourceError> {
-        let _ = (connection, cas_refusal);
+        let _ = (connection, cas_refusal, taken_read, lost_or_denied_verdict);
         Err(SourceError::Unimplemented { story: "E21-32" })
     }
 
