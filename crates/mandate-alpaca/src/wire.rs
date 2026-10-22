@@ -11,6 +11,7 @@
 //! interpret answers [`WireError::NotInterpreted`] with its owning story (DEC-85).
 
 use mandate_accounting::{InstrumentId, Side};
+use mandate_connections::account_entry::BrokerAccountId;
 use mandate_executor::{
     BrokerAccount, BrokerFill, BrokerOrder, BrokerPosition, BrokerReject, FillId, OrderState,
     OrderType, StatusMapping, SubmitOrder, TimeInForce,
@@ -143,6 +144,18 @@ pub fn positions(body: &[u8]) -> Result<Vec<BrokerPosition>, WireError> {
         .iter()
         .map(position_from)
         .collect()
+}
+
+/// The account object's `id` alone, the broker's own id of the account, read only by the connect
+/// check, which writes it to the personal-data vault (connections spec §5.2 step 4, DEC-2339). It
+/// is a [`BrokerAccountId`], which prints nothing of it, and nothing else of the object is read.
+///
+/// # Errors
+/// [`WireError::NotJson`], [`WireError::MissingField`] or [`WireError::WrongType`] for `id`,
+/// which name nothing of the value.
+pub fn account_id(body: &[u8]) -> Result<BrokerAccountId, WireError> {
+    let _ = body;
+    Err(WireError::Unimplemented { story: "E10-13" })
 }
 
 /// Parses the account object, dropping `id` and `account_number` before anything else: the type

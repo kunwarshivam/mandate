@@ -37,9 +37,13 @@
 //!   **API process**, which maps each planned effect to its journal event (DEC-694).
 //! - [`token_entry`] is the vault's token entry, the one byte form the token-exchange process
 //!   writes and the executor reads (DEC-2624).
+//! - [`account_entry`] is the personal-data vault's account entry: the broker's account id and the
+//!   random reference that stands for it, which the executor creates once and the connection
+//!   manager reads (DEC-2339).
 //! - [`manager`] plans the connection manager's start of a connect, in the **API process**: the
 //!   pending record `ConnectionRequested` and the connect's step-up digest (DEC-694, DEC-699).
 
+pub mod account_entry;
 pub mod checks;
 pub mod error;
 pub mod exchange;

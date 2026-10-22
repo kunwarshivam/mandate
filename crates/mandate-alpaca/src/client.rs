@@ -16,6 +16,7 @@ use mandate_executor::{
 use mandate_time::UtcNanos;
 
 use mandate_accounting::{InstrumentId, Side};
+use mandate_connections::account_entry::BrokerAccountId;
 use mandate_num::Qty;
 
 use crate::error::{ClientError, ReadError, TransportError, WireError};
@@ -201,6 +202,18 @@ impl<T: TradingTransport, P: Pause> TradingClient<T, P> {
             asset: read::asset(instrument, &response.body)?,
             loaded_at: self.pause.now(),
         })
+    }
+
+    /// The broker's own id of the account, `GET /v2/account`'s `id` alone, for the connect check
+    /// to write to the personal-data vault (connections spec §5.2 step 4, DEC-2339). It is not a
+    /// [`BrokerRequest`]: the executor's account read keeps no id, and this answer is only ever a
+    /// [`BrokerAccountId`], which prints nothing of it.
+    ///
+    /// # Errors
+    /// [`ReadError::Overloaded`] for a `429` or a `5xx`, another status as
+    /// [`ReadError::UnexpectedStatus`], and the wire's refusals of the body.
+    pub async fn account_id(&self) -> Result<BrokerAccountId, ReadError> {
+        Err(ReadError::Unimplemented { story: "E10-13" })
     }
 
     /// Cancels one of our orders. Alpaca cancels by **its** order id, so an order Alpaca holds
