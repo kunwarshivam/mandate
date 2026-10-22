@@ -634,9 +634,11 @@ impl ExecutorState {
 
     /// Whether `agent` may hold lots in any instrument the account holds (DEC-2347 item 3.6): its
     /// sub-ledger, the quantity its kill switch would sell (trading-domain spec §5.5), is above
-    /// zero there, or one of its buys there reads filled with other than its quantity applied to
-    /// it, as when the broker's fill named no order the fold could attribute it to. The second
-    /// reading keeps an agent's shares from passing for the owner's.
+    /// zero there, or one of its buys there, in any state but `Rejected` or `Abandoned`, has other
+    /// than its quantity applied to it, as when the broker's fill named no order the fold could
+    /// attribute it to: filled, or partly filled and then canceled or expired. The second reading
+    /// keeps an agent's shares from passing for the owner's; an unfilled buy canceled with the
+    /// account holding the instrument only holds the exit longer, which is safe.
     pub fn holds_lots(&self, agent: &AgentId) -> Result<bool, ExecutorError> {
         for (instrument, position) in &self.positions {
             if sub_ledger(self, agent, instrument)? > Qty::ZERO {
@@ -646,7 +648,7 @@ impl ExecutorState {
                 order.agent.as_ref() == Some(agent)
                     && &order.instrument == instrument
                     && order.side == Side::Buy
-                    && order.state == OrderState::Filled
+                    && !matches!(order.state, OrderState::Rejected | OrderState::Abandoned)
                     && order.filled_qty != order.qty
             });
             if unattributed && *position > SignedQty::ZERO {
