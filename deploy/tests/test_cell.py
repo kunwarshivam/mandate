@@ -402,12 +402,44 @@ SECRET_KEY = re.compile(
 # Variables that name where a credential file is, never hold one: libpq's pgpass file and systemd's
 # credentials directory, which the API server reads its session key from (workspace API §3.11).
 FILE_PATH_NAMES = ("PGPASSFILE", "CREDENTIALS_DIRECTORY")
+# Variables that name an address and hold no credential, each with the one value it may take: the
+# token exchange's token URL, pointed at a dev or ci cell's fixture pod (DEC-1176 item 5).
+ADDRESS_NAMES = {"MANDATE_TOKEN_URL": "http://oauth-fixture:8091/alpaca/oauth/token"}
+
+
+def fixture_client_secret(secret: dict, docs: list[dict]) -> bool:
+    """Whether `secret` is the one Secret the chart may make (DEC-1176 item 6): the fixture OAuth
+    provider's client secret, `oauth-fixture-client` with its one `client-secret` key, kept across
+    upgrades, in a render whose `oauth-fixture` pod runs in a dev or ci tier. It is a fake client's,
+    which no real provider knows."""
+    fixture = [w for w in workloads(docs) if w["kind"] == "Deployment" and w["metadata"]["name"] == "oauth-fixture"]
+    tiers = {
+        e.get("value")
+        for w in fixture
+        for c in containers(w)
+        for e in c.get("env", [])
+        if e["name"] == "MANDATE_DEPLOYMENT_TIER"
+    }
+    return (
+        secret["metadata"]["name"] == "oauth-fixture-client"
+        and secret.get("type") == "Opaque"
+        and set(secret.get("data") or {}) == {"client-secret"}
+        and not secret.get("stringData")
+        and secret["metadata"].get("annotations", {}).get("helm.sh/resource-policy") == "keep"
+        and len(fixture) == 1
+        and bool(tiers)
+        and tiers <= {"dev", "ci"}
+    )
 
 
 def secrets_as_files(docs: list[dict]) -> list[str]:
     """Secrets arrive only as mounted files (DEC-822 item 4): no env from a Secret, no password in a
-    DSN, no Secret object in the chart."""
-    problems = [f"the chart renders Secret {d['metadata']['name']}" for d in docs if d["kind"] == "Secret"]
+    DSN, no Secret object in the chart but the dev or ci fixture's client secret (DEC-1176 item 6)."""
+    problems = [
+        f"the chart renders Secret {d['metadata']['name']}"
+        for d in docs
+        if d["kind"] == "Secret" and not fixture_client_secret(d, docs)
+    ]
     for w in workloads(docs):
         for c in containers(w):
             if c.get("envFrom"):
@@ -417,7 +449,8 @@ def secrets_as_files(docs: list[dict]) -> list[str]:
                     problems.append(f"{c['name']}: {e['name']} from {e['valueFrom']}")
                 if re.search(r"://[^/@]*:[^/@]*@", e.get("value", "")):
                     problems.append(f"{c['name']}: {e['name']} carries a password")
-                if SECRET_KEY.search(e["name"]) and e["name"] not in FILE_PATH_NAMES:
+                address = ADDRESS_NAMES.get(e["name"]) == e.get("value")
+                if SECRET_KEY.search(e["name"]) and e["name"] not in FILE_PATH_NAMES and not address:
                     problems.append(f"{c['name']}: {e['name']} looks like a secret")
     return problems
 

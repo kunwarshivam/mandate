@@ -52,6 +52,13 @@ alpacaOAuth:
   # with the callback's path.
   redirectUri: ""
 
+# The fixture OAuth provider of a dev or ci cell (DEC-1176): its own `oauth-fixture` pod, the stub
+# issuer's image run as the Alpaca provider alone, which only the token exchange reaches, and the
+# exchange's token URL pointed at it. It needs images.stub-issuer and both alpacaOAuth values. Any
+# tier but dev or ci refuses it, in the schema and in the chart.
+oauthFixture:
+  enabled: false
+
 # The workspace API server's settings (workspace API spec §3.11 item 2), each required once
 # images.api is named. None is a secret: the session signing key is made in the pod's memory at
 # each start, since sessions live in that one replica's memory too, and the subject links are a
