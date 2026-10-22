@@ -256,7 +256,6 @@ fn an_agentless_account_whose_connection_is_revoked_lets_it_exit() -> Result<(),
 /// Item 3.2 with 3.3: an agentless executor whose connection closed still keeps running while the
 /// control stream, the only stream it follows, does not read, and exits once it reads.
 #[test]
-#[ignore = "pending E7-4"]
 fn an_agentless_executor_waits_for_its_control_stream_to_read() -> Result<(), Error> {
     let journal = Journal::default();
     connect(&journal, "c1", CONNECTION, ACCOUNT)?;
