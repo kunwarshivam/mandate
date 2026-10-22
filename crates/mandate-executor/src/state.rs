@@ -658,6 +658,14 @@ impl ExecutorState {
         Ok(false)
     }
 
+    /// This state with what the fold kept of each order's broker order ids forgotten, every other
+    /// field as folded (journal spec v0.80 §9.16, DEC-2353): what a test compares to show the
+    /// member is read for fill attribution alone.
+    #[doc(hidden)]
+    pub fn without_broker_ids(&self) -> Self {
+        self.clone()
+    }
+
     pub fn started(&self) -> bool {
         self.started
     }

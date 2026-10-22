@@ -5053,6 +5053,83 @@ fn the_agents_switch_sells_what_an_ended_buys_broker_id_fill_bought() {
     }
 }
 
+/// DEC-2353 item 3 (the review of #2299): a fill naming only the broker's order id is no order's
+/// when that order's records carry two ids, and it is not taken past the order's own checks: more
+/// than the order has left, the other side, or another instrument. Each stays external activity,
+/// every agent goes `exits_only`, and nothing is applied to the order; the account holds what the
+/// fill bought, so no position difference is in play.
+#[test]
+fn a_broker_id_fill_failing_its_orders_checks_stays_external() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    for case in ["two ids", "overfill", "side", "instrument"] {
+        let mut shell = reconciling(&ports);
+        let id = accepted_order(&mut shell, &ports, INTENT);
+        let mut fill = broker_fill("f-1", None, "10", "150");
+        fill.broker_order_id = Some("b-1".to_owned());
+        let mut held = (AAPL, "10");
+        match case {
+            "two ids" => {
+                shell.run(
+                    Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+                        "b-2",
+                        Some(&id),
+                        AAPL,
+                        Side::Buy,
+                        "10",
+                        "0",
+                        "accepted",
+                    ))),
+                    &ports,
+                );
+            }
+            "overfill" => {
+                fill.qty = qty("11");
+                held = (AAPL, "11");
+            }
+            "side" => {
+                fill.side = Side::Sell;
+                held = (AAPL, "-10");
+            }
+            _ => {
+                fill.instrument = instrument(FixedInstruments::THIN_EQUITY);
+                held = (FixedInstruments::THIN_EQUITY, "10");
+            }
+        }
+        let mut taken = snapshot(shell.head().0, ReconcileReason::Startup);
+        taken.fills = vec![fill];
+        taken.positions = vec![broker_position(held.0, held.1)];
+        let ran = shell.run(Input::BrokerSnapshot(taken), &ports);
+        assert!(
+            ran.draft_types().contains(&"ExternalActivityIngested"),
+            "{case}: {:?}",
+            ran.draft_types()
+        );
+        assert_eq!(
+            ran.draft("FillApplied")
+                .and_then(|applied| applied.payload.get("client_order_id")),
+            None,
+            "{case}"
+        );
+        assert!(
+            shell
+                .state
+                .orders()
+                .values()
+                .all(|order| order.filled_qty == qty("0")),
+            "{case}"
+        );
+        assert_eq!(
+            shell.state.effective_mode(&agent(common::AGENT)),
+            Mode::ExitsOnly,
+            "{case}"
+        );
+    }
+}
+
 /// DEC-2353 invariant 4: the broker id is folded from the journaled acknowledgment, so after a
 /// restart the fill is still the order's.
 #[test]
