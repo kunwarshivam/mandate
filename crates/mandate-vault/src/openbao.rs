@@ -397,6 +397,18 @@ pub fn fingerprint_key_verdict(answer: Option<&Value>) -> Result<(), SourceError
     }
 }
 
+/// Whether provisioning must create the fingerprint key, from its `GET <transit>/keys/<key>`:
+/// only a 404 is a key that is not there, `true`; a key that is there must pass
+/// [`fingerprint_key_verdict`], `false`. Any other refusal fails provisioning, so a transient
+/// error never lets an existing key go unverified (review F1, round 2).
+///
+/// # Errors
+/// The GET's own refusal, other than [`SourceError::Missing`], and [`fingerprint_key_verdict`]'s.
+pub fn key_needs_creating(found: &Result<Option<Value>, SourceError>) -> Result<bool, SourceError> {
+    let _ = found;
+    Err(SourceError::Unimplemented { story: "E21-32" })
+}
+
 /// A logged-in session as one identity.
 pub struct OpenBaoSource {
     identity: Identity,
