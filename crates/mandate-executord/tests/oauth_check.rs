@@ -306,7 +306,6 @@ fn every_refused_create_journals_a_null_reference() -> Result<(), Error> {
 /// nothing, and journals the account as unreadable under no reference, rather than an entry at
 /// some other path.
 #[test]
-#[ignore = "pending E21-32"]
 fn an_account_that_is_no_stream_reference_creates_nothing() -> Result<(), Error> {
     let mut store = MemoryStore::default();
     let vault = CreateOnce::default();
