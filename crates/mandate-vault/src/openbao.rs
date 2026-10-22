@@ -273,8 +273,10 @@ pub(crate) fn taken_read(
 
 /// The bytes `encoded`, padded standard base64, decodes to, in a buffer of exactly their size, so
 /// boxing them as a secret never copies them and leaves the first copy unwiped; a buffer partly
-/// written by a decode that fails is wiped. Anything but padded standard base64 is
-/// [`SourceError::Malformed`].
+/// written by a decode that fails is wiped. The size is three bytes a four-character group less
+/// one a pad, which is exact for every input the decode accepts: it refuses a length that is not
+/// a whole number of groups, misplaced padding, and output that does not fit. Anything but padded
+/// standard base64 is [`SourceError::Malformed`].
 fn exact_decode(encoded: &str) -> Result<SecretSlice<u8>, SourceError> {
     let padding = encoded
         .bytes()
@@ -286,12 +288,11 @@ fn exact_decode(encoded: &str) -> Result<SecretSlice<u8>, SourceError> {
         .checked_div(4)
         .and_then(|quads| quads.checked_mul(3))
         .and_then(|whole| whole.checked_sub(padding))
-        .filter(|_| encoded.len().is_multiple_of(4) && padding <= 2)
         .ok_or(SourceError::Malformed)?;
     let mut bytes = vec![0u8; size];
     match STANDARD.decode_slice(encoded, &mut bytes) {
-        Ok(written) if written == size => Ok(SecretSlice::from(bytes.into_boxed_slice())),
-        _ => {
+        Ok(_) => Ok(SecretSlice::from(bytes.into_boxed_slice())),
+        Err(_) => {
             bytes.zeroize();
             Err(SourceError::Malformed)
         }
