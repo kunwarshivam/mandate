@@ -1,7 +1,0 @@
-file = "crates/mandate-deploy-manager/tests/connect.rs"
-test = "the_connects_executor_runs_on_through_establishment_with_no_agent"
-reason = """
-E21-33 K2a (DEC-2336) changes the manager's fold and decision, which have no stub form: today's
-manager reads a succeeded token exchange as an exit and never starts the connect's executor, so the
-test fails on that behaviour. K2a's implementation PR deletes this row with the test's ignore line.
-"""

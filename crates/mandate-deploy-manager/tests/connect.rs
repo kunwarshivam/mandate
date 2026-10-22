@@ -119,7 +119,6 @@ fn exchanged_at_2() -> (Journal, Manager) {
 }
 
 #[test]
-#[ignore = "pending E21-33"]
 fn an_exchange_that_succeeds_while_its_request_is_open_starts_the_accounts_executor_journaled_first()
  {
     let (journal, mut m) = exchanged_at_2();
@@ -172,7 +171,6 @@ fn a_success_read_after_its_request_closed_starts_nothing() {
 }
 
 #[test]
-#[ignore = "pending E21-33"]
 fn the_connects_executor_runs_on_through_establishment_with_no_agent() {
     let (journal, mut m) = exchanged_at_2();
     journal.services(&established(&connection(), ACCOUNT), at(3));
@@ -185,7 +183,6 @@ fn the_connects_executor_runs_on_through_establishment_with_no_agent() {
 }
 
 #[test]
-#[ignore = "pending E21-33"]
 fn a_refusal_or_a_revocation_stops_the_connects_executor_journaled_first_as_connection_closed() {
     let (journal, mut m) = exchanged_at_2();
     journal.services(&refused(&connection(), "connect"), at(3));
@@ -217,7 +214,6 @@ fn a_refusal_or_a_revocation_stops_the_connects_executor_journaled_first_as_conn
 }
 
 #[test]
-#[ignore = "pending E21-33"]
 fn a_deployed_agent_keeps_the_executor_through_a_revocation_and_its_stop_is_agent_stopped() {
     let (journal, mut m) = exchanged_at_2();
     journal.services(&established(&connection(), ACCOUNT), at(3));
@@ -242,7 +238,6 @@ fn a_deployed_agent_keeps_the_executor_through_a_revocation_and_its_stop_is_agen
 }
 
 #[test]
-#[ignore = "pending E21-33"]
 fn an_agent_stopping_while_the_connection_lives_leaves_the_executor_until_the_connection_closes() {
     let (journal, mut m) = exchanged_at_2();
     journal.services(&established(&connection(), ACCOUNT), at(3));
@@ -266,7 +261,6 @@ fn an_agent_stopping_while_the_connection_lives_leaves_the_executor_until_the_co
 }
 
 #[test]
-#[ignore = "pending E21-33"]
 fn the_connects_executor_restarts_after_a_crash_and_answers_a_connection_kill_switch_at_once() {
     let (journal, mut m) = exchanged_at_2();
     m.orchestrator().fake.crash(&executor());
@@ -290,7 +284,6 @@ fn the_connects_executor_restarts_after_a_crash_and_answers_a_connection_kill_sw
 }
 
 #[test]
-#[ignore = "pending E21-33"]
 fn exchanged_is_journaled_once_across_the_managers_restart_and_the_pods_removal() {
     let (journal, m) = exchanged_at_2();
     let mut m = restart(m);
@@ -522,7 +515,6 @@ fn sequences() -> impl Strategy<Value = Vec<Op>> {
 }
 
 #[test]
-#[ignore = "pending E21-33"]
 fn the_connects_executor_is_journaled_first_and_runs_exactly_while_wanted() {
     if let Err(failure) = runner().run(&sequences(), |ops| {
         run(&ops, Seed::None);
