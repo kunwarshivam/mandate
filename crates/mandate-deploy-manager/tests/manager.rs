@@ -661,7 +661,11 @@ fn a_stopped_agent_is_stopped_once_journaled_first_and_never_started_again() {
         tick(&mut m, s);
     }
     assert_eq!(starts(&mut m, &rt("agent_a")), vec![1], "stopped is final");
-    assert_eq!(starts(&mut m, &ex("01J8Z2ACCT00000000000000A1")), vec![1]);
+    assert_eq!(
+        starts(&mut m, &ex("01J8Z2ACCT00000000000000A1")),
+        vec![1, 2],
+        "the executor no agent wants starts once for the covering switch (DEC-2344 item 1)"
+    );
     assert_eq!(stops(&mut m).len(), 2, "each stop once");
     clean(&mut m);
 }

@@ -101,6 +101,14 @@ pub const CRASH_LOOP: OperatorAlert = OperatorAlert {
     runbook: "RB-14",
 };
 
+/// A crash loop of an executor no agent wants, started for a kill switch it had not applied
+/// (DEC-2344 item 1): the switch is unapplied, so this replaces [`CRASH_LOOP`] for it. A fixed code
+/// with no subject (`AGENTS.md` rule 6).
+pub const KILL_SWITCH_UNAPPLIED: OperatorAlert = OperatorAlert {
+    code: "kill_switch_unapplied",
+    runbook: "RB-14",
+};
+
 /// A version-1 `AgentDeployed` of an agent not stopped: it names no connection, so the manager
 /// starts nothing for it until the owner stops it and deploys a new agent id at version 2
 /// (DEC-1173 item 3).

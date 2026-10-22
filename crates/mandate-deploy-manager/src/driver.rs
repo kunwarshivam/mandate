@@ -121,7 +121,7 @@ impl<J: ControlJournal, O: Orchestrator, A: Alerts> Deployer<J, O, A> {
                     if let Effect::Start { slot, generation } = record.effect() {
                         self.manager.issued(&slot, generation);
                         self.refresh().await?;
-                        if !self.manager.desired(&slot) {
+                        if !self.manager.wanted(&slot) {
                             continue;
                         }
                     }

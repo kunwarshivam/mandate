@@ -1,8 +1,0 @@
-file = "crates/mandate-deploy-manager/tests/retired.rs"
-test = "a_covering_kill_switch_starts_an_executor_no_agent_wants_once_journaled_first"
-reason = """
-DEC-2344 items 1 and 3 (E21-33): the deployment manager is implemented, and today it starts no
-executor that no agent wants and stops one at the account's last retirement whatever kill switch
-it has not answered. So this test fails on the manager's own answer, not at a stub. The
-implementation PR that follows DEC-2343's contract deletes this file with the test's `#[ignore]`.
-"""

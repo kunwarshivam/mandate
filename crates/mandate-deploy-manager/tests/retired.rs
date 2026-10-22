@@ -11,12 +11,13 @@ mod common;
 use std::collections::{BTreeMap, BTreeSet};
 
 use common::{
-    Journal, Manager, accounts, at, block_on, connection_of, deployed, kill, manager, restart,
-    stopped,
+    Journal, Manager, accounts, at, block_on, connection_of, deployed, identity, kill, manager,
+    restart, revoked_again, stopped,
 };
 use mandate_canon::Value;
-use mandate_deploy_manager::Slot;
 use mandate_deploy_manager::fake::Call;
+use mandate_deploy_manager::orchestrator::CRASH_LOOP;
+use mandate_deploy_manager::{Cause, Record, Slot, StopCause};
 use proptest::collection::vec;
 use proptest::prelude::*;
 use proptest::test_runner::{Config, TestRunner};
@@ -118,7 +119,6 @@ fn retired(journal: &Journal) -> Manager {
 }
 
 #[test]
-#[ignore = "pending E21-33"]
 fn a_covering_kill_switch_starts_an_executor_no_agent_wants_once_journaled_first() {
     for (scope, subject) in [
         ("agent", "agent_a".to_owned()),
@@ -158,7 +158,6 @@ fn a_covering_kill_switch_starts_an_executor_no_agent_wants_once_journaled_first
 }
 
 #[test]
-#[ignore = "pending E21-33"]
 fn each_covering_kill_switch_gives_the_executor_no_agent_wants_one_start() {
     let journal = Journal::new();
     let mut m = retired(&journal);
@@ -183,7 +182,6 @@ fn each_covering_kill_switch_gives_the_executor_no_agent_wants_one_start() {
 }
 
 #[test]
-#[ignore = "pending E21-33"]
 fn a_kill_switch_start_that_ended_on_its_own_is_never_restarted() {
     let journal = Journal::new();
     let mut m = retired(&journal);
@@ -198,7 +196,6 @@ fn a_kill_switch_start_that_ended_on_its_own_is_never_restarted() {
 }
 
 #[test]
-#[ignore = "pending E21-33"]
 fn a_kill_switch_start_that_crash_loops_before_it_ends_raises_kill_switch_unapplied() {
     let journal = Journal::new();
     let mut m = retired(&journal);
@@ -252,7 +249,6 @@ fn no_kill_switch_and_none_that_covers_another_account_starts_an_executor_no_age
 }
 
 #[test]
-#[ignore = "pending E21-33"]
 fn the_last_retirement_does_not_stop_an_executor_with_a_switch_it_has_not_answered() {
     let journal = Journal::new();
     let mut m = manager(&journal, accounts(&[("agent_a", ACCOUNT)]));
@@ -405,7 +401,93 @@ fn executor_records(journal: &Journal, from: usize) -> Vec<Executed> {
         .collect()
 }
 
+/// A bug seeded after a pass, as a manager with it would have journaled or raised, so each of the
+/// oracle's checks is shown to catch one before it is trusted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Bug {
+    None,
+    /// A `kill_switch` start of an executor no agent wants, with no switch to answer.
+    Unswitched,
+    /// A second start of an executor no agent wants for the same switch, beside the one it asked for.
+    Twice,
+    /// A stop of an executor no agent wants whose switch is not answered.
+    Stopped,
+    /// A crash loop of an executor no agent wants that no kill switch started.
+    Looped,
+    /// A `crash_loop` alert where only `kill_switch_unapplied` may be raised.
+    Alerted,
+}
+
+fn inject(journal: &Journal, record: &Record, now: i64) {
+    journal.services(&record.draft(&identity(), "paper", at(now)), at(now));
+}
+
+/// Whether `bug` is to be seeded now, given the oracle's view before the pass, and seeds it.
+fn seed(
+    bug: Bug,
+    m: &mut Manager,
+    journal: &Journal,
+    oracle: &Oracle,
+    waiting: &BTreeSet<&str>,
+    now: i64,
+) -> bool {
+    let idle = |a: &&str| {
+        !oracle.wanted(a) && oracle.known(a) && !oracle.pending(a) && !oracle.live.contains(a)
+    };
+    let pick = match bug {
+        Bug::None => None,
+        Bug::Unswitched | Bug::Looped => ACCOUNTS.iter().copied().find(|a| idle(a)),
+        Bug::Twice => ACCOUNTS.iter().copied().find(|a| waiting.contains(a)),
+        Bug::Stopped => ACCOUNTS
+            .iter()
+            .copied()
+            .find(|a| !oracle.wanted(a) && oracle.pending(a)),
+        Bug::Alerted => ACCOUNTS.iter().copied().find(|a| oracle.known(a)),
+    };
+    let Some(account) = pick else {
+        return false;
+    };
+    let slot = ex(account);
+    let record = match bug {
+        Bug::None => return false,
+        Bug::Unswitched => Record::Start {
+            slot,
+            generation: 900,
+            cause: Cause::KillSwitch,
+            kill_switch: Some(kill("workspace", "ws_01J8Z2", 900).0),
+        },
+        Bug::Twice => Record::Start {
+            slot,
+            generation: 901,
+            cause: Cause::KillSwitch,
+            kill_switch: oracle.pending.get(account).and_then(|p| p.first().cloned()),
+        },
+        Bug::Stopped => Record::Stop {
+            slot,
+            generation: 1,
+            cause: StopCause::AgentStopped,
+        },
+        Bug::Looped => Record::CrashLooped {
+            slot,
+            generation: 1,
+            restarts: 5,
+            alert: CRASH_LOOP,
+        },
+        Bug::Alerted => {
+            m.alerts().0.push(CRASH_LOOP);
+            return true;
+        }
+    };
+    inject(journal, &record, now);
+    true
+}
+
 fn check(ops: &[Op]) -> Result<(), TestCaseError> {
+    check_seeded(ops, Bug::None)
+}
+
+fn check_seeded(ops: &[Op], bug: Bug) -> Result<(), TestCaseError> {
+    let mut bug = bug;
     let journal = Journal::new();
     let mut m = manager(&journal, accounts(&AGENTS));
     let mut oracle = Oracle::default();
@@ -481,6 +563,14 @@ fn check(ops: &[Op]) -> Result<(), TestCaseError> {
             Op::Advance(secs) => now += secs,
             Op::Restart => m = restart(m),
         }
+        let rearmed = if matches!(op, Op::Restart) {
+            ACCOUNTS
+                .iter()
+                .filter(|a| oracle.looped.contains(*a) && !oracle.wanted(a))
+                .count()
+        } else {
+            0
+        };
         for (id, covered) in &switches {
             for account in covered {
                 oracle
@@ -496,6 +586,9 @@ fn check(ops: &[Op]) -> Result<(), TestCaseError> {
             .filter(|a| !oracle.wanted(a) && !oracle.live.contains(a) && oracle.pending(a))
             .collect();
         block_on(m.tick(at(now))).map_err(|h| TestCaseError::fail(format!("{h:?}")))?;
+        if seed(bug, &mut m, &journal, &oracle, &waiting, now) {
+            bug = Bug::None;
+        }
         let records = executor_records(&journal, seen);
         seen = journal.rows().len();
         let mut unapplied = 0;
@@ -577,15 +670,14 @@ fn check(ops: &[Op]) -> Result<(), TestCaseError> {
         alerted += alerts.len();
         prop_assert_eq!(
             alerts,
-            vec![UNAPPLIED; unapplied],
-            "each crash loop that leaves a switch unapplied raises kill_switch_unapplied once, and nothing else alerts"
+            vec![UNAPPLIED; unapplied + rearmed],
+            "each crash loop that leaves a switch unapplied raises kill_switch_unapplied once, again once by a restarted manager, and nothing else alerts"
         );
     }
     Ok(())
 }
 
 #[test]
-#[ignore = "pending E21-33"]
 fn an_executor_no_agent_wants_starts_once_per_covering_kill_switch_and_never_without_one() {
     let mut runner = TestRunner::new(Config {
         cases: 256,
@@ -594,4 +686,140 @@ fn an_executor_no_agent_wants_starts_once_per_covering_kill_switch_and_never_wit
     });
     let outcome = runner.run(&vec(op(), 1..60), |ops| check(&ops));
     assert!(outcome.is_ok(), "{outcome:?}");
+}
+
+/// Each check of the oracle fails on the bug seeded for it, before it is trusted.
+#[test]
+fn every_check_of_the_oracle_catches_its_seeded_bug() {
+    let retired = [Op::Deploy(0), Op::Stop(0), Op::Advance(1)];
+    let held = [
+        Op::Deploy(0),
+        Op::KillConnection(0),
+        Op::Stop(0),
+        Op::Advance(1),
+    ];
+    let waiting = [
+        Op::Deploy(0),
+        Op::Stop(0),
+        Op::Advance(1),
+        Op::KillConnection(0),
+    ];
+    let cases: [(Bug, &[Op], &str); 5] = [
+        (Bug::Unswitched, &retired, "answers a switch"),
+        (Bug::Twice, &waiting, "exactly one start"),
+        (Bug::Stopped, &held, "never stopped by the manager"),
+        (Bug::Looped, &retired, "follows only a kill switch"),
+        (Bug::Alerted, &retired, "nothing else alerts"),
+    ];
+    for (bug, ops, message) in cases {
+        let caught = check_seeded(ops, bug).expect_err(&format!("{bug:?} escaped"));
+        assert!(caught.to_string().contains(message), "{bug:?}: {caught}");
+        check(ops).unwrap();
+    }
+}
+
+/// A connection revoked after its agent retired: a covering switch still starts the executor, as the
+/// account of the connection its last generation ran as, since a revocation destroys the token, not
+/// the account (DEC-2344 item 1, DEC-2350 item 3). One that cannot apply it, its login refused,
+/// crash-loops and raises `kill_switch_unapplied`; one that applies it and ends is never restarted.
+/// The executor's own exit once its switches are applied is lane LV's DEC-2347 item 3.2 test.
+#[test]
+fn a_revoked_connections_kill_switch_start_runs_as_its_account_and_is_unapplied_if_it_cannot_log_in()
+ {
+    for ends in [false, true] {
+        let journal = Journal::new();
+        let mut m = retired(&journal);
+        journal.services(&revoked_again(&connection_of(ACCOUNT), 0), at(5));
+        tick(&mut m, 5);
+        journal.services(&kill("connection", &connection_of(ACCOUNT), 1).1, at(10));
+        tick(&mut m, 10);
+        let launched: Vec<Option<String>> = m
+            .orchestrator()
+            .fake
+            .calls()
+            .iter()
+            .filter_map(|c| match c {
+                Call::Start {
+                    slot, connection, ..
+                } if *slot == ex(ACCOUNT) => Some(connection.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            launched,
+            vec![Some(connection_of(ACCOUNT)); 2],
+            "ends {ends}"
+        );
+        let mut second = 11;
+        if ends {
+            m.orchestrator().fake.succeed(&ex(ACCOUNT));
+        } else {
+            for _ in 0..8 {
+                let before = starts(&mut m, &ex(ACCOUNT)).len();
+                m.orchestrator().fake.crash(&ex(ACCOUNT));
+                while second < 4000 && starts(&mut m, &ex(ACCOUNT)).len() == before {
+                    tick(&mut m, second);
+                    second += 1;
+                }
+            }
+        }
+        for s in second..second + 800 {
+            tick(&mut m, s);
+        }
+        let codes: Vec<&str> = m.alerts().0.iter().map(|alert| alert.code).collect();
+        if ends {
+            assert_eq!(starts(&mut m, &ex(ACCOUNT)), vec![1, 2]);
+            assert!(codes.is_empty(), "{codes:?}");
+        } else {
+            assert_eq!(codes, vec![UNAPPLIED]);
+        }
+        clean(&mut m);
+    }
+}
+
+/// A manager restarted after an executor's switch was left unapplied raises the alert again, once,
+/// so a crash between the crash loop's record and its alert loses no alert.
+#[test]
+fn a_restarted_manager_raises_kill_switch_unapplied_again_once() {
+    let journal = Journal::new();
+    let mut m = retired(&journal);
+    journal.services(&kill("agent", "agent_a", 1).1, at(10));
+    tick(&mut m, 10);
+    let mut second = 11;
+    for _ in 0..8 {
+        let before = starts(&mut m, &ex(ACCOUNT)).len();
+        m.orchestrator().fake.crash(&ex(ACCOUNT));
+        while second < 4000 && starts(&mut m, &ex(ACCOUNT)).len() == before {
+            tick(&mut m, second);
+            second += 1;
+        }
+    }
+    let mut m = restart(m);
+    for s in second..second + 50 {
+        tick(&mut m, s);
+    }
+    let codes: Vec<&str> = m.alerts().0.iter().map(|alert| alert.code).collect();
+    assert_eq!(codes, vec![UNAPPLIED, UNAPPLIED]);
+}
+
+/// An executor an agent still wants is restarted after any exit, a successful one included: only one
+/// no agent wants ends by its own exit.
+#[test]
+fn a_wanted_executor_that_exits_with_success_is_restarted() {
+    let journal = Journal::new();
+    let mut m = manager(&journal, accounts(&[("agent_a", ACCOUNT)]));
+    journal.services(&journal.deployed("agent_a"), at(1));
+    tick(&mut m, 1);
+    m.orchestrator().fake.succeed(&ex(ACCOUNT));
+    for s in 2..10 {
+        tick(&mut m, s);
+    }
+    assert_eq!(starts(&mut m, &ex(ACCOUNT)), vec![1, 2]);
+    assert_eq!(
+        executor_starts(&journal, ACCOUNT)
+            .last()
+            .map(|s| s.0.as_str()),
+        Some("restart")
+    );
+    clean(&mut m);
 }
