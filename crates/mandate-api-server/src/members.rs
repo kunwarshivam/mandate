@@ -213,6 +213,19 @@ impl ControlLookup {
         )
     }
 
+    /// Whether `member`'s membership of the hosted workspace reaches it at the lookup's instant:
+    /// `active` or `cooling_off` (identity spec §5.1), as route 2 requires (§4.10 route 2 item 2).
+    ///
+    /// # Errors
+    /// [`LookupFailed`] when the control stream's records cannot be read or folded.
+    pub fn reaches(&self, member: PrincipalId) -> Result<bool, LookupFailed> {
+        let fold = self.fold()?;
+        Ok(matches!(
+            fold.state(member, self.now),
+            Some(MembershipState::Active | MembershipState::CoolingOff)
+        ))
+    }
+
     /// The hosted workspace's scope.
     fn scope(&self) -> Scope {
         Scope::Workspace {
