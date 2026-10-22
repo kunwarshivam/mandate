@@ -3056,6 +3056,21 @@ enables `live` (ES-23, OPS-5).
     namespace check, as DEC-1177 item 6 has the token exchange do.
   - After K2b: the chart's Deployment executor moves from `default` to its connection's `<hex>`
     account, once the manager owns every executor.
+  - **The role provisioner** ([DEC-2350](decisions/DEC-2350.md), DEC-2630 item 7; journal spec v0.77
+    §9.33). Nothing makes a connection's Kubernetes-auth roles today, so every exchange's and every
+    managed executor's login is refused. Spec first (this row's first PR), then: the vault side with
+    lane V2 (the provisioner identity and AppRole, `delete` on the token exchange's mount alone in `provisioner_policy`, making and
+    removing a connection's roles); the journal crate's three records (the `connection_roles`
+    vectors, pending until then); the `provisioner` process; its chart, with vault-only egress to
+    lane GO's pattern; and the manager's wait for `ConnectionRolesMade` before an exchange starts.
+    *Accepted when:* a property test over requests, closes, revocations, executor starts and stops,
+    crashes and vault refusals shows every record the provisioner journals keeps rules 262 and 263,
+    against an oracle rebuilt from the stream, with no executor's role ever removed, a revocation
+    right after a kill switch among them; and the manager starts no exchange before its
+    `ConnectionRolesMade`. Left: a sweep of the executor's roles the provisioner never removes, one
+    per connection whose request closed without an establishment or that was revoked, once no
+    executor of its account runs; the manager does not journal a held generation's own exit
+    (DEC-2344), so the sweep needs a signal it does not have yet.
 - **E21-34 (Proposed, M8; SC; lane O4)** As an owner, I want the kill switch reachable in the cell
   with nothing running but Postgres, the executor and the broker, so that rule 13 holds when the
   web app, the API and the cell's tooling are down (design §3.6, OPS-4). *Accepted when:*
