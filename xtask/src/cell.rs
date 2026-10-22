@@ -923,7 +923,28 @@ pub fn up() -> Result<()> {
     ])?;
     eprintln!("    journal: failure domains: {}", domain.trim());
     vault()?;
-    fixture_client_secret()?;
+    fixture_client_secret(
+        || {
+            kubectl(&[
+                "get",
+                "secret",
+                FIXTURE_CLIENT_SECRET,
+                "--namespace",
+                NAMESPACE,
+                "--ignore-not-found",
+                "-o",
+                "name",
+            ])
+        },
+        || {
+            let mut bytes = [0u8; FIXTURE_CLIENT_SECRET_BYTES];
+            fs::File::open("/dev/urandom")
+                .and_then(|mut random| random.read_exact(&mut bytes))
+                .context("reading /dev/urandom")?;
+            Ok(hex_of(&bytes))
+        },
+        |secret| apply(&[secret]),
+    )?;
     if stub.is_some() {
         demo_links(&image)?;
     }
@@ -1533,32 +1554,30 @@ fn client_secret_seed_stdin(root: &str, encoded: &str) -> String {
 /// The length of the fixture client's fake secret, in random bytes, written as hex.
 const FIXTURE_CLIENT_SECRET_BYTES: usize = 32;
 
+/// Whether the cell keeps the fixture client's Secret it already holds: `found` is kubectl's
+/// `get secret -o name` answer, empty when there is none.
+fn keep_existing(found: &str) -> bool {
+    !found.trim().is_empty()
+}
+
 /// Makes [`FIXTURE_CLIENT_SECRET`] once, before the workspace release whose `oauth-fixture` pod
 /// mounts it, and keeps one already made, so the pod and the vault's seed agree across every
-/// `cell up` (DEC-1176 item 6). Its value is a fake client's, random bytes in hex, which no real
-/// provider knows; it reaches no argument, since kubectl reads the object from stdin.
-fn fixture_client_secret() -> Result<()> {
-    let found = kubectl(&[
-        "get",
-        "secret",
-        FIXTURE_CLIENT_SECRET,
-        "--namespace",
-        NAMESPACE,
-        "--ignore-not-found",
-        "-o",
-        "name",
-    ])?;
-    if !found.trim().is_empty() {
+/// `cell up` (DEC-1176 item 6): `found` reads what the cell holds, `value` draws a fake client's
+/// secret, random bytes in hex, which no real provider knows, and `create` applies the Secret,
+/// which kubectl reads from stdin, so the value reaches no argument. `Ok(true)` when it was made;
+/// any failure fails `cell up`.
+fn fixture_client_secret(
+    found: impl FnOnce() -> Result<String>,
+    value: impl FnOnce() -> Result<String>,
+    create: impl FnOnce(Value) -> Result<()>,
+) -> Result<bool> {
+    if keep_existing(&found()?) {
         eprintln!("    oauth-fixture: its client secret is kept");
-        return Ok(());
+        return Ok(false);
     }
-    let mut bytes = [0u8; FIXTURE_CLIENT_SECRET_BYTES];
-    fs::File::open("/dev/urandom")
-        .and_then(|mut random| random.read_exact(&mut bytes))
-        .context("reading /dev/urandom")?;
-    apply(&[fixture_client_secret_object(&hex_of(&bytes))])?;
+    create(fixture_client_secret_object(&value()?))?;
     eprintln!("    oauth-fixture: its client secret is made");
-    Ok(())
+    Ok(true)
 }
 
 /// The fixture client's Secret holding `value` at its one key.
@@ -5122,6 +5141,50 @@ mod tests {
         assert_eq!(stdin, "fake-root\nZmFrZS1jbGllbnQtc2VjcmV0");
     }
 
+    /// A Secret the cell already holds is kept, unread and unchanged; none is made, from a value
+    /// drawn once; and a failure to read, draw or create fails the step, so `cell up` stops.
+    #[test]
+    fn the_fixture_client_secret_is_kept_or_made_once_and_its_failures_stop_cell_up() {
+        assert!(keep_existing("secret/oauth-fixture-client\n"));
+        assert!(!keep_existing(""));
+        assert!(!keep_existing("  \n"));
+        let kept = fixture_client_secret(
+            || Ok("secret/oauth-fixture-client\n".to_owned()),
+            || panic!("a kept Secret draws no value"),
+            |_| panic!("a kept Secret is not made again"),
+        );
+        assert!(matches!(kept, Ok(false)));
+        let mut made = Vec::new();
+        let created = fixture_client_secret(
+            || Ok(String::new()),
+            || Ok("ab01".to_owned()),
+            |secret| {
+                made.push(secret);
+                Ok(())
+            },
+        );
+        assert!(matches!(created, Ok(true)));
+        assert_eq!(made, [fixture_client_secret_object("ab01")]);
+        let unread = fixture_client_secret(
+            || bail!("kubectl failed"),
+            || Ok("ab01".to_owned()),
+            |_| panic!("nothing is made when the cell cannot be read"),
+        );
+        assert!(unread.is_err());
+        let undrawn = fixture_client_secret(
+            || Ok(String::new()),
+            || bail!("no randomness"),
+            |_| panic!("nothing is made without a value"),
+        );
+        assert!(undrawn.is_err());
+        let refused = fixture_client_secret(
+            || Ok(String::new()),
+            || Ok("ab01".to_owned()),
+            |_| bail!("kubectl apply failed"),
+        );
+        assert!(refused.is_err());
+    }
+
     /// The fixture client's Secret holds its one key as written, in the cell's namespace, and its
     /// value is hex.
     #[test]
@@ -5146,9 +5209,15 @@ mod tests {
             .nth(1)
             .and_then(|rest| rest.split("\n}\n").next())
             .unwrap_or_default();
-        let made = up
-            .find("    fixture_client_secret()?;")
-            .unwrap_or(usize::MAX);
+        let made = up.find("    fixture_client_secret(").unwrap_or(usize::MAX);
+        let made_call = up
+            .get(made..)
+            .and_then(|rest| rest.split("\n    if stub.is_some()").next())
+            .unwrap_or_default();
+        assert!(
+            made_call.trim_end().ends_with(")?;"),
+            "a failure to make the Secret fails `cell up`: {made_call}"
+        );
         let install = up.find("let installed = helm(&install);").unwrap_or(0);
         let installed = up.find("    installed?;").unwrap_or(usize::MAX);
         let seeded = up.find("    seed_client_secret()?;").unwrap_or(0);
@@ -5161,7 +5230,7 @@ mod tests {
             "the seed runs after the workspace install"
         );
         assert_eq!(up.matches("seed_client_secret()").count(), 1);
-        assert_eq!(up.matches("fixture_client_secret()").count(), 1);
+        assert_eq!(up.matches("fixture_client_secret(").count(), 1);
     }
 
     /// The vault drill passes only these answers, written out here rather than built from
