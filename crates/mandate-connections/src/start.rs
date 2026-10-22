@@ -18,6 +18,12 @@ pub const CALLBACK_PATH: &str = "/v1/oauth/alpaca/callback";
 const PRODUCTION_REDIRECT_URI: &str = "https://api.owlhead.ai/v1/oauth/alpaca/callback";
 /// Alpaca's authorization page.
 pub const AUTHORIZE_URL: &str = "https://app.alpaca.markets/oauth/authorize";
+/// The one authority beside loopback a cell's authorization page may name, over plain `http`
+/// only: the cell's `oauth-fixture` pod (DEC-1176), its scheme, host and port pinned (DEC-2633
+/// items 1 and 3).
+#[cfg(debug_assertions)]
+const FIXTURE_POD: &str = "oauth-fixture:8091";
+
 /// Where the browser is sent to grant the connect: Alpaca's page, or, only in a build with debug
 /// assertions, a dev or CI cell's fixture provider (DEC-2633 item 3). Only [`AuthorizePage::alpaca`]
 /// and [`AuthorizePage::for_cell`] make one, so no other text can become the page:
@@ -35,16 +41,12 @@ impl AuthorizePage {
     }
 
     /// A dev or CI cell's page, kept exactly as given: `http://` or `https://` on a loopback host
-    /// with an optional port from 1 to 65535, or `http://` on exactly `oauth-fixture:8091` (DEC-2633 item 1), and a
+    /// with an optional port from 1 to 65535, or `http://` on exactly [`FIXTURE_POD`], and a
     /// non-empty path of unreserved characters and `/`, nothing else, so no user information,
     /// query or fragment, and never an Alpaca host. The tier is the caller's to check first.
     #[cfg(debug_assertions)]
-    #[expect(
-        clippy::todo,
-        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-    )]
-    pub fn for_cell(_text: &str) -> Option<Self> {
-        todo!()
+    pub fn for_cell(text: &str) -> Option<Self> {
+        cell_page_admitted(text).then(|| Self(text.to_owned()))
     }
 
     pub fn as_str(&self) -> &str {
@@ -57,6 +59,37 @@ impl AuthorizePage {
 pub struct Authorizer {
     pub page: AuthorizePage,
     pub client: OAuthClient,
+}
+
+/// [`AuthorizePage::for_cell`]'s check.
+#[cfg(debug_assertions)]
+fn cell_page_admitted(text: &str) -> bool {
+    let (plain, rest) = match (text.strip_prefix("http://"), text.strip_prefix("https://")) {
+        (Some(rest), _) => (true, rest),
+        (None, Some(rest)) => (false, rest),
+        (None, None) => return false,
+    };
+    let Some((authority, path)) = rest.split_once('/') else {
+        return false;
+    };
+    let path_ok = !path.is_empty()
+        && path
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~' | b'/'));
+    let fixture_pod = plain && authority == FIXTURE_POD;
+    let loopback = split_authority(authority).is_some_and(|(host, port)| {
+        let host_ok = match host {
+            Host::Bracketed(inner) => inner == "::1",
+            Host::Named(name) => LOOPBACK_HOSTS.contains(&name),
+        };
+        let port_ok = port.is_none_or(|port| {
+            !port.starts_with('0')
+                && port.bytes().all(|b| b.is_ascii_digit())
+                && port.parse::<u16>().is_ok_and(|n| n != 0)
+        });
+        host_ok && port_ok
+    });
+    (loopback || fixture_pod) && path_ok
 }
 
 /// The scopes requested, space-separated as Alpaca expects (connections spec §5.3).

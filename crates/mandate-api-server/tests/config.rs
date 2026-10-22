@@ -414,7 +414,6 @@ const CELL_PAGE: &str = "http://oauth-fixture:8091/alpaca/oauth/authorize";
 
 /// Unset, the page is Alpaca's in every tier (DEC-2633 item 3).
 #[test]
-#[ignore = "pending E10-13"]
 fn without_an_authorize_url_the_page_is_alpaca_s() {
     for tier in [Tier::Dev, Tier::Ci, Tier::Staging, Tier::Production] {
         assert_eq!(
@@ -428,7 +427,6 @@ fn without_an_authorize_url_the_page_is_alpaca_s() {
 /// A dev or CI cell may name its fixture provider's page, kept as given.
 #[test]
 #[cfg(debug_assertions)]
-#[ignore = "pending E10-13"]
 fn a_dev_or_ci_cell_names_its_fixture_page() {
     for tier in [Tier::Dev, Tier::Ci] {
         assert_eq!(
@@ -442,7 +440,6 @@ fn a_dev_or_ci_cell_names_its_fixture_page() {
 /// Outside dev and CI any set value refuses the start, Alpaca's own page and an empty one
 /// included: the variable being set at all is the refusal (DEC-2633 items 2 and 3).
 #[test]
-#[ignore = "pending E10-13"]
 fn outside_dev_and_ci_any_authorize_url_refuses_the_start() {
     for tier in [Tier::Staging, Tier::Production] {
         for value in [CELL_PAGE, "", "https://app.alpaca.markets/oauth/authorize"] {
@@ -458,7 +455,6 @@ fn outside_dev_and_ci_any_authorize_url_refuses_the_start() {
 /// In dev and CI a page the cell check refuses, or one that is not UTF-8, refuses the start.
 #[test]
 #[cfg(debug_assertions)]
-#[ignore = "pending E10-13"]
 fn a_page_the_cell_check_refuses_refuses_the_start_in_dev() {
     for value in [
         OsStr::new(""),

@@ -150,12 +150,21 @@ pub const AUTHORIZE_URL: &str = "MANDATE_ALPACA_AUTHORIZE_URL";
 ///
 /// # Errors
 /// [`StartRefusal::AuthorizeUrl`].
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
-pub fn authorize_page(_tier: Tier, _value: Option<&OsStr>) -> Result<AuthorizePage, StartRefusal> {
-    todo!()
+pub fn authorize_page(tier: Tier, value: Option<&OsStr>) -> Result<AuthorizePage, StartRefusal> {
+    let Some(text) = value else {
+        return Ok(AuthorizePage::alpaca());
+    };
+    #[cfg(debug_assertions)]
+    let judged = matches!(tier, Tier::Dev | Tier::Ci)
+        .then(|| text.to_str().and_then(AuthorizePage::for_cell))
+        .flatten()
+        .ok_or(StartRefusal::AuthorizeUrl);
+    #[cfg(not(debug_assertions))]
+    let judged = {
+        let _unread_in_release = (tier, text);
+        Err(StartRefusal::AuthorizeUrl)
+    };
+    judged
 }
 
 /// Refuses a key set fetched over anything but `https` outside dev and CI (E21-53, DEC-2100 item

@@ -444,7 +444,6 @@ fn holding_a_state_neither_spends_it_nor_outlives_it() {
 /// after one `?` (DEC-2633 item 3).
 #[test]
 #[cfg(debug_assertions)]
-#[ignore = "pending E10-13"]
 fn the_authorization_url_is_on_the_authorizer_s_page() {
     assert_eq!(AuthorizePage::alpaca().as_str(), AUTHORIZE_URL);
     let page = AuthorizePage::for_cell("http://oauth-fixture:8091/alpaca/oauth/authorize").unwrap();
@@ -471,7 +470,6 @@ fn the_authorization_url_is_on_the_authorizer_s_page() {
 /// nothing else, and never an Alpaca host (DEC-2633 items 1 and 3), kept exactly as given.
 #[test]
 #[cfg(debug_assertions)]
-#[ignore = "pending E10-13"]
 fn a_cell_page_is_loopback_or_exactly_the_fixture_pod() {
     for admitted in [
         "http://127.0.0.1:8091/alpaca/oauth/authorize",
