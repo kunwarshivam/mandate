@@ -72,7 +72,6 @@ fn senders() -> Vec<String> {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn only_the_executor_sends_completed() {
     assert_eq!(senders(), ["mandate-executord"]);
 }

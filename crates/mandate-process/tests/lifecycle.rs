@@ -167,7 +167,6 @@ fn a_fenced_append_exits_from_every_state_and_nothing_is_permitted_after() {
 /// replaying, ready, not ready and draining, and nothing is permitted after; a process already
 /// exited keeps its exit.
 #[test]
-#[ignore = "pending E7-4"]
 fn completed_exits_from_every_state_not_yet_exited() {
     let prefixes: [&[Input]; 5] = [
         &[],

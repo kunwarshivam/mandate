@@ -174,11 +174,13 @@ pub struct ExecutorProcess<S, B> {
 }
 
 /// What one pass reads from the agents' streams: the kill switches this stream has not applied,
-/// the proposals the core does not hold yet, each with its agent, and whether a row did not read.
+/// the proposals the core does not hold yet, each with its agent, whether a row did not read, and
+/// whether every agent followed is stopped ([`Following::all_stopped`]).
 struct Followed {
     switches: Vec<(AgentId, Switch)>,
     proposals: Vec<(AgentId, Proposal)>,
     unreadable: bool,
+    all_stopped: bool,
 }
 
 impl<S: Store, B: Broker> ExecutorProcess<S, B> {
@@ -312,10 +314,12 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             switches,
             proposals: proposed,
             unreadable,
+            all_stopped,
         }) = self.switches(now, &mut alerts)
         else {
             return alerts;
         };
+        let nothing_read = switches.is_empty() && proposed.is_empty();
         for (agent, switch) in switches {
             if !self.apply(now, agent, switch, &mut alerts) {
                 return alerts;
@@ -340,7 +344,29 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                 return alerts;
             }
         }
+        if nothing_read && all_stopped && self.owes_nothing() {
+            self.lifecycle.observe(now, Lifecycled::Completed);
+        }
         alerts
+    }
+
+    /// Whether the account owes nothing more (DEC-2347): the process is ready, no reconciliation
+    /// is due, every order the account stream holds is terminal, `Unknown` included, and no agent
+    /// followed holds lots its kill switch or exits would still sell. A pass that reads a switch
+    /// or a proposal, or reaches here with anything in doubt or unsent, never asks: it returned
+    /// earlier, or reads again on the next pass.
+    fn owes_nothing(&self) -> bool {
+        self.ready()
+            && !self.reconcile
+            && self
+                .state
+                .orders()
+                .values()
+                .all(|order| order.state.is_terminal())
+            && self
+                .deployed
+                .keys()
+                .all(|agent| self.state.holds_lots(agent) == Ok(false))
     }
 
     /// Drains at `now`: no new input; an input in doubt is handed once more, then the process exits
@@ -509,6 +535,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             switches: pending,
             proposals: proposed,
             unreadable,
+            all_stopped: following.all_stopped(),
         })
     }
 

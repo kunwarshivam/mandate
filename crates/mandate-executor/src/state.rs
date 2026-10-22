@@ -9,6 +9,7 @@ use mandate_time::Date;
 
 use crate::error::ExecutorError;
 use crate::ids::{ClientOrderId, IntentId};
+use crate::kill::sub_ledger;
 use crate::shape::transitional_alpaca;
 use crate::types::{
     AccountScope, AccountState, ActivityCursor, AgentId, BracketLegs, EventId, FillId, IntentBody,
@@ -630,8 +631,12 @@ impl ExecutorState {
     /// Whether `agent` holds lots in any instrument: its sub-ledger, the quantity its kill switch
     /// would sell (trading-domain spec §5.5), is above zero somewhere (DEC-2347).
     pub fn holds_lots(&self, agent: &AgentId) -> Result<bool, ExecutorError> {
-        let _ = agent;
-        Err(ExecutorError::Unimplemented { story: "E7-4" })
+        for instrument in self.positions.keys() {
+            if sub_ledger(self, agent, instrument)? > Qty::ZERO {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     pub fn started(&self) -> bool {

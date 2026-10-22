@@ -1,8 +1,0 @@
-file = "crates/mandate-process/tests/lifecycle.rs"
-test = "completed_exits_from_every_state_not_yet_exited"
-reason = """
-`Input::Completed` is new, and until E7-4's exit (DEC-2347 item 1) lands its arm in
-`Lifecycle::observe` changes nothing, so the process stays where it was: the test fails on that
-state, not at a stub, since `observe` returns a state and has no error to carry one. The
-implementation PR deletes this row.
-"""

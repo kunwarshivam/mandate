@@ -18,7 +18,6 @@ const COMPLETED: State = State::Exited(Exit::Completed);
 /// Item 3: its only agent stopped, nothing on the account, so the first pass exits `completed`,
 /// status 0.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_stopped_agent_and_nothing_owed_exit_completed() -> Result<(), Error> {
     let journal = deployed()?;
     stopped(&journal, "c3", AGENT)?;
@@ -49,7 +48,6 @@ fn a_desired_agent_keeps_it_running() -> Result<(), Error> {
 /// Item 3.2: the pass that reads a switch applies it and does not exit; the next pass, with
 /// nothing left to read, does.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_switch_read_is_applied_before_the_exit() -> Result<(), Error> {
     let journal = deployed()?;
     stopped(&journal, "c3", AGENT)?;
@@ -71,7 +69,6 @@ fn a_switch_read_is_applied_before_the_exit() -> Result<(), Error> {
 /// pending its cancel, which keeps the executor running; once the broker confirms it, a restart
 /// reads the order canceled and exits.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_cancel_not_yet_confirmed_keeps_it_running() -> Result<(), Error> {
     let journal = deployed()?;
     journal.seed(ACCOUNT_STREAM, OPENED)?;
@@ -113,7 +110,6 @@ fn a_process_not_ready_keeps_running() -> Result<(), Error> {
 
 /// Invariant 4: a restart after the exit applies a switch journaled since, then exits again.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_restart_after_the_exit_applies_a_later_switch_and_exits_again() -> Result<(), Error> {
     let journal = deployed()?;
     stopped(&journal, "c3", AGENT)?;

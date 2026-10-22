@@ -1,7 +1,0 @@
-file = "crates/mandate-executord/tests/completed.rs"
-test = "a_cancel_not_yet_confirmed_keeps_it_running"
-reason = """
-The executor process asks nothing at the end of its pass until E7-4's exit predicate (DEC-2347
-item 3) lands, so it keeps running where the test expects it to exit `completed`: it fails on
-the process's state, not at a stub. The implementation PR deletes this row.
-"""

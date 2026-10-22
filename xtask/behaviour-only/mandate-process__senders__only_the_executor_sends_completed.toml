@@ -1,7 +1,0 @@
-file = "crates/mandate-process/tests/senders.rs"
-test = "only_the_executor_sends_completed"
-reason = """
-No crate sends `Input::Completed` until E7-4's exit predicate (DEC-2347 item 3) lands in
-`mandate-executord`, so the test reads no sender where it expects that one: it fails on the
-sources, not at a stub. The implementation PR deletes this row.
-"""

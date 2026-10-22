@@ -228,7 +228,7 @@ impl Lifecycle {
                     State::Exited(exit) => exit,
                 });
             }
-            Input::Completed => {}
+            Input::Completed => self.exit = Some(Exit::Completed),
         }
         self.state()
     }

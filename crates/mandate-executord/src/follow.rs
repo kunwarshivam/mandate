@@ -223,6 +223,13 @@ pub fn agents_of(
 }
 
 impl Following {
+    /// Whether every agent the executor follows has an `AgentStopped`, which is final (journal
+    /// spec v0.56), and it follows at least one: an executor following none was started for
+    /// something the journal does not show it yet, so it waits (DEC-2347 item 3.1).
+    pub fn all_stopped(&self) -> bool {
+        !self.agents.is_empty() && self.agents.keys().all(|agent| self.stopped.contains(agent))
+    }
+
     /// The kill-switch commands the executor applies itself to `agent` (DEC-2343 item 3), in
     /// control-stream order: each command of its connection's or the workspace's scope issued
     /// after the agent was deployed on one of this account's connections it names, when one of
