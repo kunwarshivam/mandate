@@ -1123,3 +1123,62 @@ fn a_deprovision_since_the_last_sign_in_or_a_full_store_refuses_a_passkey_sessio
     );
     assert_eq!(full.len(), MAX_SESSIONS);
 }
+
+#[test]
+#[ignore = "pending E9-1"]
+fn a_full_sign_in_is_kept_as_the_route_two_standing_and_nothing_else_is() {
+    let store = sessions();
+    assert_eq!(store.standing(alice()), SubjectStanding::default());
+    store
+        .open(alice(), SUBJECT.to_owned(), None, at(T0))
+        .expect("opened");
+    store
+        .open(alice(), SUBJECT.to_owned(), None, at(T0 - 10))
+        .expect("opened");
+    assert_eq!(
+        store.standing(alice()),
+        SubjectStanding {
+            last_sign_in: Some(at(T0)),
+            last_deprovision: None,
+        },
+        "the latest sign-in"
+    );
+    assert_eq!(
+        store.standing(bob()),
+        SubjectStanding::default(),
+        "each their own"
+    );
+    store
+        .open_reduction_only(bob(), signed_in(), None, at(T0 + 5))
+        .expect("opened");
+    assert_eq!(
+        store.standing(bob()),
+        SubjectStanding::default(),
+        "a passkey session is not a sign-in"
+    );
+    let broken = Sessions::new(&key(), Box::new(Broken));
+    assert_eq!(
+        broken.open(alice(), SUBJECT.to_owned(), None, at(T0)),
+        Err(Unauthenticated)
+    );
+    assert_eq!(
+        broken.standing(alice()),
+        SubjectStanding::default(),
+        "a refused open records nothing"
+    );
+    let full = sessions();
+    for i in 0..MAX_SESSIONS {
+        full.open(
+            PrincipalId(1_000 + i as u128),
+            SUBJECT.to_owned(),
+            None,
+            at(T0),
+        )
+        .expect("opened");
+    }
+    assert_eq!(
+        full.open(alice(), SUBJECT.to_owned(), None, at(T0 + 1)),
+        Err(Unauthenticated)
+    );
+    assert_eq!(full.standing(alice()), SubjectStanding::default());
+}

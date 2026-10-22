@@ -470,6 +470,20 @@ impl Sessions {
         UtcNanos::from_parts(entry.absolute_until.min(idle), 0).map_err(|_| Unauthenticated)
     }
 
+    /// `member`'s standing for route 2: the last sign-in this store opened a full session for
+    /// at, and no deprovision, which has no source yet ([DEC-2319] items 1 and 2, Proposed). A
+    /// reduction-only session is not a sign-in, and a refused open records nothing.
+    ///
+    /// [DEC-2319]: ../../../docs/project/decisions/DEC-2319.md
+    #[expect(
+        clippy::todo,
+        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+    )]
+    pub fn standing(&self, member: PrincipalId) -> SubjectStanding {
+        let _ = member;
+        todo!()
+    }
+
     /// How many sessions are held, for the tests' independent count.
     pub fn len(&self) -> usize {
         self.store().entries.len()
