@@ -73,6 +73,25 @@ fn fixture_behind(signer: &Signer, signed_in: bool, ingress: Vec<IpAddr>) -> Fix
         T0 - 900,
         enrolled(ALICE, CREDENTIAL, &cose, signer.alg()),
     );
+    for (kind, version) in [("ConnectionRequested", 1), ("ConnectionEstablished", 2)] {
+        rows.edited(kind, T0 - 880, |e| {
+            e["schema_version"] = serde_json::json!(version);
+            e["payload"] = serde_json::json!({
+                "connection_id": "conn_live", "broker": "alpaca", "environment": "paper",
+                "scopes": ["account:write", "trading"],
+                "account_ref": "01JB3K6F0C9R2V7N4M8Q1T5W60", "user": "usr_1",
+                "step_up": {"assertion_id": "01JAA3P4A000000000000000S1", "authenticated_at": "2026-10-19T15:00:05.250000000Z", "method": "passkey"},
+                "margin_attestation": null,
+            });
+        });
+    }
+    rows.edited("AgentDeployed", T0 - 870, |e| {
+        e["schema_version"] = serde_json::json!(2);
+        e["payload"] = serde_json::json!({
+            "agent_id": "agt_one", "mandate_version": format!("sha256:{}", "ef".repeat(32)),
+            "record_ref": format!("sha256:{}", "ab".repeat(32)), "connection_id": "conn_live",
+        });
+    });
     let journal = Arc::new(MemJournal::default());
     journal
         .streams
@@ -504,4 +523,145 @@ fn clients_without_a_device_cookie_share_one_device_budget() {
             "ten cookie-less failures from ten addresses share one device's ten"
         );
     }
+}
+
+/// The session cookie a route-2 opening at T0 set, in the fixture `f`.
+fn opened(f: &Fixture, signer: &Signer) -> (Reply, String) {
+    let (id, bytes) = challenge(f);
+    let reply = present(f, &[], &request(&id, CREDENTIAL, &signer.assert(&bytes)));
+    assert_eq!(reply.status, 201);
+    let cookie = cookie_value(&session_set(&reply).expect("a cookie"));
+    (reply, cookie)
+}
+
+/// The one workspace an answer names.
+fn workspace_of(answer: &Value) -> Value {
+    match answer.get("workspaces") {
+        Some(Value::Array(items)) if items.len() == 1 => items[0].clone(),
+        other => panic!("one workspace: {other:?}"),
+    }
+}
+
+fn texts(value: &Value, key: &str) -> Vec<String> {
+    match value.get(key) {
+        Some(Value::Array(items)) => items
+            .iter()
+            .map(|item| match item {
+                Value::Str(text) => text.clone(),
+                other => panic!("{other:?}"),
+            })
+            .collect(),
+        other => panic!("{key}: {other:?}"),
+    }
+}
+
+#[test]
+#[ignore = "pending E9-1"]
+fn the_opening_and_me_session_name_what_the_session_may_act_on() {
+    let signer = Signer::es256();
+    let f = fixture(&signer, true);
+    let (reply, cookie) = opened(&f, &signer);
+    let named = workspace_of(&json(&reply));
+    assert_eq!(texts(&named, "agent_ids"), ["agt_one"], "the opening");
+    assert_eq!(texts(&named, "connection_ids"), ["conn_live"]);
+    let headers = [("Cookie", format!("{COOKIE_NAME}={cookie}"))];
+    let headers: Vec<(&str, &str)> = headers.iter().map(|(k, v)| (*k, v.as_str())).collect();
+    let me = send(f.addr, "GET", "/v1/me/session", &headers, b"");
+    assert_eq!(me.status, 200, "{:?}", String::from_utf8_lossy(&me.body));
+    let answer = json(&me);
+    assert_eq!(text(&answer, "kind"), "reduction_only");
+    assert_eq!(text(&answer, "expires_at"), at(T0 + 900).to_string());
+    assert_eq!(
+        text(&answer, "principal_id"),
+        ALICE.to_ulid_text().expect("a ULID")
+    );
+    let workspace = workspace_of(&answer);
+    assert_eq!(text(&workspace, "workspace_id"), WORKSPACE);
+    assert_eq!(workspace.get("label"), Some(&Value::Null));
+    assert_eq!(texts(&workspace, "agent_ids"), ["agt_one"], "/me/session");
+    assert_eq!(texts(&workspace, "connection_ids"), ["conn_live"]);
+}
+
+#[test]
+fn a_passkey_session_pauses_kill_switches_and_signs_out_and_reaches_nothing_else() {
+    let signer = Signer::es256();
+    let f = fixture(&signer, true);
+    let (_, cookie) = opened(&f, &signer);
+    let ws = |path: &str| format!("/v1/workspaces/{WORKSPACE}{path}");
+    let call = |method: &str, path: &str, key: Option<&str>, body: &[u8]| {
+        let cookie = format!("{COOKIE_NAME}={cookie}");
+        let mut headers = vec![
+            ("Origin", ORIGIN),
+            ("X-Mandate-Request", "1"),
+            ("Cookie", cookie.as_str()),
+            ("Content-Type", "application/json"),
+        ];
+        if let Some(key) = key {
+            headers.push(("Idempotency-Key", key));
+        }
+        send(f.addr, method, path, &headers, body)
+    };
+    let paused = call(
+        "POST",
+        &ws("/agents/agt_one/pause"),
+        Some("k1Z-9_aaaaaaaaaa"),
+        b"{}",
+    );
+    assert_eq!(
+        paused.status,
+        202,
+        "{:?}",
+        String::from_utf8_lossy(&paused.body)
+    );
+    let killed = call(
+        "POST",
+        &ws("/kill-switch"),
+        Some("k1Z-9_bbbbbbbbbb"),
+        br#"{"scope":{"kind":"connection","id":"conn_live"}}"#,
+    );
+    assert_eq!(
+        killed.status,
+        202,
+        "{:?}",
+        String::from_utf8_lossy(&killed.body)
+    );
+    for (method, path, key, body) in [
+        ("GET", ws("/agents"), None, &b""[..]),
+        ("GET", "/v1/me/workspaces".to_owned(), None, b""),
+        (
+            "POST",
+            ws("/agents/agt_one/resume"),
+            Some("k1Z-9_cccccccccc"),
+            b"{}",
+        ),
+        (
+            "POST",
+            ws("/step-up/challenges"),
+            None,
+            br#"{"action":{"kind":"resume","agent_id":"agt_one"}}"#,
+        ),
+        ("GET", ws("/connections"), None, b""),
+    ] {
+        let refused = call(method, &path, key, body);
+        assert_eq!(
+            refused.status,
+            403,
+            "{method} {path}: {:?}",
+            String::from_utf8_lossy(&refused.body)
+        );
+        assert_eq!(
+            text(&json(&refused), "code"),
+            "reduction_only",
+            "{method} {path}"
+        );
+    }
+    let out = call("DELETE", "/v1/sessions/current", None, b"");
+    assert_eq!(out.status, 204, "sign-out");
+    let after = call(
+        "POST",
+        &ws("/agents/agt_one/pause"),
+        Some("k1Z-9_dddddddddd"),
+        b"{}",
+    );
+    assert_eq!(after.status, 401, "signed out");
 }
