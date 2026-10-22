@@ -970,3 +970,53 @@ fn a_crashed_kill_switch_generation_waits_its_back_off_before_one_restart() {
     );
     clean(&mut m);
 }
+
+/// DEC-2344 item 3 and rule 13: an agent deployed and retired while a kill switch's generation
+/// runs does not take the hold away, so the account's last retirement does not stop that
+/// generation; it ends by its own exit and is not restarted.
+#[test]
+#[ignore = "pending E21-33"]
+fn a_deploy_and_retire_during_a_kill_switch_run_does_not_stop_it() {
+    let journal = Journal::new();
+    let mut m = manager(
+        &journal,
+        accounts(&[
+            ("agent_a", ACCOUNT),
+            ("agent_c", ACCOUNT),
+            ("agent_b", OTHER),
+        ]),
+    );
+    journal.services(&journal.deployed("agent_a"), at(1));
+    tick(&mut m, 1);
+    journal.services(&stopped("agent_a", ACCOUNT), at(2));
+    tick(&mut m, 2);
+    tick(&mut m, 3);
+    journal.services(&kill("connection", &connection_of(ACCOUNT), 1).1, at(10));
+    tick(&mut m, 10);
+    assert_eq!(
+        starts(&mut m, &ex(ACCOUNT)),
+        vec![1, 2],
+        "the switch's one start"
+    );
+    journal.services(&journal.deployed("agent_c"), at(11));
+    tick(&mut m, 11);
+    journal.services(&stopped("agent_c", ACCOUNT), at(12));
+    for s in 12..40 {
+        tick(&mut m, s);
+    }
+    assert_eq!(
+        stops(&mut m, &ex(ACCOUNT)),
+        vec![1],
+        "the switch's generation is not stopped by the retirement"
+    );
+    m.orchestrator().fake.succeed(&ex(ACCOUNT));
+    for s in 40..80 {
+        tick(&mut m, s);
+    }
+    assert_eq!(
+        starts(&mut m, &ex(ACCOUNT)),
+        vec![1, 2],
+        "its own end is not restarted"
+    );
+    clean(&mut m);
+}

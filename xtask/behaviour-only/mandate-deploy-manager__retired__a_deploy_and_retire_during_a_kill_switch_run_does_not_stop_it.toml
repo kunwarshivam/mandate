@@ -1,0 +1,7 @@
+file = "crates/mandate-deploy-manager/tests/retired.rs"
+test = "a_deploy_and_retire_during_a_kill_switch_run_does_not_stop_it"
+reason = """
+DEC-2344 items 1 and 3 (E21-33): today's manager starts no kill-switch generation, so there is none
+for a later retirement to leave running. So this test fails on the manager's own answer, not at a
+stub. The implementation PR (DEC-2344 items 1 and 3) deletes this file with the test's `#[ignore]`.
+"""
