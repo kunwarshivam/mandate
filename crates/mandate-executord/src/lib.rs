@@ -40,6 +40,7 @@ pub mod lease;
 pub mod oauth_check;
 pub mod paper;
 mod process;
+pub mod serve;
 
 pub use process::{
     Alert, Broker, Config, ExecutorProcess, Protections, Unplanned, VERSION, Wiring,

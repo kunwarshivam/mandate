@@ -1,0 +1,7 @@
+file = "crates/mandate-executord/tests/serve.rs"
+test = "a_start_is_live_only_within_its_bound"
+reason = """
+`serve::starting` answers a snapshot the probe reads, which has no stub's report to carry: its
+stub keeps today's unbounded start, so the test fails on that answer. E21-32's E2c-2
+implementation bounds the start by `STARTUP` and deletes this row.
+"""
