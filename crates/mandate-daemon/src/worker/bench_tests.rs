@@ -52,6 +52,14 @@ const COSTLY_USAGE: Usage = Usage {
     cached: 0,
 };
 
+/// What one reply under [`COSTLY_USAGE`] costs at the recorded endpoint's prices of 3 and 15 USD a
+/// million input and output tokens: 100 × 3 + 2,000 × 15 micros.
+const COSTLY_CALL_MICROS: u64 = 100 * 3 + 2_000 * 15;
+
+/// The turns answered under [`LOW_CAP_MICROS`] before what is left of it cannot hold the next
+/// call's reservation.
+const COSTLY_TURNS: usize = 3;
+
 /// A run cap three costly turns spend most of, so the run ends `cost` before its turns run out: what
 /// is left then cannot hold another call's reservation.
 const LOW_CAP_MICROS: u64 = 160_000;
@@ -758,9 +766,16 @@ fn a_run_under_a_low_ceiling_ends_cost_within_it() {
         "{:?}",
         of(&trial, "RunEnded").collect::<Vec<_>>()
     );
+    let answered = of(&trial, "ModelInvocationRecorded")
+        .filter(|record| record.payload["outcome"] == "ok")
+        .count();
     let spent: u64 = trial.settled.iter().map(|(_, cost)| cost).sum();
-    assert!(
-        (LOW_CAP_MICROS / 2..=LOW_CAP_MICROS).contains(&spent),
-        "spent {spent} micros under a cap of {LOW_CAP_MICROS}"
+    assert_eq!(
+        (answered, spent),
+        (
+            COSTLY_TURNS,
+            COSTLY_CALL_MICROS * u64::try_from(COSTLY_TURNS).unwrap()
+        ),
+        "three costly turns spend 30,300 micros each under a cap of {LOW_CAP_MICROS}"
     );
 }
