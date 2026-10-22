@@ -1,5 +1,5 @@
 //! Route 2's challenge route (workspace API spec §4.10 route 2, identity spec §6.4 route 2,
-//! DEC-2117, DEC-2118, DEC-653): browser-only and strict, a challenge that names nothing
+//! DEC-2117, DEC-2119, DEC-653): browser-only and strict, a challenge that names nothing
 //! workspace-specific and is never journaled, a device cookie that is random bytes and nothing
 //! else, the address and device each request counts against, and the one 401 over every limit.
 

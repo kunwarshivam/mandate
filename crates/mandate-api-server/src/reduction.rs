@@ -1,6 +1,6 @@
 //! Route 2's challenge route (workspace API spec §4.10 route 2, identity spec §6.4 route 2,
 //! [DEC-2117](../../../docs/project/decisions/DEC-2117.md),
-//! [DEC-2118](../../../docs/project/decisions/DEC-2118.md)): `POST
+//! [DEC-2119](../../../docs/project/decisions/DEC-2119.md)): `POST
 //! /v1/reduction-sessions/challenges`, unauthenticated and browser-only, which issues a WebAuthn
 //! challenge through `mandate_authn::reduction::ReductionGate` (DEC-653) and names nothing
 //! workspace-specific.
