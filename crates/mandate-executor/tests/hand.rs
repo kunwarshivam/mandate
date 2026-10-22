@@ -5077,8 +5077,14 @@ fn a_fill_whose_broker_id_names_no_one_order_stays_external() {
     }
 }
 
-/// The agent's buy the broker reports filled, after a reconciliation, with its fill naming no order.
-fn filled_without_its_fill(fills: Vec<mandate_executor::BrokerFill>, held: &str) -> Shell {
+/// The agent's buy of 10 the broker reports in `status` with `filled` of it filled, after a
+/// reconciliation, with its fill naming no order.
+fn ended_without_its_fill(
+    status: &str,
+    filled: &str,
+    fills: Vec<mandate_executor::BrokerFill>,
+    held: &str,
+) -> Shell {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
     let instruments = FixedInstruments;
@@ -5093,8 +5099,8 @@ fn filled_without_its_fill(fills: Vec<mandate_executor::BrokerFill>, held: &str)
         AAPL,
         Side::Buy,
         "10",
-        "10",
-        "filled",
+        filled,
+        status,
     )];
     taken.fills = fills;
     taken.positions = vec![broker_position(AAPL, held)];
@@ -5110,7 +5116,7 @@ fn a_filled_buy_whose_fill_named_no_order_still_holds_lots() {
     let bought = broker_fill("f-1", None, "10", "150");
     let mut sold = broker_fill("f-2", None, "10", "151");
     sold.side = Side::Sell;
-    let holding = filled_without_its_fill(vec![bought.clone()], "10");
+    let holding = ended_without_its_fill("filled", "10", vec![bought.clone()], "10");
     assert!(
         holding
             .state
@@ -5121,8 +5127,31 @@ fn a_filled_buy_whose_fill_named_no_order_still_holds_lots() {
     );
     assert_eq!(holding.state.holds_lots(&agent(common::AGENT)), Ok(true));
     assert_eq!(holding.state.holds_lots(&agent(OTHER_AGENT)), Ok(false));
-    let flat = filled_without_its_fill(vec![bought, sold], "0");
+    let flat = ended_without_its_fill("filled", "10", vec![bought, sold], "0");
     assert_eq!(flat.state.holds_lots(&agent(common::AGENT)), Ok(false));
+}
+
+/// DEC-2347 item 3.6 (the review of #2270): a buy that filled 5 of its 10 and then ended canceled
+/// or expired, its fill naming no order, still holds the 5 the account holds.
+#[test]
+fn a_partly_filled_buy_that_ended_with_its_fill_named_no_order_still_holds_lots() {
+    for status in ["canceled", "expired"] {
+        let fill = broker_fill("f-1", None, "5", "150");
+        let ended = ended_without_its_fill(status, "5", vec![fill], "5");
+        assert!(
+            ended.state.orders().values().all(|order| {
+                order.state.is_terminal()
+                    && order.state != OrderState::Filled
+                    && order.filled_qty == qty("0")
+            }),
+            "{status}: the order ended unfilled in the fold"
+        );
+        assert_eq!(
+            ended.state.holds_lots(&agent(common::AGENT)),
+            Ok(true),
+            "{status}"
+        );
+    }
 }
 
 #[test]
