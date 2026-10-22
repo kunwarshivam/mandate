@@ -1708,6 +1708,58 @@ def test_the_tunnel_runs_beside_the_api():
         assert tunnel_route(seeded), seeded
 
 
+ALPACA_ENV = ("MANDATE_ALPACA_CLIENT_ID", "MANDATE_ALPACA_REDIRECT_URI")
+ALPACA_PROCESSES = {"api", "token-exchange"}
+ALPACA_SET = (
+    "--set",
+    "alpacaOAuth.clientId=PKTESTCLIENT01",
+    "--set",
+    "alpacaOAuth.redirectUri=https://api.example/v1/oauth/alpaca/callback",
+)
+
+
+def alpaca_oauth_env(docs: list[dict], set_: bool) -> list[str]:
+    """DEC-2636: the Alpaca OAuth client id and redirect URI reach only the API's and the token
+    exchange's own containers, both when set and neither when not, and no other container at all."""
+    problems = []
+    for w in workloads(docs):
+        process = w["metadata"].get("labels", {}).get("mandate.dev/process")
+        for c in pod_spec(w)["containers"]:
+            carried = {e["name"] for e in c.get("env", [])} & set(ALPACA_ENV)
+            wanted = set(ALPACA_ENV) if set_ and process in ALPACA_PROCESSES and c["name"] == process else set()
+            if carried != wanted:
+                problems.append(f"{w['metadata']['name']}/{c['name']} carries {sorted(carried)}")
+    return problems
+
+
+def test_the_alpaca_oauth_settings_reach_the_api_and_the_token_exchange_only():
+    assert alpaca_oauth_env(render_all(), set_=False) == []
+    docs = render_all(*ALPACA_SET)
+    assert alpaca_oauth_env(docs, set_=True) == []
+    leaked = mutate(
+        docs,
+        "scheduler",
+        "Deployment",
+        lambda w: first_container(w).setdefault("env", []).append({"name": "MANDATE_ALPACA_CLIENT_ID", "value": "x"}),
+    )
+    assert alpaca_oauth_env(leaked, set_=True), "a third process given the client id is caught"
+    dropped = mutate(
+        docs,
+        "token-exchange",
+        "Deployment",
+        lambda w: first_container(w).update(
+            env=[e for e in first_container(w)["env"] if e["name"] != "MANDATE_ALPACA_REDIRECT_URI"]
+        ),
+    )
+    assert alpaca_oauth_env(dropped, set_=True), "the exchange without the redirect URI is caught"
+    for refused in (
+        "alpacaOAuth.clientId=has space",
+        "alpacaOAuth.redirectUri=http://evil.example/v1/oauth/alpaca/callback",
+        "alpacaOAuth.redirectUri=https://api.example/elsewhere",
+    ):
+        assert helm(CHART, "--set", refused).returncode != 0, refused
+
+
 def test_environment_is_paper_or_backtest():
     assert render("--set", "environment=backtest")
     for refused in ("live", "production", ""):

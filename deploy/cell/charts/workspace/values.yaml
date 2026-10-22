@@ -41,6 +41,17 @@ images:
   # executors. Once named, those two render as its pod templates, never as Deployments.
   deploy-manager: ""
 
+# The Alpaca OAuth app the founder registers for paper (DEC-2636): its client id and this
+# deployment's redirect URI, both public. Each is rendered, when set, into the API and the token
+# exchange only, which both send it. The client secret is never a value: staging's apply imports
+# it into the vault, where only the token exchange reads it.
+alpacaOAuth:
+  # MANDATE_ALPACA_CLIENT_ID; empty until the app is registered.
+  clientId: ""
+  # MANDATE_ALPACA_REDIRECT_URI: https on this deployment's API host, or loopback http in a cell,
+  # with the callback's path.
+  redirectUri: ""
+
 # The workspace API server's settings (workspace API spec §3.11 item 2), each required once
 # images.api is named. None is a secret: the session signing key is made in the pod's memory at
 # each start, since sessions live in that one replica's memory too, and the subject links are a

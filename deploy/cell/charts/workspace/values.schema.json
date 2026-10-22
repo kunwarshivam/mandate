@@ -20,7 +20,8 @@
     "api",
     "artifacts",
     "founding",
-    "executor"
+    "executor",
+    "alpacaOAuth"
   ],
   "properties": {
     "workspace": {
@@ -518,6 +519,27 @@
           "description": "The founder's principal, an opaque ULID (identity spec §3.1), or empty when founding is off",
           "type": "string",
           "pattern": "^([0-7][0-9A-HJKMNP-TV-Z]{25})?$"
+        }
+      }
+    },
+    "alpacaOAuth": {
+      "description": "The paper Alpaca OAuth app's public settings (DEC-2636), rendered into the API and the token exchange only. No secret: the client secret is the vault's.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "clientId",
+        "redirectUri"
+      ],
+      "properties": {
+        "clientId": {
+          "type": "string",
+          "pattern": "^$|^[A-Za-z0-9._-]{1,128}$",
+          "description": "MANDATE_ALPACA_CLIENT_ID"
+        },
+        "redirectUri": {
+          "type": "string",
+          "pattern": "^$|^https://[a-z0-9.-]+(:[0-9]+)?/v1/oauth/alpaca/callback$|^http://(127\\.0\\.0\\.1|localhost|\\[::1\\])(:[0-9]+)?/v1/oauth/alpaca/callback$",
+          "description": "MANDATE_ALPACA_REDIRECT_URI: the callback on this deployment's API host (DEC-2623 item 2)"
         }
       }
     }

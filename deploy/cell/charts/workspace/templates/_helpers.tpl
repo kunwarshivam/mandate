@@ -188,6 +188,16 @@ start without them (AGENTS.md rule 3).
   value: /tmp
 - name: MANDATE_DEPLOYMENT_TIER
   value: {{ .root.Values.deploymentTier | quote }}
+{{- if has .p.name (list "api" "token-exchange") }}
+{{- with .root.Values.alpacaOAuth.clientId }}
+- name: MANDATE_ALPACA_CLIENT_ID
+  value: {{ . | quote }}
+{{- end }}
+{{- with .root.Values.alpacaOAuth.redirectUri }}
+- name: MANDATE_ALPACA_REDIRECT_URI
+  value: {{ . | quote }}
+{{- end }}
+{{- end }}
 {{- if include "mandate.artifactsAccess" . }}
 - name: {{ ternary "MANDATE_API_ARTIFACTS" "MANDATE_ARTIFACTS" (eq .p.name "api") }}
   value: {{ include "mandate.artifactsPath" . | quote }}
