@@ -744,8 +744,10 @@ pub fn provisioned_policy(
     mounts: &Mounts,
     namespace: Option<&str>,
 ) -> Result<String, SourceError> {
-    let _ = (identity, connections, mounts, namespace);
-    Err(SourceError::Unimplemented { story: "E21-33" })
+    match (identity, namespace) {
+        (Identity::Provisioner, Some(namespace)) => provisioner_policy(mounts, namespace),
+        _ => openbao_policy(identity, connections, mounts),
+    }
 }
 
 /// Sets a vault up for `connections`, with an operator's token: the KV v2 mount, the AppRole
@@ -807,10 +809,7 @@ pub async fn provision(
     let mut credentials = Vec::new();
     for identity in provisioned_identities(connections, namespace.is_some()) {
         let policy = policy_name(&identity, mounts);
-        let hcl = match (&identity, namespace) {
-            (Identity::Provisioner, Some(namespace)) => provisioner_policy(mounts, namespace)?,
-            _ => openbao_policy(&identity, connections, mounts)?,
-        };
+        let hcl = provisioned_policy(&identity, connections, mounts, namespace)?;
         http.call(
             Method::PUT,
             &format!("sys/policies/acl/{policy}"),

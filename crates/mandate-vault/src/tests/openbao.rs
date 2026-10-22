@@ -456,7 +456,6 @@ fn a_kubernetes_login_is_accepted_only_in_the_workspaces_namespace() {
 /// `provisioner_policy` for the workspace's namespace, and every other identity's is its
 /// `openbao_policy`, with no server needed to tell them apart (DEC-2350 item 1).
 #[test]
-#[ignore = "pending E21-33"]
 fn provisioning_writes_the_provisioners_own_policy_for_its_role() {
     let c = |id: &str| ConnectionId::new(id).unwrap();
     let connections = [c("c1")];
