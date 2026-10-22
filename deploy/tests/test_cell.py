@@ -2273,7 +2273,7 @@ def test_the_alpaca_oauth_settings_reach_the_api_and_the_token_exchange_only():
     dropped = mutate(
         docs,
         "token-exchange",
-        "Deployment",
+        "Pod",
         lambda w: first_container(w).update(
             env=[e for e in first_container(w)["env"] if e["name"] != "MANDATE_ALPACA_REDIRECT_URI"]
         ),
@@ -2282,7 +2282,7 @@ def test_the_alpaca_oauth_settings_reach_the_api_and_the_token_exchange_only():
     differs = mutate(
         docs,
         "token-exchange",
-        "Deployment",
+        "Pod",
         lambda w: next(e for e in first_container(w)["env"] if e["name"] == "MANDATE_ALPACA_REDIRECT_URI").update(
             value="https://other.example/v1/oauth/alpaca/callback"
         ),
