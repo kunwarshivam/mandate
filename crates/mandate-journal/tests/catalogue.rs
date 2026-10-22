@@ -1581,7 +1581,6 @@ fn the_credential_records_are_catalogued_and_closed_on_the_control_stream() {
 /// Journal spec v0.77 §9.33 (DEC-2350): the role provisioner's three records are on the control
 /// stream alone, with no configuration, closed there at schema version 1.
 #[test]
-#[ignore = "pending E21-33"]
 fn the_connection_role_records_are_catalogued_and_closed_on_the_control_stream() {
     closed_on_the_control_stream(&[
         "ConnectionRolesMade",

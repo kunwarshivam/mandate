@@ -141,7 +141,6 @@ fn the_connection_roles_section_holds_every_part() {
 }
 
 #[test]
-#[ignore = "pending E21-33"]
 fn each_base_and_every_valid_connection_roles_draft_parse_as_its_record() {
     let section = section();
     let mut failed = Vec::new();
@@ -166,7 +165,6 @@ fn each_base_and_every_valid_connection_roles_draft_parse_as_its_record() {
 }
 
 #[test]
-#[ignore = "pending E21-33"]
 fn every_invalid_connection_roles_draft_is_refused_with_its_reason_at_its_path() {
     let section = section();
     let mut failed = Vec::new();
@@ -189,7 +187,6 @@ fn every_invalid_connection_roles_draft_is_refused_with_its_reason_at_its_path()
 /// and 263 refuse included, and [`check_stream`] refuses none of them, since those rules are the
 /// provisioner's against its own fold and the verifier's (§9.33).
 #[test]
-#[ignore = "pending E21-33"]
 fn append_judges_rule_261_alone_and_leaves_rules_262_and_263_to_the_folds() {
     let section = section();
     let mut failed = Vec::new();
@@ -212,7 +209,6 @@ fn append_judges_rule_261_alone_and_leaves_rules_262_and_263_to_the_folds() {
 /// The verifier's fold judges rules 262 and 263 over each stream case, and answers its outcome:
 /// valid, or the rule and the index of the first record that breaks it.
 #[test]
-#[ignore = "pending E21-33"]
 fn the_verifiers_fold_answers_every_stream_case() {
     let section = section();
     let mut failed = Vec::new();

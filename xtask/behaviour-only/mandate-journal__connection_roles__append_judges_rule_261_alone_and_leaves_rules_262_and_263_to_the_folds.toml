@@ -1,7 +1,0 @@
-file = "crates/mandate-journal/tests/connection_roles.rs"
-test = "append_judges_rule_261_alone_and_leaves_rules_262_and_263_to_the_folds"
-reason = """
-The journal does not yet register §9.33's three records, so `Draft::parse` refuses each as an
-unknown event type before any schema or rule could report a stub. E21-33's S3 implementation
-registers them and deletes this row (DEC-2350).
-"""

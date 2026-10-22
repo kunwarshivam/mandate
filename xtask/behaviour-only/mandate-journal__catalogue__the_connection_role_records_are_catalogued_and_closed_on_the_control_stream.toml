@@ -1,7 +1,0 @@
-file = "crates/mandate-journal/tests/catalogue.rs"
-test = "the_connection_role_records_are_catalogued_and_closed_on_the_control_stream"
-reason = """
-The journal does not yet register §9.33's three records, so `Draft::parse` refuses each as an
-unknown event type before any schema or rule could report a stub. E21-33's S3 implementation
-registers them and deletes this row (DEC-2350).
-"""
