@@ -1027,6 +1027,13 @@ fn fill_applied(state: &mut ExecutorState, payload: &Value, seq: Seq) -> Result<
         .and_then(|id| state.orders.get_mut(&id))
     {
         order.filled_qty = order.filled_qty.checked_add(quantity)?;
+        let id = order.client_order_id.clone();
+        state
+            .details
+            .entry(id)
+            .or_default()
+            .fill_qtys
+            .push(quantity);
     }
     if named.is_none() && side == Side::Sell {
         state
