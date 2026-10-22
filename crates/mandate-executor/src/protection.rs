@@ -236,7 +236,7 @@ pub(crate) fn exit_price(
 /// on a fresh, sane latest quote (§4.4: no presumed halt) that shows a bid, so a market order never
 /// goes into a book with no buyer. With no bid the exit is laddered from the last sane bid or
 /// trade, or held with nothing to price from (DEC-2037 items 4 and 5).
-fn market_allowed(batch: &Batch<'_, '_>, instrument: &InstrumentId) -> bool {
+pub(crate) fn market_allowed(batch: &Batch<'_, '_>, instrument: &InstrumentId) -> bool {
     venue(batch.ports, instrument, batch.at()) == Venue::Regular
         && current_quote(batch, instrument).is_some_and(|quote| quote.bid.is_some())
 }
@@ -1544,7 +1544,7 @@ fn stop_after(
     let filled = order
         .filled_qty
         .max(detail.reported_filled.unwrap_or(Qty::ZERO));
-    if filled == Qty::ZERO {
+    if filled == Qty::ZERO || batch.view.closing_all.contains(&order.instrument) {
         return Ok(());
     }
     let named = vec![("bracket", text(entry.as_str()))];
@@ -1688,6 +1688,7 @@ pub(crate) fn new_day(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         .filter(|(instrument, protection)| {
             !protection.resting.is_empty()
                 && !batch.view.exiting.contains_key(*instrument)
+                && !batch.view.closing_all.contains(*instrument)
                 && !batch.view.replacing.contains_key(*instrument)
                 && protection.resting.iter().any(|id| {
                     batch
@@ -1786,6 +1787,8 @@ fn unprotectable(
 /// at once ([`re_place`]), its interval started first, for what the protection and the exits
 /// still working leave uncovered. The prices are the resting protection's, or else the ended
 /// protective order's own.
+/// Nor is protection in an instrument an account kill switch closes through the broker's
+/// close-position: a stop beside that close would sell the same shares twice (§5.5, rule 12).
 /// Protection the broker refuses, or cancels before acknowledging it, is not re-placed here: its
 /// interval stays open and bounded (DEC-348 item 2), so neither loops, nor restarts the bound.
 /// With no prices anywhere to place from, the shortfall is journaled and the owner alerted
@@ -1838,6 +1841,7 @@ fn re_cover(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
     for instrument in instruments {
         if batch.view.exiting.contains_key(&instrument)
             || batch.view.replacing.contains_key(&instrument)
+            || batch.view.closing_all.contains(&instrument)
             || stepping_alone(&batch.view, &instrument, &ended)
         {
             continue;

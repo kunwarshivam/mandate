@@ -4964,7 +4964,6 @@ fn an_agent_kill_switch_sells_exactly_the_sub_ledger_quantity() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn an_account_kill_switch_uses_cancel_all_and_close_position() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -4994,7 +4993,6 @@ fn an_account_kill_switch_uses_cancel_all_and_close_position() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn an_account_cancel_all_covers_unknown_orders() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL, CPHC]);
@@ -5127,7 +5125,6 @@ fn account_switch(initiator: Initiator) -> Input {
 /// (DEC-100), journaled before the broker's cancel-all goes, so nothing an agent hands in meanwhile
 /// is gated under its old mode (`AGENTS.md` rule 13).
 #[test]
-#[ignore = "pending E7-4"]
 fn an_account_kill_switch_applies_every_agents_mode_before_its_cancel_all() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL, BTC]);
@@ -5173,7 +5170,6 @@ fn an_account_kill_switch_applies_every_agents_mode_before_its_cancel_all() {
 /// fill, acknowledged, is cancelled by the cancel-all; the cancel is folded, and nothing protective
 /// is sent, in that step or the next.
 #[test]
-#[ignore = "pending E7-4"]
 fn an_account_kill_switch_never_re_places_the_protection_its_cancel_all_cancelled() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[BTC]);
@@ -5252,7 +5248,6 @@ fn an_account_kill_switch_never_re_places_the_protection_its_cancel_all_cancelle
 /// The account switch's records replay (ES-21): a restart folds every record it journaled, the
 /// account-scoped `KillSwitchActivated` included, and every agent stays held under its mode.
 #[test]
-#[ignore = "pending E7-4"]
 fn an_account_kill_switch_replays_after_a_restart() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL, BTC]);
@@ -5284,7 +5279,6 @@ fn an_account_kill_switch_replays_after_a_restart() {
 /// instrument whoever holds it, crypto included, after the cancel-all; never a cancel by id beside
 /// it and never an order of the executor's own (DEC-485 item 1).
 #[test]
-#[ignore = "pending E7-4"]
 fn an_account_kill_switch_closes_each_held_instrument_once_after_its_cancel_all() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL, BTC]);
@@ -5334,7 +5328,6 @@ fn an_account_kill_switch_closes_each_held_instrument_once_after_its_cancel_all(
 /// `KillSwitchActivated` of scope `account`, naming the account as its subject and the
 /// instruments it closes, ahead of the cancel-all.
 #[test]
-#[ignore = "pending E7-4"]
 fn an_account_kill_switch_is_journaled_naming_the_account_before_it_acts() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL, BTC]);

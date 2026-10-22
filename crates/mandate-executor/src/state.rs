@@ -132,6 +132,11 @@ pub struct ExecutorState {
     /// Each agent-scoped kill switch as its `KillSwitchActivated` journaled it, by that record's
     /// id, with the closes it has not yet raised as flatten intents (§5.5, DEC-485).
     pub(crate) switches: BTreeMap<EventId, Switch>,
+    /// The instruments an account-scoped kill switch closes through the broker's close-position,
+    /// from its `KillSwitchActivated`: their protection is never placed again beside that close,
+    /// which would sell the same shares twice (§5.4, §5.5). An instrument leaves once it is no
+    /// longer held long, and all of them once the account's kill-switch mode is lifted.
+    pub(crate) closing_all: BTreeSet<InstrumentId>,
     /// The owner's confirmation each owner's exit was received with, by intent, from its
     /// `OwnerConfirmationReceived` (journal spec §9.5, DEC-2040 item 2).
     pub(crate) confirmations: BTreeMap<IntentId, Confirmed>,
@@ -365,6 +370,7 @@ impl ExecutorState {
             uncompensated: BTreeMap::new(),
             pending_requests: BTreeMap::new(),
             switches: BTreeMap::new(),
+            closing_all: BTreeSet::new(),
             confirmations: BTreeMap::new(),
             now: None,
             previous_now: None,

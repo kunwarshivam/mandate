@@ -17,8 +17,9 @@ use crate::payload::{
 };
 use crate::protection::climbs;
 use crate::state::{
-    Adoption, Confirmed, ExecutorState, ExitSequence, IntentOutcome, IntentRecord, Ladder,
-    LoneLadder, ObservedAccount, OrderDetail, PendingRequest, PriorBase, Replacement, Switch,
+    Adoption, Confirmed, EVERY_AGENT, ExecutorState, ExitSequence, IntentOutcome, IntentRecord,
+    Ladder, LoneLadder, ObservedAccount, OrderDetail, PendingRequest, PriorBase, Replacement,
+    Switch,
 };
 use crate::types::{
     AccountState, ActivityCursor, AgentId, BracketLegs, EventId, FillId, FoldedEvent, IntentBody,
@@ -427,7 +428,8 @@ fn kill_switch_activated(
     event: &FoldedEvent,
 ) -> Result<(), ExecutorError> {
     let payload = &event.payload;
-    if optional_text(payload, "scope") != Some("agent") {
+    let scope = optional_text(payload, "scope");
+    if !matches!(scope, Some("agent" | "account")) {
         return Err(ExecutorError::Unimplemented { story: "E7-4" });
     }
     let named = |field: &str| -> Result<Vec<InstrumentId>, ExecutorError> {
@@ -445,6 +447,10 @@ fn kill_switch_activated(
     };
     let mut instruments = named("closes")?;
     instruments.extend(named("deferred")?);
+    if scope == Some("account") {
+        state.closing_all.extend(instruments);
+        return Ok(());
+    }
     let cancels = match payload.get("cancels") {
         Some(Value::Array(items)) => items
             .iter()
@@ -1019,6 +1025,9 @@ fn fill_applied(state: &mut ExecutorState, payload: &Value, seq: Seq) -> Result<
     let position_of = instrument.clone();
     let position = state.positions.entry(instrument).or_insert(SignedQty::ZERO);
     *position = position.checked_add(signed)?;
+    if *position <= SignedQty::ZERO {
+        state.closing_all.remove(&position_of);
+    }
     state.cash_flow = state.cash_flow.checked_add(cash)?;
     state.fill_notional = state.fill_notional.checked_add(notional)?;
     let named = optional_text(payload, "client_order_id");
@@ -1112,6 +1121,9 @@ fn agent_mode_applied(state: &mut ExecutorState, payload: &Value) -> Result<(), 
             if switch.agent == agent && restriction == "kill_switch" {
                 switch.pending.clear();
             }
+        }
+        if agent.0 == EVERY_AGENT && restriction == "kill_switch" {
+            state.closing_all.clear();
         }
         state.restrictions.remove(&(agent.clone(), restriction));
     } else {

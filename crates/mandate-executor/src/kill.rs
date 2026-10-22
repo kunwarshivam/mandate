@@ -14,21 +14,23 @@ use crate::error::ExecutorError;
 use crate::ids::{ClientOrderId, FLATTEN, IntentId};
 use crate::intent::{order_tif, received};
 use crate::payload::text;
-use crate::protection::{ask_cancel, lowest_sane};
+use crate::protection::{ask_cancel, lowest_sane, market_allowed};
 use crate::session::{Venue, venue};
 use crate::state::{EVERY_AGENT, ExecutorState, IntentOutcome, Switch};
 use crate::types::{
-    AgentId, BrokerRequest, EventId, Initiator, IntentBody, IntentHandoff, KillScope, Mode, Order,
-    OrderState, OwnerConfirmation, Purpose, RiskClock,
+    AccountWide, AccountWideScope, AgentId, BrokerRequest, EventId, Initiator, IntentBody,
+    IntentHandoff, KillScope, Mode, Order, OrderState, OwnerConfirmation, Purpose, RiskClock,
 };
 
 /// The restriction the kill switch's final mode is recorded under (mandate spec §5.9).
 const KILL_SWITCH: &str = "kill_switch";
 
-/// `Command::KillSwitch`. Only the agent scope is implemented: the account and workspace scopes,
-/// which alone may name `cancel-all` and `close-position`, answer the next slice's stub, so no
-/// path reaches the account-wide endpoints yet (DEC-485 item 1). A switch that copies another
-/// stream's record names it as `copied_from`, and `null` otherwise (DEC-2003 item 4).
+/// `Command::KillSwitch`. The agent scope sells through the executor's own flatten intents. The
+/// account scope, one of the only two that may name `cancel-all` and `close-position` (DEC-485
+/// item 1), uses them where every held instrument may close at the market now ([`account`]); where
+/// one may not, and for the workspace scope, it answers the next slice's stub (DEC-2309 items 1 to
+/// 3). A switch that copies another stream's record names it as `copied_from`, and `null`
+/// otherwise (DEC-2003 item 4).
 pub(crate) fn kill_switch(
     batch: &mut Batch<'_, '_>,
     scope: KillScope,
@@ -36,8 +38,12 @@ pub(crate) fn kill_switch(
     confirmation: Option<OwnerConfirmation>,
     cause: Option<EventId>,
 ) -> Result<(), ExecutorError> {
-    let KillScope::Agent(agent) = scope else {
-        return Err(ExecutorError::Unimplemented { story: "E7-4" });
+    let agent = match scope {
+        KillScope::Agent(agent) => agent,
+        KillScope::Account(reference) => {
+            return account(batch, reference, initiator, confirmation, cause);
+        }
+        KillScope::Workspace(_) => return Err(ExecutorError::Unimplemented { story: "E7-4" }),
     };
     let mode = batch.journal(
         "AgentModeApplied",
@@ -97,6 +103,86 @@ pub(crate) fn kill_switch(
     )?;
     batch.notify(switch, KILL_SWITCH);
     cancel_each(batch, cancels)
+}
+
+/// §5.5's account scope where every held instrument may close at the market now (regular session,
+/// outside the closing window, a fresh quote with a bid): the final mode for every agent of the
+/// account first, journaled under `*` so an agent not yet seen is held too; then the switch's own
+/// record, naming the account and each instrument it closes; then the broker's cancel-all, which
+/// reaches `Unknown` orders too; then its close-position once for each held instrument, crypto
+/// included. Nothing is cancelled by id and nothing is sold through an order of the executor's
+/// own. Where any held instrument may not close at the market now, the switch waits for the slice
+/// that keeps that position's protection (DEC-2309 items 1 and 2).
+fn account(
+    batch: &mut Batch<'_, '_>,
+    reference: crate::types::AccountRef,
+    initiator: Initiator,
+    confirmation: Option<OwnerConfirmation>,
+    cause: Option<EventId>,
+) -> Result<(), ExecutorError> {
+    let held: Vec<InstrumentId> = batch
+        .view
+        .positions
+        .iter()
+        .filter(|(_, held)| **held > SignedQty::ZERO)
+        .map(|(instrument, _)| instrument.clone())
+        .collect();
+    if !held
+        .iter()
+        .all(|instrument| market_allowed(batch, instrument))
+    {
+        return Err(ExecutorError::Unimplemented { story: "E7-4" });
+    }
+    let mode = batch.journal(
+        "AgentModeApplied",
+        None,
+        vec![
+            ("agent", text(EVERY_AGENT)),
+            ("to", text(mode_name(initiator.final_mode()))),
+            ("restriction", text(KILL_SWITCH)),
+            ("originated", Value::Bool(true)),
+        ],
+    )?;
+    let price = |price: Option<String>| price.map_or(Value::Null, text);
+    let switch = batch.journal(
+        "KillSwitchActivated",
+        Some(mode),
+        vec![
+            ("scope", text("account")),
+            ("subject", text(reference.0.clone())),
+            ("initiator", text(initiator_name(initiator))),
+            ("purpose", text(purpose_name(initiator.sell_purpose()))),
+            ("cancels", Value::Array(Vec::new())),
+            (
+                "closes",
+                Value::Array(held.iter().map(|i| text(i.as_str())).collect()),
+            ),
+            ("deferred", Value::Array(Vec::new())),
+            (
+                "floor",
+                price(confirmation.as_ref().map(|c| c.floor.to_string())),
+            ),
+            (
+                "bid",
+                price(confirmation.as_ref().map(|c| c.bid.to_string())),
+            ),
+            (
+                "bid_size",
+                price(confirmation.as_ref().map(|c| c.bid_size.to_string())),
+            ),
+            (
+                "copied_from",
+                cause.map_or(Value::Null, |copied| text(copied.0)),
+            ),
+        ],
+    )?;
+    batch.notify(switch, KILL_SWITCH);
+    let scope = || AccountWideScope::new(AccountWide::Account(reference.clone()));
+    batch.broker(BrokerRequest::CancelAll(scope()));
+    for instrument in held {
+        batch.broker(BrokerRequest::ClosePosition(scope(), instrument));
+    }
+    Ok(())
 }
 
 /// Asks the cancel of each order by its own id, once until confirmed (§5.5).
