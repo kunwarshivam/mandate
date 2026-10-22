@@ -5,7 +5,7 @@
 //! | Identity | Read | Write | Delete |
 //! |---|---|---|---|
 //! | API | — | every connection's code | every connection's code and token |
-//! | Connection manager | every connection's account entry (DEC-2339) | — | every connection's code and token; it also issues and revokes token-exchange grants |
+//! | Connection manager | — | — | every connection's code and token; it also issues and revokes token-exchange grants |
 //! | Token exchange for `c` | `c`'s code, the client secret | `c`'s token, and `c`'s code only as [`Access::Take`] (DEC-2061) | `c`'s code |
 //! | Executor for `c` | `c`'s token, as a lease | `c`'s account entry only as [`Access::Create`] (DEC-2339) | — |
 //! | Runtime | — | — | — |
@@ -128,7 +128,6 @@ pub fn allows(identity: &Identity, access: Access, path: &SecretPath) -> bool {
         | (Identity::TokenExchange(own), Access::Write, SecretPath::Token(c))
         | (Identity::Executor(own), Access::Read, SecretPath::Token(c))
         | (Identity::Executor(own), Access::Create, SecretPath::AccountId(c)) => own == c,
-        (Identity::ConnectionManager, Access::Read, SecretPath::AccountId(_)) => true,
         (identity, Access::Read, SecretPath::Platform(secret)) => {
             holders(*secret).is_ok_and(|h| h.reads == *identity)
         }
@@ -234,7 +233,6 @@ pub fn openbao_policy(
     for connection in connections {
         paths.push(SecretPath::Code(connection.clone()));
         paths.push(SecretPath::Token(connection.clone()));
-        paths.push(SecretPath::AccountId(connection.clone()));
     }
     let mut hcl = String::new();
     for path in &paths {
