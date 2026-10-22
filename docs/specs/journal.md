@@ -6087,9 +6087,10 @@ revoked, the provisioner removes the token exchange's; it never removes the exec
 | `occasion` | `request_closed` \| `revoked` | The request closed without an establishment, or the connection was revoked |
 
 A `ConnectionRolesMade` or `ConnectionRolesRefused` names its request's `ConnectionRequested` as its
-`causation_id`; a `ConnectionRolesRemoved` names the record that closed the request (a
-`ConnectionRefused` with occasion `connect`) or revoked the connection (`ConnectionRevoked`).
-`append` does not check the links. None carries a credential, a role's name, or a reason's detail.
+`causation_id`; a `ConnectionRolesRemoved` names the record that closed the request its roles were
+made for (a `ConnectionRefused` with occasion `connect`) or revoked the connection
+(`ConnectionRevoked`), journaled after those roles were made (rule 263). `append` does not check
+the links. None carries a credential, a role's name, or a reason's detail.
 
 **Consistency rule** (reason `schema`; the path is the member named):
 
@@ -6102,12 +6103,16 @@ fold:
 262. A `ConnectionRolesMade` or `ConnectionRolesRefused` follows the version-2 `ConnectionRequested`
      with `credential` `oauth` its `causation_id` names, of the same `connection_id`
      (`payload.connection_id`), and no two of either name one request (`causation_id`).
-263. A `ConnectionRolesRemoved` follows its connection's `ConnectionRolesMade`, at most once after
-     it (`payload.role`):
-     - with `occasion` `request_closed`, only after a `ConnectionRefused` with occasion `connect`
-       closed the request (`payload.occasion`);
-     - with `occasion` `revoked`, only after the connection's `ConnectionRevoked`
-       (`payload.occasion`).
+263. A `ConnectionRolesRemoved` follows its connection's latest `ConnectionRolesMade`, at most once
+     after it (`payload.role`), and its `causation_id` names a record of the same connection that
+     follows that `ConnectionRolesMade` (`payload.occasion`):
+     - with `occasion` `request_closed`, a `ConnectionRefused` with occasion `connect`, which closed
+       the request the roles were made for;
+     - with `occasion` `revoked`, a `ConnectionRevoked`.
+
+     So a removal never cites the closer of an earlier request of the same connection id (DEC-699
+     lets a refused id be requested again): a request whose roles are made keeps them until its own
+     close or revocation.
 
 The token exchange's role is removed at once on either occasion. The executor's role is never
 removed: an executor started for any reason, a kill switch's to apply among them (DEC-2343,

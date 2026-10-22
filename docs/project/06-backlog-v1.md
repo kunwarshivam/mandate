@@ -3045,7 +3045,7 @@ enables `live` (ES-23, OPS-5).
   - **The role provisioner** ([DEC-2350](decisions/DEC-2350.md), DEC-2630 item 7; journal spec v0.77
     §9.33). Nothing makes a connection's Kubernetes-auth roles today, so every exchange's and every
     managed executor's login is refused. Spec first (this row's first PR), then: the vault side with
-    lane V2 (the provisioner identity and AppRole, `delete` in `provisioner_policy`, making and
+    lane V2 (the provisioner identity and AppRole, `delete` on the token exchange's mount alone in `provisioner_policy`, making and
     removing a connection's roles); the journal crate's three records (the `connection_roles`
     vectors, pending until then); the `provisioner` process; its chart, with vault-only egress to
     lane GO's pattern; and the manager's wait for `ConnectionRolesMade` before an exchange starts.

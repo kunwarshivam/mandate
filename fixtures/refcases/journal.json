@@ -121303,6 +121303,26 @@
      "reason": "unknown_schema",
      "path": "payload"
     }
+   },
+   {
+    "name": "ConnectionRolesRemoved.of_the_executor",
+    "clause": "§9.33: the executor's role is never removed",
+    "base_draft": "connection_roles_removed",
+    "changes": [
+     {
+      "path": "payload.role",
+      "value": "executor"
+     },
+     {
+      "path": "payload.occasion",
+      "value": "revoked"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.role"
+    }
    }
   ],
   "valid_drafts": [
@@ -121314,24 +121334,6 @@
      {
       "path": "payload.reason",
       "value": "role_refused"
-     }
-    ],
-    "expect": {
-     "outcome": "Valid"
-    }
-   },
-   {
-    "name": "ConnectionRolesRemoved.executor_on_revoke",
-    "clause": "§9.33: the executor's role, on a revocation",
-    "base_draft": "connection_roles_removed",
-    "changes": [
-     {
-      "path": "payload.role",
-      "value": "executor"
-     },
-     {
-      "path": "payload.occasion",
-      "value": "revoked"
      }
     ],
     "expect": {
@@ -122040,7 +122042,7 @@
    },
    {
     "name": "removed_on_close",
-    "clause": "rule 263: both roles once the request closed",
+    "clause": "rule 263: the exchange's role once the request closed",
     "records": [
      {
       "envelope_version": 1,
@@ -122146,7 +122148,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01J8Z4CS040000000000000000",
+      "event_id": "01J8Z4CS030000000000000000",
       "stream_id": "ctl:ws_01J8Z2",
       "event_type": "ConnectionRolesRemoved",
       "schema_version": 1,
@@ -122164,32 +122166,6 @@
       "payload": {
        "connection_id": "conn_alpaca_paper",
        "role": "token_exchange",
-       "occasion": "request_closed"
-      },
-      "artifact_refs": [],
-      "pii_refs": []
-     },
-     {
-      "envelope_version": 1,
-      "environment": "paper",
-      "event_id": "01J8Z4CS050000000000000000",
-      "stream_id": "ctl:ws_01J8Z2",
-      "event_type": "ConnectionRolesRemoved",
-      "schema_version": 1,
-      "event_time": "2026-10-22T16:00:00.000000000Z",
-      "clock_source": "local",
-      "causation_id": "01J8Z4CS020000000000000000",
-      "correlation_id": null,
-      "actor": {
-       "kind": "system",
-       "id": "control_services",
-       "version": "0.1.0",
-       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
-      },
-      "config_refs": {},
-      "payload": {
-       "connection_id": "conn_alpaca_paper",
-       "role": "executor",
        "occasion": "request_closed"
       },
       "artifact_refs": [],
@@ -122316,7 +122292,7 @@
    },
    {
     "name": "removed_twice",
-    "clause": "rule 263: each role once",
+    "clause": "rule 263: at most once after its roles were made",
     "records": [
      {
       "envelope_version": 1,
@@ -122422,7 +122398,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01J8Z4CS040000000000000000",
+      "event_id": "01J8Z4CS030000000000000000",
       "stream_id": "ctl:ws_01J8Z2",
       "event_type": "ConnectionRolesRemoved",
       "schema_version": 1,
@@ -122448,7 +122424,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01J8Z4CS050000000000000000",
+      "event_id": "01J8Z4CS040000000000000000",
       "stream_id": "ctl:ws_01J8Z2",
       "event_type": "ConnectionRolesRemoved",
       "schema_version": 1,
@@ -122684,7 +122660,7 @@
    },
    {
     "name": "revoked_exchange_at_once",
-    "clause": "rule 263: the exchange's role at once on a revocation",
+    "clause": "rule 263: the exchange's role at once on a revocation, its executor still running",
     "records": [
      {
       "envelope_version": 1,
@@ -122834,8 +122810,8 @@
     }
    },
    {
-    "name": "revoked_executor_while_it_runs",
-    "clause": "rule 263: the executor's role kept while its executor runs",
+    "name": "removed_by_an_earlier_requests_refusal",
+    "clause": "rule 263: names the closer of the request its roles were made for",
     "records": [
      {
       "envelope_version": 1,
@@ -122907,9 +122883,9 @@
       "environment": "paper",
       "event_id": "01J8Z4CS020000000000000000",
       "stream_id": "ctl:ws_01J8Z2",
-      "event_type": "ProcessStartIssued",
+      "event_type": "ConnectionRefused",
       "schema_version": 1,
-      "event_time": "2026-10-22T16:00:00.000000000Z",
+      "event_time": "2026-09-22T13:00:00.000000000Z",
       "clock_source": "local",
       "causation_id": null,
       "correlation_id": null,
@@ -122921,10 +122897,19 @@
       },
       "config_refs": {},
       "payload": {
-       "process": "executor",
-       "subject": "01J8Z2ACCT00000000000000A1",
-       "generation": 1,
-       "cause": "deployed"
+       "connection_id": "conn_alpaca_paper",
+       "broker": "alpaca",
+       "environment": "paper",
+       "occasion": "connect",
+       "check": "scope",
+       "reason": "fund_movement",
+       "existing_connection_id": null,
+       "user": "user_owner_01",
+       "step_up": {
+        "assertion_id": "assert_owner_09",
+        "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+        "method": "cli_confirm"
+       }
       },
       "artifact_refs": [],
       "pii_refs": []
@@ -122934,11 +122919,78 @@
       "environment": "paper",
       "event_id": "01J8Z4CS030000000000000000",
       "stream_id": "ctl:ws_01J8Z2",
-      "event_type": "ConnectionRevoked",
+      "event_type": "ConnectionRolesRemoved",
       "schema_version": 1,
-      "event_time": "2026-09-22T13:00:00.000000000Z",
+      "event_time": "2026-10-22T16:00:00.000000000Z",
       "clock_source": "local",
-      "causation_id": "01J8Z4C4A000000000000000C4",
+      "causation_id": "01J8Z4CS020000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "role": "token_exchange",
+       "occasion": "request_closed"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS090000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRequested",
+      "schema_version": 2,
+      "event_time": "2026-10-19T15:30:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "account_ref": "01J8Z2ACCT00000000000000A1",
+       "broker": "alpaca",
+       "environment": "paper",
+       "user": "user_owner_01",
+       "step_up": {
+        "assertion_id": "assert_owner_09",
+        "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+        "method": "cli_confirm"
+       },
+       "credential": "oauth",
+       "breadth": {
+        "other_environment": "may_reach",
+        "disclosure": {
+         "document": "alpaca_oauth_token_breadth",
+         "version": "1"
+        }
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS050000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRolesMade",
+      "schema_version": 1,
+      "event_time": "2026-10-22T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01J8Z4CS090000000000000000",
       "correlation_id": null,
       "actor": {
        "kind": "system",
@@ -122956,13 +123008,13 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01J8Z4CS040000000000000000",
+      "event_id": "01J8Z4CS060000000000000000",
       "stream_id": "ctl:ws_01J8Z2",
       "event_type": "ConnectionRolesRemoved",
       "schema_version": 1,
       "event_time": "2026-10-22T16:00:00.000000000Z",
       "clock_source": "local",
-      "causation_id": "01J8Z4CS030000000000000000",
+      "causation_id": "01J8Z4CS020000000000000000",
       "correlation_id": null,
       "actor": {
        "kind": "system",
@@ -122973,8 +123025,8 @@
       "config_refs": {},
       "payload": {
        "connection_id": "conn_alpaca_paper",
-       "role": "executor",
-       "occasion": "revoked"
+       "role": "token_exchange",
+       "occasion": "request_closed"
       },
       "artifact_refs": [],
       "pii_refs": []
@@ -122983,12 +123035,12 @@
     "expect": {
      "outcome": "Invalid",
      "rule": "rule 263",
-     "index": 4
+     "index": 6
     }
    },
    {
-    "name": "revoked_executor_after_its_stop",
-    "clause": "rule 263: the executor's role once its executor stopped",
+    "name": "removed_by_a_revocation_before_its_roles",
+    "clause": "rule 263: names the closer of the request its roles were made for",
     "records": [
      {
       "envelope_version": 1,
@@ -123058,33 +123110,6 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01J8Z4CS020000000000000000",
-      "stream_id": "ctl:ws_01J8Z2",
-      "event_type": "ProcessStartIssued",
-      "schema_version": 1,
-      "event_time": "2026-10-22T16:00:00.000000000Z",
-      "clock_source": "local",
-      "causation_id": null,
-      "correlation_id": null,
-      "actor": {
-       "kind": "system",
-       "id": "control_services",
-       "version": "0.1.0",
-       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
-      },
-      "config_refs": {},
-      "payload": {
-       "process": "executor",
-       "subject": "01J8Z2ACCT00000000000000A1",
-       "generation": 1,
-       "cause": "deployed"
-      },
-      "artifact_refs": [],
-      "pii_refs": []
-     },
-     {
-      "envelope_version": 1,
-      "environment": "paper",
       "event_id": "01J8Z4CS030000000000000000",
       "stream_id": "ctl:ws_01J8Z2",
       "event_type": "ConnectionRevoked",
@@ -123110,33 +123135,6 @@
       "envelope_version": 1,
       "environment": "paper",
       "event_id": "01J8Z4CS040000000000000000",
-      "stream_id": "ctl:ws_01J8Z2",
-      "event_type": "ProcessStopIssued",
-      "schema_version": 1,
-      "event_time": "2026-10-22T16:00:00.000000000Z",
-      "clock_source": "local",
-      "causation_id": null,
-      "correlation_id": null,
-      "actor": {
-       "kind": "system",
-       "id": "control_services",
-       "version": "0.1.0",
-       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
-      },
-      "config_refs": {},
-      "payload": {
-       "process": "executor",
-       "subject": "01J8Z2ACCT00000000000000A1",
-       "generation": 1,
-       "cause": "agent_stopped"
-      },
-      "artifact_refs": [],
-      "pii_refs": []
-     },
-     {
-      "envelope_version": 1,
-      "environment": "paper",
-      "event_id": "01J8Z4CS050000000000000000",
       "stream_id": "ctl:ws_01J8Z2",
       "event_type": "ConnectionRolesRemoved",
       "schema_version": 1,
@@ -123153,25 +123151,16 @@
       "config_refs": {},
       "payload": {
        "connection_id": "conn_alpaca_paper",
-       "role": "executor",
+       "role": "token_exchange",
        "occasion": "revoked"
       },
       "artifact_refs": [],
       "pii_refs": []
-     }
-    ],
-    "expect": {
-     "outcome": "Valid"
-    }
-   },
-   {
-    "name": "revoked_executor_restarted",
-    "clause": "rule 263: every generation stopped, a kill switch's start among them",
-    "records": [
+     },
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01J8Z4CS000000000000000000",
+      "event_id": "01J8Z4CS090000000000000000",
       "stream_id": "ctl:ws_01J8Z2",
       "event_type": "ConnectionRequested",
       "schema_version": 2,
@@ -123212,13 +123201,13 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01J8Z4CS010000000000000000",
+      "event_id": "01J8Z4CS050000000000000000",
       "stream_id": "ctl:ws_01J8Z2",
       "event_type": "ConnectionRolesMade",
       "schema_version": 1,
       "event_time": "2026-10-22T16:00:00.000000000Z",
       "clock_source": "local",
-      "causation_id": "01J8Z4CS000000000000000000",
+      "causation_id": "01J8Z4CS090000000000000000",
       "correlation_id": null,
       "actor": {
        "kind": "system",
@@ -123229,111 +123218,6 @@
       "config_refs": {},
       "payload": {
        "connection_id": "conn_alpaca_paper"
-      },
-      "artifact_refs": [],
-      "pii_refs": []
-     },
-     {
-      "envelope_version": 1,
-      "environment": "paper",
-      "event_id": "01J8Z4CS020000000000000000",
-      "stream_id": "ctl:ws_01J8Z2",
-      "event_type": "ProcessStartIssued",
-      "schema_version": 1,
-      "event_time": "2026-10-22T16:00:00.000000000Z",
-      "clock_source": "local",
-      "causation_id": null,
-      "correlation_id": null,
-      "actor": {
-       "kind": "system",
-       "id": "control_services",
-       "version": "0.1.0",
-       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
-      },
-      "config_refs": {},
-      "payload": {
-       "process": "executor",
-       "subject": "01J8Z2ACCT00000000000000A1",
-       "generation": 1,
-       "cause": "deployed"
-      },
-      "artifact_refs": [],
-      "pii_refs": []
-     },
-     {
-      "envelope_version": 1,
-      "environment": "paper",
-      "event_id": "01J8Z4CS030000000000000000",
-      "stream_id": "ctl:ws_01J8Z2",
-      "event_type": "ConnectionRevoked",
-      "schema_version": 1,
-      "event_time": "2026-09-22T13:00:00.000000000Z",
-      "clock_source": "local",
-      "causation_id": "01J8Z4C4A000000000000000C4",
-      "correlation_id": null,
-      "actor": {
-       "kind": "system",
-       "id": "control_services",
-       "version": "0.1.0",
-       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
-      },
-      "config_refs": {},
-      "payload": {
-       "connection_id": "conn_alpaca_paper"
-      },
-      "artifact_refs": [],
-      "pii_refs": []
-     },
-     {
-      "envelope_version": 1,
-      "environment": "paper",
-      "event_id": "01J8Z4CS040000000000000000",
-      "stream_id": "ctl:ws_01J8Z2",
-      "event_type": "ProcessStopIssued",
-      "schema_version": 1,
-      "event_time": "2026-10-22T16:00:00.000000000Z",
-      "clock_source": "local",
-      "causation_id": null,
-      "correlation_id": null,
-      "actor": {
-       "kind": "system",
-       "id": "control_services",
-       "version": "0.1.0",
-       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
-      },
-      "config_refs": {},
-      "payload": {
-       "process": "executor",
-       "subject": "01J8Z2ACCT00000000000000A1",
-       "generation": 1,
-       "cause": "agent_stopped"
-      },
-      "artifact_refs": [],
-      "pii_refs": []
-     },
-     {
-      "envelope_version": 1,
-      "environment": "paper",
-      "event_id": "01J8Z4CS050000000000000000",
-      "stream_id": "ctl:ws_01J8Z2",
-      "event_type": "ProcessStartIssued",
-      "schema_version": 1,
-      "event_time": "2026-10-22T16:00:00.000000000Z",
-      "clock_source": "local",
-      "causation_id": null,
-      "correlation_id": null,
-      "actor": {
-       "kind": "system",
-       "id": "control_services",
-       "version": "0.1.0",
-       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
-      },
-      "config_refs": {},
-      "payload": {
-       "process": "executor",
-       "subject": "01J8Z2ACCT00000000000000A1",
-       "generation": 2,
-       "cause": "restart"
       },
       "artifact_refs": [],
       "pii_refs": []
@@ -123358,7 +123242,7 @@
       "config_refs": {},
       "payload": {
        "connection_id": "conn_alpaca_paper",
-       "role": "executor",
+       "role": "token_exchange",
        "occasion": "revoked"
       },
       "artifact_refs": [],
@@ -123372,8 +123256,8 @@
     }
    },
    {
-    "name": "revoked_executor_never_started",
-    "clause": "rule 263: an executor that never ran keeps nothing",
+    "name": "removed_by_another_connections_refusal",
+    "clause": "rule 263: names its own connection's closer",
     "records": [
      {
       "envelope_version": 1,
@@ -123421,6 +123305,47 @@
       "environment": "paper",
       "event_id": "01J8Z4CS010000000000000000",
       "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRequested",
+      "schema_version": 2,
+      "event_time": "2026-10-19T15:30:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper_2",
+       "account_ref": "01J8Z2ACCT00000000000000B7",
+       "broker": "alpaca",
+       "environment": "paper",
+       "user": "user_owner_01",
+       "step_up": {
+        "assertion_id": "assert_owner_09",
+        "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+        "method": "cli_confirm"
+       },
+       "credential": "oauth",
+       "breadth": {
+        "other_environment": "may_reach",
+        "disclosure": {
+         "document": "alpaca_oauth_token_breadth",
+         "version": "1"
+        }
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS020000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
       "event_type": "ConnectionRolesMade",
       "schema_version": 1,
       "event_time": "2026-10-22T16:00:00.000000000Z",
@@ -123445,11 +123370,11 @@
       "environment": "paper",
       "event_id": "01J8Z4CS030000000000000000",
       "stream_id": "ctl:ws_01J8Z2",
-      "event_type": "ConnectionRevoked",
+      "event_type": "ConnectionRefused",
       "schema_version": 1,
       "event_time": "2026-09-22T13:00:00.000000000Z",
       "clock_source": "local",
-      "causation_id": "01J8Z4C4A000000000000000C4",
+      "causation_id": null,
       "correlation_id": null,
       "actor": {
        "kind": "system",
@@ -123459,7 +123384,19 @@
       },
       "config_refs": {},
       "payload": {
-       "connection_id": "conn_alpaca_paper"
+       "connection_id": "conn_alpaca_paper_2",
+       "broker": "alpaca",
+       "environment": "paper",
+       "occasion": "connect",
+       "check": "scope",
+       "reason": "fund_movement",
+       "existing_connection_id": null,
+       "user": "user_owner_01",
+       "step_up": {
+        "assertion_id": "assert_owner_09",
+        "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+        "method": "cli_confirm"
+       }
       },
       "artifact_refs": [],
       "pii_refs": []
@@ -123467,7 +123404,7 @@
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01J8Z4CS030000000000000000",
+      "event_id": "01J8Z4CS040000000000000000",
       "stream_id": "ctl:ws_01J8Z2",
       "event_type": "ConnectionRolesRemoved",
       "schema_version": 1,
@@ -123483,21 +123420,23 @@
       },
       "config_refs": {},
       "payload": {
-       "connection_id": "conn_alpaca_paper",
-       "role": "executor",
-       "occasion": "revoked"
+       "connection_id": "conn_alpaca_paper_2",
+       "role": "token_exchange",
+       "occasion": "request_closed"
       },
       "artifact_refs": [],
       "pii_refs": []
      }
     ],
     "expect": {
-     "outcome": "Valid"
+     "outcome": "Invalid",
+     "rule": "rule 263",
+     "index": 4
     }
    },
    {
-    "name": "revoked_another_accounts_executor_runs",
-    "clause": "rule 263: only its own account's executor keeps it",
+    "name": "removed_after_a_second_request_closed",
+    "clause": "rule 263: once per made roles, the second request's own",
     "records": [
      {
       "envelope_version": 1,
@@ -123569,9 +123508,9 @@
       "environment": "paper",
       "event_id": "01J8Z4CS020000000000000000",
       "stream_id": "ctl:ws_01J8Z2",
-      "event_type": "ProcessStartIssued",
+      "event_type": "ConnectionRefused",
       "schema_version": 1,
-      "event_time": "2026-10-22T16:00:00.000000000Z",
+      "event_time": "2026-09-22T13:00:00.000000000Z",
       "clock_source": "local",
       "causation_id": null,
       "correlation_id": null,
@@ -123583,10 +123522,246 @@
       },
       "config_refs": {},
       "payload": {
-       "process": "executor",
-       "subject": "01J8Z2ACCT00000000000000B7",
-       "generation": 1,
-       "cause": "deployed"
+       "connection_id": "conn_alpaca_paper",
+       "broker": "alpaca",
+       "environment": "paper",
+       "occasion": "connect",
+       "check": "scope",
+       "reason": "fund_movement",
+       "existing_connection_id": null,
+       "user": "user_owner_01",
+       "step_up": {
+        "assertion_id": "assert_owner_09",
+        "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+        "method": "cli_confirm"
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS030000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRolesRemoved",
+      "schema_version": 1,
+      "event_time": "2026-10-22T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01J8Z4CS020000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "role": "token_exchange",
+       "occasion": "request_closed"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS090000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRequested",
+      "schema_version": 2,
+      "event_time": "2026-10-19T15:30:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "account_ref": "01J8Z2ACCT00000000000000A1",
+       "broker": "alpaca",
+       "environment": "paper",
+       "user": "user_owner_01",
+       "step_up": {
+        "assertion_id": "assert_owner_09",
+        "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+        "method": "cli_confirm"
+       },
+       "credential": "oauth",
+       "breadth": {
+        "other_environment": "may_reach",
+        "disclosure": {
+         "document": "alpaca_oauth_token_breadth",
+         "version": "1"
+        }
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS050000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRolesMade",
+      "schema_version": 1,
+      "event_time": "2026-10-22T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01J8Z4CS090000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS070000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRefused",
+      "schema_version": 1,
+      "event_time": "2026-09-22T13:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "broker": "alpaca",
+       "environment": "paper",
+       "occasion": "connect",
+       "check": "scope",
+       "reason": "fund_movement",
+       "existing_connection_id": null,
+       "user": "user_owner_01",
+       "step_up": {
+        "assertion_id": "assert_owner_09",
+        "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+        "method": "cli_confirm"
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS080000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRolesRemoved",
+      "schema_version": 1,
+      "event_time": "2026-10-22T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01J8Z4CS070000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "role": "token_exchange",
+       "occasion": "request_closed"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "removed_twice_on_revoke",
+    "clause": "rule 263: at most once after its roles were made",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS000000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRequested",
+      "schema_version": 2,
+      "event_time": "2026-10-19T15:30:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "account_ref": "01J8Z2ACCT00000000000000A1",
+       "broker": "alpaca",
+       "environment": "paper",
+       "user": "user_owner_01",
+       "step_up": {
+        "assertion_id": "assert_owner_09",
+        "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+        "method": "cli_confirm"
+       },
+       "credential": "oauth",
+       "breadth": {
+        "other_environment": "may_reach",
+        "disclosure": {
+         "document": "alpaca_oauth_token_breadth",
+         "version": "1"
+        }
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS010000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRolesMade",
+      "schema_version": 1,
+      "event_time": "2026-10-22T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01J8Z4CS000000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper"
       },
       "artifact_refs": [],
       "pii_refs": []
@@ -123635,7 +123810,33 @@
       "config_refs": {},
       "payload": {
        "connection_id": "conn_alpaca_paper",
-       "role": "executor",
+       "role": "token_exchange",
+       "occasion": "revoked"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS050000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRolesRemoved",
+      "schema_version": 1,
+      "event_time": "2026-10-22T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01J8Z4CS030000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "role": "token_exchange",
        "occasion": "revoked"
       },
       "artifact_refs": [],
@@ -123643,7 +123844,9 @@
      }
     ],
     "expect": {
-     "outcome": "Valid"
+     "outcome": "Invalid",
+     "rule": "rule 263",
+     "index": 4
     }
    }
   ]

@@ -263,16 +263,15 @@ def stream_failure(records: list[dict], skip: frozenset[str] = frozenset()) -> i
     answered: set[str] = set()
     made_for: set[str] = set()
     gone: set[str] = set()
-    closed_requests: set[str] = set()
-    revoked_connections: set[str] = set()
+    closers: dict[str, dict[str, str]] = {}
     for i, record in enumerate(records):
         t, p = record["event_type"], record["payload"]
         if t == "ConnectionRequested":
             requests[record["event_id"]] = record
         elif t == "ConnectionRefused" and p.get("occasion") == "connect":
-            closed_requests.add(p["connection_id"])
+            closers.setdefault(p["connection_id"], {})[record["event_id"]] = "request_closed"
         elif t == "ConnectionRevoked":
-            revoked_connections.add(p["connection_id"])
+            closers.setdefault(p["connection_id"], {})[record["event_id"]] = "revoked"
         elif t in ("ConnectionRolesMade", "ConnectionRolesRefused"):
             request = requests.get(record["causation_id"])
             oauth = request is not None and request["schema_version"] == 2 and request["payload"].get("credential") == "oauth"
@@ -286,15 +285,17 @@ def stream_failure(records: list[dict], skip: frozenset[str] = frozenset()) -> i
             if t == "ConnectionRolesMade" and request is not None:
                 made_for.add(p["connection_id"])
                 gone.discard(p["connection_id"])
+                closers[p["connection_id"]] = {}
         elif t == "ConnectionRolesRemoved":
             connection = p["connection_id"]
             if connection not in made_for and "stream.263.made" not in skip:
                 return i
             if connection in gone and "stream.263.once" not in skip:
                 return i
-            if p["occasion"] == "request_closed" and connection not in closed_requests and "stream.263.closed" not in skip:
+            closer = closers.get(connection, {}).get(record["causation_id"])
+            if p["occasion"] == "request_closed" and closer != "request_closed" and "stream.263.closed" not in skip:
                 return i
-            if p["occasion"] == "revoked" and connection not in revoked_connections and "stream.263.revoked" not in skip:
+            if p["occasion"] == "revoked" and closer != "revoked" and "stream.263.revoked" not in skip:
                 return i
             gone.add(connection)
     return None
@@ -310,6 +311,7 @@ def stream_cases() -> list[dict]:
     other = requested(1, connection=OTHER_CONNECTION, account=OTHER_ACCOUNT)
     refusal = closed(2, oauth)
     revocation = revoked(3)
+    again = requested(9)
     return [
         case("made", "rule 262: after its OAuth request", [oauth, made(1, oauth)], None),
         case("refused", "rule 262: a refusal after its OAuth request", [oauth, refused(1, oauth)], None),
@@ -349,6 +351,33 @@ def stream_cases() -> list[dict]:
             "revoked_exchange_at_once",
             "rule 263: the exchange's role at once on a revocation, its executor still running",
             [oauth, made(1, oauth), process(2, "start", 1), revocation, removed(4, revocation, "token_exchange", "revoked")],
+            None,
+        ),
+        case(
+            "removed_by_an_earlier_requests_refusal",
+            "rule 263: names the closer of the request its roles were made for",
+            [oauth, made(1, oauth), refusal, removed(3, refusal, "token_exchange", "request_closed"),
+             again, made(5, again), removed(6, refusal, "token_exchange", "request_closed")],
+            6,
+        ),
+        case(
+            "removed_by_a_revocation_before_its_roles",
+            "rule 263: names the closer of the request its roles were made for",
+            [oauth, made(1, oauth), revocation, removed(4, revocation, "token_exchange", "revoked"),
+             again, made(5, again), removed(6, revocation, "token_exchange", "revoked")],
+            6,
+        ),
+        case(
+            "removed_by_another_connections_refusal",
+            "rule 263: names its own connection's closer",
+            [oauth, other, made(2, oauth), closed(3, other), removed(4, closed(3, other), "token_exchange", "request_closed")],
+            4,
+        ),
+        case(
+            "removed_after_a_second_request_closed",
+            "rule 263: once per made roles, the second request's own",
+            [oauth, made(1, oauth), refusal, removed(3, refusal, "token_exchange", "request_closed"),
+             again, made(5, again), closed(7, again), removed(8, closed(7, again), "token_exchange", "request_closed")],
             None,
         ),
         case(
@@ -411,9 +440,11 @@ def oracle(records: list[dict]) -> int | None:
             since = before[makes[-1]:]
             if any(r["event_type"] == "ConnectionRolesRemoved" and r["payload"]["connection_id"] == connection for r in since):
                 return i
-            closers = {"request_closed": "ConnectionRefused", "revoked": "ConnectionRevoked"}
-            if not any(r["event_type"] == closers[p["occasion"]] and r["payload"]["connection_id"] == connection
-                       and (r["event_type"] == "ConnectionRevoked" or r["payload"].get("occasion") == "connect") for r in before):
+            named = [r for r in since if r["event_id"] == record["causation_id"]]
+            kinds = {"request_closed": "ConnectionRefused", "revoked": "ConnectionRevoked"}
+            if not named or named[0]["event_type"] != kinds[p["occasion"]] or named[0]["payload"]["connection_id"] != connection:
+                return i
+            if named[0]["event_type"] == "ConnectionRefused" and named[0]["payload"].get("occasion") != "connect":
                 return i
     return None
 
@@ -512,6 +543,11 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
             "a stream case lets a removal repeat",
             "streams.rule",
             mutated(lambda s: case(s, "streams", "removed_twice").update(expect={"outcome": "Valid"})),
+        ),
+        (
+            "a stream case lets a removal cite an earlier request's closer",
+            "streams.rule",
+            mutated(lambda s: case(s, "streams", "removed_by_an_earlier_requests_refusal").update(expect={"outcome": "Valid"})),
         ),
     ]
 
