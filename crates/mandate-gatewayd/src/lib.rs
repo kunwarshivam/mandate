@@ -13,7 +13,9 @@
 //! runtime one framed call at a time. It is the only live caller of a model provider.
 //!
 //! [`key`] holds the provider's key, read once from the vault at start, and [`start`] refuses a
-//! live start whose meters cannot be read.
+//! live start whose meters cannot be read. [`cap`] reads each agent's daily research cap from the
+//! deployed mandate (DEC-2268).
 
+pub mod cap;
 pub mod key;
 pub mod start;
