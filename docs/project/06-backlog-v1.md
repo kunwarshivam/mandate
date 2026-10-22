@@ -4232,6 +4232,16 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   after `max_unprotected_s` ended its sell; register the executor's own intent ids (`w-<record>`, `k-<switch>-<n>`)
   in journal spec §9.5's `IntentReceived`; and, with the account scope, add `KillSwitchActivated` to
   `properties::every_catalogue_event_is_interpreted_or_named`'s `INTERPRETED`.
+- **E7-4 (executor process), from [DEC-2343](decisions/DEC-2343.md) Alternatives option (1), for
+  the founder:** whether the executor reads every connection- and workspace-scope kill switch from
+  the control stream itself, independent of the runtime (`AGENTS.md` rule 13), at the cost of the
+  owner's confirmed bid on those switches. Until the founder decides, it reads one only for an agent
+  whose connection is revoked at or after it.
+- **E7-4 (deployment manager), from [DEC-2343](decisions/DEC-2343.md) Not covered:** a kill switch
+  issued after `AgentStopped` has no runtime to copy it, and the manager stops the executor once no
+  running agent remains on the account. Keep the executor, or another reader, applying such a switch
+  while the account may hold the agent's orders or positions, after confirming whether a stopped
+  agent can still hold them.
 - **E7-4 slices 5 and 6's tests correction (stream K), from #286 round 1 (minor 2):**
   `properties::no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding` counts a cancel as
   outstanding until the order is terminal, abandoned or its protection cancelled, so it would fail on
