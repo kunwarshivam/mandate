@@ -11053,7 +11053,7 @@ kill_switch_unapplied:
   spec: docs/specs/journal.md v0.78 §9.15, rule 264 (DEC-2351)
   streams:
   - name: after_restarts
-    clause: 'rule 264: the run''s first start was the switch''s, whatever restarts followed'
+    clause: 'rule 264: a held run stays held through its restarts'
     records:
     - &id005
       event_id: 01J8Z6U0000000000000000000
@@ -11144,7 +11144,7 @@ kill_switch_unapplied:
     expect:
       outcome: Valid
   - name: an_ordinary_loop
-    clause: 'rule 264: a run that began with a deployment is ordinary'
+    clause: 'rule 264: a run a deployment began is not held'
     records:
     - *id005
     - *id006
@@ -11177,18 +11177,18 @@ kill_switch_unapplied:
       outcome: Invalid
       rule: rule 264
       index: 4
-  - name: redeployed
-    clause: 'rule 264: a deployment on the account since the switch''s start makes the loop ordinary'
+  - name: wanted_at_the_loop
+    clause: 'rule 264: an agent deployed and not stopped at the loop makes it ordinary'
     records:
     - *id005
     - *id006
     - *id007
-    - event_id: 01J8Z6U0300000000000000000
+    - event_id: 01J8Z6U1300000000000000000
       event_type: AgentDeployed
       schema_version: 2
       causation_id: null
       payload:
-        agent_id: agent_3
+        agent_id: agent_13
         connection_id: conn_01J8Z2CONN000000000000C1
     - event_id: 01J8Z6U0400000000000000000
       event_type: ProcessStartIssued
@@ -11219,8 +11219,157 @@ kill_switch_unapplied:
       outcome: Invalid
       rule: rule 264
       index: 6
+  - name: deployed_and_retired_during_the_run
+    clause: 'rule 264: a deployment and retirement during the run leave it held'
+    records:
+    - *id005
+    - *id006
+    - *id007
+    - event_id: 01J8Z6U1300000000000000000
+      event_type: AgentDeployed
+      schema_version: 2
+      causation_id: null
+      payload:
+        agent_id: agent_13
+        connection_id: conn_01J8Z2CONN000000000000C1
+    - event_id: 01J8Z6U1400000000000000000
+      event_type: AgentStopped
+      schema_version: 1
+      causation_id: null
+      payload:
+        agent_id: agent_13
+    - event_id: 01J8Z6U0400000000000000000
+      event_type: ProcessStartIssued
+      schema_version: 1
+      causation_id: null
+      payload:
+        process: executor
+        subject: 01J8Z2ACCT00000000000000A1
+        generation: 3
+        cause: restart
+    - event_id: 01J8Z6U0500000000000000000
+      event_type: ProcessCrashLooped
+      schema_version: 1
+      causation_id: null
+      payload:
+        process: executor
+        subject: 01J8Z2ACCT00000000000000A1
+        generation: 3
+    - event_id: 01J8Z6U0600000000000000000
+      event_type: OwnerAlertSent
+      schema_version: 1
+      causation_id: 01J8Z6U0500000000000000000
+      payload:
+        subject: 01J8Z6U0500000000000000000
+        kind: kill_switch_unapplied
+        owner_command: null
+    expect:
+      outcome: Valid
+  - name: a_wanted_switch_after_a_held_one
+    clause: 'rule 264: a later switch''s start while wanted does not clear the hold'
+    records:
+    - *id005
+    - *id006
+    - *id007
+    - event_id: 01J8Z6U1300000000000000000
+      event_type: AgentDeployed
+      schema_version: 2
+      causation_id: null
+      payload:
+        agent_id: agent_13
+        connection_id: conn_01J8Z2CONN000000000000C1
+    - event_id: 01J8Z6U0400000000000000000
+      event_type: ProcessStartIssued
+      schema_version: 1
+      causation_id: 01J8Z6KS00000000000000000S
+      payload:
+        process: executor
+        subject: 01J8Z2ACCT00000000000000A1
+        generation: 3
+        cause: kill_switch
+    - event_id: 01J8Z6U1400000000000000000
+      event_type: AgentStopped
+      schema_version: 1
+      causation_id: null
+      payload:
+        agent_id: agent_13
+    - event_id: 01J8Z6U0500000000000000000
+      event_type: ProcessCrashLooped
+      schema_version: 1
+      causation_id: null
+      payload:
+        process: executor
+        subject: 01J8Z2ACCT00000000000000A1
+        generation: 3
+    - event_id: 01J8Z6U0600000000000000000
+      event_type: OwnerAlertSent
+      schema_version: 1
+      causation_id: 01J8Z6U0500000000000000000
+      payload:
+        subject: 01J8Z6U0500000000000000000
+        kind: kill_switch_unapplied
+        owner_command: null
+    expect:
+      outcome: Valid
+  - name: stopped_since
+    clause: 'rule 264: the manager''s stop of its generation ends the hold'
+    records:
+    - *id005
+    - *id006
+    - *id007
+    - event_id: 01J8Z6U0300000000000000000
+      event_type: ProcessStopIssued
+      schema_version: 1
+      causation_id: null
+      payload:
+        process: executor
+        subject: 01J8Z2ACCT00000000000000A1
+        generation: 2
+        cause: agent_stopped
+    - event_id: 01J8Z6U1300000000000000000
+      event_type: AgentDeployed
+      schema_version: 2
+      causation_id: null
+      payload:
+        agent_id: agent_13
+        connection_id: conn_01J8Z2CONN000000000000C1
+    - event_id: 01J8Z6U0400000000000000000
+      event_type: ProcessStartIssued
+      schema_version: 1
+      causation_id: null
+      payload:
+        process: executor
+        subject: 01J8Z2ACCT00000000000000A1
+        generation: 3
+        cause: restart
+    - event_id: 01J8Z6U1400000000000000000
+      event_type: AgentStopped
+      schema_version: 1
+      causation_id: null
+      payload:
+        agent_id: agent_13
+    - event_id: 01J8Z6U0500000000000000000
+      event_type: ProcessCrashLooped
+      schema_version: 1
+      causation_id: null
+      payload:
+        process: executor
+        subject: 01J8Z2ACCT00000000000000A1
+        generation: 3
+    - event_id: 01J8Z6U0600000000000000000
+      event_type: OwnerAlertSent
+      schema_version: 1
+      causation_id: 01J8Z6U0500000000000000000
+      payload:
+        subject: 01J8Z6U0500000000000000000
+        kind: kill_switch_unapplied
+        owner_command: null
+    expect:
+      outcome: Invalid
+      rule: rule 264
+      index: 8
   - name: deployed_elsewhere
-    clause: 'rule 264: a deployment on another account''s connection does not end this run'
+    clause: 'rule 264: a deployment on another account''s connection does not make this one wanted'
     records:
     - *id005
     - event_id: 01J8Z6U0100000000000000000
@@ -11328,7 +11477,7 @@ kill_switch_unapplied:
     expect:
       outcome: Valid
   - name: switched_while_wanted
-    clause: 'rule 264: a switch''s start of an executor an agent still wants is no held run'
+    clause: 'rule 264: a switch''s start of an executor an agent still wants holds nothing'
     records:
     - *id005
     - event_id: 01J8Z6U1100000000000000000
@@ -11348,6 +11497,12 @@ kill_switch_unapplied:
         subject: 01J8Z2ACCT00000000000000A1
         generation: 2
         cause: kill_switch
+    - event_id: 01J8Z6U1200000000000000000
+      event_type: AgentStopped
+      schema_version: 1
+      causation_id: null
+      payload:
+        agent_id: agent_11
     - event_id: 01J8Z6U0300000000000000000
       event_type: ProcessStartIssued
       schema_version: 1
@@ -11376,9 +11531,9 @@ kill_switch_unapplied:
     expect:
       outcome: Invalid
       rule: rule 264
-      index: 6
+      index: 7
   - name: a_new_run_after_a_loop
-    clause: 'rule 264: a later switch''s start after an unapplied loop is a new run, and its loop is unapplied too'
+    clause: 'rule 264: a later switch''s start after an unapplied loop is held too'
     records:
     - *id005
     - *id006
@@ -11462,7 +11617,7 @@ kill_switch_unapplied:
       rule: rule 264
       index: 4
   - name: another_accounts_switch
-    clause: 'rule 264: the run is the looping executor''s own'
+    clause: 'rule 264: the hold is the looping executor''s own'
     records:
     - *id005
     - *id006
@@ -11554,6 +11709,41 @@ kill_switch_unapplied:
         generation: 2
     expect:
       outcome: Valid
+  - name: cleared_by_a_request
+    clause: 'rule 264: a start for a request ends the hold'
+    records:
+    - *id005
+    - *id006
+    - *id007
+    - event_id: 01J8Z6U0300000000000000000
+      event_type: ProcessStartIssued
+      schema_version: 1
+      causation_id: null
+      payload:
+        process: executor
+        subject: 01J8Z2ACCT00000000000000A1
+        generation: 3
+        cause: requested
+    - event_id: 01J8Z6U0400000000000000000
+      event_type: ProcessCrashLooped
+      schema_version: 1
+      causation_id: null
+      payload:
+        process: executor
+        subject: 01J8Z2ACCT00000000000000A1
+        generation: 3
+    - event_id: 01J8Z6U0500000000000000000
+      event_type: OwnerAlertSent
+      schema_version: 1
+      causation_id: 01J8Z6U0400000000000000000
+      payload:
+        subject: 01J8Z6U0400000000000000000
+        kind: kill_switch_unapplied
+        owner_command: null
+    expect:
+      outcome: Invalid
+      rule: rule 264
+      index: 5
 approval_requests:
   spec: docs/specs/journal.md v0.42 §9.6 (DEC-942)
   drafts:

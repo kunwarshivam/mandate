@@ -17,9 +17,10 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   `kill_switch_unapplied` (safety, after `kill_switch`), 33 kinds to 34: the deployment manager's
   `OwnerAlertSent` for its own unapplied crash loop (notifications spec §3.2, DEC-2344 item 1).
   Stream rule 264 holds the kind to that subject, which the control stream alone shows: no record
-  gains a member. The new `kill_switch_unapplied` vectors are 12 control streams, the redeploy, a
-  new run after a loop, an executor still wanted, and a runtime's loop among them, judged by the
-  fold and an independent oracle, with 5 stream and 2 vector mutants caught. **Versions and
+  gains a member. The new `kill_switch_unapplied` vectors are 16 control streams, a deployment
+  and retirement during the run, an agent wanting it at the loop, a stop, a new run after a loop,
+  and a runtime's loop among them, judged by the fold and an independent oracle, with 6 stream and
+  2 vector mutants caught. **Versions and
   numbers:** v0.77 is held by #2278 (DEC-2350) and lane V2's #2292 and #2293 stacked on it, and
   rules 261 to 263 by #2278, so this takes v0.78 and rule 264, and renumbers at merge if
   that order changes.
@@ -4123,16 +4124,18 @@ does `address_retired`, which records only that the address left the set.
 264. **Stream rule** (control stream, [DEC-2351](../project/decisions/DEC-2351.md), v0.78; numbered
      on after #2278's rules 261 to 263, renumbering none). An `OwnerAlertSent` whose
      `kind` is `kill_switch_unapplied` names as its `subject` an **unapplied crash loop**
-     (`payload.subject`): a `ProcessCrashLooped` of an executor whose **run**, from the latest of
-     its `ProcessStartIssued` records before the loop whose `cause` is not `restart`, began with
-     one whose `cause` is `kill_switch`, journaled while every `AgentDeployed` on a connection of
-     the executor's account (by its `ConnectionEstablished`'s `account_ref`) already had its
-     `AgentStopped`, and with no `AgentDeployed` on such a connection between that start and the
-     loop. So a run a deployment began or rejoined is an ordinary one, whose loop is `crash_loop`
-     alone, and a later covering switch's start after an unapplied loop begins a new run, whose
-     own loop is unapplied too ([DEC-2344](../project/decisions/DEC-2344.md) item 1). The
-     manager writes exactly one such `OwnerAlertSent`, in the batch, for each unapplied crash
-     loop, and none for any other: the writer's half, which E8-17's tests pin. The
+     (`payload.subject`): a `ProcessCrashLooped` of an executor whose run is **held**, with no
+     `AgentDeployed` on a connection of its account (by its `ConnectionEstablished`'s
+     `account_ref`) lacking its `AgentStopped` at the loop. A run is held from a
+     `ProcessStartIssued` with cause `kill_switch` journaled while every such deployment already
+     had its `AgentStopped`, until a later start of the executor with cause `deployed`,
+     `requested`, or `exchanged`, or a `ProcessStopIssued` of it: the manager journals a stop only
+     for a generation it does not hold. So a deployment and retirement while the run goes on leave
+     it held and unstopped (DEC-2344 item 3); a loop while an agent wants the executor is an
+     ordinary one, `crash_loop` alone; and a later covering switch's start after an unapplied loop
+     begins a new run, whose own loop is unapplied too ([DEC-2344](../project/decisions/DEC-2344.md)
+     item 1). The manager writes exactly one such `OwnerAlertSent`, in the batch, for each unapplied
+     crash loop, and none for any other: the writer's half, which E8-17's tests pin. The
      `kill_switch_unapplied` vectors' streams are judged by the fold and by an independent oracle
      that reads each alert's subject backwards, and each seeded bug is shown caught.
 134. `NoticeAttempted` version 2 ([DEC-706](../project/decisions/DEC-706.md)), numbered on after
