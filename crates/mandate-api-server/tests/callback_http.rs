@@ -114,7 +114,6 @@ fn held(s: &Started) -> bool {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_callback_writes_the_code_for_the_bound_connection_and_redirects_to_it() {
     let s = started();
     let rows_before = appended(&s.f).len();
@@ -160,7 +159,6 @@ fn a_callback_writes_the_code_for_the_bound_connection_and_redirects_to_it() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_state_is_spent_by_its_first_callback() {
     let s = started();
     let query = format!("state={}&code=first", s.state);
@@ -172,7 +170,6 @@ fn a_state_is_spent_by_its_first_callback() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn without_a_session_the_callback_is_unauthenticated_and_spends_nothing() {
     let s = started();
     let query = format!("state={}&code=abc", s.state);
@@ -191,7 +188,6 @@ fn without_a_session_the_callback_is_unauthenticated_and_spends_nothing() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn another_users_state_is_refused_and_spent() {
     let s = started();
     let bob = signed_in(&s.f, BOB);
@@ -203,7 +199,6 @@ fn another_users_state_is_refused_and_spent() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn an_expired_or_unknown_state_writes_nothing_and_names_no_connection() {
     let s = started();
     redirected(
@@ -219,7 +214,6 @@ fn an_expired_or_unknown_state_writes_nothing_and_names_no_connection() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_declined_grant_writes_nothing_and_spends_the_state() {
     let s = started();
     let query = format!("error=access_denied&state={}&code=abc", s.state);
@@ -229,7 +223,6 @@ fn a_declined_grant_writes_nothing_and_spends_the_state() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_code_that_is_missing_repeated_or_malformed_writes_nothing() {
     let long = "a".repeat(513);
     for code_part in [
@@ -256,7 +249,6 @@ fn a_code_that_is_missing_repeated_or_malformed_writes_nothing() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_repeated_state_or_a_malformed_query_redeems_nothing() {
     let s = started();
     for query in [
@@ -272,7 +264,6 @@ fn a_repeated_state_or_a_malformed_query_redeems_nothing() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_request_closed_while_the_owner_was_at_alpaca_gets_no_code() {
     let s = started();
     seed(
@@ -288,7 +279,6 @@ fn a_request_closed_while_the_owner_was_at_alpaca_gets_no_code() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_failed_vault_write_still_redirects_and_appends_nothing() {
     let s = started();
     s.f.codes.failing.store(true, Ordering::SeqCst);
@@ -300,7 +290,6 @@ fn a_failed_vault_write_still_redirects_and_appends_nothing() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_deployment_without_a_connect_answers_not_found_before_the_session() {
     let f = fixture("paper", false, true);
     let cookie = signed_in(&f, ALICE);
