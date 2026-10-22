@@ -68,6 +68,25 @@ pub struct Enrolment {
     pub sign_count: u32,
     /// When the credential may first step up, or `None` for no cool-off.
     pub cool_off_ends: Option<UtcNanos>,
+    /// The registration's backup-eligible flag at version 2, or `None` for a version 1 enrolment,
+    /// which carries none and which the verifier never counts (DEC-2122 item 3).
+    pub backup_eligible: Option<bool>,
+}
+
+/// A `StepUpAsserted` (journal spec §9.32), as the fold reads it: whose assertion it was, of which
+/// credential, over which challenge, and the counter it carried.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Assertion {
+    /// The record's `seq` on the control stream.
+    pub seq: u64,
+    /// The member who asserted, the record's actor.
+    pub member: PrincipalId,
+    /// The credential asserted with.
+    pub credential: String,
+    /// The step-up challenge the assertion answered, its ULID text.
+    pub challenge: String,
+    /// The signature counter the assertion carried.
+    pub sign_count: u32,
 }
 
 /// A `CredentialRemoved`, as the fold reads it.
@@ -88,8 +107,8 @@ pub enum CredentialRecord {
     Enrolled(Enrolment),
     /// A `CredentialRemoved`.
     Removed(Removal),
-    /// A `StepUpAsserted` at this `seq`, kept unread so step-up fails closed on it.
-    Asserted { seq: u64 },
+    /// A `StepUpAsserted`.
+    Asserted(Assertion),
 }
 
 /// Why a credential read gives no answer.
@@ -110,6 +129,9 @@ pub enum CredentialError {
     /// so no passkey's last counter is known.
     #[error("the step-up assertion at seq {seq} is not read yet")]
     AssertionUnread { seq: u64 },
+    /// The stub's own report until its story lands (DEC-77).
+    #[error("{story} has not been implemented yet")]
+    Unimplemented { story: &'static str },
 }
 
 /// The §9.31 record in the control-stream `envelope` at `seq`, a `StepUpAsserted` as
@@ -129,13 +151,15 @@ pub fn credential_record(
         .and_then(Value::as_str)
         .ok_or(at("event_type"))?;
     if event_type == ASSERTED {
-        return Ok(Some(CredentialRecord::Asserted { seq }));
+        return assertion(seq, envelope).map(Some);
     }
     if event_type != ENROLLED && event_type != REMOVED {
         return Ok(None);
     }
-    if envelope.get("schema_version").and_then(Value::as_int) != Some(1) {
-        return Err(at("schema_version"));
+    match envelope.get("schema_version").and_then(Value::as_int) {
+        Some(1) => {}
+        Some(2) if event_type == ENROLLED => return version_2(seq, envelope).map(Some),
+        _ => return Err(at("schema_version")),
     }
     let payload = envelope.get("payload").ok_or(at("payload"))?;
     let text = |name: &str, path| payload.get(name).and_then(Value::as_str).ok_or(at(path));
@@ -181,7 +205,25 @@ pub fn credential_record(
         alg,
         sign_count,
         cool_off_ends,
+        backup_eligible: None,
     })))
+}
+
+/// The story whose tests are pending on this module's stubs (DEC-77).
+pub const STORY: &str = "E9-4";
+
+/// A `CredentialEnrolled` at version 2 (journal spec v0.71 §9.31): version 1's members and its
+/// `backup_eligible`, mapped whole or not at all.
+fn version_2(seq: u64, envelope: &Value) -> Result<CredentialRecord, CredentialError> {
+    let _ = (seq, envelope);
+    Err(CredentialError::Unimplemented { story: STORY })
+}
+
+/// A `StepUpAsserted` at schema version 1 (journal spec §9.32), its member read from its actor,
+/// mapped whole or not at all.
+fn assertion(seq: u64, envelope: &Value) -> Result<CredentialRecord, CredentialError> {
+    let _ = (seq, envelope);
+    Err(CredentialError::Unimplemented { story: STORY })
 }
 
 /// §9.31's `credential_id`: unpadded base64url of 16 to 1023 bytes, so 22 to 1364 characters and
@@ -237,6 +279,16 @@ impl CredentialFold {
             .into_iter()
             .filter(|e| e.member == member)
             .collect())
+    }
+
+    /// The last counter of `credential`, step-up's view: the greatest an assertion that keeps rule
+    /// 254 carried, else the enrolment's; `None` when it is not held.
+    ///
+    /// # Errors
+    /// [`CredentialError::Broken`] when a record breaks rule 251 or rule 254 for its holder.
+    pub fn last_count(&self, credential: &str) -> Result<Option<u32>, CredentialError> {
+        let _ = (&self.records, credential);
+        Err(CredentialError::Unimplemented { story: STORY })
     }
 
     /// The enrolment of `credential` while it is held, or `None`: route 2's view. Only the records
@@ -337,7 +389,7 @@ impl CredentialRecord {
         match self {
             Self::Enrolled(e) => Some((&e.credential, e.member)),
             Self::Removed(r) => Some((&r.credential, r.member)),
-            Self::Asserted { .. } => None,
+            Self::Asserted(_) => None,
         }
     }
 
@@ -346,7 +398,7 @@ impl CredentialRecord {
         match self {
             Self::Enrolled(e) => e.seq,
             Self::Removed(r) => r.seq,
-            Self::Asserted { seq } => *seq,
+            Self::Asserted(a) => a.seq,
         }
     }
 }
