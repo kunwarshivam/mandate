@@ -6,16 +6,23 @@ use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 
+use secrecy::{SecretBox, SecretString};
+
 use crate::startup::{
     ADDRESS_KEY_CREDENTIAL, ADDRESSES_DIR, Ids, Inputs, open_reader, open_writer,
 };
-use crate::{AddressReader, AddressRef, AddressWriter, MemberId, UnixNanos, WorkspaceId};
+use crate::{
+    AddressError, AddressReader, AddressRef, AddressWriter, MemberId, NewEntry, PushKeys,
+    UnixNanos, WorkspaceId,
+};
 
 pub const ADDRESS_KEY: [u8; 32] = [5; 32];
 
 pub const WORKSPACE: &str = "ws_01J8Z2";
+pub const OTHER_WORKSPACE: &str = "ws_01J8Z3";
 pub const ALICE: &str = "01J8Z2A0000000000000000001";
 pub const BOB: &str = "01J8Z2B0000000000000000002";
+pub const CAROL: &str = "01J8Z2C0000000000000000003";
 
 static NEXT: AtomicU32 = AtomicU32::new(0);
 
@@ -119,8 +126,29 @@ pub fn address(n: u8) -> AddressRef {
     AddressRef::parse(&address_text(n)).expect("a valid address_ref")
 }
 
+pub fn entry(member_text: &str, endpoint: &str, digest: u8) -> NewEntry {
+    NewEntry {
+        member: member(member_text),
+        endpoint: SecretString::from(endpoint.to_owned()),
+        keys: PushKeys {
+            p256dh: SecretString::from(format!("p256dh-of-{endpoint}")),
+            auth: SecretString::from(format!("auth-of-{endpoint}")),
+        },
+        key_id: SecretString::from("vapid-key-1".to_owned()),
+        request_digest: SecretBox::new(Box::new([digest; 32])),
+    }
+}
+
 /// The headers' times, in 2099, so every file a test writes was modified before them: a sweep's
 /// cutoff at or after `T0` lists by `written_at` alone unless a test sets a file's time itself.
 pub const T0: UnixNanos = UnixNanos(4_100_000_000_000_000_000);
 pub const T1: UnixNanos = UnixNanos(4_100_000_001_000_000_000);
 pub const T2: UnixNanos = UnixNanos(4_100_000_002_000_000_000);
+pub const ENDPOINT: &str = "https://push.example/a";
+
+/// What the reader answers for `who` at `address(n)`: whether an entry came back, or the error.
+pub fn read(reader: &AddressReader, who: &str, n: u8) -> Result<bool, AddressError> {
+    reader
+        .entry(&workspace(WORKSPACE), &member(who), &address(n))
+        .map(|e| e.is_some())
+}
