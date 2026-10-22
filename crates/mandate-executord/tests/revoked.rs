@@ -270,6 +270,27 @@ fn a_later_deployment_elsewhere_keeps_the_agent_followed_here() -> Result<(), Er
     Ok(())
 }
 
+/// An agent redeployed onto another account's connection (DEC-2343 items 1 and 2, the review's
+/// blocker): this account still reads its kill switch and hands its exit, but not its opening, since
+/// its latest deployment names another account.
+#[test]
+#[ignore = "pending E7-4"]
+fn an_agent_redeployed_elsewhere_gets_no_opening_here_but_its_exit_and_switch() -> Result<(), Error>
+{
+    let journal = deployed()?;
+    connect(&journal, "c3", OTHER_CONNECTION, OTHER_ACCOUNT)?;
+    deploy(&journal, "c4", AGENT, OTHER_CONNECTION)?;
+    propose(&journal, AGENT, OPEN, "buy", "10", "150", "open")?;
+    propose(&journal, AGENT, EXIT, "sell", "10", "150", "risk_exit")?;
+    kill(&journal, AGENT, COPY)?;
+    let broker = Paper::new(&journal);
+    let mut process = start_allowing(&journal, &broker)?;
+    process.step(at(NOON)?);
+    assert_eq!(journal.received(), [EXIT], "the exit only");
+    assert_eq!(journal.switched(), [AGENT], "and the switch");
+    Ok(())
+}
+
 /// Option (2) of DEC-2343: with no revocation, a connection's kill switch waits for the runtime's
 /// copy, which carries the owner's confirmation, and is applied once from it.
 #[test]

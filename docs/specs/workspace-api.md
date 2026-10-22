@@ -1978,8 +1978,9 @@ The API commits one batch, in this order: `OwnerCommandIssued` with `kill_switch
 connection's scope, then `ConnectionRevoked` with reason `compromised`. Revocation never waits on
 positions, on fills, or on the regular session. The executor processes the batch in `seq` order:
 
-1. **The kill switch first** (trading spec §5.5): every agent on the connection to `stopped`, the
-   broker's cancel-all and close-position requests sent with the executor's current lease.
+1. **The kill switch first** (trading spec §5.5): every agent on the connection to `stopped`, and,
+   in its account-wide form (DEC-2333's slice A2b), the broker's cancel-all and close-position
+   requests sent with the executor's current lease; until then, agent by agent, as below.
    Whatever the broker accepts, queues, or fills stands at the broker after revocation; nothing on
    our side holds or cancels it (rule 13).
    - **The executor reads it itself** ([DEC-2343](../project/decisions/DEC-2343.md)). The
@@ -1991,8 +1992,11 @@ positions, on fills, or on the regular session. The executor processes the batch
      `AgentStopped`; it reads an agent-scope `kill_switch` naming a stopped agent the same way. A
      revocation never
      ends the following of an agent whose version-2 deployment named the connection before it: the
-     executor keeps reading that agent's kill switches, exits, and protective re-placements, and
-     hands none of its openings. The runtime's copy of a switch already applied this way counts as
+     executor keeps reading that agent's kill switches, exits, and protective re-placements. It
+     hands an agent's openings only while the agent's latest version-2 deployment, on any
+     connection, names a connection whose latest establishment or revocation is a version-2
+     establishment naming this account, so none after the revocation, and none once the agent is
+     deployed on another account. The runtime's copy of a switch already applied this way counts as
      applied, and is never applied a second time.
    - **Agent by agent, until the account-wide form lands.** Until DEC-2333's slice A2b, the
      executor applies the switch as the agent-scoped switch of each agent it follows on the
@@ -2004,9 +2008,11 @@ positions, on fills, or on the regular session. The executor processes the batch
    revocation (OAuth), the platform revokes the token there.
 3. **What is left is the owner's, and the owner is told so.** An exit the executor would have
    deferred and re-driven later (equities outside the regular session) is not re-driven, because no
-   credential remains; protection was canceled by step 1. Until A2b, the confirmation and the alert
-   never say or imply that every order on the connection was canceled: they say that the platform's
-   own orders were, and that any order placed outside the platform stays at the broker. The confirmation and the alert say which
+   credential remains; step 1 asked the broker to cancel the protection. Until A2b, the
+   confirmation and the alert never say or imply that every order on the connection was canceled,
+   nor that any cancel was already confirmed when they are sent: they say that the platform's own
+   orders were asked to cancel, and that any order placed outside the platform stays at the
+   broker. The confirmation and the alert say which
    positions remain at the broker, unprotected, and that the owner must also revoke the leaked key
    at the broker, since revoking it on our side does not stop someone else who holds it. This
    residual is listed for the threat model (#557).
