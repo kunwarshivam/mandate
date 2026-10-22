@@ -16558,24 +16558,23 @@ mod tests {
     }
 
     /// DEC-2334: the jobs that run `cargo xtask ci full`'s parts, each with its parts in order.
-    /// `full-checks` keeps every part that needs its services (Postgres, OpenBao, the S3 store);
-    /// `full-checks-2` runs the rest.
+    /// `full-checks` keeps the parts that need its services (Postgres, OpenBao, the S3 store) and
+    /// `refcases`, which warms the build they share; `full-checks-2` runs the rest.
     const FULL_CI_JOBS: [(&str, &[&str]); 2] = [
         (
             "full-checks",
-            &[
-                "refcases",
-                "reference",
-                "schemas",
-                "supply-chain",
-                "postgres",
-                "openbao",
-                "objectstore",
-            ],
+            &["refcases", "postgres", "openbao", "objectstore"],
         ),
         (
             "full-checks-2",
-            &["tofu", "stub-release", "exchange-release"],
+            &[
+                "reference",
+                "schemas",
+                "supply-chain",
+                "tofu",
+                "stub-release",
+                "exchange-release",
+            ],
         ),
     ];
 

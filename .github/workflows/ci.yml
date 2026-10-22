@@ -446,19 +446,11 @@ jobs:
           enable-cache: true
       - uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
         with:
-          tool: cargo-deny@0.20.2,cargo-nextest@0.9.146
-      - name: Install gitleaks (checksum-verified)
-        run: |
-          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o gitleaks.tgz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
-          echo "${GITLEAKS_SHA256}  gitleaks.tgz" | sha256sum --check
-          tar xzf gitleaks.tgz gitleaks && sudo install gitleaks /usr/local/bin/ && rm gitleaks gitleaks.tgz
+          tool: cargo-nextest@0.9.146
       - name: Install the pinned Rust toolchain (rust-toolchain.toml)
         run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: cargo xtask ci refcases
-      - run: cargo xtask ci reference
-      - run: cargo xtask ci schemas
-      - run: cargo xtask ci supply-chain
       - run: cargo xtask ci postgres
       - run: cargo xtask ci openbao
       - run: cargo xtask ci objectstore
@@ -481,6 +473,18 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.19"
+          enable-cache: true
+      - uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
+        with:
+          tool: cargo-deny@0.20.2
+      - name: Install gitleaks (checksum-verified)
+        run: |
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o gitleaks.tgz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  gitleaks.tgz" | sha256sum --check
+          tar xzf gitleaks.tgz gitleaks && sudo install gitleaks /usr/local/bin/ && rm gitleaks gitleaks.tgz
       # `tofu`, the credential-free checks of deploy/tofu/ (E21-56, DEC-2013): fmt, tflint,
       # validate, and `tofu test` against mocked providers. No step here holds a cloud credential.
       - name: Install OpenTofu and tflint (checksum-verified)
@@ -494,6 +498,9 @@ jobs:
       - name: Install the pinned Rust toolchain (rust-toolchain.toml)
         run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - run: cargo xtask ci reference
+      - run: cargo xtask ci schemas
+      - run: cargo xtask ci supply-chain
       - run: cargo xtask ci tofu
       - run: cargo xtask ci stub-release
       - run: cargo xtask ci exchange-release
