@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use mandate_accounting::InstrumentId;
+use mandate_accounting::{InstrumentId, Side};
 use mandate_domain::CapabilityProfile;
 use mandate_num::{Price, Qty, Rounding, SignedQty, Usd};
 use mandate_time::Date;
@@ -628,11 +628,24 @@ impl ExecutorState {
             .any(|switch| &switch.agent == agent && switch.copied_from.as_ref() == Some(source))
     }
 
-    /// Whether `agent` holds lots in any instrument: its sub-ledger, the quantity its kill switch
-    /// would sell (trading-domain spec §5.5), is above zero somewhere (DEC-2347).
+    /// Whether `agent` may hold lots in any instrument the account holds (DEC-2347 item 3.6): its
+    /// sub-ledger, the quantity its kill switch would sell (trading-domain spec §5.5), is above
+    /// zero there, or one of its buys there reads filled with less of it applied than its quantity,
+    /// as when the broker's fill named no order the fold could attribute it to. The second reading
+    /// keeps an agent's shares from passing for the owner's.
     pub fn holds_lots(&self, agent: &AgentId) -> Result<bool, ExecutorError> {
-        for instrument in self.positions.keys() {
+        for (instrument, position) in &self.positions {
             if sub_ledger(self, agent, instrument)? > Qty::ZERO {
+                return Ok(true);
+            }
+            let unattributed = self.orders.values().any(|order| {
+                order.agent.as_ref() == Some(agent)
+                    && &order.instrument == instrument
+                    && order.side == Side::Buy
+                    && order.state == OrderState::Filled
+                    && order.filled_qty < order.qty
+            });
+            if unattributed && *position > SignedQty::ZERO {
                 return Ok(true);
             }
         }

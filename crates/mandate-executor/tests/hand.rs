@@ -4968,7 +4968,6 @@ fn filled_without_its_fill(fills: Vec<mandate_executor::BrokerFill>, held: &str)
 /// order leaves no lots in the sub-ledger, but the shares the account holds are the agent's, so it
 /// still holds lots; once the account holds none of the instrument, it holds none.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_filled_buy_whose_fill_named_no_order_still_holds_lots() {
     let bought = broker_fill("f-1", None, "10", "150");
     let mut sold = broker_fill("f-2", None, "10", "151");

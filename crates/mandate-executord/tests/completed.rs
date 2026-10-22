@@ -344,7 +344,6 @@ fn a_stopped_agents_fill_named_no_order_and_still_holds_it() -> Result<(), Error
 /// Item 3.5 (lane D1's finding): an order resting at the broker that the platform did not place
 /// is no order of the fold's, yet it keeps the executor running until the broker reports it final.
 #[test]
-#[ignore = "pending E7-4"]
 fn an_order_the_platform_did_not_place_keeps_it_running() -> Result<(), Error> {
     let journal = deployed()?;
     stopped(&journal, "c3", AGENT)?;
