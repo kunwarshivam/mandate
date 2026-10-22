@@ -12,12 +12,11 @@ use mandate_canon::{Key, Object, Value};
 use mandate_executor::{
     AccountScope, BindingGateInput, BindingGateRequest, BindingGateSource, EventDraft, EventId,
 };
-use mandate_journal::{Environment, StoredEvent};
+use mandate_journal::{Environment, StoredEvent, StreamId};
 use mandate_store::Store;
 use mandate_time::UtcNanos;
 
 use crate::Broker;
-use crate::credential::Unimplemented;
 use crate::follow::folded;
 use crate::process::ExecutorProcess;
 
@@ -225,6 +224,20 @@ pub fn pass<S: Store, B: Broker>(
     environment: Environment,
     now: UtcNanos,
 ) -> Result<Connected, &'static str> {
-    let _ = (process, gate, scope, environment, now);
-    Err(Unimplemented)
+    let stream = |id: String| StreamId::parse(&id).ok_or("stream_unavailable");
+    let account = stream(format!("acct:{}:{}", scope.workspace.0, scope.account.0))?;
+    let control = stream(format!("ctl:{}", scope.workspace.0))?;
+    let rows = |id: &StreamId| process.store().rows(id).ok_or("stream_unavailable");
+    let state = establishment(&rows(&account)?, &rows(&control)?, scope, environment)?;
+    match state {
+        Establishment::Established => {}
+        Establishment::ToCopy(_) if !process.state().started() => {
+            return Ok(Connected::Connecting);
+        }
+        Establishment::ToCopy(due) => process.copy_establishment(now, &due)?,
+        Establishment::Closed => return Ok(Connected::Closed),
+        Establishment::Connecting => return Ok(Connected::Connecting),
+    }
+    gate.open();
+    Ok(Connected::Open)
 }

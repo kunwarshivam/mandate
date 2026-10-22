@@ -364,7 +364,6 @@ fn a_shut_gate_holds_every_opening_and_lets_every_exit_go() -> Result<(), Error>
 /// Items 3 and 6: an executor left connecting, with no establishment and no refusal, opens no
 /// risk however many passes it runs, while a risk exit behind the held opening is still received.
 #[test]
-#[ignore = "pending E21-32"]
 fn a_connecting_executor_opens_nothing_and_still_exits() -> Result<(), Error> {
     let journal = deployed()?;
     opened(&journal)?;
@@ -415,7 +414,6 @@ fn a_connecting_executor_opens_nothing_and_still_exits() -> Result<(), Error> {
 /// executor that served before DEC-2341 among them, writes the copy on its first pass once it has
 /// started, opens, and never writes it again; before it has started it copies nothing.
 #[test]
-#[ignore = "pending E21-32"]
 fn the_first_pass_copies_a_due_establishment_once_and_opens() -> Result<(), Error> {
     let journal = deployed()?;
     opened(&journal)?;
@@ -457,7 +455,6 @@ fn the_first_pass_copies_a_due_establishment_once_and_opens() -> Result<(), Erro
 
 /// Item 4: a connection refused before its copy is closed, and the gate stays shut.
 #[test]
-#[ignore = "pending E21-32"]
 fn a_refused_connection_is_closed_and_stays_shut() -> Result<(), Error> {
     let journal = deployed()?;
     opened(&journal)?;

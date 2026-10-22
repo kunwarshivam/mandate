@@ -354,8 +354,16 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         now: UtcNanos,
         copy: &crate::establish::ToCopy,
     ) -> Result<(), &'static str> {
-        let _ = (now, copy);
-        Err(crate::credential::Unimplemented)
+        let head = self.account_head();
+        let id = self
+            .wiring
+            .ids
+            .event_id(WriterEpoch(self.epoch), Seq(head), 0);
+        let draft = crate::establish::copy_draft(copy, id, now)?;
+        match self.journal(now, &[draft]) {
+            Ran::Committed => Ok(()),
+            _ => Err("copy_refused"),
+        }
     }
 
     /// Drains at `now`: no new input; an input in doubt is handed once more, then the process exits
