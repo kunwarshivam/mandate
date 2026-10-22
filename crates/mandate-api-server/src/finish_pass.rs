@@ -14,7 +14,9 @@ use mandate_connections::record::{AccountRef, ConnectionId};
 use mandate_journal::{AppendOutcome, StoredEvent};
 use mandate_time::UtcNanos;
 
-use crate::finish::{Fingerprints, Pass, Unreadable, checked, decide, request};
+use crate::finish::{
+    CONNECT_DEADLINE_SECS, Fingerprints, Pass, Unreadable, checked, decide, request,
+};
 use crate::finish_records::drafted;
 use crate::journal::{Journal, JournalUnavailable};
 
@@ -50,15 +52,13 @@ pub struct Finisher<F, T, A> {
     journal: Arc<dyn Journal>,
     fingerprints: F,
     teardown: T,
-    #[expect(
-        dead_code,
-        reason = "raised by the pass in DEC-2348's implementation PR"
-    )]
     alerts: A,
     workspace: String,
     /// The closed requests, by connection id and `account_ref`, whose deletes succeeded since the
     /// process started: DEC-699 lets a refused connection id be requested again.
     cleared: BTreeSet<(ConnectionId, AccountRef)>,
+    /// The requests [`TEARDOWN_STALLED`] was raised for since the process started.
+    alerted: BTreeSet<(ConnectionId, AccountRef)>,
     /// Whether no pass has read the control stream since the process started.
     restarted: bool,
 }
@@ -79,6 +79,7 @@ impl<F: Fingerprints, T: Teardown, A: Alerts> Finisher<F, T, A> {
             alerts,
             workspace,
             cleared: BTreeSet::new(),
+            alerted: BTreeSet::new(),
             restarted: true,
         }
     }
@@ -93,8 +94,8 @@ impl<F: Fingerprints, T: Teardown, A: Alerts> Finisher<F, T, A> {
         let stream = format!("ctl:{}", self.workspace);
         let control = self.journal.rows(&stream).await?;
         let restarted = std::mem::replace(&mut self.restarted, false);
-        for (connection, account_ref) in closed(&control) {
-            self.clear(connection, account_ref).await;
+        for (connection, account_ref, deadline) in closed(&control) {
+            self.clear(connection, account_ref, deadline, now).await;
         }
         let mut head = control.last().map_or(0, |row| row.seq);
         for connection in requested(&control) {
@@ -117,6 +118,11 @@ impl<F: Fingerprints, T: Teardown, A: Alerts> Finisher<F, T, A> {
             for effect in &effects {
                 let refusal = matches!(effect, ManagerEffect::ConnectRefused { .. });
                 if refusal && self.teardown.delete(&connection).await.is_err() {
+                    self.stalled(
+                        (connection.clone(), members.account_ref.clone()),
+                        deadline(request.opened_at),
+                        now,
+                    );
                     continue;
                 }
                 let Some(draft) = drafted(effect, causation.as_deref(), &self.workspace, now)
@@ -138,8 +144,13 @@ impl<F: Fingerprints, T: Teardown, A: Alerts> Finisher<F, T, A> {
                         Ok(AppendOutcome::Committed(_) | AppendOutcome::AlreadyCommitted(_))
                     )
                 {
-                    self.clear(connection.clone(), members.account_ref.clone())
-                        .await;
+                    self.clear(
+                        connection.clone(),
+                        members.account_ref.clone(),
+                        deadline(request.opened_at),
+                        now,
+                    )
+                    .await;
                 }
             }
         }
@@ -147,11 +158,32 @@ impl<F: Fingerprints, T: Teardown, A: Alerts> Finisher<F, T, A> {
     }
 
     /// Deletes the entries of `connection`'s request on `account_ref` unless they were deleted
-    /// since the process started.
-    async fn clear(&mut self, connection: ConnectionId, account_ref: AccountRef) {
+    /// since the process started, then releases its fingerprint; a delete that fails at `now`
+    /// past `deadline` is [`Self::stalled`].
+    async fn clear(
+        &mut self,
+        connection: ConnectionId,
+        account_ref: AccountRef,
+        deadline: i64,
+        now: UtcNanos,
+    ) {
         let closed = (connection, account_ref);
-        if !self.cleared.contains(&closed) && self.teardown.delete(&closed.0).await.is_ok() {
+        if self.cleared.contains(&closed) {
+            return;
+        }
+        if self.teardown.delete(&closed.0).await.is_ok() {
+            self.fingerprints.release(&closed.0, &closed.1);
             self.cleared.insert(closed);
+        } else {
+            self.stalled(closed, deadline, now);
+        }
+    }
+
+    /// Raises [`TEARDOWN_STALLED`] for `request`, once per process, when its delete failed at
+    /// `now`, at or past its `deadline` (DEC-2348 item 1).
+    fn stalled(&mut self, request: (ConnectionId, AccountRef), deadline: i64, now: UtcNanos) {
+        if now.secs() >= deadline && self.alerted.insert(request) {
+            self.alerts.raise(TEARDOWN_STALLED, TEARDOWN_RUNBOOK);
         }
     }
 }
@@ -175,10 +207,18 @@ fn requested(control: &[StoredEvent]) -> Vec<ConnectionId> {
         .collect()
 }
 
+/// The second at which a request recorded at `opened_at` reaches its deadline; a time that cannot
+/// be read is past it.
+fn deadline(opened_at: Option<UtcNanos>) -> i64 {
+    opened_at.map_or(i64::MIN, |at| {
+        at.secs().saturating_add(CONNECT_DEADLINE_SECS)
+    })
+}
+
 /// The version-2 `oauth` requests on `control` that a refusal or a revoke closed while open, each
-/// by its connection id and `account_ref`: the connects whose code and token entries the teardown
-/// deletes.
-fn closed(control: &[StoredEvent]) -> Vec<(ConnectionId, AccountRef)> {
+/// by its connection id, its `account_ref` and its [`deadline`]: the connects whose code and token
+/// entries the teardown deletes.
+fn closed(control: &[StoredEvent]) -> Vec<(ConnectionId, AccountRef, i64)> {
     let mut open = BTreeMap::new();
     let mut closed = Vec::new();
     for row in control {
@@ -195,15 +235,16 @@ fn closed(control: &[StoredEvent]) -> Vec<(ConnectionId, AccountRef)> {
                     .and_then(Value::as_str)
                     .and_then(|text| AccountRef::new(text).ok())
                 {
-                    open.insert(id, account_ref);
+                    let opened_at = UtcNanos::parse_rfc3339(&row.recorded_at).ok();
+                    open.insert(id, (account_ref, deadline(opened_at)));
                 }
             }
             "ConnectionEstablished" => {
                 open.remove(&id);
             }
             "ConnectionRefused" | "ConnectionRevoked" => {
-                if let Some(account_ref) = open.remove(&id) {
-                    closed.push((id, account_ref));
+                if let Some((account_ref, deadline)) = open.remove(&id) {
+                    closed.push((id, account_ref, deadline));
                 }
             }
             _ => {}

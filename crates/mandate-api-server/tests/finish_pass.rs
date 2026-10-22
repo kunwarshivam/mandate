@@ -595,7 +595,6 @@ const STALLED: (&str, &str) = (TEARDOWN_STALLED, TEARDOWN_RUNBOOK);
 /// deadline and not before, and appends nothing; once the vault recovers, delete, append, delete,
 /// and no second alert.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_held_refusal_past_its_deadline_raises_one_alert() {
     let (journal, deletes, raised, _, mut finisher) = recorded();
     request(&journal, A, 2, "oauth");
@@ -620,7 +619,6 @@ fn a_held_refusal_past_its_deadline_raises_one_alert() {
 /// A closed request whose deletes keep failing raises the alert once past its deadline, and a
 /// restarted process raises it again.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_closed_request_whose_delete_keeps_failing_raises_one_alert_per_process() {
     let (journal, deletes, raised, releases, mut finisher) = recorded();
     request(&journal, A, 2, "oauth");
@@ -657,7 +655,6 @@ fn a_teardown_that_succeeds_raises_nothing() {
 /// DEC-2348 item 2: each closed request's fingerprint is released once its deletes succeeded,
 /// once per process, and an establishment releases nothing.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_closed_request_is_released_after_its_deletes() {
     let (journal, deletes, _, releases, mut finisher) = recorded();
     request(&journal, A, 2, "oauth");
@@ -681,7 +678,6 @@ fn a_closed_request_is_released_after_its_deletes() {
 /// The release follows a failed delete only once the delete succeeds, and each request on one
 /// connection id is released on its own.
 #[test]
-#[ignore = "pending E10-13"]
 fn each_request_on_one_connection_is_released_once_its_delete_succeeds() {
     let second = "01JB3K6F0C9R2V7N4M8Q1T5W6Z";
     let (journal, deletes, _, releases, mut finisher) = recorded();
