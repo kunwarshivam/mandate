@@ -15,6 +15,7 @@ use mandate_api_server::journal::{Answer, Journal, JournalUnavailable, Rows};
 use mandate_api_server::keys::FetchedKeys;
 use mandate_api_server::lifecycle::Drain;
 use mandate_api_server::members::{Hosted, control_parser};
+use mandate_api_server::reduction::Reduction;
 use mandate_api_server::session::{OsRandom, Sessions};
 use mandate_api_server::subject::{SubjectLinks, digest, principal_at};
 use mandate_api_server::token::{Issuer as TokenIssuer, Keys};
@@ -124,6 +125,7 @@ fn api(
         step_up: Arc::new(mandate_api_server::stepup::Unbound),
         challenges: Arc::default(),
         connect: None,
+        reduction: Arc::new(Reduction::new(Vec::new(), Box::new(OsRandom::new()))),
     };
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a port");
     let addr = listener.local_addr().expect("its address");

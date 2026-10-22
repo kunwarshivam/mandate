@@ -98,7 +98,7 @@ BOOTSTRAP_VALUES = {
 STUB_TIERS = {"dev", "ci"}
 DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 PINNED = re.compile(r"@sha256:[0-9a-f]{64}$")
-KUBE_API = ["--set-json", 'kubeApi={"cidrs":["10.245.0.1/32"],"ports":[443]}']
+KUBE_API = ["--set-json", 'kubeApi.cidrs=["10.245.0.1/32"]', "--set-json", "kubeApi.ports=[443]"]
 PRUNE_DISABLED = {"kustomize.toolkit.fluxcd.io/prune": "disabled"}
 
 # The kinds kubeconform has no schema for: CloudNativePG's and the Barman Cloud plugin's, skipped by
@@ -172,7 +172,7 @@ def render(release: dict, values: dict, tmp: Path) -> list[dict]:
     chart = OWN_CHARTS[release["spec"]["chartRef"]["name"]]
     values_file = tmp / f"{release['metadata']['name']}-values.yaml"
     values_file.write_text(yaml.safe_dump(values))
-    extra = KUBE_API if chart == "journal-db" else []
+    extra = KUBE_API if chart in ("journal-db", "vault") else []
     done = subprocess.run(
         [
             *("helm", "template", release["spec"]["releaseName"], str(CHARTS / chart)),
@@ -729,6 +729,73 @@ def test_sources_pinned(overlay):
 
 def test_vault_release(overlay):
     assert vault_release(overlay[1], overlay[0]) == []
+
+
+def vault_reviewer(rendered: list[dict], environment: str = "staging") -> list[str]:
+    """Only where the vault runs, staging, is there one binding that lets it review tokens: the
+    vault's own ServiceAccount in ws-ws1, bound to `system:auth-delegator` (DEC-2062), rendered
+    together with the token it reviews with and its egress to the API server. Production renders
+    no vault object at all."""
+    problems = []
+    vault = [d for d in rendered if (d.get("metadata", {}).get("labels") or {}).get("mandate.dev/process") == "vault"]
+    if environment != "staging":
+        problems += [f"{environment}: renders the vault's {d['kind']} {d['metadata']['name']}" for d in vault]
+    else:
+        sets = [d for d in vault if d.get("kind") == "StatefulSet"]
+        volumes = [v["name"] for s in sets for v in s["spec"]["template"]["spec"].get("volumes", [])]
+        egress = [e for d in vault if d.get("kind") == "NetworkPolicy" for e in d["spec"].get("egress") or []]
+        if "kube-api-token" not in volumes or not egress:
+            problems.append(f"staging: the vault's token volume {volumes} and egress {egress} are not both there")
+    bindings = [d for d in rendered if d.get("kind") == "ClusterRoleBinding"]
+    want = (
+        [
+            {
+                "name": "vault-token-review-ws-ws1",
+                "roleRef": "system:auth-delegator",
+                "subjects": [{"kind": "ServiceAccount", "name": "vault", "namespace": "ws-ws1"}],
+            }
+        ]
+        if environment == "staging"
+        else []
+    )
+    got = [
+        {"name": b["metadata"]["name"], "roleRef": b["roleRef"]["name"], "subjects": b.get("subjects")}
+        for b in bindings
+    ]
+    if got != want:
+        problems.append(f"{environment}: the review bindings are {got}, not {want}")
+    return problems
+
+
+def test_only_staging_lets_the_vault_review_tokens(overlay):
+    environment, _, _, rendered, _ = overlay
+    assert vault_reviewer(rendered, environment) == []
+
+
+def test_a_review_binding_out_of_place_is_caught(overlay):
+    environment, _, _, rendered, _ = overlay
+    staged = [d for d in rendered if d.get("kind") == "ClusterRoleBinding"]
+    if environment == "staging":
+        assert vault_reviewer(rendered, "production"), "production must refuse staging's binding"
+        assert vault_reviewer([d for d in rendered if d not in staged], "staging")
+        widened = copy.deepcopy(rendered)
+        for d in widened:
+            if d.get("kind") == "ClusterRoleBinding":
+                d["subjects"].append({"kind": "Group", "name": "system:authenticated"})
+        assert vault_reviewer(widened, "staging")
+        closed = copy.deepcopy(rendered)
+        for d in closed:
+            if d.get("kind") == "NetworkPolicy" and d["metadata"]["name"] == "vault":
+                d["spec"]["egress"] = []
+        assert vault_reviewer(closed, "staging"), "a binding without the egress is caught"
+    else:
+        stray = {
+            "kind": "ClusterRoleBinding",
+            "metadata": {"name": "vault-token-review-ws-ws1"},
+            "roleRef": {"name": "system:auth-delegator"},
+            "subjects": [{"kind": "ServiceAccount", "name": "vault", "namespace": "ws-ws1"}],
+        }
+        assert vault_reviewer([*rendered, stray], environment)
 
 
 def test_production_running_the_vault_is_caught(tmp_path):
@@ -1415,3 +1482,26 @@ def test_pins_are_read_per_key():
     assert ("images.mandate", "ghcr.io/x@sha256:" + "a" * 64) in found
     assert {key for key, _ in found} >= {"mandate-workspace", "mandate-journal-db", "images.mandate"}
     assert all(ANY_DIGEST.fullmatch(digest) for key, digest in found if not key.startswith("images."))
+
+
+TOFU_STAGING = ROOT / "deploy" / "tofu" / "environments" / "staging" / "main.tf"
+
+
+def staging_redirect_problems(overlay: str, main_tf: str) -> list[str]:
+    """DEC-2636: staging's Alpaca OAuth redirect URI is the callback on the API host staging's
+    OpenTofu root names, so a host rename cannot silently break the callback."""
+    named = re.search(r'^\s*api_hostname\s*=\s*"([^"]+)"', main_tf, re.M)
+    if not named:
+        return ["staging's main.tf names no api_hostname"]
+    uri = (yaml.safe_load(overlay)["spec"]["values"].get("alpacaOAuth") or {}).get("redirectUri", "")
+    expected = f"https://{named.group(1)}/v1/oauth/alpaca/callback"
+    return [] if uri == expected else [f"staging's redirect URI {uri!r} is not {expected!r}"]
+
+
+def test_staging_s_alpaca_redirect_uri_is_on_its_api_host():
+    overlay = (GITOPS / "clusters" / "staging" / "workspace.yaml").read_text()
+    main_tf = TOFU_STAGING.read_text()
+    assert staging_redirect_problems(overlay, main_tf) == []
+    assert staging_redirect_problems(overlay, main_tf.replace("api-staging.owlhead.ai", "api-stage.owlhead.ai"))
+    assert staging_redirect_problems(overlay.replace("api-staging.owlhead.ai", "api.owlhead.ai"), main_tf)
+    assert staging_redirect_problems(overlay, main_tf.replace("api_hostname", "api_host"))

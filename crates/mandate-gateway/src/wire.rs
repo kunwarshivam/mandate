@@ -123,7 +123,7 @@ pub fn request_from(bytes: &[u8]) -> Result<CallRequest, WireError> {
 pub fn reply_bytes(reply: &Reply) -> Vec<u8> {
     let (name, value) = match reply {
         Ok(record) => ("record", record_value(record)),
-        Err(refusal) => ("refused", text(refusal_code(*refusal))),
+        Err(refusal) => ("refused", text(refusal.code())),
     };
     to_canonical(&object([
         (name, value),
@@ -416,30 +416,10 @@ fn guard_rule(code: &str) -> Option<GuardRule> {
     .find(|rule| rule.code() == code)
 }
 
-const REFUSALS: [(RequestError, &str); 9] = [
-    (RequestError::ForeignWorkspace, "foreign_workspace"),
-    (RequestError::AgentPurpose, "agent_purpose"),
-    (RequestError::CallId, "call_id"),
-    (RequestError::UnknownModel, "unknown_model"),
-    (RequestError::HashMismatch, "hash_mismatch"),
-    (RequestError::NotAgentic, "not_agentic"),
-    (RequestError::RunKind, "run_kind"),
-    (RequestError::Tools, "tools"),
-    (RequestError::Transcript, "transcript"),
-];
-
-fn refusal_code(refusal: RequestError) -> &'static str {
-    REFUSALS
-        .iter()
-        .find(|(error, _)| *error == refusal)
-        .map_or("", |(_, code)| code)
-}
-
 fn refusal(code: &str) -> Option<RequestError> {
-    REFUSALS
-        .iter()
-        .find(|(_, name)| *name == code)
-        .map(|(error, _)| *error)
+    RequestError::ALL
+        .into_iter()
+        .find(|refusal| refusal.code() == code)
 }
 
 fn text(value: &str) -> Value {

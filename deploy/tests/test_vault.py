@@ -24,6 +24,18 @@ STAGING = CELL / "values" / "vault-staging.yaml"
 # environment (DEC-2021).
 SEAL_KEY = "file:///openbao/seal/key"
 NAMESPACE = "ws-ws1"
+# The API server's addresses a render outside a cluster names, as test_gitops's do: staging reads
+# them at install from the `kubernetes` Service and its EndpointSlice.
+KUBE_API = {"cidrs": ["10.245.0.1/32", "10.110.0.2/32"], "ports": [443, 6443]}
+# Staging's values, with the addresses its install would read.
+STAGED = (
+    "-f",
+    str(CELL / "values" / "vault-staging.yaml"),
+    "--set-json",
+    f"kubeApi.cidrs={json.dumps(KUBE_API['cidrs'])}",
+    "--set-json",
+    f"kubeApi.ports={json.dumps(KUBE_API['ports'])}",
+)
 WORKSPACE = "ws1"
 PORT = 8200
 # The one command the server runs: server mode from the chart's config file, no dev flag (DEC-977
@@ -320,28 +332,96 @@ def sealed_by_staging_key(docs: list[dict]) -> list[str]:
     return found
 
 
-def every(docs: list[dict]) -> list[str]:
+# Where OpenBao reads the in-cluster token and CA it reviews other tokens with (DEC-2062).
+TOKEN_PATH = "/var/run/secrets/kubernetes.io/serviceaccount"
+REVIEWER = {
+    "apiGroup": "rbac.authorization.k8s.io",
+    "kind": "ClusterRole",
+    "name": "system:auth-delegator",
+}
+
+
+def token_review(docs: list[dict], enabled: bool) -> list[str]:
+    """The vault runs as its own ServiceAccount, which mounts no token by itself (DEC-2062). With
+    Kubernetes auth on, and only then: one projected volume, read by owner and group, holds a token of that
+    account for the API server's default audience, lasting an hour at most, and the cluster's CA,
+    at the path OpenBao reads; and one binding gives that account, in its namespace, the
+    `system:auth-delegator` role and nothing else. No other role, binding or token Secret. The
+    pod names its user and its fsGroup and no container overrides them, since the kubelet makes
+    the projected files readable through exactly those."""
+    found = []
+    spec = server(docs)["spec"]["template"]["spec"]
+    pod_sc = spec.get("securityContext", {})
+    if not pod_sc.get("runAsUser") or not pod_sc.get("fsGroup"):
+        found.append(f"the pod names no user or fsGroup: {pod_sc}")
+    for c in spec.get("containers", []) + spec.get("initContainers", []):
+        sc = c.get("securityContext", {})
+        if any(k in sc for k in ("runAsUser", "runAsGroup")):
+            found.append(f"{c['name']} runs as {sc}, not the pod's user")
+    accounts = [d for d in docs if d["kind"] == "ServiceAccount"]
+    if [a["metadata"]["name"] for a in accounts] != ["vault"] or any(
+        a.get("automountServiceAccountToken") is not False for a in accounts
+    ):
+        found.append(f"the ServiceAccounts are {accounts}")
+    if spec.get("serviceAccountName") != "vault" or spec.get("automountServiceAccountToken") is not False:
+        who, automount = spec.get("serviceAccountName"), spec.get("automountServiceAccountToken")
+        found.append(f"the pod runs as {who}, automount {automount}")
+    for d in docs:
+        if d["kind"] in ("Role", "RoleBinding", "ClusterRole") or (
+            d["kind"] == "Secret" and d.get("type") == "kubernetes.io/service-account-token"
+        ):
+            found.append(f"{d['kind']} {d['metadata']['name']} is rendered")
+    bindings = [d for d in docs if d["kind"] == "ClusterRoleBinding"]
+    projected = [v for v in spec.get("volumes", []) if "projected" in v]
+    mounts = [m for m in container(docs).get("volumeMounts", []) if m["mountPath"] == TOKEN_PATH]
+    if not enabled:
+        if bindings or projected or mounts:
+            found.append(f"Kubernetes auth is off, yet {bindings} {projected} {mounts}")
+        return found
+    subject = [{"kind": "ServiceAccount", "name": "vault", "namespace": NAMESPACE}]
+    if len(bindings) != 1 or bindings[0].get("roleRef") != REVIEWER or bindings[0].get("subjects") != subject:
+        found.append(f"the review bindings are {bindings}")
+    want = [
+        {"serviceAccountToken": {"path": "token", "expirationSeconds": 3600}},
+        {"configMap": {"name": "kube-root-ca.crt", "items": [{"key": "ca.crt", "path": "ca.crt"}]}},
+    ]
+    if len(projected) != 1 or projected[0]["projected"] != {"defaultMode": 0o440, "sources": want}:
+        found.append(f"the projected volumes are {projected}")
+    if (
+        len(mounts) != 1
+        or mounts[0].get("readOnly") is not True
+        or (projected and mounts[0]["name"] != projected[0]["name"])
+    ):
+        found.append(f"the token is mounted as {mounts}")
+    if "token_reviewer" in json.dumps(docs):
+        found.append("a reviewer token is stored rather than reread")
+    return found
+
+
+def every(docs: list[dict], api: dict | None = None) -> list[str]:
+    """Every invariant, with Kubernetes auth on exactly when `api` names the API server."""
     return [
         *server_mode(docs),
         *tls_only(docs),
         *sealed_is_not_ready(docs),
-        *reached_only_by_its_processes(docs),
+        *reached_only_by_its_processes(docs, api),
         *root_generation_on_loopback_only(docs),
         *hardened(docs),
         *secrets_as_files(docs),
         *certificate(docs),
+        *token_review(docs, enabled=api is not None),
     ]
 
 
 def test_every_invariant_holds_on_each_rendering():
-    for docs in (render(), render("-f", str(MANAGED)), render("-f", str(STAGING))):
-        assert every(docs) == []
+    for docs, api in ((render(), None), (render("-f", str(MANAGED)), None), (render(*STAGED), KUBE_API)):
+        assert every(docs, api) == []
 
 
 def test_the_cell_and_production_unseal_by_hand_and_staging_by_its_key():
     assert sealed_by_hand(render()) == []
     assert sealed_by_hand(render("-f", str(MANAGED))) == []
-    assert sealed_by_staging_key(render("-f", str(STAGING))) == []
+    assert sealed_by_staging_key(render(*STAGED)) == []
 
 
 def test_the_static_seal_is_refused_outside_staging():
@@ -356,7 +436,7 @@ def test_the_static_seal_is_refused_outside_staging():
 def test_the_seal_checks_catch_a_key_in_the_wrong_place():
     hand = render()
     assert sealed_by_hand(with_config(hand, 'storage "raft"', 'seal "static" {}\n    storage "raft"'))
-    staged = render("-f", str(STAGING))
+    staged = render(*STAGED)
     assert sealed_by_staging_key(with_config(staged, SEAL_KEY, "env://BAO_SEAL_KEY"))
     assert sealed_by_staging_key(
         with_config(staged, 'current_key = "', 'previous_key = "x"\n      current_key = "')
@@ -373,8 +453,8 @@ def test_the_seal_checks_catch_a_key_in_the_wrong_place():
 
 
 def test_the_managed_values_change_only_the_volume():
-    for values in (MANAGED, STAGING):
-        claim = server(render("-f", str(values)))["spec"]["volumeClaimTemplates"][0]["spec"]
+    for values in (("-f", str(MANAGED)), STAGED):
+        claim = server(render(*values))["spec"]["volumeClaimTemplates"][0]["spec"]
         assert claim["storageClassName"] == "do-block-storage"
     assert "storageClassName" not in server(render())["spec"]["volumeClaimTemplates"][0]["spec"]
 
@@ -394,7 +474,7 @@ def with_config(docs: list[dict], old: str, new: str) -> list[dict]:
 
 
 def test_root_generation_catches_it_on_the_shared_listener_or_outside_staging():
-    staged = render("-f", str(STAGING))
+    staged = render(*STAGED)
     assert root_generation_on_loopback_only(staged) == []
     root_on = "disable_unauthed_generate_root_endpoints = false"
     shared = with_config(staged, 'cluster_address = "127.0.0.1:8201"', f'cluster_address = "127.0.0.1:8201"\n      {root_on}')
@@ -433,11 +513,8 @@ def test_sealed_is_not_ready_catches_a_restart_or_a_sealed_route():
     assert sealed_is_not_ready(bad)
 
 
-KUBE_API = {"cidrs": ["10.245.0.1/32", "10.110.0.2/32"], "ports": [443, 6443]}
-
-
 def test_kubernetes_auth_reaches_only_the_api_server():
-    plain = render("-f", str(STAGING))
+    plain = render(*STAGED, "--set", "kubeApi.enabled=false")
     assert reached_only_by_its_processes(plain) == []
     on = render("-f", str(STAGING), "--set-json", f"kubeApi={json.dumps({'enabled': True, **KUBE_API})}")
     assert reached_only_by_its_processes(on, KUBE_API) == []
@@ -548,3 +625,60 @@ def test_the_workspace_reaches_the_vault_it_selects():
     declared = {p["name"] for p in PROCESSES if "vault" in p["egress"]}
     assert declared, "no process in processes.json names the vault"
     assert labelled == declared, f"admitted {sorted(labelled)}, declared {sorted(declared)}"
+
+
+def test_the_vault_reviews_tokens_only_with_kubernetes_auth_on():
+    on = render("-f", str(STAGING), "--set-json", f"kubeApi={json.dumps({'enabled': True, **KUBE_API})}")
+    assert token_review(on, enabled=True) == []
+    assert token_review(on, enabled=False), "the off check must refuse the binding"
+    assert token_review(render(*STAGED), enabled=True) == []
+    assert token_review(render(*STAGED, "--set", "kubeApi.enabled=false"), enabled=False) == []
+    statefulset = ("StatefulSet", "vault")
+    binding = ("ClusterRoleBinding", f"vault-token-review-{NAMESPACE}")
+    account = ("ServiceAccount", "vault")
+
+    def volume(d: dict) -> dict:
+        (v,) = [v for v in d["spec"]["template"]["spec"]["volumes"] if "projected" in v]
+        return v["projected"]
+
+    for where, mutate in (
+        (statefulset, lambda d: d["spec"]["template"]["spec"].update(automountServiceAccountToken=True)),
+        (statefulset, lambda d: d["spec"]["template"]["spec"].pop("serviceAccountName")),
+        (account, lambda d: d.pop("automountServiceAccountToken")),
+        (binding, lambda d: d["roleRef"].update(name="cluster-admin")),
+        (binding, lambda d: d["roleRef"].update(name="system:auth-delegator-wide")),
+        (binding, lambda d: d["subjects"].append({"kind": "Group", "name": "system:authenticated"})),
+        (binding, lambda d: d["subjects"][0].update(namespace="default")),
+        (binding, lambda d: d["subjects"][0].update(name="default")),
+        (
+            statefulset,
+            lambda d: volume(d)["sources"][0]["serviceAccountToken"].update(expirationSeconds=86400),
+        ),
+        (
+            statefulset,
+            lambda d: volume(d)["sources"][0]["serviceAccountToken"].update(audience="mandate-vault"),
+        ),
+        (statefulset, lambda d: volume(d).update(defaultMode=0o444)),
+        (statefulset, lambda d: volume(d).update(defaultMode=0o400)),
+        (statefulset, lambda d: d["spec"]["template"]["spec"]["securityContext"].pop("runAsUser")),
+        (statefulset, lambda d: d["spec"]["template"]["spec"]["securityContext"].pop("fsGroup")),
+        (statefulset, lambda d: d["spec"]["template"]["spec"]["containers"][0]["securityContext"].update(runAsUser=0)),
+        (statefulset, lambda d: volume(d)["sources"].pop(1)),
+        (statefulset, lambda d: volume(d)["sources"].append({"secret": {"name": "vault-tls"}})),
+        (
+            statefulset,
+            lambda d: d["spec"]["template"]["spec"]["containers"][0]["volumeMounts"][-1].update(
+                readOnly=False
+            ),
+        ),
+    ):
+        bad = copy.deepcopy(on)
+        mutate(one(bad, *where))
+        assert token_review(bad, enabled=True), mutate
+    for added in (
+        {"kind": "ClusterRoleBinding", "metadata": {"name": "second"}, "roleRef": REVIEWER, "subjects": []},
+        {"kind": "RoleBinding", "metadata": {"name": "extra"}, "roleRef": {"kind": "Role", "name": "x"}},
+        {"kind": "Secret", "metadata": {"name": "t"}, "type": "kubernetes.io/service-account-token"},
+        {"kind": "ServiceAccount", "metadata": {"name": "other"}, "automountServiceAccountToken": False},
+    ):
+        assert token_review([*on, added], enabled=True), added
