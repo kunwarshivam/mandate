@@ -305,7 +305,6 @@ fn a_deployment_without_a_connect_answers_not_found_before_the_session() {
 /// The session's user must still hold the broker-connection permission when the code arrives: an
 /// admin demoted while at Alpaca gets no code written, and the `state` is spent (DEC-2626 item 3).
 #[test]
-#[ignore = "pending E10-13"]
 fn an_admin_demoted_while_at_alpaca_gets_no_code() {
     let s = started();
     demote_alice(&s.f);
@@ -320,7 +319,6 @@ fn an_admin_demoted_while_at_alpaca_gets_no_code() {
 
 /// A redeemed `state` bound to a workspace this deployment does not host writes nothing.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_binding_for_a_workspace_not_hosted_writes_nothing() {
     let f = fixture("paper", true, true);
     let cookie = signed_in(&f, ALICE);
@@ -356,7 +354,6 @@ fn a_binding_for_a_workspace_not_hosted_writes_nothing() {
 /// A control stream that cannot be read writes nothing: neither the permission nor the open
 /// request can be confirmed.
 #[test]
-#[ignore = "pending E10-13"]
 fn an_unreadable_control_stream_writes_nothing() {
     let s = started();
     s.f.journal.failing.lock().unwrap().insert(ctl());

@@ -179,7 +179,7 @@ async fn redeemed(
         only(&pairs, "code").and_then(code_text)
     };
     if let Some(code) = code
-        && still_open(app, &redeemed.binding).await
+        && still_open(app, admitted, now, &redeemed.binding).await
     {
         let _failed_write_is_closed_by_the_teardown: Result<(), ConnectError> =
             connect.codes.put_code(
@@ -244,19 +244,23 @@ fn code_text(value: &[u8]) -> Option<String> {
         .flatten()
 }
 
-/// Whether the binding's workspace is the hosted one and its connection's request is still open
-/// in the control stream; an unreadable or unfoldable stream is not (DEC-2626 item 3).
-async fn still_open(app: &App, binding: &Binding) -> bool {
-    let Ok(workspace) = app.hosted.workspace.to_ulid_text() else {
+/// Whether the session's user still holds the broker-connection permission in the binding's
+/// workspace, which must be the hosted one, and the control stream that check reads still holds
+/// the connection's request open; an unreadable or unfoldable stream is not (DEC-2626 item 3).
+async fn still_open(app: &App, admitted: &Authenticated, now: UtcNanos, binding: &Binding) -> bool {
+    let Ok(reader) = authorized(
+        app,
+        admitted,
+        now,
+        &binding.workspace_id,
+        Permission::BrokerConnection,
+        Unreadable::Command,
+    )
+    .await
+    else {
         return false;
     };
-    if binding.workspace_id != workspace {
-        return false;
-    }
-    let Ok(control) = app.journal.rows(&format!("ctl:{workspace}")).await else {
-        return false;
-    };
-    facts(&control, binding.connection_id.as_str(), "").id == IdFold::RequestOpen
+    facts(&reader.control, binding.connection_id.as_str(), "").id == IdFold::RequestOpen
 }
 
 /// A `303` to `location` (DEC-2626 item 6).
