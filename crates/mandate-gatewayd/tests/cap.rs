@@ -1,4 +1,4 @@
-//! Each agent's daily research cap, read by the service from the deployed mandate (DEC-2268): the
+//! Each agent's daily research cap, read by the service from the deployed mandate (DEC-2272): the
 //! deployed version's `behavior.research.cost_cap_usd_per_day`, zero with no research envelope or
 //! no deployment, each document that does not read refused with its code, and a version change read
 //! again while an unchanged one is not.
@@ -107,7 +107,7 @@ impl World {
     }
 }
 
-/// DEC-2268 item 1: the cap is the deployed version's `cost_cap_usd_per_day`, which the internal
+/// DEC-2272 item 1: the cap is the deployed version's `cost_cap_usd_per_day`, which the internal
 /// research profile, setting no ceiling of its own, leaves as it is.
 #[test]
 fn the_cap_is_the_deployed_version_s_own() {
@@ -121,7 +121,7 @@ fn the_cap_is_the_deployed_version_s_own() {
     );
 }
 
-/// DEC-2268 item 3: no research envelope, no deployment, or a stop since gives a cap of zero.
+/// DEC-2272 item 3: no research envelope, no deployment, or a stop since gives a cap of zero.
 #[test]
 fn no_research_envelope_no_deployment_or_a_stop_gives_zero() {
     let mut world = World::default();
@@ -136,7 +136,7 @@ fn no_research_envelope_no_deployment_or_a_stop_gives_zero() {
     assert_eq!(world.cap(), Ok(Usd6::ZERO), "stopped since");
 }
 
-/// DEC-2268 item 1: the agent's latest record in the service's environment names the version;
+/// DEC-2272 item 1: the agent's latest record in the service's environment names the version;
 /// another agent's records and another environment's are not the agent's deployment.
 #[test]
 fn only_the_agent_s_latest_record_in_this_environment_counts() {
@@ -153,7 +153,7 @@ fn only_the_agent_s_latest_record_in_this_environment_counts() {
 /// Stores a case's document, or not, and gives the version an `AgentDeployed` names.
 type Stores = Box<dyn Fn(&mut World) -> String>;
 
-/// DEC-2268 item 4: each document that does not give a cap the gateway can hold is refused with
+/// DEC-2272 item 4: each document that does not give a cap the gateway can hold is refused with
 /// its code, never read as some other cap.
 #[test]
 fn each_document_that_does_not_read_is_refused_with_its_code() {
@@ -231,7 +231,30 @@ fn each_document_that_does_not_read_is_refused_with_its_code() {
     );
 }
 
-/// DEC-2268 item 5: an unchanged deployment's cap is held without reading the document again, a
+/// DEC-2272 items 1 and 4, the coordinator's check: bytes stored under the journaled version's
+/// digest that are not that version's document are refused, never read as the cap they hold, so a
+/// store that swapped a document cannot raise the cap the core validated.
+#[test]
+#[ignore = "pending E21-62"]
+fn a_document_whose_hash_differs_from_the_journaled_version_is_refused() {
+    let mut world = World::default();
+    let journaled = ArtifactRef::of(&with_cap("5"));
+    world.store.insert(journaled.digest(), with_cap("49"));
+    world.deployed(&journaled.to_string());
+    let mut caps = DailyCaps::new(Environment::Paper, monthly());
+    assert_eq!(
+        caps.current(&world.control, AGENT, &world.store),
+        Err(CapError::DocumentUnavailable)
+    );
+    world.store.insert(journaled.digest(), with_cap("5"));
+    assert_eq!(
+        caps.current(&world.control, AGENT, &world.store),
+        Ok(usd("5")),
+        "the journaled version's own document reads"
+    );
+}
+
+/// DEC-2272 item 5: an unchanged deployment's cap is held without reading the document again, a
 /// changed one is read again, and a read that fails leaves no cap, not the one held before.
 #[test]
 fn a_version_change_is_read_again_and_a_failed_read_leaves_no_cap() {
@@ -281,7 +304,7 @@ fn a_version_change_is_read_again_and_a_failed_read_leaves_no_cap() {
     );
 }
 
-/// DEC-2268 items 1 and 4, over any cap: one at or under the workspace's monthly cap is read as
+/// DEC-2272 items 1 and 4, over any cap: one at or under the workspace's monthly cap is read as
 /// itself, one above it is refused.
 #[test]
 fn any_cap_is_read_as_itself_or_refused_above_the_monthly_cap() {

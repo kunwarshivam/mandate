@@ -153,11 +153,8 @@ impl Vault for MemVault {
         Ok(())
     }
 
-    fn read_code(&mut self, key: &VaultKey) -> Result<Option<WaitingCode>, ConnectError> {
-        Ok(self.codes.get(key).map(|waiting| WaitingCode {
-            code: AuthorizationCode(SecretString::from(waiting.code.0.expose_secret())),
-            verifier: PkceVerifier(SecretString::from(waiting.verifier.0.expose_secret())),
-        }))
+    fn take_code(&mut self, key: &VaultKey) -> Result<Option<WaitingCode>, ConnectError> {
+        Ok(self.codes.remove(key))
     }
 
     fn put_token(

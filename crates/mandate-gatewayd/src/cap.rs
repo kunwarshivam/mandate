@@ -1,4 +1,4 @@
-//! Each agent's daily research cap, read by the service from the deployed mandate (DEC-2268,
+//! Each agent's daily research cap, read by the service from the deployed mandate (DEC-2272,
 //! DEC-2254, E21-62): the agent's deployed version from its workspace's control stream, the
 //! version's artifact checked against its hash, and `behavior.research.cost_cap_usd_per_day`
 //! tightened by the internal research profile. Nothing the caller sends sets it, and anything that
@@ -43,7 +43,7 @@ pub enum Deployment {
     NotDeployed,
 }
 
-/// The agent's latest `AgentDeployed` or `AgentStopped` in `environment` (DEC-2268 item 1).
+/// The agent's latest `AgentDeployed` or `AgentStopped` in `environment` (DEC-2272 item 1).
 ///
 /// # Errors
 /// [`CapError::ControlUnreadable`] for a deployment record whose body does not read.
@@ -71,7 +71,7 @@ pub fn deployment(
     Ok(Deployment::NotDeployed)
 }
 
-/// The cap `deployment` gives (DEC-2268 items 1 to 4): zero when not deployed or when the
+/// The cap `deployment` gives (DEC-2272 items 1 to 4): zero when not deployed or when the
 /// document's `behavior.research` is `null`.
 ///
 /// # Errors
@@ -113,7 +113,7 @@ pub fn research_cap(
 }
 
 /// Each agent's cap with the deployment it was read from, read again whenever the control stream
-/// names another (DEC-2268 item 5): a call is only ever admitted against the cap of the version
+/// names another (DEC-2272 item 5): a call is only ever admitted against the cap of the version
 /// deployed now.
 pub struct DailyCaps {
     environment: Environment,
