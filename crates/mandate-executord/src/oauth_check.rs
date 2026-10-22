@@ -18,10 +18,12 @@ use mandate_executor::{AccountScope, IdGen};
 use mandate_store::Store;
 use mandate_time::UtcNanos;
 use mandate_vault::SourceError;
+use mandate_vault::personal::PiiRandom;
 use mandate_vault::policy::SecretPath;
 use secrecy::{ExposeSecret, SecretSlice};
 
 use crate::connect::{Checked, journal_check};
+use crate::credential::Unimplemented;
 
 /// What the OAuth connect check is given: the connection, the scopes its token entry was stored
 /// with, the account id the paper host answered (`None` when it could not be read), and the
@@ -95,4 +97,34 @@ pub fn leased_scopes(secret: &[u8]) -> Result<GrantedScopes, &'static str> {
     token_entry::decode(secret)
         .map(|entry| entry.scopes)
         .map_err(|_| "credential_malformed")
+}
+
+/// What the exchanged executor holds for its connect check: its connection, the secret its lease
+/// read, and the account id the paper host answered (`None` when it could not be read).
+#[derive(Debug)]
+pub struct Exchanged<'a> {
+    pub connection: ConnectionId,
+    pub leased: &'a [u8],
+    pub account: Option<BrokerAccountId>,
+}
+
+/// The exchanged executor's connect check from what it holds: the scopes its lease's token entry
+/// was stored with, and a reference minted from `random` at `now`, then [`oauth_connect_check`]
+/// with `create`.
+///
+/// # Errors
+/// `credential_malformed` for a secret that is not a token entry, `entropy_unavailable` when
+/// `random` cannot fill, and [`oauth_connect_check`]'s codes. Neither the secret nor the id is
+/// named.
+pub fn exchanged_check<S: Store>(
+    store: &mut S,
+    ids: &dyn IdGen,
+    scope: &AccountScope,
+    held: Exchanged<'_>,
+    random: &mut dyn PiiRandom,
+    create: impl FnOnce(&SecretPath, &SecretSlice<u8>) -> Result<(), SourceError>,
+    now: UtcNanos,
+) -> Result<Checked, &'static str> {
+    let _ = (store, ids, scope, held, random, create, now);
+    Err(Unimplemented)
 }
