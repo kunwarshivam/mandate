@@ -129,6 +129,7 @@ workspace_services = [
     "mandate-deploy-manager",
     "mandate-deployd",
     "mandate-provisioner",
+    "mandate-provisionerd",
     "mandate-dispatcher",
     "mandate-gatewayd",
 ]
@@ -794,6 +795,32 @@ safety_critical = true
 pure = false
 allowed_external = ["reqwest", "rustls", "secrecy", "tokio"]
 allowed_dependents = []
+
+# The role provisioner's process (E21-33, DEC-2350): mandate-provisioner over the Postgres control
+# stream, written as the deployment manager's process writes it (mandate-deployd's PgControl), and
+# the vault, logged in by AppRole, with mandate-process's lifecycle and probes. tokio drives the
+# journal, the vault's HTTPS and the SIGTERM listener; secrecy holds the vault's CA as it is read.
+# Like the provisioner it wires, it may never reach a crate that writes an agent or account stream,
+# holds a broker credential, or edits a mandate.
+[crates.mandate-provisionerd]
+layer = 10
+safety_critical = true
+pure = false
+allowed_external = ["secrecy", "tokio"]
+forbidden_internal = [
+    "mandate-agentd",
+    "mandate-alpaca",
+    "mandate-builder",
+    "mandate-cli",
+    "mandate-executor",
+    "mandate-mcp",
+    "mandate-paper",
+    "mandate-risk",
+    "mandate-robinhood",
+    "mandate-runtime",
+    "mandate-shell",
+    "mandate-spec",
+]
 
 # The workspace scheduler process (E21-29, DEC-1010): the clock stream's single writer, over
 # mandate-store, with mandate-process's lifecycle and probes. tokio drives the Postgres journal

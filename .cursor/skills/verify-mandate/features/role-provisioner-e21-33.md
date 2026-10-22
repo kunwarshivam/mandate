@@ -12,12 +12,18 @@
   (`crates/mandate-provisioner`): `src/plan.rs` (`plan`: the steps the control stream owes),
   `src/record.rs` (the §9.33 drafts with event ids derived from the step) and `src/driver.rs`
   (`Provisioner::tick`: the vault first, then the record; the `connection_roles_refused` alert).
+  The process is `mandate-provisionerd` (`crates/mandate-provisionerd`): `src/lib.rs` (`input`, a
+  pass's outcome as a lifecycle input; `vault_config` and `vault_login`, the AppRole session from
+  the mounted vault directory; `next_login`, the hourly renewal; `FixtureVault`) and
+  `src/main.rs` (the loop, probes, drain, and the control stream as `mandate-deployd` writes it).
 - **Tests:** `crates/mandate-journal/tests/connection_roles.rs` (the vectors' `connection_roles`
   section through `Draft::parse`, `check_stream` and the fold); `crates/mandate-vault/src/tests/`
   (`kubernetes.rs`: the provisioner's policy pinned; `provisioner.rs`: the refusals' reasons;
   `openbao_server.rs`: the provisioner's own session making and removing roles on a real vault);
   `crates/mandate-provisioner/tests/provisioner.rs` (the plan against every valid vector stream,
   a request's roles once, a refusal and a slow vault, a close and a revocation removing only the
-  exchange's role, a step the journal missed, two racing writers).
+  exchange's role, a step the journal missed, two racing writers);
+  `crates/mandate-provisionerd/tests/` (`process.rs`: the lifecycle input, the renewal, the vault
+  directory's refusals; `binary.rs`: the refused starts, the probes, and the drain on SIGTERM).
 - **Run:** `cargo nextest run -p mandate-journal --test connection_roles`,
-  `cargo nextest run -p mandate-vault`, and `cargo nextest run -p mandate-provisioner`.
+  `cargo nextest run -p mandate-vault`, and `cargo nextest run -p mandate-provisioner -p mandate-provisionerd`.
