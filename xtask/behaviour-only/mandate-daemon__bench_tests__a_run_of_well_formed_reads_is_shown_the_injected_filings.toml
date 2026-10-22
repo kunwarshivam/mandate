@@ -1,0 +1,8 @@
+file = "crates/mandate-daemon/src/worker/bench_tests.rs"
+test = "a_run_of_well_formed_reads_is_shown_the_injected_filings"
+reason = """
+The cell's recorded plane keeps the filing reader's default `search`, which answers `unavailable`,
+so the scripted run's `filings.search` reads nothing and no injected filing reaches the model: the
+test fails on that behaviour, not at a stub. E19-16's filings slice (DEC-2328) implements the read
+and deletes this row.
+"""
