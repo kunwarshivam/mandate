@@ -5,7 +5,7 @@
 //! policies select) is the chart's template; the adapter adds only the pod's name, its labels and
 //! the process's identity. A token exchange also runs as its connection's own ServiceAccount, which
 //! the adapter makes just before the pod and deletes just before deleting it, and ends by its request's
-//! deadline (DEC-1175 items 4, 7 and 9).
+//! deadline (DEC-1175 item 4, DEC-1177 items 4, 6 and 11).
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -208,7 +208,9 @@ impl Kubernetes {
 
     /// The pod `generation` of `slot` is created from: the chart's template with the name, the
     /// labels, the subject, `restartPolicy: Never`, and the process's identity in its environment.
-    /// A token exchange also names its account and ends by its `lifetime`, in whole seconds
+    /// A token exchange also names its account, as `serviceAccountName` and, beside its
+    /// connection, as `MANDATE_SUBJECT_ACCOUNT`, which admission and the exchange check against
+    /// each other (DEC-1177 item 6), and ends by its `lifetime`, in whole seconds
     /// rounded down, so it never outlives its request; it needs one of at least a second, and a
     /// standing process is never given one.
     pub fn manifest(
@@ -245,12 +247,16 @@ impl Kubernetes {
         if let Some(account) = self.account_name(slot) {
             spec.insert("serviceAccountName".to_owned(), json!(account));
         }
-        let env = [
+        let mut env = vec![
             ("MANDATE_WORKSPACE", self.workspace.clone()),
             ("MANDATE_PROCESS", slot.process.code().to_owned()),
             ("MANDATE_SUBJECT", slot.subject.clone()),
             ("MANDATE_GENERATION", generation.to_string()),
         ];
+        env.extend(
+            self.account_name(slot)
+                .map(|account| ("MANDATE_SUBJECT_ACCOUNT", account)),
+        );
         for container in spec.get_mut("containers")?.as_array_mut()? {
             let vars = container
                 .as_object_mut()?
