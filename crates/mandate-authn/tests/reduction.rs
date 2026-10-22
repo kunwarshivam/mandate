@@ -45,12 +45,20 @@ struct Bench {
 
 impl Bench {
     fn new(challenges: (u32, u32), failures: (u32, u32)) -> Self {
+        Self::bounded(challenges, failures, (u32::MAX, u32::MAX, u32::MAX))
+    }
+
+    /// A bench bounded in all: `(max_outstanding, reserve, max_failure_keys)`.
+    fn bounded(challenges: (u32, u32), failures: (u32, u32), all: (u32, u32, u32)) -> Self {
         let n = |v| NonZeroU32::new(v).unwrap();
         let gate = ReductionGate::new(ReductionLimits {
             challenges_per_address: n(challenges.0),
             challenges_per_device: n(challenges.1),
             failures_per_address: n(failures.0),
             failures_per_device: n(failures.1),
+            max_outstanding: n(all.0),
+            reserve: n(all.1),
+            max_failure_keys: n(all.2),
         });
         Self {
             gate,
@@ -501,4 +509,100 @@ fn random_histories_verify_exactly_the_outstanding_challenges_within_the_limits(
         Ok(())
     });
     outcome.unwrap();
+}
+
+#[test]
+#[ignore = "pending E9-1"]
+fn past_max_outstanding_the_gate_refuses_every_client_and_drops_nothing() {
+    let mut bench = Bench::bounded((9, 9), (9, 9), (3, 3, 9));
+    for n in 0..3 {
+        let who = client(&format!("a{n}"), &format!("d{n}"));
+        assert_eq!(bench.issue(&who, n, 0), Ok(issued(n, 0)));
+    }
+    let fresh = client("fresh", "fresh");
+    assert_eq!(
+        bench.issue(&fresh, 9, 0),
+        Err(Unauthenticated),
+        "the 4th in all"
+    );
+    assert_eq!(
+        bench.issue(&fresh, 9, LIFETIME - S),
+        Err(Unauthenticated),
+        "a second before they expire the cap still binds"
+    );
+    assert_eq!(
+        bench.present(&client("a0", "d0"), 0, LIFETIME - S, true),
+        Ok(MEMBER),
+        "the refusals dropped no held challenge"
+    );
+    assert_eq!(
+        bench.issue(&fresh, 9, LIFETIME - S),
+        Ok(issued(9, LIFETIME - S)),
+        "a consumed challenge frees its slot"
+    );
+    assert_eq!(
+        bench.issue(&fresh, 10, LIFETIME),
+        Ok(issued(10, LIFETIME)),
+        "and so do expired ones"
+    );
+}
+
+#[test]
+#[ignore = "pending E9-1"]
+fn past_the_reserve_an_address_that_holds_one_gets_no_more() {
+    let mut bench = Bench::bounded((9, 9), (9, 9), (4, 2, 9));
+    assert_eq!(bench.issue(&client("a1", "d1"), 1, 0), Ok(issued(1, 0)));
+    assert_eq!(
+        bench.issue(&client("a1", "d2"), 2, 0),
+        Ok(issued(2, 0)),
+        "below the reserve a repeat address is issued"
+    );
+    assert_eq!(
+        bench.issue(&client("a1", "d3"), 3, 0),
+        Err(Unauthenticated),
+        "at the reserve an address that holds one gets no more"
+    );
+    assert_eq!(bench.issue(&client("a2", "d4"), 4, 0), Ok(issued(4, 0)));
+    assert_eq!(bench.issue(&client("a2", "d5"), 5, 0), Err(Unauthenticated));
+    assert_eq!(bench.issue(&client("a3", "d6"), 6, 0), Ok(issued(6, 0)));
+    assert_eq!(
+        bench.issue(&client("a4", "d7"), 7, 0),
+        Err(Unauthenticated),
+        "the cap"
+    );
+    assert_eq!(
+        bench.issue(&client("a1", "d3"), 3, LIFETIME - S),
+        Err(Unauthenticated),
+        "a second before expiry the reserve still binds"
+    );
+    assert_eq!(
+        bench.present(&client("a1", "d1"), 1, LIFETIME - S, true),
+        Ok(MEMBER),
+        "the refusals dropped no held challenge"
+    );
+}
+
+#[test]
+#[ignore = "pending E9-1"]
+fn failure_keys_are_bounded_and_the_oldest_is_dropped_first() {
+    let mut bench = Bench::bounded((9, 9), (1, 1), (9, 9, 4));
+    let (first, second, third) = (client("a1", "d1"), client("a2", "d2"), client("a3", "d3"));
+    assert_eq!(bench.present(&first, 100, 0, true), REFUSED);
+    assert_eq!(bench.present(&second, 101, S, true), REFUSED);
+    assert!(
+        bench.reached(&first, S) && bench.reached(&second, S),
+        "four keys held"
+    );
+    assert_eq!(bench.present(&third, 102, 2 * S, true), REFUSED);
+    assert!(
+        !bench.reached(&first, 2 * S),
+        "the oldest keys, the first client's, were dropped"
+    );
+    assert!(bench.reached(&second, 2 * S) && bench.reached(&third, 2 * S));
+    bench.issue(&first, 1, 3 * S).unwrap();
+    assert_eq!(
+        bench.present(&first, 1, 3 * S, true),
+        Ok(MEMBER),
+        "dropping a key changes no answer"
+    );
 }

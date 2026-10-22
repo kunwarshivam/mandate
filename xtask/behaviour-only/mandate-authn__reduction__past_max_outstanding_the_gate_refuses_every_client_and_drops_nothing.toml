@@ -1,0 +1,8 @@
+file = "crates/mandate-authn/tests/reduction.rs"
+test = "past_max_outstanding_the_gate_refuses_every_client_and_drops_nothing"
+reason = """
+The bounds in all (DEC-2119 items 4 and 11) are new fields of ReductionLimits that the existing
+gate does not yet read, so this test fails on the gate's current answer rather than at a stub:
+stubbing ReductionGate::issue or ::present would stop every existing route-2 test. The row goes
+with the implementation PR that makes the gate read them.
+"""

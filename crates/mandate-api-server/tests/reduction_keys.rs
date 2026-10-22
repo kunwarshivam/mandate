@@ -40,6 +40,9 @@ fn the_limits_are_dec_2117s_numbers() {
             challenges_per_device: n(4),
             failures_per_address: n(100),
             failures_per_device: n(10),
+            max_outstanding: n(4_096),
+            reserve: n(3_072),
+            max_failure_keys: n(65_536),
         }
     );
 }

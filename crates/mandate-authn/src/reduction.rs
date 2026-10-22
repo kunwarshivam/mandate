@@ -48,15 +48,22 @@ pub struct ClientKey {
     pub device: String,
 }
 
-/// The four limits, none zero. A challenge counts against its issuing client's address and device
+/// The limits, none zero. A challenge counts against its issuing client's address and device
 /// while it is outstanding; a failed assertion counts against its presenting client's address and
-/// device for [`CHALLENGE_LIFETIME_S`] after it failed.
+/// device for [`CHALLENGE_LIFETIME_S`] after it failed. The last three bound the gate in all
+/// (workspace API spec §4.10 route 2 item 3, DEC-2119 items 4 and 11): at most `max_outstanding`
+/// challenges outstanding; once `reserve` are, none more to an address that already holds one;
+/// and failures kept for at most `max_failure_keys` addresses and devices together, the key whose
+/// latest failure is oldest dropped first.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ReductionLimits {
     pub challenges_per_address: NonZeroU32,
     pub challenges_per_device: NonZeroU32,
     pub failures_per_address: NonZeroU32,
     pub failures_per_device: NonZeroU32,
+    pub max_outstanding: NonZeroU32,
+    pub reserve: NonZeroU32,
+    pub max_failure_keys: NonZeroU32,
 }
 
 /// What the challenge route returns, and all it returns: the bytes the caller drew and when they

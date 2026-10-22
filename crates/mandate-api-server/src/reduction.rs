@@ -33,13 +33,17 @@ pub const INGRESS_PEERS: &str = "MANDATE_API_INGRESS_PEERS";
 const FORWARDED_FOR: &str = "x-forwarded-for";
 
 /// DEC-2117 item 3's numbers: 4 challenges per device and 32 per address outstanding, and 10
-/// failures per device and 100 per address kept.
+/// failures per device and 100 per address kept; DEC-2119's bounds in all: 4,096 outstanding, the
+/// reserve from 3,072, and 65,536 failure keys.
 pub fn limits() -> ReductionLimits {
     ReductionLimits {
         challenges_per_address: NonZeroU32::MIN.saturating_add(31),
         challenges_per_device: NonZeroU32::MIN.saturating_add(3),
         failures_per_address: NonZeroU32::MIN.saturating_add(99),
         failures_per_device: NonZeroU32::MIN.saturating_add(9),
+        max_outstanding: NonZeroU32::MIN.saturating_add(4_095),
+        reserve: NonZeroU32::MIN.saturating_add(3_071),
+        max_failure_keys: NonZeroU32::MIN.saturating_add(65_535),
     }
 }
 
