@@ -8,7 +8,7 @@ use mandate_time::UtcNanos;
 
 use crate::control::fact;
 use crate::manager::{Decision, Manager};
-use crate::orchestrator::{Alerts, Effect, Orchestrator, Unavailable};
+use crate::orchestrator::{Alerts, Effect, Launch, Orchestrator, Unavailable};
 
 pub use crate::record::Identity;
 
@@ -152,10 +152,13 @@ impl<J: ControlJournal, O: Orchestrator, A: Alerts> Deployer<J, O, A> {
     async fn perform(&mut self, effect: Effect, now: UtcNanos) {
         match effect {
             Effect::Start { slot, generation } => {
-                let lifetime = self.manager.lifetime(&slot, now);
+                let launch = Launch {
+                    lifetime: self.manager.lifetime(&slot, now),
+                    connection: None,
+                };
                 if self
                     .orchestrator
-                    .start(&slot, generation, lifetime)
+                    .start(&slot, generation, &launch)
                     .await
                     .is_ok()
                 {
@@ -163,7 +166,12 @@ impl<J: ControlJournal, O: Orchestrator, A: Alerts> Deployer<J, O, A> {
                 }
             }
             Effect::Stop { slot, generation } => {
-                if self.orchestrator.stop(&slot, generation).await.is_ok() {
+                if self
+                    .orchestrator
+                    .stop(&slot, generation, None)
+                    .await
+                    .is_ok()
+                {
                     self.manager.stopped(&slot, generation);
                 }
             }

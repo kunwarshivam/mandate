@@ -52,7 +52,9 @@ fn stops(m: &mut Manager) -> Vec<(Slot, u64)> {
         .calls()
         .iter()
         .filter_map(|c| match c {
-            Call::Stop { slot, generation } => Some((slot.clone(), *generation)),
+            Call::Stop {
+                slot, generation, ..
+            } => Some((slot.clone(), *generation)),
             _ => None,
         })
         .collect()
