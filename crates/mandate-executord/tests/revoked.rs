@@ -14,6 +14,7 @@ use support::{
 };
 
 const COMMAND: &str = "01JCMD000000000000000000AA";
+const OTHER_COMMAND: &str = "01JCMD000000000000000000AB";
 const COPY: &str = "01JKILL00000000000000000AA";
 const OTHER_COPY: &str = "01JKILL00000000000000000AB";
 const OPEN: &str = "01JINTENT0000000000000000A";
@@ -143,6 +144,27 @@ fn a_stopped_agents_switch_is_applied_from_the_command_with_no_revocation() -> R
             "stopped before the command: {stopped_first}"
         );
     }
+    Ok(())
+}
+
+/// An agent-scope kill switch naming a stopped agent (DEC-2343 item 3): no runtime runs to copy it,
+/// so the executor applies it from the command; one naming a running agent waits for its copy.
+#[test]
+#[ignore = "pending E7-4"]
+fn an_agent_scope_switch_naming_a_stopped_agent_is_applied_from_the_command() -> Result<(), Error> {
+    let journal = deployed()?;
+    deploy(&journal, "c3", OTHER_AGENT, CONNECTION)?;
+    stopped(&journal, "c4", AGENT)?;
+    kill_command(&journal, COMMAND, "agent", AGENT)?;
+    kill_command(&journal, OTHER_COMMAND, "agent", OTHER_AGENT)?;
+    let broker = Paper::new(&journal);
+    let mut process = start(&journal, &broker)?;
+    process.step(at(NOON)?);
+    assert_eq!(
+        journal.applications(),
+        [(AGENT.to_owned(), COMMAND.to_owned())],
+        "the stopped agent's, not the running agent's"
+    );
     Ok(())
 }
 
