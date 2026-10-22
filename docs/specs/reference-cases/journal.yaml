@@ -14491,7 +14491,7 @@ control_plane:
     expect:
       outcome: Valid
 deployment_manager:
-  spec: docs/specs/journal.md v0.48 §9.21 (DEC-1170)
+  spec: docs/specs/journal.md v0.70 §9.21 (DEC-1170, DEC-1175)
   drafts:
     process_start_issued:
       envelope_version: 1
@@ -15151,6 +15151,80 @@ deployment_manager:
       outcome: Invalid
       reason: schema
       path: payload.window_seconds
+  - name: ProcessStartIssued.exchange_restarted
+    clause: 'rule 167: an exchange is requested at generation 1 only'
+    base_draft: process_start_issued
+    changes:
+    - path: payload.process
+      value: token_exchange
+    - path: payload.subject
+      value: conn_01J8Z2CONN000000000000C1
+    - path: payload.generation
+      value: 2
+    - path: payload.cause
+      value: requested
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.cause
+  - name: ProcessStartIssued.exchange_deployed
+    clause: 'rule 256: a token exchange is started as requested'
+    base_draft: process_start_issued
+    changes:
+    - path: payload.process
+      value: token_exchange
+    - path: payload.subject
+      value: conn_01J8Z2CONN000000000000C1
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.cause
+  - name: ProcessStartIssued.runtime_requested
+    clause: 'rule 256: only a token exchange is requested'
+    base_draft: process_start_issued
+    changes:
+    - path: payload.cause
+      value: requested
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.cause
+  - name: ProcessStopIssued.exchange_stopped_for_an_agent
+    clause: 'rule 256: a token exchange is stopped as its request closed'
+    base_draft: process_stop_issued
+    changes:
+    - path: payload.process
+      value: token_exchange
+    - path: payload.subject
+      value: conn_01J8Z2CONN000000000000C1
+    - path: payload.generation
+      value: 1
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.cause
+  - name: ProcessStopIssued.runtime_stopped_as_closed
+    clause: 'rule 256: only a token exchange stops as its request closed'
+    base_draft: process_stop_issued
+    changes:
+    - path: payload.cause
+      value: request_closed
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.cause
+  - name: ProcessCrashLooped.exchange_looped
+    clause: '§9.21 types: a token exchange never crash-loops'
+    base_draft: process_crash_looped
+    changes:
+    - path: payload.process
+      value: token_exchange
+    - path: payload.subject
+      value: conn_01J8Z2CONN000000000000C1
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.process
   valid_drafts:
   - name: ProcessStartIssued.executor
     clause: '§9.21: an executor, named by its account'
@@ -15234,6 +15308,32 @@ deployment_manager:
     changes:
     - path: environment
       value: live
+    expect:
+      outcome: Valid
+  - name: ProcessStartIssued.token_exchange
+    clause: 'rule 256: an OAuth connect''s exchange, named by its connection'
+    base_draft: process_start_issued
+    changes:
+    - path: payload.process
+      value: token_exchange
+    - path: payload.subject
+      value: conn_01J8Z2CONN000000000000C1
+    - path: payload.cause
+      value: requested
+    expect:
+      outcome: Valid
+  - name: ProcessStopIssued.token_exchange_closed
+    clause: 'rule 256: a running exchange stopped as its request closed'
+    base_draft: process_stop_issued
+    changes:
+    - path: payload.process
+      value: token_exchange
+    - path: payload.subject
+      value: conn_01J8Z2CONN000000000000C1
+    - path: payload.generation
+      value: 1
+    - path: payload.cause
+      value: request_closed
     expect:
       outcome: Valid
 broker_profile:
@@ -72100,5 +72200,1178 @@ connection_requested:
     clause: '§9.8: version 1 stays registered and unchanged'
     base_draft: request_v1
     changes: []
+    expect:
+      outcome: Valid
+credentials:
+  spec: docs/specs/journal.md v0.69 §9.31 (DEC-2108)
+  drafts:
+    first_enrolled:
+      envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000E1
+      stream_id: ctl:ws_01J8Z2
+      event_type: CredentialEnrolled
+      schema_version: 1
+      event_time: '2026-10-19T15:00:05.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        member: 01JAA2N0A000000000000000P1
+        kind: passkey
+        credential: AAECAwQFBgcICQoLDA0ODw
+        public_key: sha256:5555555555555555555555555555555555555555555555555555555555555555
+        alg: es256
+        sign_count: 0
+        cool_off_ends: '2026-10-20T15:00:05.250000000Z'
+        step_up: null
+      artifact_refs:
+      - sha256:5555555555555555555555555555555555555555555555555555555555555555
+      pii_refs: []
+    stepped_up_enrolled:
+      envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000E1
+      stream_id: ctl:ws_01J8Z2
+      event_type: CredentialEnrolled
+      schema_version: 1
+      event_time: '2026-10-19T15:00:05.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        member: 01JAA2N0A000000000000000P1
+        kind: passkey
+        credential: AAECAwQFBgcICQoLDA0ODw
+        public_key: sha256:5555555555555555555555555555555555555555555555555555555555555555
+        alg: es256
+        sign_count: 0
+        cool_off_ends: null
+        step_up:
+          assertion_id: 01JAA3P0A000000000000000H1
+          authenticated_at: '2026-10-19T15:00:05.250000000Z'
+          method: passkey
+      artifact_refs:
+      - sha256:5555555555555555555555555555555555555555555555555555555555555555
+      pii_refs: []
+    removed:
+      envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000E2
+      stream_id: ctl:ws_01J8Z2
+      event_type: CredentialRemoved
+      schema_version: 1
+      event_time: '2026-10-19T15:00:05.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        member: 01JAA2N0A000000000000000P1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        step_up:
+          assertion_id: 01JAA3P0A000000000000000H1
+          authenticated_at: '2026-10-19T15:00:05.250000000Z'
+          method: passkey
+      artifact_refs: []
+      pii_refs: []
+  invalid_drafts:
+  - name: first_enrolled.member.kind
+    clause: §9.31 types
+    base_draft: first_enrolled
+    changes:
+    - path: payload.member
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.member
+  - name: first_enrolled.member.form
+    clause: §9.31 types
+    base_draft: first_enrolled
+    changes:
+    - path: payload.member
+      value: member-01
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.member
+  - name: first_enrolled.credential.kind
+    clause: §9.31 types
+    base_draft: first_enrolled
+    changes:
+    - path: payload.credential
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.credential
+  - name: first_enrolled.credential.form
+    clause: §9.31 types
+    base_draft: first_enrolled
+    changes:
+    - path: payload.credential
+      value: AAECAwQFBgcICQoLDA0ODw==
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.credential
+  - name: first_enrolled.public_key.kind
+    clause: §9.31 types
+    base_draft: first_enrolled
+    changes:
+    - path: payload.public_key
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.public_key
+      also:
+      - reason: artifact_refs
+        path: artifact_refs
+  - name: first_enrolled.public_key.form
+    clause: §9.31 types
+    base_draft: first_enrolled
+    changes:
+    - path: payload.public_key
+      value: '5555555555555555555555555555555555555555555555555555555555555555'
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.public_key
+      also:
+      - reason: artifact_refs
+        path: artifact_refs
+  - name: first_enrolled.cool_off_ends.kind
+    clause: §9.31 types
+    base_draft: first_enrolled
+    changes:
+    - path: payload.cool_off_ends
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.cool_off_ends
+  - name: first_enrolled.cool_off_ends.form
+    clause: §9.31 types
+    base_draft: first_enrolled
+    changes:
+    - path: payload.cool_off_ends
+      value: '2026-10-20T15:00:05Z'
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.cool_off_ends
+  - name: removed.member.kind
+    clause: §9.31 types
+    base_draft: removed
+    changes:
+    - path: payload.member
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.member
+  - name: removed.member.form
+    clause: §9.31 types
+    base_draft: removed
+    changes:
+    - path: payload.member
+      value: member-01
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.member
+  - name: removed.credential.kind
+    clause: §9.31 types
+    base_draft: removed
+    changes:
+    - path: payload.credential
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.credential
+  - name: removed.credential.form
+    clause: §9.31 types
+    base_draft: removed
+    changes:
+    - path: payload.credential
+      value: AAECAwQF+gcICQoLDA0ODw
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.credential
+  - name: credential.short
+    clause: §9.31 `credential_id`
+    base_draft: first_enrolled
+    changes:
+    - path: payload.credential
+      value: AAECAwQFBgcICQoLDA0OD
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.credential
+  - name: credential.fifteen_bytes
+    clause: §9.31 `credential_id`
+    base_draft: first_enrolled
+    changes:
+    - path: payload.credential
+      value: AAAAAAAAAAAAAAAAAAAA
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.credential
+  - name: credential.one_over_a_block
+    clause: §9.31 `credential_id`
+    base_draft: first_enrolled
+    changes:
+    - path: payload.credential
+      value: AAAAAAAAAAAAAAAAAAAAAAAAA
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.credential
+  - name: credential.too_long
+    clause: §9.31 `credential_id`
+    base_draft: first_enrolled
+    changes:
+    - path: payload.credential
+      value: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.credential
+  - name: credential.padded
+    clause: §9.31 `credential_id`
+    base_draft: first_enrolled
+    changes:
+    - path: payload.credential
+      value: AAECAwQFBgcICQoLDA0ODw=
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.credential
+  - name: sign_count.past_32_bits
+    clause: §9.31 `sign_count`
+    base_draft: first_enrolled
+    changes:
+    - path: payload.sign_count
+      value: 4294967296
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.sign_count
+  - name: sign_count.text
+    clause: §9.31 `sign_count`
+    base_draft: first_enrolled
+    changes:
+    - path: payload.sign_count
+      value: '0'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.sign_count
+  - name: sign_count.boolean
+    clause: §9.31 `sign_count`
+    base_draft: first_enrolled
+    changes:
+    - path: payload.sign_count
+      value: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.sign_count
+  - name: alg.rs256
+    clause: §9.31 `passkey_alg`
+    base_draft: first_enrolled
+    changes:
+    - path: payload.alg
+      value: rs256
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.alg
+  - name: alg.kind
+    clause: §9.31 `passkey_alg`
+    base_draft: first_enrolled
+    changes:
+    - path: payload.alg
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.alg
+  - name: first_enrolled.member.null
+    clause: §9.31 types
+    base_draft: first_enrolled
+    changes:
+    - path: payload.member
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.member
+  - name: first_enrolled.kind.null
+    clause: §9.31 types
+    base_draft: first_enrolled
+    changes:
+    - path: payload.kind
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.kind
+  - name: first_enrolled.credential.null
+    clause: §9.31 types
+    base_draft: first_enrolled
+    changes:
+    - path: payload.credential
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.credential
+  - name: first_enrolled.public_key.null
+    clause: §9.31 types
+    base_draft: first_enrolled
+    changes:
+    - path: payload.public_key
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.public_key
+      also:
+      - reason: artifact_refs
+        path: artifact_refs
+  - name: first_enrolled.alg.null
+    clause: §9.31 types
+    base_draft: first_enrolled
+    changes:
+    - path: payload.alg
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.alg
+  - name: first_enrolled.sign_count.null
+    clause: §9.31 types
+    base_draft: first_enrolled
+    changes:
+    - path: payload.sign_count
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.sign_count
+  - name: removed.member.null
+    clause: §9.31 types
+    base_draft: removed
+    changes:
+    - path: payload.member
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.member
+  - name: removed.credential.null
+    clause: §9.31 types
+    base_draft: removed
+    changes:
+    - path: payload.credential
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.credential
+  - name: removed.step_up.null
+    clause: §9.31 types
+    base_draft: removed
+    changes:
+    - path: payload.step_up
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.step_up
+  - name: missing
+    clause: §9.31 closed
+    base_draft: first_enrolled
+    changes:
+    - path: payload.alg
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.alg
+  - name: extra
+    clause: §9.31 closed
+    base_draft: removed
+    changes:
+    - path: payload.reason
+      value: lost
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reason
+  - name: another_kind
+    clause: 'rule 249: the one kind is `passkey`'
+    base_draft: first_enrolled
+    changes:
+    - path: payload.kind
+      value: recovery_code
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.kind
+  - name: enrolled_by_a_system
+    clause: 'rule 249: the actor is a user'
+    base_draft: first_enrolled
+    changes:
+    - path: actor
+      value: &id159
+        kind: system
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: enrolled_for_another
+    clause: 'rule 249: the actor is the member'
+    base_draft: first_enrolled
+    changes:
+    - path: actor.id
+      value: 01JAA2N0A000000000000000P2
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.id
+  - name: enrolled_with_cli_confirm
+    clause: 'rule 249: a passkey step-up'
+    base_draft: stepped_up_enrolled
+    changes:
+    - path: payload.step_up.method
+      value: cli_confirm
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.step_up.method
+  - name: first_without_cool_off
+    clause: 'rule 249: a first enrolment cools off'
+    base_draft: first_enrolled
+    changes:
+    - path: payload.cool_off_ends
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.cool_off_ends
+  - name: first_cools_a_second_short
+    clause: 'rule 249: exactly 86 400 s'
+    base_draft: first_enrolled
+    changes:
+    - path: payload.cool_off_ends
+      value: '2026-10-20T15:00:04.250000000Z'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.cool_off_ends
+  - name: first_cools_from_the_whole_second
+    clause: 'rule 249: to the nanosecond'
+    base_draft: first_enrolled
+    changes:
+    - path: payload.cool_off_ends
+      value: '2026-10-20T15:00:05.000000000Z'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.cool_off_ends
+  - name: stepped_up_cools_off
+    clause: 'rule 249: one stepped up never cools off'
+    base_draft: stepped_up_enrolled
+    changes:
+    - path: payload.cool_off_ends
+      value: '2026-10-20T15:00:05.250000000Z'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.cool_off_ends
+  - name: removed_by_a_system
+    clause: 'rule 250: the actor is a user'
+    base_draft: removed
+    changes:
+    - path: actor
+      value: *id159
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: removed_for_another
+    clause: 'rule 250: the actor is the member'
+    base_draft: removed
+    changes:
+    - path: actor.id
+      value: 01JAA2N0A000000000000000P2
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.id
+  - name: removed_with_cli_confirm
+    clause: 'rule 250: a passkey step-up'
+    base_draft: removed
+    changes:
+    - path: payload.step_up.method
+      value: cli_confirm
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.step_up.method
+  - name: enrolled_at_version_2
+    clause: '§9.31: closed at schema version 1 only'
+    base_draft: first_enrolled
+    changes:
+    - path: schema_version
+      value: 2
+    expect:
+      outcome: Invalid
+      reason: unknown_schema
+      path: payload
+  - name: removed_at_version_2
+    clause: '§9.31: closed at schema version 1 only'
+    base_draft: removed
+    changes:
+    - path: schema_version
+      value: 2
+    expect:
+      outcome: Invalid
+      reason: unknown_schema
+      path: payload
+  valid_drafts:
+  - name: eddsa
+    clause: §9.31 `passkey_alg`
+    base_draft: first_enrolled
+    changes:
+    - path: payload.alg
+      value: eddsa
+    expect:
+      outcome: Valid
+  - name: kept_counter
+    clause: '§9.31 `sign_count`: the top of 32 bits'
+    base_draft: first_enrolled
+    changes:
+    - path: payload.sign_count
+      value: 4294967295
+    expect:
+      outcome: Valid
+  - name: shortest_id
+    clause: '§9.31 `credential_id`: 16 bytes'
+    base_draft: first_enrolled
+    changes:
+    - path: payload.credential
+      value: EBESExQVFhcYGRobHB0eHw
+    expect:
+      outcome: Valid
+  - name: longest_id
+    clause: '§9.31 `credential_id`: 1023 bytes'
+    base_draft: first_enrolled
+    changes:
+    - path: payload.credential
+      value: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+    expect:
+      outcome: Valid
+  - name: another_member_as_its_own_actor
+    clause: 'rules 249 and 250: a member enrols for itself'
+    base_draft: first_enrolled
+    changes:
+    - path: payload.member
+      value: 01JAA2N0A000000000000000P2
+    - path: actor.id
+      value: 01JAA2N0A000000000000000P2
+    expect:
+      outcome: Valid
+  - name: in_live
+    clause: '§9.31: a passkey serves `live` too (identity spec §7.3)'
+    base_draft: removed
+    changes:
+    - path: environment
+      value: live
+    expect:
+      outcome: Valid
+  - name: whole_second
+    clause: 'rule 249: a whole-second enrolment cools off from its whole second'
+    base_draft: first_enrolled
+    changes:
+    - path: event_time
+      value: '2026-10-19T15:00:05.000000000Z'
+    - path: payload.cool_off_ends
+      value: '2026-10-20T15:00:05.000000000Z'
+    expect:
+      outcome: Valid
+  streams:
+  - name: enrolled_then_removed
+    clause: 'rule 251: one enrolment, one removal'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000E1
+      stream_id: ctl:ws_01J8Z2
+      event_type: CredentialEnrolled
+      schema_version: 1
+      event_time: '2026-10-19T15:00:05.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        member: 01JAA2N0A000000000000000P1
+        kind: passkey
+        credential: AAECAwQFBgcICQoLDA0ODw
+        public_key: sha256:5555555555555555555555555555555555555555555555555555555555555555
+        alg: es256
+        sign_count: 0
+        cool_off_ends: '2026-10-20T15:00:05.250000000Z'
+        step_up: null
+      artifact_refs:
+      - sha256:5555555555555555555555555555555555555555555555555555555555555555
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000E2
+      stream_id: ctl:ws_01J8Z2
+      event_type: CredentialEnrolled
+      schema_version: 1
+      event_time: '2026-10-19T15:00:05.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        member: 01JAA2N0A000000000000000P1
+        kind: passkey
+        credential: EBESExQVFhcYGRobHB0eHw
+        public_key: sha256:5555555555555555555555555555555555555555555555555555555555555555
+        alg: es256
+        sign_count: 0
+        cool_off_ends: null
+        step_up:
+          assertion_id: 01JAA3P0A000000000000000H1
+          authenticated_at: '2026-10-19T15:00:05.250000000Z'
+          method: passkey
+      artifact_refs:
+      - sha256:5555555555555555555555555555555555555555555555555555555555555555
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000E3
+      stream_id: ctl:ws_01J8Z2
+      event_type: CredentialRemoved
+      schema_version: 1
+      event_time: '2026-10-19T15:00:05.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        member: 01JAA2N0A000000000000000P1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        step_up:
+          assertion_id: 01JAA3P0A000000000000000H1
+          authenticated_at: '2026-10-19T15:00:05.250000000Z'
+          method: passkey
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Valid
+  - name: enrolled_twice
+    clause: 'rule 251: a credential is enrolled once'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000E1
+      stream_id: ctl:ws_01J8Z2
+      event_type: CredentialEnrolled
+      schema_version: 1
+      event_time: '2026-10-19T15:00:05.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        member: 01JAA2N0A000000000000000P1
+        kind: passkey
+        credential: AAECAwQFBgcICQoLDA0ODw
+        public_key: sha256:5555555555555555555555555555555555555555555555555555555555555555
+        alg: es256
+        sign_count: 0
+        cool_off_ends: '2026-10-20T15:00:05.250000000Z'
+        step_up: null
+      artifact_refs:
+      - sha256:5555555555555555555555555555555555555555555555555555555555555555
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000E2
+      stream_id: ctl:ws_01J8Z2
+      event_type: CredentialEnrolled
+      schema_version: 1
+      event_time: '2026-10-19T15:00:05.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        member: 01JAA2N0A000000000000000P1
+        kind: passkey
+        credential: AAECAwQFBgcICQoLDA0ODw
+        public_key: sha256:5555555555555555555555555555555555555555555555555555555555555555
+        alg: es256
+        sign_count: 0
+        cool_off_ends: null
+        step_up:
+          assertion_id: 01JAA3P0A000000000000000H1
+          authenticated_at: '2026-10-19T15:00:05.250000000Z'
+          method: passkey
+      artifact_refs:
+      - sha256:5555555555555555555555555555555555555555555555555555555555555555
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      rule: '251'
+      index: 1
+  - name: enrolled_again_after_removal
+    clause: 'rule 251: never enrolled again'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000E1
+      stream_id: ctl:ws_01J8Z2
+      event_type: CredentialEnrolled
+      schema_version: 1
+      event_time: '2026-10-19T15:00:05.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        member: 01JAA2N0A000000000000000P1
+        kind: passkey
+        credential: AAECAwQFBgcICQoLDA0ODw
+        public_key: sha256:5555555555555555555555555555555555555555555555555555555555555555
+        alg: es256
+        sign_count: 0
+        cool_off_ends: '2026-10-20T15:00:05.250000000Z'
+        step_up: null
+      artifact_refs:
+      - sha256:5555555555555555555555555555555555555555555555555555555555555555
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000E2
+      stream_id: ctl:ws_01J8Z2
+      event_type: CredentialRemoved
+      schema_version: 1
+      event_time: '2026-10-19T15:00:05.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        member: 01JAA2N0A000000000000000P1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        step_up:
+          assertion_id: 01JAA3P0A000000000000000H1
+          authenticated_at: '2026-10-19T15:00:05.250000000Z'
+          method: passkey
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000E3
+      stream_id: ctl:ws_01J8Z2
+      event_type: CredentialEnrolled
+      schema_version: 1
+      event_time: '2026-10-19T15:00:05.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        member: 01JAA2N0A000000000000000P1
+        kind: passkey
+        credential: AAECAwQFBgcICQoLDA0ODw
+        public_key: sha256:5555555555555555555555555555555555555555555555555555555555555555
+        alg: es256
+        sign_count: 0
+        cool_off_ends: null
+        step_up:
+          assertion_id: 01JAA3P0A000000000000000H1
+          authenticated_at: '2026-10-19T15:00:05.250000000Z'
+          method: passkey
+      artifact_refs:
+      - sha256:5555555555555555555555555555555555555555555555555555555555555555
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      rule: '251'
+      index: 2
+  - name: removed_unenrolled
+    clause: 'rule 251: only an enrolled credential is removed'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000E1
+      stream_id: ctl:ws_01J8Z2
+      event_type: CredentialRemoved
+      schema_version: 1
+      event_time: '2026-10-19T15:00:05.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        member: 01JAA2N0A000000000000000P1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        step_up:
+          assertion_id: 01JAA3P0A000000000000000H1
+          authenticated_at: '2026-10-19T15:00:05.250000000Z'
+          method: passkey
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      rule: '251'
+      index: 0
+  - name: removed_by_another_member
+    clause: 'rule 251: only by the member who enrolled it'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000E1
+      stream_id: ctl:ws_01J8Z2
+      event_type: CredentialEnrolled
+      schema_version: 1
+      event_time: '2026-10-19T15:00:05.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        member: 01JAA2N0A000000000000000P1
+        kind: passkey
+        credential: AAECAwQFBgcICQoLDA0ODw
+        public_key: sha256:5555555555555555555555555555555555555555555555555555555555555555
+        alg: es256
+        sign_count: 0
+        cool_off_ends: '2026-10-20T15:00:05.250000000Z'
+        step_up: null
+      artifact_refs:
+      - sha256:5555555555555555555555555555555555555555555555555555555555555555
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000E2
+      stream_id: ctl:ws_01J8Z2
+      event_type: CredentialRemoved
+      schema_version: 1
+      event_time: '2026-10-19T15:00:05.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P2
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        member: 01JAA2N0A000000000000000P2
+        credential: AAECAwQFBgcICQoLDA0ODw
+        step_up:
+          assertion_id: 01JAA3P0A000000000000000H1
+          authenticated_at: '2026-10-19T15:00:05.250000000Z'
+          method: passkey
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      rule: '251'
+      index: 1
+  - name: removed_twice
+    clause: 'rule 251: not removed twice'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000E1
+      stream_id: ctl:ws_01J8Z2
+      event_type: CredentialEnrolled
+      schema_version: 1
+      event_time: '2026-10-19T15:00:05.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        member: 01JAA2N0A000000000000000P1
+        kind: passkey
+        credential: AAECAwQFBgcICQoLDA0ODw
+        public_key: sha256:5555555555555555555555555555555555555555555555555555555555555555
+        alg: es256
+        sign_count: 0
+        cool_off_ends: '2026-10-20T15:00:05.250000000Z'
+        step_up: null
+      artifact_refs:
+      - sha256:5555555555555555555555555555555555555555555555555555555555555555
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000E2
+      stream_id: ctl:ws_01J8Z2
+      event_type: CredentialRemoved
+      schema_version: 1
+      event_time: '2026-10-19T15:00:05.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        member: 01JAA2N0A000000000000000P1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        step_up:
+          assertion_id: 01JAA3P0A000000000000000H1
+          authenticated_at: '2026-10-19T15:00:05.250000000Z'
+          method: passkey
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000E3
+      stream_id: ctl:ws_01J8Z2
+      event_type: CredentialRemoved
+      schema_version: 1
+      event_time: '2026-10-19T15:00:05.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        member: 01JAA2N0A000000000000000P1
+        credential: AAECAwQFBgcICQoLDA0ODw
+        step_up:
+          assertion_id: 01JAA3P0A000000000000000H1
+          authenticated_at: '2026-10-19T15:00:05.250000000Z'
+          method: passkey
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      rule: '251'
+      index: 2
+  - name: enrolled_by_another_member
+    clause: 'rule 251: a credential is enrolled once on the stream, whoever enrols it'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000E1
+      stream_id: ctl:ws_01J8Z2
+      event_type: CredentialEnrolled
+      schema_version: 1
+      event_time: '2026-10-19T15:00:05.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        member: 01JAA2N0A000000000000000P1
+        kind: passkey
+        credential: AAECAwQFBgcICQoLDA0ODw
+        public_key: sha256:5555555555555555555555555555555555555555555555555555555555555555
+        alg: es256
+        sign_count: 0
+        cool_off_ends: '2026-10-20T15:00:05.250000000Z'
+        step_up: null
+      artifact_refs:
+      - sha256:5555555555555555555555555555555555555555555555555555555555555555
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000E2
+      stream_id: ctl:ws_01J8Z2
+      event_type: CredentialEnrolled
+      schema_version: 1
+      event_time: '2026-10-19T15:00:05.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P2
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        member: 01JAA2N0A000000000000000P2
+        kind: passkey
+        credential: AAECAwQFBgcICQoLDA0ODw
+        public_key: sha256:5555555555555555555555555555555555555555555555555555555555555555
+        alg: es256
+        sign_count: 0
+        cool_off_ends: '2026-10-20T15:00:05.250000000Z'
+        step_up: null
+      artifact_refs:
+      - sha256:5555555555555555555555555555555555555555555555555555555555555555
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      rule: '251'
+      index: 1
+  - name: second_unstepped_enrolment
+    clause: '§9.31: enrolment gating is the API''s; the journal admits a second enrolment with no step-up'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000E1
+      stream_id: ctl:ws_01J8Z2
+      event_type: CredentialEnrolled
+      schema_version: 1
+      event_time: '2026-10-19T15:00:05.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        member: 01JAA2N0A000000000000000P1
+        kind: passkey
+        credential: AAECAwQFBgcICQoLDA0ODw
+        public_key: sha256:5555555555555555555555555555555555555555555555555555555555555555
+        alg: es256
+        sign_count: 0
+        cool_off_ends: '2026-10-20T15:00:05.250000000Z'
+        step_up: null
+      artifact_refs:
+      - sha256:5555555555555555555555555555555555555555555555555555555555555555
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAA3P4A000000000000000E2
+      stream_id: ctl:ws_01J8Z2
+      event_type: CredentialEnrolled
+      schema_version: 1
+      event_time: '2026-10-19T15:00:05.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: user
+        id: 01JAA2N0A000000000000000P1
+        version: '1'
+        build: null
+      config_refs: {}
+      payload:
+        member: 01JAA2N0A000000000000000P1
+        kind: passkey
+        credential: EBESExQVFhcYGRobHB0eHw
+        public_key: sha256:5555555555555555555555555555555555555555555555555555555555555555
+        alg: es256
+        sign_count: 0
+        cool_off_ends: '2026-10-20T15:00:05.250000000Z'
+        step_up: null
+      artifact_refs:
+      - sha256:5555555555555555555555555555555555555555555555555555555555555555
+      pii_refs: []
     expect:
       outcome: Valid

@@ -20,7 +20,9 @@ use mandate_gateway::tools::ToolCall as GatewayToolCall;
 use mandate_gateway::{CallRecord, Outcome};
 use mandate_journal::{Draft, Invalid};
 use mandate_research::{AssetId, WorkingUniverse};
-use mandate_research_run::agentic::{LoopBounds, OutputMode, Tool, ToolCallId, ToolOutcome};
+use mandate_research_run::agentic::{
+    LoopBounds, OutputMode, RunKind, Tool, ToolCallId, ToolOutcome,
+};
 use mandate_research_run::{Retrieval, retrieve};
 use mandate_runtime::{
     ActiveThesis, AgenticConfig, Command, DispatchRequest, DispatchedResult, Effect, EventDraft,
@@ -404,6 +406,11 @@ fn turn_one_follows_the_seed_s_observations_with_the_menu_and_the_run_s_ceiling(
     let world = world();
     let (run, seed) = seeded(&ports, &world);
     let turn = turn_of(&seed);
+    assert_eq!(
+        turn.kind,
+        RunKind::Ideate,
+        "the run's kind, for the turn's call"
+    );
     assert_eq!(turn.plan.turn, 1);
     assert_eq!(turn.plan.tools, agentic().ideate_menu);
     assert_eq!(turn.plan.spend_ceiling, agentic().cost_ceiling);
@@ -580,6 +587,11 @@ fn a_monitor_reply_carrying_a_thesis_uses_nothing_and_ends_the_run_error() {
         Some("monitor")
     );
     let turn = turn_of(&seed);
+    assert_eq!(
+        turn.kind,
+        RunKind::Monitor,
+        "the run's kind, for the turn's call"
+    );
     let before = run.lp.types().len();
     let record = reply(&run, &turn, &world, Vec::new(), Some(RESPONSE_AAPL));
     answered(&mut run, record, &ports, &world);
@@ -1530,4 +1542,195 @@ fn a_refusal_for_another_run_leaves_the_agentic_run_in_flight() {
     );
     assert_eq!(run.lp.types().len(), before);
     assert_eq!(run.lp.research.in_flight(), Some(run.run_id.as_str()));
+}
+
+/// A `market.bars` read's result for turn 1, its items AAPL's recorded bar and a copy of it under
+/// each of `others`, captured as the worker captures them; and the items themselves.
+fn bars_result(
+    run: &Run,
+    others: &[&str],
+) -> (DispatchedResult, Vec<mandate_research_run::RetrievedItem>) {
+    let plane = RecordedPlane::load();
+    let aapl = plane
+        .bars
+        .iter()
+        .find(|bar| bar.symbol.as_str() == "AAPL")
+        .cloned()
+        .unwrap_or_else(|| panic!("the plane records an AAPL bar"));
+    let mut bars = vec![aapl.clone()];
+    for symbol in others {
+        let mut other = aapl.clone();
+        other.symbol = mandate_research_run::Symbol::new(symbol).unwrap_or_else(|e| panic!("{e}"));
+        bars.push(other);
+    }
+    let retrieved: Vec<mandate_research_run::RetrievedItem> = bars
+        .into_iter()
+        .map(mandate_research_run::RetrievedItem::Bar)
+        .collect();
+    let items = retrieved
+        .iter()
+        .map(|item| {
+            mandate_runtime::RetrievedObservation::capture(item, run.cut_off)
+                .unwrap_or_else(|e| panic!("{e}"))
+                .0
+        })
+        .collect();
+    (
+        DispatchedResult {
+            items,
+            ..read_result(1, 0, r#"{"items":[],"truncated":false}"#)
+        },
+        retrieved,
+    )
+}
+
+/// A run that reads `result` at turn 1, then gives the final output over the seed and the read's
+/// items: its loop, every step taken.
+fn read_then_final(
+    result: impl FnOnce(&Run) -> (DispatchedResult, Vec<mandate_research_run::RetrievedItem>),
+) -> Run {
+    let (ids, plan, view) = fixture();
+    let ports = ports(&ids, &AllowGate, &plan, &view);
+    let world = world();
+    let (mut run, seed) = seeded(&ports, &world);
+    let turn = turn_of(&seed);
+    let record = reply(
+        &run,
+        &turn,
+        &world,
+        vec![call(0, "market.bars", r#"{"count":5,"symbol":"AAPL"}"#)],
+        None,
+    );
+    answered(&mut run, record, &ports, &world);
+    let (dispatched, read) = result(&run);
+    let next = go(
+        &mut run.lp,
+        ResearchInput::Dispatched {
+            run_id: run.run_id.clone(),
+            at: clock(CUT_OFF + 25),
+            results: vec![dispatched],
+        },
+        &ports,
+        &world,
+    );
+    let turn = turn_of(&next);
+    let mut seen = run.retrieval.clone();
+    seen.items.extend(read);
+    let record = record_for(
+        &recorded(RESPONSE_AAPL),
+        &turn.call,
+        &seen,
+        &world,
+        mandate_time::UtcNanos::from_parts(run.cut_off.secs(), 0).unwrap_or_else(|e| panic!("{e}")),
+    );
+    answered(&mut run, record, &ports, &world);
+    run
+}
+
+fn instruments_read(run: &Run) -> Vec<String> {
+    let summary = run.lp.events("RunSummaryRecorded");
+    assert_eq!(summary.len(), 1, "one summary");
+    strs(summary[0].payload.get("instruments_read"))
+        .into_iter()
+        .map(str::to_owned)
+        .collect()
+}
+
+/// The run summary draft the core journaled, as its step wrote it.
+fn summary_draft(run: &Run) -> (EventDraft, Option<String>) {
+    run.lp
+        .steps
+        .iter()
+        .flat_map(|step| {
+            step.effects.iter().filter_map(move |effect| match effect {
+                Effect::Journal(draft) if draft.event_type == "RunSummaryRecorded" => {
+                    Some((draft.clone(), step.correlation_id.clone()))
+                }
+                _ => None,
+            })
+        })
+        .next()
+        .unwrap_or_else(|| panic!("the run journaled its summary"))
+}
+
+/// DEC-2267 item 1, journal spec §9.23: the run summary names the instruments its reads returned
+/// items about by asset ID, the seed's instrument fact for each item's symbol.
+#[test]
+fn a_run_summary_names_its_reads_instruments_by_asset_id() {
+    let run = read_then_final(|run| bars_result(run, &[]));
+    assert_eq!(instruments_read(&run), [AAPL]);
+}
+
+/// DEC-2267 item 2: a read item's symbol the seed has no instrument fact for is left out of the
+/// summary, mapped to nothing, while its `ObservationRecorded` keeps the symbol-derived id.
+#[test]
+fn a_symbol_the_seed_does_not_map_is_left_out_and_its_observation_keeps_it() {
+    let run = read_then_final(|run| bars_result(run, &["IBM"]));
+    assert_eq!(
+        instruments_read(&run),
+        [AAPL],
+        "IBM is left out, not mapped"
+    );
+    let observed: Vec<Option<&str>> = run
+        .lp
+        .events("ObservationRecorded")
+        .iter()
+        .map(|event| payload_str(event, "instrument_id"))
+        .collect();
+    assert!(
+        observed.contains(&Some("IBM")),
+        "IBM's read is still observed: {observed:?}"
+    );
+}
+
+/// DEC-2267 item 3, journal spec §9.23 and rule 181: every record of a run whose read returned
+/// items about instruments is one the journal's own schemas accept.
+#[test]
+fn every_record_of_a_run_that_read_instruments_passes_the_journal_s_check() {
+    let run = read_then_final(|run| bars_result(run, &["IBM"]));
+    let mut failed = Vec::new();
+    for step in &run.lp.steps {
+        for effect in &step.effects {
+            if let Effect::Journal(draft) = effect
+                && let Err(refusal) = parse_as_journal_draft(draft, step.correlation_id.as_deref())
+            {
+                failed.push(format!("{}: {refusal:?}", draft.event_type));
+            }
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+    let (mut summary, correlation) = summary_draft(&run);
+    if let Value::Object(members) = &mut summary.payload {
+        members.insert(
+            mandate_canon::Key::new("instruments_read").unwrap_or_else(|e| panic!("{e:?}")),
+            Value::Array(vec![Value::Str("AAPL".to_owned())]),
+        );
+    }
+    assert!(
+        parse_as_journal_draft(&summary, correlation.as_deref()).is_err(),
+        "the check refuses the summary mapped back to the symbol"
+    );
+}
+
+/// The journal check this file trusts refuses a run summary naming a symbol where an asset ID
+/// belongs, and accepts the same summary naming the asset ID: the oracle fails on the bug F fixes.
+#[test]
+fn the_journal_check_refuses_a_summary_that_names_a_symbol() {
+    let summary = |read: &str| {
+        EventDraft {
+        event_id: mandate_runtime::EventId("01J8Z3MC000000000000000099".to_owned()),
+        event_type: "RunSummaryRecorded".to_owned(),
+        causation_id: None,
+        payload: mandate_canon::parse(
+            format!(
+                r#"{{"admitted":0,"instruments_read":["{read}"],"invalidated":0,"proposed":0,"watch":[]}}"#
+            )
+            .as_bytes(),
+        )
+        .unwrap_or_else(|e| panic!("{e:?}")),
+    }
+    };
+    let run = Some("01J8Z3MC0000000000000000RN");
+    assert!(parse_as_journal_draft(&summary(AAPL), run).is_ok());
+    assert!(parse_as_journal_draft(&summary("AAPL"), run).is_err());
 }

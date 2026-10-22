@@ -17,6 +17,7 @@ use anyhow::{Context, Result, bail, ensure};
 use serde::Deserialize;
 use sha2::{Digest as _, Sha256};
 
+use crate::founding::without_step_secrets;
 use crate::mask;
 
 pub(crate) const DO_API: &str = "https://api.digitalocean.com/v2";
@@ -363,7 +364,7 @@ impl Answer {
 /// Runs `curl` with `config` on its standard input, so no credential is on a command line, and
 /// returns the status and body. Only a request that is safe to repeat is retried.
 fn curl(config: &str, retry: bool) -> Result<Answer> {
-    let mut child = Command::new("curl")
+    let mut child = without_step_secrets(&mut Command::new("curl"))
         .args(["-sS", "--max-time", "60", "-K", "-"])
         .args(if retry {
             ["--retry", "3"].as_slice()

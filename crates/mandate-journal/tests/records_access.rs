@@ -522,3 +522,59 @@ fn version_1_still_parses_and_rule_112_still_judges_it() {
     }
     assert!(failed.is_empty(), "{}", failed.join("\n"));
 }
+
+/// A base draft of section `name` with the stream id at `path` set to the deployment meter stream
+/// of the draft's own workspace segment.
+fn naming_the_deployment_stream(name: &str, base_name: &str, path: &[&str]) -> Vec<u8> {
+    let section = section(name);
+    let mut body = base(&section, base_name).clone();
+    let workspace = text(&body, "stream_id")
+        .split(':')
+        .nth(1)
+        .unwrap()
+        .to_owned();
+    let mut node = &mut body;
+    for step in path {
+        node = match node {
+            Value::Object(members) => members.get_mut(*step).unwrap(),
+            Value::Array(items) => items.get_mut(step.parse::<usize>().unwrap()).unwrap(),
+            other => panic!("{step}: {other:?}"),
+        };
+    }
+    *node = Value::Str(format!("dmeter:{workspace}"));
+    to_canonical(&body)
+}
+
+/// Rules 107, 113 and 116, and journal spec v0.53 §2: a range, an anchor's leaf, or an exported
+/// segment that names the deployment meter stream names no stream of the workspace, even when its
+/// deployment id is the workspace's own segment, so each is refused at that member.
+#[test]
+fn a_record_naming_the_deployment_meter_stream_is_refused_at_it() {
+    for (name, base_name, path, at) in [
+        (
+            RECORDS_ACCESS,
+            "records_read",
+            &["payload", "ranges", "0", "stream_id"][..],
+            "payload.ranges[0].stream_id",
+        ),
+        (
+            COLD_RECORDS,
+            "anchor",
+            &["payload", "leaves", "0", "stream_id"][..],
+            "payload.leaves[0].stream_id",
+        ),
+        (
+            COLD_RECORDS,
+            "segment",
+            &["payload", "stream_id"][..],
+            "payload.stream_id",
+        ),
+    ] {
+        let refused = Draft::parse(&naming_the_deployment_stream(name, base_name, path)).err();
+        assert_eq!(
+            refused.as_ref().map(|e| e.path.as_str()),
+            Some(at),
+            "{base_name}: {refused:?}"
+        );
+    }
+}

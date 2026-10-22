@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/workspace-api/v1/commands/reduction-session-challenge-request.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {},
+  "description": "POST /v1/reduction-sessions/challenges (\u00a74.10 route 2, identity spec \u00a76.4 route 2, DEC-2117): an empty object. The route is unauthenticated and asks for nothing, so nothing workspace-specific is read before an assertion verifies."
+}

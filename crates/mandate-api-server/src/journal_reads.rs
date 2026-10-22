@@ -183,10 +183,11 @@ pub async fn one_event(
     enveloped(StatusCode::OK, now, served)
 }
 
-/// Whether `stream` is one of the workspace's: its workspace segment, the second of every stream
-/// id (journal spec §2), equals `workspace` whole, never by prefix (DEC-770 item 1).
+/// Whether `stream` is one of the workspace's: [`mandate_journal::workspace_owns`], whose segment
+/// comparison never matches by prefix (DEC-770 item 1) and whose deployment meter stream is no
+/// workspace's (journal spec v0.53 §2).
 fn owned(workspace: &str, stream: &StreamId) -> bool {
-    stream.as_str().split(':').nth(1) == Some(workspace)
+    mandate_journal::workspace_owns(workspace, stream)
 }
 
 /// The request's `after_seq` and `limit`, each defaulted when absent, or the path of the first that

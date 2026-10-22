@@ -1,0 +1,107 @@
+[
+  {
+    "label": "no challenge_id",
+    "remove": [
+      "/challenge_id"
+    ]
+  },
+  {
+    "label": "no webauthn_challenge",
+    "remove": [
+      "/webauthn_challenge"
+    ]
+  },
+  {
+    "label": "no rp_id",
+    "remove": [
+      "/rp_id"
+    ]
+  },
+  {
+    "label": "no issued_at",
+    "remove": [
+      "/issued_at"
+    ]
+  },
+  {
+    "label": "no expires_at",
+    "remove": [
+      "/expires_at"
+    ]
+  },
+  {
+    "label": "a padded webauthn_challenge",
+    "set": {
+      "/webauthn_challenge": "q83vEjRWeJCrze8SNFZ4kKvN7xI0VniQq83vEjRWeJA="
+    }
+  },
+  {
+    "label": "a webauthn_challenge with bits past 256",
+    "set": {
+      "/webauthn_challenge": "q83vEjRWeJCrze8SNFZ4kKvN7xI0VniQq83vEjRWeJB"
+    }
+  },
+  {
+    "label": "a webauthn_challenge of 31 bytes",
+    "set": {
+      "/webauthn_challenge": "q83vEjRWeJCrze8SNFZ4kKvN7xI0VniQq83vEjRWeA"
+    }
+  },
+  {
+    "label": "an rp_id with a scheme",
+    "set": {
+      "/rp_id": "https://app-staging.owlhead.ai"
+    }
+  },
+  {
+    "label": "a challenge_id that is not a ULID",
+    "set": {
+      "/challenge_id": "challenge-1"
+    }
+  },
+  {
+    "label": "an issued_at that is not a timestamp",
+    "set": {
+      "/issued_at": "2026-10-19"
+    }
+  },
+  {
+    "label": "an expires_at that is not a timestamp",
+    "set": {
+      "/expires_at": "soon"
+    }
+  },
+  {
+    "label": "a stream named in as_of",
+    "set": {
+      "/as_of": [
+        {
+          "stream_id": "ctl:ws_1",
+          "seq": 1,
+          "hash": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+          "recorded_at": "2026-10-19T17:30:00.000000000Z"
+        }
+      ]
+    }
+  },
+  {
+    "label": "the workspace named",
+    "set": {
+      "/workspace_id": "01KDEM0000000000000000000W"
+    }
+  },
+  {
+    "label": "passkeys to allow",
+    "set": {
+      "/allow": [
+        "AAECAwQFBgcICQoLDA0ODw"
+      ]
+    }
+  },
+  {
+    "label": "a member named for a secret",
+    "set": {
+      "/credential_id": "AAECAwQFBgcICQoLDA0ODw"
+    }
+  }
+]
