@@ -127,6 +127,22 @@ pub fn establishment(
     })
 }
 
+/// [`establishment`] over `store`'s account stream in `scope` and its control stream.
+///
+/// # Errors
+/// `stream_unavailable` when a stream cannot be read, and [`establishment`]'s code.
+pub fn read_establishment<S: Store>(
+    store: &S,
+    scope: &AccountScope,
+    environment: Environment,
+) -> Result<Establishment, &'static str> {
+    let stream = |id: String| StreamId::parse(&id).ok_or("stream_unavailable");
+    let account = stream(format!("acct:{}:{}", scope.workspace.0, scope.account.0))?;
+    let control = stream(format!("ctl:{}", scope.workspace.0))?;
+    let rows = |id: &StreamId| store.rows(id).ok_or("stream_unavailable");
+    establishment(&rows(&account)?, &rows(&control)?, scope, environment)
+}
+
 /// The copy of `copy` with id `event_id` at `now`: `ConnectionEstablished` version 2 on the
 /// account stream, the original's members and `risk_clock` (`now` on its whole second, journal
 /// spec §4.7), with the original as `causation_id` (rules 61 and 68).
@@ -225,12 +241,7 @@ pub fn pass<S: Store, B: Broker>(
     environment: Environment,
     now: UtcNanos,
 ) -> Result<Connected, &'static str> {
-    let stream = |id: String| StreamId::parse(&id).ok_or("stream_unavailable");
-    let account = stream(format!("acct:{}:{}", scope.workspace.0, scope.account.0))?;
-    let control = stream(format!("ctl:{}", scope.workspace.0))?;
-    let rows = |id: &StreamId| process.store().rows(id).ok_or("stream_unavailable");
-    let state = establishment(&rows(&account)?, &rows(&control)?, scope, environment)?;
-    match state {
+    match read_establishment(process.store(), scope, environment)? {
         Establishment::Established => {}
         Establishment::ToCopy(_) if !process.state().started() => {
             return Ok(Connected::Connecting);

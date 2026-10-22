@@ -5,15 +5,18 @@
 //! SIGTERM, and stderr; the probe reads the [`Status`] both publish. Everything the run decides is
 //! here, so tests drive it with a fixture wiring that would admit an opening.
 
+use std::thread;
 use std::time::Duration;
 
+use mandate_journal::StreamId;
 use mandate_process::probe::Status;
-use mandate_process::{Snapshot, State};
+use mandate_process::{Input, Kind, Lifecycle, Snapshot, State};
 use mandate_store::Store;
 use mandate_time::UtcNanos;
 
-use crate::credential::Unimplemented;
-use crate::{Broker, Config, Wiring};
+use crate::establish::{Establishment, GateReport, OpeningGate, pass, read_establishment};
+use crate::follow::agents_of;
+use crate::{Broker, Config, ExecutorProcess, Wiring};
 
 /// What the run is handed from the binary's edge.
 pub struct Edge<'a> {
@@ -51,8 +54,7 @@ pub const STARTUP: Duration = Duration::from_secs(120);
 /// What the probe reads while the executor starts: starting, and live only for [`STARTUP`] from
 /// `now`, so a start that hangs is restarted rather than held live forever.
 pub fn starting(now: UtcNanos) -> Snapshot {
-    let _ = now;
-    Snapshot::unbounded(State::Starting)
+    Lifecycle::new(Kind::Executor, STARTUP, now).snapshot()
 }
 
 /// DEC-2346: before the process starts, waits until the account stream in `config`'s scope is
@@ -72,8 +74,43 @@ pub fn wait<S: Store>(
     status: &Status,
     edge: &mut Edge<'_>,
 ) -> Result<Waited, &'static str> {
-    let _ = (store, config, status, edge);
-    Err(Unimplemented)
+    let mut lifecycle = Lifecycle::new(Kind::Executor, config.liveness, (edge.now)());
+    loop {
+        match read_establishment(store, &config.scope, config.environment)? {
+            Establishment::Established | Establishment::ToCopy(_) => return Ok(Waited::Ready),
+            Establishment::Closed => return closed(store, config),
+            Establishment::Connecting => {}
+        }
+        let now = (edge.now)();
+        lifecycle.observe(now, Input::Heartbeat);
+        status.publish(lifecycle.snapshot());
+        if let Some(code) = (edge.tick)(now) {
+            return Err(code);
+        }
+        if (edge.terminated)() {
+            return Ok(Waited::Stopped);
+        }
+        thread::sleep(edge.interval);
+    }
+}
+
+/// How a wait ends on a closed connection: cleanly when no agent is deployed on the account, and
+/// as `connection_closed` while one is.
+///
+/// # Errors
+/// `connection_closed` while an agent is deployed, `stream_unavailable` for a control stream that
+/// cannot be read, and `connection_record_unreadable` for a deployment that does not read.
+fn closed<S: Store>(store: &S, config: &Config) -> Result<Waited, &'static str> {
+    let control = StreamId::parse(&format!("ctl:{}", config.scope.workspace.0))
+        .and_then(|stream| store.rows(&stream))
+        .ok_or("stream_unavailable")?;
+    let agents = agents_of(&control, &config.scope, config.environment)
+        .map_err(|_| "connection_record_unreadable")?;
+    if agents.is_empty() {
+        Ok(Waited::Closed)
+    } else {
+        Err("connection_closed")
+    }
 }
 
 /// Runs the process over `store` and `broker` with `wiring` behind rule 68's gate: the gate
@@ -87,11 +124,52 @@ pub fn wait<S: Store>(
 pub fn serve<S: Store, B: Broker>(
     store: S,
     broker: B,
-    wiring: Wiring,
+    mut wiring: Wiring,
     config: &Config,
     status: &Status,
     edge: Edge<'_>,
 ) -> Result<u8, &'static str> {
-    let _ = (store, broker, wiring, config, status, edge);
-    Err(Unimplemented)
+    let Edge {
+        now,
+        tick,
+        terminated,
+        say,
+        interval,
+    } = edge;
+    let gate = OpeningGate::default();
+    wiring.gate = gate.guard(wiring.gate);
+    let mut process = ExecutorProcess::start(store, broker, wiring, config, now());
+    status.publish(process.lifecycle().snapshot());
+    let mut report = GateReport::default();
+    loop {
+        let stop = tick(now());
+        let stopping = stop.is_some() || terminated();
+        if stopping {
+            process.drain(now());
+        }
+        if let State::Exited(stopped) = process.lifecycle().state() {
+            status.publish(process.lifecycle().snapshot());
+            if let Some(code) = stop {
+                say(code);
+            }
+            say(stopped.code());
+            return Ok(stopped.exit_status());
+        }
+        if stopping {
+            return Err(stop.unwrap_or("drain_unfinished"));
+        }
+        process.step(now());
+        let passed = pass(
+            &mut process,
+            &gate,
+            &config.scope,
+            config.environment,
+            now(),
+        );
+        if let Some(code) = report.changed(passed) {
+            say(code);
+        }
+        status.publish(process.lifecycle().snapshot());
+        thread::sleep(interval);
+    }
 }

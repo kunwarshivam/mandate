@@ -170,7 +170,6 @@ fn starting_status() -> Status {
 /// while the stream is connecting. A pass follows each step, so the step after the control
 /// services establish the connection finds its copy written, and the held opening then goes.
 #[test]
-#[ignore = "pending E21-32"]
 fn the_run_holds_an_opening_until_its_copy_and_passes_after_each_step() -> Result<(), Error> {
     let journal = connecting()?;
     let broker = Paper::new(&journal);
@@ -218,7 +217,6 @@ fn the_run_holds_an_opening_until_its_copy_and_passes_after_each_step() -> Resul
 /// A closed connection's code is said once, however many passes keep the gate shut, then the
 /// drain's own; the run is not stopped by it.
 #[test]
-#[ignore = "pending E21-32"]
 fn a_gate_code_is_said_once_per_change() -> Result<(), Error> {
     let journal = connecting()?;
     refuse(&journal)?;
@@ -249,7 +247,6 @@ fn a_gate_code_is_said_once_per_change() -> Result<(), Error> {
 
 /// A lease that stops the run drains it, and the lease's code is said before the drain's.
 #[test]
-#[ignore = "pending E21-32"]
 fn a_lapsed_lease_drains_the_run() -> Result<(), Error> {
     let journal = connecting()?;
     establish(&journal)?;
@@ -279,7 +276,6 @@ fn a_lapsed_lease_drains_the_run() -> Result<(), Error> {
 /// DEC-2346: the wait reads the journal until the control services establish the connection,
 /// appends nothing meanwhile, and is live and not ready to the probes.
 #[test]
-#[ignore = "pending E21-32"]
 fn the_wait_appends_nothing_until_the_connection_is_due() -> Result<(), Error> {
     let journal = connecting()?;
     let rows = journal.rows_of(ACCOUNT_STREAM).len();
@@ -314,7 +310,6 @@ fn the_wait_appends_nothing_until_the_connection_is_due() -> Result<(), Error> {
 
 /// A stream already holding its copy, or due it, ends the wait at once.
 #[test]
-#[ignore = "pending E21-32"]
 fn an_established_or_due_stream_ends_the_wait_at_once() -> Result<(), Error> {
     let journal = connecting()?;
     establish(&journal)?;
@@ -334,7 +329,6 @@ fn an_established_or_due_stream_ends_the_wait_at_once() -> Result<(), Error> {
 /// A connection refused before its copy, a lease that lapses, and a record that does not read
 /// each end the wait with their code, before anything started; SIGTERM ends it as stopped.
 #[test]
-#[ignore = "pending E21-32"]
 fn the_wait_ends_fail_safe() -> Result<(), Error> {
     let closed = connecting()?;
     refuse(&closed)?;
@@ -378,7 +372,6 @@ fn the_wait_ends_fail_safe() -> Result<(), Error> {
 /// agent is deployed, ends the wait cleanly, since nothing was started and nothing is owed; with
 /// an agent deployed it ends as `connection_closed`, for the manager.
 #[test]
-#[ignore = "pending E21-32"]
 fn a_closed_connection_with_no_agent_ends_the_wait_cleanly() -> Result<(), Error> {
     let agentless = Journal::default();
     connect(&agentless, "c1", CONNECTION, ACCOUNT)?;
@@ -409,7 +402,6 @@ fn a_closed_connection_with_no_agent_ends_the_wait_cleanly() -> Result<(), Error
 /// The probe holds a start live for [`STARTUP`] and no longer, so a start that hangs (a vault
 /// login that never answers) is restarted.
 #[test]
-#[ignore = "pending E21-32"]
 fn a_start_is_live_only_within_its_bound() -> Result<(), Error> {
     let start = at(NOON)?;
     let snapshot = starting(start);

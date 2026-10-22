@@ -23,16 +23,20 @@
 //!
 //! The broker is the fixture paper broker unless `--broker alpaca-paper` names Alpaca's paper
 //! trading host (DEC-2306 item 1). Then the process trusts the vault's CA mounted in
-//! `--vault-dir`, logs in by Kubernetes auth with the pod's projected ServiceAccount token, takes
-//! the lease on the connection the account stream's latest connect check passed for, and only
-//! then takes the account stream; each pass ticks the
+//! `--vault-dir`, logs in by Kubernetes auth with the pod's projected ServiceAccount token as its
+//! own connection's executor, runs that connection's connect check once if its account stream
+//! holds none ([`mandate_executord::oauth_check::exchanged_start`]), takes the lease on the connection the stream's
+//! latest connect check passed for, and waits while that connection is still connecting
+//! ([`mandate_executord::serve::wait`], DEC-2346); only then does it take the account stream. Each pass ticks the
 //! lease, a lost or rotated credential drains the process, and the lease is given back when it
 //! stops ([`credential`]). It runs the fixture wiring ([`fixture`]), which admits no opening, behind
 //! journal rule 68's gate: until its account stream holds its establishment's copy, which each pass
 //! writes once it is due, no opening reaches the binding gate. A connection refused or revoked
 //! before it, or a record that does not read, is reported once and keeps the gate shut, never
 //! stopping the process, so every exit still goes until the manager stops it ([`establish`],
-//! DEC-2341 item 4). This is the one place the host clock is read (ES-05).
+//! DEC-2341 item 4). The run is the library's ([`mandate_executord::serve::serve`]); this binary hands it the host
+//! clock, the lease's tick, SIGTERM and stderr. This is the one place the host clock is read
+//! (ES-05).
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -50,12 +54,11 @@ use mandate_executord::credential::{
     paper_account, paper_broker, paper_settings, paper_transport, subject_account,
     subject_connection, vault_config, vault_login, workspace_namespace,
 };
-use mandate_executord::establish::{GateReport, OpeningGate, pass};
 use mandate_executord::oauth_check::{Start, exchanged_start};
 use mandate_executord::paper::FixturePaper;
-use mandate_executord::{Broker, Config, ExecutorProcess, fixture, launch};
+use mandate_executord::serve::{self, Edge, Waited, wait};
+use mandate_executord::{Broker, Config, fixture, launch};
 use mandate_journal::Environment;
-use mandate_process::State;
 use mandate_process::probe::{self, Probe, Status};
 use mandate_store::{MemoryStore, PgStore, Store};
 use mandate_time::UtcNanos;
@@ -190,7 +193,9 @@ fn run(
 }
 
 /// The broker the run names, before the process takes the account stream: the fixture, or
-/// Alpaca's paper host over the lease on the checked connection, refused without one.
+/// Alpaca's paper host over the lease on the checked connection, refused without one. On the
+/// paper host the run waits while its connection is still connecting (DEC-2346). The probe is
+/// served from the start, and the run itself is the library's ([`serve::serve`]).
 fn serve<S: Store>(
     mut store: S,
     named: &launch::Named,
@@ -198,9 +203,27 @@ fn serve<S: Store>(
     terminate: &AtomicBool,
     paper: Option<&VaultMount>,
 ) -> Result<u8, &'static str> {
+    let config = Config {
+        scope: scope(named),
+        environment: Environment::Paper,
+        liveness: LIVENESS,
+        max_chain: MAX_CHAIN,
+    };
+    let status = Status::new(serve::starting(host_now()));
+    probe::serve(socket, status.clone(), host_now).map_err(|_| "probe_socket_unavailable")?;
+    let wiring = fixture::wiring()?;
+    let terminated = || terminate.load(Ordering::SeqCst);
+    let mut say = |line: &str| eprintln!("{line}");
     let Some(mount) = paper else {
         let broker = AlpacaBroker::new(FixturePaper::new(host_now()))?;
-        return serve_on(store, broker, None, named, socket, terminate);
+        let edge = Edge {
+            now: &host_now,
+            tick: &mut |_| None,
+            terminated: &terminated,
+            say: &mut say,
+            interval: PASS,
+        };
+        return serve::serve(store, broker, wiring, &config, &status, edge);
     };
     let connection = subject_connection(std::env::var(SUBJECT_ACCOUNT_ENV).ok())?;
     let vault = logged_in(mount, &connection)?;
@@ -210,10 +233,26 @@ fn serve<S: Store>(
         account: |token| paper_transport(token).and_then(paper_account).ok(),
         random: &mut OsRandom,
     };
-    exchanged_start(&mut store, &fixture::Ids, &scope(named), start, host_now())?;
-    own_checked_connection(&store, &scope(named), &connection)?;
+    exchanged_start(&mut store, &fixture::Ids, &config.scope, start, host_now())?;
+    own_checked_connection(&store, &config.scope, &connection)?;
     let (broker, mut lease) = paper_broker(vault, &connection, host_now())?;
-    let served = serve_on(store, broker, Some(&mut lease), named, socket, terminate);
+    let mut tick = |now| lease.pass(now);
+    let mut edge = Edge {
+        now: &host_now,
+        tick: &mut tick,
+        terminated: &terminated,
+        say: &mut say,
+        interval: PASS,
+    };
+    let served = match wait(&store, &config, &status, &mut edge) {
+        Ok(Waited::Ready) => serve::serve(store, broker, wiring, &config, &status, edge),
+        Ok(Waited::Stopped) => Ok(0),
+        Ok(Waited::Closed) => {
+            (edge.say)("connection_closed");
+            Ok(0)
+        }
+        Err(code) => Err(code),
+    };
     if let Err(code) = lease.give_back() {
         eprintln!("{code}");
     }
@@ -252,60 +291,6 @@ fn logged_in(mount: &VaultMount, connection: &ConnectionId) -> Result<OpenBaoSou
         },
         connection,
     )
-}
-
-fn serve_on<S: Store, B: Broker>(
-    store: S,
-    broker: B,
-    mut lease: Option<&mut PaperLease>,
-    named: &launch::Named,
-    socket: &Path,
-    terminate: &AtomicBool,
-) -> Result<u8, &'static str> {
-    let config = Config {
-        scope: scope(named),
-        environment: Environment::Paper,
-        liveness: LIVENESS,
-        max_chain: MAX_CHAIN,
-    };
-    let gate = OpeningGate::default();
-    let mut wiring = fixture::wiring()?;
-    wiring.gate = gate.guard(wiring.gate);
-    let mut process = ExecutorProcess::start(store, broker, wiring, &config, host_now());
-    let status = Status::new(process.lifecycle().snapshot());
-    probe::serve(socket, status.clone(), host_now).map_err(|_| "probe_socket_unavailable")?;
-    let mut report = GateReport::default();
-    loop {
-        let stop = lease.as_deref_mut().and_then(|held| held.pass(host_now()));
-        let terminated = stop.is_some() || terminate.load(Ordering::SeqCst);
-        if terminated {
-            process.drain(host_now());
-        }
-        if let State::Exited(stopped) = process.lifecycle().state() {
-            status.publish(process.lifecycle().snapshot());
-            if let Some(code) = stop {
-                eprintln!("{code}");
-            }
-            eprintln!("{}", stopped.code());
-            return Ok(stopped.exit_status());
-        }
-        if terminated {
-            return Err(stop.unwrap_or("drain_unfinished"));
-        }
-        process.step(host_now());
-        let passed = pass(
-            &mut process,
-            &gate,
-            &config.scope,
-            config.environment,
-            host_now(),
-        );
-        if let Some(code) = report.changed(passed) {
-            eprintln!("{code}");
-        }
-        status.publish(process.lifecycle().snapshot());
-        thread::sleep(PASS);
-    }
 }
 
 fn check(
