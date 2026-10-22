@@ -2715,6 +2715,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-vault-addresses"
+version = "0.0.0"
+dependencies = [
+ "ring",
+ "rustix",
+ "secrecy",
+ "thiserror",
+]
+
+[[package]]
 name = "mandate-vault-local"
 version = "0.0.0"
 dependencies = [

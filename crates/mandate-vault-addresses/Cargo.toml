@@ -1,0 +1,16 @@
+[package]
+name = "mandate-vault-addresses"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "The web-push address store: a writer for the workspace API and a read-only reader for the dispatcher (E8-14, DEC-2120)"
+
+[lints]
+workspace = true
+
+[dependencies]
+ring.workspace = true
+rustix = { workspace = true, features = ["fs"] }
+secrecy.workspace = true
+thiserror.workspace = true

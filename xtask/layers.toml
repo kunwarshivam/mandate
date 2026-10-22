@@ -228,7 +228,7 @@ layer = 3
 safety_critical = true
 pure = true
 allowed_external = ["thiserror"]
-forbidden_internal = ["mandate-journal-pg", "mandate-journal-cold", "mandate-runtime", "mandate-executor", "mandate-shell", "mandate-alpaca", "mandate-robinhood", "mandate-mcp", "mandate-cli", "mandate-paper", "mandate-agentd", "mandate-risk", "mandate-approval", "mandate-dispatcher", "mandate-webpush", "mandate-push-relay", "mandate-connections", "mandate-vault-local", "mandate-api", "mandate-authn"]
+forbidden_internal = ["mandate-journal-pg", "mandate-journal-cold", "mandate-runtime", "mandate-executor", "mandate-shell", "mandate-alpaca", "mandate-robinhood", "mandate-mcp", "mandate-cli", "mandate-paper", "mandate-agentd", "mandate-risk", "mandate-approval", "mandate-dispatcher", "mandate-webpush", "mandate-push-relay", "mandate-connections", "mandate-vault-local", "mandate-vault-addresses", "mandate-api", "mandate-authn"]
 
 [crates.mandate-push-relay]
 layer = 3
@@ -349,6 +349,7 @@ forbidden_internal = [
     "mandate-executor",
     "mandate-connections",
     "mandate-vault-local",
+    "mandate-vault-addresses",
     "mandate-shell",
     "mandate-agentd",
     "mandate-paper",
@@ -373,6 +374,7 @@ forbidden_internal = [
     "mandate-executor",
     "mandate-connections",
     "mandate-vault-local",
+    "mandate-vault-addresses",
     "mandate-shell",
     "mandate-agentd",
     "mandate-paper",
@@ -393,6 +395,7 @@ forbidden_internal = [
     "mandate-executor",
     "mandate-connections",
     "mandate-vault-local",
+    "mandate-vault-addresses",
     "mandate-shell",
     "mandate-agentd",
     "mandate-paper",
@@ -482,7 +485,7 @@ layer = 1
 safety_critical = true
 pure = true
 allowed_external = ["serde_json", "thiserror"]
-forbidden_internal = ["mandate-spec", "mandate-journal", "mandate-builder", "mandate-risk", "mandate-executor", "mandate-runtime", "mandate-alpaca", "mandate-robinhood", "mandate-shell", "mandate-connections", "mandate-vault-local"]
+forbidden_internal = ["mandate-spec", "mandate-journal", "mandate-builder", "mandate-risk", "mandate-executor", "mandate-runtime", "mandate-alpaca", "mandate-robinhood", "mandate-shell", "mandate-connections", "mandate-vault-local", "mandate-vault-addresses"]
 
 [crates.mandate-research]
 layer = 5
@@ -546,7 +549,7 @@ layer = 7
 safety_critical = true
 pure = false
 allowed_external = ["reqwest", "rustls", "thiserror", "tokio"]
-forbidden_internal = ["mandate-spec", "mandate-journal", "mandate-builder", "mandate-risk", "mandate-executor", "mandate-runtime", "mandate-alpaca", "mandate-robinhood", "mandate-shell", "mandate-connections", "mandate-vault-local"]
+forbidden_internal = ["mandate-spec", "mandate-journal", "mandate-builder", "mandate-risk", "mandate-executor", "mandate-runtime", "mandate-alpaca", "mandate-robinhood", "mandate-shell", "mandate-connections", "mandate-vault-local", "mandate-vault-addresses"]
 
 # The model-gateway service (E21-62, DEC-2257, DEC-2265): mandate-gateway over the HTTPS transport,
 # the journaled meter and the system clock, serving its one workspace's runtime one framed call at a
@@ -635,6 +638,17 @@ layer = 7
 safety_critical = true
 pure = false
 allowed_external = ["ring", "rustix", "secrecy", "thiserror"]
+
+# The web-push address store (E8-14, DEC-2120): its own directory and key, never a token. Below the
+# API server, which writes through `AddressWriter`, and the dispatcher, which reads through the
+# read-only `AddressReader`; nothing else may take it.
+[crates.mandate-vault-addresses]
+layer = 6
+safety_critical = true
+pure = false
+allowed_external = ["ring", "rustix", "secrecy", "thiserror"]
+forbidden_internal = ["mandate-connections", "mandate-vault-local", "mandate-vault"]
+allowed_dependents = ["mandate-api-server", "mandate-dispatcher"]
 
 # The workspace vault behind `SecretSource` (E21-32, DEC-977): the local vault and OpenBao. Above
 # mandate-vault-local, whose store it adapts. No runtime, scheduler, or connector may take it: an
