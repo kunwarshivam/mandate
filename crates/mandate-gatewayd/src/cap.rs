@@ -4,7 +4,7 @@
 //! tightened by the internal research profile. Nothing the caller sends sets it, and anything that
 //! does not read refuses with its code rather than leaving a cap the confirmed mandate did not give.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_canon::{Value, parse};
 use mandate_gateway::money::Usd6;
@@ -71,6 +71,46 @@ pub fn deployment(
     Ok(Deployment::NotDeployed)
 }
 
+/// Every agent an `AgentDeployed` in `environment` names, deployed now or stopped since: the agents
+/// whose caps the start reads (DEC-2272 item 4).
+///
+/// # Errors
+/// [`CapError::ControlUnreadable`] for an `AgentDeployed` whose body does not read.
+pub fn agents(
+    control: &[StoredEvent],
+    environment: Environment,
+) -> Result<BTreeSet<String>, CapError> {
+    control
+        .iter()
+        .filter(|row| row.environment == environment.as_str() && row.event_type == "AgentDeployed")
+        .map(|row| {
+            let body = parse(&row.body).map_err(|_| CapError::ControlUnreadable)?;
+            body.get("payload")
+                .and_then(|payload| text(payload, "agent_id"))
+                .map(str::to_owned)
+                .ok_or(CapError::ControlUnreadable)
+        })
+        .collect()
+}
+
+/// The agents deployed now in `environment`: those whose latest deployment record is an
+/// `AgentDeployed`, the only agents whose caps the service holds (DEC-2272 item 3).
+///
+/// # Errors
+/// [`CapError::ControlUnreadable`] for a deployment record whose body does not read.
+pub fn deployed_agents(
+    control: &[StoredEvent],
+    environment: Environment,
+) -> Result<BTreeSet<String>, CapError> {
+    let mut deployed = BTreeSet::new();
+    for agent in agents(control, environment)? {
+        if deployment(control, &agent, environment)? != Deployment::NotDeployed {
+            deployed.insert(agent);
+        }
+    }
+    Ok(deployed)
+}
+
 /// The cap `deployment` gives (DEC-2272 items 1 to 4): zero when not deployed or when the
 /// document's `behavior.research` is `null`.
 ///
@@ -130,8 +170,24 @@ impl DailyCaps {
         }
     }
 
+    /// How many agents' caps are held: only deployed agents' (DEC-2272 item 3), so the count grows
+    /// with nothing a caller sends.
+    pub fn held(&self) -> usize {
+        self.held.len()
+    }
+
+    /// Keeps the caps of `deployed` alone, dropping every other agent's.
+    pub fn retain(&mut self, deployed: &BTreeSet<String>) {
+        self.held.retain(|agent, _| deployed.contains(agent));
+    }
+
+    /// The environment whose deployments the caps are read for.
+    pub fn environment(&self) -> Environment {
+        self.environment
+    }
+
     /// `agent`'s cap for the deployment `control` names now: the one held when it is unchanged,
-    /// else read again. A read that fails drops what was held, so the agent has no cap to use
+    /// else read again, and zero, holding nothing, for an agent not deployed. A read that fails drops what was held, so the agent has no cap to use
     /// until a read succeeds.
     ///
     /// # Errors
@@ -143,6 +199,10 @@ impl DailyCaps {
         store: &dyn ArtifactSource,
     ) -> Result<Usd6, CapError> {
         let read = deployment(control, agent, self.environment).and_then(|now| {
+            if now == Deployment::NotDeployed {
+                self.held.remove(agent);
+                return Ok(Usd6::ZERO);
+            }
             match self.held.get(agent) {
                 Some((held, cap)) if *held == now => Ok(*cap),
                 _ => research_cap(&now, self.environment, store, self.workspace_monthly).inspect(

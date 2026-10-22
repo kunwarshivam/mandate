@@ -1,11 +1,12 @@
 //! The connect start's fixture (§4.5, DEC-2623): a paper workspace whose admin is Alice and
 //! viewer Bob, an OAuth client, a step-up port that counts only the connect digest computed here,
-//! and a random source whose draws the tests know.
+//! a random source whose draws the tests know, and a vault port that keeps each code written.
 
 #![allow(dead_code, reason = "each test file uses part of the shared helpers")]
 
 use std::collections::BTreeSet;
 use std::os::unix::fs::PermissionsExt;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use mandate_api::envelope::StepUpEvidence;
@@ -13,7 +14,7 @@ use mandate_api::idempotency::{Derivation, IdempotencyKey, event_id};
 use mandate_api::problem::{Problem, ProblemCode};
 use mandate_api::wire::{Id, decode};
 use mandate_api_server::config::{SESSION_KEY_FILE, read_session_key};
-use mandate_api_server::connect::Connect;
+use mandate_api_server::connect::{CodeVault, Connect};
 use mandate_api_server::http::{self, App, Settings};
 use mandate_api_server::lifecycle::Drain;
 use mandate_api_server::session::{COOKIE_NAME, OsRandom, Random, Sessions, Unauthenticated};
@@ -21,11 +22,16 @@ use mandate_api_server::stepup::{Action, Judged, StepUp};
 use mandate_api_server::token::{FixedKeys, Issuer};
 use mandate_authn::{Algorithm, IssuerConfig};
 use mandate_canon::{Digest, Value, parse, to_canonical};
-use mandate_connections::start::{ClientId, OAuthClient, RedirectUri};
+use mandate_connections::ConnectError;
+use mandate_connections::start::{
+    Binding, ClientId, Environment, OAuthClient, PkceVerifier, RedirectUri,
+};
+use mandate_connections::vault::AuthorizationCode;
 use mandate_identity::{MembershipEvent, MembershipRecord, PrincipalId, Role, StepUpActionKind};
 use mandate_identity_seal::Seal;
 use mandate_journal::StoredEvent;
 use mandate_time::UtcNanos;
+use secrecy::ExposeSecret;
 
 use crate::common::{self, MemJournal, Reply, WORKSPACE, hosted, send, serve};
 
@@ -89,6 +95,46 @@ impl Random for Counting {
     }
 }
 
+/// One code the callback wrote: the binding's members and the two secrets' text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Put {
+    pub workspace_id: String,
+    pub user_id: String,
+    pub connection_id: String,
+    pub environment: Environment,
+    pub code: String,
+    pub verifier: String,
+}
+
+/// The callback's vault port: every code written, and whether the next write fails.
+#[derive(Default)]
+pub struct Codes {
+    pub puts: Mutex<Vec<Put>>,
+    pub failing: AtomicBool,
+}
+
+impl CodeVault for Codes {
+    fn put_code(
+        &self,
+        binding: &Binding,
+        code: AuthorizationCode,
+        verifier: PkceVerifier,
+    ) -> Result<(), ConnectError> {
+        if self.failing.load(Ordering::SeqCst) {
+            return Err(ConnectError::VaultUnavailable);
+        }
+        self.puts.lock().expect("unpoisoned").push(Put {
+            workspace_id: binding.workspace_id.clone(),
+            user_id: binding.user_id.clone(),
+            connection_id: binding.connection_id.as_str().to_owned(),
+            environment: binding.environment,
+            code: code.0.expose_secret().to_owned(),
+            verifier: verifier.0.expose_secret().to_owned(),
+        });
+        Ok(())
+    }
+}
+
 pub struct Fixture {
     pub addr: std::net::SocketAddr,
     pub journal: Arc<MemJournal>,
@@ -96,6 +142,9 @@ pub struct Fixture {
     pub clock: Arc<common::ManualClock>,
     pub connect: Option<Arc<Connect>>,
     pub port: Arc<Port>,
+    pub codes: Arc<Codes>,
+    /// The membership records the server reads, which a test may change mid-flight.
+    pub records: Arc<Mutex<Vec<MembershipRecord>>>,
 }
 
 static DIRS: Mutex<u32> = Mutex::new(0);
@@ -136,10 +185,11 @@ pub fn fixture_random(
     std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).expect("mode");
     let key = read_session_key(&dir).expect("the key reads");
     let journal = Arc::new(MemJournal::default());
-    let records = vec![
+    let records = Arc::new(Mutex::new(vec![
         activated(1, principal(ALICE), &[Role::WorkspaceAdmin]),
         activated(2, principal(BOB), &[Role::Viewer]),
-    ];
+    ]));
+    let read_records = Arc::clone(&records);
     let sessions = Arc::new(Sessions::new(&key, Box::new(OsRandom::new())));
     let clock = common::ManualClock::at(T0);
     let config = IssuerConfig::new(
@@ -152,7 +202,14 @@ pub fn fixture_random(
         asked: Mutex::default(),
         accepting,
     });
-    let connect = offered.then(|| Arc::new(Connect::new(client(), random)));
+    let codes = Arc::new(Codes::default());
+    let connect = offered.then(|| {
+        Arc::new(Connect::new(
+            client(),
+            random,
+            Arc::clone(&codes) as Arc<dyn CodeVault>,
+        ))
+    });
     let app = App {
         settings: Settings {
             app_origin: APP.to_owned(),
@@ -162,13 +219,16 @@ pub fn fixture_random(
         links: Arc::new(common::LinksAt(dir.join("absent"))),
         clock: Arc::clone(&clock) as Arc<dyn mandate_api_server::clock::Clock>,
         journal: Arc::clone(&journal) as Arc<dyn mandate_api_server::journal::Journal>,
-        members: Arc::new(move |_: &[StoredEvent]| Ok(records.clone())),
+        members: Arc::new(move |_: &[StoredEvent]| {
+            Ok(read_records.lock().expect("unpoisoned").clone())
+        }),
         hosted: hosted(),
         artifacts: None,
         objects: None,
         step_up: Arc::clone(&port) as Arc<dyn StepUp>,
         challenges: Arc::default(),
         connect: connect.clone(),
+        reduction: Arc::default(),
     };
     journal
         .streams
@@ -182,7 +242,14 @@ pub fn fixture_random(
         clock,
         connect,
         port,
+        codes,
+        records,
     }
+}
+
+/// Makes Alice a viewer only, as a demotion while she is at Alpaca would.
+pub fn demote_alice(f: &Fixture) {
+    f.records.lock().expect("unpoisoned")[0] = activated(1, principal(ALICE), &[Role::Viewer]);
 }
 
 pub fn client() -> OAuthClient {

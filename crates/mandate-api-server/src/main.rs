@@ -50,6 +50,7 @@ use mandate_api_server::keys::{FetchedKeys, REFETCH};
 use mandate_api_server::lifecycle::{DRAIN_BOUND, Drain, Local};
 use mandate_api_server::members::{self, Hosted};
 use mandate_api_server::objects::{ObjectStore, Objects};
+use mandate_api_server::reduction::{self, Reduction};
 use mandate_api_server::session::{OsRandom, Sessions};
 use mandate_api_server::subject;
 use mandate_api_server::token::Issuer;
@@ -145,6 +146,7 @@ struct Start {
     database_url: String,
     hosted: Hosted,
     artifacts: Option<Arc<Objects<FsArtifactStore>>>,
+    ingress: Vec<IpAddr>,
 }
 
 /// A required setting's value, refused when absent, empty, or not Unicode.
@@ -197,6 +199,13 @@ fn checked() -> Result<(Args, Start), StartRefusal> {
         name: "MANDATE_API_JWKS_URL",
     })?;
     let artifacts = artifact_store(env::var_os("MANDATE_API_ARTIFACTS").as_deref())?;
+    let ingress_setting = env::var_os(reduction::INGRESS_PEERS)
+        .map(|value| value.into_string())
+        .transpose()
+        .map_err(|_| StartRefusal::Setting {
+            name: reduction::INGRESS_PEERS,
+        })?;
+    let ingress = reduction::ingress_peers(ingress_setting.as_deref())?;
     let start = Start {
         settings,
         key,
@@ -205,6 +214,7 @@ fn checked() -> Result<(Args, Start), StartRefusal> {
         database_url,
         hosted,
         artifacts,
+        ingress,
     };
     Ok((args, start))
 }
@@ -231,9 +241,12 @@ async fn serve(
     router: axum::Router,
     stop: impl Future<Output = ()> + Send + 'static,
 ) -> io::Result<()> {
-    axum::serve(listener, router)
-        .with_graceful_shutdown(stop)
-        .await
+    axum::serve(
+        listener,
+        router.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(stop)
+    .await
 }
 
 /// What ends the wait for SIGTERM: the signal, or a listener that stopped on its own.
@@ -288,6 +301,7 @@ async fn run(args: Args, start: Start) -> io::Result<()> {
         step_up: Arc::new(step_up),
         challenges,
         connect: None,
+        reduction: Arc::new(Reduction::new(start.ingress, Box::new(OsRandom::new()))),
     };
     let api = spawn_listener(
         serve(

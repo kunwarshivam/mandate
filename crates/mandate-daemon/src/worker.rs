@@ -91,12 +91,25 @@ pub struct WorkerFor {
     pub description: String,
 }
 
-/// The gateway's request rate for the cell: a one-shot run makes one call per research interval,
-/// so a small fixed cap never binds it and bounds a fault that would call again.
-const RATE: RateCaps = RateCaps {
-    per_workspace: 6,
-    per_agent: 6,
-};
+/// The cell gateway's calls a minute for the whole workspace, fixed whatever the entry pins: it
+/// bounds a fault that would call again however many turns an entry's loop allows (DEC-2316).
+const WORKSPACE_RATE: u32 = 12;
+
+/// The calls a minute an agent may make beyond the turns one run of its entry may take, so a run
+/// that uses every turn its loop allows is never cut by the rate cap (DEC-2316).
+const RATE_MARGIN: u32 = 2;
+
+/// The gateway's request rate for the cell's agent (DEC-2316): the turns one run may take, the
+/// agentic loop's pinned `max_turns` or one for a one-shot entry, and [`RATE_MARGIN`] beyond them,
+/// under the fixed [`WORKSPACE_RATE`]. A run's own bounds and cost ceiling still bind it; the cap
+/// bounds only a fault that would call again.
+fn rate(bounds: Option<&LoopBounds>) -> RateCaps {
+    let turns = bounds.map_or(1, |bounds| bounds.max_turns);
+    RateCaps {
+        per_workspace: WORKSPACE_RATE,
+        per_agent: turns.saturating_add(RATE_MARGIN),
+    }
+}
 
 /// An answer kept until the core is handed it, without the risk clock it is handed at.
 enum Ready {
@@ -228,7 +241,7 @@ impl<T: Transport> RecordedWorker<T> {
                 None,
             ),
             guard: GuardContext::default(),
-            rate: RATE,
+            rate: rate(bundle.entry.agentic.as_ref()),
         };
         let start = now();
         let ids = |offset: u128| {
@@ -668,6 +681,18 @@ impl<T: Transport> RecordedWorker<T> {
         model: T,
     ) -> Result<Self, WorkerError> {
         let meter = own_meter(&who);
+        Self::with_model_metered(bundle, who, sink, now, model, meter)
+    }
+
+    /// As [`RecordedWorker::with_model`], metering through `meter`, whose records a test reads.
+    pub(crate) fn with_model_metered(
+        bundle: &Bundle,
+        who: WorkerFor,
+        sink: Box<dyn ArtifactSink>,
+        now: Box<dyn FnMut() -> UtcNanos>,
+        model: T,
+        meter: CellMeter,
+    ) -> Result<Self, WorkerError> {
         let caps = Caps::new(bundle.workspace_cap);
         Self::built(bundle, who, sink, now, meter, caps, (model, |_, _| {}))
     }
@@ -698,6 +723,17 @@ mod model_tests;
     reason = "ADR-0001 ES-09 excepts tests from the safety-critical denies"
 )]
 mod injection_tests;
+
+#[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    reason = "ADR-0001 ES-09 excepts tests from the safety-critical denies"
+)]
+mod bench_tests;
 
 /// The recorded fake, primed by replacing any reply a call never sent took with `reply`.
 fn recorded() -> (RecordedTransport, fn(&mut RecordedTransport, Recorded)) {
