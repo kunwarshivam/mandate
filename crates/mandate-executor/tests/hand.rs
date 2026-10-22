@@ -5548,6 +5548,11 @@ fn the_bound_never_sells_beside_the_account_switch() {
         sells.is_empty(),
         "the bound sells nothing beside the switch's close: {sells:?}"
     );
+    assert!(
+        !bound.draft_types().contains(&"IntentReceived"),
+        "nor raises a flatten of its own, held or not: {:?}",
+        bound.draft_types()
+    );
 }
 
 /// Protection the cancel-all cancels leaves its position unprotected under §5.4's bound, journaled
