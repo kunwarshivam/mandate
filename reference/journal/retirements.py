@@ -12,6 +12,7 @@ per cause without the stream fold, and every seeded bug is shown caught.
 from __future__ import annotations
 
 import copy
+from decimal import Decimal
 
 from common import change, delete, digest_strings, epoch_seconds
 from control import (
@@ -432,9 +433,88 @@ def stream_cases() -> list[dict]:
     ]
 
 
+# --------------------------------------------------------------------------- the silent finding
+
+
+def cancels(cause: dict, version: dict, skip: frozenset[str] = frozenset()) -> bool:
+    """Whether a version applied cancels the retirement its cause began, from the cause record's
+    and the new version's own fields alone: a `profit_stop` whose new `profit_level` is above the
+    breach value the cause recorded, a passed `end_date` moved past the cause's date, or an
+    `on_complete` changed from the one that retired it. The agent's current return is never read,
+    so a dip never cancels a retirement whose exits are unfilled."""
+    fields = version["payload"]["mandate"]
+    if cause["kind"] == "profit_stop":
+        raised = Decimal(fields["profit_level"]) > Decimal(cause["breach_value"])
+        return raised or "silence.profit" in skip
+    if cause["kind"] == "end_date":
+        return fields["end_date"] > cause["date"]
+    return fields["on_complete"] != cause["on_complete"]
+
+
+def silent(cause: dict, records: list[dict], now: str, skip: frozenset[str] = frozenset()) -> bool:
+    """The verifier's `retirement_held_silent` finding at risk clock `now`: the sequence's last
+    `RetirementHeld` is more than 48 hours old, with no end and no version that cancels it since."""
+    last = None
+    for record in records:
+        t = record["event_type"]
+        if t == "RetirementHeld":
+            last = epoch_seconds(record["payload"]["risk_clock"])
+        elif last is not None and t in ("AgentStopped", "OwnerCommandIssued"):
+            last = None
+        elif last is not None and t == "MandateVersionApplied" and "silence.cancel" not in skip:
+            if cancels(cause, record, skip):
+                last = None
+    return last is not None and epoch_seconds(now) - last > 2 * DAY
+
+
+def version(level: str = "0.10", end_date: str = "2026-09-21", on_complete: str = "release") -> dict:
+    return {
+        "event_type": "MandateVersionApplied",
+        "payload": {"agent_id": AGENT_ID, "new_version": NEWER, "result": "applied",
+                    "mandate": {"profit_level": level, "end_date": end_date, "on_complete": on_complete}},
+    }
+
+
+def silence_cases() -> list[dict]:
+    stop = {"kind": "profit_stop", "breach_value": "0.12"}
+    end = {"kind": "end_date", "date": "2026-09-21"}
+    goal = {"kind": "on_complete", "on_complete": "release"}
+    first = held(1)
+
+    def case(name, clause, cause, records, now, is_silent):
+        return {"name": name, "clause": clause, "cause": cause, "records": records, "now": now, "silent": is_silent}
+
+    return [
+        case("held_and_writing", "§9.34: a record within 48 hours is no silence", stop, [first], clock(2 * DAY), False),
+        case("silent", "§9.34: more than 48 hours with no record and no end", stop, [first], clock(3 * DAY + 1), True),
+        case("ended", "§9.34: an end is no silence", stop, [first, ended("AgentStopped", 20)], clock(5 * DAY), False),
+        case(
+            "cancelled_by_a_raised_level",
+            "§9.34: a version whose profit_level is above the breach value cancels it",
+            stop, [first, version(level="0.15")], clock(5 * DAY), False,
+        ),
+        case(
+            "a_level_still_breached",
+            "§9.34: a level at or below the breach value cancels nothing, whatever the return since",
+            stop, [first, version(level="0.12")], clock(5 * DAY), True,
+        ),
+        case(
+            "cancelled_by_a_later_end_date",
+            "§9.34: an end_date moved past the cause's cancels it",
+            end, [first, version(end_date="2026-10-21")], clock(5 * DAY), False,
+        ),
+        case("the_same_end_date", "§9.34: the same end_date cancels nothing", end, [first, version()], clock(5 * DAY), True),
+        case(
+            "cancelled_by_on_complete",
+            "§9.34: an on_complete changed from the one that retired it cancels it",
+            goal, [first, version(on_complete="stop")], clock(5 * DAY), False,
+        ),
+    ]
+
+
 # --------------------------------------------------------------------------- independent oracle
 
-ORACLE_CHECKS = ("drafts.valid", "invalid_drafts", "valid_drafts", "streams.rule", "streams.oracle")
+ORACLE_CHECKS = ("drafts.valid", "invalid_drafts", "valid_drafts", "streams.rule", "streams.oracle", "silence")
 
 
 def found(check: str, message: str) -> str:
@@ -509,6 +589,10 @@ def oracle(records: list[dict]) -> int | None:
 def check_section(section: dict) -> list[str]:
     """Every failure, so seeded bugs can be shown caught."""
     problems = []
+    for case in section["silence"]:
+        got = silent(case["cause"], case["records"], case["now"])
+        if got != case["silent"]:
+            problems.append(found("silence", f"{case['name']}: expected silent {case['silent']}, got {got}"))
     for name, draft in section["drafts"].items():
         got = violations(draft)
         if got:
@@ -547,6 +631,7 @@ VALIDATOR_MUTANTS = (
     *(f"loose.payload.{member}" for member, _, _, _ in MEMBER_CASES),
     *(f"nullable.payload.{member}" for member in NULLED),
 )
+SILENCE_MUTANTS = ("silence.cancel", "silence.profit")
 STREAM_MUTANTS = tuple(f"stream.266.{part}" for part in ("own", "end", "subject", "alert", "finished", "period", "one", "since", "version", "spacing"))
 
 
@@ -563,6 +648,11 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
 
     return [
         ("the base draft names no cause", "drafts.valid", mutated(lambda s: s["drafts"][BASE].update(causation_id=None))),
+        (
+            "a cancelled retirement is expected silent",
+            "silence",
+            mutated(lambda s: case(s, "silence", "cancelled_by_a_raised_level").update(silent=True)),
+        ),
         (
             "an invalid draft's expectation differs",
             "invalid_drafts",
@@ -604,6 +694,10 @@ def run_mutants(section: dict) -> list[str]:
         skip = frozenset([mutant])
         if all(stream_failure(c["records"], skip) == c["expect"].get("index") for c in section["streams"]):
             escaped.append(f"retirement stream mutant {mutant}")
+    for mutant in SILENCE_MUTANTS:
+        skip = frozenset([mutant])
+        if all(silent(c["cause"], c["records"], c["now"], skip) == c["silent"] for c in section["silence"]):
+            escaped.append(f"retirement silence mutant {mutant}")
     registered = vector_mutants(section)
     for check in ORACLE_CHECKS:
         if not any(c == check for _, c, _ in registered):
@@ -625,4 +719,5 @@ def build_section() -> dict:
         "invalid_drafts": invalid_drafts(),
         "valid_drafts": valid_drafts(),
         "streams": stream_cases(),
+        "silence": silence_cases(),
     }

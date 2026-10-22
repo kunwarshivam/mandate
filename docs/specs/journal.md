@@ -6158,19 +6158,25 @@ attributed to the agent and no working order of its own (§9.2's `AgentStopped`,
   agent's own: its `AgentStopped`, or an owner's `OwnerCommandIssued` scoped to the agent with
   `command` `resume` or `stop` (control stream). No `RetirementHeld` of that cause follows. A
   `MandateVersionApplied` with `result` `applied` for the agent (account stream) ends nothing by
-  itself. A version **cancels** the retirement when its cause no longer holds under the new
-  version's own fields: a passed `end_date` moved ahead, a `profit_stop` level the agent no longer
-  reaches, or an `on_complete` changed away from what retired it. A version that does not cancel
+  itself. A version **cancels** the retirement when, from the cause record's and the new version's
+  own fields alone, the cause no longer holds: for `profit_stop`, a new `profit_level` above the
+  breach value the cause's `RiskLimitTriggered` recorded; for a passed `end_date`, a new `end_date`
+  after the cause's date; for a goal's `release`, an `on_complete` changed from the one that
+  retired it. The agent's current return is never read, so a dip below the level never cancels a
+  retirement whose exits are unfilled. A version that does not cancel
   it leaves the runtime writing the same sequence under the new version. One that cancels it
   leaves the runtime writing nothing more of that cause (the writer's rule), and if the agent
   retires again, the new cause begins its own sequence from 1. So an applied version can add
   alerts, never silence one. A redeploy is a new agent id on its own stream
   ([DEC-1173](../project/decisions/DEC-1173.md)), so nothing carries over to it.
 - **A restarted runtime folds its stream first**, so it never writes a period twice.
-- **A silent sequence is a verifier finding.** An open sequence with no `RetirementHeld` for more
-  than 48 hours of risk clock and no end is not refused at append, since a down runtime writes
-  nothing; the verifier reports it as `retirement_held_silent` for the agent, so a writer that
-  stopped while the agent still held something is seen.
+- **A silent sequence is a verifier finding.** An open sequence whose last `RetirementHeld` is more
+  than 48 hours of risk clock old, with no end and no version that cancels it since, is not
+  refused at append, since a down runtime writes nothing; the verifier reports it as
+  `retirement_held_silent` for the agent, so a writer that stopped while the agent still held
+  something is seen, and a cancelled retirement raises nothing. The `retirements` vectors' `silence`
+  cases pin it: writing, silent, ended, cancelled by each kind of version, and a level still
+  breached.
 
 **`RetirementHeld`** (agent stream; `config_refs` names `mandate_version`)
 
