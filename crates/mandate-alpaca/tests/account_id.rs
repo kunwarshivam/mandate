@@ -36,7 +36,6 @@ fn client(
 /// The recorded account's `id` is read, and only it: a body whose every other member is gone or
 /// broken still gives the id.
 #[test]
-#[ignore = "pending E10-13"]
 fn the_account_id_is_the_objects_id_and_nothing_else() {
     assert_eq!(
         wire::account_id(&body("account_active", 0)),
@@ -57,7 +56,6 @@ fn the_account_id_is_the_objects_id_and_nothing_else() {
 /// No id, an id that is not text, an id outside the account entry's form, or no JSON is refused,
 /// and no refusal names the value.
 #[test]
-#[ignore = "pending E10-13"]
 fn an_account_id_that_is_missing_or_malformed_is_refused() {
     for (bad, want) in [
         (
@@ -83,7 +81,6 @@ fn an_account_id_that_is_missing_or_malformed_is_refused() {
 /// The client reads `GET /v2/account` once, through the allowlist, and answers its id; an
 /// overloaded broker is `Overloaded`, never an id, and another status is not interpreted.
 #[tokio::test]
-#[ignore = "pending E10-13"]
 async fn the_client_reads_the_account_once_for_its_id() {
     let (trading, transport) = client([reply(200, "account_active", 0)]);
     assert_eq!(

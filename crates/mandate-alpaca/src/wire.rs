@@ -154,8 +154,9 @@ pub fn positions(body: &[u8]) -> Result<Vec<BrokerPosition>, WireError> {
 /// [`WireError::NotJson`], [`WireError::MissingField`] or [`WireError::WrongType`] for `id`,
 /// which name nothing of the value.
 pub fn account_id(body: &[u8]) -> Result<BrokerAccountId, WireError> {
-    let _ = body;
-    Err(WireError::Unimplemented { story: "E10-13" })
+    let value = json(body)?;
+    let id = text(object(&value, "account")?, "id")?;
+    BrokerAccountId::new(id).map_err(|_| WireError::WrongType { field: "id" })
 }
 
 /// Parses the account object, dropping `id` and `account_number` before anything else: the type

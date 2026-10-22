@@ -213,7 +213,13 @@ impl<T: TradingTransport, P: Pause> TradingClient<T, P> {
     /// [`ReadError::Overloaded`] for a `429` or a `5xx`, another status as
     /// [`ReadError::UnexpectedStatus`], and the wire's refusals of the body.
     pub async fn account_id(&self) -> Result<BrokerAccountId, ReadError> {
-        Err(ReadError::Unimplemented { story: "E10-13" })
+        let request = HttpRequest::new(Method::Get, "/v2/account", None)?;
+        let response = self.transport.send(&request).await?;
+        match response.status {
+            200..=299 => Ok(wire::account_id(&response.body)?),
+            429 | 500..=599 => Err(ReadError::Overloaded),
+            status => Err(ReadError::UnexpectedStatus { status }),
+        }
     }
 
     /// Cancels one of our orders. Alpaca cancels by **its** order id, so an order Alpaca holds

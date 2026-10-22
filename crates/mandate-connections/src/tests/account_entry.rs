@@ -26,7 +26,6 @@ fn decoded(bytes: &[u8]) -> Result<(String, String), ConnectError> {
 /// The entry is the canonical JSON of the id, the format and the reference, and reads back as
 /// the same two.
 #[test]
-#[ignore = "pending E10-13"]
 fn the_entry_is_exactly_its_canonical_form() {
     let id = BrokerAccountId::new(ID).unwrap();
     let pii_ref = AccountPiiRef::new(REF).unwrap();
@@ -43,7 +42,6 @@ fn the_entry_is_exactly_its_canonical_form() {
 /// An id is 1 to 128 bytes from `!` to `~`, neither `"` nor `\`; anything else is refused, and
 /// names nothing of it.
 #[test]
-#[ignore = "pending E10-13"]
 fn an_account_id_is_printable_ascii_needing_no_escape() {
     assert_eq!(MAX_ACCOUNT_ID_LEN, 128);
     for kept in ["a", "!~", ID, &"x".repeat(128)] {
@@ -73,7 +71,6 @@ fn an_account_id_is_printable_ascii_needing_no_escape() {
 /// Only format 1's exact bytes decode: another format, a member missing or added, reordered or
 /// spaced members, an escape, a reference that is not `pii_` and a ULID, or no JSON at all.
 #[test]
-#[ignore = "pending E10-13"]
 fn only_the_entrys_exact_bytes_decode() {
     for bytes in [
         String::new(),
@@ -99,7 +96,6 @@ fn only_the_entrys_exact_bytes_decode() {
 
 /// No `Debug` of an id, an entry or an error ever shows the id.
 #[test]
-#[ignore = "pending E10-13"]
 fn no_debug_shows_the_account_id() {
     let id = BrokerAccountId::new(ID).unwrap();
     assert_eq!(format!("{id:?}"), "BrokerAccountId(redacted)");
@@ -111,7 +107,6 @@ fn no_debug_shows_the_account_id() {
 
 /// Every id in the form round-trips through the entry unchanged.
 #[test]
-#[ignore = "pending E10-13"]
 fn every_id_in_the_form_round_trips() {
     let pii_ref = AccountPiiRef::new(REF).unwrap();
     let mut runner = TestRunner::new(Config::default());

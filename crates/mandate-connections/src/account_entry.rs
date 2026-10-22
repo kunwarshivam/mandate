@@ -13,6 +13,7 @@
 
 use std::fmt;
 
+use mandate_canon::is_ulid;
 use secrecy::{ExposeSecret, SecretString};
 
 use crate::ConnectError;
@@ -23,6 +24,28 @@ pub const FORMAT: u64 = 1;
 
 /// The longest account id an entry holds, in bytes.
 pub const MAX_ACCOUNT_ID_LEN: usize = 128;
+
+/// The entry's bytes before the id.
+const BEFORE: &str = r#"{"account_id":""#;
+
+/// The entry's bytes between the id and the reference.
+const BETWEEN: &str = r#"","format":1,"pii_ref":""#;
+
+/// The entry's bytes after the reference.
+const AFTER: &str = r#""}"#;
+
+/// Whether `id` is 1 to [`MAX_ACCOUNT_ID_LEN`] bytes from `!` to `~`, none of them `"` or `\`.
+fn in_form(id: &str) -> bool {
+    (1..=MAX_ACCOUNT_ID_LEN).contains(&id.len())
+        && id
+            .bytes()
+            .all(|b| (b'!'..=b'~').contains(&b) && b != b'"' && b != b'\\')
+}
+
+/// Whether `pii_ref` is `pii_` and a ULID (journal spec §6.4).
+fn is_pii_ref(pii_ref: &str) -> bool {
+    pii_ref.strip_prefix("pii_").is_some_and(is_ulid)
+}
 
 /// A broker's own id of the account a credential reaches: personal data (journal spec §6.4),
 /// read once through the connection's paper host, written once to the personal-data vault, and
@@ -49,8 +72,11 @@ impl BrokerAccountId {
     /// # Errors
     /// [`ConnectError::AccountEntryInvalid`] for any other text; the error names nothing of it.
     pub fn new(text: &str) -> Result<Self, ConnectError> {
-        let _ = text;
-        Err(ConnectError::Unimplemented { story: "E10-13" })
+        if in_form(text) {
+            Ok(Self(SecretString::from(text.to_owned())))
+        } else {
+            Err(ConnectError::AccountEntryInvalid)
+        }
     }
 }
 
@@ -69,8 +95,14 @@ pub fn encode(
     pii_ref: &AccountPiiRef,
     account_id: &BrokerAccountId,
 ) -> Result<SecretString, ConnectError> {
-    let _ = (pii_ref, account_id);
-    Err(ConnectError::Unimplemented { story: "E10-13" })
+    let id = account_id.0.expose_secret();
+    let pii_ref = pii_ref.as_str();
+    if !in_form(id) || !is_pii_ref(pii_ref) {
+        return Err(ConnectError::AccountEntryInvalid);
+    }
+    Ok(SecretString::from(format!(
+        "{BEFORE}{id}{BETWEEN}{pii_ref}{AFTER}"
+    )))
 }
 
 /// The reference and id of an entry's bytes.
@@ -79,6 +111,15 @@ pub fn encode(
 /// [`ConnectError::AccountEntryInvalid`] for any bytes but format 1's exact form; the error
 /// names nothing of the bytes.
 pub fn decode(bytes: &[u8]) -> Result<AccountEntry, ConnectError> {
-    let _ = bytes;
-    Err(ConnectError::Unimplemented { story: "E10-13" })
+    let (id, pii_ref) = std::str::from_utf8(bytes)
+        .ok()
+        .and_then(|text| text.strip_prefix(BEFORE))
+        .and_then(|rest| rest.strip_suffix(AFTER))
+        .and_then(|rest| rest.split_once(BETWEEN))
+        .filter(|(id, pii_ref)| in_form(id) && is_pii_ref(pii_ref))
+        .ok_or(ConnectError::AccountEntryInvalid)?;
+    Ok(AccountEntry {
+        pii_ref: AccountPiiRef::new(pii_ref).map_err(|_| ConnectError::AccountEntryInvalid)?,
+        account_id: BrokerAccountId(SecretString::from(id.to_owned())),
+    })
 }
