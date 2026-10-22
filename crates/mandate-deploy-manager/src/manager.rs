@@ -85,7 +85,11 @@ struct SlotState {
     /// started when not desired. The manager never stops it: it ends by its own exit, and only a
     /// crash is restarted. Such a start begins a new run: the last run's restarts, crash loop, and
     /// alert are behind it, so a later switch after an unapplied loop is tried, and reported, again.
-    /// A deployment on the account clears it (`resume`), so a later loop is an ordinary one.
+    /// Only a later start for a deployment, a request, or an exchange, its successful end, or a
+    /// stop of its generation (which the manager journals only for a generation it does not hold, so
+    /// a replay agrees) clears it: a deployment and
+    /// retirement while it runs leave it held, so the retirement never stops it (DEC-2344 item 3).
+    /// Its crash loop leaves a switch unapplied only if no agent wants it at the loop.
     held: bool,
     /// For an executor: its crash loop was journaled while `held`, so a switch is unapplied and its
     /// alert is [`KILL_SWITCH_UNAPPLIED`].
@@ -287,7 +291,7 @@ impl Manager {
                         }
                         Cause::Restart => state.restarts.push(*at),
                         Cause::KillSwitch => {
-                            state.held = held;
+                            state.held |= held;
                             if held {
                                 state.restarts.clear();
                                 state.looped = false;
@@ -299,16 +303,17 @@ impl Manager {
                 }
             }
             Fact::StopIssued { slot, generation } => {
-                self.slots
-                    .entry(slot.clone())
-                    .or_default()
-                    .stopping
-                    .insert(*generation);
+                let state = self.slots.entry(slot.clone()).or_default();
+                state.stopping.insert(*generation);
+                if *generation == state.generation {
+                    state.held = false;
+                }
             }
             Fact::CrashLooped { slot } => {
+                let wanted = self.desired(slot);
                 let state = self.slots.entry(slot.clone()).or_default();
                 state.looped = true;
-                state.unapplied = state.held;
+                state.unapplied = state.held && !wanted;
             }
         }
     }
@@ -396,7 +401,6 @@ impl Manager {
             state.looped = false;
             state.alerted = false;
             state.restarts.clear();
-            state.held = false;
             state.unapplied = false;
         }
     }
