@@ -126,7 +126,7 @@ impl Bao {
         };
         let credentials = provision(&direct, &operator, &[c("c1"), c("c2")], None)
             .await
-            .unwrap();
+            .unwrap_or_else(|e| panic!("provisioning the test vault at {address}: {e:?}"));
         let target: SocketAddr = address
             .trim_start_matches("https://")
             .parse()
