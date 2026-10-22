@@ -187,12 +187,11 @@ impl ExecutorVault {
     /// Takes a code: renames it to a fresh name of 16 random bytes, reads and decrypts it there,
     /// and unlinks it. The rename is atomic and never replaces an existing name, so of any number
     /// of concurrent takers exactly one gets the code and the rest `None` (DEC-2628 item 2). An
-    /// entry this call cannot decrypt, such as one bound to another connection, is renamed back
-    /// and refused, so a wrong taker destroys nothing; it hides the code from the rightful taker
-    /// only for that moment. The rename back never replaces a code written meanwhile
-    /// ([`put_back`]). A delete whose sweep unlinks the take name while a take is reading it fails
-    /// the take closed: the take finds nothing and answers `None`, which the exchange reads as
-    /// `CodeMissing`.
+    /// entry this call cannot decrypt, such as one bound to another connection, is refused and
+    /// discarded, never renamed back ([`discard_refused_take`]): the rightful run then finds no code
+    /// and loses the connect, but no superseded code can come back. A delete whose sweep races a
+    /// take gives that take either the code, when the take read it first, or `None`, which the
+    /// exchange reads as `CodeMissing`; it never gives a code twice.
     pub fn take_code(&self, entry: &Entry) -> Result<Option<SecretSlice<u8>>, VaultError> {
         let path = entry_path(&self.vault_dir, entry);
         let taken = taken_path(&path, entry)?;
@@ -224,22 +223,19 @@ impl ExecutorVault {
         match read {
             Ok(secret) => unlink(&taken).map(|()| secret),
             Err(error) => {
-                put_back(&taken, &path);
+                discard_refused_take(&taken);
                 Err(error)
             }
         }
     }
 }
 
-/// Renames a refused take at `taken` back to `path`, never replacing a code the API wrote there
-/// meanwhile: when one was, that newer code stays and the refused entry is unlinked. A rename that
-/// fails otherwise leaves the refused entry under its take name, for the next delete's sweep.
-pub(crate) fn put_back(taken: &Path, path: &Path) {
-    if let Err(rustix::io::Errno::EXIST) =
-        renameat_with(CWD, taken, CWD, path, RenameFlags::NOREPLACE)
-    {
-        let _swept_by_the_next_delete_if_this_fails = unlink(taken);
-    }
+/// Unlinks a refused take at `taken` and never renames it back: the entry may have been
+/// superseded by a fresh code, and even taken and consumed, since the take, so a put-back could
+/// return a code a later run already replaced. The rightful run finds no code and loses the
+/// connect, which fails closed; a failed unlink leaves the name for the next delete's sweep.
+pub(crate) fn discard_refused_take(taken: &Path) {
+    let _swept_by_the_next_delete_if_this_fails = unlink(taken);
 }
 
 /// The prefix of every name a take of `entry` uses.

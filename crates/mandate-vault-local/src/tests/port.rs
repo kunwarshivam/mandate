@@ -12,7 +12,7 @@ use super::fixtures::{code, conn, token};
 use super::layout::Layout;
 use crate::VaultError;
 use crate::port::{ApiPort, ExecutorPort};
-use crate::store::{put_back, sweep_taken};
+use crate::store::{discard_refused_take, sweep_taken};
 
 fn key() -> VaultKey {
     VaultKey("ws/c1".to_owned())
@@ -85,14 +85,14 @@ fn a_code_goes_in_through_the_api_and_out_through_the_executor() {
 fn a_code_bound_to_another_connection_or_environment_is_refused() {
     let layout = Layout::new();
     let (api, executor) = layout.both();
-    ApiPort {
-        vault: &api,
-        connection_id: conn("c1"),
-        environment: Environment::Paper,
-    }
-    .put_code(&key(), code_secret("c"), verifier("v"))
-    .unwrap();
     for (connection, environment) in [("c2", Environment::Paper), ("c1", Environment::Live)] {
+        ApiPort {
+            vault: &api,
+            connection_id: conn("c1"),
+            environment: Environment::Paper,
+        }
+        .put_code(&key(), code_secret("c"), verifier("v"))
+        .unwrap();
         let mut port = ExecutorPort {
             vault: &executor,
             connection_id: conn(connection),
@@ -103,17 +103,18 @@ fn a_code_bound_to_another_connection_or_environment_is_refused() {
             Err(ConnectError::VaultUnavailable),
             "{connection} {environment:?}"
         );
+        let mut right = ExecutorPort {
+            vault: &executor,
+            connection_id: conn("c1"),
+            environment: Environment::Paper,
+        };
+        assert!(
+            right.take_code(&key()).unwrap().is_none(),
+            "{connection} {environment:?}: a refused take discards the code, so the rightful run \
+             loses the connect, and no code is ever put back where a fresher one may have been \
+             written and consumed"
+        );
     }
-    let mut right = ExecutorPort {
-        vault: &executor,
-        connection_id: conn("c1"),
-        environment: Environment::Paper,
-    };
-    let waiting = right.take_code(&key()).unwrap();
-    assert!(
-        waiting.is_some(),
-        "a refused take puts the code back for its own connection"
-    );
 }
 
 /// Of concurrent takers of one code, exactly one gets it and nothing is left behind (DEC-2628
@@ -404,29 +405,54 @@ fn a_sweep_that_cannot_list_the_directory_is_refused() {
     );
 }
 
-/// A refused take is put back where it was taken from, and leaves no take name behind.
+/// A refused take is unlinked, never renamed back.
 #[test]
-fn a_refused_take_is_put_back() {
+fn a_refused_take_is_discarded() {
     let layout = Layout::new();
     let path = layout.file(&code("ws/c1", "c1"));
-    let taken = path.with_file_name("put-back.taken-00");
+    let taken = path.with_file_name("refused.taken-00");
     std::fs::write(&taken, b"refused").unwrap();
-    put_back(&taken, &path);
-    assert_eq!(std::fs::read(&path).unwrap(), b"refused");
-    assert!(!taken.exists());
+    discard_refused_take(&taken);
+    assert!(!taken.exists(), "the refused entry is unlinked");
+    assert!(!path.exists(), "nothing is renamed back");
 }
 
-/// A fresh code the API writes while a wrong-binding take holds the entry is never replaced by
-/// that take's put-back: the fresh code stays for the rightful taker, and the refused entry is
-/// unlinked.
+/// A fresh code the API writes while a wrong-binding take holds the entry is left for the
+/// rightful taker.
 #[test]
-fn a_put_back_never_replaces_a_code_written_meanwhile() {
+fn a_refused_take_never_touches_a_code_written_meanwhile() {
     let layout = Layout::new();
     let (api, executor) = layout.both();
-    let entry = code("ws/c1", "c1");
-    let path = layout.file(&entry);
-    let taken = path.with_file_name("put-back.taken-01");
+    let path = layout.file(&code("ws/c1", "c1"));
+    let taken = path.with_file_name("refused.taken-01");
     std::fs::write(&taken, b"refused").unwrap();
+    ApiPort {
+        vault: &api,
+        connection_id: conn("c1"),
+        environment: Environment::Paper,
+    }
+    .put_code(&key(), code_secret("fresh"), verifier("fresh-verifier"))
+    .unwrap();
+    discard_refused_take(&taken);
+    let mut exec_port = ExecutorPort {
+        vault: &executor,
+        connection_id: conn("c1"),
+        environment: Environment::Paper,
+    };
+    let waiting = exec_port.take_code(&key()).unwrap().unwrap();
+    assert_eq!(waiting.code.0.expose_secret(), "fresh");
+}
+
+/// The resurrection interleaving: a wrong taker holds the old entry, a fresh code is written and
+/// the rightful run takes and consumes it, then the wrong taker finishes. Nothing comes back: the
+/// superseded code is never readable again.
+#[test]
+fn a_superseded_code_is_never_resurrected() {
+    let layout = Layout::new();
+    let (api, executor) = layout.both();
+    let path = layout.file(&code("ws/c1", "c1"));
+    let taken = path.with_file_name("refused.taken-02");
+    std::fs::write(&taken, b"superseded").unwrap();
     let mut api_port = ApiPort {
         vault: &api,
         connection_id: conn("c1"),
@@ -435,8 +461,6 @@ fn a_put_back_never_replaces_a_code_written_meanwhile() {
     api_port
         .put_code(&key(), code_secret("fresh"), verifier("fresh-verifier"))
         .unwrap();
-    put_back(&taken, &path);
-    assert!(!taken.exists(), "the refused entry is unlinked");
     let mut exec_port = ExecutorPort {
         vault: &executor,
         connection_id: conn("c1"),
@@ -444,4 +468,8 @@ fn a_put_back_never_replaces_a_code_written_meanwhile() {
     };
     let waiting = exec_port.take_code(&key()).unwrap().unwrap();
     assert_eq!(waiting.code.0.expose_secret(), "fresh");
+    discard_refused_take(&taken);
+    assert!(!path.exists(), "the superseded code is not put back");
+    assert!(!taken.exists());
+    assert!(exec_port.take_code(&key()).unwrap().is_none());
 }
