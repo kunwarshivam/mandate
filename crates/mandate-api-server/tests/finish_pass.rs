@@ -10,7 +10,9 @@ use std::time::Duration;
 
 use common::{ManualClock, MemJournal, Scripted};
 use mandate_api_server::clock::Clock;
-use mandate_api_server::finish::{CONNECT_DEADLINE_SECS, Fingerprints, Judged, Unbacked};
+use mandate_api_server::finish::{
+    CONNECT_DEADLINE_SECS, Fingerprints, Judged, Judging, ReleaseFailed, Released, Unbacked,
+};
 use mandate_api_server::finish_pass::{
     Alerts, DeleteFailed, Deleted, Finisher, LineAlerts, TEARDOWN_RUNBOOK, TEARDOWN_STALLED,
     Teardown, passes,
@@ -177,19 +179,26 @@ fn check_on(journal: &MemJournal, connection: &str, account_ref: &str, passed: b
 struct Unique;
 
 impl Fingerprints for Unique {
-    fn judge(&self, _request: &RequestMembers, _account_pii_ref: &str) -> Judged {
-        Judged::Unique
+    fn judge<'a>(&'a self, _request: &'a RequestMembers, _account_pii_ref: &'a str) -> Judging<'a> {
+        Box::pin(std::future::ready(Judged::Unique))
     }
 
-    fn release(&self, _connection: &ConnectionId, _account_ref: &AccountRef) {}
+    fn release<'a>(
+        &'a self,
+        _connection: &'a ConnectionId,
+        _account_ref: &'a AccountRef,
+    ) -> Released<'a> {
+        Box::pin(std::future::ready(Ok(())))
+    }
 }
 
 /// A fingerprint port that answers `Unique` and records each release with the teardown's deletes
-/// so far.
+/// so far, failing the releases of the connections in `failing`.
 #[derive(Clone)]
 struct Releases {
     deletes: Deletes,
     calls: Arc<Mutex<Vec<(String, String, usize)>>>,
+    failing: Arc<Mutex<Vec<String>>>,
 }
 
 impl Releases {
@@ -199,17 +208,32 @@ impl Releases {
 }
 
 impl Fingerprints for Releases {
-    fn judge(&self, _request: &RequestMembers, _account_pii_ref: &str) -> Judged {
-        Judged::Unique
+    fn judge<'a>(&'a self, _request: &'a RequestMembers, _account_pii_ref: &'a str) -> Judging<'a> {
+        Box::pin(std::future::ready(Judged::Unique))
     }
 
-    fn release(&self, connection: &ConnectionId, account_ref: &AccountRef) {
+    fn release<'a>(
+        &'a self,
+        connection: &'a ConnectionId,
+        account_ref: &'a AccountRef,
+    ) -> Released<'a> {
         let deletes = self.deletes.calls.lock().unwrap().len();
         self.calls.lock().unwrap().push((
             connection.as_str().to_owned(),
             account_ref.as_str().to_owned(),
             deletes,
         ));
+        let failed = self
+            .failing
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|failing| failing == connection.as_str());
+        Box::pin(std::future::ready(if failed {
+            Err(ReleaseFailed)
+        } else {
+            Ok(())
+        }))
     }
 }
 
@@ -321,6 +345,7 @@ fn recorded() -> (Arc<MemJournal>, Deletes, Raised, Releases, Pass<Releases>) {
     let releases = Releases {
         deletes: deletes.clone(),
         calls: Arc::default(),
+        failing: Arc::default(),
     };
     let raised = Raised::default();
     let finisher = restarted(&journal, releases.clone(), &deletes, &raised);
@@ -803,4 +828,47 @@ fn the_passes_wait_while_the_clock_cannot_be_read() {
     run_passes(finisher, Arc::new(NoClock), Duration::from_millis(1));
     assert_eq!(deletes.take(), []);
     assert!(journal.appends.lock().unwrap().is_empty());
+}
+
+/// DEC-2348 item 2: a release that fails leaves its request uncleared, so the next pass deletes
+/// and releases it again, until the release succeeds; then nothing more.
+#[test]
+#[ignore = "pending E10-13"]
+fn a_release_that_fails_is_retried_until_it_succeeds() {
+    let (journal, deletes, raised, releases, mut finisher) = recorded();
+    request(&journal, A, 2, "oauth");
+    close(&journal, "ConnectionRevoked", A);
+    releases.failing.lock().unwrap().push(A.to_owned());
+    pass(&mut finisher, OPENED + 31);
+    assert_eq!(releases.take(), [(A.to_owned(), account(A), 1)]);
+    pass(&mut finisher, OPENED + 36);
+    assert_eq!(
+        releases.take(),
+        [(A.to_owned(), account(A), 2)],
+        "deleted and released again"
+    );
+    releases.failing.lock().unwrap().clear();
+    pass(&mut finisher, OPENED + 41);
+    assert_eq!(releases.take(), [(A.to_owned(), account(A), 3)]);
+    pass(&mut finisher, OPENED + 46);
+    assert_eq!(releases.take(), [], "cleared");
+    assert_eq!(deletes.of(), [A, A, A]);
+    assert_eq!(raised.take(), [], "within its deadline");
+}
+
+/// DEC-2348 items 1 and 2: a release that keeps failing at or past the deadline raises the
+/// stalled alert once, as a delete that keeps failing does.
+#[test]
+#[ignore = "pending E10-13"]
+fn a_release_that_keeps_failing_raises_one_alert_past_the_deadline() {
+    let (journal, _, raised, releases, mut finisher) = recorded();
+    request(&journal, A, 2, "oauth");
+    close(&journal, "ConnectionRevoked", A);
+    releases.failing.lock().unwrap().push(A.to_owned());
+    pass(&mut finisher, OPENED + CONNECT_DEADLINE_SECS - 1);
+    assert_eq!(raised.take(), []);
+    pass(&mut finisher, OPENED + CONNECT_DEADLINE_SECS);
+    assert_eq!(raised.take(), [STALLED]);
+    pass(&mut finisher, OPENED + CONNECT_DEADLINE_SECS + 5);
+    assert_eq!(raised.take(), [], "once per request");
 }

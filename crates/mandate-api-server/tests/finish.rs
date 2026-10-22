@@ -3,10 +3,11 @@
 //! `plan_finish` is asked for each, the deadline and the fingerprint port included.
 
 use mandate_api_server::finish::{
-    CONNECT_DEADLINE_SECS, Checked, Fingerprints, Judged, Pass, Request, Unbacked, Unreadable,
-    checked, decide, request,
+    CONNECT_DEADLINE_SECS, Checked, Fingerprints, Judged, Judging, Pass, Released, Request,
+    Unbacked, Unreadable, checked, request,
 };
 use mandate_canon::Digest;
+use mandate_connections::ConnectError;
 use mandate_connections::checks::Reason;
 use mandate_connections::manager::{
     FinishPlan, FinishRefusal, ManagerEffect, RefusedAs, RequestFold, RequestMembers,
@@ -133,19 +134,46 @@ fn members() -> RequestMembers {
 }
 
 /// A fingerprint port that answers `judged` and records what it was asked.
-struct Answers(Judged, std::cell::RefCell<Vec<String>>);
+struct Answers(Judged, std::sync::Mutex<Vec<String>>);
 
 impl Fingerprints for Answers {
-    fn judge(&self, request: &RequestMembers, account_pii_ref: &str) -> Judged {
+    fn judge<'a>(&'a self, request: &'a RequestMembers, account_pii_ref: &'a str) -> Judging<'a> {
         assert_eq!(request, &members());
-        self.1.borrow_mut().push(account_pii_ref.to_owned());
-        self.0.clone()
+        self.1.lock().unwrap().push(account_pii_ref.to_owned());
+        Box::pin(std::future::ready(self.0.clone()))
     }
-    fn release(&self, _connection: &ConnectionId, _account_ref: &AccountRef) {}
+
+    fn release<'a>(
+        &'a self,
+        _connection: &'a ConnectionId,
+        _account_ref: &'a AccountRef,
+    ) -> Released<'a> {
+        Box::pin(std::future::ready(Ok(())))
+    }
 }
 
 fn answering(judged: Judged) -> Answers {
-    Answers(judged, std::cell::RefCell::default())
+    Answers(judged, std::sync::Mutex::default())
+}
+
+/// The pass's decision, on a runtime of the test's own.
+fn decide(
+    request: &Request,
+    checked: Result<Option<Checked>, Unreadable>,
+    fingerprints: &impl Fingerprints,
+    now: UtcNanos,
+    restarted: bool,
+) -> Result<Pass, ConnectError> {
+    tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap()
+        .block_on(mandate_api_server::finish::decide(
+            request,
+            checked,
+            fingerprints,
+            now,
+            restarted,
+        ))
 }
 
 fn refused(
@@ -355,7 +383,7 @@ fn a_unique_passed_check_establishes_with_the_scopes_caused_by_the_check() {
         }
     );
     assert_eq!(
-        *port.1.borrow(),
+        *port.1.lock().unwrap(),
         [PII.to_owned()],
         "judged by its reference"
     );

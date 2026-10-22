@@ -146,7 +146,7 @@ impl<F: Fingerprints, T: Teardown, A: Alerts> Finisher<F, T, A> {
             let Ok(Pass::Finish {
                 plan: FinishPlan::Commit(effects),
                 causation,
-            }) = decide(&request, checked, &self.fingerprints, now, restarted)
+            }) = decide(&request, checked, &self.fingerprints, now, restarted).await
             else {
                 continue;
             };
@@ -207,7 +207,8 @@ impl<F: Fingerprints, T: Teardown, A: Alerts> Finisher<F, T, A> {
             return;
         }
         if self.teardown.delete(&closed.0).await.is_ok() {
-            self.fingerprints.release(&closed.0, &closed.1);
+            let _failed_release_not_yet_retried =
+                self.fingerprints.release(&closed.0, &closed.1).await;
             self.cleared.insert(closed);
         } else {
             self.stalled(closed, deadline, now);

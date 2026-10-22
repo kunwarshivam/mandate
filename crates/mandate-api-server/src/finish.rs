@@ -4,6 +4,8 @@
 //! and what it answers. It decides only; the pass that appends and tears down is the server's.
 
 use std::collections::BTreeSet;
+use std::future::{Future, ready};
+use std::pin::Pin;
 
 use mandate_canon::{Value, parse};
 use mandate_connections::ConnectError;
@@ -71,15 +73,29 @@ pub enum Judged {
     CannotAnswer,
 }
 
+/// A fingerprint port's judgement of one request.
+pub type Judging<'a> = Pin<Box<dyn Future<Output = Judged> + Send + 'a>>;
+
+/// A release that did not reach the vault, or that the vault refused; the next pass retries it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReleaseFailed;
+
+/// One release's answer.
+pub type Released<'a> = Pin<Box<dyn Future<Output = Result<(), ReleaseFailed>> + Send + 'a>>;
+
 /// Where the finish has checks 3 and 4 judged: the account behind `account_pii_ref` against the
 /// request's connection and every established one.
-pub trait Fingerprints {
-    fn judge(&self, request: &RequestMembers, account_pii_ref: &str) -> Judged;
+pub trait Fingerprints: Send + Sync {
+    fn judge<'a>(&'a self, request: &'a RequestMembers, account_pii_ref: &'a str) -> Judging<'a>;
 
     /// Frees the fingerprint the closed request of `connection` on `account_ref` held, once its
     /// deletes have succeeded (DEC-2348 item 2). A restarted pass calls it again, so it is
-    /// idempotent.
-    fn release(&self, connection: &ConnectionId, account_ref: &AccountRef);
+    /// idempotent; a release that fails is retried on the next pass.
+    fn release<'a>(
+        &'a self,
+        connection: &'a ConnectionId,
+        account_ref: &'a AccountRef,
+    ) -> Released<'a>;
 }
 
 /// The port while no fingerprint backing exists (DEC-2342 item 7): it answers nothing, so no
@@ -88,11 +104,17 @@ pub trait Fingerprints {
 pub struct Unbacked;
 
 impl Fingerprints for Unbacked {
-    fn judge(&self, _request: &RequestMembers, _account_pii_ref: &str) -> Judged {
-        Judged::CannotAnswer
+    fn judge<'a>(&'a self, _request: &'a RequestMembers, _account_pii_ref: &'a str) -> Judging<'a> {
+        Box::pin(ready(Judged::CannotAnswer))
     }
 
-    fn release(&self, _connection: &ConnectionId, _account_ref: &AccountRef) {}
+    fn release<'a>(
+        &'a self,
+        _connection: &'a ConnectionId,
+        _account_ref: &'a AccountRef,
+    ) -> Released<'a> {
+        Box::pin(ready(Ok(())))
+    }
 }
 
 /// What one pass does for a connection.
@@ -285,7 +307,7 @@ pub fn checked(
 ///
 /// # Errors
 /// `plan_finish`'s.
-pub fn decide(
+pub async fn decide(
     request: &Request,
     checked: Result<Option<Checked>, Unreadable>,
     fingerprints: &impl Fingerprints,
@@ -332,7 +354,7 @@ pub fn decide(
             Some(event_id),
         ),
         Some(Checked::Passed { event_id, pii_ref }) => {
-            match fingerprints.judge(members, &pii_ref) {
+            match fingerprints.judge(members, &pii_ref).await {
                 Judged::Unique => {
                     let scopes: BTreeSet<String> = check_scope(ESTABLISHED_SCOPES)?
                         .iter()
