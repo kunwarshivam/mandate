@@ -187,10 +187,10 @@ fn tombstoned(answer: Option<&Value>) -> bool {
     answer.and_then(|a| a.pointer(&format!("/data/data/{TOMBSTONE}"))) == Some(&Value::Bool(true))
 }
 
-/// The refusal a check-and-set write's answer means: [`refusal`]'s, except that a 400 whose one
-/// error is that the version moved on is [`SourceError::Missing`], since another taker got the
-/// code first.
-fn cas_refusal(status: u16, body: &[u8]) -> Result<(), SourceError> {
+/// The refusal a check-and-set overwrite's answer means, its status and its body: [`refusal`]'s,
+/// except that a 400 whose one error is that the version moved on is [`SourceError::Missing`],
+/// since another taker got the code first. No part of the body reaches the error.
+pub(crate) fn cas_refusal(status: u16, body: &[u8]) -> Result<(), SourceError> {
     let moved = json!(["check-and-set parameter did not match the current version"]);
     let lost = status == 400
         && serde_json::from_slice::<Value>(body)
@@ -557,12 +557,11 @@ impl OpenBaoSource {
 
     /// What a refused overwrite of the code at `data` means. The taker may only update, never
     /// create, so once another taker has deleted the code the overwrite is refused before its
-    /// version is checked: that is a lost race, and `None`, but only if the code is gone or a
-    /// tombstone when read again. Anything else stays [`SourceError::Denied`].
+    /// version is checked: that is a lost race, and `None`, but only if the code is gone when read
+    /// again. A code still there means the taker may not take it: [`SourceError::Denied`].
     async fn lost_or_denied(&self, data: &str) -> Result<Option<SecretSlice<u8>>, SourceError> {
         match self.call(Method::GET, data, None).await {
             Err(SourceError::Missing) => Ok(None),
-            Ok(read) if tombstoned(read.as_ref()) => Ok(None),
             Ok(_) => Err(SourceError::Denied),
             Err(e) => Err(e),
         }

@@ -8,7 +8,7 @@ use mandate_time::UtcNanos;
 use serde_json::{Value, json};
 
 use crate::openbao::{
-    OpenBaoConfig, OpenBaoSource, kubernetes_login_path, kubernetes_login_refusal,
+    OpenBaoConfig, OpenBaoSource, cas_refusal, kubernetes_login_path, kubernetes_login_refusal,
     kubernetes_login_verdict, kubernetes_namespace_verdict, provision, provisioned_identities,
     refusal, role_settings, seal_verdict, secret_id_identities,
 };
@@ -417,4 +417,40 @@ fn a_kubernetes_login_is_accepted_only_in_the_workspaces_namespace() {
         kubernetes_namespace_verdict(None, NAMESPACE),
         Err(SourceError::Malformed)
     );
+}
+
+/// A check-and-set overwrite that finds the version moved on lost to another taker, which is no
+/// code; every other answer keeps `refusal`'s meaning.
+#[test]
+fn an_overwrite_that_finds_the_version_moved_on_lost_its_race() {
+    let moved = br#"{"errors":["check-and-set parameter did not match the current version"]}"#;
+    assert_eq!(cas_refusal(400, moved), Err(SourceError::Missing));
+    assert_eq!(cas_refusal(200, moved), Ok(()));
+    for (status, body, want) in [
+        (403_u16, &moved[..], SourceError::Denied),
+        (500, &moved[..], SourceError::Unavailable),
+        (
+            400,
+            br#"{"errors":["permission denied"]}"#,
+            SourceError::Denied,
+        ),
+        (
+            400,
+            br#"{"errors":["check-and-set parameter did not match the current version","more"]}"#,
+            SourceError::Denied,
+        ),
+        (
+            400,
+            b"check-and-set parameter did not match the current version",
+            SourceError::Denied,
+        ),
+        (400, b"", SourceError::Denied),
+    ] {
+        assert_eq!(
+            cas_refusal(status, body),
+            Err(want),
+            "{status} {}",
+            String::from_utf8_lossy(body)
+        );
+    }
 }
