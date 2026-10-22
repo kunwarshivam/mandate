@@ -51,7 +51,7 @@ enum Reading {
 /// The account stream's catalogue (journal spec §9): every event type `mandate-journal`'s
 /// `stream_event_types` lists for an account stream, and how the fold reads each. A table rather
 /// than a `match`, so no type can fall through to another type's reading.
-const ACCOUNT_STREAM: [(&str, Reading); 52] = [
+const ACCOUNT_STREAM: [(&str, Reading); 51] = [
     ("StreamOpened", Reading::Record),
     ("TradingDayStarted", Reading::Record),
     ("ClockAdvanced", Reading::Tick),
@@ -87,7 +87,6 @@ const ACCOUNT_STREAM: [(&str, Reading); 52] = [
     ("MarkUpdated", Reading::Mark),
     ("ProtectionChanged", Reading::Record),
     ("OwnerConfirmationReceived", Reading::Record),
-    ("AccountCloseRequested", Reading::Record),
     ("BrokerPositionObserved", Reading::Record),
     ("ReconciliationRun", Reading::Record),
     ("CompensatingEvent", Reading::RiskInput),
