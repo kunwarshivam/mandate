@@ -51,7 +51,7 @@ const AT: &str = "2026-10-17T14:00:00.000000000Z";
 const BUILD: &str = "sha256:3333333333333333333333333333333333333333333333333333333333333333";
 const AUDIENCE: [(&str, PushChannel); 2] = [
     ("founder", PushChannel::Email),
-    ("founder", PushChannel::WebPush),
+    ("founder", PushChannel::Phone),
 ];
 const KINDS: [&str; 3] = ["risk_limit", "agent_held", "kill_switch"];
 const MARK: &str = r#"{"instrument_id":"inst","price":"1","source":"quote","feed":"iex",

@@ -35,7 +35,7 @@ const NONE: &[&str] = &[];
 
 /// Every event type [`lookup`] admits, in its order. The test below reads `lookup`'s source, so
 /// a type added there and not here fails the build's tests.
-pub(crate) const EVENT_TYPES: [&str; 129] = [
+pub(crate) const EVENT_TYPES: [&str; 130] = [
     "StreamOpened",
     "MeterReserved",
     "MeterSettled",
@@ -165,6 +165,7 @@ pub(crate) const EVENT_TYPES: [&str; 129] = [
     "OwnerAlertSent",
     "NoticeIssued",
     "NoticeAttempted",
+    "NotificationAddressChanged",
 ];
 
 /// The catalogue entry for `event_type`. `TradingDayStarted` and `ClockAdvanced` are owned by the
@@ -300,6 +301,7 @@ pub(crate) fn lookup(event_type: &str) -> Option<Entry> {
         "ClockOffsetRecorded" | "ClockToleranceExceeded" => entry(&[Scheduler], NONE),
         "OwnerAlertSent" => entry(&[Account, Agent, Control], NONE),
         "NoticeIssued" | "NoticeAttempted" => entry(&[Notice], NONE),
+        "NotificationAddressChanged" => entry(CONTROL, NONE),
         _ => return None,
     };
     Some(e)
