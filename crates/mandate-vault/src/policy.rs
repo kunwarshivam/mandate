@@ -292,20 +292,6 @@ pub fn openbao_policy(
     Ok(hcl)
 }
 
-/// The connection manager's `read` of each request's fingerprint entry, in HCL, one block per
-/// request spelled out: the provisioner adds it to the manager's policy when the request is made
-/// (DEC-2345, DEC-2349), as no policy can name an entry before its request exists.
-///
-/// # Errors
-/// [`kv_path`]'s.
-pub fn fingerprint_reads(
-    requests: &[(ConnectionId, AccountRef)],
-    mounts: &Mounts,
-) -> Result<String, SourceError> {
-    let _ = (requests, mounts);
-    Err(SourceError::Unimplemented { story: "E21-32" })
-}
-
 /// Refuses as [`SourceError::Denied`] what [`allows`] does not allow.
 pub fn require(identity: &Identity, access: Access, path: &SecretPath) -> Result<(), SourceError> {
     if allows(identity, access, path) {
