@@ -417,3 +417,50 @@ fn a_frame_the_encoder_would_not_write_reads_as_nothing() {
         assert!(reply_from(refused.as_bytes()).is_err(), "{refused}");
     }
 }
+
+/// The position of `refusal` in [`RequestError::ALL`] as this test lists it. The match names every
+/// variant, so a new refusal fails to compile here until it is listed.
+fn listed(refusal: RequestError) -> usize {
+    match refusal {
+        RequestError::ForeignWorkspace => 0,
+        RequestError::AgentPurpose => 1,
+        RequestError::CallId => 2,
+        RequestError::UnknownModel => 3,
+        RequestError::HashMismatch => 4,
+        RequestError::NotAgentic => 5,
+        RequestError::RunKind => 6,
+        RequestError::Tools => 7,
+        RequestError::Transcript => 8,
+    }
+}
+
+/// DEC-2265 items 5 and 9: every refusal is in `ALL` once, has its own snake_case code, the code the
+/// spec's errors name, and crosses the wire as itself under it.
+#[test]
+#[ignore = "pending E21-62"]
+fn every_refusal_has_its_own_code_and_crosses_the_wire_as_itself() {
+    let expected = [
+        "foreign_workspace",
+        "agent_purpose",
+        "call_id",
+        "unknown_model",
+        "hash_mismatch",
+        "not_agentic",
+        "run_kind",
+        "tools",
+        "transcript",
+    ];
+    assert_eq!(RequestError::ALL.len(), expected.len());
+    for (position, refusal) in RequestError::ALL.into_iter().enumerate() {
+        assert_eq!(listed(refusal), position, "{refusal:?} out of place in ALL");
+        assert_eq!(refusal.code(), expected[position]);
+        let reply: Reply = Err(refusal);
+        let bytes = reply_bytes(&reply);
+        assert_eq!(reply_from(&bytes), Ok(reply));
+        let body = parse(&bytes).unwrap();
+        assert_eq!(
+            body.get("refused").and_then(Value::as_str),
+            Some(expected[position])
+        );
+    }
+}

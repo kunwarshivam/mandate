@@ -803,6 +803,31 @@ pub enum RequestError {
     Transcript,
 }
 
+impl RequestError {
+    /// Every refusal, in the order the gateway checks them.
+    pub const ALL: [Self; 9] = [
+        Self::ForeignWorkspace,
+        Self::AgentPurpose,
+        Self::CallId,
+        Self::UnknownModel,
+        Self::HashMismatch,
+        Self::NotAgentic,
+        Self::RunKind,
+        Self::Tools,
+        Self::Transcript,
+    ];
+
+    /// The refusal's code: its name on the wire and in a log line.
+    #[expect(
+        clippy::todo,
+        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+    )]
+    pub fn code(self) -> &'static str {
+        let _ = self;
+        todo!()
+    }
+}
+
 fn add_usage(a: Usage, b: Usage) -> Usage {
     Usage {
         input: a.input.saturating_add(b.input),
