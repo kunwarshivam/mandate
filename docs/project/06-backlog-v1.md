@@ -1338,20 +1338,29 @@ after U-A1 to U-A5 are recorded.
   minimum, not a deadline. A rotation is refused while any entry remains under the previous key,
   so the one slot never holds two retiring keys and no entry is orphaned. The first rotation is
   blocked until the re-seal tool exists. After a compromise of the previous key, it is dropped at
-  once, without waiting for the re-seal; every entry still under it is then a `RetiredKey` fault,
-  which the dispatcher records as `address_missing` and which raises `channel_lost`, and those
-  members set their addresses again.
+  once, without waiting for the re-seal. After a compromise of the current key, a new key is
+  installed at once as the current key, the compromised one becomes the previous key, and the
+  older previous key, if any, is dropped at once. Every entry still under a dropped key is then a
+  `RetiredKey` fault, which the dispatcher records as `address_missing` and which raises
+  `channel_lost`, and those members set their addresses again. The tool never erases. It lists
+  each entry it cannot open (a file check, a header, or a seal that fails) by workspace id and
+  `address_ref` in its report, exits non-zero, and raises one operator alert carrying those opaque
+  ids only. Such an entry counts as remaining under its key, so it blocks the previous key's
+  retirement and the next rotation until an operator erases it by `address_ref` (the writer's
+  `erase`). One corrupt entry therefore blocks rotation loudly, never silently.
   *`key_id` in §5.7* ([DEC-2120](decisions/DEC-2120.md) item 5): workspace API §5.7's "The vault's
   part" lists what an entry holds without the VAPID `key_id` that DEC-2503 item 5 stores there; add
   it, with the note that it is the workspace's current key id and so outside the step-up digest.
-  *Active addresses and the fold-error case in the specs* ([DEC-2120](decisions/DEC-2120.md) item
-  9; the specs' lanes own it, the L2 lead raises it; one spec-only PR, ES-22): workspace API §4.11
-  ("Active addresses" and "Deactivation"), identity spec §5.2 step 3 (the removals may be absent
-  when the fold fails; the deactivation commits with one opaque operator alert), and journal
-  §9.15's active set (an address is active only when its `added` follows the member's latest
-  `MemberActivated` or `MemberReactivated` with no `MemberDeactivated` or `MemberRemoved` after
-  it, and no matching `removed` follows the `added`). L3 reviews §9.15 and L1 reviews §5.2. Until
-  it lands, the code follows DEC-2120 item 9, which only deletes or disregards more.
+  *Active addresses and the fold-error case in the specs* (DEC-2123, from
+  DEC-2120 item 9; one spec-only PR, ES-22, raised by the L2 lead): workspace API §4.11 ("Active
+  addresses" and "Deactivation") and §5.7's sweep text (the sweep erases only on positive evidence
+  from a fold that succeeded, keeps the entry and raises one opaque operator alert otherwise, and
+  waits a 7-day grace for an address dead only because a membership ended), identity spec §5.2
+  step 3 (the removals may be absent when the fold fails; the deactivation commits with one opaque
+  operator alert), and journal §9.15's active set (an address is active only when its `added`
+  follows the member's latest `MemberActivated` or `MemberReactivated` with no
+  `MemberDeactivated` or `MemberRemoved` after it, and no matching `removed` follows the `added`).
+  L3 reviews §9.15 and L1 reviews §5.2. Until it lands, the code follows DEC-2120 item 9.
 - **E8-16 (Should, M7)** As a reviewer, I want the minors of the notifications spec's round 1
   ([#558](https://github.com/kunwarshivam/mandate/pull/558); freeze rule) fixed in the spec:
   - HLD §6 flow C step 4 still says "an escalation chain (push → SMS → phone call)"; align it with
@@ -1466,9 +1475,10 @@ story buys a service, and none uses a real identity-provider account in tests (s
   `expected_head`; it touches no vault. A fold error never blocks the deactivation (coordinator
   ruling): the writer commits the `MemberDeactivated` or `MemberRemoved` without the removals and
   raises one operator alert with opaque ids only, and a test of the writer must pin that path.
-  Under DEC-2120 item 9's definition of an active address, the member's addresses stop being
-  active when the deactivation commits, with or without the removals, so the dispatcher sends
-  them nothing and the sweep erases their entries.
+  Under DEC-2120 item 9's serving definition, the member's addresses stop being active when the
+  deactivation commits, with or without the removals, so the dispatcher sends them nothing; the
+  sweep erases their entries on positive evidence (the start followed by the membership's end),
+  after a 7-day grace.
 - **E9-8 (Must, M8; SC)** As a workspace owner, I want my data unreachable from any other workspace.
   *Accepted when:* data APIs take only a `TenantContext` the authorization step constructs, with
   compile-fail tests for a bare workspace ID; and cross-workspace attack tests fail at the API, row-level
