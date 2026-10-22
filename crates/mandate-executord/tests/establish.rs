@@ -145,7 +145,6 @@ fn to_copy(original: &str) -> Result<Establishment, Error> {
 /// Item 1: no check, or a passed one the control services have not established, is connecting;
 /// the establishment its check caused, for its connection and account, is due to be copied.
 #[test]
-#[ignore = "pending E21-32"]
 fn only_the_establishment_of_the_passed_connect_check_is_due() -> Result<(), Error> {
     let journal = Journal::default();
     opened(&journal)?;
@@ -164,7 +163,6 @@ fn only_the_establishment_of_the_passed_connect_check_is_due() -> Result<(), Err
 
 /// Item 1: a failed latest `connect` check is never copied, even with an establishment it caused.
 #[test]
-#[ignore = "pending E21-32"]
 fn a_failed_check_is_never_copied() -> Result<(), Error> {
     let journal = Journal::default();
     opened(&journal)?;
@@ -177,7 +175,6 @@ fn a_failed_check_is_never_copied() -> Result<(), Error> {
 /// Items 1 and 4: a `connect` refusal or a revocation of the checked connection closes it before
 /// its copy, over an establishment too; another connection's, or another occasion's, does not.
 #[test]
-#[ignore = "pending E21-32"]
 fn a_refusal_or_revocation_closes_the_connection_before_its_copy() -> Result<(), Error> {
     for (event_type, connection, occasion, closed) in [
         ("ConnectionRefused", CONNECTION, "connect", true),
@@ -217,7 +214,6 @@ fn a_refusal_or_revocation_closes_the_connection_before_its_copy() -> Result<(),
 /// Item 1: a stream holding its copy is established, and a connection record that does not read
 /// refuses rather than guesses.
 #[test]
-#[ignore = "pending E21-32"]
 fn a_copy_establishes_and_an_unreadable_record_refuses() -> Result<(), Error> {
     let journal = Journal::default();
     opened(&journal)?;
@@ -256,7 +252,6 @@ fn a_copy_establishes_and_an_unreadable_record_refuses() -> Result<(), Error> {
 /// Item 2: the copy is the original's members and `risk_clock` on its whole second, with the
 /// original as cause; members that already hold `risk_clock` are refused.
 #[test]
-#[ignore = "pending E21-32"]
 fn the_copy_is_the_originals_members_and_the_risk_clock() -> Result<(), Error> {
     let Establishment::ToCopy(due) = to_copy(ESTABLISHED)? else {
         return Err("due".into());
@@ -527,7 +522,6 @@ fn an_increase_is_held_while_shut_and_decided_once_open() -> Result<(), Error> {
 /// against its registered schemas and rules, an account stream opened by a passed `connect`
 /// check commits the copy `copy_draft` writes as the next record.
 #[test]
-#[ignore = "pending E21-32"]
 fn the_journal_admits_the_copy() -> Result<(), Error> {
     const ULID_ACCOUNT: &str = "01J8Z2ACCT0000000000000001";
     let mut store = MemoryStore::default();
