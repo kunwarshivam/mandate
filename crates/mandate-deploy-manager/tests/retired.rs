@@ -198,6 +198,47 @@ fn a_kill_switch_start_that_ended_on_its_own_is_never_restarted() {
 }
 
 #[test]
+#[ignore = "pending E21-33"]
+fn a_kill_switch_start_that_crash_loops_before_it_ends_raises_kill_switch_unapplied() {
+    let journal = Journal::new();
+    let mut m = retired(&journal);
+    journal.services(&kill("connection", &connection_of(ACCOUNT), 1).1, at(10));
+    tick(&mut m, 10);
+    assert_eq!(
+        starts(&mut m, &ex(ACCOUNT)),
+        vec![1, 2],
+        "the switch's one start"
+    );
+    let mut second = 11;
+    for _ in 0..8 {
+        let before = starts(&mut m, &ex(ACCOUNT)).len();
+        m.orchestrator().fake.crash(&ex(ACCOUNT));
+        while second < 4000 && starts(&mut m, &ex(ACCOUNT)).len() == before {
+            tick(&mut m, second);
+            second += 1;
+        }
+    }
+    assert!(
+        starts(&mut m, &ex(ACCOUNT)).len() > 3,
+        "a crash before it ends is restarted, so one crash loses no switch"
+    );
+    assert!(
+        journal
+            .rows()
+            .iter()
+            .any(|row| row.event_type == "ProcessCrashLooped"),
+        "until the crash-loop bound"
+    );
+    let codes: Vec<&str> = m.alerts().0.iter().map(|alert| alert.code).collect();
+    assert_eq!(
+        codes,
+        vec!["kill_switch_unapplied"],
+        "an unapplied switch raises its own opaque alert, once, in place of crash_loop"
+    );
+    clean(&mut m);
+}
+
+#[test]
 fn no_kill_switch_and_none_that_covers_another_account_starts_an_executor_no_agent_wants() {
     let journal = Journal::new();
     let mut m = retired(&journal);
