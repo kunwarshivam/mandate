@@ -52,7 +52,9 @@ use mandate_process::State;
 use mandate_process::probe::{self, Probe, Status};
 use mandate_store::{MemoryStore, PgStore, Store};
 use mandate_time::UtcNanos;
-use mandate_vault::mounted::{SERVICE_ACCOUNT_TOKEN_DIR, read_service_account_token};
+use mandate_vault::mounted::{
+    SERVICE_ACCOUNT_TOKEN_DIR, read_service_account_namespace, read_service_account_token,
+};
 use mandate_vault::openbao::OpenBaoSource;
 use tokio::signal::unix::{SignalKind, signal};
 
@@ -214,10 +216,12 @@ fn leased_broker(
     let vault = vault_login(
         || read_service_account_token(Path::new(SERVICE_ACCOUNT_TOKEN_DIR)),
         |identity, jwt| {
+            let namespace = read_service_account_namespace(Path::new(SERVICE_ACCOUNT_TOKEN_DIR))?;
             runtime.block_on(OpenBaoSource::login_kubernetes(
                 &config,
                 identity,
                 &jwt,
+                &namespace,
                 host_now(),
             ))
         },
