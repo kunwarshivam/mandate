@@ -391,3 +391,24 @@ pub async fn challenge(
     }
     response
 }
+
+/// `POST /v1/reduction-sessions` (§4.10 route 2): 403 `forbidden` without the browser marks;
+/// otherwise the named challenge is taken out first, the assertion judged
+/// ([`crate::opening::judge`]), the presentation settled with the gate, and on an opening `201`
+/// with `commands/reduction-session-opened` and the session cookie, ending a session the call
+/// presented. Every refusal after the browser check, an invalid body included, is the one 401
+/// with the same headers, no cookie set or cleared, and nothing ended. Both answers carry
+/// `Cache-Control: no-store`.
+#[expect(
+    clippy::todo,
+    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+)]
+pub async fn open(
+    State(app): State<Arc<App>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let _ = (app, peer, headers, body);
+    todo!()
+}
