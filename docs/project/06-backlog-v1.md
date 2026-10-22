@@ -3048,9 +3048,12 @@ enables `live` (ES-23, OPS-5).
     (DEC-1176) and its callback, the exchange's redemption and success, the executor's `exchanged`
     start and its connect check, and the API's `ConnectionEstablished`, then a seeded run with the
     exchange's egress to the fixture removed, which must refuse the connect. It waits on:
-    - the token-exchange image in the cell (lane D1, next): its Dockerfile, the cell's build, and
+    - the token-exchange image in the cell (lane D1, #2219): its Dockerfile, the cell's build, and
       `built` in `processes.json`; `cargo xtask cell up` then turns `oauthFixture.enabled` on only
       when the stub's and the exchange's images are built;
+    - the exchange itself (lane X, E10-13 slice 5b-3b): `mandate-token-exchange` passes its start
+      checks and exits `token_exchange_not_yet_exchanging`, so its pod fails, no executor starts,
+      and the connect ends by its deadline;
     - the fixture pod itself: #2213, #2214 and #2215 (DEC-1176);
     - `MANDATE_ALPACA_AUTHORIZE_URL` in the API (lane X): the API names Alpaca's authorize page
       alone, so the browser cannot reach the fixture;
