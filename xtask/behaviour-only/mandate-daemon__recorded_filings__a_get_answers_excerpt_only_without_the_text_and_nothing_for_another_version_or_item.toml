@@ -1,0 +1,8 @@
+file = "crates/mandate-daemon/tests/recorded_filings.rs"
+test = "a_get_answers_excerpt_only_without_the_text_and_nothing_for_another_version_or_item"
+reason = """
+The cell's recorded plane keeps the filing reader's default `search` and `filing_text`, which
+answer `unavailable`, and reads no `text` member: the test fails on that behaviour, not at a stub,
+since a panicking stub would break the bench and the injection tests that already ask these reads.
+E19-16's filings slice (DEC-2328) implements them and deletes this row.
+"""

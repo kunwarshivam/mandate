@@ -16,18 +16,20 @@
 //! 13). It keeps `paused` or `stopped` only when the last readable view already was.
 
 use mandate_canon::{Object, Value, parse};
-use mandate_domain::{AgentMode, MarketSession};
+use mandate_domain::{AgentMode, AssetId, MarketSession};
 use mandate_journal::StoredEvent;
 use mandate_num::Price;
 use mandate_spec::SpecError;
+use mandate_spec::document::{LadderAction, OnComplete};
 use mandate_spec::risk::{
-    Input, Opening, Outcome, RiskEvent, RiskState, SessionClock, Snapshot, Step, risk_day,
+    GoalReason, Input, LiftReason, Opening, Outcome, RemovalReason, RestrictionReason, RiskEvent,
+    RiskState, SessionClock, Snapshot, Step, ThenAction, TriggerReason, risk_day,
 };
 use mandate_spec::validate::ValidatedMandate;
 use mandate_time::UtcNanos;
 
 use crate::ExecutorError;
-use crate::payload::{object, text};
+use crate::payload::{int, object, text};
 use crate::tripwire::TripwireState;
 
 /// How the fold reads an account-stream event type.
@@ -108,6 +110,83 @@ fn reading(event_type: &str) -> Option<Reading> {
         .iter()
         .find(|(name, _)| *name == event_type)
         .map(|(_, reading)| *reading)
+}
+
+/// The journal's spelling of each agent mode (journal spec §9.6's `to`).
+const MODES: [(AgentMode, &str); 4] = [
+    (AgentMode::Normal, "normal"),
+    (AgentMode::ExitsOnly, "exits_only"),
+    (AgentMode::Paused, "paused"),
+    (AgentMode::Stopped, "stopped"),
+];
+
+/// Why a limit triggered, as §9.27's `RiskLimitTriggered.reason` spells it.
+const TRIGGER_REASONS: [(TriggerReason, &str); 5] = [
+    (TriggerReason::HardTrigger, "hard_trigger"),
+    (TriggerReason::HardBreachPending, "hard_breach_pending"),
+    (TriggerReason::ResolvedAtRollover, "resolved_at_rollover"),
+    (TriggerReason::NewDayBreach, "new_day_breach"),
+    (TriggerReason::AfterReset, "after_reset"),
+];
+
+/// Why a limit lifted, as §9.27's `RiskLimitLifted.reason` spells it.
+const LIFT_REASONS: [(LiftReason, &str); 3] = [
+    (LiftReason::OwnerAcknowledged, "owner_acknowledged"),
+    (LiftReason::VersionLoosened, "version_loosened"),
+    (LiftReason::HardBreachCleared, "hard_breach_cleared"),
+];
+
+/// Why an instrument restriction changed, as §9.27's `InstrumentRestrictionChanged.reason` spells
+/// it: a mark's verdict, or §9.3's `UniverseChanged` reason.
+const RESTRICTION_REASONS: [(RestrictionReason, &str); 9] = [
+    (RestrictionReason::NoSaneMark, "no_sane_mark"),
+    (RestrictionReason::SaneMark, "sane_mark"),
+    (
+        RestrictionReason::Removal(RemovalReason::ThesisAdmitted),
+        "thesis_admitted",
+    ),
+    (
+        RestrictionReason::Removal(RemovalReason::ThesisExpired),
+        "thesis_expired",
+    ),
+    (
+        RestrictionReason::Removal(RemovalReason::ThesisInvalidated),
+        "thesis_invalidated",
+    ),
+    (
+        RestrictionReason::Removal(RemovalReason::LineageRetired),
+        "lineage_retired",
+    ),
+    (
+        RestrictionReason::Removal(RemovalReason::EligibilityLost),
+        "eligibility_lost",
+    ),
+    (
+        RestrictionReason::Removal(RemovalReason::OperatorHalt),
+        "operator_halt",
+    ),
+    (
+        RestrictionReason::Removal(RemovalReason::VersionApplied),
+        "version_applied",
+    ),
+];
+
+/// The journal's spelling of `value` in `table`. Every table above is total over its type, so a
+/// value it lacks is a record the fold cannot write.
+fn spelled<T: PartialEq + Copy>(
+    table: &[(T, &'static str)],
+    value: T,
+) -> Result<&'static str, UnreadableCause> {
+    table
+        .iter()
+        .find(|(known, _)| *known == value)
+        .map(|(_, name)| *name)
+        .ok_or(UnreadableCause::AppendFailed)
+}
+
+/// An optional spelling: the text, or `null`.
+fn nullable(name: Option<&str>) -> Value {
+    name.map_or(Value::Null, text)
 }
 
 /// A refusal to decide, which the fold fails closed on (DEC-2304 item 1).
@@ -267,8 +346,9 @@ impl<'c> AccountRiskFold<'c> {
     /// since a row before `head` may have bound it.
     ///
     /// # Errors
-    /// Whatever `RiskState::open` refuses, and `invalid_input` for a held opening, or an opening
-    /// after seq 1, that names no instrument.
+    /// Whatever `RiskState::open` refuses. `invalid_input` (`what: "instrument"`) for a held
+    /// opening, or an opening after seq 1, that names no instrument (DEC-2310 item 1), and for any
+    /// opening that names one that is not a canonical asset id (DEC-2313 item 1).
     #[expect(
         clippy::too_many_arguments,
         reason = "each is one of the fold's independent inputs, none derivable from another"
@@ -284,6 +364,9 @@ impl<'c> AccountRiskFold<'c> {
         tripwires: TripwireState,
     ) -> Result<Self, SpecError> {
         if instrument.is_none() && (!opening.position_qty.is_zero() || head > 1) {
+            return Err(SpecError::InvalidInput { what: "instrument" });
+        }
+        if instrument.is_some_and(|named| AssetId::parse(named).is_err()) {
             return Err(SpecError::InvalidInput { what: "instrument" });
         }
         let risk = RiskState::open(mandate, opening, calendar)?;
@@ -457,37 +540,173 @@ impl<'c> AccountRiskFold<'c> {
             .map_err(refused)
     }
 
-    /// The records a step journaled, as §9.27 closes them. B2a writes `RiskDayStarted` only, so any
-    /// other record is one it cannot append, and the view fails closed rather than hold a change it
-    /// has not journaled (`AGENTS.md` rule 5).
+    /// The records a step journaled, in the step's §5.2 order, each with the payload journal spec
+    /// §9.27 or §9.6 closes for it and the row as its cause. A record whose payload the fold cannot
+    /// build makes the view unreadable (`append_failed`) rather than hold a change it has not
+    /// journaled (`AGENTS.md` rule 5):
+    ///
+    /// - `KillSwitchActivated` is never returned. The fold never acts; the cancels and closes a
+    ///   `flatten_and_pause` rung asks for are slice C5's (DEC-2307 item 3).
+    /// - `AgentModeApplied` is the executor's own, and names as its restriction the action of the
+    ///   step's last `RiskLimitTriggered` before it (DEC-2308 item 3). A mode change with no trigger
+    ///   before it in the step names the limit or event that caused it, which B2b-2b writes; until
+    ///   then it fails closed.
+    /// - `InstrumentRestrictionChanged` names the bound instrument (DEC-2307 item 4, DEC-2308 item 2),
+    ///   which `open` and `bind` only ever bind to a canonical asset id or to one a mark named; a
+    ///   restriction on an instrument that is not a canonical asset id fails closed as a refusal to
+    ///   decide.
+    /// - `HighWaterMarkReset` and `PositionReleased` carry the acknowledging user, step-up evidence,
+    ///   and the canceled protective orders, which only the owner's input rows hold. The fold reads
+    ///   none of those inputs yet, so they fail closed, as do `MandateVersionApplied`,
+    ///   `UniverseChanged`, and `AgentStopped`, which the account stream's own writers journal.
     fn records(
         &self,
         row: &StoredEvent,
         clock: UtcNanos,
         outcome: &Outcome,
     ) -> Result<Vec<RiskAppend>, UnreadableCause> {
-        outcome
-            .journal
-            .iter()
-            .map(|event| match event {
-                RiskEvent::RiskDayStarted { day_start_equity } => Ok(RiskAppend {
-                    event_type: "RiskDayStarted",
-                    schema_version: 1,
-                    causation_id: Some(row.event_id.clone()),
-                    payload: object(vec![
-                        ("agent_id", text(self.agent.as_str())),
+        let snapshot = &outcome.snapshot;
+        let figures = || {
+            vec![
+                ("agent_equity", text(snapshot.agent_equity.to_string())),
+                (
+                    "high_water_mark",
+                    text(snapshot.high_water_mark.to_string()),
+                ),
+                ("drawdown", text(snapshot.drawdown.to_string())),
+                (
+                    "day_start_equity",
+                    text(snapshot.day_start_equity.to_string()),
+                ),
+                ("capital_base", text(snapshot.capital_base.to_string())),
+                ("inherited_loss", text(snapshot.inherited_loss.to_string())),
+                (
+                    "net_contributed",
+                    text(snapshot.net_contributed.to_string()),
+                ),
+            ]
+        };
+        let mut appends = Vec::new();
+        let mut last_action = None;
+        for (index, event) in outcome.journal.iter().enumerate() {
+            let (event_type, agent, mut members) = match event {
+                RiskEvent::RiskDayStarted { day_start_equity } => (
+                    "RiskDayStarted",
+                    "agent_id",
+                    vec![
                         (
                             "day",
                             text(risk_day(clock).map_err(refused)?.day.to_string()),
                         ),
                         ("day_start_equity", text(day_start_equity.to_string())),
-                        ("risk_clock", text(clock.to_string())),
-                    ])
-                    .map_err(|_| UnreadableCause::AppendFailed)?,
-                }),
-                _ => Err(UnreadableCause::AppendFailed),
-            })
-            .collect()
+                    ],
+                ),
+                RiskEvent::RiskLimitTriggered {
+                    limit,
+                    action,
+                    reason,
+                } => {
+                    last_action = Some(*action);
+                    let breach_time_s = outcome
+                        .breach_time_s(index)
+                        .ok()
+                        .flatten()
+                        .ok_or(UnreadableCause::AppendFailed)?;
+                    let reason = reason.map(|r| spelled(&TRIGGER_REASONS, r)).transpose()?;
+                    let mut members = figures();
+                    members.extend([
+                        ("limit", text(limit.journal_name())),
+                        ("action", text(action.as_str())),
+                        ("reason", nullable(reason)),
+                        (
+                            "breach_time_s",
+                            int(breach_time_s).map_err(|_| UnreadableCause::AppendFailed)?,
+                        ),
+                        ("metric", Value::Null),
+                        ("threshold", Value::Null),
+                        ("value", Value::Null),
+                    ]);
+                    ("RiskLimitTriggered", "agent_id", members)
+                }
+                RiskEvent::RiskLimitLifted {
+                    limit,
+                    action,
+                    reason,
+                } => {
+                    let reason = reason.map(|r| spelled(&LIFT_REASONS, r)).transpose()?;
+                    let mut members = figures();
+                    members.extend([
+                        ("limit", text(limit.journal_name())),
+                        ("action", nullable(action.map(LadderAction::as_str))),
+                        ("reason", nullable(reason)),
+                    ]);
+                    ("RiskLimitLifted", "agent_id", members)
+                }
+                RiskEvent::AgentModeApplied { to, .. } => {
+                    let restriction = last_action.ok_or(UnreadableCause::AppendFailed)?;
+                    (
+                        "AgentModeApplied",
+                        "agent",
+                        vec![
+                            ("to", text(spelled(&MODES, *to)?)),
+                            ("restriction", text(restriction.as_str())),
+                            ("originated", Value::Bool(true)),
+                        ],
+                    )
+                }
+                RiskEvent::InstrumentRestrictionChanged {
+                    restriction,
+                    reason,
+                    active,
+                } => {
+                    let instrument = self
+                        .instrument
+                        .as_deref()
+                        .filter(|named| AssetId::parse(named).is_ok())
+                        .ok_or(UnreadableCause::RefusedToDecide)?;
+                    (
+                        "InstrumentRestrictionChanged",
+                        "agent_id",
+                        vec![
+                            ("instrument", text(instrument)),
+                            ("restriction", text(restriction.as_str())),
+                            ("reason", text(spelled(&RESTRICTION_REASONS, *reason)?)),
+                            ("active", Value::Bool(*active)),
+                        ],
+                    )
+                }
+                RiskEvent::GoalCompleted {
+                    reason,
+                    then,
+                    on_complete,
+                } => (
+                    "GoalCompleted",
+                    "agent_id",
+                    vec![
+                        ("reason", nullable(reason.map(GoalReason::as_str))),
+                        ("then", nullable(then.map(ThenAction::as_str))),
+                        ("on_complete", nullable(on_complete.map(OnComplete::as_str))),
+                    ],
+                ),
+                RiskEvent::KillSwitchActivated { .. } => continue,
+                RiskEvent::HighWaterMarkReset { .. }
+                | RiskEvent::PositionReleased { .. }
+                | RiskEvent::MandateVersionApplied { .. }
+                | RiskEvent::UniverseChanged { .. }
+                | RiskEvent::AgentStopped { .. } => return Err(UnreadableCause::AppendFailed),
+            };
+            members.extend([
+                (agent, text(self.agent.as_str())),
+                ("risk_clock", text(clock.to_string())),
+            ]);
+            appends.push(RiskAppend {
+                event_type,
+                schema_version: 1,
+                causation_id: Some(row.event_id.clone()),
+                payload: object(members).map_err(|_| UnreadableCause::AppendFailed)?,
+            });
+        }
+        Ok(appends)
     }
 
     /// Records that the records the fold last returned could not be appended, which makes the

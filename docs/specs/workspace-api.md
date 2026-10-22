@@ -1693,11 +1693,13 @@ id and is used once, so a retried opening asks for a new challenge.
    body, and headers, no cookie set or cleared. Past the challenge, every request runs the same
    steps whatever it names:
    - the passkey lookup reads the whole fold and does not stop at a match;
-   - the signature is verified first, before anything is judged: against the passkey's key, or,
-     for an unknown passkey, against a fixed decoy key chosen by the signature's encoding, since
-     an assertion's authenticator data names no algorithm: an ECDSA signature's DER structure is
-     verified against the ES256 decoy, 64 raw bytes against the Ed25519 decoy, and any other
-     shape against the ES256 decoy;
+   - the signature is verified first, before anything is judged, by exactly one ES256 and one
+     Ed25519 check over the same signature, ES256 first, whatever the request names: the
+     passkey's key for its own algorithm and a fixed decoy key for the other, or both decoys
+     when the passkey is unknown or its key does not resolve, since a check of the wrong shape
+     costs no arithmetic and checking one algorithm alone would tell a held key, and its
+     algorithm, by time ([DEC-2324](../project/decisions/DEC-2324.md)); only the held key's check
+     answers, and a decoy's never does;
    - the membership and provider-refusal lookups always run, against a fixed decoy principal when
      the passkey is unknown;
    - only then are the results judged, together.

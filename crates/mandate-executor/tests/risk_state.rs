@@ -7,6 +7,12 @@
 //! E6-15 slice B2b-1 (DEC-2305, journal spec §9.30): a version-2 `MarkUpdated` steps the risk state
 //! with its verdict, a version-1 mark stays no verdict, and the reference cases' marks and ticks,
 //! driven as account-stream rows, give the harness's snapshots and records (DEC-2304 item 6).
+//!
+//! E6-15 slice B2b-2a (journal spec §9.27, DEC-2307 items 3 and 4): every record the risk state
+//! journals is appended with its closed payload, `AgentModeApplied` among them and the kill switch
+//! never, and `open` refuses an instrument that is not a canonical asset id (DEC-2313), so every
+//! instrument here is one. Until B2b-2 lands, each test that reaches such a record or refusal fails
+//! at its `Unimplemented` stub.
 
 use mandate_canon::{Key, Value, parse, to_canonical};
 use mandate_domain::{AgentMode, AssetClass, Environment, MarketSession};
@@ -500,6 +506,16 @@ fn open_case<'c>(
     mandate: &ValidatedMandate,
     calendar: &'c dyn RiskCalendar,
 ) -> AccountRiskFold<'c> {
+    opened(case, mandate, calendar, instrument(case)).unwrap()
+}
+
+/// [`open_case`] on the position's instrument `held`, or why `open` refused it.
+fn opened<'c>(
+    case: &Json,
+    mandate: &ValidatedMandate,
+    calendar: &'c dyn RiskCalendar,
+    held: &str,
+) -> Result<AccountRiskFold<'c>, SpecError> {
     let initial = |key: &str| case["initial"][key].as_str().unwrap().to_owned();
     let max_age = fixture()["harness_defaults"]["mark_max_age_s"].as_u64();
     let opening = Opening {
@@ -511,11 +527,16 @@ fn open_case<'c>(
         mark_max_age_s: u32::try_from(max_age.unwrap()).unwrap(),
     };
     let tripwires = TripwireState::default();
-    let held = Some(instrument(case));
     AccountRiskFold::open(
-        ACCOUNT, 1, AGENT, mandate, &opening, held, calendar, tripwires,
+        ACCOUNT,
+        1,
+        AGENT,
+        mandate,
+        &opening,
+        Some(held),
+        calendar,
+        tripwires,
     )
-    .unwrap()
 }
 
 /// A version-2 `MarkUpdated` for `instrument` in §9.30's member order, its `price` the bid.
@@ -538,12 +559,22 @@ fn mark(
     )
 }
 
-/// The instrument a case's marks quote: the reference cases name none, so BTC/USD for crypto and
-/// AAPL for an equity.
+/// `btc_accumulator`'s pinned BTC/USD, by its canonical asset ID (DEC-2313 item 1).
+const BTC: &str = "7b4a1c2e-1111-4a2b-9c3d-000000000001";
+
+/// `two_stock_swing`'s and `research_equity_pinned`'s pinned XYZ, by its canonical asset ID.
+const XYZ: &str = "7b4a1c2e-2222-4a2b-9c3d-000000000002";
+
+/// A second instrument no reference base pins, by a canonical asset ID: ETH/USD where a test names
+/// one.
+const ETH: &str = "7b4a1c2e-4444-4a2b-9c3d-000000000004";
+
+/// The instrument a case's position is and its marks quote: the reference cases name none, so the
+/// bases' pinned BTC/USD for crypto and XYZ for an equity.
 fn instrument(case: &Json) -> &'static str {
     match case["initial"]["asset_class"].as_str().unwrap() {
-        "crypto" => "BTC/USD",
-        _ => "AAPL",
+        "crypto" => BTC,
+        _ => XYZ,
     }
 }
 
@@ -606,23 +637,90 @@ fn check_snapshot(view: &RiskView, seq: u64, expect: &Json) {
     assert_eq!(instrument, names("instrument_restrictions"));
 }
 
-/// The appended records against a step's `journal`: every type in §5.2's order, and every member
-/// the step states of a §9.27 record.
-fn check_records(appends: &[RiskAppend], seq: u64, journal: &Json) {
-    let journal = journal.as_array().unwrap();
+/// The snapshot members §9.27 gives `RiskLimitTriggered` and `RiskLimitLifted` that a step's
+/// `expect` states.
+const SNAPSHOT_MEMBERS: [&str; 6] = [
+    "agent_equity",
+    "high_water_mark",
+    "drawdown",
+    "day_start_equity",
+    "capital_base",
+    "net_contributed",
+];
+
+/// `risk_limits`' base `RiskDayStarted` draft from the journal's test vectors, whose envelope every
+/// risk record the walks append is checked in.
+fn base_draft() -> Json {
+    let vectors = std::fs::read("../../fixtures/refcases/journal.json").unwrap();
+    let vectors: Json = serde_json::from_slice(&vectors).unwrap();
+    vectors["risk_limits"]["drafts"]["day_started"].clone()
+}
+
+/// Whether the journal accepts `append` on the account stream: §9.27 closes the risk records, and
+/// §9.6 closes `AgentModeApplied`, which names no configuration.
+fn accepted(base: &Json, append: &RiskAppend) -> bool {
+    let mut draft = base.clone();
+    draft["event_type"] = Json::from(append.event_type);
+    draft["schema_version"] = Json::from(append.schema_version);
+    draft["payload"] = serde_json::from_slice(&to_canonical(&append.payload)).unwrap();
+    if append.event_type == "AgentModeApplied" {
+        draft["config_refs"] = Json::Object(serde_json::Map::new());
+    }
+    let canonical = parse(&serde_json::to_vec(&draft).unwrap()).unwrap();
+    Draft::parse(&to_canonical(&canonical)).is_ok()
+}
+
+/// The appended records against a step: every type in §5.2's order but `KillSwitchActivated`, which
+/// the fold never runs (DEC-2307 item 3), and every member the step states but `AgentModeApplied`'s
+/// `from`, which §9.6's closed payload does not carry. Each record follows from its row at the row's
+/// clock for this agent and is one the journal accepts; a trigger or a lift carries the step's
+/// snapshot, `AgentModeApplied` is the executor's own and names the action of the step's last trigger
+/// before it as its restriction (DEC-2308 item 3), and an instrument restriction names the
+/// instrument the marks named (DEC-2307 item 4, DEC-2308 item 2).
+fn check_records(appends: &[RiskAppend], row: &StoredEvent, instrument: &str, step: &Json) {
+    let (seq, base) = (row.seq, base_draft());
+    let journal = step["expect"]["journal"].as_array().unwrap().iter();
+    let journal: Vec<&Json> = journal
+        .filter(|e| e["type"] != "KillSwitchActivated")
+        .collect();
     let types: Vec<&str> = appends.iter().map(|append| append.event_type).collect();
     let wanted: Vec<&str> = journal
         .iter()
         .map(|e| e["type"].as_str().unwrap())
         .collect();
     assert_eq!(types, wanted, "seq {seq}: the records, in order");
+    let mut action = None;
     for (append, entry) in appends.iter().zip(journal) {
-        if !CLOSED_RECORDS.contains(&append.event_type) {
+        let mode = append.event_type == "AgentModeApplied";
+        if entry["type"] == "RiskLimitTriggered" {
+            action = entry["action"].as_str();
+        }
+        if !mode && !CLOSED_RECORDS.contains(&append.event_type) {
             continue;
+        }
+        let text = |member: &str| append.payload.get(member).and_then(Value::as_str);
+        assert_eq!(append.causation_id.as_deref(), Some(row.event_id.as_str()));
+        assert_eq!(text("risk_clock"), step["at"].as_str(), "seq {seq}");
+        assert_eq!(text(if mode { "agent" } else { "agent_id" }), Some(AGENT));
+        assert!(accepted(&base, append), "seq {seq}: {append:?}");
+        match append.event_type {
+            "RiskLimitTriggered" | "RiskLimitLifted" => {
+                for member in SNAPSHOT_MEMBERS {
+                    let wanted = step["expect"][member].as_str();
+                    assert_eq!(text(member), wanted, "seq {seq}: {member}");
+                }
+            }
+            "InstrumentRestrictionChanged" => assert_eq!(text("instrument"), Some(instrument)),
+            "AgentModeApplied" => {
+                assert_eq!(append.payload.get("originated"), Some(&Value::Bool(true)));
+                assert_eq!(text("restriction"), action, "seq {seq}: the rung's action");
+            }
+            _ => {}
         }
         for (member, value) in entry.as_object().unwrap() {
             let actual = append.payload.get(member);
             let same = match value {
+                _ if mode && member == "from" => true,
                 Json::String(text) if member == "type" => text == append.event_type,
                 Json::String(text) => actual.and_then(Value::as_str) == Some(text.as_str()),
                 Json::Bool(flag) => actual == Some(&Value::Bool(*flag)),
@@ -634,9 +732,21 @@ fn check_records(appends: &[RiskAppend], seq: u64, journal: &Json) {
 }
 
 /// Folds a case's steps as account-stream rows from seq 2, a `mark` as a version-2 `MarkUpdated`
-/// and a `clock` or `risk_day_started` as a tick, and checks each against its `expect`.
-fn walk(fold: &mut AccountRiskFold<'_>, instrument: &str, steps: &[Json]) {
-    for (seq, step) in (2..).zip(steps) {
+/// and a `clock` or `risk_day_started` as a tick, checks each against its `expect`, and returns each
+/// step's records.
+fn walk(fold: &mut AccountRiskFold<'_>, instrument: &str, steps: &[Json]) -> Vec<Vec<RiskAppend>> {
+    walk_from(fold, instrument, 2, steps)
+}
+
+/// [`walk`] from the row at `first`.
+fn walk_from(
+    fold: &mut AccountRiskFold<'_>,
+    instrument: &str,
+    first: u64,
+    steps: &[Json],
+) -> Vec<Vec<RiskAppend>> {
+    let mut records = Vec::new();
+    for (seq, step) in (first..).zip(steps) {
         let text = |key: &str| step[key].as_str().unwrap();
         let row = match text("event") {
             "mark" => mark(
@@ -651,9 +761,11 @@ fn walk(fold: &mut AccountRiskFold<'_>, instrument: &str, steps: &[Json]) {
             other => panic!("not a mark or a tick: {other}"),
         };
         let appends = fold.fold(&row).unwrap();
-        check_records(&appends, seq, &step["expect"]["journal"]);
+        check_records(&appends, &row, instrument, step);
         check_snapshot(fold.view(), seq, &step["expect"]);
+        records.push(appends);
     }
+    records
 }
 
 fn readable_in(mode: AgentMode) -> RiskView {
@@ -714,7 +826,7 @@ fn a_version_1_mark_is_no_verdict_and_moves_nothing() {
         2,
         "MarkUpdated",
         1,
-        r#"{"instrument_id":"BTC/USD","price":"1","source":"quote","feed":"iex",
+        r#"{"instrument_id":"7b4a1c2e-1111-4a2b-9c3d-000000000001","price":"1","source":"quote","feed":"iex",
         "risk_clock":"2026-09-21T04:00:30.000000000Z"}"#,
     );
     assert_eq!(fold.fold(&v1).unwrap(), vec![]);
@@ -739,7 +851,7 @@ fn a_mark_for_a_second_instrument_makes_the_view_unreadable() {
     let mut fold = open_case(&case, &mandate, &Crypto);
     let first = mark(
         2,
-        "BTC/USD",
+        BTC,
         "2026-09-21T04:00:30.000000000Z",
         "57990",
         true,
@@ -752,7 +864,7 @@ fn a_mark_for_a_second_instrument_makes_the_view_unreadable() {
     assert_eq!(snapshot.agent_equity.to_string(), "9799");
     let other = mark(
         3,
-        "ETH/USD",
+        ETH,
         "2026-09-21T04:01:00.000000000Z",
         "1",
         true,
@@ -779,7 +891,7 @@ fn a_held_openings_first_mark_for_another_instrument_makes_the_view_unreadable()
     let mut fold = open_case(&case, &mandate, &Crypto);
     let other = mark(
         2,
-        "ETH/USD",
+        ETH,
         "2026-09-21T04:00:30.000000000Z",
         "59000",
         true,
@@ -836,7 +948,7 @@ fn a_not_sane_marks_step_ignores_its_bid() {
             let mut fold = open(&mandate, &Wall);
             let row = mark(
                 2,
-                "AAPL",
+                XYZ,
                 "2026-09-22T14:30:01.000000000Z",
                 bid,
                 false,
@@ -863,7 +975,7 @@ fn a_mark_past_new_york_midnight_with_no_tick_starts_no_risk_day() {
     let mut fold = open_case(&case, &mandate, &Crypto);
     let late = mark(
         2,
-        "BTC/USD",
+        BTC,
         "2026-09-22T04:00:30.000000000Z",
         "57990",
         true,
@@ -885,7 +997,7 @@ fn a_mark_after_version_2_is_an_unknown_schema_version() {
     let mut fold = open(&mandate, &Wall);
     let mut later = mark(
         2,
-        "AAPL",
+        XYZ,
         "2026-09-22T14:30:01.000000000Z",
         "1",
         true,
@@ -923,4 +1035,192 @@ fn mc_r13_session_marks_leave_an_equitys_equity_as_the_reference_case() {
     let mut fold = open_case(&case, &mandate, &calendar);
     let steps = case["steps"].as_array().unwrap();
     walk(&mut fold, instrument(&case), &steps[..3]);
+}
+
+/// MC-R13 in full: after its session marks, a mark that is not sane sets `stale_mark` at once, a sane
+/// one clears it, and the tick 120 regular-session seconds later sets it again (§5.2), each record
+/// naming the marks' `instrument_id`, the tick's included (DEC-2308 item 2).
+///
+/// The case steps no `risk_day_started` between its two days, while the account stream ticks at New
+/// York midnight and the fold starts the day at that tick (§5.4, DEC-2308 item 1). So the walk folds
+/// that tick between steps 2 and 3: E₀ becomes step 2's E, 10000, the E₀ every later step expects,
+/// and nothing else moves (30 regular-session seconds have passed since the last sane mark).
+#[test]
+fn mc_r13_session_and_insane_marks_fold_as_the_reference_case() {
+    let case = case("MC-R13");
+    let (mandate, calendar) = (case_mandate(&case), nyse());
+    let mut fold = open_case(&case, &mandate, &calendar);
+    let steps = case["steps"].as_array().unwrap();
+    walk(&mut fold, XYZ, &steps[..2]);
+    let midnight = fold.fold(&tick(4, "2026-09-22T04:00:00.000000000Z"));
+    let midnight = midnight.unwrap();
+    let [day] = midnight.as_slice() else {
+        panic!("one record: {midnight:?}");
+    };
+    let text = |member: &str| day.payload.get(member).and_then(Value::as_str);
+    assert_eq!(day.event_type, "RiskDayStarted");
+    assert_eq!(
+        text("day_start_equity"),
+        steps[1]["expect"]["agent_equity"].as_str()
+    );
+    walk_from(&mut fold, XYZ, 5, &steps[2..]);
+}
+
+/// MC-R01's ladder reaches `paused`, and a row the fold cannot read after it keeps `paused`, which
+/// holds every exit and protective order and never the kill switch (DEC-2304 item 3).
+#[test]
+fn an_unreadable_view_after_mc_r01s_paused_stays_paused() {
+    let case = case("MC-R01");
+    let (mandate, calendar) = (case_mandate(&case), nyse());
+    let mut fold = open_case(&case, &mandate, &calendar);
+    walk(&mut fold, XYZ, case["steps"].as_array().unwrap());
+    let head = readable_head(fold.view());
+    assert_eq!(fold.view().mode(), AgentMode::Paused);
+    let waived = row(head + 1, "LimitWaived", 1, "{}");
+    assert_eq!(fold.fold(&waived).unwrap(), vec![]);
+    let paused = RiskView::Unreadable {
+        cause: UnreadableCause::UnfoldedEventType,
+        head,
+        mode: AgentMode::Paused,
+    };
+    assert_eq!(fold.view(), &paused);
+    for path in EXITS {
+        assert!(paused.holds(path), "paused holds {path:?}");
+    }
+    assert!(!paused.holds(OrderPath::KillSwitch));
+}
+
+/// MC-R01's last mark crosses the `flatten_and_pause` rung: the fold returns the trigger, then
+/// `AgentModeApplied` to `paused` in §9.6's closed payload, and nothing that acts, since the kill
+/// switch the case journals is slice C5's action (DEC-2307 item 3). Every trigger of the walk
+/// carries a breach time of 0 s: `breach_confirm_s` is 0, a scale rung has no confirmation, and no
+/// rung is breached at the start of the interval before the mark that triggers it (§5.2, §5.6).
+#[test]
+fn a_flatten_and_pause_rung_returns_agent_mode_applied_and_nothing_that_acts() {
+    let case = case("MC-R01");
+    let (mandate, calendar) = (case_mandate(&case), nyse());
+    let mut fold = open_case(&case, &mandate, &calendar);
+    let records = walk(&mut fold, XYZ, case["steps"].as_array().unwrap());
+    let last = records.last().unwrap();
+    let types: Vec<&str> = last.iter().map(|append| append.event_type).collect();
+    assert_eq!(types, ["RiskLimitTriggered", "AgentModeApplied"]);
+    let text = |member: &str| last[0].payload.get(member).and_then(Value::as_str);
+    assert_eq!(text("limit"), Some("drawdown_ladder[2]"));
+    assert_eq!(text("action"), Some("flatten_and_pause"));
+    let applied = last[1].payload.as_object().unwrap();
+    let members: Vec<&str> = applied.keys().map(Key::as_str).collect();
+    assert_eq!(
+        members,
+        ["agent", "originated", "restriction", "risk_clock", "to"]
+    );
+    let member = |name: &str| applied[&Key::new(name).unwrap()].as_str();
+    assert_eq!(member("to"), Some("paused"));
+    assert_eq!(
+        member("restriction"),
+        Some("flatten_and_pause"),
+        "DEC-2308 item 3"
+    );
+    let triggers = records.iter().flatten();
+    for trigger in triggers.filter(|append| append.event_type == "RiskLimitTriggered") {
+        let breach = trigger.payload.get("breach_time_s").map(to_canonical);
+        assert_eq!(breach, Some(b"0".to_vec()), "{trigger:?}");
+    }
+    assert!(fold.view().holds(OrderPath::RiskExit), "paused holds exits");
+    assert!(!fold.view().holds(OrderPath::KillSwitch));
+}
+
+/// DEC-2307 item 4: an instrument restriction names the mark's `instrument_id` as written. MC-R13
+/// opens holding 100 shares, so a mark that is not sane sets `stale_mark` at once (§5.2), and the
+/// one record is this, member for member.
+#[test]
+fn an_instrument_restriction_names_the_marks_instrument_as_written() {
+    let case = case("MC-R13");
+    let (mandate, calendar) = (case_mandate(&case), nyse());
+    let mut fold = open_case(&case, &mandate, &calendar);
+    let clock = "2026-09-21T13:32:00.000000000Z";
+    let insane = mark(2, XYZ, clock, "99", false, "regular");
+    let payload = format!(
+        r#"{{"agent_id":"{AGENT}","instrument":"{XYZ}","restriction":"stale_mark",
+        "reason":"no_sane_mark","active":true,"risk_clock":"{clock}"}}"#
+    );
+    let record = RiskAppend {
+        event_type: "InstrumentRestrictionChanged",
+        schema_version: 1,
+        causation_id: Some(insane.event_id.clone()),
+        payload: parse(payload.as_bytes()).unwrap(),
+    };
+    assert_eq!(fold.fold(&insane).unwrap(), vec![record]);
+    assert_eq!(readable_head(fold.view()), 2);
+}
+
+/// DEC-2310 item 4: §5.2 never reads a not-sane mark's bid, so on MC-R20's held 0.1 BTC the same
+/// not-sane mark with two bids gives equal records and equal views. E stays at the allocation, 10000,
+/// and the mark sets `stale_mark` at once, which B2b-2 writes.
+#[test]
+fn a_not_sane_marks_step_ignores_its_bid_on_a_held_position() {
+    let case = case("MC-R20");
+    let mandate = case_mandate(&case);
+    let folded: Vec<(Vec<RiskAppend>, RiskView)> = ["1", "99999"]
+        .into_iter()
+        .map(|bid| {
+            let mut fold = open_case(&case, &mandate, &Crypto);
+            let clock = "2026-09-21T04:00:30.000000000Z";
+            let insane = mark(2, BTC, clock, bid, false, "crypto");
+            let appends = fold.fold(&insane).unwrap();
+            (appends, fold.view().clone())
+        })
+        .collect();
+    assert_eq!(folded[0], folded[1]);
+    let (appends, view) = &folded[0];
+    let types: Vec<&str> = appends.iter().map(|append| append.event_type).collect();
+    assert_eq!(types, ["InstrumentRestrictionChanged"]);
+    let RiskView::Readable { snapshot, head: 2 } = view else {
+        panic!("a held position's not-sane mark is readable: {view:?}");
+    };
+    assert_eq!(snapshot.agent_equity.to_string(), "10000");
+}
+
+/// DEC-2313 item 1: `open` binds only a canonical asset ID (lowercase `8-4-4-4-12` hexadecimal), so a
+/// held MC-R20 opening on the symbol, or on the asset ID in uppercase, is refused, and on the asset
+/// ID as the journal writes it is opened.
+#[test]
+fn an_opening_on_an_instrument_that_is_not_a_canonical_asset_id_is_refused() {
+    let case = case("MC-R20");
+    let mandate = case_mandate(&case);
+    let refused = Some(SpecError::InvalidInput { what: "instrument" });
+    let bad = [
+        "BTC/USD".to_owned(),
+        BTC.to_uppercase(),
+        BTC.replace('-', ""),
+        format!("{BTC}0"),
+        BTC[..35].to_owned(),
+        BTC.replacen('a', "g", 1),
+        format!(" {BTC}"),
+        format!("{BTC}\n"),
+        String::new(),
+    ];
+    for held in &bad {
+        let opened = opened(&case, &mandate, &Crypto, held);
+        assert_eq!(opened.err(), refused, "{held:?}");
+    }
+    assert!(opened(&case, &mandate, &Crypto, BTC).is_ok());
+    let flat = |named: &str| {
+        AccountRiskFold::open(
+            ACCOUNT,
+            1,
+            AGENT,
+            &mandate,
+            &opening(),
+            Some(named),
+            &Wall,
+            TripwireState::default(),
+        )
+        .err()
+    };
+    assert_eq!(
+        flat("XYZ"),
+        refused,
+        "a flat opening names no symbol either"
+    );
+    assert_eq!(flat(XYZ), None, "a flat opening on a canonical id");
 }
