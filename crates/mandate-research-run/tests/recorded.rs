@@ -59,7 +59,6 @@ fn edited(mut value: Value, path: &[&str], to: Option<Value>) -> Value {
 
 /// DEC-2210 item 1: the demo recording reads as the model its own text names.
 #[test]
-#[ignore = "pending E21-62"]
 fn the_demo_recording_reads_as_the_model_its_text_names() {
     let file = demo();
     let model = RecordedModel::read(&file).unwrap();
@@ -98,7 +97,6 @@ fn the_demo_recording_reads_as_the_model_its_text_names() {
 /// DEC-2210 item 2: the registry offers the entry on its one endpoint, probed with what the
 /// endpoint reports.
 #[test]
-#[ignore = "pending E21-62"]
 fn the_registry_offers_the_entry_on_its_one_endpoint() {
     let model = RecordedModel::read(&demo()).unwrap();
     let registry = model.registry().unwrap();
@@ -116,7 +114,6 @@ fn the_registry_offers_the_entry_on_its_one_endpoint() {
 /// Every member is required, none is defaulted, and an empty text is as missing as an absent one:
 /// each refuses with its own name.
 #[test]
-#[ignore = "pending E21-62"]
 fn each_member_missing_or_empty_refuses_with_its_name() {
     let paths: [&[&str]; 14] = [
         &["entry"],
@@ -174,7 +171,6 @@ fn each_member_missing_or_empty_refuses_with_its_name() {
 /// DEC-2266: an agentic recording's turns read in order, each call's arguments canonical, and its
 /// counts its own.
 #[test]
-#[ignore = "pending E21-62"]
 fn an_agentic_recording_reads_its_turns_in_order() {
     let file = agentic();
     let model = RecordedModel::read(&file).unwrap();
@@ -213,7 +209,6 @@ fn an_agentic_recording_reads_its_turns_in_order() {
 /// DEC-2266: turns refuse whole on an entry with no agentic loop, and on a call the entry does not
 /// declare, so no recording scripts a call its gateway would refuse.
 #[test]
-#[ignore = "pending E21-62"]
 fn turns_the_entry_could_not_serve_refuse_whole() {
     let turns = agentic().get("turns").unwrap().clone();
     assert_eq!(

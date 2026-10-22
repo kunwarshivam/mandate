@@ -6,16 +6,17 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 
-use mandate_canon::{Digest, Value, parse, to_canonical};
+use mandate_canon::{Digest, Value, parse};
 use mandate_domain::{AssetClass, AssetId};
-use mandate_gateway::money::{PriceTable, TokenPrice, Usage, Usd6};
-use mandate_gateway::registry::{Endpoint, Locality, Registry, Reported, Route, Status};
-use mandate_gateway::schema::fits;
+use mandate_gateway::money::Usd6;
+use mandate_gateway::registry::{Endpoint, Registry, Reported};
 use mandate_num::{Price, Qty};
 use mandate_research::{AllowlistVersion, SourceAllowlist, SourceId as AllowedSource};
+use mandate_research_run::recorded::{self, RecordedError, RecordedModel};
+pub use mandate_research_run::recorded::{RecordedReply, ScriptedTurn};
 use mandate_research_run::{
-    Bar, BarReader, EntryError, Filing, FilingReader, InstrumentFact, InstrumentReader, ItemId,
-    NewsItem, NewsReader, ReadError, ResearchEntry, SourceId, Symbol, TextQuery,
+    Bar, BarReader, Filing, FilingReader, InstrumentFact, InstrumentReader, ItemId, NewsItem,
+    NewsReader, ReadError, ResearchEntry, SourceId, Symbol, TextQuery,
 };
 use mandate_time::UtcNanos;
 
@@ -32,23 +33,6 @@ pub enum BundleError {
     },
     /// The gateway's registry refused the entry or its endpoint.
     Unregistered,
-}
-
-/// The model's one recorded reply: the output text the fake replays, its latency, and its usage.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RecordedReply {
-    pub output: String,
-    pub latency_ms: u64,
-    pub usage: Usage,
-}
-
-/// One scripted tool-call reply of an agentic run's turn (DEC-2266): each call's declared tool
-/// name and canonical arguments, in reply order, its latency, and its usage.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ScriptedTurn {
-    pub calls: Vec<(String, String)>,
-    pub latency_ms: u64,
-    pub usage: Usage,
 }
 
 /// One recorded daily bar, known `age_s` seconds before the read's cut-off.
@@ -139,28 +123,14 @@ impl Bundle {
     /// [`BundleError`] when a file is missing or unreadable, or a member is missing or invalid.
     pub fn load(dir: &Path) -> Result<Self, BundleError> {
         let research = Doc::read(dir, RESEARCH)?;
-        let entry = research.member("entry")?;
-        let endpoint = research.member("endpoint")?;
-        let caps = research.member("caps")?;
-        let reply = research.member("reply")?;
-        let pinned = ResearchEntry::recorded(entry.value).map_err(|error| match error {
-            EntryError::Member(member) => entry.malformed(member),
+        let model = RecordedModel::read(&research.value).map_err(|error| match error {
+            RecordedError::Malformed(member) => BundleError::Malformed {
+                file: RESEARCH,
+                member,
+            },
+            RecordedError::Unregistered => BundleError::Unregistered,
         })?;
-        let turns = research
-            .value
-            .get("turns")
-            .map(|turns| scripted(turns, &pinned))
-            .transpose()?
-            .unwrap_or_default();
-        let slug = pinned.identity.model_name.clone();
-        let reported_provider = endpoint.text("reported_provider")?;
-        let prices = PriceTable::new(
-            endpoint.per_million("input_per_million")?,
-            endpoint.per_million("output_per_million")?,
-            endpoint.per_million("cached_per_million")?,
-            Digest::of(endpoint.text("price_table")?.as_bytes()),
-        )
-        .map_err(|_| endpoint.malformed("cached_per_million"))?;
+        let caps = research.member("caps")?;
         let plane = RecordedPlane {
             bars: Doc::read(dir, BARS)?
                 .rows()?
@@ -186,22 +156,9 @@ impl Bundle {
         let halted = halts(&research, &plane.instruments)?;
         let allowlist = allowlist(&research)?;
         Ok(Self {
-            entry: pinned,
-            endpoint: Endpoint {
-                id: endpoint.text("id")?.to_owned(),
-                host: endpoint.text("host")?.to_owned(),
-                region: endpoint.text("region")?.to_owned(),
-                locality: Locality::Hosted,
-                route: Route {
-                    upstream: endpoint.text("upstream")?.to_owned(),
-                    reported_provider: reported_provider.to_owned(),
-                },
-                prices,
-            },
-            probe: Reported {
-                model: Some(slug),
-                provider: Some(reported_provider.to_owned()),
-            },
+            entry: model.entry,
+            endpoint: model.endpoint,
+            probe: model.probe,
             workspace_cap: caps.usd6("workspace_monthly_usd")?,
             deployment_cap: caps.usd6("deployment_usd")?,
             run_cap: caps
@@ -209,16 +166,8 @@ impl Bundle {
                 .get("run_usd")
                 .map(|_| caps.usd6("run_usd"))
                 .transpose()?,
-            reply: RecordedReply {
-                output: reply.text("output")?.to_owned(),
-                latency_ms: reply.int("latency_ms")?,
-                usage: Usage {
-                    input: reply.int("input_tokens")?,
-                    output: reply.int("output_tokens")?,
-                    cached: reply.int("cached_tokens")?,
-                },
-            },
-            turns,
+            reply: model.reply,
+            turns: model.turns,
             plane,
             halted,
             allowlist,
@@ -230,23 +179,8 @@ impl Bundle {
     /// # Errors
     /// [`BundleError::Unregistered`] when the registry refuses the entry or the endpoint.
     pub fn registry(&self) -> Result<Registry, BundleError> {
-        let content = self.entry.content();
-        let pin = content.model_ref();
-        let mut registry = Registry::new();
-        registry
-            .register(content)
-            .map_err(|_| BundleError::Unregistered)?;
-        registry
-            .add_endpoint(
-                &pin,
-                self.endpoint.clone(),
-                std::slice::from_ref(&self.probe),
-            )
-            .map_err(|_| BundleError::Unregistered)?;
-        registry
-            .set_status(&pin, Status::Offered)
-            .map_err(|_| BundleError::Unregistered)?;
-        Ok(registry)
+        recorded::registry(&self.entry, &self.endpoint, &self.probe)
+            .map_err(|_| BundleError::Unregistered)
     }
 }
 
@@ -400,10 +334,6 @@ impl Doc<'_> {
         Usd6::parse(self.text(member)?).map_err(|_| self.malformed(member))
     }
 
-    fn per_million(&self, member: &'static str) -> Result<TokenPrice, BundleError> {
-        self.usd6(member).map(TokenPrice::per_million)
-    }
-
     fn price(&self, member: &'static str) -> Result<Price, BundleError> {
         Price::parse(self.text(member)?).map_err(|_| self.malformed(member))
     }
@@ -438,60 +368,6 @@ impl Read {
             })
             .collect())
     }
-}
-
-/// `research.json`'s `turns` (DEC-2266): refused whole, `Malformed { member: "turns" }`, unless the
-/// entry names the agentic loop and every turn is one its gateway would accept, so no bundle a
-/// worker is built from scripts a call the entry does not declare.
-fn scripted(turns: &Value, entry: &ResearchEntry) -> Result<Vec<ScriptedTurn>, BundleError> {
-    let refused = BundleError::Malformed {
-        file: RESEARCH,
-        member: "turns",
-    };
-    let content = entry.content();
-    let (Some(agentic), Some(listed)) = (content.agentic(), turns.as_array()) else {
-        return Err(refused);
-    };
-    let bounds = agentic.loop_bounds;
-    if u32::try_from(listed.len()).map_or(true, |n| n >= bounds.max_turns) {
-        return Err(refused);
-    }
-    listed
-        .iter()
-        .map(|turn| {
-            let count = |member: &str| turn.get(member).and_then(Value::as_int);
-            let calls = turn.get("calls").and_then(Value::as_array)?;
-            let fits_turn = u32::try_from(calls.len())
-                .is_ok_and(|n| n > 0 && n <= bounds.max_tool_calls_per_turn);
-            if !fits_turn {
-                return None;
-            }
-            let calls = calls
-                .iter()
-                .map(|call| {
-                    let name = call.get("name").and_then(Value::as_str)?;
-                    let arguments = call.get("arguments")?;
-                    let declared = agentic.tool(name)?;
-                    fits(&declared.arguments, arguments).then(|| {
-                        (
-                            name.to_owned(),
-                            String::from_utf8_lossy(&to_canonical(arguments)).into_owned(),
-                        )
-                    })
-                })
-                .collect::<Option<Vec<_>>>()?;
-            Some(ScriptedTurn {
-                calls,
-                latency_ms: count("latency_ms")?,
-                usage: Usage {
-                    input: count("input_tokens")?,
-                    output: count("output_tokens")?,
-                    cached: count("cached_tokens")?,
-                },
-            })
-        })
-        .collect::<Option<Vec<_>>>()
-        .ok_or(refused)
 }
 
 /// The assets of the instruments `research.json`'s `halted_instruments` names by symbol, each one an
