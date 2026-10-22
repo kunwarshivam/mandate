@@ -659,16 +659,23 @@ below). In order, workspace services:
    its open streams in the workspace within 60 s (ID-3). Its sessions keep serving its other
    workspaces, and a session left with no workspace and no org membership that reaches a scope is
    closed (`SessionRevoked` with reason `deactivated`);
-3. in the same transaction as step 1, remove the member's notification addresses in that workspace
+3. in the same transaction as step 1, when the active-set fold reads, remove the member's
+   notification addresses in that workspace
    (they are per workspace, held in its vault namespace, §9.1): one `NotificationAddressChanged`
    with `action: removed` per address, raising no address-change notice (the remaining admins get
-   `member_deactivated`; owed to E9-7: `deactivation_removes_the_workspace_notification_addresses_in_one_transaction`).
+   `member_deactivated`; owed to E9-7: `deactivation_removes_the_workspace_notification_addresses_in_one_transaction`
+   and `a_deactivation_whose_fold_fails_commits_without_removals_and_alerts_once`).
    These carry the same actor as the `MemberDeactivated` or `MemberRemoved` they ride in: on the
    request path the authenticated principal, the deactivating admin or the member who left (§4.5);
    when the separate process deactivates (a directory sync, SCIM, §11.1), `system`. No step-up
    evidence is needed, since removing access needs none. A reactivated member starts with no
    address in the workspace, and an in-app notice (`web_inbox`, a kind lane L3's notifications
-   follow-up names) tells them to add one;
+   follow-up names) tells them to add one. If the active-set fold cannot be read, the removals are
+   absent: step 1 still commits, with one operator alert carrying opaque ids only, and the
+   addresses stop being active anyway, because an address is active only after the member's latest
+   activation, before any later `MemberDeactivated` or `MemberRemoved`, and until its own `removed`
+   (workspace API §4.11,
+   [DEC-2123](../project/decisions/DEC-2123.md));
 4. leave every committed event as it was. A response or command committed before step 1 was
    authorized when committed and is judged by the runtime as usual. One arriving after step 1 is
    refused at the API and never committed;

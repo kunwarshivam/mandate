@@ -507,9 +507,13 @@ The dispatcher **tails the journal**, which is its outbox:
    outcome as `NoticeAttempted`. On web push the handle names one `address_ref` as well, and a
    recipient's send fans out to each of their active addresses, one call and one record each
    (§4.6, DEC-2502 item 4).
-   **An address is sent to only while it is active**, that is, while its last
-   `NotificationAddressChanged` is `added` (workspace API spec §4.11), and only while its host is on
-   the allowlist (§4.6). The single exception is the one last send of a
+   **An address is sent to only while it is active** by the one fail-closed definition of
+   workspace API spec §4.11 and journal spec §9.15's active set
+   ([DEC-2123](../project/decisions/DEC-2123.md)): the member has a start (`MemberActivated` or
+   `MemberReactivated`), the `added` seq is greater than the member's latest start seq, no end
+   (`MemberDeactivated` or `MemberRemoved`) has a seq above that start, and no matching `removed`
+   follows the `added`; and only while its host is on the allowlist (§4.6). When the fold cannot be
+   read, nothing is sent to any address. The single exception is the one last send of a
    `notification_address_changed` notice to the very address its `removed` event names: opaque like
    every notice, subject to the allowlist, retried within the safety window (NT-6), and never
    repeated for a later notice. If the adapter finds the vault entry already gone when that last
@@ -597,9 +601,13 @@ that notice and, for `address_rejected` or `auth_failed`, marks the address (§5
 `not_pending` is for `action` only and `retry_window_ended` for `safety` and `info` only.
 
 On web push each address is its own send on this schedule, numbered from attempt 1 (§4.6). A send
-whose address is removed, or marked `unreachable` by another attempt (§5.6), before its next
-attempt is journaled `abandoned` with reason `address_retired` at the next step, except DEC-795's
-one last send (§5.1); its other addresses go on (DEC-2502 item 5).
+whose address stops being active for any reason before its next attempt (its `removed`, a
+membership that ended, §5.1), or is marked `unreachable` by another attempt (§5.6), is journaled
+`abandoned` with reason `address_retired` at the next step, except DEC-795's one last send (§5.1);
+its other addresses go on (DEC-2502 item 5). When the fold fails, the dispatcher sends nothing and
+does not journal `address_retired`, since that stop claims the address left the active set, which
+a failed read cannot show. The pending send waits and, if the fold stays down, ends
+`retry_window_ended` ([DEC-2123](../project/decisions/DEC-2123.md) item 6).
 
 ### 5.4 Coalescing and rate limits
 
@@ -827,7 +835,7 @@ stateDiagram-v2
 | **A journal read fails** | The step ends before it issues, sends, or appends anything; the next tick tries again; past the liveness bound the process is restarted (§5.9) | None | Nothing; the lag alert, owed (infrastructure §8.2 has no dispatcher row yet; E21-39, §12 item 8), is to fire past 60 seconds |
 | **An append is refused as `Invalid`** | The process exits instead of looping; restarted, it replays to the same record and exits again, so push stops for the whole workspace until a human or a hotfix intervenes, while the pull channels (`web_inbox`, `cli_inbox`) keep carrying every notice (§5.9). Nothing detects it yet: the lag and refused-append alerts are owed (infrastructure §8.2's dispatcher rows, E21-39), and the poison-record policy is open (§12 item 8, DEC-707) | None (NT-5, NT-9). Approvals stay listed and grantable in the pull channels; unanswered ones time out to `skip` | Nothing for that step, nor for any later one until it is fixed |
 | **The vault is unreachable** | At start: the dispatcher does not become ready and the orchestrator retries it. Running: an address read is `retryable { provider_error }`, retried in the class's window, marking nothing (§5.2); the VAPID keys are already in memory | None | `failed` with verdict `retryable` |
-| **A member adds or removes a web-push address while a notice is being sent** | An address added after a notice's first web-push step gets nothing for that notice; one removed is sent nothing more but DEC-795's last send, its pending send journaled `abandoned` `address_retired` (§4.6, §5.3) | None | `abandoned`, `address_retired` |
+| **A member adds or removes a web-push address, or their membership ends, while a notice is being sent** | An address added after a notice's first web-push step gets nothing for that notice; one that stops being active (removed, or its membership ended, §5.1) is sent nothing more but DEC-795's last send after a removal, its pending send journaled `abandoned` `address_retired` (§4.6, §5.3). If the active-set fold cannot be read, nothing is sent and nothing is journaled `address_retired`; the pending send waits and may end `retry_window_ended` (§5.3) | None | `abandoned`, `address_retired`; or later `retry_window_ended` |
 | **One browser's subscription expires** (`404`, `410`) | That address only is marked `unreachable`; `channel_lost` goes to the member's other channels and browsers and the pull channels (§5.6) | None | `failed`, `address_rejected`, on that `address_ref` |
 | **The VAPID key is rotated** | Planned: both keys are held until no active address names the old one. After a compromise: the old key is deleted at once, and its addresses are `provider_error` until the browser subscribes again (§4.6, DEC-2503 item 7) | None | `failed`, `provider_error`, marking nothing |
 | **Web push is off** (DEC-2504's interim) | No web-push attempt; every notice is in the pull channels when its cause commits | None (NT-5) | Nothing on web push |

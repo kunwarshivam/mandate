@@ -1358,19 +1358,13 @@ after U-A1 to U-A5 are recorded.
   ids only. Such an entry counts as remaining under its key, so it blocks the previous key's
   retirement and the next rotation until an operator erases it by `address_ref` (the writer's
   `erase`). One corrupt entry therefore blocks rotation loudly, never silently.
+  *The `address_fold_unreadable` alert* ([DEC-2123](decisions/DEC-2123.md) item 7): add the kind
+  to infrastructure design §8.2's alert table (source: the deactivation writer's fold error and the
+  sweep's keep for want of evidence; opaque: the workspace id and the member's or entry's opaque id
+  only) and to `mandate-alerts`' closed `AlertKind`, with its runbook.
   *`key_id` in §5.7* ([DEC-2120](decisions/DEC-2120.md) item 5): workspace API §5.7's "The vault's
   part" lists what an entry holds without the VAPID `key_id` that DEC-2503 item 5 stores there; add
   it, with the note that it is the workspace's current key id and so outside the step-up digest.
-  *Active addresses and the fold-error case in the specs* (a spec-only PR, ES-22, DEC-2123,
-  reserved in that PR; from DEC-2120 item 9, raised by the L2 lead): workspace API §4.11 ("Active
-  addresses" and "Deactivation") and §5.7's sweep text (the sweep erases only on positive evidence
-  from a fold that succeeded, keeps the entry and raises one opaque operator alert otherwise, and
-  waits a 7-day grace for an address dead only because a membership ended), identity spec §5.2
-  step 3 (the removals may be absent when the fold fails; the deactivation commits with one opaque
-  operator alert), and journal §9.15's active set (an address is active only when its `added`
-  follows the member's latest `MemberActivated` or `MemberReactivated` with no
-  `MemberDeactivated` or `MemberRemoved` after it, and no matching `removed` follows the `added`).
-  L3 reviews §9.15 and L1 reviews §5.2. Until it lands, the code follows DEC-2120 item 9.
 - **E8-16 (Should, M7)** As a reviewer, I want the minors of the notifications spec's round 1
   ([#558](https://github.com/kunwarshivam/mandate/pull/558); freeze rule) fixed in the spec:
   - HLD §6 flow C step 4 still says "an escalation chain (push → SMS → phone call)"; align it with
@@ -1484,7 +1478,10 @@ story buys a service, and none uses a real identity-provider account in tests (s
   for that member, in add order, read at the same control-stream head the batch appends with as
   `expected_head`; it touches no vault. A fold error never blocks the deactivation (coordinator
   ruling): the writer commits the `MemberDeactivated` or `MemberRemoved` without the removals and
-  raises one operator alert with opaque ids only, and a test of the writer must pin that path.
+  raises one operator alert (kind `address_fold_unreadable`, DEC-2123 item 7) with opaque ids
+  only, and a test of the writer must pin that path:
+  `a_deactivation_whose_fold_fails_commits_without_removals_and_alerts_once`, beside
+  `deactivation_removes_the_workspace_notification_addresses_in_one_transaction`.
   Under DEC-2120 item 9's serving definition, the member's addresses stop being active when the
   deactivation commits, with or without the removals, so the dispatcher sends them nothing; the
   sweep erases their entries on positive evidence (the start followed by the membership's end),
