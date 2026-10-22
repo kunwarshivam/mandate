@@ -31,6 +31,7 @@ use crate::kubernetes::{
 use crate::openbao::{
     OpenBaoConfig, OpenBaoSource, RoleCredentials, provision, provision_kubernetes_auth,
 };
+use crate::openbao::{fingerprint_key_verdict, transit_mount_verdict};
 use crate::policy::{Identity, Mounts, SecretPath, kv_path, role_name};
 use crate::source::{Grant, SecretSource};
 use mandate_connections::record::{AccountRef, ConnectionId};
@@ -1093,6 +1094,98 @@ async fn only_an_executor_hashes_an_account_under_the_vaults_key() {
             other.hmac_account(&id("acct-1")).await,
             Err(SourceError::Denied),
             "{identity:?}"
+        );
+    }
+}
+
+/// DEC-2345 item 1 on a real vault: provisioning keeps a fingerprint key already there only when
+/// it is never exportable and never deletable, on a mount that is transit. A key made exportable
+/// or deletable before provisioning, or a transit path that holds another engine, fails it as
+/// `Config`. The pure verdicts are checked first, so a run with no server still fails until they
+/// hold.
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "pending E21-32"]
+async fn provisioning_fails_on_a_fingerprint_key_that_can_leave_the_vault() {
+    let kept = json!({ "data": {
+        "exportable": false, "deletion_allowed": false, "allow_plaintext_backup": false,
+    } });
+    assert_eq!(fingerprint_key_verdict(Some(&kept)), Ok(()));
+    let mount = json!({ "data": { "type": "transit" } });
+    assert_eq!(transit_mount_verdict(Some(&mount)), Ok(()));
+    let Some((address, ca_pem, operator)) = server() else {
+        return;
+    };
+    let setups: [(&str, Vec<(String, Value)>); 3] = [
+        (
+            "an exportable key",
+            vec![
+                (
+                    "sys/mounts/{transit}".to_owned(),
+                    json!({ "type": "transit" }),
+                ),
+                (
+                    format!("{{transit}}/keys/{FINGERPRINT_KEY}"),
+                    json!({ "exportable": true }),
+                ),
+            ],
+        ),
+        (
+            "a deletable key",
+            vec![
+                (
+                    "sys/mounts/{transit}".to_owned(),
+                    json!({ "type": "transit" }),
+                ),
+                (
+                    format!("{{transit}}/keys/{FINGERPRINT_KEY}"),
+                    json!({ "exportable": false }),
+                ),
+                (
+                    format!("{{transit}}/keys/{FINGERPRINT_KEY}/config"),
+                    json!({ "deletion_allowed": true }),
+                ),
+            ],
+        ),
+        (
+            "another engine",
+            vec![(
+                "sys/mounts/{transit}".to_owned(),
+                json!({ "type": "kv", "options": { "version": "2" } }),
+            )],
+        ),
+    ];
+    for (case, steps) in setups {
+        let n = NEXT.fetch_add(1, Ordering::Relaxed);
+        let suffix = format!("{}-{n}", std::process::id());
+        let config = OpenBaoConfig {
+            address: address.clone(),
+            ca_pem: ca_pem.clone(),
+            mounts: Mounts {
+                kv: format!("kv-{suffix}"),
+                auth: format!("approle-{suffix}"),
+                kubernetes_executor: format!("kubernetes-executor-{suffix}"),
+                kubernetes_exchange: format!("kubernetes-exchange-{suffix}"),
+                transit: format!("transit-{suffix}"),
+            },
+        };
+        for (path, body) in steps {
+            let path = path.replace("{transit}", &config.mounts.transit);
+            operator_request(
+                &address,
+                &ca_pem,
+                &operator,
+                Method::POST,
+                &path,
+                Some(body),
+            )
+            .await;
+        }
+        assert_eq!(
+            provision(&config, &operator, &[c("c1")], None)
+                .await
+                .map(drop),
+            Err(SourceError::Config),
+            "{case}"
         );
     }
 }
