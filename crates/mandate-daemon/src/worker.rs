@@ -668,6 +668,18 @@ impl<T: Transport> RecordedWorker<T> {
         model: T,
     ) -> Result<Self, WorkerError> {
         let meter = own_meter(&who);
+        Self::with_model_metered(bundle, who, sink, now, model, meter)
+    }
+
+    /// As [`RecordedWorker::with_model`], metering through `meter`, whose records a test reads.
+    pub(crate) fn with_model_metered(
+        bundle: &Bundle,
+        who: WorkerFor,
+        sink: Box<dyn ArtifactSink>,
+        now: Box<dyn FnMut() -> UtcNanos>,
+        model: T,
+        meter: CellMeter,
+    ) -> Result<Self, WorkerError> {
         let caps = Caps::new(bundle.workspace_cap);
         Self::built(bundle, who, sink, now, meter, caps, (model, |_, _| {}))
     }
