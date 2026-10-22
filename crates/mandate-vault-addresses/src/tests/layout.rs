@@ -12,11 +12,12 @@ use crate::startup::{
     ADDRESS_KEY_CREDENTIAL, ADDRESSES_DIR, Ids, Inputs, open_reader, open_writer,
 };
 use crate::{
-    AddressError, AddressReader, AddressRef, AddressWriter, MemberId, NewEntry, PushKeys,
-    UnixNanos, WorkspaceId,
+    AddressError, AddressReader, AddressRef, AddressWriter, EntryFault, MemberId, NewEntry,
+    PushKeys, UnixNanos, WorkspaceId,
 };
 
 pub const ADDRESS_KEY: [u8; 32] = [5; 32];
+pub const NEXT_ADDRESS_KEY: [u8; 32] = [6; 32];
 
 pub const WORKSPACE: &str = "ws_01J8Z2";
 pub const OTHER_WORKSPACE: &str = "ws_01J8Z3";
@@ -151,4 +152,11 @@ pub fn read(reader: &AddressReader, who: &str, n: u8) -> Result<bool, AddressErr
     reader
         .entry(&workspace(WORKSPACE), &member(who), &address(n))
         .map(|e| e.is_some())
+}
+
+pub fn fault(n: u8, fault: EntryFault) -> Result<bool, AddressError> {
+    Err(AddressError::Entry {
+        address_ref: address(n),
+        fault,
+    })
 }
