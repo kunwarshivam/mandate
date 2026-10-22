@@ -7,7 +7,7 @@
 //! | API | — | every connection's code | every connection's code and token |
 //! | Connection manager | — | — | every connection's code and token; it also issues and revokes token-exchange grants |
 //! | Token exchange for `c` | `c`'s code, the client secret | `c`'s token, and `c`'s code only as [`Access::Take`] (DEC-2061) | `c`'s code |
-//! | Executor for `c` | `c`'s token, as a lease | — | — |
+//! | Executor for `c` | `c`'s token, as a lease | `c`'s account entry only as [`Access::Create`] (DEC-2339) | — |
 //! | Runtime | — | — | — |
 //! | Secret import | — | the client secret, the platform's own secrets | — |
 //! | Model gateway | the model provider's key | — | — |
@@ -16,7 +16,7 @@
 //! The platform's own secrets ([`PlatformSecret`], DEC-2020) are each read by one identity and
 //! written only by the secret import; none is ever deleted, and a rotation writes over it.
 
-use mandate_connections::record::ConnectionId;
+use mandate_connections::record::{AccountRef, ConnectionId};
 
 use crate::SourceError;
 
@@ -52,6 +52,10 @@ pub enum SecretPath {
     Token(ConnectionId),
     /// The platform's OAuth client secret.
     ClientSecret,
+    /// The broker account id and its random reference of one connect of a connection, to one
+    /// account stream, in the personal-data vault, outside `connections/` so no revoke deletes it
+    /// (DEC-2339): a request again on the same connection to another account has its own.
+    AccountId(ConnectionId, AccountRef),
     /// A secret of the platform's own that one process type reads (DEC-2020).
     Platform(PlatformSecret),
 }
@@ -101,6 +105,9 @@ pub enum Access {
     /// (DEC-2061). Only the Kubernetes-auth exchange's templated policy grants it; the AppRole
     /// policies, retired with that exchange, never do.
     Take,
+    /// Write an entry that is not there, never overwrite or read one: a connection's executor's
+    /// one write of its account id to the personal-data vault (DEC-2339).
+    Create,
 }
 
 /// Whether `identity` may `access` `path`: the table above.
@@ -120,7 +127,8 @@ pub fn allows(identity: &Identity, access: Access, path: &SecretPath) -> bool {
             SecretPath::Code(c),
         )
         | (Identity::TokenExchange(own), Access::Write, SecretPath::Token(c))
-        | (Identity::Executor(own), Access::Read, SecretPath::Token(c)) => own == c,
+        | (Identity::Executor(own), Access::Read, SecretPath::Token(c))
+        | (Identity::Executor(own), Access::Create, SecretPath::AccountId(c, _)) => own == c,
         (identity, Access::Read, SecretPath::Platform(secret)) => {
             holders(*secret).is_ok_and(|h| h.reads == *identity)
         }
@@ -203,6 +211,11 @@ pub fn kv_path(path: &SecretPath) -> Result<String, SourceError> {
         SecretPath::Code(c) => format!("connections/{}/code", connection_segment(c)?),
         SecretPath::Token(c) => format!("connections/{}/token", connection_segment(c)?),
         SecretPath::ClientSecret => "platform/alpaca-oauth-client-secret".to_owned(),
+        SecretPath::AccountId(c, account) => format!(
+            "personal/accounts/{}/{}",
+            connection_segment(c)?,
+            account.as_str()
+        ),
         SecretPath::Platform(PlatformSecret::ModelProviderKey) => {
             "platform/model-provider-key".to_owned()
         }
