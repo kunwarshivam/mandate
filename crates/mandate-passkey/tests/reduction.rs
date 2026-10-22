@@ -1,6 +1,7 @@
-//! Route 2's verifier (workspace API spec §4.10 route 2 items 2 and 4, DEC-2324): a known passkey
-//! and an unknown one, checked against a decoy, take the same path up to the signature's result,
-//! and that result is the answer whenever the signature is bad, whatever else is wrong.
+//! Route 2's verifier (workspace API spec §4.10 route 2 items 2 and 4, DEC-2324): every call makes
+//! exactly one ES256 and one Ed25519 check, whether a key is held, of either algorithm, or none, so
+//! a held passkey and an unknown one do the same work; the signature's result is the answer
+//! whenever it is bad, whatever else is wrong; and no key never verifies.
 
 mod common;
 
@@ -8,8 +9,11 @@ use common::{
     AT, Alg, Authenticator, BE, BS, Ceremony, OwnedAssertion, UP, UV, cbor_int, cbor_map,
     challenge, rp,
 };
+use std::cell::RefCell;
+
 use mandate_passkey::reduction::{
-    DECOY_ED25519, DECOY_ES256, cose_key, decoy_for, verify_reduction,
+    DECOY_ED25519, DECOY_ES256, RingCheck, SignatureCheck, cose_key, verify_reduction,
+    verify_reduction_with,
 };
 use mandate_passkey::{PublicKey, Refusal};
 use ring::rand::SystemRandom;
@@ -17,7 +21,7 @@ use ring::signature::{ECDSA_P256_SHA256_ASN1_SIGNING, EcdsaKeyPair, Ed25519KeyPa
 
 const CHALLENGE: [u8; 32] = [0xfb; 32];
 
-fn judged(key: &PublicKey, assertion: &OwnedAssertion) -> Result<(), Refusal> {
+fn judged(key: Option<&PublicKey>, assertion: &OwnedAssertion) -> Result<(), Refusal> {
     verify_reduction(&rp(), &challenge(&CHALLENGE), key, &assertion.view())
 }
 
@@ -87,7 +91,7 @@ fn a_held_key_verifies_whatever_id_flag_or_counter_the_assertion_carries() {
             let mut assertion = authenticator.assert(&ceremony);
             assertion.credential_id = vec![0x5a; 40];
             assert_eq!(
-                judged(&authenticator.public_key(), &assertion),
+                judged(Some(&authenticator.public_key()), &assertion),
                 Ok(()),
                 "{alg:?}, flags {flags:#04x}, counter {counter}: no id, backup flag, or counter compared"
             );
@@ -97,7 +101,7 @@ fn a_held_key_verifies_whatever_id_flag_or_counter_the_assertion_carries() {
 
 #[test]
 #[ignore = "pending E9-1"]
-fn a_bad_signature_is_the_answer_whatever_else_is_wrong_for_a_held_key_or_a_decoy() {
+fn a_bad_signature_is_the_answer_whatever_else_is_wrong_held_key_or_none() {
     for alg in [Alg::Es256, Alg::Ed25519] {
         let held = Authenticator::new(alg);
         let stranger = Authenticator::new(alg);
@@ -106,12 +110,11 @@ fn a_bad_signature_is_the_answer_whatever_else_is_wrong_for_a_held_key_or_a_deco
             change(&mut ceremony);
             let signed = held.assert(&ceremony);
             assert_eq!(
-                judged(&held.public_key(), &signed),
+                judged(Some(&held.public_key()), &signed),
                 Err(refusal),
                 "{alg:?}, {name}, signed well"
             );
-            let decoy = decoy_for(&signed.signature);
-            for key in [&stranger.public_key(), decoy] {
+            for key in [Some(&stranger.public_key()), None] {
                 assert_eq!(
                     judged(key, &signed),
                     Err(Refusal::SignatureInvalid),
@@ -121,7 +124,7 @@ fn a_bad_signature_is_the_answer_whatever_else_is_wrong_for_a_held_key_or_a_deco
             let mut forged = signed.clone();
             forged.signature[10] ^= 1;
             assert_eq!(
-                judged(&held.public_key(), &forged),
+                judged(Some(&held.public_key()), &forged),
                 Err(Refusal::SignatureInvalid),
                 "{alg:?}, {name}: a bad signature over a held key"
             );
@@ -129,7 +132,7 @@ fn a_bad_signature_is_the_answer_whatever_else_is_wrong_for_a_held_key_or_a_deco
         let mut garbled = held.assert(&Ceremony::get(&CHALLENGE, 5));
         garbled.authenticator_data.truncate(20);
         garbled.client_data_json = b"{".to_vec();
-        for key in [&held.public_key(), decoy_for(&garbled.signature)] {
+        for key in [Some(&held.public_key()), None] {
             assert_eq!(
                 judged(key, &garbled),
                 Err(Refusal::SignatureInvalid),
@@ -138,7 +141,7 @@ fn a_bad_signature_is_the_answer_whatever_else_is_wrong_for_a_held_key_or_a_deco
         }
         garbled.signature = held.sign_response(&garbled.authenticator_data, b"{");
         assert_eq!(
-            judged(&held.public_key(), &garbled),
+            judged(Some(&held.public_key()), &garbled),
             Err(Refusal::ClientDataMalformed),
             "{alg:?}: signed well, the client data is judged next"
         );
@@ -146,10 +149,22 @@ fn a_bad_signature_is_the_answer_whatever_else_is_wrong_for_a_held_key_or_a_deco
         garbled.signature =
             held.sign_response(&garbled.authenticator_data, &garbled.client_data_json);
         assert_eq!(
-            judged(&held.public_key(), &garbled),
+            judged(Some(&held.public_key()), &garbled),
             Err(Refusal::AuthenticatorDataMalformed),
             "{alg:?}: then the authenticator data"
         );
+    }
+}
+
+/// A [`SignatureCheck`] that records the key of every check it makes, then makes it through
+/// [`RingCheck`].
+#[derive(Default)]
+struct Counting(RefCell<Vec<PublicKey>>);
+
+impl SignatureCheck for Counting {
+    fn check(&self, key: &PublicKey, message: &[u8], signature: &[u8]) -> Result<(), Refusal> {
+        self.0.borrow_mut().push(key.clone());
+        RingCheck.check(key, message, signature)
     }
 }
 
@@ -162,52 +177,50 @@ fn der(r: usize, s: usize) -> Vec<u8> {
 
 #[test]
 #[ignore = "pending E9-1"]
-fn the_decoy_is_chosen_by_the_signatures_encoding_der_first() {
+fn every_call_checks_once_with_es256_then_once_with_ed25519_whatever_is_held() {
     let es256 = Authenticator::new(Alg::Es256);
-    let signature = es256.sign(b"anything");
-    assert_eq!(decoy_for(&signature), &DECOY_ES256, "an ECDSA signature");
-    assert_eq!(der(29, 29).len(), 64);
-    assert_eq!(decoy_for(&der(29, 29)), &DECOY_ES256, "64 bytes of DER");
-    for (r, s) in [(32, 32), (33, 33), (1, 1), (33, 31)] {
-        assert_eq!(decoy_for(&der(r, s)), &DECOY_ES256, "DER of {r} and {s}");
+    let ed25519 = Authenticator::new(Alg::Ed25519);
+    let assertion = es256.assert(&Ceremony::get(&CHALLENGE, 5));
+    let shapes: Vec<(&str, Vec<u8>)> = vec![
+        ("an ECDSA signature", assertion.signature.clone()),
+        (
+            "an Ed25519 signature",
+            ed25519.assert(&Ceremony::get(&CHALLENGE, 5)).signature,
+        ),
+        ("64 bytes of DER", der(29, 29)),
+        ("64 raw bytes", vec![0x5a; 64]),
+        ("8 bytes", vec![0x5a; 8]),
+        ("none", Vec::new()),
+    ];
+    let held: [(&str, Option<PublicKey>); 3] = [
+        ("a held ES256 key", Some(es256.public_key())),
+        ("a held Ed25519 key", Some(ed25519.public_key())),
+        ("no key", None),
+    ];
+    for (shape, signature) in &shapes {
+        for (label, key) in &held {
+            let counting = Counting::default();
+            let mut presented = assertion.clone();
+            presented.signature = signature.clone();
+            let _answer = verify_reduction_with(
+                &counting,
+                &rp(),
+                &challenge(&CHALLENGE),
+                key.as_ref(),
+                &presented.view(),
+            );
+            let expected = match key {
+                Some(own @ PublicKey::Es256 { .. }) => vec![own.clone(), DECOY_ED25519],
+                Some(own @ PublicKey::Ed25519 { .. }) => vec![DECOY_ES256, own.clone()],
+                None => vec![DECOY_ES256, DECOY_ED25519],
+            };
+            assert_eq!(
+                counting.0.into_inner(),
+                expected,
+                "{label}, {shape}: one ES256 then one Ed25519 check, the held key in its own"
+            );
+        }
     }
-    let mut raw = vec![0x30; 64];
-    raw[1] = 0x3e;
-    assert_eq!(
-        decoy_for(&raw),
-        &DECOY_ED25519,
-        "64 bytes that open like DER but are not"
-    );
-    assert_eq!(decoy_for(&[0x5a; 64]), &DECOY_ED25519, "64 raw bytes");
-    for len in [0, 1, 8, 63, 65, 72, 128] {
-        assert_eq!(
-            decoy_for(&vec![0x5a; len]),
-            &DECOY_ES256,
-            "{len} raw bytes are any other shape"
-        );
-    }
-    let mut trailing = der(29, 28);
-    trailing.push(0);
-    assert_eq!(trailing.len(), 64);
-    assert_eq!(
-        decoy_for(&trailing),
-        &DECOY_ED25519,
-        "64 bytes of DER with a trailing byte are not DER"
-    );
-    let mut past_the_end = der(29, 29);
-    past_the_end[3] = 70;
-    assert_eq!(
-        decoy_for(&past_the_end),
-        &DECOY_ED25519,
-        "64 bytes whose inner length runs past the end are not DER"
-    );
-    let mut not_an_integer = der(29, 29);
-    not_an_integer[33] = 0x04;
-    assert_eq!(
-        decoy_for(&not_an_integer),
-        &DECOY_ED25519,
-        "64 bytes whose second member is not an INTEGER are not DER"
-    );
 }
 
 /// Ed25519 and P-256 signers for the two decoys, from their published secrets: RFC 8032 §7.1's
@@ -241,7 +254,7 @@ fn decoy_signers() -> (EcdsaKeyPair, Ed25519KeyPair) {
 
 #[test]
 #[ignore = "pending E9-1"]
-fn each_decoy_is_a_valid_key_so_its_check_is_a_full_verification() {
+fn each_decoy_is_a_valid_key_yet_with_no_key_held_nothing_verifies() {
     let (p256, ed25519) = decoy_signers();
     let ceremony = Ceremony::get(&CHALLENGE, 1);
     let authenticator_data = ceremony.auth_data_head();
@@ -251,15 +264,22 @@ fn each_decoy_is_a_valid_key_so_its_check_is_a_full_verification() {
         common::sha256(&client_data_json),
     ]
     .concat();
-    let signatures = [
-        p256.sign(&SystemRandom::new(), &message)
-            .expect("sign")
-            .as_ref()
-            .to_vec(),
-        ed25519.sign(&message).as_ref().to_vec(),
+    let signed = [
+        (
+            DECOY_ES256,
+            p256.sign(&SystemRandom::new(), &message)
+                .expect("sign")
+                .as_ref()
+                .to_vec(),
+        ),
+        (DECOY_ED25519, ed25519.sign(&message).as_ref().to_vec()),
     ];
-    for signature in signatures {
-        let decoy = decoy_for(&signature);
+    for (decoy, signature) in signed {
+        assert_eq!(
+            RingCheck.check(&decoy, &message, &signature),
+            Ok(()),
+            "its published secret signs for it, so the key parses and its check runs to the end"
+        );
         let assertion = OwnedAssertion {
             credential_id: vec![1; 16],
             authenticator_data: authenticator_data.clone(),
@@ -267,9 +287,14 @@ fn each_decoy_is_a_valid_key_so_its_check_is_a_full_verification() {
             signature,
         };
         assert_eq!(
-            judged(decoy, &assertion),
+            judged(None, &assertion),
+            Err(Refusal::SignatureInvalid),
+            "a decoy's check never answers"
+        );
+        assert_eq!(
+            judged(Some(&decoy), &assertion),
             Ok(()),
-            "a signature its published secret makes verifies, so the key parsed and the check ran to the end"
+            "as a held key it would"
         );
     }
 }

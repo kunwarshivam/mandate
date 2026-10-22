@@ -4,15 +4,19 @@
 //!
 //! [`verify`](crate::verify) returns at the first check that fails, before the signature, and
 //! compares the backup-eligible flag with the stored credential's, so a held passkey with another
-//! flag would fail sooner than an unknown one checked against a decoy. [`verify_reduction`]
-//! instead verifies the signature first and always, then judges the client data and the
-//! authenticator data, and only then answers. It compares no credential id (the caller looked the
-//! key up by it), no backup-eligible flag (journal spec §9.31 records none, so nothing holds one
-//! to compare; where it comes from stays open, as [DEC-2121]'s follow-ups say), and no counter
-//! (route 2 neither reads nor advances it).
+//! flag would fail sooner than an unknown one. [`verify_reduction`] instead verifies the signature
+//! first and always, then judges the client data and the authenticator data, and only then
+//! answers. It compares no credential id (the caller looked the key up by it), no backup-eligible
+//! flag (journal spec §9.31 records none, so nothing holds one to compare; where it comes from
+//! stays open, as [DEC-2121]'s follow-ups say), and no counter (route 2 neither reads nor advances
+//! it).
 //!
-//! For an unknown passkey, or a key that does not resolve or parse, the caller checks the
-//! assertion against [`decoy_for`] its signature: the same work, whose answer it never accepts.
+//! **Constant work.** `ring` refuses a signature of the wrong shape for its algorithm without any
+//! arithmetic, so checking only the held key's algorithm would tell a held key, and its
+//! algorithm, from an unknown one by time ([DEC-2324] item 4). Every call therefore runs exactly
+//! one ES256 and one Ed25519 check over the same message and signature, ES256 first: the held key
+//! for its own algorithm and the other algorithm's decoy for the other, or both decoys when no key
+//! is held. Only the held key's check answers; with no key the signature never verifies.
 //!
 //! [DEC-2121]: ../../../docs/project/decisions/DEC-2121.md
 //! [DEC-2324]: ../../../docs/project/decisions/DEC-2324.md
@@ -20,8 +24,7 @@
 use crate::{Assertion, Challenge, PublicKey, Refusal, RelyingParty};
 
 /// The ES256 decoy: the P-256 base point, a valid key, so checking a signature against it costs
-/// a full verification. Its private key is 1, so anyone can sign for it; the caller never accepts
-/// what a decoy answers.
+/// a full verification. Its private key is 1, so anyone can sign for it; its check never answers.
 pub const DECOY_ES256: PublicKey = PublicKey::Es256 {
     x: [
         0x6b, 0x17, 0xd1, 0xf2, 0xe1, 0x2c, 0x42, 0x47, 0xf8, 0xbc, 0xe6, 0xe5, 0x63, 0xa4, 0x40,
@@ -45,17 +48,28 @@ pub const DECOY_ED25519: PublicKey = PublicKey::Ed25519 {
     ],
 };
 
-/// The decoy for an assertion whose passkey is unknown, chosen by its signature's encoding, since
-/// an assertion's authenticator data names no algorithm (§4.10 item 4): an ECDSA signature's DER
-/// structure, a SEQUENCE of two INTEGERs, is tried first and gets [`DECOY_ES256`]; any other 64
-/// bytes get [`DECOY_ED25519`]; any other shape gets [`DECOY_ES256`].
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
-pub fn decoy_for(signature: &[u8]) -> &'static PublicKey {
-    let _ = signature;
-    todo!()
+/// One signature check: whether `signature` over `message` verifies under `key`. The crate's own
+/// is [`RingCheck`]; a test may count the checks a call makes through
+/// [`verify_reduction_with`].
+pub trait SignatureCheck {
+    /// # Errors
+    /// [`Refusal::SignatureInvalid`] for a signature that does not verify under `key`.
+    fn check(&self, key: &PublicKey, message: &[u8], signature: &[u8]) -> Result<(), Refusal>;
+}
+
+/// The signature check through `ring`, the one [`verify_reduction`] uses.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RingCheck;
+
+impl SignatureCheck for RingCheck {
+    #[expect(
+        clippy::todo,
+        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+    )]
+    fn check(&self, key: &PublicKey, message: &[u8], signature: &[u8]) -> Result<(), Refusal> {
+        let _ = (key, message, signature);
+        todo!()
+    }
 }
 
 /// The public key a COSE_Key's bytes encode (RFC 9053), as a `CredentialEnrolled`'s `public_key`
@@ -73,26 +87,41 @@ pub fn cose_key(bytes: &[u8]) -> Result<PublicKey, Refusal> {
     todo!()
 }
 
-/// Judges `assertion` for route 2 against `challenge`, `rp`, and `key`: the passkey's own key,
-/// or the [`decoy_for`] its signature. The signature over the authenticator data and the client
-/// data's SHA-256 is verified first, whatever else is wrong; then the client data (a `get`
-/// ceremony, the challenge, the origin, not cross-origin) and the authenticator data (no attested
-/// credential, the RP ID hash, user presence and verification, consistent backup flags) are
-/// judged. A bad signature is the answer whenever it is bad.
+/// Judges `assertion` for route 2 against `challenge`, `rp`, and `key`, the passkey's own key, or
+/// `None` for an unknown passkey or a key that does not resolve or parse. One ES256 and one
+/// Ed25519 check run over the signature, whatever `key` is (the module's constant work); then the
+/// client data (a `get` ceremony, the challenge, the origin, not cross-origin) and the
+/// authenticator data (no attested credential, the RP ID hash, user presence and verification,
+/// consistent backup flags) are judged. A bad signature is the answer whenever it is bad, and with
+/// no key it always is.
 ///
 /// # Errors
-/// [`Refusal::SignatureInvalid`] for a signature that does not verify; otherwise the client
-/// data's refusal, then the authenticator data's.
+/// [`Refusal::SignatureInvalid`] for a signature that does not verify under `key`, or no `key`;
+/// otherwise the client data's refusal, then the authenticator data's.
+pub fn verify_reduction(
+    rp: &RelyingParty,
+    challenge: &Challenge,
+    key: Option<&PublicKey>,
+    assertion: &Assertion<'_>,
+) -> Result<(), Refusal> {
+    verify_reduction_with(&RingCheck, rp, challenge, key, assertion)
+}
+
+/// [`verify_reduction`] with its two signature checks made through `check`.
+///
+/// # Errors
+/// As [`verify_reduction`].
 #[expect(
     clippy::todo,
     reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
 )]
-pub fn verify_reduction(
+pub fn verify_reduction_with(
+    check: &impl SignatureCheck,
     rp: &RelyingParty,
     challenge: &Challenge,
-    key: &PublicKey,
+    key: Option<&PublicKey>,
     assertion: &Assertion<'_>,
 ) -> Result<(), Refusal> {
-    let _ = (rp, challenge, key, assertion);
+    let _ = (check, rp, challenge, key, assertion);
     todo!()
 }
