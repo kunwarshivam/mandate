@@ -171,7 +171,6 @@ fn token(text: &str) -> AccessToken {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn only_the_connection_s_own_exchange_is_served() {
     for identity in [
         Identity::TokenExchange(connection(OTHER)),
@@ -189,7 +188,6 @@ fn only_the_connection_s_own_exchange_is_served() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn the_take_is_the_session_s_single_use_take_read_as_the_code_entry() {
     let script = Script::waiting();
     let vault = adapter(&script);
@@ -210,7 +208,6 @@ fn the_take_is_the_session_s_single_use_take_read_as_the_code_entry() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_taken_entry_in_another_form_is_code_entry_invalid() {
     for bytes in [
         b"not an entry".to_vec(),
@@ -230,7 +227,6 @@ fn a_taken_entry_in_another_form_is_code_entry_invalid() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn the_token_is_written_as_the_token_entry_at_the_connection_s_token() {
     let script = Script::waiting();
     let scopes = check_scope("trading data").unwrap();
@@ -248,7 +244,6 @@ fn the_token_is_written_as_the_token_entry_at_the_connection_s_token() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_token_outside_the_entry_s_form_is_never_written() {
     let script = Script::waiting();
     let scopes = check_scope("trading data").unwrap();
@@ -260,7 +255,6 @@ fn a_token_outside_the_entry_s_form_is_never_written() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn another_connection_s_key_is_refused_before_any_call() {
     let script = Script::waiting();
     let vault = adapter(&script);
@@ -278,7 +272,6 @@ fn another_connection_s_key_is_refused_before_any_call() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn the_client_secret_is_the_stored_line() {
     let script = Script::waiting();
     let secret = (&adapter(&script)).client_secret().unwrap();
@@ -287,7 +280,6 @@ fn the_client_secret_is_the_stored_line() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_client_secret_absent_or_out_of_form_is_vault_unavailable() {
     let long = vec![b's'; MAX_CLIENT_SECRET + 1];
     let at_limit = vec![b's'; MAX_CLIENT_SECRET];
@@ -324,7 +316,6 @@ fn a_client_secret_absent_or_out_of_form_is_vault_unavailable() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_session_failure_is_vault_unavailable() {
     for refused in [
         SourceError::Unavailable,
@@ -356,7 +347,6 @@ fn a_session_failure_is_vault_unavailable() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn the_exchange_never_writes_a_code_or_deletes() {
     let script = Script::waiting();
     let vault = adapter(&script);

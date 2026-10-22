@@ -450,7 +450,6 @@ fn a_hung_endpoint_fails_at_the_total_timeout() {
 /// client secret is read, then the code entry taken, then the one request sent with both, then the
 /// token entry written at the connection's token, and nothing else asked of the vault.
 #[test]
-#[ignore = "pending E10-13"]
 fn the_exchange_runs_through_the_vault_adapter_and_the_http_adapter() {
     let (addr, hits) = serve(Answer::Grant);
     let url = format!("http://{addr}{TOKEN_PATH}");
