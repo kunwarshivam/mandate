@@ -635,6 +635,17 @@ impl<S: MeterStore> Meter<S> {
         self.caps.research_unreadable.remove(agent);
     }
 
+    /// Keeps the research daily caps and unread marks of `deployed` alone, dropping every other
+    /// agent's, so a stop or a redeploy leaves nothing behind (DEC-2272 item 3).
+    pub fn retain_research_daily(&mut self, deployed: &BTreeSet<String>) {
+        self.caps
+            .research_daily
+            .retain(|agent, _| deployed.contains(agent));
+        self.caps
+            .research_unreadable
+            .retain(|agent| deployed.contains(agent));
+    }
+
     /// Replaces `agent`'s research daily cap on a running meter (DEC-2272 item 5): `Some` sets it,
     /// at most the workspace's monthly budget; `None` marks it unread, so the agent's research calls
     /// are refused `Unavailable`, reserving nothing, until a cap is set again.

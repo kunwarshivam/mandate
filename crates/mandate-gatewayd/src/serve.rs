@@ -76,7 +76,9 @@ impl Server {
     }
 
     /// Serves until stopped, answering each request that decoded whole with `answer`, one at a
-    /// time and on this thread, so the gateway it holds never crosses a thread.
+    /// time and on this thread, so the gateway it holds never crosses a thread. If `answer`
+    /// panics, the listener is stopped as the panic unwinds, so no connection is accepted that
+    /// nothing would answer.
     pub fn run(self, mut answer: impl FnMut(CallRequest) -> Reply) {
         let (jobs, queue) = mpsc::channel::<Job>();
         let Self {
@@ -85,6 +87,12 @@ impl Server {
             log,
             stopping,
         } = self;
+        let _stop_on_unwind = listener.local_addr().ok().map(|address| {
+            StopOnDrop(Stopper {
+                stopping: Arc::clone(&stopping),
+                address,
+            })
+        });
         let acceptor = thread::spawn(move || accept(&listener, limits, &log, &stopping, &jobs));
         answer_all(&queue, &mut answer);
         let _ = acceptor.join();
@@ -96,6 +104,16 @@ impl Stopper {
     pub fn stop(&self) {
         self.stopping.store(true, Ordering::SeqCst);
         let _ = TcpStream::connect(self.address);
+    }
+}
+
+/// Stops its server when dropped: at the end of [`Server::run`], or as a panic in `answer`
+/// unwinds it.
+struct StopOnDrop(Stopper);
+
+impl Drop for StopOnDrop {
+    fn drop(&mut self) {
+        self.0.stop();
     }
 }
 
