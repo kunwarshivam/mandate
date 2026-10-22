@@ -27,6 +27,7 @@ use mandate_authn::{
     ClientKey, REDUCTION_ONLY_LIFETIME_S, ReductionGate, ReductionLimits, Unauthenticated,
 };
 use mandate_canon::{Value, encode_ulid, parse};
+use mandate_identity::{LookupFailed, PrincipalId};
 use mandate_passkey::{Challenge, RelyingParty};
 use mandate_time::UtcNanos;
 use ring::digest::{SHA256, digest};
@@ -34,7 +35,7 @@ use ring::digest::{SHA256, digest};
 use crate::config::StartRefusal;
 use crate::http::{App, browser, forbidden, invalid, session_cookie, unauthenticated};
 use crate::members::credential_records;
-use crate::opening::{Opened, Presented, Reads, judge};
+use crate::opening::{Opened, Presented, Reads, judge, reach};
 use crate::routes::{enveloped, object, string};
 use crate::session::{COOKIE_NAME, OsRandom, Random};
 
@@ -459,10 +460,12 @@ pub async fn open(
             .open_reduction_only(opened.member, opened.standing, replaced.as_deref(), now)
             .ok()?;
         let expires_at = app.sessions.expires_at(cookie.value(), now).ok()?;
-        Some((cookie, expires_at))
+        Some((cookie, expires_at, opened.member))
     });
-    let workspace = app.hosted.workspace.to_ulid_text();
-    let (Some((cookie, expires_at)), Ok(workspace)) = (opened, workspace) else {
+    let Some((cookie, expires_at, member)) = opened else {
+        return refused();
+    };
+    let Some(workspaces) = workspaces(&app, member, now).await else {
         return refused();
     };
     let mut response = enveloped(
@@ -471,15 +474,7 @@ pub async fn open(
         vec![
             ("kind", string("reduction_only")),
             ("expires_at", string(&expires_at.to_string())),
-            (
-                "workspaces",
-                Value::Array(vec![object(vec![
-                    ("workspace_id", string(&workspace)),
-                    ("label", Value::Null),
-                    ("agent_ids", Value::Array(Vec::new())),
-                    ("connection_ids", Value::Array(Vec::new())),
-                ])]),
-            ),
+            ("workspaces", workspaces),
             ("as_of", Value::Array(Vec::new())),
         ],
     );
@@ -493,6 +488,30 @@ pub async fn open(
         headers.insert(SET_COOKIE, set);
     }
     response
+}
+
+/// The workspaces a reduction-only session of `member` covers at `now`, as the opening and
+/// `GET /v1/me/session` answer them (§4.10 route 2 item 6): the hosted one, with the agents and
+/// connections it may act on read from the control stream now; a read that failed names empty
+/// lists. `None` only when the hosted workspace's id has no text.
+pub(crate) async fn workspaces(app: &App, member: PrincipalId, now: UtcNanos) -> Option<Value> {
+    let workspace = app.hosted.workspace.to_ulid_text().ok()?;
+    let rows = app.journal.rows(&format!("ctl:{workspace}")).await;
+    let (control, records) = match rows {
+        Ok(rows) => {
+            let records = (app.members)(&rows);
+            (rows, records)
+        }
+        Err(_) => (Vec::new(), Err(LookupFailed)),
+    };
+    let reach = reach(app.hosted, &control, records, member, now);
+    let ids = |ids: Vec<String>| Value::Array(ids.iter().map(|id| string(id)).collect());
+    Some(Value::Array(vec![object(vec![
+        ("workspace_id", string(&workspace)),
+        ("label", Value::Null),
+        ("agent_ids", ids(reach.agent_ids)),
+        ("connection_ids", ids(reach.connection_ids)),
+    ])]))
 }
 
 /// The operator alert a client reaching its failure limit raises: an opaque code with no address,

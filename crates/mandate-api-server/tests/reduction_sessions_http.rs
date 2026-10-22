@@ -556,7 +556,6 @@ fn texts(value: &Value, key: &str) -> Vec<String> {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn the_opening_and_me_session_name_what_the_session_may_act_on() {
     let signer = Signer::es256();
     let f = fixture(&signer, true);

@@ -644,8 +644,9 @@ per workspace deployment (item 6).
    session gets the one 401 with the cookie cleared too. Records live
    in the process until a Postgres store exists: a restart, a deploy included, ends every session.
    The user signs in again; with the identity provider down, pause and the kill switch remain
-   through the host CLI (identity spec §6.4 route 3) until route 2's reduction-only sessions are
-   served.
+   through the host CLI (identity spec §6.4 route 3). Route 2's reduction-only sessions (§4.10) do not
+   help here yet: under [DEC-2319](../project/decisions/DEC-2319.md)'s interim (Proposed) they need a
+   sign-in seen since the restart.
 7. **The subject link** (interim, for the demo cell's paper workspace only). Identity spec §3.3 keeps
    IdP subjects in the personal-data vault; until that store serves links, the server reads the
    file `/etc/mandate/subject-links`, a fixed path and no setting
@@ -1599,15 +1600,16 @@ workspace exists to name before it is authorized (identity spec §4.5, §6.4).
 
 | Operation | Method and path | Event | Notes |
 |---|---|---|---|
-| One's own session | `GET /v1/me/session` | — | On the authentication plane, outside the matrix (identity spec §4.2, §4.5; DEC-816 item 7): reads only the caller's own session record and yields no context. Answers `{principal_id, kind, expires_at}` with `as_of` `[]`: the caller's own principal id, never a session reference, cookie, token, digest, subject, or issuer; `expires_at` is the earlier of the idle and absolute deadlines. A session an outage narrowed is refused `reduction_only`, and no live session gets the one 401. Shape: `read-models/session` ([DEC-2113](../project/decisions/DEC-2113.md)) |
+| One's own session | `GET /v1/me/session` | — | On the authentication plane, outside the matrix (identity spec §4.2, §4.5; DEC-816 item 7): reads only the caller's own session record and yields no context. Answers `{principal_id, kind, expires_at}` with `as_of` `[]`: the caller's own principal id, never a session reference, cookie, token, digest, subject, or issuer; `expires_at` is the earlier of the idle and absolute deadlines. A session an outage narrowed is refused `reduction_only`, and no live session gets the one 401. A session route 2 opened answers `kind: "reduction_only"`, its absolute `expires_at`, and `workspaces` as route 2 item 6 gives them Shape: `read-models/session` ([DEC-2113](../project/decisions/DEC-2113.md)) |
 | List one's own workspace memberships | `GET /v1/me/workspaces` | — | Authorized by the `self` row "List one's own workspace memberships" (identity spec §4.2): a full session of a user principal only. Returns the caller's `active` memberships as `{workspace_id, label, roles}` from the membership index, reading no workspace's data; absent and foreign workspaces look the same. A failed index read is `membership_unavailable` ([DEC-816](../project/decisions/DEC-816.md) item 1). A hosted deployment's index is its control stream's membership fold; `label` is `null` until one is recorded; `as_of` is `[]`. Shape: `read-models/my-workspaces` ([DEC-2113](../project/decisions/DEC-2113.md)) |
 
 Owed to the identity spec's lanes, and listed so the prefix rule above is complete:
 `GET /v1/oauth/alpaca/callback` (§4.5).
 
 **Route 2, the workspace-local passkey** (identity spec §6.4 route 2, DEC-816 item 6, DEC-834,
-[DEC-2117](../project/decisions/DEC-2117.md), [DEC-2119](../project/decisions/DEC-2119.md);
-planned, E9-1). Pause and the kill switch must work when sign-in does not, so a member opens a
+[DEC-2117](../project/decisions/DEC-2117.md), [DEC-2119](../project/decisions/DEC-2119.md),
+[DEC-2319](../project/decisions/DEC-2319.md), [DEC-2324](../project/decisions/DEC-2324.md); served,
+E9-1). Pause and the kill switch must work when sign-in does not, so a member opens a
 *reduction-only session* with a passkey the deployment already holds, with no identity provider,
 global control plane, or model involved. Both routes sit outside the matrix (DEC-816 item 7), are
 browser-only (`Origin` equal to the app origin and `X-Mandate-Request: 1`, else 403 `forbidden`
@@ -2249,7 +2251,7 @@ risk-reducing call never consults one (API-7, API-8).
 | Journal events this spec needs: `MandateDraftSaved`, the compiler's invocation on the control stream, `MandateConfirmed`'s agent link, and `OwnerRequestSubmitted` | **Specified** (journal spec v0.21 §9.9, DEC-670); `mandate-journal` registration planned (E10-15) |
 | The `client` actor, `ConnectionRevoked`'s reason, and the client events | **Specified** (journal spec v0.22 §3 and §9.10, DEC-671); `mandate-journal` registration planned (E10-15) |
 | `hold_openings` and `lift_hold` | **Specified** (journal spec v0.23 §9.11, DEC-672); `mandate-journal` registration planned (E10-15) |
-| Sessions, roles, step-up ceremonies | **Partly served** (E9, the identity spec): browser sessions (§3.11 items 5 and 6), one's own session and memberships (§4.10, [DEC-2113](../project/decisions/DEC-2113.md)), and step-up challenges (§3.6, DEC-2103); member routes, role changes, the passkey ceremony, and route 2's reduction-only sessions (§4.10, [DEC-2117](../project/decisions/DEC-2117.md); E9-1) are planned |
+| Sessions, roles, step-up ceremonies | **Partly served** (E9, the identity spec): browser sessions (§3.11 items 5 and 6), one's own session and memberships (§4.10, [DEC-2113](../project/decisions/DEC-2113.md)), step-up challenges (§3.6, DEC-2103), and route 2's reduction-only sessions (§4.10, [DEC-2117](../project/decisions/DEC-2117.md), E9-1); member routes, role changes, and the passkey ceremony are planned |
 | Notification addresses (§4.11, §5.7) and `NotificationAddressChanged` | **Planned** (E8-14). Mounted once the API's authentication middleware lands and the journal spec change that writes the `NotificationAddressChanged` row (the L3 lane's journal spec v0.28 PR, §9.15) merges. Merge order: #811, #763, this change (#827), then #833. The push-service allowlist's decision is DEC-792 (this spec change, #827); the web client's mirror of its table is #833, which merges after #827. Accepted when: a canary scan of responses, problems, logs, metrics and the journal finds no endpoint, key, or endpoint hash; the append is failed at every step of §5.7's tables (API-3's test) and crash injection gives each stated outcome; a replay after a lost `202` returns it; a retry with a different body, once its event exists, answers the original outcome and writes nothing to the vault; before the event exists, with the entry present, it is `idempotency_conflict`; a retry racing the sweep ends with the entry present or `address_missing` recorded; inert and removed entries neither match an endpoint nor count to the limit; two concurrent PUTs of one endpoint, an eleventh address, and a double removal are each settled by the expected head; a PUT of an unreachable address's endpoint replaces it in one batch with no last send to the old address; a stream busy for 5 attempts answers `busy` without a second vault write or step-up judgment; deactivation removes every address in its own commit, under the acting principal; a foreign `address_ref` answers byte-for-byte as a random one; the shared allowlist table (DEC-792) passes; and a replayed or wrongly bound step-up is refused |
 | The relay's own allowlist check (DEC-792 item 3) | **Planned** (E20-8) |
 
