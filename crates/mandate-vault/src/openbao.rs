@@ -268,6 +268,26 @@ pub struct OpenBaoSource {
     token_expires_at: Mutex<UtcNanos>,
 }
 
+impl OpenBaoSource {
+    /// A session over `token`, which the test's operator made with the policy it gives: the one
+    /// way to hold the Kubernetes-auth exchange's policy without a cluster to check a login.
+    #[cfg(test)]
+    pub(crate) fn from_token(
+        config: &OpenBaoConfig,
+        identity: Identity,
+        token: SecretString,
+        expires_at: UtcNanos,
+    ) -> Result<Self, SourceError> {
+        Ok(Self {
+            identity,
+            http: Http::new(config)?,
+            mounts: config.mounts.clone(),
+            token,
+            token_expires_at: Mutex::new(expires_at),
+        })
+    }
+}
+
 impl fmt::Debug for OpenBaoSource {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("OpenBaoSource")
@@ -505,6 +525,17 @@ impl OpenBaoSource {
 impl SecretSource for OpenBaoSource {
     fn identity(&self) -> &Identity {
         &self.identity
+    }
+
+    /// Reads the code with its version, overwrites that version alone with a tombstone, then
+    /// deletes every version: a taker whose overwrite loses, or that reads a tombstone or no code,
+    /// gets `None`.
+    async fn take_code(
+        &self,
+        connection: &ConnectionId,
+    ) -> Result<Option<SecretSlice<u8>>, SourceError> {
+        let _ = connection;
+        Err(SourceError::Unimplemented { story: "E21-32" })
     }
 
     async fn put(&self, path: &SecretPath, secret: &SecretSlice<u8>) -> Result<(), SourceError> {

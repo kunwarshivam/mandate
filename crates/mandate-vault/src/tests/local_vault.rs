@@ -20,8 +20,8 @@ use super::conformance::{self, Harness};
 use crate::SourceError;
 use crate::local::{GrantBook, LocalSource};
 use crate::policy::Identity;
-use crate::source::Grant;
-use mandate_connections::record::Environment;
+use crate::source::{Grant, SecretSource};
+use mandate_connections::record::{ConnectionId, Environment};
 use mandate_time::UtcNanos;
 use mandate_vault_local::startup::{Ids, Inputs, Role};
 use mandate_vault_local::store::{Opened, open};
@@ -115,6 +115,12 @@ impl Harness for Local {
             Arc::clone(&self.grants),
         )
         .unwrap()
+    }
+
+    async fn taker(&self, connection: &ConnectionId, now: UtcNanos) -> LocalSource {
+        let manager = self.source(Identity::ConnectionManager, now).await;
+        let grant = manager.issue_grant(connection, now).await.unwrap();
+        self.exchange(&grant, now).await.unwrap()
     }
 
     async fn exchange(&self, grant: &Grant, now: UtcNanos) -> Result<LocalSource, SourceError> {
@@ -303,4 +309,16 @@ async fn a_platform_secret_is_written_by_import_and_read_by_its_one_process() {
 async fn no_debug_or_refusal_shows_a_platform_secret() {
     conformance::the_platform_secrets_have_their_holders();
     conformance::no_debug_or_refusal_shows_a_platform_secret(&Local::new()).await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "pending E21-32"]
+async fn a_code_is_taken_once_and_only_by_its_own_exchange() {
+    conformance::a_code_is_taken_once_and_only_by_its_own_exchange(&Local::new()).await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "pending E21-32"]
+async fn of_two_racing_takers_exactly_one_gets_the_code() {
+    conformance::of_two_racing_takers_exactly_one_gets_the_code(&Local::new()).await;
 }

@@ -74,4 +74,16 @@ pub trait SecretSource {
 
     /// Revokes a grant, whether or not it was used.
     async fn revoke_grant(&self, grant: &Grant) -> Result<(), SourceError>;
+
+    /// Takes `connection`'s code once (DEC-2061): of any number of overlapping takers exactly one
+    /// gets it, and every other gets `None`, as does a taker that finds no code or a taken one; no
+    /// taker ever leaves the code readable. Only that connection's token exchange takes. A source
+    /// that holds no codes refuses, as [`SourceError::Denied`].
+    async fn take_code(
+        &self,
+        connection: &ConnectionId,
+    ) -> Result<Option<SecretSlice<u8>>, SourceError> {
+        let _ = connection;
+        Err(SourceError::Denied)
+    }
 }
