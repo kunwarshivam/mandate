@@ -4,7 +4,8 @@ Alpaca provider alone (`--alpaca-only`, DEC-1176 item 8) on its own pod, so no s
 served to the namespace. A ClusterIP Service `oauth-fixture` fronts it on 8091; its policy admits
 only this workspace's token-exchange pods on 8091 and allows it no egress at all, not even DNS. The
 browser reaches it as it reaches the API, through `kubectl port-forward`, with `oauth-fixture`
-resolved to loopback, so it sends the one `Host` the fixture answers.
+resolved to loopback, so its `Host` header is the one the fixture answers. The stub compares that
+header alone, never an absolute-form request target's authority.
 Its client secret is the Secret `oauth-fixture-client`, key `client-secret`, made once and kept
 across upgrades; `cargo xtask cell up` seeds the same value into the cell's vault for the token
 exchange (lane V2, #2197). It is mounted group-readable for fsGroup, as every Secret here is, and
