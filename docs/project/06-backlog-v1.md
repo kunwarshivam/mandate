@@ -3035,6 +3035,13 @@ enables `live` (ES-23, OPS-5).
   - The chart test of the gate seeds no 9153 allow in the manager's policy.
   - `PgControl`'s `rows_after` reads the whole control stream on every pass.
   - `pg.rs` has no competing-writer test for the writer epoch taken for each append.
+  - From #2178's review: a token exchange's pod ends by its deadline, but its account is deleted
+    only on its request's closing record, which the connection manager's teardown journals
+    (DEC-2332 item 3); a sweep at the deadline itself, for a teardown that never comes, is left.
+  - From #2178's review: an exchange whose pod the API server keeps refusing is retried on every
+    pass while its request has time left, making and deleting its account each time; a retry
+    bound or backoff is left. Open until R1 lands: DEC-2332 items 4 to 6 (the environment pin, the
+    vault CA, the exchange's launch).
 - **E21-34 (Proposed, M8; SC; lane O4)** As an owner, I want the kill switch reachable in the cell
   with nothing running but Postgres, the executor and the broker, so that rule 13 holds when the
   web app, the API and the cell's tooling are down (design §3.6, OPS-4). *Accepted when:*
