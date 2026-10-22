@@ -1515,8 +1515,8 @@ fn past_bound(view: &ExecutorState, instrument: &InstrumentId, entry: &ClientOrd
 }
 
 /// One plain entry: crypto (§5.4, DEC-36), or an equity on a profile with no OCO or bracket
-/// (§5.4, DEC-529 item 7, DEC-966). The unprotected interval starts, journaled once and naming the entry, at its first fill. Once the
-/// entry is terminal — filled completely, or ended partly filled, its remainder cancelled at
+/// (§5.4, DEC-529 item 7, DEC-966). The unprotected interval starts, journaled once and naming
+/// the entry, at its first fill. Once the entry is terminal — filled completely, or ended partly filled, its remainder cancelled at
 /// `bracket_partial_fill_timeout_s` (or `max_unprotected_s`, if shorter) or once its venue is no
 /// longer the regular session, exactly as [`bracket`] cancels one — one protective order is
 /// journaled and then sent for its filled quantity, capped at what the position leaves after every
@@ -1524,7 +1524,8 @@ fn past_bound(view: &ExecutorState, instrument: &InstrumentId, entry: &ClientOrd
 /// offers for it ([`protective_shape`]), one GTC stop-limit at the intent's stop and
 /// stop × (1 − `stop_limit_offset`). A crypto entry's stop waits until every fill the broker
 /// reported is applied, and covers what the buy leaves held once its fee posts
-/// ([`held_after_fees`]), so it never outlasts the position (RC-07, RC-20). Its take-profit is never a resting order: beside a stop
+/// ([`held_after_fees`]; DEC-349 items 1 and 2), so it never outlasts the position (RC-07,
+/// RC-20). Its take-profit is never a resting order: beside a stop
 /// for the same shares it would sell them twice (DEC-966 item 3). The interval ends once the broker
 /// acknowledges the stop ([`acknowledged`]); with no form to place, the shortfall is journaled and
 /// alerted ([`unprotectable`]) and the interval stays open, so [`bound`] exits the position. An
@@ -1638,8 +1639,8 @@ fn stop_after(
 
 /// What a buy of `bought` leaves held once its fee posts (§5.4, §6.3): a crypto buy withholds its
 /// fee from the asset bought, at the maker or the taker rate, so a stop-limit sized before the
-/// rate is known takes the larger one and never outlasts the position (RC-07, RC-20). An equity
-/// keeps what it bought.
+/// rate is known takes the larger one and never outlasts the position (DEC-349 item 2; RC-07,
+/// RC-20). An equity keeps what it bought.
 pub(crate) fn held_after_fees(
     ports: &Ports<'_>,
     instrument: &InstrumentId,
