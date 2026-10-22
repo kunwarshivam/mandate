@@ -12154,6 +12154,7 @@ mod tests {
                 "mandate-deploy-manager",
                 "mandate-deployd",
                 "mandate-provisioner",
+                "mandate-provisionerd",
                 "mandate-dispatcher",
                 "mandate-gatewayd"
             ]
