@@ -8,7 +8,8 @@
 
 use std::fmt;
 
-use mandate_connections::record::ConnectionId;
+use mandate_connections::record::{AccountPiiRef, ConnectionId};
+use secrecy::SecretSlice;
 
 use crate::SourceError;
 
@@ -78,4 +79,27 @@ pub enum FingerprintError {
     Missing,
     /// The vault is sealed or unreachable, or refused the session.
     Unavailable,
+}
+
+/// The fingerprint entry's bytes: the fingerprint and the reference of the account entry it was
+/// computed beside, in one canonical form, `{"fingerprint":…,"format":1,"pii_ref":…}`.
+///
+/// # Errors
+/// Never for the two values in their forms; the result keeps the stub's place until E21-32 lands.
+pub fn encode_entry(
+    fingerprint: &AccountFingerprint,
+    pii_ref: &AccountPiiRef,
+) -> Result<SecretSlice<u8>, SourceError> {
+    let _ = (fingerprint, pii_ref);
+    Err(SourceError::Unimplemented { story: "E21-32" })
+}
+
+/// The fingerprint and reference a fingerprint entry holds, by its one reader.
+///
+/// # Errors
+/// [`SourceError::Malformed`] for bytes that are not [`encode_entry`]'s form, exactly; it names
+/// nothing of them.
+pub fn decode_entry(bytes: &[u8]) -> Result<(AccountFingerprint, AccountPiiRef), SourceError> {
+    let _ = bytes;
+    Err(SourceError::Unimplemented { story: "E21-32" })
 }
