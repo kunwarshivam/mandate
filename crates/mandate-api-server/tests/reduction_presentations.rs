@@ -139,7 +139,6 @@ fn failures_count_only_when_nothing_opened_and_the_limit_raises_the_alert_once()
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn refused_presentations_of_taken_challenges_count_and_the_tenth_raises_the_alert() {
     let store = store();
     let guesser = client("198.51.100.4", "guesser");
@@ -171,7 +170,6 @@ fn refused_presentations_of_taken_challenges_count_and_the_tenth_raises_the_aler
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn an_address_reaches_its_limit_at_its_hundredth_failure_across_devices() {
     let store = store();
     let raised: Vec<bool> = (0..104)
