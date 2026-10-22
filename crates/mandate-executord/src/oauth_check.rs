@@ -51,9 +51,10 @@ pub struct OAuthCheck {
 }
 
 /// Runs `check` for the account in `scope` at `now`: once the account stream is this writer's, an
-/// account read and hashed is written by `create` to this request's [`SecretPath::AccountId`]
-/// entry, in [`mandate_connections::account_entry::encode`]'s form, then its fingerprint to the
-/// request's [`SecretPath::Fingerprint`] entry, in [`encode_entry`]'s form, and the checks run as
+/// account read and hashed has its fingerprint written by `create` to the request's
+/// [`SecretPath::Fingerprint`] entry, in [`encode_entry`]'s form, then the id to this request's
+/// [`SecretPath::AccountId`] entry, in [`mandate_connections::account_entry::encode`]'s form, so a
+/// refused second create leaves only the pseudonymous hash, never the id; and the checks run as
 /// an Alpaca paper OAuth connection. The account is read only when `create` stored both entries;
 /// an unread or unhashed account never calls it, and any refusal of either is an unreadable
 /// account.
@@ -83,15 +84,20 @@ pub fn oauth_connect_check<S: Store>(
                 .zip(fingerprint)
                 .zip(request)
                 .is_some_and(|((id, fingerprint), request)| {
-                    encode(&pii_ref, &id).is_ok_and(|entry| {
-                        let bytes = SecretSlice::from(entry.expose_secret().as_bytes().to_vec());
-                        create(
-                            &SecretPath::AccountId(connection.clone(), request.clone()),
-                            &bytes,
-                        )
-                        .is_ok()
-                    }) && fingerprinted(&mut create, &connection, request, &fingerprint, &pii_ref)
-                        .is_ok()
+                    fingerprinted(
+                        &mut create,
+                        &connection,
+                        request.clone(),
+                        &fingerprint,
+                        &pii_ref,
+                    )
+                    .is_ok()
+                        && encode(&pii_ref, &id).is_ok_and(|entry| {
+                            let bytes =
+                                SecretSlice::from(entry.expose_secret().as_bytes().to_vec());
+                            create(&SecretPath::AccountId(connection.clone(), request), &bytes)
+                                .is_ok()
+                        })
                 });
         let account = if stored {
             AccountRead::Read {

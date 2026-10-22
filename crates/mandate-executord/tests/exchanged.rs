@@ -86,11 +86,11 @@ fn the_check_keeps_the_account_under_a_reference_minted_from_its_source() -> Res
     assert!(checked.passed);
     let created = created.borrow();
     let [
-        (SecretPath::AccountId(..), entry),
         (SecretPath::Fingerprint(..), fingerprint),
+        (SecretPath::AccountId(..), entry),
     ] = created.as_slice()
     else {
-        return Err("the account entry, then the fingerprint entry".into());
+        return Err("the fingerprint entry, then the account entry".into());
     };
     let pii_ref = decode(entry)?.pii_ref.as_str().to_owned();
     assert_eq!(decode_entry(fingerprint)?.1.as_str(), pii_ref);
