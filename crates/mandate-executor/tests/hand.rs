@@ -5374,7 +5374,6 @@ fn an_account_kill_switch_never_re_places_the_protection_its_cancel_all_cancelle
 /// filled 60 of 100 when the account switch goes, the entry is reported canceled at 60, and the
 /// GTC OCO `bracket` would place for those 60 would sell them twice beside the switch's close.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_bracket_the_cancel_all_leaves_partly_filled_gets_no_oco() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -5439,7 +5438,6 @@ fn a_bracket_the_cancel_all_leaves_partly_filled_gets_no_oco() {
 /// once its cancel is confirmed (DEC-2333 item 5): the buffer day cancels the OCO, the switch
 /// goes, and the confirmed cancel places nothing beside the switch's close.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_re_placement_under_way_across_the_account_switch_places_nothing() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -5493,7 +5491,6 @@ fn a_re_placement_under_way_across_the_account_switch_places_nothing() {
 /// partly filled when the switch goes leaves its interval open, and at `max_unprotected_s` the
 /// interval is journaled and alerted, but nothing is sent to exit it.
 #[test]
-#[ignore = "pending E7-4"]
 fn the_bound_never_sells_beside_the_account_switch() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[BTC]);
@@ -5558,7 +5555,6 @@ fn the_bound_never_sells_beside_the_account_switch() {
 /// `max_unprotected_s` the interval is journaled (`interval_limit`) and the owner alerted
 /// (`unprotected_interval_limit`), while nothing is placed or sold beside the switch's close.
 #[test]
-#[ignore = "pending E7-4"]
 fn protection_the_cancel_all_cancels_opens_a_bounded_alerted_interval() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[BTC]);

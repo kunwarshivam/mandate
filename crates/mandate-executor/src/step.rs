@@ -218,6 +218,7 @@ fn step(batch: &mut Batch<'_, '_>, input: Input) -> Result<(), ExecutorError> {
         Input::BrokerUpdate(BrokerUpdate::Reject(refused)) => reject(batch, &refused),
         Input::BrokerSnapshot(snapshot) => {
             run(batch, &snapshot)?;
+            open_orders_read(batch, &snapshot.open_orders)?;
             if snapshot.reason == ReconcileReason::Startup {
                 resume(batch, false)?;
             }

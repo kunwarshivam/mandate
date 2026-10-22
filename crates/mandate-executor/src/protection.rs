@@ -1401,6 +1401,9 @@ fn bracket(
         changed(batch, &instrument, "unprotected_start", named.clone())?;
     }
     if order.state.is_terminal() {
+        if batch.view.closing_all.contains(&instrument) {
+            return Ok(());
+        }
         let unapplied = filled.checked_sub(order.filled_qty)?;
         let committed = covered(&batch.view, &instrument)?
             .checked_add(still_selling(&batch.view, &instrument)?)?;
@@ -1789,6 +1792,8 @@ fn unprotectable(
 /// protective order's own.
 /// Nor is protection in an instrument an account kill switch closes through the broker's
 /// close-position: a stop beside that close would sell the same shares twice (§5.5, rule 12).
+/// Its loss starts the instrument's interval instead, naming no order, so §5.4's bound journals
+/// and alerts it (DEC-2333 item 3).
 /// Protection the broker refuses, or cancels before acknowledging it, is not re-placed here: its
 /// interval stays open and bounded (DEC-348 item 2), so neither loops, nor restarts the bound.
 /// With no prices anywhere to place from, the shortfall is journaled and the owner alerted
@@ -1839,9 +1844,18 @@ fn re_cover(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         .filter_map(|instrument| InstrumentId::new(instrument).ok())
         .collect();
     for instrument in instruments {
+        if batch.view.closing_all.contains(&instrument) {
+            let open =
+                batch.view.unprotected.iter().any(|interval| {
+                    interval.instrument == instrument && interval.ended_at.is_none()
+                });
+            if !open {
+                changed(batch, &instrument, "unprotected_start", Vec::new())?;
+            }
+            continue;
+        }
         if batch.view.exiting.contains_key(&instrument)
             || batch.view.replacing.contains_key(&instrument)
-            || batch.view.closing_all.contains(&instrument)
             || stepping_alone(&batch.view, &instrument, &ended)
         {
             continue;
@@ -2313,6 +2327,9 @@ fn re_place(
     instrument: &InstrumentId,
     sequence: &Replacement,
 ) -> Result<(), ExecutorError> {
+    if batch.view.closing_all.contains(instrument) {
+        return Ok(());
+    }
     let committed =
         covered(&batch.view, instrument)?.checked_add(working_exits(&batch.view, instrument)?)?;
     let qty = long(&batch.view, instrument)?
@@ -2557,7 +2574,8 @@ pub(crate) fn bound(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         }
         let alerted = changed(batch, &instrument, "interval_limit", Vec::new())?;
         batch.notify(alerted.clone(), "unprotected_interval_limit");
-        let Some(entry) = entry.filter(|_| !exiting) else {
+        let closing = batch.view.closing_all.contains(&instrument);
+        let Some(entry) = entry.filter(|_| !exiting && !closing) else {
             continue;
         };
         let plain = batch

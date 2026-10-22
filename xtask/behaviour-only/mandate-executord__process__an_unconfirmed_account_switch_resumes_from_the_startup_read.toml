@@ -1,9 +1,0 @@
-file = "crates/mandate-executord/tests/process.rs"
-test = "an_unconfirmed_account_switch_resumes_from_the_startup_read"
-reason = """
-E7-4's account kill switch, A1a (DEC-2333 items 2 and 3): a process whose stream holds an
-account-scoped KillSwitchActivated stops when the fold refuses that scope, so the startup
-reconciliation never confirms the cancel-all and nothing is cancelled. That is a behaviour of the
-whole process, not a stub's report the test can read. It still runs and fails, and the slice that
-implements it deletes this file with its `#[ignore]` line.
-"""

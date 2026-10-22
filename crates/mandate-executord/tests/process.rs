@@ -234,7 +234,6 @@ const ACCOUNT_SWITCHED: &str = include_str!("fixtures/account_switched.jsonl");
 /// (DEC-2333 items 2 and 3): its open orders show the opening still working, so the opening is
 /// cancelled by its own id. The cancel-all is never sent again.
 #[test]
-#[ignore = "pending E7-4"]
 fn an_unconfirmed_account_switch_resumes_from_the_startup_read() -> Result<(), Error> {
     let journal = deployed()?;
     journal.seed(ACCOUNT_STREAM, OPENED)?;
