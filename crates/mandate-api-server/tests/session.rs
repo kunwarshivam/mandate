@@ -10,8 +10,8 @@ use mandate_api_server::config::{MIN_SESSION_KEY_BYTES, SessionKey, read_session
 use mandate_api_server::session::{
     Answer, MAX_PER_PRINCIPAL, MAX_SESSIONS, ROTATION_GRACE_S, Random, Sessions, Unauthenticated,
 };
-use mandate_authn::Request;
-use mandate_identity::PrincipalId;
+use mandate_authn::{Request, SubjectStanding};
+use mandate_identity::{PrincipalId, SessionKind};
 
 const T0: i64 = 1_791_000_000;
 const ACCESS_S: i64 = 300;
@@ -877,4 +877,229 @@ fn a_graced_cookie_admits_no_more_than_the_session_does() {
         Err(Unauthenticated),
         "but not past it, within the window or not"
     );
+}
+
+/// How long a route-2 session lasts from its opening, absolute (§4.10 route 2 item 5).
+const PASSKEY_S: i64 = 900;
+
+/// A subject that signed in and was never refused since.
+fn signed_in() -> SubjectStanding {
+    SubjectStanding {
+        last_sign_in: Some(at(T0 - 60)),
+        last_deprovision: None,
+    }
+}
+
+#[test]
+#[ignore = "pending E9-1"]
+fn a_passkey_session_reaches_pause_the_kill_switch_and_sign_out_for_fifteen_minutes_absolute() {
+    let store = sessions();
+    let cookie = store
+        .open_reduction_only(alice(), signed_in(), None, at(T0))
+        .expect("opened");
+    let paused = store
+        .authenticate(cookie.value(), Request::Pause, at(T0 + 1))
+        .expect("pause");
+    assert_eq!(paused.principal, alice());
+    assert_eq!(paused.kind, SessionKind::ReductionOnly);
+    assert!(
+        store
+            .authenticate(cookie.value(), Request::KillSwitch, at(T0 + 2))
+            .is_ok()
+    );
+    assert_eq!(
+        store.authenticate(cookie.value(), Request::Other, at(T0 + 3)),
+        Err(Unauthenticated),
+        "nothing else"
+    );
+    assert!(store.reduction_only(cookie.value(), at(T0 + 3)));
+    assert_eq!(
+        store.expires_at(cookie.value(), at(T0 + 3)),
+        Ok(at(T0 + PASSKEY_S)),
+        "from the opening, whatever was admitted since"
+    );
+    assert!(
+        store
+            .authenticate(cookie.value(), Request::Pause, at(T0 + PASSKEY_S - 1))
+            .is_ok(),
+        "no idle limit"
+    );
+    assert!(store.opened_by_passkey(cookie.value(), at(T0 + PASSKEY_S - 1)));
+    assert!(!store.opened_by_passkey(cookie.value(), at(T0 + PASSKEY_S)));
+    assert!(!store.reduction_only(cookie.value(), at(T0 + PASSKEY_S)));
+    assert_eq!(
+        store.authenticate(cookie.value(), Request::Pause, at(T0 + PASSKEY_S)),
+        Err(Unauthenticated),
+        "absolute"
+    );
+    assert_eq!(store.subject(cookie.value()), Err(Unauthenticated));
+    let other = store
+        .open_reduction_only(alice(), signed_in(), None, at(T0))
+        .expect("opened");
+    assert_eq!(store.end(other.value()), Ok(()), "sign-out");
+    assert_eq!(
+        store.authenticate(other.value(), Request::Pause, at(T0 + 1)),
+        Err(Unauthenticated)
+    );
+}
+
+#[test]
+#[ignore = "pending E9-1"]
+fn a_passkey_session_is_never_refreshed_and_a_refresh_keeps_it() {
+    let store = sessions();
+    let cookie = store
+        .open_reduction_only(alice(), signed_in(), None, at(T0))
+        .expect("opened");
+    for answer in [
+        Answer::Granted {
+            subject: SUBJECT.to_owned(),
+            principal: alice(),
+        },
+        Answer::Unreachable,
+        Answer::Failed,
+    ] {
+        assert_eq!(
+            store.refresh(cookie.value(), answer, at(T0 + 10)),
+            Err(Unauthenticated)
+        );
+        assert!(store.opened_by_passkey(cookie.value(), at(T0 + 10)));
+        assert!(
+            store
+                .authenticate(cookie.value(), Request::Pause, at(T0 + 11))
+                .is_ok(),
+            "kept"
+        );
+        assert_eq!(
+            store.authenticate(cookie.value(), Request::Other, at(T0 + 11)),
+            Err(Unauthenticated),
+            "and still reduction-only"
+        );
+    }
+    assert_eq!(
+        store.expires_at(cookie.value(), at(T0 + 12)),
+        Ok(at(T0 + PASSKEY_S)),
+        "never extended"
+    );
+    let full = store
+        .open(alice(), SUBJECT.to_owned(), None, at(T0))
+        .expect("opened");
+    assert!(!store.opened_by_passkey(full.value(), at(T0 + 1)));
+    assert_eq!(
+        store.refresh(full.value(), Answer::Unreachable, at(T0 + 2)),
+        Ok(None)
+    );
+    assert!(
+        !store.opened_by_passkey(full.value(), at(T0 + 3)),
+        "an outage narrows, it does not mark"
+    );
+    assert!(!store.opened_by_passkey("00", at(T0 + 3)));
+    let mut forged = cookie.value().to_owned();
+    forged.replace_range(..2, if forged.starts_with("00") { "01" } else { "00" });
+    assert!(!store.opened_by_passkey(&forged, at(T0 + 3)));
+}
+
+#[test]
+#[ignore = "pending E9-1"]
+fn a_passkey_session_counts_toward_sixteen_and_ends_a_presented_one_only_once_opened() {
+    let store = sessions();
+    let mut cookies = Vec::new();
+    for i in 0..MAX_PER_PRINCIPAL {
+        cookies.push(
+            store
+                .open(alice(), SUBJECT.to_owned(), None, at(T0 + i as i64))
+                .expect("opened"),
+        );
+    }
+    let passkey = store
+        .open_reduction_only(alice(), signed_in(), None, at(T0 + 20))
+        .expect("opened");
+    assert_eq!(store.len(), MAX_PER_PRINCIPAL);
+    assert_eq!(
+        store.authenticate(cookies[0].value(), Request::Pause, at(T0 + 21)),
+        Err(Unauthenticated),
+        "the oldest ended"
+    );
+    let refused = SubjectStanding {
+        last_sign_in: Some(at(T0 - 60)),
+        last_deprovision: Some(at(T0 - 60)),
+    };
+    assert_eq!(
+        store.open_reduction_only(alice(), refused, Some(cookies[1].value()), at(T0 + 22)),
+        Err(Unauthenticated)
+    );
+    assert!(
+        store
+            .authenticate(cookies[1].value(), Request::Other, at(T0 + 23))
+            .is_ok(),
+        "a refused open ends nothing"
+    );
+    let replacing = store
+        .open_reduction_only(alice(), signed_in(), Some(passkey.value()), at(T0 + 24))
+        .expect("opened");
+    assert_eq!(store.len(), MAX_PER_PRINCIPAL);
+    assert_eq!(
+        store.authenticate(passkey.value(), Request::Pause, at(T0 + 25)),
+        Err(Unauthenticated),
+        "the presented session ended"
+    );
+    for cookie in cookies.iter().skip(1) {
+        assert!(
+            store
+                .authenticate(cookie.value(), Request::Other, at(T0 + 25))
+                .is_ok()
+        );
+    }
+    assert!(
+        store
+            .authenticate(replacing.value(), Request::KillSwitch, at(T0 + 25))
+            .is_ok()
+    );
+    let empty = Sessions::new(&key(), Box::new(Broken));
+    assert_eq!(
+        empty.open_reduction_only(alice(), signed_in(), None, at(T0)),
+        Err(Unauthenticated)
+    );
+    assert!(empty.is_empty());
+}
+
+#[test]
+#[ignore = "pending E9-1"]
+fn a_deprovision_since_the_last_sign_in_or_a_full_store_refuses_a_passkey_session() {
+    let store = sessions();
+    for (sign_in, refused, opens) in [
+        (Some(T0 - 60), Some(T0 - 60), false),
+        (Some(T0 - 60), Some(T0 - 30), false),
+        (None, Some(T0 - 30), false),
+        (Some(T0 - 30), Some(T0 - 60), true),
+        (None, None, true),
+    ] {
+        let standing = SubjectStanding {
+            last_sign_in: sign_in.map(at),
+            last_deprovision: refused.map(at),
+        };
+        let before = store.len();
+        assert_eq!(
+            store
+                .open_reduction_only(bob(), standing, None, at(T0))
+                .is_ok(),
+            opens,
+            "{sign_in:?} {refused:?}"
+        );
+        assert_eq!(store.len(), before + usize::from(opens));
+    }
+    let full = sessions();
+    for i in 0..MAX_SESSIONS {
+        full.open_reduction_only(PrincipalId(1_000 + i as u128), signed_in(), None, at(T0))
+            .expect("opened");
+    }
+    assert_eq!(
+        full.open_reduction_only(alice(), signed_in(), None, at(T0)),
+        Err(Unauthenticated)
+    );
+    assert_eq!(
+        full.open(alice(), SUBJECT.to_owned(), None, at(T0)),
+        Err(Unauthenticated),
+        "and they fill the store as any session does"
+    );
+    assert_eq!(full.len(), MAX_SESSIONS);
 }

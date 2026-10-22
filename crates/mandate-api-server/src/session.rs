@@ -16,7 +16,7 @@ use std::sync::{Mutex, MutexGuard};
 
 use mandate_authn::{
     EndReason, OrgKind, ProviderAnswer, Reach, RefreshSecret, Refreshed, Request, SessionLimits,
-    SessionPolicy, SessionRecord, SessionRefusal,
+    SessionPolicy, SessionRecord, SessionRefusal, SubjectStanding,
 };
 use mandate_identity::{PrincipalId, SessionKind, SessionRef};
 use mandate_time::UtcNanos;
@@ -233,6 +233,43 @@ impl Sessions {
             },
         );
         Ok(self.encode(&id, &secret))
+    }
+
+    /// Opens a reduction-only session (§4.10 route 2 item 5) for `principal`, whose passkey
+    /// assertion the caller verified, at `now`, unless `standing` shows a deprovision signal at or
+    /// after the subject's last successful sign-in. It lasts
+    /// [`mandate_authn::REDUCTION_ONLY_LIFETIME_S`] from `now`, absolute, is never refreshed,
+    /// reaches only pause, the kill switch, and sign-out, and counts toward `principal`'s
+    /// [`MAX_PER_PRINCIPAL`]. It ends the session `replaced` names, as [`Sessions::open`] does, and
+    /// only once everything that can fail has passed, so a refused open ends nothing.
+    ///
+    /// # Errors
+    /// [`Unauthenticated`] for a deprovisioned subject, a full store, or no randomness.
+    #[expect(
+        clippy::todo,
+        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+    )]
+    pub fn open_reduction_only(
+        &self,
+        principal: PrincipalId,
+        standing: SubjectStanding,
+        replaced: Option<&str>,
+        now: UtcNanos,
+    ) -> Result<Cookie, Unauthenticated> {
+        let _ = (principal, standing, replaced, now);
+        todo!()
+    }
+
+    /// Whether the session `cookie` names is live at `now` and was opened by route 2, the marker
+    /// no answer exposes: `POST /v1/sessions/refresh` answers it `reduction_only` and keeps it
+    /// (§4.10 route 2 item 5). It changes nothing.
+    #[expect(
+        clippy::todo,
+        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+    )]
+    pub fn opened_by_passkey(&self, cookie: &str, now: UtcNanos) -> bool {
+        let _ = (cookie, now);
+        todo!()
     }
 
     /// Refreshes the session `cookie` names with `answer` at `now`: a new cookie when its secret
