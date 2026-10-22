@@ -189,6 +189,21 @@ fn nullable(name: Option<&str>) -> Value {
     name.map_or(Value::Null, text)
 }
 
+/// Why the fold stopped at a row: a cause that makes the view unreadable, or a rule whose
+/// implementation is still E6-15 B2b-2b's stub.
+enum Stop {
+    Unreadable(UnreadableCause),
+    /// DEC-2314's refusal of a non-canonical binding, and the restriction of an `AgentModeApplied`
+    /// that follows no trigger (DEC-2331): the view fails closed, and the fold reports the stub.
+    Pending,
+}
+
+impl From<UnreadableCause> for Stop {
+    fn from(cause: UnreadableCause) -> Self {
+        Self::Unreadable(cause)
+    }
+}
+
 /// A refusal to decide, which the fold fails closed on (DEC-2304 item 1).
 fn refused(_: SpecError) -> UnreadableCause {
     UnreadableCause::RefusedToDecide
@@ -396,7 +411,9 @@ impl<'c> AccountRiskFold<'c> {
     ///
     /// # Errors
     /// [`ExecutorError::ForeignStream`] for a row on another stream: a caller's mistake, which
-    /// changes nothing.
+    /// changes nothing. [`ExecutorError::Unimplemented`], with the view made unreadable, for a rule
+    /// E6-15 B2b-2b implements: a first instrument that is not a canonical asset id (DEC-2314), and
+    /// a mode change with no trigger before it in its step (DEC-2331).
     pub fn fold(&mut self, row: &StoredEvent) -> Result<Vec<RiskAppend>, ExecutorError> {
         if row.stream_id != self.stream {
             return Err(ExecutorError::ForeignStream {
@@ -418,36 +435,42 @@ impl<'c> AccountRiskFold<'c> {
                 };
                 Ok(appends)
             }
-            Err(cause) => {
+            Err(Stop::Unreadable(cause)) => {
                 self.unreadable(cause);
                 Ok(Vec::new())
+            }
+            Err(Stop::Pending) => {
+                self.unreadable(UnreadableCause::RefusedToDecide);
+                Err(ExecutorError::Unimplemented { story: "E6-15" })
             }
         }
     }
 
     /// Reads the row after the head: its body, its type and version, and, for a tick or a
     /// version-2 mark, the risk state's steps.
-    fn read(&mut self, row: &StoredEvent) -> Result<Vec<RiskAppend>, UnreadableCause> {
+    fn read(&mut self, row: &StoredEvent) -> Result<Vec<RiskAppend>, Stop> {
         let body = parse(&row.body).map_err(|_| UnreadableCause::Undecodable)?;
         let payload = body
             .get("payload")
             .and_then(Value::as_object)
             .ok_or(UnreadableCause::Undecodable)?;
         match (reading(&row.event_type), row.schema_version) {
-            (None, _) => Err(UnreadableCause::UnfoldedEventType),
+            (None, _) => Err(UnreadableCause::UnfoldedEventType.into()),
             (Some(Reading::Record), _) | (Some(Reading::Mark), 1) => Ok(Vec::new()),
             (Some(Reading::Tick), 1) => self.tick(row, payload),
             (Some(Reading::Mark), 2) => self.mark(row, payload),
-            (Some(_), _) => Err(UnreadableCause::UnknownSchemaVersion),
+            (Some(_), _) => Err(UnreadableCause::UnknownSchemaVersion.into()),
         }
     }
 
     /// Binds the fold to the first instrument a row names, and refuses to decide a row naming any
-    /// other (DEC-2308 item 4): openings wait, exits go on (`AGENTS.md` rule 13).
-    fn bind(&mut self, instrument: &str) -> Result<(), UnreadableCause> {
+    /// other (DEC-2308 item 4): openings wait, exits go on (`AGENTS.md` rule 13). A first instrument
+    /// that is not a canonical asset id is refused too (DEC-2314), which B2b-2b's stub stands for.
+    fn bind(&mut self, instrument: &str) -> Result<(), Stop> {
         match &self.instrument {
-            Some(bound) if bound != instrument => Err(UnreadableCause::RefusedToDecide),
+            Some(bound) if bound != instrument => Err(UnreadableCause::RefusedToDecide.into()),
             Some(_) => Ok(()),
+            None if AssetId::parse(instrument).is_err() => Err(Stop::Pending),
             None => {
                 self.instrument = Some(instrument.to_owned());
                 Ok(())
@@ -467,11 +490,7 @@ impl<'c> AccountRiskFold<'c> {
     /// reference cases do (MC-R13 steps a pre-market mark on the next day with E₀ unchanged and no
     /// `RiskDayStarted`). So a mark past midnight is stepped against the closing day's E₀, and the
     /// next tick still starts the new day.
-    fn mark(
-        &mut self,
-        row: &StoredEvent,
-        payload: &Object,
-    ) -> Result<Vec<RiskAppend>, UnreadableCause> {
+    fn mark(&mut self, row: &StoredEvent, payload: &Object) -> Result<Vec<RiskAppend>, Stop> {
         let instrument = payload
             .get("instrument_id")
             .and_then(Value::as_str)
@@ -479,7 +498,7 @@ impl<'c> AccountRiskFold<'c> {
         self.bind(instrument)?;
         let sane = match payload.get("sane") {
             Some(Value::Bool(sane)) => *sane,
-            _ => return Err(UnreadableCause::Undecodable),
+            _ => return Err(UnreadableCause::Undecodable.into()),
         };
         let bid = payload
             .get("bid")
@@ -511,11 +530,7 @@ impl<'c> AccountRiskFold<'c> {
     /// step settles time up to the tick under the closing day's state and then sets E₀ (§5.2's
     /// order), as the reference cases step a rollover at its tick. The tick's `Clock` input follows
     /// at the same instant, with no time passing.
-    fn tick(
-        &mut self,
-        row: &StoredEvent,
-        payload: &Object,
-    ) -> Result<Vec<RiskAppend>, UnreadableCause> {
+    fn tick(&mut self, row: &StoredEvent, payload: &Object) -> Result<Vec<RiskAppend>, Stop> {
         let clock = whole_second(payload, "clock")?;
         let session = self.calendar.session(clock).map_err(refused)?;
         let mut appends = Vec::new();
@@ -534,10 +549,10 @@ impl<'c> AccountRiskFold<'c> {
         at: UtcNanos,
         session: MarketSession,
         input: Input,
-    ) -> Result<Outcome, UnreadableCause> {
+    ) -> Result<Outcome, Stop> {
         self.risk
             .step(&Step { at, session, input })
-            .map_err(refused)
+            .map_err(|error| refused(error).into())
     }
 
     /// The records a step journaled, in the step's §5.2 order, each with the payload journal spec
@@ -549,8 +564,8 @@ impl<'c> AccountRiskFold<'c> {
     ///   `flatten_and_pause` rung asks for are slice C5's (DEC-2307 item 3).
     /// - `AgentModeApplied` is the executor's own, and names as its restriction the action of the
     ///   step's last `RiskLimitTriggered` before it (DEC-2308 item 3). A mode change with no trigger
-    ///   before it in the step names the limit or event that caused it, which B2b-2b writes; until
-    ///   then it fails closed.
+    ///   before it in the step names its cause (DEC-2331), which B2b-2b writes; until then it stops
+    ///   at its stub.
     /// - `InstrumentRestrictionChanged` names the bound instrument (DEC-2307 item 4, DEC-2308 item 2),
     ///   which `open` and `bind` only ever bind to a canonical asset id or to one a mark named; a
     ///   restriction on an instrument that is not a canonical asset id fails closed as a refusal to
@@ -564,7 +579,7 @@ impl<'c> AccountRiskFold<'c> {
         row: &StoredEvent,
         clock: UtcNanos,
         outcome: &Outcome,
-    ) -> Result<Vec<RiskAppend>, UnreadableCause> {
+    ) -> Result<Vec<RiskAppend>, Stop> {
         let snapshot = &outcome.snapshot;
         let figures = || {
             vec![
@@ -643,7 +658,7 @@ impl<'c> AccountRiskFold<'c> {
                     ("RiskLimitLifted", "agent_id", members)
                 }
                 RiskEvent::AgentModeApplied { to, .. } => {
-                    let restriction = last_action.ok_or(UnreadableCause::AppendFailed)?;
+                    let restriction = last_action.ok_or(Stop::Pending)?;
                     (
                         "AgentModeApplied",
                         "agent",
@@ -693,7 +708,9 @@ impl<'c> AccountRiskFold<'c> {
                 | RiskEvent::PositionReleased { .. }
                 | RiskEvent::MandateVersionApplied { .. }
                 | RiskEvent::UniverseChanged { .. }
-                | RiskEvent::AgentStopped { .. } => return Err(UnreadableCause::AppendFailed),
+                | RiskEvent::AgentStopped { .. } => {
+                    return Err(UnreadableCause::AppendFailed.into());
+                }
             };
             members.extend([
                 (agent, text(self.agent.as_str())),
@@ -734,9 +751,13 @@ impl<'c> AccountRiskFold<'c> {
 mod tests {
     use std::collections::BTreeSet;
 
+    use mandate_domain::AgentMode;
     use mandate_journal::{StreamType, stream_event_types};
+    use mandate_spec::risk::{LiftReason, RemovalReason, RestrictionReason, TriggerReason};
 
-    use super::{ACCOUNT_STREAM, reading};
+    use super::{
+        ACCOUNT_STREAM, LIFT_REASONS, MODES, RESTRICTION_REASONS, TRIGGER_REASONS, reading, spelled,
+    };
 
     #[test]
     fn the_fold_reads_every_type_the_journal_admits_on_an_account_stream_and_no_other() {
@@ -750,6 +771,85 @@ mod tests {
         assert_eq!(table, catalogue);
         for event_type in catalogue {
             assert!(reading(event_type).is_some(), "{event_type} has no reading");
+        }
+    }
+
+    /// Each variant against the closed value the journal spec spells it as: §9.6's `to`, §9.27's
+    /// trigger and lift `reason`, and §9.27's restriction `reason` with §9.3's `UniverseChanged`
+    /// reasons. Each list matches its type exhaustively, so a new variant fails to compile here
+    /// until it has a spelling.
+    #[test]
+    fn every_spelling_is_the_journal_specs_closed_value() {
+        for (mode, name) in [
+            (AgentMode::Normal, "normal"),
+            (AgentMode::ExitsOnly, "exits_only"),
+            (AgentMode::Paused, "paused"),
+            (AgentMode::Stopped, "stopped"),
+        ] {
+            match mode {
+                AgentMode::Normal
+                | AgentMode::ExitsOnly
+                | AgentMode::Paused
+                | AgentMode::Stopped => {}
+            }
+            assert_eq!(spelled(&MODES, mode), Ok(name));
+        }
+        for (reason, name) in [
+            (TriggerReason::HardTrigger, "hard_trigger"),
+            (TriggerReason::HardBreachPending, "hard_breach_pending"),
+            (TriggerReason::ResolvedAtRollover, "resolved_at_rollover"),
+            (TriggerReason::NewDayBreach, "new_day_breach"),
+            (TriggerReason::AfterReset, "after_reset"),
+        ] {
+            match reason {
+                TriggerReason::HardTrigger
+                | TriggerReason::HardBreachPending
+                | TriggerReason::ResolvedAtRollover
+                | TriggerReason::NewDayBreach
+                | TriggerReason::AfterReset => {}
+            }
+            assert_eq!(spelled(&TRIGGER_REASONS, reason), Ok(name));
+        }
+        for (reason, name) in [
+            (LiftReason::OwnerAcknowledged, "owner_acknowledged"),
+            (LiftReason::VersionLoosened, "version_loosened"),
+            (LiftReason::HardBreachCleared, "hard_breach_cleared"),
+        ] {
+            match reason {
+                LiftReason::OwnerAcknowledged
+                | LiftReason::VersionLoosened
+                | LiftReason::HardBreachCleared => {}
+            }
+            assert_eq!(spelled(&LIFT_REASONS, reason), Ok(name));
+        }
+        let verdicts = [
+            (RestrictionReason::NoSaneMark, "no_sane_mark"),
+            (RestrictionReason::SaneMark, "sane_mark"),
+        ];
+        let removals = [
+            (RemovalReason::ThesisAdmitted, "thesis_admitted"),
+            (RemovalReason::ThesisExpired, "thesis_expired"),
+            (RemovalReason::ThesisInvalidated, "thesis_invalidated"),
+            (RemovalReason::LineageRetired, "lineage_retired"),
+            (RemovalReason::EligibilityLost, "eligibility_lost"),
+            (RemovalReason::OperatorHalt, "operator_halt"),
+            (RemovalReason::VersionApplied, "version_applied"),
+        ]
+        .map(|(reason, name)| (RestrictionReason::Removal(reason), name));
+        for (reason, name) in verdicts.into_iter().chain(removals) {
+            match reason {
+                RestrictionReason::NoSaneMark | RestrictionReason::SaneMark => {}
+                RestrictionReason::Removal(
+                    RemovalReason::ThesisAdmitted
+                    | RemovalReason::ThesisExpired
+                    | RemovalReason::ThesisInvalidated
+                    | RemovalReason::LineageRetired
+                    | RemovalReason::EligibilityLost
+                    | RemovalReason::OperatorHalt
+                    | RemovalReason::VersionApplied,
+                ) => {}
+            }
+            assert_eq!(spelled(&RESTRICTION_REASONS, reason), Ok(name));
         }
     }
 }

@@ -596,6 +596,17 @@ the spec invariants (DP-n) its tests cover.
   - **Follow-up (slice C, the #2120 review):** slice C's caller treats an `Err` from
     `AccountRiskFold::open` as an unreadable view, at least `exits_only`, never as "no risk state",
     and reads the view, not a `fold` error, after the view becomes unreadable.
+  - **Gate (slice C, the #2120 review):** slice C binds the risk view to the gate only once C5's risk
+    actions have landed. A `flatten_and_pause` rung or a `paused` daily loss makes the view hold every
+    exit, so before C5 a paused agent would hold its exits with nothing flattening it.
+  - **Follow-up ([DEC-2314](decisions/DEC-2314.md), B2b-2b):** `bind` refuses a first instrument that is
+    not a canonical asset id, which closes DEC-2313 item 2's path. A mode change with no trigger before
+    it in its step names its cause as `AgentModeApplied.restriction` ([DEC-2331](decisions/DEC-2331.md):
+    MC-R07's and MC-R19's lifts, MC-R22's goal).
+  - **Follow-up ([DEC-2331](decisions/DEC-2331.md) item 3):** the mandate reference cases assert no
+    `RiskLimitTriggered.breach_time_s`, because neither the Python reference nor the Rust harness reads
+    one. Teach both to read it from a case's journal entry, then assert MC-R06's 1830 (and MC-R04's 5
+    and 15), so the fold's pinned values are confirmed by an approved case.
   - **Follow-up ([DEC-2305](decisions/DEC-2305.md)):** a last-trade risk mark (trading spec §8.2,
     "in-session and fresh") needs a `MarkUpdated` version 3 or a new member before any writer uses
     one. Version 2 records a quote's bid only, so until then no last-trade mark updates E, which
