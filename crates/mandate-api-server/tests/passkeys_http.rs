@@ -401,7 +401,6 @@ fn nothing_journaled(f: &Fixture, rows: &Rows) {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_member_with_no_passkey_obtains_a_challenge_bound_to_them_in_a_fresh_session() {
     let rows = opened();
     let f = plain(&rows);
@@ -439,7 +438,6 @@ fn a_member_with_no_passkey_obtains_a_challenge_bound_to_them_in_a_fresh_session
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn exclude_and_step_up_needed_follow_the_members_own_passkeys() {
     let alice = encode_ulid(id(ALICE).0);
     let bob = encode_ulid(id(BOB).0);
@@ -476,7 +474,6 @@ fn exclude_and_step_up_needed_follow_the_members_own_passkeys() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_member_with_no_passkey_past_three_hundred_seconds_from_sign_in_is_stale_after_a_refresh() {
     let rows = opened();
     let f = plain(&rows);
@@ -506,7 +503,6 @@ fn a_member_with_no_passkey_past_three_hundred_seconds_from_sign_in_is_stale_aft
 /// The 300 s are instants, not whole seconds: a sign-in at T0.0 is fresh at T0+300.0 and stale
 /// one nanosecond later (DEC-2115 item 2, DEC-2124 item 4).
 #[test]
-#[ignore = "pending E9-4"]
 fn the_first_enrolment_window_ends_at_its_exact_instant() {
     let rows = opened();
     let f = plain(&rows);
@@ -530,7 +526,6 @@ fn the_first_enrolment_window_ends_at_its_exact_instant() {
 /// request between the expiry E and E + 1 h, the key is still a conflict at E + 24 h - 1 s and
 /// issues fresh bytes at E + 24 h (DEC-2118 item 1).
 #[test]
-#[ignore = "pending E9-4"]
 fn a_tombstone_ages_from_the_expiry_however_late_the_store_sees_it() {
     let alice = encode_ulid(id(ALICE).0);
     let rows = enrol(opened(), &alice, PASSKEY_A, T0 - 100);
@@ -555,7 +550,6 @@ fn a_tombstone_ages_from_the_expiry_however_late_the_store_sees_it() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_retry_answers_the_held_challenge_and_its_key_never_revives_it_after_expiry() {
     let alice = encode_ulid(id(ALICE).0);
     let rows = enrol(opened(), &alice, PASSKEY_A, T0 - 100);
@@ -606,7 +600,6 @@ fn a_retry_answers_the_held_challenge_and_its_key_never_revives_it_after_expiry(
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_principal_keeps_sixty_four_tombstones_and_drops_the_oldest_first() {
     assert_eq!((TOMBSTONE_S, TOMBSTONES_PER_PRINCIPAL), (86_400, 64));
     let alice = encode_ulid(id(ALICE).0);
@@ -639,7 +632,6 @@ fn a_principal_keeps_sixty_four_tombstones_and_drops_the_oldest_first() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn registration_and_step_up_challenges_count_under_one_bound() {
     let alice = encode_ulid(id(ALICE).0);
     let rows = enrol(opened(), &alice, PASSKEY_A, T0 - 100);
@@ -672,7 +664,6 @@ fn registration_and_step_up_challenges_count_under_one_bound() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn the_session_the_csrf_mark_the_key_and_the_strict_body_come_first() {
     let rows = opened();
     let f = plain(&rows);
@@ -710,7 +701,6 @@ fn the_session_the_csrf_mark_the_key_and_the_strict_body_come_first() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_reduction_only_session_neither_asks_nor_lists() {
     let rows = opened();
     let f = plain(&rows);
@@ -734,7 +724,6 @@ fn a_reduction_only_session_neither_asks_nor_lists() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_stranger_and_another_workspace_find_nothing_and_every_role_holds_the_own_cell() {
     let rows = opened();
     let f = plain(&rows);
@@ -761,7 +750,6 @@ fn a_stranger_and_another_workspace_find_nothing_and_every_role_holds_the_own_ce
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_live_workspace_is_refused_after_the_row() {
     let mut rows = Rows { rows: Vec::new() };
     rows.push(
@@ -780,7 +768,6 @@ fn a_live_workspace_is_refused_after_the_row() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_member_whose_records_break_their_rule_is_answered_journal_unavailable() {
     let alice = encode_ulid(id(ALICE).0);
     let bob = encode_ulid(id(BOB).0);
@@ -798,7 +785,6 @@ fn a_member_whose_records_break_their_rule_is_answered_journal_unavailable() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_control_stream_that_cannot_be_read_is_answered_journal_unavailable() {
     let rows = opened();
     let f = plain(&rows);
@@ -813,7 +799,6 @@ fn a_control_stream_that_cannot_be_read_is_answered_journal_unavailable() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn the_list_serves_the_members_passkeys_in_enrolment_order_dated_by_recorded_at() {
     let alice = encode_ulid(id(ALICE).0);
     let bob = encode_ulid(id(BOB).0);
@@ -932,7 +917,6 @@ fn oracle(steps: &[(Step, i64)]) -> BTreeMap<&'static str, Option<Vec<(String, i
 /// oracle finds broken is answered `journal_unavailable` by both routes (DEC-2124). It drives
 /// proptest's runner itself, as a plain test, so a failure reports the server's own panic.
 #[test]
-#[ignore = "pending E9-4"]
 fn both_routes_read_the_oracles_view_of_each_members_passkeys() {
     let mut runner = TestRunner::new(ProptestConfig {
         cases: 48,
