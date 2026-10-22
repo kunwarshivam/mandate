@@ -10,7 +10,7 @@
 
 use core::fmt;
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
 use mandate_canon::{Digest, Value};
@@ -453,6 +453,17 @@ impl Caps {
         todo!()
     }
 
+    /// The agents with a research daily cap set or marked unread: on a meter that requires a daily
+    /// cap, only agents set one by name are here, so the set grows with nothing a caller sends.
+    #[expect(
+        clippy::todo,
+        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+    )]
+    pub fn research_agents(&self) -> BTreeSet<String> {
+        let _ = self;
+        todo!()
+    }
+
     /// Every cap a call of `agent` for `purpose` on `day` must fit under, with its scope and
     /// period, workspace first.
     pub fn applying(
@@ -611,6 +622,28 @@ impl<S: MeterStore> Meter<S> {
 
     pub fn caps(&self) -> &Caps {
         &self.caps
+    }
+
+    /// From now on, a research call of an agent with neither a daily cap nor an unread mark is
+    /// refused `BudgetExhausted`, as a cap of zero would refuse it, with nothing stored for the
+    /// agent (DEC-2272 item 3): the service's meter, whose callers name agents it never set.
+    #[expect(
+        clippy::todo,
+        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+    )]
+    pub fn require_research_daily(&mut self) {
+        let _ = &mut self.caps;
+        todo!()
+    }
+
+    /// Drops `agent`'s research daily cap and unread mark, for an agent no longer deployed.
+    #[expect(
+        clippy::todo,
+        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+    )]
+    pub fn clear_research_daily(&mut self, agent: &str) {
+        let _ = (&mut self.caps, agent);
+        todo!()
     }
 
     /// Replaces `agent`'s research daily cap on a running meter (DEC-2272 item 5): `Some` sets it,

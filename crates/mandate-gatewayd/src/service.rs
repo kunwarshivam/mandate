@@ -49,6 +49,11 @@ impl<T: Transport, S: MeterStore, C: Clock> Service<T, S, C> {
         todo!()
     }
 
+    /// The caps the service holds, one per deployed agent.
+    pub fn daily_caps(&self) -> &DailyCaps {
+        todo!()
+    }
+
     /// The start's check (DEC-2272 item 4): the control stream reads, and so does the cap of every
     /// agent it names as deployed, each then held on the gateway.
     ///
