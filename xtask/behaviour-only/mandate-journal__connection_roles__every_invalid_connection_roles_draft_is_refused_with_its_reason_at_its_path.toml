@@ -1,0 +1,7 @@
+file = "crates/mandate-journal/tests/connection_roles.rs"
+test = "every_invalid_connection_roles_draft_is_refused_with_its_reason_at_its_path"
+reason = """
+The journal does not yet register §9.33's three records, so `Draft::parse` refuses each as an
+unknown event type before any schema or rule could report a stub. E21-33's S3 implementation
+registers them and deletes this row (DEC-2350).
+"""
