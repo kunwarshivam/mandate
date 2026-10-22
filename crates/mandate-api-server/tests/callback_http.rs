@@ -4,20 +4,27 @@
 
 mod common;
 mod support_connect;
+mod support_vault;
 
 use std::sync::atomic::Ordering;
+use std::sync::{Arc, Mutex};
 
 use mandate_api::problem::ProblemCode;
+use mandate_api_server::clock::Clock;
+use mandate_api_server::connect::CodeVault;
 use mandate_api_server::session::COOKIE_NAME;
+use mandate_api_server::vault_codes::VaultCodes;
 use mandate_canon::to_canonical;
+use mandate_connections::code_entry;
 use mandate_connections::record::ConnectionId;
 use mandate_connections::start::{AuthorizePage, Authorizer, Binding, Environment, PkceVerifier};
-use secrecy::SecretString;
+use mandate_vault::policy::{Identity, SecretPath};
+use secrecy::{ExposeSecret, SecretString};
 
-use common::{Reply, WORKSPACE, send};
+use common::{ManualClock, Reply, WORKSPACE, send};
 use support_connect::{
-    ALICE, APP, BOB, DRAWS, Fixture, KEY, Put, T0, appended, at, b64, base, client, code, ctl,
-    demote_alice, fixture, json, seed, signed_in, start, text,
+    ALICE, APP, BOB, DRAWS, Draws, Fixture, KEY, Put, T0, appended, at, b64, base, client, code,
+    ctl, demote_alice, fixture, fixture_port, json, seed, signed_in, start, text,
 };
 
 const CALLBACK: &str = "/v1/oauth/alpaca/callback";
@@ -290,6 +297,38 @@ fn a_failed_vault_write_still_redirects_and_appends_nothing() {
     redirected(&callback(&s.f, Some(&s.cookie), &query), &to_connection(&s));
     assert_eq!(appended(&s.f).len(), rows_before);
     assert!(!held(&s), "the state is spent");
+}
+
+/// Through the API's real vault port (DEC-2338 item 3), whose write runs a runtime of its own: the
+/// callback calls it off the server's runtime, and the code reaches the vault as format 1's entry.
+#[test]
+#[ignore = "pending E10-13"]
+fn a_callback_writes_through_the_vault_port_off_the_server_s_runtime() {
+    let script = support_vault::Script::new(Identity::Api);
+    let vault = VaultCodes {
+        login: support_vault::Login(Arc::clone(&script)),
+        clock: ManualClock::at(T0) as Arc<dyn Clock>,
+    };
+    let s = started_in(fixture_port(
+        "paper",
+        true,
+        true,
+        Box::new(Draws(Mutex::new(0))),
+        Some(Arc::new(vault) as Arc<dyn CodeVault>),
+    ));
+    let query = format!("state={}&code={CODE_QUERY}", s.state);
+    redirected(&callback(&s.f, Some(&s.cookie), &query), &to_connection(&s));
+    let calls = script.calls();
+    let [support_vault::Call::Put(path, bytes)] = calls.as_slice() else {
+        panic!("one put and no other call: {calls:?}")
+    };
+    assert_eq!(
+        path,
+        &SecretPath::Code(ConnectionId::new(&s.connection).expect("an id"))
+    );
+    let taken = code_entry::decode(bytes).expect("format 1's entry");
+    assert_eq!(taken.code.0.expose_secret(), CODE_TEXT);
+    assert_eq!(taken.verifier.0.expose_secret(), s.verifier);
 }
 
 #[test]

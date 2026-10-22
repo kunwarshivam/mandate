@@ -41,6 +41,7 @@
 //! - [`reduction`]: route 2's challenge route, its store and request keys, and the address and
 //!   device its limits count against (DEC-2117, DEC-2119).
 //! - [`me`]: the caller's own session, outside every workspace path (§4.10, DEC-2113).
+//! - [`connect_binding`]: whether the start binds a connect, from its four settings (DEC-2338).
 //! - [`vault_codes`]: the callback's vault port, which writes a code as the API's vault identity
 //!   and nothing else (DEC-2338).
 //!
@@ -54,6 +55,7 @@ pub mod commands;
 pub mod config;
 pub mod confirm;
 pub mod connect;
+pub mod connect_binding;
 pub mod connections;
 pub mod documents;
 pub mod http;

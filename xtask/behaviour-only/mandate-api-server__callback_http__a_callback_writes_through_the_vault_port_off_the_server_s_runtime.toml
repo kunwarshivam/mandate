@@ -1,0 +1,10 @@
+file = "crates/mandate-api-server/tests/callback_http.rs"
+test = "a_callback_writes_through_the_vault_port_off_the_server_s_runtime"
+reason = """
+DEC-2338 item 3: the callback calls the API's real vault port, whose write runs a current-thread
+runtime of its own. The port is already implemented (#2230), so the test does not stop at a stub:
+today's callback calls the port on the server's runtime, and its runtime refuses to start inside
+another ("Cannot start a runtime from within a runtime"), so the server task panics and the test
+fails on that behaviour. The implementation PR calls the port through `spawn_blocking` and deletes
+this row.
+"""
