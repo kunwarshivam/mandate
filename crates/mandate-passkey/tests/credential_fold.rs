@@ -69,7 +69,6 @@ fn credential_of(record: &CredentialRecord) -> (&str, PrincipalId) {
 /// Every vector stream's records are admitted one by one up to the index the vectors name, and
 /// the record there is refused `Breaks`; a valid stream is admitted whole.
 #[test]
-#[ignore = "pending E9-4"]
 fn admits_refuses_each_stream_at_the_index_the_vectors_name() {
     let section = section();
     let streams = list(&section, "streams");
@@ -97,7 +96,6 @@ fn admits_refuses_each_stream_at_the_index_the_vectors_name() {
 /// A valid stream's members hold what they enrolled and did not remove, in enrolment order, and
 /// `held` names each credential's holder.
 #[test]
-#[ignore = "pending E9-4"]
 fn a_valid_stream_holds_each_members_unremoved_passkeys_in_enrolment_order() {
     for stream in list(&section(), "streams") {
         if expected_break(stream).is_some() {
@@ -132,7 +130,7 @@ fn a_valid_stream_holds_each_members_unremoved_passkeys_in_enrolment_order() {
         for record in &all {
             let (credential, _) = credential_of(record);
             let holder = kept.iter().find(|(_, c)| c == credential).map(|(m, _)| *m);
-            let got = fold.held(credential).unwrap().map(|e| e.member);
+            let got = fold.held(credential).map(|e| e.member);
             assert_eq!(got, holder, "{}: {credential}", text(stream, "name"));
         }
     }
@@ -142,7 +140,6 @@ fn a_valid_stream_holds_each_members_unremoved_passkeys_in_enrolment_order() {
 /// first enrolled the credential it names, from its `seq` on. Route 2's `held` still keeps the
 /// first enrolment of the id, unless the enroller's own removal followed it.
 #[test]
-#[ignore = "pending E9-4"]
 fn a_breaking_record_disables_step_up_for_both_members_and_the_first_enrolment_still_holds() {
     for stream in list(&section(), "streams") {
         let Some(index) = expected_break(stream) else {
@@ -175,8 +172,8 @@ fn a_breaking_record_disables_step_up_for_both_members_and_the_first_enrolment_s
             _ => None,
         };
         assert_eq!(
-            fold.held(credential).map(|e| e.map(|e| e.member)),
-            Ok(holder),
+            fold.held(credential).map(|e| e.member),
+            holder,
             "{}",
             text(stream, "name")
         );
@@ -186,7 +183,6 @@ fn a_breaking_record_disables_step_up_for_both_members_and_the_first_enrolment_s
 /// `admits` judges only the next record: a record that keeps rule 251 is admitted from a member
 /// an earlier record broke, and step-up still discounts that member (§9.31).
 #[test]
-#[ignore = "pending E9-4"]
 fn admits_a_clean_record_from_a_broken_member_whom_step_up_still_discounts() {
     let stream = list(&section(), "streams")
         .iter()
@@ -214,7 +210,6 @@ fn admits_a_clean_record_from_a_broken_member_whom_step_up_still_discounts() {
 /// Each base draft maps to its record, member by member, and a record §9.31 does not add maps to
 /// `None`.
 #[test]
-#[ignore = "pending E9-4"]
 fn credential_record_maps_both_base_drafts_and_passes_over_other_records() {
     let section = section();
     let drafts = section.get("drafts").unwrap();
@@ -270,7 +265,6 @@ fn credential_record_maps_both_base_drafts_and_passes_over_other_records() {
 /// A §9.31 record maps whole or not at all: another schema version, or a member absent or of
 /// another type, is refused at its path.
 #[test]
-#[ignore = "pending E9-4"]
 fn credential_record_refuses_a_record_that_does_not_map_at_its_path() {
     let section = section();
     let enrolled = section
@@ -381,7 +375,6 @@ fn vector_draft(section: &Value, case: &Value) -> Value {
 /// refused at that member's path; the journal's `unknown_schema` at `payload` is the mapping's
 /// `schema_version`.
 #[test]
-#[ignore = "pending E9-4"]
 fn credential_record_refuses_each_invalid_vector_draft_at_the_member_it_reads() {
     let section = section();
     let mut checked = 0;
@@ -414,7 +407,6 @@ fn credential_record_refuses_each_invalid_vector_draft_at_the_member_it_reads() 
 /// Every valid draft maps to its record: the other algorithm, the counter's top, the shortest
 /// and longest ids, a removal in `live`, and the envelope members the mapping does not read.
 #[test]
-#[ignore = "pending E9-4"]
 fn credential_record_maps_every_valid_vector_draft() {
     let section = section();
     for case in list(&section, "valid_drafts") {
@@ -446,7 +438,6 @@ fn credential_record_maps_every_valid_vector_draft() {
 /// enrolment's counter is never taken for the last, while route 2's view, which reads no counter,
 /// still holds the credential, and `admits` does not judge it.
 #[test]
-#[ignore = "pending E9-4"]
 fn a_step_up_asserted_fails_step_up_closed_and_leaves_route_two_holding() {
     let section = section();
     let enrolled = section
@@ -470,10 +461,7 @@ fn a_step_up_asserted_fails_step_up_closed_and_leaves_route_two_holding() {
         fold.passkeys(member),
         Err(CredentialError::AssertionUnread { seq: 2 })
     );
-    assert_eq!(
-        fold.held(&credential).map(|e| e.map(|e| e.member)),
-        Ok(Some(member))
-    );
+    assert_eq!(fold.held(&credential).map(|e| e.member), Some(member));
     assert_eq!(fold.admits(&CredentialRecord::Asserted { seq: 3 }), Ok(()));
 }
 
@@ -564,7 +552,6 @@ proptest! {
     /// agrees with the replay on every member's passkeys and every id's holder, and admits exactly
     /// the next steps the replay finds break nobody new.
     #[test]
-    #[ignore = "pending E9-4"]
     fn the_fold_agrees_with_an_independent_replay(
         steps in prop::collection::vec(step(), 0..24),
         next in step(),
@@ -589,8 +576,8 @@ proptest! {
             prop_assert_eq!(got, want);
         }
         for credential in (0..4).map(|c| format!("credential-{c}-AAAAAAAAAAAAA")) {
-            let got = fold.held(&credential).map(|e| e.map(|e| e.member));
-            prop_assert_eq!(got, Ok(holders.get(&credential).copied()));
+            let got = fold.held(&credential).map(|e| e.member);
+            prop_assert_eq!(got, holders.get(&credential).copied());
         }
         let seq = u64::try_from(stream.len() + 1).unwrap();
         let mut extended = stream.clone();

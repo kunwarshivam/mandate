@@ -27,9 +27,18 @@
 //! [DEC-2108]: ../../../docs/project/decisions/DEC-2108.md
 //! [DEC-2121]: ../../../docs/project/decisions/DEC-2121.md
 
-use mandate_canon::Value;
+use std::collections::BTreeMap;
+
+use mandate_canon::{Value, decode_ulid};
 use mandate_identity::PrincipalId;
 use mandate_time::UtcNanos;
+
+/// §9.31's two record types.
+const ENROLLED: &str = "CredentialEnrolled";
+const REMOVED: &str = "CredentialRemoved";
+/// §9.32's record of a later counter (planned), which the fold maps but does not read yet
+/// (DEC-2121 item 4).
+const ASSERTED: &str = "StepUpAsserted";
 
 /// A key's algorithm, §9.31's `passkey_alg` ([DEC-660]).
 ///
@@ -83,9 +92,6 @@ pub enum CredentialRecord {
     Asserted { seq: u64 },
 }
 
-/// The story whose tests are pending on this module's stubs (DEC-77).
-pub const STORY: &str = "E9-4";
-
 /// Why a credential read gives no answer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum CredentialError {
@@ -104,9 +110,6 @@ pub enum CredentialError {
     /// so no passkey's last counter is known.
     #[error("the step-up assertion at seq {seq} is not read yet")]
     AssertionUnread { seq: u64 },
-    /// The stub's own report until its story lands (DEC-77).
-    #[error("{story} has not been implemented yet")]
-    Unimplemented { story: &'static str },
 }
 
 /// The §9.31 record in the control-stream `envelope` at `seq`, a `StepUpAsserted` as
@@ -120,8 +123,85 @@ pub fn credential_record(
     seq: u64,
     envelope: &Value,
 ) -> Result<Option<CredentialRecord>, CredentialError> {
-    let _ = (seq, envelope);
-    Err(CredentialError::Unimplemented { story: STORY })
+    let at = |member| CredentialError::Unreadable { seq, member };
+    let event_type = envelope
+        .get("event_type")
+        .and_then(Value::as_str)
+        .ok_or(at("event_type"))?;
+    if event_type == ASSERTED {
+        return Ok(Some(CredentialRecord::Asserted { seq }));
+    }
+    if event_type != ENROLLED && event_type != REMOVED {
+        return Ok(None);
+    }
+    if envelope.get("schema_version").and_then(Value::as_int) != Some(1) {
+        return Err(at("schema_version"));
+    }
+    let payload = envelope.get("payload").ok_or(at("payload"))?;
+    let text = |name: &str, path| payload.get(name).and_then(Value::as_str).ok_or(at(path));
+    let member = decode_ulid(text("member", "payload.member")?)
+        .map(PrincipalId)
+        .map_err(|_| at("payload.member"))?;
+    let credential = text("credential", "payload.credential")?;
+    if !credential_id(credential) {
+        return Err(at("payload.credential"));
+    }
+    let credential = credential.to_owned();
+    if event_type == REMOVED {
+        return Ok(Some(CredentialRecord::Removed(Removal {
+            seq,
+            member,
+            credential,
+        })));
+    }
+    let public_key = text("public_key", "payload.public_key")?;
+    if !artifact_ref(public_key) {
+        return Err(at("payload.public_key"));
+    }
+    let alg = match text("alg", "payload.alg")? {
+        "es256" => PasskeyAlg::Es256,
+        "eddsa" => PasskeyAlg::EdDsa,
+        _ => return Err(at("payload.alg")),
+    };
+    let sign_count = payload
+        .get("sign_count")
+        .and_then(Value::as_int)
+        .and_then(|n| u32::try_from(n).ok())
+        .ok_or(at("payload.sign_count"))?;
+    let cool_off_ends = match payload.get("cool_off_ends") {
+        Some(Value::Null) => None,
+        Some(Value::Str(t)) => Some(UtcNanos::parse(t).map_err(|_| at("payload.cool_off_ends"))?),
+        _ => return Err(at("payload.cool_off_ends")),
+    };
+    Ok(Some(CredentialRecord::Enrolled(Enrolment {
+        seq,
+        member,
+        credential,
+        public_key: public_key.to_owned(),
+        alg,
+        sign_count,
+        cool_off_ends,
+    })))
+}
+
+/// §9.31's `credential_id`: unpadded base64url of 16 to 1023 bytes, so 22 to 1364 characters and
+/// never a length whose remainder by 4 is 1.
+fn credential_id(text: &str) -> bool {
+    (22..=1364).contains(&text.len())
+        && text.len() % 4 != 1
+        && text
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
+/// §9.1's `ref`: `sha256:` and 64 lowercase hex digits.
+fn artifact_ref(text: &str) -> bool {
+    text.strip_prefix("sha256:").is_some_and(|hex| {
+        hex.len() == 64
+            && hex
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    })
 }
 
 /// The passkeys of one control stream: §9.31's records, in stream order, folded on each read.
@@ -145,20 +225,30 @@ impl CredentialFold {
     /// [`CredentialError::AssertionUnread`] when the stream holds a `StepUpAsserted`, first, and
     /// then [`CredentialError::Broken`] when a record breaks rule 251 for `member`.
     pub fn passkeys(&self, member: PrincipalId) -> Result<Vec<&Enrolment>, CredentialError> {
-        let _ = (&self.records, member);
-        Err(CredentialError::Unimplemented { story: STORY })
+        let folded = self.fold();
+        if let Some(seq) = folded.asserted {
+            return Err(CredentialError::AssertionUnread { seq });
+        }
+        if let Some(seq) = folded.broken.get(&member) {
+            return Err(CredentialError::Broken { seq: *seq });
+        }
+        Ok(folded
+            .held
+            .into_iter()
+            .filter(|e| e.member == member)
+            .collect())
     }
 
     /// The enrolment of `credential` while it is held, or `None`: route 2's view. Only the records
     /// that keep rule 251 count, so the first enrolment of an id wins and a breaking record,
     /// enrolment or removal, changes nothing. A broken member still holds what they hold here, and
-    /// a `StepUpAsserted` is skipped. Who holds it is the enrolment's `member`.
-    ///
-    /// # Errors
-    /// None once implemented: this view never refuses (`AGENTS.md` rule 13).
-    pub fn held(&self, credential: &str) -> Result<Option<&Enrolment>, CredentialError> {
-        let _ = credential;
-        Err(CredentialError::Unimplemented { story: STORY })
+    /// a `StepUpAsserted` is skipped. Who holds it is the enrolment's `member`. It has no error to
+    /// return: this view never refuses (`AGENTS.md` rule 13).
+    pub fn held(&self, credential: &str) -> Option<&Enrolment> {
+        self.fold()
+            .held
+            .into_iter()
+            .find(|e| e.credential == credential)
     }
 
     /// Whether appending `next` after the folded records keeps rule 251: the writer's check before
@@ -169,7 +259,94 @@ impl CredentialFold {
     /// # Errors
     /// [`CredentialError::Breaks`] when `next` would break rule 251.
     pub fn admits(&self, next: &CredentialRecord) -> Result<(), CredentialError> {
-        let _ = next;
-        Err(CredentialError::Unimplemented { story: STORY })
+        let Some((credential, member)) = next.names() else {
+            return Ok(());
+        };
+        if keeps_rule_251(self.fold().history.get(credential), next, member) {
+            Ok(())
+        } else {
+            Err(CredentialError::Breaks)
+        }
+    }
+
+    /// The records replayed: each credential's history, the members broken and from which `seq`,
+    /// the first `StepUpAsserted`, and the enrolments the records that keep rule 251 leave held,
+    /// in enrolment order.
+    fn fold(&self) -> Folded<'_> {
+        let mut folded = Folded::default();
+        for record in &self.records {
+            let Some((credential, member)) = record.names() else {
+                folded.asserted = folded.asserted.or(Some(record.seq()));
+                continue;
+            };
+            let history = folded.history.get(credential);
+            if !keeps_rule_251(history, record, member) {
+                let first = history.and_then(|h| h.enroller);
+                for broken in std::iter::once(member).chain(first) {
+                    folded.broken.entry(broken).or_insert(record.seq());
+                }
+            } else if let CredentialRecord::Enrolled(enrolment) = record {
+                folded.held.push(enrolment);
+            } else {
+                folded.held.retain(|e| e.credential != credential);
+            }
+            let entry = folded.history.entry(credential).or_default();
+            entry.records = entry.records.saturating_add(1);
+            if entry.records == 1 {
+                entry.enroller = matches!(record, CredentialRecord::Enrolled(_)).then_some(member);
+            }
+        }
+        folded
+    }
+}
+
+/// One credential's records so far: how many, and who enrolled it when its first was an
+/// enrolment.
+#[derive(Debug, Clone, Copy, Default)]
+struct History {
+    records: u32,
+    enroller: Option<PrincipalId>,
+}
+
+/// What a replay of the records finds.
+#[derive(Debug, Default)]
+struct Folded<'a> {
+    history: BTreeMap<&'a str, History>,
+    broken: BTreeMap<PrincipalId, u64>,
+    asserted: Option<u64>,
+    held: Vec<&'a Enrolment>,
+}
+
+/// Rule 251 for `record` after its credential's `history`: an enrolment must be the credential's
+/// first record, and a removal its second, by the member who enrolled it.
+fn keeps_rule_251(
+    history: Option<&History>,
+    record: &CredentialRecord,
+    member: PrincipalId,
+) -> bool {
+    match (record, history) {
+        (CredentialRecord::Enrolled(_), None) => true,
+        (CredentialRecord::Removed(_), Some(h)) => h.records == 1 && h.enroller == Some(member),
+        _ => false,
+    }
+}
+
+impl CredentialRecord {
+    /// The credential the record names, and its member, or `None` for an `Asserted` record.
+    fn names(&self) -> Option<(&str, PrincipalId)> {
+        match self {
+            Self::Enrolled(e) => Some((&e.credential, e.member)),
+            Self::Removed(r) => Some((&r.credential, r.member)),
+            Self::Asserted { .. } => None,
+        }
+    }
+
+    /// The record's `seq`.
+    fn seq(&self) -> u64 {
+        match self {
+            Self::Enrolled(e) => e.seq,
+            Self::Removed(r) => r.seq,
+            Self::Asserted { seq } => *seq,
+        }
     }
 }

@@ -9,7 +9,9 @@
   `src/serve.rs` (`Server`, the serve loop: a thread per connection under socket timeouts and a
   cap, one thread holding the gateway, a log of codes alone), `src/cap.rs` (`DailyCaps`, each
   agent's daily research cap read from the deployed mandate and read again on a version change,
-  DEC-2272); `RequestError::ALL` and `RequestError::code` in `mandate-gateway`.
+  DEC-2272), `src/service.rs` (`Service`, each research call held to its agent's cap read before
+  anything is reserved, and the start's check that every deployed agent's cap reads);
+  `RequestError::ALL`, `RequestError::code` and `Meter::set_research_daily` in `mandate-gateway`.
 - **Tests:** `crates/mandate-gatewayd/tests/key.rs` (read once, only as the model gateway, each
   vault failure's code, a value a header cannot carry, and a canary that the key shows in no
   `Debug`, error or code), `tests/start.rs` (both meters must read back, and the one that does not
@@ -19,8 +21,13 @@
   deployed version's own cap, zero with no envelope, deployment or after a stop, each document
   that does not read refused with its code, a document whose hash differs from the journaled
   version refused, a version change read again and a failed read leaving no cap, and any cap read
-  as itself or refused above the monthly cap); `crates/mandate-gateway/tests/wire.rs` (every
-  refusal's code crosses the wire as itself).
-- **Not yet:** the binary with its lifecycle and probes and the cap wired into its calls, the §4.3
-  identity probe before registration, and the runtime's worker over the service.
+  as itself or refused above the monthly cap, and the agents deployed in this environment),
+  `tests/service.rs` (a research call held to the cap of the version deployed now, a cap that does
+  not read refusing `meter_unavailable` with nothing reserved, only this workspace's research calls
+  read for, and the start refusing unless every deployed agent's cap reads);
+  `crates/mandate-gateway/tests/wire.rs` (every refusal's code crosses the wire as itself),
+  `crates/mandate-gateway/tests/meter.rs` (a replaced daily cap binds the next reservation, and an
+  unread one refuses `Unavailable` reserving nothing).
+- **Not yet:** the binary with its lifecycle and probes, the §4.3 identity probe before
+  registration, and the runtime's worker over the service.
 - **Run:** `cargo nextest run -p mandate-gatewayd`.

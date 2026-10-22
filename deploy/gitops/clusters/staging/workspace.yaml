@@ -25,6 +25,9 @@ spec:
       audience: authenticated
       jwksUrl: https://wyyxngmblqqokcvraflx.supabase.co/auth/v1/.well-known/jwks.json
       appOrigin: https://app.owlhead.ai
+      # cloudflared runs beside the API in its pod and reaches it on loopback, so the address
+      # Cloudflare appended to X-Forwarded-For is the client's (route 2's limits, DEC-2117 item 4).
+      ingressPeers: ["127.0.0.1"]
     # The founder's principal, an opaque ULID (DEC-2114): staging's apply links the founder's
     # identity-provider subject to it as a digest in the `subject-links` ConfigMap. Founding is off
     # until the `mandate` image staging runs has `workspace found --open`.
