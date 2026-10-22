@@ -1984,9 +1984,11 @@ positions, on fills, or on the regular session. The executor processes the batch
    our side holds or cancels it (rule 13).
    - **The executor reads it itself** ([DEC-2343](../project/decisions/DEC-2343.md)). The
      runtime's copy of the kill switch on each agent's stream is written only after the batch, so
-     after the revocation. The executor therefore reads the control stream's `OwnerCommandIssued`
-     `kill_switch` of connection or workspace scope itself, in `seq` order, for every agent it
-     follows whose connection has a `ConnectionRevoked` at or after the command. A revocation never
+     after the revocation, and a stopped agent has no runtime to copy it at all. The executor
+     therefore reads the control stream's `OwnerCommandIssued` `kill_switch` of connection or
+     workspace scope itself, in `seq` order, for every agent it follows that was deployed before the
+     command and whose connection has a `ConnectionRevoked` at or after the command, or that has an
+     `AgentStopped`. A revocation never
      ends the following of an agent whose version-2 deployment named the connection before it: the
      executor keeps reading that agent's kill switches, exits, and protective re-placements, and
      hands none of its openings. The runtime's copy of a switch already applied this way counts as
