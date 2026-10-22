@@ -13,6 +13,7 @@ workspace = true
 mandate-canon.workspace = true
 mandate-connections.workspace = true
 mandate-release.workspace = true
+mandate-time.workspace = true
 mandate-vault.workspace = true
 reqwest.workspace = true
 rustls.workspace = true
