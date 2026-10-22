@@ -174,7 +174,6 @@ impl TokenEndpoint for Endpoint1 {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn an_exchange_sends_the_code_once_with_the_settings_client_and_stores_the_token() {
     let mut vault = MemVault::with_code();
     let mut secrets = Secrets::for_vault(&vault, false);
@@ -209,7 +208,6 @@ fn an_exchange_sends_the_code_once_with_the_settings_client_and_stores_the_token
 /// A vault that cannot give the client secret takes no code and sends nothing: the code waits
 /// for a run that can.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_client_secret_that_cannot_be_read_takes_no_code() {
     let mut vault = MemVault::with_code();
     let mut secrets = Secrets::for_vault(&vault, true);
@@ -224,7 +222,6 @@ fn a_client_secret_that_cannot_be_read_takes_no_code() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn without_a_waiting_code_nothing_is_sent() {
     let mut vault = MemVault::default();
     let mut secrets = Secrets::for_vault(&vault, false);
@@ -239,7 +236,6 @@ fn without_a_waiting_code_nothing_is_sent() {
 
 /// A refused grant stores no token, and the code it spent is gone, so no rerun sends it again.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_refused_grant_stores_nothing_and_spends_the_code() {
     let mut vault = MemVault::with_code();
     let mut secrets = Secrets::for_vault(&vault, false);

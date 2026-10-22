@@ -11,7 +11,7 @@
 use std::ffi::{OsStr, OsString};
 
 use mandate_connections::record::ConnectionId;
-use mandate_connections::start::OAuthClient;
+use mandate_connections::start::{ClientId, OAuthClient, RedirectUri};
 
 #[cfg(debug_assertions)]
 use crate::cell::{self, CellTokenUrl};
@@ -101,23 +101,34 @@ impl StartRefused {
 pub fn settings(var: impl Fn(&str) -> Option<OsString>) -> Result<Settings, StartRefused> {
     let text = |name: &str| var(name).and_then(|value| value.into_string().ok());
     let endpoint = endpoint(text(TIER).as_deref(), var(TOKEN_URL).as_deref())?;
-    let (connection, client) = after_the_token_url(&text)?;
+    if text(PROCESS).as_deref() != Some(TOKEN_EXCHANGE) {
+        return Err(StartRefused::Process);
+    }
+    let connection = text(SUBJECT)
+        .and_then(|subject| ConnectionId::new(&subject).ok())
+        .ok_or(StartRefused::Subject)?;
+    let client_id = text(CLIENT_ID)
+        .filter(|id| client_id_admitted(id))
+        .ok_or(StartRefused::ClientId)?;
+    let redirect_uri = text(REDIRECT_URI)
+        .and_then(|uri| RedirectUri::parse(&uri).ok())
+        .ok_or(StartRefused::RedirectUri)?;
     Ok(Settings {
         connection,
         endpoint,
-        client,
+        client: OAuthClient {
+            client_id: ClientId(client_id),
+            redirect_uri,
+        },
     })
 }
 
-/// The checks after the token URL: the process, the subject, the client id and the redirect URI.
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
-fn after_the_token_url(
-    _text: &impl Fn(&str) -> Option<String>,
-) -> Result<(ConnectionId, OAuthClient), StartRefused> {
-    todo!()
+/// 1 to [`MAX_CLIENT_ID`] bytes of `A-Z a-z 0-9 . _ -`, the chart schema's pattern.
+fn client_id_admitted(id: &str) -> bool {
+    (1..=MAX_CLIENT_ID).contains(&id.len())
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
 }
 
 /// The live endpoint when no token URL is set. A debug build admits a cell's when `tier` admits

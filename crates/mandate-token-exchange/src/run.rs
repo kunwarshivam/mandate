@@ -4,7 +4,10 @@
 //! one request, and stores the token.
 
 use mandate_connections::ConnectError;
-use mandate_connections::exchange::{ClientSecret, ExchangedGrant, TokenEndpoint};
+use mandate_connections::exchange::{
+    ClientSecret, ExchangedGrant, PendingConnect, TokenEndpoint, exchange_code,
+};
+use mandate_connections::start::Environment;
 use mandate_connections::vault::{Vault, VaultKey};
 
 use crate::startup::Settings;
@@ -29,15 +32,17 @@ pub fn vault_key(settings: &Settings) -> VaultKey {
 ///
 /// # Errors
 /// The client secret's refusal, before anything is taken; then `exchange_code`'s.
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
 pub fn run(
-    _settings: &Settings,
-    _secrets: &mut impl ClientSecretSource,
-    _vault: &mut impl Vault,
-    _endpoint: &mut impl TokenEndpoint,
+    settings: &Settings,
+    secrets: &mut impl ClientSecretSource,
+    vault: &mut impl Vault,
+    endpoint: &mut impl TokenEndpoint,
 ) -> Result<ExchangedGrant, ConnectError> {
-    todo!()
+    let client_secret = secrets.client_secret()?;
+    let pending = PendingConnect {
+        connection_id: settings.connection.as_str().to_owned(),
+        environment: Environment::Paper,
+        vault_key: vault_key(settings),
+    };
+    exchange_code(&pending, &settings.client, &client_secret, vault, endpoint)
 }

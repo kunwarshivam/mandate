@@ -62,7 +62,6 @@ fn a_token_url_that_is_not_utf8_refuses_the_start() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_missing_subject_refuses_the_start() {
     refused_with(
         &run(&[
@@ -76,7 +75,6 @@ fn a_missing_subject_refuses_the_start() {
 /// A pod started as any process but the token exchange refuses before it reads anything else
 /// but the token URL (DEC-1175 item 1).
 #[test]
-#[ignore = "pending E10-13"]
 fn any_process_but_the_token_exchange_refuses_the_start() {
     for process in ["executor", "runtime", ""] {
         refused_with(
@@ -91,7 +89,6 @@ fn any_process_but_the_token_exchange_refuses_the_start() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_start_that_passes_its_checks_does_not_yet_exchange() {
     let output = run(&[
         ("MANDATE_SUBJECT", CONNECTION),

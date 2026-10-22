@@ -76,7 +76,6 @@ fn not_utf8() -> OsString {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn without_a_token_url_the_process_sends_to_the_pinned_live_url() {
     for tier in ["dev", "ci", "staging", "production", "unknown"] {
         assert_eq!(
@@ -100,7 +99,6 @@ fn without_a_token_url_the_process_sends_to_the_pinned_live_url() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_dev_or_ci_cell_sends_to_the_url_the_cell_check_admits() {
     for tier in ["dev", "ci"] {
         assert_eq!(
@@ -191,7 +189,6 @@ fn the_token_url_is_judged_before_everything_else() {
 /// any other value, a missing one, or one that is not UTF-8 refuses the start, before the
 /// subject is read.
 #[test]
-#[ignore = "pending E10-13"]
 fn only_the_token_exchange_process_runs() {
     for process in [
         "",
@@ -227,7 +224,6 @@ fn only_the_token_exchange_process_runs() {
 
 /// The client id must be 1 to 128 of `A-Z a-z 0-9 . _ -`, as the chart's schema admits.
 #[test]
-#[ignore = "pending E10-13"]
 fn the_client_id_is_required_and_strict() {
     let longest = "a".repeat(128);
     let too_long = "a".repeat(129);
@@ -271,7 +267,6 @@ fn the_client_id_is_required_and_strict() {
 /// The redirect URI must be one `RedirectUri::parse` admits: https on a host, or loopback http,
 /// with exactly the callback's path.
 #[test]
-#[ignore = "pending E10-13"]
 fn the_redirect_uri_is_required_and_parsed() {
     for refused in [
         "",
@@ -309,7 +304,6 @@ fn the_redirect_uri_is_required_and_parsed() {
 /// The checks run in their stated order: the subject before the client id, the client id before
 /// the redirect URI.
 #[test]
-#[ignore = "pending E10-13"]
 fn the_later_checks_run_in_order() {
     assert_eq!(
         from_omitting(&[], &["MANDATE_SUBJECT", "MANDATE_ALPACA_CLIENT_ID"]),
@@ -325,7 +319,6 @@ fn the_later_checks_run_in_order() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_missing_or_malformed_subject_refuses_the_start() {
     for subject in [
         None,
