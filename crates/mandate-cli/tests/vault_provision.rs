@@ -352,38 +352,25 @@ fn a_kubernetes_host_that_is_not_https_is_refused_before_any_vault_is_reached() 
     refused(&output, "unavailable", &out, "an https Kubernetes host");
 }
 
-/// With `--kubernetes-host`, provisioning the dev server also sets Kubernetes auth up, twice
-/// without harm, and prints only the names of the files it wrote.
+/// With `--kubernetes-host`, provisioning asks the vault to set Kubernetes auth up with no CA, so
+/// that the vault reads the CA its own pod projects. The dev server runs in no pod and has none to
+/// read, so it refuses the configuration, and the run fails closed, `denied`, where the same run
+/// without the flag succeeds: the refusal is the Kubernetes setup's, reached past every check.
 #[test]
 #[ignore = "pending E21-32"]
-fn provisioning_with_a_kubernetes_host_sets_kubernetes_auth_up() {
+fn provisioning_with_a_kubernetes_host_asks_the_vault_to_set_kubernetes_auth_up() {
     a_kubernetes_host_that_is_not_https_is_refused_before_any_vault_is_reached();
     let Some((address, ca, operator)) = server() else {
         return;
     };
     let token = token_file(fs::read_to_string(operator).unwrap().trim(), 0o600);
-    let _removed = Removed(vec![token.clone()]);
-    for round in 0..2 {
-        let out = fresh("out");
-        let _out = Removed(vec![out.clone()]);
-        let output = provision_with(
-            &address,
-            &ca,
-            &token,
-            &["c1"],
-            &out,
-            &["--kubernetes-host", "https://127.0.0.1:6443"],
-        );
-        assert!(
-            output.status.success(),
-            "round {round}: {}",
-            stderr(&output)
-        );
-        assert!(
-            !String::from_utf8_lossy(&output.stdout).contains("://"),
-            "round {round}"
-        );
-    }
+    let out = fresh("out");
+    let _removed = Removed(vec![token.clone(), out.clone()]);
+    let host = ["--kubernetes-host", "https://127.0.0.1:6443"];
+    let output = provision_with(&address, &ca, &token, &["c1"], &out, &host);
+    refused(&output, "denied", &out, "a Kubernetes host outside a pod");
+    let output = provision(&address, &ca, &token, &["c1"], &out);
+    assert!(output.status.success(), "{}", stderr(&output));
 }
 
 /// The host is passed as it is, with no CA: the vault reads the one its own pod projects.
