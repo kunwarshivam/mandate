@@ -15,7 +15,15 @@
 //! [`key`] holds the provider's key, read once from the vault at start, and [`start`] refuses a
 //! live start whose meters cannot be read. [`serve`] is the serve loop: one thread per connection
 //! under socket timeouts and a cap, one thread holding the gateway, and a log of codes alone.
+//! [`cap`] reads each agent's daily research cap from the deployed mandate (DEC-2272), and
+//! [`service`] holds each research call to it before the gateway reserves anything. [`config`]
+//! reads the start-up values, none with a default, and [`control`] reads the control stream through
+//! the journal store.
 
+pub mod cap;
+pub mod config;
+pub mod control;
 pub mod key;
 pub mod serve;
+pub mod service;
 pub mod start;
