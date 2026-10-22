@@ -891,7 +891,6 @@ fn signed_in() -> SubjectStanding {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_passkey_session_reaches_pause_the_kill_switch_and_sign_out_for_fifteen_minutes_absolute() {
     let store = sessions();
     let cookie = store
@@ -944,7 +943,6 @@ fn a_passkey_session_reaches_pause_the_kill_switch_and_sign_out_for_fifteen_minu
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_passkey_session_is_never_refreshed_and_a_refresh_keeps_it() {
     let store = sessions();
     let cookie = store
@@ -999,7 +997,6 @@ fn a_passkey_session_is_never_refreshed_and_a_refresh_keeps_it() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_passkey_session_counts_toward_sixteen_and_ends_a_presented_one_only_once_opened() {
     let store = sessions();
     let mut cookies = Vec::new();
@@ -1063,7 +1060,6 @@ fn a_passkey_session_counts_toward_sixteen_and_ends_a_presented_one_only_once_op
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_deprovision_since_the_last_sign_in_or_a_full_store_refuses_a_passkey_session() {
     let store = sessions();
     for (sign_in, refused, opens) in [
