@@ -196,7 +196,29 @@ fn a_forwarded_address_counts_only_from_a_listed_ingress_peer() {
     ]);
     assert_eq!(
         reduction::address(loopback, &lines, &ingress),
-        "2001:db8:9:9::/64"
+        "2001:db8:9:9::/64",
+        "the lines are one list"
+    );
+    let through = headers(&[(
+        "x-forwarded-for",
+        "203.0.113.9, 127.0.0.1, ::ffff:127.0.0.1",
+    )]);
+    assert_eq!(
+        reduction::address(loopback, &through, &ingress),
+        "203.0.113.9",
+        "walked from the right past every listed peer"
+    );
+    let only = headers(&[("x-forwarded-for", "127.0.0.1")]);
+    assert_eq!(reduction::address(loopback, &only, &ingress), "127.0.0.1");
+    assert_eq!(
+        reduction::address(ip("::ffff:127.0.0.1"), &forwarded, &ingress),
+        "203.0.113.9",
+        "an IPv4-mapped peer matches its IPv4 address"
+    );
+    assert_eq!(
+        reduction::address(loopback, &forwarded, &[ip("::ffff:127.0.0.1")]),
+        "203.0.113.9",
+        "and a mapped listing matches the IPv4 peer"
     );
 }
 
@@ -301,9 +323,19 @@ fn the_store_issues_within_the_gate_and_holds_at_most_4096_in_all() {
     );
 
     let wide = Reduction::new(Vec::new(), Box::new(Wide::default()));
-    for n in 0..CHALLENGES_IN_ALL {
+    for n in 0..3_072 {
         wide.issue(&client(&format!("a{n}"), &format!("d{n}")), now)
             .expect("issued");
+    }
+    assert!(
+        wide.issue(&client("a0", "e0"), now).is_err(),
+        "past 3,072, an address that holds one gets no more"
+    );
+    assert!(wide.issue(&client("n0", "m0"), now).is_ok(), "the reserve");
+    assert!(wide.issue(&client("n0", "m1"), now).is_err());
+    for n in 1..1_024 {
+        wide.issue(&client(&format!("n{n}"), &format!("m{n}")), now)
+            .expect("issued from the reserve");
     }
     assert!(
         wide.issue(&client("fresh", "fresh"), now).is_err(),
@@ -559,10 +591,35 @@ fn over_its_limits_the_challenge_route_answers_the_one_401() {
         assert_eq!(ask(&f, &device, b"{}").status, 201);
     }
     the_one_401(&f, &ask(&f, &device, b"{}"), "a fifth on one device");
-    for _ in 4..32 {
-        assert_eq!(ask(&f, &[], b"{}").status, 201, "a fresh device each");
+    for n in 4..32 {
+        let claimed = format!("203.0.113.{n}");
+        assert_eq!(
+            ask(&f, &[("X-Forwarded-For", &claimed)], b"{}").status,
+            201,
+            "a fresh device each"
+        );
     }
-    the_one_401(&f, &ask(&f, &[], b"{}"), "a 33rd on one address");
+    the_one_401(
+        &f,
+        &ask(&f, &[("X-Forwarded-For", "198.51.100.7")], b"{}"),
+        "a 33rd on one address: a forwarded address from no listed peer claims nothing",
+    );
+    let elsewhere = fixture(Reduction::new(
+        vec![ip("10.0.0.1")],
+        Box::new(Wide::default()),
+    ));
+    for n in 0..32 {
+        let claimed = format!("203.0.113.{n}");
+        assert_eq!(
+            ask(&elsewhere, &[("X-Forwarded-For", &claimed)], b"{}").status,
+            201
+        );
+    }
+    the_one_401(
+        &elsewhere,
+        &ask(&elsewhere, &[("X-Forwarded-For", "198.51.100.7")], b"{}"),
+        "an ingress listed elsewhere: the loopback peer is no ingress",
+    );
 
     let behind = fixture(Reduction::new(
         vec![ip("127.0.0.1")],
