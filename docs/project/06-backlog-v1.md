@@ -1421,6 +1421,21 @@ after U-A1 to U-A5 are recorded.
   the request's event id, and only after sign-in (spec §3.9, DEC-436 item 19; the payload is the
   notifications spec's, E8-9).
 
+- **E8-17 (Must, M7; SC; needed before staging)** As an owner, I want to hear when a kill switch
+  did not reach my account, and when an agent's retirement is held, so that I can act in the
+  broker's own console ([DEC-2344](decisions/DEC-2344.md) items 1 and 2,
+  [DEC-2351](decisions/DEC-2351.md)). Today only the operator is told (RB-14).
+  - `kill_switch_unapplied` (notifications spec v0.9 §3.2, journal spec v0.78): the kind in
+    `mandate-notify` and `mandate-journal`'s closed set, its class and text key, and the deployment
+    manager's `OwnerAlertSent` in its `ProcessCrashLooped`'s batch for an executor last started for
+    a kill switch. Tests first: the kind parses and maps to `safety` and `attention_needed`; the
+    manager writes exactly one `OwnerAlertSent` per such loop and none for any other loop or after
+    a restart.
+  - `retirement_held` (DEC-2344 item 2): its own spec change first, since it has no journaled
+    subject: an agent-stream record the runtime writes when a retirement has waited 24 hours, and
+    each 24 hours after, with its `OwnerAlertSent` in the batch, stream rules, and reference
+    vectors; then the kind and the runtime's writer, as above.
+
 ### E9 Identity, tenancy, and policy
 
 The [identity spec](../specs/identity.md) (v0.1 draft, [DEC-437](decisions/DEC-437.md)) defines these
