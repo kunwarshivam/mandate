@@ -8,8 +8,9 @@ mod support;
 use mandate_process::{Exit, State};
 use support::{
     ACCOUNT, ACCOUNT_STREAM, AGENT, CONNECTION, Error, Journal, NOON, OPENED, OPENING,
-    OTHER_ACCOUNT, OTHER_AGENT, OTHER_CONNECTION, Paper, at, connect, deploy, deployed, exchanged,
-    kill, kill_command, refused, requested, revoke, start, start_issued, stopped, tick,
+    OTHER_ACCOUNT, OTHER_AGENT, OTHER_CONNECTION, Paper, agent_stream, at, connect, deploy,
+    deployed, exchanged, kill, kill_command, refused, requested, revoke, start, start_issued,
+    stopped, tick,
 };
 
 const COMMAND: &str = "01JCMD000000000000000000AA";
@@ -235,6 +236,31 @@ fn only_this_executors_exchanged_start_holds_it() -> Result<(), Error> {
     start_issued(&journal, "c6", "executor", ACCOUNT, "deployed")?;
     let broker = Paper::new(&journal);
     let mut process = start(&journal, &broker)?;
+    process.step(at(NOON)?);
+    assert_eq!(process.lifecycle().state(), COMPLETED);
+    Ok(())
+}
+
+/// Item 3.3 (the coordinator's review): an agent stream that does not read may hold a switch, so
+/// it keeps the executor running, not failed; once it reads, the switch applies and the executor
+/// then exits.
+#[test]
+#[ignore = "pending E7-4"]
+fn an_unreadable_agent_stream_keeps_it_running() -> Result<(), Error> {
+    let journal = deployed()?;
+    stopped(&journal, "c3", AGENT)?;
+    kill(&journal, AGENT, SWITCH)?;
+    journal.unreadable(&agent_stream(AGENT));
+    let broker = Paper::new(&journal);
+    let mut process = start(&journal, &broker)?;
+    for _ in 0..3 {
+        process.step(at(NOON)?);
+    }
+    assert!(journal.switched().is_empty());
+    assert_eq!(process.lifecycle().state(), State::Ready);
+    journal.readable(&agent_stream(AGENT));
+    process.step(at(NOON)?);
+    assert_eq!(journal.switched(), [AGENT]);
     process.step(at(NOON)?);
     assert_eq!(process.lifecycle().state(), COMPLETED);
     Ok(())
