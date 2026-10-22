@@ -25,6 +25,10 @@ pub const PROCESS: &str = "MANDATE_PROCESS";
 /// The only [`PROCESS`] this binary runs as.
 pub const TOKEN_EXCHANGE: &str = "token_exchange";
 
+/// The ServiceAccount the pod runs as: `x` and the lowercase hex of the subject's bytes, which the
+/// deployment manager's admission policy pins (DEC-2060, DEC-1177).
+pub const SUBJECT_ACCOUNT: &str = "MANDATE_SUBJECT_ACCOUNT";
+
 /// The platform's OAuth client id, public (DEC-2636 item 3).
 pub const CLIENT_ID: &str = "MANDATE_ALPACA_CLIENT_ID";
 
@@ -70,6 +74,8 @@ pub enum StartRefused {
     Process,
     /// `MANDATE_SUBJECT` is unset or names no connection.
     Subject,
+    /// `MANDATE_SUBJECT_ACCOUNT` is not `x` and the lowercase hex of the subject's bytes.
+    SubjectAccount,
     /// `MANDATE_ALPACA_CLIENT_ID` is unset, empty, or not 1 to 128 of `A-Z a-z 0-9 . _ -`.
     ClientId,
     /// `MANDATE_ALPACA_REDIRECT_URI` is unset or not a redirect URI `RedirectUri::parse` admits.
@@ -85,6 +91,7 @@ impl StartRefused {
             Self::Cell(refused) => refused.code(),
             Self::Process => "token_exchange_process",
             Self::Subject => "token_exchange_subject",
+            Self::SubjectAccount => "token_exchange_subject_account",
             Self::ClientId => "token_exchange_client_id",
             Self::RedirectUri => "token_exchange_redirect_uri",
         }
@@ -96,7 +103,8 @@ impl StartRefused {
 ///
 /// # Errors
 /// In this order: [`endpoint`]'s refusal, then [`StartRefused::Process`],
-/// [`StartRefused::Subject`], [`StartRefused::ClientId`] and [`StartRefused::RedirectUri`]. The
+/// [`StartRefused::Subject`], [`StartRefused::SubjectAccount`], [`StartRefused::ClientId`] and
+/// [`StartRefused::RedirectUri`]. The
 /// token URL is judged first, so a release build refuses it before anything else is read.
 pub fn settings(var: impl Fn(&str) -> Option<OsString>) -> Result<Settings, StartRefused> {
     let text = |name: &str| var(name).and_then(|value| value.into_string().ok());
@@ -109,7 +117,17 @@ pub fn settings(var: impl Fn(&str) -> Option<OsString>) -> Result<Settings, Star
     })
 }
 
-/// The checks after the token URL: the process, the subject, the client id and the redirect URI.
+/// The ServiceAccount name of `connection`'s pod: `x` and its bytes in lowercase hex (DEC-2060).
+#[expect(
+    clippy::todo,
+    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+)]
+pub fn subject_account(_connection: &ConnectionId) -> String {
+    todo!()
+}
+
+/// The checks after the token URL: the process, the subject, its ServiceAccount, the client id and
+/// the redirect URI.
 #[expect(
     clippy::todo,
     reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
