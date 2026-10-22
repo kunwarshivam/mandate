@@ -5018,6 +5018,7 @@ fn an_account_cancel_all_covers_unknown_orders() {
             .is_some_and(|o| o.state == OrderState::Unknown),
         "there is an Unknown order on the account"
     );
+    shell.run(Input::Market(quote(AAPL, "155", "155.1", 20)), &ports);
 
     let ran = shell.run(
         Input::Command(Command::KillSwitch {
@@ -5042,6 +5043,344 @@ fn an_account_cancel_all_covers_unknown_orders() {
         )),
         "and the executor does not also cancel the Unknown one by id"
     );
+}
+
+/// A position of `qty` in `instrument` held by `holder`, folded as the journaled facts of its
+/// filled buy from `seq` on: what an account kill switch finds to close.
+fn held_by(shell: &mut Shell, seq: u64, holder: &str, instrument: &str, qty: &str, id: &str) {
+    for fact in [
+        event(
+            ACCOUNT_STREAM,
+            seq,
+            "OrderSubmitted",
+            with_clock(
+                &[
+                    ("client_order_id", text(id)),
+                    ("agent", text(holder)),
+                    ("instrument", text(instrument)),
+                    ("side", text("buy")),
+                    ("qty", text(qty)),
+                    ("limit", text("100")),
+                ],
+                12,
+            ),
+        ),
+        event(
+            ACCOUNT_STREAM,
+            seq.saturating_add(1),
+            "FillApplied",
+            with_clock(
+                &[
+                    ("fill_id", text(&format!("f-{id}"))),
+                    ("client_order_id", text(id)),
+                    ("instrument", text(instrument)),
+                    ("side", text("buy")),
+                    ("qty_gross", text(qty)),
+                    ("price", text("100")),
+                ],
+                12,
+            ),
+        ),
+        event(
+            ACCOUNT_STREAM,
+            seq.saturating_add(2),
+            "OrderStateChanged",
+            with_clock(
+                &[("client_order_id", text(id)), ("state", text("filled"))],
+                12,
+            ),
+        ),
+    ] {
+        shell.fold_one(&fact).expect("the held position folds");
+    }
+}
+
+/// An account with two agents: `AGENT`'s protected `AAPL` and `OTHER_AGENT`'s `BTC`, in the
+/// regular session with a fresh quote for each, where §5.5 lets a close go at the market.
+fn two_agent_account(ports: &mandate_executor::Ports<'_>) -> Shell {
+    let mut shell = started();
+    shell.fold_one(&stream_opened()).expect("folds");
+    for event in protected_position_events(2) {
+        shell
+            .fold_one(&event)
+            .expect("the protected position folds");
+    }
+    held_by(&mut shell, 6, OTHER_AGENT, BTC, "0.5", "md-held-btc");
+    let mut shell = shell.restart_ready(ports);
+    shell.run(Input::Market(quote(AAPL, "155", "155.1", 20)), ports);
+    shell.run(Input::Market(quote(BTC, "60000", "60010", 20)), ports);
+    shell
+}
+
+fn account_switch(initiator: Initiator) -> Input {
+    Input::Command(Command::KillSwitch {
+        scope: KillScope::Account(mandate_executor::AccountRef(common::ACCOUNT.to_owned())),
+        initiator,
+        confirmation: (initiator == Initiator::Owner).then(owner_confirmation),
+        cause: None,
+    })
+}
+
+/// §5.5's sequence for the account scope: the final mode first, for every agent on the account,
+/// then the cancel. It is one `AgentModeApplied` for `*`, every agent of the account, those the
+/// executor has not yet seen included: an owner's switch stops them, a mandate limit's pauses them
+/// (DEC-100), journaled before the broker's cancel-all goes, so nothing an agent hands in meanwhile
+/// is gated under its old mode (`AGENTS.md` rule 13).
+#[test]
+#[ignore = "pending E7-4"]
+fn an_account_kill_switch_applies_every_agents_mode_before_its_cancel_all() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL, BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    for (initiator, mode, name) in [
+        (Initiator::Owner, Mode::Stopped, "stopped"),
+        (Initiator::RiskLimit, Mode::Paused, "paused"),
+    ] {
+        let mut shell = two_agent_account(&ports);
+
+        let ran = shell.run(account_switch(initiator), &ports);
+
+        let cancel_all = ran
+            .effects
+            .iter()
+            .position(|e| matches!(e, Effect::Broker(BrokerRequest::CancelAll(_))))
+            .unwrap_or_else(|| panic!("{initiator:?}: the cancel-all goes"));
+        let every = ran.effects.iter().position(|e| {
+            matches!(e, Effect::Journal(d) if d.event_type == "AgentModeApplied"
+                && d.payload.get("agent").and_then(mandate_canon::Value::as_str) == Some("*")
+                && d.payload.get("to").and_then(mandate_canon::Value::as_str) == Some(name))
+        });
+        assert!(
+            every.is_some_and(|at| at < cancel_all),
+            "{initiator:?}: every agent `{name}` before the cancel-all: {:?}",
+            ran.draft_types()
+        );
+        for holder in [common::AGENT, OTHER_AGENT, "agent-unseen"] {
+            assert_eq!(
+                shell.state.effective_mode(&agent(holder)),
+                mode,
+                "{initiator:?}: {holder} is {name}"
+            );
+        }
+    }
+}
+
+/// After the account switch's cancel-all, the protection it cancelled is never placed again: the
+/// broker's close-position sells those shares, and a stop resting beside it would sell them twice
+/// (§5.4, `AGENTS.md` rule 12). Here the stop-limit the executor placed after a crypto entry's
+/// fill, acknowledged, is cancelled by the cancel-all; the cancel is folded, and nothing protective
+/// is sent, in that step or the next.
+#[test]
+#[ignore = "pending E7-4"]
+fn an_account_kill_switch_never_re_places_the_protection_its_cancel_all_cancelled() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = started();
+    shell.fold_one(&stream_opened()).expect("folds");
+    let mut shell = shell.restart_ready(&ports);
+    shell.run(Input::Market(quote(BTC, "60000", "60010", 20)), &ports);
+    let submitted = shell.run(
+        handoff(
+            INTENT,
+            common::AGENT,
+            protected_opening(BTC, "0.5", "60000", "54000", None),
+        ),
+        &ports,
+    );
+    let entry = submitted
+        .submissions()
+        .first()
+        .map(|o| o.client_order_id.as_str().to_owned())
+        .expect("the crypto entry is sent");
+    shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+            "b-1",
+            Some(&entry),
+            BTC,
+            Side::Buy,
+            "0.5",
+            "0.5",
+            "filled",
+        ))),
+        &ports,
+    );
+    let filled = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Fill(btc_fill(&entry, "0.5"))),
+        &ports,
+    );
+    let stop = filled
+        .submissions()
+        .into_iter()
+        .find(|o| o.purpose == Purpose::Protective)
+        .map(|o| (o.client_order_id.as_str().to_owned(), o.qty.to_string()))
+        .expect("the stop-limit is placed");
+    let resting = |status: &str| {
+        Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+            "b-stop",
+            Some(&stop.0),
+            BTC,
+            Side::Sell,
+            &stop.1,
+            "0",
+            status,
+        )))
+    };
+    shell.run(resting("new"), &ports);
+    shell.run(account_switch(Initiator::Owner), &ports);
+
+    let cancelled = shell.run(resting("canceled"), &ports);
+    let later = shell.run(Input::Market(quote(BTC, "60000", "60010", 40)), &ports);
+
+    let protective: Vec<_> = cancelled
+        .submissions()
+        .into_iter()
+        .chain(later.submissions())
+        .filter(|o| o.purpose == Purpose::Protective)
+        .map(|o| o.client_order_id.as_str().to_owned())
+        .collect();
+    assert!(
+        protective.is_empty(),
+        "no protection re-placed beside the close-position: {protective:?}"
+    );
+}
+
+/// The account switch's records replay (ES-21): a restart folds every record it journaled, the
+/// account-scoped `KillSwitchActivated` included, and every agent stays held under its mode.
+#[test]
+#[ignore = "pending E7-4"]
+fn an_account_kill_switch_replays_after_a_restart() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL, BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = two_agent_account(&ports);
+    shell.run(account_switch(Initiator::Owner), &ports);
+    assert!(
+        shell
+            .account_journal
+            .iter()
+            .any(|e| e.event_type == "KillSwitchActivated"),
+        "the switch is on the journal"
+    );
+
+    let restarted = shell.restart_ready(&ports);
+
+    for holder in [common::AGENT, OTHER_AGENT] {
+        assert_eq!(
+            restarted.state.effective_mode(&agent(holder)),
+            Mode::Stopped,
+            "{holder} stays stopped after the replay"
+        );
+    }
+}
+
+/// §5.5's close for the account scope: the broker's close-position endpoint, once for each held
+/// instrument whoever holds it, crypto included, after the cancel-all; never a cancel by id beside
+/// it and never an order of the executor's own (DEC-485 item 1).
+#[test]
+#[ignore = "pending E7-4"]
+fn an_account_kill_switch_closes_each_held_instrument_once_after_its_cancel_all() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL, BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = two_agent_account(&ports);
+
+    let ran = shell.run(account_switch(Initiator::Owner), &ports);
+
+    let cancel_all = ran
+        .requests
+        .iter()
+        .position(|r| matches!(r, BrokerRequest::CancelAll(_)))
+        .expect("the cancel-all goes");
+    let closes: Vec<(usize, &str)> = ran
+        .requests
+        .iter()
+        .enumerate()
+        .filter_map(|(at, r)| match r {
+            BrokerRequest::ClosePosition(_, instrument) => Some((at, instrument.as_str())),
+            _ => None,
+        })
+        .collect();
+    let mut closed: Vec<&str> = closes.iter().map(|(_, name)| *name).collect();
+    closed.sort_unstable();
+    assert_eq!(
+        closed,
+        vec![AAPL, BTC],
+        "one close-position per held instrument"
+    );
+    assert!(
+        closes.iter().all(|(at, _)| *at > cancel_all),
+        "each after the cancel-all: {:?}",
+        ran.requests
+    );
+    assert!(
+        !ran.requests
+            .iter()
+            .any(|r| matches!(r, BrokerRequest::Cancel { .. } | BrokerRequest::Submit(_))),
+        "no cancel by id and no order of its own beside the account-wide endpoints: {:?}",
+        ran.requests
+    );
+}
+
+/// The account switch is journaled before anything is sent (`AGENTS.md` rule 5): one
+/// `KillSwitchActivated` of scope `account`, naming the account as its subject and the
+/// instruments it closes, ahead of the cancel-all.
+#[test]
+#[ignore = "pending E7-4"]
+fn an_account_kill_switch_is_journaled_naming_the_account_before_it_acts() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL, BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = two_agent_account(&ports);
+
+    let ran = shell.run(account_switch(Initiator::Owner), &ports);
+
+    let record = ran
+        .effects
+        .iter()
+        .position(|e| matches!(e, Effect::Journal(d) if d.event_type == "KillSwitchActivated"))
+        .expect("the switch is journaled");
+    let cancel_all = ran
+        .effects
+        .iter()
+        .position(|e| matches!(e, Effect::Broker(BrokerRequest::CancelAll(_))))
+        .expect("the cancel-all goes");
+    assert!(record < cancel_all, "journaled before it acts");
+    let switch = ran.draft("KillSwitchActivated").expect("the record");
+    let field = |name: &str| {
+        switch
+            .payload
+            .get(name)
+            .and_then(mandate_canon::Value::as_str)
+    };
+    assert_eq!(
+        (field("scope"), field("subject")),
+        (Some("account"), Some(common::ACCOUNT)),
+        "scope account, subject the account"
+    );
+    let mut closes: Vec<&str> = switch
+        .payload
+        .get("closes")
+        .and_then(mandate_canon::Value::as_array)
+        .map(|names| {
+            names
+                .iter()
+                .filter_map(mandate_canon::Value::as_str)
+                .collect()
+        })
+        .unwrap_or_default();
+    closes.sort_unstable();
+    assert_eq!(closes, vec![AAPL, BTC], "naming every instrument it closes");
 }
 
 #[test]
