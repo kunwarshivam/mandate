@@ -287,7 +287,6 @@ fn the_latest_connect_check_of_the_connection_is_read() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_check_that_omits_scope_environment_or_account_is_unreadable() {
     let id = connection(CONNECTION);
     for omitted in ["account", "environment", "scope"] {

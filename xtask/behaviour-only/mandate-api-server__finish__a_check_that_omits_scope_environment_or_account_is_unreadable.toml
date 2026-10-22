@@ -1,8 +1,0 @@
-file = "crates/mandate-api-server/tests/finish.rs"
-test = "a_check_that_omits_scope_environment_or_account_is_unreadable"
-reason = """
-Journal rule 57: a `ConnectionChecked` lists `scope`, `environment` and `account`. F1's `checked`
-(DEC-2342) reads a check whose listed results all passed as passed without requiring the three, so
-this test fails on that answer rather than at a stub. F2b's implementation PR requires them and
-deletes this file with the test's `#[ignore]` line.
-"""

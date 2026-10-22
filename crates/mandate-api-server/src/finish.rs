@@ -203,9 +203,13 @@ fn members(payload: &Value, connection: &ConnectionId) -> Option<RequestMembers>
     })
 }
 
+/// The checks journal rule 57 says every `ConnectionChecked` lists; a check that omits one is
+/// read as [`Unreadable`], never as passed.
+const RULE_57_CHECKS: [&str; 3] = ["account", "environment", "scope"];
+
 /// The latest `ConnectionChecked` of `connection` with occasion `connect` on `account`, read as
-/// the executor writes it (rules 57, 58, 62): every result `passed` with a non-null
-/// `account_pii_ref`, or the first failed result's reason.
+/// the executor writes it (rules 57, 58, 62): `account`, `environment` and `scope` listed, and
+/// every result `passed` with a non-null `account_pii_ref`, or the first failed result's reason.
 ///
 /// # Errors
 /// [`Unreadable`] for a check of the connection that cannot be read so: the finish cannot answer.
@@ -229,7 +233,12 @@ pub fn checked(
             .get("results")
             .and_then(Value::as_array)
             .ok_or(Unreadable)?;
-        if results.is_empty() {
+        let listed = |name: &str| {
+            results
+                .iter()
+                .any(|result| result.get("check").and_then(Value::as_str) == Some(name))
+        };
+        if !RULE_57_CHECKS.iter().all(|name| listed(name)) {
             return Err(Unreadable);
         }
         let failed = results
