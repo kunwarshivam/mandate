@@ -8,3 +8,5 @@ mod response;
 mod cell;
 #[cfg(debug_assertions)]
 mod http;
+#[cfg(debug_assertions)]
+mod startup;
