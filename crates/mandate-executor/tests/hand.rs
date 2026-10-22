@@ -5973,6 +5973,57 @@ fn a_close_is_asked_again_only_on_a_later_read_showing_it_still_held() {
     );
 }
 
+/// The close ends only an interval that is open (DEC-2337 item 4): with the stop's cancel never
+/// reported, no interval opened under the switch, so the close's fill leaving nothing held journals
+/// no `unprotected_end`.
+#[test]
+#[ignore = "pending E7-4"]
+fn a_close_with_no_interval_open_ends_none() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (mut shell, _, _, _) = closed_btc(&ports);
+    let close = shell
+        .account_journal
+        .iter()
+        .position(|e| e.event_type == "AccountCloseRequested")
+        .expect("the close is requested");
+    let held = shell
+        .state
+        .positions()
+        .get(&instrument(BTC))
+        .map(ToString::to_string)
+        .unwrap_or_default();
+
+    shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Fill(mandate_executor::BrokerFill {
+            instrument: instrument(BTC),
+            side: Side::Sell,
+            broker_order_id: Some("b-close".to_owned()),
+            ..broker_fill("f-btc-close", None, &held, "59000")
+        })),
+        &ports,
+    );
+
+    let ended: Vec<usize> = shell
+        .account_journal
+        .iter()
+        .enumerate()
+        .skip(close)
+        .filter(|(_, e)| {
+            e.event_type == "ProtectionChanged"
+                && e.payload
+                    .get("action")
+                    .and_then(mandate_canon::Value::as_str)
+                    == Some("unprotected_end")
+        })
+        .map(|(at, _)| at)
+        .collect();
+    assert!(ended.is_empty(), "no interval to end: {ended:?}");
+}
+
 /// BTC's unprotected interval ends on its close (DEC-2337 item 4): the close is journaled, the
 /// broker reports the stop the cancel-all cancelled, which opens BTC's interval, and the close's
 /// fill, which names no order of ours, leaves nothing held, so the interval journals
