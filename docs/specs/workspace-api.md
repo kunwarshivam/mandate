@@ -1633,11 +1633,13 @@ id and is used once, so a retried opening asks for a new challenge.
      entry that is itself a listed peer; the first other entry is the address. A missing header, an
      entry that is not an address, or a list holding only listed peers falls back to the TCP peer.
      A forwarded header from any other peer is ignored, so a request that did not come through the
-     ingress cannot claim an address (DEC-822 item 7). Peers are matched exactly, after an
-     IPv4-mapped IPv6 address is read as its IPv4 address. An IPv6 address counts as its /64
-     prefix, so one client cannot rotate addresses within it to escape its budget; an IPv4 address
-     counts as itself. Unset behind an ingress, every client shares one address budget, so a
-     deployment behind one sets it.
+     ingress cannot claim an address (DEC-822 item 7). Peers are matched exactly. An IPv4-mapped
+     IPv6 address (`::ffff:a.b.c.d`), whether the peer's or a forwarded one, is read as its
+     embedded IPv4 address everywhere, so it counts as that IPv4 address; an IPv4 address counts
+     as itself. Only a native IPv6 address counts as its /64 prefix, so one client cannot rotate
+     addresses within it to escape its budget; a client holding a /56 or a /48 can still rotate
+     across its /64s, a residual the global cap below bounds. Unset behind an ingress, every client
+     shares one address budget, so a deployment behind one sets it.
    - **Device:** the `__Host-mandate_device` cookie: 32 bytes from the operating system's generator
      as unpadded base64url, `Secure`, `HttpOnly`, `SameSite=Strict`, `Path=/` (the `__Host-` prefix
      requires it; every other route ignores it), `Max-Age` 30 days. The challenge route sets it when
@@ -1652,10 +1654,12 @@ id and is used once, so a retried opening asks for a new challenge.
      and 32 per address. In all it holds at most 4,096, and the last 1,024 are a reserve: once
      3,072 are outstanding, an address that already holds one gets no more, so the rest go one per
      address. Past any of these it answers the one 401, as every other refusal of route 2 does
-     (DEC-653 item 3). **Residual:** a flood from about 1,100 distinct addresses (IPv6 /64s) that
-     re-asks whenever a slot frees can hold every slot while it lasts; a member then waits for a
-     slot, uses another network, the host CLI (route 3) where there is one, or route 1 once the
-     provider answers.
+     (DEC-653 item 3). **Residual:** 96 addresses at their 32 each fill the first 3,072, and 1,024
+     more distinct addresses take the reserve, so a flood from about 1,120 distinct addresses
+     (IPv6 /64s, which one /48 holds many times over) that re-asks whenever a slot frees can hold
+     every slot while it lasts. A member who asks then gets the one 401, and waits for a slot,
+     uses another network, the host CLI (route 3) where there is one, or route 1 once the provider
+     answers.
    - **The assertion route** counts each failed assertion against the address and device that
      presented it, for 300 s after it failed: at most 10 per device and 100 per address are kept.
      This limit only counts and reports (DEC-653 item 3, the founder's reading): no answer depends
@@ -1664,9 +1668,13 @@ id and is used once, so a retried opening asks for a new challenge.
      Verification work stays bounded by the challenge limits, since only an outstanding challenge
      reaches the verifier, once; a request naming none fails without verifying. **An assertion that
      verifies is never refused for a limit.**
-   - **Bounded memory.** Besides the 4,096 outstanding challenges, the server keeps failures for
-     at most 65,536 addresses and devices in all, dropping the oldest first. Dropping one changes
-     no answer, since failures only report.
+   - **Bounded memory.** Besides the 4,096 outstanding challenges, failures are kept for at most
+     65,536 addresses and devices in all, the oldest dropped first. Dropping one changes no answer,
+     since failures only report. Both bounds are owed to the gate itself by S2's gate change
+     (E9-1): `mandate_authn`'s `ReductionLimits` gains `max_outstanding` (4,096), past which it
+     refuses a challenge with its one refusal, and `max_failure_keys` (65,536), evicting the oldest
+     failure key first. Until that lands, the route holds the 4,096 bound itself and the gate holds
+     only its per-key limits.
 4. **No membership oracle, by structure.** Every refusal of `POST /v1/reduction-sessions` after the
    browser check (an invalid body; an unknown, expired, or reused challenge; an unknown passkey id;
    a passkey removed, or whose member is deactivated, removed, or deprovisioned; a bad signature; a
