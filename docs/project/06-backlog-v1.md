@@ -4246,7 +4246,8 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
 - **E7-4 (deployment manager and executor), from [DEC-2343](decisions/DEC-2343.md) Not covered
   here:** lane D1's [DEC-2344](decisions/DEC-2344.md) starts the executor for a kill switch that
   covers only stopped agents, and the executor exits 0 once no agent it follows is desired and every
-  covering switch it read is applied, with nothing in flight and no `Unknown` order in scope.
+  covering switch it read is applied, with nothing in flight and no `Unknown` order in scope. The
+  executor's half, a tighter exit, is [DEC-2347](decisions/DEC-2347.md)'s.
 - **E7-4 slices 5 and 6's tests correction (stream K), from #286 round 1 (minor 2):**
   `properties::no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding` counts a cancel as
   outstanding until the order is terminal, abandoned or its protection cancelled, so it would fail on

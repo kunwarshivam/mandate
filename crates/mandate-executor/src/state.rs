@@ -627,6 +627,13 @@ impl ExecutorState {
             .any(|switch| &switch.agent == agent && switch.copied_from.as_ref() == Some(source))
     }
 
+    /// Whether `agent` holds lots in any instrument: its sub-ledger, the quantity its kill switch
+    /// would sell (trading-domain spec §5.5), is above zero somewhere (DEC-2347).
+    pub fn holds_lots(&self, agent: &AgentId) -> Result<bool, ExecutorError> {
+        let _ = agent;
+        Err(ExecutorError::Unimplemented { story: "E7-4" })
+    }
+
     pub fn started(&self) -> bool {
         self.started
     }

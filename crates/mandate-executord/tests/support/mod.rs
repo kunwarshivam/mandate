@@ -476,6 +476,17 @@ impl Paper {
         Ok(())
     }
 
+    /// The broker confirms the cancel of the order under `client_order_id`: it reads as canceled.
+    pub fn canceled(&self, client_order_id: &str) -> Result<(), Error> {
+        let mut books = self.books.borrow_mut();
+        let order = books
+            .orders
+            .get_mut(client_order_id)
+            .ok_or("no such order")?;
+        order.status = "canceled".to_owned();
+        Ok(())
+    }
+
     /// The account reads as blocked from trading from now on.
     pub fn block(&self) {
         self.books.borrow_mut().blocked = true;

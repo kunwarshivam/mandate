@@ -4925,6 +4925,21 @@ fn an_agent_kill_switch_cancels_only_that_agents_orders() {
     );
 }
 
+/// DEC-2347 item 3.5: the agent whose own buy filled holds lots, the quantity its kill switch would
+/// sell, and another agent, with none of its own, holds none in the same position.
+#[test]
+#[ignore = "pending E7-4"]
+fn only_the_agent_whose_buy_filled_holds_lots() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let shell = protected_position(&ports);
+    assert_eq!(shell.state.holds_lots(&agent(common::AGENT)), Ok(true));
+    assert_eq!(shell.state.holds_lots(&agent(OTHER_AGENT)), Ok(false));
+}
+
 #[test]
 fn an_agent_kill_switch_sells_exactly_the_sub_ledger_quantity() {
     let ids = TestIds;

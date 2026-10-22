@@ -163,6 +163,56 @@ fn a_fenced_append_exits_from_every_state_and_nothing_is_permitted_after() {
     assert_eq!(Input::from_append(&AppendOutcome::Ambiguous), None);
 }
 
+/// DEC-2347 item 1: the executor's `Completed` exits from every state not yet exited, starting,
+/// replaying, ready, not ready and draining, and nothing is permitted after; a process already
+/// exited keeps its exit.
+#[test]
+#[ignore = "pending E7-4"]
+fn completed_exits_from_every_state_not_yet_exited() {
+    let prefixes: [&[Input]; 5] = [
+        &[],
+        &[Input::StartupPassed],
+        &UP_TO_READY,
+        &[
+            Input::StartupPassed,
+            Input::EpochTaken,
+            Input::Replayed {
+                position: 1,
+                head: 1,
+            },
+        ],
+        &[Input::DrainRequested],
+    ];
+    for prefix in prefixes {
+        let mut lifecycle = run(Kind::Executor, prefix);
+        assert_eq!(
+            lifecycle.observe(at(1, 0), Input::Completed),
+            State::Exited(Exit::Completed),
+            "{prefix:?}"
+        );
+        for action in [Action::Open, Action::RiskExit, Action::KillSwitch] {
+            assert!(!lifecycle.permits(action), "{prefix:?} {action:?}");
+        }
+        assert!(!lifecycle.live(at(1, 0)));
+        for input in UP_TO_READY {
+            assert_eq!(
+                lifecycle.observe(at(1, 0), input),
+                State::Exited(Exit::Completed)
+            );
+        }
+    }
+    for (exited, exit) in [
+        (Input::Fenced, Exit::Fenced),
+        (Input::Failed, Exit::Refused),
+    ] {
+        let mut lifecycle = run(Kind::Executor, &[exited]);
+        assert_eq!(
+            lifecycle.observe(at(1, 0), Input::Completed),
+            State::Exited(exit)
+        );
+    }
+}
+
 #[test]
 fn a_failure_exits_by_how_far_the_process_got() {
     assert_eq!(
@@ -338,6 +388,7 @@ fn exits_keep_their_codes_and_statuses() {
         (Exit::Fenced, "fenced", 3),
         (Exit::CycleFailed, "cycle_failed", 4),
         (Exit::DrainIncomplete, "drain_incomplete", 5),
+        (Exit::Completed, "completed", 0),
     ];
     for (exit, code, status) in table {
         assert_eq!(exit.code(), code);
