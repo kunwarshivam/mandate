@@ -47,9 +47,11 @@ use mandate_executord::alpaca::AlpacaBroker;
 use mandate_executord::connect::connect_check;
 use mandate_executord::credential::{
     RunLease, SUBJECT_ACCOUNT_ENV, VaultMount, WORKSPACE_NAMESPACE_ENV, checked_connection,
-    paper_broker, paper_settings, subject_account, vault_config, vault_login, workspace_namespace,
+    paper_account, paper_broker, paper_settings, paper_transport, subject_account,
+    subject_connection, vault_config, vault_login, workspace_namespace,
 };
 use mandate_executord::establish::{GateReport, OpeningGate, pass};
+use mandate_executord::oauth_check::{Start, exchanged_start};
 use mandate_executord::paper::FixturePaper;
 use mandate_executord::{Broker, Config, ExecutorProcess, fixture, launch};
 use mandate_journal::Environment;
@@ -61,6 +63,7 @@ use mandate_vault::mounted::{
     SERVICE_ACCOUNT_TOKEN_DIR, read_service_account_namespace, read_service_account_token,
 };
 use mandate_vault::openbao::OpenBaoSource;
+use mandate_vault::personal::OsRandom;
 use tokio::signal::unix::{SignalKind, signal};
 
 const LIVENESS: Duration = Duration::from_secs(10);
@@ -189,7 +192,7 @@ fn run(
 /// The broker the run names, before the process takes the account stream: the fixture, or
 /// Alpaca's paper host over the lease on the checked connection, refused without one.
 fn serve<S: Store>(
-    store: S,
+    mut store: S,
     named: &launch::Named,
     socket: &Path,
     terminate: &AtomicBool,
@@ -199,8 +202,19 @@ fn serve<S: Store>(
         let broker = AlpacaBroker::new(FixturePaper::new(host_now()))?;
         return serve_on(store, broker, None, named, socket, terminate);
     };
-    let connection = checked_connection(&store, &scope(named))?;
-    let (broker, mut lease) = leased_broker(mount, &connection)?;
+    let connection = subject_connection(std::env::var(SUBJECT_ACCOUNT_ENV).ok())?;
+    let vault = logged_in(mount, &connection)?;
+    let start = Start {
+        connection: &connection,
+        vault: &vault,
+        account: |token| paper_transport(token).and_then(paper_account).ok(),
+        random: &mut OsRandom,
+    };
+    exchanged_start(&mut store, &fixture::Ids, &scope(named), start, host_now())?;
+    if checked_connection(&store, &scope(named))? != connection {
+        return Err("connection_mismatch");
+    }
+    let (broker, mut lease) = paper_broker(vault, &connection, host_now())?;
     let served = serve_on(store, broker, Some(&mut lease), named, socket, terminate);
     if let Err(code) = lease.give_back() {
         eprintln!("{code}");
@@ -213,6 +227,11 @@ fn leased_broker(
     mount: &VaultMount,
     connection: &ConnectionId,
 ) -> Result<(impl Broker, PaperLease), &'static str> {
+    paper_broker(logged_in(mount, connection)?, connection, host_now())
+}
+
+/// The vault session of `connection`'s executor, logged in by Kubernetes auth.
+fn logged_in(mount: &VaultMount, connection: &ConnectionId) -> Result<OpenBaoSource, &'static str> {
     let config = vault_config(mount)?;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -222,7 +241,7 @@ fn leased_broker(
     let namespace = workspace_namespace(std::env::var(WORKSPACE_NAMESPACE_ENV).ok(), || {
         read_service_account_namespace(Path::new(SERVICE_ACCOUNT_TOKEN_DIR))
     })?;
-    let vault = vault_login(
+    vault_login(
         || read_service_account_token(Path::new(SERVICE_ACCOUNT_TOKEN_DIR)),
         |identity, jwt| {
             runtime.block_on(OpenBaoSource::login_kubernetes(
@@ -234,8 +253,7 @@ fn leased_broker(
             ))
         },
         connection,
-    )?;
-    paper_broker(vault, connection, host_now())
+    )
 }
 
 fn serve_on<S: Store, B: Broker>(

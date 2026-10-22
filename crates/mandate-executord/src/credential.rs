@@ -18,7 +18,9 @@
 
 use std::path::PathBuf;
 
-use mandate_alpaca::{AlpacaPaperHttp, Credentials, TradingTransport};
+use mandate_alpaca::{
+    AlpacaPaperHttp, Credentials, RetryPolicy, TokioPause, TradingClient, TradingTransport,
+};
 use mandate_canon::{Value, parse};
 use mandate_connections::account_entry::BrokerAccountId;
 use mandate_connections::record::ConnectionId;
@@ -145,8 +147,10 @@ pub fn paper_transport(token: AccessToken) -> Result<AlpacaPaperHttp, &'static s
 /// `account_unreadable` when the host does not answer it, or `runtime_unavailable`; neither
 /// names the id.
 pub fn paper_account<T: TradingTransport>(transport: T) -> Result<BrokerAccountId, &'static str> {
-    let _ = transport;
-    Err(Unimplemented)
+    let client = TradingClient::new(transport, TokioPause, RetryPolicy::default());
+    runtime()?
+        .block_on(client.account_id())
+        .map_err(|_| "account_unreadable")
 }
 
 /// Where the vault is and where its CA is mounted: `--vault-address` and `--vault-dir`.
@@ -262,14 +266,6 @@ pub fn subject_connection(configured: Option<String>) -> Result<ConnectionId, &'
     subject_account(Some(text), &connection)?;
     Ok(connection)
 }
-
-/// The report of a function E21-32 has not implemented yet, which its pending tests fail on
-/// (DEC-77); the implementation PR replaces the stubs and removes it.
-#[allow(
-    non_upper_case_globals,
-    reason = "the pending gate recognises a stub by the name `Unimplemented` (DEC-137)"
-)]
-pub const Unimplemented: &str = "unimplemented";
 
 /// The variable the workspace chart sets to the namespace the deployment manager creates the
 /// executor's pod in (lane D1, K2).

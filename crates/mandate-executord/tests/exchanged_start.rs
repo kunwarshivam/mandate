@@ -211,7 +211,6 @@ fn started(
 /// read is handed the lease's token, the entry is created once, the record holds every check
 /// passed, and the lease is given back.
 #[test]
-#[ignore = "pending E21-32"]
 fn a_fresh_stream_is_checked_once_over_the_lease_which_is_given_back() -> Result<(), Error> {
     let mut store = MemoryStore::default();
     let (session, calls) = Session::new(Ok(full()))?;
@@ -239,7 +238,6 @@ fn a_fresh_stream_is_checked_once_over_the_lease_which_is_given_back() -> Result
 /// any other bytes) refuses the start as `credential_malformed`, before any create or record, and
 /// the lease is given back.
 #[test]
-#[ignore = "pending E21-32"]
 fn the_scopes_are_read_from_the_lease_alone() -> Result<(), Error> {
     for secret in [entry(r#""data""#), b"not a token entry".to_vec()] {
         let mut store = MemoryStore::default();
@@ -264,7 +262,6 @@ fn the_scopes_are_read_from_the_lease_alone() -> Result<(), Error> {
 /// A stream that holds a `connect` check, passed or failed, is not checked again: no lease, no
 /// create, nothing appended. A refused connect stays refused, and the owner reconnects.
 #[test]
-#[ignore = "pending E21-32"]
 fn a_stream_with_a_connect_check_runs_none() -> Result<(), Error> {
     for account in [Some(BROKER_ID), None] {
         let mut store = MemoryStore::default();
@@ -301,7 +298,6 @@ fn a_stream_with_a_connect_check_runs_none() -> Result<(), Error> {
 /// Item (c): a random source that cannot fill refuses the start as `entropy_unavailable` before any
 /// create and before any record, and the lease is given back.
 #[test]
-#[ignore = "pending E21-32"]
 fn an_entropy_failure_refuses_the_start_before_any_create() -> Result<(), Error> {
     let mut store = MemoryStore::default();
     let (session, calls) = Session::new(Ok(full()))?;
@@ -326,7 +322,6 @@ fn an_entropy_failure_refuses_the_start_before_any_create() -> Result<(), Error>
 
 /// A lease the vault refuses refuses the start, with nothing created and nothing appended.
 #[test]
-#[ignore = "pending E21-32"]
 fn a_refused_lease_refuses_the_start() -> Result<(), Error> {
     let mut store = MemoryStore::default();
     let (session, calls) = Session::new(Err(SourceError::Denied))?;
@@ -355,7 +350,6 @@ type Route = (
 /// Item (b): on every route, passed or refused, no journaled row holds the account id, and no code
 /// the start answers does, so the stderr line the binary prints from it cannot either.
 #[test]
-#[ignore = "pending E21-32"]
 fn the_account_id_is_in_no_record_and_no_code() -> Result<(), Error> {
     let routes: [Route; 4] = [
         (full(), Ok(()), true, Ok(Some(true))),
@@ -395,7 +389,6 @@ fn the_account_id_is_in_no_record_and_no_code() -> Result<(), Error> {
 /// The account read the binary hands the leased token to reads the paper host's own id of the
 /// account, over `mandate-alpaca`'s client.
 #[test]
-#[ignore = "pending E21-32"]
 fn the_account_is_read_from_the_paper_host() -> Result<(), Error> {
     let id = paper_account(FixturePaper::new(now()?))?;
     assert_eq!(id, BrokerAccountId::new("fixture")?);
