@@ -287,6 +287,35 @@ fn the_latest_connect_check_of_the_connection_is_read() {
 }
 
 #[test]
+#[ignore = "pending E10-13"]
+fn a_check_that_omits_scope_environment_or_account_is_unreadable() {
+    let id = connection(CONNECTION);
+    for omitted in ["account", "environment", "scope"] {
+        for failed in [false, true] {
+            let results: Vec<Value> = ["account", "environment", "scope"]
+                .into_iter()
+                .filter(|name| *name != omitted)
+                .map(|name| match (failed, name) {
+                    (true, "environment") => {
+                        json!({"check": name, "reason": "reaches_both", "result": "failed"})
+                    }
+                    (true, "scope") => {
+                        json!({"check": name, "reason": "scope_mismatch", "result": "failed"})
+                    }
+                    _ => json!({"check": name, "reason": null, "result": "passed"}),
+                })
+                .collect();
+            let row = check("ev-1", CONNECTION, "connect", json!(results), json!(PII));
+            assert_eq!(
+                checked(&[row], &id),
+                Err(Unreadable),
+                "rule 57: a check that omits {omitted} (failed: {failed}) cannot be read"
+            );
+        }
+    }
+}
+
+#[test]
 fn a_check_it_cannot_read_is_unreadable() {
     let id = connection(CONNECTION);
     let unknown = json!([{"check": "scope", "reason": "made_up", "result": "failed"}]);
