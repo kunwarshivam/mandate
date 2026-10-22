@@ -224,6 +224,42 @@ fn a_switch_cancels_the_agents_working_order_by_its_id() -> Result<(), Error> {
     Ok(())
 }
 
+/// The account stream's last records: every agent stopped and an account-scoped kill switch
+/// journaled after the recorded opening, as a process that crashed before its cancel-all, or
+/// before its answer, leaves them (DEC-2333).
+const ACCOUNT_SWITCHED: &str = include_str!("fixtures/account_switched.jsonl");
+
+/// An account switch whose cancel-all is not confirmed resumes on the process's next start, and
+/// the confirming read is the startup reconciliation the process gathers, not a separate listing
+/// (DEC-2333 items 2 and 3): its open orders show the opening still working, so the opening is
+/// cancelled by its own id. The cancel-all is never sent again.
+#[test]
+#[ignore = "pending E7-4"]
+fn an_unconfirmed_account_switch_resumes_from_the_startup_read() -> Result<(), Error> {
+    let journal = deployed()?;
+    journal.seed(ACCOUNT_STREAM, OPENED)?;
+    journal.seed(ACCOUNT_STREAM, ACCOUNT_SWITCHED)?;
+    let broker = Paper::new(&journal);
+    broker.resting(OPENING, "AAPL", "10", "150")?;
+    let mut process = start(&journal, &broker)?;
+    process.step(at(NOON)?);
+    let sent: Vec<BrokerRequest> = broker.seen().into_iter().map(|seen| seen.request).collect();
+    assert!(
+        sent.iter().any(|request| matches!(
+            request,
+            BrokerRequest::Cancel { client_order_id } if client_order_id.as_str() == OPENING
+        )),
+        "the opening still working is cancelled by its id: {sent:?}"
+    );
+    assert!(
+        !sent
+            .iter()
+            .any(|request| matches!(request, BrokerRequest::CancelAll(_))),
+        "the cancel-all is never sent again: {sent:?}"
+    );
+    Ok(())
+}
+
 /// Every switch waiting in a pass is applied in that pass, for each agent of the account.
 #[test]
 fn every_switch_waiting_in_a_pass_is_applied_in_it() -> Result<(), Error> {
