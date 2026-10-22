@@ -369,7 +369,7 @@ fn the_provisioners_policy_requires_every_parameter_and_pins_all_but_the_name() 
             "{}{}",
             block(
                 "kubernetes-executor",
-                "\"create\", \"update\", \"read\"",
+                "\"create\", \"update\"",
                 "ws-ws1",
                 "mandate-kubernetes-executor",
                 "86400",
@@ -377,7 +377,7 @@ fn the_provisioners_policy_requires_every_parameter_and_pins_all_but_the_name() 
             ),
             block(
                 "kubernetes-exchange",
-                "\"create\", \"update\", \"read\", \"delete\"",
+                "\"create\", \"update\", \"delete\"",
                 "ws-ws1",
                 "mandate-kubernetes-exchange",
                 "600",
@@ -558,13 +558,10 @@ fn the_provisioners_plus_reaches_only_the_two_role_paths() {
     assert_eq!(
         blocks,
         [
-            (
-                "auth/k-exec/role/+".to_owned(),
-                "create,update,read".to_owned()
-            ),
+            ("auth/k-exec/role/+".to_owned(), "create,update".to_owned()),
             (
                 "auth/k-exch/role/+".to_owned(),
-                "create,update,read,delete".to_owned()
+                "create,update,delete".to_owned()
             ),
         ]
     );

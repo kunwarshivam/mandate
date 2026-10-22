@@ -37,11 +37,11 @@ const REQUIRED: [&str; 8] = [
 
 /// What the provisioner may do to an executor's role: make it, never remove it, so an executor
 /// started for any reason, a kill switch's among them, can always log in (DEC-2350 item 3).
-const EXECUTOR_ROLE_CAPABILITIES: &str = "\"create\", \"update\", \"read\"";
+const EXECUTOR_ROLE_CAPABILITIES: &str = "\"create\", \"update\"";
 
 /// What the provisioner may do to a token exchange's role: make it, and remove it when its request
 /// closes or its connection is revoked (DEC-2350 items 3 and 5).
-const EXCHANGE_ROLE_CAPABILITIES: &str = "\"create\", \"update\", \"read\", \"delete\"";
+const EXCHANGE_ROLE_CAPABILITIES: &str = "\"create\", \"update\", \"delete\"";
 
 /// One kind's place: its auth mount, its namespace, its policy, its token's lifetimes, and
 /// whether the provisioner may remove its roles.
@@ -203,8 +203,9 @@ pub fn kubernetes_policy(
     }
 }
 
-/// The provisioner's policy, in HCL: it may create, update and read roles on the two Kubernetes
-/// auth mounts, and delete them on the token exchange's alone, and nothing else, every parameter
+/// The provisioner's policy, in HCL: it may create and update roles on the two Kubernetes auth
+/// mounts, and delete them on the token exchange's alone, and nothing else; no `read`, which
+/// OpenBao refuses under `required_parameters` however it is granted (DEC-2350 item 5), every parameter
 /// but the ServiceAccount's name pinned to its one value, so it can neither widen a role's namespace, policy, audience or lifetime nor reach a
 /// policy, a token or a secret. Both kinds' ServiceAccounts are in `namespace`, the workspace's
 /// own, so its default deny, egress policies and admission rules cover them. Kubernetes mounts
