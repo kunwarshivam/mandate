@@ -15,8 +15,8 @@ use secrecy::ExposeSecret;
 
 use crate::SourceError;
 use crate::mounted::{
-    read_checked, read_mounted, read_mounted_credentials, read_service_account_namespace,
-    read_service_account_token,
+    CA_FILE, read_checked, read_mounted, read_mounted_ca, read_mounted_credentials,
+    read_service_account_namespace, read_service_account_token,
 };
 use crate::policy::Identity;
 
@@ -439,4 +439,129 @@ fn the_projected_namespace_is_read_by_the_tokens_rules() {
         read_service_account_namespace(&missing.0),
         Err(SourceError::CredentialFile)
     );
+}
+
+const PEM: &str = "-----BEGIN CERTIFICATE-----\nAAAA\nBBBB\n-----END CERTIFICATE-----\n";
+
+/// A CA behind the kubelet's links is read whole at every mode a ConfigMap mounts it with, none
+/// of which lets a group or others write: 0444, 0440 under an `fsGroup`, and owner-only (DEC-2340).
+#[test]
+#[ignore = "pending E21-32"]
+fn a_ca_is_read_at_every_mode_no_other_may_write() {
+    assert_eq!(CA_FILE, "ca.crt");
+    for mode in [0o444, 0o440, 0o404, 0o400, 0o644, 0o600] {
+        let dir = Fresh::new("ca-public");
+        kubelet(&dir.0, &[("ca.crt", PEM, mode)]);
+        assert_eq!(read_mounted_ca(&dir.0), Ok(PEM.to_owned()), "{mode:o}");
+    }
+}
+
+/// A CA a group or others may write is refused, whatever its read bits.
+#[test]
+#[ignore = "pending E21-32"]
+fn a_ca_others_may_write_is_refused() {
+    for mode in [0o446, 0o466, 0o464, 0o646, 0o664, 0o666, 0o642, 0o622] {
+        let dir = Fresh::new("ca-writable");
+        kubelet(&dir.0, &[("ca.crt", PEM, mode)]);
+        assert_eq!(
+            read_mounted_ca(&dir.0),
+            Err(SourceError::CredentialFile),
+            "{mode:o}"
+        );
+    }
+}
+
+/// The CA reader reads `ca.crt` alone, inside its mount, by the mounted reader's other rules: a
+/// missing CA, a link out of the mount, a key beside it, and a file over the bound are refused.
+#[test]
+#[ignore = "pending E21-32"]
+fn the_ca_reader_reads_ca_crt_alone_inside_its_mount() {
+    let keyed = Fresh::new("ca-keyed");
+    kubelet(&keyed.0, &[("tls.key", PEM, 0o444)]);
+    assert_eq!(read_mounted_ca(&keyed.0), Err(SourceError::CredentialFile));
+    let parent = Fresh::new("ca-parent");
+    let dir = parent.0.join("mount");
+    fs::create_dir(&dir).unwrap();
+    write(&parent.0.join("ca.crt"), PEM, 0o444);
+    symlink("../ca.crt", dir.join("ca.crt")).unwrap();
+    assert_eq!(read_mounted_ca(&dir), Err(SourceError::CredentialFile));
+    let over = Fresh::new("ca-over");
+    write(&over.0.join("ca.crt"), &"a".repeat(65537), 0o444);
+    assert_eq!(read_mounted_ca(&over.0), Err(SourceError::CredentialFile));
+}
+
+/// A secret file keeps the owner-only rule at the modes the CA may have: a role id, a secret id,
+/// or any file the mounted reader reads, at 0440 or 0444, is refused.
+#[test]
+fn a_secret_at_a_ca_mode_is_still_refused() {
+    for mode in [0o440, 0o444, 0o404] {
+        let dir = Fresh::new("secret-public");
+        kubelet(
+            &dir.0,
+            &[
+                ("executor-c1.role-id", "role-1", mode),
+                ("executor-c1.secret-id", "secret-1", mode),
+                ("ca.crt", PEM, mode),
+            ],
+        );
+        assert_eq!(
+            credentials(&dir.0, &executor()),
+            Err(SourceError::CredentialFile),
+            "{mode:o}"
+        );
+        assert_eq!(
+            read(&dir.0, "ca.crt"),
+            Err(SourceError::CredentialFile),
+            "{mode:o}"
+        );
+    }
+}
+
+/// The chart file that mounts the vault's CA into the executor and the token exchange, from the
+/// repository's root, which names it to `cargo xtask ci select` too.
+const CHART_HELPERS: &str = "deploy/cell/charts/workspace/templates/_helpers.tpl";
+
+/// The `defaultMode` of every volume of `chart` that mounts the ConfigMap `vault-ca`: the line
+/// after `configMap:` and `name: vault-ca`, a YAML integer, octal when it starts with `0`.
+fn vault_ca_modes(chart: &str) -> Vec<u32> {
+    let lines: Vec<&str> = chart.lines().map(str::trim).collect();
+    lines
+        .windows(3)
+        .filter(|w| w[0] == "configMap:" && w[1] == "name: vault-ca")
+        .map(|w| {
+            let mode = w[2].strip_prefix("defaultMode: ").unwrap();
+            match mode.strip_prefix("0o").or(mode.strip_prefix('0')) {
+                Some(octal) if !octal.is_empty() => u32::from_str_radix(octal, 8).unwrap(),
+                _ => mode.parse().unwrap(),
+            }
+        })
+        .collect()
+}
+
+/// The CA reader reads the CA at the mode the workspace chart mounts it with, and at that mode
+/// with the group read bit an `fsGroup` adds, so a chart mode the reader refuses fails here, not
+/// on a cluster (DEC-2340).
+#[test]
+#[ignore = "pending E21-32"]
+fn the_ca_is_read_at_the_mode_the_chart_mounts_it_with() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let chart = fs::read_to_string(root.join(CHART_HELPERS)).unwrap();
+    let modes = vault_ca_modes(&chart);
+    assert!(!modes.is_empty(), "no vault-ca volume in {CHART_HELPERS}");
+    for chart_mode in modes {
+        for mode in [chart_mode, chart_mode | 0o040] {
+            let dir = Fresh::new("ca-chart");
+            kubelet(&dir.0, &[("ca.crt", PEM, mode)]);
+            assert_eq!(read_mounted_ca(&dir.0), Ok(PEM.to_owned()), "{mode:o}");
+        }
+    }
+}
+
+/// The chart parser reads each YAML integer form and every `vault-ca` volume, and nothing else.
+#[test]
+fn the_chart_parser_reads_every_vault_ca_mode() {
+    let chart = "    - name: vault-ca\n      configMap:\n        name: vault-ca\n        defaultMode: 292\n\
+                 configMap:\n    name: vault-ca\n    defaultMode: 0440\n\
+                 configMap:\n    name: other\n    defaultMode: 511\n";
+    assert_eq!(vault_ca_modes(chart), vec![0o444, 0o440]);
 }
