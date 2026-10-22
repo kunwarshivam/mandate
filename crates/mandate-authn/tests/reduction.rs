@@ -605,7 +605,6 @@ fn failure_keys_are_bounded_and_the_oldest_is_dropped_first() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn the_failure_key_whose_latest_failure_is_oldest_goes_first_an_address_before_a_device() {
     let address = |a: &str| client(a, "never-seen");
     let device = |d: &str| client("never-seen", d);

@@ -267,7 +267,8 @@ impl ReductionGate {
 
     /// Drops failure keys, the one whose latest failure is oldest first and an address before a
     /// device at a tie, until at most `max_failure_keys` addresses and devices are held. Dropping
-    /// one changes no answer, since failures only report.
+    /// one changes no answer, since failures only report, and a key that cannot be dropped ends
+    /// the loop rather than spinning on it.
     fn bound_failure_keys(&mut self) {
         let cap = usize::try_from(self.limits.max_failure_keys.get()).unwrap_or(usize::MAX);
         while self
@@ -276,20 +277,19 @@ impl ReductionGate {
             .saturating_add(self.failures_by_device.len())
             > cap
         {
-            match (
+            let dropped = match (
                 oldest_key(&self.failures_by_address),
                 oldest_key(&self.failures_by_device),
             ) {
                 (Some(address), Some(device)) if device.0 < address.0 => {
-                    self.failures_by_device.remove(&device.1);
+                    self.failures_by_device.remove(&device.1)
                 }
-                (Some(address), _) => {
-                    self.failures_by_address.remove(&address.1);
-                }
-                (None, Some(device)) => {
-                    self.failures_by_device.remove(&device.1);
-                }
-                (None, None) => break,
+                (Some(address), _) => self.failures_by_address.remove(&address.1),
+                (None, Some(device)) => self.failures_by_device.remove(&device.1),
+                (None, None) => None,
+            };
+            if dropped.is_none() {
+                break;
             }
         }
     }
