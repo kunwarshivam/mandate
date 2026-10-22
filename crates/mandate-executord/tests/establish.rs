@@ -5,7 +5,9 @@
 mod support;
 
 use mandate_canon::{Key, Value};
-use mandate_executor::{AccountRef, AccountScope, BrokerRequest, EventId, WorkspaceId};
+use mandate_executor::{
+    AccountRef, AccountScope, BrokerRequest, EventId, IdGen, Seq, WorkspaceId, WriterEpoch,
+};
 use mandate_executord::alpaca::AlpacaBroker;
 use mandate_executord::connect::connect_check;
 use mandate_executord::establish::{Establishment, OpeningGate, ToCopy, copy_draft, establishment};
@@ -574,7 +576,7 @@ fn the_journal_admits_the_copy() -> Result<(), Error> {
     let head = u64::try_from(store.rows(&stream).ok_or("rows")?.len())?;
     let draft = copy_draft(
         &due,
-        EventId("1000020000000000000002000000".to_owned()),
+        Ids.event_id(WriterEpoch(epoch), Seq(head), 0),
         at(NOON)?,
     )?;
     let bytes = draft_bytes(
