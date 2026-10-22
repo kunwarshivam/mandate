@@ -9048,6 +9048,319 @@ protection_shapes:
       value: null
     expect:
       outcome: Valid
+protection_fraction:
+  spec: docs/specs/journal.md v0.72 §9.5 rule 44 (DEC-2312)
+  drafts:
+    placed_v1:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8ZQA6A000000000000000E7
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+      event_type: ProtectionChanged
+      schema_version: 1
+      event_time: '2026-09-21T14:00:30.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+        action: placed
+        orders:
+        - md-01J8ZT90A000000000000000P1-p1
+        awaiting: []
+        qty: '10'
+        stop: '139'
+        take_profit: '159'
+        intent_id: null
+        bracket: null
+        entry: null
+        agent_id: null
+        replacing: null
+        created_on: '2026-09-21'
+        sent: null
+        uncovered: null
+        acknowledged: null
+        risk_clock: '2026-09-21T14:00:30.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    placed:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8ZQA6A000000000000000E7
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+      event_type: ProtectionChanged
+      schema_version: 2
+      event_time: '2026-09-21T14:00:30.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+        action: placed
+        orders:
+        - md-01J8ZT90A000000000000000P1-p1
+        awaiting: []
+        qty: '10'
+        stop: '139'
+        take_profit: '159'
+        intent_id: null
+        bracket: null
+        entry: null
+        agent_id: null
+        replacing: null
+        created_on: '2026-09-21'
+        sent: null
+        uncovered: null
+        acknowledged: null
+        unprotected_fraction: null
+        risk_clock: '2026-09-21T14:00:30.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    start:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8ZQA7A000000000000000E8
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+      event_type: ProtectionChanged
+      schema_version: 2
+      event_time: '2026-09-21T14:00:35.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+        action: unprotected_start
+        orders:
+        - md-01J8ZT90A000000000000000P1-p1
+        awaiting: []
+        qty: null
+        stop: '139'
+        take_profit: '159'
+        intent_id: 01J8ZT90A000000000000000P1
+        bracket: null
+        entry: md-01J8ZT90A000000000000000P1
+        agent_id: agent_a
+        replacing: true
+        created_on: null
+        sent: null
+        uncovered: null
+        acknowledged: null
+        unprotected_fraction: null
+        risk_clock: '2026-09-21T14:00:35.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+  invalid_drafts:
+  - name: fraction_on_cancelled
+    clause: 'rule 44: only a start and a placement disclose a fraction'
+    base_draft: placed
+    changes:
+    - path: payload.action
+      value: cancelled
+    - path: payload.stop
+      value: null
+    - path: payload.take_profit
+      value: null
+    - path: payload.created_on
+      value: null
+    - path: payload.unprotected_fraction
+      value: '0.4'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.unprotected_fraction
+  - name: fraction_on_an_end
+    clause: 'rule 44: an end discloses no fraction'
+    base_draft: start
+    changes:
+    - path: payload.stop
+      value: null
+    - path: payload.take_profit
+      value: null
+    - path: payload.intent_id
+      value: null
+    - path: payload.entry
+      value: null
+    - path: payload.agent_id
+      value: null
+    - path: payload.action
+      value: unprotected_end
+    - path: payload.orders
+      value: []
+    - path: payload.replacing
+      value: null
+    - path: payload.unprotected_fraction
+      value: '0.4'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.unprotected_fraction
+  - name: fraction_on_a_passive_start
+    clause: 'rule 44: a passive start discloses no fraction'
+    base_draft: start
+    changes:
+    - path: payload.action
+      value: passive_start
+    - path: payload.unprotected_fraction
+      value: '0.4'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.unprotected_fraction
+  - name: fraction_zero
+    clause: 'rule 44: a disclosed fraction is above zero'
+    base_draft: placed
+    changes:
+    - path: payload.unprotected_fraction
+      value: '0'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.unprotected_fraction
+  - name: fraction_negative
+    clause: 'rule 44: a disclosed fraction is above zero'
+    base_draft: placed
+    changes:
+    - path: payload.unprotected_fraction
+      value: '-0.4'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.unprotected_fraction
+  - name: fraction_one
+    clause: 'rule 44: a disclosed fraction is below one share'
+    base_draft: placed
+    changes:
+    - path: payload.unprotected_fraction
+      value: '1'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.unprotected_fraction
+  - name: fraction_above_one
+    clause: 'rule 44: a disclosed fraction is below one share'
+    base_draft: start
+    changes:
+    - path: payload.stop
+      value: null
+    - path: payload.take_profit
+      value: null
+    - path: payload.intent_id
+      value: null
+    - path: payload.entry
+      value: null
+    - path: payload.agent_id
+      value: null
+    - path: payload.orders
+      value: []
+    - path: payload.replacing
+      value: null
+    - path: payload.bracket
+      value: md-01J8ZT90A000000000000000P1
+    - path: payload.unprotected_fraction
+      value: '1.4'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.unprotected_fraction
+  - name: version_1_carries_no_fraction
+    clause: '§8: version 1 is never edited'
+    base_draft: placed_v1
+    changes:
+    - path: payload.unprotected_fraction
+      value: '0.4'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.unprotected_fraction
+  valid_drafts:
+  - name: fraction_on_first_fill_start
+    clause: 'rule 44: a fractional entry''s first fill discloses its fraction'
+    base_draft: start
+    changes:
+    - path: payload.stop
+      value: null
+    - path: payload.take_profit
+      value: null
+    - path: payload.intent_id
+      value: null
+    - path: payload.entry
+      value: null
+    - path: payload.agent_id
+      value: null
+    - path: payload.orders
+      value: []
+    - path: payload.replacing
+      value: null
+    - path: payload.bracket
+      value: md-01J8ZT90A000000000000000P1
+    - path: payload.unprotected_fraction
+      value: '0.4'
+    expect:
+      outcome: Valid
+  - name: fraction_on_placed
+    clause: 'rule 44: the whole shares'' protection discloses the fraction it leaves'
+    base_draft: placed
+    changes:
+    - path: payload.unprotected_fraction
+      value: '0.4'
+    expect:
+      outcome: Valid
+  - name: fraction_smallest
+    clause: 'rule 44: the smallest fraction a fractionable share has'
+    base_draft: placed
+    changes:
+    - path: payload.unprotected_fraction
+      value: '0.000000001'
+    expect:
+      outcome: Valid
+  - name: fraction_largest
+    clause: 'rule 44: the largest fraction below one share'
+    base_draft: placed
+    changes:
+    - path: payload.unprotected_fraction
+      value: '0.999999999'
+    expect:
+      outcome: Valid
+  - name: no_fraction_on_a_whole_position
+    clause: 'rule 44: a whole-share position discloses nothing'
+    base_draft: start
+    changes:
+    - path: payload.stop
+      value: null
+    - path: payload.take_profit
+      value: null
+    - path: payload.intent_id
+      value: null
+    - path: payload.entry
+      value: null
+    - path: payload.agent_id
+      value: null
+    - path: payload.orders
+      value: []
+    - path: payload.replacing
+      value: null
+    - path: payload.bracket
+      value: md-01J8ZT90A000000000000000P1
+    expect:
+      outcome: Valid
 approval_answers:
   spec: docs/specs/journal.md v0.17 §9.7 (DEC-533)
   drafts:
