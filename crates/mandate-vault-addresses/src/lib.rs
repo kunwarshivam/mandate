@@ -27,6 +27,7 @@
 //! `Debug` output (DEC-2120 item 8).
 
 pub mod error;
+pub mod maintenance;
 pub mod startup;
 pub mod store;
 

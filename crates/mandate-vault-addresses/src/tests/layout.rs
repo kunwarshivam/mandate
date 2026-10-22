@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use secrecy::{SecretBox, SecretString};
 
+use crate::maintenance::{AddressMaintenance, open_maintenance};
 use crate::startup::{
     ADDRESS_KEY_CREDENTIAL, ADDRESSES_DIR, Ids, Inputs, open_reader, open_writer,
 };
@@ -82,6 +83,10 @@ impl Layout {
 
     pub fn reader(&self) -> AddressReader {
         open_reader(&self.inputs()).expect("the reader opens on a correct layout")
+    }
+
+    pub fn maintenance(&self) -> AddressMaintenance {
+        open_maintenance(&self.inputs()).expect("the re-seal tool opens on a correct layout")
     }
 
     /// Installs a key credential as `LoadCredential=` presents it: a regular file, mode `0400`.
