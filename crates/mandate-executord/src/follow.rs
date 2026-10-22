@@ -64,8 +64,8 @@ pub struct Following {
     pub agents: BTreeMap<AgentId, MandateVersion>,
     /// The followed agents whose openings are not handed (DEC-2343 item 1).
     pub held: BTreeSet<AgentId>,
-    /// Each followed agent's deployments on this account's connections, by control-stream `seq`.
-    deployments: BTreeMap<AgentId, Vec<(u64, String)>>,
+    /// This account's connections: each one a version-2 establishment ever named this account for.
+    ours: BTreeSet<String>,
     /// Each of this account's connections' revocations, by control-stream `seq`.
     revocations: BTreeMap<String, Vec<u64>>,
     /// The kill-switch commands of connection or workspace scope, in control-stream order.
@@ -81,6 +81,9 @@ struct KillCommand {
     id: EventId,
     seq: u64,
     connection: Option<String>,
+    /// Every version-2 deployment before the command, as agent and connection: the agents it can
+    /// cover, so one deployed after it never is.
+    before: BTreeSet<(String, String)>,
     /// The agent an agent-scope command names, which the executor reads only for a stopped agent.
     agent: Option<AgentId>,
 }
@@ -162,10 +165,19 @@ pub fn agents_of(
                     "agent" => (None, Some(AgentId(text("subject")?))),
                     _ => continue,
                 };
+                let before = deployed
+                    .iter()
+                    .flat_map(|(agent, deployments)| {
+                        deployments
+                            .iter()
+                            .map(move |(_, connection, _)| (agent.clone(), connection.clone()))
+                    })
+                    .collect();
                 commands.push(KillCommand {
                     id: event.event_id.clone(),
                     seq: row.seq,
                     connection,
+                    before,
                     agent,
                 });
             }
@@ -184,17 +196,18 @@ pub fn agents_of(
             .filter(|(connection, _)| ours.contains(connection))
             .collect(),
         commands,
+        ours: ours.clone(),
         ..Following::default()
     };
     for (agent, deployments) in deployed {
         let latest_live = deployments
             .last()
             .is_some_and(|(_, connection, _)| live.get(connection).copied().unwrap_or(false));
-        let here: Vec<(u64, String, String)> = deployments
-            .into_iter()
-            .filter(|(_, connection, _)| ours.contains(connection))
-            .collect();
-        let Some((_, _, version)) = here.last() else {
+        let Some((_, _, version)) = deployments
+            .iter()
+            .rev()
+            .find(|(_, connection, _)| ours.contains(connection))
+        else {
             continue;
         };
         let agent = AgentId(agent);
@@ -202,14 +215,8 @@ pub fn agents_of(
             .agents
             .insert(agent.clone(), MandateVersion(version.clone()));
         if !latest_live {
-            following.held.insert(agent.clone());
+            following.held.insert(agent);
         }
-        following.deployments.insert(
-            agent,
-            here.into_iter()
-                .map(|(seq, connection, _)| (seq, connection))
-                .collect(),
-        );
     }
     Ok(following)
 }
@@ -223,18 +230,14 @@ impl Following {
     /// `AgentStopped`. Every other covered agent waits for the runtime's copy, which carries the
     /// owner's confirmation.
     pub fn commands_for(&self, agent: &AgentId) -> Vec<EventId> {
-        let deployments = self
-            .deployments
-            .get(agent)
-            .map(Vec::as_slice)
-            .unwrap_or_default();
         let stopped = self.stopped.contains(agent);
         self.commands
             .iter()
             .filter(|command| match &command.agent {
                 Some(named) => named == agent && stopped,
-                None => deployments.iter().any(|(deployed, connection)| {
-                    *deployed < command.seq
+                None => command.before.iter().any(|(deployed, connection)| {
+                    deployed == &agent.0
+                        && self.ours.contains(connection)
                         && command
                             .connection
                             .as_ref()
