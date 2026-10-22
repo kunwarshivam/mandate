@@ -711,7 +711,6 @@ fn the_cost_of_a_failure_does_not_grow_with_the_keys_held() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_key_that_lapsed_holds_no_place_under_the_bound() {
     let mut bench = Bench::bounded((9, 9), (1, 1), (9, 9, 4));
     let lapsed = client("a0", "d0");
