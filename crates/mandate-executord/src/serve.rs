@@ -5,14 +5,16 @@
 //! SIGTERM, and stderr; the probe reads the [`Status`] both publish. Everything the run decides is
 //! here, so tests drive it with a fixture wiring that would admit an opening.
 
+use std::thread;
 use std::time::Duration;
 
 use mandate_process::probe::Status;
+use mandate_process::{Input, Kind, Lifecycle, State};
 use mandate_store::Store;
 use mandate_time::UtcNanos;
 
-use crate::credential::Unimplemented;
-use crate::{Broker, Config, Wiring};
+use crate::establish::{Establishment, GateReport, OpeningGate, pass, read_establishment};
+use crate::{Broker, Config, ExecutorProcess, Wiring};
 
 /// What the run is handed from the binary's edge.
 pub struct Edge<'a> {
@@ -54,8 +56,24 @@ pub fn wait<S: Store>(
     status: &Status,
     edge: &mut Edge<'_>,
 ) -> Result<Waited, &'static str> {
-    let _ = (store, config, status, edge);
-    Err(Unimplemented)
+    let mut lifecycle = Lifecycle::new(Kind::Executor, config.liveness, (edge.now)());
+    loop {
+        match read_establishment(store, &config.scope, config.environment)? {
+            Establishment::Established | Establishment::ToCopy(_) => return Ok(Waited::Ready),
+            Establishment::Closed => return Err("connection_closed"),
+            Establishment::Connecting => {}
+        }
+        let now = (edge.now)();
+        lifecycle.observe(now, Input::Heartbeat);
+        status.publish(lifecycle.snapshot());
+        if let Some(code) = (edge.tick)(now) {
+            return Err(code);
+        }
+        if (edge.terminated)() {
+            return Ok(Waited::Stopped);
+        }
+        thread::sleep(edge.interval);
+    }
 }
 
 /// Runs the process over `store` and `broker` with `wiring` behind rule 68's gate: the gate
@@ -69,11 +87,52 @@ pub fn wait<S: Store>(
 pub fn serve<S: Store, B: Broker>(
     store: S,
     broker: B,
-    wiring: Wiring,
+    mut wiring: Wiring,
     config: &Config,
     status: &Status,
     edge: Edge<'_>,
 ) -> Result<u8, &'static str> {
-    let _ = (store, broker, wiring, config, status, edge);
-    Err(Unimplemented)
+    let Edge {
+        now,
+        tick,
+        terminated,
+        say,
+        interval,
+    } = edge;
+    let gate = OpeningGate::default();
+    wiring.gate = gate.guard(wiring.gate);
+    let mut process = ExecutorProcess::start(store, broker, wiring, config, now());
+    status.publish(process.lifecycle().snapshot());
+    let mut report = GateReport::default();
+    loop {
+        let stop = tick(now());
+        let stopping = stop.is_some() || terminated();
+        if stopping {
+            process.drain(now());
+        }
+        if let State::Exited(stopped) = process.lifecycle().state() {
+            status.publish(process.lifecycle().snapshot());
+            if let Some(code) = stop {
+                say(code);
+            }
+            say(stopped.code());
+            return Ok(stopped.exit_status());
+        }
+        if stopping {
+            return Err(stop.unwrap_or("drain_unfinished"));
+        }
+        process.step(now());
+        let passed = pass(
+            &mut process,
+            &gate,
+            &config.scope,
+            config.environment,
+            now(),
+        );
+        if let Some(code) = report.changed(passed) {
+            say(code);
+        }
+        status.publish(process.lifecycle().snapshot());
+        thread::sleep(interval);
+    }
 }
