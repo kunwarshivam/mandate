@@ -376,7 +376,6 @@ fn the_login_is_held_to_the_charts_namespace_when_the_pod_shares_it() {
 /// hex (DEC-2336): a missing or empty name, the exchange's `x` name, another connection's, a case
 /// or whitespace variant, or a name for no connection refuses the start, with one opaque code.
 #[test]
-#[ignore = "pending E21-32"]
 fn the_executor_starts_only_as_its_own_connections_service_account() {
     assert_eq!(SUBJECT_ACCOUNT_ENV, "MANDATE_SUBJECT_ACCOUNT");
     let c = |id: &str| ConnectionId::new(id).unwrap();

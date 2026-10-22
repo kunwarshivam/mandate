@@ -28,6 +28,7 @@ use mandate_journal::StreamId;
 use mandate_store::Store;
 use mandate_time::UtcNanos;
 use mandate_vault::SourceError;
+use mandate_vault::kubernetes::service_account_name;
 use mandate_vault::lease::{Lease, LeaseKeeper};
 use mandate_vault::mounted::read_mounted;
 use mandate_vault::openbao::OpenBaoConfig;
@@ -197,14 +198,6 @@ pub fn vault_login<V>(
     login(Identity::Executor(connection.clone()), token).map_err(|_| "vault_login_failed")
 }
 
-/// The report of a function E21-32 has not implemented yet, which its pending tests fail on
-/// (DEC-77); the implementation PR replaces the stub and removes it.
-#[allow(
-    non_upper_case_globals,
-    reason = "the pending gate recognises a stub by the name `Unimplemented` (DEC-137)"
-)]
-pub const Unimplemented: &str = "unimplemented";
-
 /// The variable the deployment manager sets to the ServiceAccount its pod runs as (DEC-2336).
 pub const SUBJECT_ACCOUNT_ENV: &str = "MANDATE_SUBJECT_ACCOUNT";
 
@@ -220,8 +213,13 @@ pub fn subject_account(
     configured: Option<String>,
     connection: &ConnectionId,
 ) -> Result<(), &'static str> {
-    let _ = (configured, connection);
-    Err(Unimplemented)
+    let own = service_account_name(&Identity::Executor(connection.clone()))
+        .map_err(|_| "executor_subject_account")?;
+    if configured.as_deref() == Some(own.as_str()) {
+        Ok(())
+    } else {
+        Err("executor_subject_account")
+    }
 }
 
 /// The variable the workspace chart sets to the namespace the deployment manager creates the
