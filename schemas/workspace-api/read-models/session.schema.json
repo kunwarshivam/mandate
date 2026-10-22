@@ -45,7 +45,10 @@
       "enum": [
         "full",
         "reduction_only"
-      ]
+      ],
+      "x-planned": {
+        "reduction_only": "E9-1"
+      }
     },
     "expires_at": {
       "$ref": "../common.schema.json#/$defs/Timestamp"
