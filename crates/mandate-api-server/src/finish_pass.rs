@@ -8,7 +8,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use mandate_connections::record::ConnectionId;
+use mandate_connections::record::{AccountRef, ConnectionId};
 use mandate_time::UtcNanos;
 
 use crate::finish::Fingerprints;
@@ -40,8 +40,9 @@ pub struct Finisher<F, T> {
     fingerprints: F,
     teardown: T,
     workspace: String,
-    /// The closed connects whose deletes succeeded since the process started.
-    cleared: BTreeSet<ConnectionId>,
+    /// The closed requests, by connection id and `account_ref`, whose deletes succeeded since the
+    /// process started: DEC-699 lets a refused connection id be requested again.
+    cleared: BTreeSet<(ConnectionId, AccountRef)>,
     /// Whether no pass has read the control stream since the process started.
     restarted: bool,
 }

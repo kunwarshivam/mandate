@@ -66,15 +66,35 @@ fn seed(journal: &MemJournal, stream: &str, kind: &str, version: u64, secs: i64,
 }
 
 fn request(journal: &MemJournal, connection: &str, version: u64, credential: &str) {
+    request_as(
+        journal,
+        connection,
+        &account(connection),
+        version,
+        credential,
+        OPENED,
+    );
+}
+
+/// A request for `connection` on `account_ref`, recorded at `secs`: DEC-699 lets a refused
+/// connection id be requested again with a new `account_ref`.
+fn request_as(
+    journal: &MemJournal,
+    connection: &str,
+    account_ref: &str,
+    version: u64,
+    credential: &str,
+    secs: i64,
+) {
     let mut payload = json!({
         "connection_id": connection,
-        "account_ref": account(connection),
+        "account_ref": account_ref,
         "broker": "alpaca",
         "environment": "paper",
         "user": "01JB3K6F0C9R2V7N4M8Q1T5W3Z",
         "step_up": {
             "assertion_id": "asrt-1",
-            "authenticated_at": at(OPENED - 10).to_string(),
+            "authenticated_at": at(secs - 10).to_string(),
             "method": "passkey",
         },
     });
@@ -87,7 +107,7 @@ fn request(journal: &MemJournal, connection: &str, version: u64, credential: &st
         &ctl(),
         "ConnectionRequested",
         version,
-        OPENED,
+        secs,
         payload,
     );
 }
@@ -106,6 +126,12 @@ fn close(journal: &MemJournal, kind: &str, connection: &str) {
 /// The executor's `connect` check of `connection`, listing `account`, `environment` and `scope`
 /// (rule 57): every result passed, or `scope` failed.
 fn check(journal: &MemJournal, connection: &str, passed: bool) {
+    check_on(journal, connection, &account(connection), passed);
+}
+
+/// The executor's `connect` check of `connection` on `account_ref`'s stream, as [`check`].
+fn check_on(journal: &MemJournal, connection: &str, account_ref: &str, passed: bool) {
+    let stream = format!("acct:{WORKSPACE}:{account_ref}");
     let scope = if passed {
         json!({"check": "scope", "reason": null, "result": "passed"})
     } else {
@@ -118,10 +144,10 @@ fn check(journal: &MemJournal, connection: &str, passed: bool) {
     ]);
     let mut streams = journal.streams.lock().unwrap();
     streams
-        .entry(acct(connection))
+        .entry(stream.clone())
         .or_default()
         .push(StoredEvent {
-            stream_id: acct(connection),
+            stream_id: stream,
             seq: 1,
             event_id: CHECK.to_owned(),
             event_type: "ConnectionChecked".to_owned(),
@@ -151,12 +177,14 @@ impl Fingerprints for Unique {
 }
 
 /// A teardown that records each delete with the control stream's length when it ran, and fails
-/// for the connections in `failing`.
+/// for the connections in `failing`, and for every connection once the control stream holds
+/// `failing_from` rows.
 #[derive(Clone)]
 struct Deletes {
     journal: Arc<MemJournal>,
     calls: Arc<Mutex<Vec<(String, usize)>>>,
     failing: Arc<Mutex<Vec<String>>>,
+    failing_from: Arc<Mutex<Option<usize>>>,
 }
 
 impl Deletes {
@@ -165,6 +193,7 @@ impl Deletes {
             journal: Arc::clone(journal),
             calls: Arc::default(),
             failing: Arc::default(),
+            failing_from: Arc::default(),
         }
     }
 
@@ -189,7 +218,12 @@ impl Teardown for Deletes {
             .lock()
             .unwrap()
             .iter()
-            .any(|id| id == connection.as_str());
+            .any(|id| id == connection.as_str())
+            || self
+                .failing_from
+                .lock()
+                .unwrap()
+                .is_some_and(|rows| length >= rows);
         Box::pin(async move { if fails { Err(DeleteFailed) } else { Ok(()) } })
     }
 }
@@ -382,22 +416,84 @@ fn a_refusal_already_committed_is_deleted_again() {
     assert_eq!(deletes.take(), []);
 }
 
+/// Item 3: with the vault down nothing is appended; once it recovers, the delete runs, then the
+/// refusal is appended, then the delete runs again.
 #[test]
 #[ignore = "pending E10-13"]
-fn a_failed_delete_is_retried_on_every_pass_until_it_succeeds() {
+fn a_vault_that_is_down_holds_the_refusal_until_its_first_delete_succeeds() {
     let (journal, deletes, mut finisher) = finisher(Unique);
     request(&journal, A, 2, "oauth");
     check(&journal, A, false);
     deletes.failing.lock().unwrap().push(A.to_owned());
     pass(&mut finisher, OPENED + 31);
-    assert_eq!(deletes.of(), [A, A]);
+    assert_eq!(deletes.take(), [(A.to_owned(), 1)]);
+    pass(&mut finisher, OPENED + 36);
+    assert_eq!(deletes.take(), [(A.to_owned(), 1)]);
+    assert_eq!(journal.rows_of(&ctl()).len(), 1, "nothing appended");
+    assert!(journal.appends.lock().unwrap().is_empty());
+    deletes.failing.lock().unwrap().clear();
+    pass(&mut finisher, OPENED + 41);
+    assert_eq!(deletes.take(), [(A.to_owned(), 1), (A.to_owned(), 2)]);
+    assert_eq!(last(&journal).0, "ConnectionRefused");
+    pass(&mut finisher, OPENED + 46);
+    assert_eq!(deletes.take(), []);
+}
+
+#[test]
+#[ignore = "pending E10-13"]
+fn a_failed_second_delete_is_retried_on_every_pass_until_it_succeeds() {
+    let (journal, deletes, mut finisher) = finisher(Unique);
+    request(&journal, A, 2, "oauth");
+    check(&journal, A, false);
+    *deletes.failing_from.lock().unwrap() = Some(2);
+    pass(&mut finisher, OPENED + 31);
+    assert_eq!(deletes.take(), [(A.to_owned(), 1), (A.to_owned(), 2)]);
     pass(&mut finisher, OPENED + 36);
     assert_eq!(deletes.of(), [A]);
-    deletes.failing.lock().unwrap().clear();
+    *deletes.failing_from.lock().unwrap() = None;
     pass(&mut finisher, OPENED + 41);
     assert_eq!(deletes.of(), [A]);
     pass(&mut finisher, OPENED + 46);
     assert_eq!(deletes.of(), Vec::<String>::new());
+    assert_eq!(journal.rows_of(&ctl()).len(), 2, "nothing more appended");
+}
+
+/// DEC-699: a connection id refused and torn down, then requested again with a new `account_ref`,
+/// has its second request torn down too, before and after its own refusal.
+#[test]
+#[ignore = "pending E10-13"]
+fn a_second_request_on_a_torn_down_connection_is_torn_down_too() {
+    let second = "01JB3K6F0C9R2V7N4M8Q1T5W6Z";
+    let (journal, deletes, mut finisher) = finisher(Unique);
+    request(&journal, A, 2, "oauth");
+    check(&journal, A, false);
+    pass(&mut finisher, OPENED + 31);
+    assert_eq!(deletes.take(), [(A.to_owned(), 1), (A.to_owned(), 2)]);
+    request_as(&journal, A, second, 2, "oauth", OPENED + 40);
+    check_on(&journal, A, second, false);
+    pass(&mut finisher, OPENED + 71);
+    assert_eq!(last(&journal).0, "ConnectionRefused");
+    assert_eq!(deletes.take(), [(A.to_owned(), 3), (A.to_owned(), 4)]);
+    pass(&mut finisher, OPENED + 76);
+    assert_eq!(deletes.take(), []);
+}
+
+/// The restart pass deletes each closed request's entries, two requests on one connection id
+/// included.
+#[test]
+#[ignore = "pending E10-13"]
+fn the_restart_pass_deletes_each_closed_request_on_one_connection() {
+    let second = "01JB3K6F0C9R2V7N4M8Q1T5W6Z";
+    let (journal, deletes, mut finisher) = finisher(Unique);
+    request(&journal, A, 2, "oauth");
+    close(&journal, "ConnectionRefused", A);
+    request_as(&journal, A, second, 2, "oauth", OPENED + 40);
+    close(&journal, "ConnectionRefused", A);
+    pass(&mut finisher, OPENED + 71);
+    assert_eq!(deletes.of(), [A, A]);
+    pass(&mut finisher, OPENED + 76);
+    assert_eq!(deletes.of(), Vec::<String>::new());
+    assert_eq!(journal.rows_of(&ctl()).len(), 4, "nothing appended");
 }
 
 /// The restart pass deletes, once, every `oauth` connect a refusal or a revoke closed, and no
