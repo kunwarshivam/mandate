@@ -238,7 +238,8 @@ impl Manager {
     }
 
     /// Whether the control stream wants `slot` running: a runtime for an agent deployed and not
-    /// stopped, and an executor for an account with such an agent.
+    /// stopped, and an executor for an account with such an agent. No token exchange is wanted yet:
+    /// the manager reads no request.
     pub fn desired(&self, slot: &Slot) -> bool {
         match slot.process {
             Process::Runtime => self
@@ -249,10 +250,12 @@ impl Manager {
                 .agents
                 .values()
                 .any(|agent| !agent.stopped && agent.account == slot.subject),
+            Process::TokenExchange => false,
         }
     }
 
-    /// Whether a kill switch of `scope` covers `slot`.
+    /// Whether a kill switch of `scope` covers `slot`. None covers a token exchange: it holds no
+    /// order (DEC-1175 item 3).
     pub fn covers(&self, scope: &Scope, slot: &Slot) -> bool {
         let account_of = |agent: &str| self.agents.get(agent).map(|a| a.account.as_str());
         let connected = |connection: &str| self.connections.get(connection).map(String::as_str);
@@ -268,6 +271,7 @@ impl Manager {
             (Scope::Connection(connection), Process::Runtime) => {
                 account_of(&slot.subject).is_some_and(|a| connected(connection) == Some(a))
             }
+            (_, Process::TokenExchange) => false,
         }
     }
 

@@ -3,7 +3,9 @@
 //! `restartPolicy: Never`, so only the manager restarts a process and every restart is journaled
 //! (DEC-1170 item 2). The pod's shape (image, probes, resources, affinity, the labels the network
 //! policies select) is the chart's template; the adapter adds only the pod's name, its labels and
-//! the process's identity.
+//! the process's identity. A token exchange also runs as its connection's own ServiceAccount, which
+//! the adapter makes just before the pod and deletes just after it, and ends by its request's
+//! deadline (DEC-1175 items 4, 7 and 9).
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -22,6 +24,8 @@ const MANAGER: &str = "mandate-deploy-manager";
 /// network policies and the colocation affinity select, is the template's and is kept as it is.
 const WORKSPACE: &str = "mandate.dev/workspace-key";
 const PROCESS: &str = "mandate.dev/process";
+/// The chart's workspace label, copied from the template onto an account it makes.
+const CHART_WORKSPACE: &str = "mandate.dev/workspace";
 const GENERATION: &str = "mandate.dev/generation";
 const SUBJECT: &str = "mandate.dev/subject";
 /// The subject as a selectable label: an id is not always label-safe, so the label is its key.
@@ -152,14 +156,74 @@ impl Kubernetes {
         let short = match slot.process {
             Process::Runtime => "rt",
             Process::Executor => "ex",
+            Process::TokenExchange => "tx",
         };
         let key = format!("{}:{}", self.workspace, slot.subject);
         format!("mandate-{short}-{}-g{generation}", hex16(&key))
     }
 
+    /// The ServiceAccount `slot` runs as, when it is not the namespace's default: a token
+    /// exchange's is `x` and its connection id's bytes in lowercase hex, the name its vault role
+    /// and the admission policies are written for (DEC-2060).
+    pub fn account_name(&self, slot: &Slot) -> Option<String> {
+        match slot.process {
+            Process::TokenExchange => {
+                let hex: String = slot
+                    .subject
+                    .bytes()
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect();
+                Some(format!("x{hex}"))
+            }
+            Process::Runtime | Process::Executor => None,
+        }
+    }
+
+    /// The account [`Kubernetes::account_name`] names for `slot`: no token mounted, no Secret, and
+    /// the manager's, the chart's workspace and the process's labels, which the chart's accounts
+    /// policy requires.
+    pub fn account(&self, slot: &Slot) -> Option<Value> {
+        let name = self.account_name(slot)?;
+        let workspace = self
+            .templates
+            .get(&slot.process)?
+            .get("metadata")?
+            .get("labels")?
+            .get(CHART_WORKSPACE)?
+            .clone();
+        Some(json!({
+            "apiVersion": "v1",
+            "kind": "ServiceAccount",
+            "metadata": {
+                "name": name,
+                "labels": {
+                    MANAGED_BY: MANAGER,
+                    CHART_WORKSPACE: workspace,
+                    PROCESS: slot.process.label(),
+                }
+            },
+            "automountServiceAccountToken": false
+        }))
+    }
+
     /// The pod `generation` of `slot` is created from: the chart's template with the name, the
     /// labels, the subject, `restartPolicy: Never`, and the process's identity in its environment.
-    pub fn manifest(&self, slot: &Slot, generation: u64) -> Option<Value> {
+    /// A token exchange also names its account and ends by its `lifetime`, in whole seconds
+    /// rounded down, so it never outlives its request; it needs one of at least a second, and a
+    /// standing process is never given one.
+    pub fn manifest(
+        &self,
+        slot: &Slot,
+        generation: u64,
+        lifetime: Option<Duration>,
+    ) -> Option<Value> {
+        let deadline = match (slot.process, lifetime) {
+            (Process::TokenExchange, Some(lifetime)) if lifetime.as_secs() >= 1 => {
+                Some(lifetime.as_secs())
+            }
+            (Process::Runtime | Process::Executor, None) => None,
+            _ => return None,
+        };
         let mut pod = self.templates.get(&slot.process)?.clone();
         let root = pod.as_object_mut()?;
         root.insert("apiVersion".to_owned(), json!("v1"));
@@ -169,12 +233,18 @@ impl Kubernetes {
         let labels = member(metadata, "labels")?;
         labels.insert(MANAGED_BY.to_owned(), json!(MANAGER));
         labels.insert(WORKSPACE.to_owned(), json!(hex16(&self.workspace)));
-        labels.insert(PROCESS.to_owned(), json!(slot.process.code()));
+        labels.insert(PROCESS.to_owned(), json!(slot.process.label()));
         labels.insert(GENERATION.to_owned(), json!(generation.to_string()));
         labels.insert(SUBJECT_KEY.to_owned(), json!(hex16(&slot.subject)));
         member(metadata, "annotations")?.insert(SUBJECT.to_owned(), json!(slot.subject));
         let spec = member(root, "spec")?;
         spec.insert("restartPolicy".to_owned(), json!("Never"));
+        if let Some(seconds) = deadline {
+            spec.insert("activeDeadlineSeconds".to_owned(), json!(seconds));
+        }
+        if let Some(account) = self.account_name(slot) {
+            spec.insert("serviceAccountName".to_owned(), json!(account));
+        }
         let env = [
             ("MANDATE_WORKSPACE", self.workspace.clone()),
             ("MANDATE_PROCESS", slot.process.code().to_owned()),
@@ -196,6 +266,33 @@ impl Kubernetes {
 
     fn pods(&self) -> String {
         format!("{}/api/v1/namespaces/{}/pods", self.api, self.namespace)
+    }
+
+    fn accounts(&self) -> String {
+        format!(
+            "{}/api/v1/namespaces/{}/serviceaccounts",
+            self.api, self.namespace
+        )
+    }
+
+    /// Creates `body` at `url`; one that already exists is made.
+    async fn create(&self, url: String, body: &Value) -> Result<(), Unavailable> {
+        let (status, _) = self.send(Method::POST, url, Some(body)).await?;
+        if status.is_success() || status == StatusCode::CONFLICT {
+            Ok(())
+        } else {
+            Err(Unavailable)
+        }
+    }
+
+    /// Deletes `url`; one already gone is deleted.
+    async fn delete(&self, url: String) -> Result<(), Unavailable> {
+        let (status, _) = self.send(Method::DELETE, url, None).await?;
+        if status.is_success() || status == StatusCode::NOT_FOUND {
+            Ok(())
+        } else {
+            Err(Unavailable)
+        }
     }
 
     async fn send(
@@ -249,23 +346,28 @@ impl Orchestrator for Kubernetes {
             .collect()
     }
 
-    async fn start(&mut self, slot: &Slot, generation: u64) -> Result<(), Unavailable> {
-        let pod = self.manifest(slot, generation).ok_or(Unavailable)?;
-        let (status, _) = self.send(Method::POST, self.pods(), Some(&pod)).await?;
-        if status.is_success() || status == StatusCode::CONFLICT {
-            Ok(())
-        } else {
-            Err(Unavailable)
+    async fn start(
+        &mut self,
+        slot: &Slot,
+        generation: u64,
+        lifetime: Option<Duration>,
+    ) -> Result<(), Unavailable> {
+        let pod = self
+            .manifest(slot, generation, lifetime)
+            .ok_or(Unavailable)?;
+        if self.account_name(slot).is_some() {
+            let account = self.account(slot).ok_or(Unavailable)?;
+            self.create(self.accounts(), &account).await?;
         }
+        self.create(self.pods(), &pod).await
     }
 
     async fn stop(&mut self, slot: &Slot, generation: u64) -> Result<(), Unavailable> {
-        let url = format!("{}/{}", self.pods(), self.pod_name(slot, generation));
-        let (status, _) = self.send(Method::DELETE, url, None).await?;
-        if status.is_success() || status == StatusCode::NOT_FOUND {
-            Ok(())
-        } else {
-            Err(Unavailable)
+        let pod = format!("{}/{}", self.pods(), self.pod_name(slot, generation));
+        self.delete(pod).await?;
+        match self.account_name(slot) {
+            Some(account) => self.delete(format!("{}/{account}", self.accounts())).await,
+            None => Ok(()),
         }
     }
 }
@@ -275,7 +377,9 @@ impl Orchestrator for Kubernetes {
 fn instance(pod: &Value) -> Result<Instance, Unavailable> {
     let metadata = pod.get("metadata").ok_or(Unavailable)?;
     let label = |name: &str| metadata.get("labels")?.get(name)?.as_str();
-    let process = label(PROCESS).and_then(Process::parse).ok_or(Unavailable)?;
+    let process = label(PROCESS)
+        .and_then(Process::from_label)
+        .ok_or(Unavailable)?;
     let generation = label(GENERATION)
         .and_then(|g| g.parse::<u64>().ok())
         .ok_or(Unavailable)?;

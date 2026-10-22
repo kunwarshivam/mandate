@@ -15,8 +15,8 @@ use std::time::Duration;
 
 use common::block_on;
 use mandate_canon::Digest;
-use mandate_deploy_manager::kubernetes::{InCluster, Kubernetes, MAX_BODY, SetupError};
 use mandate_connections::record::ConnectionId;
+use mandate_deploy_manager::kubernetes::{InCluster, Kubernetes, MAX_BODY, SetupError};
 use mandate_deploy_manager::{Instance, Orchestrator, Phase, Process, Slot, Unavailable};
 use mandate_vault::kubernetes::service_account_name;
 use mandate_vault::policy::Identity;
@@ -525,16 +525,25 @@ fn an_exchanges_start_creates_its_account_then_its_pod_ended_by_its_deadline() {
         ("POST", "/api/v1/namespaces/cell/pods")
     );
     let pod: Value = serde_json::from_str(&seen[1].body).unwrap();
-    assert_eq!(pod["spec"]["serviceAccountName"], exchange_account().as_str());
+    assert_eq!(
+        pod["spec"]["serviceAccountName"],
+        exchange_account().as_str()
+    );
     assert_eq!(
         pod["spec"]["activeDeadlineSeconds"], 599,
         "whole seconds, rounded down, so the pod never outlives its request"
     );
     assert_eq!(pod["spec"]["restartPolicy"], "Never");
-    assert_eq!(pod["metadata"]["labels"]["mandate.dev/process"], "token-exchange");
+    assert_eq!(
+        pod["metadata"]["labels"]["mandate.dev/process"],
+        "token-exchange"
+    );
     let name = pod["metadata"]["name"].as_str().unwrap();
     assert_eq!(name, k.pod_name(&exchange(), 1));
-    assert!(name.starts_with("mandate-tx-") && name.ends_with("-g1"), "{name}");
+    assert!(
+        name.starts_with("mandate-tx-") && name.ends_with("-g1"),
+        "{name}"
+    );
     let env: BTreeMap<&str, &str> = pod["spec"]["containers"][0]["env"]
         .as_array()
         .unwrap()
@@ -586,7 +595,10 @@ fn only_an_exchange_takes_a_lifetime_and_it_always_takes_one_of_a_second_or_more
         None,
         "a deadline already reached starts nothing"
     );
-    assert!(k.manifest(&exchange(), 1, Some(Duration::from_secs(1))).is_some());
+    assert!(
+        k.manifest(&exchange(), 1, Some(Duration::from_secs(1)))
+            .is_some()
+    );
     assert_eq!(
         k.manifest(&Slot::runtime("agent_a"), 1, Some(Duration::from_secs(60))),
         None,
@@ -610,7 +622,11 @@ fn an_exchanges_stop_deletes_its_pod_then_its_account() {
     ]);
     let mut k = adapter(api);
     assert_eq!(block_on(k.stop(&exchange(), 1)), Ok(()));
-    assert_eq!(block_on(k.stop(&exchange(), 1)), Ok(()), "both already gone");
+    assert_eq!(
+        block_on(k.stop(&exchange(), 1)),
+        Ok(()),
+        "both already gone"
+    );
     assert_eq!(block_on(k.stop(&exchange(), 1)), Err(Unavailable));
     let seen = seen.lock().unwrap();
     let asked: Vec<(&str, String)> = seen
@@ -623,11 +639,17 @@ fn an_exchanges_stop_deletes_its_pod_then_its_account() {
         [
             (
                 "DELETE",
-                format!("/api/v1/namespaces/cell/pods/{}", k.pod_name(&exchange(), 1))
+                format!(
+                    "/api/v1/namespaces/cell/pods/{}",
+                    k.pod_name(&exchange(), 1)
+                )
             ),
             (
                 "DELETE",
-                format!("/api/v1/namespaces/cell/serviceaccounts/{}", exchange_account())
+                format!(
+                    "/api/v1/namespaces/cell/serviceaccounts/{}",
+                    exchange_account()
+                )
             ),
         ]
     );

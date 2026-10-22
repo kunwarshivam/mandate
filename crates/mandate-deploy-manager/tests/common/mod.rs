@@ -234,7 +234,11 @@ impl Orchestrator for Checked {
             Seed::None => {}
             Seed::DropStarts => return Ok(()),
             Seed::SecondInstance => self.fake.start(slot, generation + 1000, lifetime).await?,
-            Seed::Unwanted => self.fake.start(&Slot::runtime("agent_nobody"), 1, None).await?,
+            Seed::Unwanted => {
+                self.fake
+                    .start(&Slot::runtime("agent_nobody"), 1, None)
+                    .await?
+            }
             Seed::Repeated => {
                 self.fake.start(slot, generation, lifetime).await?;
                 self.fake.start(slot, generation, lifetime).await?;
