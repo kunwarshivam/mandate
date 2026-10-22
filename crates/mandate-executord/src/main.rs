@@ -50,7 +50,7 @@ use mandate_executor::{AccountRef, AccountScope, WorkspaceId};
 use mandate_executord::alpaca::AlpacaBroker;
 use mandate_executord::connect::connect_check;
 use mandate_executord::credential::{
-    RunLease, SUBJECT_ACCOUNT_ENV, VaultMount, WORKSPACE_NAMESPACE_ENV, checked_connection,
+    RunLease, SUBJECT_ACCOUNT_ENV, VaultMount, WORKSPACE_NAMESPACE_ENV, own_checked_connection,
     paper_account, paper_broker, paper_settings, paper_transport, subject_account,
     subject_connection, vault_config, vault_login, workspace_namespace,
 };
@@ -235,9 +235,7 @@ fn serve<S: Store>(
         random: &mut OsRandom,
     };
     exchanged_start(&mut store, &fixture::Ids, &config.scope, start, host_now())?;
-    if checked_connection(&store, &config.scope)? != connection {
-        return Err("connection_mismatch");
-    }
+    own_checked_connection(&store, &config.scope, &connection)?;
     let (broker, mut lease) = paper_broker(vault, &connection, host_now())?;
     let mut tick = |now| lease.pass(now);
     let mut edge = Edge {

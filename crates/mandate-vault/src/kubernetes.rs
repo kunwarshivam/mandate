@@ -122,7 +122,8 @@ pub fn kubernetes_policy_name(identity: &Identity, mounts: &Mounts) -> Result<St
 /// The templated policy, in HCL, of `identity`'s kind, keyed by the ServiceAccount name in the
 /// login's alias metadata on the auth mount whose accessor is `accessor`, an `x` before an
 /// executor's, so both kinds reach [`crate::policy::connection_segment`]. An executor reads its
-/// connection's token and creates its account entry in the personal-data vault (DEC-2339); a token
+/// connection's token and creates its account entries in the personal-data vault, one per request
+/// below its own connection (DEC-2339); a token
 /// exchange writes the token, reads, overwrites, destroys and deletes its code but never its
 /// code's metadata (DEC-2321), and reads the platform's client secret. Anything else, or an
 /// accessor that is not one plain path segment (a quote, a brace or a newline would end the
@@ -151,7 +152,7 @@ pub fn kubernetes_policy(
             ),
             block(
                 "data",
-                &format!("personal/accounts/{SEGMENT_PREFIX}{own}"),
+                &format!("personal/accounts/{SEGMENT_PREFIX}{own}/+"),
                 "\"create\"",
             ),
         ]
