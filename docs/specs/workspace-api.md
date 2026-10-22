@@ -563,7 +563,8 @@ per workspace deployment (item 6).
    and `MANDATE_API_WORKSPACE` and `MANDATE_API_ORG`: the one
    workspace this deployment hosts and its organization, as ULIDs. `MANDATE_API_INGRESS_PEERS`,
    optional, lists the ingress's own addresses, comma-separated, whose `X-Forwarded-For` route 2's
-   limits read (§4.10); unset, they key on the TCP peer alone. Every other workspace in a path
+   limits read (§4.10): exact IPv4 or IPv6 addresses, no ranges; any other entry refuses the start.
+   Unset, the limits key on the TCP peer alone. Every other workspace in a path
    is absent (API-9's 404), and the organization is what `authorize` checks the pair against;
    journal spec §9.12's records name neither. `MANDATE_DEPLOYMENT_TIER` is the deployment tier, read as every
    process reads it (`dev`, `ci`, `staging`, or `production`; no value or any other is
@@ -1596,17 +1597,19 @@ Owed to the identity spec's lanes, and listed so the prefix rule above is comple
 `GET /v1/oauth/alpaca/callback` (§4.5).
 
 **Route 2, the workspace-local passkey** (identity spec §6.4 route 2, DEC-816 item 6, DEC-834,
-[DEC-2117](../project/decisions/DEC-2117.md); planned, E9-1). Pause and the kill switch must work
-when sign-in does not, so a member opens a *reduction-only session* with a passkey the deployment
-already holds, with no identity provider, global control plane, or model involved. Both routes sit
-outside the matrix (DEC-816 item 7), are browser-only (`Origin` equal to the app origin and
-`X-Mandate-Request: 1`, else 403 `forbidden` before the body is read, as §3.11 item 5), answer with
-`Cache-Control: no-store`, and are never logged with their bodies.
+[DEC-2117](../project/decisions/DEC-2117.md), [DEC-2119](../project/decisions/DEC-2119.md);
+planned, E9-1). Pause and the kill switch must work when sign-in does not, so a member opens a
+*reduction-only session* with a passkey the deployment already holds, with no identity provider,
+global control plane, or model involved. Both routes sit outside the matrix (DEC-816 item 7), are
+browser-only (`Origin` equal to the app origin and `X-Mandate-Request: 1`, else 403 `forbidden`
+before the body is read, as §3.11 item 5), answer with `Cache-Control: no-store`, and are never
+logged with their bodies. Both are exempt from `Idempotency-Key` (§3.4): each challenge has a fresh
+id and is used once, so a retried opening asks for a new challenge.
 
 | Operation | Method and path | Event | Notes |
 |---|---|---|---|
-| Ask for a reduction-session challenge | `POST /v1/reduction-sessions/challenges` | — | Unauthenticated. Body `commands/reduction-session-challenge-request`, strict and empty; anything else is `invalid`. Answers `201` with `commands/reduction-session-challenge`: `challenge_id` (a fresh ULID), `webauthn_challenge` (32 bytes from the operating system's generator, unpadded base64url), the deployment's `rp_id`, `issued_at`, and `expires_at`, 300 s later. It reads nothing workspace-specific and returns nothing workspace-specific: no workspace, member, passkey list, or `allowCredentials`. The challenge is held in the server's memory and **never journaled**. Over item 3's limits it is the one 401, so no refusal tells a limit from anything else (DEC-653 item 3, [DEC-2119](../project/decisions/DEC-2119.md)) |
-| Open a reduction-only session | `POST /v1/reduction-sessions` | — | Body `commands/reduction-session-request`, strict: `challenge_id`, and the authenticator's `passkey_id`, `authenticator_data`, `client_data_json`, and `signature`. Answers `201` with `commands/reduction-session-opened`, `{kind: "reduction_only", expires_at, workspaces}`, and the §3.3 item 5 session cookie. **Every** refusal after the browser check is the one 401 (item 4) |
+| Ask for a reduction-session challenge | `POST /v1/reduction-sessions/challenges` | — | Unauthenticated. Body `commands/reduction-session-challenge-request`, strict and empty; anything else is `invalid`. Answers `201` with `commands/reduction-session-challenge`: `challenge_id` (a fresh ULID), `webauthn_challenge` (32 bytes from the operating system's generator, unpadded base64url), the deployment's `rp_id`, `issued_at`, and `expires_at`, 300 s later. It reads nothing workspace-specific and returns nothing workspace-specific: no workspace, member, passkey list, or `allowCredentials`. The challenge is held in the server's memory and **never journaled**. Over item 3's limits it is the one 401, so no refusal tells a limit from anything else (DEC-653 item 3, DEC-2119) |
+| Open a reduction-only session | `POST /v1/reduction-sessions` | `SessionOpened` (item 5) | Body `commands/reduction-session-request`, strict: `challenge_id`, and the authenticator's `passkey_id`, `authenticator_data`, `client_data_json`, and `signature`. Answers `201` with `commands/reduction-session-opened`, `{kind: "reduction_only", expires_at, workspaces}`, and the §3.3 item 5 session cookie. **Every** refusal after the browser check is the one 401 (item 4) |
 
 1. **The challenge is single-use.** The assertion route takes the named challenge out of memory on
    its first presentation, before anything else is judged and whatever follows, so a challenge is
@@ -1616,61 +1619,97 @@ outside the matrix (DEC-816 item 7), are browser-only (`Origin` equal to the app
    control stream holds enrolled and not removed (journal spec §9.31), so a discoverable passkey
    and a non-discoverable one whose id the client supplies both serve (DEC-833 keeps both).
    `mandate_passkey::verify` judges the assertion against the challenge's bytes, this deployment's
-   origin and RP ID, and user verification. The session is refused when the passkey's member has
-   no `active` membership in the hosted workspace, or when the member's identity-provider subject
-   was refused by the provider since their last successful sign-in (route 1's deprovision signal).
-   An enrolment cool-off does not bar it: route 2 reaches only risk reduction (DEC-2117 item 6).
-3. **Limits** (DEC-834, the founder's; DEC-653; numbers by DEC-2117 item 3 and
-   [DEC-2119](../project/decisions/DEC-2119.md)). A request is counted against its address and its
-   device:
-   - **Address:** the TCP peer of the API listener. When `MANDATE_API_INGRESS_PEERS` (§3.11 item
-     2) lists that peer, it is instead the last address in `X-Forwarded-For`, the one the ingress
-     appended. A forwarded header from any other peer is ignored (DEC-822 item 4). Unset behind an
-     ingress, every client shares one address budget, so a deployment behind one sets it. An IPv6
-     address counts as its /64 prefix, so one client cannot rotate addresses within it to escape
-     its budget; an IPv4 address counts as itself.
-   - **Device:** the `__Host-mandate_device` cookie: 32 random bytes as unpadded base64url, `Secure`,
-     `HttpOnly`, `SameSite=Strict`, `Path=/` (the `__Host-` prefix requires it; every other route
-     ignores it), `Max-Age` 30 days. The challenge route sets it when the call carries none or one
-     of another shape. It is a random key and nothing else: it carries no workspace, member, principal, passkey, or session, the server never
-     links it to one, and it keeps only its SHA-256 digest, only as a limit key, only while that
-     key counts something. The assertion route never sets or clears it.
+   origin and RP ID, and user verification. Route 2 neither reads nor advances the passkey's
+   signature counter; detecting a cloned authenticator is out of its scope. The session is refused
+   when the passkey's member holds no membership that reaches the hosted workspace (`active` or
+   `cooling_off`, identity spec §5.1), or when the member's identity-provider subject was refused by
+   the provider since their last successful sign-in (route 1's deprovision signal). An enrolment
+   cool-off does not bar it: a cooling-off passkey can pause and kill switch (identity spec §10.1).
+3. **Limits** (DEC-834, the founder's; DEC-653; numbers by DEC-2117 item 3 and DEC-2119). A request
+   is counted against its address and its device:
+   - **Address:** the TCP peer of the API listener. Only when the peer is one
+     `MANDATE_API_INGRESS_PEERS` (§3.11 item 2) lists does the server read `X-Forwarded-For`: its
+     lines are joined into one list in order, and it is walked from the right, skipping every
+     entry that is itself a listed peer; the first other entry is the address. A missing header, an
+     entry that is not an address, or a list holding only listed peers falls back to the TCP peer.
+     A forwarded header from any other peer is ignored, so a request that did not come through the
+     ingress cannot claim an address (DEC-822 item 7). Peers are matched exactly, after an
+     IPv4-mapped IPv6 address is read as its IPv4 address. An IPv6 address counts as its /64
+     prefix, so one client cannot rotate addresses within it to escape its budget; an IPv4 address
+     counts as itself. Unset behind an ingress, every client shares one address budget, so a
+     deployment behind one sets it.
+   - **Device:** the `__Host-mandate_device` cookie: 32 bytes from the operating system's generator
+     as unpadded base64url, `Secure`, `HttpOnly`, `SameSite=Strict`, `Path=/` (the `__Host-` prefix
+     requires it; every other route ignores it), `Max-Age` 30 days. The challenge route sets it when
+     the call carries none or one of another shape. It is a random key and nothing else: it carries
+     no workspace, member, principal, passkey, or session, the server never links it to one, and it
+     keeps only its SHA-256 digest, only as a limit key, only while that key counts something. The
+     assertion route never sets or clears it. A browser keeps no `Secure` cookie from a plain
+     `http` origin, so a dev or ci cell served that way gets a fresh device on every call: the
+     device limit does not bind there, by intent, and the address limit is the bound.
    - **The challenge route** counts a challenge only while it is outstanding (issued, unexpired,
-     not yet presented), against the address and device that asked for it: at most 4 per device,
-     32 per address, and 4,096 in all. Past any of them it answers the one 401, as every other
-     refusal of route 2 does (DEC-653 item 3).
+     not yet presented), against the address and device that asked for it: at most 4 per device
+     and 32 per address. In all it holds at most 4,096, and the last 1,024 are a reserve: once
+     3,072 are outstanding, an address that already holds one gets no more, so the rest go one per
+     address. Past any of these it answers the one 401, as every other refusal of route 2 does
+     (DEC-653 item 3). **Residual:** a flood from about 1,100 distinct addresses (IPv6 /64s) that
+     re-asks whenever a slot frees can hold every slot while it lasts; a member then waits for a
+     slot, uses another network, the host CLI (route 3) where there is one, or route 1 once the
+     provider answers.
    - **The assertion route** counts each failed assertion against the address and device that
      presented it, for 300 s after it failed: at most 10 per device and 100 per address are kept.
-     This limit only reports (DEC-653 item 3, the founder's reading): no answer depends on it, it
-     refuses no challenge and no assertion, and reaching it is recorded as the abuse signal.
+     This limit only counts and reports (DEC-653 item 3, the founder's reading): no answer depends
+     on it, it refuses no challenge and no assertion, and reaching it raises the operator alert
+     `reduction_failures_over_limit`, an opaque code naming no address, device, member, or passkey.
      Verification work stays bounded by the challenge limits, since only an outstanding challenge
      reaches the verifier, once; a request naming none fails without verifying. **An assertion that
      verifies is never refused for a limit.**
    - **Bounded memory.** Besides the 4,096 outstanding challenges, the server keeps failures for
      at most 65,536 addresses and devices in all, dropping the oldest first. Dropping one changes
      no answer, since failures only report.
-4. **No membership oracle.** Every refusal of `POST /v1/reduction-sessions` after the browser check
-   (an invalid body; an unknown, expired, or reused challenge; an unknown passkey id; a passkey
-   removed, or whose member is deactivated, removed, or deprovisioned; a bad signature; a wrong
-   origin or RP ID; any limit) is 401 `unauthenticated` with §3.5's one body: the same status, body,
-   and headers, no cookie set or cleared. For an unknown passkey the server judges the assertion
-   against a fixed decoy key of the same algorithm, so every refusal past the challenge costs one
-   verification and timing tells none apart.
+4. **No membership oracle, by structure.** Every refusal of `POST /v1/reduction-sessions` after the
+   browser check (an invalid body; an unknown, expired, or reused challenge; an unknown passkey id;
+   a passkey removed, or whose member is deactivated, removed, or deprovisioned; a bad signature; a
+   wrong origin or RP ID; any limit) is 401 `unauthenticated` with §3.5's one body: the same status,
+   body, and headers, no cookie set or cleared. Past the challenge, every request runs the same
+   steps whatever it names:
+   - the passkey lookup reads the whole fold and does not stop at a match;
+   - the signature is verified first, before anything is judged: against the passkey's key, or,
+     for an unknown passkey, against a fixed decoy key of the algorithm the request's
+     authenticator data names, or a fixed one when it names none the server supports;
+   - the membership and provider-refusal lookups always run, against a fixed decoy principal when
+     the passkey is unknown;
+   - only then are the results judged, together.
+   So for any request that reaches it, timing tells no membership or passkey state apart. A
+   challenge-level refusal (an unknown, expired, or reused challenge) costs no verification and is
+   distinguishable by timing; it tells nothing about any member, which is all identity spec §6.4's
+   timing claim covers.
 5. **The session.** The record is §3.11 item 5's, of kind `reduction_only`, for the passkey's
-   member, and counts toward that principal's 16. A session cookie presented with the call ends
-   that earlier session (`sign_out`) and is replaced. It lives **15 minutes from the opening,
-   absolute**: no idle limit, and it is **never refreshed or extended**; `POST
-   /v1/sessions/refresh` with it is refused `reduction_only` and keeps it, and nothing turns it
-   into a full session. Sessions live in memory as item 5's do.
-6. **Its reach.** It covers each workspace in which the member holds an `active` membership when it
-   opens (one, on a hosted deployment), with the roles in effect then as its snapshot, and
-   `workspaces` names them `{workspace_id, label}` (`label` as §4.10's memberships). In each, it
-   authorizes only pause and the kill switch at their scopes, and only where the snapshot's roles
-   grant them (identity spec §4.2's rows for the two). Every other route, owner exits, resume,
-   Stop, approvals, confirm, deploy, step-up, enrolment, and every workspace read included, is
-   refused `reduction_only`.
-   Membership events act on it as on any session (DEC-816 item 7). `GET /v1/me/session` answers it
-   with `kind: "reduction_only"`, its `expires_at`, and the same `workspaces`.
+   member, and counts toward that principal's 16. It also stores that route 2 opened it, a marker
+   no answer ever exposes. A session cookie presented with the call ends that earlier session
+   (`sign_out`) and is replaced, only once the assertion verifies; a refused call ends nothing. It
+   lives **15 minutes from the opening, absolute**: no idle limit, and it is **never refreshed or
+   extended**. `POST /v1/sessions/refresh` refuses a route-2 session `reduction_only` and keeps it,
+   even when the provider answers, so nothing turns it into a full session; a session an outage
+   narrowed (route 1) is still restored by a granted refresh (DEC-816 item 8). Sessions live in
+   memory as item 5's do. Opening one commits `SessionOpened` (identity spec §12.1) with the method
+   `passkey_local` once the journal registers that event; until then it journals nothing.
+6. **Its reach.** It covers each workspace in which the member holds a membership that reaches its
+   scope (`active` or `cooling_off`, identity spec §5.1) when it opens (one, on a hosted
+   deployment), with the roles in effect then, as identity spec §8.3 allows, as its snapshot. In
+   each, it authorizes only pause and the kill switch at their scopes, and only where the
+   snapshot's roles grant them (identity spec §4.2's rows for the two), and sign-out
+   (`DELETE /v1/sessions/current`). The kill switch is the stop alone: its privileges beyond the
+   stop need step-up, and the step-up challenge route refuses this session `reduction_only` (§3.6),
+   so a kill switch it sends is routed without them, as §5.4 routes any kill switch without valid
+   step-up. Every other route, owner exits, resume, Stop, approvals, confirm, deploy, step-up,
+   enrolment, and every workspace read included, is refused `reduction_only`. Membership events
+   act on it as on any session (DEC-816 item 7). `GET /v1/me/session` answers it with `kind:
+   "reduction_only"`, its `expires_at`, and the same `workspaces`. In both that answer and the
+   opening's, each workspace carries the ids the session may act on there, read from the control
+   stream at the answer: `agent_ids`, the agents it may pause or kill switch, and
+   `connection_ids`, the connections it may kill switch, so a session that reads nothing else can
+   name its scope. They are opaque ids, as every read returns them.
 
 | Operation | Method and path | Event | Notes |
 |---|---|---|---|

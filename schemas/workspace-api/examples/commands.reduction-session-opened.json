@@ -8,7 +8,9 @@
   "workspaces": [
     {
       "workspace_id": "01KDEM0000000000000000000W",
-      "label": null
+      "label": null,
+      "agent_ids": [],
+      "connection_ids": []
     }
   ]
 }
