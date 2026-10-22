@@ -3,18 +3,25 @@
 //! connection manager reads each fingerprint entry, reads and changes the registry, and reads the
 //! rotation marker; no other identity reaches any of them.
 
-use mandate_connections::record::ConnectionId;
+use mandate_connections::record::{AccountRef, ConnectionId};
 
 use crate::SourceError;
 use crate::fingerprint::{AccountFingerprint, FINGERPRINT_KEY};
 use crate::kubernetes::kubernetes_policy;
-use crate::policy::{Access, Identity, Mounts, SecretPath, allows, kv_path, openbao_policy};
+use crate::policy::{
+    Access, Identity, Mounts, SecretPath, allows, fingerprint_reads, kv_path, openbao_policy,
+};
 
 /// A transit HMAC-SHA256 output: `vault:v1:` and 44 characters of base64.
 const HASH: &str = "vault:v1:q83vEjRWeJCrze8SNFZ4kKvN7xI0VniQq83vEjRWeJA=";
 
 fn c(id: &str) -> ConnectionId {
     ConnectionId::new(id).unwrap()
+}
+
+/// The account stream of a connect: the first, or a second request on the same connection.
+fn a(n: u8) -> AccountRef {
+    AccountRef::new(&format!("01J8Z2ACCT000000000000000{n}")).unwrap()
 }
 
 fn identities() -> Vec<Identity> {
@@ -32,8 +39,9 @@ fn identities() -> Vec<Identity> {
 
 fn paths() -> Vec<SecretPath> {
     vec![
-        SecretPath::Fingerprint(c("c1")),
-        SecretPath::Fingerprint(c("c2")),
+        SecretPath::Fingerprint(c("c1"), a(1)),
+        SecretPath::Fingerprint(c("c1"), a(2)),
+        SecretPath::Fingerprint(c("c2"), a(1)),
         SecretPath::Claims,
         SecretPath::Rotating,
     ]
@@ -41,38 +49,37 @@ fn paths() -> Vec<SecretPath> {
 
 /// The oracle, written out from DEC-2345: anything else is refused.
 fn expected() -> Vec<(Identity, Access, SecretPath)> {
-    vec![
-        (
+    let mut out = Vec::new();
+    for n in [1, 2] {
+        out.push((
             Identity::Executor(c("c1")),
             Access::Create,
-            SecretPath::Fingerprint(c("c1")),
-        ),
-        (
+            SecretPath::Fingerprint(c("c1"), a(n)),
+        ));
+    }
+    for (id, n) in [("c1", 1), ("c1", 2), ("c2", 1)] {
+        out.push((
             Identity::ConnectionManager,
             Access::Read,
-            SecretPath::Fingerprint(c("c1")),
-        ),
-        (
-            Identity::ConnectionManager,
-            Access::Read,
-            SecretPath::Fingerprint(c("c2")),
-        ),
-        (
-            Identity::ConnectionManager,
-            Access::Read,
-            SecretPath::Claims,
-        ),
-        (
-            Identity::ConnectionManager,
-            Access::Write,
-            SecretPath::Claims,
-        ),
-        (
-            Identity::ConnectionManager,
-            Access::Read,
-            SecretPath::Rotating,
-        ),
-    ]
+            SecretPath::Fingerprint(c(id), a(n)),
+        ));
+    }
+    out.push((
+        Identity::ConnectionManager,
+        Access::Read,
+        SecretPath::Claims,
+    ));
+    out.push((
+        Identity::ConnectionManager,
+        Access::Write,
+        SecretPath::Claims,
+    ));
+    out.push((
+        Identity::ConnectionManager,
+        Access::Read,
+        SecretPath::Rotating,
+    ));
+    out
 }
 
 /// A fingerprint is transit's HMAC output alone, and prints nothing of it.
@@ -105,14 +112,15 @@ fn a_fingerprint_is_transits_hmac_output_and_prints_nothing() {
     }
 }
 
-/// The fingerprint entry is in the personal-data vault beside the account entry, under the
-/// connection's own segment; the registry is one entry there; the marker is outside it.
+/// The fingerprint entry is in the personal-data vault beside the account entry, one per request,
+/// under the connection's own segment and the request's account stream; the registry is one entry
+/// there; the marker is outside it.
 #[test]
 #[ignore = "pending E21-32"]
 fn the_fingerprint_paths_are_pinned() {
     assert_eq!(
-        kv_path(&SecretPath::Fingerprint(c("c1"))).unwrap(),
-        "personal/fingerprints/x6331"
+        kv_path(&SecretPath::Fingerprint(c("c1"), a(1))).unwrap(),
+        "personal/fingerprints/x6331/01J8Z2ACCT0000000000000001"
     );
     assert_eq!(kv_path(&SecretPath::Claims).unwrap(), "personal/claims");
     assert_eq!(
@@ -172,9 +180,10 @@ const FINGERPRINT_PREFIXES: [&str; 4] = [
     "transit/",
 ];
 
-/// The connection manager's generated policy reads each connection's fingerprint entry, reads and
-/// changes the one registry entry by check-and-set, and reads the marker, each path spelled out;
-/// no other identity's generated policy names any of them, or transit.
+/// The connection manager's generated policy reads and changes the one registry entry by
+/// check-and-set and reads the marker, each path spelled out; no other identity's generated policy
+/// names any of them, or transit. Its read of each request's fingerprint is added per request
+/// ([`fingerprint_reads`]).
 #[test]
 #[ignore = "pending E21-32"]
 fn the_managers_policy_reads_each_fingerprint_and_changes_the_registry() {
@@ -184,8 +193,6 @@ fn the_managers_policy_reads_each_fingerprint_and_changes_the_registry() {
         let got = blocks_under(&hcl, &FINGERPRINT_PREFIXES);
         let want: Vec<(String, String)> = if identity == Identity::ConnectionManager {
             [
-                ("mandate/data/personal/fingerprints/x6331", "read"),
-                ("mandate/data/personal/fingerprints/x6332", "read"),
                 ("mandate/data/personal/claims", "read"),
                 ("mandate/data/personal/claims", "create,update"),
                 ("mandate/data/fingerprints/rotating", "read"),
@@ -200,6 +207,27 @@ fn the_managers_policy_reads_each_fingerprint_and_changes_the_registry() {
     }
 }
 
+/// The connection manager reads each request's fingerprint entry, spelled out under the request's
+/// connection and account stream, and nothing else: one block per request, no wildcard.
+#[test]
+#[ignore = "pending E21-32"]
+fn the_manager_reads_each_requests_fingerprint_spelled_out() {
+    let requests = [(c("c1"), a(1)), (c("c1"), a(2)), (c("c2"), a(1))];
+    let hcl = fingerprint_reads(&requests, &Mounts::default()).unwrap();
+    let block = |id: &str, n: u8| {
+        format!(
+            "path \"mandate/data/personal/fingerprints/{}/01J8Z2ACCT000000000000000{n}\" {{\n  capabilities = [\"read\"]\n}}\n",
+            crate::policy::connection_segment(&c(id)).unwrap()
+        )
+    };
+    assert_eq!(
+        hcl,
+        [block("c1", 1), block("c1", 2), block("c2", 1)].concat()
+    );
+    assert!(!hcl.contains('+') && !hcl.contains('*'), "{hcl}");
+    assert_eq!(fingerprint_reads(&[], &Mounts::default()).unwrap(), "");
+}
+
 /// The executor's templated policy creates its own connection's fingerprint entry and updates
 /// the one transit HMAC path of the fingerprint key: no other transit path, so it can hash an id
 /// but never read, export or verify against the key. The token exchange's names none of them.
@@ -209,7 +237,8 @@ fn the_executor_creates_its_fingerprint_and_only_hashes() {
     let accessor = "auth_kubernetes_1a2b";
     let executor =
         kubernetes_policy(&Identity::Executor(c("c1")), &Mounts::default(), accessor).unwrap();
-    let own = format!("x{{{{identity.entity.aliases.{accessor}.metadata.service_account_name}}}}");
+    let own =
+        format!("x{{{{identity.entity.aliases.{accessor}.metadata.service_account_name}}}}/+");
     assert_eq!(
         blocks_under(&executor, &FINGERPRINT_PREFIXES),
         [

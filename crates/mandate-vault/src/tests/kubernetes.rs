@@ -189,15 +189,13 @@ fn each_kinds_policy_reaches_exactly_the_paths_its_connection_is_stored_at() {
                 Identity::Executor(connection.clone()),
                 [
                     block("data", &token, "\"read\""),
-                    block(
-                        "data",
-                        &SecretPath::AccountId(connection.clone()),
-                        "\"create\"",
+                    format!(
+                        "path \"mandate/data/personal/accounts/{}/+\" {{\n  capabilities = [\"create\"]\n}}\n",
+                        connection_segment(&connection).unwrap_or_default()
                     ),
-                    block(
-                        "data",
-                        &SecretPath::Fingerprint(connection.clone()),
-                        "\"create\"",
+                    format!(
+                        "path \"mandate/data/personal/fingerprints/{}/+\" {{\n  capabilities = [\"create\"]\n}}\n",
+                        connection_segment(&connection).unwrap_or_default()
                     ),
                     "path \"transit/hmac/account-fingerprint\" {\n  capabilities = [\"update\"]\n}\n"
                         .to_owned(),
@@ -296,11 +294,64 @@ fn the_executors_policy_reads_its_own_token_alone() {
         kubernetes_policy(&Identity::Executor(c("any")), &Mounts::default(), ACCESSOR),
         Ok(format!(
             "path \"mandate/data/connections/x{TEMPLATE}/token\" {{\n  capabilities = [\"read\"]\n}}\n\
-             path \"mandate/data/personal/accounts/x{TEMPLATE}\" {{\n  capabilities = [\"create\"]\n}}\n\
-             path \"mandate/data/personal/fingerprints/x{TEMPLATE}\" {{\n  capabilities = [\"create\"]\n}}\n\
-             path \"transit/hmac/account-fingerprint\" {{\n  capabilities = [\"update\"]\n}}\n"
+             path \"mandate/data/personal/accounts/x{TEMPLATE}/+\" {{
+  capabilities = [\"create\"]
+}}
+\
+             path \"mandate/data/personal/fingerprints/x{TEMPLATE}/+\" {{
+  capabilities = [\"create\"]
+}}
+\
+             path \"transit/hmac/account-fingerprint\" {{
+  capabilities = [\"update\"]
+}}
+"
         ))
     );
+}
+
+/// DEC-2339 item 1's deliberate exception to spelling every path out, and DEC-2345's beside it: the
+/// executor's creates of its account entries and its fingerprint entries end in `+`, one segment
+/// below its own connection's templated segment, and create only, so a request again on the
+/// connection to another account stream (DEC-699) has entries of its own. No other path of a
+/// templated policy holds `+` or `*`.
+#[test]
+#[ignore = "pending E21-32"]
+fn the_executors_one_wildcard_is_below_its_own_account_entries() {
+    let wildcards = |policy: &str| -> Vec<(String, String)> {
+        policy
+            .split("path \"")
+            .skip(1)
+            .filter_map(|block| {
+                let (path, rest) = block.split_once('"')?;
+                let caps = rest.split_once('[')?.1.split_once(']')?.0;
+                (path.contains('+') || path.contains('*'))
+                    .then(|| (path.to_owned(), caps.replace([' ', '"'], "")))
+            })
+            .collect()
+    };
+    let executor =
+        kubernetes_policy(&Identity::Executor(c("any")), &Mounts::default(), ACCESSOR).unwrap();
+    assert_eq!(
+        wildcards(&executor),
+        [
+            (
+                format!("mandate/data/personal/accounts/x{TEMPLATE}/+"),
+                "create".to_owned()
+            ),
+            (
+                format!("mandate/data/personal/fingerprints/x{TEMPLATE}/+"),
+                "create".to_owned()
+            ),
+        ]
+    );
+    let exchange = kubernetes_policy(
+        &Identity::TokenExchange(c("any")),
+        &Mounts::default(),
+        ACCESSOR,
+    )
+    .unwrap();
+    assert!(wildcards(&exchange).is_empty(), "{exchange}");
 }
 
 /// The exchange's code block reads and updates, the update being its take (DEC-2061); it destroys

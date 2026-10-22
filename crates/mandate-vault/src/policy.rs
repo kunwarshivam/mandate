@@ -16,7 +16,7 @@
 //! The platform's own secrets ([`PlatformSecret`], DEC-2020) are each read by one identity and
 //! written only by the secret import; none is ever deleted, and a rotation writes over it.
 
-use mandate_connections::record::ConnectionId;
+use mandate_connections::record::{AccountRef, ConnectionId};
 
 use crate::SourceError;
 
@@ -52,14 +52,16 @@ pub enum SecretPath {
     Token(ConnectionId),
     /// The platform's OAuth client secret.
     ClientSecret,
-    /// A connection's broker account id and its random reference, in the personal-data vault,
-    /// outside `connections/` so no revoke deletes it (DEC-2339).
-    AccountId(ConnectionId),
+    /// The broker account id and its random reference of one connect of a connection, to one
+    /// account stream, in the personal-data vault, outside `connections/` so no revoke deletes it
+    /// (DEC-2339): a request again on the same connection to another account has its own.
+    AccountId(ConnectionId, AccountRef),
     /// A secret of the platform's own that one process type reads (DEC-2020).
     Platform(PlatformSecret),
-    /// A connection's account fingerprint and the reference it was computed beside, in the
-    /// personal-data vault, written once by its executor (DEC-2345).
-    Fingerprint(ConnectionId),
+    /// The account fingerprint of one connect of a connection, to one account stream, and the
+    /// reference it was computed beside, in the personal-data vault, written once by its executor
+    /// beside the account entry (DEC-2345).
+    Fingerprint(ConnectionId, AccountRef),
     /// The fingerprint registry: which connection holds each fingerprint, the connection
     /// manager's alone, changed by check-and-set (DEC-2345).
     Claims,
@@ -135,7 +137,7 @@ pub fn allows(identity: &Identity, access: Access, path: &SecretPath) -> bool {
         )
         | (Identity::TokenExchange(own), Access::Write, SecretPath::Token(c))
         | (Identity::Executor(own), Access::Read, SecretPath::Token(c))
-        | (Identity::Executor(own), Access::Create, SecretPath::AccountId(c)) => own == c,
+        | (Identity::Executor(own), Access::Create, SecretPath::AccountId(c, _)) => own == c,
         (identity, Access::Read, SecretPath::Platform(secret)) => {
             holders(*secret).is_ok_and(|h| h.reads == *identity)
         }
@@ -222,14 +224,18 @@ pub fn kv_path(path: &SecretPath) -> Result<String, SourceError> {
         SecretPath::Code(c) => format!("connections/{}/code", connection_segment(c)?),
         SecretPath::Token(c) => format!("connections/{}/token", connection_segment(c)?),
         SecretPath::ClientSecret => "platform/alpaca-oauth-client-secret".to_owned(),
-        SecretPath::AccountId(c) => format!("personal/accounts/{}", connection_segment(c)?),
+        SecretPath::AccountId(c, account) => format!(
+            "personal/accounts/{}/{}",
+            connection_segment(c)?,
+            account.as_str()
+        ),
         SecretPath::Platform(PlatformSecret::ModelProviderKey) => {
             "platform/model-provider-key".to_owned()
         }
         SecretPath::Platform(PlatformSecret::EmailCredential) => {
             "platform/email-credential".to_owned()
         }
-        SecretPath::Fingerprint(_) | SecretPath::Claims | SecretPath::Rotating => {
+        SecretPath::Fingerprint(..) | SecretPath::Claims | SecretPath::Rotating => {
             return Err(SourceError::Unimplemented { story: "E21-32" });
         }
     })
@@ -284,6 +290,20 @@ pub fn openbao_policy(
         hcl.push_str("# This identity reads, writes, and deletes nothing (infrastructure §5.2).\n");
     }
     Ok(hcl)
+}
+
+/// The connection manager's `read` of each request's fingerprint entry, in HCL, one block per
+/// request spelled out: the provisioner adds it to the manager's policy when the request is made
+/// (DEC-2345, DEC-2349), as no policy can name an entry before its request exists.
+///
+/// # Errors
+/// [`kv_path`]'s.
+pub fn fingerprint_reads(
+    requests: &[(ConnectionId, AccountRef)],
+    mounts: &Mounts,
+) -> Result<String, SourceError> {
+    let _ = (requests, mounts);
+    Err(SourceError::Unimplemented { story: "E21-32" })
 }
 
 /// Refuses as [`SourceError::Denied`] what [`allows`] does not allow.
