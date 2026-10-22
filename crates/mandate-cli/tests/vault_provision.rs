@@ -481,7 +481,6 @@ fn kubernetes_alone_needs_a_host_and_takes_no_connection_out_or_namespace() {
 /// With its host, `--kubernetes-only` checks the host as provisioning does, then reaches the
 /// vault, so a vault no one answers for is an outage, and it prints nothing.
 #[test]
-#[ignore = "pending E21-32"]
 fn kubernetes_alone_checks_its_host_and_reaches_the_vault() {
     let token = token_file(CANARY, 0o600);
     let out = fresh("out");
@@ -502,7 +501,6 @@ fn kubernetes_alone_checks_its_host_and_reaches_the_vault() {
 /// is, `denied`, printing nothing; what it sets up on a vault given a CA, and that it mints no
 /// secret id, is `mandate-vault`'s own server test.
 #[test]
-#[ignore = "pending E21-32"]
 fn kubernetes_alone_on_the_dev_server_is_refused_outside_a_pod() {
     kubernetes_alone_checks_its_host_and_reaches_the_vault();
     let Some((address, ca, operator)) = server() else {

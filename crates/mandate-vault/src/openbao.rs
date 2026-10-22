@@ -698,8 +698,8 @@ pub async fn provision_kubernetes_auth(
     operator_token: &SecretString,
     auth: &KubernetesAuth,
 ) -> Result<(), SourceError> {
-    let _ = (config, operator_token, auth);
-    Err(SourceError::Unimplemented { story: "E21-32" })
+    let http = Http::new(config)?;
+    provision_kubernetes(&http, Some(operator_token), &config.mounts, auth).await
 }
 
 /// Sets a vault up for `connections`, with an operator's token: the KV v2 mount, the AppRole

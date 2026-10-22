@@ -470,7 +470,6 @@ async fn operator_request(
 /// policies are written, and no secret id is minted, so no credential is rotated. A vault no one
 /// answers for is an outage, checked first, so a run with no server fails the same way.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending E21-32"]
 async fn kubernetes_auth_alone_adds_only_the_missing_mount_and_mints_no_secret_id() {
     let auth = |ca_pem: &[u8], host: &str| KubernetesAuth {
         host: host.to_owned(),
