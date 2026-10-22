@@ -10,24 +10,33 @@
 //! numbers for `mandate_authn`'s gate (DEC-653).
 
 use std::collections::BTreeMap;
-use std::net::{IpAddr, Ipv6Addr};
+use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::num::NonZeroU32;
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError};
 
-use axum::http::HeaderMap;
-use axum::http::header::COOKIE;
+use axum::body::Bytes;
+use axum::extract::{ConnectInfo, State};
+use axum::http::header::{CACHE_CONTROL, COOKIE, SET_COOKIE};
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use axum::response::Response;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use mandate_api::problem::Violation;
 use mandate_authn::{ClientKey, ReductionGate, ReductionLimits, Unauthenticated};
-use mandate_canon::encode_ulid;
+use mandate_canon::{Value, encode_ulid, parse};
 use mandate_time::UtcNanos;
 use ring::digest::{SHA256, digest};
 
 use crate::config::StartRefusal;
+use crate::http::{App, browser, forbidden, invalid, unauthenticated};
+use crate::routes::{enveloped, string};
 use crate::session::{OsRandom, Random};
 
 /// The device cookie's name (§4.10 route 2 item 3).
 pub const DEVICE_COOKIE: &str = "__Host-mandate_device";
+
+/// How long a browser keeps the device cookie: 30 days, in seconds.
+pub const DEVICE_MAX_AGE_S: i64 = 2_592_000;
 
 /// The most challenges outstanding in all (DEC-2117 item 3).
 pub const CHALLENGES_IN_ALL: usize = 4_096;
@@ -267,4 +276,77 @@ impl Default for Reduction {
     fn default() -> Self {
         Self::new(Vec::new(), Box::new(OsRandom::new()))
     }
+}
+
+/// Whether `body` is exactly an empty JSON object.
+fn empty_object(body: &[u8]) -> bool {
+    matches!(parse(body), Ok(Value::Object(members)) if members.is_empty())
+}
+
+/// `POST /v1/reduction-sessions/challenges` (§4.10 route 2): 403 `forbidden` without the browser
+/// marks, `invalid` for any body but `{}`, the one 401 over a limit, else `201` with
+/// `commands/reduction-session-challenge`, `Cache-Control: no-store`, and a device cookie when
+/// the call carried none.
+pub async fn challenge(
+    State(app): State<Arc<App>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    if !browser(&headers, &app.settings.app_origin) {
+        return forbidden();
+    }
+    if !empty_object(&body) {
+        return invalid(vec![Violation::Schema {
+            path: String::new(),
+            code: "additionalProperties".to_owned(),
+            message: "The request is an empty object.".to_owned(),
+        }]);
+    }
+    let issued = (|| {
+        let rp_id = rp_id(&app.settings.app_origin)?;
+        let presented = device(&headers);
+        let fresh = match presented {
+            Some(_) => None,
+            None => Some(app.reduction.new_device().ok()?),
+        };
+        let device = presented.or_else(|| fresh.as_deref().map(hex_digest))?;
+        let client = ClientKey {
+            address: address(peer.ip(), &headers, app.reduction.ingress()),
+            device,
+        };
+        let now = app.clock.now()?;
+        let issued = app.reduction.issue(&client, now).ok()?;
+        Some((rp_id, fresh, issued, now))
+    })();
+    let Some((rp_id, fresh, issued, now)) = issued else {
+        return unauthenticated();
+    };
+    let mut response = enveloped(
+        StatusCode::CREATED,
+        now,
+        vec![
+            ("challenge_id", string(&issued.challenge_id)),
+            (
+                "webauthn_challenge",
+                string(&URL_SAFE_NO_PAD.encode(issued.bytes)),
+            ),
+            ("rp_id", string(&rp_id)),
+            ("issued_at", string(&issued.issued_at.to_string())),
+            ("expires_at", string(&issued.expires_at.to_string())),
+            ("as_of", Value::Array(Vec::new())),
+        ],
+    );
+    let headers = response.headers_mut();
+    headers.insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    let cookie = fresh.and_then(|value| {
+        HeaderValue::from_str(&format!(
+            "{DEVICE_COOKIE}={value}; Path=/; Max-Age={DEVICE_MAX_AGE_S}; Secure; HttpOnly; SameSite=Strict"
+        ))
+        .ok()
+    });
+    if let Some(cookie) = cookie {
+        headers.insert(SET_COOKIE, cookie);
+    }
+    response
 }

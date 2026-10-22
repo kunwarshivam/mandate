@@ -169,6 +169,7 @@ pub fn fixture_random(
         step_up: Arc::clone(&port) as Arc<dyn StepUp>,
         challenges: Arc::default(),
         connect: connect.clone(),
+        reduction: Arc::default(),
     };
     journal
         .streams

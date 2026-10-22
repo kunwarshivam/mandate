@@ -57,6 +57,10 @@ api:
   appOrigin: ""
   # The ConfigMap holding the `subject-links` key; empty mounts none, so every sign-in is refused.
   subjectLinks: ""
+  # The addresses of the ingress in front of the API (MANDATE_API_INGRESS_PEERS): from these peers
+  # alone, route 2's limits read the client's address from X-Forwarded-For (DEC-2117 item 4). With
+  # the tunnel on, cloudflared runs beside the API in its pod and reaches it on loopback.
+  ingressPeers: []
 
 # The workspace's shared artifact store (mandate documents, backtest reports), mounted at
 # /var/lib/mandate/artifacts. Which process may write it is fixed by the chart, never a value.
