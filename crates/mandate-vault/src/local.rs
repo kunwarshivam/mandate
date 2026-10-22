@@ -152,6 +152,7 @@ impl LocalSource {
             SecretPath::Platform(_) => {
                 Entry::client_secret(KeyRef::new(&kv_path(path)?).map_err(|_| SourceError::Config)?)
             }
+            SecretPath::AccountId(_) => return Err(SourceError::Config),
         })
     }
 
@@ -187,6 +188,18 @@ fn from_vault(error: VaultError) -> SourceError {
 impl SecretSource for LocalSource {
     fn identity(&self) -> &Identity {
         &self.identity
+    }
+
+    /// Takes the code through the local vault's own take (DEC-2628 item 2), after the policy
+    /// check.
+    async fn take_code(
+        &self,
+        connection: &ConnectionId,
+    ) -> Result<Option<SecretSlice<u8>>, SourceError> {
+        let path = SecretPath::Code(connection.clone());
+        require(&self.identity, Access::Take, &path)?;
+        let entry = self.entry(&path)?;
+        self.executor()?.take_code(&entry).map_err(from_vault)
     }
 
     async fn put(&self, path: &SecretPath, secret: &SecretSlice<u8>) -> Result<(), SourceError> {
