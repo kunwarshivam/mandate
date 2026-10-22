@@ -62,6 +62,7 @@ fn credential_of(record: &CredentialRecord) -> (&str, PrincipalId) {
     match record {
         CredentialRecord::Enrolled(e) => (&e.credential, e.member),
         CredentialRecord::Removed(r) => (&r.credential, r.member),
+        CredentialRecord::Asserted { seq } => panic!("no credential record at seq {seq}"),
     }
 }
 
@@ -109,6 +110,7 @@ fn a_valid_stream_holds_each_members_unremoved_passkeys_in_enrolment_order() {
             match record {
                 CredentialRecord::Enrolled(_) => kept.push((member, credential.to_owned())),
                 CredentialRecord::Removed(_) => kept.retain(|(_, c)| c != credential),
+                CredentialRecord::Asserted { .. } => {}
             }
         }
         let fold = CredentialFold::new(all.iter().cloned());
@@ -136,12 +138,12 @@ fn a_valid_stream_holds_each_members_unremoved_passkeys_in_enrolment_order() {
     }
 }
 
-/// The record that breaks rule 251 breaks its own member, and the member who first enrolled the
-/// credential it names, from its `seq` on: their reads answer `Broken`, and so does `held` for a
-/// credential someone enrolled.
+/// The record that breaks rule 251 disables step-up for its own member and for the member who
+/// first enrolled the credential it names, from its `seq` on. Route 2's `held` still keeps the
+/// first enrolment of the id, unless the enroller's own removal followed it.
 #[test]
 #[ignore = "pending E9-4"]
-fn a_breaking_record_breaks_its_member_and_the_credentials_first_enroller() {
+fn a_breaking_record_disables_step_up_for_both_members_and_the_first_enrolment_still_holds() {
     for stream in list(&section(), "streams") {
         let Some(index) = expected_break(stream) else {
             continue;
@@ -162,15 +164,51 @@ fn a_breaking_record_breaks_its_member_and_the_credentials_first_enroller() {
                 text(stream, "name")
             );
         }
-        if first.is_some() || matches!(all[index], CredentialRecord::Enrolled(_)) {
-            assert_eq!(
-                fold.held(credential),
-                Err(CredentialError::Broken { seq }),
-                "{}",
-                text(stream, "name")
-            );
-        }
+        let mut history = all.iter().filter(|r| credential_of(r).0 == credential);
+        let holder = match (history.next(), history.next()) {
+            (Some(CredentialRecord::Enrolled(e)), Some(CredentialRecord::Removed(r)))
+                if r.member == e.member =>
+            {
+                None
+            }
+            (Some(CredentialRecord::Enrolled(e)), _) => Some(e.member),
+            _ => None,
+        };
+        assert_eq!(
+            fold.held(credential).map(|e| e.map(|e| e.member)),
+            Ok(holder),
+            "{}",
+            text(stream, "name")
+        );
     }
+}
+
+/// `admits` judges only the next record: a record that keeps rule 251 is admitted from a member
+/// an earlier record broke, and step-up still discounts that member (§9.31).
+#[test]
+#[ignore = "pending E9-4"]
+fn admits_a_clean_record_from_a_broken_member_whom_step_up_still_discounts() {
+    let stream = list(&section(), "streams")
+        .iter()
+        .find(|s| text(s, "name") == "enrolled_twice")
+        .cloned()
+        .unwrap();
+    let all = records(&stream);
+    let CredentialRecord::Enrolled(base) = &all[0] else {
+        panic!("enrolled_twice opens with an enrolment");
+    };
+    let fresh = CredentialRecord::Enrolled(Enrolment {
+        seq: 3,
+        credential: "fresh-credential-AAAAAAAA".to_owned(),
+        ..base.clone()
+    });
+    let fold = CredentialFold::new(all.iter().cloned());
+    assert_eq!(fold.admits(&fresh), Ok(()));
+    let after = CredentialFold::new(all.iter().cloned().chain([fresh]));
+    assert_eq!(
+        after.passkeys(base.member),
+        Err(CredentialError::Broken { seq: 2 })
+    );
 }
 
 /// Each base draft maps to its record, member by member, and a record §9.31 does not add maps to
@@ -392,6 +430,7 @@ fn credential_record_maps_every_valid_vector_draft() {
         let enrolled = match &record {
             CredentialRecord::Enrolled(e) => Some((e.alg, e.sign_count)),
             CredentialRecord::Removed(_) => None,
+            CredentialRecord::Asserted { seq } => panic!("a valid draft is no assertion: {seq}"),
         };
         match text(case, "name") {
             "eddsa" => assert_eq!(enrolled.map(|e| e.0), Some(PasskeyAlg::EdDsa)),
@@ -402,12 +441,13 @@ fn credential_record_maps_every_valid_vector_draft() {
     }
 }
 
-/// A `StepUpAsserted` (journal spec §9.32) carries a credential's later counter. Until the fold
-/// reads it, it is refused rather than passed over, so a stream that holds one fails closed and
-/// the enrolment's counter is never taken as the last.
+/// A `StepUpAsserted` (journal spec §9.32) carries a credential's later counter, which the fold
+/// does not read yet. It maps to an unread record: step-up's view fails closed on it, so the
+/// enrolment's counter is never taken for the last, while route 2's view, which reads no counter,
+/// still holds the credential, and `admits` does not judge it.
 #[test]
 #[ignore = "pending E9-4"]
-fn credential_record_refuses_a_step_up_asserted_until_the_fold_reads_it() {
+fn a_step_up_asserted_fails_step_up_closed_and_leaves_route_two_holding() {
     let section = section();
     let enrolled = section
         .get("drafts")
@@ -419,12 +459,22 @@ fn credential_record_refuses_a_step_up_asserted_until_the_fold_reads_it() {
         Value::Str("StepUpAsserted".to_owned()),
     );
     assert_eq!(
-        credential_record(4, &Value::Object(asserted)),
-        Err(CredentialError::Unreadable {
-            seq: 4,
-            member: "event_type"
-        })
+        credential_record(2, &Value::Object(asserted)),
+        Ok(Some(CredentialRecord::Asserted { seq: 2 }))
     );
+    let enrolment = credential_record(1, enrolled).unwrap().unwrap();
+    let (credential, member) = credential_of(&enrolment);
+    let (credential, member) = (credential.to_owned(), member);
+    let fold = CredentialFold::new([enrolment, CredentialRecord::Asserted { seq: 2 }]);
+    assert_eq!(
+        fold.passkeys(member),
+        Err(CredentialError::AssertionUnread { seq: 2 })
+    );
+    assert_eq!(
+        fold.held(&credential).map(|e| e.map(|e| e.member)),
+        Ok(Some(member))
+    );
+    assert_eq!(fold.admits(&CredentialRecord::Asserted { seq: 3 }), Ok(()));
 }
 
 /// One random step: member, credential, and whether it enrols or removes.
@@ -459,6 +509,7 @@ fn record(seq: u64, (member, credential, enrols): (u8, u8, bool)) -> CredentialR
 struct Replayed {
     broken: BTreeMap<PrincipalId, u64>,
     held: BTreeMap<PrincipalId, Vec<String>>,
+    holders: BTreeMap<String, PrincipalId>,
     last_breaks: bool,
 }
 
@@ -491,6 +542,7 @@ fn replay(records: &[CredentialRecord]) -> Replayed {
             order.retain(|(_, c)| c != credential);
         }
     }
+    let holders = order.iter().map(|(m, c)| (c.clone(), *m)).collect();
     let mut held: BTreeMap<PrincipalId, Vec<String>> = BTreeMap::new();
     for (member, credential) in order {
         if !broken.contains_key(&member) {
@@ -500,6 +552,7 @@ fn replay(records: &[CredentialRecord]) -> Replayed {
     Replayed {
         broken,
         held,
+        holders,
         last_breaks,
     }
 }
@@ -508,8 +561,8 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(512))]
 
     /// Over random streams of enrolments and removals among three members and four ids, the fold
-    /// agrees with the replay on every member, and admits exactly the next steps the replay finds
-    /// break nobody new.
+    /// agrees with the replay on every member's passkeys and every id's holder, and admits exactly
+    /// the next steps the replay finds break nobody new.
     #[test]
     #[ignore = "pending E9-4"]
     fn the_fold_agrees_with_an_independent_replay(
@@ -518,7 +571,12 @@ proptest! {
     ) {
         let stream: Vec<CredentialRecord> =
             steps.iter().zip(1..).map(|(s, seq)| record(seq, *s)).collect();
-        let Replayed { broken, held, .. } = replay(&stream);
+        let Replayed {
+            broken,
+            held,
+            holders,
+            ..
+        } = replay(&stream);
         let fold = CredentialFold::new(stream.iter().cloned());
         for member in (1..=3).map(PrincipalId) {
             let got = fold
@@ -529,6 +587,10 @@ proptest! {
                 None => Ok(held.get(&member).cloned().unwrap_or_default()),
             };
             prop_assert_eq!(got, want);
+        }
+        for credential in (0..4).map(|c| format!("credential-{c}-AAAAAAAAAAAAA")) {
+            let got = fold.held(&credential).map(|e| e.map(|e| e.member));
+            prop_assert_eq!(got, Ok(holders.get(&credential).copied()));
         }
         let seq = u64::try_from(stream.len() + 1).unwrap();
         let mut extended = stream.clone();
