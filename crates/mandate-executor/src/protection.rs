@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 
 use mandate_accounting::{AssetClass, InstrumentId};
 use mandate_domain::MarketSession;
-use mandate_num::{Adverse, Fraction, Price, Qty, ShareIncrement, SignedQty, TickRule};
+use mandate_num::{Adverse, Fraction, Price, Qty, Rounding, ShareIncrement, SignedQty, TickRule};
 
 use mandate_accounting::Side;
 use mandate_canon::Value;
@@ -1483,19 +1483,15 @@ fn bracket(
     Ok(())
 }
 
-/// The prices a plain entry's protection follows its fill at: a risk-adding equity entry sent
-/// with no bracket, whose intent carried protective prices, which only a profile that offers no
-/// bracket sends (`crate::intent::bracket_of`; §5.4, DEC-966 item 2). None for anything else: a
-/// bracket entry, an entry with no prices, crypto (slice 5's), or one already protected.
-fn plain_protection(
-    view: &ExecutorState,
-    ports: &Ports<'_>,
-    order: &Order,
-) -> Option<ProtectionPrices> {
+/// The prices a plain entry's protection follows its fill at: a risk-adding entry sent with no
+/// bracket, whose intent carried protective prices. An equity goes so only on a profile that
+/// offers no bracket (`crate::intent::bracket_of`; §5.4, DEC-966 item 2); a crypto entry always
+/// does, since crypto takes simple orders only (§5.4, DEC-36). None for anything else: a bracket
+/// entry, an entry with no prices, or one already protected.
+fn plain_protection(view: &ExecutorState, order: &Order) -> Option<ProtectionPrices> {
     let detail = view.details.get(&order.client_order_id)?;
     let request = detail.request.as_ref()?;
     let plain = order.purpose.adds_risk() && request.bracket.is_none() && !detail.bracket_placed;
-    let crypto = ports.instruments.asset_class(&order.instrument) == Some(AssetClass::Crypto);
     let IntentBody::Order {
         protection: Some(prices),
         ..
@@ -1503,18 +1499,19 @@ fn plain_protection(
     else {
         return None;
     };
-    (plain && !crypto).then_some(*prices)
+    plain.then_some(*prices)
 }
 
-/// §5.4's equities on a profile with no OCO or bracket, after every step: each plain entry whose
-/// protection follows its fill ([`plain_protection`]) and that has filled anything ([`stop_after`]).
+/// §5.4's simple-order protection, after every step: each plain entry, crypto or an equity on a
+/// profile with no OCO or bracket, whose protection follows its fill ([`plain_protection`]) and
+/// that has filled anything ([`stop_after`]).
 fn plain_entries(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
     let entries: Vec<(ClientOrderId, ProtectionPrices)> = batch
         .view
         .orders
         .values()
         .filter_map(|order| {
-            plain_protection(&batch.view, batch.ports, order)
+            plain_protection(&batch.view, order)
                 .map(|prices| (order.client_order_id.clone(), prices))
         })
         .collect();
@@ -1534,20 +1531,24 @@ fn past_bound(view: &ExecutorState, instrument: &InstrumentId, entry: &ClientOrd
     })
 }
 
-/// One plain entry: on a profile with no OCO or bracket (§5.4, DEC-529 item 7, DEC-966), or a
-/// fractional equity entry, which is never a bracket (§5.2, DEC-2312). The unprotected interval
-/// starts, journaled once and naming the entry, at its first fill, and discloses the fraction of a
-/// share the position then holds beyond its whole shares, counting the fills the broker reported.
-/// Once the entry is terminal — filled completely, or ended partly filled, its remainder cancelled
-/// at `bracket_partial_fill_timeout_s` (or `max_unprotected_s`, if shorter) or once its venue is no
-/// longer the regular session, exactly as [`bracket`] cancels one — one protective order is
-/// journaled and then sent for the whole shares of its filled quantity, capped at what the position
-/// leaves after every live protective order and every exit still selling (rule 12; DEC-2312 item
-/// 2): the strongest form the profile offers for it ([`protective_shape`]). Where the profile
-/// offers an OCO, that is one OCO at the intent's prices, whose legs cancel each other; otherwise
-/// one GTC stop-limit at the intent's stop and stop × (1 − `stop_limit_offset`), and its
-/// take-profit is never a resting order: beside a stop for the same shares it would sell them
-/// twice (DEC-966 item 3). The placement discloses the fraction as the start does. The interval ends once the broker
+/// One plain entry: crypto (§5.4, DEC-36), an equity on a profile with no OCO or bracket (§5.4,
+/// DEC-529 item 7, DEC-966), or a fractional equity entry, which is never a bracket (§5.2,
+/// DEC-2312). The unprotected interval starts, journaled once and naming the entry, at its first
+/// fill, and discloses the fraction of a share the position then holds beyond its whole shares,
+/// counting the fills the broker reported. Once the entry is terminal — filled completely, or ended
+/// partly filled, its remainder cancelled at `bracket_partial_fill_timeout_s` (or
+/// `max_unprotected_s`, if shorter) or once its venue is no longer the regular session, exactly as
+/// [`bracket`] cancels one — one protective order is journaled and then sent for the whole shares
+/// of its filled quantity, capped at what the position leaves after every live protective order and
+/// every exit still selling (rule 12; DEC-2312 item 2): the strongest form the profile offers for it
+/// ([`protective_shape`]). Where the profile offers an OCO for an equity, that is one OCO at the
+/// intent's prices, whose legs cancel each other; otherwise one GTC stop-limit at the intent's stop
+/// and stop × (1 − `stop_limit_offset`), and its take-profit is never a resting order: beside a stop
+/// for the same shares it would sell them twice (DEC-966 item 3). Crypto is always the one
+/// stop-limit, never an OCO. A crypto entry's stop waits until every fill the broker reported is
+/// applied, and covers what the buy leaves held once each fill's fee posts ([`held_after_fees`];
+/// DEC-349 items 1 and 2), so it never outlasts the position (RC-07). The placement discloses the
+/// fraction as the start does. The interval ends once the broker
 /// acknowledges the stop ([`acknowledged`]); with no form to place, the shortfall is journaled and
 /// alerted ([`unprotectable`]) and the interval stays open, so [`bound`] exits the position. An
 /// entry that ends only after its interval reached the bound places no stop: what it filled is
@@ -1604,10 +1605,19 @@ fn stop_after(
         let record = changed(batch, &instrument, "unprotected_end", ended)?;
         return flatten_unprotected(batch, &instrument, entry, &record);
     }
+    if unapplied > Qty::ZERO
+        && batch.ports.instruments.asset_class(&instrument) == Some(AssetClass::Crypto)
+    {
+        return Ok(());
+    }
     let committed =
         covered(&batch.view, &instrument)?.checked_add(still_selling(&batch.view, &instrument)?)?;
     let room = held.checked_sub(committed).unwrap_or(Qty::ZERO);
-    let qty = whole_shares(batch.ports, &instrument, filled.min(room))?;
+    let qty = whole_shares(
+        batch.ports,
+        &instrument,
+        held_after_fees(batch.ports, &instrument, filled, &detail.fill_qtys)?.min(room),
+    )?;
     if qty == Qty::ZERO {
         changed(batch, &instrument, "unprotected_end", named)?;
         return Ok(());
@@ -1660,6 +1670,29 @@ fn stop_after(
     changed(batch, &instrument, "unprotected_end", ended)?;
     batch.broker(BrokerRequest::Submit(request));
     Ok(())
+}
+
+/// What a buy of `bought` leaves held once its fees post (§5.4, §6.3): a crypto buy withholds
+/// each fill's fee from the asset that fill bought, rounded at the ninth place half up fill by
+/// fill as `mandate-accounting` rounds it, at the maker or the taker rate, so a stop-limit sized
+/// before the rate is known takes the larger one and never outlasts the position (DEC-349 item 2;
+/// RC-07). It counts only the `fills` the fold applied, each net of its own fee: one rounding over
+/// their sum could leave a nano-unit more than is held. An equity keeps what it bought.
+pub(crate) fn held_after_fees(
+    ports: &Ports<'_>,
+    instrument: &InstrumentId,
+    bought: Qty,
+    fills: &[Qty],
+) -> Result<Qty, ExecutorError> {
+    if ports.instruments.asset_class(instrument) != Some(AssetClass::Crypto) {
+        return Ok(bought);
+    }
+    let crypto = &ports.fees.crypto;
+    let rate = crypto.maker.max(crypto.taker);
+    fills.iter().try_fold(Qty::ZERO, |held, fill| {
+        let withheld = fill.times_bps(rate, Rounding::HalfUp)?;
+        Ok(held.checked_add(fill.checked_sub(withheld)?)?)
+    })
 }
 
 /// The `created_on` a protective order placed now records: the trading day the latest copied

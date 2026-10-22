@@ -151,11 +151,13 @@ impl TemplateError {
         match self {
             Self::Unreadable(Process::Runtime) => "runtime_template_unreadable",
             Self::Unreadable(Process::Executor) => "executor_template_unreadable",
+            Self::Unreadable(Process::TokenExchange) => "token_exchange_template_unreadable",
         }
     }
 }
 
-/// The chart's pod template for each process, `<dir>/runtime.json` and `<dir>/executor.json`. A
+/// The chart's pod template for each process, `<dir>/runtime.json`, `<dir>/executor.json` and
+/// `<dir>/token-exchange.json`, each named for the chart's process (`Process::label`). A
 /// process whose image the cell has not built has no file, so the manager journals its start and
 /// the start fails until the image exists; one that is present must parse.
 ///
@@ -163,8 +165,8 @@ impl TemplateError {
 /// [`TemplateError`].
 pub fn templates(dir: &Path) -> Result<BTreeMap<Process, Value>, TemplateError> {
     let mut found = BTreeMap::new();
-    for process in [Process::Runtime, Process::Executor] {
-        let path = dir.join(format!("{}.json", process.code()));
+    for process in [Process::Runtime, Process::Executor, Process::TokenExchange] {
+        let path = dir.join(format!("{}.json", process.label()));
         if !path.exists() {
             continue;
         }
