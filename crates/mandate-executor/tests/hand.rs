@@ -6211,6 +6211,7 @@ fn the_in_doubt_hold_reads_again_at_the_lookup_window() {
     let config = config();
     let ports = ports(&ids, &mandates, &instruments, &config);
     let (mut shell, _) = crypto_stop_account(&ports);
+    shell.run(Input::Tick(clock(20)), &ports);
     shell.run(account_switch(Initiator::Owner), &ports);
     shell.run(Input::Broker(Err(BrokerUnknown::Timeout)), &ports);
 
