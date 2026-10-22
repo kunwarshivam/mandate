@@ -1708,41 +1708,45 @@ def test_the_tunnel_runs_beside_the_api():
         assert tunnel_route(seeded), seeded
 
 
-ALPACA_ENV = ("MANDATE_ALPACA_CLIENT_ID", "MANDATE_ALPACA_REDIRECT_URI")
+ALPACA_SET_VALUES = {
+    "MANDATE_ALPACA_CLIENT_ID": "PKTESTCLIENT01",
+    "MANDATE_ALPACA_REDIRECT_URI": "https://api.example/v1/oauth/alpaca/callback",
+}
 ALPACA_PROCESSES = {"api", "token-exchange"}
 ALPACA_SET = (
     "--set",
-    "alpacaOAuth.clientId=PKTESTCLIENT01",
+    f"alpacaOAuth.clientId={ALPACA_SET_VALUES['MANDATE_ALPACA_CLIENT_ID']}",
     "--set",
-    "alpacaOAuth.redirectUri=https://api.example/v1/oauth/alpaca/callback",
+    f"alpacaOAuth.redirectUri={ALPACA_SET_VALUES['MANDATE_ALPACA_REDIRECT_URI']}",
 )
 
 
-def alpaca_oauth_env(docs: list[dict], set_: bool) -> list[str]:
+def alpaca_oauth_env(docs: list[dict], expected: dict[str, str]) -> list[str]:
     """DEC-2636: the Alpaca OAuth client id and redirect URI reach only the API's and the token
-    exchange's own containers, both when set and neither when not, and no other container at all."""
+    exchange's own containers, each exactly as `expected` names them (so both send the identical
+    URI), neither when `expected` is empty, and no other container at all."""
     problems = []
     for w in workloads(docs):
         process = w["metadata"].get("labels", {}).get("mandate.dev/process")
         for c in pod_spec(w)["containers"]:
-            carried = {e["name"] for e in c.get("env", [])} & set(ALPACA_ENV)
-            wanted = set(ALPACA_ENV) if set_ and process in ALPACA_PROCESSES and c["name"] == process else set()
+            carried = {e["name"]: e.get("value") for e in c.get("env", []) if e["name"] in ALPACA_SET_VALUES}
+            wanted = expected if process in ALPACA_PROCESSES and c["name"] == process else {}
             if carried != wanted:
-                problems.append(f"{w['metadata']['name']}/{c['name']} carries {sorted(carried)}")
+                problems.append(f"{w['metadata']['name']}/{c['name']} carries {carried}")
     return problems
 
 
 def test_the_alpaca_oauth_settings_reach_the_api_and_the_token_exchange_only():
-    assert alpaca_oauth_env(render_all(), set_=False) == []
+    assert alpaca_oauth_env(render_all(), {}) == []
     docs = render_all(*ALPACA_SET)
-    assert alpaca_oauth_env(docs, set_=True) == []
+    assert alpaca_oauth_env(docs, ALPACA_SET_VALUES) == []
     leaked = mutate(
         docs,
         "scheduler",
         "Deployment",
         lambda w: first_container(w).setdefault("env", []).append({"name": "MANDATE_ALPACA_CLIENT_ID", "value": "x"}),
     )
-    assert alpaca_oauth_env(leaked, set_=True), "a third process given the client id is caught"
+    assert alpaca_oauth_env(leaked, ALPACA_SET_VALUES), "a third process given the client id is caught"
     dropped = mutate(
         docs,
         "token-exchange",
@@ -1751,11 +1755,22 @@ def test_the_alpaca_oauth_settings_reach_the_api_and_the_token_exchange_only():
             env=[e for e in first_container(w)["env"] if e["name"] != "MANDATE_ALPACA_REDIRECT_URI"]
         ),
     )
-    assert alpaca_oauth_env(dropped, set_=True), "the exchange without the redirect URI is caught"
+    assert alpaca_oauth_env(dropped, ALPACA_SET_VALUES), "the exchange without the redirect URI is caught"
+    differs = mutate(
+        docs,
+        "token-exchange",
+        "Deployment",
+        lambda w: next(e for e in first_container(w)["env"] if e["name"] == "MANDATE_ALPACA_REDIRECT_URI").update(
+            value="https://other.example/v1/oauth/alpaca/callback"
+        ),
+    )
+    assert alpaca_oauth_env(differs, ALPACA_SET_VALUES), "an exchange sending another URI is caught"
     for refused in (
         "alpacaOAuth.clientId=has space",
         "alpacaOAuth.redirectUri=http://evil.example/v1/oauth/alpaca/callback",
         "alpacaOAuth.redirectUri=https://api.example/elsewhere",
+        "alpacaOAuth.redirectUri=https://api.example/v1/oauth/alpaca/callback?x=1",
+        "alpacaOAuth.redirectUri=https://api.example/v1/oauth/alpaca/callback#f",
     ):
         assert helm(CHART, "--set", refused).returncode != 0, refused
 
