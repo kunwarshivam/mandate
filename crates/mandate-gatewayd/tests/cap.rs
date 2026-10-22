@@ -235,7 +235,6 @@ fn each_document_that_does_not_read_is_refused_with_its_code() {
 /// digest that are not that version's document are refused, never read as the cap they hold, so a
 /// store that swapped a document cannot raise the cap the core validated.
 #[test]
-#[ignore = "pending E21-62"]
 fn a_document_whose_hash_differs_from_the_journaled_version_is_refused() {
     let mut world = World::default();
     let journaled = ArtifactRef::of(&with_cap("5"));
