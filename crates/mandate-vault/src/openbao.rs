@@ -335,6 +335,23 @@ pub fn kubernetes_namespace_verdict(
 }
 
 impl OpenBaoSource {
+    /// A session as `identity` that never logged in, for unit tests of the checks that refuse
+    /// before the vault is reached: its token is empty, so any call that does reach a vault is
+    /// refused there.
+    #[cfg(test)]
+    pub(crate) fn unlogged(
+        config: &OpenBaoConfig,
+        identity: Identity,
+    ) -> Result<Self, SourceError> {
+        Ok(Self {
+            identity,
+            http: Http::new(config)?,
+            mounts: config.mounts.clone(),
+            token: SecretString::from(String::new()),
+            token_expires_at: Mutex::new(UtcNanos::EPOCH),
+        })
+    }
+
     /// Logs in as `identity` with its AppRole `role_id` and `secret_id` (read by the caller from
     /// mounted files, never the environment). The login is refused unless the role it reaches
     /// is `identity`'s own. The token exchange logs in with [`OpenBaoSource::login_with_grant`].
@@ -504,12 +521,25 @@ impl OpenBaoSource {
     }
 }
 
+impl OpenBaoSource {
+    /// Refuses `role_refused`, before the vault is reached, a role operation from any session but
+    /// the provisioner's own (DEC-2350 item 5), whatever its policy would answer.
+    fn provisioner_only(&self) -> Result<(), RoleRefusal> {
+        if self.identity == Identity::Provisioner {
+            Ok(())
+        } else {
+            Err(RoleRefusal::RoleRefused)
+        }
+    }
+}
+
 impl RoleProvisioner for OpenBaoSource {
     async fn make_roles(
         &self,
         connection: &ConnectionId,
         namespace: &str,
     ) -> Result<(), RoleRefusal> {
+        self.provisioner_only()?;
         for identity in [
             Identity::Executor(connection.clone()),
             Identity::TokenExchange(connection.clone()),
@@ -523,11 +553,15 @@ impl RoleProvisioner for OpenBaoSource {
         Ok(())
     }
 
+    /// OpenBao answers a DELETE of a role that is not there 204, so an absent role is `Ok` from
+    /// the call itself. `Missing` (404) comes only when the auth mount is absent, and then no
+    /// role can exist under it either, so it is `Ok` too: nothing is left for the exchange.
     async fn remove_exchange_role(
         &self,
         connection: &ConnectionId,
         namespace: &str,
     ) -> Result<(), RoleRefusal> {
+        self.provisioner_only()?;
         let (path, _) = role_request(
             &Identity::TokenExchange(connection.clone()),
             &self.mounts,
