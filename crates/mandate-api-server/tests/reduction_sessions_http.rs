@@ -440,7 +440,6 @@ fn device_cookie(n: u32) -> String {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn ten_bad_presentations_from_one_device_raise_the_alert_once() {
     let f = fixture(&Signer::es256(), true);
     for i in 1..=12_u64 {
@@ -454,7 +453,6 @@ fn ten_bad_presentations_from_one_device_raise_the_alert_once() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn behind_a_listed_ingress_each_forwarded_address_counts_apart() {
     let f = fixture_behind(
         &Signer::es256(),
@@ -486,7 +484,6 @@ fn behind_a_listed_ingress_each_forwarded_address_counts_apart() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn clients_without_a_device_cookie_share_one_device_budget() {
     let f = fixture_behind(
         &Signer::es256(),
