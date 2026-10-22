@@ -59,7 +59,7 @@ const STEP_UP: &[(&str, Ty)] = &[
     ("method", Ty::Str),
 ];
 
-static STEP_UP_RECORD: Ty = Ty::Record(STEP_UP);
+pub(crate) const STEP_UP_RECORD: Ty = Ty::Record(STEP_UP);
 
 static CREDENTIAL_ENROLLED: Ty = Ty::Record(&[
     ("member", Ty::Ulid),

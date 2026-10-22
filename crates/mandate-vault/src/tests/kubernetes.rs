@@ -4,6 +4,7 @@
 //! paths [`kv_path`] stores at, and no two connections share a path, a ServiceAccount or a role.
 
 use std::collections::BTreeSet;
+use std::net::{Ipv4Addr, SocketAddrV4};
 use std::path::Path;
 
 use mandate_connections::record::ConnectionId;
@@ -11,8 +12,8 @@ use serde_json::{Value, json};
 
 use crate::SourceError;
 use crate::kubernetes::{
-    KubernetesAuth, kubernetes_mount_requests, kubernetes_policy, kubernetes_policy_name,
-    mount_accessor, provisioner_policy, role_request, service_account_name,
+    KubernetesAuth, api_server_address, kubernetes_mount_requests, kubernetes_policy,
+    kubernetes_policy_name, mount_accessor, provisioner_policy, role_request, service_account_name,
 };
 use crate::policy::{Identity, Mounts, SecretPath, connection_segment, kv_path};
 
@@ -191,7 +192,7 @@ fn each_kinds_policy_reaches_exactly_the_paths_its_connection_is_stored_at() {
                 Identity::TokenExchange(connection.clone()),
                 [
                     block("data", &SecretPath::ClientSecret, "\"read\""),
-                    block("data", &code, "\"read\""),
+                    block("data", &code, "\"read\", \"update\""),
                     block("metadata", &code, "\"delete\""),
                     block("data", &token, "\"create\", \"update\""),
                 ]
@@ -278,8 +279,10 @@ fn the_executors_policy_reads_its_own_token_alone() {
     );
 }
 
+/// The exchange's code block reads and updates, the update being its take (DEC-2061), and never
+/// creates: `create` would let it write a code where none is.
 #[test]
-fn the_exchanges_policy_writes_its_token_and_reads_and_deletes_its_code() {
+fn the_exchanges_policy_writes_its_token_and_reads_takes_and_deletes_its_code() {
     assert_eq!(
         kubernetes_policy(
             &Identity::TokenExchange(c("any")),
@@ -288,7 +291,7 @@ fn the_exchanges_policy_writes_its_token_and_reads_and_deletes_its_code() {
         ),
         Ok(format!(
             "path \"mandate/data/platform/alpaca-oauth-client-secret\" {{\n  capabilities = [\"read\"]\n}}\n\
-             path \"mandate/data/connections/{TEMPLATE}/code\" {{\n  capabilities = [\"read\"]\n}}\n\
+             path \"mandate/data/connections/{TEMPLATE}/code\" {{\n  capabilities = [\"read\", \"update\"]\n}}\n\
              path \"mandate/metadata/connections/{TEMPLATE}/code\" {{\n  capabilities = [\"delete\"]\n}}\n\
              path \"mandate/data/connections/{TEMPLATE}/token\" {{\n  capabilities = [\"create\", \"update\"]\n}}\n"
         ))
@@ -613,6 +616,78 @@ fn a_plain_address_a_bad_ca_or_a_bad_mount_sets_nothing_up() {
             kubernetes_mount_requests(&broken, &fine),
             Err(SourceError::Config),
             "{broken:?}"
+        );
+    }
+}
+
+/// The vault sends its reviewer token to the host on every TokenReview, so the host is exactly
+/// `https://`, an IPv4 address and a port, and nothing else, or no mount is set up.
+#[test]
+fn an_api_server_is_https_an_ipv4_address_and_a_port_and_nothing_else() {
+    for (host, ip, port) in [
+        ("https://10.43.0.1:443", [10, 43, 0, 1], 443),
+        ("https://127.0.0.1:6443", [127, 0, 0, 1], 6443),
+        ("https://10.43.0.1:1", [10, 43, 0, 1], 1),
+        ("https://10.43.0.1:65535", [10, 43, 0, 1], 65535),
+    ] {
+        assert_eq!(
+            api_server_address(host),
+            Ok(SocketAddrV4::new(Ipv4Addr::from(ip), port)),
+            "{host:?}"
+        );
+        let auth = KubernetesAuth {
+            host: host.to_owned(),
+            ca_pem: None,
+        };
+        let requests = kubernetes_mount_requests(&Mounts::default(), &auth);
+        assert!(requests.is_ok(), "{host:?}: {requests:?}");
+    }
+    for host in [
+        "https://u:p@10.43.0.1:443",
+        "https://u@10.43.0.1:443",
+        "https://@10.43.0.1:443",
+        "https://@",
+        "https:///x",
+        "https://10.43.0.1:443/",
+        "https://10.43.0.1:443/x",
+        "https://10.43.0.1:443?a=b",
+        "https://10.43.0.1:443#f",
+        "https://evil.example.com:443",
+        "https://evil.example.com",
+        "https://localhost:6443",
+        "https://10.43.0.1",
+        "https://10.43.0.1:",
+        "https://10.43.0.1:0",
+        "https://10.43.0.1:99999",
+        "https://10.43.0.1:65536",
+        "https://10.43.0.1:+443",
+        "https://10.43.0.1:0443",
+        "https://010.43.0.1:443",
+        "https://10.43.1:443",
+        "https://[::1]:443",
+        "https://10.43.0.1:443 ",
+        " https://10.43.0.1:443",
+        "https://10.43.0.1:443\n",
+        "https://10.43.0.1 :443",
+        "HTTPS://10.43.0.1:443",
+        "http://10.43.0.1:443",
+        "10.43.0.1:443",
+        "https://",
+        "",
+    ] {
+        assert_eq!(
+            api_server_address(host),
+            Err(SourceError::Config),
+            "{host:?}"
+        );
+        let auth = KubernetesAuth {
+            host: host.to_owned(),
+            ca_pem: None,
+        };
+        assert_eq!(
+            kubernetes_mount_requests(&Mounts::default(), &auth),
+            Err(SourceError::Config),
+            "{host:?}"
         );
     }
 }
