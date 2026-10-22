@@ -1363,12 +1363,30 @@ def run_shape_mutants(section: dict) -> list[str]:
 # fraction of a fractional equity position (trading spec §5.4). A section of its own, as
 # `protection_shapes` is, so `mandate-journal`'s tests keep their answers until the code change that
 # accepts version 2 reads this one.
-FRACTION_SPEC = "docs/specs/journal.md v0.72 §9.5 rule 44 (DEC-2312)"
+FRACTION_SPEC = "docs/specs/journal.md v0.72 §9.5 rule 44 (DEC-2312, DEC-2315)"
 FRACTION = "payload.unprotected_fraction"
 FIRST_FILL = (*NO_PRICES, *NO_TRIO, change("payload.orders", []), change("payload.replacing", None),
               change("payload.bracket", ENTRY))
 CANCELLED = (change("payload.action", "cancelled"), *NO_PRICES, change("payload.created_on", None))
-FRACTION_VALIDATOR_MUTANTS = ("rule.44.fraction", "rule.44.fraction_range")
+# A start stripped to an action of `action` that names no order, prices, or sequence: every other
+# action rule 44 forbids a fraction on, each otherwise valid, so the fraction is all it breaks.
+BARE = (*NO_PRICES, *NO_TRIO, change("payload.orders", []), change("payload.replacing", None))
+FORBIDDEN = {
+    "intended": (change("payload.intent_id", INTENT), change("payload.stop", "139")),
+    "watchdog": (),
+    "exit_unpriced": (),
+    "ladder_floor": (),
+    "expiry_unreplaceable": (),
+    "rung_short": (change("payload.intent_id", INTENT), change("payload.sent", "2")),
+    "interval_limit": (),
+}
+FRACTION_VALIDATOR_MUTANTS = (
+    "rule.44.fraction",
+    "rule.44.fraction_range",
+    # Each widens the actions a fraction may ride on by one: its own invalid draft must refuse it.
+    *(f"widen.44.{action}" for action in ("cancelled", "passive_start", "intended", "watchdog", "exit_unpriced",
+                                           "ladder_floor", "expiry_unreplaceable", "rung_short", "interval_limit")),
+)
 # A seeded bug that narrows the actions a fraction may ride on: it must refuse a valid draft.
 FRACTION_TIGHTEN_MUTANTS = ("tighten.44.fraction_placed",)
 FRACTION_CHECKS = ("drafts.valid", "drafts.version", "invalid_drafts", "valid_drafts")
@@ -1408,16 +1426,22 @@ def fraction_valid_drafts() -> list[dict]:
               "placed", [change(FRACTION, "0.999999999")]),
         shape("no_fraction_on_a_whole_position", "rule 44: a whole-share position discloses nothing",
               "start", [*FIRST_FILL]),
+        shape("fraction_in_exponent_form", "§4.6: an exponent form is normalized on the way in, 4e-1 is 0.4",
+              "placed", [change(FRACTION, "4e-1")]),
+        shape("fraction_on_the_end", "rule 44: the end discloses the final fraction of a position built "
+              "from several fills (DEC-2315)", "start", [*ENDS, change("payload.bracket", ENTRY),
+                                                       change(FRACTION, "0.4")]),
     ]
 
 
 def fraction_invalid_drafts() -> list[dict]:
-    """A fraction on an action that discloses none, out of range, or on version 1."""
+    """A fraction on each action that discloses none, out of range, not a decimal, or on version 1."""
     return [
-        shape_invalid("fraction_on_cancelled", "rule 44: only a start and a placement disclose a fraction",
+        shape_invalid("fraction_on_cancelled", "rule 44: only a start, a placement and an end disclose a fraction",
                       "placed", [*CANCELLED, change(FRACTION, "0.4")], FRACTION),
-        shape_invalid("fraction_on_an_end", "rule 44: an end discloses no fraction",
-                      "start", [*ENDS, change(FRACTION, "0.4")], FRACTION),
+        *(shape_invalid(f"fraction_on_{action}", f"rule 44: {action} discloses no fraction", "start",
+                        [*BARE, change("payload.action", action), *extra, change(FRACTION, "0.4")], FRACTION)
+          for action, extra in FORBIDDEN.items()),
         shape_invalid("fraction_on_a_passive_start", "rule 44: a passive start discloses no fraction",
                       "start", [change("payload.action", "passive_start"), change(FRACTION, "0.4")], FRACTION),
         shape_invalid("fraction_zero", "rule 44: a disclosed fraction is above zero",
@@ -1430,7 +1454,18 @@ def fraction_invalid_drafts() -> list[dict]:
                       "start", [*FIRST_FILL, change(FRACTION, "1.4")], FRACTION),
         shape_invalid("version_1_carries_no_fraction", "§8: version 1 is never edited",
                       "placed_v1", [change(FRACTION, "0.4")], FRACTION),
+        typed("fraction_a_json_number", "§9.1 decimal: a JSON number is not a decimal", 1, "schema"),
+        typed("fraction_not_a_number", "§9.1 decimal", "abc", "non_canonical"),
+        typed("one_share_in_exponent_form", "rule 44 on the normalized decimal: 1e0 is one share", "1e0",
+              "schema"),
     ]
+
+
+def typed(name: str, clause: str, value, reason: str) -> dict:
+    """A fraction that is not a §9.1 decimal, on a placement that may disclose one."""
+    case = shape_invalid(name, clause, "placed", [change(FRACTION, value)], FRACTION)
+    case["expect"]["reason"] = reason
+    return case
 
 
 def build_fraction_section() -> dict:

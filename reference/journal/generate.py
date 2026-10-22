@@ -39,6 +39,7 @@ import backtest_records
 import canceled
 import confirmations
 import credentials
+import step_up_assertions
 import control_plane
 import deployed
 import deployment_manager
@@ -3903,6 +3904,8 @@ def render(
     owner_confirmations_section: dict,
     connection_requested_section: dict,
     credentials_section: dict,
+    credential_enrolled_v2_section: dict,
+    step_up_assertions_section: dict,
 ) -> str:
     head, _ = split_file(v3_text)
     body = yaml.dump(
@@ -3948,6 +3951,8 @@ def render(
             "owner_confirmations": owner_confirmations_section,
             "connection_requested": connection_requested_section,
             "credentials": credentials_section,
+            "credential_enrolled_v2": credential_enrolled_v2_section,
+            "step_up_assertions": step_up_assertions_section,
         },
         Dumper=Dumper,
         sort_keys=False,
@@ -4024,6 +4029,8 @@ def main(argv: list[str] | None = None) -> int:
     owner_confirmations_section = owner_confirmations.build_section()
     connection_requested_section = connection_requested.build_section()
     credentials_section = credentials.build_section()
+    credential_enrolled_v2_section = credentials.build_v2_section()
+    step_up_assertions_section = step_up_assertions.build_section()
 
     problems = check_chain(section, v3)
     problems += run_mutants(section, v3)
@@ -4071,6 +4078,10 @@ def main(argv: list[str] | None = None) -> int:
     problems += confirmations.run_mutants(confirmations_section)
     problems += credentials.check_section(credentials_section)
     problems += credentials.run_mutants(credentials_section)
+    problems += credentials.check_v2_section(credential_enrolled_v2_section)
+    problems += credentials.run_v2_mutants(credential_enrolled_v2_section)
+    problems += step_up_assertions.check_section(step_up_assertions_section)
+    problems += step_up_assertions.run_mutants(step_up_assertions_section)
     problems += marks.check_section(marks_section)
     problems += marks.run_mutants(marks_section)
     problems += market_intents.check_section(market_intents_section)
@@ -4155,6 +4166,8 @@ def main(argv: list[str] | None = None) -> int:
         owner_confirmations_section,
         connection_requested_section,
         credentials_section,
+        credential_enrolled_v2_section,
+        step_up_assertions_section,
     )
     reread = yaml.safe_load(rendered)
     canonical_self_test()
@@ -4285,6 +4298,12 @@ def main(argv: list[str] | None = None) -> int:
         f"credential drafts, {len(credentials_section['streams'])} rule-251 streams, "
         f"{len(credentials.VALIDATOR_MUTANTS)} validator, {len(credentials.STREAM_MUTANTS)} stream and "
         f"{len(credentials.vector_mutants(credentials_section))} vector mutants caught; "
+        f"{len(credential_enrolled_v2_section['invalid_drafts'])} invalid version 2 enrolments, "
+        f"{len(credentials.V2_VALIDATOR_MUTANTS)} version 2 validator mutants caught; "
+        f"{len(step_up_assertions_section['invalid_drafts'])} invalid StepUpAsserted drafts, "
+        f"{len(step_up_assertions_section['batches'])} rule-253 batches, {len(step_up_assertions_section['streams'])} rule-254 streams, "
+        f"{len(step_up_assertions.VALIDATOR_MUTANTS)} validator, {len(step_up_assertions.BATCH_MUTANTS)} batch, "
+        f"{len(step_up_assertions.STREAM_MUTANTS)} stream and {len(step_up_assertions.vector_mutants(step_up_assertions_section))} vector mutants caught; "
         f"{len(control_plane_section['invalid_drafts'])} invalid and {len(control_plane_section['valid_drafts'])} valid "
         f"control-plane drafts, {len(control_plane.VALIDATOR_MUTANTS)} validator and "
         f"{len(control_plane.vector_mutants(control_plane_section))} vector mutants caught; "
