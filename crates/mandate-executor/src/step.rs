@@ -5,7 +5,8 @@ use crate::error::ExecutorError;
 use crate::ids::{FLATTEN, WATCHDOG};
 use crate::intent::{received, release_held, resume};
 use crate::kill::{
-    cancel_all_answered, closes_due, kill_switch, note_read, open_orders_read, reread_due,
+    cancel_all_answered, closes_due, kill_switch, note_answer, note_read, open_orders_read,
+    reread_due,
 };
 use crate::listing::{listed, query_unknown};
 use crate::orders::{
@@ -56,6 +57,7 @@ pub fn handle(
     ports: &Ports<'_>,
     binding_gate: &dyn BindingGateSource,
 ) -> Result<Vec<Effect>, ExecutorError> {
+    note_answer(state, &input);
     if let Input::Started(epoch) = input {
         return started(state, epoch, ports, binding_gate);
     }

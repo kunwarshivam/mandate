@@ -459,6 +459,8 @@ fn kill_switch_activated(
             at,
             requests: BTreeMap::new(),
         });
+        state.switch_read = None;
+        state.cancel_all_answered = false;
         return Ok(());
     }
     let cancels = match payload.get("cancels") {

@@ -197,14 +197,26 @@ pub(crate) fn cancel_all_answered(batch: &mut Batch<'_, '_>) -> bool {
     true
 }
 
-/// Notes a broker read taken at or after the account switch, before its step (DEC-2333 item 2,
-/// DEC-2337 item 3): the sells it shows working in each instrument, ours by id, and the positions a
-/// reconciliation shows. A read taken before the switch cannot show what its cancel-all did, so it
-/// is not noted.
+/// Notes the account switch's cancel-all answered, before the step (DEC-2333 items 2 and 3):
+/// accepted, lost, or a restart since the switch, which reads as lost.
+pub(crate) fn note_answer(state: &mut ExecutorState, input: &Input) {
+    let answers = matches!(
+        input,
+        Input::Broker(Err(_) | Ok(BrokerOutcome::AccountWideAccepted)) | Input::Started(_)
+    );
+    if answers && state.account_switch.is_some() {
+        state.cancel_all_answered = true;
+    }
+}
+
+/// Notes a broker read once the account switch's cancel-all is answered, before its step (DEC-2333
+/// item 2, DEC-2337 item 3): the head it was taken at, the sells it shows working in each
+/// instrument, ours by id, and the positions a reconciliation shows. A read before the answer is
+/// not noted, so it releases no close.
 pub(crate) fn note_read(state: &mut ExecutorState, input: &Input) {
-    let Some(switch) = &state.account_switch else {
+    if state.account_switch.is_none() || !state.cancel_all_answered {
         return;
-    };
+    }
     let (taken_at, orders, held) = match input {
         Input::Broker(Ok(BrokerOutcome::OpenOrders(orders))) => {
             (state.account_head(), orders, None)
@@ -222,9 +234,6 @@ pub(crate) fn note_read(state: &mut ExecutorState, input: &Input) {
         ),
         _ => return,
     };
-    if taken_at < switch.seq {
-        return;
-    }
     let mut sells: BTreeMap<InstrumentId, Vec<Option<ClientOrderId>>> = BTreeMap::new();
     for order in orders.iter().filter(|order| order.side == Side::Sell) {
         let ours = order
@@ -269,8 +278,8 @@ pub(crate) fn open_orders_read(
 }
 
 /// The account switch's close-position, one instrument at a time (§5.5, DEC-2333 item 2,
-/// DEC-2337): for each instrument it closes that is still held, once the latest read taken at or
-/// after the switch shows no sell working there but ours whose cancel is since confirmed. The first
+/// DEC-2337): for each instrument it closes that is still held, once the latest read noted after
+/// its cancel-all was answered, taken at or after the switch, shows no sell working there but ours whose cancel is since confirmed. The first
 /// request is attempt 1. A later one goes only on a reconciliation taken at or after the last
 /// request that shows the instrument still held, so a crash or a lost answer never strands it and
 /// nothing is ever sent twice blind. Each request is journaled before it is sent. An instrument
@@ -282,6 +291,9 @@ pub(crate) fn closes_due(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError>
     ) else {
         return Ok(());
     };
+    if read.taken_at < switch.seq {
+        return Ok(());
+    }
     for instrument in batch.view.closing_all.clone() {
         let held = batch
             .view

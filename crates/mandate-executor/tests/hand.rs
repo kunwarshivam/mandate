@@ -6120,7 +6120,6 @@ fn sends_a_close(ran: &common::Ran) -> bool {
 /// DEC-2333 items 2 and 4): its batch sends the cancel-all and no close, its answer alone sends no
 /// close, and only a read after it closes BTC again, as that switch's first request.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_second_account_switch_closes_nothing_until_its_own_cancel_all_is_read() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[BTC]);
@@ -6180,7 +6179,6 @@ fn a_second_account_switch_closes_nothing_until_its_own_cancel_all_is_read() {
 /// before the cancel-all is accepted or lost releases no close, and the read after the answer
 /// does.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_read_before_the_cancel_all_is_answered_releases_no_close() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[BTC]);
@@ -6218,7 +6216,6 @@ fn a_read_before_the_cancel_all_is_answered_releases_no_close() {
 /// A reconciliation whose snapshot was taken before the switch releases no close (DEC-2333 item
 /// 2), even after the cancel-all is answered; one taken at or after it does.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_read_taken_before_the_switch_releases_no_close() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[BTC]);
