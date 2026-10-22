@@ -16,11 +16,12 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   [DEC-176](../project/04-decision-log.md#decisions)):** §9.34 adds the agent stream's
   `RetirementHeld` at schema version 1, the runtime's record that a retirement has waited another
   24 hours for what the agent still holds (DEC-2344 item 2), with rule 265 on the record and stream
-  rule 266 on its one sequence per agent: each record with its alert, periods counting records,
-  and none after the retirement ends at its `AgentStopped`, a resume, or a mandate version applied;
+  rule 266 on its one sequence per agent: each record with its alert, periods counting records a
+  day apart, and none after the retirement ends at its own `AgentStopped` or an owner's resume or
+  stop, a version applied moving the sequence on or ending it for a new cause;
   §9.15's closed set of kinds gains `retirement_held` (safety), 34 to 35. The `retirements` vectors
-  are new: 25 invalid and 5 valid drafts and 20 streams, judged by the reference fold and an
-  independent oracle, with 16 validator, 8 stream, and 5 vector mutants caught. **Versions and
+  are new: 24 invalid and 5 valid drafts and 27 streams, judged by the reference fold and an
+  independent oracle, with 16 validator, 10 stream, and 5 vector mutants caught. **Versions and
   numbers:** v0.77 and rules 261 to 263 are #2278's (§9.33), and rule 264 #2294's, so this takes
   v0.79, §9.34, and rules 265 and 266, and renumbers at merge if that order changes.
 - **v0.78 ([DEC-2351](../project/decisions/DEC-2351.md), an agent reading under
@@ -6137,21 +6138,23 @@ attributed to the agent and no working order of its own (§9.2's `AgentStopped`,
 `OwnerAlertSent` (`retirement_held`, its `subject` this record) as the next row of the same batch
 (rule 130, notifications spec §3.2):
 
-- **Periods count records, not days.** Period k+1 follows period k. A period is due no sooner than
-  `held_since` plus `period` times 24 hours (rule 265), and the runtime writes the next one at its
-  first risk tick at or after that. A runtime that was down for three days writes the next period
-  when it is back, never the ones it missed, so after a gap a period's number is its place in the
-  sequence and its `risk_clock` says when it was written.
+- **Periods count records, not days.** Period k+1 follows period k, at least 24 hours of risk
+  clock after it (rule 266), and the first at least 24 hours after `held_since` (rule 265); the
+  runtime writes each at its first risk tick once due. A runtime that was down for days writes the
+  next period when it is back, and the one after a day later, never the missed ones in a burst, so a
+  period's number is its place in the sequence and its `risk_clock` says when it was written.
 - **It keeps writing in every agent mode,** `paused` and `stopped` included: a kill switch or a
   hold during the wait is when the owner most needs to hear that the agent still holds something.
 - **One sequence per agent.** A second cause while a sequence is open starts nothing, and the
   first cause's sequence continues (rule 266).
-- **The sequence ends with the retirement**, at a record the verifier reads beside the agent
-  stream, so no record is added for it: the agent's `AgentStopped` or an owner's resume
-  `OwnerCommandIssued` naming the agent (control stream), or a `MandateVersionApplied` for the
-  agent (account stream), which ends the retirement it was held under. No `RetirementHeld` of that
-  cause follows its end; a retirement that begins later, under the newer version or after a
-  resume, is a new cause and a new sequence from 1. A redeploy is a new agent id on its own stream
+- **The sequence ends with the retirement, read from records already journaled**, all of this
+  agent's own: its `AgentStopped`, or an owner's `OwnerCommandIssued` scoped to the agent with
+  `command` `resume` or `stop` (control stream). No `RetirementHeld` of that cause follows. A
+  `MandateVersionApplied` with `result` `applied` for the agent (account stream) ends nothing by
+  itself, since a version may leave the agent retiring: the next record either goes on under the
+  new version, unbroken, or, if the version cancelled that retirement and the agent retires again,
+  begins a new cause from 1. A version that cancelled it with no new retirement leaves the runtime
+  writing nothing more (the writer's rule). A redeploy is a new agent id on its own stream
   ([DEC-1173](../project/decisions/DEC-1173.md)), so nothing carries over to it.
 - **A restarted runtime folds its stream first**, so it never writes a period twice.
 
@@ -6170,25 +6173,30 @@ position, instrument, or quantity (`AGENTS.md` rule 6).
 
 265. `RetirementHeld`: its `actor` is the runtime's (`agent`, `actor.kind`), never a workspace
      service's or a user's; `causation_id` is non-null (`causation_id`); `period` is at least 1
-     (`payload.period`); `risk_clock` is no sooner than `held_since` plus `period` times 86400
-     seconds (`payload.risk_clock`); and `waiting_on` is non-empty, each value once, in ascending
-     order (`payload.waiting_on`).
-266. **Stream rule** (the agent stream, read with the control and account streams' records that
-     end a retirement, in commit order). (a) Each `RetirementHeld` is followed by its
-     `OwnerAlertSent` (`retirement_held`, `subject` it), and each such alert follows the record it
-     names. (b) At most one sequence is open: a `RetirementHeld` while one is open has the open
-     sequence's cause, the next period, and the first period's `held_since` and
-     `config_refs.mandate_version`; one with no sequence open has period 1. (c) An `AgentStopped`
-     of the agent, a resume `OwnerCommandIssued` naming it, and a `MandateVersionApplied` for it
-     each end the open sequence, and no `RetirementHeld` of an ended sequence's cause follows. The
-     fold reports the first record that breaks it; other records are not read.
+     (`payload.period`); `risk_clock` is no sooner than `held_since` plus 86400 seconds
+     (`payload.risk_clock`); and `waiting_on` is non-empty, each value once, in ascending order
+     (`payload.waiting_on`).
+266. **Stream rule** (the agent stream, read with the control and account streams' records about
+     the agent, in commit order). (a) Each `RetirementHeld` is followed by its `OwnerAlertSent`
+     (`retirement_held`, `subject` it), and each such alert follows the record it names. (b) At most
+     one sequence is open. A `RetirementHeld` while one is open has its cause, the next period, the
+     first one's `held_since`, a `config_refs.mandate_version` that is the sequence's or the
+     `new_version` of a `MandateVersionApplied` (`result` `applied`) for this agent since its last
+     record, and a `risk_clock` at least 86400 seconds after its last record's. One of another cause
+     is refused, unless such a version was applied since the open sequence's last record: then the
+     open sequence has ended, and the new one begins. A `RetirementHeld` with none open has period
+     1. (c) This agent's `AgentStopped`, and an `OwnerCommandIssued` scoped to this agent with
+     `command` `resume` or `stop`, end the open sequence, and no `RetirementHeld` of an ended
+     sequence's cause follows. Another agent's records, another command, and a rejected version end
+     and move nothing. The fold reports the first record that breaks it; other records are not read.
 
 **Vectors.** The `retirements` section of the reference cases: a base draft, an invalid draft for
 every member type and for each part of rule 265, valid drafts for a late period, both values, a
-working order alone, and period 3, and 20 streams for rule 266, among them a period after three
-days down, a second cause while one holds, each kind of end, and a record without its alert. The
-reference fold and an independent oracle, which pairs alerts by position and cuts the stream into
-segments at each end, agree on every stream, and each check is shown catching its seeded bug.
+working order alone, and period 3, and 27 streams for rule 266, among them days down and a burst
+after them, a second cause while one holds, each kind of end, another agent's end, a pause, a
+version that leaves it retiring and one that is rejected, and a record without its alert. The
+reference fold and an independent oracle, which reads the ends itself and walks each segment's
+consecutive records, agree on every stream, and each check is shown catching its seeded bug.
 
 ## 10. Anchoring
 

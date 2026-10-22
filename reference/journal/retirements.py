@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import copy
 
-from common import change, delete, digest_strings
+from common import change, delete, digest_strings, epoch_seconds
 from control import (
     AGENT_STREAM,
     RUNTIME,
@@ -145,15 +145,8 @@ def invalid_drafts() -> list[dict]:
         invalid("period_zero", "rule 265: periods count from 1", [change("payload.period", 0)], "schema", "payload.period"),
         invalid(
             "too_soon",
-            "rule 265: period n no sooner than n times 24 hours after it began",
+            "rule 265: no sooner than 24 hours after it began",
             [change("payload.risk_clock", clock(DAY - 1)), change("event_time", clock(DAY - 1))],
-            "schema",
-            "payload.risk_clock",
-        ),
-        invalid(
-            "second_period_too_soon",
-            "rule 265: period 2 waits 48 hours",
-            [change("payload.period", 2), change("payload.risk_clock", clock(2 * DAY - 1))],
             "schema",
             "payload.risk_clock",
         ),
@@ -212,7 +205,8 @@ def valid_drafts() -> list[dict]:
 # --------------------------------------------------------------------------- stream rule 266
 
 AGENT_ID = AGENT_STREAM.split(":")[-1]
-ENDS = ("AgentStopped", "OwnerCommandIssued", "MandateVersionApplied")
+OTHER_AGENT = "agent_other"
+ENDING_COMMANDS = ("resume", "stop")
 
 
 def alert_for(record: dict, index: int) -> dict:
@@ -232,17 +226,16 @@ def with_alert(record: dict, index: int) -> list[dict]:
     return [record, alert_for(record, index)]
 
 
-def ended(kind: str, index: int) -> dict:
-    """What ends a retirement, which the verifier reads beside the agent stream: the agent's
-    `AgentStopped` and an owner's resume (control stream), and a mandate version applied to it
-    (account stream)."""
+def ended(kind: str, index: int, agent: str = AGENT_ID, command: str = "resume", result: str = "applied") -> dict:
+    """A record the verifier reads beside the agent stream: an `AgentStopped` or an owner's command
+    (control stream), or a mandate version applied (account stream)."""
     payload = {
-        "AgentStopped": {"agent_id": AGENT_ID},
-        "OwnerCommandIssued": {"command": "resume", "scope": "agent", "subject": AGENT_ID},
-        "MandateVersionApplied": {"agent_id": AGENT_ID},
+        "AgentStopped": {"agent_id": agent},
+        "OwnerCommandIssued": {"command": command, "scope": "agent", "subject": agent},
+        "MandateVersionApplied": {"agent_id": agent, "new_version": NEWER, "result": result},
     }[kind]
     return {
-        "event_id": f"01J8Z5RHE{index:02d}".ljust(26, "0"),
+        "event_id": f"01J8Z5RHX{index:02d}".ljust(26, "0"),
         "event_type": kind,
         "causation_id": None,
         "config_refs": {},
@@ -250,32 +243,36 @@ def ended(kind: str, index: int) -> dict:
     }
 
 
-def ends_sequence(record: dict) -> bool:
-    p = record["payload"]
-    if record["event_type"] == "AgentStopped":
-        return p["agent_id"] == AGENT_ID
-    if record["event_type"] == "OwnerCommandIssued":
-        return p["command"] == "resume" and p["subject"] == AGENT_ID
-    return record["event_type"] == "MandateVersionApplied" and p["agent_id"] == AGENT_ID
-
-
 def stream_failure(records: list[dict], skip: frozenset[str] = frozenset()) -> int | None:
-    """Rule 266 folded once, over the agent stream with the records that end a retirement, in
-    commit order: one open sequence per agent; its periods run 1, 2, ... under one cause,
-    `held_since`, and mandate version; none after its end; and each `RetirementHeld` and its
-    `OwnerAlertSent` are adjacent. Returns the first index that breaks it, or `None`."""
-    open_: tuple[str, int, str, str] | None = None
+    """Rule 266 folded once, over the agent stream with the records that end or move a retirement,
+    in commit order. One sequence is open at a time; its records run 1, 2, ... under one cause and
+    `held_since`, each at least 24 hours of risk clock after the one before, under the mandate
+    version in effect; this agent's `AgentStopped` or an owner's resume or stop naming it ends it,
+    and no record of its cause follows; a version applied to it lets the next record either go on
+    under the new version or begin a new cause from 1. Each record and its `OwnerAlertSent` are
+    adjacent. Returns the first index that breaks it, or `None`."""
+    open_: dict | None = None
     finished: set[str] = set()
+    own = "stream.266.own" in skip
     for i, record in enumerate(records):
-        t = record["event_type"]
-        if t in ENDS and ends_sequence(record):
-            if open_ is not None and "stream.266.end" not in skip:
-                finished.add(open_[0])
+        t, p = record["event_type"], record["payload"]
+        if t == "AgentStopped" or t == "OwnerCommandIssued":
+            mine = own or (
+                p.get("agent_id") == AGENT_ID
+                if t == "AgentStopped"
+                else p["subject"] == AGENT_ID and p["scope"] == "agent" and p["command"] in ENDING_COMMANDS
+            )
+            if mine and open_ is not None and "stream.266.end" not in skip:
+                finished.add(open_["cause"])
                 open_ = None
             continue
-        if t == "OwnerAlertSent" and record["payload"]["kind"] == "retirement_held":
+        if t == "MandateVersionApplied":
+            if (own or (p["agent_id"] == AGENT_ID and p["result"] == "applied")) and open_ is not None:
+                open_["moved_to"] = p["new_version"]
+            continue
+        if t == "OwnerAlertSent" and p["kind"] == "retirement_held":
             before = records[i - 1] if i > 0 else None
-            tied = before is not None and before["event_type"] == "RetirementHeld" and before["event_id"] == record["payload"]["subject"]
+            tied = before is not None and before["event_type"] == "RetirementHeld" and before["event_id"] == p["subject"]
             if not tied and "stream.266.subject" not in skip:
                 return i
             continue
@@ -285,24 +282,28 @@ def stream_failure(records: list[dict], skip: frozenset[str] = frozenset()) -> i
         alerted = after is not None and after["event_type"] == "OwnerAlertSent" and after["payload"]["subject"] == record["event_id"]
         if not alerted and "stream.266.alert" not in skip:
             return i
-        cause, p = record["causation_id"], record["payload"]
-        version = record["config_refs"]["mandate_version"]
+        cause, version, now = record["causation_id"], record["config_refs"]["mandate_version"], epoch_seconds(p["risk_clock"])
+        if open_ is not None and cause != open_["cause"]:
+            if open_.get("moved_to") is None and "stream.266.one" not in skip:
+                return i
+            finished.add(open_["cause"])
+            open_ = None
         if open_ is None:
             if cause in finished and "stream.266.finished" not in skip:
                 return i
             if p["period"] != 1 and "stream.266.period" not in skip:
                 return i
-            open_ = (cause, p["period"], p["held_since"], version)
+            open_ = {"cause": cause, "period": p["period"], "since": p["held_since"], "version": version, "at": now}
             continue
-        if cause != open_[0] and "stream.266.one" not in skip:
+        if p["period"] != open_["period"] + 1 and "stream.266.period" not in skip:
             return i
-        if p["period"] != open_[1] + 1 and "stream.266.period" not in skip:
+        if p["held_since"] != open_["since"] and "stream.266.since" not in skip:
             return i
-        if p["held_since"] != open_[2] and "stream.266.since" not in skip:
+        if version not in (open_["version"], open_.get("moved_to")) and "stream.266.version" not in skip:
             return i
-        if version != open_[3] and "stream.266.version" not in skip:
+        if now < open_["at"] + DAY and "stream.266.spacing" not in skip:
             return i
-        open_ = (open_[0], p["period"], open_[2], open_[3])
+        open_ = {"cause": cause, "period": p["period"], "since": open_["since"], "version": version, "at": now}
     return None
 
 
@@ -329,15 +330,22 @@ def stream_cases() -> list[dict]:
         return with_alert(held(period, **kw), next(n))
 
     bare = held(1, event_id="01J8Z5RH8000000000000000B1")
+    newer = {"version": NEWER}
     return [
         case("one_period", "rule 266: the first period is 1", [h(1)], None),
         case("three_periods", "rule 266: each next period is one more", [h(1), h(2), h(3)], None),
         case("between_others", "rule 266: other records between periods are not read", [h(1), other(1), h(2)], None),
         case(
             "after_downtime",
-            "rule 266: a runtime back after three days writes the next period, not the missed ones",
-            [h(1), h(2, after=5 * DAY)],
+            "rule 266: a runtime back after days down writes the next period, a day after the last",
+            [h(1), h(2, after=5 * DAY), h(3, after=6 * DAY)],
             None,
+        ),
+        case(
+            "drains_after_downtime",
+            "rule 266: each record at least 24 hours after the one before, so missed periods never drain",
+            [h(1), h(2, after=5 * DAY), h(3, after=5 * DAY + 60)],
+            4,
         ),
         case(
             "what_it_waits_on_changes",
@@ -345,68 +353,69 @@ def stream_cases() -> list[dict]:
             [h(1, waiting=("position", "working_order")), h(2, waiting=("position",))],
             None,
         ),
+        case("a_new_cause_after_a_stop", "rule 266: after its end, a later retirement is a new sequence from 1", [h(1), ended("AgentStopped", 1), h(1, cause=LIMIT)], None),
+        case("a_new_cause_after_a_resume", "rule 266: a resume ends the sequence", [h(1), ended("OwnerCommandIssued", 2), h(1, cause=LIMIT)], None),
         case(
-            "a_new_cause_after_a_stop",
-            "rule 266: after its end, a later retirement is a new sequence from 1",
-            [h(1), ended("AgentStopped", 1), h(1, cause=LIMIT)],
+            "a_new_cause_after_an_owner_stop",
+            "rule 266: an owner's stop naming the agent ends the sequence",
+            [h(1), ended("OwnerCommandIssued", 3, command="stop"), h(1, cause=LIMIT)],
             None,
         ),
         case(
-            "a_new_cause_after_a_resume",
-            "rule 266: a resume ends the sequence",
-            [h(1), ended("OwnerCommandIssued", 2), h(1, cause=LIMIT)],
+            "still_held_under_a_newer_version",
+            "rule 266: a version that leaves it retiring moves the sequence on, unbroken",
+            [h(1), ended("MandateVersionApplied", 4), h(2, **newer), h(3, **newer)],
             None,
         ),
         case(
             "retired_again_under_the_newer_version",
-            "rule 266: a version applied ends the sequence; one the newer version begins counts from 1",
-            [h(1), ended("MandateVersionApplied", 3),
-             h(1, cause=LIMIT, since=clock(3600), after=DAY + 3600, version=NEWER),
-             h(2, cause=LIMIT, since=clock(3600), after=2 * DAY + 3600, version=NEWER)],
+            "rule 266: a retirement a newer version begins is a new cause, from 1",
+            [h(1), ended("MandateVersionApplied", 5),
+             h(1, cause=LIMIT, since=clock(3600), after=DAY + 3600, **newer),
+             h(2, cause=LIMIT, since=clock(3600), after=2 * DAY + 3600, **newer)],
             None,
         ),
         case("starts_at_two", "rule 266: the first period is 1", [h(2)], 0),
         case("skips_a_period", "rule 266: each next period is one more", [h(1), h(3)], 2),
-        case("repeats_a_period", "rule 266: each period once", [h(1), h(2), h(2)], 4),
+        case("repeats_a_period", "rule 266: each period once", [h(1), h(2), h(2, after=3 * DAY)], 4),
+        case("another_since", "rule 266: one retirement began once", [h(1), h(2, since=clock(3600), after=2 * DAY + 3600)], 2),
+        case("under_a_newer_version", "rule 266: a newer version with none applied is no continuation", [h(1), h(2, **newer)], 2),
         case(
-            "another_since",
-            "rule 266: one retirement began once",
-            [h(1), h(2, since=clock(3600), after=2 * DAY + 3600)],
-            2,
+            "under_a_rejected_version",
+            "rule 266: a rejected version moves nothing",
+            [h(1), ended("MandateVersionApplied", 6, result="rejected"), h(2, **newer)],
+            3,
+        ),
+        case("a_second_cause_while_one_holds", "rule 266: one sequence per agent; a second cause starts nothing", [h(1), h(1, cause=LIMIT)], 2),
+        case("a_second_cause_continuing_the_count", "rule 266: a record of another cause is no continuation", [h(1), h(2, cause=LIMIT)], 2),
+        case("after_its_stop", "rule 266: none after the agent's AgentStopped", [h(1), ended("AgentStopped", 7), h(2)], 3),
+        case("after_a_resume", "rule 266: none after a resume", [h(1), ended("OwnerCommandIssued", 8), h(1)], 3),
+        case(
+            "another_agents_stop",
+            "rule 266: only this agent's own AgentStopped ends it",
+            [h(1), ended("AgentStopped", 9, agent=OTHER_AGENT), h(1, cause=LIMIT)],
+            3,
         ),
         case(
-            "under_a_newer_version",
-            "rule 266: a newer version with no end between is no continuation",
-            [h(1), h(2, version=NEWER)],
-            2,
+            "another_agents_resume",
+            "rule 266: only a command naming this agent ends it",
+            [h(1), ended("OwnerCommandIssued", 10, agent=OTHER_AGENT), h(1, cause=LIMIT)],
+            3,
         ),
         case(
-            "a_second_cause_while_one_holds",
-            "rule 266: one sequence per agent; a second cause starts nothing",
-            [h(1), h(1, cause=LIMIT)],
-            2,
+            "a_pause_naming_it",
+            "rule 266: only a resume or a stop ends it",
+            [h(1), ended("OwnerCommandIssued", 11, command="pause"), h(1, cause=LIMIT)],
+            3,
         ),
         case(
-            "a_second_cause_continuing_the_count",
-            "rule 266: a period of another cause is no continuation, whatever its number",
-            [h(1), h(2, cause=LIMIT)],
-            2,
-        ),
-        case("after_its_stop", "rule 266: none after the agent's AgentStopped", [h(1), ended("AgentStopped", 4), h(2)], 3),
-        case("after_a_resume", "rule 266: none after a resume", [h(1), ended("OwnerCommandIssued", 5), h(1)], 3),
-        case(
-            "after_a_version_applied",
-            "rule 266: none of its cause after a version applied",
-            [h(1), ended("MandateVersionApplied", 6), h(1)],
+            "another_agents_version",
+            "rule 266: only a version applied to this agent moves it",
+            [h(1), ended("MandateVersionApplied", 12, agent=OTHER_AGENT), h(1, cause=LIMIT)],
             3,
         ),
         case("without_its_alert", "rule 266: each record with its alert in the batch", [bare, other(2)], 0),
-        case(
-            "an_alert_without_its_record",
-            "rule 266: a `retirement_held` alert names the record just before it",
-            [h(1), other(3), alert_for(bare, 90)],
-            3,
-        ),
+        case("an_alert_without_its_record", "rule 266: a `retirement_held` alert names the record just before it", [h(1), other(3), alert_for(bare, 90)], 3),
     ]
 
 
@@ -422,9 +431,12 @@ def found(check: str, message: str) -> str:
 
 
 def oracle(records: list[dict]) -> int | None:
-    """Rule 266 read another way: pair records with alerts by position first, then cut the stream
-    at every end into segments, and require each segment's held periods to be one cause not seen in
-    an earlier segment, counted 1, 2, ... with the first one's `held_since` and version."""
+    """Rule 266 read another way. Pairs records with alerts by position first. Then it reads the
+    retirement's ends itself, without the fold's helper: this agent's `AgentStopped`, and an owner's
+    `resume` or `stop` scoped to this agent. It cuts the stream at each end, and within a segment
+    walks consecutive held records: a record of a new cause is allowed only first in its segment or
+    straight after a version applied to this agent; every other one continues the last by one, with
+    its `held_since`, a version in effect, and a day of risk clock between them."""
     bad = []
     for i, r in enumerate(records):
         if r["event_type"] == "RetirementHeld":
@@ -435,30 +447,49 @@ def oracle(records: list[dict]) -> int | None:
             prev = records[i - 1] if i else {}
             if prev.get("event_type") != "RetirementHeld" or prev["event_id"] != r["payload"]["subject"]:
                 bad.append(i)
-    segments: list[list[tuple[int, dict]]] = [[]]
-    for i, r in enumerate(records):
-        if r["event_type"] in ENDS and ends_sequence(r):
-            segments.append([])
-        elif r["event_type"] == "RetirementHeld":
-            segments[-1].append((i, r))
+
+    def an_end(r: dict) -> bool:
+        if r["event_type"] == "AgentStopped":
+            return r["payload"]["agent_id"] == AGENT_ID
+        if r["event_type"] == "OwnerCommandIssued":
+            c = r["payload"]
+            return (c["scope"], c["subject"], c["command"]) in {("agent", AGENT_ID, "resume"), ("agent", AGENT_ID, "stop")}
+        return False
+
     seen: set[str] = set()
-    for segment in segments:
-        if not segment:
+    last: dict | None = None
+    moved: str | None = None
+    for i, r in enumerate(records):
+        if an_end(r):
+            if last is not None:
+                seen.add(last["causation_id"])
+            last, moved = None, None
             continue
-        first = segment[0][1]
-        for n, (i, r) in enumerate(segment, start=1):
-            if r["causation_id"] in seen:
+        if r["event_type"] == "MandateVersionApplied":
+            if r["payload"]["agent_id"] == AGENT_ID and r["payload"]["result"] == "applied" and last is not None:
+                moved = r["payload"]["new_version"]
+            continue
+        if r["event_type"] != "RetirementHeld":
+            continue
+        fresh = last is None or (moved is not None and r["causation_id"] != last["causation_id"])
+        if fresh:
+            if last is not None:
+                seen.add(last["causation_id"])
+            if r["causation_id"] in seen or r["payload"]["period"] != 1:
                 bad.append(i)
                 break
-            same = (
-                r["causation_id"] == first["causation_id"]
-                and r["payload"]["held_since"] == first["payload"]["held_since"]
-                and r["config_refs"] == first["config_refs"]
+        else:
+            ok = (
+                r["causation_id"] == last["causation_id"]
+                and r["payload"]["period"] == last["payload"]["period"] + 1
+                and r["payload"]["held_since"] == last["payload"]["held_since"]
+                and r["config_refs"]["mandate_version"] in {last["config_refs"]["mandate_version"], moved}
+                and epoch_seconds(r["payload"]["risk_clock"]) - epoch_seconds(last["payload"]["risk_clock"]) >= DAY
             )
-            if r["payload"]["period"] != n or not same:
+            if not ok:
                 bad.append(i)
                 break
-        seen.add(first["causation_id"])
+        last, moved = r, None
     return min(bad) if bad else None
 
 
@@ -503,7 +534,7 @@ VALIDATOR_MUTANTS = (
     *(f"loose.payload.{member}" for member, _, _, _ in MEMBER_CASES),
     *(f"nullable.payload.{member}" for member in NULLED),
 )
-STREAM_MUTANTS = tuple(f"stream.266.{part}" for part in ("end", "subject", "alert", "finished", "period", "one", "since", "version"))
+STREAM_MUTANTS = tuple(f"stream.266.{part}" for part in ("own", "end", "subject", "alert", "finished", "period", "one", "since", "version", "spacing"))
 
 
 def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:

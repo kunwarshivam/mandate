@@ -2849,7 +2849,8 @@ def deployment_manager_violations(event_type: str, draft: dict, skip: frozenset[
 
 def retirement_held_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
     """§9.34's rule 265, on a well-typed payload: the runtime's own record, caused by what began
-    the retirement; a period from 1, reached no sooner than that many 24 hours after it began; and
+    the retirement; a period from 1, no sooner than 24 hours after it began (the 24 hours between
+    records are rule 266's); and
     what it waits on, once each and in order."""
     if event_type != "RetirementHeld":
         return []
@@ -2866,7 +2867,7 @@ def retirement_held_violations(event_type: str, draft: dict, skip: frozenset[str
     if isinstance(period, int):
         rule("265.period", period >= 1, "payload.period")
         if isinstance(since, str) and isinstance(now, str) and is_timestamp(since) and is_timestamp(now) and (period >= 1 or "rule.265.period" in skip):
-            due = epoch_seconds(since) + HELD_PERIOD_S * period
+            due = epoch_seconds(since) + HELD_PERIOD_S
             rule("265.due", epoch_seconds(now) >= due, "payload.risk_clock")
     if isinstance(waiting, list):
         rule("265.waiting", bool(waiting) and ascending(waiting), "payload.waiting_on")
