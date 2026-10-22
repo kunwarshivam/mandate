@@ -96,12 +96,19 @@ ConfigMap `vault-ca`, projected read-only into one source directory, mounted 044
 fsGroup, and copied by an init container into a memory-backed directory as `api.role-id`,
 `api.secret-id` and `ca.crt` at 0600 with nothing else in it, since `mandate_vault`'s reader refuses
 a file any group or other can read. The API reads them there as files, never from its environment.
+With `api.connectionManagerBinding` (DEC-2348), the connection manager's AppRole, the Secret
+`vault-approle-connection-manager`, rides the same projection and copy as `connection-manager.role-id`
+and `connection-manager.secret-id`, since the API finishes a connect as the connection manager.
 */ -}}
 {{- define "mandate.apiVaultCopy" -}}
 - name: vault-credentials
   image: {{ .root.Values.images.postgres | quote }}
   imagePullPolicy: IfNotPresent
-  command: ["install", "-m", "0600", "/run/secrets/vault-api/api.role-id", "/run/secrets/vault-api/api.secret-id", "/run/secrets/vault-api/ca.crt", "/run/mandate/vault/"]
+  {{- $manager := "" }}
+  {{- if .root.Values.api.connectionManagerBinding }}
+  {{- $manager = ` "/run/secrets/vault-api/connection-manager.role-id", "/run/secrets/vault-api/connection-manager.secret-id",` }}
+  {{- end }}
+  command: ["install", "-m", "0600", "/run/secrets/vault-api/api.role-id", "/run/secrets/vault-api/api.secret-id",{{ $manager }} "/run/secrets/vault-api/ca.crt", "/run/mandate/vault/"]
   securityContext:
     {{- include "mandate.containerSecurity" . | nindent 4 }}
   resources:
@@ -123,12 +130,22 @@ a file any group or other can read. The API reads them there as files, never fro
           items:
             - {key: role-id, path: api.role-id}
             - {key: secret-id, path: api.secret-id}
+      {{- if .root.Values.api.connectionManagerBinding }}
+      - secret:
+          name: vault-approle-connection-manager
+          items:
+            - {key: role-id, path: connection-manager.role-id}
+            - {key: secret-id, path: connection-manager.secret-id}
+      {{- end }}
       - configMap:
           name: vault-ca
           items:
             - {key: ca.crt, path: ca.crt}
 {{- end -}}
 {{- define "mandate.api" -}}
+{{- if and .root.Values.api.connectionManagerBinding (not .root.Values.api.vaultBinding) }}
+{{- fail "api.connectionManagerBinding needs api.vaultBinding: the connection manager's AppRole rides the API's vault copy (DEC-2348)" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
