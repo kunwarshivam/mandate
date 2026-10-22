@@ -704,7 +704,6 @@ fn the_demo_agent_opted_in_runs_no_research_and_spends_nothing() {
 /// turns within one minute, each answered `ok`, and ends `done`. The cell's gateway rate cap is
 /// derived from the pinned loop, so it never cuts a run inside its own bounds.
 #[test]
-#[ignore = "pending E19-6"]
 fn an_agentic_run_takes_every_turn_its_loop_allows_and_ends_done() {
     let rig = Rig::default();
     reconciled(&rig);

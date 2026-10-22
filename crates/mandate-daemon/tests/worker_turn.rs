@@ -273,7 +273,6 @@ fn the_core_s_turn_request_is_run_when_handed() {
 /// read from the bounds, not from the worker. Each call's transcript holds a different result, so
 /// no call is the gateway's cache hit, which reaches no provider and is not counted.
 #[test]
-#[ignore = "pending E19-6"]
 fn a_fault_that_calls_again_within_a_minute_is_refused_past_the_loop_s_turns() {
     let shelf = Shelf::default();
     let (mut worker, items) = started(&shelf);
