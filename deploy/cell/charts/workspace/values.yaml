@@ -137,6 +137,15 @@ runtime:
   owner: ""
   research: ""
 
+# The broker every executor runs over (DEC-2306 item 1): `fixture`, the in-process fixture paper
+# broker, or `alpaca-paper`, Alpaca's paper trading host under the vault lease on its connection,
+# which staging alone may name. `vaultAddress` is the cell's vault, which `alpaca-paper` needs: the
+# executor trusts the CA mounted at /run/mandate/vault and logs in with the ServiceAccount token at
+# /run/mandate/vault-token, both of which the vault wiring mounts.
+executor:
+  broker: fixture
+  vaultAddress: ""
+
 # The cell's one ingress: cloudflared dialing out to Cloudflare's tunnel edge, so the cluster
 # exposes no port (DEC-967 item 6). Off in the local cell, which has no tunnel.
 ingress:

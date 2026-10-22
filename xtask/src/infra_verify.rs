@@ -296,7 +296,7 @@ fn why(pod: &Value) -> String {
 
 /// What a failing Job's last log lines say, as fixed class words alone: its lines may echo a
 /// connection string or SQL, so none of them is printed, only which of these it matched.
-const LOG_CLASSES: [(&str, &str); 10] = [
+const LOG_CLASSES: [(&str, &str); 13] = [
     ("password authentication failed", "auth-failed"),
     ("connection refused", "connection-refused"),
     ("timeout expired", "timeout"),
@@ -307,6 +307,9 @@ const LOG_CLASSES: [(&str, &str); 10] = [
     ("permission denied", "permission-denied"),
     ("ssl", "tls"),
     ("a migration is never edited", "migration-edited"),
+    ("workspace_not_new", "workspace_not_new"),
+    ("members_exist", "members_exist"),
+    ("workspace_not_open", "workspace_not_open"),
 ];
 
 /// The classes `logs` matches, in [`LOG_CLASSES`]' order, each once; a line that says it failed

@@ -168,7 +168,7 @@ fn is_stream_name(s: &str) -> bool {
     let parts: Vec<&str> = s.split(':').collect();
     let segments = match parts.first() {
         Some(&("acct" | "agent")) => 3,
-        Some(&("ctl" | "clock" | "ntf" | "meter")) => 2,
+        Some(&("ctl" | "clock" | "ntf" | "meter" | "dmeter")) => 2,
         _ => return false,
     };
     parts.len() == segments && parts.iter().skip(1).all(|segment| is_ident(segment))

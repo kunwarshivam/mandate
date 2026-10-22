@@ -1,0 +1,93 @@
+[
+  {
+    "label": "no kind",
+    "remove": [
+      "/kind"
+    ]
+  },
+  {
+    "label": "no expires_at",
+    "remove": [
+      "/expires_at"
+    ]
+  },
+  {
+    "label": "no workspaces",
+    "remove": [
+      "/workspaces"
+    ]
+  },
+  {
+    "label": "a full session",
+    "set": {
+      "/kind": "full"
+    }
+  },
+  {
+    "label": "no workspace covered",
+    "set": {
+      "/workspaces": []
+    }
+  },
+  {
+    "label": "a workspace without a label",
+    "set": {
+      "/workspaces": [
+        {
+          "workspace_id": "01KDEM0000000000000000000W"
+        }
+      ]
+    }
+  },
+  {
+    "label": "a workspace with its roles",
+    "set": {
+      "/workspaces": [
+        {
+          "workspace_id": "01KDEM0000000000000000000W",
+          "label": null,
+          "roles": [
+            "viewer"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "label": "an expires_at that is not a timestamp",
+    "set": {
+      "/expires_at": "in 15 minutes"
+    }
+  },
+  {
+    "label": "a stream named in as_of",
+    "set": {
+      "/as_of": [
+        {
+          "stream_id": "ctl:ws_1",
+          "seq": 1,
+          "hash": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+          "recorded_at": "2026-10-19T17:30:00.000000000Z"
+        }
+      ]
+    }
+  },
+  {
+    "label": "the principal named",
+    "set": {
+      "/principal_id": "01JB3K6F0C9R2V7N4M8Q1T5W3Z"
+    }
+  },
+  {
+    "label": "the passkey named",
+    "set": {
+      "/passkey_id": "AAECAwQFBgcICQoLDA0ODw"
+    }
+  },
+  {
+    "label": "a member named for a secret",
+    "set": {
+      "/session_token": "abc"
+    }
+  }
+]

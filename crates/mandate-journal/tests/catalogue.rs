@@ -1571,6 +1571,13 @@ fn the_step_up_confirmation_is_catalogued_and_closed_on_the_control_stream() {
     closed_on_the_control_stream(&["StepUpConfirmed"]);
 }
 
+/// Journal spec v0.69 §9.31 (DEC-2108): `CredentialEnrolled` and `CredentialRemoved` are on the
+/// control stream alone, with no configuration, closed there at schema version 1.
+#[test]
+fn the_credential_records_are_catalogued_and_closed_on_the_control_stream() {
+    closed_on_the_control_stream(&["CredentialEnrolled", "CredentialRemoved"]);
+}
+
 /// `VerificationRun` version 2 (journal spec v0.36 §9.13, DEC-788, DEC-789) is closed on the
 /// control stream as version 1 is: an unlisted member is refused `schema`, never `unknown_schema`.
 #[test]
