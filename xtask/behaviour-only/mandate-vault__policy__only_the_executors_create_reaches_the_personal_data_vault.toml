@@ -1,0 +1,8 @@
+file = "crates/mandate-vault/src/tests/policy.rs"
+test = "only_the_executors_create_reaches_the_personal_data_vault"
+reason = """
+DEC-2339 gives a connection's executor `create` on its own account entry and no other identity
+any access to `personal/`. `kubernetes_policy` is already built, so this test sees the executor's
+policy without its create block, not a stub's report. It still runs and fails, and the
+implementation half deletes this file with its `#[ignore]` line.
+"""

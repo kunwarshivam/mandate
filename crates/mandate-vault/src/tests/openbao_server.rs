@@ -35,7 +35,7 @@ use crate::source::{Grant, SecretSource};
 use mandate_connections::record::ConnectionId;
 use mandate_time::UtcNanos;
 use reqwest::{Certificate, Method};
-use secrecy::{ExposeSecret, SecretSlice, SecretString};
+use secrecy::{ExposeSecret, SecretString};
 use serde_json::{Value, json};
 use tokio::io::copy_bidirectional;
 use tokio::net::{TcpListener, TcpStream};
@@ -933,7 +933,7 @@ async fn the_exchanges_update_never_creates_a_code() {
 /// does, leaves it. A vault nobody answers for is an outage, checked first.
 #[tokio::test(flavor = "current_thread")]
 #[ignore = "pending E21-32"]
-async fn an_executor_creates_its_own_account_entry_once_and_only_the_manager_reads_it() {
+async fn an_executor_creates_its_own_account_entry_once_and_no_identity_reads_it() {
     let ca = include_bytes!("fixtures/isrg-root-x1.pem").to_vec();
     let unreachable = OpenBaoSource::from_token(
         &nowhere(ca),
@@ -986,18 +986,23 @@ async fn an_executor_creates_its_own_account_entry_once_and_only_the_manager_rea
         Err(SourceError::Denied)
     );
     let manager = bao.source(Identity::ConnectionManager, now).await;
-    let read = |found: Result<Option<SecretSlice<u8>>, SourceError>| {
-        found.map(|value| value.map(|v| String::from_utf8(v.expose_secret().to_vec()).unwrap()))
+    assert!(matches!(
+        manager.read(&account).await,
+        Err(SourceError::Denied)
+    ));
+    let stored = || async {
+        bao.operator(
+            Method::GET,
+            &format!("{}/data/personal/accounts/x6331", bao.config.mounts.kv),
+            None,
+        )
+        .await
+        .pointer("/data/data/value")
+        .cloned()
     };
-    assert_eq!(
-        read(manager.read(&account).await),
-        Ok(Some("acct-1".to_owned()))
-    );
+    assert!(stored().await.is_some());
     for revoked in [SecretPath::Code(c("c1")), SecretPath::Token(c("c1"))] {
         assert_eq!(manager.delete(&revoked).await, Ok(()));
     }
-    assert_eq!(
-        read(manager.read(&account).await),
-        Ok(Some("acct-1".to_owned()))
-    );
+    assert!(stored().await.is_some());
 }
