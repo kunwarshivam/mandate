@@ -5568,7 +5568,6 @@ fn a_buy_still_working_after_the_cancel_all_is_cancelled_by_its_id() {
 /// confirmation sells the whole position then. A stop placed for the late fill beside that close
 /// would sell the same coins twice (DEC-2333 item 5, rule 12).
 #[test]
-#[ignore = "pending E7-4"]
 fn a_fill_after_the_account_switch_places_no_protection() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[BTC]);
