@@ -320,7 +320,6 @@ fn provisioning_writes_each_identitys_files_and_prints_only_their_names() {
 /// refused `config` before any vault is reached otherwise; an accepted one reaches the vault, so a
 /// vault no one answers for is an outage.
 #[test]
-#[ignore = "pending E21-32"]
 fn a_kubernetes_host_that_is_not_https_is_refused_before_any_vault_is_reached() {
     let token = token_file(CANARY, 0o600);
     let out = fresh("out");
@@ -357,7 +356,6 @@ fn a_kubernetes_host_that_is_not_https_is_refused_before_any_vault_is_reached() 
 /// read, so it refuses the configuration, and the run fails closed, `denied`, where the same run
 /// without the flag succeeds: the refusal is the Kubernetes setup's, reached past every check.
 #[test]
-#[ignore = "pending E21-32"]
 fn provisioning_with_a_kubernetes_host_asks_the_vault_to_set_kubernetes_auth_up() {
     a_kubernetes_host_that_is_not_https_is_refused_before_any_vault_is_reached();
     let Some((address, ca, operator)) = server() else {
@@ -375,7 +373,6 @@ fn provisioning_with_a_kubernetes_host_asks_the_vault_to_set_kubernetes_auth_up(
 
 /// The host is passed as it is, with no CA: the vault reads the one its own pod projects.
 #[test]
-#[ignore = "pending E21-32"]
 fn a_kubernetes_host_is_the_api_server_with_no_ca() {
     assert_eq!(
         kubernetes_auth("https://10.43.0.1:443"),
