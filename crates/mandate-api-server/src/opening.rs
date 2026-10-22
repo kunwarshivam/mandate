@@ -14,14 +14,20 @@
 //! [DEC-2324]: ../../../docs/project/decisions/DEC-2324.md
 
 use mandate_authn::SubjectStanding;
-use mandate_identity::{LookupFailed, MembershipRecord, PrincipalId};
+use mandate_identity::{
+    LookupFailed, MembershipRecord, Permission, Principal, PrincipalId, Scope, Session,
+    SessionKind, SessionRef, authorize,
+};
+use mandate_identity_seal::Seal;
 use mandate_journal::{ArtifactRef, ArtifactSource, StoredEvent, get_artifact};
 use mandate_passkey::credentials::{CredentialFold, CredentialRecord, Enrolment, PasskeyAlg};
 use mandate_passkey::reduction::{cose_key, verify_reduction};
 use mandate_passkey::{Assertion, Challenge, PublicKey, RelyingParty};
 use mandate_time::UtcNanos;
 
+use crate::connections::{ConnectionState, connections as connections_of};
 use crate::members::{ControlLookup, Hosted};
+use crate::reads::deployed;
 use crate::standing::{Standings, interim_refuses};
 
 /// The principal the membership and standing lookups run for when the passkey is unknown, so
@@ -146,10 +152,6 @@ pub struct Reach {
 /// revoked, in the order the stream first names it, when they grant the connection kill switch.
 /// Each is authorized as a reduction-only session of the member would be. A read that failed
 /// answers empty lists, never a refusal (DEC-642 item 10).
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
 pub fn reach(
     hosted: Hosted,
     control: &[StoredEvent],
@@ -157,6 +159,40 @@ pub fn reach(
     member: PrincipalId,
     now: UtcNanos,
 ) -> Reach {
-    let _ = (hosted, control, records, member, now);
-    todo!()
+    let lookup = ControlLookup::new(hosted, records, now);
+    let session = Session::new(
+        Seal::grant(),
+        SessionRef(0),
+        SessionKind::ReductionOnly,
+        lookup.snapshot(member),
+    );
+    let scope = Scope::Workspace {
+        org: hosted.org,
+        workspace: hosted.workspace,
+    };
+    let may = |permission| {
+        authorize(
+            &lookup,
+            &Principal::User { id: member },
+            &session,
+            scope,
+            permission,
+            now,
+        )
+        .is_ok()
+    };
+    let agents = may(Permission::Pause) || may(Permission::KillSwitchAgent);
+    let connections = may(Permission::KillSwitchConnectionOrWorkspace);
+    Reach {
+        agent_ids: deployed(control)
+            .into_iter()
+            .filter(|deployment| agents && !deployment.4)
+            .map(|deployment| deployment.0)
+            .collect(),
+        connection_ids: connections_of(control)
+            .into_iter()
+            .filter(|view| connections && view.state == ConnectionState::Established)
+            .map(|view| view.connection_id)
+            .collect(),
+    }
 }

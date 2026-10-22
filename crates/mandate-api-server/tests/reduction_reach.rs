@@ -86,7 +86,6 @@ fn ids(list: &[&str]) -> Vec<String> {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn an_operator_reaches_every_live_agent_and_established_connection() {
     for role in [Role::Operator, Role::WorkspaceAdmin] {
         assert_eq!(
@@ -101,7 +100,6 @@ fn an_operator_reaches_every_live_agent_and_established_connection() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn an_approver_may_pause_every_live_agent_and_kill_switch_nothing() {
     assert_eq!(
         reach_of(&workspace(&[Role::Approver]), ALICE),
@@ -113,7 +111,6 @@ fn an_approver_may_pause_every_live_agent_and_kill_switch_nothing() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn without_a_role_that_reaches_or_a_membership_or_a_read_the_lists_are_empty() {
     assert_eq!(
         reach_of(&workspace(&[Role::Viewer]), ALICE),
