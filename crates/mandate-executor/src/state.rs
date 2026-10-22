@@ -134,8 +134,8 @@ pub struct ExecutorState {
     pub(crate) switches: BTreeMap<EventId, Switch>,
     /// The instruments an account-scoped kill switch closes through the broker's close-position,
     /// from its `KillSwitchActivated`: their protection is never placed again beside that close,
-    /// which would sell the same shares twice (§5.4, §5.5). An instrument leaves once it is no
-    /// longer held long, and all of them once the account's kill-switch mode is lifted.
+    /// which would sell the same shares twice (§5.4, §5.5). They all leave once the account's
+    /// kill-switch mode is lifted; while it holds, no entry can open them again.
     pub(crate) closing_all: BTreeSet<InstrumentId>,
     /// An account-scoped kill switch's cancel-all is journaled and not yet confirmed by an
     /// open-orders read: its answer, accepted or lost, asks that read (DEC-2333 items 2 and 3).

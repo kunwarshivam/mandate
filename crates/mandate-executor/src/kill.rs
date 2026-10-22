@@ -198,8 +198,8 @@ pub(crate) fn cancel_all_answered(batch: &mut Batch<'_, '_>) -> bool {
 }
 
 /// The open-orders read that confirms an account switch's cancel-all (DEC-2333 items 2 and 3):
-/// a sell of ours still working in an instrument the switch closes is cancelled by its own id,
-/// once until confirmed. Answers whether an account switch was waiting for it.
+/// any order of ours still working is cancelled by its own id, once until confirmed, a buy as much
+/// as a sell. Answers whether an account switch was waiting for it.
 pub(crate) fn open_orders_read(
     batch: &mut Batch<'_, '_>,
     orders: &[BrokerOrder],
@@ -209,9 +209,6 @@ pub(crate) fn open_orders_read(
     }
     let working: Vec<ClientOrderId> = orders
         .iter()
-        .filter(|order| {
-            order.side == Side::Sell && batch.view.closing_all.contains(&order.instrument)
-        })
         .filter_map(|order| ClientOrderId::parse(order.client_order_id.as_deref()?).ok())
         .filter(|id| batch.view.orders.contains_key(id))
         .collect();

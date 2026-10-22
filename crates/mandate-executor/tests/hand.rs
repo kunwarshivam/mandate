@@ -5415,7 +5415,6 @@ fn re_placed_after(agent: &str, restriction: &str) -> bool {
 /// a stop the broker cancels afterwards is placed again, as it would be with no switch (§5.4,
 /// DEC-2333 item 5).
 #[test]
-#[ignore = "pending E7-4"]
 fn lifting_the_account_kill_switch_protects_the_position_again() {
     assert!(
         re_placed_after("*", "kill_switch"),
@@ -5427,7 +5426,6 @@ fn lifting_the_account_kill_switch_protects_the_position_again() {
 /// another restriction of every agent lifted, leaves the account switch's close unfinished, and
 /// nothing is placed beside it (DEC-2333 item 5, rule 12).
 #[test]
-#[ignore = "pending E7-4"]
 fn only_the_account_kill_switch_lift_ends_its_guard() {
     for (agent, restriction) in [(common::AGENT, "kill_switch"), ("*", "daily_loss")] {
         assert!(
@@ -5441,7 +5439,6 @@ fn only_the_account_kill_switch_lift_ends_its_guard() {
 /// no fresh quote, is neither named in `closes` nor holds the switch back for want of a market
 /// (§5.5, DEC-2333 item 1).
 #[test]
-#[ignore = "pending E7-4"]
 fn an_account_kill_switch_passes_over_a_flat_instrument() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL, CPHC]);
@@ -5529,7 +5526,6 @@ fn an_account_kill_switch_passes_over_a_flat_instrument() {
 /// by its own id, a buy as much as a sell: a buy left working would add the risk the switch exists
 /// to remove (DEC-2333 item 3).
 #[test]
-#[ignore = "pending E7-4"]
 fn a_buy_still_working_after_the_cancel_all_is_cancelled_by_its_id() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL, CPHC]);

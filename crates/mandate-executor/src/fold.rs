@@ -1026,9 +1026,6 @@ fn fill_applied(state: &mut ExecutorState, payload: &Value, seq: Seq) -> Result<
     let position_of = instrument.clone();
     let position = state.positions.entry(instrument).or_insert(SignedQty::ZERO);
     *position = position.checked_add(signed)?;
-    if *position <= SignedQty::ZERO {
-        state.closing_all.remove(&position_of);
-    }
     state.cash_flow = state.cash_flow.checked_add(cash)?;
     state.fill_notional = state.fill_notional.checked_add(notional)?;
     let named = optional_text(payload, "client_order_id");
