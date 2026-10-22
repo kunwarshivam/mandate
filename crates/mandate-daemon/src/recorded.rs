@@ -112,6 +112,9 @@ pub struct Bundle {
     pub probe: Reported,
     pub workspace_cap: Usd6,
     pub deployment_cap: Usd6,
+    /// The workspace's `research_run_cost_cap_usd`, recorded as `caps.run_usd`: an agentic run's
+    /// cost ceiling, or `None` when the recording sets none (DEC-2268).
+    pub run_cap: Option<Usd6>,
     pub reply: RecordedReply,
     /// The scripted replies of an agentic run's turns before its final one, turn 1 first; empty
     /// for a bundle with no `turns` (DEC-2266).
@@ -201,6 +204,11 @@ impl Bundle {
             },
             workspace_cap: caps.usd6("workspace_monthly_usd")?,
             deployment_cap: caps.usd6("deployment_usd")?,
+            run_cap: caps
+                .value
+                .get("run_usd")
+                .map(|_| caps.usd6("run_usd"))
+                .transpose()?,
             reply: RecordedReply {
                 output: reply.text("output")?.to_owned(),
                 latency_ms: reply.int("latency_ms")?,
