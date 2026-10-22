@@ -8,8 +8,9 @@ use mandate_time::UtcNanos;
 use serde_json::json;
 
 use crate::openbao::{
-    OpenBaoConfig, OpenBaoSource, kubernetes_login_path, kubernetes_login_verdict, provision,
-    provisioned_identities, refusal, role_settings, seal_verdict, secret_id_identities,
+    OpenBaoConfig, OpenBaoSource, kubernetes_login_path, kubernetes_login_refusal,
+    kubernetes_login_verdict, provision, provisioned_identities, refusal, role_settings,
+    seal_verdict, secret_id_identities,
 };
 use crate::policy::{Identity, Mounts};
 use secrecy::SecretString;
@@ -177,7 +178,7 @@ async fn provisioning_an_unreachable_vault_is_an_outage() {
         mounts: Mounts::default(),
     };
     let token = SecretString::from("operator".to_owned());
-    let provisioned = provision(&config, &token, &[ConnectionId::new("c1").unwrap()]).await;
+    let provisioned = provision(&config, &token, &[ConnectionId::new("c1").unwrap()], None).await;
     assert_eq!(
         provisioned.map(|credentials| credentials.len()),
         Err(SourceError::Unavailable)
@@ -327,4 +328,55 @@ fn a_kubernetes_login_is_accepted_only_for_its_own_role_and_account() {
         kubernetes_login_verdict(&executor, None),
         Err(SourceError::Malformed)
     );
+}
+
+/// A Kubernetes login's refusal is `refusal`'s, except that the vault saying the login's own role
+/// does not exist is `RoleMissing`, which a process may wait out; a missing role named otherwise,
+/// another 400, or a body that is not the vault's error list is still `Denied`.
+#[test]
+fn a_missing_role_is_its_own_refusal_and_every_other_answer_keeps_its_meaning() {
+    let missing = br#"{"errors":["invalid role name \"6331\""]}"#;
+    assert_eq!(
+        kubernetes_login_refusal(400, missing, "6331"),
+        Err(SourceError::RoleMissing)
+    );
+    assert_eq!(kubernetes_login_refusal(200, missing, "6331"), Ok(()));
+    for (status, body, want) in [
+        (400_u16, &missing[..], SourceError::RoleMissing),
+        (403, &missing[..], SourceError::Denied),
+        (500, &missing[..], SourceError::Unavailable),
+        (503, &missing[..], SourceError::Sealed),
+        (404, &missing[..], SourceError::Missing),
+        (
+            400,
+            br#"{"errors":["invalid role name \"6332\""]}"#,
+            SourceError::Denied,
+        ),
+        (
+            400,
+            br#"{"errors":["invalid role name \"6331\"","more"]}"#,
+            SourceError::Denied,
+        ),
+        (
+            400,
+            br#"{"errors":["permission denied"]}"#,
+            SourceError::Denied,
+        ),
+        (
+            400,
+            br#"{"errors":"invalid role name \"6331\""}"#,
+            SourceError::Denied,
+        ),
+        (400, b"invalid role name \"6331\"", SourceError::Denied),
+        (400, b"", SourceError::Denied),
+    ] {
+        assert_eq!(
+            kubernetes_login_refusal(status, body, "6331"),
+            Err(want),
+            "{status} {}",
+            String::from_utf8_lossy(body)
+        );
+    }
+    let shown = format!("{:?}", kubernetes_login_refusal(400, missing, "6331"));
+    assert!(!shown.contains("6331"), "{shown}");
 }
