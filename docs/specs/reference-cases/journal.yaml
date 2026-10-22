@@ -11049,6 +11049,991 @@ approval_timeouts:
       value: 01J8Z3P2A000000000000000Q3
     expect:
       outcome: Valid
+retirements:
+  spec: docs/specs/journal.md v0.79 §9.34 (DEC-2352)
+  drafts:
+    held:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8Z5RH10000000000000000H
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: RetirementHeld
+      schema_version: 1
+      event_time: '2026-09-22T15:00:00.000000000Z'
+      clock_source: scheduler
+      causation_id: 01J8Z5RH0A000000000000000S
+      correlation_id: null
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:1111111111111111111111111111111111111111111111111111111111111111
+      payload:
+        held_since: '2026-09-21T15:00:00.000000000Z'
+        period: 1
+        waiting_on:
+        - position
+        risk_clock: '2026-09-22T15:00:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+  invalid_drafts:
+  - name: held_since.kind
+    clause: §9.34 types
+    base_draft: held
+    changes:
+    - path: payload.held_since
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.held_since
+  - name: held_since.form
+    clause: §9.34 types
+    base_draft: held
+    changes:
+    - path: payload.held_since
+      value: '2026-09-21T15:00:00.5Z'
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.held_since
+  - name: period.kind
+    clause: §9.34 types
+    base_draft: held
+    changes:
+    - path: payload.period
+      value: '1'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.period
+  - name: waiting_on.kind
+    clause: §9.34 types
+    base_draft: held
+    changes:
+    - path: payload.waiting_on
+      value: position
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.waiting_on
+  - name: waiting_on.form
+    clause: §9.34 types
+    base_draft: held
+    changes:
+    - path: payload.waiting_on
+      value:
+      - orders
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.waiting_on[0]
+  - name: risk_clock.kind
+    clause: §9.34 types
+    base_draft: held
+    changes:
+    - path: payload.risk_clock
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.risk_clock
+  - name: risk_clock.form
+    clause: §9.34 types
+    base_draft: held
+    changes:
+    - path: payload.risk_clock
+      value: '2026-09-22T15:00:00Z'
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.risk_clock
+  - name: held_since.null
+    clause: §9.34 types
+    base_draft: held
+    changes:
+    - path: payload.held_since
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.held_since
+  - name: period.null
+    clause: §9.34 types
+    base_draft: held
+    changes:
+    - path: payload.period
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.period
+  - name: waiting_on.null
+    clause: §9.34 types
+    base_draft: held
+    changes:
+    - path: payload.waiting_on
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.waiting_on
+  - name: risk_clock.null
+    clause: §9.34 types
+    base_draft: held
+    changes:
+    - path: payload.risk_clock
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.risk_clock
+  - name: missing
+    clause: §9.34 closed
+    base_draft: held
+    changes:
+    - path: payload.period
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.period
+  - name: extra
+    clause: §9.34 closed
+    base_draft: held
+    changes:
+    - path: payload.qty
+      value: '10'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.qty
+  - name: by_a_user
+    clause: 'rule 264: the runtime''s own record'
+    base_draft: held
+    changes:
+    - path: actor.kind
+      value: user
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: uncaused
+    clause: 'rule 264: caused by what began the retirement'
+    base_draft: held
+    changes:
+    - path: causation_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: causation_id
+  - name: period_zero
+    clause: 'rule 264: periods count from 1'
+    base_draft: held
+    changes:
+    - path: payload.period
+      value: 0
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.period
+  - name: too_soon
+    clause: 'rule 264: period n no sooner than n times 24 hours after it began'
+    base_draft: held
+    changes:
+    - path: payload.risk_clock
+      value: '2026-09-22T14:59:59.000000000Z'
+    - path: event_time
+      value: '2026-09-22T14:59:59.000000000Z'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.risk_clock
+  - name: second_period_too_soon
+    clause: 'rule 264: period 2 waits 48 hours'
+    base_draft: held
+    changes:
+    - path: payload.period
+      value: 2
+    - path: payload.risk_clock
+      value: '2026-09-23T14:59:59.000000000Z'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.risk_clock
+  - name: waiting_on_nothing
+    clause: 'rule 264: it waits on something'
+    base_draft: held
+    changes:
+    - path: payload.waiting_on
+      value: []
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.waiting_on
+  - name: waiting_on_twice
+    clause: 'rule 264: each thing once'
+    base_draft: held
+    changes:
+    - path: payload.waiting_on
+      value:
+      - position
+      - position
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.waiting_on
+  - name: waiting_on_out_of_order
+    clause: 'rule 264: in order'
+    base_draft: held
+    changes:
+    - path: payload.waiting_on
+      value:
+      - working_order
+      - position
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.waiting_on
+  - name: without_its_mandate
+    clause: '§9 row: `RetirementHeld` names `mandate_version`'
+    base_draft: held
+    changes:
+    - path: config_refs
+      value: {}
+    expect:
+      outcome: Invalid
+      reason: missing_config_ref
+      path: config_refs.mandate_version
+  - name: on_the_control_stream
+    clause: '§9 row: `RetirementHeld` is an agent-stream record'
+    base_draft: held
+    changes:
+    - path: stream_id
+      value: ctl:ws_01J8Z2
+    expect:
+      outcome: Invalid
+      reason: wrong_stream
+      path: event_type
+  - name: at_version_2
+    clause: '§9.34: closed at schema version 1 only'
+    base_draft: held
+    changes:
+    - path: schema_version
+      value: 2
+    expect:
+      outcome: Invalid
+      reason: unknown_schema
+      path: payload
+  valid_drafts:
+  - name: exactly_due
+    clause: 'rule 264: at the 24-hour mark itself'
+    base_draft: held
+    changes: []
+    expect:
+      outcome: Valid
+  - name: late
+    clause: 'rule 264: a late period is fine; no sooner, not no later'
+    base_draft: held
+    changes:
+    - path: payload.risk_clock
+      value: '2026-09-22T16:00:00.000000000Z'
+    expect:
+      outcome: Valid
+  - name: both
+    clause: 'rule 264: a position and a working order'
+    base_draft: held
+    changes:
+    - path: payload.waiting_on
+      value:
+      - position
+      - working_order
+    expect:
+      outcome: Valid
+  - name: working_order_alone
+    clause: 'rule 264: a working order alone'
+    base_draft: held
+    changes:
+    - path: payload.waiting_on
+      value:
+      - working_order
+    expect:
+      outcome: Valid
+  - name: third_period
+    clause: 'rule 264: period 3 at 72 hours'
+    base_draft: held
+    changes:
+    - path: payload.period
+      value: 3
+    - path: payload.risk_clock
+      value: '2026-09-24T15:00:00.000000000Z'
+    expect:
+      outcome: Valid
+  streams:
+  - name: one_period
+    clause: 'rule 265: the first period is 1'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z5RH21S000000000000000
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: RetirementHeld
+      schema_version: 1
+      event_time: '2026-09-22T15:00:00.000000000Z'
+      clock_source: scheduler
+      causation_id: 01J8Z5RH0A000000000000000S
+      correlation_id: null
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:1111111111111111111111111111111111111111111111111111111111111111
+      payload:
+        held_since: '2026-09-21T15:00:00.000000000Z'
+        period: 1
+        waiting_on:
+        - position
+        risk_clock: '2026-09-22T15:00:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Valid
+  - name: three_periods
+    clause: 'rule 265: each next period is one more'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z5RH21S000000000000000
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: RetirementHeld
+      schema_version: 1
+      event_time: '2026-09-22T15:00:00.000000000Z'
+      clock_source: scheduler
+      causation_id: 01J8Z5RH0A000000000000000S
+      correlation_id: null
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:1111111111111111111111111111111111111111111111111111111111111111
+      payload:
+        held_since: '2026-09-21T15:00:00.000000000Z'
+        period: 1
+        waiting_on:
+        - position
+        risk_clock: '2026-09-22T15:00:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z5RH22S000000000000000
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: RetirementHeld
+      schema_version: 1
+      event_time: '2026-09-23T15:00:00.000000000Z'
+      clock_source: scheduler
+      causation_id: 01J8Z5RH0A000000000000000S
+      correlation_id: null
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:1111111111111111111111111111111111111111111111111111111111111111
+      payload:
+        held_since: '2026-09-21T15:00:00.000000000Z'
+        period: 2
+        waiting_on:
+        - position
+        risk_clock: '2026-09-23T15:00:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z5RH23S000000000000000
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: RetirementHeld
+      schema_version: 1
+      event_time: '2026-09-24T15:00:00.000000000Z'
+      clock_source: scheduler
+      causation_id: 01J8Z5RH0A000000000000000S
+      correlation_id: null
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:1111111111111111111111111111111111111111111111111111111111111111
+      payload:
+        held_since: '2026-09-21T15:00:00.000000000Z'
+        period: 3
+        waiting_on:
+        - position
+        risk_clock: '2026-09-24T15:00:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Valid
+  - name: between_others
+    clause: 'rule 265: other records between periods are not read'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z5RH21S000000000000000
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: RetirementHeld
+      schema_version: 1
+      event_time: '2026-09-22T15:00:00.000000000Z'
+      clock_source: scheduler
+      causation_id: 01J8Z5RH0A000000000000000S
+      correlation_id: null
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:1111111111111111111111111111111111111111111111111111111111111111
+      payload:
+        held_since: '2026-09-21T15:00:00.000000000Z'
+        period: 1
+        waiting_on:
+        - position
+        risk_clock: '2026-09-22T15:00:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z5RH310000000000000000
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: ApprovalTimedOut
+      schema_version: 1
+      event_time: '2026-09-22T15:00:00.000000000Z'
+      clock_source: scheduler
+      causation_id: 01J8Z5RH0A000000000000000S
+      correlation_id: null
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:1111111111111111111111111111111111111111111111111111111111111111
+      payload:
+        held_since: '2026-09-21T15:00:00.000000000Z'
+        period: 1
+        waiting_on:
+        - position
+        risk_clock: '2026-09-22T15:00:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z5RH22S000000000000000
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: RetirementHeld
+      schema_version: 1
+      event_time: '2026-09-23T15:00:00.000000000Z'
+      clock_source: scheduler
+      causation_id: 01J8Z5RH0A000000000000000S
+      correlation_id: null
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:1111111111111111111111111111111111111111111111111111111111111111
+      payload:
+        held_since: '2026-09-21T15:00:00.000000000Z'
+        period: 2
+        waiting_on:
+        - position
+        risk_clock: '2026-09-23T15:00:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Valid
+  - name: two_causes
+    clause: 'rule 265: each cause counts its own periods'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z5RH21S000000000000000
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: RetirementHeld
+      schema_version: 1
+      event_time: '2026-09-22T15:00:00.000000000Z'
+      clock_source: scheduler
+      causation_id: 01J8Z5RH0A000000000000000S
+      correlation_id: null
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:1111111111111111111111111111111111111111111111111111111111111111
+      payload:
+        held_since: '2026-09-21T15:00:00.000000000Z'
+        period: 1
+        waiting_on:
+        - position
+        risk_clock: '2026-09-22T15:00:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z5RH21M000000000000000
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: RetirementHeld
+      schema_version: 1
+      event_time: '2026-09-22T15:00:00.000000000Z'
+      clock_source: scheduler
+      causation_id: 01J8Z5RH0B000000000000000M
+      correlation_id: null
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:1111111111111111111111111111111111111111111111111111111111111111
+      payload:
+        held_since: '2026-09-21T15:00:00.000000000Z'
+        period: 1
+        waiting_on:
+        - position
+        risk_clock: '2026-09-22T15:00:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z5RH22S000000000000000
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: RetirementHeld
+      schema_version: 1
+      event_time: '2026-09-23T15:00:00.000000000Z'
+      clock_source: scheduler
+      causation_id: 01J8Z5RH0A000000000000000S
+      correlation_id: null
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:1111111111111111111111111111111111111111111111111111111111111111
+      payload:
+        held_since: '2026-09-21T15:00:00.000000000Z'
+        period: 2
+        waiting_on:
+        - position
+        risk_clock: '2026-09-23T15:00:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z5RH22M000000000000000
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: RetirementHeld
+      schema_version: 1
+      event_time: '2026-09-23T15:00:00.000000000Z'
+      clock_source: scheduler
+      causation_id: 01J8Z5RH0B000000000000000M
+      correlation_id: null
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:1111111111111111111111111111111111111111111111111111111111111111
+      payload:
+        held_since: '2026-09-21T15:00:00.000000000Z'
+        period: 2
+        waiting_on:
+        - position
+        risk_clock: '2026-09-23T15:00:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Valid
+  - name: what_it_waits_on_changes
+    clause: 'rule 265: what it waits on may change between periods'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z5RH21S000000000000000
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: RetirementHeld
+      schema_version: 1
+      event_time: '2026-09-22T15:00:00.000000000Z'
+      clock_source: scheduler
+      causation_id: 01J8Z5RH0A000000000000000S
+      correlation_id: null
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:1111111111111111111111111111111111111111111111111111111111111111
+      payload:
+        held_since: '2026-09-21T15:00:00.000000000Z'
+        period: 1
+        waiting_on:
+        - position
+        - working_order
+        risk_clock: '2026-09-22T15:00:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z5RH22S000000000000000
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: RetirementHeld
+      schema_version: 1
+      event_time: '2026-09-23T15:00:00.000000000Z'
+      clock_source: scheduler
+      causation_id: 01J8Z5RH0A000000000000000S
+      correlation_id: null
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:1111111111111111111111111111111111111111111111111111111111111111
+      payload:
+        held_since: '2026-09-21T15:00:00.000000000Z'
+        period: 2
+        waiting_on:
+        - position
+        risk_clock: '2026-09-23T15:00:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Valid
+  - name: starts_at_two
+    clause: 'rule 265: the first period is 1'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z5RH22S000000000000000
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: RetirementHeld
+      schema_version: 1
+      event_time: '2026-09-23T15:00:00.000000000Z'
+      clock_source: scheduler
+      causation_id: 01J8Z5RH0A000000000000000S
+      correlation_id: null
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:1111111111111111111111111111111111111111111111111111111111111111
+      payload:
+        held_since: '2026-09-21T15:00:00.000000000Z'
+        period: 2
+        waiting_on:
+        - position
+        risk_clock: '2026-09-23T15:00:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      rule: rule 265
+      index: 0
+  - name: skips_a_period
+    clause: 'rule 265: each next period is one more'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z5RH21S000000000000000
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: RetirementHeld
+      schema_version: 1
+      event_time: '2026-09-22T15:00:00.000000000Z'
+      clock_source: scheduler
+      causation_id: 01J8Z5RH0A000000000000000S
+      correlation_id: null
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:1111111111111111111111111111111111111111111111111111111111111111
+      payload:
+        held_since: '2026-09-21T15:00:00.000000000Z'
+        period: 1
+        waiting_on:
+        - position
+        risk_clock: '2026-09-22T15:00:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z5RH23S000000000000000
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: RetirementHeld
+      schema_version: 1
+      event_time: '2026-09-24T15:00:00.000000000Z'
+      clock_source: scheduler
+      causation_id: 01J8Z5RH0A000000000000000S
+      correlation_id: null
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:1111111111111111111111111111111111111111111111111111111111111111
+      payload:
+        held_since: '2026-09-21T15:00:00.000000000Z'
+        period: 3
+        waiting_on:
+        - position
+        risk_clock: '2026-09-24T15:00:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      rule: rule 265
+      index: 1
+  - name: repeats_a_period
+    clause: 'rule 265: each period once'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z5RH21S000000000000000
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: RetirementHeld
+      schema_version: 1
+      event_time: '2026-09-22T15:00:00.000000000Z'
+      clock_source: scheduler
+      causation_id: 01J8Z5RH0A000000000000000S
+      correlation_id: null
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:1111111111111111111111111111111111111111111111111111111111111111
+      payload:
+        held_since: '2026-09-21T15:00:00.000000000Z'
+        period: 1
+        waiting_on:
+        - position
+        risk_clock: '2026-09-22T15:00:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z5RH22S000000000000000
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: RetirementHeld
+      schema_version: 1
+      event_time: '2026-09-23T15:00:00.000000000Z'
+      clock_source: scheduler
+      causation_id: 01J8Z5RH0A000000000000000S
+      correlation_id: null
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:1111111111111111111111111111111111111111111111111111111111111111
+      payload:
+        held_since: '2026-09-21T15:00:00.000000000Z'
+        period: 2
+        waiting_on:
+        - position
+        risk_clock: '2026-09-23T15:00:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z5RH22S000000000000000
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: RetirementHeld
+      schema_version: 1
+      event_time: '2026-09-23T15:00:00.000000000Z'
+      clock_source: scheduler
+      causation_id: 01J8Z5RH0A000000000000000S
+      correlation_id: null
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:1111111111111111111111111111111111111111111111111111111111111111
+      payload:
+        held_since: '2026-09-21T15:00:00.000000000Z'
+        period: 2
+        waiting_on:
+        - position
+        risk_clock: '2026-09-23T15:00:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      rule: rule 265
+      index: 2
+  - name: another_since
+    clause: 'rule 265: one retirement began once'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z5RH21S000000000000000
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: RetirementHeld
+      schema_version: 1
+      event_time: '2026-09-22T15:00:00.000000000Z'
+      clock_source: scheduler
+      causation_id: 01J8Z5RH0A000000000000000S
+      correlation_id: null
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:1111111111111111111111111111111111111111111111111111111111111111
+      payload:
+        held_since: '2026-09-21T15:00:00.000000000Z'
+        period: 1
+        waiting_on:
+        - position
+        risk_clock: '2026-09-22T15:00:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z5RH22S000000000000000
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: RetirementHeld
+      schema_version: 1
+      event_time: '2026-09-23T16:00:00.000000000Z'
+      clock_source: scheduler
+      causation_id: 01J8Z5RH0A000000000000000S
+      correlation_id: null
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:1111111111111111111111111111111111111111111111111111111111111111
+      payload:
+        held_since: '2026-09-21T16:00:00.000000000Z'
+        period: 2
+        waiting_on:
+        - position
+        risk_clock: '2026-09-23T16:00:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      rule: rule 265
+      index: 1
+  - name: another_cause_restarts_at_one
+    clause: 'rule 265: another cause starts from 1'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z5RH21S000000000000000
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: RetirementHeld
+      schema_version: 1
+      event_time: '2026-09-22T15:00:00.000000000Z'
+      clock_source: scheduler
+      causation_id: 01J8Z5RH0A000000000000000S
+      correlation_id: null
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:1111111111111111111111111111111111111111111111111111111111111111
+      payload:
+        held_since: '2026-09-21T15:00:00.000000000Z'
+        period: 1
+        waiting_on:
+        - position
+        risk_clock: '2026-09-22T15:00:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z5RH22S000000000000000
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: RetirementHeld
+      schema_version: 1
+      event_time: '2026-09-23T15:00:00.000000000Z'
+      clock_source: scheduler
+      causation_id: 01J8Z5RH0A000000000000000S
+      correlation_id: null
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:1111111111111111111111111111111111111111111111111111111111111111
+      payload:
+        held_since: '2026-09-21T15:00:00.000000000Z'
+        period: 2
+        waiting_on:
+        - position
+        risk_clock: '2026-09-23T15:00:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z5RH22M000000000000000
+      stream_id: agent:ws_01J8Z2:agent_a
+      event_type: RetirementHeld
+      schema_version: 1
+      event_time: '2026-09-23T15:00:00.000000000Z'
+      clock_source: scheduler
+      causation_id: 01J8Z5RH0B000000000000000M
+      correlation_id: null
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:1111111111111111111111111111111111111111111111111111111111111111
+      payload:
+        held_since: '2026-09-21T15:00:00.000000000Z'
+        period: 2
+        waiting_on:
+        - position
+        risk_clock: '2026-09-23T15:00:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      rule: rule 265
+      index: 2
 approval_requests:
   spec: docs/specs/journal.md v0.42 §9.6 (DEC-942)
   drafts:
