@@ -336,3 +336,62 @@ fn over_its_limits_the_challenge_route_answers_the_one_401() {
         );
     }
 }
+
+const OTHER: &str = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
+
+fn cookie(value: &str) -> String {
+    format!("{DEVICE_COOKIE}={value}")
+}
+
+#[test]
+#[ignore = "pending E9-1"]
+fn a_refused_request_spends_nothing_and_each_device_keeps_its_own_budget() {
+    let f = fixture(Reduction::new(Vec::new(), Box::new(Wide::default())));
+    let mine = cookie(DEVICE);
+    for _ in 0..4 {
+        let forbidden = send(f.addr, "POST", PATH, &[("Cookie", &mine)], b"{}");
+        assert_eq!(forbidden.status, 403, "no browser marks");
+        let invalid = ask(&f, &[("Cookie", &mine)], b"{\"x\":1}");
+        assert_eq!(invalid.status, 422, "a malformed body");
+    }
+    for n in 0..4 {
+        assert_eq!(
+            ask(&f, &[("Cookie", &mine)], b"{}").status,
+            201,
+            "challenge {n}: the eight refusals spent no slot"
+        );
+    }
+    the_one_401(
+        &f,
+        &ask(&f, &[("Cookie", &mine)], b"{}"),
+        "a fifth on one device",
+    );
+    let over = ask(&f, &[("Cookie", &mine)], b"[]");
+    assert_eq!(
+        over.status, 422,
+        "an over-limit device's malformed body is still invalid (DEC-2119 item 5)"
+    );
+    assert_eq!(
+        ask(&f, &[("Cookie", &cookie(OTHER))], b"{}").status,
+        201,
+        "a second device keeps its own budget"
+    );
+}
+
+#[test]
+#[ignore = "pending E9-1"]
+fn over_the_address_limit_a_device_with_a_cookie_gets_the_one_401_too() {
+    let f = fixture(Reduction::new(Vec::new(), Box::new(Wide::default())));
+    for n in 0..32 {
+        assert_eq!(
+            ask(&f, &[], b"{}").status,
+            201,
+            "challenge {n}, a fresh device each"
+        );
+    }
+    the_one_401(
+        &f,
+        &ask(&f, &[("Cookie", &cookie(OTHER))], b"{}"),
+        "a device that never asked, on a full address",
+    );
+}
