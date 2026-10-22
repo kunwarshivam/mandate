@@ -45,7 +45,6 @@ fn clean(m: &mut Manager) {
 }
 
 #[test]
-#[ignore = "pending E21-33"]
 fn a_deployments_executor_starts_and_stops_naming_the_connection_it_is_deployed_on() {
     let journal = Journal::new();
     let mut m = manager(&journal, accounts(&[(AGENT, DEPLOYED)]));
@@ -78,7 +77,6 @@ fn a_deployments_executor_starts_and_stops_naming_the_connection_it_is_deployed_
 }
 
 #[test]
-#[ignore = "pending E21-33"]
 fn a_connects_executor_starts_and_stops_naming_its_connect() {
     let journal = Journal::new();
     let mut m = manager(&journal, accounts(&[]));
@@ -107,7 +105,6 @@ fn a_connects_executor_starts_and_stops_naming_its_connect() {
 }
 
 #[test]
-#[ignore = "pending E21-33"]
 fn each_executor_names_its_own_accounts_connection_beside_another_accounts_connect() {
     let journal = Journal::new();
     let mut m = manager(&journal, accounts(&[(AGENT, DEPLOYED)]));
@@ -132,7 +129,6 @@ fn each_executor_names_its_own_accounts_connection_beside_another_accounts_conne
 }
 
 #[test]
-#[ignore = "pending E21-33"]
 fn two_connects_of_one_account_that_succeed_in_one_pass_start_its_executor_once() {
     let journal = Journal::new();
     let mut m = manager(&journal, accounts(&[]));
@@ -162,7 +158,6 @@ fn two_connects_of_one_account_that_succeed_in_one_pass_start_its_executor_once(
 const OLD: &str = "conn_00J8Z2OLD";
 
 #[test]
-#[ignore = "pending E21-33"]
 fn a_deployments_executor_names_the_connection_the_deployment_names_not_a_revoked_one() {
     let journal = Journal::new();
     let mut m = manager(&journal, accounts(&[]));
@@ -188,7 +183,6 @@ fn a_deployments_executor_names_the_connection_the_deployment_names_not_a_revoke
 }
 
 #[test]
-#[ignore = "pending E21-33"]
 fn a_restart_after_the_connect_ended_names_the_deployments_connection_across_the_managers_restart()
 {
     let journal = Journal::new();
@@ -231,7 +225,6 @@ fn a_restart_after_the_connect_ended_names_the_deployments_connection_across_the
 }
 
 #[test]
-#[ignore = "pending E21-33"]
 fn a_stop_names_the_connection_its_generation_started_with_once_nothing_names_one() {
     let journal = Journal::new();
     let mut m = manager(&journal, accounts(&[]));
@@ -265,7 +258,6 @@ fn a_stop_names_the_connection_its_generation_started_with_once_nothing_names_on
 }
 
 #[test]
-#[ignore = "pending E21-33"]
 fn each_executor_names_its_own_accounts_connection_beside_other_accounts_deployments_and_connects()
 {
     let first = "01J8Z2ACCT00000000000000P1";

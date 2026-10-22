@@ -166,17 +166,11 @@ impl Kubernetes {
     /// exchange's is `x` and its connection id's bytes in lowercase hex, the name its vault role
     /// and the admission policies are written for (DEC-2060). An executor's `connection` is the
     /// one it acts for.
-    pub fn account_name(&self, slot: &Slot, _connection: Option<&str>) -> Option<String> {
+    pub fn account_name(&self, slot: &Slot, connection: Option<&str>) -> Option<String> {
         match slot.process {
-            Process::TokenExchange => {
-                let hex: String = slot
-                    .subject
-                    .bytes()
-                    .map(|byte| format!("{byte:02x}"))
-                    .collect();
-                Some(format!("x{hex}"))
-            }
-            Process::Runtime | Process::Executor => None,
+            Process::TokenExchange => Some(format!("x{}", lower_hex(&slot.subject))),
+            Process::Executor => connection.map(lower_hex),
+            Process::Runtime => None,
         }
     }
 
@@ -241,6 +235,9 @@ impl Kubernetes {
             spec.insert("activeDeadlineSeconds".to_owned(), json!(seconds));
         }
         let account = self.account_name(slot, launch.connection.as_deref());
+        if slot.process == Process::Executor && account.is_none() {
+            return None;
+        }
         if let Some(account) = &account {
             spec.insert("serviceAccountName".to_owned(), json!(account));
         }
@@ -251,6 +248,9 @@ impl Kubernetes {
             ("MANDATE_GENERATION", generation.to_string()),
         ];
         env.extend(account.map(|account| ("MANDATE_SUBJECT_ACCOUNT", account)));
+        if slot.process == Process::Executor {
+            env.push(("MANDATE_WORKSPACE_NAMESPACE", self.namespace.clone()));
+        }
         for container in spec.get_mut("containers")?.as_array_mut()? {
             let vars = container
                 .as_object_mut()?
@@ -467,7 +467,8 @@ fn instance(pod: &Value) -> Result<Instance, Unavailable> {
         .get("deletionTimestamp")
         .is_some_and(|d| !d.is_null());
     let phase = match status.and_then(|s| s.get("phase")).and_then(Value::as_str) {
-        Some("Succeeded" | "Failed") => Phase::Exited,
+        Some("Succeeded") => Phase::Succeeded,
+        Some("Failed") => Phase::Exited,
         Some("Pending") if !deleting => Phase::Pending,
         Some("Running") if !deleting => Phase::Running { ready },
         _ => Phase::Unknown,
@@ -492,6 +493,11 @@ fn member<'a>(
         .entry(name.to_owned())
         .or_insert_with(|| Value::Object(Map::new()))
         .as_object_mut()
+}
+
+/// `text`'s bytes in lowercase hex, two digits each.
+fn lower_hex(text: &str) -> String {
+    text.bytes().map(|byte| format!("{byte:02x}")).collect()
 }
 
 /// The first 16 hex digits of the SHA-256 of `text`: a label-safe, DNS-safe key.
