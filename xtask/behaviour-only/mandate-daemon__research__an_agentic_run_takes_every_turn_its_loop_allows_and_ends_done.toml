@@ -1,0 +1,8 @@
+file = "crates/mandate-daemon/tests/research.rs"
+test = "an_agentic_run_takes_every_turn_its_loop_allows_and_ends_done"
+reason = """
+The cell worker's gateway rate cap is a fixed 6 calls a minute, so the run's seventh turn is
+refused `rate_limited_local` and the run ends `error`: the test fails on that behaviour, not at
+a stub, since no code is stubbed. DEC-2316's implementation derives the cap from the pinned
+loop's `max_turns` and deletes this row.
+"""
