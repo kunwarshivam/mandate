@@ -437,7 +437,8 @@
         "audience",
         "jwksUrl",
         "appOrigin",
-        "subjectLinks"
+        "subjectLinks",
+        "ingressPeers"
       ],
       "properties": {
         "org": {
@@ -474,6 +475,15 @@
           "type": "string",
           "pattern": "^$|^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$",
           "description": "The ConfigMap whose `subject-links` key is mounted at /etc/mandate/subject-links (DEC-1023); empty mounts none, and every sign-in is refused"
+        },
+        "ingressPeers": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^([0-9]{1,3}\\.){3}[0-9]{1,3}$|^[0-9a-f:]*:[0-9a-f:]*$"
+          },
+          "description": "MANDATE_API_INGRESS_PEERS: the ingress's own addresses, from which alone route 2's limits read X-Forwarded-For (workspace API spec §4.10, DEC-2117 item 4); empty reads none"
         }
       }
     },

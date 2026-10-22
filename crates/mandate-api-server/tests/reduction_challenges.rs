@@ -150,7 +150,6 @@ fn the_one_401(f: &Fixture, reply: &Reply, label: &str) {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_challenge_names_nothing_but_itself_and_journals_nothing() {
     let f = fixture(Reduction::new(Vec::new(), Box::new(Counting::default())));
     let reply = ask(&f, &[], b"{}");
@@ -218,7 +217,6 @@ fn a_challenge_names_nothing_but_itself_and_journals_nothing() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_device_cookie_presented_is_kept_and_a_malformed_one_replaced() {
     let f = fixture(Reduction::new(Vec::new(), Box::new(Counting::default())));
     let kept = ask(
@@ -237,7 +235,6 @@ fn a_device_cookie_presented_is_kept_and_a_malformed_one_replaced() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn the_challenge_route_is_browser_only_and_takes_an_empty_object() {
     let f = fixture(Reduction::default());
     let forbidden = |reply: Reply, label: &str| {
@@ -284,7 +281,6 @@ fn the_challenge_route_is_browser_only_and_takes_an_empty_object() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn over_its_limits_the_challenge_route_answers_the_one_401() {
     let f = fixture(Reduction::new(Vec::new(), Box::new(Wide::default())));
     let device = [("Cookie", format!("{DEVICE_COOKIE}={DEVICE}"))];

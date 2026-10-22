@@ -50,6 +50,7 @@ use mandate_api_server::keys::{FetchedKeys, REFETCH};
 use mandate_api_server::lifecycle::{DRAIN_BOUND, Drain, Local};
 use mandate_api_server::members::{self, Hosted};
 use mandate_api_server::objects::{ObjectStore, Objects};
+use mandate_api_server::reduction::{self, Reduction};
 use mandate_api_server::session::{OsRandom, Sessions};
 use mandate_api_server::subject;
 use mandate_api_server::token::Issuer;
@@ -145,6 +146,7 @@ struct Start {
     database_url: String,
     hosted: Hosted,
     artifacts: Option<Arc<Objects<FsArtifactStore>>>,
+    ingress: Vec<IpAddr>,
 }
 
 /// A required setting's value, refused when absent, empty, or not Unicode.
@@ -197,6 +199,7 @@ fn checked() -> Result<(Args, Start), StartRefusal> {
         name: "MANDATE_API_JWKS_URL",
     })?;
     let artifacts = artifact_store(env::var_os("MANDATE_API_ARTIFACTS").as_deref())?;
+    let ingress = reduction::ingress_peers(env::var(reduction::INGRESS_PEERS).ok().as_deref())?;
     let start = Start {
         settings,
         key,
@@ -205,6 +208,7 @@ fn checked() -> Result<(Args, Start), StartRefusal> {
         database_url,
         hosted,
         artifacts,
+        ingress,
     };
     Ok((args, start))
 }
@@ -291,7 +295,7 @@ async fn run(args: Args, start: Start) -> io::Result<()> {
         step_up: Arc::new(step_up),
         challenges,
         connect: None,
-        reduction: Arc::default(),
+        reduction: Arc::new(Reduction::new(start.ingress, Box::new(OsRandom::new()))),
     };
     let api = spawn_listener(
         serve(
