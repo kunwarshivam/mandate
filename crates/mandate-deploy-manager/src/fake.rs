@@ -2,6 +2,7 @@
 //! keeps every call, and lets a test crash, flap, or lose an instance.
 
 use std::collections::BTreeMap;
+use std::time::Duration;
 
 use crate::control::Slot;
 use crate::orchestrator::{Instance, Orchestrator, Phase, Unavailable};
@@ -9,8 +10,15 @@ use crate::orchestrator::{Instance, Orchestrator, Phase, Unavailable};
 /// One call the manager made.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Call {
-    Start { slot: Slot, generation: u64 },
-    Stop { slot: Slot, generation: u64 },
+    Start {
+        slot: Slot,
+        generation: u64,
+        lifetime: Option<Duration>,
+    },
+    Stop {
+        slot: Slot,
+        generation: u64,
+    },
 }
 
 /// The fake. A start creates a running instance that is not ready; a stop removes a running or
@@ -111,13 +119,19 @@ impl Orchestrator for Fake {
         Ok(self.instances())
     }
 
-    async fn start(&mut self, slot: &Slot, generation: u64) -> Result<(), Unavailable> {
+    async fn start(
+        &mut self,
+        slot: &Slot,
+        generation: u64,
+        lifetime: Option<Duration>,
+    ) -> Result<(), Unavailable> {
         if self.unavailable || self.refuse_effects {
             return Err(Unavailable);
         }
         self.calls.push(Call::Start {
             slot: slot.clone(),
             generation,
+            lifetime,
         });
         self.instances
             .entry((slot.clone(), generation))

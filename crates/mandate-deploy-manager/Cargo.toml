@@ -19,5 +19,7 @@ rustls.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
+mandate-connections.workspace = true
+mandate-vault.workspace = true
 proptest.workspace = true
 tokio = { workspace = true, features = ["rt", "net", "time"] }

@@ -2,6 +2,7 @@
 //! asks for. It reads probes and changes nothing else (infrastructure design §3.1, DEC-986).
 
 use std::future::Future;
+use std::time::Duration;
 
 use crate::control::Slot;
 
@@ -55,11 +56,14 @@ pub trait Orchestrator {
     /// may start (the Kubernetes API's list is a quorum read; the writer epoch still fences a copy
     /// a stale list hid).
     fn observe(&mut self) -> impl Future<Output = Result<Vec<Instance>, Unavailable>>;
-    /// Creates `generation` of `slot`, which the orchestrator must never restart on its own.
+    /// Creates `generation` of `slot`, which the orchestrator must never restart on its own. A token
+    /// exchange is given the `lifetime` its request has left and ends by it; a standing process is
+    /// given none.
     fn start(
         &mut self,
         slot: &Slot,
         generation: u64,
+        lifetime: Option<Duration>,
     ) -> impl Future<Output = Result<(), Unavailable>>;
     /// Asks `generation` of `slot` to stop, by the process's own drain (design §7.3).
     fn stop(
