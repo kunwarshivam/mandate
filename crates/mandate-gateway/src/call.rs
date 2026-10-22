@@ -803,6 +803,36 @@ pub enum RequestError {
     Transcript,
 }
 
+impl RequestError {
+    /// Every refusal, in the order the gateway checks them.
+    pub const ALL: [Self; 9] = [
+        Self::ForeignWorkspace,
+        Self::AgentPurpose,
+        Self::CallId,
+        Self::UnknownModel,
+        Self::HashMismatch,
+        Self::NotAgentic,
+        Self::RunKind,
+        Self::Tools,
+        Self::Transcript,
+    ];
+
+    /// The refusal's code: its name on the wire and in a log line.
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::ForeignWorkspace => "foreign_workspace",
+            Self::AgentPurpose => "agent_purpose",
+            Self::CallId => "call_id",
+            Self::UnknownModel => "unknown_model",
+            Self::HashMismatch => "hash_mismatch",
+            Self::NotAgentic => "not_agentic",
+            Self::RunKind => "run_kind",
+            Self::Tools => "tools",
+            Self::Transcript => "transcript",
+        }
+    }
+}
+
 fn add_usage(a: Usage, b: Usage) -> Usage {
     Usage {
         input: a.input.saturating_add(b.input),

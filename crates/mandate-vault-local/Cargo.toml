@@ -12,6 +12,7 @@ workspace = true
 [dependencies]
 mandate-connections.workspace = true
 ring.workspace = true
+rustix = { workspace = true, features = ["fs"] }
 secrecy.workspace = true
 thiserror.workspace = true
 

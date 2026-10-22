@@ -194,13 +194,21 @@ def one_workload_per_process(docs: list[dict], run_process: str = "control") -> 
     return problems
 
 
+def mounts_the_store(workload: dict) -> bool:
+    return any(
+        v.get("persistentVolumeClaim", {}).get("claimName") == "artifacts" for v in pod_spec(workload).get("volumes", [])
+    )
+
+
 def colocated(docs: list[dict]) -> list[str]:
-    """A workspace's executors, runtimes and data service share a node by required pod affinity (§3.2)."""
+    """A workspace's executors, runtimes and data service share a node by required pod affinity (§3.2),
+    and so does every pod that mounts the artifact store, a ReadWriteOnce claim, as one group
+    (DEC-2273): the store's mounts are read from each pod's volumes, not from the chart's helper."""
     problems = []
     for w in workloads(docs):
         affinity = pod_spec(w).get("affinity", {}).get("podAffinity", {})
         terms = affinity.get("requiredDuringSchedulingIgnoredDuringExecution", [])
-        want = owner(w)["colocate"]
+        want = owner(w)["colocate"] or mounts_the_store(w)
         good = [
             t
             for t in terms
@@ -216,6 +224,9 @@ def colocated(docs: list[dict]) -> list[str]:
     for name in ("runtime", "executor", "data"):
         if not process(name)["colocate"]:
             problems.append(f"{name} is not colocated")
+    mounting = {w["metadata"]["labels"]["mandate.dev/process"] for w in workloads(docs) if mounts_the_store(w)}
+    if mounting and not {"api", "model-gateway"} <= mounting:
+        problems.append(f"the store's mounts are {sorted(mounting)}, without the API server or the model gateway")
     return problems
 
 
@@ -2332,6 +2343,14 @@ def manager_gate(docs: list[dict]) -> dict:
 SEEDED = [
     (one_workload_per_process, lambda d: [x for x in d if x["metadata"]["name"] != "scheduler"]),
     (colocated, lambda d: mutate(d, "executor", "Pod", lambda w: pod_spec(w).pop("affinity"))),
+    (colocated, lambda d: mutate(d, "api", "Deployment", lambda w: pod_spec(w).pop("affinity"))),
+    (colocated, lambda d: mutate(d, "model-gateway", "Deployment", lambda w: pod_spec(w).pop("affinity"))),
+    (
+        colocated,
+        lambda d: mutate(
+            d, "control-t1", "Job", lambda w: w["spec"]["template"]["metadata"]["labels"].pop("mandate.dev/colocate")
+        ),
+    ),
     (
         guaranteed,
         lambda d: mutate(

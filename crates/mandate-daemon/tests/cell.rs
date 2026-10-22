@@ -2,9 +2,12 @@
 //! paper one read from the journal, nor over a bundle that does not load, and, once opted in, the
 //! bundle's entry over the recorded worker and the cell's source, with records naming the deployed
 //! mandate and the entry. Without the opt-in the binary runs deny-all, and a refused opt-in stops
-//! its start (`tests/process.rs`).
+//! its start (`tests/process.rs`). An agentic bundle gives the core its loop: `final_output`, the
+//! entry's bounds and declared tools, and the recorded run cap; one recording no run cap is refused
+//! at the opt-in (DEC-2268).
 
 use std::cell::RefCell;
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -12,15 +15,16 @@ use std::rc::Rc;
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Digest, Value, parse};
 use mandate_daemon::cell::{
-    CellDeployment, CellError, OptIn, meter_opened_ids, opt_in, research, research_daily_cap,
-    research_metered,
+    CellDeployment, CellError, OptIn, agentic_config, meter_opened_ids, opt_in, research,
+    research_daily_cap, research_metered,
 };
 use mandate_daemon::recorded::{Bundle, BundleError};
 use mandate_daemon::source::Rows;
 use mandate_gateway::money::Usd6;
 use mandate_gateway::provider::{IdSource, SequentialIds};
 use mandate_journal::{ArtifactStore, Environment, StoredEvent, StreamId};
-use mandate_runtime::{EventDraft, EventId};
+use mandate_research_run::agentic::{LoopBounds, OutputMode, Tool, ToolClass};
+use mandate_runtime::{AgenticConfig, EventDraft, EventId};
 use mandate_spec::document::Mandate;
 use mandate_store::MemoryStore;
 use mandate_store::meter::JournalMeter;
@@ -28,6 +32,10 @@ use mandate_time::UtcNanos;
 use serde_json::{Value as Json, json};
 
 const FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/research");
+const AGENTIC: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/research-agentic"
+);
 const MANDATE: &str = include_str!("fixtures/mandate.json");
 const AGENT: &str = "agent-a";
 
@@ -336,4 +344,107 @@ fn each_workspace_s_meter_stream_opens_with_an_id_of_its_own() {
     let mut ids = meter_opened_ids("ws1");
     let (one, two) = (ids.next_id(), ids.next_id());
     assert_ne!(one, two);
+}
+
+/// A copy of the agentic fixture with `edit` applied to its `research.json`, at a directory of its
+/// own for test `name`.
+fn agentic_edited(name: &str, edit: impl FnOnce(&mut Json)) -> PathBuf {
+    let dir =
+        std::env::temp_dir().join(format!("daemon-{}-cell-agentic-{name}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    for entry in fs::read_dir(AGENTIC).unwrap() {
+        let path = entry.unwrap().path();
+        fs::copy(&path, dir.join(path.file_name().unwrap())).unwrap();
+    }
+    let file = dir.join("research.json");
+    let mut value: Json = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+    edit(&mut value);
+    fs::write(&file, value.to_string()).unwrap();
+    dir
+}
+
+/// The core's loop for the agentic fixture, typed out from the fixture and DEC-2262's tools.
+fn expected_loop() -> AgenticConfig {
+    let tools = BTreeSet::from([
+        Tool::FilingsGet,
+        Tool::FilingsSearch,
+        Tool::MarketBars,
+        Tool::MarketQuote,
+        Tool::NewsGet,
+        Tool::NewsSearch,
+        Tool::Note,
+        Tool::Plan,
+    ]);
+    AgenticConfig {
+        output: OutputMode::FinalOutput,
+        bounds: LoopBounds::v0_2(),
+        ideate_menu: tools.clone(),
+        monitor_menu: tools,
+        cost_ceiling: Usd6::from_micros(1_500_000),
+    }
+}
+
+/// DEC-2268 item 1: a recording's `caps.run_usd` is the workspace's run cap, absent when it records
+/// none, and a malformed one refuses the load.
+#[test]
+fn a_recording_s_run_cap_is_read_when_it_records_one() {
+    assert_eq!(
+        Bundle::load(Path::new(AGENTIC)).unwrap().run_cap,
+        Some(Usd6::from_micros(1_500_000))
+    );
+    assert_eq!(Bundle::load(Path::new(FIXTURE)).unwrap().run_cap, None);
+    let dir = agentic_edited("bad-cap", |file| {
+        file["caps"]["run_usd"] = json!("a dollar")
+    });
+    assert_eq!(
+        Bundle::load(&dir).map(|_| ()),
+        Err(BundleError::Malformed {
+            file: "research.json",
+            member: "run_usd"
+        })
+    );
+}
+
+/// DEC-2268 items 2 and 3: an agentic bundle's research is the core's loop over the entry, and the
+/// single-call bundle's stays single-call.
+#[test]
+fn an_agentic_bundle_s_research_runs_the_entry_s_loop() {
+    let bundle = Bundle::load(Path::new(AGENTIC)).unwrap();
+    assert_eq!(agentic_config(&bundle), Ok(expected_loop()));
+    let (root, control, _, _) = deployed("agentic");
+    let opted = opt_in(Path::new(AGENTIC), &paper(true)).unwrap_or_else(|e| panic!("{e:?}"));
+    let wired = research(opted, Box::new(control), &root, now())
+        .unwrap_or_else(|error| panic!("{error:?}"));
+    assert_eq!(wired.wiring.config.agentic, Some(expected_loop()));
+    assert_eq!(wired.wiring.config.pin, bundle.entry.content().model_ref());
+}
+
+/// DEC-2268 item 3: no menu holds a tool that acts, and only declared tools are offered.
+#[test]
+fn neither_menu_offers_an_action_or_an_undeclared_tool() {
+    let bundle = Bundle::load(Path::new(AGENTIC)).unwrap();
+    let config = agentic_config(&bundle).unwrap_or_else(|e| panic!("{e:?}"));
+    let content = bundle.entry.content();
+    let declared = content.agentic().unwrap();
+    for tool in config.ideate_menu.iter().chain(&config.monitor_menu) {
+        assert_ne!(tool.class(), ToolClass::Action, "{tool:?}");
+        assert!(declared.tool(tool.name()).is_some(), "{tool:?} is declared");
+    }
+}
+
+/// DEC-2268 item 4 and §6.11: an agentic bundle that records no run cap is refused at the opt-in,
+/// before any store, worker or call, so no agentic run starts without one.
+#[test]
+fn an_agentic_bundle_without_a_run_cap_is_refused_at_the_opt_in() {
+    let dir = agentic_edited("no-cap", |file| {
+        file["caps"].as_object_mut().unwrap().remove("run_usd");
+    });
+    let refused = opt_in(&dir, &paper(true)).map(|_| ());
+    assert_eq!(
+        refused,
+        Err(CellError::Bundle(BundleError::Malformed {
+            file: "research.json",
+            member: "run_usd"
+        }))
+    );
 }
