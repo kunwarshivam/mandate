@@ -104,6 +104,8 @@ pub enum Cause {
     Deployed,
     Restart,
     KillSwitch,
+    /// A token exchange's one start, for its connection's OAuth request (rule 256).
+    Requested,
 }
 
 impl Cause {
@@ -112,6 +114,7 @@ impl Cause {
             Self::Deployed => "deployed",
             Self::Restart => "restart",
             Self::KillSwitch => "kill_switch",
+            Self::Requested => "requested",
         }
     }
 
@@ -120,6 +123,7 @@ impl Cause {
             "deployed" => Some(Self::Deployed),
             "restart" => Some(Self::Restart),
             "kill_switch" => Some(Self::KillSwitch),
+            "requested" => Some(Self::Requested),
             _ => None,
         }
     }
@@ -139,8 +143,21 @@ pub enum Fact {
         account: String,
     },
     /// A connection's `ConnectionRevoked`: a deployment on it after this starts nothing until it is
-    /// established again (rule 201); one deployed before keeps running (§9.24).
+    /// established again (rule 201); one deployed before keeps running (§9.24). It also closes the
+    /// connection's request (rule 131).
     Revoked {
+        connection: String,
+    },
+    /// A version-2 `ConnectionRequested` with `credential` `oauth` (§9.8): its connection's token
+    /// exchange runs until `deadline`, the request's `recorded_at` plus 600 seconds (DEC-2627).
+    Requested {
+        connection: String,
+        deadline: UtcNanos,
+    },
+    /// A record that closes a connection's request other than a version-2 establishment, which is
+    /// read as `Connected` and closes it too: a version-1 `ConnectionEstablished`, or a
+    /// `ConnectionRefused` with occasion `connect` (rule 131).
+    RequestClosed {
         connection: String,
     },
     /// A version-2 `AgentDeployed`, which names its connection (§9.24).
@@ -175,6 +192,9 @@ pub enum Fact {
     },
 }
 
+/// How long a connection request stays open: its exchange's deadline (DEC-2627 item 1).
+pub const REQUEST_SECONDS: i64 = 600;
+
 /// The fact `row` records, or `None` for a row the manager does not act on.
 pub fn fact(row: &StoredEvent) -> Option<Fact> {
     let body = parse(&row.body).ok()?;
@@ -191,9 +211,26 @@ pub fn fact(row: &StoredEvent) -> Option<Fact> {
         "StreamOpened" => Some(Fact::Opened {
             environment: row.environment.clone(),
         }),
-        "ConnectionEstablished" => Some(Fact::Connected {
+        "ConnectionEstablished" => {
+            let connection = text("connection_id")?.to_owned();
+            Some(match text("account_ref") {
+                Some(account) => Fact::Connected {
+                    connection,
+                    account: account.to_owned(),
+                },
+                None => Fact::RequestClosed { connection },
+            })
+        }
+        "ConnectionRequested" if row.schema_version == 2 && text("credential") == Some("oauth") => {
+            let recorded = UtcNanos::parse(&row.recorded_at).ok()?;
+            let deadline = recorded.secs().checked_add(REQUEST_SECONDS)?;
+            Some(Fact::Requested {
+                connection: text("connection_id")?.to_owned(),
+                deadline: UtcNanos::from_parts(deadline, recorded.nanos()).ok()?,
+            })
+        }
+        "ConnectionRefused" if text("occasion") == Some("connect") => Some(Fact::RequestClosed {
             connection: text("connection_id")?.to_owned(),
-            account: text("account_ref")?.to_owned(),
         }),
         "ConnectionRevoked" => Some(Fact::Revoked {
             connection: text("connection_id")?.to_owned(),
