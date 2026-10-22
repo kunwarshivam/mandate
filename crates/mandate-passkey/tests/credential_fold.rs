@@ -130,7 +130,7 @@ fn a_valid_stream_holds_each_members_unremoved_passkeys_in_enrolment_order() {
         for record in &all {
             let (credential, _) = credential_of(record);
             let holder = kept.iter().find(|(_, c)| c == credential).map(|(m, _)| *m);
-            let got = fold.held(credential).unwrap().map(|e| e.member);
+            let got = fold.held(credential).map(|e| e.member);
             assert_eq!(got, holder, "{}: {credential}", text(stream, "name"));
         }
     }
@@ -172,8 +172,8 @@ fn a_breaking_record_disables_step_up_for_both_members_and_the_first_enrolment_s
             _ => None,
         };
         assert_eq!(
-            fold.held(credential).map(|e| e.map(|e| e.member)),
-            Ok(holder),
+            fold.held(credential).map(|e| e.member),
+            holder,
             "{}",
             text(stream, "name")
         );
@@ -461,10 +461,7 @@ fn a_step_up_asserted_fails_step_up_closed_and_leaves_route_two_holding() {
         fold.passkeys(member),
         Err(CredentialError::AssertionUnread { seq: 2 })
     );
-    assert_eq!(
-        fold.held(&credential).map(|e| e.map(|e| e.member)),
-        Ok(Some(member))
-    );
+    assert_eq!(fold.held(&credential).map(|e| e.member), Some(member));
     assert_eq!(fold.admits(&CredentialRecord::Asserted { seq: 3 }), Ok(()));
 }
 
@@ -579,8 +576,8 @@ proptest! {
             prop_assert_eq!(got, want);
         }
         for credential in (0..4).map(|c| format!("credential-{c}-AAAAAAAAAAAAA")) {
-            let got = fold.held(&credential).map(|e| e.map(|e| e.member));
-            prop_assert_eq!(got, Ok(holders.get(&credential).copied()));
+            let got = fold.held(&credential).map(|e| e.member);
+            prop_assert_eq!(got, holders.get(&credential).copied());
         }
         let seq = u64::try_from(stream.len() + 1).unwrap();
         let mut extended = stream.clone();

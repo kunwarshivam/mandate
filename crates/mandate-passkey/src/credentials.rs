@@ -242,17 +242,13 @@ impl CredentialFold {
     /// The enrolment of `credential` while it is held, or `None`: route 2's view. Only the records
     /// that keep rule 251 count, so the first enrolment of an id wins and a breaking record,
     /// enrolment or removal, changes nothing. A broken member still holds what they hold here, and
-    /// a `StepUpAsserted` is skipped. Who holds it is the enrolment's `member`.
-    ///
-    /// # Errors
-    /// None: this view never refuses (`AGENTS.md` rule 13). It keeps the fold's `Result` so every
-    /// read has the same shape.
-    pub fn held(&self, credential: &str) -> Result<Option<&Enrolment>, CredentialError> {
-        Ok(self
-            .fold()
+    /// a `StepUpAsserted` is skipped. Who holds it is the enrolment's `member`. It has no error to
+    /// return: this view never refuses (`AGENTS.md` rule 13).
+    pub fn held(&self, credential: &str) -> Option<&Enrolment> {
+        self.fold()
             .held
             .into_iter()
-            .find(|e| e.credential == credential))
+            .find(|e| e.credential == credential)
     }
 
     /// Whether appending `next` after the folded records keeps rule 251: the writer's check before
