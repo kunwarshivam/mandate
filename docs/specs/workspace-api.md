@@ -1754,8 +1754,17 @@ or a response (API-11's shape). Unlike §4.10's routes, these name the workspace
 | Remove a push address | `POST /me/channels/web_push/{address_ref}/remove` | `NotificationAddressChanged` (`action: removed`) with its `OwnerAlertSent`, one batch | §5.7. Step-up. An `address_ref` that is not the member's own or does not exist is 404 exactly as any missing resource (API-9, NT-10). One already removed answers `200` and appends nothing. The pull channels (`web_inbox`, `cli_inbox`) are not addresses and are never affected |
 | List one's push addresses | `GET /me/channels/web_push` | — | Each active `address_ref` with when it was added and its delivery status (`ok` or `unreachable`, notifications spec §5.6); never an endpoint, a key, or a hash of either |
 
-**Active addresses.** An address is active while its last `NotificationAddressChanged` is
-`added`. The set is derived from the journal, never from the vault: a vault entry with no committed
+**Active addresses** ([DEC-2123](../project/decisions/DEC-2123.md) item 1). An address is active
+if and only if all hold: (1) the member has a start (`MemberActivated` or `MemberReactivated`);
+(2) the `added` seq is greater than the member's latest start seq; (3) no end (`MemberDeactivated`
+or `MemberRemoved`) has a seq above that start; (4) no matching `removed` (same member and
+`address_ref`) follows the `added`. With no start, nothing is active. A `removed` naming an
+`address_ref` that is not active, or another member's, changes nothing, and `cooling_off` has no
+end record, so a cooling-off member's addresses stay active. The dispatcher, these routes, and the deactivation's removals all read it through the one
+fold, journal spec §9.15's active set, and send, list, count, or match nothing it does not hold. So
+an address added before a membership ended is never served again, even after a reactivation: the
+reactivated member is told to add one by identity spec §5.2 step 3's in-app notice, never by push.
+The set is derived from the journal, never from the vault: a vault entry with no committed
 event, and one kept after its removal for the last send (§5.7), are not active. Only active
 addresses count toward the limit, match an endpoint already held, or are listed, and a re-add after
 a removal is a new address under a new `address_ref`. An active address marked `unreachable` (an
@@ -1785,7 +1794,11 @@ spec §4.1).
 
 **Deactivation.** When a deactivation or removal ends a member's membership in this workspace,
 workspace services append a `removed` `NotificationAddressChanged` for each of the member's active
-addresses in this workspace inside the deactivation's own commit, all or nothing (identity spec
+addresses in this workspace inside the deactivation's own commit, all or nothing. If the active-set
+fold cannot be read, the deactivation still commits, without the removals, and raises one operator
+alert carrying opaque ids only: a deactivation never waits on the fold, and by the definition above
+those addresses stop being active when it commits ([DEC-2123](../project/decisions/DEC-2123.md)
+item 3; identity spec
 §5.2 step 3, [#811](https://github.com/kunwarshivam/mandate/pull/811), DEC-816 item 7). Each carries
 the same actor as the `MemberDeactivated` or `MemberRemoved` it rides in: on the request path the
 authenticated principal, the admin or the member who left (DEC-642, identity spec §4.5); when the
@@ -2100,9 +2113,17 @@ no inline rollback.
 | Step 5, the append's outcome unknown | `effect: unknown`; a retry with the same key resolves it |
 | Step 6, the put fails | `effect: unknown`, `retryable: true`; the address is active, and if its entry is missing the dispatcher's attempt is `address_missing` until the member removes the address and sets it again |
 
-**The sweep.** For an entry whose `written_at` is more than 24 hours old, workspace services check
-the journal; if no `added` event names its `address_ref`, they delete it by compare-and-delete
-inside the vault on the `version` they read, which fails if steps 4 or 6 have written it since. A
+**The sweep** ([DEC-2123](../project/decisions/DEC-2123.md) item 2). Workspace services erase an
+entry only on positive evidence from a fold that succeeded and covers the entry's `written_at`: a
+matching `removed`, after any last send ends or 24 hours after the `removed` (removing step 5); the
+member's latest start followed by a `MemberDeactivated` or `MemberRemoved`; an `added` before the
+member's latest start; or, for an entry whose `written_at` and file are both more than 24 hours old,
+no `added` naming its `address_ref` at all. An address dead only because a membership ended waits a
+further 7 days: from the end record's time, or for an `added` before a later start, from that
+start's time. A member with no start, or a fold or journal read that fails, keeps the
+entry and raises one operator alert with opaque ids only: not serving an address is reversible,
+deleting it is not. They delete by compare-and-delete inside the vault on the `version` they read,
+which fails if steps 4 or 6 have written it since. A
 first attempt that loses that race regardless is repaired by its step 6; if step 6 also fails, the
 dispatcher finds the entry missing, records `address_missing`, and tells the member to remove the
 address and set it again (notifications spec §5.1, §5.6). Removing needs no vault entry.
@@ -2113,7 +2134,10 @@ address and set it again (notifications spec §5.1, §5.6). Removing needs no va
    members returns its original outcome, without judging the step-up again.
 2. Check that the `address_ref` is the member's own and exists (otherwise 404, the same answer as
    for a random id), and only then that it is active (otherwise `200`), so the `200` for an
-   already-removed address is never given for a foreign one.
+   already-removed address is never given for a foreign one. An address that is not active only
+   because a membership ended, with no `removed` of its own, answers `200` with the watermark of the
+   `MemberDeactivated` or `MemberRemoved` that ended it ([DEC-2123](../project/decisions/DEC-2123.md)
+   item 4).
 3. Check the step-up evidence.
 4. Append the batch with the expected head. From then on the dispatcher sends nothing to the
    address but the one last `notification_address_changed` notice about this removal

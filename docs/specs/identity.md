@@ -668,7 +668,11 @@ below). In order, workspace services:
    when the separate process deactivates (a directory sync, SCIM, §11.1), `system`. No step-up
    evidence is needed, since removing access needs none. A reactivated member starts with no
    address in the workspace, and an in-app notice (`web_inbox`, a kind lane L3's notifications
-   follow-up names) tells them to add one;
+   follow-up names) tells them to add one. If the active-set fold cannot be read, the removals are
+   absent: step 1 still commits, with one operator alert carrying opaque ids only, and the
+   addresses stop being active anyway, because an address is active only after the member's latest
+   activation and before any deactivation or removal (workspace API §4.11,
+   [DEC-2123](../project/decisions/DEC-2123.md));
 4. leave every committed event as it was. A response or command committed before step 1 was
    authorized when committed and is judged by the runtime as usual. One arriving after step 1 is
    refused at the API and never committed;

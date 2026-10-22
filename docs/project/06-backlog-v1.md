@@ -1361,16 +1361,6 @@ after U-A1 to U-A5 are recorded.
   *`key_id` in §5.7* ([DEC-2120](decisions/DEC-2120.md) item 5): workspace API §5.7's "The vault's
   part" lists what an entry holds without the VAPID `key_id` that DEC-2503 item 5 stores there; add
   it, with the note that it is the workspace's current key id and so outside the step-up digest.
-  *Active addresses and the fold-error case in the specs* (a spec-only PR, ES-22, DEC-2123,
-  reserved in that PR; from DEC-2120 item 9, raised by the L2 lead): workspace API §4.11 ("Active
-  addresses" and "Deactivation") and §5.7's sweep text (the sweep erases only on positive evidence
-  from a fold that succeeded, keeps the entry and raises one opaque operator alert otherwise, and
-  waits a 7-day grace for an address dead only because a membership ended), identity spec §5.2
-  step 3 (the removals may be absent when the fold fails; the deactivation commits with one opaque
-  operator alert), and journal §9.15's active set (an address is active only when its `added`
-  follows the member's latest `MemberActivated` or `MemberReactivated` with no
-  `MemberDeactivated` or `MemberRemoved` after it, and no matching `removed` follows the `added`).
-  L3 reviews §9.15 and L1 reviews §5.2. Until it lands, the code follows DEC-2120 item 9.
 - **E8-16 (Should, M7)** As a reviewer, I want the minors of the notifications spec's round 1
   ([#558](https://github.com/kunwarshivam/mandate/pull/558); freeze rule) fixed in the spec:
   - HLD §6 flow C step 4 still says "an escalation chain (push → SMS → phone call)"; align it with
