@@ -72,6 +72,8 @@ pub struct Following {
     commands: Vec<KillCommand>,
     /// The agents with an `AgentStopped`, whose runtime no longer runs to copy a kill switch.
     stopped: BTreeSet<AgentId>,
+    /// Whether an `exchanged` start of this account's executor is open (DEC-2347 item 3.9).
+    connecting: bool,
 }
 
 /// An `OwnerCommandIssued` `kill_switch` the executor may read itself (DEC-2343 item 3): its
@@ -105,6 +107,8 @@ pub fn agents_of(
     let mut revocations: BTreeMap<String, Vec<u64>> = BTreeMap::new();
     let mut commands = Vec::new();
     let mut stopped = BTreeSet::new();
+    let mut requested: Option<String> = None;
+    let mut connects: Vec<Option<String>> = Vec::new();
     for row in control
         .iter()
         .filter(|row| row.environment == environment.as_str())
@@ -116,6 +120,9 @@ pub fn agents_of(
                 | "AgentDeployed"
                 | "AgentStopped"
                 | "OwnerCommandIssued"
+                | "ConnectionRequested"
+                | "ConnectionRefused"
+                | "ProcessStartIssued"
         ) {
             continue;
         }
@@ -141,8 +148,28 @@ pub fn agents_of(
             ("ConnectionEstablished", _) => {
                 live.insert(text("connection_id")?, false);
             }
+            ("ConnectionRequested", _) => {
+                if text("account_ref")? == scope.account.0 {
+                    requested = Some(text("connection_id")?);
+                }
+            }
+            ("ProcessStartIssued", _) => {
+                if text("process")? == "executor"
+                    && text("subject")? == scope.account.0
+                    && text("cause")? == "exchanged"
+                {
+                    connects.push(requested.clone());
+                }
+            }
+            ("ConnectionRefused", _) => {
+                if text("occasion")? == "connect" {
+                    let connection = Some(text("connection_id")?);
+                    connects.retain(|open| open != &connection);
+                }
+            }
             ("ConnectionRevoked", _) => {
                 let connection = text("connection_id")?;
+                connects.retain(|open| open.as_ref() != Some(&connection));
                 revocations
                     .entry(connection.clone())
                     .or_default()
@@ -192,6 +219,7 @@ pub fn agents_of(
     }
     let mut following = Following {
         stopped,
+        connecting: !connects.is_empty(),
         revocations: revocations
             .into_iter()
             .filter(|(connection, _)| ours.contains(connection))
@@ -228,6 +256,14 @@ impl Following {
     /// something the journal does not show it yet, so it waits (DEC-2347 item 3.1).
     pub fn all_stopped(&self) -> bool {
         !self.agents.is_empty() && self.agents.keys().all(|agent| self.stopped.contains(agent))
+    }
+
+    /// Whether an OAuth connect still wants this executor (DEC-2347 item 3.9, DEC-2335 item 2): a
+    /// `ProcessStartIssued` of this account's executor with cause `exchanged` whose connection, the
+    /// latest one requested for this account before it, has no `ConnectionRefused` of its connect
+    /// and no `ConnectionRevoked` after it. A start with no request before it stays open.
+    pub fn connecting(&self) -> bool {
+        self.connecting
     }
 
     /// The kill-switch commands the executor applies itself to `agent` (DEC-2343 item 3), in

@@ -150,7 +150,6 @@ fn an_executor_following_no_agent_keeps_running() -> Result<(), Error> {
 /// its connection closes, agent or none (DEC-2335). Its only agent stopped, it keeps running while
 /// the connection is open, and exits once the connection is revoked.
 #[test]
-#[ignore = "pending E7-4"]
 fn an_open_connect_keeps_it_running_until_its_connection_is_revoked() -> Result<(), Error> {
     let journal = Journal::default();
     requested(&journal, "c0", CONNECTION, ACCOUNT)?;
@@ -178,7 +177,6 @@ fn an_open_connect_keeps_it_running_until_its_connection_is_revoked() -> Result<
 /// Item 3.7: a connect refused closes its `exchanged` start too. Another connect of the account,
 /// started after the stopped agent's, holds the executor until it is refused.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_refused_connect_lets_it_exit() -> Result<(), Error> {
     let journal = deployed()?;
     stopped(&journal, "c3", AGENT)?;
@@ -222,7 +220,6 @@ fn a_connects_executor_with_no_agent_never_exits_completed() -> Result<(), Error
 /// Item 3.9 reads only this account's executor's `exchanged` start: another account's, a token
 /// exchange's, and this executor's `deployed` start hold nothing.
 #[test]
-#[ignore = "pending E7-4"]
 fn only_this_executors_exchanged_start_holds_it() -> Result<(), Error> {
     let journal = deployed()?;
     stopped(&journal, "c3", AGENT)?;

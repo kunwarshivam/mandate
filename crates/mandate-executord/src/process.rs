@@ -175,7 +175,8 @@ pub struct ExecutorProcess<S, B> {
 
 /// What one pass reads from the agents' streams: the kill switches this stream has not applied,
 /// the proposals the core does not hold yet, each with its agent, whether a row did not read, and
-/// whether every agent followed is stopped ([`Following::all_stopped`]).
+/// whether every agent followed is stopped ([`Following::all_stopped`]) with no connect open
+/// ([`Following::connecting`]).
 struct Followed {
     switches: Vec<(AgentId, Switch)>,
     proposals: Vec<(AgentId, Proposal)>,
@@ -535,7 +536,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             switches: pending,
             proposals: proposed,
             unreadable,
-            all_stopped: following.all_stopped(),
+            all_stopped: following.all_stopped() && !following.connecting(),
         })
     }
 
