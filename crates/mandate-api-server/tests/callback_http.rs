@@ -10,12 +10,14 @@ use std::sync::atomic::Ordering;
 use mandate_api::problem::ProblemCode;
 use mandate_api_server::session::COOKIE_NAME;
 use mandate_canon::to_canonical;
-use mandate_connections::start::Environment;
+use mandate_connections::record::ConnectionId;
+use mandate_connections::start::{Binding, Environment, PkceVerifier};
+use secrecy::SecretString;
 
 use common::{Reply, WORKSPACE, send};
 use support_connect::{
-    ALICE, APP, BOB, DRAWS, Fixture, KEY, Put, T0, appended, b64, base, code, fixture, json, seed,
-    signed_in, start, text,
+    ALICE, APP, BOB, DRAWS, Fixture, KEY, Put, T0, appended, at, b64, base, client, code, ctl,
+    demote_alice, fixture, json, seed, signed_in, start, text,
 };
 
 const CALLBACK: &str = "/v1/oauth/alpaca/callback";
@@ -92,6 +94,7 @@ fn redirected(reply: &Reply, location: &str) {
     assert_eq!(reply.header("Location"), Some(location));
     assert_eq!(reply.header("Cache-Control"), Some("no-store"));
     assert_eq!(reply.header("Referrer-Policy"), Some("no-referrer"));
+    assert!(reply.body.is_empty(), "a redirect carries no body");
 }
 
 fn to_connection(s: &Started) -> String {
@@ -297,4 +300,68 @@ fn a_deployment_without_a_connect_answers_not_found_before_the_session() {
         let reply = callback(&f, cookie, "state=abc&code=abc");
         assert_eq!(code(&reply), (404, ProblemCode::NotFound), "{cookie:?}");
     }
+}
+
+/// The session's user must still hold the broker-connection permission when the code arrives: an
+/// admin demoted while at Alpaca gets no code written, and the `state` is spent (DEC-2626 item 3).
+#[test]
+#[ignore = "pending E10-13"]
+fn an_admin_demoted_while_at_alpaca_gets_no_code() {
+    let s = started();
+    demote_alice(&s.f);
+    let query = format!("state={}&code=abc", s.state);
+    redirected(&callback(&s.f, Some(&s.cookie), &query), &to_connection(&s));
+    assert!(
+        puts(&s.f).is_empty(),
+        "a demoted admin gets no code written"
+    );
+    assert!(!held(&s), "the state is spent");
+}
+
+/// A redeemed `state` bound to a workspace this deployment does not host writes nothing.
+#[test]
+#[ignore = "pending E10-13"]
+fn a_binding_for_a_workspace_not_hosted_writes_nothing() {
+    let f = fixture("paper", true, true);
+    let cookie = signed_in(&f, ALICE);
+    let connection = "conn_01JB3K6F0C9R2V7N4M8Q1T5W77";
+    let binding = Binding {
+        workspace_id: "01JB3K6F0C9R2V7N4M8Q1T5W40".to_owned(),
+        user_id: ALICE.to_owned(),
+        connection_id: ConnectionId::new(connection).unwrap(),
+        environment: Environment::Paper,
+    };
+    f.connect
+        .as_ref()
+        .expect("offered")
+        .states
+        .lock()
+        .unwrap()
+        .begin(
+            &client(),
+            binding,
+            "foreign-state",
+            PkceVerifier(SecretString::from("v".repeat(43))),
+            "challenge",
+            at(f.clock.secs()),
+        )
+        .unwrap();
+    redirected(
+        &callback(&f, Some(&cookie), "state=foreign-state&code=abc"),
+        &format!("{APP}/connections/{connection}"),
+    );
+    assert!(puts(&f).is_empty(), "no code for a workspace not hosted");
+}
+
+/// A control stream that cannot be read writes nothing: neither the permission nor the open
+/// request can be confirmed.
+#[test]
+#[ignore = "pending E10-13"]
+fn an_unreadable_control_stream_writes_nothing() {
+    let s = started();
+    s.f.journal.failing.lock().unwrap().insert(ctl());
+    let query = format!("state={}&code=abc", s.state);
+    redirected(&callback(&s.f, Some(&s.cookie), &query), &to_connection(&s));
+    assert!(puts(&s.f).is_empty());
+    assert!(!held(&s), "the state is spent");
 }
