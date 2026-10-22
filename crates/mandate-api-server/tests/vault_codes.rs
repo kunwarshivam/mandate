@@ -72,7 +72,6 @@ fn entry() -> Vec<u8> {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_paper_code_is_one_put_at_its_connection_s_code_path_after_one_login() {
     let script = Script::new(Identity::Api);
     assert_eq!(written(&script, Environment::Paper, CODE), Ok(()));
@@ -95,7 +94,6 @@ fn a_paper_code_is_one_put_at_its_connection_s_code_path_after_one_login() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn each_write_logs_in_afresh() {
     let script = Script::new(Identity::Api);
     let codes = port(&script);
@@ -113,7 +111,6 @@ fn each_write_logs_in_afresh() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_live_binding_is_refused_before_any_login() {
     let script = Script::new(Identity::Api);
     assert_eq!(
@@ -124,7 +121,6 @@ fn a_live_binding_is_refused_before_any_login() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_code_outside_the_entry_s_form_is_refused_before_any_login() {
     let script = Script::new(Identity::Api);
     for c in ["", "a\"b", "a\\b", "a b"] {
@@ -138,7 +134,6 @@ fn a_code_outside_the_entry_s_form_is_refused_before_any_login() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_failed_login_or_put_is_vault_unavailable() {
     for refused in [
         SourceError::Unavailable,
@@ -169,7 +164,6 @@ fn a_failed_login_or_put_is_vault_unavailable() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_session_that_is_not_the_api_s_writes_nothing() {
     for identity in [
         Identity::ConnectionManager,
@@ -197,7 +191,6 @@ impl Clock for NoClock {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn without_a_clock_nothing_is_logged_in() {
     let script = Script::new(Identity::Api);
     let codes = VaultCodes {
@@ -214,7 +207,6 @@ fn without_a_clock_nothing_is_logged_in() {
 /// The deployment's login takes its AppRole credentials from the mounted directory only: one
 /// without them writes nothing.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_deployment_login_without_its_mounted_credentials_writes_nothing() {
     let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
         "mandate-api-server-vault-codes-{}",
