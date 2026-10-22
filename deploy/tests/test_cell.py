@@ -963,6 +963,17 @@ def test_the_api_is_bound_to_the_vault_only_with_its_binding():
 
 APPROLE_SECRET = "vault-approle-"
 APPROLE_COPY_MODES = (["install", "-m", "0600"], ["install", "-m", "0400"])
+POD_KINDS = {"Deployment", "Job", "CronJob", "StatefulSet", "DaemonSet", "ReplicaSet", "ReplicationController"}
+
+
+def other_pods(docs: list[dict]) -> list[dict]:
+    """The pod templates of every kind but the workspace's own (Deployments, Jobs, managed pods),
+    each shaped as a workload: a CronJob's job template's, and the rest's own."""
+    return [
+        {"kind": d["kind"], "metadata": d["metadata"], "spec": d["spec"]["jobTemplate"]["spec"] if d["kind"] == "CronJob" else d["spec"]}
+        for d in docs
+        if d["kind"] in POD_KINDS - {"Deployment", "Job"}
+    ]
 
 
 def approle_copied(docs: list[dict]) -> list[str]:
@@ -972,8 +983,12 @@ def approle_copied(docs: list[dict]) -> list[str]:
     that runs to completion and `install`s its files owner-only into a memory-backed directory, the
     pgpass pattern; no container, sidecar included, mounts it or names it in its environment,
     command or arguments."""
-    problems = []
-    for w in workloads(docs):
+    problems = [
+        f"{d['kind']} {d['metadata']['name']} runs pods this check does not read"
+        for d in docs
+        if d["kind"] not in POD_KINDS and ("template" in d.get("spec", {}) or "jobTemplate" in d.get("spec", {}))
+    ]
+    for w in workloads(docs) + other_pods(docs):
         spec = pod_spec(w)
         name = w["metadata"]["name"]
         volumes = spec.get("volumes", [])
@@ -983,7 +998,7 @@ def approle_copied(docs: list[dict]) -> list[str]:
         readers = spec.get("containers", []) + [c for c in spec.get("initContainers", []) if c not in copies]
         for c in readers + copies:
             named = json.dumps({k: c.get(k) for k in ("env", "envFrom", "command", "args")})
-            if APPROLE_SECRET in named and not (c in copies and c.get("command", [])[:3] in APPROLE_COPY_MODES):
+            if APPROLE_SECRET in named:
                 problems.append(f"{name}/{c['name']} names an AppRole Secret in its environment or command")
         for c in readers:
             if held & {m["name"] for m in c.get("volumeMounts", [])}:
@@ -997,6 +1012,9 @@ def approle_copied(docs: list[dict]) -> list[str]:
                 problems.append(f"{name}/{c['name']} copies an AppRole Secret by {c.get('command')} {c.get('args')}")
             if not into or not into <= memory or into & held:
                 problems.append(f"{name}/{c['name']} copies an AppRole Secret into {sorted(into)}, not memory alone")
+            targets = {m["mountPath"].rstrip("/") for m in mounts if not m.get("readOnly") and m["name"] in memory}
+            if not c.get("command") or c["command"][-1].rstrip("/") not in targets:
+                problems.append(f"{name}/{c['name']} installs an AppRole Secret's files into {c.get('command', [None])[-1:]}, not its memory mount")
             if any(m["name"] in held and not m.get("readOnly") for m in mounts):
                 problems.append(f"{name}/{c['name']} mounts an AppRole Secret writable")
         everyone = spec.get("containers", []) + spec.get("initContainers", [])
@@ -1033,6 +1051,25 @@ def test_no_process_reads_an_approle_secret_where_it_is_mounted():
     ]
     for kind, name, seed in seeds:
         assert approle_copied(mutate(on, name, kind, seed)), (name, seed)
+    named = [
+        lambda w: copier(w).setdefault("env", []).append({"name": "X", "valueFrom": {"secretKeyRef": {"name": "vault-approle-api", "key": "secret-id"}}}),
+        lambda w: copier(w).setdefault("envFrom", []).append({"secretRef": {"name": "vault-approle-api"}}),
+        lambda w: copier(w)["command"].append("vault-approle-api"),
+        lambda w: copier(w)["command"].__setitem__(-1, "/etc/"),
+    ]
+    for seed in named:
+        assert approle_copied(mutate(on, "api", "Deployment", seed)), seed
+    assert {d["kind"] for d in on if d["kind"] in POD_KINDS} == {"Deployment", "Job"}, "the workspace runs pods as Deployments and Jobs alone"
+    leaked = next(d for d in on if d["kind"] == "Deployment" and d["metadata"]["name"] == "scheduler")
+    leaked = copy.deepcopy(leaked)
+    pod_spec(leaked).setdefault("volumes", []).append(leak)
+    pod_spec(leaked)["containers"][0].setdefault("volumeMounts", []).append({"name": "leak", "mountPath": "/run/leak", "readOnly": True})
+    for kind in ("StatefulSet", "DaemonSet", "ReplicaSet", "CronJob", "Rollout"):
+        escaped = copy.deepcopy(leaked)
+        escaped["kind"] = kind
+        if kind == "CronJob":
+            escaped["spec"] = {"jobTemplate": {"spec": escaped["spec"]}}
+        assert approle_copied([d for d in on if d["metadata"]["name"] != "scheduler"] + [escaped]), kind
     for where, volume in (("containers", "vault"), ("containers", "vault-sources"), ("initContainers", "vault-sources"), ("initContainers", "vault")):
         assert approle_copied(mutate(on, "api", "Deployment", lambda w: beside_api(w, where, volume))), (where, volume)
 
