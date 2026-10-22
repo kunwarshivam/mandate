@@ -6,7 +6,7 @@
 
 use core::fmt;
 use core::num::NonZeroU32;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::UtcNanos;
 
@@ -48,15 +48,22 @@ pub struct ClientKey {
     pub device: String,
 }
 
-/// The four limits, none zero. A challenge counts against its issuing client's address and device
+/// The limits, none zero. A challenge counts against its issuing client's address and device
 /// while it is outstanding; a failed assertion counts against its presenting client's address and
-/// device for [`CHALLENGE_LIFETIME_S`] after it failed.
+/// device for [`CHALLENGE_LIFETIME_S`] after it failed. The last three bound the gate in all
+/// (workspace API spec §4.10 route 2 item 3, DEC-2119 items 4 and 11): at most `max_outstanding`
+/// challenges outstanding; once `reserve` are, none more to an address that already holds one;
+/// and failures kept for at most `max_failure_keys` addresses and devices together, the key whose
+/// latest failure is oldest dropped first.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ReductionLimits {
     pub challenges_per_address: NonZeroU32,
     pub challenges_per_device: NonZeroU32,
     pub failures_per_address: NonZeroU32,
     pub failures_per_device: NonZeroU32,
+    pub max_outstanding: NonZeroU32,
+    pub reserve: NonZeroU32,
+    pub max_failure_keys: NonZeroU32,
 }
 
 /// What the challenge route returns, and all it returns: the bytes the caller drew and when they
@@ -71,7 +78,9 @@ pub struct Challenge {
 /// The outstanding challenges and the recent failures, per address and per device.
 ///
 /// **Memory.** Every call that changes the gate first forgets the challenges that expired and the
-/// failures that lapsed by its `now`, so nothing older than [`CHALLENGE_LIFETIME_S`] is held. An
+/// failure keys whose latest failure lapsed by its `now`, so no key is held past
+/// [`CHALLENGE_LIFETIME_S`] after its last failure; a kept key may still hold older lapsed
+/// failures, within its limit, which no count reads. An
 /// address holds at most `challenges_per_address` outstanding challenges and a device at most
 /// `challenges_per_device`; an address keeps at most its `failures_per_address` latest failures and
 /// a device its `failures_per_device` latest, since older ones can no longer change what
@@ -88,6 +97,17 @@ pub struct ReductionGate {
     outstanding: BTreeMap<[u8; 32], Outstanding>,
     failures_by_address: BTreeMap<String, Vec<UtcNanos>>,
     failures_by_device: BTreeMap<String, Vec<UtcNanos>>,
+    /// One entry per failure key held, by its latest failure, then its kind, then the key: the
+    /// first is both the next to lapse and the next to drop, so neither scans the keys.
+    by_latest: BTreeSet<(UtcNanos, Kind, String)>,
+}
+
+/// Which map a failure key is held in. An address orders before a device, so at a tie the
+/// address is dropped first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Kind {
+    Address,
+    Device,
 }
 
 /// An issued challenge not yet consumed: when it expires and which client's slots it holds.
@@ -115,22 +135,6 @@ fn fills(held: usize, limit: NonZeroU32) -> bool {
     usize::try_from(limit.get()).is_ok_and(|limit| held >= limit)
 }
 
-/// Records a failure at `now` against `key`, keeping only the `limit` latest failures of that key.
-fn record_failure(
-    failures: &mut BTreeMap<String, Vec<UtcNanos>>,
-    key: &str,
-    now: UtcNanos,
-    limit: NonZeroU32,
-) {
-    let times = failures.entry(key.to_owned()).or_default();
-    times.push(now);
-    times.sort_unstable();
-    let surplus = times
-        .len()
-        .saturating_sub(usize::try_from(limit.get()).unwrap_or(usize::MAX));
-    times.drain(..surplus);
-}
-
 /// How many failures of `key` count at `now`.
 fn failures_at(failures: &BTreeMap<String, Vec<UtcNanos>>, key: &str, now: UtcNanos) -> usize {
     failures.get(key).map_or(0, |times| {
@@ -149,18 +153,54 @@ impl ReductionGate {
             outstanding: BTreeMap::new(),
             failures_by_address: BTreeMap::new(),
             failures_by_device: BTreeMap::new(),
+            by_latest: BTreeSet::new(),
         }
     }
 
-    /// Forgets every challenge expired and every failure lapsed at `now`, and every key left with
-    /// no failure.
+    /// The failures held for keys of `kind`.
+    fn failures_mut(&mut self, kind: Kind) -> &mut BTreeMap<String, Vec<UtcNanos>> {
+        match kind {
+            Kind::Address => &mut self.failures_by_address,
+            Kind::Device => &mut self.failures_by_device,
+        }
+    }
+
+    /// Records a failure at `now` against `key` of `kind`, keeping only the `limit` latest failures
+    /// of that key, and moves the key to its new place in [`Self::by_latest`].
+    fn record_failure(&mut self, kind: Kind, key: &str, now: UtcNanos, limit: NonZeroU32) {
+        let failures = match kind {
+            Kind::Address => &mut self.failures_by_address,
+            Kind::Device => &mut self.failures_by_device,
+        };
+        let times = failures.entry(key.to_owned()).or_default();
+        if let Some(latest) = times.last() {
+            self.by_latest.remove(&(*latest, kind, key.to_owned()));
+        }
+        times.push(now);
+        times.sort_unstable();
+        let surplus = times
+            .len()
+            .saturating_sub(usize::try_from(limit.get()).unwrap_or(usize::MAX));
+        times.drain(..surplus);
+        if let Some(latest) = times.last() {
+            self.by_latest.insert((*latest, kind, key.to_owned()));
+        }
+    }
+
+    /// Forgets every challenge expired at `now`, and every failure key whose latest failure lapsed
+    /// by then, oldest first from [`Self::by_latest`]. A kept key's older failures that lapsed stay
+    /// until its next failure pushes them out; no count reads them, since [`failures_at`] counts
+    /// only those that still count, and a key holds at most its limit of them.
     fn forget_before(&mut self, now: UtcNanos) {
         self.outstanding.retain(|_, held| now < held.expires_at);
-        for failures in [&mut self.failures_by_address, &mut self.failures_by_device] {
-            failures.retain(|_, times| {
-                times.retain(|failed_at| counts_at(*failed_at, now));
-                !times.is_empty()
-            });
+        while let Some((latest, _, _)) = self.by_latest.first() {
+            if counts_at(*latest, now) {
+                break;
+            }
+            let Some((_, kind, key)) = self.by_latest.pop_first() else {
+                break;
+            };
+            self.failures_mut(kind).remove(&key);
         }
     }
 
@@ -188,7 +228,16 @@ impl ReductionGate {
                 .count(),
             self.limits.challenges_per_device,
         );
-        if address_full || device_full || self.outstanding.contains_key(&random) {
+        let held = self.outstanding.len();
+        let in_all = fills(held, self.limits.max_outstanding);
+        let reserved = fills(held, self.limits.reserve)
+            && issuers().any(|issuer| issuer.address == client.address);
+        if address_full
+            || device_full
+            || in_all
+            || reserved
+            || self.outstanding.contains_key(&random)
+        {
             return Err(Unauthenticated);
         }
         let expires_at = lifetime_after(now).ok_or(Unauthenticated)?;
@@ -225,19 +274,40 @@ impl ReductionGate {
             return Ok(verified);
         }
         let limits = self.limits;
-        record_failure(
-            &mut self.failures_by_address,
+        self.record_failure(
+            Kind::Address,
             &client.address,
             now,
             limits.failures_per_address,
         );
-        record_failure(
-            &mut self.failures_by_device,
+        self.record_failure(
+            Kind::Device,
             &client.device,
             now,
             limits.failures_per_device,
         );
+        self.bound_failure_keys();
         Err(Unauthenticated)
+    }
+
+    /// Drops failure keys, the one whose latest failure is oldest first and an address before a
+    /// device at a tie, until at most `max_failure_keys` addresses and devices are held: each drop
+    /// is the first entry of [`Self::by_latest`], so the bound costs no scan of the keys. Dropping
+    /// one changes no answer, since failures only report. The loop also ends if the index runs
+    /// out first, which it cannot while it holds one entry per key, rather than spin.
+    fn bound_failure_keys(&mut self) {
+        let cap = usize::try_from(self.limits.max_failure_keys.get()).unwrap_or(usize::MAX);
+        while self
+            .failures_by_address
+            .len()
+            .saturating_add(self.failures_by_device.len())
+            > cap
+        {
+            let Some((_, kind, key)) = self.by_latest.pop_first() else {
+                break;
+            };
+            self.failures_mut(kind).remove(&key);
+        }
     }
 
     /// Whether `client`'s address or device has reached its failure limit at `now`. No answer of

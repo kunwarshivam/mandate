@@ -62,6 +62,7 @@ pub mod lifecycle;
 pub mod me;
 pub mod members;
 pub mod objects;
+pub mod opening;
 pub mod reads;
 pub mod reduction;
 pub mod routes;

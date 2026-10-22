@@ -7,9 +7,16 @@
 //! standard input, applies the Secrets it prints through `kubectl`'s standard input, and revokes
 //! the token, however the step ends. Every key, one-time pad, and token is masked the moment it
 //! exists and is never an argument, an environment variable, a file, or a log line.
+//!
+//! Each provisioning sets Kubernetes auth up too, at the `kubernetes` Service's address
+//! (DEC-2062), and records that address in the ConfigMap `vault-kubernetes-auth`, which holds
+//! nothing secret. A vault whose Secrets are there but whose ConfigMap is missing or names another
+//! address gains Kubernetes auth alone, `--kubernetes-only`, which mints no secret id, so no
+//! credential in use is rotated.
 
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
+use std::net::SocketAddrV4;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 
@@ -39,12 +46,19 @@ const PLATFORM_SECRETS: [&str; 6] = [
     "vault-approle-model-gateway",
     "vault-approle-email-sender",
 ];
+/// The ConfigMap that records the API server address the vault's Kubernetes auth was last set up
+/// at, and its key.
+const MARKER: &str = "vault-kubernetes-auth";
+const MARKER_KEY: &str = "host";
 /// Revokes the token on standard input, as `vault_init` revokes its own.
 const REVOKE: [&str; 3] = [
     "sh",
     "-c",
     "BAO_TOKEN=\"$(cat)\" exec bao token revoke -self",
 ];
+
+/// `mandate vault provision`, given its arguments after `vault` and its standard input.
+pub(crate) type Provision<'a> = &'a dyn Fn(&[String], &str) -> Result<(bool, String)>;
 
 /// `mandate vault put <secret>`, given the secret's name and its standard input.
 pub(crate) type Put<'a> = &'a dyn Fn(&str, &str) -> Result<(bool, String)>;
@@ -54,7 +68,7 @@ pub(crate) type Put<'a> = &'a dyn Fn(&str, &str) -> Result<(bool, String)>;
 /// and what it printed: the Secrets, or one status line.
 pub(crate) struct Steps<'a> {
     pub(crate) kubectl: Kubectl<'a>,
-    pub(crate) provision: &'a dyn Fn(&str) -> Result<(bool, String)>,
+    pub(crate) provision: Provision<'a>,
     pub(crate) put: Put<'a>,
 }
 
@@ -109,6 +123,69 @@ fn provisioned(steps: &Steps<'_>, connections: &[&str]) -> Result<bool> {
         .copied()
         .chain(executors.iter().map(String::as_str))
         .all(|name| present.contains(&name)))
+}
+
+/// `host` when it is exactly `https://`, an IPv4 address and a port from 1 to 65535, written the
+/// one way `SocketAddrV4` writes it, as `mandate_vault::kubernetes::api_server_address` takes it:
+/// the vault sends its own token there on every TokenReview, so nothing else is trusted.
+fn api_server_host(host: &str) -> Option<String> {
+    let address: SocketAddrV4 = host.strip_prefix("https://")?.parse().ok()?;
+    let written = format!("https://{address}");
+    (address.port() != 0 && written == host).then_some(written)
+}
+
+/// The `kubernetes` Service's address, as the vault's pod reaches the API server.
+fn kubernetes_host(steps: &Steps<'_>) -> Result<String> {
+    let (read, address) = (steps.kubectl)(
+        &[
+            "get",
+            "service",
+            "kubernetes",
+            "--namespace",
+            "default",
+            "-o",
+            "jsonpath={.spec.clusterIP}:{.spec.ports[?(@.name==\"https\")].port}",
+        ],
+        None,
+    )?;
+    ensure!(read, "reading the kubernetes Service's address failed");
+    api_server_host(&format!("https://{address}"))
+        .context("the kubernetes Service's address is not an IPv4 address and a port")
+}
+
+/// The address [`MARKER`] records, when it is one [`api_server_host`] takes; a missing, empty or
+/// malformed one is none, so the step sets Kubernetes auth up again.
+fn marked_host(steps: &Steps<'_>) -> Result<Option<String>> {
+    let (read, marked) = (steps.kubectl)(
+        &[
+            "get",
+            "configmap",
+            MARKER,
+            "--namespace",
+            WORKSPACE_NAMESPACE,
+            "--ignore-not-found",
+            "-o",
+            "jsonpath={.data.host}",
+        ],
+        None,
+    )?;
+    ensure!(read, "reading {MARKER} failed");
+    Ok(api_server_host(&marked))
+}
+
+/// [`MARKER`]'s manifest, naming `host`.
+fn marker_manifest(host: &str) -> String {
+    serde_json::json!({
+        "apiVersion": "v1",
+        "kind": "ConfigMap",
+        "metadata": {
+            "name": MARKER,
+            "namespace": WORKSPACE_NAMESPACE,
+            "labels": {"app.kubernetes.io/managed-by": "mandate-vault-provision"},
+        },
+        "data": {MARKER_KEY: host},
+    })
+    .to_string()
 }
 
 /// The recovery keys `vault_init` stored, each masked as it is read.
@@ -407,21 +484,36 @@ pub(crate) fn run_cli(
     ))
 }
 
-/// The arguments of `mandate vault provision` for `connections`, its token on stdin and its
-/// Secrets on stdout.
-pub(crate) fn provision_command(connections: &[String]) -> Vec<String> {
+/// The arguments of `mandate vault provision` for `connections`, Kubernetes auth at `host`, its
+/// token on stdin and its Secrets on stdout.
+pub(crate) fn provision_command(connections: &[&str], host: &str) -> Vec<String> {
     let mut command: Vec<String> = [
         "provision",
         "--operator-token-stdin",
         "--secrets-namespace",
         WORKSPACE_NAMESPACE,
+        "--kubernetes-host",
+        host,
     ]
     .map(str::to_owned)
     .to_vec();
     for connection in connections {
-        command.extend(["--connection".to_owned(), connection.clone()]);
+        command.extend(["--connection".to_owned(), (*connection).to_owned()]);
     }
     command
+}
+
+/// The arguments of `mandate vault provision --kubernetes-only` at `host`, its token on stdin.
+pub(crate) fn kubernetes_command(host: &str) -> Vec<String> {
+    [
+        "provision",
+        "--operator-token-stdin",
+        "--kubernetes-only",
+        "--kubernetes-host",
+        host,
+    ]
+    .map(str::to_owned)
+    .to_vec()
 }
 
 /// The `mandate vault put` name of the model provider's key (DEC-2630).
@@ -460,7 +552,10 @@ fn secret_import(steps: &Steps<'_>) -> Result<String> {
     Ok(lines)
 }
 
-/// Provisions staging's vault for `connections` unless every Secret is already there, then writes
+/// Provisions staging's vault for `connections`, with Kubernetes auth at the `kubernetes`
+/// Service's address, unless every Secret is already there; sets Kubernetes auth alone up when
+/// they are but [`MARKER`] does not name that address; records the address once either is done;
+/// and revokes the root token on every path, a failure's included. Then it writes
 /// each of `model_key` (DEC-2630) and `alpaca_client_secret` (DEC-2636) that is not empty through
 /// the secret-import identity on every run, so a rotation is the secret replaced and the apply run
 /// again; an empty one is left as the vault holds it, never deleted. Answers the status words to
@@ -472,22 +567,33 @@ pub(crate) fn vault_provision(
     alpaca_client_secret: &str,
 ) -> Result<Vec<&'static str>> {
     let mut words = Vec::new();
-    if provisioned(steps, connections)? {
-        words.push("credentials: present");
+    let host = kubernetes_host(steps)?;
+    let present = provisioned(steps, connections)?;
+    let marked = marked_host(steps)?.as_deref() == Some(host.as_str());
+    if present && marked {
+        words.extend(["credentials: present", "kubernetes auth: present"]);
     } else {
         let keys = recovery_keys(steps)?;
         let root = root(steps, &keys)?;
         let token = root.token.clone().unwrap_or_default();
-        let (provisioned, list) = (steps.provision)(&format!("{token}\n"))?;
-        ensure!(provisioned, "mandate vault provision failed");
-        let (applied, _) = (steps.kubectl)(&["apply", "-f", "-"], Some(&list))?;
-        ensure!(applied, "applying staging's vault credentials failed");
+        let stdin = format!("{token}\n");
+        words.push("root token: generated");
+        if present {
+            words.push("credentials: present");
+            let (set, _) = (steps.provision)(&kubernetes_command(&host), &stdin)?;
+            ensure!(set, "mandate vault provision --kubernetes-only failed");
+        } else {
+            let (provisioned, list) =
+                (steps.provision)(&provision_command(connections, &host), &stdin)?;
+            ensure!(provisioned, "mandate vault provision failed");
+            let (applied, _) = (steps.kubectl)(&["apply", "-f", "-"], Some(&list))?;
+            ensure!(applied, "applying staging's vault credentials failed");
+            words.push("credentials: provisioned");
+        }
+        let (recorded, _) = (steps.kubectl)(&["apply", "-f", "-"], Some(&marker_manifest(&host)))?;
+        ensure!(recorded, "recording {MARKER} failed");
         root.revoke()?;
-        words.extend([
-            "root token: generated",
-            "credentials: provisioned",
-            "root token: revoked",
-        ]);
+        words.extend(["kubernetes auth: set up", "root token: revoked"]);
     }
     words.push(import(
         steps,
@@ -563,8 +669,15 @@ mod tests {
         revoke_spawn_failures: Cell<u32>,
         model_key: &'static str,
         client_secret: &'static str,
+        /// What `kubectl` reads as the `kubernetes` Service's address; empty is `10.43.0.1:443`.
+        api_server: &'static str,
+        /// What [`MARKER`] names; `None` is the default address, as a provisioned vault records.
+        marker: Option<&'static str>,
+        kubernetes_only_fails: bool,
+        marker_apply_fails: bool,
         calls: RefCell<Vec<(Vec<String>, Option<String>)>>,
         provisioned_with: RefCell<Vec<String>>,
+        commands: RefCell<Vec<Vec<String>>>,
         put_with: RefCell<Vec<String>>,
     }
 
@@ -577,6 +690,19 @@ mod tests {
             let has = |word: &str| args.contains(&word);
             Ok(match args.first().copied().unwrap_or_default() {
                 "get" if has("secrets") => (true, self.present.join(" ")),
+                "get" if has("service") => (
+                    true,
+                    if self.api_server.is_empty() {
+                        "10.43.0.1:443"
+                    } else {
+                        self.api_server
+                    }
+                    .to_owned(),
+                ),
+                "get" if has(MARKER) => (
+                    true,
+                    self.marker.unwrap_or("https://10.43.0.1:443").to_owned(),
+                ),
                 "get" if has("vault-approle-secret-import") => (true, IMPORT.to_owned()),
                 "get" if has(RECOVERY_SECRET) => (
                     !self.unreadable_keys,
@@ -610,13 +736,20 @@ mod tests {
                     }
                     (!self.revoke_fails, String::new())
                 }
+                "apply" if stdin.is_some_and(|manifest| manifest.contains(MARKER)) => {
+                    (!self.marker_apply_fails, String::new())
+                }
                 "apply" => (!self.apply_fails, String::new()),
                 other => return Err(anyhow!("unexpected kubectl {other}: {args:?}")),
             })
         }
 
         fn run(&self, connections: &[&str]) -> Result<Vec<&'static str>> {
-            let provision = |stdin: &str| {
+            let provision = |command: &[String], stdin: &str| {
+                self.commands.borrow_mut().push(command.to_vec());
+                if command.iter().any(|arg| arg == "--kubernetes-only") {
+                    return Ok((!self.kubernetes_only_fails, String::new()));
+                }
                 self.provisioned_with.borrow_mut().push(stdin.to_owned());
                 Ok((!self.provision_fails, LIST.to_owned()))
             };
@@ -720,12 +853,13 @@ mod tests {
             fake.run(&["c1"])?,
             [
                 "credentials: present",
+                "kubernetes auth: present",
                 "model provider key: not set",
                 "alpaca oauth client secret: not set"
             ]
         );
-        assert_eq!(fake.calls.borrow().len(), 1);
-        assert!(fake.provisioned_with.borrow().is_empty());
+        assert_eq!(fake.calls.borrow().len(), 3);
+        assert!(fake.commands.borrow().is_empty());
         Ok(())
     }
 
@@ -745,6 +879,7 @@ mod tests {
             [
                 "root token: generated",
                 "credentials: provisioned",
+                "kubernetes auth: set up",
                 "root token: revoked",
                 "model provider key: not set",
                 "alpaca oauth client secret: not set"
@@ -771,14 +906,170 @@ mod tests {
                 "sys/generate-root/update",
                 "sys/generate-root/update",
                 "apply",
+                "apply",
                 REVOKE[2],
             ]
         );
         assert_eq!(*fake.provisioned_with.borrow(), [format!("{ROOT}\n")]);
-        assert_eq!(fake.calls_with("apply")[0].1.as_deref(), Some(LIST));
+        assert_eq!(
+            *fake.commands.borrow(),
+            [provision_command(&["c1"], "https://10.43.0.1:443")]
+        );
+        let applied = fake.calls_with("apply");
+        assert_eq!(applied[0].1.as_deref(), Some(LIST));
+        assert_eq!(
+            applied[1].1.as_deref(),
+            Some(marker_manifest("https://10.43.0.1:443").as_str())
+        );
         assert!(fake.revoked());
         fake.nothing_secret_in_argv();
         Ok(())
+    }
+
+    /// Every Secret there but no record of Kubernetes auth, or a record of another address or
+    /// one that is no address: Kubernetes auth alone is set up at the Service's address, with the
+    /// root token on stdin, no Secret applied and no secret id minted; the address is recorded,
+    /// and the token revoked.
+    #[test]
+    fn a_provisioned_vault_without_kubernetes_auth_at_its_address_gains_it_alone() -> Result<()> {
+        for marker in [
+            "",
+            "https://10.43.0.2:443",
+            "https://10.43.0.1:6443",
+            "https://10.43.0.1:443/",
+            "https://u@10.43.0.1:443",
+            " https://10.43.0.1:443",
+        ] {
+            let fake = Fake {
+                present: all_present(&["c1"]),
+                marker: Some(marker),
+                ..Fake::default()
+            };
+            assert_eq!(
+                fake.run(&["c1"])?,
+                [
+                    "root token: generated",
+                    "credentials: present",
+                    "kubernetes auth: set up",
+                    "root token: revoked",
+                    "model provider key: not set",
+                    "alpaca oauth client secret: not set"
+                ],
+                "{marker:?}"
+            );
+            assert_eq!(
+                *fake.commands.borrow(),
+                [kubernetes_command("https://10.43.0.1:443")],
+                "{marker:?}"
+            );
+            assert!(fake.provisioned_with.borrow().is_empty(), "{marker:?}");
+            let applied: Vec<Option<String>> = fake
+                .calls_with("apply")
+                .into_iter()
+                .map(|(_, stdin)| stdin)
+                .collect();
+            assert_eq!(
+                applied,
+                [Some(marker_manifest("https://10.43.0.1:443"))],
+                "{marker:?}"
+            );
+            assert!(fake.revoked(), "{marker:?}");
+            fake.nothing_secret_in_argv();
+        }
+        Ok(())
+    }
+
+    /// The address is the `kubernetes` Service's, an IPv4 address and a port; anything else stops
+    /// the step before a root token is made.
+    #[test]
+    fn an_api_server_that_is_not_an_ipv4_address_and_port_stops_the_step() {
+        for api_server in [
+            "kubernetes.default.svc:443",
+            "10.43.0.1:",
+            ":443",
+            "10.43.0.1:0",
+            "10.43.0.1:443/x",
+            "u@10.43.0.1:443",
+            "[::1]:443",
+        ] {
+            let fake = Fake {
+                api_server,
+                ..Fake::default()
+            };
+            assert!(fake.run(&["c1"]).is_err(), "{api_server:?}");
+            assert!(fake.calls_with("exec").is_empty(), "{api_server:?}");
+            assert!(fake.commands.borrow().is_empty(), "{api_server:?}");
+        }
+        let elsewhere = Fake {
+            api_server: "10.96.0.1:6443",
+            ..Fake::default()
+        };
+        elsewhere.run(&["c1"]).unwrap();
+        assert_eq!(
+            elsewhere.commands.borrow()[0],
+            provision_command(&["c1"], "https://10.96.0.1:6443")
+        );
+    }
+
+    /// The marker's manifest is a ConfigMap in the workspace's namespace, labelled as the
+    /// provisioned Secrets are, naming the address alone.
+    #[test]
+    fn the_marker_is_a_configmap_naming_the_address() {
+        let manifest: Value =
+            serde_json::from_str(&marker_manifest("https://10.43.0.1:443")).unwrap();
+        assert_eq!(
+            manifest,
+            json!({
+                "apiVersion": "v1",
+                "kind": "ConfigMap",
+                "metadata": {
+                    "name": "vault-kubernetes-auth",
+                    "namespace": "ws-ws1",
+                    "labels": {"app.kubernetes.io/managed-by": "mandate-vault-provision"},
+                },
+                "data": {"host": "https://10.43.0.1:443"},
+            })
+        );
+        assert_eq!(
+            MANAGED_BY,
+            "app.kubernetes.io/managed-by=mandate-vault-provision"
+        );
+    }
+
+    /// The root token is revoked however setting Kubernetes auth up ends: the CLI failing, or
+    /// recording the address failing, on either path.
+    #[test]
+    fn a_failed_kubernetes_setup_or_record_still_revokes_the_token() {
+        for fake in [
+            Fake {
+                present: all_present(&["c1"]),
+                marker: Some(""),
+                kubernetes_only_fails: true,
+                ..Fake::default()
+            },
+            Fake {
+                present: all_present(&["c1"]),
+                marker: Some(""),
+                marker_apply_fails: true,
+                ..Fake::default()
+            },
+            Fake {
+                marker_apply_fails: true,
+                ..Fake::default()
+            },
+        ] {
+            assert!(fake.run(&["c1"]).is_err());
+            assert!(fake.revoked());
+            fake.nothing_secret_in_argv();
+        }
+        let failed = Fake {
+            present: all_present(&["c1"]),
+            marker: Some(""),
+            kubernetes_only_fails: true,
+            ..Fake::default()
+        };
+        assert!(failed.run(&["c1"]).is_err());
+        assert!(failed.calls_with("apply").is_empty(), "no address recorded");
     }
 
     #[test]
@@ -855,6 +1146,7 @@ mod tests {
             fake.run(&["c1"])?,
             [
                 "credentials: present",
+                "kubernetes auth: present",
                 "model provider key: written",
                 "alpaca oauth client secret: not set"
             ]
@@ -909,6 +1201,7 @@ mod tests {
             fake.run(&["c1"])?,
             [
                 "credentials: present",
+                "kubernetes auth: present",
                 "model provider key: not set",
                 "alpaca oauth client secret: written"
             ]
@@ -974,14 +1267,26 @@ mod tests {
     #[test]
     fn the_commands_are_the_clis() {
         assert_eq!(
-            provision_command(&["c1".to_owned()]),
+            provision_command(&["c1"], "https://10.43.0.1:443"),
             [
                 "provision",
                 "--operator-token-stdin",
                 "--secrets-namespace",
                 "ws-ws1",
+                "--kubernetes-host",
+                "https://10.43.0.1:443",
                 "--connection",
                 "c1"
+            ]
+        );
+        assert_eq!(
+            kubernetes_command("https://10.43.0.1:443"),
+            [
+                "provision",
+                "--operator-token-stdin",
+                "--kubernetes-only",
+                "--kubernetes-host",
+                "https://10.43.0.1:443"
             ]
         );
         assert_eq!(put_command(MODEL_KEY_SECRET), ["put", "model-provider-key"]);
