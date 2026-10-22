@@ -2494,6 +2494,15 @@ research run starts before E19-5 and E15-8 land (spec §6.2 preconditions).
   *Slice 2 (planned, spec §15.12):* desk actions become proposal cards built by deterministic code
   through E19-13's action tools and sent only by the owner's own call with step-up (HI-26, lane SU);
   its own spec change and DEC first.
+- **E19-16 (Should, before E19-6's bench covers every read; SC)** As the founder, I want the cell's
+  recorded plane to serve `news.search`, `filings.search`, `news.get`, `filings.get`, and
+  `market.quote`, so that an agentic run in the cell reads with the whole read menu it is offered,
+  not only `market.bars` and the seed (found by E19-6's injection fixture, DEC-2270). Today
+  the recorded plane implements no search terms, no stored text, and no quote, so each answers
+  `unavailable` (rule 3). *Accepted when:* the recorded plane matches terms inside the data service
+  (HI-28) and serves stored text and quotes within the run's scope; recording fixtures hold them; and
+  DEC-2270's canary scan, which already asks each of these reads for every canary by name, still
+  finds none, its seeded scope breaches still caught.
 
 *Follow-ups (#554 review round 1, minors, deferred by the freeze rule):*
 
