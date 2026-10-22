@@ -5816,9 +5816,16 @@ fn a_confirmed_instrument_is_closed_by_the_broker() {
 }
 
 /// The account switch, accepted and read clear, up to the run that closes BTC: the shell, the
-/// switch's `KillSwitchActivated` event id, and that run.
-fn closed_btc(ports: &mandate_executor::Ports<'_>) -> (Shell, String, common::Ran) {
-    let (mut shell, _) = crypto_stop_account(ports);
+/// switch's `KillSwitchActivated` event id, that run, and the stop the cancel-all cancelled.
+fn closed_btc(
+    ports: &mandate_executor::Ports<'_>,
+) -> (
+    Shell,
+    String,
+    common::Ran,
+    impl Fn(&str) -> mandate_executor::BrokerOrder,
+) {
+    let (mut shell, stop) = crypto_stop_account(ports);
     let switched = shell.run(account_switch(Initiator::Owner), ports);
     let switch = switched
         .draft("KillSwitchActivated")
@@ -5829,7 +5836,7 @@ fn closed_btc(ports: &mandate_executor::Ports<'_>) -> (Shell, String, common::Ra
         Input::Broker(Ok(BrokerOutcome::OpenOrders(Vec::new()))),
         ports,
     );
-    (shell, switch, read)
+    (shell, switch, read, stop)
 }
 
 /// Each close-position is journaled before it is sent (DEC-2337 items 1 and 3, `AGENTS.md` rule
@@ -5843,7 +5850,7 @@ fn a_close_is_journaled_before_it_is_sent() {
     let instruments = FixedInstruments;
     let config = config();
     let ports = ports(&ids, &mandates, &instruments, &config);
-    let (shell, switch, read) = closed_btc(&ports);
+    let (shell, switch, read, _) = closed_btc(&ports);
 
     let record = read
         .effects
@@ -5900,7 +5907,7 @@ fn a_close_is_asked_again_only_on_a_later_read_showing_it_still_held() {
     let instruments = FixedInstruments;
     let config = config();
     let ports = ports(&ids, &mandates, &instruments, &config);
-    let (shell, _, _) = closed_btc(&ports);
+    let (shell, _, _, _) = closed_btc(&ports);
     let requested = shell
         .account_journal
         .iter()
@@ -5954,7 +5961,8 @@ fn a_close_is_asked_again_only_on_a_later_read_showing_it_still_held() {
     );
 }
 
-/// BTC's unprotected interval ends on its close (DEC-2337 item 4): the close is journaled, and its
+/// BTC's unprotected interval ends on its close (DEC-2337 item 4): the close is journaled, the
+/// broker reports the stop the cancel-all cancelled, which opens BTC's interval, and the close's
 /// fill, which names no order of ours, leaves nothing held, so the interval journals
 /// `unprotected_end` after the `AccountCloseRequested`: the last end, since the entry's own interval
 /// ended before the switch.
@@ -5966,7 +5974,11 @@ fn the_interval_ends_once_the_close_leaves_nothing_held() {
     let instruments = FixedInstruments;
     let config = config();
     let ports = ports(&ids, &mandates, &instruments, &config);
-    let (mut shell, _, _) = closed_btc(&ports);
+    let (mut shell, _, _, stop) = closed_btc(&ports);
+    shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(stop("canceled"))),
+        &ports,
+    );
     let held = shell
         .state
         .positions()
