@@ -51,6 +51,7 @@ mandate-num = { path = "crates/mandate-num", version = "0.0.0" }
 mandate-passkey = { path = "crates/mandate-passkey", version = "0.0.0" }
 mandate-ports = { path = "crates/mandate-ports", version = "0.0.0" }
 mandate-process = { path = "crates/mandate-process", version = "0.0.0" }
+mandate-provisioner = { path = "crates/mandate-provisioner", version = "0.0.0" }
 mandate-push-relay = { path = "crates/mandate-push-relay", version = "0.0.0" }
 mandate-scheduler = { path = "crates/mandate-scheduler", version = "0.0.0" }
 mandate-store = { path = "crates/mandate-store", version = "0.0.0" }
