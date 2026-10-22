@@ -137,6 +137,9 @@ pub struct ExecutorState {
     /// which would sell the same shares twice (§5.4, §5.5). An instrument leaves once it is no
     /// longer held long, and all of them once the account's kill-switch mode is lifted.
     pub(crate) closing_all: BTreeSet<InstrumentId>,
+    /// An account-scoped kill switch's cancel-all is journaled and not yet confirmed by an
+    /// open-orders read: its answer, accepted or lost, asks that read (DEC-2333 items 2 and 3).
+    pub(crate) cancel_all_unconfirmed: bool,
     /// The owner's confirmation each owner's exit was received with, by intent, from its
     /// `OwnerConfirmationReceived` (journal spec §9.5, DEC-2040 item 2).
     pub(crate) confirmations: BTreeMap<IntentId, Confirmed>,
@@ -371,6 +374,7 @@ impl ExecutorState {
             pending_requests: BTreeMap::new(),
             switches: BTreeMap::new(),
             closing_all: BTreeSet::new(),
+            cancel_all_unconfirmed: false,
             confirmations: BTreeMap::new(),
             now: None,
             previous_now: None,

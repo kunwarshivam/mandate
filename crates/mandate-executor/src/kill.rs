@@ -18,8 +18,9 @@ use crate::protection::{ask_cancel, lowest_sane, market_allowed};
 use crate::session::{Venue, venue};
 use crate::state::{EVERY_AGENT, ExecutorState, IntentOutcome, Switch};
 use crate::types::{
-    AccountWide, AccountWideScope, AgentId, BrokerRequest, EventId, Initiator, IntentBody,
-    IntentHandoff, KillScope, Mode, Order, OrderState, OwnerConfirmation, Purpose, RiskClock,
+    AccountWide, AccountWideScope, AgentId, BrokerOrder, BrokerRequest, EventId, Initiator,
+    IntentBody, IntentHandoff, KillScope, Mode, Order, OrderState, OwnerConfirmation, Purpose,
+    RiskClock,
 };
 
 /// The restriction the kill switch's final mode is recorded under (mandate spec §5.9).
@@ -27,9 +28,9 @@ const KILL_SWITCH: &str = "kill_switch";
 
 /// `Command::KillSwitch`. The agent scope sells through the executor's own flatten intents. The
 /// account scope, one of the only two that may name `cancel-all` and `close-position` (DEC-485
-/// item 1), uses them where every held instrument may close at the market now ([`account`]); where
-/// one may not, and for the workspace scope, it answers the next slice's stub (DEC-2309 items 1 to
-/// 3). A switch that copies another stream's record names it as `copied_from`, and `null`
+/// item 1), sends its cancel-all where every held instrument may close at the market now
+/// ([`account`]); where one may not, and for the workspace scope, it answers the next slice's stub
+/// (DEC-2309 items 1 to 3, DEC-2333). A switch that copies another stream's record names it as `copied_from`, and `null`
 /// otherwise (DEC-2003 item 4).
 pub(crate) fn kill_switch(
     batch: &mut Batch<'_, '_>,
@@ -106,13 +107,14 @@ pub(crate) fn kill_switch(
 }
 
 /// §5.5's account scope where every held instrument may close at the market now (regular session,
-/// outside the closing window, a fresh quote with a bid): the final mode for every agent of the
-/// account first, journaled under `*` so an agent not yet seen is held too; then the switch's own
-/// record, naming the account and each instrument it closes; then the broker's cancel-all, which
-/// reaches `Unknown` orders too; then its close-position once for each held instrument, crypto
-/// included. Nothing is cancelled by id and nothing is sold through an order of the executor's
-/// own. Where any held instrument may not close at the market now, the switch waits for the slice
-/// that keeps that position's protection (DEC-2309 items 1 and 2).
+/// outside the closing window, a fresh quote with a bid), up to its cancel (DEC-2333 item 1): the
+/// final mode for every agent of the account first, journaled under `*` so an agent not yet seen is
+/// held too; then the switch's own record, naming the account and each instrument it will close;
+/// then the broker's cancel-all, which reaches `Unknown` orders too, and nothing else. Nothing is
+/// cancelled by id beside it and nothing closes until the cancel is confirmed
+/// ([`cancel_all_answered`], [`open_orders_read`]). Where any held instrument may not close at the
+/// market now, the switch waits for the slice that keeps that position's protection (DEC-2309
+/// items 1 and 2).
 fn account(
     batch: &mut Batch<'_, '_>,
     reference: crate::types::AccountRef,
@@ -177,12 +179,44 @@ fn account(
         ],
     )?;
     batch.notify(switch, KILL_SWITCH);
-    let scope = || AccountWideScope::new(AccountWide::Account(reference.clone()));
-    batch.broker(BrokerRequest::CancelAll(scope()));
-    for instrument in held {
-        batch.broker(BrokerRequest::ClosePosition(scope(), instrument));
-    }
+    batch.broker(BrokerRequest::CancelAll(AccountWideScope::new(
+        AccountWide::Account(reference),
+    )));
     Ok(())
+}
+
+/// The cancel-all's answer, accepted or lost (DEC-2333 items 2 and 3): the cancel is confirmed by
+/// a fresh read of the account's open orders, never by the answer alone, and a lost answer is read
+/// the same way, never by sending the cancel-all again. Answers whether an account switch was
+/// waiting for it.
+pub(crate) fn cancel_all_answered(batch: &mut Batch<'_, '_>) -> bool {
+    if !batch.view.cancel_all_unconfirmed {
+        return false;
+    }
+    batch.broker(BrokerRequest::ListOpenOrders);
+    true
+}
+
+/// The open-orders read that confirms an account switch's cancel-all (DEC-2333 items 2 and 3):
+/// a sell of ours still working in an instrument the switch closes is cancelled by its own id,
+/// once until confirmed. Answers whether an account switch was waiting for it.
+pub(crate) fn open_orders_read(
+    batch: &mut Batch<'_, '_>,
+    orders: &[BrokerOrder],
+) -> Result<bool, ExecutorError> {
+    if !batch.view.cancel_all_unconfirmed {
+        return Ok(false);
+    }
+    let working: Vec<ClientOrderId> = orders
+        .iter()
+        .filter(|order| {
+            order.side == Side::Sell && batch.view.closing_all.contains(&order.instrument)
+        })
+        .filter_map(|order| ClientOrderId::parse(order.client_order_id.as_deref()?).ok())
+        .filter(|id| batch.view.orders.contains_key(id))
+        .collect();
+    cancel_each(batch, working)?;
+    Ok(true)
 }
 
 /// Asks the cancel of each order by its own id, once until confirmed (§5.5).

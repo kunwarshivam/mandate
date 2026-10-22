@@ -4,7 +4,7 @@ use crate::batch::Batch;
 use crate::error::ExecutorError;
 use crate::ids::{FLATTEN, WATCHDOG};
 use crate::intent::{received, release_held, resume};
-use crate::kill::kill_switch;
+use crate::kill::{cancel_all_answered, kill_switch, open_orders_read};
 use crate::listing::{listed, query_unknown};
 use crate::orders::{
     absent, account, cancelled, described, duplicate, fill, kill_cancels_due, lookups_due, reject,
@@ -207,7 +207,10 @@ fn step(batch: &mut Batch<'_, '_>, input: Input) -> Result<(), ExecutorError> {
             })
         }
         Input::Intent(handoff) => received(batch, handoff),
-        Input::Broker(Err(_)) => silence(batch),
+        Input::Broker(Err(_)) => {
+            cancel_all_answered(batch);
+            silence(batch)
+        }
         Input::Broker(Ok(outcome)) => outcome_of(batch, outcome),
         Input::BrokerUpdate(BrokerUpdate::Order(order)) => described(batch, &order),
         Input::BrokerUpdate(BrokerUpdate::Fill(one)) => fill(batch, &one, None).map(|_| ()),
@@ -246,6 +249,8 @@ fn outcome_of(batch: &mut Batch<'_, '_>, outcome: BrokerOutcome) -> Result<(), E
         BrokerOutcome::CancelAccepted { client_order_id } => cancelled(batch, &client_order_id),
         BrokerOutcome::Rejected(refused) => reject(batch, &refused),
         BrokerOutcome::Account(snapshot) => account(batch, &snapshot),
+        BrokerOutcome::AccountWideAccepted if cancel_all_answered(batch) => Ok(()),
+        BrokerOutcome::OpenOrders(orders) if open_orders_read(batch, &orders)? => Ok(()),
         BrokerOutcome::OpenOrders(_)
         | BrokerOutcome::Positions(_)
         | BrokerOutcome::Activities { .. }

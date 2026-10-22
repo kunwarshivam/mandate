@@ -449,6 +449,7 @@ fn kill_switch_activated(
     instruments.extend(named("deferred")?);
     if scope == Some("account") {
         state.closing_all.extend(instruments);
+        state.cancel_all_unconfirmed = true;
         return Ok(());
     }
     let cancels = match payload.get("cancels") {
@@ -1124,6 +1125,7 @@ fn agent_mode_applied(state: &mut ExecutorState, payload: &Value) -> Result<(), 
         }
         if agent.0 == EVERY_AGENT && restriction == "kill_switch" {
             state.closing_all.clear();
+            state.cancel_all_unconfirmed = false;
         }
         state.restrictions.remove(&(agent.clone(), restriction));
     } else {
