@@ -12,7 +12,7 @@ use crate::openbao::{
     kubernetes_login_verdict, kubernetes_namespace_verdict, lost_or_denied_verdict, provision,
     provisioned_identities, refusal, role_settings, seal_verdict, secret_id_identities, taken_read,
 };
-use crate::openbao::{fingerprint_key_verdict, transit_mount_verdict};
+use crate::openbao::{fingerprint_key_verdict, key_needs_creating, transit_mount_verdict};
 use crate::policy::{Identity, Mounts};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
@@ -611,6 +611,39 @@ fn an_existing_fingerprint_key_must_never_leave_the_vault() {
             fingerprint_key_verdict(answer.as_ref()),
             Err(SourceError::Config),
             "{answer:?}"
+        );
+    }
+}
+
+/// Provisioning creates the fingerprint key only when its GET answers 404; a key there is kept
+/// only when it passes the verdict, and any other refusal of the GET fails provisioning, so a
+/// transient error never lets an exportable key through unverified (review F1, round 2).
+#[test]
+#[ignore = "pending E21-32"]
+fn only_a_missing_fingerprint_key_is_created_and_any_other_error_fails() {
+    let kept = json!({ "data": {
+        "exportable": false, "deletion_allowed": false, "allow_plaintext_backup": false,
+    } });
+    let exportable = json!({ "data": {
+        "exportable": true, "deletion_allowed": false, "allow_plaintext_backup": false,
+    } });
+    assert_eq!(key_needs_creating(&Ok(Some(kept))), Ok(false));
+    assert_eq!(
+        key_needs_creating(&Ok(Some(exportable))),
+        Err(SourceError::Config)
+    );
+    assert_eq!(key_needs_creating(&Ok(None)), Err(SourceError::Config));
+    assert_eq!(key_needs_creating(&Err(SourceError::Missing)), Ok(true));
+    for refusal in [
+        SourceError::Unavailable,
+        SourceError::Denied,
+        SourceError::Sealed,
+        SourceError::Malformed,
+    ] {
+        assert_eq!(
+            key_needs_creating(&Err(refusal.clone())),
+            Err(refusal.clone()),
+            "{refusal:?}"
         );
     }
 }
