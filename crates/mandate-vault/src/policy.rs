@@ -41,6 +41,10 @@ pub enum Identity {
     ModelGateway,
     /// The process that sends the platform's email: reads the email credential (DEC-2020).
     EmailSender,
+    /// The role provisioner: makes each OAuth connect's two Kubernetes-auth roles and removes the
+    /// token exchange's, by [`crate::kubernetes::provisioner_policy`] alone, and reads no secret
+    /// (DEC-2630 item 7, DEC-2350 items 1 and 5).
+    Provisioner,
 }
 
 /// One secret the vault holds.
@@ -171,6 +175,7 @@ pub fn role_name(identity: &Identity) -> String {
         Identity::SecretImport => "secret-import".to_owned(),
         Identity::ModelGateway => "model-gateway".to_owned(),
         Identity::EmailSender => "email-sender".to_owned(),
+        Identity::Provisioner => "provisioner".to_owned(),
     }
 }
 

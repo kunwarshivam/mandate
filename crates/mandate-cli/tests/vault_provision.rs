@@ -385,19 +385,20 @@ fn provisioning_with_a_kubernetes_host_asks_the_vault_to_set_kubernetes_auth_up(
     assert!(output.status.success(), "{}", stderr(&output));
 }
 
-/// The host is passed as it is, with no CA: the vault reads the one its own pod projects. No
-/// host is no Kubernetes auth with `--out`, and refused with `--secrets-namespace`, the
-/// cluster's path, so a staging vault is never provisioned without it.
+/// The host is passed as it is, with no CA: the vault reads the one its own pod projects, and
+/// `--secrets-namespace` is the workspace's namespace the role provisioner's roles bind
+/// (DEC-2350 item 1). No host is no Kubernetes auth with `--out`, and refused with
+/// `--secrets-namespace`, the cluster's path, so a staging vault is never provisioned without it.
 #[test]
 fn a_kubernetes_host_is_the_api_server_with_no_ca() {
-    let in_cluster = Some(KubernetesAuth {
-        host: "https://10.43.0.1:443".to_owned(),
-        ca_pem: None,
-    });
     for namespace in [None, Some("ws-ws1")] {
         assert_eq!(
             kubernetes_auth(Some("https://10.43.0.1:443"), namespace),
-            Ok(in_cluster.clone()),
+            Ok(Some(KubernetesAuth {
+                host: "https://10.43.0.1:443".to_owned(),
+                ca_pem: None,
+                namespace: namespace.map(str::to_owned),
+            })),
             "{namespace:?}"
         );
         assert_eq!(
