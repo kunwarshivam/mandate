@@ -5017,7 +5017,6 @@ fn the_agents_switch_sells_the_lots_a_broker_id_fill_bought() {
 /// DEC-2353, the review of #2270: a buy that filled 5 of its 10 and then ended canceled or expired,
 /// its fill naming only the broker's order id, is the agent's, so its switch sells exactly the 5.
 #[test]
-#[ignore = "pending E7-4"]
 fn the_agents_switch_sells_what_an_ended_buys_broker_id_fill_bought() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
