@@ -94,6 +94,14 @@ fn a_cookie_is_an_id_and_a_secret_tagged_under_the_session_key() {
     assert_eq!(format!("{cookie:?}"), "Cookie(..)");
 }
 
+/// A cookie for the session whose id is `id_hex`'s, holding `secret`, tagged under the test's key
+/// as the server tags one: a cookie the tag check passes and only the secret check can refuse.
+fn retagged(id_hex: &str, secret: [u8; 32]) -> String {
+    let body = [decode(id_hex), secret.to_vec()].concat();
+    let tag = ring::hmac::sign(&ring::hmac::Key::new(ring::hmac::HMAC_SHA256, &KEY), &body);
+    format!("{id_hex}{}{}", hex(&secret), hex(tag.as_ref()))
+}
+
 fn decode(text: &str) -> Vec<u8> {
     (0..text.len())
         .step_by(2)
@@ -896,6 +904,15 @@ fn a_passkey_session_reaches_pause_the_kill_switch_and_sign_out_for_fifteen_minu
     let cookie = store
         .open_reduction_only(alice(), signed_in(), None, at(T0))
         .expect("opened");
+    assert_eq!(
+        store.subject(cookie.value()),
+        Err(Unauthenticated),
+        "no sign-in opened it, so it holds no subject while it lives"
+    );
+    let full = store
+        .open(bob(), SUBJECT.to_owned(), None, at(T0))
+        .expect("opened");
+    assert_eq!(store.subject(full.value()), Ok(SUBJECT.to_owned()));
     let paused = store
         .authenticate(cookie.value(), Request::Pause, at(T0 + 1))
         .expect("pause");
@@ -991,6 +1008,13 @@ fn a_passkey_session_is_never_refreshed_and_a_refresh_keeps_it() {
         "an outage narrows, it does not mark"
     );
     assert!(!store.opened_by_passkey("00", at(T0 + 3)));
+    let wrong_secret = retagged(&cookie.value()[..32], [0x77; 32]);
+    assert!(store.opened_by_passkey(cookie.value(), at(T0 + 3)));
+    assert!(
+        !store.opened_by_passkey(&wrong_secret, at(T0 + 3)),
+        "its id with another secret, tagged: only the secret check refuses it"
+    );
+    assert!(!store.reduction_only(&wrong_secret, at(T0 + 3)));
     let mut forged = cookie.value().to_owned();
     forged.replace_range(..2, if forged.starts_with("00") { "01" } else { "00" });
     assert!(!store.opened_by_passkey(&forged, at(T0 + 3)));
