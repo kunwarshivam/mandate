@@ -219,6 +219,16 @@ impl Reduction {
         todo!()
     }
 
+    /// Whether the challenge `challenge_id` is held, issued and not yet taken or found expired.
+    #[expect(
+        clippy::todo,
+        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+    )]
+    pub fn contains(&self, challenge_id: &str) -> bool {
+        let _ = challenge_id;
+        todo!()
+    }
+
     /// Fresh device cookie bytes, unpadded base64url.
     #[expect(
         clippy::todo,

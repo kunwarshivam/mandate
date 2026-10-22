@@ -108,19 +108,41 @@ fn the_store_issues_within_the_gate_and_holds_at_most_4096_in_all() {
         store.issue(&client("a1", "d99"), now).is_err(),
         "a 33rd on one address"
     );
+    let edge = at(T0 + 299);
+    assert!(
+        store.issue(&client("a1", "d1"), edge).is_err(),
+        "a second before expiry the device limit still binds"
+    );
+    assert!(
+        store.issue(&client("a1", "d100"), edge).is_err(),
+        "and so does the address limit"
+    );
+    assert!(
+        store.contains(&first.challenge_id),
+        "and nothing was dropped"
+    );
     assert!(
         store.issue(&client("a1", "d1"), at(T0 + 300)).is_ok(),
         "expired challenges free their slots"
     );
 
     let wide = Reduction::new(Vec::new(), Box::new(Wide::default()));
-    for n in 0..3_072 {
+    let held = wide.issue(&client("a0", "d0"), now).expect("issued");
+    for n in 1..3_071 {
         wide.issue(&client(&format!("a{n}"), &format!("d{n}")), now)
             .expect("issued");
     }
     assert!(
+        wide.issue(&client("a1", "e1"), now).is_ok(),
+        "with 3,071 held a repeat address is still issued"
+    );
+    assert!(
         wide.issue(&client("a0", "e0"), now).is_err(),
         "past 3,072, an address that holds one gets no more"
+    );
+    assert!(
+        wide.contains(&held.challenge_id),
+        "the reserve refusal drops nothing"
     );
     assert!(wide.issue(&client("n0", "m0"), now).is_ok(), "the reserve");
     assert!(wide.issue(&client("n0", "m1"), now).is_err());
@@ -132,13 +154,38 @@ fn the_store_issues_within_the_gate_and_holds_at_most_4096_in_all() {
         wide.issue(&client("fresh", "fresh"), now).is_err(),
         "the 4,097th outstanding in all"
     );
+    assert!(
+        wide.contains(&held.challenge_id),
+        "the cap refusal drops nothing"
+    );
+    assert!(
+        wide.issue(&client("fresh", "fresh"), edge).is_err(),
+        "a second before expiry the cap still binds"
+    );
+    assert!(
+        wide.issue(&client("a0", "e2"), edge).is_err(),
+        "and so does the reserve"
+    );
+    assert!(wide.contains(&held.challenge_id));
     assert!(wide.issue(&client("fresh", "fresh"), at(T0 + 300)).is_ok());
+    assert!(
+        !wide.contains(&held.challenge_id),
+        "an expired challenge is gone"
+    );
 
     let shared = Reduction::new(Vec::new(), Box::new(SharedPrefix::default()));
-    shared.issue(&client("a1", "d1"), now).expect("issued");
+    let kept = shared.issue(&client("a1", "d1"), now).expect("issued");
     assert!(
         shared.issue(&client("a2", "d2"), now).is_err(),
         "an id already held is never issued twice"
+    );
+    assert!(
+        shared.contains(&kept.challenge_id),
+        "the collision refusal keeps the one held"
+    );
+    assert!(
+        !shared.contains("01ARZ3NDEKTSV4RRFFQ69G5FAV"),
+        "an id never issued"
     );
     let later = UtcNanos::from_parts(T0, 1_000_000).expect("an instant");
     assert!(shared.issue(&client("a2", "d2"), later).is_ok());
