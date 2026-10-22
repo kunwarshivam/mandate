@@ -1,0 +1,7 @@
+file = "crates/mandate-gatewayd/tests/serve.rs"
+test = "a_panicking_answer_stops_the_listener"
+reason = """
+A guard has no stub to fail at: without it, `Server::run` already exists and keeps its listener
+open after `answer` panics, so the test fails on that behaviour, the listener still accepting,
+rather than at a `todo!()`. E21-62's implementation PR adds the guard and deletes this row.
+"""
