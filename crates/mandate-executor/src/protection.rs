@@ -14147,7 +14147,7 @@ mod closed_form {
     use std::collections::BTreeSet;
     use std::panic::catch_unwind;
 
-    use mandate_canon::{Key, Object, Value, parse, to_canonical};
+    use mandate_canon::{Int, Key, Object, Value, parse, to_canonical};
     use mandate_journal::{AppendOutcome, Draft, Invalid, InvalidReason, MemoryJournal, StreamId};
     use mandate_time::UtcNanos;
 
@@ -14214,18 +14214,28 @@ mod closed_form {
         )
     }
 
-    /// Asserts `draft` is §9.5's closed version-1 record of `action` on `AAPL`: the members
-    /// `named` as given, every other list empty and every other member null, its own `risk_clock`,
-    /// and no other member, so no legacy `instrument`, `agent`, `limit`, `reason`, or joined
-    /// `orders`; and that the journal admits it.
+    /// Asserts `draft` is §9.5's closed record of `action` on `AAPL`, at the version the executor
+    /// writes (`schema_version`): the members `named` as given, every other list empty and every
+    /// other member null, its own `risk_clock`, and no other member, so no legacy `instrument`,
+    /// `agent`, `limit`, `reason`, or joined `orders`; and that the journal admits it at that
+    /// version. Version 2 adds `unprotected_fraction` before `risk_clock` (journal spec v0.72,
+    /// DEC-2312).
     pub(super) fn assert_closed(
         draft: &EventDraft,
         action: &str,
         named: &[(&str, Value)],
     ) -> Result<(), ExecutorError> {
         let mut expected = Object::new();
-        let members: Vec<&str> = MEMBERS.split_whitespace().collect();
-        assert_eq!(members.len(), 17, "§9.5's table has seventeen members");
+        let version = crate::batch::schema_version("ProtectionChanged");
+        let mut members: Vec<&str> = MEMBERS.split_whitespace().collect();
+        assert_eq!(
+            members.len(),
+            17,
+            "§9.5's version-1 table has seventeen members"
+        );
+        if version == 2 {
+            members.insert(16, "unprotected_fraction");
+        }
         for member in members.iter().copied() {
             let given = named.iter().find(|(name, _)| *name == member);
             let value = match (member, given) {
@@ -14246,10 +14256,10 @@ mod closed_form {
         }
         assert_eq!(
             (draft.schema_version, &draft.payload),
-            (1, &Value::Object(expected)),
+            (version, &Value::Object(expected)),
             "{action}: §9.5's closed record"
         );
-        let refused = Draft::parse(&to_canonical(&envelope(&draft.payload)?)).err();
+        let refused = Draft::parse(&to_canonical(&envelope(&draft.payload, version)?)).err();
         assert!(
             refused.is_none(),
             "{action}: the journal refuses it: {refused:?}"
@@ -14292,7 +14302,7 @@ mod closed_form {
             closed.insert(Key::new(member).map_err(|_| missing(member))?, value);
         }
         let judged = |payload: &Object| -> Result<Option<Invalid>, ExecutorError> {
-            let draft = envelope(&Value::Object(payload.clone()))?;
+            let draft = envelope(&Value::Object(payload.clone()), 1)?;
             Ok(Draft::parse(&to_canonical(&draft)).err())
         };
         assert_eq!(judged(&closed)?, None, "the closed watchdog is admitted");
@@ -14309,13 +14319,16 @@ mod closed_form {
     }
 
     /// The vectors' `placed` chain event, seq 7 (`fixtures/refcases/journal.json`), less what only
-    /// a sealed row carries, with `payload` in place of its own.
-    fn envelope(payload: &Value) -> Result<Value, ExecutorError> {
+    /// a sealed row carries, with `payload` in place of its own, at `version`.
+    fn envelope(payload: &Value, version: u64) -> Result<Value, ExecutorError> {
         let mut body = chain_body(7)?;
-        body.remove(&Key::new("payload").map_err(|_| missing("payload"))?);
         body.insert(
             Key::new("payload").map_err(|_| missing("payload"))?,
             payload.clone(),
+        );
+        body.insert(
+            Key::new("schema_version").map_err(|_| missing("schema_version"))?,
+            Value::Int(Int::new(version).ok_or_else(|| missing("schema_version"))?),
         );
         Ok(Value::Object(body))
     }
@@ -14368,7 +14381,7 @@ mod closed_form {
         }
         let mut bodies = Vec::new();
         for (index, draft) in drafted.iter().enumerate() {
-            let mut body = envelope(&draft.payload)?;
+            let mut body = envelope(&draft.payload, draft.schema_version)?;
             if let Value::Object(fields) = &mut body {
                 let id = Key::new("event_id").map_err(|_| missing("event_id"))?;
                 fields.insert(id, Value::Str(format!("01J8ZQB{index:019}")));
