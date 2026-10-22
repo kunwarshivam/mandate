@@ -512,7 +512,6 @@ fn random_histories_verify_exactly_the_outstanding_challenges_within_the_limits(
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn past_max_outstanding_the_gate_refuses_every_client_and_drops_nothing() {
     let mut bench = Bench::bounded((9, 9), (9, 9), (3, 3, 9));
     for n in 0..3 {
@@ -548,7 +547,6 @@ fn past_max_outstanding_the_gate_refuses_every_client_and_drops_nothing() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn past_the_reserve_an_address_that_holds_one_gets_no_more() {
     let mut bench = Bench::bounded((9, 9), (9, 9), (4, 2, 9));
     assert_eq!(bench.issue(&client("a1", "d1"), 1, 0), Ok(issued(1, 0)));
@@ -583,7 +581,6 @@ fn past_the_reserve_an_address_that_holds_one_gets_no_more() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn failure_keys_are_bounded_and_the_oldest_is_dropped_first() {
     let mut bench = Bench::bounded((9, 9), (1, 1), (9, 9, 4));
     let (first, second, third) = (client("a1", "d1"), client("a2", "d2"), client("a3", "d3"));

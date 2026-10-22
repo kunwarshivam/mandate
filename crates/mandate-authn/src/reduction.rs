@@ -138,6 +138,14 @@ fn record_failure(
     times.drain(..surplus);
 }
 
+/// The key whose latest failure is oldest, with that failure.
+fn oldest_key(failures: &BTreeMap<String, Vec<UtcNanos>>) -> Option<(Option<UtcNanos>, String)> {
+    failures
+        .iter()
+        .map(|(key, times)| (times.last().copied(), key.clone()))
+        .min()
+}
+
 /// How many failures of `key` count at `now`.
 fn failures_at(failures: &BTreeMap<String, Vec<UtcNanos>>, key: &str, now: UtcNanos) -> usize {
     failures.get(key).map_or(0, |times| {
@@ -195,7 +203,16 @@ impl ReductionGate {
                 .count(),
             self.limits.challenges_per_device,
         );
-        if address_full || device_full || self.outstanding.contains_key(&random) {
+        let held = self.outstanding.len();
+        let in_all = fills(held, self.limits.max_outstanding);
+        let reserved = fills(held, self.limits.reserve)
+            && issuers().any(|issuer| issuer.address == client.address);
+        if address_full
+            || device_full
+            || in_all
+            || reserved
+            || self.outstanding.contains_key(&random)
+        {
             return Err(Unauthenticated);
         }
         let expires_at = lifetime_after(now).ok_or(Unauthenticated)?;
@@ -244,7 +261,37 @@ impl ReductionGate {
             now,
             limits.failures_per_device,
         );
+        self.bound_failure_keys();
         Err(Unauthenticated)
+    }
+
+    /// Drops failure keys, the one whose latest failure is oldest first and an address before a
+    /// device at a tie, until at most `max_failure_keys` addresses and devices are held. Dropping
+    /// one changes no answer, since failures only report.
+    fn bound_failure_keys(&mut self) {
+        let cap = usize::try_from(self.limits.max_failure_keys.get()).unwrap_or(usize::MAX);
+        while self
+            .failures_by_address
+            .len()
+            .saturating_add(self.failures_by_device.len())
+            > cap
+        {
+            match (
+                oldest_key(&self.failures_by_address),
+                oldest_key(&self.failures_by_device),
+            ) {
+                (Some(address), Some(device)) if device.0 < address.0 => {
+                    self.failures_by_device.remove(&device.1);
+                }
+                (Some(address), _) => {
+                    self.failures_by_address.remove(&address.1);
+                }
+                (None, Some(device)) => {
+                    self.failures_by_device.remove(&device.1);
+                }
+                (None, None) => break,
+            }
+        }
     }
 
     /// Whether `client`'s address or device has reached its failure limit at `now`. No answer of
