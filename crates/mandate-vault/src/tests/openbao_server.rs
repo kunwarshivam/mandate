@@ -33,6 +33,7 @@ use crate::kubernetes::{
 use crate::openbao::{
     OpenBaoConfig, OpenBaoSource, RoleCredentials, provision, provision_kubernetes_auth,
 };
+use crate::openbao::{fingerprint_key_verdict, transit_mount_verdict};
 use crate::policy::{Identity, Mounts, SecretPath, kv_path, openbao_policy, role_name};
 use crate::source::{Grant, SecretSource};
 use mandate_connections::record::{AccountPiiRef, AccountRef, ConnectionId};
@@ -1099,6 +1100,97 @@ async fn only_an_executor_hashes_an_account_under_the_vaults_key() {
     }
 }
 
+/// DEC-2345 item 1 on a real vault: provisioning keeps a fingerprint key already there only when
+/// it is never exportable and never deletable, on a mount that is transit. A key made exportable
+/// or deletable before provisioning, or a transit path that holds another engine, fails it as
+/// `Config`. The pure verdicts are checked first, so a run with no server still fails until they
+/// hold.
+#[tokio::test(flavor = "current_thread")]
+async fn provisioning_fails_on_a_fingerprint_key_that_can_leave_the_vault() {
+    let kept = json!({ "data": {
+        "exportable": false, "deletion_allowed": false, "allow_plaintext_backup": false,
+    } });
+    assert_eq!(fingerprint_key_verdict(Some(&kept)), Ok(()));
+    let mount = json!({ "data": { "type": "transit" } });
+    assert_eq!(transit_mount_verdict(Some(&mount)), Ok(()));
+    let Some((address, ca_pem, operator)) = server() else {
+        return;
+    };
+    let setups: [(&str, Vec<(String, Value)>); 3] = [
+        (
+            "an exportable key",
+            vec![
+                (
+                    "sys/mounts/{transit}".to_owned(),
+                    json!({ "type": "transit" }),
+                ),
+                (
+                    format!("{{transit}}/keys/{FINGERPRINT_KEY}"),
+                    json!({ "exportable": true }),
+                ),
+            ],
+        ),
+        (
+            "a deletable key",
+            vec![
+                (
+                    "sys/mounts/{transit}".to_owned(),
+                    json!({ "type": "transit" }),
+                ),
+                (
+                    format!("{{transit}}/keys/{FINGERPRINT_KEY}"),
+                    json!({ "exportable": false }),
+                ),
+                (
+                    format!("{{transit}}/keys/{FINGERPRINT_KEY}/config"),
+                    json!({ "deletion_allowed": true }),
+                ),
+            ],
+        ),
+        (
+            "another engine",
+            vec![(
+                "sys/mounts/{transit}".to_owned(),
+                json!({ "type": "kv", "options": { "version": "2" } }),
+            )],
+        ),
+    ];
+    for (case, steps) in setups {
+        let n = NEXT.fetch_add(1, Ordering::Relaxed);
+        let suffix = format!("{}-{n}", std::process::id());
+        let config = OpenBaoConfig {
+            address: address.clone(),
+            ca_pem: ca_pem.clone(),
+            mounts: Mounts {
+                kv: format!("kv-{suffix}"),
+                auth: format!("approle-{suffix}"),
+                kubernetes_executor: format!("kubernetes-executor-{suffix}"),
+                kubernetes_exchange: format!("kubernetes-exchange-{suffix}"),
+                transit: format!("transit-{suffix}"),
+            },
+        };
+        for (path, body) in steps {
+            let path = path.replace("{transit}", &config.mounts.transit);
+            operator_call(
+                &address,
+                &ca_pem,
+                &operator,
+                Method::POST,
+                &path,
+                Some(body),
+            )
+            .await;
+        }
+        assert_eq!(
+            provision(&config, &operator, &[c("c1")], None)
+                .await
+                .map(drop),
+            Err(SourceError::Config),
+            "{case}"
+        );
+    }
+}
+
 /// A session as `connection`'s executor, logged in by its Kubernetes token.
 async fn executor_of(bao: &Bao, connection: &str, now: UtcNanos) -> OpenBaoSource {
     let identity = Identity::Executor(c(connection));
@@ -1230,6 +1322,49 @@ async fn the_manager_claims_each_fingerprint_for_one_connection() {
     assert_eq!(
         manager.claim(&c("c1"), &held).await,
         Err(FingerprintError::Rotating)
+    );
+}
+
+/// Review F-b: a release whose fingerprint entry is there but does not read answers
+/// `Unavailable`, and the claim is kept, so a release never reports success while the account
+/// stays claimed by a connection that can no longer give it back. A vault nobody answers for is an
+/// outage, checked first.
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "pending E21-32"]
+async fn a_release_over_an_unreadable_entry_fails_closed() {
+    let ca = include_bytes!("fixtures/isrg-root-x1.pem").to_vec();
+    let unreachable = OpenBaoSource::from_token(
+        &nowhere(ca),
+        Identity::ConnectionManager,
+        SecretString::from("unused".to_owned()),
+        at(1_000_600),
+    )
+    .unwrap();
+    assert_eq!(
+        unreachable.release(&c("c1"), &request(1)).await,
+        Err(FingerprintError::Unavailable)
+    );
+    let Some(bao) = Bao::new().await else {
+        return;
+    };
+    let now = at(1_000_000);
+    let held = fingerprinted(&bao, "c1", 1, now).await;
+    let manager = fingerprint_manager(&bao, now).await;
+    assert_eq!(manager.claim(&c("c1"), &held).await, Ok(Claim::Claimed));
+    let entry = kv_path(&SecretPath::Fingerprint(c("c1"), request(1))).unwrap();
+    bao.operator(
+        Method::POST,
+        &format!("{}/data/{entry}", bao.config.mounts.kv),
+        Some(json!({"data": {"value": "bm90IGFuIGVudHJ5"}})),
+    )
+    .await;
+    assert_eq!(
+        manager.release(&c("c1"), &request(1)).await,
+        Err(FingerprintError::Unavailable)
+    );
+    assert_eq!(
+        manager.claim(&c("c2"), &held).await,
+        Ok(Claim::HeldBy(c("c1")))
     );
 }
 
