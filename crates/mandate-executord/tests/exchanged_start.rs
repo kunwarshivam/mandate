@@ -436,7 +436,6 @@ impl Store for Blind {
 /// A stream the start cannot read is never taken for one with no check: a refused connect stays
 /// refused through a moment the journal cannot be read, with no lease, no create and no append.
 #[test]
-#[ignore = "pending E21-32"]
 fn an_unreadable_stream_refuses_the_start() -> Result<(), Error> {
     let mut journal = MemoryStore::default();
     oauth_connect_check(
