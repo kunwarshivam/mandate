@@ -886,6 +886,19 @@ async fn provision_kubernetes(
     Ok(())
 }
 
+/// Sets Kubernetes auth alone up on a vault already provisioned, with an operator's token: both
+/// mounts, each enabled only where it is not there, their configuration, and their templated
+/// policies, as [`provision`] sets them given `kubernetes`. It touches no AppRole role and mints
+/// no secret id, so running it on a vault whose credentials are in use rotates none of them.
+pub async fn provision_kubernetes_auth(
+    config: &OpenBaoConfig,
+    operator_token: &SecretString,
+    auth: &KubernetesAuth,
+) -> Result<(), SourceError> {
+    let http = Http::new(config)?;
+    provision_kubernetes(&http, Some(operator_token), &config.mounts, auth).await
+}
+
 /// Sets a vault up for `connections`, with an operator's token: the KV v2 mount, the AppRole
 /// auth method, one policy and one role per identity, and a secret id for every identity but the
 /// token exchanges, whose secret ids are grants; and, given `kubernetes`, both Kubernetes auth

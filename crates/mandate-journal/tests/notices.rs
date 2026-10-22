@@ -521,7 +521,6 @@ fn the_batch_rule_binds_an_alert_to_an_earlier_subject_in_its_batch() {
 /// version 1 in its own shape, and any later version are `unknown_schema` at `payload`, through
 /// `Draft::parse` and `append` alike.
 #[test]
-#[ignore = "pending E8-10"]
 fn an_attempt_is_appended_at_version_3_and_refused_at_versions_1_and_2() {
     closed_on(&[("NoticeAttempted", &[NTF])]);
     run(&[
@@ -608,7 +607,6 @@ fn on_channel(draft: &[u8], channel: &str) -> Vec<u8> {
 /// Version 3 is closed (DEC-720's form): without `verdict` or `address_ref`, or with an unlisted
 /// member beside them, an attempt is `schema` at that member, on web push as on every other channel.
 #[test]
-#[ignore = "pending E8-10"]
 fn every_member_of_an_attempt_is_required_and_no_unlisted_member_is_admitted() {
     closed(&base("attempted"));
     let failed = set(
@@ -623,7 +621,6 @@ fn every_member_of_an_attempt_is_required_and_no_unlisted_member_is_admitted() {
 /// sentence, its `verdict` and `address_ref` included, and no part of a web-push address beside
 /// the `address_ref` that names it.
 #[test]
-#[ignore = "pending E8-10"]
 fn no_attempt_can_carry_trading_content() {
     no_unlisted_content("attempted");
     for member in [
@@ -667,7 +664,6 @@ const ENDPOINT: &str = r#""https://fcm.googleapis.com/fcm/send/dXNlcl9hZGRyZXNz"
 /// `schema`, a string outside `retryable` and `permanent` is `non_canonical`, `address_ref` is a
 /// `ulid` or `null`, and an unlisted member or an earlier ill-typed member is reported before it.
 #[test]
-#[ignore = "pending E8-10"]
 fn an_attempts_member_types_refuse_event_ids_and_foreign_vocabulary() {
     let ulid = event_id(5);
     let over = "x".repeat(257);
@@ -720,7 +716,6 @@ fn an_attempts_member_types_refuse_event_ids_and_foreign_vocabulary() {
 /// with each verdict its reason takes, every other status with none, on email and on web push at
 /// one address, and the web-push stop `address_retired`.
 #[test]
-#[ignore = "pending E8-10"]
 fn every_channel_and_outcome_is_admitted_at_version_3() {
     let mut cases = Vec::new();
     for channel in ["email", "phone", "slack", "sms", "telegram"] {
@@ -768,7 +763,6 @@ fn web_push() -> String {
 /// Rules 126 to 129 at version 3, and rule 134 after them: `verdict` is refused only on a payload
 /// those rules pass, so a wrong verdict never hides an earlier rule's path.
 #[test]
-#[ignore = "pending E8-10"]
 fn an_attempts_consistency_rules_refuse_at_their_paths() {
     let failed = "status=failed provider_message_id=null verdict=permanent";
     let abandoned = "status=abandoned provider_message_id=null";
@@ -880,7 +874,6 @@ fn attempt_with((status, reason, message): Attempt, verdict: Option<&str>) -> Ve
 /// five outcomes with no verdict, nine fixed reasons with one, and two reasons with either. It holds
 /// at version 3 unchanged (DEC-2505 item 6).
 #[test]
-#[ignore = "pending E8-10"]
 fn the_verdict_is_set_exactly_on_a_failed_attempt_and_fixed_where_the_reason_fixes_it() {
     let mut admitted = 0;
     let mut differ = Vec::new();
@@ -907,7 +900,6 @@ fn the_verdict_is_set_exactly_on_a_failed_attempt_and_fixed_where_the_reason_fix
 /// address, as rule 215 requires), attempt number, recipient, and, where rule 129 allows one, the
 /// combined message.
 #[test]
-#[ignore = "pending E8-10"]
 fn rule_134_does_not_depend_on_the_other_members() {
     let channel = prop_oneof![
         Just("email"),
@@ -951,7 +943,6 @@ fn rule_134_does_not_depend_on_the_other_members() {
 /// `pii_refs`, which is empty on every other channel. It is checked after rule 134 and before rule
 /// 216, and on a payload whose members are well typed.
 #[test]
-#[ignore = "pending E8-10"]
 fn an_attempt_names_its_address_exactly_on_web_push_and_lists_it_in_pii_refs() {
     let named = address();
     let other = event_id(99);
@@ -997,7 +988,6 @@ fn an_attempt_names_its_address_exactly_on_web_push_and_lists_it_in_pii_refs() {
 /// only on web push, where an address can leave the set; every other status, and every other
 /// channel, refuses it at `payload.reason`. The other stops stay admitted on web push.
 #[test]
-#[ignore = "pending E8-10"]
 fn address_retired_stops_only_an_abandoned_web_push_attempt() {
     let pushed = web_push();
     let retired = "reason=address_retired provider_message_id=null";
@@ -1130,7 +1120,6 @@ fn attempt_on(channel: &str, status: &str, reason: Option<&str>, named: bool) ->
 /// statuses with no reason, three stops, and eleven failures; on each of the five other channels
 /// with none, the same but for `address_retired`.
 #[test]
-#[ignore = "pending E8-10"]
 fn rules_127_215_and_216_hold_over_every_channel_status_reason_and_address() {
     let mut admitted = 0;
     let mut tried = 0;
@@ -1225,7 +1214,6 @@ fn a_stored_version_2_attempt_still_verifies() {
 /// (DEC-2505 item 1). The three base drafts, an add, a request's removal, and a deactivation's
 /// removal, are admitted.
 #[test]
-#[ignore = "pending E8-14"]
 fn an_address_change_is_closed_on_the_control_stream_only_at_version_1() {
     closed_on(&[("NotificationAddressChanged", &[CTL])]);
     run(&[
@@ -1242,7 +1230,6 @@ fn an_address_change_is_closed_on_the_control_stream_only_at_version_1() {
 /// The record is closed (DEC-720's form, as §9.15 closes it): without any one of its members, its
 /// step-up evidence's members included, or with an unlisted one, it is `schema` at that member.
 #[test]
-#[ignore = "pending E8-14"]
 fn every_member_of_an_address_change_is_required_and_no_unlisted_member_is_admitted() {
     for name in ["added", "removed", "retired"] {
         closed(&base(name));
@@ -1259,7 +1246,6 @@ fn every_member_of_an_address_change_is_required_and_no_unlisted_member_is_admit
 /// service or its host, a hash of any of them, or the VAPID `key_id`, beside the opaque
 /// `address_ref` or inside the step-up evidence; and no trading content or sentence either.
 #[test]
-#[ignore = "pending E8-14"]
 fn no_address_change_can_hold_any_part_of_an_address() {
     for name in ["added", "removed", "retired"] {
         no_unlisted_content(name);
@@ -1284,7 +1270,6 @@ fn no_address_change_can_hold_any_part_of_an_address() {
 /// order: an unlisted member first, then the listed members in the order given, a non-string
 /// `schema` and a string outside the type `non_canonical`.
 #[test]
-#[ignore = "pending E8-14"]
 fn an_address_changes_member_types_refuse_foreign_vocabulary() {
     run(&[
         "added | member=not-a-ulid | non_canonical@payload.member",
@@ -1322,7 +1307,6 @@ fn an_address_changes_member_types_refuse_foreign_vocabulary() {
 /// the record lists nothing else. Rule 210 is reported before rule 211, and both before rules 212
 /// and 213, on a payload whose members are well typed.
 #[test]
-#[ignore = "pending E8-14"]
 fn an_address_is_named_by_the_event_that_added_it_and_listed_in_pii_refs() {
     let added = event_id(ADDED);
     let earlier = event_id(EARLIER);
@@ -1365,7 +1349,6 @@ fn authenticated(time: &str) -> String {
 /// before the time, and rule 212 before rule 213. A `removed` without step-up passes the record's
 /// rules; the batch decides whether it rides a deactivation (rule 214).
 #[test]
-#[ignore = "pending E8-14"]
 fn an_address_change_carries_fresh_step_up_unless_it_rides_a_deactivation() {
     let build = build();
     let stale = authenticated("13:54:59.999999999");
@@ -1411,7 +1394,6 @@ fn an_address_change_carries_fresh_step_up_unless_it_rides_a_deactivation() {
 /// `user` or the `system`, as rule 98 has the deactivation's. A `client` is refused at
 /// `actor.kind` before the payload is read (rule 83).
 #[test]
-#[ignore = "pending E8-14"]
 fn only_the_member_changes_their_own_addresses() {
     let build = build();
     run(&[
@@ -1519,7 +1501,6 @@ fn judge(batches: Vec<Batch>) {
 /// through `append` shows the same: an add with its alert, then a lone removal refused, then the
 /// removal with its own alert.
 #[test]
-#[ignore = "pending E8-14"]
 fn a_request_commits_its_address_change_with_its_alert_in_one_batch() {
     let other = address_change(21, "removed", EARLIER, OTHER_MEMBER);
     let second = set(&remove(21, EARLIER), "step_up.assertion_id=assert_2");

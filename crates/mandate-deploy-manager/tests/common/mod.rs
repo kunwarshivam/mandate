@@ -542,3 +542,43 @@ pub fn owner_command(command: &str, scope: &str, subject: &str, nth: u32) -> (St
     );
     (id, draft)
 }
+
+/// A connect's request on the control stream (journal spec §9.8): at version 2 with `credential`
+/// `oauth` (and its breadth) or `api_key`, or at version 1, which names no credential.
+pub fn requested(connection: &str, account: &str, credential: Option<&str>) -> Vec<u8> {
+    let step_up = r#"{"assertion_id":"assert_owner_09","authenticated_at":"2026-10-17T14:59:50.000000000Z","method":"cli_confirm"}"#;
+    let tail = match credential {
+        Some("oauth") => r#","credential":"oauth","breadth":{"other_environment":"may_reach","disclosure":{"document":"alpaca_oauth_token_breadth","version":"1"}}"#.to_owned(),
+        Some(other) => format!(r#","credential":"{other}","breadth":null"#),
+        None => String::new(),
+    };
+    let draft = envelope(
+        &event_id(&format!("requested {connection}")),
+        "ConnectionRequested",
+        SERVICES,
+        "{}",
+        &format!(
+            r#"{{"connection_id":"{connection}","account_ref":"{account}","broker":"alpaca","environment":"paper","user":"user_owner_01","step_up":{step_up}{tail}}}"#
+        ),
+        "[]",
+    );
+    match credential {
+        Some(_) => at_version_2(&draft),
+        None => draft,
+    }
+}
+
+/// A teardown's `ConnectionRefused` of `connection` with `occasion` (journal spec §9.8): with
+/// occasion `connect` it closes the connection's request.
+pub fn refused(connection: &str, occasion: &str) -> Vec<u8> {
+    envelope(
+        &event_id(&format!("refused {connection} {occasion}")),
+        "ConnectionRefused",
+        SERVICES,
+        "{}",
+        &format!(
+            r#"{{"connection_id":"{connection}","broker":"alpaca","environment":"paper","occasion":"{occasion}","check":null,"reason":"timeout","existing_connection_id":null,"user":"user_owner_01","step_up":{{"assertion_id":"assert_owner_09","authenticated_at":"2026-10-17T14:59:50.000000000Z","method":"cli_confirm"}}}}"#
+        ),
+        "[]",
+    )
+}
