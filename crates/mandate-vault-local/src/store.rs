@@ -26,6 +26,7 @@ use std::path::{Path, PathBuf};
 
 use ring::aead::{Aad, CHACHA20_POLY1305, LessSafeKey, Nonce, UnboundKey};
 use ring::rand::{SecureRandom, SystemRandom};
+use rustix::fs::{CWD, RenameFlags, renameat_with};
 use secrecy::zeroize::Zeroize;
 use secrecy::{ExposeSecret, SecretBox, SecretSlice};
 
@@ -146,7 +147,9 @@ impl ApiVault {
         if entry.kind() == Kind::ClientSecret {
             return Err(wrong_role(entry));
         }
-        unlink(&entry_path(&self.vault_dir, entry))
+        let path = entry_path(&self.vault_dir, entry);
+        unlink(&path)?;
+        sweep_taken(&path, entry)
     }
 }
 
@@ -173,10 +176,92 @@ impl ExecutorVault {
         unseal(key, entry, bytes).map(Some)
     }
 
-    /// Unlinks an entry of any kind; an absent entry is already deleted.
+    /// Unlinks an entry of any kind, and any name a take left beside it; an absent entry is
+    /// already deleted.
     pub fn delete(&self, entry: &Entry) -> Result<(), VaultError> {
-        unlink(&entry_path(&self.vault_dir, entry))
+        let path = entry_path(&self.vault_dir, entry);
+        unlink(&path)?;
+        sweep_taken(&path, entry)
     }
+
+    /// Takes a code: renames it to a fresh name of 16 random bytes, reads and decrypts it there,
+    /// and unlinks it. The rename is atomic and never replaces an existing name, so of any number
+    /// of concurrent takers exactly one gets the code and the rest `None` (DEC-2628 item 2). An
+    /// entry this call cannot decrypt, such as one bound to another connection, is renamed back
+    /// and refused, so a wrong taker destroys nothing; it hides the code from the rightful taker
+    /// only for that moment.
+    pub fn take_code(&self, entry: &Entry) -> Result<Option<SecretSlice<u8>>, VaultError> {
+        let path = entry_path(&self.vault_dir, entry);
+        let taken = taken_path(&path, entry)?;
+        self.take_code_into(entry, &taken)
+    }
+
+    /// [`ExecutorVault::take_code`] into `taken`, which must not exist: an existing name there is
+    /// refused and left as it was.
+    pub(crate) fn take_code_into(
+        &self,
+        entry: &Entry,
+        taken: &Path,
+    ) -> Result<Option<SecretSlice<u8>>, VaultError> {
+        if entry.kind() != Kind::Code {
+            return Err(wrong_role(entry));
+        }
+        let path = entry_path(&self.vault_dir, entry);
+        let taken = taken.to_path_buf();
+        match renameat_with(CWD, &path, CWD, &taken, RenameFlags::NOREPLACE) {
+            Ok(()) => {}
+            Err(e) if e == rustix::io::Errno::NOENT => return Ok(None),
+            Err(_) => return Err(VaultError::Io),
+        }
+        let read = read_checked(&taken, Kind::Code, &self.ids).and_then(|bytes| {
+            bytes
+                .map(|bytes| unseal(&self.pending_key, entry, bytes))
+                .transpose()
+        });
+        match read {
+            Ok(secret) => unlink(&taken).map(|()| secret),
+            Err(error) => {
+                let _restored = fs::rename(&taken, &path);
+                Err(error)
+            }
+        }
+    }
+}
+
+/// The prefix of every name a take of `entry` uses.
+fn taken_prefix(entry: &Entry) -> String {
+    format!("{}.taken-", entry.file_name())
+}
+
+/// A fresh name beside `path` for one take: [`taken_prefix`] and 16 random bytes in hex.
+fn taken_path(path: &Path, entry: &Entry) -> Result<PathBuf, VaultError> {
+    let mut random = [0_u8; 16];
+    SystemRandom::new()
+        .fill(&mut random)
+        .map_err(|_| VaultError::Random)?;
+    let suffix: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
+    Ok(path.with_file_name(format!("{}{suffix}", taken_prefix(entry))))
+}
+
+/// Unlinks every name a take of `entry` left beside `path`, as a take that stopped between its
+/// rename and its unlink leaves one.
+pub(crate) fn sweep_taken(path: &Path, entry: &Entry) -> Result<(), VaultError> {
+    let Some(dir) = path.parent() else {
+        return Err(VaultError::Io);
+    };
+    let prefix = taken_prefix(entry);
+    let names = match fs::read_dir(dir) {
+        Ok(names) => names,
+        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(()),
+        Err(_) => return Err(VaultError::Io),
+    };
+    for name in names {
+        let name = name.map_err(|_| VaultError::Io)?;
+        if name.file_name().to_string_lossy().starts_with(&prefix) {
+            unlink(&name.path())?;
+        }
+    }
+    Ok(())
 }
 
 fn wrong_role(entry: &Entry) -> VaultError {

@@ -53,8 +53,10 @@ pub trait Vault {
         code: AuthorizationCode,
         verifier: PkceVerifier,
     ) -> Result<(), ConnectError>;
-    /// Reads the code and verifier. The token-exchange process reads them once (§5.2 step 4).
-    fn read_code(&mut self, key: &VaultKey) -> Result<Option<WaitingCode>, ConnectError>;
+    /// Reads the code and verifier and deletes them in one step: of any number of concurrent
+    /// takers, exactly one gets them and every other `None` (DEC-2628 item 2). The
+    /// token-exchange process takes them once, before it sends anything (§5.2 step 4).
+    fn take_code(&mut self, key: &VaultKey) -> Result<Option<WaitingCode>, ConnectError>;
     /// Stores the token with the granted scopes, which the executor reads through its lease.
     fn put_token(
         &mut self,
@@ -62,7 +64,7 @@ pub trait Vault {
         token: AccessToken,
         scopes: &GrantedScopes,
     ) -> Result<(), ConnectError>;
-    /// Deletes the code and verifier, once the token is stored.
+    /// Deletes the code and verifier without reading them, as a revoke or a teardown does.
     fn delete_code(&mut self, key: &VaultKey) -> Result<(), ConnectError>;
     /// Deletes everything stored under `key`.
     fn delete(&mut self, key: &VaultKey) -> Result<(), ConnectError>;
