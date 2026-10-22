@@ -114,6 +114,7 @@ fn open<'c>(mandate: &ValidatedMandate, calendar: &'c Wall) -> AccountRiskFold<'
         AGENT,
         mandate,
         &opening(),
+        None,
         calendar,
         TripwireState::default(),
     )
@@ -510,7 +511,11 @@ fn open_case<'c>(
         mark_max_age_s: u32::try_from(max_age.unwrap()).unwrap(),
     };
     let tripwires = TripwireState::default();
-    AccountRiskFold::open(ACCOUNT, 1, AGENT, mandate, &opening, calendar, tripwires).unwrap()
+    let held = Some(instrument(case));
+    AccountRiskFold::open(
+        ACCOUNT, 1, AGENT, mandate, &opening, held, calendar, tripwires,
+    )
+    .unwrap()
 }
 
 /// A version-2 `MarkUpdated` for `instrument` in §9.30's member order, its `price` the bid.
@@ -763,6 +768,61 @@ fn a_mark_for_a_second_instrument_makes_the_view_unreadable() {
     for path in EXITS.into_iter().chain([OrderPath::KillSwitch]) {
         assert!(!fold.view().holds(path), "{path:?} is never held (rule 13)");
     }
+}
+
+/// MC-R20 opens holding BTC/USD, bound at open, so a first mark naming ETH/USD at 59000 is never
+/// read as BTC's price (which would make E 9900): the view becomes unreadable (DEC-2310 item 1).
+#[test]
+fn a_held_openings_first_mark_for_another_instrument_makes_the_view_unreadable() {
+    let case = case("MC-R20");
+    let mandate = case_mandate(&case);
+    let mut fold = open_case(&case, &mandate, &Crypto);
+    let other = mark(
+        2,
+        "ETH/USD",
+        "2026-09-21T04:00:30.000000000Z",
+        "59000",
+        true,
+        "crypto",
+    );
+    assert_eq!(fold.fold(&other).unwrap(), vec![]);
+    assert_eq!(
+        unreadable(fold.view()),
+        (UnreadableCause::RefusedToDecide, 1)
+    );
+    assert_eq!(fold.view().mode(), AgentMode::ExitsOnly);
+    assert!(fold.view().holds(OrderPath::Opening));
+    for path in EXITS.into_iter().chain([OrderPath::KillSwitch]) {
+        assert!(!fold.view().holds(path), "{path:?} is never held (rule 13)");
+    }
+}
+
+/// A held opening, or a fold opened past seq 1, must name its instrument: the first could otherwise
+/// be bound to whatever a mark names, and the second has lost the binding an earlier row made.
+#[test]
+fn an_opening_that_cannot_bind_its_instrument_is_refused() {
+    let mandate = mandate();
+    let held = Opening {
+        position_qty: Qty::parse("1").unwrap(),
+        ..opening()
+    };
+    let refused = |head: u64, opening: &Opening| {
+        AccountRiskFold::open(
+            ACCOUNT,
+            head,
+            AGENT,
+            &mandate,
+            opening,
+            None,
+            &Wall,
+            TripwireState::default(),
+        )
+        .err()
+    };
+    let want = Some(SpecError::InvalidInput { what: "instrument" });
+    assert_eq!(refused(1, &held), want, "a held opening");
+    assert_eq!(refused(6, &opening()), want, "a flat opening past seq 1");
+    assert_eq!(refused(1, &opening()), None, "a flat opening at seq 1");
 }
 
 /// §5.2 never reads a not-sane mark's bid, so the same not-sane mark on a flat position with two
