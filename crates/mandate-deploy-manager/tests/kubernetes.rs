@@ -303,7 +303,11 @@ fn a_start_creates_a_bare_pod_the_orchestrator_never_restarts() {
         ]
     );
     let values: Vec<&str> = env.iter().map(|e| e["value"].as_str().unwrap()).collect();
-    assert_eq!(values, ["1", "ws_01J8Z2", "runtime", "Agent_A", "7"]);
+    assert_eq!(
+        values,
+        ["1", "ws_01J8Z2", "runtime", "Agent_A", "7"],
+        "a runtime names no account: it runs as the default one"
+    );
 }
 
 #[test]
@@ -552,6 +556,11 @@ fn an_exchanges_start_creates_its_account_then_its_pod_ended_by_its_deadline() {
         .collect();
     assert_eq!(env["MANDATE_PROCESS"], "token_exchange");
     assert_eq!(env["MANDATE_SUBJECT"], CONNECTION);
+    assert_eq!(
+        env["MANDATE_SUBJECT_ACCOUNT"],
+        exchange_account(),
+        "its account named beside its connection, which admission and the exchange check"
+    );
     assert_eq!(
         pod["spec"]["containers"][0]["command"],
         json!(["/usr/local/bin/mandate-token-exchange"]),
