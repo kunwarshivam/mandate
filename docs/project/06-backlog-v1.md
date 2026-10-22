@@ -1712,14 +1712,16 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   kill touches only its own scope (rule 13); and a test runs each command through the binary
   against the journal. No agent starts on the L2 host before this lands.
 - **E10-21 (Must, M8, before an Alpaca OAuth connect on staging; SC)** As the owner, I want a
-  closed connect request to leave no authorization code in the vault, so that a code the callback
-  wrote just before a revoke or the deadline teardown is never exchanged
-  ([DEC-2626](decisions/DEC-2626.md) item 3, the residual window). *Accepted when:* the revoke of a
-  pending connection and the deadline teardown each delete the connection's code entry after
-  journaling the close, a failed delete is retried until it succeeds or the entry is absent, and
-  a test shows a code written between the callback's open-request check and its vault write gone
-  once the close is journaled. The token exchange's own refusal of a closed request is E10-13
-  slice 5b-3b's.
+  closed connect request to leave no authorization code or token in the vault, so that a code the
+  callback wrote just before a revoke or the deadline teardown is never exchanged, and a token an
+  exchange wrote just before the close is never used ([DEC-2626](decisions/DEC-2626.md) item 3,
+  the residual window). *Accepted when:* the revoke of a pending connection and the deadline
+  teardown each delete the connection's code entry and any token entry after journaling the
+  close; where Alpaca offers token revocation, the token is revoked at Alpaca before it is
+  deleted, and the revocation is journaled with opaque ids only; a failed delete or revocation is
+  retried until it succeeds or the entry is absent; and tests show a code written between the
+  callback's open-request check and its vault write, and a token an exchange wrote after the
+  close, both gone once the close is journaled.
 
 ### E11 Web app: dashboard and controls
 
