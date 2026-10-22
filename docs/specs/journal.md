@@ -16,12 +16,12 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   [DEC-176](../project/04-decision-log.md#decisions)):** §9.15's closed set of kinds gains
   `kill_switch_unapplied` (safety, after `kill_switch`), 33 kinds to 34: the deployment manager's
   `OwnerAlertSent` for its own unapplied crash loop (notifications spec §3.2, DEC-2344 item 1).
-  Stream rule 266 holds the kind to that subject, which the control stream alone shows: no record
+  Stream rule 264 holds the kind to that subject, which the control stream alone shows: no record
   gains a member. The new `kill_switch_unapplied` vectors are 12 control streams, the redeploy, a
   new run after a loop, an executor still wanted, and a runtime's loop among them, judged by the
   fold and an independent oracle, with 5 stream and 2 vector mutants caught. **Versions and
   numbers:** v0.77 is held by #2278 (DEC-2350) and lane V2's #2292 and #2293 stacked on it, and
-  rules 261 to 265 by #2278 and #2295, so this takes v0.78 and rule 266, and renumbers at merge if
+  rules 261 to 263 by #2278, so this takes v0.78 and rule 264, and renumbers at merge if
   that order changes.
 - **v0.76 ([DEC-2344](../project/decisions/DEC-2344.md), an agent reading under
   [DEC-176](../project/04-decision-log.md#decisions)):** §9.2 states its writer's precondition for
@@ -4120,8 +4120,8 @@ does `address_retired`, which records only that the address left the set.
      the batch names the same subject (`payload.subject`, at the first alert that breaks it):
      notifications spec §3.2's "in the subject's own batch" and §3.4's "one subject, one kind",
      checked at append.
-266. **Stream rule** (control stream, [DEC-2351](../project/decisions/DEC-2351.md), v0.78; numbered
-     on after the open changes' rules 261 to 265, renumbering none). An `OwnerAlertSent` whose
+264. **Stream rule** (control stream, [DEC-2351](../project/decisions/DEC-2351.md), v0.78; numbered
+     on after #2278's rules 261 to 263, renumbering none). An `OwnerAlertSent` whose
      `kind` is `kill_switch_unapplied` names as its `subject` an **unapplied crash loop**
      (`payload.subject`): a `ProcessCrashLooped` of an executor whose **run**, from the latest of
      its `ProcessStartIssued` records before the loop whose `cause` is not `restart`, began with

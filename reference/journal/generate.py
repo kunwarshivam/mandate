@@ -4267,7 +4267,7 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(timeout_section['invalid_drafts'])} invalid and {len(timeout_section['valid_drafts'])} valid "
         f"approval-timeout drafts, {len(timeouts.VALIDATOR_MUTANTS)} validator and "
         f"{len(timeouts.vector_mutants(timeout_section))} vector mutants caught; "
-        f"{len(unapplied_section['streams'])} rule-266 streams, {len(unapplied.STREAM_MUTANTS)} stream and "
+        f"{len(unapplied_section['streams'])} rule-264 streams, {len(unapplied.STREAM_MUTANTS)} stream and "
         f"{len(unapplied.vector_mutants(unapplied_section))} vector mutants caught; "
         f"{len(requests_section['invalid_drafts'])} invalid and {len(requests_section['valid_drafts'])} valid "
         f"approval-request drafts, {len(requests.VALIDATOR_MUTANTS)} validator and "

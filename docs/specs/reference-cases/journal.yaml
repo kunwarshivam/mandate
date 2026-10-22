@@ -11050,10 +11050,10 @@ approval_timeouts:
     expect:
       outcome: Valid
 kill_switch_unapplied:
-  spec: docs/specs/journal.md v0.78 §9.15, rule 266 (DEC-2351)
+  spec: docs/specs/journal.md v0.78 §9.15, rule 264 (DEC-2351)
   streams:
   - name: after_restarts
-    clause: 'rule 266: the run''s first start was the switch''s, whatever restarts followed'
+    clause: 'rule 264: the run''s first start was the switch''s, whatever restarts followed'
     records:
     - &id005
       event_id: 01J8Z6U0000000000000000000
@@ -11120,7 +11120,7 @@ kill_switch_unapplied:
     expect:
       outcome: Valid
   - name: at_once
-    clause: 'rule 266: a loop of the switch''s own start'
+    clause: 'rule 264: a loop of the switch''s own start'
     records:
     - *id005
     - *id006
@@ -11144,7 +11144,7 @@ kill_switch_unapplied:
     expect:
       outcome: Valid
   - name: an_ordinary_loop
-    clause: 'rule 266: a run that began with a deployment is ordinary'
+    clause: 'rule 264: a run that began with a deployment is ordinary'
     records:
     - *id005
     - *id006
@@ -11175,10 +11175,10 @@ kill_switch_unapplied:
         owner_command: null
     expect:
       outcome: Invalid
-      rule: rule 266
+      rule: rule 264
       index: 4
   - name: redeployed
-    clause: 'rule 266: a deployment on the account since the switch''s start makes the loop ordinary'
+    clause: 'rule 264: a deployment on the account since the switch''s start makes the loop ordinary'
     records:
     - *id005
     - *id006
@@ -11217,10 +11217,10 @@ kill_switch_unapplied:
         owner_command: null
     expect:
       outcome: Invalid
-      rule: rule 266
+      rule: rule 264
       index: 6
   - name: deployed_elsewhere
-    clause: 'rule 266: a deployment on another account''s connection does not end this run'
+    clause: 'rule 264: a deployment on another account''s connection does not end this run'
     records:
     - *id005
     - event_id: 01J8Z6U0100000000000000000
@@ -11283,7 +11283,7 @@ kill_switch_unapplied:
     expect:
       outcome: Valid
   - name: retired_before_the_switch
-    clause: 'rule 266: an agent deployed and retired before the switch''s start leaves it wanted by none'
+    clause: 'rule 264: an agent deployed and retired before the switch''s start leaves it wanted by none'
     records:
     - *id005
     - event_id: 01J8Z6U1100000000000000000
@@ -11328,7 +11328,7 @@ kill_switch_unapplied:
     expect:
       outcome: Valid
   - name: switched_while_wanted
-    clause: 'rule 266: a switch''s start of an executor an agent still wants is no held run'
+    clause: 'rule 264: a switch''s start of an executor an agent still wants is no held run'
     records:
     - *id005
     - event_id: 01J8Z6U1100000000000000000
@@ -11375,10 +11375,10 @@ kill_switch_unapplied:
         owner_command: null
     expect:
       outcome: Invalid
-      rule: rule 266
+      rule: rule 264
       index: 6
   - name: a_new_run_after_a_loop
-    clause: 'rule 266: a later switch''s start after an unapplied loop is a new run, and its loop is unapplied too'
+    clause: 'rule 264: a later switch''s start after an unapplied loop is a new run, and its loop is unapplied too'
     records:
     - *id005
     - *id006
@@ -11436,7 +11436,7 @@ kill_switch_unapplied:
     expect:
       outcome: Valid
   - name: a_runtime_loop
-    clause: 'rule 266: only an executor''s loop'
+    clause: 'rule 264: only an executor''s loop'
     records:
     - *id005
     - *id006
@@ -11459,10 +11459,10 @@ kill_switch_unapplied:
         owner_command: null
     expect:
       outcome: Invalid
-      rule: rule 266
+      rule: rule 264
       index: 4
   - name: another_accounts_switch
-    clause: 'rule 266: the run is the looping executor''s own'
+    clause: 'rule 264: the run is the looping executor''s own'
     records:
     - *id005
     - *id006
@@ -11502,10 +11502,10 @@ kill_switch_unapplied:
         owner_command: null
     expect:
       outcome: Invalid
-      rule: rule 266
+      rule: rule 264
       index: 5
   - name: names_a_start
-    clause: 'rule 266: the subject is the loop, not the start'
+    clause: 'rule 264: the subject is the loop, not the start'
     records:
     - *id005
     - *id006
@@ -11528,10 +11528,10 @@ kill_switch_unapplied:
         owner_command: null
     expect:
       outcome: Invalid
-      rule: rule 266
+      rule: rule 264
       index: 4
   - name: an_ordinary_alert_on_an_ordinary_loop
-    clause: rule 266 reads only `kill_switch_unapplied`
+    clause: rule 264 reads only `kill_switch_unapplied`
     records:
     - *id005
     - *id006
