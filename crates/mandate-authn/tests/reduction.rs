@@ -709,3 +709,29 @@ fn the_cost_of_a_failure_does_not_grow_with_the_keys_held() {
         "64 times the keys cost {many:?} against {few:?}: a failure scans the keys it holds"
     );
 }
+
+#[test]
+#[ignore = "pending E9-1"]
+fn a_key_that_lapsed_holds_no_place_under_the_bound() {
+    let mut bench = Bench::bounded((9, 9), (1, 1), (9, 9, 4));
+    let lapsed = client("a0", "d0");
+    assert_eq!(bench.present(&lapsed, 100, 0, true), REFUSED);
+    let (first, second) = (client("a1", "d1"), client("a2", "d2"));
+    assert_eq!(bench.present(&first, 101, 400 * S, true), REFUSED);
+    assert_eq!(bench.present(&second, 102, 401 * S, true), REFUSED);
+    for key in [&first, &second] {
+        assert!(
+            bench.reached(&client(&key.address, "never-seen"), 401 * S)
+                && bench.reached(&client("never-seen", &key.device), 401 * S),
+            "the lapsed key left the index and its map together, so four live keys fit the bound: {key:?}"
+        );
+    }
+    assert!(!bench.reached(&lapsed, 401 * S));
+    let third = client("a3", "d3");
+    assert_eq!(bench.present(&third, 103, 402 * S, true), REFUSED);
+    assert!(
+        !bench.reached(&first, 402 * S),
+        "past the bound the oldest live keys go"
+    );
+    assert!(bench.reached(&second, 402 * S) && bench.reached(&third, 402 * S));
+}
