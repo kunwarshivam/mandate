@@ -253,7 +253,7 @@ pub(crate) fn browser(headers: &HeaderMap, app_origin: &str) -> bool {
 }
 
 /// The 403 a failed [`browser`] check answers, before any cookie or token is read.
-fn forbidden() -> Response {
+pub(crate) fn forbidden() -> Response {
     problem(StatusCode::FORBIDDEN, problem_body(ProblemCode::Forbidden))
 }
 

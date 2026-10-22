@@ -13,18 +13,26 @@
 //! never journaled.
 
 use std::collections::BTreeMap;
-use std::net::{IpAddr, SocketAddr};
-use std::sync::{Arc, Mutex};
+use std::net::{IpAddr, Ipv6Addr, SocketAddr};
+use std::num::NonZeroU32;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use axum::body::Bytes;
 use axum::extract::{ConnectInfo, State};
-use axum::http::HeaderMap;
+use axum::http::header::{CACHE_CONTROL, COOKIE, SET_COOKIE};
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::Response;
+use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use mandate_api::problem::Violation;
 use mandate_authn::{ClientKey, ReductionGate, ReductionLimits, Unauthenticated};
+use mandate_canon::{Value, encode_ulid, parse};
 use mandate_time::UtcNanos;
+use ring::digest::{SHA256, digest};
 
 use crate::config::StartRefusal;
-use crate::http::App;
+use crate::http::{App, browser, forbidden, invalid, unauthenticated};
+use crate::routes::{enveloped, string};
 use crate::session::{OsRandom, Random};
 
 /// The device cookie's name (§4.10 route 2 item 3).
@@ -39,70 +47,110 @@ pub const CHALLENGES_IN_ALL: usize = 4_096;
 /// The setting naming the ingress's own addresses (§3.11 item 2).
 pub const INGRESS_PEERS: &str = "MANDATE_API_INGRESS_PEERS";
 
+/// The forwarded-address header the ingress appends to.
+const FORWARDED_FOR: &str = "x-forwarded-for";
+
 /// DEC-2117 item 3's numbers: 4 challenges per device and 32 per address outstanding, and 10
 /// failures per device and 100 per address kept.
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
 pub fn limits() -> ReductionLimits {
-    todo!()
+    ReductionLimits {
+        challenges_per_address: NonZeroU32::MIN.saturating_add(31),
+        challenges_per_device: NonZeroU32::MIN.saturating_add(3),
+        failures_per_address: NonZeroU32::MIN.saturating_add(99),
+        failures_per_device: NonZeroU32::MIN.saturating_add(9),
+    }
 }
 
 /// The ingress peers `setting` lists, comma-separated IP addresses; none when it is absent or
 /// empty, and [`StartRefusal::Setting`] naming [`INGRESS_PEERS`] for any entry that is not an
 /// address.
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
 pub fn ingress_peers(setting: Option<&str>) -> Result<Vec<IpAddr>, StartRefusal> {
-    let _ = (setting, INGRESS_PEERS);
-    todo!()
+    match setting.map(str::trim) {
+        None | Some("") => Ok(Vec::new()),
+        Some(listed) => listed
+            .split(',')
+            .map(|entry| entry.trim().parse::<IpAddr>())
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| StartRefusal::Setting {
+                name: INGRESS_PEERS,
+            }),
+    }
 }
 
 /// The address a request counts against: `peer`, or the last `X-Forwarded-For` entry when `peer`
 /// is one of `ingress` and that entry is an address. An IPv4 address, IPv4-mapped included, is
 /// itself; an IPv6 address is its /64, as `<prefix>::/64`.
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
 pub fn address(peer: IpAddr, headers: &HeaderMap, ingress: &[IpAddr]) -> String {
-    let _ = (peer, headers, ingress);
-    todo!()
+    let from = if ingress.contains(&peer) {
+        forwarded(headers).unwrap_or(peer)
+    } else {
+        peer
+    };
+    match from {
+        IpAddr::V4(v4) => v4.to_string(),
+        IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
+            Some(v4) => v4.to_string(),
+            None => {
+                let [a, b, c, d, ..] = v6.segments();
+                format!("{}/64", Ipv6Addr::new(a, b, c, d, 0, 0, 0, 0))
+            }
+        },
+    }
+}
+
+/// The last entry of the last `X-Forwarded-For` line, when it is an address.
+fn forwarded(headers: &HeaderMap) -> Option<IpAddr> {
+    let line = headers.get_all(FORWARDED_FOR).iter().next_back()?;
+    line.to_str().ok()?.rsplit(',').next()?.trim().parse().ok()
 }
 
 /// The device key of a request carrying exactly one well-formed device cookie (32 bytes as
 /// unpadded base64url): the lowercase hex SHA-256 of its value, never the value itself.
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
 pub fn device(headers: &HeaderMap) -> Option<String> {
-    let _ = headers;
-    todo!()
+    let mut found = headers
+        .get_all(COOKIE)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(';'))
+        .filter_map(|pair| pair.trim().split_once('='))
+        .filter(|(name, _)| *name == DEVICE_COOKIE)
+        .map(|(_, value)| value);
+    let value = match (found.next(), found.next()) {
+        (Some(value), None) => value,
+        _ => return None,
+    };
+    let bytes: [u8; 32] = URL_SAFE_NO_PAD.decode(value).ok()?.try_into().ok()?;
+    (URL_SAFE_NO_PAD.encode(bytes) == value).then(|| hex_digest(value))
+}
+
+/// The lowercase hex SHA-256 of `value`.
+fn hex_digest(value: &str) -> String {
+    digest(&SHA256, value.as_bytes())
+        .as_ref()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 /// The WebAuthn RP ID of `app_origin`: its host, when it is an `https` origin whose host has a dot.
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
 pub fn rp_id(app_origin: &str) -> Option<String> {
-    let _ = app_origin;
-    todo!()
+    let rest = app_origin.strip_prefix("https://")?;
+    let host = rest.split_once(':').map_or(rest, |(host, _)| host);
+    (host.contains('.') && !host.contains('/')).then(|| host.to_owned())
 }
 
 /// A challenge's id: the ULID whose time is `issued_at`'s millisecond and whose randomness is the
 /// challenge's first ten bytes.
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
 pub fn challenge_id(issued_at: UtcNanos, bytes: &[u8; 32]) -> String {
-    let _ = (issued_at, bytes);
-    todo!()
+    let millis = u128::try_from(issued_at.secs())
+        .unwrap_or_default()
+        .saturating_mul(1_000)
+        .saturating_add(u128::from(issued_at.nanos() / 1_000_000));
+    let random = bytes
+        .iter()
+        .take(10)
+        .fold(0_u128, |acc, byte| (acc << 8) | u128::from(*byte));
+    encode_ulid((millis << 80) | random)
 }
 
 /// A challenge the route issued.
@@ -115,7 +163,9 @@ pub struct Issued {
 }
 
 /// The gate, the challenges outstanding by id, the ingress peers, and the generator the challenge
-/// bytes and device cookies come from.
+/// bytes and device cookies come from. A lock a panic poisoned is taken as it stands, so a
+/// failure elsewhere never closes route 2 (rule 13); the store's own guard is always the
+/// outstanding map before the gate.
 pub struct Reduction {
     gate: Mutex<ReductionGate>,
     outstanding: Mutex<BTreeMap<String, Issued>>,
@@ -127,7 +177,7 @@ impl Reduction {
     /// A store with nothing outstanding, behind `ingress`, drawing from `random`.
     pub fn new(ingress: Vec<IpAddr>, random: Box<dyn Random>) -> Self {
         Self {
-            gate: Mutex::new(ReductionGate::new(limits_or_one())),
+            gate: Mutex::new(ReductionGate::new(limits())),
             outstanding: Mutex::new(BTreeMap::new()),
             ingress,
             random,
@@ -140,24 +190,43 @@ impl Reduction {
     }
 
     /// Issues a challenge for `client` at `now`: fresh bytes, held until `now` plus 300 s. Refused
-    /// when the gate refuses, when [`CHALLENGES_IN_ALL`] are outstanding, or when the generator
-    /// fails.
-    #[expect(
-        clippy::todo,
-        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-    )]
+    /// when the gate refuses, when [`CHALLENGES_IN_ALL`] are outstanding, when the id is already
+    /// held, or when the generator fails.
     pub fn issue(&self, client: &ClientKey, now: UtcNanos) -> Result<Issued, Unauthenticated> {
-        let _ = (client, now, &self.gate, &self.outstanding, &self.random);
-        todo!()
+        let mut outstanding = self
+            .outstanding
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        outstanding.retain(|_, held| now < held.expires_at);
+        if outstanding.len() >= CHALLENGES_IN_ALL {
+            return Err(Unauthenticated);
+        }
+        let mut bytes = [0_u8; 32];
+        self.random.fill(&mut bytes).map_err(|_| Unauthenticated)?;
+        let id = challenge_id(now, &bytes);
+        if outstanding.contains_key(&id) {
+            return Err(Unauthenticated);
+        }
+        let challenge = self
+            .gate
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .issue(client, bytes, now)?;
+        let issued = Issued {
+            challenge_id: id.clone(),
+            bytes,
+            issued_at: now,
+            expires_at: challenge.expires_at,
+        };
+        outstanding.insert(id, issued.clone());
+        Ok(issued)
     }
 
     /// Fresh device cookie bytes, unpadded base64url.
-    #[expect(
-        clippy::todo,
-        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-    )]
     pub fn new_device(&self) -> Result<String, Unauthenticated> {
-        todo!()
+        let mut bytes = [0_u8; 32];
+        self.random.fill(&mut bytes).map_err(|_| Unauthenticated)?;
+        Ok(URL_SAFE_NO_PAD.encode(bytes))
     }
 }
 
@@ -167,30 +236,75 @@ impl Default for Reduction {
     }
 }
 
-/// The gate's limits until [`limits`] is served: one of each, so a stub never widens a limit.
-fn limits_or_one() -> ReductionLimits {
-    ReductionLimits {
-        challenges_per_address: core::num::NonZeroU32::MIN,
-        challenges_per_device: core::num::NonZeroU32::MIN,
-        failures_per_address: core::num::NonZeroU32::MIN,
-        failures_per_device: core::num::NonZeroU32::MIN,
-    }
+/// Whether `body` is exactly an empty JSON object.
+fn empty_object(body: &[u8]) -> bool {
+    matches!(parse(body), Ok(Value::Object(members)) if members.is_empty())
 }
 
 /// `POST /v1/reduction-sessions/challenges` (§4.10 route 2): 403 `forbidden` without the browser
 /// marks, `invalid` for any body but `{}`, the one 401 over a limit, else `201` with
 /// `commands/reduction-session-challenge`, `Cache-Control: no-store`, and a device cookie when
 /// the call carried none.
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
 pub async fn challenge(
     State(app): State<Arc<App>>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    let _ = (app, peer, headers, body);
-    todo!()
+    if !browser(&headers, &app.settings.app_origin) {
+        return forbidden();
+    }
+    if !empty_object(&body) {
+        return invalid(vec![Violation::Schema {
+            path: String::new(),
+            code: "additionalProperties".to_owned(),
+            message: "The request is an empty object.".to_owned(),
+        }]);
+    }
+    let issued = (|| {
+        let rp_id = rp_id(&app.settings.app_origin)?;
+        let presented = device(&headers);
+        let fresh = match presented {
+            Some(_) => None,
+            None => Some(app.reduction.new_device().ok()?),
+        };
+        let device = presented.or_else(|| fresh.as_deref().map(hex_digest))?;
+        let client = ClientKey {
+            address: address(peer.ip(), &headers, app.reduction.ingress()),
+            device,
+        };
+        let now = app.clock.now()?;
+        let issued = app.reduction.issue(&client, now).ok()?;
+        Some((rp_id, fresh, issued, now))
+    })();
+    let Some((rp_id, fresh, issued, now)) = issued else {
+        return unauthenticated();
+    };
+    let mut response = enveloped(
+        StatusCode::CREATED,
+        now,
+        vec![
+            ("challenge_id", string(&issued.challenge_id)),
+            (
+                "webauthn_challenge",
+                string(&URL_SAFE_NO_PAD.encode(issued.bytes)),
+            ),
+            ("rp_id", string(&rp_id)),
+            ("issued_at", string(&issued.issued_at.to_string())),
+            ("expires_at", string(&issued.expires_at.to_string())),
+            ("as_of", Value::Array(Vec::new())),
+        ],
+    );
+    let headers = response.headers_mut();
+    headers.insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    let cookie = fresh.and_then(|value| {
+        HeaderValue::from_str(&format!(
+            "{DEVICE_COOKIE}={value}; Path=/; Max-Age={DEVICE_MAX_AGE_S}; Secure; HttpOnly; SameSite=Strict"
+        ))
+        .ok()
+    });
+    if let Some(cookie) = cookie {
+        headers.insert(SET_COOKIE, cookie);
+    }
+    response
 }

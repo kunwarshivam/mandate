@@ -52,7 +52,8 @@ impl Random for Failing {
     }
 }
 
-/// A generator that draws distinct 32-byte values for as long as a test needs.
+/// A generator that draws distinct 32-byte values for as long as a test needs, distinct in their
+/// first eight bytes too.
 #[derive(Default)]
 struct Wide(Mutex<u64>);
 
@@ -61,9 +62,22 @@ impl Random for Wide {
         let mut n = self.0.lock().expect("unpoisoned");
         *n += 1;
         out.iter_mut().for_each(|b| *b = 0xa5);
-        let bytes = n.to_be_bytes();
-        let tail = out.len() - bytes.len();
-        out[tail..].copy_from_slice(&bytes);
+        out[..8].copy_from_slice(&n.to_be_bytes());
+        Ok(())
+    }
+}
+
+/// A generator whose draws differ only past their first ten bytes, so two drawn in one
+/// millisecond share a challenge id.
+#[derive(Default)]
+struct SharedPrefix(Mutex<u64>);
+
+impl Random for SharedPrefix {
+    fn fill(&self, out: &mut [u8]) -> Result<(), Unauthenticated> {
+        let mut n = self.0.lock().expect("unpoisoned");
+        *n += 1;
+        out.iter_mut().for_each(|b| *b = 0x5a);
+        out[24..].copy_from_slice(&n.to_be_bytes());
         Ok(())
     }
 }
@@ -91,7 +105,6 @@ fn client(address: &str, device: &str) -> ClientKey {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn the_limits_are_dec_2117s_numbers() {
     let n = |v: u32| core::num::NonZeroU32::new(v).expect("not zero");
     assert_eq!(
@@ -107,7 +120,6 @@ fn the_limits_are_dec_2117s_numbers() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn ingress_peers_name_addresses_and_refuse_anything_else() {
     assert_eq!(reduction::ingress_peers(None), Ok(Vec::new()));
     assert_eq!(reduction::ingress_peers(Some("")), Ok(Vec::new()));
@@ -137,7 +149,6 @@ fn ingress_peers_name_addresses_and_refuse_anything_else() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn an_ipv4_address_counts_as_itself_and_an_ipv6_as_its_64() {
     let none = HeaderMap::new();
     let at = |peer: &str| reduction::address(ip(peer), &none, &[]);
@@ -154,7 +165,6 @@ fn an_ipv4_address_counts_as_itself_and_an_ipv6_as_its_64() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_forwarded_address_counts_only_from_a_listed_ingress_peer() {
     let loopback = ip("127.0.0.1");
     let ingress = [loopback];
@@ -191,7 +201,6 @@ fn a_forwarded_address_counts_only_from_a_listed_ingress_peer() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn the_device_key_is_a_digest_of_one_well_formed_cookie() {
     let cookie = |value: &str| headers(&[("cookie", value)]);
     let key = reduction::device(&cookie(&format!("{DEVICE_COOKIE}={DEVICE}"))).expect("a key");
@@ -226,7 +235,6 @@ fn the_device_key_is_a_digest_of_one_well_formed_cookie() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn the_rp_id_is_the_app_origins_host() {
     assert_eq!(
         reduction::rp_id("https://app.owlhead.ai").as_deref(),
@@ -247,7 +255,6 @@ fn the_rp_id_is_the_app_origins_host() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_challenge_id_is_the_ulid_of_its_millisecond_and_first_ten_bytes() {
     let bytes: [u8; 32] = core::array::from_fn(|i| u8::try_from(i * 7 % 256).expect("a byte"));
     let issued = mandate_time::UtcNanos::from_parts(T0, 123_456_789).expect("an instant");
@@ -261,7 +268,6 @@ fn a_challenge_id_is_the_ulid_of_its_millisecond_and_first_ten_bytes() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn the_store_issues_within_the_gate_and_holds_at_most_4096_in_all() {
     let store = Reduction::new(Vec::new(), Box::new(Counting::default()));
     let now = at(T0);
@@ -304,6 +310,15 @@ fn the_store_issues_within_the_gate_and_holds_at_most_4096_in_all() {
         "the 4,097th outstanding in all"
     );
     assert!(wide.issue(&client("fresh", "fresh"), at(T0 + 300)).is_ok());
+
+    let shared = Reduction::new(Vec::new(), Box::new(SharedPrefix::default()));
+    shared.issue(&client("a1", "d1"), now).expect("issued");
+    assert!(
+        shared.issue(&client("a2", "d2"), now).is_err(),
+        "an id already held is never issued twice"
+    );
+    let later = mandate_time::UtcNanos::from_parts(T0, 1_000_000).expect("an instant");
+    assert!(shared.issue(&client("a2", "d2"), later).is_ok());
 
     let broken = Reduction::new(Vec::new(), Box::new(Failing));
     assert!(broken.issue(&client("a1", "d1"), now).is_err());
@@ -397,7 +412,7 @@ fn shape(reply: &Reply) -> BTreeSet<String> {
 }
 
 fn the_one_401(f: &Fixture, reply: &Reply, label: &str) {
-    let nowhere = send(f.addr, "GET", "/nowhere", &[], b"");
+    let nowhere = send(f.addr, "GET", "/nowhere", &[("Origin", APP)], b"");
     assert_eq!(reply.status, 401, "{label}");
     assert_eq!(reply.body, nowhere.body, "{label}: the one body");
     assert_eq!(shape(reply), shape(&nowhere), "{label}: the same headers");
@@ -405,7 +420,6 @@ fn the_one_401(f: &Fixture, reply: &Reply, label: &str) {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_challenge_names_nothing_but_itself_and_journals_nothing() {
     let f = fixture(Reduction::new(Vec::new(), Box::new(Counting::default())));
     let reply = ask(&f, &[], b"{}");
@@ -473,7 +487,6 @@ fn a_challenge_names_nothing_but_itself_and_journals_nothing() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_device_cookie_presented_is_kept_and_a_malformed_one_replaced() {
     let f = fixture(Reduction::new(Vec::new(), Box::new(Counting::default())));
     let kept = ask(
@@ -492,7 +505,6 @@ fn a_device_cookie_presented_is_kept_and_a_malformed_one_replaced() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn the_challenge_route_is_browser_only_and_takes_an_empty_object() {
     let f = fixture(Reduction::default());
     let forbidden = |reply: Reply, label: &str| {
@@ -523,18 +535,22 @@ fn the_challenge_route_is_browser_only_and_takes_an_empty_object() {
     );
     for body in [&b"{\"workspace_id\":\"x\"}"[..], b"[]", b"", b"not json"] {
         let reply = ask(&f, &[], body);
-        assert_eq!(reply.status, 400, "{:?}", String::from_utf8_lossy(body));
+        assert_eq!(reply.status, 422, "{:?}", String::from_utf8_lossy(body));
         assert_eq!(
             json(&reply).get("code"),
             Some(&Value::Str("invalid".to_owned()))
         );
     }
     let other = send(f.addr, "GET", PATH, &[("Origin", APP)], b"");
-    the_one_401(&f, &other, "another method");
+    let nowhere = send(f.addr, "GET", "/nowhere", &[("Origin", APP)], b"");
+    assert_eq!(
+        (other.status, &other.body),
+        (401, &nowhere.body),
+        "another method: the one 401"
+    );
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn over_its_limits_the_challenge_route_answers_the_one_401() {
     let f = fixture(Reduction::new(Vec::new(), Box::new(Wide::default())));
     let device = [("Cookie", format!("{DEVICE_COOKIE}={DEVICE}"))];
