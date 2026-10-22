@@ -1695,9 +1695,10 @@ id and is used once, so a retried opening asks for a new challenge.
    - the passkey lookup reads the whole fold and does not stop at a match;
    - the signature is verified first, before anything is judged: against the passkey's key, or,
      for an unknown passkey, against a fixed decoy key chosen by the signature's encoding, since
-     an assertion's authenticator data names no algorithm: an ECDSA signature's DER structure is
-     verified against the ES256 decoy, 64 raw bytes against the Ed25519 decoy, and any other
-     shape against the ES256 decoy;
+     an assertion's authenticator data names no algorithm. The encodings are tried in this order,
+     so every signature has one answer: one that parses as an ECDSA DER structure is verified
+     against the ES256 decoy, even when it is also 64 bytes long; else one of exactly 64 raw bytes
+     against the Ed25519 decoy; else any other shape against the ES256 decoy;
    - the membership and provider-refusal lookups always run, against a fixed decoy principal when
      the passkey is unknown;
    - only then are the results judged, together.
