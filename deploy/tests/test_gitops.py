@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from test_cell import api_vault
+from test_cell import api_vault, approle_copied
 
 ROOT = Path(__file__).resolve().parents[2]
 GITOPS = ROOT / "deploy" / "gitops"
@@ -1347,6 +1347,7 @@ def test_the_api_is_bound_to_the_vault_in_staging_alone(overlay):
     if directory == GITOPS / "clusters" / "staging":
         assert bound, "staging's API is bound to its vault"
     assert api_vault(rendered, on=bound) == []
+    assert approle_copied(rendered) == []
     if environment != "staging":
         bad = copy.deepcopy(values)
         bad["workspace"] = merge(bad["workspace"], {"api": {"vaultBinding": True}})
