@@ -1,6 +1,6 @@
 # Per-PR checks (ADR-0001 ES-12, DEC-75, DEC-76, DEC-464). The required checks remain `fast` and
 # `full`, and both are quick aggregates. `fast` is over `fast-lint` (lint and the spec guard), the
-# three `fast-test` shards of the nextest run, `fast-pending` (pending tests, doctests and the
+# four `fast-test` shards of the nextest run, `fast-pending` (pending tests, doctests and the
 # rh-sim build's tests) and `fast-python` (pytest), which together run exactly `cargo xtask ci
 # fast` (DEC-871), and `fast-rh-sim-live`, the runner's tests in the `live,rh-sim` build, which no
 # `cargo xtask` group runs (DEC-964). `full` is
@@ -180,7 +180,7 @@ jobs:
         if: steps.change.outputs.docs_only != 'true'
 
   # DEC-871. The workspace's nextest run, in nextest's counted partitions: each shard builds every
-  # test binary and runs its third of the tests, and together they run every test once. The shards
+  # test binary and runs its quarter of the tests, and together they run every test once. The shards
   # and `fast-pending` build the same test profile, so they share one cache, which only the first
   # shard saves.
   fast-test:
@@ -194,7 +194,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: ["1/3", "2/3", "3/3"]
+        shard: ["1/4", "2/4", "3/4", "4/4"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -224,7 +224,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: fast-test
-          save-if: ${{ matrix.shard == '1/3' }}
+          save-if: ${{ matrix.shard == '1/4' }}
       - run: cargo xtask ci test-nextest
         env:
           MANDATE_TEST_PARTITION: ${{ matrix.shard }}
