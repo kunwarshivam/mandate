@@ -81,8 +81,19 @@ pub enum PutSecret {
 /// secret at its own path, and the Alpaca OAuth client secret at [`SecretPath::ClientSecret`],
 /// the one path the token exchange reads it from (DEC-2636 item 1).
 pub fn put_path(secret: PutSecret) -> Result<(SecretPath, &'static str), SourceError> {
-    let _ = secret;
-    Err(SourceError::Unimplemented { story: "E21-32" })
+    Ok(match secret {
+        PutSecret::ModelProviderKey => (
+            SecretPath::Platform(PlatformSecret::ModelProviderKey),
+            "model provider's key",
+        ),
+        PutSecret::EmailCredential => (
+            SecretPath::Platform(PlatformSecret::EmailCredential),
+            "email credential",
+        ),
+        PutSecret::AlpacaOauthClientSecret => {
+            (SecretPath::ClientSecret, "Alpaca OAuth client secret")
+        }
+    })
 }
 
 /// The most bytes `vault put` reads from stdin: two credentials and a secret are far shorter.
@@ -255,17 +266,7 @@ pub fn run_put(
     {
         return Err(refused(SourceError::CredentialFile));
     }
-    let (path, name) = match args.secret {
-        PutSecret::ModelProviderKey => (
-            SecretPath::Platform(PlatformSecret::ModelProviderKey),
-            "model provider's key",
-        ),
-        PutSecret::EmailCredential => (
-            SecretPath::Platform(PlatformSecret::EmailCredential),
-            "email credential",
-        ),
-        PutSecret::AlpacaOauthClientSecret => put_path(args.secret).map_err(refused)?,
-    };
+    let (path, name) = put_path(args.secret).map_err(refused)?;
     let config = OpenBaoConfig {
         address: args.address.clone(),
         ca_pem: fs::read(&args.ca).map_err(|_| refused(SourceError::Config))?,

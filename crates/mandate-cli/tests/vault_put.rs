@@ -176,7 +176,6 @@ fn a_plain_http_address_or_a_bad_ca_is_refused() {
 /// Each secret `vault put` names is written at its own path: a platform secret at its platform
 /// path, and the Alpaca OAuth client secret at the client secret's (DEC-2636 item 1).
 #[test]
-#[ignore = "pending E21-32"]
 fn each_secret_is_put_at_its_own_path() {
     assert_eq!(
         put_path(PutSecret::ModelProviderKey),
@@ -200,7 +199,6 @@ fn each_secret_is_put_at_its_own_path() {
 
 /// The client secret's three lines are read and the vault reached, as a platform secret's are.
 #[test]
-#[ignore = "pending E21-32"]
 fn the_client_secret_is_read_and_the_vault_reached() {
     let output = put(
         "alpaca-oauth-client-secret",
@@ -269,7 +267,6 @@ fn a_put_with_provisioned_credentials_reaches_the_vault() {
 /// The client secret's put with provisioned credentials reaches the dev server as a platform
 /// secret's does, so the refusal is `dev_server_refused`, never a stdin or connection refusal.
 #[test]
-#[ignore = "pending E21-32"]
 fn a_client_secret_put_with_provisioned_credentials_reaches_the_vault() {
     each_secret_is_put_at_its_own_path();
     the_client_secret_is_read_and_the_vault_reached();
