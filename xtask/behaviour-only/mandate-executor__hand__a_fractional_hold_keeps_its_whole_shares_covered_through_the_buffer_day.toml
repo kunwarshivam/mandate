@@ -1,0 +1,9 @@
+file = "crates/mandate-executor/tests/hand.rs"
+test = "a_fractional_hold_keeps_its_whole_shares_covered_through_the_buffer_day"
+reason = """
+E7-4's fractional slice (DEC-2312 item 2, DEC-2315): the re-placement before expiry of a held
+10.4 cancels its OCO for ten and then finds no OCO to place for 10.4, so it journals
+`expiry_unreplaceable` and protects nothing, instead of re-placing the whole ten. That is a
+behaviour, not a stub's report. It still runs and fails, and the slice that implements it deletes
+this file with its `#[ignore]` line.
+"""
