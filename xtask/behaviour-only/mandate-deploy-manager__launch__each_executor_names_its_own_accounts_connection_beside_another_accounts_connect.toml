@@ -1,8 +1,0 @@
-file = "crates/mandate-deploy-manager/tests/launch.rs"
-test = "each_executor_names_its_own_accounts_connection_beside_another_accounts_connect"
-reason = """
-E21-33 K2b (DEC-2336 items 2 and 6) changes the manager's driver, which has no stub form: today's
-driver names no connection on an executor's start or stop and asks for a start once per journaled
-decision, so the test fails on that behaviour. K2b's implementation PR deletes this row with the
-test's ignore line.
-"""

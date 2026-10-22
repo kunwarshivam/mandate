@@ -912,7 +912,6 @@ fn env_of(pod: &Value) -> BTreeMap<String, String> {
 }
 
 #[test]
-#[ignore = "pending E21-33"]
 fn an_executors_account_is_the_one_the_vaults_role_is_named_for() {
     let k = adapter("http://127.0.0.1:1".to_owned());
     let connection = ConnectionId::new(CONNECTION).unwrap();
@@ -937,7 +936,6 @@ fn an_executors_account_is_the_one_the_vaults_role_is_named_for() {
 }
 
 #[test]
-#[ignore = "pending E21-33"]
 fn an_executors_start_creates_its_connections_account_then_its_pod_running_as_it() {
     let (api, seen) = server(vec![
         (201, "{}".to_owned()),
@@ -986,7 +984,6 @@ fn an_executors_start_creates_its_connections_account_then_its_pod_running_as_it
 }
 
 #[test]
-#[ignore = "pending E21-33"]
 fn an_executor_without_its_connection_starts_nothing() {
     let k = adapter("http://127.0.0.1:1".to_owned());
     assert!(k.manifest(&executor(), 1, &connected()).is_some());
@@ -1004,7 +1001,6 @@ fn an_executor_without_its_connection_starts_nothing() {
 }
 
 #[test]
-#[ignore = "pending E21-33"]
 fn an_executors_stop_deletes_its_account_then_its_pod() {
     let (api, seen) = server(vec![
         (200, "{}".to_owned()),
@@ -1040,7 +1036,6 @@ fn an_executors_stop_deletes_its_account_then_its_pod() {
 }
 
 #[test]
-#[ignore = "pending E21-33"]
 fn a_succeeded_pod_reads_as_succeeded_and_a_failed_one_as_exited() {
     let list = json!({"items": [
         pod("token-exchange", CONNECTION, "1", "Succeeded", false, false),

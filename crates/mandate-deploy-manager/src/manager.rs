@@ -320,6 +320,25 @@ impl Manager {
         }
     }
 
+    /// The connection `slot` acts for, which an executor runs as the account of (DEC-2060 item 9):
+    /// the connect whose exchange started it, else the established connection of its account, as
+    /// a deployment on it names. `None` for a runtime and a token exchange, whose subjects say
+    /// what they need.
+    pub fn connection(&self, slot: &Slot) -> Option<String> {
+        if slot.process != Process::Executor {
+            return None;
+        }
+        let exchanged = self
+            .requests
+            .iter()
+            .find(|(_, r)| r.exchanged && r.account == slot.subject);
+        let established = self.connections.iter().find(|(_, a)| **a == slot.subject);
+        exchanged
+            .map(|(connection, _)| connection)
+            .or(established.map(|(connection, _)| connection))
+            .cloned()
+    }
+
     /// Ends an executor's crash-loop pause once no agent wants it: every agent of its account is
     /// stopped (DEC-1170 item 3).
     fn resume(&mut self, executor: &Slot) {
@@ -430,7 +449,11 @@ impl Manager {
             .filter(|i| i.phase == Phase::Succeeded && i.slot.process == Process::TokenExchange)
             .map(|i| i.slot.subject.clone())
             .collect();
-        decisions.extend(succeeded.iter().filter_map(|c| self.exchanged(c)));
+        for start in succeeded.iter().filter_map(|c| self.exchanged(c)) {
+            if !decisions.contains(&start) {
+                decisions.push(start);
+            }
+        }
         let slots: Vec<Slot> = self.slots.keys().cloned().collect();
         decisions.extend(slots.into_iter().filter_map(|slot| {
             let desired = self.desired(&slot);

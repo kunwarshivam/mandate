@@ -45,7 +45,6 @@ fn clean(m: &mut Manager) {
 }
 
 #[test]
-#[ignore = "pending E21-33"]
 fn a_deployments_executor_starts_and_stops_naming_the_connection_it_is_deployed_on() {
     let journal = Journal::new();
     let mut m = manager(&journal, accounts(&[(AGENT, DEPLOYED)]));
@@ -78,7 +77,6 @@ fn a_deployments_executor_starts_and_stops_naming_the_connection_it_is_deployed_
 }
 
 #[test]
-#[ignore = "pending E21-33"]
 fn a_connects_executor_starts_and_stops_naming_its_connect() {
     let journal = Journal::new();
     let mut m = manager(&journal, accounts(&[]));
@@ -107,7 +105,6 @@ fn a_connects_executor_starts_and_stops_naming_its_connect() {
 }
 
 #[test]
-#[ignore = "pending E21-33"]
 fn each_executor_names_its_own_accounts_connection_beside_another_accounts_connect() {
     let journal = Journal::new();
     let mut m = manager(&journal, accounts(&[(AGENT, DEPLOYED)]));
@@ -132,7 +129,6 @@ fn each_executor_names_its_own_accounts_connection_beside_another_accounts_conne
 }
 
 #[test]
-#[ignore = "pending E21-33"]
 fn two_connects_of_one_account_that_succeed_in_one_pass_start_its_executor_once() {
     let journal = Journal::new();
     let mut m = manager(&journal, accounts(&[]));
