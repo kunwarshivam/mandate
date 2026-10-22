@@ -4,11 +4,11 @@
 //! re-establishments, `AgentStopped`, passes and restarts.
 //!
 //! The oracle reads only the journaled rows, in `seq` order, and never `follow.rs`: an agent is
-//! followed when any of its version-2 deployments named a connection this account established; a
-//! command covers the followed agents deployed on its connection (or, for the workspace, on any of
-//! the account's connections) before it; and a covered agent owes the switch once when its
-//! connection is revoked after the command or the runtime copied the command onto its stream, and
-//! never otherwise. Seeded followers that drop an agent on revocation, or keep only its latest
+//! followed when any of its version-2 deployments named a connection this account established. A
+//! followed agent owes a command's switch once when the runtime copied the command onto its stream
+//! (the runtime judged it covered), or when the command covers it, deployed before it on its
+//! connection (or, for the workspace, on any of the account's connections), and that connection is
+//! revoked after the command; and never otherwise. Seeded followers that drop an agent on revocation, or keep only its latest
 //! deployment, are shown rejected by the same comparison.
 
 mod support;
@@ -164,13 +164,18 @@ fn owed(journal: &Journal) -> BTreeSet<(String, String)> {
     let control = control(&journal.rows_of(CONTROL_STREAM));
     let mut out = BTreeSet::new();
     for agent in AGENTS {
+        let followed = control
+            .deployed
+            .get(agent)
+            .into_iter()
+            .flatten()
+            .any(|(_, connection)| control.ours.contains(connection));
+        if !followed {
+            continue;
+        }
         let copied: BTreeSet<String> = copies(journal, agent).into_values().collect();
         for command in &control.commands {
-            let connections = covering(&control, agent, command);
-            if connections.is_empty() {
-                continue;
-            }
-            let revoked_after = connections.iter().any(|connection| {
+            let revoked_after = covering(&control, agent, command).iter().any(|connection| {
                 control
                     .revoked
                     .get(connection)
