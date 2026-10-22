@@ -16,8 +16,8 @@
 //! - [`local::LocalSource`], over the demo host's local vault (`mandate-vault-local`, DEC-692);
 //! - [`openbao::OpenBaoSource`], over OpenBao's HTTP API, over TLS, with one AppRole and one
 //!   generated policy per process ([`policy::openbao_policy`]), every path spelled out but the
-//!   Api's and the connection manager's one-segment `+` on their write and delete paths, and no
-//!   `*` (DEC-2349).
+//!   Api's and the connection manager's one-segment `+` on their write and delete paths, and the
+//!   manager's on fingerprint reads; no `+` on a read of a credential, and no `*` (DEC-2349).
 //!
 //! Every identity can do exactly what [`policy::allows`] says and nothing else: a runtime reads
 //! nothing, an executor reads exactly its own connection's token, and a credential is write-only
