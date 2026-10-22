@@ -484,6 +484,11 @@ impl Sessions {
         self.standings.standing(member)
     }
 
+    /// The sign-ins this store has seen, which route 2's judge reads.
+    pub fn standings(&self) -> &Standings {
+        &self.standings
+    }
+
     /// How many sessions are held, for the tests' independent count.
     pub fn len(&self) -> usize {
         self.store().entries.len()

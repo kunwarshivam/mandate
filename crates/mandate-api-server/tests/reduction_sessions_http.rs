@@ -204,7 +204,6 @@ fn shape(reply: &Reply) -> BTreeSet<String> {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_verified_assertion_opens_a_reduction_only_session_for_fifteen_minutes() {
     for signer in [Signer::es256(), Signer::ed25519()] {
         let f = fixture(&signer, true);
@@ -261,7 +260,6 @@ fn a_verified_assertion_opens_a_reduction_only_session_for_fifteen_minutes() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn every_refusal_is_the_same_401_and_ends_nothing() {
     let signer = Signer::es256();
     let f = fixture(&signer, true);
@@ -360,7 +358,6 @@ fn every_refusal_is_the_same_401_and_ends_nothing() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn an_opening_replaces_the_session_it_presented_and_a_refresh_keeps_it_reduction_only() {
     let signer = Signer::es256();
     let f = fixture(&signer, true);
@@ -443,7 +440,6 @@ fn device_cookie(n: u32) -> String {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn ten_bad_presentations_from_one_device_raise_the_alert_once() {
     let signer = Signer::es256();
     let f = fixture(&signer, true);
@@ -462,7 +458,6 @@ fn ten_bad_presentations_from_one_device_raise_the_alert_once() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn behind_a_listed_ingress_each_forwarded_address_counts_apart() {
     let f = fixture_behind(
         &Signer::es256(),
@@ -494,7 +489,6 @@ fn behind_a_listed_ingress_each_forwarded_address_counts_apart() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn clients_without_a_device_cookie_share_one_device_budget() {
     let f = fixture_behind(
         &Signer::es256(),
