@@ -64,12 +64,15 @@ impl StartRefused {
 ///
 /// # Errors
 /// [`endpoint`]'s refusal first, then [`StartRefused::Subject`].
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
-pub fn settings(_var: impl Fn(&str) -> Option<String>) -> Result<Settings, StartRefused> {
-    todo!()
+pub fn settings(var: impl Fn(&str) -> Option<String>) -> Result<Settings, StartRefused> {
+    let endpoint = endpoint(var(TIER).as_deref(), var(TOKEN_URL).as_deref())?;
+    let connection = var(SUBJECT)
+        .and_then(|subject| ConnectionId::new(&subject).ok())
+        .ok_or(StartRefused::Subject)?;
+    Ok(Settings {
+        connection,
+        endpoint,
+    })
 }
 
 /// The live endpoint when no token URL is set. A debug build admits a cell's when `tier` admits
@@ -78,10 +81,18 @@ pub fn settings(_var: impl Fn(&str) -> Option<String>) -> Result<Settings, Start
 /// # Errors
 /// [`StartRefused::Cell`] in a debug build for a token URL [`crate::cell::parse`] refuses;
 /// [`StartRefused::TokenUrlInRelease`] in any other build for any token URL, even an empty one.
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
-pub fn endpoint(_tier: Option<&str>, _token_url: Option<&str>) -> Result<Endpoint, StartRefused> {
-    todo!()
+pub fn endpoint(tier: Option<&str>, token_url: Option<&str>) -> Result<Endpoint, StartRefused> {
+    let Some(text) = token_url else {
+        return Ok(Endpoint::Live);
+    };
+    #[cfg(debug_assertions)]
+    let judged = cell::parse(tier, text)
+        .map(Endpoint::Cell)
+        .map_err(StartRefused::Cell);
+    #[cfg(not(debug_assertions))]
+    let judged = {
+        let _unread_in_release = (tier, text);
+        Err(StartRefused::TokenUrlInRelease)
+    };
+    judged
 }

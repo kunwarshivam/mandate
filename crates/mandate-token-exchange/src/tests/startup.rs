@@ -21,7 +21,6 @@ fn from(vars: &[(&str, &str)]) -> Result<Settings, StartRefused> {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn without_a_token_url_the_process_sends_to_the_pinned_live_url() {
     for tier in ["dev", "ci", "staging", "production", "unknown"] {
         assert_eq!(
@@ -44,7 +43,6 @@ fn without_a_token_url_the_process_sends_to_the_pinned_live_url() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_dev_or_ci_cell_sends_to_the_url_the_cell_check_admits() {
     for tier in ["dev", "ci"] {
         assert_eq!(
@@ -63,7 +61,6 @@ fn a_dev_or_ci_cell_sends_to_the_url_the_cell_check_admits() {
 /// Outside `dev` and `ci` a token URL refuses the start, whatever it names, an empty one
 /// included: the variable being set at all is the refusal (DEC-2633 item 2).
 #[test]
-#[ignore = "pending E10-13"]
 fn outside_dev_and_ci_any_token_url_refuses_the_start() {
     for tier in [None, Some("staging"), Some("production"), Some("Dev")] {
         for url in [CELL_URL, "", "https://api.alpaca.markets/oauth/token"] {
@@ -81,7 +78,6 @@ fn outside_dev_and_ci_any_token_url_refuses_the_start() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_token_url_the_cell_check_refuses_refuses_the_start_in_dev() {
     for url in [
         "",
@@ -103,7 +99,6 @@ fn a_token_url_the_cell_check_refuses_refuses_the_start_in_dev() {
 /// The token URL is judged before the subject, so a refused URL is the refusal named even when
 /// the subject is missing too.
 #[test]
-#[ignore = "pending E10-13"]
 fn the_token_url_is_judged_before_the_subject() {
     assert_eq!(
         from(&[("MANDATE_TOKEN_URL", CELL_URL)]),
@@ -112,7 +107,6 @@ fn the_token_url_is_judged_before_the_subject() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_missing_or_malformed_subject_refuses_the_start() {
     for subject in [
         None,
