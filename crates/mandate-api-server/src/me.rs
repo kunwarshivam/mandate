@@ -25,6 +25,7 @@ use mandate_time::UtcNanos;
 
 use crate::http::{App, session_cookie};
 use crate::members::ControlLookup;
+use crate::reduction;
 use crate::routes::{self, Refused, enveloped, object, string};
 use crate::session::Authenticated;
 
@@ -32,6 +33,9 @@ use crate::session::Authenticated;
 /// empty `as_of`, for a full session; the one 401 without one, and `reduction_only` for a session
 /// an outage narrowed.
 pub async fn session(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
+    if let Some(answer) = passkey_session(&app, &headers).await {
+        return answer;
+    }
     let (admitted, now) = match routes::session(&app, &headers, Request::Other) {
         Ok(admitted) => admitted,
         Err(refused) => return refused.response(),
@@ -110,4 +114,34 @@ async fn own_workspaces(app: &App, admitted: &Authenticated, now: UtcNanos) -> R
             ("as_of", Value::Array(Vec::new())),
         ],
     )
+}
+
+/// The answer for a session route 2 opened (§4.10 route 2 item 6): `kind: "reduction_only"`, its
+/// absolute `expires_at`, and the workspaces it covers with what it may act on there; `None` for
+/// any other cookie, which [`session`] answers as before. A session an outage narrowed is not
+/// route 2's and is still refused `reduction_only`.
+async fn passkey_session(app: &App, headers: &HeaderMap) -> Option<Response> {
+    let cookie = session_cookie(headers)?;
+    let now = app.clock.now()?;
+    if !app.sessions.opened_by_passkey(&cookie, now) {
+        return None;
+    }
+    let admitted = app
+        .sessions
+        .authenticate(&cookie, Request::Pause, now)
+        .ok()?;
+    let expires = app.sessions.expires_at(&cookie, now).ok()?;
+    let principal = admitted.principal.to_ulid_text().ok()?;
+    let workspaces = reduction::workspaces(app, admitted.principal, now).await?;
+    Some(enveloped(
+        StatusCode::OK,
+        now,
+        vec![
+            ("principal_id", string(&principal)),
+            ("kind", string("reduction_only")),
+            ("expires_at", string(&expires.to_string())),
+            ("workspaces", workspaces),
+            ("as_of", Value::Array(Vec::new())),
+        ],
+    ))
 }
