@@ -152,6 +152,17 @@ impl DailyCaps {
         }
     }
 
+    /// How many agents' caps are held: only deployed agents' (DEC-2272 item 3), so the count grows
+    /// with nothing a caller sends.
+    #[expect(
+        clippy::todo,
+        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+    )]
+    pub fn held(&self) -> usize {
+        let _ = &self.held;
+        todo!()
+    }
+
     /// The environment whose deployments the caps are read for.
     pub fn environment(&self) -> Environment {
         self.environment

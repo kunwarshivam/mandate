@@ -5,6 +5,7 @@
 
 mod common;
 
+use std::collections::BTreeSet;
 use std::sync::OnceLock;
 
 use common::*;
@@ -907,5 +908,69 @@ fn an_agent_whose_cap_did_not_read_is_refused_unavailable_and_reserves_nothing()
         meter
             .reserve(reservation(5, Some("a"), Purpose::Research, "0.1", day(5)))
             .is_ok()
+    );
+}
+
+/// DEC-2272 item 3, the coordinator's bound: a meter that requires a daily cap refuses a research
+/// call of an agent it holds nothing for `BudgetExhausted`, as a cap of zero would, and stores
+/// nothing for it; only agents set by name are held, and a cleared one is held no longer.
+#[test]
+#[ignore = "pending E21-62"]
+fn a_meter_requiring_daily_caps_refuses_an_unknown_agent_and_stores_nothing() {
+    let mut meter = Meter::new(MemoryMeter::new(), common::caps(), common::deployment());
+    meter.require_research_daily();
+    for n in 0..20 {
+        let agent = format!("ghost_{n}");
+        assert_eq!(
+            meter.reserve(reservation(
+                n,
+                Some(&agent),
+                Purpose::Research,
+                "0.01",
+                day(5)
+            )),
+            Err(MeterRefusal::BudgetExhausted)
+        );
+    }
+    assert!(meter.caps().research_agents().is_empty(), "nothing stored");
+    assert_eq!(meter.store().read(), Ok(Vec::new()));
+    assert!(
+        meter
+            .reserve(reservation(
+                30,
+                Some("ghost_0"),
+                Purpose::LlmSignal,
+                "0.01",
+                day(5)
+            ))
+            .is_ok(),
+        "not a research call"
+    );
+
+    meter
+        .set_research_daily("a", Some(Usd6::parse("1").unwrap()))
+        .unwrap();
+    meter.set_research_daily("b", None).unwrap();
+    assert_eq!(
+        meter.caps().research_agents(),
+        BTreeSet::from(["a".to_owned(), "b".to_owned()])
+    );
+    assert!(
+        meter
+            .reserve(reservation(31, Some("a"), Purpose::Research, "0.1", day(5)))
+            .is_ok()
+    );
+    assert_eq!(
+        meter.reserve(reservation(32, Some("b"), Purpose::Research, "0.1", day(5))),
+        Err(MeterRefusal::Unavailable)
+    );
+
+    meter.clear_research_daily("a");
+    meter.clear_research_daily("b");
+    assert!(meter.caps().research_agents().is_empty());
+    assert_eq!(
+        meter.reserve(reservation(33, Some("a"), Purpose::Research, "0.1", day(5))),
+        Err(MeterRefusal::BudgetExhausted),
+        "a cleared agent is refused as an unknown one"
     );
 }

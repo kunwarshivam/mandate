@@ -362,3 +362,32 @@ fn the_agents_are_those_deployed_in_this_environment() {
         Err(CapError::ControlUnreadable)
     );
 }
+
+/// DEC-2272 item 3, the coordinator's bound: an agent never deployed, or stopped since, is read as
+/// a cap of zero and held no longer, so the caps held count deployed agents alone.
+#[test]
+#[ignore = "pending E21-62"]
+fn a_never_deployed_or_stopped_agent_is_not_held() {
+    let mut world = World::default();
+    let mut caps = DailyCaps::new(Environment::Paper, monthly());
+    for n in 0..20 {
+        assert_eq!(
+            caps.current(&world.control, &format!("ghost_{n}"), &world.store),
+            Ok(Usd6::ZERO)
+        );
+    }
+    assert_eq!(caps.held(), 0, "never deployed");
+    let version = world.stored(with_cap("5"));
+    world.deployed(&version);
+    assert_eq!(
+        caps.current(&world.control, AGENT, &world.store),
+        Ok(usd("5"))
+    );
+    assert_eq!(caps.held(), 1);
+    world.stopped(AGENT);
+    assert_eq!(
+        caps.current(&world.control, AGENT, &world.store),
+        Ok(Usd6::ZERO)
+    );
+    assert_eq!(caps.held(), 0, "stopped since");
+}

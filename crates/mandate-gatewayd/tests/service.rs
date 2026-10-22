@@ -198,18 +198,26 @@ impl World {
     }
 
     fn deploy(&self, agent: &str, version: &str) {
+        let payload = format!(
+            r#"{{"agent_id":"{agent}","mandate_version":"{version}","record_ref":"{version}"}}"#
+        );
+        self.push("AgentDeployed", &payload);
+    }
+
+    /// Appends a control-stream row of `event_type` carrying `payload`.
+    fn push(&self, event_type: &str, payload: &str) {
         let mut control = self.control.borrow_mut();
         let rows = control.get_or_insert_with(Vec::new);
         let seq = u64::try_from(rows.len()).unwrap() + 1;
         let event_id = format!("01J8Z3MC{seq:018}");
         let body = format!(
-            r#"{{"actor":{{"build":null,"id":"user-owner","kind":"user","version":"1"}},"artifact_refs":[],"causation_id":null,"clock_source":"system","config_refs":{{}},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"{event_id}","event_time":"2026-10-16T13:00:00.000000000Z","event_type":"AgentDeployed","payload":{{"agent_id":"{agent}","mandate_version":"{version}","record_ref":"{version}"}},"pii_refs":[],"schema_version":1,"stream_id":"ctl:{WORKSPACE}"}}"#
+            r#"{{"actor":{{"build":null,"id":"user-owner","kind":"user","version":"1"}},"artifact_refs":[],"causation_id":null,"clock_source":"system","config_refs":{{}},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"{event_id}","event_time":"2026-10-16T13:00:00.000000000Z","event_type":"{event_type}","payload":{payload},"pii_refs":[],"schema_version":1,"stream_id":"ctl:{WORKSPACE}"}}"#
         );
         rows.push(StoredEvent {
             stream_id: format!("ctl:{WORKSPACE}"),
             seq,
             event_id,
-            event_type: "AgentDeployed".into(),
+            event_type: event_type.into(),
             schema_version: 1,
             environment: "paper".into(),
             recorded_at: "2026-10-16T13:00:00.000000000Z".into(),
@@ -382,4 +390,59 @@ fn the_start_holds_each_deployed_agent_s_cap() {
         outcome(&mut service, &request(&model, 1, Purpose::Research)),
         Outcome::BudgetExhausted
     );
+}
+
+/// DEC-2272 item 3, the coordinator's bound: research calls naming agents never deployed are
+/// refused `budget_exhausted` with nothing reserved and nothing held, whether the control stream
+/// reads or not, so what the service holds is bounded by the deployed agents alone; a stopped
+/// agent is held no longer.
+#[test]
+#[ignore = "pending E21-62"]
+fn unknown_agent_names_leave_the_held_caps_unchanged() {
+    let world = World::new();
+    world.deploy(AGENT, &world.version("5"));
+    let (mut service, model) = world.service();
+    service.ready().unwrap();
+    let known = BTreeSet::from([AGENT.to_owned()]);
+    let ghost = |n: u128| {
+        let mut call = request(&model, n, Purpose::Research);
+        call.agent_id = Some(format!("ghost_{n}"));
+        call
+    };
+    for n in 0..30 {
+        assert_eq!(outcome(&mut service, &ghost(n)), Outcome::BudgetExhausted);
+    }
+    let rows = world.control.borrow_mut().take();
+    for n in 30..60 {
+        assert_eq!(outcome(&mut service, &ghost(n)), Outcome::BudgetExhausted);
+    }
+    assert_eq!(service.gateway().meter().caps().research_agents(), known);
+    assert_eq!(service.daily_caps().held(), 1);
+    assert_eq!(reserved(&service), 0, "nothing reserved for any of them");
+
+    assert_eq!(
+        outcome(&mut service, &request(&model, 60, Purpose::Research)),
+        Outcome::MeterUnavailable,
+        "the deployed agent, with the stream down"
+    );
+    *world.control.borrow_mut() = rows;
+
+    let payload = format!(
+        r#"{{"agent_id":"{AGENT}","connection_id":"conn_alpaca_paper_01","loss_added":"0","reason":"owner_stop","retired_on":"2026-10-16"}}"#
+    );
+    world.push("AgentStopped", &payload);
+    assert_eq!(
+        outcome(&mut service, &request(&model, 61, Purpose::Research)),
+        Outcome::BudgetExhausted,
+        "stopped since"
+    );
+    assert!(
+        service
+            .gateway()
+            .meter()
+            .caps()
+            .research_agents()
+            .is_empty()
+    );
+    assert_eq!(service.daily_caps().held(), 0);
 }
