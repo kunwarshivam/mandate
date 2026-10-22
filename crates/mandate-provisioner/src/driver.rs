@@ -36,6 +36,8 @@ pub enum Halt {
     Refused { event_type: &'static str },
     /// The control stream has no `StreamOpened` yet, so no record can name its environment.
     NotOpened,
+    /// The vault session is at or near its token's end: no further step is performed with it.
+    SessionExpired,
 }
 
 /// The provisioner with its ports, for the workspace `namespace` its roles bind.
@@ -46,6 +48,7 @@ pub struct Provisioner<J, V, A> {
     vault: V,
     alerts: A,
     deadline: Duration,
+    alerted: Vec<Step>,
 }
 
 impl<J: ControlJournal, V: RoleProvisioner, A: Alerts> Provisioner<J, V, A> {
@@ -57,6 +60,7 @@ impl<J: ControlJournal, V: RoleProvisioner, A: Alerts> Provisioner<J, V, A> {
             vault,
             alerts,
             deadline: DEADLINE,
+            alerted: Vec::new(),
         }
     }
 
@@ -87,6 +91,19 @@ impl<J: ControlJournal, V: RoleProvisioner, A: Alerts> Provisioner<J, V, A> {
     /// [`Halt`], after which every record committed stays committed and the next pass picks up
     /// the rest.
     pub async fn tick(&mut self, now: UtcNanos) -> Result<(), Halt> {
+        self.tick_while(now, || true).await
+    }
+
+    /// [`Provisioner::tick`], asking `usable` before each step whether the vault session may
+    /// still be used: once it may not, the pass stops before the vault is called again.
+    ///
+    /// # Errors
+    /// [`Halt`]; [`Halt::SessionExpired`] when `usable` answers no.
+    pub async fn tick_while(
+        &mut self,
+        now: UtcNanos,
+        usable: impl Fn() -> bool,
+    ) -> Result<(), Halt> {
         let mut skipped: Vec<Step> = Vec::new();
         let mut moved: usize = 0;
         let mut bound: Option<usize> = None;
@@ -106,8 +123,11 @@ impl<J: ControlJournal, V: RoleProvisioner, A: Alerts> Provisioner<J, V, A> {
             let Some(step) = owed.steps.into_iter().find(|s| !skipped.contains(s)) else {
                 return Ok(());
             };
+            if !usable() {
+                return Err(Halt::SessionExpired);
+            }
             let Some(outcome) = self.perform(&step).await else {
-                self.alerts.raise(ROLES_REFUSED);
+                self.alert_once(&step);
                 skipped.push(step);
                 continue;
             };
@@ -120,7 +140,7 @@ impl<J: ControlJournal, V: RoleProvisioner, A: Alerts> Provisioner<J, V, A> {
             {
                 AppendOutcome::Committed(_) | AppendOutcome::AlreadyCommitted(_) => {
                     if matches!(outcome, Outcome::Refused(_)) {
-                        self.alerts.raise(ROLES_REFUSED);
+                        self.alert_once(&step);
                     }
                 }
                 AppendOutcome::HeadMismatch { .. }
@@ -138,6 +158,15 @@ impl<J: ControlJournal, V: RoleProvisioner, A: Alerts> Provisioner<J, V, A> {
                 }
                 AppendOutcome::Unavailable | AppendOutcome::Ambiguous => return Err(Halt::Journal),
             }
+        }
+    }
+
+    /// Raises [`ROLES_REFUSED`] for `step` the first time only: a removal the vault keeps
+    /// refusing is tried again each pass, and alerts once in this process's life.
+    fn alert_once(&mut self, step: &Step) {
+        if !self.alerted.contains(step) {
+            self.alerted.push(step.clone());
+            self.alerts.raise(ROLES_REFUSED);
         }
     }
 

@@ -55,11 +55,12 @@ const _RENEWED_BEFORE_THE_END: () = assert!(
 /// What one pass reports to the lifecycle. A pass that could not read or write the journal, or
 /// that found the stream not yet opened, is a heartbeat, and the next pass starts again from the
 /// journal; a record the journal refuses is a defect, so the process stops rather than retry it
-/// blind.
+/// blind; and a session that reached its token's end mid-pass stops it too, so it starts again
+/// and logs in afresh.
 pub fn input(pass: &Result<(), Halt>) -> Input {
     match pass {
         Ok(()) => Input::Heartbeat,
-        Err(Halt::Refused { .. }) => Input::Failed,
+        Err(Halt::Refused { .. } | Halt::SessionExpired) => Input::Failed,
         Err(Halt::Journal | Halt::NotOpened) => Input::Heartbeat,
     }
 }

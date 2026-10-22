@@ -3056,7 +3056,13 @@ enables `live` (ES-23, OPS-5).
     `ConnectionRolesMade`. Left: a sweep of the executor's roles the provisioner never removes, one
     per connection whose request closed without an establishment or that was revoked, once no
     executor of its account runs; the manager does not journal a held generation's own exit
-    (DEC-2344), so the sweep needs a signal it does not have yet.
+    (DEC-2344), so the sweep needs a signal it does not have yet. **Before production**, from S4b's
+    review: the provisioner writes the vault before the record, so when a request closes while its
+    roles are being made, or a `ConnectionRolesMade` loses an append race to the closer, the record
+    lands after the closer; rule 263 then owes no removal, and that exchange's role is left in the
+    vault (its exchange never starts). Closing it needs a spec change: a removal owed for roles made
+    against an already-closed request, an amendment of rule 263, and the provisioner's plan to
+    follow it.
 - **E21-34 (Proposed, M8; SC; lane O4)** As an owner, I want the kill switch reachable in the cell
   with nothing running but Postgres, the executor and the broker, so that rule 13 holds when the
   web app, the API and the cell's tooling are down (design §3.6, OPS-4). *Accepted when:*

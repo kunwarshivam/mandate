@@ -721,6 +721,7 @@ are authoritative; a few come from metrics.
 | Anchor or timestamping gap | `AnchorComputed` gaps (journal §10) | SEV-3 | RB-10 |
 | Clock out of tolerance | `ClockToleranceExceeded` (journal §5.4) | SEV-2 | RB-11 |
 | Vault lease renewal failing | Executor metrics | SEV-2 | RB-12 |
+| A connection's Kubernetes-auth roles refused, or the token exchange's not removed (`connection_roles_refused`): a fixed code, naming no connection, account or request | Role provisioner ([DEC-2350](../project/decisions/DEC-2350.md)) | SEV-2 | RB-12 |
 | Broker API errors, rate limits, or outage | Connector metrics | SEV-2 | RB-13 |
 | Crash loop; agent left paused | Deployment manager | SEV-2 | RB-14 |
 | A version-1 deployment the manager cannot run (`deployment_unread`) | Deployment manager ([DEC-1173](../project/decisions/DEC-1173.md)) | SEV-3 | RB-14 |
@@ -762,7 +763,7 @@ are authoritative; a few come from metrics.
 | RB-09 | Journal integrity incident; unexpected DDL |
 | RB-10 | Cold export or anchoring behind |
 | RB-11 | Clock out of tolerance |
-| RB-12 | Vault outage; credential rotation; connection revoked |
+| RB-12 | Vault outage; credential rotation; connection revoked; a connection's roles refused (`connection_roles_refused`) |
 | RB-13 | Broker API outage or degradation |
 | RB-14 | Crash loop, and deployments the manager cannot run ([RB-14](../runbooks/RB-14-crash-loop.md)) |
 | RB-15 | Approvals not delivered |

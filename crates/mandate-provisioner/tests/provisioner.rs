@@ -4,7 +4,7 @@
 //! every stream it leaves. Before E21-33's S4b the plan and the pass are stubs, the answer these
 //! tests fail on.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::BTreeSet;
 use std::path::Path;
 use std::rc::Rc;
@@ -14,7 +14,7 @@ use mandate_canon::{Digest, Value, parse, to_canonical};
 use mandate_connections::record::ConnectionId;
 use mandate_deploy_manager::{Alerts, ControlJournal, Identity, OperatorAlert, Unavailable};
 use mandate_journal::{AppendOutcome, Draft, StoredEvent, verify_connection_roles};
-use mandate_provisioner::driver::{Halt, Provisioner, ROLES_REFUSED};
+use mandate_provisioner::driver::{APPEND_TRIES, Halt, Provisioner, ROLES_REFUSED};
 use mandate_provisioner::plan::{Occasion, Step, plan};
 use mandate_provisioner::record::{ACTOR_ID, Outcome, draft, event_id};
 use mandate_time::UtcNanos;
@@ -77,11 +77,14 @@ fn text<'a>(value: &'a Value, name: &str) -> &'a str {
 /// The control stream in memory, shared by every writer that holds it: a row per record, the
 /// journal's own parse on each append, and an `event_id` committed once. `moved` puts another
 /// writer's record at the head just before the next append, which that append then misses.
+/// `hides` answers every append `Committed` and keeps nothing, a journal that never shows what it
+/// says it took.
 #[derive(Clone, Default)]
 struct Stream {
     rows: Rc<RefCell<Vec<StoredEvent>>>,
     moved: Rc<RefCell<Option<Vec<u8>>>>,
     down: Rc<RefCell<usize>>,
+    hides: Rc<RefCell<bool>>,
 }
 
 impl Stream {
@@ -159,6 +162,9 @@ impl ControlJournal for Stream {
         if let Err(error) = Draft::parse(draft) {
             return Ok(AppendOutcome::Invalid { draft: 0, error });
         }
+        if *self.hides.borrow() {
+            return Ok(AppendOutcome::Committed(Vec::new()));
+        }
         let record = parse(draft).unwrap();
         let id = text(&record, "event_id").to_owned();
         if let Some(stored) = self.rows().iter().find(|r| r.event_id == id) {
@@ -182,6 +188,7 @@ struct Vault {
     removed: RefCell<Vec<String>>,
     refusal: Option<RoleRefusal>,
     slow: bool,
+    removal_refused: bool,
 }
 
 impl RoleProvisioner for Vault {
@@ -207,7 +214,11 @@ impl RoleProvisioner for Vault {
         self.removed
             .borrow_mut()
             .push(connection.as_str().to_owned());
-        Ok(())
+        if self.removal_refused {
+            Err(RoleRefusal::VaultUnavailable)
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -434,6 +445,91 @@ async fn two_writers_racing_lose_no_record_and_write_none_twice() {
         );
         assert_eq!(verify_connection_roles(&stream.rows()), Ok(()), "{name}");
     }
+}
+
+/// A removal the vault keeps refusing is tried again on every pass, and its alert is raised once:
+/// a vault down for an hour pages once, not once a second. No removal is recorded until it is done.
+#[tokio::test(flavor = "current_thread")]
+async fn a_removal_the_vault_keeps_refusing_alerts_once() {
+    let stream = Stream::opened();
+    let mut provisioner = provisioner(&stream, Vault::default());
+    let records = world("removed_on_close");
+    stream.push(&records[0]);
+    assert_eq!(provisioner.tick(at(1)).await, Ok(()));
+    for record in &records[1..] {
+        stream.push(record);
+    }
+    provisioner.vault().removal_refused = true;
+    for second in 2..6 {
+        assert_eq!(provisioner.tick(at(second)).await, Ok(()));
+    }
+    assert_eq!(provisioner.vault().removed.borrow().len(), 4);
+    assert_eq!(provisioner.alerts().0, [ROLES_REFUSED]);
+    assert!(stream.of("ConnectionRolesRemoved").is_empty());
+    provisioner.vault().removal_refused = false;
+    assert_eq!(provisioner.tick(at(6)).await, Ok(()));
+    assert_eq!(stream.of("ConnectionRolesRemoved").len(), 1);
+    assert_eq!(provisioner.alerts().0, [ROLES_REFUSED]);
+    assert_eq!(verify_connection_roles(&stream.rows()), Ok(()));
+}
+
+/// A journal that answers `Committed` and never shows the record leaves the step owed on every
+/// read; the pass ends once it has done the steps first owed and [`APPEND_TRIES`] more, with the
+/// journal named, rather than calling the vault for ever.
+#[tokio::test(flavor = "current_thread")]
+async fn a_journal_that_never_shows_its_record_ends_the_pass() {
+    let stream = Stream::opened();
+    for record in world("made") {
+        stream.push(&record);
+    }
+    *stream.hides.borrow_mut() = true;
+    let mut provisioner = provisioner(&stream, Vault::default());
+    assert_eq!(provisioner.tick(at(1)).await, Err(Halt::Journal));
+    assert_eq!(provisioner.vault().made.borrow().len(), 1 + APPEND_TRIES);
+    assert!(stream.of("ConnectionRolesMade").is_empty());
+}
+
+/// The session is asked before every step, not only when the pass starts: once it may no longer
+/// be used, the pass stops before the vault is called again, and the records already committed
+/// stay; a session that is never usable calls the vault not at all.
+#[tokio::test(flavor = "current_thread")]
+async fn a_session_that_expires_mid_pass_stops_before_the_next_step() {
+    for (usable_for, made) in [(1, 1), (0, 0)] {
+        let stream = Stream::opened();
+        for record in world("two_requests") {
+            stream.push(&record);
+        }
+        let mut provisioner = provisioner(&stream, Vault::default());
+        let asked = Cell::new(0);
+        let usable = || {
+            asked.set(asked.get() + 1);
+            asked.get() <= usable_for
+        };
+        assert_eq!(
+            provisioner.tick_while(at(1), usable).await,
+            Err(Halt::SessionExpired),
+            "{usable_for}"
+        );
+        assert_eq!(
+            provisioner.vault().made.borrow().len(),
+            made,
+            "{usable_for}"
+        );
+        assert_eq!(stream.of("ConnectionRolesMade").len(), made, "{usable_for}");
+        assert_eq!(asked.get(), usable_for + 1, "{usable_for}");
+        assert_eq!(
+            verify_connection_roles(&stream.rows()),
+            Ok(()),
+            "{usable_for}"
+        );
+    }
+    let stream = Stream::opened();
+    for record in world("two_requests") {
+        stream.push(&record);
+    }
+    let mut provisioner = provisioner(&stream, Vault::default());
+    assert_eq!(provisioner.tick_while(at(1), || true).await, Ok(()));
+    assert_eq!(stream.of("ConnectionRolesMade").len(), 2);
 }
 
 /// A stream with no `StreamOpened` gives no record its environment, so nothing is done.

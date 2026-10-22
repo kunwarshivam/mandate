@@ -22,6 +22,7 @@
 //! `mandate-provisionerd probe livez|readyz --probe <socket>` is its `exec` probe (DEC-994 item 5).
 //! This is the one place the host clock is read (ES-05).
 
+use std::cell::Cell;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -154,9 +155,13 @@ fn run(
             FixtureVault,
             StderrAlerts::default(),
         );
-        return runtime.block_on(serve(provisioner, socket, &terminate, async |_| {
-            Session::Keep
-        }));
+        return runtime.block_on(serve(
+            provisioner,
+            socket,
+            &terminate,
+            async |_| Session::Keep,
+            || true,
+        ));
     }
     let Some((address, dir)) = vault else {
         return Err(StartRefused::FixtureNotBuilt.code());
@@ -165,7 +170,8 @@ fn run(
     let dsn = std::env::var("MANDATE_JOURNAL_DSN").map_err(|_| "journal_dsn_missing")?;
     runtime.block_on(async {
         let journal = PgJournal::from_dsn(&dsn).map_err(|e| e.code())?;
-        let session = vault_login(&config, &dir, host_now()).await?;
+        let logged_in = host_now();
+        let session = vault_login(&config, &dir, logged_in).await?;
         let provisioner = Provisioner::new(
             identity,
             namespace,
@@ -173,27 +179,30 @@ fn run(
             session,
             StderrAlerts::default(),
         );
-        let mut renewal = Renewal::new(host_now());
+        let renewal = Cell::new(Renewal::new(logged_in));
         let relogin = async |now: UtcNanos| {
-            if renewal.due(now) {
+            if renewal.get().due(now) {
                 match vault_login(&config, &dir, now).await {
                     Ok(session) => {
-                        renewal = Renewal::new(now);
+                        renewal.set(Renewal::new(now));
                         return Session::Replace(session);
                     }
                     Err(code) => {
                         eprintln!("role_provisioner_relogin_failed: {code}");
-                        renewal.refused(now);
+                        let mut refused = renewal.get();
+                        refused.refused(now);
+                        renewal.set(refused);
                     }
                 }
             }
-            if renewal.usable(now) {
+            if renewal.get().usable(now) {
                 Session::Keep
             } else {
                 Session::Expired
             }
         };
-        serve(provisioner, socket, &terminate, relogin).await
+        let usable = || renewal.get().usable(host_now());
+        serve(provisioner, socket, &terminate, relogin, usable).await
     })
 }
 
@@ -207,14 +216,16 @@ enum Session<V> {
     Expired,
 }
 
-/// Runs passes until the lifecycle exits. Before each pass `relogin` names the session to use.
-/// With none, the process makes and removes no role and stops, failed, so it is started again
-/// and logs in afresh rather than calling the vault with a lapsed token.
+/// Runs passes until the lifecycle exits. Before each pass `relogin` names the session to use,
+/// and before each step of a pass `usable` says whether it may still be used. With none, the
+/// process makes and removes no role and stops, failed, so it is started again and logs in
+/// afresh rather than calling the vault with a lapsed token.
 async fn serve<J: ControlJournal, V: RoleProvisioner, A: Alerts>(
     mut provisioner: Provisioner<J, V, A>,
     socket: &Path,
     terminate: &AtomicBool,
     mut relogin: impl AsyncFnMut(UtcNanos) -> Session<V>,
+    usable: impl Fn() -> bool,
 ) -> Result<u8, &'static str> {
     let mut lifecycle = Lifecycle::new(Kind::Service, LIVENESS, host_now());
     lifecycle.observe(host_now(), Input::StartupPassed);
@@ -242,7 +253,7 @@ async fn serve<J: ControlJournal, V: RoleProvisioner, A: Alerts>(
                 continue;
             }
         }
-        let pass = provisioner.tick(now).await;
+        let pass = provisioner.tick_while(now, &usable).await;
         if let Err(halt) = &pass
             && pass != last
         {
