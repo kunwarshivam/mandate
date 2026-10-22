@@ -8,8 +8,8 @@
 //! followed agent owes a command's switch once when the runtime copied the command onto its stream
 //! (the runtime judged it covered), or when the command covers it, deployed before it on its
 //! connection (or, for the workspace, on any of the account's connections), and that connection is
-//! revoked after the command or the agent has an `AgentStopped`, so no runtime copies it; and never
-//! otherwise. Seeded followers that drop an agent on revocation, or keep only its latest
+//! revoked after the command or the agent has an `AgentStopped`, so no runtime copies it, or when an
+//! agent-scope command names a stopped agent; and never otherwise. Seeded followers that drop an agent on revocation, or keep only its latest
 //! deployment, are shown rejected by the same comparison.
 
 mod support;
@@ -32,6 +32,7 @@ const CONNECTIONS: [(&str, &str); 2] = [("conn1", ACCOUNT), ("conn2", OTHER_ACCO
 enum Op {
     Deploy(usize, usize),
     Command(Option<usize>),
+    AgentCommand(usize),
     Copy(usize),
     Revoke(usize, bool),
     Establish(usize),
@@ -44,6 +45,7 @@ fn op() -> impl Strategy<Value = Op> {
     prop_oneof![
         2 => (0..AGENTS.len(), 0..CONNECTIONS.len()).prop_map(|(a, c)| Op::Deploy(a, c)),
         2 => proptest::option::of(0..CONNECTIONS.len()).prop_map(Op::Command),
+        1 => (0..AGENTS.len()).prop_map(Op::AgentCommand),
         2 => (0usize..8).prop_map(Op::Copy),
         1 => (0..CONNECTIONS.len(), any::<bool>()).prop_map(|(c, k)| Op::Revoke(c, k)),
         1 => (0..CONNECTIONS.len()).prop_map(Op::Establish),
@@ -60,6 +62,8 @@ struct Command {
     id: String,
     seq: u64,
     connection: Option<String>,
+    /// The agent an agent-scope command names; `None` with no connection is the workspace.
+    agent: Option<String>,
 }
 
 fn payload(row: &StoredEvent) -> Value {
@@ -113,6 +117,7 @@ fn control(rows: &[StoredEvent]) -> Control {
                     seq: row.seq,
                     connection: (member(&p, "scope") == "connection")
                         .then(|| member(&p, "subject")),
+                    agent: (member(&p, "scope") == "agent").then(|| member(&p, "subject")),
                 });
             }
             ("AgentStopped", _) => {
@@ -132,6 +137,9 @@ fn control(rows: &[StoredEvent]) -> Control {
 /// The connections of this account that `agent` was deployed on before `seq`, and that `command`
 /// names (all of them, for the workspace).
 fn covering(control: &Control, agent: &str, command: &Command) -> BTreeSet<String> {
+    if command.agent.is_some() {
+        return BTreeSet::new();
+    }
     control
         .deployed
         .get(agent)
@@ -188,7 +196,8 @@ fn owed(journal: &Journal) -> BTreeSet<(String, String)> {
                     .get(connection)
                     .is_some_and(|seqs| seqs.iter().any(|seq| *seq > command.seq))
             });
-            let unrun = !covering.is_empty() && control.stopped.contains(agent);
+            let named = command.agent.as_deref() == Some(agent);
+            let unrun = (named || !covering.is_empty()) && control.stopped.contains(agent);
             if revoked_after || unrun || copied.contains(&command.id) {
                 out.insert((agent.to_owned(), command.id.clone()));
             }
@@ -250,6 +259,7 @@ fn run(ops: &[Op]) -> Result<Journal, Error> {
             Op::Deploy(agent, connection) => {
                 deploy(&journal, &id, AGENTS[*agent], CONNECTIONS[*connection].0)?;
             }
+            Op::AgentCommand(agent) => kill_command(&journal, &id, "agent", AGENTS[*agent])?,
             Op::Command(connection) => match connection {
                 Some(index) => kill_command(&journal, &id, "connection", CONNECTIONS[*index].0)?,
                 None => kill_command(&journal, &id, "workspace", WORKSPACE)?,
@@ -257,15 +267,16 @@ fn run(ops: &[Op]) -> Result<Journal, Error> {
             Op::Copy(pick) => {
                 let control = control(&journal.rows_of(CONTROL_STREAM));
                 let runtime_covers = |agent: &str, command: &Command| {
-                    control
-                        .deployed
-                        .get(agent)
-                        .into_iter()
-                        .flatten()
-                        .any(|(seq, c)| {
-                            *seq < command.seq
-                                && command.connection.as_ref().is_none_or(|named| named == c)
-                        })
+                    command.agent.as_deref().is_none_or(|named| named == agent)
+                        && control
+                            .deployed
+                            .get(agent)
+                            .into_iter()
+                            .flatten()
+                            .any(|(seq, c)| {
+                                *seq < command.seq
+                                    && command.connection.as_ref().is_none_or(|named| named == c)
+                            })
                 };
                 let due: Vec<(&str, &Command)> = control
                     .commands
@@ -277,9 +288,10 @@ fn run(ops: &[Op]) -> Result<Journal, Error> {
                     })
                     .collect();
                 if let Some((agent, command)) = due.get(pick % due.len().max(1)).copied() {
-                    let (scope, subject) = match &command.connection {
-                        Some(connection) => ("connection", connection.as_str()),
-                        None => ("workspace", WORKSPACE),
+                    let (scope, subject) = match (&command.connection, &command.agent) {
+                        (Some(connection), _) => ("connection", connection.as_str()),
+                        (None, Some(named)) => ("agent", named.as_str()),
+                        (None, None) => ("workspace", WORKSPACE),
                     };
                     copy_of(&journal, agent, &id, &command.id, scope, subject)?;
                     copied.insert((agent.to_owned(), command.id.clone()));
