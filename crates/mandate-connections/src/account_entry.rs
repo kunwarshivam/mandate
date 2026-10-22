@@ -78,6 +78,13 @@ impl BrokerAccountId {
             Err(ConnectError::AccountEntryInvalid)
         }
     }
+
+    /// The id itself, for the vault's keyed hash alone (DEC-2345 item 2): still a
+    /// [`SecretString`], so it prints nothing.
+    #[must_use]
+    pub fn secret(&self) -> &SecretString {
+        &self.0
+    }
 }
 
 /// One decoded entry: the reference the executor minted, and the id it stands for.

@@ -2,11 +2,13 @@
 
 use std::fmt;
 
+use mandate_connections::account_entry::BrokerAccountId;
 use mandate_connections::record::ConnectionId;
 use mandate_time::UtcNanos;
 use secrecy::{SecretSlice, SecretString};
 
 use crate::SourceError;
+use crate::fingerprint::AccountFingerprint;
 use crate::lease::Lease;
 use crate::policy::{Identity, SecretPath};
 
@@ -92,6 +94,18 @@ pub trait SecretSource {
     /// no personal data refuses, as [`SourceError::Denied`] (DEC-2339).
     async fn create(&self, path: &SecretPath, secret: &SecretSlice<u8>) -> Result<(), SourceError> {
         let _ = (path, secret);
+        Err(SourceError::Denied)
+    }
+
+    /// The fingerprint of the broker account id `account` under the deployment's key, by the
+    /// vault's keyed hash: asked by a connection's executor alone, at its connect (DEC-2345 item
+    /// 2). The key never leaves the vault, and the id is sent only to it. A source that holds no
+    /// key refuses, as [`SourceError::Denied`].
+    async fn hmac_account(
+        &self,
+        account: &BrokerAccountId,
+    ) -> Result<AccountFingerprint, SourceError> {
+        let _ = account;
         Err(SourceError::Denied)
     }
 }

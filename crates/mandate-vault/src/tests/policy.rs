@@ -183,6 +183,18 @@ fn blocks(hcl: &str) -> Vec<(String, String)> {
     out
 }
 
+/// Whether `path` is one of the fingerprint's, which `tests/fingerprint.rs` checks block by block
+/// (DEC-2345).
+fn fingerprint(path: &str) -> bool {
+    [
+        "mandate/data/personal/fingerprints/",
+        "mandate/data/personal/claims",
+        "mandate/data/fingerprints/",
+    ]
+    .iter()
+    .any(|prefix| path.starts_with(prefix))
+}
+
 #[test]
 fn each_policy_is_the_table_with_no_wildcard() {
     let connections = [c("c1"), c("c2")];
@@ -199,7 +211,9 @@ fn each_policy_is_the_table_with_no_wildcard() {
         let got = blocks(&hcl);
         let data_blocks = got
             .iter()
-            .filter(|(p, _)| p.starts_with("mandate/") && !platform_paths.contains(p))
+            .filter(|(p, _)| {
+                p.starts_with("mandate/") && !platform_paths.contains(p) && !fingerprint(p)
+            })
             .count();
         let allowed = [Access::Read, Access::Write, Access::Delete]
             .iter()
@@ -221,9 +235,10 @@ fn each_policy_is_the_table_with_no_wildcard() {
             0
         };
         assert_eq!(auth_blocks, want_auth, "{identity:?}: {hcl}");
+        let fingerprint_blocks = got.iter().filter(|(p, _)| fingerprint(p)).count();
         assert_eq!(
             got.len(),
-            data_blocks + auth_blocks + platform_blocks,
+            data_blocks + auth_blocks + platform_blocks + fingerprint_blocks,
             "{identity:?}: {hcl}"
         );
         for access in [Access::Read, Access::Write, Access::Delete] {
@@ -358,9 +373,9 @@ fn only_the_executors_create_reaches_the_personal_data_vault() {
         Identity::TokenExchange(c("c1")),
         Identity::Executor(c("c1")),
     ] {
-        let hcl = crate::policy::openbao_policy(&identity, &connections, &Mounts::default())
-            .unwrap_or_default();
-        assert!(!hcl.contains("personal/"), "{identity:?}: {hcl}");
+        let hcl =
+            crate::policy::openbao_policy(&identity, &connections, &Mounts::default()).unwrap();
+        assert!(!hcl.contains("personal/accounts/"), "{identity:?}: {hcl}");
     }
     let accessor = "auth_kubernetes_1a2b";
     let exchange = kubernetes_policy(
@@ -369,12 +384,12 @@ fn only_the_executors_create_reaches_the_personal_data_vault() {
         accessor,
     )
     .unwrap();
-    assert!(!exchange.contains("personal/"), "{exchange}");
+    assert!(!exchange.contains("personal/accounts/"), "{exchange}");
     let executor =
         kubernetes_policy(&Identity::Executor(c("c1")), &Mounts::default(), accessor).unwrap();
     let personal: Vec<&str> = executor
         .split("path ")
-        .filter(|block| block.contains("personal/"))
+        .filter(|block| block.contains("personal/accounts/"))
         .collect();
     assert_eq!(personal.len(), 1, "{executor}");
     assert!(

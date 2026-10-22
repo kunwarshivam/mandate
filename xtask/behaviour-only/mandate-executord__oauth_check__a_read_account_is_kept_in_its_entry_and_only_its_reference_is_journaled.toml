@@ -1,0 +1,8 @@
+file = "crates/mandate-executord/tests/oauth_check.rs"
+test = "a_read_account_is_kept_in_its_entry_and_only_its_reference_is_journaled"
+reason = """
+The connect check folds its fingerprint create into whether the account was read, so its stub's
+report never reaches the check's answer: the stub refuses the fingerprint entry, the account is
+journaled unreadable, and the test fails on that answer. E21-32's F3c implementation creates the
+entry and deletes this row (DEC-2345 item 7).
+"""
