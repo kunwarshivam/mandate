@@ -18,6 +18,47 @@ pub const CALLBACK_PATH: &str = "/v1/oauth/alpaca/callback";
 const PRODUCTION_REDIRECT_URI: &str = "https://api.owlhead.ai/v1/oauth/alpaca/callback";
 /// Alpaca's authorization page.
 pub const AUTHORIZE_URL: &str = "https://app.alpaca.markets/oauth/authorize";
+/// Where the browser is sent to grant the connect: Alpaca's page, or, only in a build with debug
+/// assertions, a dev or CI cell's fixture provider (DEC-2633 item 3). Only [`AuthorizePage::alpaca`]
+/// and [`AuthorizePage::for_cell`] make one, so no other text can become the page:
+///
+/// ```compile_fail,E0423
+/// let forged = mandate_connections::start::AuthorizePage("https://evil.example/".to_owned());
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthorizePage(String);
+
+impl AuthorizePage {
+    /// Alpaca's own page, [`AUTHORIZE_URL`].
+    pub fn alpaca() -> Self {
+        Self(AUTHORIZE_URL.to_owned())
+    }
+
+    /// A dev or CI cell's page, kept exactly as given: `http://` or `https://` on a loopback host
+    /// with an optional port from 1 to 65535, or `http://` on exactly `oauth-fixture:8091` (DEC-2633 item 1), and a
+    /// non-empty path of unreserved characters and `/`, nothing else, so no user information,
+    /// query or fragment, and never an Alpaca host. The tier is the caller's to check first.
+    #[cfg(debug_assertions)]
+    #[expect(
+        clippy::todo,
+        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+    )]
+    pub fn for_cell(_text: &str) -> Option<Self> {
+        todo!()
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// What the start sends the browser with: the page and the platform's OAuth client.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Authorizer {
+    pub page: AuthorizePage,
+    pub client: OAuthClient,
+}
+
 /// The scopes requested, space-separated as Alpaca expects (connections spec §5.3).
 pub const REQUESTED_SCOPES: &str = "trading data";
 /// How long a `state` may be redeemed after it is issued (Proposed default, §5.2 step 1).
@@ -185,14 +226,15 @@ pub struct PendingStates {
 }
 
 impl PendingStates {
-    /// Issues `state` for `binding` and returns the authorization URL: `response_type=code`,
+    /// Issues `state` for `binding` and returns the authorization URL on `authorizer`'s page:
+    /// `response_type=code`,
     /// the client's id and redirect URI, the `state`, the PKCE challenge (`S256`),
     /// [`REQUESTED_SCOPES`], and `env` set to the binding's environment. Only a paper binding
     /// is accepted (DEC-821 item 3; DEC-441 item 21). A `state` already issued and not yet
     /// redeemed is refused, and the binding and verifier issued with it are kept unchanged.
     pub fn begin(
         &mut self,
-        client: &OAuthClient,
+        authorizer: &Authorizer,
         binding: Binding,
         state: &str,
         verifier: PkceVerifier,
@@ -202,6 +244,7 @@ impl PendingStates {
         if binding.environment != Environment::Paper {
             return Err(ConnectError::EnvironmentRefused);
         }
+        let client = &authorizer.client;
         if self.issued.contains_key(state) {
             return Err(ConnectError::StateReused);
         }
@@ -228,7 +271,8 @@ impl PendingStates {
             },
         );
         Ok(AuthorizeRedirect(format!(
-            "{AUTHORIZE_URL}?{}",
+            "{}?{}",
+            authorizer.page.as_str(),
             query.join("&")
         )))
     }
