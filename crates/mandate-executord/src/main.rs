@@ -213,10 +213,11 @@ fn leased_broker(
         .enable_all()
         .build()
         .map_err(|_| "runtime_unavailable")?;
+    let namespace = read_service_account_namespace(Path::new(SERVICE_ACCOUNT_TOKEN_DIR))
+        .map_err(|_| "vault_credentials_unreadable")?;
     let vault = vault_login(
         || read_service_account_token(Path::new(SERVICE_ACCOUNT_TOKEN_DIR)),
         |identity, jwt| {
-            let namespace = read_service_account_namespace(Path::new(SERVICE_ACCOUNT_TOKEN_DIR))?;
             runtime.block_on(OpenBaoSource::login_kubernetes(
                 &config,
                 identity,
