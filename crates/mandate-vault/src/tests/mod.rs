@@ -12,6 +12,7 @@ mod local_vault;
 mod mounted;
 mod openbao;
 mod openbao_server;
+mod personal;
 mod platform;
 mod policy;
 mod take;
