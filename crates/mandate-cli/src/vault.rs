@@ -65,14 +65,24 @@ pub struct PutArgs {
     pub ca: PathBuf,
 }
 
-/// The platform secrets `vault put` writes (DEC-2020): each is written by the secret-import
-/// identity alone.
+/// The platform secrets `vault put` writes (DEC-2020), and the platform's Alpaca OAuth client
+/// secret (DEC-2636 item 1): each is written by the secret-import identity alone.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum PutSecret {
     #[value(name = "model-provider-key")]
     ModelProviderKey,
     #[value(name = "email-credential")]
     EmailCredential,
+    #[value(name = "alpaca-oauth-client-secret")]
+    AlpacaOauthClientSecret,
+}
+
+/// Where `vault put` writes `secret`, and the name its one line of output gives it: a platform
+/// secret at its own path, and the Alpaca OAuth client secret at [`SecretPath::ClientSecret`],
+/// the one path the token exchange reads it from (DEC-2636 item 1).
+pub fn put_path(secret: PutSecret) -> Result<(SecretPath, &'static str), SourceError> {
+    let _ = secret;
+    Err(SourceError::Unimplemented { story: "E21-32" })
 }
 
 /// The most bytes `vault put` reads from stdin: two credentials and a secret are far shorter.
@@ -246,8 +256,15 @@ pub fn run_put(
         return Err(refused(SourceError::CredentialFile));
     }
     let (path, name) = match args.secret {
-        PutSecret::ModelProviderKey => (PlatformSecret::ModelProviderKey, "model provider's key"),
-        PutSecret::EmailCredential => (PlatformSecret::EmailCredential, "email credential"),
+        PutSecret::ModelProviderKey => (
+            SecretPath::Platform(PlatformSecret::ModelProviderKey),
+            "model provider's key",
+        ),
+        PutSecret::EmailCredential => (
+            SecretPath::Platform(PlatformSecret::EmailCredential),
+            "email credential",
+        ),
+        PutSecret::AlpacaOauthClientSecret => put_path(args.secret).map_err(refused)?,
     };
     let config = OpenBaoConfig {
         address: args.address.clone(),
@@ -269,10 +286,7 @@ pub fn run_put(
             )
             .await?;
             source
-                .put(
-                    &SecretPath::Platform(path),
-                    &SecretSlice::from(value.as_bytes().to_vec()),
-                )
+                .put(&path, &SecretSlice::from(value.as_bytes().to_vec()))
                 .await
         })
         .map_err(refused)?;
