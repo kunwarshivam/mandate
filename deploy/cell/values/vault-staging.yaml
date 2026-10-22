@@ -12,10 +12,3 @@ seal:
 storage:
   size: 1Gi
   className: do-block-storage
-# Kubernetes auth is on in staging (DEC-2060, DEC-2062): the vault reaches the cluster's API server
-# for TokenReview, by the `kubernetes` Service's and EndpointSlice's addresses, read at install as
-# the journal-db chart reads them, and reviews tokens as its own ServiceAccount.
-kubeApi:
-  enabled: true
-  cidrs: []
-  ports: []

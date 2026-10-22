@@ -135,7 +135,7 @@ spec:
         {{- if .Values.kubeApi.enabled }}
         - name: kube-api-token
           projected:
-            defaultMode: 0400
+            defaultMode: 0440
             sources:
               - serviceAccountToken:
                   path: token
@@ -255,7 +255,7 @@ spec:
 {{- /*
 The vault's own ServiceAccount, which mounts no token by itself. With Kubernetes auth on, the pod
 projects one short-lived token of it, for the API server's default audience, at the path OpenBao
-reads, and the account may review other pods' tokens, `system:auth-delegator` and nothing more
+reads, owner- and group-read as the other mounts are, so the pod's fsGroup reads it, and the account may review other pods' tokens, `system:auth-delegator` and nothing more
 (DEC-2062): no `token_reviewer_jwt` is stored, so OpenBao rereads the rotating token.
 */ -}}
 {{- define "vault.account" -}}

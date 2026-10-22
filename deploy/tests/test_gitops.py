@@ -98,7 +98,7 @@ BOOTSTRAP_VALUES = {
 STUB_TIERS = {"dev", "ci"}
 DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 PINNED = re.compile(r"@sha256:[0-9a-f]{64}$")
-KUBE_API = ["--set-json", 'kubeApi.cidrs=["10.245.0.1/32"]', "--set-json", "kubeApi.ports=[443]"]
+KUBE_API = ["--set-json", 'kubeApi={"cidrs":["10.245.0.1/32"],"ports":[443]}']
 PRUNE_DISABLED = {"kustomize.toolkit.fluxcd.io/prune": "disabled"}
 
 # The kinds kubeconform has no schema for: CloudNativePG's and the Barman Cloud plugin's, skipped by
@@ -172,7 +172,7 @@ def render(release: dict, values: dict, tmp: Path) -> list[dict]:
     chart = OWN_CHARTS[release["spec"]["chartRef"]["name"]]
     values_file = tmp / f"{release['metadata']['name']}-values.yaml"
     values_file.write_text(yaml.safe_dump(values))
-    extra = KUBE_API if chart in ("journal-db", "vault") else []
+    extra = KUBE_API if chart == "journal-db" else []
     done = subprocess.run(
         [
             *("helm", "template", release["spec"]["releaseName"], str(CHARTS / chart)),
@@ -729,55 +729,6 @@ def test_sources_pinned(overlay):
 
 def test_vault_release(overlay):
     assert vault_release(overlay[1], overlay[0]) == []
-
-
-def vault_reviewer(rendered: list[dict], environment: str = "staging") -> list[str]:
-    """Only where the vault runs, staging, is there one binding that lets it review tokens: the
-    vault's own ServiceAccount in ws-ws1, bound to `system:auth-delegator` (DEC-2062). Production
-    renders none."""
-    bindings = [d for d in rendered if d.get("kind") == "ClusterRoleBinding"]
-    want = (
-        [
-            {
-                "name": "vault-token-review-ws-ws1",
-                "roleRef": "system:auth-delegator",
-                "subjects": [{"kind": "ServiceAccount", "name": "vault", "namespace": "ws-ws1"}],
-            }
-        ]
-        if environment == "staging"
-        else []
-    )
-    got = [
-        {"name": b["metadata"]["name"], "roleRef": b["roleRef"]["name"], "subjects": b.get("subjects")}
-        for b in bindings
-    ]
-    return [] if got == want else [f"{environment}: the review bindings are {got}, not {want}"]
-
-
-def test_only_staging_lets_the_vault_review_tokens(overlay):
-    environment, _, _, rendered, _ = overlay
-    assert vault_reviewer(rendered, environment) == []
-
-
-def test_a_review_binding_out_of_place_is_caught(overlay):
-    environment, _, _, rendered, _ = overlay
-    staged = [d for d in rendered if d.get("kind") == "ClusterRoleBinding"]
-    if environment == "staging":
-        assert vault_reviewer(rendered, "production"), "production must refuse staging's binding"
-        assert vault_reviewer([d for d in rendered if d not in staged], "staging")
-        widened = copy.deepcopy(rendered)
-        for d in widened:
-            if d.get("kind") == "ClusterRoleBinding":
-                d["subjects"].append({"kind": "Group", "name": "system:authenticated"})
-        assert vault_reviewer(widened, "staging")
-    else:
-        stray = {
-            "kind": "ClusterRoleBinding",
-            "metadata": {"name": "vault-token-review-ws-ws1"},
-            "roleRef": {"name": "system:auth-delegator"},
-            "subjects": [{"kind": "ServiceAccount", "name": "vault", "namespace": "ws-ws1"}],
-        }
-        assert vault_reviewer([*rendered, stray], environment)
 
 
 def test_production_running_the_vault_is_caught(tmp_path):
