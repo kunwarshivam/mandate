@@ -31,7 +31,6 @@ fn headers(pairs: &[(&str, &str)]) -> HeaderMap {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn the_limits_are_dec_2117s_numbers() {
     let n = |v: u32| core::num::NonZeroU32::new(v).expect("not zero");
     assert_eq!(
@@ -46,7 +45,6 @@ fn the_limits_are_dec_2117s_numbers() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn ingress_peers_name_addresses_and_refuse_anything_else() {
     assert_eq!(reduction::ingress_peers(None), Ok(Vec::new()));
     assert_eq!(reduction::ingress_peers(Some("")), Ok(Vec::new()));
@@ -76,7 +74,6 @@ fn ingress_peers_name_addresses_and_refuse_anything_else() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn an_ipv4_address_counts_as_itself_and_an_ipv6_as_its_64() {
     let none = HeaderMap::new();
     let at = |peer: &str| reduction::address(ip(peer), &none, &[]);
@@ -93,7 +90,6 @@ fn an_ipv4_address_counts_as_itself_and_an_ipv6_as_its_64() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_forwarded_address_counts_only_from_a_listed_ingress_peer() {
     let loopback = ip("127.0.0.1");
     let ingress = [loopback];
@@ -158,7 +154,6 @@ fn a_forwarded_address_counts_only_from_a_listed_ingress_peer() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn the_device_key_is_a_digest_of_one_well_formed_cookie() {
     let cookie = |value: &str| headers(&[("cookie", value)]);
     let key = reduction::device(&cookie(&format!("{DEVICE_COOKIE}={DEVICE}"))).expect("a key");
@@ -193,7 +188,6 @@ fn the_device_key_is_a_digest_of_one_well_formed_cookie() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn the_rp_id_is_the_app_origins_host() {
     assert_eq!(
         reduction::rp_id("https://app.owlhead.ai").as_deref(),
@@ -214,7 +208,6 @@ fn the_rp_id_is_the_app_origins_host() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_challenge_id_is_the_ulid_of_its_millisecond_and_first_ten_bytes() {
     let bytes: [u8; 32] = core::array::from_fn(|i| u8::try_from(i * 7 % 256).expect("a byte"));
     let issued = mandate_time::UtcNanos::from_parts(T0, 123_456_789).expect("an instant");
