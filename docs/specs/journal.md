@@ -4149,8 +4149,12 @@ does `address_retired`, which records only that the address left the set.
      it held and unstopped (DEC-2344 item 3); a loop while an agent wants the executor is an
      ordinary one, `crash_loop` alone; and a later covering switch's start after an unapplied loop
      begins a new run, whose own loop is unapplied too ([DEC-2344](../project/decisions/DEC-2344.md)
-     item 1). The manager writes exactly one such `OwnerAlertSent`, in the batch, for each unapplied
-     crash loop, and none for any other: the writer's half, which E8-17's tests pin. The
+     item 1). Once an executor has run, the only end of a hold the journal shows is a
+     `ProcessStopIssued`: rule 167 holds `deployed`, `requested`, and `exchanged` to generation 1.
+     The manager also ends a hold at the run's own `Succeeded` end, which is not journaled, so the
+     rule admits an alert the manager may no longer write: rule 264 admits the alert, and the
+     manager writes at most one per loop, in its batch, and only while it holds the run, which
+     E8-17's tests pin. The
      `kill_switch_unapplied` vectors' streams are judged by the fold and by an independent oracle
      that reads each alert's subject backwards, and each seeded bug is shown caught.
 134. `NoticeAttempted` version 2 ([DEC-706](../project/decisions/DEC-706.md)), numbered on after
