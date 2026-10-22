@@ -9,6 +9,7 @@
 //! included, journals the account as unreadable, a null `account_pii_ref` (rule 62), and the API
 //! refuses the connect; the owner reconnects under a new connection id (DEC-2339 item 6).
 
+use mandate_canon::Value;
 use mandate_connections::account_entry::{BrokerAccountId, encode};
 use mandate_connections::checks::{AccountRead, CheckInput, Granted, Occasion, run};
 use mandate_connections::grant::GrantedScopes;
@@ -18,6 +19,7 @@ use mandate_connections::record::{
 use mandate_connections::token_entry;
 use mandate_connections::vault::AccessToken;
 use mandate_executor::{AccountScope, IdGen};
+use mandate_journal::StreamId;
 use mandate_store::Store;
 use mandate_time::UtcNanos;
 use mandate_vault::SourceError;
@@ -27,7 +29,9 @@ use mandate_vault::source::SecretSource;
 use secrecy::{ExposeSecret, SecretSlice};
 
 use crate::connect::{Checked, journal_check};
-use crate::credential::Unimplemented;
+use crate::credential::read_token;
+use crate::follow::folded;
+use crate::lease::runtime;
 
 /// What the OAuth connect check is given: the connection, the scopes its token entry was stored
 /// with, the account id the paper host answered (`None` when it could not be read), and the
@@ -169,8 +173,8 @@ pub struct Start<'a, V, A> {
 /// answers `None`, so a refused connect is never run again into a second create.
 ///
 /// # Errors
-/// `connection_record_unreadable` for a check record that does not read,
-/// `credential_unavailable` when the vault refuses the lease, and [`exchanged_check`]'s codes,
+/// `stream_unavailable` for an account stream that cannot be read, `connection_record_unreadable`
+/// for a check record that does not read, `credential_unavailable` when the vault refuses the lease, and [`exchanged_check`]'s codes,
 /// `entropy_unavailable` among them: each refuses the start before any create, and none names
 /// the secret or the id.
 pub fn exchanged_start<S, V, A>(
@@ -185,6 +189,55 @@ where
     V: SecretSource,
     A: FnOnce(AccessToken) -> Option<BrokerAccountId>,
 {
-    let _ = (store, ids, scope, start, now);
-    Err(Unimplemented)
+    if connect_checked(store, scope)? {
+        return Ok(None);
+    }
+    let Start {
+        connection,
+        vault,
+        account,
+        random,
+    } = start;
+    let runtime = runtime()?;
+    let lease = runtime
+        .block_on(vault.lease(connection, now))
+        .map_err(|_| "credential_unavailable")?;
+    let leased = lease.secret.expose_secret();
+    let checked = read_token(leased).and_then(|token| {
+        let held = Exchanged {
+            connection: connection.clone(),
+            leased,
+            account: account(token),
+        };
+        let create = |path: &SecretPath, secret: &SecretSlice<u8>| {
+            runtime.block_on(vault.create(path, secret))
+        };
+        exchanged_check(store, ids, scope, held, random, create, now)
+    });
+    let _expires_unless_given_back = runtime.block_on(vault.revoke(lease));
+    checked.map(Some)
+}
+
+/// Whether the account stream in `scope` holds a `ConnectionChecked` of occasion `connect`.
+///
+/// # Errors
+/// `stream_unavailable` for a stream that cannot be read, which is never taken for one with no
+/// check, and `connection_record_unreadable` for a check record that does not read.
+fn connect_checked<S: Store>(store: &S, scope: &AccountScope) -> Result<bool, &'static str> {
+    let unreadable = "connection_record_unreadable";
+    let stream = StreamId::parse(&format!("acct:{}:{}", scope.workspace.0, scope.account.0))
+        .ok_or("stream_unavailable")?;
+    for row in store
+        .rows(&stream)
+        .ok_or("stream_unavailable")?
+        .iter()
+        .filter(|row| row.event_type == "ConnectionChecked")
+    {
+        let event = folded(row).map_err(|_| unreadable)?;
+        let occasion = event.payload.get("occasion").and_then(Value::as_str);
+        if occasion.ok_or(unreadable)? == "connect" {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }

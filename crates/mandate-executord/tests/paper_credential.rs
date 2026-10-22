@@ -139,7 +139,6 @@ fn the_connection_is_the_one_the_latest_check_passed_for() -> Result<(), Error> 
 /// DEC-2339: the run leases only its own connection. A latest check passed for another
 /// connection refuses the start as `connection_mismatch`, and none still leaves it unchecked.
 #[test]
-#[ignore = "pending E21-32"]
 fn the_run_leases_only_its_own_checked_connection() -> Result<(), Error> {
     let mut store = MemoryStore::default();
     let own = ConnectionId::new("conn1")?;
