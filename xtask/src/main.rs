@@ -913,15 +913,29 @@ const RELEASE_UNSIGNED: &str = "release_unsigned\n";
 /// DEC-2338 item 5: a build without debug assertions refuses to start whenever
 /// `MANDATE_ALPACA_AUTHORIZE_URL` is set, in every tier. Builds the API with `--release` once, only
 /// when the diff selects its crate (DEC-1190), and runs it with a cell's page, a loopback page and
-/// an empty one, in each tier. Each run must be [`release_api_refused`]; this pin, not a unit test,
-/// covers `config::authorize_page`'s release arm. The page is judged before any other setting, so
-/// the run needs no database, key or address.
+/// an empty one, in each tier. Each run must be [`release_api_refused`]. The page is judged before
+/// any other setting, so the run needs no database, key or address. An unsigned binary in staging
+/// or production meets `release_unsigned` first, so it also runs the crate's `config` tests built
+/// with `--release`, whose release-only test asserts every tier refuses any set page. Together
+/// they, not a debug unit test, cover `config::authorize_page`'s release arm.
 fn api_release() -> Result<()> {
     if !selection()?.crates.contains(API_SERVER) {
         eprintln!("    api-release: {API_SERVER} is not affected (DEC-1190)");
         return Ok(());
     }
     release_profile_untouched(|name| env::var(name).ok())?;
+    sh(
+        "cargo",
+        &[
+            "test",
+            "--locked",
+            "--release",
+            "--package",
+            API_SERVER,
+            "--test",
+            "config",
+        ],
+    )?;
     for tier in ["dev", "ci", "staging", "production"] {
         for page in [
             "http://oauth-fixture:8091/alpaca/oauth/authorize",

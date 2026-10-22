@@ -44,8 +44,7 @@ use mandate_api_server::config::{
     read_session_key,
 };
 use mandate_api_server::confirm::CliConfirm;
-use mandate_api_server::connect::Connect;
-use mandate_api_server::connect_binding::{ConnectBinding, connect_binding};
+use mandate_api_server::connect_binding::{ConnectBinding, bound, connect_binding};
 use mandate_api_server::http::{self, App, Settings};
 use mandate_api_server::journal::{Journal, JournalUnavailable, Postgres};
 use mandate_api_server::keys::{FetchedKeys, REFETCH};
@@ -56,7 +55,6 @@ use mandate_api_server::reduction::{self, Reduction};
 use mandate_api_server::session::{OsRandom, Sessions};
 use mandate_api_server::subject;
 use mandate_api_server::token::Issuer;
-use mandate_api_server::vault_codes::VaultCodes;
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_authn::{Algorithm, IssuerConfig};
 use mandate_identity::{OrgId, WorkspaceId};
@@ -306,7 +304,11 @@ async fn run(args: Args, start: Start) -> io::Result<()> {
         }),
         step_up: Arc::new(step_up),
         challenges,
-        connect: bound(start.connect),
+        connect: bound(
+            start.connect,
+            Box::new(OsRandom::new()),
+            Arc::new(SystemClock),
+        ),
         reduction: Arc::new(Reduction::new(start.ingress, Box::new(OsRandom::new()))),
     };
     let api = spawn_listener(
@@ -346,21 +348,6 @@ async fn run(args: Args, start: Start) -> io::Result<()> {
     drained.map_err(|_| {
         io::Error::other("the drain bound was reached with requests or connections open")
     })
-}
-
-/// The connect the settings bind, its codes written through the vault as the API's identity.
-fn bound(binding: ConnectBinding) -> Option<Arc<Connect>> {
-    match binding {
-        ConnectBinding::On(bound) => Some(Arc::new(Connect::new(
-            bound.authorizer,
-            Box::new(OsRandom::new()),
-            Arc::new(VaultCodes {
-                login: bound.login,
-                clock: Arc::new(SystemClock),
-            }),
-        ))),
-        ConnectBinding::Off | ConnectBinding::Incomplete(_) => None,
-    }
 }
 
 /// Runs one listener, and wakes the main task if it ends.

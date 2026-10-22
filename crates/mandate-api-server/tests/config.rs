@@ -480,3 +480,27 @@ fn the_authorize_url_refusal_names_the_setting_alone() {
         "{text}"
     );
 }
+
+/// A build without debug assertions refuses any set page in every tier, dev and ci included,
+/// whatever it names (DEC-2633 item 3, DEC-2338 item 5). `cargo xtask ci api-release` runs this
+/// file with `--release`, so a tier-dependent loosening of the release arm fails here even where
+/// the release binary meets `release_unsigned` first.
+#[test]
+#[cfg(not(debug_assertions))]
+fn a_release_build_refuses_any_set_page_in_every_tier() {
+    for tier in [Tier::Dev, Tier::Ci, Tier::Staging, Tier::Production] {
+        for value in [
+            OsStr::new(CELL_PAGE),
+            OsStr::new("http://127.0.0.1:8091/alpaca/oauth/authorize"),
+            OsStr::new("https://app.alpaca.markets/oauth/authorize"),
+            OsStr::new(""),
+            OsStr::from_bytes(b"http://127.0.0.1/\xff"),
+        ] {
+            assert_eq!(
+                authorize_page(tier, Some(value)),
+                Err(StartRefusal::AuthorizeUrl),
+                "{tier:?} {value:?}"
+            );
+        }
+    }
+}

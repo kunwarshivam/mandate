@@ -6,6 +6,7 @@
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use mandate_connections::start::{Authorizer, ClientId, OAuthClient, RedirectUri};
 use mandate_release::startup::Tier;
@@ -14,8 +15,11 @@ use mandate_vault::openbao::OpenBaoConfig;
 use mandate_vault::policy::Mounts;
 use secrecy::ExposeSecret;
 
+use crate::clock::Clock;
 use crate::config::{AUTHORIZE_URL, StartRefusal, authorize_page};
-use crate::vault_codes::OpenBaoLogin;
+use crate::connect::Connect;
+use crate::session::Random;
+use crate::vault_codes::{OpenBaoLogin, VaultCodes};
 
 /// The platform's registered OAuth client id.
 pub const CLIENT_ID: &str = "MANDATE_ALPACA_CLIENT_ID";
@@ -155,4 +159,25 @@ fn ca_pem(dir: &Path) -> Option<Vec<u8>> {
     read_mounted(dir, VAULT_CA)
         .ok()
         .map(|pem| pem.expose_secret().as_bytes().to_vec())
+}
+
+/// The connect `binding` binds: for [`ConnectBinding::On`], its page and client, states drawn from
+/// `random`, and codes written through the vault as the API's identity at `clock`'s time; `None`
+/// otherwise.
+pub fn bound(
+    binding: ConnectBinding,
+    random: Box<dyn Random>,
+    clock: Arc<dyn Clock>,
+) -> Option<Arc<Connect>> {
+    match binding {
+        ConnectBinding::On(bound) => Some(Arc::new(Connect::new(
+            bound.authorizer,
+            random,
+            Arc::new(VaultCodes {
+                login: bound.login,
+                clock,
+            }),
+        ))),
+        ConnectBinding::Off | ConnectBinding::Incomplete(_) => None,
+    }
 }
