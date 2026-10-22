@@ -67,6 +67,9 @@
   `src/worker/model_tests.rs`: the worker over a model double, built only in this crate's tests
   (DEC-2269; E19-6): each turn sent to the double and answered with its own calls, and a hostile
   model's calls recorded `schema_invalid` by the gateway.
+  `src/worker/injection_tests.rs` over `tests/fixtures/research-adversarial/`: the injected fixture
+  (DEC-2270; E19-6): every in-scope news item, filing and the description injected, and no HI-11
+  canary in any stored artifact or request body over a compromised model.
 - **Run:** `cargo nextest run -p mandate-daemon -p mandate-store -p mandate-runtime -p mandate-shell`
   (with `MANDATE_PG_URL` for `tests/pg.rs`); `cargo xtask cell demo --no-web` shows the runtime
   ready in the local cell.
