@@ -7,6 +7,7 @@ use mandate_connections::record::ConnectionId;
 use mandate_time::UtcNanos;
 use serde_json::{Value, json};
 
+use crate::openbao::provisioned_policy;
 use crate::openbao::{
     OpenBaoConfig, OpenBaoSource, kubernetes_login_path, kubernetes_login_refusal,
     kubernetes_login_verdict, kubernetes_namespace_verdict, provision, provisioned_identities,
@@ -448,5 +449,50 @@ fn a_kubernetes_login_is_accepted_only_in_the_workspaces_namespace() {
     assert_eq!(
         kubernetes_namespace_verdict(None, NAMESPACE),
         Err(SourceError::Malformed)
+    );
+}
+
+/// The policy `provision` writes for the role provisioner's role is exactly
+/// `provisioner_policy` for the workspace's namespace, and every other identity's is its
+/// `openbao_policy`, with no server needed to tell them apart (DEC-2350 item 1).
+#[test]
+#[ignore = "pending E21-33"]
+fn provisioning_writes_the_provisioners_own_policy_for_its_role() {
+    let c = |id: &str| ConnectionId::new(id).unwrap();
+    let connections = [c("c1")];
+    let mounts = Mounts::default();
+    assert_eq!(
+        provisioned_policy(
+            &Identity::Provisioner,
+            &connections,
+            &mounts,
+            Some("ws-ws1")
+        ),
+        crate::kubernetes::provisioner_policy(&mounts, "ws-ws1")
+    );
+    assert_ne!(
+        provisioned_policy(
+            &Identity::Provisioner,
+            &connections,
+            &mounts,
+            Some("ws-ws1")
+        ),
+        crate::policy::openbao_policy(&Identity::Provisioner, &connections, &mounts)
+    );
+    for identity in [
+        Identity::Api,
+        Identity::ConnectionManager,
+        Identity::Executor(c("c1")),
+        Identity::TokenExchange(c("c1")),
+    ] {
+        assert_eq!(
+            provisioned_policy(&identity, &connections, &mounts, Some("ws-ws1")),
+            crate::policy::openbao_policy(&identity, &connections, &mounts),
+            "{identity:?}"
+        );
+    }
+    assert_eq!(
+        provisioned_policy(&Identity::Provisioner, &connections, &mounts, None),
+        crate::policy::openbao_policy(&Identity::Provisioner, &connections, &mounts)
     );
 }
