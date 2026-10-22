@@ -4,13 +4,27 @@
 
 mod support;
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use mandate_accounting::{InstrumentId, Side};
 use mandate_canon::{Key, Value};
-use mandate_executor::{AccountRef, AccountScope, BrokerRequest, EventId, WorkspaceId};
-use mandate_executord::establish::{
-    Connected, Establishment, OpeningGate, ToCopy, copy_draft, establishment, pass,
+use mandate_executor::{
+    AccountRef, AccountScope, AgentId, BindingGateInput, BindingGateRequest, BindingGateSource,
+    BrokerRequest, EventId, IdGen, Purpose, Seq, TimeInForce, WorkspaceId, WriterEpoch,
 };
-use mandate_journal::Environment;
+use mandate_executord::alpaca::AlpacaBroker;
+use mandate_executord::connect::connect_check;
+use mandate_executord::establish::{
+    Connected, Establishment, GateReport, OpeningGate, ToCopy, copy_draft, establishment, pass,
+};
+use mandate_executord::fixture::Ids;
+use mandate_executord::paper::FixturePaper;
+use mandate_journal::{AppendOutcome, Environment, StreamId};
+use mandate_num::{Price, Qty};
 use mandate_process::State;
+use mandate_store::envelope::{Envelope, Fields, draft_bytes};
+use mandate_store::{MemoryStore, Store};
 use support::{
     ACCOUNT, ACCOUNT_STREAM, AGENT, Allowing, CONNECTION, CONTROL_STREAM, Error, Journal, NOON,
     OTHER_ACCOUNT, OTHER_CONNECTION, Paper, TwoPercentStop, WORKSPACE, at, deployed, object,
@@ -19,6 +33,8 @@ use support::{
 
 const CHECK: &str = "e1h1o1";
 const ESTABLISHED: &str = "c9";
+const OWNER: &str = "01JOWNER0000000000000000AA";
+const OWNER_EXIT: &str = "01JINTENT0000000000000000D";
 
 fn text(s: &str) -> Value {
     Value::Str(s.to_owned())
@@ -362,6 +378,291 @@ fn a_shut_gate_holds_every_opening_and_lets_every_exit_go() -> Result<(), Error>
     Ok(())
 }
 
+/// A journal and broker where the agent holds 10 AAPL: an opening taken through an open gate and
+/// filled whole, so an exit has something to sell.
+fn holding() -> Result<(Journal, Paper), Error> {
+    let journal = deployed()?;
+    let broker = Paper::new(&journal);
+    let open = OpeningGate::default();
+    open.open();
+    let mut opening = start_wired(
+        &journal,
+        &broker,
+        wired(open.guard(Box::new(Allowing)), Box::new(TwoPercentStop))?,
+    )?;
+    propose(
+        &journal,
+        AGENT,
+        "01JINTENT0000000000000000A",
+        "buy",
+        "10",
+        "150",
+        "open",
+    )?;
+    opening.step(at(NOON)?);
+    for id in broker.submitted() {
+        broker.fill(&id, "150")?;
+    }
+    for _ in 0..3 {
+        opening.step(at(NOON)?);
+    }
+    Ok((journal, broker))
+}
+
+/// What a restarted executor, under a gate `open` or shut, journals and asks the broker for the
+/// risk reduction `action` over that position.
+fn reduced(action: &str, open: bool) -> Result<(Vec<String>, Vec<String>), Error> {
+    let (journal, broker) = holding()?;
+    let gate = OpeningGate::default();
+    if open {
+        gate.open();
+    }
+    let mut process = start_wired(
+        &journal,
+        &broker,
+        wired(gate.guard(Box::new(Allowing)), Box::new(TwoPercentStop))?,
+    )?;
+    let exit = |purpose| {
+        propose(
+            &journal,
+            AGENT,
+            "01JINTENT0000000000000000C",
+            "sell",
+            "5",
+            "150",
+            purpose,
+        )
+    };
+    match action {
+        "owner_exit" => {
+            support::owner_exit(&journal, AGENT, OWNER, Some("149"))?;
+            support::propose_owner_market_exit(&journal, AGENT, OWNER_EXIT, OWNER)?;
+        }
+        "kill_switch" => support::kill(&journal, AGENT, "01JKILL00000000000000000AA")?,
+        purpose => exit(purpose)?,
+    }
+    for _ in 0..3 {
+        process.step(at(NOON)?);
+    }
+    let requests = broker
+        .seen()
+        .iter()
+        .map(|seen| format!("{:?}", seen.request))
+        .collect();
+    Ok((journal.types(ACCOUNT_STREAM), requests))
+}
+
+/// Rule 13 over a real position: a risk, discretionary or owner exit and a kill switch each
+/// journal and ask the broker exactly the same under a shut gate as under an open one, and each
+/// does act under the shut gate: the exits are received and sent, and the kill switch is applied.
+#[test]
+fn every_risk_reduction_goes_alike_under_a_shut_and_an_open_gate() -> Result<(), Error> {
+    for (action, acted) in [
+        ("risk_exit", "md-01JINTENT0000000000000000C"),
+        ("discretionary_exit", "md-01JINTENT0000000000000000C"),
+        ("owner_exit", "md-01JINTENT0000000000000000D"),
+        ("kill_switch", "KillSwitchActivated"),
+    ] {
+        let shut = reduced(action, false)?;
+        assert_eq!(shut, reduced(action, true)?, "{action}");
+        let (types, requests) = &shut;
+        if action == "kill_switch" {
+            assert!(types.iter().any(|t| t == acted), "{action}: {types:?}");
+        } else {
+            assert!(
+                types.iter().filter(|t| *t == "IntentReceived").count() == 2
+                    && requests
+                        .iter()
+                        .any(|request| request.starts_with("Submit") && request.contains(acted)),
+                "{action}: {types:?} {requests:?}"
+            );
+        }
+    }
+    Ok(())
+}
+
+/// A binding-gate source that records which purposes it was asked about, and answers none.
+#[derive(Default)]
+struct Asked(Rc<RefCell<Vec<Purpose>>>);
+
+impl BindingGateSource for Asked {
+    fn input(&self, request: &BindingGateRequest<'_>) -> Option<BindingGateInput> {
+        self.0.borrow_mut().push(request.purpose);
+        None
+    }
+}
+
+/// Item 3 at the one place the gate acts: while shut it asks the wiring's source about every
+/// purpose that adds no risk, a protective order and a kill switch's flatten among them, and about
+/// none that adds risk; once open it asks about those too. The executor's own protective orders
+/// never ask the binding gate at all: only a received intent does.
+#[test]
+fn a_shut_gate_asks_its_source_about_everything_but_risk() -> Result<(), Error> {
+    let agent = AgentId(AGENT.to_owned());
+    let instrument = InstrumentId::new("AAPL")?;
+    let ask = |gate: &OpeningGate, purpose| {
+        let asked = Asked::default();
+        let request = BindingGateRequest {
+            agent: &agent,
+            instrument: &instrument,
+            side: Side::Sell,
+            qty: Qty::parse("5")?,
+            limit: Price::parse("150")?,
+            purpose,
+            tif: TimeInForce::Day,
+            protection: None,
+        };
+        let seen = Rc::clone(&asked.0);
+        assert!(gate.guard(Box::new(asked)).input(&request).is_none());
+        let purposes = seen.borrow().clone();
+        Ok::<_, Error>(purposes)
+    };
+    let gate = OpeningGate::default();
+    for purpose in [
+        Purpose::RiskExit,
+        Purpose::OwnerExit,
+        Purpose::DiscretionaryExit,
+        Purpose::Protective,
+        Purpose::Flatten,
+    ] {
+        assert_eq!(ask(&gate, purpose)?, [purpose], "{purpose:?}");
+    }
+    for purpose in [Purpose::Open, Purpose::Increase] {
+        assert!(ask(&gate, purpose)?.is_empty(), "{purpose:?}");
+    }
+    gate.open();
+    for purpose in [Purpose::Open, Purpose::Increase] {
+        assert_eq!(ask(&gate, purpose)?, [purpose], "{purpose:?}");
+    }
+    Ok(())
+}
+
+/// An increase adds risk as an opening does: held while the gate is shut, not even received, and
+/// received and decided as soon as it opens.
+#[test]
+fn an_increase_is_held_while_shut_and_decided_once_open() -> Result<(), Error> {
+    let (journal, broker) = holding()?;
+    let gate = OpeningGate::default();
+    let mut process = start_wired(
+        &journal,
+        &broker,
+        wired(gate.guard(Box::new(Allowing)), Box::new(TwoPercentStop))?,
+    )?;
+    propose(
+        &journal,
+        AGENT,
+        "01JINTENT0000000000000000D",
+        "buy",
+        "5",
+        "150",
+        "increase",
+    )?;
+    for _ in 0..5 {
+        process.step(at(NOON)?);
+    }
+    assert_eq!(journal.received(), ["01JINTENT0000000000000000A"]);
+    let decided = |journal: &Journal| {
+        journal
+            .types(ACCOUNT_STREAM)
+            .iter()
+            .filter(|t| *t == "GateDecided")
+            .count()
+    };
+    let before = decided(&journal);
+    gate.open();
+    process.step(at(NOON)?);
+    assert_eq!(
+        journal.received(),
+        ["01JINTENT0000000000000000A", "01JINTENT0000000000000000D"]
+    );
+    assert_eq!(decided(&journal), before + 1);
+    Ok(())
+}
+
+/// Item 2: the copy's draft is a record the journal admits. On a journal that judges every record
+/// against its registered schemas and rules, an account stream opened by a passed `connect`
+/// check commits the copy `copy_draft` writes as the next record.
+#[test]
+fn the_journal_admits_the_copy() -> Result<(), Error> {
+    const ULID_ACCOUNT: &str = "01J8Z2ACCT0000000000000001";
+    let mut store = MemoryStore::default();
+    let mut broker = AlpacaBroker::new(FixturePaper::new(at(NOON)?))?;
+    let scope = AccountScope {
+        account: AccountRef(ULID_ACCOUNT.to_owned()),
+        workspace: WorkspaceId(WORKSPACE.to_owned()),
+    };
+    let checked = connect_check(
+        &mut store,
+        &mut broker,
+        &Ids,
+        &scope,
+        CONNECTION,
+        "pii_01J8Z2PQ000000000000000001",
+        at(NOON)?,
+    )?;
+    assert!(checked.passed);
+    let Value::Object(members) = object(vec![
+        ("account_ref", text(ULID_ACCOUNT)),
+        ("broker", text("alpaca")),
+        ("connection_id", text(CONNECTION)),
+        ("environment", text("paper")),
+        ("margin_attestation", Value::Null),
+        ("scopes", Value::Array(vec![text("data"), text("trading")])),
+        (
+            "step_up",
+            object(vec![
+                ("assertion_id", text("as_1")),
+                ("authenticated_at", text("2026-09-21T14:59:00.000000000Z")),
+                ("method", text("passkey")),
+            ])?,
+        ),
+        ("user", text("usr_1")),
+    ])?
+    else {
+        return Err("members".into());
+    };
+    let due = ToCopy {
+        original: EventId("01J8Z2CCCC0000000000000001".to_owned()),
+        members,
+    };
+    let stream_id = format!("acct:{WORKSPACE}:{ULID_ACCOUNT}");
+    let stream = StreamId::parse(&stream_id).ok_or("stream")?;
+    let epoch = store.take_ownership(&stream).ok_or("epoch")?;
+    let head = u64::try_from(store.rows(&stream).ok_or("rows")?.len())?;
+    let draft = copy_draft(
+        &due,
+        Ids.event_id(WriterEpoch(epoch), Seq(head), 0),
+        at(NOON)?,
+    )?;
+    let bytes = draft_bytes(
+        &Envelope {
+            stream: &stream_id,
+            environment: Environment::Paper,
+            actor_kind: "system",
+            actor_id: "executor",
+            build: "mandate-executord/0.0.0",
+            version: "0.0.0",
+            event_time: at(NOON)?,
+        },
+        &Fields {
+            event_id: &draft.event_id.0,
+            event_type: &draft.event_type,
+            schema_version: draft.schema_version,
+            causation_id: draft.causation_id.as_ref().map(|id| id.0.as_str()),
+            correlation_id: None,
+            config_refs: &draft.config_refs,
+            payload: &draft.payload,
+        },
+    )
+    .ok_or("draft")?;
+    let appended = store.append(&stream, head, epoch, at(NOON)?, &[bytes]);
+    assert!(
+        matches!(appended, AppendOutcome::Committed(_)),
+        "{appended:?}"
+    );
+    Ok(())
+}
+
 /// Items 3 and 6: an executor left connecting, with no establishment and no refusal, opens no
 /// risk however many passes it runs, while a risk exit behind the held opening is still received.
 #[test]
@@ -451,6 +752,60 @@ fn the_first_pass_copies_a_due_establishment_once_and_opens() -> Result<(), Erro
         copied.iter().any(|p| p.get("risk_clock").is_some()),
         "{copied:?}"
     );
+    Ok(())
+}
+
+/// Item 1: an executor restarted on an account stream that already holds its copy is established
+/// on its first pass, before it has stepped, and opens; it writes no second copy.
+#[test]
+#[ignore = "pending E21-32"]
+fn a_restarted_established_executor_opens_on_its_first_pass() -> Result<(), Error> {
+    let journal = deployed()?;
+    opened(&journal)?;
+    check(&journal, CHECK, CONNECTION, "connect", "passed")?;
+    establish(&journal, ESTABLISHED, 2, Some(CHECK), CONNECTION, ACCOUNT)?;
+    let broker = Paper::new(&journal);
+    let first = OpeningGate::default();
+    let mut process = start_wired(
+        &journal,
+        &broker,
+        wired(first.guard(Box::new(Allowing)), Box::new(TwoPercentStop))?,
+    )?;
+    process.step(at(NOON)?);
+    pass(
+        &mut process,
+        &first,
+        &scope(),
+        Environment::Paper,
+        at(NOON)?,
+    )?;
+    drop(process);
+    let restarted = OpeningGate::default();
+    let mut process = start_wired(
+        &journal,
+        &broker,
+        wired(
+            restarted.guard(Box::new(Allowing)),
+            Box::new(TwoPercentStop),
+        )?,
+    )?;
+    assert_eq!(
+        pass(
+            &mut process,
+            &restarted,
+            &scope(),
+            Environment::Paper,
+            at(NOON)?
+        )?,
+        Connected::Open
+    );
+    assert!(restarted.is_open());
+    let copies = journal
+        .rows_of(ACCOUNT_STREAM)
+        .into_iter()
+        .filter(|row| row.event_type == "ConnectionEstablished")
+        .count();
+    assert_eq!(copies, 1);
     Ok(())
 }
 
@@ -570,4 +925,42 @@ fn an_unreadable_record_keeps_the_gate_shut_and_every_exit_going() -> Result<(),
     );
     assert_eq!(journal.received(), ["01JINTENT0000000000000000C"]);
     Ok(())
+}
+
+/// Item 4's log: a closed or unreadable connection's code is printed when it starts and again
+/// only after it changed, never once per pass, and nothing is printed while open or connecting.
+#[test]
+#[ignore = "pending E21-32"]
+fn the_gate_reports_each_code_once_per_change() {
+    let mut report = GateReport::default();
+    let printed: Vec<_> = [
+        Ok(Connected::Connecting),
+        Ok(Connected::Closed),
+        Ok(Connected::Closed),
+        Err("connection_record_unreadable"),
+        Err("connection_record_unreadable"),
+        Err("stream_unavailable"),
+        Ok(Connected::Connecting),
+        Ok(Connected::Closed),
+        Ok(Connected::Open),
+        Ok(Connected::Open),
+    ]
+    .into_iter()
+    .map(|outcome| report.changed(outcome))
+    .collect();
+    assert_eq!(
+        printed,
+        [
+            None,
+            Some("connection_closed"),
+            None,
+            Some("connection_record_unreadable"),
+            None,
+            Some("stream_unavailable"),
+            None,
+            Some("connection_closed"),
+            None,
+            None,
+        ]
+    );
 }
