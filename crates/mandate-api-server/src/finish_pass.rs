@@ -3,14 +3,14 @@
 //! [`crate::finish::decide`] answers, appending at the head it read, and tears down every connect a
 //! refusal or a revoke closed through the [`Teardown`] port.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
 use mandate_canon::{Value, parse};
 use mandate_connections::manager::{FinishPlan, ManagerEffect, RequestFold};
-use mandate_connections::record::ConnectionId;
+use mandate_connections::record::{AccountRef, ConnectionId};
 use mandate_journal::{AppendOutcome, StoredEvent};
 use mandate_time::UtcNanos;
 
@@ -40,8 +40,9 @@ pub struct Finisher<F, T> {
     fingerprints: F,
     teardown: T,
     workspace: String,
-    /// The closed connects whose deletes succeeded since the process started.
-    cleared: BTreeSet<ConnectionId>,
+    /// The closed requests, by connection id and `account_ref`, whose deletes succeeded since the
+    /// process started: DEC-699 lets a refused connection id be requested again.
+    cleared: BTreeSet<(ConnectionId, AccountRef)>,
     /// Whether no pass has read the control stream since the process started.
     restarted: bool,
 }
@@ -69,8 +70,8 @@ impl<F: Fingerprints, T: Teardown> Finisher<F, T> {
         let stream = format!("ctl:{}", self.workspace);
         let control = self.journal.rows(&stream).await?;
         let restarted = std::mem::replace(&mut self.restarted, false);
-        for connection in closed(&control) {
-            self.clear(connection).await;
+        for (connection, account_ref) in closed(&control) {
+            self.clear(connection, account_ref).await;
         }
         let mut head = control.last().map_or(0, |row| row.seq);
         for connection in requested(&control) {
@@ -92,8 +93,8 @@ impl<F: Fingerprints, T: Teardown> Finisher<F, T> {
             };
             for effect in &effects {
                 let refusal = matches!(effect, ManagerEffect::ConnectRefused { .. });
-                if refusal {
-                    let _owed_until_a_later_delete = self.teardown.delete(&connection).await;
+                if refusal && self.teardown.delete(&connection).await.is_err() {
+                    continue;
                 }
                 let Some(draft) = drafted(effect, causation.as_deref(), &self.workspace, now)
                 else {
@@ -114,17 +115,20 @@ impl<F: Fingerprints, T: Teardown> Finisher<F, T> {
                         Ok(AppendOutcome::Committed(_) | AppendOutcome::AlreadyCommitted(_))
                     )
                 {
-                    self.clear(connection.clone()).await;
+                    self.clear(connection.clone(), members.account_ref.clone())
+                        .await;
                 }
             }
         }
         Ok(())
     }
 
-    /// Deletes `connection`'s entries unless they were deleted since the process started.
-    async fn clear(&mut self, connection: ConnectionId) {
-        if !self.cleared.contains(&connection) && self.teardown.delete(&connection).await.is_ok() {
-            self.cleared.insert(connection);
+    /// Deletes the entries of `connection`'s request on `account_ref` unless they were deleted
+    /// since the process started.
+    async fn clear(&mut self, connection: ConnectionId, account_ref: AccountRef) {
+        let closed = (connection, account_ref);
+        if !self.cleared.contains(&closed) && self.teardown.delete(&closed.0).await.is_ok() {
+            self.cleared.insert(closed);
         }
     }
 }
@@ -148,10 +152,11 @@ fn requested(control: &[StoredEvent]) -> Vec<ConnectionId> {
         .collect()
 }
 
-/// The version-2 `oauth` requests on `control` that a refusal or a revoke closed while open: the
-/// connects whose code and token entries the teardown deletes.
-fn closed(control: &[StoredEvent]) -> Vec<ConnectionId> {
-    let mut open = BTreeSet::new();
+/// The version-2 `oauth` requests on `control` that a refusal or a revoke closed while open, each
+/// by its connection id and `account_ref`: the connects whose code and token entries the teardown
+/// deletes.
+fn closed(control: &[StoredEvent]) -> Vec<(ConnectionId, AccountRef)> {
+    let mut open = BTreeMap::new();
     let mut closed = Vec::new();
     for row in control {
         let Some((id, payload)) = named(row) else {
@@ -162,12 +167,22 @@ fn closed(control: &[StoredEvent]) -> Vec<ConnectionId> {
                 if row.schema_version == 2
                     && payload.get("credential").and_then(Value::as_str) == Some("oauth") =>
             {
-                open.insert(id);
+                if let Some(account_ref) = payload
+                    .get("account_ref")
+                    .and_then(Value::as_str)
+                    .and_then(|text| AccountRef::new(text).ok())
+                {
+                    open.insert(id, account_ref);
+                }
             }
             "ConnectionEstablished" => {
                 open.remove(&id);
             }
-            "ConnectionRefused" | "ConnectionRevoked" if open.remove(&id) => closed.push(id),
+            "ConnectionRefused" | "ConnectionRevoked" => {
+                if let Some(account_ref) = open.remove(&id) {
+                    closed.push((id, account_ref));
+                }
+            }
             _ => {}
         }
     }
