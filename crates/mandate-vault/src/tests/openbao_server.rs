@@ -23,7 +23,9 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use super::conformance::{self, Harness, at, c};
 use crate::SourceError;
-use crate::fingerprint::FINGERPRINT_KEY;
+use crate::fingerprint::{
+    AccountFingerprint, Claim, FINGERPRINT_KEY, FingerprintError, encode_entry,
+};
 use crate::kubernetes::{
     KubernetesAuth, kubernetes_mount_requests, kubernetes_policy, kubernetes_policy_name,
     mount_accessor, service_account_name,
@@ -31,9 +33,9 @@ use crate::kubernetes::{
 use crate::openbao::{
     OpenBaoConfig, OpenBaoSource, RoleCredentials, provision, provision_kubernetes_auth,
 };
-use crate::policy::{Identity, Mounts, SecretPath, kv_path, role_name};
+use crate::policy::{Identity, Mounts, SecretPath, kv_path, openbao_policy, role_name};
 use crate::source::{Grant, SecretSource};
-use mandate_connections::record::{AccountRef, ConnectionId};
+use mandate_connections::record::{AccountPiiRef, AccountRef, ConnectionId};
 use mandate_time::UtcNanos;
 use reqwest::{Certificate, Method};
 use secrecy::{ExposeSecret, SecretString};
@@ -1107,4 +1109,185 @@ async fn executor_of(bao: &Bao, connection: &str, now: UtcNanos) -> OpenBaoSourc
         at(now.secs() + 600),
     )
     .unwrap()
+}
+
+/// A session as the connection manager whose policy is its generated one and DEC-2349's read of
+/// every fingerprint entry, `personal/fingerprints/+/+`, which that decision's provisioning renders.
+async fn fingerprint_manager(bao: &Bao, now: UtcNanos) -> OpenBaoSource {
+    let mounts = &bao.config.mounts;
+    let hcl = format!(
+        "{}path \"{}/data/personal/fingerprints/+/+\" {{\n  capabilities = [\"read\"]\n}}\n",
+        openbao_policy(&Identity::ConnectionManager, &[c("c1"), c("c2")], mounts).unwrap(),
+        mounts.kv
+    );
+    let name = format!("{}-fingerprint-manager", mounts.kv);
+    bao.operator(
+        Method::PUT,
+        &format!("sys/policies/acl/{name}"),
+        Some(json!({"policy": hcl})),
+    )
+    .await;
+    let made = bao
+        .operator(
+            Method::POST,
+            "auth/token/create",
+            Some(json!({"policies": [name], "no_default_policy": true, "ttl": "600s"})),
+        )
+        .await;
+    OpenBaoSource::from_token(
+        &bao.config,
+        Identity::ConnectionManager,
+        SecretString::from(made["auth"]["client_token"].as_str().unwrap().to_owned()),
+        at(now.secs() + 600),
+    )
+    .unwrap()
+}
+
+fn request(n: u8) -> AccountRef {
+    AccountRef::new(&format!("01J8Z2ACCT000000000000000{n}")).unwrap()
+}
+
+/// `connection`'s executor writes its request's fingerprint entry, as at its connect.
+async fn fingerprinted(bao: &Bao, connection: &str, n: u8, now: UtcNanos) -> AccountFingerprint {
+    let executor = executor_of(bao, connection, now).await;
+    let fingerprint = executor
+        .hmac_account(&SecretString::from("acct-1".to_owned()))
+        .await
+        .unwrap();
+    let pii_ref = AccountPiiRef::new(&format!("pii_01J8Z2PQ00000000000000000{n}")).unwrap();
+    executor
+        .create(
+            &SecretPath::Fingerprint(c(connection), request(n)),
+            &encode_entry(&fingerprint, &pii_ref).unwrap(),
+        )
+        .await
+        .unwrap();
+    fingerprint
+}
+
+/// DEC-2345 items 3 to 6 on a real vault: the manager reads a request's fingerprint and its
+/// reference, and nothing for a request with no entry; a claim is the connection's once, again
+/// for it, and `HeldBy` it for another; a release by a connection that does not hold it deletes
+/// nothing, and the holder's frees it for the next; while the key rotates, the manager reads and
+/// claims nothing. A vault nobody answers for is an outage, checked first.
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "pending E21-32"]
+async fn the_manager_claims_each_fingerprint_for_one_connection() {
+    let ca = include_bytes!("fixtures/isrg-root-x1.pem").to_vec();
+    let unreachable = OpenBaoSource::from_token(
+        &nowhere(ca),
+        Identity::ConnectionManager,
+        SecretString::from("unused".to_owned()),
+        at(1_000_600),
+    )
+    .unwrap();
+    assert_eq!(
+        unreachable.fingerprint(&c("c1"), &request(1)).await,
+        Err(FingerprintError::Unavailable)
+    );
+    let Some(bao) = Bao::new().await else {
+        return;
+    };
+    let now = at(1_000_000);
+    let held = fingerprinted(&bao, "c1", 1, now).await;
+    assert_eq!(fingerprinted(&bao, "c2", 2, now).await, held);
+    let manager = fingerprint_manager(&bao, now).await;
+    let (fingerprint, pii_ref) = manager.fingerprint(&c("c1"), &request(1)).await.unwrap();
+    assert_eq!(fingerprint, held);
+    assert_eq!(pii_ref.as_str(), "pii_01J8Z2PQ000000000000000001");
+    assert_eq!(
+        manager.fingerprint(&c("c1"), &request(3)).await,
+        Err(FingerprintError::Missing)
+    );
+    assert_eq!(manager.claim(&c("c1"), &held).await, Ok(Claim::Claimed));
+    assert_eq!(manager.claim(&c("c1"), &held).await, Ok(Claim::Claimed));
+    assert_eq!(
+        manager.claim(&c("c2"), &held).await,
+        Ok(Claim::HeldBy(c("c1")))
+    );
+    assert_eq!(manager.release(&c("c2"), &request(2)).await, Ok(()));
+    assert_eq!(
+        manager.claim(&c("c2"), &held).await,
+        Ok(Claim::HeldBy(c("c1")))
+    );
+    assert_eq!(manager.release(&c("c1"), &request(1)).await, Ok(()));
+    assert_eq!(manager.release(&c("c1"), &request(1)).await, Ok(()));
+    assert_eq!(manager.claim(&c("c2"), &held).await, Ok(Claim::Claimed));
+    let api = bao.source(Identity::Api, now).await;
+    assert_eq!(
+        api.claim(&c("c1"), &held).await,
+        Err(FingerprintError::Unavailable)
+    );
+    bao.operator(
+        Method::POST,
+        &format!("{}/data/fingerprints/rotating", bao.config.mounts.kv),
+        Some(json!({"data": {"value": "cm90YXRpbmc="}})),
+    )
+    .await;
+    assert_eq!(
+        manager.fingerprint(&c("c2"), &request(2)).await,
+        Err(FingerprintError::Rotating)
+    );
+    assert_eq!(
+        manager.claim(&c("c1"), &held).await,
+        Err(FingerprintError::Rotating)
+    );
+}
+
+/// DEC-2345 item 4: of two concurrent claims of one fingerprint, exactly one wins, and the other
+/// answers `HeldBy` the winner, never both `Claimed`.
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "pending E21-32"]
+async fn of_two_concurrent_claims_exactly_one_wins() {
+    let ca = include_bytes!("fixtures/isrg-root-x1.pem").to_vec();
+    let unreachable = OpenBaoSource::from_token(
+        &nowhere(ca),
+        Identity::ConnectionManager,
+        SecretString::from("unused".to_owned()),
+        at(1_000_600),
+    )
+    .unwrap();
+    let probe =
+        AccountFingerprint::new("vault:v1:q83vEjRWeJCrze8SNFZ4kKvN7xI0VniQq83vEjRWeJA=").unwrap();
+    assert_eq!(
+        unreachable.claim(&c("c1"), &probe).await,
+        Err(FingerprintError::Unavailable)
+    );
+    let Some(bao) = Bao::new().await else {
+        return;
+    };
+    let now = at(1_000_000);
+    let held = fingerprinted(&bao, "c1", 1, now).await;
+    let (one, two) = (
+        fingerprint_manager(&bao, now).await,
+        fingerprint_manager(&bao, now).await,
+    );
+    for _ in 0..4 {
+        let (c1, c2) = (c("c1"), c("c2"));
+        let (first, second) = tokio::join!(one.claim(&c1, &held), two.claim(&c2, &held));
+        let answers = [first.unwrap(), second.unwrap()];
+        let won: Vec<_> = answers.iter().filter(|a| **a == Claim::Claimed).collect();
+        assert_eq!(won.len(), 1, "{answers:?}");
+        let winner = if answers[0] == Claim::Claimed {
+            c("c1")
+        } else {
+            c("c2")
+        };
+        assert!(
+            answers.contains(&Claim::HeldBy(winner.clone())),
+            "{answers:?}"
+        );
+        bao.operator(
+            Method::DELETE,
+            &format!("{}/metadata/personal/claims", bao.config.mounts.kv),
+            None,
+        )
+        .await;
+        bao.operator(
+            Method::POST,
+            &format!("{}/metadata/personal/claims", bao.config.mounts.kv),
+            Some(json!({"cas_required": true})),
+        )
+        .await;
+    }
 }

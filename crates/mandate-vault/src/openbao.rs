@@ -21,7 +21,7 @@ use std::time::Duration;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
-use mandate_connections::record::ConnectionId;
+use mandate_connections::record::{AccountPiiRef, AccountRef, ConnectionId};
 use mandate_time::UtcNanos;
 use reqwest::{Certificate, Method, StatusCode, redirect};
 use secrecy::zeroize::Zeroize;
@@ -29,7 +29,7 @@ use secrecy::{ExposeSecret, SecretSlice, SecretString};
 use serde_json::{Value, json};
 
 use crate::SourceError;
-use crate::fingerprint::{AccountFingerprint, FINGERPRINT_KEY};
+use crate::fingerprint::{AccountFingerprint, Claim, FINGERPRINT_KEY, FingerprintError};
 use crate::kubernetes::{
     KubernetesAuth, kubernetes_mount_requests, kubernetes_policy, kubernetes_policy_name,
     mount_accessor, service_account_name,
@@ -660,6 +660,58 @@ impl OpenBaoSource {
         let path = format!("{}/hmac/{FINGERPRINT_KEY}", self.mounts.transit);
         let answer = self.call(Method::POST, &path, Some(&body)).await?;
         AccountFingerprint::new(text(answer.as_ref(), "/data/hmac")?)
+    }
+
+    /// The fingerprint and reference of the request `account` of `connection`, from the
+    /// fingerprint entry its executor wrote at connect: asked by the connection manager, which
+    /// must find the reference equal to the journaled `account_pii_ref` before it uses the hash
+    /// (DEC-2345 item 3).
+    ///
+    /// # Errors
+    /// [`FingerprintError::Rotating`] while the key rotates, [`FingerprintError::Missing`] for no
+    /// entry, or one that does not read, and [`FingerprintError::Unavailable`] for an outage or a
+    /// refused session.
+    pub async fn fingerprint(
+        &self,
+        connection: &ConnectionId,
+        account: &AccountRef,
+    ) -> Result<(AccountFingerprint, AccountPiiRef), FingerprintError> {
+        let _ = (connection, account);
+        Err(FingerprintError::Unimplemented { story: "E21-32" })
+    }
+
+    /// Claims `fingerprint` for `connection` in the registry, by check-and-set on the version read:
+    /// [`Claim::Claimed`] when it is now this connection's or was already, and
+    /// [`Claim::HeldBy`] another connection that holds it. Of two concurrent claims one wins, and
+    /// the other reads it again and answers `HeldBy` the winner (DEC-2345 item 4).
+    ///
+    /// # Errors
+    /// [`FingerprintError::Rotating`] while the key rotates, and
+    /// [`FingerprintError::Unavailable`] for an outage, a refused session, or a registry that
+    /// keeps moving under it.
+    pub async fn claim(
+        &self,
+        connection: &ConnectionId,
+        fingerprint: &AccountFingerprint,
+    ) -> Result<Claim, FingerprintError> {
+        let _ = (connection, fingerprint);
+        Err(FingerprintError::Unimplemented { story: "E21-32" })
+    }
+
+    /// Gives back the claim of the request `account` of `connection`, when it holds it: on a
+    /// refusal and on a revoke. A connection with no fingerprint entry, or that holds no claim,
+    /// changes nothing, so a release is idempotent and a non-holder's deletes nothing.
+    ///
+    /// # Errors
+    /// [`FingerprintError::Unavailable`] for an outage, a refused session, or a registry that
+    /// keeps moving under it.
+    pub async fn release(
+        &self,
+        connection: &ConnectionId,
+        account: &AccountRef,
+    ) -> Result<(), FingerprintError> {
+        let _ = (connection, account);
+        Err(FingerprintError::Unimplemented { story: "E21-32" })
     }
 }
 
