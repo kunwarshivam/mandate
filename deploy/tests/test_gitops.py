@@ -396,6 +396,8 @@ def values_policy(values: dict[str, dict], environment: str) -> list[str]:
         problems.append("workspace: local images allowed")
     if (workspace.get("api") or {}).get("vaultBinding") and environment != "staging":
         problems.append(f"workspace: the API's vault binding is on in {environment}, where only staging runs a vault (DEC-2338)")
+    if (workspace.get("api") or {}).get("connectionManagerBinding") and environment != "staging":
+        problems.append(f"workspace: the API holds the connection manager's AppRole in {environment}, where only staging runs a vault (DEC-2348)")
     for image, reference in (workspace.get("images") or {}).items():
         if image == "stub-issuer" and reference:
             problems.append("workspace: the stub issuer is named")
@@ -1344,14 +1346,17 @@ def test_the_api_is_bound_to_the_vault_in_staging_alone(overlay):
     egress to the vault on 8200; production, which runs no vault, carries none of it."""
     environment, _, values, rendered, directory = overlay
     bound = bool((values["workspace"].get("api") or {}).get("vaultBinding"))
+    manager = bool((values["workspace"].get("api") or {}).get("connectionManagerBinding"))
     if directory == GITOPS / "clusters" / "staging":
         assert bound, "staging's API is bound to its vault"
-    assert api_vault(rendered, on=bound) == []
+        assert manager, "and holds the connection manager's AppRole (DEC-2348)"
+    assert api_vault(rendered, on=bound, manager=manager) == []
     assert approle_copied(rendered) == []
     if environment != "staging":
-        bad = copy.deepcopy(values)
-        bad["workspace"] = merge(bad["workspace"], {"api": {"vaultBinding": True}})
-        assert values_policy(bad, environment), "a binding where no vault runs is caught"
+        for setting in ("vaultBinding", "connectionManagerBinding"):
+            bad = copy.deepcopy(values)
+            bad["workspace"] = merge(bad["workspace"], {"api": {setting: True}})
+            assert values_policy(bad, environment), f"{setting} where no vault runs is caught"
 
 
 def test_another_environments_tier_is_caught(overlay):
