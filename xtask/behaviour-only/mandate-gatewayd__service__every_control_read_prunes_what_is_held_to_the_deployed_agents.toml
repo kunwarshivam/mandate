@@ -1,0 +1,7 @@
+file = "crates/mandate-gatewayd/tests/service.rs"
+test = "every_control_read_prunes_what_is_held_to_the_deployed_agents"
+reason = """
+A follow-up to d6f39e65 (#2115): `Service::answer` already exists and holds a stopped agent's cap
+until that agent calls again, so the test fails on that behaviour, a stopped and silent agent still
+held, rather than at a stub. E21-62's prune implementation PR deletes this row with the marker.
+"""
