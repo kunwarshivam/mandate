@@ -6,6 +6,7 @@
 mod common;
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::net::IpAddr;
 use std::os::unix::fs::PermissionsExt;
 use std::sync::{Arc, Mutex};
 
@@ -34,6 +35,7 @@ struct Fixture {
     addr: std::net::SocketAddr,
     sessions: Arc<Sessions>,
     journal: Arc<MemJournal>,
+    reduction: Arc<Reduction>,
 }
 
 static DIRS: Mutex<u32> = Mutex::new(0);
@@ -41,6 +43,11 @@ static DIRS: Mutex<u32> = Mutex::new(0);
 /// The hosted workspace where ALICE is an active operator who enrolled `signer`, served at T0.
 /// `signed_in` opens a full session for her first, the sign-in route 2's interim standing needs.
 fn fixture(signer: &Signer, signed_in: bool) -> Fixture {
+    fixture_behind(signer, signed_in, Vec::new())
+}
+
+/// [`fixture`] behind the ingress peers `ingress` (`MANDATE_API_INGRESS_PEERS`).
+fn fixture_behind(signer: &Signer, signed_in: bool, ingress: Vec<IpAddr>) -> Fixture {
     let mut n = DIRS.lock().expect("unpoisoned");
     *n += 1;
     let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
@@ -85,6 +92,7 @@ fn fixture(signer: &Signer, signed_in: bool) -> Fixture {
     )
     .expect("the issuer");
     let keys: BTreeMap<Digest, Vec<u8>> = BTreeMap::from([(Digest::of(&cose), cose)]);
+    let reduction = Arc::new(Reduction::new(ingress, Box::new(OsRandom::new())));
     let app = App {
         settings: Settings {
             app_origin: ORIGIN.to_owned(),
@@ -101,12 +109,13 @@ fn fixture(signer: &Signer, signed_in: bool) -> Fixture {
         step_up: Arc::new(mandate_api_server::stepup::Unbound),
         challenges: Arc::default(),
         connect: None,
-        reduction: Arc::new(Reduction::default()),
+        reduction: Arc::clone(&reduction),
     };
     Fixture {
         addr: serve(http::api(app, Drain::new())),
         sessions,
         journal,
+        reduction,
     }
 }
 
@@ -405,4 +414,94 @@ fn an_opening_replaces_the_session_it_presented_and_a_refresh_keeps_it_reduction
         Ok(at(T0 + 900)),
         "never extended"
     );
+}
+
+/// A presentation that names no challenge, from the device `cookie` (none when `None`) and, when
+/// `forwarded`, through the ingress for that address.
+fn bad(f: &Fixture, cookie: Option<String>, forwarded: Option<String>) -> Reply {
+    let mut headers = vec![
+        ("Origin", ORIGIN.to_owned()),
+        ("X-Mandate-Request", "1".to_owned()),
+    ];
+    if let Some(cookie) = cookie {
+        headers.push(("Cookie", format!("__Host-mandate_device={cookie}")));
+    }
+    if let Some(forwarded) = forwarded {
+        headers.push(("X-Forwarded-For", forwarded));
+    }
+    post(f, "/v1/reduction-sessions", &headers, b"{}")
+}
+
+/// A device cookie of its own for each `n`.
+fn device_cookie(n: u32) -> String {
+    let mut bytes = [0xa5_u8; 32];
+    bytes[..4].copy_from_slice(&n.to_be_bytes());
+    URL_SAFE_NO_PAD.encode(bytes)
+}
+
+#[test]
+fn ten_bad_presentations_from_one_device_raise_the_alert_once() {
+    let signer = Signer::es256();
+    let f = fixture(&signer, true);
+    for i in 1..=12_u64 {
+        let (id, bytes) = challenge(&f);
+        let mut forged = signer.assert(&bytes);
+        forged.2[12] ^= 1;
+        let reply = present(&f, &[], &request(&id, CREDENTIAL, &forged));
+        assert_eq!(reply.status, 401, "a real challenge, a bad signature");
+        assert_eq!(
+            f.reduction.alerts_raised(),
+            u64::from(i >= 10),
+            "after {i}: the tenth failure of the device raises it, and only once"
+        );
+    }
+}
+
+#[test]
+fn behind_a_listed_ingress_each_forwarded_address_counts_apart() {
+    let f = fixture_behind(
+        &Signer::es256(),
+        true,
+        vec!["127.0.0.1".parse().expect("an address")],
+    );
+    for i in 0..100_u32 {
+        let forwarded = format!("198.51.{}.{}", 100 + i / 50, i % 50 + 1);
+        assert_eq!(bad(&f, Some(device_cookie(i)), Some(forwarded)).status, 401);
+    }
+    assert_eq!(
+        f.reduction.alerts_raised(),
+        0,
+        "a hundred failures from a hundred forwarded addresses reach no address's limit"
+    );
+    for i in 0..100_u32 {
+        let reply = bad(
+            &f,
+            Some(device_cookie(1_000 + i)),
+            Some("192.0.2.7".to_owned()),
+        );
+        assert_eq!(reply.status, 401);
+        assert_eq!(
+            f.reduction.alerts_raised(),
+            u64::from(i == 99),
+            "the one forwarded address reaches its hundred at its hundredth failure"
+        );
+    }
+}
+
+#[test]
+fn clients_without_a_device_cookie_share_one_device_budget() {
+    let f = fixture_behind(
+        &Signer::es256(),
+        true,
+        vec!["127.0.0.1".parse().expect("an address")],
+    );
+    for i in 1..=10_u64 {
+        let forwarded = format!("203.0.113.{i}");
+        assert_eq!(bad(&f, None, Some(forwarded)).status, 401);
+        assert_eq!(
+            f.reduction.alerts_raised(),
+            u64::from(i == 10),
+            "ten cookie-less failures from ten addresses share one device's ten"
+        );
+    }
 }
