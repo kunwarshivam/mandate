@@ -3947,7 +3947,9 @@ is active if and only if all hold: (1) the member has a start (`MemberActivated`
 (3) no end (`MemberDeactivated` or `MemberRemoved`) has a seq above that start; (4) no matching
 `removed` (same member and `address_ref`) follows the `added`. With no start, nothing is active, and
 an address added before a membership ended stays inactive after a reactivation. `cooling_off` has
-no end record, so a cooling-off member's addresses stay active. A `removed` that names an `address_ref` that is
+no end record, so a cooling-off member's addresses stay active. The fold joins the two record kinds
+on `member`, the user principal's ULID that §9.12's membership records carry too, so the join is
+the same id by definition. A `removed` that names an `address_ref` that is
 not active, or that another member added, changes nothing: workspace services never commit one
 (workspace API §5.7, removing step 2), and reading it as a removal would let one record silence
 another member's address. The set is never read from the vault, and a vault entry with no committed

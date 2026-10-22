@@ -1358,6 +1358,10 @@ after U-A1 to U-A5 are recorded.
   ids only. Such an entry counts as remaining under its key, so it blocks the previous key's
   retirement and the next rotation until an operator erases it by `address_ref` (the writer's
   `erase`). One corrupt entry therefore blocks rotation loudly, never silently.
+  *The `address_fold_unreadable` alert* ([DEC-2123](decisions/DEC-2123.md) item 7): add the kind
+  to infrastructure design §8.2's alert table (source: the deactivation writer's fold error and the
+  sweep's keep for want of evidence; opaque: the workspace id and the member's or entry's opaque id
+  only) and to `mandate-alerts`' closed `AlertKind`, with its runbook.
   *`key_id` in §5.7* ([DEC-2120](decisions/DEC-2120.md) item 5): workspace API §5.7's "The vault's
   part" lists what an entry holds without the VAPID `key_id` that DEC-2503 item 5 stores there; add
   it, with the note that it is the workspace's current key id and so outside the step-up digest.
@@ -1474,7 +1478,10 @@ story buys a service, and none uses a real identity-provider account in tests (s
   for that member, in add order, read at the same control-stream head the batch appends with as
   `expected_head`; it touches no vault. A fold error never blocks the deactivation (coordinator
   ruling): the writer commits the `MemberDeactivated` or `MemberRemoved` without the removals and
-  raises one operator alert with opaque ids only, and a test of the writer must pin that path.
+  raises one operator alert (kind `address_fold_unreadable`, DEC-2123 item 7) with opaque ids
+  only, and a test of the writer must pin that path:
+  `a_deactivation_whose_fold_fails_commits_without_removals_and_alerts_once`, beside
+  `deactivation_removes_the_workspace_notification_addresses_in_one_transaction`.
   Under DEC-2120 item 9's serving definition, the member's addresses stop being active when the
   deactivation commits, with or without the removals, so the dispatcher sends them nothing; the
   sweep erases their entries on positive evidence (the start followed by the membership's end),
