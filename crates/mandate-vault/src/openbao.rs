@@ -732,6 +732,22 @@ pub async fn provision_kubernetes_auth(
     provision_kubernetes(&http, Some(operator_token), &config.mounts, auth).await
 }
 
+/// The policy [`provision`] writes for `identity`'s role: [`provisioner_policy`] for the role
+/// provisioner, given the workspace's `namespace`, and [`openbao_policy`] for every other identity
+/// (DEC-2350 item 1).
+///
+/// # Errors
+/// [`provisioner_policy`]'s or [`openbao_policy`]'s refusal.
+pub fn provisioned_policy(
+    identity: &Identity,
+    connections: &[ConnectionId],
+    mounts: &Mounts,
+    namespace: Option<&str>,
+) -> Result<String, SourceError> {
+    let _ = (identity, connections, mounts, namespace);
+    Err(SourceError::Unimplemented { story: "E21-33" })
+}
+
 /// Sets a vault up for `connections`, with an operator's token: the KV v2 mount, the AppRole
 /// auth method, one policy and one role per identity, and a secret id for every identity but the
 /// token exchanges, whose secret ids are grants; and, given `kubernetes`, both Kubernetes auth
