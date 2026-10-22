@@ -45,9 +45,6 @@ pub enum WorkerError {
     Bundle(BundleError),
     /// The daily research cap is above the workspace's monthly budget (DEC-2254 item 3).
     DailyCapAboveWorkspace,
-    /// The worker over a model double is not built yet (DEC-2269; backlog E19-6).
-    #[cfg(test)]
-    Unimplemented,
 }
 
 /// Why a dispatch was answered with nothing (DEC-2260 item 6); the core's run bound then ends the
@@ -670,8 +667,9 @@ impl<T: Transport> RecordedWorker<T> {
         now: Box<dyn FnMut() -> UtcNanos>,
         model: T,
     ) -> Result<Self, WorkerError> {
-        let _unbuilt = (bundle, who, sink, now, model);
-        Err(WorkerError::Unimplemented)
+        let meter = own_meter(&who);
+        let caps = Caps::new(bundle.workspace_cap);
+        Self::built(bundle, who, sink, now, meter, caps, (model, |_, _| {}))
     }
 
     pub(crate) fn transport(&self) -> &T {

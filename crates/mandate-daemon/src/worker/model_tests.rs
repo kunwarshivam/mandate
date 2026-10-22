@@ -92,7 +92,6 @@ fn answered(model: CompromisedModel) -> (ResearchInput, RecordedWorker<Compromis
 }
 
 #[test]
-#[ignore = "pending E19-6"]
 fn each_turn_is_sent_to_the_model_and_answered_with_its_calls() {
     for seed in 0..8 {
         let model = CompromisedModel::new(Strategy::Random, seed, reported());
@@ -119,7 +118,6 @@ fn each_turn_is_sent_to_the_model_and_answered_with_its_calls() {
 }
 
 #[test]
-#[ignore = "pending E19-6"]
 fn a_hostile_model_s_calls_are_refused_by_the_gateway_in_front_of_it() {
     for seed in 0..8 {
         let model = CompromisedModel::new(Strategy::Hostile, seed, reported());
