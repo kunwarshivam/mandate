@@ -232,7 +232,7 @@ fn a_kill_switch_start_that_crash_loops_before_it_ends_raises_kill_switch_unappl
     let codes: Vec<&str> = m.alerts().0.iter().map(|alert| alert.code).collect();
     assert_eq!(
         codes,
-        vec!["kill_switch_unapplied"],
+        vec![UNAPPLIED],
         "an unapplied switch raises its own opaque alert, once, in place of crash_loop"
     );
     clean(&mut m);
@@ -285,6 +285,7 @@ const AGENTS: [(&str, &str); 3] = [
     ("agent_2", OTHER),
 ];
 const ACCOUNTS: [&str; 2] = [ACCOUNT, OTHER];
+const UNAPPLIED: &str = "kill_switch_unapplied";
 
 #[derive(Debug, Clone)]
 enum Op {
@@ -296,6 +297,8 @@ enum Op {
     /// The executor of an account no agent wants ends on its own, as DEC-2343's executor does once
     /// its switches are applied.
     Succeed(usize),
+    /// The executor of an account no agent wants crashes before it ends.
+    Crash(usize),
     Advance(i64),
     Restart,
 }
@@ -308,7 +311,8 @@ fn op() -> impl Strategy<Value = Op> {
         2 => (0..ACCOUNTS.len()).prop_map(Op::KillConnection),
         1 => Just(Op::KillWorkspace),
         2 => (0..ACCOUNTS.len()).prop_map(Op::Succeed),
-        2 => prop_oneof![0_i64..4, 0_i64..700].prop_map(Op::Advance),
+        4 => (0..ACCOUNTS.len()).prop_map(Op::Crash),
+        3 => prop_oneof![0_i64..4, 0_i64..40, 0_i64..700].prop_map(Op::Advance),
         1 => Just(Op::Restart),
     ]
 }
@@ -319,10 +323,17 @@ struct Oracle {
     deployed: BTreeSet<usize>,
     stopped: BTreeSet<usize>,
     /// The accounts whose executor has an instance that may run, by the oracle's own count of the
-    /// starts, stops, and ends it saw.
+    /// starts, stops, ends, and crashes it saw.
     live: BTreeSet<&'static str>,
     /// Per account, the switches that covered its executor since its last start.
     pending: BTreeMap<&'static str, BTreeSet<String>>,
+    /// The accounts whose executor, no agent wanting it, crashed and has not been started since.
+    crashed: BTreeSet<&'static str>,
+    /// The accounts whose executor's crash loop is journaled: only a switch starts it again.
+    looped: BTreeSet<&'static str>,
+    /// The accounts whose running generations began with a kill switch's start no agent wanted:
+    /// its restarts carry the switch, and its crash loop leaves the switch unapplied.
+    unapplied_if_looped: BTreeSet<&'static str>,
 }
 
 impl Oracle {
@@ -337,41 +348,50 @@ impl Oracle {
     fn known(&self, account: &str) -> bool {
         self.deployed.iter().any(|i| AGENTS[*i].1 == account)
     }
+
+    fn pending(&self, account: &str) -> bool {
+        self.pending.get(account).is_some_and(|p| !p.is_empty())
+    }
 }
 
-/// Every executor start and stop journaled after the first `from` rows: its account, whether it is
-/// a start, its cause, and its causation id.
-fn executor_records(journal: &Journal, from: usize) -> Vec<(String, bool, String, Option<String>)> {
+/// One executor record of the control stream: its account, its type, its cause, and its causation.
+struct Executed {
+    account: String,
+    kind: &'static str,
+    cause: String,
+    causation: Option<String>,
+}
+
+/// Every executor start, stop, and crash loop journaled after the first `from` rows.
+fn executor_records(journal: &Journal, from: usize) -> Vec<Executed> {
     journal
         .rows()
         .into_iter()
         .skip(from)
-        .filter(|row| {
-            matches!(
-                row.event_type.as_str(),
-                "ProcessStartIssued" | "ProcessStopIssued"
-            )
-        })
         .filter_map(|row| {
+            let kind = match row.event_type.as_str() {
+                "ProcessStartIssued" => "start",
+                "ProcessStopIssued" => "stop",
+                "ProcessCrashLooped" => "looped",
+                _ => return None,
+            };
             let body = mandate_canon::parse(&row.body).ok()?;
             let payload = body.get("payload")?;
-            (payload.get("process").and_then(Value::as_str) == Some("executor")).then(|| {
-                (
-                    payload
-                        .get("subject")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default()
-                        .to_owned(),
-                    row.event_type == "ProcessStartIssued",
-                    payload
-                        .get("cause")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default()
-                        .to_owned(),
-                    body.get("causation_id")
-                        .and_then(Value::as_str)
-                        .map(str::to_owned),
-                )
+            let text = |member: &str| {
+                payload
+                    .get(member)
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned()
+            };
+            (text("process") == "executor").then(|| Executed {
+                account: text("subject"),
+                kind,
+                cause: text("cause"),
+                causation: body
+                    .get("causation_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
             })
         })
         .collect()
@@ -383,6 +403,7 @@ fn check(ops: &[Op]) -> Result<(), TestCaseError> {
     let mut oracle = Oracle::default();
     let mut now = 1_i64;
     let mut seen = journal.rows().len();
+    let mut alerted = 0;
     let mut nth = 0_u32;
     for op in ops {
         let mut switches: Vec<(String, Vec<&'static str>)> = Vec::new();
@@ -391,6 +412,9 @@ fn check(ops: &[Op]) -> Result<(), TestCaseError> {
                 let (agent, account) = AGENTS[*i];
                 if oracle.deployed.insert(*i) {
                     journal.services(&deployed(agent, account), at(now));
+                    oracle.crashed.remove(account);
+                    oracle.looped.remove(account);
+                    oracle.unapplied_if_looped.remove(account);
                 }
             }
             Op::Stop(i) => {
@@ -437,6 +461,14 @@ fn check(ops: &[Op]) -> Result<(), TestCaseError> {
                 if !oracle.wanted(account) && oracle.live.remove(account) {
                     m.orchestrator().fake.succeed(&ex(account));
                     oracle.pending.remove(account);
+                    oracle.unapplied_if_looped.remove(account);
+                }
+            }
+            Op::Crash(j) => {
+                let account = ACCOUNTS[*j];
+                if !oracle.wanted(account) && oracle.live.remove(account) {
+                    m.orchestrator().fake.crash(&ex(account));
+                    oracle.crashed.insert(account);
                 }
             }
             Op::Advance(secs) => now += secs,
@@ -454,58 +486,93 @@ fn check(ops: &[Op]) -> Result<(), TestCaseError> {
         let waiting: BTreeSet<&'static str> = ACCOUNTS
             .iter()
             .copied()
-            .filter(|a| {
-                !oracle.wanted(a)
-                    && !oracle.live.contains(a)
-                    && oracle.pending.get(a).is_some_and(|p| !p.is_empty())
-            })
+            .filter(|a| !oracle.wanted(a) && !oracle.live.contains(a) && oracle.pending(a))
             .collect();
         block_on(m.tick(at(now))).map_err(|h| TestCaseError::fail(format!("{h:?}")))?;
         let records = executor_records(&journal, seen);
         seen = journal.rows().len();
+        let mut unapplied = 0;
         for account in ACCOUNTS {
-            let mine: Vec<_> = records.iter().filter(|r| r.0 == account).collect();
-            let started: Vec<_> = mine.iter().filter(|r| r.1).collect();
+            let mine: Vec<&Executed> = records.iter().filter(|r| r.account == account).collect();
+            let started: Vec<&&Executed> = mine.iter().filter(|r| r.kind == "start").collect();
+            let looped = mine.iter().any(|r| r.kind == "looped");
             if !oracle.wanted(account) {
-                for (_, _, cause, causation) in &started {
-                    prop_assert_eq!(
-                        cause.as_str(),
-                        "kill_switch",
-                        "{}: a start no agent wants answers a switch",
-                        account
-                    );
+                for start in &started {
+                    let answers = start.cause == "kill_switch"
+                        && start.causation.as_ref().is_some_and(|c| {
+                            oracle.pending.get(account).is_some_and(|p| p.contains(c))
+                        });
+                    let restarts = start.cause == "restart"
+                        && oracle.crashed.contains(account)
+                        && !oracle.looped.contains(account)
+                        && !oracle.pending(account);
                     prop_assert!(
-                        causation.as_ref().is_some_and(|c| oracle
-                            .pending
-                            .get(account)
-                            .is_some_and(|p| p.contains(c))),
-                        "{}: and its cause is a switch that covered it since its last start",
+                        answers || restarts,
+                        "{}: a start no agent wants answers a switch that covered it since its last start, or restarts a crash before its loop",
                         account
                     );
                 }
-                prop_assert_eq!(
-                    started.len(),
-                    usize::from(waiting.contains(account)),
-                    "{}: exactly one start for the switches that found it down, none otherwise",
-                    account
-                );
-                let pending = oracle.pending.get(account).is_some_and(|p| !p.is_empty());
-                if pending || !started.is_empty() {
-                    prop_assert!(
-                        mine.iter().all(|r| r.1),
-                        "{}: a switch not yet answered keeps it from being stopped",
+                if waiting.contains(account) {
+                    prop_assert_eq!(
+                        started.len(),
+                        1,
+                        "{}: exactly one start for the switches that found it down",
                         account
                     );
+                } else {
+                    prop_assert!(
+                        started.len() <= usize::from(oracle.crashed.contains(account)),
+                        "{}: no start without a switch, but a crash's restart",
+                        account
+                    );
+                }
+                if oracle.pending(account) || oracle.unapplied_if_looped.contains(account) {
+                    prop_assert!(
+                        mine.iter().all(|r| r.kind != "stop"),
+                        "{}: a generation a switch keeps is never stopped by the manager",
+                        account
+                    );
+                }
+                if looped {
+                    prop_assert!(
+                        oracle.crashed.contains(account)
+                            && oracle.unapplied_if_looped.contains(account),
+                        "{}: a crash loop no agent wants follows only a kill switch's crashing start",
+                        account
+                    );
+                    unapplied += 1;
                 }
             }
-            if !started.is_empty() {
+            if looped {
+                oracle.looped.insert(account);
+                oracle.crashed.remove(account);
+                oracle.unapplied_if_looped.remove(account);
+            }
+            if let Some(last) = started.last() {
+                if !oracle.wanted(account) && last.cause == "kill_switch" {
+                    oracle.unapplied_if_looped.insert(account);
+                }
                 oracle.pending.remove(account);
+                oracle.crashed.remove(account);
                 oracle.live.insert(account);
             }
-            if mine.iter().any(|r| !r.1) {
+            if mine.iter().any(|r| r.kind == "stop") {
                 oracle.live.remove(account);
             }
         }
+        let alerts: Vec<&str> = m
+            .alerts()
+            .0
+            .iter()
+            .skip(alerted)
+            .map(|alert| alert.code)
+            .collect();
+        alerted += alerts.len();
+        prop_assert_eq!(
+            alerts,
+            vec![UNAPPLIED; unapplied],
+            "each crash loop that leaves a switch unapplied raises kill_switch_unapplied once, and nothing else alerts"
+        );
     }
     Ok(())
 }
