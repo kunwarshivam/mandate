@@ -103,13 +103,19 @@ fn close(journal: &MemJournal, kind: &str, connection: &str) {
     );
 }
 
-/// The executor's `connect` check of `connection`: every result passed, or `scope` failed.
+/// The executor's `connect` check of `connection`, listing `account`, `environment` and `scope`
+/// (rule 57): every result passed, or `scope` failed.
 fn check(journal: &MemJournal, connection: &str, passed: bool) {
-    let results = if passed {
-        json!([{"check": "scope", "reason": null, "result": "passed"}])
+    let scope = if passed {
+        json!({"check": "scope", "reason": null, "result": "passed"})
     } else {
-        json!([{"check": "scope", "reason": "scope_mismatch", "result": "failed"}])
+        json!({"check": "scope", "reason": "scope_mismatch", "result": "failed"})
     };
+    let results = json!([
+        {"check": "account", "reason": null, "result": "passed"},
+        {"check": "environment", "reason": null, "result": "passed"},
+        scope,
+    ]);
     let mut streams = journal.streams.lock().unwrap();
     streams
         .entry(acct(connection))
