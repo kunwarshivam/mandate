@@ -89,7 +89,7 @@ pub struct App {
     /// The connect start's OAuth client and `state` values (DEC-2623); `None` when the deployment
     /// offers no connect, and the start answers `not_found`.
     pub connect: Option<Arc<crate::connect::Connect>>,
-    /// Route 2's challenges, limits, and ingress peers (DEC-2117, DEC-2118).
+    /// Route 2's challenges, limits, and ingress peers (DEC-2117, DEC-2119).
     pub reduction: Arc<Reduction>,
 }
 

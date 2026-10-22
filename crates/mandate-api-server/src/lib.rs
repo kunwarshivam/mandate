@@ -39,7 +39,7 @@
 //! - [`journal_reads`]: the journal's audit reads, a stream's events page (§4.8.1, E12-6).
 //! - [`connections`]: the connections read's fold, references only (DEC-2620).
 //! - [`reduction`]: route 2's challenge route, its device cookie, and the address and device its
-//!   limits count against (DEC-2117, DEC-2118).
+//!   limits count against (DEC-2117, DEC-2119).
 //! - [`me`]: the caller's own session, outside every workspace path (§4.10, DEC-2113).
 //!
 //! It never places, cancels, or sizes an order, and never calls a broker or a runtime (§1.4):
