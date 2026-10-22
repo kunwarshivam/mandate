@@ -45,7 +45,7 @@ fn the_entry_is_exactly_its_canonical_form() {
 fn an_account_id_is_printable_ascii_needing_no_escape() {
     assert_eq!(MAX_ACCOUNT_ID_LEN, 128);
     for kept in ["a", "!~", ID, &"x".repeat(128)] {
-        assert!(BrokerAccountId::new(kept).is_ok(), "{kept:?}");
+        assert_eq!(BrokerAccountId::new(kept).map(drop), Ok(()), "{kept:?}");
     }
     for refused in [
         "",
