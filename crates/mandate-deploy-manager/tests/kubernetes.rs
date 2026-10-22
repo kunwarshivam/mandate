@@ -568,30 +568,151 @@ fn an_exchanges_start_creates_its_account_then_its_pod_ended_by_its_deadline() {
     );
 }
 
+/// The account [`Kubernetes::account`] makes for [`exchange`], as the API server answers a read of it.
+fn made_account(k: &Kubernetes) -> Value {
+    k.account(&exchange()).unwrap()
+}
+
 #[test]
-fn an_account_already_made_is_kept_and_one_not_made_starts_no_pod() {
+fn an_existing_account_is_used_only_if_it_is_the_one_the_manager_makes() {
+    let lifetime = Some(Duration::from_secs(300));
+    let shape = made_account(&adapter("http://127.0.0.1:1".to_owned()));
     let (api, seen) = server(vec![
         (409, "{}".to_owned()),
+        (200, shape.to_string()),
         (201, "{}".to_owned()),
-        (500, "{}".to_owned()),
     ]);
     let mut k = adapter(api);
-    let lifetime = Some(Duration::from_secs(300));
     assert_eq!(block_on(k.start(&exchange(), 1, lifetime)), Ok(()));
-    assert_eq!(
-        block_on(k.start(&exchange(), 1, lifetime)),
-        Err(Unavailable)
-    );
-    let seen = seen.lock().unwrap();
-    let asked: Vec<&str> = seen.iter().map(|s| s.path.as_str()).collect();
+    let asked: Vec<(String, String)> = seen
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|s| (s.method.clone(), s.path.clone()))
+        .collect();
     assert_eq!(
         asked,
         [
-            "/api/v1/namespaces/cell/serviceaccounts",
-            "/api/v1/namespaces/cell/pods",
-            "/api/v1/namespaces/cell/serviceaccounts",
+            (
+                "POST".to_owned(),
+                "/api/v1/namespaces/cell/serviceaccounts".to_owned()
+            ),
+            (
+                "GET".to_owned(),
+                format!(
+                    "/api/v1/namespaces/cell/serviceaccounts/{}",
+                    exchange_account()
+                )
+            ),
+            ("POST".to_owned(), "/api/v1/namespaces/cell/pods".to_owned()),
+        ]
+    );
+    let mut altered: Vec<(&str, Value)> = Vec::new();
+    let mut with = |name: &'static str, change: &dyn Fn(&mut Value)| {
+        let mut other = shape.clone();
+        change(&mut other);
+        altered.push((name, other));
+    };
+    with("a mounted token", &|a| {
+        a["automountServiceAccountToken"] = json!(true)
+    });
+    with("no automount setting", &|a| {
+        a.as_object_mut()
+            .unwrap()
+            .remove("automountServiceAccountToken");
+    });
+    with("a Secret", &|a| {
+        a["secrets"] = json!([{"name": "journal-ca"}])
+    });
+    with("a pull secret", &|a| {
+        a["imagePullSecrets"] = json!([{"name": "s"}])
+    });
+    with("another manager", &|a| {
+        a["metadata"]["labels"]["app.kubernetes.io/managed-by"] = json!("someone-else");
+    });
+    with("another workspace", &|a| {
+        a["metadata"]["labels"]["mandate.dev/workspace"] = json!("ws2")
+    });
+    with("another process", &|a| {
+        a["metadata"]["labels"]["mandate.dev/process"] = json!("executor")
+    });
+    with("no labels", &|a| {
+        a["metadata"].as_object_mut().unwrap().remove("labels");
+    });
+    for (name, other) in altered {
+        let (api, seen) = server(vec![(409, "{}".to_owned()), (200, other.to_string())]);
+        assert_eq!(
+            block_on(adapter(api).start(&exchange(), 1, lifetime)),
+            Err(Unavailable),
+            "{name}"
+        );
+        assert_eq!(seen.lock().unwrap().len(), 2, "{name}: no pod runs as it");
+    }
+    for unread in [(404, "{}"), (500, "{}"), (200, "not json")] {
+        let (api, seen) = server(vec![
+            (409, "{}".to_owned()),
+            (unread.0, unread.1.to_owned()),
+        ]);
+        assert_eq!(
+            block_on(adapter(api).start(&exchange(), 1, lifetime)),
+            Err(Unavailable),
+            "{unread:?}"
+        );
+        assert_eq!(seen.lock().unwrap().len(), 2, "{unread:?}");
+    }
+}
+
+#[test]
+fn a_pod_the_api_server_refused_takes_its_new_account_with_it() {
+    let lifetime = Some(Duration::from_secs(300));
+    let (api, seen) = server(vec![
+        (201, "{}".to_owned()),
+        (403, "{}".to_owned()),
+        (200, "{}".to_owned()),
+    ]);
+    assert_eq!(
+        block_on(adapter(api).start(&exchange(), 1, lifetime)),
+        Err(Unavailable)
+    );
+    let asked: Vec<String> = seen
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|s| format!("{} {}", s.method, s.path))
+        .collect();
+    assert_eq!(
+        asked,
+        [
+            "POST /api/v1/namespaces/cell/serviceaccounts".to_owned(),
+            "POST /api/v1/namespaces/cell/pods".to_owned(),
+            format!(
+                "DELETE /api/v1/namespaces/cell/serviceaccounts/{}",
+                exchange_account()
+            ),
         ],
-        "no pod is asked for while its account may not exist"
+        "an account no pod will run as is not left behind"
+    );
+    for unsure in [500, 503] {
+        let (api, seen) = server(vec![(201, "{}".to_owned()), (unsure, "{}".to_owned())]);
+        assert_eq!(
+            block_on(adapter(api).start(&exchange(), 1, lifetime)),
+            Err(Unavailable)
+        );
+        assert_eq!(
+            seen.lock().unwrap().len(),
+            2,
+            "{unsure}: the pod may have been made, so its account is kept for it"
+        );
+    }
+    let (api, seen) = server(vec![(500, "{}".to_owned())]);
+    assert_eq!(
+        block_on(adapter(api).start(&exchange(), 1, lifetime)),
+        Err(Unavailable)
+    );
+    assert_eq!(
+        seen.lock().unwrap().len(),
+        1,
+        "no account, no pod asked for"
     );
 }
 
