@@ -9,7 +9,8 @@ mod support;
 
 use support::{
     AGENT, CONNECTION, Error, OTHER_ACCOUNT, OTHER_AGENT, OTHER_CONNECTION, Paper, WORKSPACE, at,
-    connect, copy_of, deploy, deployed, kill, kill_command, propose, revoke, start, stopped,
+    connect, copy_of, deploy, deployed, kill, kill_command, propose, revoke, start, start_allowing,
+    stopped,
 };
 
 const COMMAND: &str = "01JCMD000000000000000000AA";
@@ -144,8 +145,7 @@ fn a_revoked_agents_opening_is_not_handed_and_its_exit_is() -> Result<(), Error>
     propose(&journal, AGENT, OPEN, "buy", "10", "150", "open")?;
     propose(&journal, AGENT, EXIT, "sell", "10", "150", "risk_exit")?;
     let broker = Paper::new(&journal);
-    broker.holding("AAPL", "10")?;
-    let mut process = start(&journal, &broker)?;
+    let mut process = start_allowing(&journal, &broker)?;
     process.step(at(NOON)?);
     assert_eq!(journal.received(), [EXIT], "the exit only");
 
