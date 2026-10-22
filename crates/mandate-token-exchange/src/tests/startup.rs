@@ -7,18 +7,21 @@ use std::ffi::OsString;
 use std::os::unix::ffi::OsStringExt;
 
 use crate::cell::{Refused, parse};
-use crate::startup::{Endpoint, Settings, StartRefused, settings};
+use crate::startup::{Endpoint, Settings, StartRefused, settings, subject_account};
 use mandate_connections::record::ConnectionId;
 use mandate_connections::start::{ClientId, OAuthClient, RedirectUri};
 
 const CONNECTION: &str = "conn_01JB3K6F0C9R2V7N4M8Q1T5W50";
 const CELL_URL: &str = "http://127.0.0.1:8091/alpaca/oauth/token";
 const CLIENT: &str = "PKTESTCLIENT01";
+/// [`CONNECTION`]'s ServiceAccount, its bytes in lowercase hex, computed by hand.
+const ACCOUNT: &str = "x636f6e6e5f30314a42334b3646304339523256374e344d3851315435573530";
 const REDIRECT: &str = "https://api-staging.owlhead.ai/v1/oauth/alpaca/callback";
 
 /// What every start that passes its checks carries beside the subject and the tier.
-const STARTED: [(&str, &str); 3] = [
+const STARTED: [(&str, &str); 4] = [
     ("MANDATE_PROCESS", "token_exchange"),
+    ("MANDATE_SUBJECT_ACCOUNT", ACCOUNT),
     ("MANDATE_ALPACA_CLIENT_ID", CLIENT),
     ("MANDATE_ALPACA_REDIRECT_URI", REDIRECT),
 ];
@@ -301,6 +304,49 @@ fn the_redirect_uri_is_required_and_parsed() {
     );
 }
 
+/// The pod must run as the connection's own ServiceAccount, `x` and the lowercase hex of the
+/// subject's bytes, which the manager's admission policy pins (DEC-1177): another connection's,
+/// an uppercase spelling, or none refuses the start.
+#[test]
+fn the_subject_account_must_be_the_connection_s_own() {
+    let other = "x636f6e6e5f30314a42334b3646304339523256374e344d3851315435573531";
+    let upper = "x636F6E6E5F30314A42334B3646304339523256374E344D3851315435573530";
+    for refused in [
+        other,
+        upper,
+        "",
+        "636f6e6e5f30314a42334b3646304339523256374e344d3851315435573530",
+    ] {
+        assert_eq!(
+            from(&[
+                ("MANDATE_SUBJECT", CONNECTION),
+                ("MANDATE_SUBJECT_ACCOUNT", refused)
+            ]),
+            Err(StartRefused::SubjectAccount),
+            "{refused:?}"
+        );
+    }
+    assert_eq!(
+        from_omitting(
+            &[("MANDATE_SUBJECT", CONNECTION)],
+            &["MANDATE_SUBJECT_ACCOUNT"]
+        ),
+        Err(StartRefused::SubjectAccount)
+    );
+    assert_eq!(
+        from_omitting(
+            &[("MANDATE_SUBJECT", CONNECTION)],
+            &["MANDATE_SUBJECT_ACCOUNT", "MANDATE_ALPACA_CLIENT_ID"]
+        ),
+        Err(StartRefused::SubjectAccount),
+        "the account is judged before the client id"
+    );
+    assert_eq!(
+        subject_account(&ConnectionId::new(CONNECTION).unwrap()),
+        ACCOUNT
+    );
+}
+
 /// The checks run in their stated order: the subject before the client id, the client id before
 /// the redirect URI.
 #[test]
@@ -347,6 +393,10 @@ fn each_start_refusal_has_its_stable_code() {
     );
     assert_eq!(StartRefused::Subject.code(), "token_exchange_subject");
     assert_eq!(StartRefused::Process.code(), "token_exchange_process");
+    assert_eq!(
+        StartRefused::SubjectAccount.code(),
+        "token_exchange_subject_account"
+    );
     assert_eq!(StartRefused::ClientId.code(), "token_exchange_client_id");
     assert_eq!(
         StartRefused::RedirectUri.code(),
