@@ -1197,7 +1197,6 @@ fn scripted_calls() -> (usize, usize) {
 /// calls' `ToolCallRecorded`, each call's `ToolResultRecorded` follows before the next turn, and the
 /// run ends `done` after the final reply is judged. No stream holds an order event.
 #[test]
-#[ignore = "pending E19-13"]
 fn an_agentic_run_journals_every_turn_through_to_its_end() {
     let rig = Rig::default();
     reconciled(&rig);

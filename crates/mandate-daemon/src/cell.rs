@@ -4,6 +4,7 @@
 //! (DEC-2208 item 1).
 
 use std::cell::RefCell;
+use std::collections::BTreeSet;
 use std::fmt;
 use std::path::Path;
 use std::rc::Rc;
@@ -16,6 +17,7 @@ use mandate_gateway::provider::SequentialIds;
 use mandate_journal::{Environment, StreamId};
 use mandate_num::Usd;
 use mandate_research::PolicyOverlay;
+use mandate_research_run::agentic::{OutputMode, Tool, ToolClass};
 use mandate_runtime::{AgenticConfig, EventDraft, ResearchConfig};
 use mandate_time::UtcNanos;
 
@@ -52,8 +54,6 @@ pub enum CellError {
     Mandate(&'static str),
     /// The recorded worker could not be built.
     Worker(WorkerError),
-    /// The body of the tests commit's stub (DEC-77).
-    Unimplemented,
 }
 
 impl CellError {
@@ -66,7 +66,6 @@ impl CellError {
             Self::Bundle(_) => "research_bundle_unreadable",
             Self::Mandate(code) => code,
             Self::Worker(_) => "research_worker_unbuilt",
-            Self::Unimplemented => "unimplemented",
         }
     }
 }
@@ -148,8 +147,31 @@ pub fn opt_in(dir: &Path, deployment: &CellDeployment) -> Result<OptIn, CellErro
 ///
 /// # Errors
 /// [`CellError::Bundle`] with `run_usd` malformed when the bundle records no run cap.
-pub fn agentic_config(_bundle: &Bundle) -> Result<AgenticConfig, CellError> {
-    Err(CellError::Unimplemented)
+pub fn agentic_config(bundle: &Bundle) -> Result<AgenticConfig, CellError> {
+    let malformed = |member| {
+        CellError::Bundle(BundleError::Malformed {
+            file: "research.json",
+            member,
+        })
+    };
+    let (Some(bounds), Some(cost_ceiling)) = (bundle.entry.agentic, bundle.run_cap) else {
+        return Err(malformed("run_usd"));
+    };
+    let content = bundle.entry.content();
+    let declared = content.agentic().ok_or_else(|| malformed("agentic"))?;
+    let menu: BTreeSet<Tool> = declared
+        .tools
+        .iter()
+        .filter_map(|tool| Tool::from_name(&tool.name))
+        .filter(|tool| tool.class() != ToolClass::Action)
+        .collect();
+    Ok(AgenticConfig {
+        output: OutputMode::FinalOutput,
+        bounds,
+        ideate_menu: menu.clone(),
+        monitor_menu: menu,
+        cost_ceiling,
+    })
 }
 
 /// The agent's daily research cap (DEC-2254 items 1 to 3): the mandate document's
