@@ -16,7 +16,7 @@
 //! The platform's own secrets ([`PlatformSecret`], DEC-2020) are each read by one identity and
 //! written only by the secret import; none is ever deleted, and a rotation writes over it.
 
-use mandate_connections::record::ConnectionId;
+use mandate_connections::record::{AccountRef, ConnectionId};
 
 use crate::SourceError;
 
@@ -52,9 +52,10 @@ pub enum SecretPath {
     Token(ConnectionId),
     /// The platform's OAuth client secret.
     ClientSecret,
-    /// A connection's broker account id and its random reference, in the personal-data vault,
-    /// outside `connections/` so no revoke deletes it (DEC-2339).
-    AccountId(ConnectionId),
+    /// The broker account id and its random reference of one connect of a connection, to one
+    /// account stream, in the personal-data vault, outside `connections/` so no revoke deletes it
+    /// (DEC-2339): a request again on the same connection to another account has its own.
+    AccountId(ConnectionId, AccountRef),
     /// A secret of the platform's own that one process type reads (DEC-2020).
     Platform(PlatformSecret),
 }
@@ -209,7 +210,11 @@ pub fn kv_path(path: &SecretPath) -> Result<String, SourceError> {
         SecretPath::Code(c) => format!("connections/{}/code", connection_segment(c)?),
         SecretPath::Token(c) => format!("connections/{}/token", connection_segment(c)?),
         SecretPath::ClientSecret => "platform/alpaca-oauth-client-secret".to_owned(),
-        SecretPath::AccountId(c) => format!("personal/accounts/{}", connection_segment(c)?),
+        SecretPath::AccountId(c, account) => format!(
+            "personal/accounts/{}/{}",
+            connection_segment(c)?,
+            account.as_str()
+        ),
         SecretPath::Platform(PlatformSecret::ModelProviderKey) => {
             "platform/model-provider-key".to_owned()
         }
