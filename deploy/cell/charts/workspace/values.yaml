@@ -40,6 +40,10 @@ images:
   # The deployment manager (DEC-1172): the one pod with an API token, which starts the runtimes and
   # executors. Once named, those two render as its pod templates, never as Deployments.
   deploy-manager: ""
+  # The role provisioner (DEC-2350): makes each OAuth connect's Kubernetes-auth roles with its own
+  # AppRole, the Secret `vault-approle-provisioner` the vault's provisioning makes. It needs
+  # `api.workspace`, whose control stream it reads, like the deployment manager.
+  role-provisioner: ""
 
 # The Alpaca OAuth app the founder registers for paper (DEC-2636): its client id and this
 # deployment's redirect URI, both public. Each is rendered, when set, into the API and the token
