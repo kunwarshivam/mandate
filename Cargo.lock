@@ -2716,6 +2716,7 @@ dependencies = [
  "mandate-connections",
  "proptest",
  "ring",
+ "rustix",
  "secrecy",
  "thiserror",
 ]

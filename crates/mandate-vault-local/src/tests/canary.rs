@@ -17,7 +17,6 @@ use crate::startup::Role;
 use crate::store::open;
 
 #[test]
-#[ignore = "pending E10-13"]
 fn the_canary_never_leaves_the_vault_in_the_clear() {
     let layout = Layout::new();
     let (api, executor) = layout.both();

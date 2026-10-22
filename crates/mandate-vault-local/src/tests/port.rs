@@ -41,7 +41,6 @@ fn fields(parts: &[&str]) -> Vec<u8> {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_code_goes_in_through_the_api_and_out_through_the_executor() {
     let layout = Layout::new();
     let (api, executor) = layout.both();
@@ -83,7 +82,6 @@ fn a_code_goes_in_through_the_api_and_out_through_the_executor() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_code_bound_to_another_connection_or_environment_is_refused() {
     let layout = Layout::new();
     let (api, executor) = layout.both();
@@ -121,7 +119,6 @@ fn a_code_bound_to_another_connection_or_environment_is_refused() {
 /// Of concurrent takers of one code, exactly one gets it and nothing is left behind (DEC-2628
 /// item 2): the take is one rename, which only one of them can make.
 #[test]
-#[ignore = "pending E10-13"]
 fn of_concurrent_takers_exactly_one_gets_the_code() {
     for round in 0..20 {
         let layout = Layout::new();
@@ -260,7 +257,6 @@ fn an_invalid_vault_key_is_refused_by_every_call() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_code_entry_that_does_not_parse_is_refused() {
     let layout = Layout::new();
     let (api, executor) = layout.both();
@@ -296,7 +292,6 @@ fn a_code_entry_that_does_not_parse_is_refused() {
 /// A take whose rename fails for any reason but an absent entry is refused, never read as "no code
 /// waiting": here the pending directory has been replaced by a file.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_take_the_vault_cannot_make_is_refused_not_none() {
     let layout = Layout::new();
     let (_api, executor) = layout.both();
@@ -317,7 +312,6 @@ fn a_take_the_vault_cannot_make_is_refused_not_none() {
 /// A take never replaces an existing name: with its target already present, it is refused, and the
 /// code and the existing file are both left as they were (DEC-2628 item 2).
 #[test]
-#[ignore = "pending E10-13"]
 fn a_take_never_overwrites_an_existing_name() {
     let layout = Layout::new();
     let (api, executor) = layout.both();
@@ -347,7 +341,6 @@ fn a_take_never_overwrites_an_existing_name() {
 /// Deleting a code from either role also removes any name a stopped take left beside it, and
 /// nothing of another entry.
 #[test]
-#[ignore = "pending E10-13"]
 fn delete_sweeps_what_a_stopped_take_left() {
     for api_deletes in [true, false] {
         let layout = Layout::new();
@@ -399,7 +392,6 @@ fn a_delete_without_the_entry_directory_is_already_deleted() {
 
 /// A sweep that cannot list the entry's directory is refused, not taken as clean.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_sweep_that_cannot_list_the_directory_is_refused() {
     let layout = Layout::new();
     let entry = code("ws/c1", "c1");
