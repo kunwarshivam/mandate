@@ -714,6 +714,22 @@ fn a_pod_the_api_server_refused_takes_its_new_account_with_it() {
         1,
         "no account, no pod asked for"
     );
+    let shape = made_account(&adapter("http://127.0.0.1:1".to_owned()));
+    let (api, seen) = server(vec![
+        (409, "{}".to_owned()),
+        (200, shape.to_string()),
+        (403, "{}".to_owned()),
+        (200, "{}".to_owned()),
+    ]);
+    assert_eq!(
+        block_on(adapter(api).start(&exchange(), 1, lifetime)),
+        Err(Unavailable)
+    );
+    assert_eq!(
+        seen.lock().unwrap().len(),
+        3,
+        "an account that was there before is not this start's to delete"
+    );
 }
 
 #[test]
