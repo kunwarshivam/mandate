@@ -22,15 +22,20 @@ use axum::response::Response;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use mandate_api::problem::Violation;
-use mandate_authn::{ClientKey, ReductionGate, ReductionLimits, Unauthenticated};
+use mandate_authn::{
+    ClientKey, REDUCTION_ONLY_LIFETIME_S, ReductionGate, ReductionLimits, Unauthenticated,
+};
 use mandate_canon::{Value, encode_ulid, parse};
+use mandate_passkey::{Challenge, RelyingParty};
 use mandate_time::UtcNanos;
 use ring::digest::{SHA256, digest};
 
 use crate::config::StartRefusal;
-use crate::http::{App, browser, forbidden, invalid, unauthenticated};
-use crate::routes::{enveloped, string};
-use crate::session::{OsRandom, Random};
+use crate::http::{App, browser, forbidden, invalid, session_cookie, unauthenticated};
+use crate::members::credential_records;
+use crate::opening::{Opened, Presented, Reads, judge};
+use crate::routes::{enveloped, object, string};
+use crate::session::{COOKIE_NAME, OsRandom, Random};
 
 /// The device cookie's name (§4.10 route 2 item 3).
 pub const DEVICE_COOKIE: &str = "__Host-mandate_device";
@@ -399,16 +404,159 @@ pub async fn challenge(
 /// presented. Every refusal after the browser check, an invalid body included, is the one 401
 /// with the same headers, no cookie set or cleared, and nothing ended. Both answers carry
 /// `Cache-Control: no-store`.
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
 pub async fn open(
     State(app): State<Arc<App>>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    let _ = (app, peer, headers, body);
-    todo!()
+    if !browser(&headers, &app.settings.app_origin) {
+        return forbidden();
+    }
+    let Some(now) = app.clock.now() else {
+        return refused();
+    };
+    let client = ClientKey {
+        address: address(peer.ip(), &headers, app.reduction.ingress()),
+        device: device(&headers).unwrap_or_else(|| hex_digest("")),
+    };
+    let request = Request::parse(&body);
+    let taken = request
+        .as_ref()
+        .and_then(|request| app.reduction.take(&request.challenge_id, now));
+    let judged = match (&request, &taken) {
+        (Some(request), Some(taken)) => judged(&app, request, taken, now).await,
+        _ => None,
+    };
+    if app
+        .reduction
+        .settle(&client, taken.as_ref(), judged.is_some(), now)
+    {
+        eprintln!("alert: {FAILURES_OVER_LIMIT}");
+    }
+    let opened = judged.and_then(|opened| {
+        let replaced = session_cookie(&headers);
+        let cookie = app
+            .sessions
+            .open_reduction_only(opened.member, opened.standing, replaced.as_deref(), now)
+            .ok()?;
+        let expires_at = app.sessions.expires_at(cookie.value(), now).ok()?;
+        Some((cookie, expires_at))
+    });
+    let workspace = app.hosted.workspace.to_ulid_text();
+    let (Some((cookie, expires_at)), Ok(workspace)) = (opened, workspace) else {
+        return refused();
+    };
+    let mut response = enveloped(
+        StatusCode::CREATED,
+        now,
+        vec![
+            ("kind", string("reduction_only")),
+            ("expires_at", string(&expires_at.to_string())),
+            (
+                "workspaces",
+                Value::Array(vec![object(vec![
+                    ("workspace_id", string(&workspace)),
+                    ("label", Value::Null),
+                    ("agent_ids", Value::Array(Vec::new())),
+                    ("connection_ids", Value::Array(Vec::new())),
+                ])]),
+            ),
+            ("as_of", Value::Array(Vec::new())),
+        ],
+    );
+    let headers = response.headers_mut();
+    headers.insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    let set = format!(
+        "{COOKIE_NAME}={}; Path=/; Max-Age={REDUCTION_ONLY_LIFETIME_S}; Secure; HttpOnly; SameSite=Strict",
+        cookie.value()
+    );
+    if let Ok(set) = HeaderValue::from_str(&set) {
+        headers.insert(SET_COOKIE, set);
+    }
+    response
+}
+
+/// The operator alert a client reaching its failure limit raises: an opaque code with no address,
+/// device, member, or passkey (infrastructure design §8.2, rule 6).
+const FAILURES_OVER_LIMIT: &str = "reduction_failures_over_limit";
+
+/// The one 401, with the `Cache-Control: no-store` both route-2 routes answer with.
+fn refused() -> Response {
+    let mut response = unauthenticated();
+    response
+        .headers_mut()
+        .insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
+}
+
+/// `commands/reduction-session-request`, strict: exactly its five members, each a string, the
+/// last three unpadded base64url of at most [`BASE64URL_MAX`] characters.
+struct Request {
+    challenge_id: String,
+    passkey_id: String,
+    authenticator_data: Vec<u8>,
+    client_data_json: Vec<u8>,
+    signature: Vec<u8>,
+}
+
+/// The longest base64url member the schema admits.
+const BASE64URL_MAX: usize = 8_192;
+
+impl Request {
+    /// The request `body` holds, or `None` for anything else.
+    fn parse(body: &[u8]) -> Option<Self> {
+        let Ok(Value::Object(members)) = parse(body) else {
+            return None;
+        };
+        if members.len() != 5 {
+            return None;
+        }
+        let text = |name: &str| match members.get(name) {
+            Some(Value::Str(text)) => Some(text.clone()),
+            _ => None,
+        };
+        let bytes = |name: &str| {
+            text(name)
+                .filter(|text| text.len() <= BASE64URL_MAX)
+                .and_then(|text| URL_SAFE_NO_PAD.decode(text).ok())
+        };
+        Some(Self {
+            challenge_id: text("challenge_id")?,
+            passkey_id: text("passkey_id")?,
+            authenticator_data: bytes("authenticator_data")?,
+            client_data_json: bytes("client_data_json")?,
+            signature: bytes("signature")?,
+        })
+    }
+}
+
+/// The judge's answer for `request` over the challenge `taken` at `now`, after reading the hosted
+/// control stream; `None` for every refusal, a failed read included.
+async fn judged(app: &App, request: &Request, taken: &Issued, now: UtcNanos) -> Option<Opened> {
+    let rp = RelyingParty {
+        rp_id: rp_id(&app.settings.app_origin)?,
+        origin: app.settings.app_origin.clone(),
+    };
+    let challenge = Challenge::new(&taken.bytes).ok()?;
+    let workspace = app.hosted.workspace.to_ulid_text().ok()?;
+    let rows = app.journal.rows(&format!("ctl:{workspace}")).await.ok();
+    let credentials = rows
+        .as_deref()
+        .and_then(|rows| credential_records(app.hosted.workspace, rows).ok());
+    let memberships = rows.as_deref().and_then(|rows| (app.members)(rows).ok());
+    let reads = Reads {
+        hosted: app.hosted,
+        credentials: credentials.as_deref(),
+        memberships: memberships.as_deref(),
+        standings: app.sessions.standings(),
+        keys: app.artifacts.as_deref(),
+    };
+    let presented = Presented {
+        passkey_id: &request.passkey_id,
+        authenticator_data: &request.authenticator_data,
+        client_data_json: &request.client_data_json,
+        signature: &request.signature,
+    };
+    judge(&rp, &challenge, &presented, &reads, now)
 }
