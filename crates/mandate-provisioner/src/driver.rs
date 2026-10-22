@@ -80,7 +80,8 @@ impl<J: ControlJournal, V: RoleProvisioner, A: Alerts> Provisioner<J, V, A> {
     }
 
     /// One pass at `now`: every step the stream owes, each performed on the vault within the
-    /// deadline and then journaled.
+    /// deadline and then journaled. A pass takes at most the steps first owed and
+    /// [`APPEND_TRIES`] more, so a stream that never shows a record committed ends it.
     ///
     /// # Errors
     /// [`Halt`], after which every record committed stays committed and the next pass picks up
@@ -88,6 +89,7 @@ impl<J: ControlJournal, V: RoleProvisioner, A: Alerts> Provisioner<J, V, A> {
     pub async fn tick(&mut self, now: UtcNanos) -> Result<(), Halt> {
         let mut skipped: Vec<Step> = Vec::new();
         let mut moved: usize = 0;
+        let mut bound: Option<usize> = None;
         loop {
             let rows = self
                 .journal
@@ -96,6 +98,11 @@ impl<J: ControlJournal, V: RoleProvisioner, A: Alerts> Provisioner<J, V, A> {
                 .map_err(|_| Halt::Journal)?;
             let Ok(owed) = plan(&rows);
             let environment = owed.environment.ok_or(Halt::NotOpened)?;
+            let left = bound.get_or_insert(owed.steps.len().saturating_add(APPEND_TRIES));
+            if *left == 0 {
+                return Err(Halt::Journal);
+            }
+            *left = left.saturating_sub(1);
             let Some(step) = owed.steps.into_iter().find(|s| !skipped.contains(s)) else {
                 return Ok(());
             };

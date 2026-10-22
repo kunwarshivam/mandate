@@ -538,7 +538,6 @@ fn owes(rows: &[StoredEvent]) -> Vec<Step> {
 /// Only a version-2 request with `credential` `oauth` is owed roles; an API-key request and a
 /// version-1 one are not.
 #[test]
-#[ignore = "pending E21-33"]
 fn only_a_version_2_oauth_request_is_owed_roles() {
     let oauth = r#"{"connection_id":"c1","credential":"oauth"}"#;
     let api_key = r#"{"connection_id":"c1","credential":"api_key"}"#;
@@ -564,7 +563,6 @@ fn only_a_version_2_oauth_request_is_owed_roles() {
 /// A request refused or revoked before it is answered is owed nothing; another connection's
 /// request is still owed, and a refusal of any occasion but `connect` closes nothing.
 #[test]
-#[ignore = "pending E21-33"]
 fn a_close_before_the_answer_ends_only_its_own_connections_request() {
     let requested = |seq, connection: &str| {
         row(
@@ -615,7 +613,6 @@ fn a_close_before_the_answer_ends_only_its_own_connections_request() {
 /// removed, keep the first's, and its close is owed a removal for it alone; a refusal of another
 /// occasion is no close.
 #[test]
-#[ignore = "pending E21-33"]
 fn each_connections_made_roles_are_its_own() {
     let requested = |seq, connection: &str| {
         row(
