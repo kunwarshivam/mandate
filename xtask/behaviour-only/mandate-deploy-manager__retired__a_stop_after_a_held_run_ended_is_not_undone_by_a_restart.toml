@@ -1,7 +1,0 @@
-file = "crates/mandate-deploy-manager/tests/retired.rs"
-test = "a_stop_after_a_held_run_ended_is_not_undone_by_a_restart"
-reason = """
-DEC-2344 items 1 and 3 and DEC-2351 item 2 (E21-33): today's manager starts no kill-switch run and
-holds none, so this test fails on the manager's own answer, not at a stub. The implementation PR
-(DEC-2344 items 1 and 3) deletes this file with the test's `#[ignore]`.
-"""

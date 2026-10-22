@@ -1058,7 +1058,6 @@ fn connect_only(journal: &Journal) -> Manager {
 /// run, since no agent wants it, so the run's crash loop leaves the switch unapplied and the owner
 /// is told.
 #[test]
-#[ignore = "pending E21-33"]
 fn a_kill_switch_start_during_an_open_connect_that_loops_is_unapplied() {
     let journal = Journal::new();
     let mut m = connect_only(&journal);
@@ -1082,7 +1081,6 @@ fn a_kill_switch_start_during_an_open_connect_that_loops_is_unapplied() {
 /// DEC-2351 item 2: a connect that opens while a kill switch's run goes on does not end the hold,
 /// so its loop leaves the switch unapplied, and a restarted manager reads it so too.
 #[test]
-#[ignore = "pending E21-33"]
 fn a_connect_opened_during_a_held_run_leaves_its_loop_unapplied_live_and_after_a_restart() {
     let journal = Journal::new();
     let mut m = retired(&journal);
@@ -1114,7 +1112,6 @@ fn a_connects_executor_that_loops_with_no_kill_switch_is_an_ordinary_loop() {
 /// A stop the manager journals after a held run ended is never undone by a restarted manager: the
 /// stop ends the hold in the replay too, so the stopped generation is not restarted.
 #[test]
-#[ignore = "pending E21-33"]
 fn a_stop_after_a_held_run_ended_is_not_undone_by_a_restart() {
     check(&[
         Op::Deploy(1),

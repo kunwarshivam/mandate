@@ -267,7 +267,7 @@ impl Manager {
                         }
                     }
                 }
-                let held = !self.desired(slot);
+                let held = slot.process == Process::Executor && !self.agent_wanted(slot);
                 let launched_as = (slot.process == Process::Executor)
                     .then(|| {
                         self.wanted_connection(&slot.subject)
@@ -310,7 +310,7 @@ impl Manager {
                 }
             }
             Fact::CrashLooped { slot } => {
-                let wanted = self.desired(slot);
+                let wanted = self.agent_wanted(slot);
                 let state = self.slots.entry(slot.clone()).or_default();
                 state.looped = true;
                 state.unapplied = state.held && !wanted;
@@ -455,6 +455,18 @@ impl Manager {
         }
     }
 
+    /// Whether an agent deployed on `slot`'s account and not stopped wants it, a connect's request
+    /// aside: what holds a kill switch's run and classifies its loop (DEC-2344 item 1, DEC-2351). A
+    /// deployment on a connection revoked since still counts until its `AgentStopped`, as journal
+    /// spec rule 264 reads it.
+    fn agent_wanted(&self, slot: &Slot) -> bool {
+        slot.process == Process::Executor
+            && self
+                .agents
+                .values()
+                .any(|agent| !agent.stopped && agent.account == slot.subject)
+    }
+
     /// Whether `slot` is to run: [`Self::desired`], or an executor no agent wants whose current
     /// generation a kill switch started (DEC-2344 item 1), so a start journaled for it is carried
     /// out.
@@ -544,12 +556,13 @@ impl Manager {
         let slots: Vec<Slot> = self.slots.keys().cloned().collect();
         decisions.extend(slots.into_iter().filter_map(|slot| {
             let desired = self.desired(&slot);
+            let unwanted_by_agents = !self.agent_wanted(&slot);
             let lifetime = self.lifetime(&slot, now);
             let state = self.slots.get_mut(&slot)?;
             let instances: Vec<&Instance> = observed.iter().filter(|i| i.slot == slot).collect();
             match lifetime {
                 Some(lifetime) => exchange_step(&slot, state, desired, lifetime, &instances),
-                None => step(&slot, state, desired, &instances, now),
+                None => step(&slot, state, desired, unwanted_by_agents, &instances, now),
             }
         }));
         decisions
@@ -560,6 +573,7 @@ fn step(
     slot: &Slot,
     state: &mut SlotState,
     desired: bool,
+    unwanted_by_agents: bool,
     instances: &[&Instance],
     now: UtcNanos,
 ) -> Option<Decision> {
@@ -619,16 +633,26 @@ fn step(
             return None;
         }
         state.alerted = true;
-        return Some(Decision::Retry(Effect::Alert(CRASH_LOOP)));
+        let alert = if state.unapplied {
+            KILL_SWITCH_UNAPPLIED
+        } else {
+            CRASH_LOOP
+        };
+        return Some(Decision::Retry(Effect::Alert(alert)));
     }
     if crash_loop(state.restarts.iter().copied(), now) {
         state.alerted = true;
         let restarts = within_window(&state.restarts, now);
+        let alert = if state.held && unwanted_by_agents {
+            KILL_SWITCH_UNAPPLIED
+        } else {
+            CRASH_LOOP
+        };
         return Some(Decision::Journal(Record::CrashLooped {
             slot: slot.clone(),
             generation: state.generation,
             restarts: u64::try_from(restarts).unwrap_or(u64::MAX),
-            alert: CRASH_LOOP,
+            alert,
         }));
     }
     let wait = backoff(within_window(&state.restarts, now));
