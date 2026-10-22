@@ -1,7 +1,0 @@
-file = "crates/mandate-journal/tests/account_close_records.rs"
-test = "every_account_close_stream_is_judged_from_its_start_as_its_vector_says"
-reason = """
-mandate-journal does not yet register `AccountCloseRequested` (journal spec v0.75 §9.5, rules 258
-to 260, DEC-2337), so it refuses the record as `unknown_event_type` rather than at a stub. The E7-4
-implementation PR that registers it deletes this row.
-"""

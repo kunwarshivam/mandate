@@ -64,7 +64,6 @@ fn draft(section: &Value, case: &Value) -> Vec<u8> {
 /// The base close and the closes rules 258 and 259 might be misread to refuse (a fraction of a
 /// share, 12 places, exponent forms, a later attempt, a crypto pair) parse.
 #[test]
-#[ignore = "pending E7-4"]
 fn every_account_close_base_and_valid_draft_parses() {
     let section = section();
     let drafts = section.get("drafts").and_then(Value::as_object).unwrap();
@@ -92,7 +91,6 @@ fn every_account_close_base_and_valid_draft_parses() {
 /// a cause other than the switch, a null, absent or mistyped member, an extra one, another
 /// version, or another stream, refused at the member named.
 #[test]
-#[ignore = "pending E7-4"]
 fn every_invalid_account_close_is_refused_with_its_reason_at_its_path() {
     let section = section();
     let invalid = list(&section, "invalid_drafts");
@@ -120,7 +118,6 @@ fn every_invalid_account_close_is_refused_with_its_reason_at_its_path() {
 /// Rule 260 over each stream vector, from the stream's start, as one batch and one record after
 /// the earlier ones: no two requests share a switch, an instrument, and an attempt.
 #[test]
-#[ignore = "pending E7-4"]
 fn every_account_close_stream_is_judged_from_its_start_as_its_vector_says() {
     let section = section();
     let streams = list(&section, "streams");
@@ -164,7 +161,6 @@ fn every_account_close_stream_is_judged_from_its_start_as_its_vector_says() {
 /// `append` reads the account stream's earlier records for a batch holding a close request, so
 /// rule 260 sees every earlier request.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_close_request_reads_its_stream() {
     let section = section();
     let close = section
@@ -177,7 +173,6 @@ fn a_close_request_reads_its_stream() {
 
 /// The record is closed on the account stream at version 1 and nowhere else.
 #[test]
-#[ignore = "pending E7-4"]
 fn the_catalogue_closes_account_close_requested_on_the_account_stream() {
     assert!(closes("AccountCloseRequested", 1, StreamType::Account));
     assert!(!closes("AccountCloseRequested", 2, StreamType::Account));
