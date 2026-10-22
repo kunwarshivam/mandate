@@ -698,3 +698,20 @@ fn each_request_on_one_connection_is_released_once_its_delete_succeeds() {
         ]
     );
 }
+
+/// DEC-2348 item 1: a closed request whose `recorded_at` cannot be read counts as past its
+/// deadline, so a delete that keeps failing raises the alert once, at any time.
+#[test]
+#[ignore = "pending E10-13"]
+fn a_closed_request_with_an_unreadable_time_alerts_at_once() {
+    let (journal, deletes, raised, _, mut finisher) = recorded();
+    request(&journal, A, 2, "oauth");
+    journal.streams.lock().unwrap().get_mut(&ctl()).unwrap()[0].recorded_at =
+        "not a time".to_owned();
+    close(&journal, "ConnectionRevoked", A);
+    deletes.failing.lock().unwrap().push(A.to_owned());
+    pass(&mut finisher, OPENED + 1);
+    assert_eq!(raised.take(), [STALLED]);
+    pass(&mut finisher, OPENED + 6);
+    assert_eq!(raised.take(), [], "once per request");
+}
