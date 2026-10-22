@@ -1,7 +1,7 @@
 //! The policy table, checked against a matrix written out by hand, and the OpenBao policies it
 //! generates: every path spelled out, no wildcard, a runtime's empty.
 
-use mandate_connections::record::ConnectionId;
+use mandate_connections::record::{AccountRef, ConnectionId};
 
 use crate::kubernetes::kubernetes_policy;
 use crate::policy::{
@@ -23,6 +23,11 @@ fn c(id: &str) -> ConnectionId {
     ConnectionId::new(id).unwrap()
 }
 
+/// The account stream of a connect: the first, or a second request on the same connection.
+fn a(n: u8) -> AccountRef {
+    AccountRef::new(&format!("01J8Z2ACCT000000000000000{n}")).unwrap()
+}
+
 fn identities() -> Vec<Identity> {
     vec![
         Identity::Api,
@@ -41,8 +46,9 @@ fn paths() -> Vec<SecretPath> {
         SecretPath::Code(c("c2")),
         SecretPath::Token(c("c2")),
         SecretPath::ClientSecret,
-        SecretPath::AccountId(c("c1")),
-        SecretPath::AccountId(c("c2")),
+        SecretPath::AccountId(c("c1"), a(1)),
+        SecretPath::AccountId(c("c1"), a(2)),
+        SecretPath::AccountId(c("c2"), a(1)),
     ]
 }
 
@@ -62,11 +68,13 @@ fn expected() -> Vec<(Identity, Access, SecretPath)> {
             SecretPath::Token(c(id)),
         ));
     }
-    out.push((
-        Identity::Executor(c("c1")),
-        Create,
-        SecretPath::AccountId(c("c1")),
-    ));
+    for n in [1, 2] {
+        out.push((
+            Identity::Executor(c("c1")),
+            Create,
+            SecretPath::AccountId(c("c1"), a(n)),
+        ));
+    }
     let exchange = Identity::TokenExchange(c("c1"));
     out.push((exchange.clone(), Read, SecretPath::Code(c("c1"))));
     out.push((exchange.clone(), Delete, SecretPath::Code(c("c1"))));
@@ -320,20 +328,29 @@ fn only_a_token_exchange_takes_and_only_its_own_connections_code() {
     }
 }
 
-/// DEC-2339: a connection's account entry is kept under `personal/`, outside every path of the
-/// connection's code and token, which are all a revoke deletes, and no identity may delete it.
+/// DEC-2339: a connect's account entry is kept under `personal/`, below its connection and its
+/// account stream, outside every path of the connection's code and token, which are all a revoke
+/// deletes, and no identity may delete it.
 #[test]
 fn the_account_entry_is_kept_outside_every_path_a_revoke_deletes() {
     for id in ["c1", "c2", "x6331"] {
-        let account = kv_path(&SecretPath::AccountId(c(id)));
+        let account = kv_path(&SecretPath::AccountId(c(id), a(1)));
         let segment = crate::policy::connection_segment(&c(id)).unwrap();
-        assert_eq!(account, format!("personal/accounts/{segment}"), "{id}");
+        assert_eq!(
+            account,
+            format!("personal/accounts/{segment}/01J8Z2ACCT0000000000000001"),
+            "{id}"
+        );
         for kept in [SecretPath::Code(c(id)), SecretPath::Token(c(id))] {
             assert!(!kv_path(&kept).starts_with("personal/"), "{id}");
         }
         for identity in identities() {
             assert!(
-                !allows(&identity, Access::Delete, &SecretPath::AccountId(c(id))),
+                !allows(
+                    &identity,
+                    Access::Delete,
+                    &SecretPath::AccountId(c(id), a(1))
+                ),
                 "{identity:?} {id}"
             );
         }
@@ -379,6 +396,7 @@ fn only_the_executors_create_reaches_the_personal_data_vault() {
         personal
             .iter()
             .all(|block| block.contains("personal/accounts/x{{")
+                && block.contains("}}/+\"")
                 && block.contains("capabilities = [\"create\"]")),
         "{executor}"
     );

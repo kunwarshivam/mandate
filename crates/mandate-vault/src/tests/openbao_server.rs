@@ -32,7 +32,7 @@ use crate::openbao::{
 };
 use crate::policy::{Identity, Mounts, SecretPath, kv_path, role_name};
 use crate::source::{Grant, SecretSource};
-use mandate_connections::record::ConnectionId;
+use mandate_connections::record::{AccountRef, ConnectionId};
 use mandate_time::UtcNanos;
 use reqwest::{Certificate, Method};
 use secrecy::{ExposeSecret, SecretString};
@@ -945,7 +945,8 @@ async fn an_executor_creates_its_own_account_entry_once_and_no_identity_reads_it
         at(1_000_600),
     )
     .unwrap();
-    let account = SecretPath::AccountId(c("c1"));
+    let request = |n: u8| AccountRef::new(&format!("01J8Z2ACCT000000000000000{n}")).unwrap();
+    let account = SecretPath::AccountId(c("c1"), request(1));
     assert_eq!(
         unreachable
             .create(&account, &conformance::secret("acct-1"))
@@ -982,11 +983,21 @@ async fn an_executor_creates_its_own_account_entry_once_and_no_identity_reads_it
     assert_eq!(
         executor
             .create(
-                &SecretPath::AccountId(c("c2")),
+                &SecretPath::AccountId(c("c2"), request(1)),
                 &conformance::secret("acct-other")
             )
             .await,
         Err(SourceError::Denied)
+    );
+    assert_eq!(
+        executor
+            .create(
+                &SecretPath::AccountId(c("c1"), request(2)),
+                &conformance::secret("acct-1")
+            )
+            .await,
+        Ok(()),
+        "a request again on the connection, to another account stream, has its own entry"
     );
     let manager = bao.source(Identity::ConnectionManager, now).await;
     assert!(matches!(
@@ -996,7 +1007,10 @@ async fn an_executor_creates_its_own_account_entry_once_and_no_identity_reads_it
     let stored = || async {
         bao.operator(
             Method::GET,
-            &format!("{}/data/personal/accounts/x6331", bao.config.mounts.kv),
+            &format!(
+                "{}/data/personal/accounts/x6331/01J8Z2ACCT0000000000000001",
+                bao.config.mounts.kv
+            ),
             None,
         )
         .await
