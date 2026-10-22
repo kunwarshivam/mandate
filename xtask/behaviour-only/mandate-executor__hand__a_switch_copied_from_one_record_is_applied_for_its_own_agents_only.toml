@@ -1,0 +1,8 @@
+file = "crates/mandate-executor/tests/hand.rs"
+test = "a_switch_copied_from_one_record_is_applied_for_its_own_agents_only"
+reason = """
+DEC-2343: the test fails on main's behaviour rather than at a stub (`applied_for`'s stub answers
+that no switch was applied, and the executor process drops an agent whose connection's latest
+record is not a version-2 establishment naming its account). The E7-4 implementation PR of DEC-2343
+deletes this row.
+"""
