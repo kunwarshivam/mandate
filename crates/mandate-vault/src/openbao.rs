@@ -31,12 +31,13 @@ use serde_json::{Value, json};
 use crate::SourceError;
 use crate::kubernetes::{
     KubernetesAuth, kubernetes_mount_requests, kubernetes_policy, kubernetes_policy_name,
-    mount_accessor, provisioner_policy, service_account_name,
+    mount_accessor, provisioner_policy, role_request, service_account_name,
 };
 use crate::lease::{LEASE_SECS, Lease, lease_times};
 use crate::policy::{
     Identity, Mounts, SecretPath, kv_path, openbao_policy, policy_name, role_name,
 };
+use crate::provisioner::{RoleProvisioner, RoleRefusal};
 use crate::source::{GRANT_SECS, Grant, SecretSource};
 
 /// How long one request may take before the vault counts as unreachable.
@@ -334,6 +335,23 @@ pub fn kubernetes_namespace_verdict(
 }
 
 impl OpenBaoSource {
+    /// A session as `identity` that never logged in, for unit tests of the checks that refuse
+    /// before the vault is reached: its token is empty, so any call that does reach a vault is
+    /// refused there.
+    #[cfg(test)]
+    pub(crate) fn unlogged(
+        config: &OpenBaoConfig,
+        identity: Identity,
+    ) -> Result<Self, SourceError> {
+        Ok(Self {
+            identity,
+            http: Http::new(config)?,
+            mounts: config.mounts.clone(),
+            token: SecretString::from(String::new()),
+            token_expires_at: Mutex::new(UtcNanos::EPOCH),
+        })
+    }
+
     /// Logs in as `identity` with its AppRole `role_id` and `secret_id` (read by the caller from
     /// mounted files, never the environment). The login is refused unless the role it reaches
     /// is `identity`'s own. The token exchange logs in with [`OpenBaoSource::login_with_grant`].
@@ -500,6 +518,26 @@ impl OpenBaoSource {
             self.mounts.auth,
             role_name(&Identity::TokenExchange(connection.clone()))
         )
+    }
+}
+
+impl RoleProvisioner for OpenBaoSource {
+    async fn make_roles(
+        &self,
+        connection: &ConnectionId,
+        namespace: &str,
+    ) -> Result<(), RoleRefusal> {
+        let _ = (connection, namespace, role_request);
+        Err(RoleRefusal::Unimplemented { story: "E21-33" })
+    }
+
+    async fn remove_exchange_role(
+        &self,
+        connection: &ConnectionId,
+        namespace: &str,
+    ) -> Result<(), RoleRefusal> {
+        let _ = (connection, namespace);
+        Err(RoleRefusal::Unimplemented { story: "E21-33" })
     }
 }
 
