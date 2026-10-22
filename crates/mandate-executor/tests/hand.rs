@@ -4940,6 +4940,55 @@ fn only_the_agent_whose_buy_filled_holds_lots() {
     assert_eq!(shell.state.holds_lots(&agent(OTHER_AGENT)), Ok(false));
 }
 
+/// The agent's buy the broker reports filled, after a reconciliation, with its fill naming no order.
+fn filled_without_its_fill(fills: Vec<mandate_executor::BrokerFill>, held: &str) -> Shell {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = reconciling(&ports);
+    let id = accepted_order(&mut shell, &ports, INTENT);
+    let mut taken = snapshot(shell.head().0, ReconcileReason::Startup);
+    taken.open_orders = vec![broker_order(
+        "b-1",
+        Some(&id),
+        AAPL,
+        Side::Buy,
+        "10",
+        "10",
+        "filled",
+    )];
+    taken.fills = fills;
+    taken.positions = vec![broker_position(AAPL, held)];
+    shell.run(Input::BrokerSnapshot(taken), &ports);
+    shell
+}
+
+/// DEC-2347 item 3.6 (lane D1's finding): a buy the broker reports filled whose fill named no
+/// order leaves no lots in the sub-ledger, but the shares the account holds are the agent's, so it
+/// still holds lots; once the account holds none of the instrument, it holds none.
+#[test]
+#[ignore = "pending E7-4"]
+fn a_filled_buy_whose_fill_named_no_order_still_holds_lots() {
+    let bought = broker_fill("f-1", None, "10", "150");
+    let mut sold = broker_fill("f-2", None, "10", "151");
+    sold.side = Side::Sell;
+    let holding = filled_without_its_fill(vec![bought.clone()], "10");
+    assert!(
+        holding
+            .state
+            .orders()
+            .values()
+            .all(|order| order.filled_qty == qty("0")),
+        "the fill is applied to no order"
+    );
+    assert_eq!(holding.state.holds_lots(&agent(common::AGENT)), Ok(true));
+    assert_eq!(holding.state.holds_lots(&agent(OTHER_AGENT)), Ok(false));
+    let flat = filled_without_its_fill(vec![bought, sold], "0");
+    assert_eq!(flat.state.holds_lots(&agent(common::AGENT)), Ok(false));
+}
+
 #[test]
 fn an_agent_kill_switch_sells_exactly_the_sub_ledger_quantity() {
     let ids = TestIds;
