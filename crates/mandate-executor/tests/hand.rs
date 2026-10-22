@@ -5575,6 +5575,78 @@ fn a_buy_still_working_after_the_cancel_all_is_cancelled_by_its_id() {
     );
 }
 
+/// A fill that arrives after the account switch never places protection: the entry was partly
+/// filled when the switch went, so its instrument is one the switch closes, and the close on
+/// confirmation sells the whole position then. A stop placed for the late fill beside that close
+/// would sell the same coins twice (DEC-2333 item 5, rule 12).
+#[test]
+#[ignore = "pending E7-4"]
+fn a_fill_after_the_account_switch_places_no_protection() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = started();
+    shell.fold_one(&stream_opened()).expect("folds");
+    let mut shell = shell.restart_ready(&ports);
+    shell.run(Input::Market(quote(BTC, "60000", "60010", 20)), &ports);
+    let submitted = shell.run(
+        handoff(
+            INTENT,
+            common::AGENT,
+            protected_opening(BTC, "0.5", "60000", "54000", None),
+        ),
+        &ports,
+    );
+    let entry = submitted
+        .submissions()
+        .first()
+        .map(|o| o.client_order_id.as_str().to_owned())
+        .expect("the crypto entry is sent");
+    let order = |filled: &str, status: &str| {
+        Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+            "b-1",
+            Some(&entry),
+            BTC,
+            Side::Buy,
+            "0.5",
+            filled,
+            status,
+        )))
+    };
+    shell.run(order("0.2", "partially_filled"), &ports);
+    shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Fill(mandate_executor::BrokerFill {
+            instrument: instrument(BTC),
+            ..broker_fill("f-btc-1", Some(&entry), "0.2", "60000")
+        })),
+        &ports,
+    );
+    shell.run(account_switch(Initiator::Owner), &ports);
+
+    let ended = shell.run(order("0.5", "filled"), &ports);
+    let late = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Fill(mandate_executor::BrokerFill {
+            instrument: instrument(BTC),
+            ..broker_fill("f-btc-2", Some(&entry), "0.3", "60000")
+        })),
+        &ports,
+    );
+
+    let protective: Vec<_> = ended
+        .submissions()
+        .into_iter()
+        .chain(late.submissions())
+        .filter(|o| o.purpose == Purpose::Protective)
+        .map(|o| (o.client_order_id.as_str().to_owned(), o.qty))
+        .collect();
+    assert!(
+        protective.is_empty(),
+        "no stop beside the switch's close: {protective:?}"
+    );
+}
+
 /// The account switch's records replay (ES-21): a restart folds every record it journaled, the
 /// account-scoped `KillSwitchActivated` included, and every agent stays held under its mode.
 #[test]
