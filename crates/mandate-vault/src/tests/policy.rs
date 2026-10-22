@@ -1,8 +1,9 @@
 //! The policy table, checked against a matrix written out by hand, and the OpenBao policies it
 //! generates: every path spelled out, no wildcard, a runtime's empty.
 
-use mandate_connections::record::ConnectionId;
+use mandate_connections::record::{AccountRef, ConnectionId};
 
+use crate::kubernetes::kubernetes_policy;
 use crate::policy::{
     Access, Identity, Mounts, PlatformSecret, SecretPath, allows, policy_name, role_name,
 };
@@ -20,6 +21,11 @@ fn openbao_policy(identity: &Identity, connections: &[ConnectionId], mounts: &Mo
 
 fn c(id: &str) -> ConnectionId {
     ConnectionId::new(id).unwrap()
+}
+
+/// The account stream of a connect: the first, or a second request on the same connection.
+fn a(n: u8) -> AccountRef {
+    AccountRef::new(&format!("01J8Z2ACCT000000000000000{n}")).unwrap()
 }
 
 fn identities() -> Vec<Identity> {
@@ -40,8 +46,9 @@ fn paths() -> Vec<SecretPath> {
         SecretPath::Code(c("c2")),
         SecretPath::Token(c("c2")),
         SecretPath::ClientSecret,
-        SecretPath::AccountId(c("c1")),
-        SecretPath::AccountId(c("c2")),
+        SecretPath::AccountId(c("c1"), a(1)),
+        SecretPath::AccountId(c("c1"), a(2)),
+        SecretPath::AccountId(c("c2"), a(1)),
     ]
 }
 
@@ -60,17 +67,14 @@ fn expected() -> Vec<(Identity, Access, SecretPath)> {
             Delete,
             SecretPath::Token(c(id)),
         ));
+    }
+    for n in [1, 2] {
         out.push((
-            Identity::ConnectionManager,
-            Read,
-            SecretPath::AccountId(c(id)),
+            Identity::Executor(c("c1")),
+            Create,
+            SecretPath::AccountId(c("c1"), a(n)),
         ));
     }
-    out.push((
-        Identity::Executor(c("c1")),
-        Create,
-        SecretPath::AccountId(c("c1")),
-    ));
     let exchange = Identity::TokenExchange(c("c1"));
     out.push((exchange.clone(), Read, SecretPath::Code(c("c1"))));
     out.push((exchange.clone(), Delete, SecretPath::Code(c("c1"))));
@@ -85,8 +89,9 @@ fn expected() -> Vec<(Identity, Access, SecretPath)> {
     out
 }
 
-/// DEC-2339: the account entry is created only by its own connection's executor, read only by the
-/// connection manager, and written over or deleted by no one.
+/// DEC-2339: the account entry is created only by its own connection's executor, and read, written
+/// over or deleted by no one: the connection manager receives only the vault's keyed hash of it
+/// (connections spec §3.1), which F3 adds.
 #[test]
 fn the_table_allows_exactly_the_matrix() {
     let expected = expected();
@@ -308,22 +313,76 @@ fn only_a_token_exchange_takes_and_only_its_own_connections_code() {
     }
 }
 
-/// DEC-2339: a connection's account entry is kept under `personal/`, outside every path of the
-/// connection's code and token, which are all a revoke deletes, and no identity may delete it.
+/// DEC-2339: a connect's account entry is kept under `personal/`, below its connection and its
+/// account stream, outside every path of the connection's code and token, which are all a revoke
+/// deletes, and no identity may delete it.
 #[test]
 fn the_account_entry_is_kept_outside_every_path_a_revoke_deletes() {
     for id in ["c1", "c2", "x6331"] {
-        let account = kv_path(&SecretPath::AccountId(c(id)));
+        let account = kv_path(&SecretPath::AccountId(c(id), a(1)));
         let segment = crate::policy::connection_segment(&c(id)).unwrap();
-        assert_eq!(account, format!("personal/accounts/{segment}"), "{id}");
+        assert_eq!(
+            account,
+            format!("personal/accounts/{segment}/01J8Z2ACCT0000000000000001"),
+            "{id}"
+        );
         for kept in [SecretPath::Code(c(id)), SecretPath::Token(c(id))] {
             assert!(!kv_path(&kept).starts_with("personal/"), "{id}");
         }
         for identity in identities() {
             assert!(
-                !allows(&identity, Access::Delete, &SecretPath::AccountId(c(id))),
+                !allows(
+                    &identity,
+                    Access::Delete,
+                    &SecretPath::AccountId(c(id), a(1))
+                ),
                 "{identity:?} {id}"
             );
         }
     }
+}
+
+/// DEC-2339 and connections spec §3.1: no policy the vault is given reaches `personal/` but the
+/// executor's templated one, and that one only to create its own entry. No AppRole identity's
+/// policy names the personal-data vault, and the token exchange's templated policy does not either.
+#[test]
+fn only_the_executors_create_reaches_the_personal_data_vault() {
+    let connections = [c("c1"), c("c2")];
+    for identity in [
+        Identity::Api,
+        Identity::ConnectionManager,
+        Identity::Runtime,
+        Identity::SecretImport,
+        Identity::ModelGateway,
+        Identity::EmailSender,
+        Identity::TokenExchange(c("c1")),
+        Identity::Executor(c("c1")),
+    ] {
+        let hcl = crate::policy::openbao_policy(&identity, &connections, &Mounts::default())
+            .unwrap_or_default();
+        assert!(!hcl.contains("personal/"), "{identity:?}: {hcl}");
+    }
+    let accessor = "auth_kubernetes_1a2b";
+    let exchange = kubernetes_policy(
+        &Identity::TokenExchange(c("c1")),
+        &Mounts::default(),
+        accessor,
+    )
+    .unwrap();
+    assert!(!exchange.contains("personal/"), "{exchange}");
+    let executor =
+        kubernetes_policy(&Identity::Executor(c("c1")), &Mounts::default(), accessor).unwrap();
+    let personal: Vec<&str> = executor
+        .split("path ")
+        .filter(|block| block.contains("personal/"))
+        .collect();
+    assert_eq!(personal.len(), 1, "{executor}");
+    assert!(
+        personal
+            .iter()
+            .all(|block| block.contains("personal/accounts/x{{")
+                && block.contains("}}/+\"")
+                && block.contains("capabilities = [\"create\"]")),
+        "{executor}"
+    );
 }
