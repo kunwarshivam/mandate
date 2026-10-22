@@ -10,6 +10,7 @@ use mandate_executord::establish::{
     Connected, Establishment, OpeningGate, ToCopy, copy_draft, establishment, pass,
 };
 use mandate_journal::Environment;
+use mandate_process::State;
 use support::{
     ACCOUNT, ACCOUNT_STREAM, AGENT, Allowing, CONNECTION, CONTROL_STREAM, Error, Journal, NOON,
     OTHER_ACCOUNT, OTHER_CONNECTION, Paper, TwoPercentStop, WORKSPACE, at, deployed, object,
@@ -453,13 +454,79 @@ fn the_first_pass_copies_a_due_establishment_once_and_opens() -> Result<(), Erro
     Ok(())
 }
 
-/// Item 4: a connection refused before its copy is closed, and the gate stays shut.
+/// Item 4 and rule 13: a connection refused or revoked before its copy is closed, and the gate
+/// stays shut; the pass stops nothing, so the process goes on taking every exit, and no opening,
+/// until the manager stops it.
 #[test]
 fn a_refused_connection_is_closed_and_stays_shut() -> Result<(), Error> {
+    for event_type in ["ConnectionRefused", "ConnectionRevoked"] {
+        let journal = deployed()?;
+        opened(&journal)?;
+        check(&journal, CHECK, CONNECTION, "connect", "passed")?;
+        closing(&journal, "r1", event_type, CONNECTION, "connect")?;
+        let broker = Paper::new(&journal);
+        let gate = OpeningGate::default();
+        let mut process = start_wired(
+            &journal,
+            &broker,
+            wired(gate.guard(Box::new(Allowing)), Box::new(TwoPercentStop))?,
+        )?;
+        propose(
+            &journal,
+            AGENT,
+            "01JINTENT0000000000000000A",
+            "buy",
+            "10",
+            "150",
+            "open",
+        )?;
+        propose(
+            &journal,
+            AGENT,
+            "01JINTENT0000000000000000C",
+            "sell",
+            "10",
+            "150",
+            "risk_exit",
+        )?;
+        for _ in 0..5 {
+            assert_eq!(
+                pass(&mut process, &gate, &scope(), Environment::Paper, at(NOON)?)?,
+                Connected::Closed,
+                "{event_type}"
+            );
+            process.step(at(NOON)?);
+        }
+        assert!(!gate.is_open(), "{event_type}");
+        assert!(
+            !matches!(process.lifecycle().state(), State::Exited(_)),
+            "{event_type}"
+        );
+        assert_eq!(
+            journal.received(),
+            ["01JINTENT0000000000000000C"],
+            "{event_type}"
+        );
+    }
+    Ok(())
+}
+
+/// Rules 3 and 13: a connection record that does not read is ambiguity, so the pass answers its
+/// code, opens nothing and stops nothing; the process goes on taking every exit.
+#[test]
+#[ignore = "pending E21-32"]
+fn an_unreadable_record_keeps_the_gate_shut_and_every_exit_going() -> Result<(), Error> {
     let journal = deployed()?;
     opened(&journal)?;
-    check(&journal, CHECK, CONNECTION, "connect", "passed")?;
-    closing(&journal, "r1", "ConnectionRefused", CONNECTION, "connect")?;
+    journal.write(
+        ACCOUNT_STREAM,
+        CHECK,
+        "ConnectionChecked",
+        1,
+        None,
+        object(vec![("occasion", text("connect"))])?,
+    )?;
+    establish(&journal, ESTABLISHED, 2, Some(CHECK), CONNECTION, ACCOUNT)?;
     let broker = Paper::new(&journal);
     let gate = OpeningGate::default();
     let mut process = start_wired(
@@ -467,10 +534,37 @@ fn a_refused_connection_is_closed_and_stays_shut() -> Result<(), Error> {
         &broker,
         wired(gate.guard(Box::new(Allowing)), Box::new(TwoPercentStop))?,
     )?;
-    assert_eq!(
-        pass(&mut process, &gate, &scope(), Environment::Paper, at(NOON)?)?,
-        Connected::Closed
-    );
+    propose(
+        &journal,
+        AGENT,
+        "01JINTENT0000000000000000A",
+        "buy",
+        "10",
+        "150",
+        "open",
+    )?;
+    propose(
+        &journal,
+        AGENT,
+        "01JINTENT0000000000000000C",
+        "sell",
+        "10",
+        "150",
+        "risk_exit",
+    )?;
+    for _ in 0..5 {
+        process.step(at(NOON)?);
+        assert_eq!(
+            pass(&mut process, &gate, &scope(), Environment::Paper, at(NOON)?),
+            Err("connection_record_unreadable")
+        );
+    }
     assert!(!gate.is_open());
+    assert!(
+        !journal
+            .types(ACCOUNT_STREAM)
+            .contains(&"ConnectionEstablished".to_owned())
+    );
+    assert_eq!(journal.received(), ["01JINTENT0000000000000000C"]);
     Ok(())
 }
