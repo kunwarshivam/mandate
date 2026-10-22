@@ -1323,6 +1323,10 @@ after U-A1 to U-A5 are recorded.
   egress requires it (spec §4.6, DEC-438 item 13). *Accepted when:* payloads are encrypted to the
   subscription; the relay refuses ciphertext over 512 bytes and stores none; NT-1's canary test
   passes on relay and push-service captures; a relay outage changes no trading state (NT-9).
+  *The dispatcher's user* ([DEC-2120](decisions/DEC-2120.md) item 1): the dispatcher's unit runs
+  as `owlhead_notify`, in no other service's group, loads only `vault-address-key` with
+  `LoadCredential=`, and the host setup creates `addresses/` as `owlhead_api:owlhead_notify`
+  `2750`; owed by the change that deploys the dispatcher on the demo host.
 - **E8-16 (Should, M7)** As a reviewer, I want the minors of the notifications spec's round 1
   ([#558](https://github.com/kunwarshivam/mandate/pull/558); freeze rule) fixed in the spec:
   - HLD §6 flow C step 4 still says "an escalation chain (push → SMS → phone call)"; align it with
@@ -1426,6 +1430,12 @@ story buys a service, and none uses a real identity-provider account in tests (s
   append `Member*` records directly. It is `mandate_identity::write_membership`, pure, over the
   `ControlStream` compare-and-append port the workspace store implements on the journal
   ([DEC-646](decisions/DEC-646.md)).
+  *Push addresses on deactivation* ([DEC-2120](decisions/DEC-2120.md) item 7, from E8-14): when a
+  deactivation or removal ends a membership, the writer appends a `removed`
+  `NotificationAddressChanged` for each of the member's active addresses in the workspace inside
+  its own commit, with the deactivation's actor, `null` step-up, and no `OwnerAlertSent`
+  (workspace API §4.11, DEC-795 item 5, journal rule 214). It computes them with
+  `removals_on_deactivation`, the pure helper E8-14's slice A2 provides, and touches no vault.
 - **E9-8 (Must, M8; SC)** As a workspace owner, I want my data unreachable from any other workspace.
   *Accepted when:* data APIs take only a `TenantContext` the authorization step constructs, with
   compile-fail tests for a bare workspace ID; and cross-workspace attack tests fail at the API, row-level
@@ -2900,6 +2910,11 @@ enables `live` (ES-23, OPS-5).
   and roles in the cell, each process's secret id as a mounted file, and the egress drill's vault
   probe; the audit device; the metrics and journal parts of the canary scan once either carries a
   vault operation.
+  *Address path* ([DEC-2120](decisions/DEC-2120.md) item 6, from E8-14): `SecretPath::Address`, an
+  OpenBao backend for the web-push address store behind `mandate-vault-addresses`'
+  `AddressWriter` and read-only `AddressReader`, keeping DEC-2120's per-workspace namespace, the
+  member bound to each entry, and the dispatcher's read-only access in the backend's policy. Until
+  it lands, the demo host and the cell use the local store.
 - **E21-33 (Proposed, M8; SC; lane D1; journal spec first if needed)** As an owner, I want a
   deployment manager that keeps each deployed agent's processes running and leaves a crash-looping
   agent paused, so that my agent is managed without anyone watching (design §3.4, §11 "Bad
