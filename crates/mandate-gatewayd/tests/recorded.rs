@@ -79,7 +79,6 @@ fn body(delivery: &Delivery) -> &[u8] {
 
 /// DEC-2210: a single call is answered with the recorded final reply, at its latency.
 #[test]
-#[ignore = "pending E21-62"]
 fn a_single_call_takes_the_recorded_reply() {
     let demo = model(DEMO);
     let replies = Replies::new(&demo);
@@ -96,7 +95,6 @@ fn a_single_call_takes_the_recorded_reply() {
 /// DEC-2266: an agentic call takes the scripted turn after the turns its transcript holds, and the
 /// recorded final reply once the script is spent.
 #[test]
-#[ignore = "pending E21-62"]
 fn an_agentic_call_takes_its_turn_s_scripted_reply_then_the_final_one() {
     let agentic = model(AGENTIC);
     let replies = Replies::new(&agentic);
@@ -122,7 +120,6 @@ fn an_agentic_call_takes_its_turn_s_scripted_reply_then_the_final_one() {
 
 /// Priming replaces any reply a call never took, so each call is sent exactly its own reply.
 #[test]
-#[ignore = "pending E21-62"]
 fn priming_replaces_a_reply_no_call_took() {
     let agentic = model(AGENTIC);
     let replies = Replies::new(&agentic);
@@ -158,7 +155,6 @@ fn priming_replaces_a_reply_no_call_took() {
 /// upstream, with the workspace's rate fixed at 12 a minute and the agent's at the turns one run
 /// may take plus two.
 #[test]
-#[ignore = "pending E21-62"]
 fn the_settings_are_the_recording_s_endpoint_under_the_cell_s_rate_caps() {
     for (text, turns) in [
         (DEMO, 1),
