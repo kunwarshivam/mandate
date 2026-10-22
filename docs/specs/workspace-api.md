@@ -1654,8 +1654,12 @@ id and is used once, so a retried opening asks for a new challenge.
      requires it; every other route ignores it), `Max-Age` 30 days. The challenge route sets it when
      the call carries none or one of another shape. It is a random key and nothing else: it carries
      no workspace, member, principal, passkey, or session, the server never links it to one, and it
-     keeps only its SHA-256 digest, only as a limit key, only while that key counts something. The
-     assertion route never sets or clears it. A browser keeps no `Secure` cookie from a plain
+     keeps only its SHA-256 digest, only as a limit key, only while that key counts something: the
+     digest of the cookie's value as sent, its 43 ASCII characters, not of the 32 bytes they
+     decode to. A value that is not exactly 43 characters decoding canonically to 32 bytes, or a
+     second device cookie in the same request (on one `Cookie` line or across several), is no
+     device cookie, and the call counts as carrying none. The assertion route never sets or clears
+     it. A browser keeps no `Secure` cookie from a plain
      `http` origin, so a dev or ci cell served that way gets a fresh device on every call: the
      device limit does not bind there, by intent, and the address limit is the bound.
    - **The challenge route** counts a challenge only while it is outstanding (issued, unexpired,
