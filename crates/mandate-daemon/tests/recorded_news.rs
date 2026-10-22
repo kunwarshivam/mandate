@@ -215,3 +215,22 @@ fn a_get_for_an_item_the_recording_lacks_or_another_allowlist_answers_nothing() 
         "and answers it"
     );
 }
+
+/// Every recorded bundle the repository holds loads as it did before the news reads were served:
+/// the reads add no member a recording must carry (DEC-2327 item 3).
+#[test]
+fn every_recorded_bundle_still_loads_unchanged() {
+    let fixtures = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures");
+    let demo = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../deploy/cell/demo/research"
+    );
+    for dir in [
+        format!("{fixtures}/research"),
+        format!("{fixtures}/research-agentic"),
+        format!("{fixtures}/research-adversarial"),
+        demo.to_owned(),
+    ] {
+        Bundle::load(Path::new(&dir)).unwrap_or_else(|e| panic!("{dir}: {e:?}"));
+    }
+}
