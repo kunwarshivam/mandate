@@ -64,3 +64,21 @@ async fn a_source_that_holds_no_codes_refuses_a_take() {
         assert_eq!(took, Err(SourceError::Denied));
     }
 }
+
+/// A source that holds no personal data refuses to create a connection's account entry, by the
+/// trait's default (DEC-2339).
+#[tokio::test(flavor = "current_thread")]
+async fn a_source_that_holds_no_personal_data_refuses_a_create() {
+    let connection = ConnectionId::new("c1").map_err(drop);
+    assert!(connection.is_ok());
+    if let Ok(connection) = connection {
+        let source = Codeless(Identity::Executor(connection.clone()));
+        let created = source
+            .create(
+                &SecretPath::AccountId(connection),
+                &SecretSlice::from(b"acct".to_vec()),
+            )
+            .await;
+        assert_eq!(created, Err(SourceError::Denied));
+    }
+}
