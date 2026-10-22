@@ -25,9 +25,8 @@ it as a kill switch not yet applied.
 - Escalate at once, as for a kill switch not applied. Today only the operator is told: the owner's
   alert for this condition, with generic text and no ids, lands with E8's notification row
   ([DEC-2344](../project/decisions/DEC-2344.md) items 1 and 2) and is needed before staging. The
-  operator never
-  trades on an owner's account; the owner can act in the broker's own console, or issue the switch
-  again once the executor can run.
+  operator never trades on an owner's account; the owner can act in the broker's own console, or
+  issue the switch again once the executor can run.
 - Find why the executor could not run: its pod's logs and last exit, as below. A revoked connection
   whose token is destroyed cannot log in to the broker; that executor cannot apply anything, so the
   manual step above is the only one.
