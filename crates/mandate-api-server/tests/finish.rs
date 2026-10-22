@@ -163,7 +163,6 @@ fn refused(
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn an_oauth_version_2_request_is_open_from_its_record() {
     let request = open_request();
     assert_eq!(request.opened_at, Some(at(OPENED)));
@@ -177,7 +176,6 @@ fn an_oauth_version_2_request_is_open_from_its_record() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn only_a_version_2_oauth_request_is_this_finish_s() {
     for row in [
         requested(CONNECTION, 1, ""),
@@ -190,7 +188,6 @@ fn only_a_version_2_oauth_request_is_this_finish_s() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn the_record_that_closes_a_request_ends_it() {
     let id = connection(CONNECTION);
     for (kind, fold) in [
@@ -219,7 +216,6 @@ fn the_record_that_closes_a_request_ends_it() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn another_connection_s_rows_leave_the_request_alone() {
     let request = request(
         &[
@@ -233,7 +229,6 @@ fn another_connection_s_rows_leave_the_request_alone() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_connection_row_it_cannot_read_leaves_the_fold_unanswered() {
     let id = connection(CONNECTION);
     let nameless = row(
@@ -257,7 +252,6 @@ fn a_connection_row_it_cannot_read_leaves_the_fold_unanswered() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn the_latest_connect_check_of_the_connection_is_read() {
     let id = connection(CONNECTION);
     assert_eq!(checked(&[], &id), Ok(None));
@@ -293,7 +287,6 @@ fn the_latest_connect_check_of_the_connection_is_read() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_check_it_cannot_read_is_unreadable() {
     let id = connection(CONNECTION);
     let unknown = json!([{"check": "scope", "reason": "made_up", "result": "failed"}]);
@@ -309,7 +302,6 @@ fn a_check_it_cannot_read_is_unreadable() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_unique_passed_check_establishes_with_the_scopes_caused_by_the_check() {
     let port = answering(Judged::Unique);
     let pass = decide(
@@ -341,7 +333,6 @@ fn a_unique_passed_check_establishes_with_the_scopes_caused_by_the_check() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_failed_check_refuses_with_its_reason_caused_by_the_check() {
     let pass = decide(
         &open_request(),
@@ -364,7 +355,6 @@ fn a_failed_check_refuses_with_its_reason_caused_by_the_check() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn checks_3_and_4_refuse_uncaused() {
     let passed = || {
         Ok(Some(Checked::Passed {
@@ -402,7 +392,6 @@ fn checks_3_and_4_refuse_uncaused() {
 /// With no check, or a passed one the port cannot judge, the request waits until its deadline,
 /// then is refused as `timeout`, or `restart_past_deadline` on the first pass after a restart.
 #[test]
-#[ignore = "pending E10-13"]
 fn without_an_answer_the_deadline_tears_down() {
     let unjudged = || {
         Ok(Some(Checked::Passed {
@@ -459,7 +448,6 @@ fn without_an_answer_the_deadline_tears_down() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_request_that_is_not_this_finish_s_waits_even_past_its_deadline() {
     let api_key = request(
         &[requested(CONNECTION, 2, "api_key")],
@@ -472,7 +460,6 @@ fn a_request_that_is_not_this_finish_s_waits_even_past_its_deadline() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn an_unreadable_check_or_fold_appends_nothing() {
     assert_eq!(
         decide(
@@ -505,7 +492,6 @@ fn an_unreadable_check_or_fold_appends_nothing() {
 /// A request a revoke closed runs the teardown and journals nothing; one already closed has nothing
 /// to close.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_closed_request_is_not_finished_again() {
     let id = connection(CONNECTION);
     let revoked = request(
@@ -561,7 +547,6 @@ fn a_closed_request_is_not_finished_again() {
 /// check; a refusal caused by a check is caused by a failed one; and nothing is decided before the
 /// deadline without a check.
 #[test]
-#[ignore = "pending E10-13"]
 fn only_a_unique_passed_check_establishes() {
     let checks = prop_oneof![
         Just(Ok(None)),
@@ -634,7 +619,6 @@ fn only_a_unique_passed_check_establishes() {
 
 /// Each broker and environment is read by its journal code; any other refuses the fold.
 #[test]
-#[ignore = "pending E10-13"]
 fn each_broker_and_environment_is_read_by_its_code() {
     let with = |broker: &str, environment: &str| {
         let mut row = requested(CONNECTION, 2, "api_key");
@@ -664,7 +648,6 @@ fn each_broker_and_environment_is_read_by_its_code() {
 /// one) changes nothing; a revoke with no request open closes nothing that a revoke-closed
 /// teardown would act on.
 #[test]
-#[ignore = "pending E10-13"]
 fn only_an_open_request_is_replaced_or_revoked() {
     let id = connection(CONNECTION);
     let mut second = requested(CONNECTION, 2, "oauth");
