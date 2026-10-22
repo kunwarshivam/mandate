@@ -154,7 +154,7 @@ impl<J: ControlJournal, O: Orchestrator, A: Alerts> Deployer<J, O, A> {
             Effect::Start { slot, generation } => {
                 let launch = Launch {
                     lifetime: self.manager.lifetime(&slot, now),
-                    connection: self.manager.connection(&slot),
+                    connection: self.manager.connection(&slot, generation),
                 };
                 if self
                     .orchestrator
@@ -166,7 +166,7 @@ impl<J: ControlJournal, O: Orchestrator, A: Alerts> Deployer<J, O, A> {
                 }
             }
             Effect::Stop { slot, generation } => {
-                let connection = self.manager.connection(&slot);
+                let connection = self.manager.connection(&slot, generation);
                 if self
                     .orchestrator
                     .stop(&slot, generation, connection.as_deref())

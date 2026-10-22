@@ -50,9 +50,11 @@ struct Request {
     ended: bool,
 }
 
+/// A deployed agent: its account, the connection its deployment names, and whether it stopped.
 #[derive(Debug, Clone)]
 struct Agent {
     account: String,
+    connection: String,
     stopped: bool,
 }
 
@@ -77,6 +79,9 @@ struct SlotState {
     /// For an executor: the last record that took a reason to want it away was its connection's
     /// refusal or revocation, not an agent's stop, so its stop's cause is `connection_closed`.
     connection_closed: bool,
+    /// For an executor: the connection each generation's start named, read when its start is
+    /// folded, so the stop of that generation names the account its start made (DEC-2336 item 6).
+    launched_as: BTreeMap<u64, String>,
     down_since: Option<UtcNanos>,
 }
 
@@ -194,6 +199,7 @@ impl Manager {
                         agent.clone(),
                         Agent {
                             account,
+                            connection: connection.clone(),
                             stopped: false,
                         },
                     );
@@ -246,7 +252,13 @@ impl Manager {
                         }
                     }
                 }
+                let launched_as = (slot.process == Process::Executor)
+                    .then(|| self.wanted_connection(&slot.subject))
+                    .flatten();
                 let state = self.slots.entry(slot.clone()).or_default();
+                if let Some(connection) = launched_as {
+                    state.launched_as.entry(*generation).or_insert(connection);
+                }
                 if *generation > state.generation {
                     state.generation = *generation;
                     let answered = std::mem::take(&mut state.kill_switches);
@@ -320,23 +332,33 @@ impl Manager {
         }
     }
 
-    /// The connection `slot` acts for, which an executor runs as the account of (DEC-2060 item 9):
-    /// the connect whose exchange started it, else the established connection of its account, as
-    /// a deployment on it names. `None` for a runtime and a token exchange, whose subjects say
-    /// what they need.
-    pub fn connection(&self, slot: &Slot) -> Option<String> {
+    /// The connection `generation` of `slot` acts for, which an executor runs as the account of
+    /// (DEC-2060 item 9, DEC-2336 item 6): the one read when its start was folded, so its start
+    /// and its stop name the same account. `None` for a runtime and a token exchange, whose
+    /// subjects say what they need, and for an executor generation this manager never read a
+    /// start of, which is then not started.
+    pub fn connection(&self, slot: &Slot, generation: u64) -> Option<String> {
         if slot.process != Process::Executor {
             return None;
         }
-        let exchanged = self
+        self.slots.get(slot)?.launched_as.get(&generation).cloned()
+    }
+
+    /// The connection an executor of `account` would start for now: the one a running agent's
+    /// deployment names, else an open connect's whose exchange started it, else none. A revoked
+    /// connection a deployment does not name is never chosen.
+    fn wanted_connection(&self, account: &str) -> Option<String> {
+        let deployed = self
+            .agents
+            .values()
+            .find(|agent| !agent.stopped && agent.account == account)
+            .map(|agent| &agent.connection);
+        let connecting = self
             .requests
             .iter()
-            .find(|(_, r)| r.exchanged && r.account == slot.subject);
-        let established = self.connections.iter().find(|(_, a)| **a == slot.subject);
-        exchanged
-            .map(|(connection, _)| connection)
-            .or(established.map(|(connection, _)| connection))
-            .cloned()
+            .find(|(_, r)| r.exchanged && !r.ended && r.account == account)
+            .map(|(connection, _)| connection);
+        deployed.or(connecting).cloned()
     }
 
     /// Ends an executor's crash-loop pause once no agent wants it: every agent of its account is
