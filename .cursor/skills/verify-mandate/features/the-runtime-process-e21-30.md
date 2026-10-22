@@ -64,6 +64,9 @@
   `tests/cell.rs` and `tests/research.rs`: the cell's agentic research (DEC-2268): the entry's loop
   capped by the recorded run cap, refused at the opt-in without one, and a run journaling every
   turn through to `RunEnded` `done`.
+  `src/worker/model_tests.rs`: the worker over a model double, built only in this crate's tests
+  (DEC-2269; E19-6): each turn sent to the double and answered with its own calls, and a hostile
+  model's calls recorded `schema_invalid` by the gateway.
 - **Run:** `cargo nextest run -p mandate-daemon -p mandate-store -p mandate-runtime -p mandate-shell`
   (with `MANDATE_PG_URL` for `tests/pg.rs`); `cargo xtask cell demo --no-web` shows the runtime
   ready in the local cell.
