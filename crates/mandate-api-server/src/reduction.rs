@@ -12,6 +12,7 @@
 use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::num::NonZeroU32;
+use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use axum::body::Bytes;
@@ -211,6 +212,8 @@ pub struct Reduction {
     outstanding: Mutex<BTreeMap<String, Issued>>,
     ingress: Vec<IpAddr>,
     random: Box<dyn Random>,
+    /// How many `reduction_failures_over_limit` alerts this process has raised.
+    alerts: AtomicU64,
 }
 
 impl Reduction {
@@ -221,7 +224,30 @@ impl Reduction {
             outstanding: Mutex::new(BTreeMap::new()),
             ingress,
             random,
+            alerts: AtomicU64::new(0),
         }
+    }
+
+    /// Raises the operator alert `reduction_failures_over_limit` once: its opaque code on standard
+    /// error, naming no address, device, member, or passkey (rule 6), and one more in
+    /// [`Reduction::alerts_raised`].
+    #[expect(
+        clippy::todo,
+        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+    )]
+    pub fn alerted(&self) {
+        let _ = &self.alerts;
+        todo!()
+    }
+
+    /// How many `reduction_failures_over_limit` alerts this process has raised, for the tests and
+    /// a future metric.
+    #[expect(
+        clippy::todo,
+        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+    )]
+    pub fn alerts_raised(&self) -> u64 {
+        todo!()
     }
 
     /// The ingress peers the store reads forwarded addresses from.
