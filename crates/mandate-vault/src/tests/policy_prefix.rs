@@ -153,9 +153,14 @@ fn no_wildcard_reads_and_none_outside_the_api_and_the_manager() {
 #[test]
 fn the_templated_policies_stay_exact() {
     let any = c("0");
-    for identity in [
-        Identity::Executor(any.clone()),
-        Identity::TokenExchange(any),
+    let own = "x{{identity.entity.aliases.auth_kubernetes_0a1b.metadata.service_account_name}}";
+    let executor = [
+        format!("mandate/data/personal/accounts/{own}/+"),
+        format!("mandate/data/personal/fingerprints/{own}/+"),
+    ];
+    for (identity, allowed) in [
+        (Identity::Executor(any.clone()), executor.to_vec()),
+        (Identity::TokenExchange(any), Vec::new()),
     ] {
         let hcl = crate::kubernetes::kubernetes_policy(
             &identity,
@@ -166,14 +171,8 @@ fn the_templated_policies_stay_exact() {
         assert!(!hcl.contains('*'), "{identity:?}: {hcl}");
         for (path, caps) in blocks(&hcl).into_iter().filter(|(p, _)| p.contains('+')) {
             assert!(
-                caps == "create"
-                    && path
-                        .split('/')
-                        .rev()
-                        .nth(1)
-                        .is_some_and(|own| own.starts_with("x{{"))
-                    && path.ends_with("/+"),
-                "a templated `+` only creates a last segment under the login's own name (DEC-2345): {identity:?} {path} [{caps}]"
+                allowed.contains(&path) && caps == "create",
+                "a templated `+` is only the executor's create of its own account entries and fingerprints (DEC-2339 item 1, DEC-2345): {identity:?} {path} [{caps}]"
             );
         }
     }
