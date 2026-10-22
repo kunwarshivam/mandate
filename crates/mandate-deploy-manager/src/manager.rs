@@ -428,7 +428,7 @@ fn step(
     (elapsed(down_since, now) >= wait).then(|| start(slot, next, Cause::Restart, None))
 }
 
-/// A token exchange's step (DEC-1175 items 2 to 4): one start, at generation 1, while its request
+/// A token exchange's step (DEC-1175 items 2 to 4, DEC-1177 item 12): one start, at generation 1, while its request
 /// is open and has at least a second left, asked of the orchestrator again only while this
 /// manager has not seen it carried out; never a restart; and once the request closes, a stop of
 /// every instance still listed, exited or not, so its pod and account are deleted. The deadline
