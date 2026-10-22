@@ -4,7 +4,7 @@
 //! (DEC-1170 item 2). The pod's shape (image, probes, resources, affinity, the labels the network
 //! policies select) is the chart's template; the adapter adds only the pod's name, its labels and
 //! the process's identity. A token exchange also runs as its connection's own ServiceAccount, which
-//! the adapter makes just before the pod and deletes just after it, and ends by its request's
+//! the adapter makes just before the pod and deletes just before deleting it, and ends by its request's
 //! deadline (DEC-1175 items 4, 7 and 9).
 
 use std::collections::BTreeMap;
@@ -362,13 +362,15 @@ impl Orchestrator for Kubernetes {
         self.create(self.pods(), &pod).await
     }
 
+    /// Deletes the account first, then the pod: a stop that fails leaves the pod listed, so the
+    /// manager asks again, and no account outlives the pod it was made for.
     async fn stop(&mut self, slot: &Slot, generation: u64) -> Result<(), Unavailable> {
-        let pod = format!("{}/{}", self.pods(), self.pod_name(slot, generation));
-        self.delete(pod).await?;
-        match self.account_name(slot) {
-            Some(account) => self.delete(format!("{}/{account}", self.accounts())).await,
-            None => Ok(()),
+        if let Some(account) = self.account_name(slot) {
+            self.delete(format!("{}/{account}", self.accounts()))
+                .await?;
         }
+        let pod = format!("{}/{}", self.pods(), self.pod_name(slot, generation));
+        self.delete(pod).await
     }
 }
 

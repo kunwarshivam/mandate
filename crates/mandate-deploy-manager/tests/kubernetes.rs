@@ -611,13 +611,12 @@ fn only_an_exchange_takes_a_lifetime_and_it_always_takes_one_of_a_second_or_more
 }
 
 #[test]
-fn an_exchanges_stop_deletes_its_pod_then_its_account() {
+fn an_exchanges_stop_deletes_its_account_then_its_pod_and_a_failure_keeps_the_pod() {
     let (api, seen) = server(vec![
         (200, "{}".to_owned()),
         (200, "{}".to_owned()),
         (404, "{}".to_owned()),
         (404, "{}".to_owned()),
-        (200, "{}".to_owned()),
         (500, "{}".to_owned()),
     ]);
     let mut k = adapter(api);
@@ -631,27 +630,26 @@ fn an_exchanges_stop_deletes_its_pod_then_its_account() {
     let seen = seen.lock().unwrap();
     let asked: Vec<(&str, String)> = seen
         .iter()
-        .take(2)
         .map(|s| (s.method.as_str(), s.path.clone()))
         .collect();
+    let account = (
+        "DELETE",
+        format!(
+            "/api/v1/namespaces/cell/serviceaccounts/{}",
+            exchange_account()
+        ),
+    );
+    let pod = (
+        "DELETE",
+        format!(
+            "/api/v1/namespaces/cell/pods/{}",
+            k.pod_name(&exchange(), 1)
+        ),
+    );
     assert_eq!(
         asked,
-        [
-            (
-                "DELETE",
-                format!(
-                    "/api/v1/namespaces/cell/pods/{}",
-                    k.pod_name(&exchange(), 1)
-                )
-            ),
-            (
-                "DELETE",
-                format!(
-                    "/api/v1/namespaces/cell/serviceaccounts/{}",
-                    exchange_account()
-                )
-            ),
-        ]
+        [account.clone(), pod.clone(), account.clone(), pod, account],
+        "an account it could not delete leaves the pod listed, so the stop is asked again"
     );
 }
 
