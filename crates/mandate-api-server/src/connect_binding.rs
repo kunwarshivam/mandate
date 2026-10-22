@@ -20,6 +20,7 @@ use crate::config::{AUTHORIZE_URL, StartRefusal, authorize_page};
 use crate::connect::Connect;
 use crate::session::Random;
 use crate::vault_codes::{OpenBaoLogin, VaultCodes};
+use crate::vault_teardown::VaultTeardown;
 
 /// The platform's registered OAuth client id.
 pub const CLIENT_ID: &str = "MANDATE_ALPACA_CLIENT_ID";
@@ -164,6 +165,19 @@ fn ca_pem(dir: &Path) -> Option<Vec<u8>> {
 /// The connect `binding` binds: for [`ConnectBinding::On`], its page and client, states drawn from
 /// `random`, and codes written through the vault as the API's identity at `clock`'s time; `None`
 /// otherwise.
+/// The finish's teardown for a bound connect, over its own copy of the connect's vault login;
+/// `None` for no connect and an incomplete one (DEC-2348 item 3).
+#[expect(
+    clippy::todo,
+    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+)]
+pub fn teardown(
+    _binding: &ConnectBinding,
+    _clock: Arc<dyn Clock>,
+) -> Option<VaultTeardown<OpenBaoLogin>> {
+    todo!()
+}
+
 pub fn bound(
     binding: ConnectBinding,
     random: Box<dyn Random>,

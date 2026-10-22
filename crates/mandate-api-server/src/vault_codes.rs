@@ -31,7 +31,7 @@ pub trait ApiLogin: Send + Sync {
 
 /// The deployment's login: the AppRole role id and secret id read from the mounted files
 /// `api.role-id` and `api.secret-id` in `dir` at each login, never from the environment or argv.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct OpenBaoLogin {
     pub config: OpenBaoConfig,
     pub dir: PathBuf,

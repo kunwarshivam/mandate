@@ -5,8 +5,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
+use std::io::Write;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use mandate_canon::{Value, parse};
 use mandate_connections::manager::{FinishPlan, ManagerEffect, RequestFold};
@@ -14,6 +16,7 @@ use mandate_connections::record::{AccountRef, ConnectionId};
 use mandate_journal::{AppendOutcome, StoredEvent};
 use mandate_time::UtcNanos;
 
+use crate::clock::Clock;
 use crate::finish::{
     CONNECT_DEADLINE_SECS, Fingerprints, Pass, Unreadable, checked, decide, request,
 };
@@ -45,6 +48,35 @@ pub const TEARDOWN_RUNBOOK: &str = "docs/runbooks/RB-19-connect-teardown.md";
 /// Where the pass raises an operator alert: a code and a runbook, and nothing else (rule 6).
 pub trait Alerts: Send + Sync {
     fn raise(&self, code: &'static str, runbook: &'static str);
+}
+
+/// Alerts written as one line each, `operator_alert <code> <runbook>`, as the deployment manager
+/// writes its own (DEC-2348 item 3); the process gives it stderr.
+pub struct LineAlerts<W>(pub Mutex<W>);
+
+impl<W: Write + Send> Alerts for LineAlerts<W> {
+    #[expect(
+        clippy::todo,
+        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+    )]
+    fn raise(&self, _code: &'static str, _runbook: &'static str) {
+        todo!()
+    }
+}
+
+/// Runs a pass at the clock's time every `every`, for as long as the process runs; a clock that
+/// cannot be read skips that pass, and a pass that cannot read the journal waits for the next.
+#[expect(
+    clippy::todo,
+    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+)]
+pub async fn passes<F, T, A>(_finisher: Finisher<F, T, A>, _clock: Arc<dyn Clock>, _every: Duration)
+where
+    F: Fingerprints,
+    T: Teardown,
+    A: Alerts,
+{
+    todo!()
 }
 
 /// The pass over one workspace's connects, and what it remembers between passes.

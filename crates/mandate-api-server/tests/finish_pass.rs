@@ -4,12 +4,16 @@
 
 mod common;
 
+use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-use common::{MemJournal, Scripted};
+use common::{ManualClock, MemJournal, Scripted};
+use mandate_api_server::clock::Clock;
 use mandate_api_server::finish::{CONNECT_DEADLINE_SECS, Fingerprints, Judged, Unbacked};
 use mandate_api_server::finish_pass::{
-    Alerts, DeleteFailed, Deleted, Finisher, TEARDOWN_RUNBOOK, TEARDOWN_STALLED, Teardown,
+    Alerts, DeleteFailed, Deleted, Finisher, LineAlerts, TEARDOWN_RUNBOOK, TEARDOWN_STALLED,
+    Teardown, passes,
 };
 use mandate_api_server::journal::Journal;
 use mandate_canon::Digest;
@@ -697,4 +701,94 @@ fn each_request_on_one_connection_is_released_once_its_delete_succeeds() {
             (A.to_owned(), second.to_owned(), 4)
         ]
     );
+}
+
+/// A writer whose bytes the test reads back.
+#[derive(Clone, Default)]
+struct Written(Arc<Mutex<Vec<u8>>>);
+
+impl Write for Written {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+/// DEC-2348 item 3: one line per alert, its code and runbook and nothing else.
+#[test]
+#[ignore = "pending E10-13"]
+fn an_alert_is_written_as_one_line_with_its_code_and_runbook() {
+    let written = Written::default();
+    let alerts = LineAlerts(Mutex::new(written.clone()));
+    alerts.raise(TEARDOWN_STALLED, TEARDOWN_RUNBOOK);
+    alerts.raise(TEARDOWN_STALLED, TEARDOWN_RUNBOOK);
+    let line = "operator_alert connect_teardown_stalled docs/runbooks/RB-19-connect-teardown.md\n";
+    assert_eq!(
+        String::from_utf8(written.0.lock().unwrap().clone()).unwrap(),
+        format!("{line}{line}")
+    );
+}
+
+/// Runs `passes` over `finisher` at `clock`, every `every`, for a tenth of a second.
+fn run_passes<F: Fingerprints>(finisher: Pass<F>, clock: Arc<dyn Clock>, every: Duration) {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .unwrap();
+    let ran = runtime.block_on(async {
+        tokio::time::timeout(Duration::from_millis(100), passes(finisher, clock, every)).await
+    });
+    assert!(ran.is_err(), "the passes run until the process stops");
+}
+
+/// DEC-2342 item 10: the passes finish a connect at the clock's time.
+#[test]
+#[ignore = "pending E10-13"]
+fn the_passes_finish_a_connect_at_the_clock_s_time() {
+    let (journal, _, finisher) = finisher(Unbacked);
+    request(&journal, A, 2, "oauth");
+    let clock = ManualClock::at(OPENED + CONNECT_DEADLINE_SECS);
+    run_passes(finisher, clock, Duration::from_millis(1));
+    assert_eq!(last(&journal).0, "ConnectionRefused");
+}
+
+/// Each pass waits its period: within one period, one pass.
+#[test]
+#[ignore = "pending E10-13"]
+fn each_pass_waits_its_period() {
+    let (journal, deletes, finisher) = finisher(Unbacked);
+    request(&journal, A, 2, "oauth");
+    close(&journal, "ConnectionRevoked", A);
+    deletes.failing.lock().unwrap().push(A.to_owned());
+    run_passes(
+        finisher,
+        ManualClock::at(OPENED + 31),
+        Duration::from_secs(3600),
+    );
+    assert_eq!(deletes.of(), [A], "one pass");
+}
+
+/// A clock that cannot be read.
+struct NoClock;
+
+impl Clock for NoClock {
+    fn now(&self) -> Option<UtcNanos> {
+        None
+    }
+}
+
+/// A clock that cannot be read skips the pass: nothing is read, deleted or appended.
+#[test]
+#[ignore = "pending E10-13"]
+fn the_passes_wait_while_the_clock_cannot_be_read() {
+    let (journal, deletes, finisher) = finisher(Unbacked);
+    request(&journal, A, 2, "oauth");
+    close(&journal, "ConnectionRevoked", A);
+    run_passes(finisher, Arc::new(NoClock), Duration::from_millis(1));
+    assert_eq!(deletes.take(), []);
+    assert!(journal.appends.lock().unwrap().is_empty());
 }
