@@ -343,6 +343,21 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         alerts
     }
 
+    /// Journals `copy`'s establishment copy on the account stream at `now`, under this process's
+    /// writer epoch, as [`crate::establish::copy_draft`] writes it with the next event id, and
+    /// folds it (DEC-2341 item 2).
+    ///
+    /// # Errors
+    /// `copy_refused` when the draft cannot be made or the journal does not commit it.
+    pub fn copy_establishment(
+        &mut self,
+        now: UtcNanos,
+        copy: &crate::establish::ToCopy,
+    ) -> Result<(), &'static str> {
+        let _ = (now, copy);
+        Err(crate::credential::Unimplemented)
+    }
+
     /// Drains at `now`: no new input; an input in doubt is handed once more, then the process exits
     /// `Drained`, or `DrainIncomplete` if it is still in doubt.
     pub fn drain(&mut self, now: UtcNanos) {

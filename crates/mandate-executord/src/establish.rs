@@ -13,9 +13,13 @@ use mandate_executor::{
     AccountScope, BindingGateInput, BindingGateRequest, BindingGateSource, EventDraft, EventId,
 };
 use mandate_journal::{Environment, StoredEvent};
+use mandate_store::Store;
 use mandate_time::UtcNanos;
 
+use crate::Broker;
+use crate::credential::Unimplemented;
 use crate::follow::folded;
+use crate::process::ExecutorProcess;
 
 const ESTABLISHED: &str = "ConnectionEstablished";
 const REFUSED: &str = "ConnectionRefused";
@@ -193,4 +197,34 @@ impl BindingGateSource for Guarded {
         }
         self.inner.input(request)
     }
+}
+
+/// What a pass found the account stream to be.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Connected {
+    /// Established, its copy written now if it was not before: `gate` is open.
+    Open,
+    /// Still connecting: `gate` stays shut.
+    Connecting,
+    /// Refused or revoked before its copy: the caller drains.
+    Closed,
+}
+
+/// One pass of the rule-68 gate over `process`'s journal at `now`: reads the account and control
+/// streams of `scope`, writes the establishment's copy through `process` when it is due and the
+/// process has started (until then the stream is still connecting), and opens `gate` once the
+/// stream holds it. A gate once open stays open.
+///
+/// # Errors
+/// [`establishment`]'s code, `stream_unavailable` when a stream cannot be read, and
+/// `copy_refused` when the copy does not commit.
+pub fn pass<S: Store, B: Broker>(
+    process: &mut ExecutorProcess<S, B>,
+    gate: &OpeningGate,
+    scope: &AccountScope,
+    environment: Environment,
+    now: UtcNanos,
+) -> Result<Connected, &'static str> {
+    let _ = (process, gate, scope, environment, now);
+    Err(Unimplemented)
 }

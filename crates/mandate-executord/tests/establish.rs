@@ -6,7 +6,9 @@ mod support;
 
 use mandate_canon::{Key, Value};
 use mandate_executor::{AccountRef, AccountScope, BrokerRequest, EventId, WorkspaceId};
-use mandate_executord::establish::{Establishment, OpeningGate, ToCopy, copy_draft, establishment};
+use mandate_executord::establish::{
+    Connected, Establishment, OpeningGate, ToCopy, copy_draft, establishment, pass,
+};
 use mandate_journal::Environment;
 use support::{
     ACCOUNT, ACCOUNT_STREAM, AGENT, Allowing, CONNECTION, CONTROL_STREAM, Error, Journal, NOON,
@@ -356,5 +358,122 @@ fn a_shut_gate_holds_every_opening_and_lets_every_exit_go() -> Result<(), Error>
     }
     assert!(!gate.is_open());
     assert_eq!(journal.received(), ["01JINTENT0000000000000000C"]);
+    Ok(())
+}
+
+/// Items 3 and 6: an executor left connecting, with no establishment and no refusal, opens no
+/// risk however many passes it runs, while a risk exit behind the held opening is still received.
+#[test]
+#[ignore = "pending E21-32"]
+fn a_connecting_executor_opens_nothing_and_still_exits() -> Result<(), Error> {
+    let journal = deployed()?;
+    opened(&journal)?;
+    check(&journal, CHECK, CONNECTION, "connect", "passed")?;
+    let broker = Paper::new(&journal);
+    let gate = OpeningGate::default();
+    let mut process = start_wired(
+        &journal,
+        &broker,
+        wired(gate.guard(Box::new(Allowing)), Box::new(TwoPercentStop))?,
+    )?;
+    propose(
+        &journal,
+        AGENT,
+        "01JINTENT0000000000000000A",
+        "buy",
+        "10",
+        "150",
+        "open",
+    )?;
+    propose(
+        &journal,
+        AGENT,
+        "01JINTENT0000000000000000C",
+        "sell",
+        "10",
+        "150",
+        "risk_exit",
+    )?;
+    for _ in 0..20 {
+        assert_eq!(
+            pass(&mut process, &gate, &scope(), Environment::Paper, at(NOON)?)?,
+            Connected::Connecting
+        );
+        process.step(at(NOON)?);
+    }
+    assert!(!gate.is_open());
+    assert_eq!(journal.received(), ["01JINTENT0000000000000000C"]);
+    assert!(
+        !journal
+            .types(ACCOUNT_STREAM)
+            .contains(&"ConnectionEstablished".to_owned())
+    );
+    Ok(())
+}
+
+/// Items 2 and 5: an executor whose control stream already established its check, the API-key
+/// executor that served before DEC-2341 among them, writes the copy on its first pass once it has
+/// started, opens, and never writes it again; before it has started it copies nothing.
+#[test]
+#[ignore = "pending E21-32"]
+fn the_first_pass_copies_a_due_establishment_once_and_opens() -> Result<(), Error> {
+    let journal = deployed()?;
+    opened(&journal)?;
+    check(&journal, CHECK, CONNECTION, "connect", "passed")?;
+    establish(&journal, ESTABLISHED, 2, Some(CHECK), CONNECTION, ACCOUNT)?;
+    let broker = Paper::new(&journal);
+    let gate = OpeningGate::default();
+    let mut process = start_wired(
+        &journal,
+        &broker,
+        wired(gate.guard(Box::new(Allowing)), Box::new(TwoPercentStop))?,
+    )?;
+    assert_eq!(
+        pass(&mut process, &gate, &scope(), Environment::Paper, at(NOON)?)?,
+        Connected::Connecting
+    );
+    assert!(!gate.is_open());
+    process.step(at(NOON)?);
+    for _ in 0..3 {
+        assert_eq!(
+            pass(&mut process, &gate, &scope(), Environment::Paper, at(NOON)?)?,
+            Connected::Open
+        );
+    }
+    assert!(gate.is_open());
+    let copies: Vec<_> = journal
+        .rows_of(ACCOUNT_STREAM)
+        .into_iter()
+        .filter(|row| row.event_type == "ConnectionEstablished")
+        .collect();
+    assert_eq!(copies.len(), 1);
+    let copied = journal.payloads("ConnectionEstablished");
+    assert!(
+        copied.iter().any(|p| p.get("risk_clock").is_some()),
+        "{copied:?}"
+    );
+    Ok(())
+}
+
+/// Item 4: a connection refused before its copy is closed, and the gate stays shut.
+#[test]
+#[ignore = "pending E21-32"]
+fn a_refused_connection_is_closed_and_stays_shut() -> Result<(), Error> {
+    let journal = deployed()?;
+    opened(&journal)?;
+    check(&journal, CHECK, CONNECTION, "connect", "passed")?;
+    closing(&journal, "r1", "ConnectionRefused", CONNECTION, "connect")?;
+    let broker = Paper::new(&journal);
+    let gate = OpeningGate::default();
+    let mut process = start_wired(
+        &journal,
+        &broker,
+        wired(gate.guard(Box::new(Allowing)), Box::new(TwoPercentStop))?,
+    )?;
+    assert_eq!(
+        pass(&mut process, &gate, &scope(), Environment::Paper, at(NOON)?)?,
+        Connected::Closed
+    );
+    assert!(!gate.is_open());
     Ok(())
 }
