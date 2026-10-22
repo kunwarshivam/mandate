@@ -203,7 +203,6 @@ fn a_refused_connect_lets_it_exit() -> Result<(), Error> {
 /// its connect is open, connecting or established, and exits once its connection is revoked, since
 /// the manager holds its stop while a switch may still want it (DEC-2344 item 3).
 #[test]
-#[ignore = "pending E7-4"]
 fn an_agentless_connects_executor_exits_once_its_connection_is_revoked() -> Result<(), Error> {
     let journal = Journal::default();
     requested(&journal, "c0", CONNECTION, ACCOUNT)?;
@@ -224,7 +223,6 @@ fn an_agentless_connects_executor_exits_once_its_connection_is_revoked() -> Resu
 
 /// Item 3.2: an agentless connect refused at its connect lets its executor exit.
 #[test]
-#[ignore = "pending E7-4"]
 fn an_agentless_connect_refused_lets_its_executor_exit() -> Result<(), Error> {
     let journal = Journal::default();
     requested(&journal, "c0", CONNECTION, ACCOUNT)?;
@@ -243,7 +241,6 @@ fn an_agentless_connect_refused_lets_its_executor_exit() -> Result<(), Error> {
 /// Item 3.2: an executor started for a kill switch on an account whose only connection, with no
 /// agent ever deployed, is revoked exits too (DEC-2344's kill-switch start).
 #[test]
-#[ignore = "pending E7-4"]
 fn an_agentless_account_whose_connection_is_revoked_lets_it_exit() -> Result<(), Error> {
     let journal = Journal::default();
     connect(&journal, "c1", CONNECTION, ACCOUNT)?;

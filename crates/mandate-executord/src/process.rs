@@ -175,13 +175,12 @@ pub struct ExecutorProcess<S, B> {
 
 /// What one pass reads from the agents' streams: the kill switches this stream has not applied,
 /// the proposals the core does not hold yet, each with its agent, whether a row did not read, and
-/// whether every agent followed is stopped ([`Following::all_stopped`]) with no connect open
-/// ([`Following::connecting`]).
+/// whether nothing the journal shows still wants the executor ([`Following::released`]).
 struct Followed {
     switches: Vec<(AgentId, Switch)>,
     proposals: Vec<(AgentId, Proposal)>,
     unreadable: bool,
-    all_stopped: bool,
+    released: bool,
     /// Whether every followed agent's stream parsed and read: one that did not may hold a switch,
     /// so it holds the exit (DEC-2347 item 3.3).
     all_read: bool,
@@ -318,7 +317,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             switches,
             proposals: proposed,
             unreadable,
-            all_stopped,
+            released,
             all_read,
         }) = self.switches(now, &mut alerts)
         else {
@@ -349,7 +348,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                 return alerts;
             }
         }
-        if nothing_read && all_read && all_stopped && self.owes_nothing() {
+        if nothing_read && all_read && released && self.owes_nothing() {
             self.lifecycle.observe(now, Lifecycled::Completed);
         }
         alerts
@@ -543,7 +542,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             switches: pending,
             proposals: proposed,
             unreadable,
-            all_stopped: following.all_stopped() && !following.connecting(),
+            released: following.released(),
             all_read,
         })
     }

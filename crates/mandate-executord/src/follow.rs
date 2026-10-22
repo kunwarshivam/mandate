@@ -74,6 +74,9 @@ pub struct Following {
     stopped: BTreeSet<AgentId>,
     /// Whether an `exchanged` start of this account's executor is open (DEC-2347 item 3.9).
     connecting: bool,
+    /// Whether the account's connection is closed (DEC-2347 item 3.2): a connect or a connection
+    /// was journaled for it, no connect is open, and none of its connections is live.
+    closed: bool,
 }
 
 /// An `OwnerCommandIssued` `kill_switch` the executor may read itself (DEC-2343 item 3): its
@@ -109,6 +112,7 @@ pub fn agents_of(
     let mut stopped = BTreeSet::new();
     let mut requested: Option<String> = None;
     let mut connects: Vec<Option<String>> = Vec::new();
+    let mut exchanged = false;
     for row in control
         .iter()
         .filter(|row| row.environment == environment.as_str())
@@ -158,6 +162,7 @@ pub fn agents_of(
                     && text("subject")? == scope.account.0
                     && text("cause")? == "exchanged"
                 {
+                    exchanged = true;
                     connects.push(requested.clone());
                 }
             }
@@ -220,6 +225,11 @@ pub fn agents_of(
     let mut following = Following {
         stopped,
         connecting: !connects.is_empty(),
+        closed: connects.is_empty()
+            && (exchanged || !ours.is_empty())
+            && ours
+                .iter()
+                .all(|connection| live.get(connection) != Some(&true)),
         revocations: revocations
             .into_iter()
             .filter(|(connection, _)| ours.contains(connection))
@@ -251,19 +261,20 @@ pub fn agents_of(
 }
 
 impl Following {
-    /// Whether every agent the executor follows has an `AgentStopped`, which is final (journal
-    /// spec v0.56), and it follows at least one: an executor following none was started for
-    /// something the journal does not show it yet, so it waits (DEC-2347 item 3.1).
-    pub fn all_stopped(&self) -> bool {
-        !self.agents.is_empty() && self.agents.keys().all(|agent| self.stopped.contains(agent))
-    }
-
-    /// Whether an OAuth connect still wants this executor (DEC-2347 item 3.9, DEC-2335 item 2): a
-    /// `ProcessStartIssued` of this account's executor with cause `exchanged` whose connection, the
-    /// latest one requested for this account before it, has no `ConnectionRefused` of its connect
-    /// and no `ConnectionRevoked` after it. A start with no request before it stays open.
-    pub fn connecting(&self) -> bool {
-        self.connecting
+    /// Whether nothing the journal shows still wants this executor (DEC-2347 items 3.1, 3.2 and
+    /// 3.9): no OAuth connect of its account is open (an `exchanged` start whose connection, the
+    /// latest requested for this account before it, has no `ConnectionRefused` of its connect and
+    /// no `ConnectionRevoked` after it; DEC-2335 item 2), and either every agent it follows has an
+    /// `AgentStopped`, which is final (journal spec v0.56), or it follows none and its account's
+    /// connection is closed. An executor following none while its connection is live, or with none
+    /// journaled, waits for the manager to stop it.
+    pub fn released(&self) -> bool {
+        !self.connecting
+            && if self.agents.is_empty() {
+                self.closed
+            } else {
+                self.agents.keys().all(|agent| self.stopped.contains(agent))
+            }
     }
 
     /// The kill-switch commands the executor applies itself to `agent` (DEC-2343 item 3), in
