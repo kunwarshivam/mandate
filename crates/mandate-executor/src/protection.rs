@@ -1129,7 +1129,7 @@ const CLOSED_MEMBERS: [(&str, &[&str]); 14] = [
 
 /// Journals one `ProtectionChanged` for `instrument` in §9.5's closed form (DEC-446 item 4,
 /// DEC-859): every member present, `orders` and `awaiting` as lists, the owner as `agent_id`.
-fn changed(
+pub(crate) fn changed(
     batch: &mut Batch<'_, '_>,
     instrument: &InstrumentId,
     action: &str,
@@ -2247,7 +2247,7 @@ fn covered(view: &ExecutorState, instrument: &InstrumentId) -> Result<Qty, Execu
         .map_err(ExecutorError::from)
 }
 
-fn interval_open(view: &ExecutorState, instrument: &InstrumentId) -> bool {
+pub(crate) fn interval_open(view: &ExecutorState, instrument: &InstrumentId) -> bool {
     view.unprotected
         .iter()
         .any(|interval| &interval.instrument == instrument && interval.ended_at.is_none())

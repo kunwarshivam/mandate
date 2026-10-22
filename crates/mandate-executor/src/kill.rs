@@ -2,7 +2,7 @@
 //! DEC-485): the final mode first, then the agent's own orders cancelled by id, then its
 //! sub-ledger sold through the executor's own flatten intents, each step journaled.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_accounting::{AssetClass, InstrumentId, Side};
 use mandate_canon::Value;
@@ -13,14 +13,14 @@ use crate::codec::{initiator_name, mode_name, purpose_name};
 use crate::error::ExecutorError;
 use crate::ids::{ClientOrderId, FLATTEN, IntentId};
 use crate::intent::{order_tif, received};
-use crate::payload::text;
-use crate::protection::{ask_cancel, lowest_sane, market_allowed};
+use crate::payload::{int, text};
+use crate::protection::{ask_cancel, changed, interval_open, lowest_sane, market_allowed};
 use crate::session::{Venue, venue};
-use crate::state::{EVERY_AGENT, ExecutorState, IntentOutcome, Switch};
+use crate::state::{EVERY_AGENT, ExecutorState, IntentOutcome, Switch, SwitchRead};
 use crate::types::{
-    AccountWide, AccountWideScope, AgentId, BrokerOrder, BrokerRequest, EventId, Initiator,
-    IntentBody, IntentHandoff, KillScope, Mode, Order, OrderState, OwnerConfirmation, Purpose,
-    RiskClock,
+    AccountWide, AccountWideScope, AgentId, BrokerOrder, BrokerOutcome, BrokerRequest, EventId,
+    Initiator, Input, IntentBody, IntentHandoff, KillScope, Mode, Order, OrderState,
+    OwnerConfirmation, Purpose, RiskClock, Seq,
 };
 
 /// The restriction the kill switch's final mode is recorded under (mandate spec §5.9).
@@ -190,22 +190,74 @@ fn account(
 /// the same way, never by sending the cancel-all again. Answers whether an account switch was
 /// waiting for it.
 pub(crate) fn cancel_all_answered(batch: &mut Batch<'_, '_>) -> bool {
-    if !batch.view.cancel_all_unconfirmed {
+    if batch.view.account_switch.is_none() {
         return false;
     }
     batch.broker(BrokerRequest::ListOpenOrders);
     true
 }
 
-/// The open-orders read that confirms an account switch's cancel-all (DEC-2333 items 2 and 3):
-/// any order of ours still working is cancelled by its own id, once until confirmed, a buy as much
-/// as a sell. Answers whether an account switch was waiting for it.
+/// Notes a broker read taken at or after the account switch, before its step (DEC-2333 item 2,
+/// DEC-2337 item 3): the sells it shows working in each instrument, ours by id, and the positions a
+/// reconciliation shows. A read taken before the switch cannot show what its cancel-all did, so it
+/// is not noted.
+pub(crate) fn note_read(state: &mut ExecutorState, input: &Input) {
+    let Some(switch) = &state.account_switch else {
+        return;
+    };
+    let (taken_at, orders, held) = match input {
+        Input::Broker(Ok(BrokerOutcome::OpenOrders(orders))) => {
+            (state.account_head(), orders, None)
+        }
+        Input::BrokerSnapshot(snapshot) => (
+            snapshot.taken_at_head,
+            &snapshot.open_orders,
+            Some(
+                snapshot
+                    .positions
+                    .iter()
+                    .map(|position| (position.instrument.clone(), position.qty))
+                    .collect(),
+            ),
+        ),
+        _ => return,
+    };
+    if taken_at < switch.seq {
+        return;
+    }
+    let mut sells: BTreeMap<InstrumentId, Vec<Option<ClientOrderId>>> = BTreeMap::new();
+    for order in orders.iter().filter(|order| order.side == Side::Sell) {
+        let ours = order
+            .client_order_id
+            .as_deref()
+            .and_then(|raw| ClientOrderId::parse(raw).ok())
+            .filter(|id| state.orders.contains_key(id));
+        sells
+            .entry(order.instrument.clone())
+            .or_default()
+            .push(ours);
+    }
+    state.switch_read = Some(SwitchRead {
+        taken_at,
+        sells,
+        held,
+    });
+}
+
+/// The open-orders read that confirms an account switch's cancel-all (DEC-2333 items 2 and 3),
+/// taken at the journal head `taken_at`: one taken before the switch confirms nothing. Any order
+/// of ours a later one shows still working is cancelled by its own id, once until confirmed, a buy
+/// as much as a sell. Answers whether an account switch was waiting for it.
 pub(crate) fn open_orders_read(
     batch: &mut Batch<'_, '_>,
     orders: &[BrokerOrder],
+    taken_at: Seq,
 ) -> Result<bool, ExecutorError> {
-    if !batch.view.cancel_all_unconfirmed {
+    let Some(switch) = &batch.view.account_switch else {
         return Ok(false);
+    };
+    if taken_at < switch.seq {
+        return Ok(true);
     }
     let working: Vec<ClientOrderId> = orders
         .iter()
@@ -214,6 +266,105 @@ pub(crate) fn open_orders_read(
         .collect();
     cancel_each(batch, working)?;
     Ok(true)
+}
+
+/// The account switch's close-position, one instrument at a time (§5.5, DEC-2333 item 2,
+/// DEC-2337): for each instrument it closes that is still held, once the latest read taken at or
+/// after the switch shows no sell working there but ours whose cancel is since confirmed. The first
+/// request is attempt 1. A later one goes only on a reconciliation taken at or after the last
+/// request that shows the instrument still held, so a crash or a lost answer never strands it and
+/// nothing is ever sent twice blind. Each request is journaled before it is sent. An instrument
+/// whose close is requested and that is no longer held ends its open interval (DEC-2337 item 4).
+pub(crate) fn closes_due(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
+    let (Some(switch), Some(read)) = (
+        batch.view.account_switch.clone(),
+        batch.view.switch_read.clone(),
+    ) else {
+        return Ok(());
+    };
+    for instrument in batch.view.closing_all.clone() {
+        let held = batch
+            .view
+            .positions
+            .get(&instrument)
+            .copied()
+            .unwrap_or(SignedQty::ZERO);
+        let clear = read.sells.get(&instrument).is_none_or(|sells| {
+            sells.iter().all(|sell| {
+                sell.as_ref()
+                    .and_then(|id| batch.view.orders.get(id))
+                    .is_some_and(|order| order.state.is_terminal())
+            })
+        });
+        if held <= SignedQty::ZERO {
+            if switch.requests.contains_key(&instrument) && interval_open(&batch.view, &instrument)
+            {
+                changed(batch, &instrument, "unprotected_end", Vec::new())?;
+            }
+            continue;
+        }
+        if !clear {
+            continue;
+        }
+        let attempt = match switch.requests.get(&instrument) {
+            None => 1,
+            Some((last, at))
+                if read.taken_at >= *at
+                    && read.held.as_ref().is_some_and(|positions| {
+                        positions
+                            .get(&instrument)
+                            .is_some_and(|qty| *qty > SignedQty::ZERO)
+                    }) =>
+            {
+                last.saturating_add(1)
+            }
+            Some(_) => continue,
+        };
+        batch.journal(
+            "AccountCloseRequested",
+            Some(switch.event.clone()),
+            vec![
+                ("instrument_id", text(instrument.as_str())),
+                ("qty", text(held.to_string())),
+                ("kill_switch_event", text(switch.event.0.clone())),
+                ("attempt", int(attempt)?),
+            ],
+        )?;
+        batch.broker(BrokerRequest::ClosePosition(
+            AccountWideScope::new(AccountWide::Account(switch.reference.clone())),
+            instrument,
+        ));
+    }
+    Ok(())
+}
+
+/// The in-doubt hold reads again every `unknown_absent_window_s` from the switch (DEC-2333 item
+/// 3) while any instrument it closes is still held: a reconciliation, whose open orders confirm the
+/// cancel-all and whose positions let a lost close be asked again (DEC-2337 item 3). Never the
+/// cancel-all again.
+pub(crate) fn reread_due(batch: &mut Batch<'_, '_>) {
+    let Some(switch) = &batch.view.account_switch else {
+        return;
+    };
+    let window = batch.ports.config.unknown_absent_window_s.max(1);
+    let windows = |at: Option<RiskClock>| {
+        at.map_or(0, |at| {
+            at.secs()
+                .saturating_sub(switch.at.secs())
+                .div_euclid(window)
+        })
+    };
+    let crossed = windows(batch.view.now) > windows(batch.view.previous_now);
+    let held = batch.view.closing_all.iter().any(|instrument| {
+        batch
+            .view
+            .positions
+            .get(instrument)
+            .is_some_and(|qty| *qty > SignedQty::ZERO)
+    });
+    if crossed && held {
+        batch.request_reconciliation();
+    }
 }
 
 /// Asks the cancel of each order by its own id, once until confirmed (§5.5).

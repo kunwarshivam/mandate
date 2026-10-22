@@ -5684,7 +5684,6 @@ fn another_instruments_open_interval_does_not_hide_the_closing_ones_start() {
 /// snapshot was taken at a head before the switch's record cannot show what the cancel-all did, so
 /// it confirms nothing and cancels nothing; one taken at or after it does.
 #[test]
-#[ignore = "pending E7-4"]
 fn only_a_read_taken_after_the_switch_confirms_its_cancel_all() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[BTC]);
@@ -5785,7 +5784,6 @@ fn a_ladder_rung_in_flight_is_not_followed_by_another_beside_the_close() {
 /// accepted, a read showing nothing of ours working in BTC, and the broker's close-position for BTC
 /// is sent, once.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_confirmed_instrument_is_closed_by_the_broker() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[BTC]);
@@ -5843,7 +5841,6 @@ fn closed_btc(
 /// 5): one `AccountCloseRequested` naming BTC, the quantity held, and the switch it carries out,
 /// ahead of the close-position.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_close_is_journaled_before_it_is_sent() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[BTC]);
@@ -5900,7 +5897,6 @@ fn a_close_is_journaled_before_it_is_sent() {
 /// it, showing BTC still held with nothing of ours working, journals `attempt` 2 before the
 /// close-position goes again.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_close_is_asked_again_only_on_a_later_read_showing_it_still_held() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[BTC]);
@@ -5967,7 +5963,6 @@ fn a_close_is_asked_again_only_on_a_later_read_showing_it_still_held() {
 /// `unprotected_end` after the `AccountCloseRequested`: the last end, since the entry's own interval
 /// ended before the switch.
 #[test]
-#[ignore = "pending E7-4"]
 fn the_interval_ends_once_the_close_leaves_nothing_held() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[BTC]);
@@ -6016,7 +6011,6 @@ fn the_interval_ends_once_the_close_leaves_nothing_held() {
 /// An instrument with a sell of ours still working waits for that cancel's confirmation, and
 /// closes then (DEC-2333 item 3): never beside a sell that may still fill.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_working_sell_holds_the_close_until_its_cancel_is_confirmed() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[BTC]);
@@ -6058,7 +6052,6 @@ fn a_working_sell_holds_the_close_until_its_cancel_is_confirmed() {
 /// unconfirmed (DEC-2333 item 3): a lost answer and a read that never comes back are read again at
 /// the window, never by sending the cancel-all again.
 #[test]
-#[ignore = "pending E7-4"]
 fn the_in_doubt_hold_reads_again_at_the_lookup_window() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[BTC]);

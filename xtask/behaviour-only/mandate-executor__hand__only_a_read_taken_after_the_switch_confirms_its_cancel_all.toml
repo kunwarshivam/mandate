@@ -1,6 +1,0 @@
-file = "crates/mandate-executor/tests/hand.rs"
-test = "only_a_read_taken_after_the_switch_confirms_its_cancel_all"
-reason = """
-E7-4's account kill switch, A1b (DEC-2333): today a snapshot taken before the switch confirms the cancel-all and cancels the stop by id; DEC-2333 item 6 asks the switch's seq be recorded and only a snapshot taken at or after it confirm. That is a behaviour, not a stub's report. It
-still runs and fails, and the slice that implements it deletes this file with its `#[ignore]` line.
-"""

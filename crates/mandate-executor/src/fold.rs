@@ -17,14 +17,14 @@ use crate::payload::{
 };
 use crate::protection::climbs;
 use crate::state::{
-    Adoption, Confirmed, EVERY_AGENT, ExecutorState, ExitSequence, IntentOutcome, IntentRecord,
-    Ladder, LoneLadder, ObservedAccount, OrderDetail, PendingRequest, PriorBase, Replacement,
-    Switch,
+    AccountSwitch, Adoption, Confirmed, EVERY_AGENT, ExecutorState, ExitSequence, IntentOutcome,
+    IntentRecord, Ladder, LoneLadder, ObservedAccount, OrderDetail, PendingRequest, PriorBase,
+    Replacement, Switch,
 };
 use crate::types::{
-    AccountState, ActivityCursor, AgentId, BracketLegs, EventId, FillId, FoldedEvent, IntentBody,
-    Mode, OcoLegs, Order, OrderState, OrderType, Protection, ProtectionPrices, Purpose, RiskClock,
-    Seq, SubmitOrder, TimeInForce, UnprotectedInterval,
+    AccountRef, AccountState, ActivityCursor, AgentId, BracketLegs, EventId, FillId, FoldedEvent,
+    IntentBody, Mode, OcoLegs, Order, OrderState, OrderType, Protection, ProtectionPrices, Purpose,
+    RiskClock, Seq, SubmitOrder, TimeInForce, UnprotectedInterval,
 };
 
 /// The copied cross-stream facts of journal spec §2 this crate interprets. Each carries a
@@ -142,7 +142,8 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
         }
         "OrderAbandoned" => order_abandoned(state, payload),
         "AgentModeApplied" => agent_mode_applied(state, payload),
-        "KillSwitchActivated" => kill_switch_activated(state, event),
+        "KillSwitchActivated" => kill_switch_activated(state, event, at),
+        "AccountCloseRequested" => account_close_requested(state, event),
         "OwnerConfirmationReceived" => owner_confirmation_received(state, payload),
         "ClockAdvanced" | "MarkUpdated" | "ConductBreachDetected" => Ok(()),
         "TradingDayStarted" => {
@@ -259,6 +260,7 @@ fn owner_elsewhere(kind: &str) -> Option<&'static str> {
         | "ConductBreachDetected"
         | "KillSwitchActivated"
         | "OwnerConfirmationReceived"
+        | "AccountCloseRequested"
         | "ConnectionChecked" => None,
         "RelatedAccountsCoordination" => Some("E7-5"),
         "MandateVersionApplied"
@@ -426,6 +428,7 @@ fn owner_confirmation_received(
 fn kill_switch_activated(
     state: &mut ExecutorState,
     event: &FoldedEvent,
+    at: RiskClock,
 ) -> Result<(), ExecutorError> {
     let payload = &event.payload;
     let scope = optional_text(payload, "scope");
@@ -449,7 +452,13 @@ fn kill_switch_activated(
     instruments.extend(named("deferred")?);
     if scope == Some("account") {
         state.closing_all.extend(instruments);
-        state.cancel_all_unconfirmed = true;
+        state.account_switch = Some(AccountSwitch {
+            event: event.event_id.clone(),
+            seq: event.seq,
+            reference: AccountRef(required_text(payload, "subject")?.to_owned()),
+            at,
+            requests: BTreeMap::new(),
+        });
         return Ok(());
     }
     let cancels = match payload.get("cancels") {
@@ -1103,6 +1112,27 @@ fn net_unattributed(
     Ok(())
 }
 
+/// One close-position request of the account switch (journal spec §9.5, DEC-2337): the latest
+/// attempt of its instrument and where it was journaled, so a replay never sends it again and a
+/// re-request waits for a read taken after it. A request naming another switch changes nothing.
+fn account_close_requested(
+    state: &mut ExecutorState,
+    event: &FoldedEvent,
+) -> Result<(), ExecutorError> {
+    let payload = &event.payload;
+    let instrument = instrument(payload)?;
+    let attempt = optional_int(payload, "attempt").ok_or_else(|| refused("attempt"))?;
+    let named = required_text(payload, "kill_switch_event")?;
+    if let Some(switch) = state
+        .account_switch
+        .as_mut()
+        .filter(|switch| switch.event.0 == named)
+    {
+        switch.requests.insert(instrument, (attempt, event.seq));
+    }
+    Ok(())
+}
+
 /// One restriction on one agent (or on every agent, as `*`). A mode is the strictest of an
 /// agent's active restrictions, and `normal` lifts the restriction it names (mandate spec §5.9).
 /// Lifting the `kill_switch` restriction also lifts whatever closes the agent's kill switches had
@@ -1122,7 +1152,8 @@ fn agent_mode_applied(state: &mut ExecutorState, payload: &Value) -> Result<(), 
         }
         if agent.0 == EVERY_AGENT && restriction == "kill_switch" {
             state.closing_all.clear();
-            state.cancel_all_unconfirmed = false;
+            state.account_switch = None;
+            state.switch_read = None;
         }
         state.restrictions.remove(&(agent.clone(), restriction));
     } else {
