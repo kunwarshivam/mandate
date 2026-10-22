@@ -42,7 +42,9 @@ use mandate_provisioner::driver::Provisioner;
 use mandate_provisioner::record::ACTOR_ID;
 #[cfg(debug_assertions)]
 use mandate_provisionerd::fixture::FixtureVault;
-use mandate_provisionerd::{Renewal, fixture_allowed, input, vault_config, vault_login};
+use mandate_provisionerd::{
+    Renewal, StartRefused, fixture_allowed, input, vault_config, vault_login,
+};
 use mandate_time::UtcNanos;
 use mandate_vault::provisioner::RoleProvisioner;
 use tokio::signal::unix::{SignalKind, signal};
@@ -143,8 +145,21 @@ fn run(
         .enable_all()
         .build()
         .map_err(|_| "runtime_unavailable")?;
+    #[cfg(debug_assertions)]
+    if vault.is_none() {
+        let provisioner = Provisioner::new(
+            identity,
+            namespace,
+            MemoryControl::new(stream),
+            FixtureVault,
+            StderrAlerts::default(),
+        );
+        return runtime.block_on(serve(provisioner, socket, &terminate, async |_| {
+            Session::Keep
+        }));
+    }
     let Some((address, dir)) = vault else {
-        return fixture(identity, namespace, stream, socket, &terminate, &runtime);
+        return Err(StartRefused::FixtureNotBuilt.code());
     };
     let config = vault_config(&address, &dir)?;
     let dsn = std::env::var("MANDATE_JOURNAL_DSN").map_err(|_| "journal_dsn_missing")?;
@@ -180,41 +195,6 @@ fn run(
         };
         serve(provisioner, socket, &terminate, relogin).await
     })
-}
-
-/// The fixture run: an in-memory journal and a vault that keeps nothing. A build without debug
-/// assertions has none, and [`fixture_allowed`] refused the start before it got here.
-#[cfg(debug_assertions)]
-fn fixture(
-    identity: Identity,
-    namespace: &str,
-    stream: StreamId,
-    socket: &Path,
-    terminate: &AtomicBool,
-    runtime: &tokio::runtime::Runtime,
-) -> Result<u8, &'static str> {
-    let provisioner = Provisioner::new(
-        identity,
-        namespace,
-        MemoryControl::new(stream),
-        FixtureVault,
-        StderrAlerts::default(),
-    );
-    runtime.block_on(serve(provisioner, socket, terminate, async |_| {
-        Session::Keep
-    }))
-}
-
-#[cfg(not(debug_assertions))]
-fn fixture(
-    _identity: Identity,
-    _namespace: &str,
-    _stream: StreamId,
-    _socket: &Path,
-    _terminate: &AtomicBool,
-    _runtime: &tokio::runtime::Runtime,
-) -> Result<u8, &'static str> {
-    Err(mandate_provisionerd::StartRefused::FixtureNotBuilt.code())
 }
 
 /// The vault session for the next pass.
