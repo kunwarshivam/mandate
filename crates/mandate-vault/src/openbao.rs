@@ -267,12 +267,35 @@ pub(crate) fn taken_read(
         .and_then(|r| r.pointer("/data/metadata/version"))
         .and_then(Value::as_u64)
         .ok_or(SourceError::Malformed)?;
-    let code = SecretSlice::from(
-        STANDARD
-            .decode(text(read.as_ref(), "/data/data/value")?)
-            .map_err(|_| SourceError::Malformed)?,
-    );
+    let code = exact_decode(text(read.as_ref(), "/data/data/value")?)?;
     Ok(Some((version, code)))
+}
+
+/// The bytes `encoded`, padded standard base64, decodes to, in a buffer of exactly their size, so
+/// boxing them as a secret never copies them and leaves the first copy unwiped; a buffer partly
+/// written by a decode that fails is wiped. Anything but padded standard base64 is
+/// [`SourceError::Malformed`].
+fn exact_decode(encoded: &str) -> Result<SecretSlice<u8>, SourceError> {
+    let padding = encoded
+        .bytes()
+        .rev()
+        .take_while(|byte| *byte == b'=')
+        .count();
+    let size = encoded
+        .len()
+        .checked_div(4)
+        .and_then(|quads| quads.checked_mul(3))
+        .and_then(|whole| whole.checked_sub(padding))
+        .filter(|_| encoded.len().is_multiple_of(4) && padding <= 2)
+        .ok_or(SourceError::Malformed)?;
+    let mut bytes = vec![0u8; size];
+    match STANDARD.decode_slice(encoded, &mut bytes) {
+        Ok(written) if written == size => Ok(SecretSlice::from(bytes.into_boxed_slice())),
+        _ => {
+            bytes.zeroize();
+            Err(SourceError::Malformed)
+        }
+    }
 }
 
 /// What the read again after a refused overwrite means: the code gone is a race another taker
@@ -619,9 +642,9 @@ impl SecretSource for OpenBaoSource {
     }
 
     /// Reads the code with its version, overwrites that version alone with a tombstone, destroys
-    /// the version read and deletes the tombstone, keeping the metadata so the version count never
-    /// restarts (DEC-2321): a taker whose overwrite loses, or that reads a tombstone or no code,
-    /// gets `None`.
+    /// the version read and deletes the tombstone's version alone, keeping the metadata so the
+    /// version count never restarts and a code stored since is never hidden (DEC-2321): a taker
+    /// whose overwrite loses, or that reads a tombstone or no code, gets `None`.
     async fn take_code(
         &self,
         connection: &ConnectionId,
@@ -632,6 +655,7 @@ impl SecretSource for OpenBaoSource {
         let Some((version, code)) = taken_read(self.call(Method::GET, &data, None).await)? else {
             return Ok(None);
         };
+        let tombstone = version.checked_add(1).ok_or(SourceError::Malformed)?;
         let body = json!({ "options": { "cas": version }, "data": { TOMBSTONE: true } });
         let overwrite = self
             .http
@@ -643,22 +667,21 @@ impl SecretSource for OpenBaoSource {
             Err(SourceError::Denied) => return self.lost_or_denied(&data).await,
             Err(e) => return Err(e),
         }
-        let destroy = format!("{}/destroy/{}", self.mounts.kv, kv_path(&path)?);
-        match self
-            .call(
-                Method::POST,
-                &destroy,
-                Some(&json!({ "versions": [version] })),
-            )
-            .await
-        {
-            Ok(_) | Err(SourceError::Missing) => {}
-            Err(e) => return Err(e),
+        for (endpoint, versions) in [("destroy", version), ("delete", tombstone)] {
+            let named = format!("{}/{endpoint}/{}", self.mounts.kv, kv_path(&path)?);
+            match self
+                .call(
+                    Method::POST,
+                    &named,
+                    Some(&json!({ "versions": [versions] })),
+                )
+                .await
+            {
+                Ok(_) | Err(SourceError::Missing) => {}
+                Err(e) => return Err(e),
+            }
         }
-        match self.call(Method::DELETE, &data, None).await {
-            Ok(_) | Err(SourceError::Missing) => Ok(Some(code)),
-            Err(e) => Err(e),
-        }
+        Ok(Some(code))
     }
 
     async fn put(&self, path: &SecretPath, secret: &SecretSlice<u8>) -> Result<(), SourceError> {

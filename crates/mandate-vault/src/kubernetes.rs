@@ -149,8 +149,9 @@ pub fn kubernetes_policy(
             block(
                 "data",
                 &format!("connections/{own}/code"),
-                "\"read\", \"update\", \"delete\"",
+                "\"read\", \"update\"",
             ),
+            block("delete", &format!("connections/{own}/code"), "\"update\""),
             block("destroy", &format!("connections/{own}/code"), "\"update\""),
             block(
                 "data",
