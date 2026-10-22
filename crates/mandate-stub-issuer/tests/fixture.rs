@@ -19,7 +19,6 @@ fn the_public_host_refusal_has_its_decisions_name() {
 }
 
 #[test]
-#[ignore = "pending E21-33"]
 fn in_dev_and_ci_it_listens_on_any_address_and_answers_its_public_host() {
     for tier in ["dev", "ci"] {
         for (bind, host) in [
@@ -39,7 +38,6 @@ fn in_dev_and_ci_it_listens_on_any_address_and_answers_its_public_host() {
 }
 
 #[test]
-#[ignore = "pending E21-33"]
 fn a_build_without_debug_assertions_refuses_before_reading_anything() {
     for tier in [Some("dev"), Some("production"), None] {
         for (bind, host) in [(BIND, HOST), ("", ""), ("0.0.0.0:0", "http://x")] {
@@ -53,7 +51,6 @@ fn a_build_without_debug_assertions_refuses_before_reading_anything() {
 }
 
 #[test]
-#[ignore = "pending E21-33"]
 fn outside_dev_and_ci_it_refuses_before_its_bind_or_host() {
     for tier in [
         None,
@@ -74,7 +71,6 @@ fn outside_dev_and_ci_it_refuses_before_its_bind_or_host() {
 }
 
 #[test]
-#[ignore = "pending E21-33"]
 fn a_bind_without_a_port_or_that_does_not_print_back_is_refused_before_the_host() {
     for bind in [
         "",
@@ -97,7 +93,6 @@ fn a_bind_without_a_port_or_that_does_not_print_back_is_refused_before_the_host(
 }
 
 #[test]
-#[ignore = "pending E21-33"]
 fn a_public_host_that_is_not_a_lowercase_name_and_a_port_is_refused() {
     let long_label = format!("{}:8091", "a".repeat(64));
     let long_name = format!("{}a:8091", "a.".repeat(127));
@@ -139,7 +134,6 @@ fn a_public_host_that_is_not_a_lowercase_name_and_a_port_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E21-33"]
 fn a_label_of_63_and_a_name_of_253_are_the_longest_answered() {
     let label = format!("{}:8091", "a".repeat(63));
     let labels = vec!["a".repeat(63); 4].join(".");

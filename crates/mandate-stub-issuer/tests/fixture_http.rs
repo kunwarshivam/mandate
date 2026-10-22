@@ -99,7 +99,6 @@ fn get(addr: SocketAddr, host: &str, path: &str) -> Reply {
 }
 
 #[test]
-#[ignore = "pending E21-33"]
 fn the_browsers_code_redeems_for_a_token_at_the_public_host() {
     let addr = serve();
     let redirected = get(addr, HOST, &authorize_path());
@@ -137,7 +136,6 @@ fn the_browsers_code_redeems_for_a_token_at_the_public_host() {
 }
 
 #[test]
-#[ignore = "pending E21-33"]
 fn any_host_but_its_public_host_or_two_hosts_are_misdirected() {
     let addr = serve();
     for host in [
@@ -157,7 +155,6 @@ fn any_host_but_its_public_host_or_two_hosts_are_misdirected() {
 }
 
 #[test]
-#[ignore = "pending E21-33"]
 fn no_issuer_runs_so_its_routes_and_every_other_path_are_not_found() {
     let addr = serve();
     for (method, path, headers) in [

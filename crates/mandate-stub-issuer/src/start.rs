@@ -22,8 +22,6 @@ pub enum Refused {
     /// `--alpaca-only` without a `--public-host` that is a lowercase host name and a port, or a
     /// `--public-host` without `--alpaca-only` (DEC-1176 item 8).
     PublicHost,
-    /// What E21-33 has not built yet.
-    Unimplemented { story: &'static str },
 }
 
 impl Refused {
@@ -35,7 +33,6 @@ impl Refused {
             Self::Bind => "stub_issuer_bind",
             Self::Alpaca => "stub_issuer_alpaca",
             Self::PublicHost => "stub_issuer_public_host",
-            Self::Unimplemented { .. } => "stub_issuer_unimplemented",
         }
     }
 }
@@ -90,6 +87,50 @@ pub fn check_fixture(
     bind: &str,
     public_host: &str,
 ) -> Result<Fixture, Refused> {
-    let _ = (built, tier, bind, public_host);
-    Err(Refused::Unimplemented { story: "E21-33" })
+    if !built {
+        return Err(Refused::NotBuilt);
+    }
+    if !matches!(Tier::from_setting(tier), Tier::Dev | Tier::Ci) {
+        return Err(Refused::Tier);
+    }
+    let bind = bind
+        .parse::<SocketAddr>()
+        .ok()
+        .filter(|addr| addr.port() != 0 && addr.to_string() == bind)
+        .ok_or(Refused::Bind)?;
+    if !host_and_port(public_host) {
+        return Err(Refused::PublicHost);
+    }
+    Ok(Fixture {
+        bind,
+        host: public_host.to_owned(),
+    })
+}
+
+/// The longest host name, and the longest label in it (RFC 1035 §2.3.4).
+const MAX_NAME: usize = 253;
+const MAX_LABEL: usize = 63;
+
+/// Whether `text` is a lowercase host name, a colon, and a port from 1 to 65535 with no leading
+/// zero.
+fn host_and_port(text: &str) -> bool {
+    let Some((name, port)) = text.rsplit_once(':') else {
+        return false;
+    };
+    let port_ok = port.bytes().all(|b| b.is_ascii_digit())
+        && !port.starts_with('0')
+        && port.parse::<u16>().is_ok_and(|port| port != 0);
+    port_ok && name.len() <= MAX_NAME && name.split('.').all(label)
+}
+
+/// Whether `text` is one label: 1 to 63 lowercase letters, digits and hyphens, neither first nor
+/// last a hyphen.
+fn label(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    (1..=MAX_LABEL).contains(&bytes.len())
+        && bytes
+            .iter()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || *b == b'-')
+        && bytes.first() != Some(&b'-')
+        && bytes.last() != Some(&b'-')
 }
