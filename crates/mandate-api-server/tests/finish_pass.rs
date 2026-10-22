@@ -219,7 +219,6 @@ fn last(journal: &MemJournal) -> (String, Value, Value) {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_passed_check_judged_unique_is_established_at_the_head_read() {
     let (journal, deletes, mut finisher) = finisher(Unique);
     request(&journal, A, 2, "oauth");
@@ -239,7 +238,6 @@ fn a_passed_check_judged_unique_is_established_at_the_head_read() {
 
 /// Item 3's order: deleted, then the refusal appended, then deleted again.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_refusal_is_deleted_before_and_after_it_is_appended() {
     let (journal, deletes, mut finisher) = finisher(Unique);
     request(&journal, A, 2, "oauth");
@@ -256,7 +254,6 @@ fn a_refusal_is_deleted_before_and_after_it_is_appended() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn the_deadline_tears_the_connect_down_as_timeout() {
     let (journal, deletes, mut finisher) = finisher(Unbacked);
     request(&journal, A, 2, "oauth");
@@ -272,7 +269,6 @@ fn the_deadline_tears_the_connect_down_as_timeout() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn the_first_pass_past_the_deadline_is_restart_past_deadline() {
     let (journal, _, mut finisher) = finisher(Unique);
     request(&journal, A, 2, "oauth");
@@ -281,7 +277,6 @@ fn the_first_pass_past_the_deadline_is_restart_past_deadline() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_control_stream_that_cannot_be_read_leaves_the_restart_pass_to_come() {
     let (journal, _, mut finisher) = finisher(Unique);
     request(&journal, A, 2, "oauth");
@@ -294,7 +289,6 @@ fn a_control_stream_that_cannot_be_read_leaves_the_restart_pass_to_come() {
 
 /// Item 6: an account stream that cannot be read leaves the fold unanswered, past the deadline too.
 #[test]
-#[ignore = "pending E10-13"]
 fn an_account_stream_that_cannot_be_read_appends_nothing() {
     let (journal, deletes, mut finisher) = finisher(Unique);
     request(&journal, A, 2, "oauth");
@@ -306,7 +300,6 @@ fn an_account_stream_that_cannot_be_read_appends_nothing() {
 
 /// Item 5: a request that is not an `oauth` one is not this writer's.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_request_that_is_not_oauth_waits_past_its_deadline() {
     let (journal, _, mut finisher) = finisher(Unique);
     request(&journal, A, 1, "");
@@ -317,7 +310,6 @@ fn a_request_that_is_not_oauth_waits_past_its_deadline() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_moved_head_appends_nothing_and_the_next_pass_retries() {
     let (journal, _, mut finisher) = finisher(Unique);
     request(&journal, A, 2, "oauth");
@@ -330,7 +322,6 @@ fn a_moved_head_appends_nothing_and_the_next_pass_retries() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn two_finishes_in_one_pass_append_in_turn() {
     let (journal, _, mut finisher) = finisher(Unique);
     request(&journal, A, 2, "oauth");
@@ -364,7 +355,6 @@ fn two_finishes_in_one_pass_append_in_turn() {
 
 /// A refusal that another writer appended first still has its deletes after it.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_refusal_already_committed_is_deleted_again() {
     let (journal, deletes, mut finisher) = finisher(Unique);
     request(&journal, A, 2, "oauth");
@@ -377,7 +367,6 @@ fn a_refusal_already_committed_is_deleted_again() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_failed_delete_is_retried_on_every_pass_until_it_succeeds() {
     let (journal, deletes, mut finisher) = finisher(Unique);
     request(&journal, A, 2, "oauth");
@@ -397,7 +386,6 @@ fn a_failed_delete_is_retried_on_every_pass_until_it_succeeds() {
 /// The restart pass deletes, once, every `oauth` connect a refusal or a revoke closed, and no
 /// established connection's entries, nor another writer's request's.
 #[test]
-#[ignore = "pending E10-13"]
 fn the_restart_pass_deletes_every_closed_connect_once() {
     let (journal, deletes, mut finisher) = finisher(Unique);
     for (connection, version, credential) in [
