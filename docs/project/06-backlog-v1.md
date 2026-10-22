@@ -425,6 +425,17 @@ the spec invariants (DP-n) its tests cover.
   to MC-L09 pass.
 - **E6-5 (Must)** As an owner, I want kill switches per agent, connection, and workspace so
   that I can stop everything immediately.
+  - **Retirement leaves nothing of the agent's** ([DEC-2344](decisions/DEC-2344.md) item 2; mandate
+    spec v0.9 §3.1, journal spec v0.75 §9.2). Once the runtime writes `AgentStopped` for an agent
+    that ran (goal completion, `release`, and the owner's Stop under DEC-136's flat-or-release
+    precondition), it writes it only when the account stream's fold shows no position attributed to
+    the agent and no working order of its own, none `Unknown`. The deployment manager stops the
+    runtime, and the account's last executor, on that record alone. Nothing writes it for an agent
+    that ran today, so this lands with that writer. *Accepted when:* a property test over random
+    sequences of fills, exits, protective cancels, releases, `Unknown` orders and Stops shows no
+    `AgentStopped` while the account fold, computed by its own accumulator, holds a position or a
+    working order of the agent's, and that oracle is shown to catch a seeded retirement on a sent but
+    unfilled exit. Safety-critical (autonomy policy and kill switches), DEC-77 sequence.
 - **E6-6 (Must)** As an owner, I want US account rules (day-trading regime, settlement, short
   sales, market hours) enforced by the risk gate so that agents never get my account restricted.
   *Accepted when:* simulation tests for each rule pass; blocked orders are journaled with the rule.
