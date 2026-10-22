@@ -679,3 +679,17 @@ fn an_exchanges_pod_is_listed_by_the_charts_process_name() {
         "the label is the chart's name, never the journal's code"
     );
 }
+
+#[test]
+fn each_process_reads_back_from_its_journal_code_and_from_its_chart_label() {
+    for process in [Process::Runtime, Process::Executor, Process::TokenExchange] {
+        assert_eq!(Process::parse(process.code()), Some(process));
+        assert_eq!(Process::from_label(process.label()), Some(process));
+    }
+    assert_eq!(
+        Process::parse("token_exchange"),
+        Some(Process::TokenExchange)
+    );
+    assert_eq!(Process::parse("token-exchange"), None);
+    assert_eq!(Process::from_label("token_exchange"), None);
+}
