@@ -280,6 +280,46 @@ fn an_agent_redeployed_elsewhere_gets_no_opening_here_but_its_exit_and_switch() 
     Ok(())
 }
 
+/// A version-1 establishment of the agent's connection holds its openings like a revocation
+/// (DEC-1171 item 3): its exit and kill switch are still read.
+#[test]
+fn a_version_1_establishment_holds_openings_but_not_the_switch_or_exit() -> Result<(), Error> {
+    let journal = deployed()?;
+    journal.write(
+        support::CONTROL_STREAM,
+        "c3",
+        "ConnectionEstablished",
+        1,
+        None,
+        support::object(vec![(
+            "connection_id",
+            mandate_canon::Value::Str(CONNECTION.to_owned()),
+        )])?,
+    )?;
+    propose(&journal, AGENT, OPEN, "buy", "10", "150", "open")?;
+    propose(&journal, AGENT, EXIT, "sell", "10", "150", "risk_exit")?;
+    kill(&journal, AGENT, COPY)?;
+    let broker = Paper::new(&journal);
+    let mut process = start_allowing(&journal, &broker)?;
+    process.step(at(NOON)?);
+    assert_eq!(journal.received(), [EXIT], "the exit only");
+    assert_eq!(journal.switched(), [AGENT], "and the switch");
+    Ok(())
+}
+
+/// Another workspace's kill switch reaches no agent here, revoked or not.
+#[test]
+fn another_workspaces_kill_switch_reaches_no_agent_here() -> Result<(), Error> {
+    let journal = deployed()?;
+    kill_command(&journal, COMMAND, "workspace", "ws-other")?;
+    revoke(&journal, "c4", CONNECTION, true)?;
+    let broker = Paper::new(&journal);
+    let mut process = start(&journal, &broker)?;
+    process.step(at(NOON)?);
+    assert!(journal.applications().is_empty());
+    Ok(())
+}
+
 /// Option (2) of DEC-2343: with no revocation, a connection's kill switch waits for the runtime's
 /// copy, which carries the owner's confirmation, and is applied once from it.
 #[test]

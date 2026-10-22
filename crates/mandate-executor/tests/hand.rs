@@ -6949,3 +6949,41 @@ fn a_restart_in_a_parked_night_alerts_nothing_more() {
         "the exit still goes at the open"
     );
 }
+
+/// One command applied as the switch of two agents counts as applied for each of them, and for no
+/// other agent or record (DEC-2343 item 4, `ExecutorState::applied_for`): the executor process
+/// dedupes a command against the runtime's copy per agent.
+#[test]
+fn a_switch_copied_from_one_record_is_applied_for_its_own_agents_only() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = started();
+    shell.fold_one(&stream_opened()).expect("folds");
+    let mut shell = shell.restart_ready(&ports);
+    let command = EventId("01JCMD000000000000000000AA".to_owned());
+    for named in [common::AGENT, OTHER_AGENT] {
+        shell.run(
+            Input::Command(Command::KillSwitch {
+                scope: KillScope::Agent(agent(named)),
+                initiator: Initiator::RiskLimit,
+                confirmation: None,
+                cause: Some(command.clone()),
+            }),
+            &ports,
+        );
+    }
+    let other = EventId("01JCMD000000000000000000AB".to_owned());
+    assert_eq!(
+        (
+            shell.state.applied_for(&agent(common::AGENT), &command),
+            shell.state.applied_for(&agent(OTHER_AGENT), &command),
+            shell.state.applied_for(&agent("agent-c"), &command),
+            shell.state.applied_for(&agent(common::AGENT), &other),
+        ),
+        (true, true, false, false),
+        "each named agent once, no other agent or record"
+    );
+}
