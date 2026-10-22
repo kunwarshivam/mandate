@@ -4473,6 +4473,375 @@ fn a_fractional_position_protects_the_whole_shares_and_discloses_the_fraction() 
     );
 }
 
+/// A fractionable position of `held` shares of `FRAC`, its whole ten protected by one resting GTC
+/// OCO created on 2026-09-22, as the fractional slice leaves it after its entry fills (DEC-2312
+/// item 2).
+fn fractional_position(ports: &mandate_executor::Ports<'_>, held: &str) -> Shell {
+    let mut shell = started();
+    shell.fold_one(&stream_opened()).expect("folds");
+    for held in [
+        event(
+            ACCOUNT_STREAM,
+            2,
+            "OrderSubmitted",
+            with_clock(
+                &[
+                    ("client_order_id", text("md-held-frac")),
+                    ("agent", text(common::AGENT)),
+                    ("instrument", text(FRAC)),
+                    ("side", text("buy")),
+                    ("qty", text(held)),
+                    ("limit", text("20")),
+                ],
+                10,
+            ),
+        ),
+        event(
+            ACCOUNT_STREAM,
+            3,
+            "FillApplied",
+            with_clock(
+                &[
+                    ("fill_id", text("f-0")),
+                    ("client_order_id", text("md-held-frac")),
+                    ("instrument", text(FRAC)),
+                    ("side", text("buy")),
+                    ("qty_gross", text(held)),
+                    ("price", text("20")),
+                ],
+                10,
+            ),
+        ),
+        event(
+            ACCOUNT_STREAM,
+            4,
+            "OrderStateChanged",
+            with_clock(
+                &[
+                    ("client_order_id", text("md-held-frac")),
+                    ("state", text("filled")),
+                ],
+                10,
+            ),
+        ),
+        event(
+            ACCOUNT_STREAM,
+            5,
+            "ProtectionChanged",
+            with_clock(
+                &[
+                    ("instrument", text(FRAC)),
+                    ("action", text("placed")),
+                    ("orders", text("md-oco-1")),
+                    ("qty", text("10")),
+                    ("take_profit", text("24")),
+                    ("stop", text("18")),
+                    ("created_on", text("2026-09-22")),
+                ],
+                11,
+            ),
+        ),
+    ] {
+        shell
+            .fold_one(&held)
+            .expect("the fractional position and its whole shares' protection fold");
+    }
+    shell.restart_ready(ports)
+}
+
+/// §5.2's Alpaca table keeps a fractional equity order out of OCO and bracket orders and makes it
+/// TIF day, and §5.3 rule 7 says the same: a fractional entry goes as a plain DAY limit whatever
+/// protective prices it carries, on a profile that offers brackets, and only that form (DEC-2312
+/// item 1). A whole-share entry in the same instrument still goes as its bracket.
+#[test]
+#[ignore = "pending E7-4"]
+fn a_fractional_entry_goes_as_a_plain_day_limit_whatever_its_prices() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[FRAC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    for (quantity, take_profit) in [("10.4", Some("24")), ("10.4", None), ("0.4", Some("24"))] {
+        let mut shell = started();
+        shell.fold_one(&stream_opened()).expect("folds");
+        let mut shell = shell.restart_ready(&ports);
+        shell.run(Input::Market(quote(FRAC, "20", "20.1", 20)), &ports);
+        let ran = shell.run(
+            handoff(
+                INTENT,
+                common::AGENT,
+                protected_opening(FRAC, quantity, "20", "18", take_profit),
+            ),
+            &ports,
+        );
+        let entry = ran
+            .submissions()
+            .first()
+            .copied()
+            .unwrap_or_else(|| panic!("the fractional entry of {quantity} is sent"));
+        assert_eq!(
+            (
+                entry.qty,
+                entry.bracket.is_some(),
+                entry.tif,
+                entry.order_type
+            ),
+            (
+                qty(quantity),
+                false,
+                mandate_executor::TimeInForce::Day,
+                mandate_executor::OrderType::Limit
+            ),
+            "{quantity} with take-profit {take_profit:?}: never a bracket, always a DAY limit (§5.2)"
+        );
+    }
+
+    let mut shell = started();
+    shell.fold_one(&stream_opened()).expect("folds");
+    let mut shell = shell.restart_ready(&ports);
+    shell.run(Input::Market(quote(FRAC, "20", "20.1", 20)), &ports);
+    let whole = shell.run(
+        handoff(
+            INTENT,
+            common::AGENT,
+            protected_opening(FRAC, "10", "20", "18", Some("24")),
+        ),
+        &ports,
+    );
+    assert!(
+        whole
+            .submissions()
+            .first()
+            .is_some_and(|entry| entry.bracket.is_some()),
+        "a whole-share entry in a fractionable instrument is still its bracket (§5.4)"
+    );
+}
+
+/// A fractional add is a plain order, not a bracket, so where protection already rests §5.3 rule 8
+/// denies it as `add_blocked_by_protective_order`, as it denies any plain equity add: the
+/// conservative reading (DEC-2312 item 1). Nothing is sent and the resting OCO is not touched.
+#[test]
+#[ignore = "pending E7-4"]
+fn a_fractional_add_where_protection_rests_is_denied_as_a_plain_add() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[FRAC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = fractional_position(&ports, "10");
+    shell.run(Input::Market(quote(FRAC, "20", "20.1", 20)), &ports);
+
+    let ran = shell.run(
+        handoff(
+            INTENT,
+            common::AGENT,
+            common::protected_add(FRAC, "0.5", "20", "18", Some("24")),
+        ),
+        &ports,
+    );
+
+    let decided = ran
+        .draft("GateDecided")
+        .expect("the add is gated and the decision journaled");
+    assert_eq!(
+        (
+            decided
+                .payload
+                .get("verdict")
+                .and_then(mandate_canon::Value::as_str),
+            decided
+                .payload
+                .get("reason_code")
+                .and_then(mandate_canon::Value::as_str)
+        ),
+        (Some("deny"), Some("add_blocked_by_protective_order")),
+        "a plain add beside resting protection (§5.3 rule 8)"
+    );
+    assert!(
+        ran.requests.is_empty(),
+        "nothing is sent and the OCO keeps resting: {:?}",
+        ran.requests
+    );
+}
+
+/// A position under one share has no whole share to protect (§5.4): once its entry fills, no
+/// protective order is sent, the interval it started ends, and the start discloses the whole
+/// position as the fraction left unprotected (DEC-2312 items 2 and 3).
+#[test]
+#[ignore = "pending E7-4"]
+fn a_position_under_one_share_places_nothing_and_discloses_its_fraction() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[FRAC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = started();
+    shell.fold_one(&stream_opened()).expect("folds");
+    let mut shell = shell.restart_ready(&ports);
+    shell.run(Input::Market(quote(FRAC, "20", "20.1", 20)), &ports);
+    let submitted = shell.run(
+        handoff(
+            INTENT,
+            common::AGENT,
+            protected_opening(FRAC, "0.4", "20", "18", Some("24")),
+        ),
+        &ports,
+    );
+    let id = submitted
+        .submissions()
+        .first()
+        .map(|o| o.client_order_id.as_str().to_owned())
+        .expect("the entry under one share is sent");
+
+    let ran = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+            "b-1",
+            Some(&id),
+            FRAC,
+            Side::Buy,
+            "0.4",
+            "0.4",
+            "filled",
+        ))),
+        &ports,
+    );
+
+    assert!(
+        ran.submissions().is_empty(),
+        "no whole share, so no protective order: {:?}",
+        ran.requests
+    );
+    let changes: Vec<(Option<&str>, Option<&str>)> = ran
+        .drafts
+        .iter()
+        .filter(|d| d.event_type == "ProtectionChanged")
+        .map(|d| {
+            (
+                d.payload
+                    .get("action")
+                    .and_then(mandate_canon::Value::as_str),
+                d.payload
+                    .get("unprotected_fraction")
+                    .and_then(mandate_canon::Value::as_str),
+            )
+        })
+        .collect();
+    assert_eq!(
+        changes,
+        vec![
+            (Some("unprotected_start"), Some("0.4")),
+            (Some("unprotected_end"), None)
+        ],
+        "the start discloses the fraction and the interval ends with nothing to cover"
+    );
+}
+
+/// §5.4's re-placement before expiry re-places the whole shares only: a held 10.4 whose OCO for ten
+/// nears its GTC expiry is cancelled, confirmed, and re-placed for ten, never 10.4, and the
+/// placement discloses the 0.4 it leaves unprotected (DEC-2312 items 2 and 3).
+#[test]
+#[ignore = "pending E7-4"]
+fn a_re_placement_before_expiry_covers_only_the_whole_shares() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[FRAC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = fractional_position(&ports, "10.4");
+    let day = copied(
+        ACCOUNT_STREAM,
+        shell.head().0.saturating_add(1),
+        "TradingDayStarted",
+        with_clock(&[("date", text("2026-12-14"))], 7_000_000),
+        &EventId(format!("{CLOCK_STREAM}-9")),
+    );
+    shell.fold_one(&day).expect("the trading day folds");
+    let cancelled = shell.run(Input::Journal(day), &ports);
+    assert!(
+        cancelled
+            .requests
+            .iter()
+            .any(|r| matches!(r, BrokerRequest::Cancel { .. })),
+        "the OCO created 2026-09-22 is cancelled at its buffer day (§5.4): {:?}",
+        cancelled.requests
+    );
+
+    let ran = shell.run(
+        Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+            client_order_id: "md-oco-1".to_owned(),
+        })),
+        &ports,
+    );
+
+    let protective = ran
+        .submissions()
+        .into_iter()
+        .find(|o| o.purpose == Purpose::Protective)
+        .expect("the whole shares are protected again");
+    assert_eq!(
+        protective.qty,
+        qty("10"),
+        "the whole shares only: a fraction is not allowed in an OCO (§5.2)"
+    );
+    let placed = ran
+        .drafts
+        .iter()
+        .find(|d| {
+            d.event_type == "ProtectionChanged"
+                && d.payload
+                    .get("action")
+                    .and_then(mandate_canon::Value::as_str)
+                    == Some("placed")
+        })
+        .expect("the re-placement is journaled");
+    assert_eq!(
+        placed
+            .payload
+            .get("unprotected_fraction")
+            .and_then(mandate_canon::Value::as_str),
+        Some("0.4"),
+        "and discloses the fraction it leaves"
+    );
+}
+
+/// Every `ProtectionChanged` the executor writes is version 2, with `unprotected_fraction` present
+/// on every record and null where nothing is disclosed (journal spec §9.5, rule 44; DEC-2312 item 3):
+/// here the `intended` record of a whole-share entry.
+#[test]
+#[ignore = "pending E7-4"]
+fn every_protection_changed_is_written_at_version_2() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = started();
+    shell.fold_one(&stream_opened()).expect("folds");
+    let mut shell = shell.restart_ready(&ports);
+    shell.run(Input::Market(quote(AAPL, "150", "150.1", 20)), &ports);
+
+    let ran = shell.run(
+        handoff(
+            INTENT,
+            common::AGENT,
+            protected_opening(AAPL, "10", "150", "140", Some("170")),
+        ),
+        &ports,
+    );
+
+    let intended = ran
+        .draft("ProtectionChanged")
+        .expect("the entry's protective prices are journaled as intended");
+    assert_eq!(
+        (
+            intended.schema_version,
+            intended.payload.get("unprotected_fraction")
+        ),
+        (2, Some(&mandate_canon::Value::Null)),
+        "version 2, the fraction present and null"
+    );
+}
+
 #[test]
 fn the_ladder_prices_from_a_fresh_sane_quote_first() {
     let ids = TestIds;
