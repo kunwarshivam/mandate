@@ -601,7 +601,7 @@ async fn after_a_take_no_version_of_the_code_is_left() {
         let left = bao
             .operator(Method::GET, &format!("{data}{version}"), None)
             .await;
-        assert!(left["data"].is_null(), "{version}: {left}");
+        assert!(left["data"]["data"].is_null(), "{version}: {left}");
     }
     let metadata = format!(
         "{}/metadata/{}",
