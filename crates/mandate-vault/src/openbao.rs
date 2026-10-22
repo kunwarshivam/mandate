@@ -371,8 +371,12 @@ pub fn seal_verdict(body: &[u8], allow_dev: bool) -> Result<(), SourceError> {
 /// # Errors
 /// [`SourceError::Config`] for any other answer.
 pub fn transit_mount_verdict(answer: Option<&Value>) -> Result<(), SourceError> {
-    let _ = answer;
-    Err(SourceError::Unimplemented { story: "E21-32" })
+    let transit = answer.and_then(|mount| mount.pointer("/data/type")) == Some(&json!("transit"));
+    if transit {
+        Ok(())
+    } else {
+        Err(SourceError::Config)
+    }
 }
 
 /// Whether a fingerprint key already there, from its `<transit>/keys/<key>` answer, is as
@@ -383,8 +387,14 @@ pub fn transit_mount_verdict(answer: Option<&Value>) -> Result<(), SourceError> 
 /// # Errors
 /// [`SourceError::Config`] for any other answer.
 pub fn fingerprint_key_verdict(answer: Option<&Value>) -> Result<(), SourceError> {
-    let _ = answer;
-    Err(SourceError::Unimplemented { story: "E21-32" })
+    let never = |field: &str| {
+        answer.and_then(|key| key.pointer(&format!("/data/{field}"))) == Some(&json!(false))
+    };
+    if never("exportable") && never("deletion_allowed") && never("allow_plaintext_backup") {
+        Ok(())
+    } else {
+        Err(SourceError::Config)
+    }
 }
 
 /// A logged-in session as one identity.
@@ -678,11 +688,14 @@ impl OpenBaoSource {
             return Err(SourceError::Denied);
         }
         let mut input = STANDARD.encode(account.expose_secret());
-        let body = json!({ "input": input });
+        let mut body = json!({ "input": input });
         input.zeroize();
         let path = format!("{}/hmac/{FINGERPRINT_KEY}", self.mounts.transit);
-        let answer = self.call(Method::POST, &path, Some(&body)).await?;
-        AccountFingerprint::new(text(answer.as_ref(), "/data/hmac")?)
+        let answer = self.call(Method::POST, &path, Some(&body)).await;
+        if let Some(Value::String(sent)) = body.get_mut("input") {
+            sent.zeroize();
+        }
+        AccountFingerprint::new(text(answer?.as_ref(), "/data/hmac")?)
     }
 }
 
@@ -979,24 +992,30 @@ async fn provision_fingerprints(
     mounts: &Mounts,
 ) -> Result<(), SourceError> {
     let transit = format!("sys/mounts/{}", mounts.transit);
-    if http.call(Method::GET, &transit, token, None).await.is_err() {
-        http.call(
-            Method::POST,
-            &transit,
-            token,
-            Some(&json!({ "type": "transit" })),
-        )
-        .await?;
+    match http.call(Method::GET, &transit, token, None).await {
+        Ok(mount) => transit_mount_verdict(mount.as_ref())?,
+        Err(_) => {
+            http.call(
+                Method::POST,
+                &transit,
+                token,
+                Some(&json!({ "type": "transit" })),
+            )
+            .await?;
+        }
     }
     let key = format!("{}/keys/{FINGERPRINT_KEY}", mounts.transit);
-    if http.call(Method::GET, &key, token, None).await.is_err() {
-        http.call(
-            Method::POST,
-            &key,
-            token,
-            Some(&json!({ "exportable": false })),
-        )
-        .await?;
+    match http.call(Method::GET, &key, token, None).await {
+        Ok(found) => fingerprint_key_verdict(found.as_ref())?,
+        Err(_) => {
+            http.call(
+                Method::POST,
+                &key,
+                token,
+                Some(&json!({ "exportable": false })),
+            )
+            .await?;
+        }
     }
     let claims = format!("{}/metadata/{}", mounts.kv, kv_path(&SecretPath::Claims)?);
     http.call(

@@ -555,7 +555,6 @@ fn a_refused_overwrite_read_again_is_a_lost_race_only_when_the_code_is_gone() {
 /// The fingerprint key's mount must be a transit mount, by its own answer; any other engine, or
 /// an answer that does not say, fails provisioning (DEC-2345 item 1).
 #[test]
-#[ignore = "pending E21-32"]
 fn the_fingerprint_keys_mount_must_be_transit() {
     assert_eq!(
         transit_mount_verdict(Some(
@@ -582,7 +581,6 @@ fn the_fingerprint_keys_mount_must_be_transit() {
 /// has no plaintext backup, each said as `false`; a key that is any of them, or an answer that
 /// does not say, fails provisioning (DEC-2345 item 1).
 #[test]
-#[ignore = "pending E21-32"]
 fn an_existing_fingerprint_key_must_never_leave_the_vault() {
     let key = |exportable: Value, deletion: Value, backup: Value| {
         json!({ "data": {

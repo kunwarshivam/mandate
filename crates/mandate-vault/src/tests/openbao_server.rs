@@ -1104,7 +1104,6 @@ async fn only_an_executor_hashes_an_account_under_the_vaults_key() {
 /// `Config`. The pure verdicts are checked first, so a run with no server still fails until they
 /// hold.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending E21-32"]
 async fn provisioning_fails_on_a_fingerprint_key_that_can_leave_the_vault() {
     let kept = json!({ "data": {
         "exportable": false, "deletion_allowed": false, "allow_plaintext_backup": false,
@@ -1170,7 +1169,7 @@ async fn provisioning_fails_on_a_fingerprint_key_that_can_leave_the_vault() {
         };
         for (path, body) in steps {
             let path = path.replace("{transit}", &config.mounts.transit);
-            operator_request(
+            operator_call(
                 &address,
                 &ca_pem,
                 &operator,
