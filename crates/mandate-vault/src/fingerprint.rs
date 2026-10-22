@@ -15,6 +15,9 @@ use crate::SourceError;
 /// The transit key the fingerprint is computed under: HMAC-SHA256, never exportable.
 pub const FINGERPRINT_KEY: &str = "account-fingerprint";
 
+/// The length of a 32-byte HMAC-SHA256 in padded base64: 43 characters and one `=`.
+const HASH_LEN: usize = 44;
+
 /// The keyed hash of one account id: transit's HMAC output, `vault:v<key version>:<base64>`.
 #[derive(Clone, PartialEq, Eq)]
 pub struct AccountFingerprint(String);
@@ -25,8 +28,23 @@ impl AccountFingerprint {
     /// # Errors
     /// [`SourceError::Malformed`] for any other text; it names nothing of it.
     pub fn new(text: &str) -> Result<Self, SourceError> {
-        let _ = text;
-        Err(SourceError::Unimplemented { story: "E21-32" })
+        let in_form = text
+            .strip_prefix("vault:v")
+            .and_then(|rest| rest.split_once(':'))
+            .is_some_and(|(version, hash)| {
+                !version.is_empty()
+                    && version.bytes().all(|b| b.is_ascii_digit())
+                    && hash.len() == HASH_LEN
+                    && hash.strip_suffix('=').is_some_and(|data| {
+                        data.bytes()
+                            .all(|b| b.is_ascii_alphanumeric() || b == b'+' || b == b'/')
+                    })
+            });
+        if in_form {
+            Ok(Self(text.to_owned()))
+        } else {
+            Err(SourceError::Malformed)
+        }
     }
 
     pub fn as_str(&self) -> &str {

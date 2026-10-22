@@ -77,7 +77,6 @@ fn expected() -> Vec<(Identity, Access, SecretPath)> {
 
 /// A fingerprint is transit's HMAC output alone, and prints nothing of it.
 #[test]
-#[ignore = "pending E21-32"]
 fn a_fingerprint_is_transits_hmac_output_and_prints_nothing() {
     let fingerprint = AccountFingerprint::new(HASH).unwrap();
     assert_eq!(fingerprint.as_str(), HASH);
@@ -108,7 +107,6 @@ fn a_fingerprint_is_transits_hmac_output_and_prints_nothing() {
 /// The fingerprint entry is in the personal-data vault beside the account entry, under the
 /// connection's own segment; the registry is one entry there; the marker is outside it.
 #[test]
-#[ignore = "pending E21-32"]
 fn the_fingerprint_paths_are_pinned() {
     assert_eq!(
         kv_path(&SecretPath::Fingerprint(c("c1"))).unwrap(),
@@ -127,7 +125,6 @@ fn the_fingerprint_paths_are_pinned() {
 /// own entry, and only the connection manager reads entries, the registry and the marker, and
 /// changes the registry.
 #[test]
-#[ignore = "pending E21-32"]
 fn the_table_allows_exactly_the_fingerprint_matrix() {
     let expected = expected();
     for identity in identities() {
@@ -176,7 +173,6 @@ const FINGERPRINT_PREFIXES: [&str; 4] = [
 /// changes the one registry entry by check-and-set, and reads the marker, each path spelled out;
 /// no other identity's generated policy names any of them, or transit.
 #[test]
-#[ignore = "pending E21-32"]
 fn the_managers_policy_reads_each_fingerprint_and_changes_the_registry() {
     let connections = [c("c1"), c("c2")];
     for identity in identities() {
@@ -204,7 +200,6 @@ fn the_managers_policy_reads_each_fingerprint_and_changes_the_registry() {
 /// the one transit HMAC path of the fingerprint key: no other transit path, so it can hash an id
 /// but never read, export or verify against the key. The token exchange's names none of them.
 #[test]
-#[ignore = "pending E21-32"]
 fn the_executor_creates_its_fingerprint_and_only_hashes() {
     let accessor = "auth_kubernetes_1a2b";
     let executor =

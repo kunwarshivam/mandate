@@ -127,7 +127,13 @@ pub fn allows(identity: &Identity, access: Access, path: &SecretPath) -> bool {
             SecretPath::Code(_) | SecretPath::Token(_),
         )
         | (Identity::TokenExchange(_), Access::Read, SecretPath::ClientSecret)
-        | (Identity::SecretImport, Access::Write, SecretPath::ClientSecret) => true,
+        | (Identity::SecretImport, Access::Write, SecretPath::ClientSecret)
+        | (
+            Identity::ConnectionManager,
+            Access::Read,
+            SecretPath::Fingerprint(_) | SecretPath::Claims | SecretPath::Rotating,
+        )
+        | (Identity::ConnectionManager, Access::Write, SecretPath::Claims) => true,
         (
             Identity::TokenExchange(own),
             Access::Read | Access::Delete | Access::Take,
@@ -135,7 +141,11 @@ pub fn allows(identity: &Identity, access: Access, path: &SecretPath) -> bool {
         )
         | (Identity::TokenExchange(own), Access::Write, SecretPath::Token(c))
         | (Identity::Executor(own), Access::Read, SecretPath::Token(c))
-        | (Identity::Executor(own), Access::Create, SecretPath::AccountId(c)) => own == c,
+        | (
+            Identity::Executor(own),
+            Access::Create,
+            SecretPath::AccountId(c) | SecretPath::Fingerprint(c),
+        ) => own == c,
         (identity, Access::Read, SecretPath::Platform(secret)) => {
             holders(*secret).is_ok_and(|h| h.reads == *identity)
         }
@@ -229,9 +239,9 @@ pub fn kv_path(path: &SecretPath) -> Result<String, SourceError> {
         SecretPath::Platform(PlatformSecret::EmailCredential) => {
             "platform/email-credential".to_owned()
         }
-        SecretPath::Fingerprint(_) | SecretPath::Claims | SecretPath::Rotating => {
-            return Err(SourceError::Unimplemented { story: "E21-32" });
-        }
+        SecretPath::Fingerprint(c) => format!("personal/fingerprints/{}", connection_segment(c)?),
+        SecretPath::Claims => "personal/claims".to_owned(),
+        SecretPath::Rotating => "fingerprints/rotating".to_owned(),
     })
 }
 
@@ -249,6 +259,8 @@ pub fn openbao_policy(
         paths.push(SecretPath::Code(connection.clone()));
         paths.push(SecretPath::Token(connection.clone()));
     }
+    paths.extend(connections.iter().cloned().map(SecretPath::Fingerprint));
+    paths.extend([SecretPath::Claims, SecretPath::Rotating]);
     let mut hcl = String::new();
     for path in &paths {
         for (access, prefix, capabilities) in [

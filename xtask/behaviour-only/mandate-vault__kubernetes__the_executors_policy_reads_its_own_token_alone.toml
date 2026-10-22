@@ -1,7 +1,0 @@
-file = "crates/mandate-vault/src/tests/kubernetes.rs"
-test = "the_executors_policy_reads_its_own_token_alone"
-reason = """
-The executor's templated policy is already implemented and renders no fingerprint block, so the
-test fails on that answer, not at a stub. E21-32's F3a implementation adds the fingerprint entry's
-create and the transit HMAC update (DEC-2345) and deletes this row.
-"""
