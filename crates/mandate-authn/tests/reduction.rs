@@ -45,12 +45,20 @@ struct Bench {
 
 impl Bench {
     fn new(challenges: (u32, u32), failures: (u32, u32)) -> Self {
+        Self::bounded(challenges, failures, (u32::MAX, u32::MAX, u32::MAX))
+    }
+
+    /// A bench bounded in all: `(max_outstanding, reserve, max_failure_keys)`.
+    fn bounded(challenges: (u32, u32), failures: (u32, u32), all: (u32, u32, u32)) -> Self {
         let n = |v| NonZeroU32::new(v).unwrap();
         let gate = ReductionGate::new(ReductionLimits {
             challenges_per_address: n(challenges.0),
             challenges_per_device: n(challenges.1),
             failures_per_address: n(failures.0),
             failures_per_device: n(failures.1),
+            max_outstanding: n(all.0),
+            reserve: n(all.1),
+            max_failure_keys: n(all.2),
         });
         Self {
             gate,
@@ -501,4 +509,203 @@ fn random_histories_verify_exactly_the_outstanding_challenges_within_the_limits(
         Ok(())
     });
     outcome.unwrap();
+}
+
+#[test]
+fn past_max_outstanding_the_gate_refuses_every_client_and_drops_nothing() {
+    let mut bench = Bench::bounded((9, 9), (9, 9), (3, 3, 9));
+    for n in 0..3 {
+        let who = client(&format!("a{n}"), &format!("d{n}"));
+        assert_eq!(bench.issue(&who, n, 0), Ok(issued(n, 0)));
+    }
+    let fresh = client("fresh", "fresh");
+    assert_eq!(
+        bench.issue(&fresh, 9, 0),
+        Err(Unauthenticated),
+        "the 4th in all"
+    );
+    assert_eq!(
+        bench.issue(&fresh, 9, LIFETIME - S),
+        Err(Unauthenticated),
+        "a second before they expire the cap still binds"
+    );
+    assert_eq!(
+        bench.present(&client("a0", "d0"), 0, LIFETIME - S, true),
+        Ok(MEMBER),
+        "the refusals dropped no held challenge"
+    );
+    assert_eq!(
+        bench.issue(&fresh, 9, LIFETIME - S),
+        Ok(issued(9, LIFETIME - S)),
+        "a consumed challenge frees its slot"
+    );
+    assert_eq!(
+        bench.issue(&fresh, 10, LIFETIME),
+        Ok(issued(10, LIFETIME)),
+        "and so do expired ones"
+    );
+}
+
+#[test]
+fn past_the_reserve_an_address_that_holds_one_gets_no_more() {
+    let mut bench = Bench::bounded((9, 9), (9, 9), (4, 2, 9));
+    assert_eq!(bench.issue(&client("a1", "d1"), 1, 0), Ok(issued(1, 0)));
+    assert_eq!(
+        bench.issue(&client("a1", "d2"), 2, 0),
+        Ok(issued(2, 0)),
+        "below the reserve a repeat address is issued"
+    );
+    assert_eq!(
+        bench.issue(&client("a1", "d3"), 3, 0),
+        Err(Unauthenticated),
+        "at the reserve an address that holds one gets no more"
+    );
+    assert_eq!(bench.issue(&client("a2", "d4"), 4, 0), Ok(issued(4, 0)));
+    assert_eq!(bench.issue(&client("a2", "d5"), 5, 0), Err(Unauthenticated));
+    assert_eq!(bench.issue(&client("a3", "d6"), 6, 0), Ok(issued(6, 0)));
+    assert_eq!(
+        bench.issue(&client("a4", "d7"), 7, 0),
+        Err(Unauthenticated),
+        "the cap"
+    );
+    assert_eq!(
+        bench.issue(&client("a1", "d3"), 3, LIFETIME - S),
+        Err(Unauthenticated),
+        "a second before expiry the reserve still binds"
+    );
+    assert_eq!(
+        bench.present(&client("a1", "d1"), 1, LIFETIME - S, true),
+        Ok(MEMBER),
+        "the refusals dropped no held challenge"
+    );
+}
+
+#[test]
+fn failure_keys_are_bounded_and_the_oldest_is_dropped_first() {
+    let mut bench = Bench::bounded((9, 9), (1, 1), (9, 9, 4));
+    let (first, second, third) = (client("a1", "d1"), client("a2", "d2"), client("a3", "d3"));
+    assert_eq!(bench.present(&first, 100, 0, true), REFUSED);
+    assert_eq!(bench.present(&second, 101, S, true), REFUSED);
+    assert!(
+        bench.reached(&first, S) && bench.reached(&second, S),
+        "four keys held"
+    );
+    assert_eq!(bench.present(&third, 102, 2 * S, true), REFUSED);
+    assert!(
+        !bench.reached(&first, 2 * S),
+        "the oldest keys, the first client's, were dropped"
+    );
+    assert!(bench.reached(&second, 2 * S) && bench.reached(&third, 2 * S));
+    bench.issue(&first, 1, 3 * S).unwrap();
+    assert_eq!(
+        bench.present(&first, 1, 3 * S, true),
+        Ok(MEMBER),
+        "dropping a key changes no answer"
+    );
+}
+
+#[test]
+fn the_failure_key_whose_latest_failure_is_oldest_goes_first_an_address_before_a_device() {
+    let address = |a: &str| client(a, "never-seen");
+    let device = |d: &str| client("never-seen", d);
+    let mut tie = Bench::bounded((9, 9), (1, 1), (9, 9, 1));
+    assert_eq!(tie.present(&client("a1", "d1"), 100, 0, true), REFUSED);
+    assert!(
+        !tie.reached(&address("a1"), 0),
+        "at a tie the address goes first"
+    );
+    assert!(tie.reached(&device("d1"), 0), "and the device stays");
+    let mut older = Bench::bounded((9, 9), (1, 1), (9, 9, 2));
+    assert_eq!(older.present(&client("a1", "d1"), 101, 0, true), REFUSED);
+    assert_eq!(older.present(&client("a1", "d2"), 102, S, true), REFUSED);
+    assert!(
+        !older.reached(&device("d1"), S),
+        "the device whose latest failure is oldest goes"
+    );
+    assert!(older.reached(&address("a1"), S), "not the newer address");
+    assert!(older.reached(&device("d2"), S));
+    let mut exact = Bench::bounded((9, 9), (1, 1), (9, 9, 4));
+    assert_eq!(exact.present(&client("a1", "d1"), 103, 0, true), REFUSED);
+    assert_eq!(exact.present(&client("a2", "d2"), 104, S, true), REFUSED);
+    for key in [address("a1"), device("d1"), address("a2"), device("d2")] {
+        assert!(
+            exact.reached(&key, S),
+            "at the bound every key is kept: {key:?}"
+        );
+    }
+}
+
+#[test]
+fn a_key_failing_now_outlives_an_idle_one_whatever_its_earliest_failure() {
+    let address = |a: &str| client(a, "never-seen");
+    let mut steering = Bench::bounded((9, 9), (2, 9), (9, 9, 3));
+    let (active, idle) = (client("a", "d"), client("b", "d"));
+    assert_eq!(steering.present(&active, 100, 0, true), REFUSED);
+    assert_eq!(steering.present(&idle, 101, S, true), REFUSED);
+    assert_eq!(steering.present(&idle, 102, 2 * S, true), REFUSED);
+    assert_eq!(steering.present(&active, 103, 3 * S, true), REFUSED);
+    assert_eq!(
+        steering.present(&client("c", "d"), 104, 4 * S, true),
+        REFUSED
+    );
+    assert!(
+        steering.reached(&address("a"), 4 * S),
+        "the key failing at 3 s is kept, though its first failure, at 0 s, is the earliest held"
+    );
+    assert!(
+        !steering.reached(&address("b"), 4 * S),
+        "the key whose latest failure, at 2 s, is oldest goes"
+    );
+    let mut lapsed = Bench::bounded((9, 9), (2, 9), (9, 9, 3));
+    assert_eq!(lapsed.present(&active, 110, 0, true), REFUSED);
+    assert_eq!(lapsed.present(&idle, 111, 305 * S, true), REFUSED);
+    assert_eq!(lapsed.present(&idle, 112, 308 * S, true), REFUSED);
+    assert_eq!(lapsed.present(&active, 113, 310 * S, true), REFUSED);
+    assert_eq!(
+        lapsed.present(&client("c", "d"), 114, 315 * S, true),
+        REFUSED
+    );
+    assert!(
+        !lapsed.reached(&address("b"), 315 * S),
+        "a lapsed failure does not make its key look oldest"
+    );
+    assert_eq!(lapsed.present(&active, 115, 320 * S, true), REFUSED);
+    assert!(
+        lapsed.reached(&address("a"), 320 * S),
+        "the key kept still holds its failure at 310 s"
+    );
+}
+
+/// The least time, over five runs, that 1,000 failures from fresh clients take at a gate already
+/// holding `keys` failure keys, its bound. A test of cost reads the wall clock; the gate itself
+/// never does.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the review of #2131 (B2) asks for a coarse bound on a failure's cost, which only elapsed time measures"
+)]
+fn bound_cost(keys: u32) -> std::time::Duration {
+    (0..5)
+        .map(|_| {
+            let mut bench = Bench::bounded((9, 9), (9, 9), (9, 9, keys));
+            let mut fail = |i: u32| {
+                let who = client(&format!("a{i}"), &format!("d{i}"));
+                let ns = i64::from(i) * 1_000;
+                assert_eq!(bench.present(&who, 0, ns, true), REFUSED);
+            };
+            (0..keys / 2).for_each(&mut fail);
+            let started = std::time::Instant::now();
+            (keys / 2..keys / 2 + 1_000).for_each(&mut fail);
+            started.elapsed()
+        })
+        .min()
+        .unwrap()
+}
+
+#[test]
+fn the_cost_of_a_failure_does_not_grow_with_the_keys_held() {
+    let (few, many) = (bound_cost(256), bound_cost(16_384));
+    assert!(
+        many < few * 8,
+        "64 times the keys cost {many:?} against {few:?}: a failure scans the keys it holds"
+    );
 }
