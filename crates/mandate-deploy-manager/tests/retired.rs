@@ -342,7 +342,8 @@ struct Oracle {
     /// that start begins a new run, which may crash, restart, and loop again.
     looped: BTreeSet<&'static str>,
     /// The accounts whose running generations began with a kill switch's start no agent wanted:
-    /// its restarts carry the switch, and its crash loop leaves the switch unapplied.
+    /// its restarts carry the switch, and its crash loop leaves the switch unapplied. A deployment
+    /// does not end such a run; only its own successful end does (DEC-2344 item 3).
     unapplied_if_looped: BTreeSet<&'static str>,
 }
 
@@ -508,9 +509,7 @@ fn check_seeded(ops: &[Op], bug: Bug) -> Result<(), TestCaseError> {
                 let (agent, account) = AGENTS[*i];
                 if oracle.deployed.insert(*i) {
                     journal.services(&deployed(agent, account), at(now));
-                    oracle.crashed.remove(account);
                     oracle.looped.remove(account);
-                    oracle.unapplied_if_looped.remove(account);
                 }
             }
             Op::Stop(i) => {
