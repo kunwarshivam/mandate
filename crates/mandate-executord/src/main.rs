@@ -42,8 +42,8 @@ use mandate_executor::{AccountRef, AccountScope, WorkspaceId};
 use mandate_executord::alpaca::AlpacaBroker;
 use mandate_executord::connect::connect_check;
 use mandate_executord::credential::{
-    RunLease, VaultMount, checked_connection, paper_broker, paper_settings, vault_config,
-    vault_login,
+    RunLease, SUBJECT_ACCOUNT_ENV, VaultMount, WORKSPACE_NAMESPACE_ENV, checked_connection,
+    paper_broker, paper_settings, subject_account, vault_config, vault_login, workspace_namespace,
 };
 use mandate_executord::paper::FixturePaper;
 use mandate_executord::{Broker, Config, ExecutorProcess, fixture, launch};
@@ -213,8 +213,10 @@ fn leased_broker(
         .enable_all()
         .build()
         .map_err(|_| "runtime_unavailable")?;
-    let namespace = read_service_account_namespace(Path::new(SERVICE_ACCOUNT_TOKEN_DIR))
-        .map_err(|_| "vault_credentials_unreadable")?;
+    subject_account(std::env::var(SUBJECT_ACCOUNT_ENV).ok(), connection)?;
+    let namespace = workspace_namespace(std::env::var(WORKSPACE_NAMESPACE_ENV).ok(), || {
+        read_service_account_namespace(Path::new(SERVICE_ACCOUNT_TOKEN_DIR))
+    })?;
     let vault = vault_login(
         || read_service_account_token(Path::new(SERVICE_ACCOUNT_TOKEN_DIR)),
         |identity, jwt| {
