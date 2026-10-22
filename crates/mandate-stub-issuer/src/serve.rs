@@ -40,6 +40,8 @@ struct Served {
 pub enum ServeError {
     /// The listener failed.
     Io,
+    /// What E21-33 has not built yet.
+    Unimplemented { story: &'static str },
 }
 
 /// Serves `issuer` on `listener` until `stop` completes. Stopping drops the server at once: a
@@ -79,6 +81,22 @@ pub async fn serve_with(
             .map(|served| served.map_err(|_| ServeError::Io))
     })
     .await
+}
+
+/// Serves the fixture provider `alpaca` alone on `listener` until `stop` completes, answering only
+/// requests whose one `Host` is `host` (DEC-1176 item 8): `/alpaca/oauth/*`, and 404 for every
+/// other path, the issuer's included, since none runs.
+///
+/// # Errors
+/// [`ServeError::Io`].
+pub async fn serve_fixture(
+    listener: TcpListener,
+    host: String,
+    alpaca: Arc<Alpaca>,
+    stop: impl Future<Output = ()> + Send + 'static,
+) -> Result<(), ServeError> {
+    let _ = (listener, host, alpaca, stop);
+    Err(ServeError::Unimplemented { story: "E21-33" })
 }
 
 /// Every request: 421 for any `Host` but the bind exactly, before anything else is read; then

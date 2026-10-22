@@ -1,0 +1,8 @@
+file = "crates/mandate-stub-issuer/tests/process.rs"
+test = "the_fixture_mode_needs_the_providers_flags_and_a_public_host_and_a_public_host_needs_it"
+reason = """
+E21-33 (DEC-1176 item 8) adds the stub issuer's fixture mode to its binary, whose argument handling
+has no stub form: today's binary ignores `--alpaca-only` and `--public-host`, so the test fails on
+that behaviour, a refusal or an issuer's announce line, not at a stub. The fixture mode's
+implementation PR deletes this row with the test's ignore line.
+"""
