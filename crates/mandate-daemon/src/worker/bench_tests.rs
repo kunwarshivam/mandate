@@ -724,7 +724,6 @@ fn each_oracle_fails_on_its_seeded_breach() {
 /// results-steered run under the injected fixture takes all eight turns, each `ok`, ends `done` with
 /// `bound` `max_turns`, and breaches nothing.
 #[test]
-#[ignore = "pending E19-6"]
 fn a_results_steered_run_takes_its_eight_turns_and_ends_done() {
     let trial = trial(Strategy::FollowResults, 0);
     let outcomes: Vec<&Json> = of(&trial, "ModelInvocationRecorded")
