@@ -8,6 +8,7 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::rc::Rc;
+use std::time::Duration;
 
 use mandate_canon::{Digest, parse};
 use mandate_deploy_manager::fake::Fake;
@@ -219,19 +220,28 @@ impl Orchestrator for Checked {
         self.fake.observe().await
     }
 
-    async fn start(&mut self, slot: &Slot, generation: u64) -> Result<(), Unavailable> {
+    async fn start(
+        &mut self,
+        slot: &Slot,
+        generation: u64,
+        lifetime: Option<Duration>,
+    ) -> Result<(), Unavailable> {
         if self.fake.unavailable || self.fake.refuse_effects {
-            return self.fake.start(slot, generation).await;
+            return self.fake.start(slot, generation, lifetime).await;
         }
         self.check_start(slot, generation);
         match self.seed {
             Seed::None => {}
             Seed::DropStarts => return Ok(()),
-            Seed::SecondInstance => self.fake.start(slot, generation + 1000).await?,
-            Seed::Unwanted => self.fake.start(&Slot::runtime("agent_nobody"), 1).await?,
+            Seed::SecondInstance => self.fake.start(slot, generation + 1000, lifetime).await?,
+            Seed::Unwanted => {
+                self.fake
+                    .start(&Slot::runtime("agent_nobody"), 1, None)
+                    .await?
+            }
             Seed::Repeated => {
-                self.fake.start(slot, generation).await?;
-                self.fake.start(slot, generation).await?;
+                self.fake.start(slot, generation, lifetime).await?;
+                self.fake.start(slot, generation, lifetime).await?;
             }
             Seed::Unjournaled => {
                 self.check_start(slot, generation + 1);
@@ -253,12 +263,12 @@ impl Orchestrator for Checked {
                     .collect();
                 for other in looped {
                     if self.fake.live(&other) == 0 {
-                        self.fake.start(&other, 1000).await?;
+                        self.fake.start(&other, 1000, None).await?;
                     }
                 }
             }
         }
-        self.fake.start(slot, generation).await
+        self.fake.start(slot, generation, lifetime).await
     }
 
     async fn stop(&mut self, slot: &Slot, generation: u64) -> Result<(), Unavailable> {

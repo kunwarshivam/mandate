@@ -1939,9 +1939,11 @@ name = "mandate-deploy-manager"
 version = "0.0.0"
 dependencies = [
  "mandate-canon",
+ "mandate-connections",
  "mandate-journal",
  "mandate-process",
  "mandate-time",
+ "mandate-vault",
  "proptest",
  "reqwest",
  "rustls",

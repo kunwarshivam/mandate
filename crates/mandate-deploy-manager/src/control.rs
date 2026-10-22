@@ -7,20 +7,25 @@ use mandate_canon::{Value, parse};
 use mandate_journal::StoredEvent;
 use mandate_time::UtcNanos;
 
-/// The two processes of an agent deployment the manager runs (infrastructure design §3.1).
+/// The processes the manager runs: an agent deployment's two (infrastructure design §3.1), and an
+/// OAuth connect's one-shot token exchange (DEC-1175).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Process {
     /// The agent's runtime, its agent stream's single writer.
     Runtime,
     /// The account's executor, its account stream's single writer.
     Executor,
+    /// One connection's token exchange, run once and never restarted (DEC-1175 item 2).
+    TokenExchange,
 }
 
 impl Process {
+    /// The journal's spelling (journal spec §9.21).
     pub fn code(self) -> &'static str {
         match self {
             Self::Runtime => "runtime",
             Self::Executor => "executor",
+            Self::TokenExchange => "token_exchange",
         }
     }
 
@@ -28,17 +33,35 @@ impl Process {
         match code {
             "runtime" => Some(Self::Runtime),
             "executor" => Some(Self::Executor),
+            "token_exchange" => Some(Self::TokenExchange),
             _ => None,
         }
     }
+
+    /// The chart's spelling: its process name, template file and `mandate.dev/process` label,
+    /// which the network and admission policies select.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Runtime => "runtime",
+            Self::Executor => "executor",
+            Self::TokenExchange => "token-exchange",
+        }
+    }
+
+    pub fn from_label(label: &str) -> Option<Self> {
+        [Self::Runtime, Self::Executor, Self::TokenExchange]
+            .into_iter()
+            .find(|process| process.label() == label)
+    }
 }
 
-/// One process the manager may run: an agent's runtime, or an account's executor. Each writes one
-/// stream, so a slot has at most one live instance.
+/// One process the manager may run: an agent's runtime, an account's executor, or a connection's
+/// token exchange. Each has at most one live instance.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Slot {
     pub process: Process,
-    /// The agent, for a runtime; the `account_ref`, for an executor.
+    /// The agent, for a runtime; the `account_ref`, for an executor; the `connection_id`, for a
+    /// token exchange.
     pub subject: String,
 }
 
@@ -54,6 +77,13 @@ impl Slot {
         Self {
             process: Process::Executor,
             subject: account.to_owned(),
+        }
+    }
+
+    pub fn token_exchange(connection: &str) -> Self {
+        Self {
+            process: Process::TokenExchange,
+            subject: connection.to_owned(),
         }
     }
 }
