@@ -15,6 +15,7 @@
 //! A grant is a single-use AppRole secret id for that connection's exchange role, valid
 //! [`crate::source::GRANT_SECS`], whose token lives no longer.
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -29,7 +30,9 @@ use secrecy::{ExposeSecret, SecretSlice, SecretString};
 use serde_json::{Value, json};
 
 use crate::SourceError;
-use crate::fingerprint::{AccountFingerprint, Claim, FINGERPRINT_KEY, FingerprintError};
+use crate::fingerprint::{
+    AccountFingerprint, Claim, FINGERPRINT_KEY, FingerprintError, decode_entry,
+};
 use crate::kubernetes::{
     KubernetesAuth, kubernetes_mount_requests, kubernetes_policy, kubernetes_policy_name,
     mount_accessor, service_account_name,
@@ -38,6 +41,7 @@ use crate::lease::{LEASE_SECS, Lease, lease_times};
 use crate::policy::{
     Access, Identity, Mounts, SecretPath, kv_path, openbao_policy, policy_name, require, role_name,
 };
+use crate::registry::{Registry, claim_in, release_in};
 use crate::source::{GRANT_SECS, Grant, SecretSource};
 
 /// How long one request may take before the vault counts as unreachable.
@@ -727,8 +731,10 @@ impl OpenBaoSource {
         connection: &ConnectionId,
         account: &AccountRef,
     ) -> Result<(AccountFingerprint, AccountPiiRef), FingerprintError> {
-        let _ = (connection, account);
-        Err(FingerprintError::Unimplemented { story: "E21-32" })
+        if self.rotating().await? {
+            return Err(FingerprintError::Rotating);
+        }
+        self.fingerprint_entry(connection, account).await
     }
 
     /// Claims `fingerprint` for `connection` in the registry, by check-and-set on the version read:
@@ -745,8 +751,10 @@ impl OpenBaoSource {
         connection: &ConnectionId,
         fingerprint: &AccountFingerprint,
     ) -> Result<Claim, FingerprintError> {
-        let _ = (connection, fingerprint);
-        Err(FingerprintError::Unimplemented { story: "E21-32" })
+        if self.rotating().await? {
+            return Err(FingerprintError::Rotating);
+        }
+        claim_in(self, connection, fingerprint).await
     }
 
     /// Gives back the claim of the request `account` of `connection`, when it holds it: on a
@@ -761,9 +769,107 @@ impl OpenBaoSource {
         connection: &ConnectionId,
         account: &AccountRef,
     ) -> Result<(), FingerprintError> {
-        let _ = (connection, account);
-        Err(FingerprintError::Unimplemented { story: "E21-32" })
+        let Some(entry) = self.fingerprint_bytes(connection, account).await? else {
+            return Ok(());
+        };
+        let (fingerprint, _) =
+            decode_entry(entry.expose_secret()).map_err(|_| FingerprintError::Unavailable)?;
+        release_in(self, connection, &fingerprint).await
     }
+
+    /// Whether the marker that the fingerprint key rotates is there.
+    async fn rotating(&self) -> Result<bool, FingerprintError> {
+        require(&self.identity, Access::Read, &SecretPath::Rotating).map_err(unavailable)?;
+        self.read_value(&SecretPath::Rotating)
+            .await
+            .map(|marker| marker.is_some())
+            .map_err(unavailable)
+    }
+
+    /// The fingerprint entry of the request `account` of `connection`, by its one reader.
+    async fn fingerprint_entry(
+        &self,
+        connection: &ConnectionId,
+        account: &AccountRef,
+    ) -> Result<(AccountFingerprint, AccountPiiRef), FingerprintError> {
+        let entry = self
+            .fingerprint_bytes(connection, account)
+            .await?
+            .ok_or(FingerprintError::Missing)?;
+        decode_entry(entry.expose_secret()).map_err(|_| FingerprintError::Missing)
+    }
+
+    /// The bytes of the fingerprint entry of the request `account` of `connection`, `None` where
+    /// there is none.
+    async fn fingerprint_bytes(
+        &self,
+        connection: &ConnectionId,
+        account: &AccountRef,
+    ) -> Result<Option<SecretSlice<u8>>, FingerprintError> {
+        let path = SecretPath::Fingerprint(connection.clone(), account.clone());
+        require(&self.identity, Access::Read, &path).map_err(unavailable)?;
+        self.read_value(&path).await.map_err(unavailable)
+    }
+}
+
+/// The version of the registry's form.
+const CLAIMS_FORMAT: u8 = 1;
+
+impl Registry for OpenBaoSource {
+    /// The registry entry, by check-and-set's version; an empty one at version 0 where there is
+    /// none.
+    async fn claims(&self) -> Result<(u64, BTreeMap<String, String>), FingerprintError> {
+        require(&self.identity, Access::Read, &SecretPath::Claims).map_err(unavailable)?;
+        let read = self
+            .call(
+                Method::GET,
+                &self.data_path(&SecretPath::Claims).map_err(unavailable)?,
+                None,
+            )
+            .await;
+        match taken_read(read).map_err(unavailable)? {
+            None => Ok((0, BTreeMap::new())),
+            Some((version, bytes)) => serde_json::from_slice::<Value>(bytes.expose_secret())
+                .ok()
+                .filter(|registry| registry.get("format") == Some(&json!(CLAIMS_FORMAT)))
+                .and_then(|registry| {
+                    serde_json::from_value::<BTreeMap<String, String>>(
+                        registry.get("claims")?.clone(),
+                    )
+                    .ok()
+                })
+                .map(|claims| (version, claims))
+                .ok_or(FingerprintError::Unavailable),
+        }
+    }
+
+    /// The registry entry written by check-and-set on `version`; a refused check-and-set is
+    /// `false`.
+    async fn write_claims(
+        &self,
+        version: u64,
+        claims: &BTreeMap<String, String>,
+    ) -> Result<bool, FingerprintError> {
+        require(&self.identity, Access::Write, &SecretPath::Claims).map_err(unavailable)?;
+        let registry = json!({ "claims": claims, "format": CLAIMS_FORMAT });
+        let encoded = STANDARD.encode(registry.to_string());
+        let body = json!({ "options": { "cas": version }, "data": { "value": encoded } });
+        let path = self.data_path(&SecretPath::Claims).map_err(unavailable)?;
+        match self
+            .http
+            .post_judged(&path, Some(&self.token), &body, cas_refusal)
+            .await
+        {
+            Ok(_) => Ok(true),
+            Err(SourceError::Missing) => Ok(false),
+            Err(e) => Err(unavailable(e)),
+        }
+    }
+}
+
+/// A vault refusal, as the fingerprint operations answer every one: unavailable.
+fn unavailable(_: SourceError) -> FingerprintError {
+    FingerprintError::Unavailable
 }
 
 impl SecretSource for OpenBaoSource {

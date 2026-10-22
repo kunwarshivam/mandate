@@ -1285,7 +1285,6 @@ async fn fingerprinted(bao: &Bao, connection: &str, n: u8, now: UtcNanos) -> Acc
 /// nothing, and the holder's frees it for the next; while the key rotates, the manager reads and
 /// claims nothing. A vault nobody answers for is an outage, checked first.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending E21-32"]
 async fn the_manager_claims_each_fingerprint_for_one_connection() {
     let ca = include_bytes!("fixtures/isrg-root-x1.pem").to_vec();
     let unreachable = OpenBaoSource::from_token(
@@ -1353,7 +1352,6 @@ async fn the_manager_claims_each_fingerprint_for_one_connection() {
 /// stays claimed by a connection that can no longer give it back. A vault nobody answers for is an
 /// outage, checked first.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending E21-32"]
 async fn a_release_over_an_unreadable_entry_fails_closed() {
     let ca = include_bytes!("fixtures/isrg-root-x1.pem").to_vec();
     let unreachable = OpenBaoSource::from_token(
@@ -1394,7 +1392,6 @@ async fn a_release_over_an_unreadable_entry_fails_closed() {
 /// DEC-2345 item 4: of two concurrent claims of one fingerprint, exactly one wins, and the other
 /// answers `HeldBy` the winner, never both `Claimed`.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending E21-32"]
 async fn of_two_concurrent_claims_exactly_one_wins() {
     let ca = include_bytes!("fixtures/isrg-root-x1.pem").to_vec();
     let unreachable = OpenBaoSource::from_token(

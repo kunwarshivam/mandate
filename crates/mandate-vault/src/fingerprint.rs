@@ -83,9 +83,6 @@ pub enum FingerprintError {
     Missing,
     /// The vault is sealed or unreachable, or refused the session.
     Unavailable,
-    /// The report of an operation E21-32 has not implemented yet (DEC-77); the implementation
-    /// removes it.
-    Unimplemented { story: &'static str },
 }
 
 /// The fingerprint entry's bytes: the fingerprint and the reference of the account entry it was
