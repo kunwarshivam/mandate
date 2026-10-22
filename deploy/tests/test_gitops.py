@@ -20,6 +20,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from test_cell import api_vault
 
 ROOT = Path(__file__).resolve().parents[2]
 GITOPS = ROOT / "deploy" / "gitops"
@@ -393,6 +394,8 @@ def values_policy(values: dict[str, dict], environment: str) -> list[str]:
         problems.append(f"workspace: deploymentTier {tier} in {environment}")
     if workspace.get("localImages"):
         problems.append("workspace: local images allowed")
+    if (workspace.get("api") or {}).get("vaultBinding") and environment != "staging":
+        problems.append(f"workspace: the API's vault binding is on in {environment}, where only staging runs a vault (DEC-2338)")
     for image, reference in (workspace.get("images") or {}).items():
         if image == "stub-issuer" and reference:
             problems.append("workspace: the stub issuer is named")
@@ -1334,6 +1337,20 @@ def test_each_values_seeded_bug_is_caught(overlay, release, change):
     bad = copy.deepcopy(values)
     bad[release] = merge(bad[release], change)
     assert values_policy(bad, environment), f"values_policy missed {release} {change}"
+
+
+def test_the_api_is_bound_to_the_vault_in_staging_alone(overlay):
+    """DEC-2338: staging's API carries the vault binding, its AppRole copied owner-only and its
+    egress to the vault on 8200; production, which runs no vault, carries none of it."""
+    environment, _, values, rendered, directory = overlay
+    bound = bool((values["workspace"].get("api") or {}).get("vaultBinding"))
+    if directory == GITOPS / "clusters" / "staging":
+        assert bound, "staging's API is bound to its vault"
+    assert api_vault(rendered, on=bound) == []
+    if environment != "staging":
+        bad = copy.deepcopy(values)
+        bad["workspace"] = merge(bad["workspace"], {"api": {"vaultBinding": True}})
+        assert values_policy(bad, environment), "a binding where no vault runs is caught"
 
 
 def test_another_environments_tier_is_caught(overlay):

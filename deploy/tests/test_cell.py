@@ -771,6 +771,114 @@ def test_api_contained():
         assert helm(CHART, *args).returncode != 0, refused
 
 
+API_VAULT_DIR = "/run/mandate/vault"
+API_VAULT_SOURCES = {
+    "defaultMode": 288,
+    "sources": [
+        {
+            "secret": {
+                "name": "vault-approle-api",
+                "items": [
+                    {"key": "role-id", "path": "api.role-id"},
+                    {"key": "secret-id", "path": "api.secret-id"},
+                ],
+            }
+        },
+        {"configMap": {"name": "vault-ca", "items": [{"key": "ca.crt", "path": "ca.crt"}]}},
+    ],
+}
+API_VAULT_COPY = [
+    "install",
+    "-m",
+    "0600",
+    "/run/secrets/vault-api/api.role-id",
+    "/run/secrets/vault-api/api.secret-id",
+    "/run/secrets/vault-api/ca.crt",
+    f"{API_VAULT_DIR}/",
+]
+
+
+def api_vault(docs: list[dict], on: bool) -> list[str]:
+    """The API's vault binding (DEC-2338), exactly, when `on`, and none of it otherwise: its
+    AppRole's two keys and the vault's CA projected read-only into one source directory, copied by
+    one init container into a memory-backed directory at 0600 with nothing else in it, which the API
+    mounts read-only and names in `MANDATE_API_VAULT_DIR`, never a credential in its environment;
+    and its egress to the vault on 8200 alone."""
+    problems = []
+    for w in [w for w in workloads(docs) if w["metadata"]["name"] == "api"]:
+        spec = pod_spec(w)
+        api = next(c for c in spec["containers"] if c["name"] == "api")
+        env = {e["name"]: e.get("value") for e in api.get("env", [])}
+        volumes = {v["name"]: v for v in spec.get("volumes", [])}
+        vaulted = {n for n, v in volumes.items() if n in ("vault", "vault-sources") or "projected" in v}
+        copies = [c for c in spec.get("initContainers", []) if c["name"] == "vault-credentials"]
+        mounts = {m["mountPath"]: m for m in api.get("volumeMounts", [])}
+        egress = {
+            (t.get("podSelector", {}).get("matchLabels", {}).get("mandate.dev/process"), p["port"])
+            for r in policies(docs)["egress-api"]["spec"]["egress"]
+            for t in r["to"]
+            for p in r.get("ports", [])
+        }
+        labelled = pod_spec(w) and w["spec"]["template"]["metadata"]["labels"].get("mandate.dev/egress-vault")
+        if not on:
+            if vaulted or copies or API_VAULT_DIR in mounts or "MANDATE_API_VAULT_DIR" in env:
+                problems.append(f"the api is bound to the vault while off: {sorted(vaulted)}")
+            if ("vault", 8200) in egress or labelled:
+                problems.append("the api reaches the vault while off")
+            continue
+        if vaulted != {"vault", "vault-sources"}:
+            problems.append(f"the api's vault volumes are {sorted(vaulted)}")
+        if volumes.get("vault-sources", {}).get("projected") != API_VAULT_SOURCES:
+            problems.append(f"the api's vault sources are {volumes.get('vault-sources')}")
+        if volumes.get("vault", {}).get("emptyDir", {}).get("medium") != "Memory":
+            problems.append(f"the api's vault directory is {volumes.get('vault')}")
+        if [c.get("command") for c in copies] != [API_VAULT_COPY]:
+            problems.append(f"the api's credentials are copied by {[c.get('command') for c in copies]}")
+        copy_mounts = sorted((m["name"], m["mountPath"], m.get("readOnly", False)) for c in copies for m in c["volumeMounts"])
+        if copy_mounts != [("vault", API_VAULT_DIR, False), ("vault-sources", "/run/secrets/vault-api", True)]:
+            problems.append(f"the copy mounts {copy_mounts}")
+        mounted = mounts.get(API_VAULT_DIR, {})
+        if mounted.get("name") != "vault" or mounted.get("readOnly") is not True:
+            problems.append(f"the api mounts its vault directory as {mounted}")
+        if any(m["name"] == "vault-sources" for m in api.get("volumeMounts", [])):
+            problems.append("the api mounts the AppRole's Secret itself")
+        if env.get("MANDATE_API_VAULT_DIR") != API_VAULT_DIR or not str(env.get("MANDATE_API_VAULT_ADDRESS", "")).startswith("https://"):
+            problems.append(f"the api's vault settings are {env.get('MANDATE_API_VAULT_DIR')}, {env.get('MANDATE_API_VAULT_ADDRESS')}")
+        if any(n.startswith("MANDATE_API_VAULT") and n not in ("MANDATE_API_VAULT_DIR", "MANDATE_API_VAULT_ADDRESS") for n in env):
+            problems.append(f"the api's environment names another vault setting: {sorted(env)}")
+        if ("vault", 8200) not in egress or {e for e in egress if e[0] == "vault"} != {("vault", 8200)}:
+            problems.append(f"the api's egress to the vault is {sorted(e for e in egress if e[0] == 'vault')}")
+        if labelled != "true":
+            problems.append("the api's pod carries no egress-vault label, so the vault refuses it")
+    return problems
+
+
+def test_the_api_is_bound_to_the_vault_only_with_its_binding():
+    off = render_all()
+    on = render_all("--set", "api.vaultBinding=true")
+    assert api_vault(off, on=False) == []
+    assert api_vault(on, on=True) == []
+    for check in (hardened, gated, secrets_as_files, api_contained, default_deny):
+        assert check(on) == [], check.__name__
+    assert api_vault(on, on=False), "a binding while off is caught"
+    assert api_vault(off, on=True), "no binding while on is caught"
+    seeds = [
+        ("Deployment", lambda w: next(v for v in pod_spec(w)["volumes"] if v["name"] == "vault-sources")["projected"].update(defaultMode=292)),
+        ("Deployment", lambda w: next(v for v in pod_spec(w)["volumes"] if v["name"] == "vault-sources")["projected"]["sources"][0]["secret"].update(name="vault-approle-runtime")),
+        ("Deployment", lambda w: next(v for v in pod_spec(w)["volumes"] if v["name"] == "vault-sources")["projected"]["sources"].append({"secret": {"name": "journal-ca"}})),
+        ("Deployment", lambda w: next(v for v in pod_spec(w)["volumes"] if v["name"] == "vault").update(emptyDir={})),
+        ("Deployment", lambda w: next(c for c in pod_spec(w)["initContainers"] if c["name"] == "vault-credentials")["command"].__setitem__(2, "0640")),
+        ("Deployment", lambda w: next(c for c in pod_spec(w)["containers"] if c["name"] == "api")["volumeMounts"].append({"name": "vault-sources", "mountPath": "/run/secrets/vault-api", "readOnly": True})),
+        ("Deployment", lambda w: next(m for m in next(c for c in pod_spec(w)["containers"] if c["name"] == "api")["volumeMounts"] if m["mountPath"] == API_VAULT_DIR).update(readOnly=False)),
+        ("Deployment", lambda w: next(c for c in pod_spec(w)["containers"] if c["name"] == "api")["env"].append({"name": "MANDATE_API_VAULT_SECRET_ID", "value": "x"})),
+        ("Deployment", lambda w: w["spec"]["template"]["metadata"]["labels"].pop("mandate.dev/egress-vault")),
+        ("NetworkPolicy", lambda p: next(r for r in p["spec"]["egress"] if any(t.get("podSelector", {}).get("matchLabels", {}).get("mandate.dev/process") == "vault" for t in r["to"]))["ports"].append({"protocol": "TCP", "port": 8201})),
+    ]
+    for kind, seed in seeds:
+        name = "api" if kind == "Deployment" else "egress-api"
+        assert api_vault(mutate(on, name, kind, seed), on=True), seed
+
+
 def api_env(rendered: list[dict]) -> dict[str, str]:
     """The api container's environment, name to value."""
     return {e["name"]: e.get("value", "") for e in first_container(owner_workload(rendered)).get("env", [])}
