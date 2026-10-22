@@ -1125,7 +1125,10 @@ const CLOSED_MEMBERS: [(&str, &[&str]); 15] = [
     ("sent", &["rung_short"]),
     ("uncovered", &["interval_limit", "unprotected_end"]),
     ("acknowledged", &["unprotected_end"]),
-    ("unprotected_fraction", &["unprotected_start", "placed"]),
+    (
+        "unprotected_fraction",
+        &["unprotected_start", "placed", "unprotected_end"],
+    ),
 ];
 
 /// Journals one `ProtectionChanged` for `instrument` in §9.5's closed form at version 2 (DEC-446
@@ -1565,7 +1568,6 @@ fn stop_after(
     if filled == Qty::ZERO {
         return Ok(());
     }
-    let named = vec![("bracket", text(entry.as_str()))];
     let instrument = order.instrument.clone();
     let unapplied = filled.checked_sub(order.filled_qty)?;
     let held = long(&batch.view, &instrument)?.checked_add(unapplied)?;
@@ -1573,10 +1575,9 @@ fn stop_after(
         "unprotected_fraction",
         unprotected_fraction(batch.ports, &instrument, held)?,
     );
+    let named = vec![("bracket", text(entry.as_str())), fraction.clone()];
     if detail.bracket_since.is_none() {
-        let mut started = named.clone();
-        started.push(fraction.clone());
-        changed(batch, &instrument, "unprotected_start", started)?;
+        changed(batch, &instrument, "unprotected_start", named.clone())?;
     }
     if !order.state.is_terminal() {
         let since = detail.bracket_since.unwrap_or(batch.at());
@@ -1617,8 +1618,15 @@ fn stop_after(
         .unwrap_or_else(|| AgentId(EVERY_AGENT.to_owned()));
     let offset = batch.ports.mandates.crypto_stop_limit_offset(&agent);
     let class = protected_class(batch, &instrument);
+    let shaped = match class {
+        AssetClass::Crypto => ProtectionPrices {
+            stop: prices.stop,
+            take_profit: None,
+        },
+        _ => prices,
+    };
     let shape = match batch.view.profile.as_ref() {
-        Some(profile) => protective_shape(profile, class, UNREAD_CLOCK, qty, prices, offset)?,
+        Some(profile) => protective_shape(profile, class, UNREAD_CLOCK, qty, shaped, offset)?,
         None => None,
     };
     let Some(shape) = shape else {
@@ -1713,6 +1721,12 @@ pub(crate) fn new_day(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
             .get(first)
             .and_then(|order| order.agent.clone())
             .unwrap_or_else(|| AgentId(EVERY_AGENT.to_owned()));
+        if !replaceable(batch, &instrument, protection.prices, &agent)? {
+            let pairs = vec![("orders", text(joined(&protection.resting)))];
+            let alerted = changed(batch, &instrument, "expiry_unreplaceable", pairs)?;
+            batch.notify(alerted, "protection_expiring");
+            continue;
+        }
         let mut pairs = vec![
             ("replacing", Value::Bool(true)),
             ("orders", text(joined(&protection.resting))),
@@ -1735,6 +1749,34 @@ pub(crate) fn new_day(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         }
     }
     Ok(())
+}
+
+/// Whether the protection resting in `instrument` could be placed again at `prices` once it is
+/// cancelled: the profile offers a form for the whole shares [`re_place`] would cover, or nothing
+/// is left to cover. An OCO the executor cannot re-place is never the one it cancels: the position
+/// keeps it, and the shortfall is journaled and alerted instead (DEC-2312 item 2).
+fn replaceable(
+    batch: &Batch<'_, '_>,
+    instrument: &InstrumentId,
+    prices: Option<ProtectionPrices>,
+    agent: &AgentId,
+) -> Result<bool, ExecutorError> {
+    let qty = whole_shares(
+        batch.ports,
+        instrument,
+        long(&batch.view, instrument)?
+            .checked_sub(working_exits(&batch.view, instrument)?)
+            .unwrap_or(Qty::ZERO),
+    )?;
+    if qty == Qty::ZERO {
+        return Ok(true);
+    }
+    let (Some(prices), Some(profile)) = (prices, batch.view.profile.as_ref()) else {
+        return Ok(false);
+    };
+    let offset = batch.ports.mandates.crypto_stop_limit_offset(agent);
+    let class = protected_class(batch, instrument);
+    Ok(protective_shape(profile, class, UNREAD_CLOCK, qty, prices, offset)?.is_some())
 }
 
 /// Whether every order that ended in `instrument` this step is a rung of one of its lone ladders

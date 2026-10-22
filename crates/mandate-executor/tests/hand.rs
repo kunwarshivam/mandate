@@ -4043,7 +4043,6 @@ fn protection_is_re_placed_at_the_buffer_day() {
 /// not cancelled, and the shortfall is journaled and the owner alerted, as for protection with no
 /// recorded prices (`expiry_unreplaceable`, `protection_expiring`; DEC-367 item 4).
 #[test]
-#[ignore = "pending E7-4"]
 fn an_oco_that_cannot_be_re_placed_is_kept_at_its_buffer_day() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -5077,7 +5076,6 @@ fn a_crypto_entry_is_never_held_to_the_fractional_equity_rule() {
 /// position is protected again, its interval ending with the 0.4 it leaves (§5.4; DEC-2312 item 2,
 /// DEC-2315). An OCO the executor cannot re-place is never the one it cancels.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_fractional_hold_keeps_its_whole_shares_covered_through_the_buffer_day() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[FRAC]);
