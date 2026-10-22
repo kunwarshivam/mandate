@@ -5973,6 +5973,94 @@ fn a_close_is_asked_again_only_on_a_later_read_showing_it_still_held() {
     );
 }
 
+/// A later read showing BTC no longer held asks no close again (DEC-2337 item 3): only a read that
+/// shows the instrument still held does.
+#[test]
+#[ignore = "pending E7-4"]
+fn a_later_read_showing_the_instrument_flat_asks_no_close_again() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (shell, _, _, _) = closed_btc(&ports);
+    assert!(
+        shell
+            .account_journal
+            .iter()
+            .any(|e| e.event_type == "AccountCloseRequested"),
+        "the first request is journaled"
+    );
+
+    let (mut restarted, _) = shell.restart(&ports);
+    let flat = restarted.run(
+        Input::BrokerSnapshot({
+            let mut taken = snapshot(restarted.head().0, ReconcileReason::Startup);
+            taken.positions = vec![broker_position(BTC, "0")];
+            taken
+        }),
+        &ports,
+    );
+
+    assert!(
+        !flat
+            .requests
+            .iter()
+            .any(|r| matches!(r, BrokerRequest::ClosePosition(..))),
+        "nothing held, nothing asked again: {:?}",
+        flat.requests
+    );
+}
+
+/// The in-doubt re-read stops once nothing the switch closes is held (DEC-2333 item 3): after the
+/// close's fill leaves BTC flat, a tick past the window reads nothing again.
+#[test]
+#[ignore = "pending E7-4"]
+fn the_switch_reads_nothing_again_once_nothing_is_held() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (mut shell, _, _, _) = closed_btc(&ports);
+    assert!(
+        shell
+            .account_journal
+            .iter()
+            .any(|e| e.event_type == "AccountCloseRequested"),
+        "the close is requested"
+    );
+    let held = shell
+        .state
+        .positions()
+        .get(&instrument(BTC))
+        .map(ToString::to_string)
+        .unwrap_or_default();
+    shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Fill(mandate_executor::BrokerFill {
+            instrument: instrument(BTC),
+            side: Side::Sell,
+            broker_order_id: Some("b-close".to_owned()),
+            ..broker_fill("f-btc-close", None, &held, "59000")
+        })),
+        &ports,
+    );
+
+    let later = shell.run(
+        Input::Tick(clock(20 + config.unknown_absent_window_s + 1)),
+        &ports,
+    );
+
+    assert!(
+        !later
+            .requests
+            .iter()
+            .any(|r| matches!(r, BrokerRequest::ListOpenOrders)),
+        "nothing held, nothing read again: {:?}",
+        later.requests
+    );
+}
+
 /// The close ends only an interval that is open (DEC-2337 item 4): with the stop's cancel never
 /// reported, no interval opened under the switch, so the close's fill leaving nothing held journals
 /// no `unprotected_end`.
@@ -6116,7 +6204,7 @@ fn a_working_sell_holds_the_close_until_its_cancel_is_confirmed() {
 
 /// The in-doubt hold reads again every `unknown_absent_window_s` while the cancel-all is
 /// unconfirmed (DEC-2333 item 3): a lost answer and a read that never comes back are read again at
-/// the window, never by sending the cancel-all again.
+/// the window, never by sending the cancel-all again, and not before it.
 #[test]
 fn the_in_doubt_hold_reads_again_at_the_lookup_window() {
     let ids = TestIds;
@@ -6129,7 +6217,17 @@ fn the_in_doubt_hold_reads_again_at_the_lookup_window() {
     shell.run(Input::Broker(Err(BrokerUnknown::Timeout)), &ports);
 
     let window = config.unknown_absent_window_s;
+    let early = shell.run(Input::Tick(clock(20 + window - 1)), &ports);
     let again = shell.run(Input::Tick(clock(20 + window + 1)), &ports);
+
+    assert!(
+        !early
+            .requests
+            .iter()
+            .any(|r| matches!(r, BrokerRequest::ListOpenOrders)),
+        "nothing read again inside the window: {:?}",
+        early.requests
+    );
 
     assert!(
         again
