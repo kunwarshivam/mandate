@@ -44,6 +44,10 @@ pub const DEVICE_MAX_AGE_S: i64 = 2_592_000;
 /// The most challenges outstanding in all (DEC-2117 item 3).
 pub const CHALLENGES_IN_ALL: usize = 4_096;
 
+/// Past this many outstanding, an address that already holds one gets no more, so the last 1,024
+/// go one per address (DEC-2119 item 11).
+pub const RESERVE_FROM: usize = 3_072;
+
 /// The setting naming the ingress's own addresses (§3.11 item 2).
 pub const INGRESS_PEERS: &str = "MANDATE_API_INGRESS_PEERS";
 
@@ -77,31 +81,51 @@ pub fn ingress_peers(setting: Option<&str>) -> Result<Vec<IpAddr>, StartRefusal>
     }
 }
 
-/// The address a request counts against: `peer`, or the last `X-Forwarded-For` entry when `peer`
-/// is one of `ingress` and that entry is an address. An IPv4 address, IPv4-mapped included, is
-/// itself; an IPv6 address is its /64, as `<prefix>::/64`.
+/// The address a request counts against: `peer`, or, when `peer` is one of `ingress`, the first
+/// `X-Forwarded-For` entry from the right that is not itself a listed peer, its lines read as one
+/// list; `peer` again when that entry is missing or not an address. Peers match after an
+/// IPv4-mapped address is read as IPv4. An IPv4 address is itself; an IPv6 address is its /64, as
+/// `<prefix>::/64`.
 pub fn address(peer: IpAddr, headers: &HeaderMap, ingress: &[IpAddr]) -> String {
-    let from = if ingress.contains(&peer) {
-        forwarded(headers).unwrap_or(peer)
+    let listed = |at: IpAddr| ingress.iter().any(|peer| plain(*peer) == plain(at));
+    let from = if listed(peer) {
+        forwarded(headers, listed).unwrap_or(peer)
     } else {
         peer
     };
-    match from {
+    match plain(from) {
         IpAddr::V4(v4) => v4.to_string(),
-        IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
-            Some(v4) => v4.to_string(),
-            None => {
-                let [a, b, c, d, ..] = v6.segments();
-                format!("{}/64", Ipv6Addr::new(a, b, c, d, 0, 0, 0, 0))
-            }
-        },
+        IpAddr::V6(v6) => {
+            let [a, b, c, d, ..] = v6.segments();
+            format!("{}/64", Ipv6Addr::new(a, b, c, d, 0, 0, 0, 0))
+        }
     }
 }
 
-/// The last entry of the last `X-Forwarded-For` line, when it is an address.
-fn forwarded(headers: &HeaderMap) -> Option<IpAddr> {
-    let line = headers.get_all(FORWARDED_FOR).iter().next_back()?;
-    line.to_str().ok()?.rsplit(',').next()?.trim().parse().ok()
+/// `at`, with an IPv4-mapped IPv6 address read as its IPv4 address.
+fn plain(at: IpAddr) -> IpAddr {
+    match at {
+        IpAddr::V6(v6) => v6.to_ipv4_mapped().map_or(at, IpAddr::V4),
+        IpAddr::V4(_) => at,
+    }
+}
+
+/// The first `X-Forwarded-For` entry from the right that `listed` does not name, when it is an
+/// address; the header's lines are one list in order.
+fn forwarded(headers: &HeaderMap, listed: impl Fn(IpAddr) -> bool) -> Option<IpAddr> {
+    let entries: Vec<&str> = headers
+        .get_all(FORWARDED_FOR)
+        .iter()
+        .map(|line| line.to_str().ok())
+        .collect::<Option<Vec<_>>>()?
+        .into_iter()
+        .flat_map(|line| line.split(','))
+        .collect();
+    entries
+        .into_iter()
+        .rev()
+        .map(|entry| entry.trim().parse::<IpAddr>().ok())
+        .find(|entry| entry.is_none_or(|at| !listed(at)))?
 }
 
 /// The device key of a request carrying exactly one well-formed device cookie (32 bytes as
@@ -142,21 +166,26 @@ pub fn rp_id(app_origin: &str) -> Option<String> {
 /// A challenge's id: the ULID whose time is `issued_at`'s millisecond and whose randomness is the
 /// challenge's first ten bytes.
 pub fn challenge_id(issued_at: UtcNanos, bytes: &[u8; 32]) -> String {
-    let millis = u128::try_from(issued_at.secs())
+    let millis = u64::try_from(issued_at.secs())
         .unwrap_or_default()
         .saturating_mul(1_000)
-        .saturating_add(u128::from(issued_at.nanos() / 1_000_000));
-    let random = bytes
+        .saturating_add(u64::from(issued_at.nanos() / 1_000_000))
+        .to_be_bytes();
+    let raw: Vec<u8> = millis
         .iter()
-        .take(10)
-        .fold(0_u128, |acc, byte| (acc << 8) | u128::from(*byte));
-    encode_ulid((millis << 80) | random)
+        .skip(2)
+        .chain(bytes.iter().take(10))
+        .copied()
+        .collect();
+    encode_ulid(u128::from_be_bytes(raw.try_into().unwrap_or_default()))
 }
 
 /// A challenge the route issued.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Issued {
     pub challenge_id: String,
+    /// The address that asked for it, which the reserve counts.
+    pub address: String,
     pub bytes: [u8; 32],
     pub issued_at: UtcNanos,
     pub expires_at: UtcNanos,
@@ -198,7 +227,13 @@ impl Reduction {
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
         outstanding.retain(|_, held| now < held.expires_at);
-        if outstanding.len() >= CHALLENGES_IN_ALL {
+        let held = outstanding.len();
+        let holds_one = || {
+            outstanding
+                .values()
+                .any(|issued| issued.address == client.address)
+        };
+        if held >= CHALLENGES_IN_ALL || (held >= RESERVE_FROM && holds_one()) {
             return Err(Unauthenticated);
         }
         let mut bytes = [0_u8; 32];
@@ -214,6 +249,7 @@ impl Reduction {
             .issue(client, bytes, now)?;
         let issued = Issued {
             challenge_id: id.clone(),
+            address: client.address.clone(),
             bytes,
             issued_at: now,
             expires_at: challenge.expires_at,
