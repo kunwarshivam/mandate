@@ -266,3 +266,49 @@ fn the_core_s_turn_request_is_run_when_handed() {
     assert_eq!(handed.answers(at), called.answers(at));
     assert_eq!(*handed_shelf.put.borrow(), *called_shelf.put.borrow());
 }
+
+/// DEC-2316 item 2: the gateway's rate cap still bounds a fault that calls again. Within one
+/// minute, the worker over a `v0_2` entry answers the loop's eight turns and the margin's two, and
+/// refuses the next `rate_limited_local`. The count is the loop's pinned `max_turns` and the margin,
+/// read from the bounds, not from the worker. Each call's transcript holds a different result, so
+/// no call is the gateway's cache hit, which reaches no provider and is not counted.
+#[test]
+fn a_fault_that_calls_again_within_a_minute_is_refused_past_the_loop_s_turns() {
+    let shelf = Shelf::default();
+    let (mut worker, items) = started(&shelf);
+    let allowed = mandate_research_run::agentic::LoopBounds::v0_2().max_turns + 2;
+    let mut outcomes = Vec::new();
+    for call in 1..=allowed + 1 {
+        let mut earlier = earlier_turn(&shelf);
+        let result = format!(r#"{{"items":[],"note":{call},"truncated":false}}"#).into_bytes();
+        earlier.results = vec![Digest::of(&result)];
+        shelf.put.borrow_mut().push(result);
+        let mut request = turn(2, &[Tool::Note], items, vec![earlier]);
+        request.call.call_id = encode_ulid((1 << 100) + u128::from(call));
+        worker
+            .turn(&request)
+            .unwrap_or_else(|e| panic!("call {call}: {e:?}"));
+        for answer in worker.answers(RiskClock::from_secs(CUT_OFF + 30)) {
+            let ResearchInput::Called { record, .. } = answer else {
+                panic!("call {call}: a call record: {answer:?}");
+            };
+            assert!(
+                !record.cache_hit,
+                "call {call} reached the provider: {record:?}"
+            );
+            outcomes.push(record.outcome);
+        }
+    }
+    let answered = outcomes
+        .iter()
+        .take_while(|outcome| **outcome != Outcome::RateLimitedLocal)
+        .count();
+    assert_eq!(
+        (answered, outcomes.last()),
+        (
+            usize::try_from(allowed).unwrap(),
+            Some(&Outcome::RateLimitedLocal)
+        ),
+        "{outcomes:?}"
+    );
+}
