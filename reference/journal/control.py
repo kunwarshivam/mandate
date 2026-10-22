@@ -1320,6 +1320,7 @@ VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
         ("instrument_id", STR),
         ("qty", DEC),
         ("kill_switch_event", ULID),
+        ("attempt", INT),
         ("risk_clock", RISK_CLOCK),
     ),
     ("ctl", "ConnectionEstablished", 2): ESTABLISHED_V2,
@@ -1849,7 +1850,14 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
             positive = Decimal(qty) >= 0
         else:
             positive = Decimal(qty) > 0
-        rule("258", positive, "schema", "payload.qty")
+        first = 0 if "boundary.rule_258_attempt" in skip else 1
+        clauses = [("258.qty", positive, "payload.qty"), ("258.attempt", p["attempt"] >= first, "payload.attempt")]
+        if "order.rule_258_attempt_first" in skip:
+            clauses.reverse()
+        wrong = next(((n, at) for n, ok, at in clauses if not ok and f"rule.{n}" not in skip), None)
+        if wrong is not None:
+            rule("258", False, "schema", wrong[1])
+        rule("259", draft["causation_id"] == p["kill_switch_event"], "schema", "causation_id")
     if event_type == "StepUpConfirmed":
         rule("242.kind", p["action_kind"] == "approve", "schema", "payload.action_kind")
         rule("242.paper", draft["environment"] == "paper", "schema", "environment")

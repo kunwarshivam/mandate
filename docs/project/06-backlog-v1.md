@@ -4232,6 +4232,10 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   after `max_unprotected_s` ended its sell; register the executor's own intent ids (`w-<record>`, `k-<switch>-<n>`)
   in journal spec §9.5's `IntentReceived`; and, with the account scope, add `KillSwitchActivated` to
   `properties::every_catalogue_event_is_interpreted_or_named`'s `INTERPRETED`.
+- **E7-4 (journal), from [DEC-2337](decisions/DEC-2337.md) item 5:** close the account stream's
+  `KillSwitchActivated` in journal spec §9.5, then add a stream rule that an `AccountCloseRequested`'s
+  `kill_switch_event` names an earlier account-scope `KillSwitchActivated` of the stream whose
+  `closes` or `deferred` lists its `instrument_id`. Until then, the executor's fold guarantees it.
 - **E7-4 slices 5 and 6's tests correction (stream K), from #286 round 1 (minor 2):**
   `properties::no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding` counts a cancel as
   outstanding until the order is terminal, abandoned or its protection cancelled, so it would fail on
