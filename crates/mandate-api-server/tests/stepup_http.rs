@@ -105,6 +105,7 @@ fn fixture(environment: &str, challenges: Challenges) -> Fixture {
         step_up: Arc::new(mandate_api_server::stepup::Unbound),
         challenges: Arc::new(challenges),
         connect: None,
+        reduction: Arc::default(),
     };
     let f = Fixture {
         addr: serve(http::api(app, Drain::new())),

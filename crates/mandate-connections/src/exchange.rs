@@ -76,14 +76,16 @@ pub struct ExchangedGrant {
 ///
 /// 1. A connection that is not paper is refused before the vault or the endpoint is touched
 ///    (DEC-821 items 3 and 4).
-/// 2. The code and PKCE verifier are read once from the vault; with none waiting, the exchange
-///    is refused and nothing is written.
+/// 2. The code and PKCE verifier are taken from the vault, read and deleted in one step no
+///    other run can interleave with, before anything is sent: the code is sent at most once,
+///    whatever stops this run, reruns it, or runs beside it (DEC-2628 item 2). With none waiting,
+///    or a take that fails, nothing is sent or written.
 /// 3. The endpoint receives the [`LiveTokenRequest`] and the form, verifier included.
 /// 4. The token type must be `bearer` and the scope must pass [`crate::grant::check_scope`].
-///    On any refusal the token is dropped before any vault write, and the vault entry is
-///    deleted, since a read code is never tried again.
-/// 5. The token is stored with the granted scopes, then the code and verifier are deleted, and
-///    the grant, without the token, is returned.
+///    On any refusal the token is dropped before any vault write, and nothing is left to delete.
+/// 5. The token is stored with the granted scopes, and the grant, without the token, is
+///    returned. A run lost before this store loses the connect, which the deadline teardown
+///    closes (connections spec §5.2 step 6).
 pub fn exchange_code(
     pending: &PendingConnect,
     client: &OAuthClient,
@@ -95,7 +97,7 @@ pub fn exchange_code(
         return Err(ConnectError::EnvironmentRefused);
     }
     let key = &pending.vault_key;
-    let waiting = vault.read_code(key)?.ok_or(ConnectError::CodeMissing)?;
+    let waiting = vault.take_code(key)?.ok_or(ConnectError::CodeMissing)?;
     let form = ExchangeForm {
         code: &waiting.code,
         code_verifier: &waiting.verifier,
@@ -107,15 +109,8 @@ pub fn exchange_code(
         .post(LiveTokenRequest::token_endpoint(), &form)
         .and_then(checked_grant);
     drop(waiting);
-    let (token, scopes) = match checked {
-        Ok(grant) => grant,
-        Err(refusal) => {
-            vault.delete(key)?;
-            return Err(refusal);
-        }
-    };
+    let (token, scopes) = checked?;
     vault.put_token(key, token, &scopes)?;
-    vault.delete_code(key)?;
     Ok(ExchangedGrant {
         connection_id: pending.connection_id.clone(),
         environment: pending.environment,

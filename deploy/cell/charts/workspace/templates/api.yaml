@@ -74,6 +74,10 @@ its memory until they move to Postgres (item 6).
   value: {{ required "api.jwksUrl is required with images.api" $a.jwksUrl | quote }}
 - name: MANDATE_API_APP_ORIGIN
   value: {{ required "api.appOrigin is required with images.api" $a.appOrigin | quote }}
+{{- with $a.ingressPeers }}
+- name: MANDATE_API_INGRESS_PEERS
+  value: {{ join "," . | quote }}
+{{- end }}
 - name: CREDENTIALS_DIRECTORY
   value: /run/credentials
 - name: SSL_CERT_FILE
