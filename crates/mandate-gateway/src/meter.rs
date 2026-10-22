@@ -629,21 +629,21 @@ impl<S: MeterStore> Meter<S> {
         self.caps.research_daily_required = true;
     }
 
-    /// Keeps the research daily caps and unread marks of `deployed` alone, dropping every other
-    /// agent's, so a stop or a redeploy leaves nothing behind (DEC-2272 item 3).
-    #[expect(
-        clippy::todo,
-        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-    )]
-    pub fn retain_research_daily(&mut self, deployed: &BTreeSet<String>) {
-        let _ = (&mut self.caps, deployed);
-        todo!()
-    }
-
     /// Drops `agent`'s research daily cap and unread mark, for an agent no longer deployed.
     pub fn clear_research_daily(&mut self, agent: &str) {
         self.caps.research_daily.remove(agent);
         self.caps.research_unreadable.remove(agent);
+    }
+
+    /// Keeps the research daily caps and unread marks of `deployed` alone, dropping every other
+    /// agent's, so a stop or a redeploy leaves nothing behind (DEC-2272 item 3).
+    pub fn retain_research_daily(&mut self, deployed: &BTreeSet<String>) {
+        self.caps
+            .research_daily
+            .retain(|agent, _| deployed.contains(agent));
+        self.caps
+            .research_unreadable
+            .retain(|agent| deployed.contains(agent));
     }
 
     /// Replaces `agent`'s research daily cap on a running meter (DEC-2272 item 5): `Some` sets it,

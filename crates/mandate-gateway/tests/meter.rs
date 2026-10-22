@@ -977,7 +977,6 @@ fn a_meter_requiring_daily_caps_refuses_an_unknown_agent_and_stores_nothing() {
 /// DEC-2272 item 3: keeping the deployed agents drops every other agent's daily cap and unread
 /// mark, and leaves the deployed ones as they were.
 #[test]
-#[ignore = "pending E21-62"]
 fn retaining_the_deployed_agents_drops_every_other_cap_and_mark() {
     let mut meter = Meter::new(MemoryMeter::new(), common::caps(), common::deployment());
     meter.require_research_daily();

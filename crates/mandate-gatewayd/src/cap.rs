@@ -93,6 +93,24 @@ pub fn agents(
         .collect()
 }
 
+/// The agents deployed now in `environment`: those whose latest deployment record is an
+/// `AgentDeployed`, the only agents whose caps the service holds (DEC-2272 item 3).
+///
+/// # Errors
+/// [`CapError::ControlUnreadable`] for a deployment record whose body does not read.
+pub fn deployed_agents(
+    control: &[StoredEvent],
+    environment: Environment,
+) -> Result<BTreeSet<String>, CapError> {
+    let mut deployed = BTreeSet::new();
+    for agent in agents(control, environment)? {
+        if deployment(control, &agent, environment)? != Deployment::NotDeployed {
+            deployed.insert(agent);
+        }
+    }
+    Ok(deployed)
+}
+
 /// The cap `deployment` gives (DEC-2272 items 1 to 4): zero when not deployed or when the
 /// document's `behavior.research` is `null`.
 ///
@@ -158,9 +176,9 @@ impl DailyCaps {
         self.held.len()
     }
 
-    /// Whether a cap is held for `agent`, which is so only while it is deployed.
-    pub fn holds(&self, agent: &str) -> bool {
-        self.held.contains_key(agent)
+    /// Keeps the caps of `deployed` alone, dropping every other agent's.
+    pub fn retain(&mut self, deployed: &BTreeSet<String>) {
+        self.held.retain(|agent, _| deployed.contains(agent));
     }
 
     /// The environment whose deployments the caps are read for.
