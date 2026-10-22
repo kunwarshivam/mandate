@@ -41,7 +41,7 @@ pub struct OAuthCheck {
 }
 
 /// Runs `check` for the account in `scope` at `now`: once the account stream is this writer's, an
-/// account read is written by `create` to the connection's [`SecretPath::AccountId`] entry, in
+/// account read is written by `create` to this request's [`SecretPath::AccountId`] entry, in
 /// [`mandate_connections::account_entry::encode`]'s form, and the checks run as an Alpaca paper
 /// OAuth connection. The account is read only when `create` stored the entry; an unread account
 /// never calls it, and any refusal of it is an unreadable account.
