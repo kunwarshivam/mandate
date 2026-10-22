@@ -128,3 +128,27 @@ fn every_id_in_the_form_round_trips() {
         )
         .unwrap();
 }
+
+/// Two ids are equal exactly when their text is.
+#[test]
+#[ignore = "pending E10-13"]
+fn two_ids_are_equal_only_when_their_text_is() {
+    assert_eq!(BrokerAccountId::new(ID), BrokerAccountId::new(ID));
+    assert_ne!(BrokerAccountId::new(ID), BrokerAccountId::new("another-id"));
+}
+
+/// An entry is written only under a `pii_` reference: an identifier of another kind is refused,
+/// though the id is in the form.
+#[test]
+#[ignore = "pending E10-13"]
+fn an_entry_is_written_only_under_a_pii_reference() {
+    let id = BrokerAccountId::new(ID).unwrap();
+    for other in ["conn_01JA0000000000000000000000", "pii_not-a-ulid"] {
+        let pii_ref = AccountPiiRef::new(other).unwrap();
+        assert_eq!(
+            encode(&pii_ref, &id).map(drop),
+            Err(ConnectError::AccountEntryInvalid),
+            "{other}"
+        );
+    }
+}
