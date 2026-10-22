@@ -346,9 +346,9 @@ impl<'c> AccountRiskFold<'c> {
     /// since a row before `head` may have bound it.
     ///
     /// # Errors
-    /// Whatever `RiskState::open` refuses, and `invalid_input` for a held opening, or an opening
-    /// after seq 1, that names no instrument, or names one that is not a canonical asset id
-    /// (DEC-2313 item 1).
+    /// Whatever `RiskState::open` refuses. `invalid_input` (`what: "instrument"`) for a held
+    /// opening, or an opening after seq 1, that names no instrument (DEC-2310 item 1), and for any
+    /// opening that names one that is not a canonical asset id (DEC-2313 item 1).
     #[expect(
         clippy::too_many_arguments,
         reason = "each is one of the fold's independent inputs, none derivable from another"

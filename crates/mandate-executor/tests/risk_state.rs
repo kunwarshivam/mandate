@@ -1188,9 +1188,39 @@ fn an_opening_on_an_instrument_that_is_not_a_canonical_asset_id_is_refused() {
     let case = case("MC-R20");
     let mandate = case_mandate(&case);
     let refused = Some(SpecError::InvalidInput { what: "instrument" });
-    for held in ["BTC/USD".to_owned(), BTC.to_uppercase()] {
-        let opened = opened(&case, &mandate, &Crypto, &held);
-        assert_eq!(opened.err(), refused, "{held}");
+    let bad = [
+        "BTC/USD".to_owned(),
+        BTC.to_uppercase(),
+        BTC.replace('-', ""),
+        format!("{BTC}0"),
+        BTC[..35].to_owned(),
+        BTC.replacen('a', "g", 1),
+        format!(" {BTC}"),
+        format!("{BTC}\n"),
+        String::new(),
+    ];
+    for held in &bad {
+        let opened = opened(&case, &mandate, &Crypto, held);
+        assert_eq!(opened.err(), refused, "{held:?}");
     }
     assert!(opened(&case, &mandate, &Crypto, BTC).is_ok());
+    let flat = |named: &str| {
+        AccountRiskFold::open(
+            ACCOUNT,
+            1,
+            AGENT,
+            &mandate,
+            &opening(),
+            Some(named),
+            &Wall,
+            TripwireState::default(),
+        )
+        .err()
+    };
+    assert_eq!(
+        flat("XYZ"),
+        refused,
+        "a flat opening names no symbol either"
+    );
+    assert_eq!(flat(XYZ), None, "a flat opening on a canonical id");
 }
