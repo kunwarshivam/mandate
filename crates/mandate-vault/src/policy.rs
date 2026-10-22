@@ -5,7 +5,7 @@
 //! | Identity | Read | Write | Delete |
 //! |---|---|---|---|
 //! | API | — | every connection's code | every connection's code and token |
-//! | Connection manager | every connection's account entry (DEC-2339) | — | every connection's code and token; it also issues and revokes token-exchange grants |
+//! | Connection manager | — | — | every connection's code and token; it also issues and revokes token-exchange grants |
 //! | Token exchange for `c` | `c`'s code, the client secret | `c`'s token, and `c`'s code only as [`Access::Take`] (DEC-2061) | `c`'s code |
 //! | Executor for `c` | `c`'s token, as a lease | `c`'s account entry only as [`Access::Create`] (DEC-2339) | — |
 //! | Runtime | — | — | — |
@@ -16,7 +16,7 @@
 //! The platform's own secrets ([`PlatformSecret`], DEC-2020) are each read by one identity and
 //! written only by the secret import; none is ever deleted, and a rotation writes over it.
 
-use mandate_connections::record::ConnectionId;
+use mandate_connections::record::{AccountRef, ConnectionId};
 
 use crate::SourceError;
 
@@ -52,9 +52,10 @@ pub enum SecretPath {
     Token(ConnectionId),
     /// The platform's OAuth client secret.
     ClientSecret,
-    /// A connection's broker account id and its random reference, in the personal-data vault,
-    /// outside `connections/` so no revoke deletes it (DEC-2339).
-    AccountId(ConnectionId),
+    /// The broker account id and its random reference of one connect of a connection, to one
+    /// account stream, in the personal-data vault, outside `connections/` so no revoke deletes it
+    /// (DEC-2339): a request again on the same connection to another account has its own.
+    AccountId(ConnectionId, AccountRef),
     /// A secret of the platform's own that one process type reads (DEC-2020).
     Platform(PlatformSecret),
 }
@@ -127,8 +128,7 @@ pub fn allows(identity: &Identity, access: Access, path: &SecretPath) -> bool {
         )
         | (Identity::TokenExchange(own), Access::Write, SecretPath::Token(c))
         | (Identity::Executor(own), Access::Read, SecretPath::Token(c))
-        | (Identity::Executor(own), Access::Create, SecretPath::AccountId(c)) => own == c,
-        (Identity::ConnectionManager, Access::Read, SecretPath::AccountId(_)) => true,
+        | (Identity::Executor(own), Access::Create, SecretPath::AccountId(c, _)) => own == c,
         (identity, Access::Read, SecretPath::Platform(secret)) => {
             holders(*secret).is_ok_and(|h| h.reads == *identity)
         }
@@ -211,7 +211,11 @@ pub fn kv_path(path: &SecretPath) -> Result<String, SourceError> {
         SecretPath::Code(c) => format!("connections/{}/code", connection_segment(c)?),
         SecretPath::Token(c) => format!("connections/{}/token", connection_segment(c)?),
         SecretPath::ClientSecret => "platform/alpaca-oauth-client-secret".to_owned(),
-        SecretPath::AccountId(c) => format!("personal/accounts/{}", connection_segment(c)?),
+        SecretPath::AccountId(c, account) => format!(
+            "personal/accounts/{}/{}",
+            connection_segment(c)?,
+            account.as_str()
+        ),
         SecretPath::Platform(PlatformSecret::ModelProviderKey) => {
             "platform/model-provider-key".to_owned()
         }
@@ -234,7 +238,6 @@ pub fn openbao_policy(
     for connection in connections {
         paths.push(SecretPath::Code(connection.clone()));
         paths.push(SecretPath::Token(connection.clone()));
-        paths.push(SecretPath::AccountId(connection.clone()));
     }
     let mut hcl = String::new();
     for path in &paths {

@@ -108,6 +108,25 @@ pub fn checked_connection<S: Store>(
         .ok_or("connection_record_unreadable")
 }
 
+/// [`checked_connection`], when it is `own`, the connection the executor runs as: a run never
+/// leases a connection whose check another connection's executor wrote.
+///
+/// # Errors
+/// [`checked_connection`]'s codes, and `connection_mismatch` for a checked connection that is
+/// not `own`.
+pub fn own_checked_connection<S: Store>(
+    store: &S,
+    scope: &AccountScope,
+    own: &ConnectionId,
+) -> Result<ConnectionId, &'static str> {
+    let checked = checked_connection(store, scope)?;
+    if checked == *own {
+        Ok(checked)
+    } else {
+        Err("connection_mismatch")
+    }
+}
+
 /// The access token a leased secret holds: DEC-2624's token entry, decoded by its one reader.
 ///
 /// # Errors
