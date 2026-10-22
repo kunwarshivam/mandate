@@ -12,6 +12,7 @@ use mandate_identity::{
 };
 use mandate_identity_seal::{LookupSeal, Seal};
 use mandate_journal::StoredEvent;
+use mandate_passkey::credentials::CredentialRecord;
 use mandate_time::UtcNanos;
 
 /// Turns the control stream's rows into its membership records, refusing a `Member*` record
@@ -84,6 +85,27 @@ pub fn membership_records(
         records.push(record);
     }
     Ok(records)
+}
+
+/// The passkey records of `workspace`'s control stream among `rows` (journal spec §9.31, read by
+/// `mandate_passkey::credentials::credential_record`), in stream order, for route 2's
+/// `CredentialFold::held` (§4.10 route 2 item 2). Rows are read as [`membership_records`] reads
+/// them: a row of another stream is passed over, the stream must open with its `StreamOpened`, and
+/// a credential record in another environment than the stream's is refused.
+///
+/// # Errors
+/// [`RowsRefused`] for a stream not opened, an unreadable row, a credential record that does not
+/// map (at any schema version but 1 too), or one written in another environment.
+#[expect(
+    clippy::todo,
+    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+)]
+pub fn credential_records(
+    workspace: WorkspaceId,
+    rows: &[StoredEvent],
+) -> Result<Vec<CredentialRecord>, RowsRefused> {
+    let _ = (workspace, rows);
+    todo!()
 }
 
 /// The parser of the hosted `workspace`'s control stream: [`membership_records`], any refusal a

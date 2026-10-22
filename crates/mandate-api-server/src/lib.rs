@@ -66,6 +66,7 @@ pub mod reads;
 pub mod reduction;
 pub mod routes;
 pub mod session;
+pub mod standing;
 pub mod status;
 pub mod stepup;
 pub mod subject;
