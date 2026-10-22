@@ -12,6 +12,7 @@ use crate::openbao::{
     kubernetes_login_verdict, kubernetes_namespace_verdict, lost_or_denied_verdict, provision,
     provisioned_identities, refusal, role_settings, seal_verdict, secret_id_identities, taken_read,
 };
+use crate::openbao::{fingerprint_key_verdict, transit_mount_verdict};
 use crate::policy::{Identity, Mounts};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
@@ -549,4 +550,67 @@ fn a_refused_overwrite_read_again_is_a_lost_race_only_when_the_code_is_gone() {
         Err(SourceError::Unavailable)
     );
     assert_eq!(verdict(Err(SourceError::Sealed)), Err(SourceError::Sealed));
+}
+
+/// The fingerprint key's mount must be a transit mount, by its own answer; any other engine, or
+/// an answer that does not say, fails provisioning (DEC-2345 item 1).
+#[test]
+#[ignore = "pending E21-32"]
+fn the_fingerprint_keys_mount_must_be_transit() {
+    assert_eq!(
+        transit_mount_verdict(Some(
+            &json!({ "type": "transit", "data": { "type": "transit" } })
+        )),
+        Ok(())
+    );
+    for answer in [
+        Some(json!({ "data": { "type": "kv" } })),
+        Some(json!({ "type": "transit", "data": {} })),
+        Some(json!({ "data": { "type": ["transit"] } })),
+        Some(json!({})),
+        None,
+    ] {
+        assert_eq!(
+            transit_mount_verdict(answer.as_ref()),
+            Err(SourceError::Config),
+            "{answer:?}"
+        );
+    }
+}
+
+/// A fingerprint key already there passes only when it is never exportable, never deletable and
+/// has no plaintext backup, each said as `false`; a key that is any of them, or an answer that
+/// does not say, fails provisioning (DEC-2345 item 1).
+#[test]
+#[ignore = "pending E21-32"]
+fn an_existing_fingerprint_key_must_never_leave_the_vault() {
+    let key = |exportable: Value, deletion: Value, backup: Value| {
+        json!({ "data": {
+            "exportable": exportable,
+            "deletion_allowed": deletion,
+            "allow_plaintext_backup": backup,
+            "type": "aes256-gcm96",
+        } })
+    };
+    let no = || json!(false);
+    assert_eq!(
+        fingerprint_key_verdict(Some(&key(no(), no(), no()))),
+        Ok(())
+    );
+    for answer in [
+        Some(key(json!(true), no(), no())),
+        Some(key(no(), json!(true), no())),
+        Some(key(no(), no(), json!(true))),
+        Some(key(Value::Null, no(), no())),
+        Some(key(no(), json!("false"), no())),
+        Some(json!({ "data": { "exportable": false, "deletion_allowed": false } })),
+        Some(json!({})),
+        None,
+    ] {
+        assert_eq!(
+            fingerprint_key_verdict(answer.as_ref()),
+            Err(SourceError::Config),
+            "{answer:?}"
+        );
+    }
 }
