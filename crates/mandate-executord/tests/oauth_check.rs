@@ -57,9 +57,7 @@ fn check(account: Option<&str>, pii: &str) -> Result<OAuthCheck, Error> {
         connection: connection()?,
         granted: granted()?,
         account: account.map(BrokerAccountId::new).transpose()?,
-        fingerprint: account
-            .map(|_| AccountFingerprint::new(HASH))
-            .transpose()?,
+        fingerprint: account.map(|_| AccountFingerprint::new(HASH)).transpose()?,
         pii_ref: AccountPiiRef::new(pii)?,
     })
 }

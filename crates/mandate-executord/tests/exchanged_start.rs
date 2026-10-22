@@ -248,7 +248,10 @@ fn a_fresh_stream_is_checked_once_over_the_lease_which_is_given_back() -> Result
     assert_eq!(
         calls.created,
         [
-            format!("{:?}", SecretPath::AccountId(connection()?, request.clone())),
+            format!(
+                "{:?}",
+                SecretPath::AccountId(connection()?, request.clone())
+            ),
             format!("{:?}", SecretPath::Fingerprint(connection()?, request)),
         ]
     );

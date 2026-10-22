@@ -78,17 +78,21 @@ pub fn oauth_connect_check<S: Store>(
     } = check;
     journal_check(store, ids, scope, now, || {
         let request = AccountRef::new(&scope.account.0).ok();
-        let stored = account
-            .zip(fingerprint)
-            .zip(request)
-            .is_some_and(|((id, fingerprint), request)| {
-                encode(&pii_ref, &id).is_ok_and(|entry| {
-                    let bytes = SecretSlice::from(entry.expose_secret().as_bytes().to_vec());
-                    create(&SecretPath::AccountId(connection.clone(), request.clone()), &bytes)
+        let stored =
+            account
+                .zip(fingerprint)
+                .zip(request)
+                .is_some_and(|((id, fingerprint), request)| {
+                    encode(&pii_ref, &id).is_ok_and(|entry| {
+                        let bytes = SecretSlice::from(entry.expose_secret().as_bytes().to_vec());
+                        create(
+                            &SecretPath::AccountId(connection.clone(), request.clone()),
+                            &bytes,
+                        )
                         .is_ok()
-                }) && fingerprinted(&mut create, &connection, request, &fingerprint, &pii_ref)
-                    .is_ok()
-            });
+                    }) && fingerprinted(&mut create, &connection, request, &fingerprint, &pii_ref)
+                        .is_ok()
+                });
         let account = if stored {
             AccountRead::Read {
                 pii_ref,
@@ -124,7 +128,14 @@ fn fingerprinted(
     fingerprint: &AccountFingerprint,
     pii_ref: &AccountPiiRef,
 ) -> Result<(), SourceError> {
-    let _ = (create, connection, request, fingerprint, pii_ref, encode_entry);
+    let _ = (
+        create,
+        connection,
+        request,
+        fingerprint,
+        pii_ref,
+        encode_entry,
+    );
     Err(SourceError::Unimplemented { story: "E21-32" })
 }
 
