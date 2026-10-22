@@ -3067,7 +3067,13 @@ enables `live` (ES-23, OPS-5).
       mounts the API's AppRole and the vault's CA, and `cargo xtask cell up` provisions the
       AppRole Secrets and sets `api.vaultBinding: true`, so the API can write the callback's code;
     - K2a and K2b (#2203, #2204, #2209, #2210), which start that executor on the exchange's
-      success, as its connection's own account.
+      success, as its connection's own account;
+    - the connection manager's AppRole in the API pod (lane D1, #2269, DEC-2348), since the API
+      finishes a connect as the connection manager;
+    - a new connection's paths in the Api and ConnectionManager vault policies (lane D1, DEC-2349):
+      `openbao_policy` writes `connections/<c>/code` and `/token` only for the connections given to
+      `provision`, so a web connect's new connection is `Denied` its code write and its finish's
+      deletes until the policy names it, before the API returns the authorize URL.
 - **E21-34 (Proposed, M8; SC; lane O4)** As an owner, I want the kill switch reachable in the cell
   with nothing running but Postgres, the executor and the broker, so that rule 13 holds when the
   web app, the API and the cell's tooling are down (design §3.6, OPS-4). *Accepted when:*
