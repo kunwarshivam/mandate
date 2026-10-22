@@ -280,14 +280,11 @@ fn fresh_step_up(payload: &Value, event_time: Option<&Value>) -> Result<(), Inva
         .and_then(|t| mandate_time::UtcNanos::parse(t).ok());
     let fresh = match (at, event) {
         (Some(at), Some(event)) => {
-            if event.secs() < at.secs() || (event.secs() == at.secs() && event.nanos() < at.nanos())
-            {
-                false
-            } else {
-                let behind = event.secs().saturating_sub(at.secs());
-                behind < STEP_UP_WINDOW_SECS
-                    || (behind == STEP_UP_WINDOW_SECS && event.nanos() <= at.nanos())
-            }
+            let earliest = mandate_time::UtcNanos::from_parts(
+                event.secs().saturating_sub(STEP_UP_WINDOW_SECS),
+                event.nanos(),
+            );
+            at <= event && earliest.is_ok_and(|earliest| earliest <= at)
         }
         _ => false,
     };
@@ -446,7 +443,7 @@ fn address_change_batch(drafts: &[Draft]) -> Result<(), (usize, Invalid)> {
                 .and_then(Value::as_str)
         })
         .collect();
-    if assertions.len() > 1 && assertions.windows(2).any(|w| matches!(w, [a, b] if a != b)) {
+    if assertions.windows(2).any(|w| matches!(w, [a, b] if a != b)) {
         return Err((
             index,
             Invalid::new(InvalidReason::Schema, "payload.address_ref"),
