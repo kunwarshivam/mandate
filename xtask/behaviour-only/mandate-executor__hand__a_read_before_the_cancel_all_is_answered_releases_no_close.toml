@@ -1,0 +1,7 @@
+file = "crates/mandate-executor/tests/hand.rs"
+test = "a_read_before_the_cancel_all_is_answered_releases_no_close"
+reason = """
+The account kill switch's close step (DEC-2337, journal v0.75's `AccountCloseRequested`) is
+A1b's: on A1a the executor sends no close-position, so the test fails on behaviour rather than at
+a stub. The E7-4 A1b implementation PR deletes this row.
+"""

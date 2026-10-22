@@ -6109,6 +6109,156 @@ fn a_close_with_no_interval_open_ends_none() {
     assert!(ended.is_empty(), "no interval to end: {ended:?}");
 }
 
+/// Whether a run sent a close-position.
+fn sends_a_close(ran: &common::Ran) -> bool {
+    ran.requests
+        .iter()
+        .any(|r| matches!(r, BrokerRequest::ClosePosition(..)))
+}
+
+/// A second account switch after a close confirms nothing by the first switch's read (rule 13,
+/// DEC-2333 items 2 and 4): its batch sends the cancel-all and no close, its answer alone sends no
+/// close, and only a read after it closes BTC again, as that switch's first request.
+#[test]
+#[ignore = "pending E7-4"]
+fn a_second_account_switch_closes_nothing_until_its_own_cancel_all_is_read() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (mut shell, first, _, _) = closed_btc(&ports);
+
+    let second = shell.run(account_switch(Initiator::RiskLimit), &ports);
+    let switch = second
+        .draft("KillSwitchActivated")
+        .map(|d| d.event_id.0.clone())
+        .expect("the second switch is journaled");
+    let accepted = shell.run(
+        Input::Broker(Ok(BrokerOutcome::AccountWideAccepted)),
+        &ports,
+    );
+    let read = shell.run(
+        Input::Broker(Ok(BrokerOutcome::OpenOrders(Vec::new()))),
+        &ports,
+    );
+
+    assert!(
+        second
+            .requests
+            .iter()
+            .any(|r| matches!(r, BrokerRequest::CancelAll(_))),
+        "the second switch sends its cancel-all: {:?}",
+        second.requests
+    );
+    assert!(
+        !sends_a_close(&second) && !sends_a_close(&accepted),
+        "no close beside the cancel-all or on its answer alone: {:?} then {:?}",
+        second.requests,
+        accepted.requests
+    );
+    assert!(sends_a_close(&read), "the read after it closes BTC");
+    let request = read
+        .draft("AccountCloseRequested")
+        .expect("journaled first");
+    let payload = &request.payload;
+    assert_eq!(
+        (
+            payload
+                .get("kill_switch_event")
+                .and_then(mandate_canon::Value::as_str),
+            payload
+                .get("attempt")
+                .and_then(mandate_canon::Value::as_int)
+        ),
+        (Some(switch.as_str()), Some(1)),
+        "the second switch's first request, not the first switch's ({first})"
+    );
+}
+
+/// The close waits for the cancel-all's answer (DEC-2333 item 2): an open-orders read that comes
+/// before the cancel-all is accepted or lost releases no close, and the read after the answer
+/// does.
+#[test]
+#[ignore = "pending E7-4"]
+fn a_read_before_the_cancel_all_is_answered_releases_no_close() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (mut shell, _) = crypto_stop_account(&ports);
+    shell.run(account_switch(Initiator::Owner), &ports);
+
+    let early = shell.run(
+        Input::Broker(Ok(BrokerOutcome::OpenOrders(Vec::new()))),
+        &ports,
+    );
+    shell.run(
+        Input::Broker(Ok(BrokerOutcome::AccountWideAccepted)),
+        &ports,
+    );
+    let read = shell.run(
+        Input::Broker(Ok(BrokerOutcome::OpenOrders(Vec::new()))),
+        &ports,
+    );
+
+    assert!(
+        !sends_a_close(&early),
+        "no close before the cancel-all is answered: {:?}",
+        early.requests
+    );
+    assert!(
+        sends_a_close(&read),
+        "the read after the answer closes BTC: {:?}",
+        read.requests
+    );
+}
+
+/// A reconciliation whose snapshot was taken before the switch releases no close (DEC-2333 item
+/// 2), even after the cancel-all is answered; one taken at or after it does.
+#[test]
+#[ignore = "pending E7-4"]
+fn a_read_taken_before_the_switch_releases_no_close() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (mut shell, _) = crypto_stop_account(&ports);
+    let held = shell
+        .state
+        .positions()
+        .get(&instrument(BTC))
+        .map(ToString::to_string)
+        .unwrap_or_default();
+    let before = shell.head().0;
+    shell.run(account_switch(Initiator::Owner), &ports);
+    shell.run(
+        Input::Broker(Ok(BrokerOutcome::AccountWideAccepted)),
+        &ports,
+    );
+    let read = |head: u64| {
+        let mut taken = snapshot(head, ReconcileReason::Scheduled);
+        taken.positions = vec![broker_position(BTC, &held)];
+        Input::BrokerSnapshot(taken)
+    };
+
+    let stale = shell.run(read(before), &ports);
+    let fresh = shell.run(read(shell.head().0), &ports);
+
+    assert!(
+        !sends_a_close(&stale),
+        "a snapshot taken before the switch releases nothing: {:?}",
+        stale.requests
+    );
+    assert!(
+        sends_a_close(&fresh),
+        "one taken after it closes BTC: {:?}",
+        fresh.requests
+    );
+}
+
 /// BTC's unprotected interval ends on its close (DEC-2337 item 4): the close is journaled, the
 /// broker reports the stop the cancel-all cancelled, which opens BTC's interval, and the close's
 /// fill, which names no order of ours, leaves nothing held, so the interval journals
