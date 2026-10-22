@@ -44,6 +44,7 @@ use mandate_api_server::config::{
     read_session_key,
 };
 use mandate_api_server::confirm::CliConfirm;
+use mandate_api_server::connect_binding::{ConnectBinding, bound, connect_binding};
 use mandate_api_server::http::{self, App, Settings};
 use mandate_api_server::journal::{Journal, JournalUnavailable, Postgres};
 use mandate_api_server::keys::{FetchedKeys, REFETCH};
@@ -147,6 +148,7 @@ struct Start {
     hosted: Hosted,
     artifacts: Option<Arc<Objects<FsArtifactStore>>>,
     ingress: Vec<IpAddr>,
+    connect: ConnectBinding,
 }
 
 /// A required setting's value, refused when absent, empty, or not Unicode.
@@ -159,6 +161,8 @@ fn setting(name: &'static str) -> Result<String, StartRefusal> {
 
 fn checked() -> Result<(Args, Start), StartRefusal> {
     check_environment(env::vars_os())?;
+    let tier = Tier::from_setting(env::var(TIER_VAR).ok().as_deref());
+    let connect = connect_binding(tier, |name| env::var_os(name))?;
     let args = args(env::args_os().skip(1))?;
     check_bind(args.bind, args.pod_address)?;
     check_bind(args.probe_bind, args.pod_address)?;
@@ -193,7 +197,6 @@ fn checked() -> Result<(Args, Start), StartRefusal> {
         name: "MANDATE_API_ISSUER",
     })?;
     let key_set = setting("MANDATE_API_JWKS_URL")?;
-    let tier = Tier::from_setting(env::var(TIER_VAR).ok().as_deref());
     check_key_set_tier(&key_set, tier)?;
     let keys = FetchedKeys::new(&key_set).map_err(|_| StartRefusal::Setting {
         name: "MANDATE_API_JWKS_URL",
@@ -215,6 +218,7 @@ fn checked() -> Result<(Args, Start), StartRefusal> {
         hosted,
         artifacts,
         ingress,
+        connect,
     };
     Ok((args, start))
 }
@@ -300,7 +304,11 @@ async fn run(args: Args, start: Start) -> io::Result<()> {
         }),
         step_up: Arc::new(step_up),
         challenges,
-        connect: None,
+        connect: bound(
+            start.connect,
+            Box::new(OsRandom::new()),
+            Arc::new(SystemClock),
+        ),
         reduction: Arc::new(Reduction::new(start.ingress, Box::new(OsRandom::new()))),
     };
     let api = spawn_listener(
@@ -369,6 +377,9 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    if let Some(line) = start.connect.off_line() {
+        eprintln!("{line}");
+    }
     let runtime = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()

@@ -39,7 +39,8 @@ commands:
   check                 run every per-PR job locally
   ci <job>              run one CI job: fast | full | nightly, or one part: lint | test | pending |
                         spec-guard | portable | refcases | reference | schemas | supply-chain |
-                        postgres | openbao | objectstore | stub-release | mutants |
+                        postgres | openbao | objectstore | stub-release | api-release |
+                        mutants |
                         schema-mutants | cell | cell-demo | cell-journal | cell-failover |
                         cell-kill-switch | cell-executor | cell-vault | sweep; or
                         one part of test: test-nextest | test-doc | test-rh-sim | test-python.
@@ -159,6 +160,7 @@ const FULL_JOB: &[&str] = &[
     "tofu",
     "stub-release",
     "exchange-release",
+    "api-release",
 ];
 const PR_JOBS: &[&str] = &[
     "lint",
@@ -175,6 +177,7 @@ const PR_JOBS: &[&str] = &[
     "objectstore",
     "stub-release",
     "exchange-release",
+    "api-release",
     "mutants",
     "schema-mutants",
     "cell",
@@ -514,6 +517,7 @@ fn ci(job: &str) -> Result<()> {
         "tofu" => tofu_checks(),
         "stub-release" => stub_release(),
         "exchange-release" => exchange_release(),
+        "api-release" => api_release(),
         "mutants" => mutants(Path::new("."), base_ref()?.as_deref()),
         "mutants-costs" => mutant_costs::ci(),
         "sweep" => sweep(Path::new(".")),
@@ -891,6 +895,89 @@ fn exchange_release() -> Result<()> {
         })?;
         release_exchange_refused(&output)
             .with_context(|| format!("tier {tier}, token URL {url:?}"))?;
+    }
+    Ok(())
+}
+
+/// The workspace API server's crate and binary (E21-31, DEC-978).
+const API_SERVER: &str = "mandate-api-server";
+
+/// All a release API may write, to standard error, when it is given an authorization page
+/// (DEC-2633 item 3, DEC-2338 item 5).
+const AUTHORIZE_URL_REFUSED: &str = "refused: MANDATE_ALPACA_AUTHORIZE_URL is set outside a dev or ci \
+debug build, or names no cell page\n";
+
+/// The refusal an unsigned release binary meets first in a tier that requires a signature.
+const RELEASE_UNSIGNED: &str = "release_unsigned\n";
+
+/// DEC-2338 item 5: a build without debug assertions refuses to start whenever
+/// `MANDATE_ALPACA_AUTHORIZE_URL` is set, in every tier. Builds the API with `--release` once, only
+/// when the diff selects its crate (DEC-1190), and runs it with a cell's page, a loopback page and
+/// an empty one, in each tier. Each run must be [`release_api_refused`]. The page is judged before
+/// any other setting, so the run needs no database, key or address. An unsigned binary in staging
+/// or production meets `release_unsigned` first, so it also runs the crate's `config` tests built
+/// with `--release`, whose release-only test asserts every tier refuses any set page. Together
+/// they, not a debug unit test, cover `config::authorize_page`'s release arm.
+fn api_release() -> Result<()> {
+    if !selection()?.crates.contains(API_SERVER) {
+        eprintln!("    api-release: {API_SERVER} is not affected (DEC-1190)");
+        return Ok(());
+    }
+    release_profile_untouched(|name| env::var(name).ok())?;
+    sh(
+        "cargo",
+        &[
+            "test",
+            "--locked",
+            "--release",
+            "--package",
+            API_SERVER,
+            "--test",
+            "config",
+        ],
+    )?;
+    for tier in ["dev", "ci", "staging", "production"] {
+        for page in [
+            "http://oauth-fixture:8091/alpaca/oauth/authorize",
+            "http://127.0.0.1:8091/alpaca/oauth/authorize",
+            "",
+        ] {
+            let output = released(
+                API_SERVER,
+                &["--bind", "127.0.0.1:0", "--probe-bind", "127.0.0.1:0"],
+                &[
+                    ("MANDATE_DEPLOYMENT_TIER", tier),
+                    ("MANDATE_ALPACA_AUTHORIZE_URL", page),
+                ],
+            )?
+            .with_context(|| {
+                format!(
+                    "the release build of {API_SERVER} kept running instead of refusing its \
+                     authorization page in tier {tier} (DEC-2338 item 5)"
+                )
+            })?;
+            release_api_refused(&output, matches!(tier, "dev" | "ci"))
+                .with_context(|| format!("tier {tier}, page {page:?}"))?;
+        }
+    }
+    Ok(())
+}
+
+/// Whether a release API's run is the refusal of its authorization page: exit 2, nothing on
+/// standard output, and [`AUTHORIZE_URL_REFUSED`] alone on standard error. Where the tier is not
+/// `lenient`, an unsigned binary is refused [`RELEASE_UNSIGNED`] before any setting is read, and
+/// that refusal is accepted too.
+fn release_api_refused(output: &std::process::Output, lenient: bool) -> Result<()> {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let refusal_named = stderr == AUTHORIZE_URL_REFUSED || (!lenient && stderr == RELEASE_UNSIGNED);
+    if output.status.code() != Some(2) || !refusal_named || !output.stdout.is_empty() {
+        bail!(
+            "the release build of {API_SERVER} must exit 2 writing only \
+             {AUTHORIZE_URL_REFUSED:?} to standard error (DEC-2338 item 5); it exited {} with \
+             stdout {:?} and stderr {stderr:?}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout)
+        );
     }
     Ok(())
 }
@@ -11627,28 +11714,29 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::{
-        ATOMIC_EXCEPTIONS, BEHAVIOUR_ONLY_DIR, BehaviourOnlyRow, BuildDir, CARGO_TARGET_DIR,
-        CiFile, CratePolicy, Dependency, FAST_JOB, FEATURE_MAP, FULL_JOB, INFRA_WORKFLOW, Layers,
-        MUTANT_BUILD_PROFILE, MUTANT_BUILD_TIMEOUT, MUTANT_SHARDS, MUTANT_TEST_TIMEOUT,
-        MUTANTS_IN_PLACE, MUTANTS_OUT, Metadata, MutantPlan, MutantShard, MutatedCrate, PR_JOBS,
-        Package, PendingTest, PendingTestRun, REFCASES, REHEARSAL, REHEARSAL_LIVE_JOB,
-        REHEARSAL_TESTED, SCHEMA_CHECKERS, SCHEMA_DIR, SCHEMA_SHARD_ENV, TEST_PARTITION_ENV,
-        TEST_PARTS, TestOrder, TestOutcome, USED_BY_DERIVED, UnmutatedSource, actionlint_workflows,
-        atomic_exception, backticked_paths, base_ref_in, behaviour_only_rows, check_schedule, ci,
-        ci_files, classify, codeowners_problems, contains_dec_id, contains_word, decision_numbers,
-        external_oracles, failure_cause, feature_files, feature_map_problems, files_by_extension,
-        first_panic_line, forbidden_reached, gate_diff, gate_diff_path, generated_pending_markers,
-        has_pending_tests, is_pending_marker, is_stub_function, layer_problems, lint,
-        listed_mutant_counts, live_feature_problems, live_test_counts, metadata_in,
-        mutant_verdicts, mutants, mutants_args, mutants_job_cargo, mutants_outcome, mutants_plan,
-        mutants_scheduled, mutated_crates, names_a_stub, output_in, pending_nextest,
-        pending_problems, pending_tests, per_shard_value, plain_comment_lines, preflight_args,
-        proptest_seeds_in, registry_problems, registry_rows, rehearsal_runs,
-        release_exchange_refused, release_profile_untouched, release_stub_refused, repo_root,
-        schema_mutants, shard_packages, shellcheck_scripts, simulator_harnesses, simulator_oracles,
-        spec_guard_problems, spec_guard_problems_for_pr, status_flip_problems, test_binary,
-        test_order_config, test_outcomes, unique_temp_path, unjudged_mutants, used_by, verdicts,
-        workspace_closure, workspace_packages,
+        ATOMIC_EXCEPTIONS, AUTHORIZE_URL_REFUSED, BEHAVIOUR_ONLY_DIR, BehaviourOnlyRow, BuildDir,
+        CARGO_TARGET_DIR, CiFile, CratePolicy, Dependency, FAST_JOB, FEATURE_MAP, FULL_JOB,
+        INFRA_WORKFLOW, Layers, MUTANT_BUILD_PROFILE, MUTANT_BUILD_TIMEOUT, MUTANT_SHARDS,
+        MUTANT_TEST_TIMEOUT, MUTANTS_IN_PLACE, MUTANTS_OUT, Metadata, MutantPlan, MutantShard,
+        MutatedCrate, PR_JOBS, Package, PendingTest, PendingTestRun, REFCASES, REHEARSAL,
+        REHEARSAL_LIVE_JOB, REHEARSAL_TESTED, RELEASE_UNSIGNED, SCHEMA_CHECKERS, SCHEMA_DIR,
+        SCHEMA_SHARD_ENV, TEST_PARTITION_ENV, TEST_PARTS, TestOrder, TestOutcome, USED_BY_DERIVED,
+        UnmutatedSource, actionlint_workflows, atomic_exception, backticked_paths, base_ref_in,
+        behaviour_only_rows, check_schedule, ci, ci_files, classify, codeowners_problems,
+        contains_dec_id, contains_word, decision_numbers, external_oracles, failure_cause,
+        feature_files, feature_map_problems, files_by_extension, first_panic_line,
+        forbidden_reached, gate_diff, gate_diff_path, generated_pending_markers, has_pending_tests,
+        is_pending_marker, is_stub_function, layer_problems, lint, listed_mutant_counts,
+        live_feature_problems, live_test_counts, metadata_in, mutant_verdicts, mutants,
+        mutants_args, mutants_job_cargo, mutants_outcome, mutants_plan, mutants_scheduled,
+        mutated_crates, names_a_stub, output_in, pending_nextest, pending_problems, pending_tests,
+        per_shard_value, plain_comment_lines, preflight_args, proptest_seeds_in, registry_problems,
+        registry_rows, rehearsal_runs, release_api_refused, release_exchange_refused,
+        release_profile_untouched, release_stub_refused, repo_root, schema_mutants, shard_packages,
+        shellcheck_scripts, simulator_harnesses, simulator_oracles, spec_guard_problems,
+        spec_guard_problems_for_pr, status_flip_problems, test_binary, test_order_config,
+        test_outcomes, unique_temp_path, unjudged_mutants, used_by, verdicts, workspace_closure,
+        workspace_packages,
     };
     use super::{
         BINARY_COUPLINGS, CrateGraph, MATRIX_LIMIT, RUNNER_CRATE, SWEEP_ROTATION,
@@ -12811,6 +12899,45 @@ mod tests {
             );
         }
         assert!(FULL_JOB.contains(&"exchange-release") && PR_JOBS.contains(&"exchange-release"));
+    }
+
+    /// DEC-2338 item 5: `api-release` accepts only exit 2 with the authorization page's refusal
+    /// alone on standard error, or, outside dev and ci, the unsigned binary's; and runs in `full`
+    /// and in `check`.
+    #[test]
+    fn the_release_api_check_accepts_only_the_lone_refusal() {
+        let run = |code: i32, stdout: &str, stderr: &str| std::process::Output {
+            status: ExitStatus::from_raw(code << 8),
+            stdout: stdout.as_bytes().to_vec(),
+            stderr: stderr.as_bytes().to_vec(),
+        };
+        for lenient in [true, false] {
+            assert!(release_api_refused(&run(2, "", AUTHORIZE_URL_REFUSED), lenient).is_ok());
+        }
+        assert!(release_api_refused(&run(2, "", RELEASE_UNSIGNED), false).is_ok());
+        assert!(release_api_refused(&run(2, "", RELEASE_UNSIGNED), true).is_err());
+        let twice = format!("{AUTHORIZE_URL_REFUSED}{AUTHORIZE_URL_REFUSED}");
+        for lenient in [true, false] {
+            for (code, stdout, stderr) in [
+                (0, "", AUTHORIZE_URL_REFUSED),
+                (1, "", AUTHORIZE_URL_REFUSED),
+                (
+                    2,
+                    "listening api=127.0.0.1:1 probes=127.0.0.1:2\n",
+                    AUTHORIZE_URL_REFUSED,
+                ),
+                (2, "", twice.as_str()),
+                (2, "", "refused: --bind is missing or invalid\n"),
+                (2, "", AUTHORIZE_URL_REFUSED.trim_end()),
+                (2, "", ""),
+            ] {
+                assert!(
+                    release_api_refused(&run(code, stdout, stderr), lenient).is_err(),
+                    "{lenient} {code} {stdout:?} {stderr:?}"
+                );
+            }
+        }
+        assert!(FULL_JOB.contains(&"api-release") && PR_JOBS.contains(&"api-release"));
     }
 
     /// DEC-2322: `exchange-release` refuses an environment that turns the release profile's

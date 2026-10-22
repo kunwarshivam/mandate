@@ -44,6 +44,9 @@
 //! - [`reduction`]: route 2's challenge route, its store and request keys, and the address and
 //!   device its limits count against (DEC-2117, DEC-2119).
 //! - [`me`]: the caller's own session, outside every workspace path (§4.10, DEC-2113).
+//! - [`connect_binding`]: whether the start binds a connect, from its four settings (DEC-2338).
+//! - [`vault_codes`]: the callback's vault port, which writes a code as the API's vault identity
+//!   and nothing else (DEC-2338).
 //!
 //! It never places, cancels, or sizes an order, and never calls a broker or a runtime (§1.4):
 //! `xtask/layers.toml` keeps it from every crate that could.
@@ -55,6 +58,7 @@ pub mod commands;
 pub mod config;
 pub mod confirm;
 pub mod connect;
+pub mod connect_binding;
 pub mod connections;
 pub mod documents;
 pub mod finish;
@@ -78,6 +82,7 @@ pub mod status;
 pub mod stepup;
 pub mod subject;
 pub mod token;
+pub mod vault_codes;
 pub mod version_routes;
 pub mod versions;
 pub mod writes;
