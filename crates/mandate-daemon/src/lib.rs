@@ -31,7 +31,21 @@
 //! (the gate, the order plan, the flatten planner, and the configuration references) waits for the
 //! post-R0 hook (DEC-968 item 6, DEC-1012 item 6); until then the binary runs only fixture wiring.
 
+#[cfg(test)]
+extern crate self as mandate_daemon;
+
 pub mod cell;
+#[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    reason = "ADR-0001 ES-09 excepts tests from the safety-critical denies"
+)]
+#[path = "../tests/cell_research/mod.rs"]
+mod cell_research;
 pub mod deployment;
 pub mod fixture;
 pub mod launch;
