@@ -11049,6 +11049,511 @@ approval_timeouts:
       value: 01J8Z3P2A000000000000000Q3
     expect:
       outcome: Valid
+kill_switch_unapplied:
+  spec: docs/specs/journal.md v0.78 §9.15, rule 266 (DEC-2351)
+  streams:
+  - name: after_restarts
+    clause: 'rule 266: the run''s first start was the switch''s, whatever restarts followed'
+    records:
+    - &id005
+      event_id: 01J8Z6U0000000000000000000
+      event_type: ConnectionEstablished
+      schema_version: 2
+      causation_id: null
+      payload:
+        connection_id: conn_01J8Z2CONN000000000000C1
+        account_ref: 01J8Z2ACCT00000000000000A1
+    - &id006
+      event_id: 01J8Z6U0100000000000000000
+      event_type: ProcessStartIssued
+      schema_version: 1
+      causation_id: null
+      payload:
+        process: executor
+        subject: 01J8Z2ACCT00000000000000A1
+        generation: 1
+        cause: deployed
+    - &id007
+      event_id: 01J8Z6U0200000000000000000
+      event_type: ProcessStartIssued
+      schema_version: 1
+      causation_id: 01J8Z6KS00000000000000000S
+      payload:
+        process: executor
+        subject: 01J8Z2ACCT00000000000000A1
+        generation: 2
+        cause: kill_switch
+    - event_id: 01J8Z6U0300000000000000000
+      event_type: ProcessStartIssued
+      schema_version: 1
+      causation_id: null
+      payload:
+        process: executor
+        subject: 01J8Z2ACCT00000000000000A1
+        generation: 3
+        cause: restart
+    - event_id: 01J8Z6U0400000000000000000
+      event_type: ProcessStartIssued
+      schema_version: 1
+      causation_id: null
+      payload:
+        process: executor
+        subject: 01J8Z2ACCT00000000000000A1
+        generation: 4
+        cause: restart
+    - event_id: 01J8Z6U0500000000000000000
+      event_type: ProcessCrashLooped
+      schema_version: 1
+      causation_id: null
+      payload:
+        process: executor
+        subject: 01J8Z2ACCT00000000000000A1
+        generation: 4
+    - event_id: 01J8Z6U0600000000000000000
+      event_type: OwnerAlertSent
+      schema_version: 1
+      causation_id: 01J8Z6U0500000000000000000
+      payload:
+        subject: 01J8Z6U0500000000000000000
+        kind: kill_switch_unapplied
+        owner_command: null
+    expect:
+      outcome: Valid
+  - name: at_once
+    clause: 'rule 266: a loop of the switch''s own start'
+    records:
+    - *id005
+    - *id006
+    - *id007
+    - event_id: 01J8Z6U0300000000000000000
+      event_type: ProcessCrashLooped
+      schema_version: 1
+      causation_id: null
+      payload:
+        process: executor
+        subject: 01J8Z2ACCT00000000000000A1
+        generation: 2
+    - event_id: 01J8Z6U0400000000000000000
+      event_type: OwnerAlertSent
+      schema_version: 1
+      causation_id: 01J8Z6U0300000000000000000
+      payload:
+        subject: 01J8Z6U0300000000000000000
+        kind: kill_switch_unapplied
+        owner_command: null
+    expect:
+      outcome: Valid
+  - name: an_ordinary_loop
+    clause: 'rule 266: a run that began with a deployment is ordinary'
+    records:
+    - *id005
+    - *id006
+    - event_id: 01J8Z6U0200000000000000000
+      event_type: ProcessStartIssued
+      schema_version: 1
+      causation_id: null
+      payload:
+        process: executor
+        subject: 01J8Z2ACCT00000000000000A1
+        generation: 2
+        cause: restart
+    - event_id: 01J8Z6U0300000000000000000
+      event_type: ProcessCrashLooped
+      schema_version: 1
+      causation_id: null
+      payload:
+        process: executor
+        subject: 01J8Z2ACCT00000000000000A1
+        generation: 2
+    - event_id: 01J8Z6U0400000000000000000
+      event_type: OwnerAlertSent
+      schema_version: 1
+      causation_id: 01J8Z6U0300000000000000000
+      payload:
+        subject: 01J8Z6U0300000000000000000
+        kind: kill_switch_unapplied
+        owner_command: null
+    expect:
+      outcome: Invalid
+      rule: rule 266
+      index: 4
+  - name: redeployed
+    clause: 'rule 266: a deployment on the account since the switch''s start makes the loop ordinary'
+    records:
+    - *id005
+    - *id006
+    - *id007
+    - event_id: 01J8Z6U0300000000000000000
+      event_type: AgentDeployed
+      schema_version: 2
+      causation_id: null
+      payload:
+        agent_id: agent_3
+        connection_id: conn_01J8Z2CONN000000000000C1
+    - event_id: 01J8Z6U0400000000000000000
+      event_type: ProcessStartIssued
+      schema_version: 1
+      causation_id: null
+      payload:
+        process: executor
+        subject: 01J8Z2ACCT00000000000000A1
+        generation: 3
+        cause: restart
+    - event_id: 01J8Z6U0500000000000000000
+      event_type: ProcessCrashLooped
+      schema_version: 1
+      causation_id: null
+      payload:
+        process: executor
+        subject: 01J8Z2ACCT00000000000000A1
+        generation: 3
+    - event_id: 01J8Z6U0600000000000000000
+      event_type: OwnerAlertSent
+      schema_version: 1
+      causation_id: 01J8Z6U0500000000000000000
+      payload:
+        subject: 01J8Z6U0500000000000000000
+        kind: kill_switch_unapplied
+        owner_command: null
+    expect:
+      outcome: Invalid
+      rule: rule 266
+      index: 6
+  - name: deployed_elsewhere
+    clause: 'rule 266: a deployment on another account''s connection does not end this run'
+    records:
+    - *id005
+    - event_id: 01J8Z6U0100000000000000000
+      event_type: ConnectionEstablished
+      schema_version: 2
+      causation_id: null
+      payload:
+        connection_id: conn_01J8Z2CONN000000000000C2
+        account_ref: 01J8Z2ACCT00000000000000A2
+    - event_id: 01J8Z6U0200000000000000000
+      event_type: ProcessStartIssued
+      schema_version: 1
+      causation_id: null
+      payload:
+        process: executor
+        subject: 01J8Z2ACCT00000000000000A1
+        generation: 1
+        cause: deployed
+    - event_id: 01J8Z6U0300000000000000000
+      event_type: ProcessStartIssued
+      schema_version: 1
+      causation_id: 01J8Z6KS00000000000000000S
+      payload:
+        process: executor
+        subject: 01J8Z2ACCT00000000000000A1
+        generation: 2
+        cause: kill_switch
+    - event_id: 01J8Z6U0400000000000000000
+      event_type: AgentDeployed
+      schema_version: 2
+      causation_id: null
+      payload:
+        agent_id: agent_4
+        connection_id: conn_01J8Z2CONN000000000000C2
+    - event_id: 01J8Z6U0500000000000000000
+      event_type: ProcessStartIssued
+      schema_version: 1
+      causation_id: null
+      payload:
+        process: executor
+        subject: 01J8Z2ACCT00000000000000A1
+        generation: 3
+        cause: restart
+    - event_id: 01J8Z6U0600000000000000000
+      event_type: ProcessCrashLooped
+      schema_version: 1
+      causation_id: null
+      payload:
+        process: executor
+        subject: 01J8Z2ACCT00000000000000A1
+        generation: 3
+    - event_id: 01J8Z6U0700000000000000000
+      event_type: OwnerAlertSent
+      schema_version: 1
+      causation_id: 01J8Z6U0600000000000000000
+      payload:
+        subject: 01J8Z6U0600000000000000000
+        kind: kill_switch_unapplied
+        owner_command: null
+    expect:
+      outcome: Valid
+  - name: retired_before_the_switch
+    clause: 'rule 266: an agent deployed and retired before the switch''s start leaves it wanted by none'
+    records:
+    - *id005
+    - event_id: 01J8Z6U1100000000000000000
+      event_type: AgentDeployed
+      schema_version: 2
+      causation_id: null
+      payload:
+        agent_id: agent_11
+        connection_id: conn_01J8Z2CONN000000000000C1
+    - *id006
+    - event_id: 01J8Z6U1200000000000000000
+      event_type: AgentStopped
+      schema_version: 1
+      causation_id: null
+      payload:
+        agent_id: agent_11
+    - event_id: 01J8Z6U0300000000000000000
+      event_type: ProcessStartIssued
+      schema_version: 1
+      causation_id: 01J8Z6KS00000000000000000S
+      payload:
+        process: executor
+        subject: 01J8Z2ACCT00000000000000A1
+        generation: 2
+        cause: kill_switch
+    - event_id: 01J8Z6U0400000000000000000
+      event_type: ProcessCrashLooped
+      schema_version: 1
+      causation_id: null
+      payload:
+        process: executor
+        subject: 01J8Z2ACCT00000000000000A1
+        generation: 2
+    - event_id: 01J8Z6U0500000000000000000
+      event_type: OwnerAlertSent
+      schema_version: 1
+      causation_id: 01J8Z6U0400000000000000000
+      payload:
+        subject: 01J8Z6U0400000000000000000
+        kind: kill_switch_unapplied
+        owner_command: null
+    expect:
+      outcome: Valid
+  - name: switched_while_wanted
+    clause: 'rule 266: a switch''s start of an executor an agent still wants is no held run'
+    records:
+    - *id005
+    - event_id: 01J8Z6U1100000000000000000
+      event_type: AgentDeployed
+      schema_version: 2
+      causation_id: null
+      payload:
+        agent_id: agent_11
+        connection_id: conn_01J8Z2CONN000000000000C1
+    - *id006
+    - event_id: 01J8Z6U0200000000000000000
+      event_type: ProcessStartIssued
+      schema_version: 1
+      causation_id: 01J8Z6KS00000000000000000S
+      payload:
+        process: executor
+        subject: 01J8Z2ACCT00000000000000A1
+        generation: 2
+        cause: kill_switch
+    - event_id: 01J8Z6U0300000000000000000
+      event_type: ProcessStartIssued
+      schema_version: 1
+      causation_id: null
+      payload:
+        process: executor
+        subject: 01J8Z2ACCT00000000000000A1
+        generation: 3
+        cause: restart
+    - event_id: 01J8Z6U0400000000000000000
+      event_type: ProcessCrashLooped
+      schema_version: 1
+      causation_id: null
+      payload:
+        process: executor
+        subject: 01J8Z2ACCT00000000000000A1
+        generation: 3
+    - event_id: 01J8Z6U0500000000000000000
+      event_type: OwnerAlertSent
+      schema_version: 1
+      causation_id: 01J8Z6U0400000000000000000
+      payload:
+        subject: 01J8Z6U0400000000000000000
+        kind: kill_switch_unapplied
+        owner_command: null
+    expect:
+      outcome: Invalid
+      rule: rule 266
+      index: 6
+  - name: a_new_run_after_a_loop
+    clause: 'rule 266: a later switch''s start after an unapplied loop is a new run, and its loop is unapplied too'
+    records:
+    - *id005
+    - *id006
+    - *id007
+    - event_id: 01J8Z6U0300000000000000000
+      event_type: ProcessCrashLooped
+      schema_version: 1
+      causation_id: null
+      payload:
+        process: executor
+        subject: 01J8Z2ACCT00000000000000A1
+        generation: 2
+    - event_id: 01J8Z6U0400000000000000000
+      event_type: OwnerAlertSent
+      schema_version: 1
+      causation_id: 01J8Z6U0300000000000000000
+      payload:
+        subject: 01J8Z6U0300000000000000000
+        kind: kill_switch_unapplied
+        owner_command: null
+    - event_id: 01J8Z6U0500000000000000000
+      event_type: ProcessStartIssued
+      schema_version: 1
+      causation_id: 01J8Z6KS00000000000000000S
+      payload:
+        process: executor
+        subject: 01J8Z2ACCT00000000000000A1
+        generation: 3
+        cause: kill_switch
+    - event_id: 01J8Z6U0600000000000000000
+      event_type: ProcessStartIssued
+      schema_version: 1
+      causation_id: null
+      payload:
+        process: executor
+        subject: 01J8Z2ACCT00000000000000A1
+        generation: 4
+        cause: restart
+    - event_id: 01J8Z6U0700000000000000000
+      event_type: ProcessCrashLooped
+      schema_version: 1
+      causation_id: null
+      payload:
+        process: executor
+        subject: 01J8Z2ACCT00000000000000A1
+        generation: 4
+    - event_id: 01J8Z6U0800000000000000000
+      event_type: OwnerAlertSent
+      schema_version: 1
+      causation_id: 01J8Z6U0700000000000000000
+      payload:
+        subject: 01J8Z6U0700000000000000000
+        kind: kill_switch_unapplied
+        owner_command: null
+    expect:
+      outcome: Valid
+  - name: a_runtime_loop
+    clause: 'rule 266: only an executor''s loop'
+    records:
+    - *id005
+    - *id006
+    - *id007
+    - event_id: 01J8Z6U0300000000000000000
+      event_type: ProcessCrashLooped
+      schema_version: 1
+      causation_id: null
+      payload:
+        process: runtime
+        subject: 01J8Z2ACCT00000000000000A1
+        generation: 2
+    - event_id: 01J8Z6U0400000000000000000
+      event_type: OwnerAlertSent
+      schema_version: 1
+      causation_id: 01J8Z6U0300000000000000000
+      payload:
+        subject: 01J8Z6U0300000000000000000
+        kind: kill_switch_unapplied
+        owner_command: null
+    expect:
+      outcome: Invalid
+      rule: rule 266
+      index: 4
+  - name: another_accounts_switch
+    clause: 'rule 266: the run is the looping executor''s own'
+    records:
+    - *id005
+    - *id006
+    - event_id: 01J8Z6U0200000000000000000
+      event_type: ProcessStartIssued
+      schema_version: 1
+      causation_id: 01J8Z6KS00000000000000000S
+      payload:
+        process: executor
+        subject: 01J8Z2ACCT00000000000000A2
+        generation: 2
+        cause: kill_switch
+    - event_id: 01J8Z6U0300000000000000000
+      event_type: ProcessStartIssued
+      schema_version: 1
+      causation_id: null
+      payload:
+        process: executor
+        subject: 01J8Z2ACCT00000000000000A1
+        generation: 2
+        cause: restart
+    - event_id: 01J8Z6U0400000000000000000
+      event_type: ProcessCrashLooped
+      schema_version: 1
+      causation_id: null
+      payload:
+        process: executor
+        subject: 01J8Z2ACCT00000000000000A1
+        generation: 2
+    - event_id: 01J8Z6U0500000000000000000
+      event_type: OwnerAlertSent
+      schema_version: 1
+      causation_id: 01J8Z6U0400000000000000000
+      payload:
+        subject: 01J8Z6U0400000000000000000
+        kind: kill_switch_unapplied
+        owner_command: null
+    expect:
+      outcome: Invalid
+      rule: rule 266
+      index: 5
+  - name: names_a_start
+    clause: 'rule 266: the subject is the loop, not the start'
+    records:
+    - *id005
+    - *id006
+    - *id007
+    - event_id: 01J8Z6U0300000000000000000
+      event_type: ProcessCrashLooped
+      schema_version: 1
+      causation_id: null
+      payload:
+        process: executor
+        subject: 01J8Z2ACCT00000000000000A1
+        generation: 2
+    - event_id: 01J8Z6U0400000000000000000
+      event_type: OwnerAlertSent
+      schema_version: 1
+      causation_id: 01J8Z6U0200000000000000000
+      payload:
+        subject: 01J8Z6U0200000000000000000
+        kind: kill_switch_unapplied
+        owner_command: null
+    expect:
+      outcome: Invalid
+      rule: rule 266
+      index: 4
+  - name: an_ordinary_alert_on_an_ordinary_loop
+    clause: rule 266 reads only `kill_switch_unapplied`
+    records:
+    - *id005
+    - *id006
+    - event_id: 01J8Z6U0200000000000000000
+      event_type: ProcessStartIssued
+      schema_version: 1
+      causation_id: null
+      payload:
+        process: executor
+        subject: 01J8Z2ACCT00000000000000A1
+        generation: 2
+        cause: restart
+    - event_id: 01J8Z6U0300000000000000000
+      event_type: ProcessCrashLooped
+      schema_version: 1
+      causation_id: null
+      payload:
+        process: executor
+        subject: 01J8Z2ACCT00000000000000A1
+        generation: 2
+    expect:
+      outcome: Valid
 approval_requests:
   spec: docs/specs/journal.md v0.42 §9.6 (DEC-942)
   drafts:
@@ -15345,44 +15850,44 @@ broker_profile:
       kind: broker_profile
       profile_version: 1
       rows:
-      - &id005
+      - &id008
         asset_class: us_equity
         session: regular
-        cells: &id022
-        - &id006
-          order_type: limit
-          quantity_form: fractional
-          times_in_force: &id023
-          - day
-          protection_forms: &id018 []
-        - &id007
-          order_type: limit
-          quantity_form: notional
-          times_in_force:
-          - day
-          protection_forms: []
-        - &id008
-          order_type: limit
-          quantity_form: whole
-          times_in_force: &id024
-          - day
-          - gtc
-          protection_forms: &id019
-          - bracket
-          - oco
+        cells: &id025
         - &id009
-          order_type: market
+          order_type: limit
           quantity_form: fractional
-          times_in_force:
+          times_in_force: &id026
           - day
-          protection_forms: []
+          protection_forms: &id021 []
         - &id010
-          order_type: market
+          order_type: limit
           quantity_form: notional
           times_in_force:
           - day
           protection_forms: []
         - &id011
+          order_type: limit
+          quantity_form: whole
+          times_in_force: &id027
+          - day
+          - gtc
+          protection_forms: &id022
+          - bracket
+          - oco
+        - &id012
+          order_type: market
+          quantity_form: fractional
+          times_in_force:
+          - day
+          protection_forms: []
+        - &id013
+          order_type: market
+          quantity_form: notional
+          times_in_force:
+          - day
+          protection_forms: []
+        - &id014
           order_type: market
           quantity_form: whole
           times_in_force:
@@ -15390,38 +15895,38 @@ broker_profile:
           - gtc
           protection_forms:
           - bracket
-        - &id012
+        - &id015
           order_type: stop
           quantity_form: fractional
-          times_in_force: &id020
+          times_in_force: &id023
           - day
-          protection_forms: &id021 []
-        - &id013
+          protection_forms: &id024 []
+        - &id016
           order_type: stop
           quantity_form: notional
           times_in_force:
           - day
           protection_forms: []
-        - &id014
+        - &id017
           order_type: stop
           quantity_form: whole
           times_in_force:
           - day
           - gtc
           protection_forms: []
-        - &id015
+        - &id018
           order_type: stop_limit
           quantity_form: fractional
           times_in_force:
           - day
           protection_forms: []
-        - &id016
+        - &id019
           order_type: stop_limit
           quantity_form: notional
           times_in_force:
           - day
           protection_forms: []
-        - &id017
+        - &id020
           order_type: stop_limit
           quantity_form: whole
           times_in_force:
@@ -15537,8 +16042,8 @@ broker_profile:
     changes:
     - path: rows
       value:
-      - *id005
-      - *id005
+      - *id008
+      - *id008
     expect:
       reason: profile_duplicate_row
   - name: duplicate_cell
@@ -15549,10 +16054,7 @@ broker_profile:
       - asset_class: us_equity
         session: regular
         cells:
-        - *id006
-        - *id006
-        - *id007
-        - *id008
+        - *id009
         - *id009
         - *id010
         - *id011
@@ -15562,6 +16064,9 @@ broker_profile:
         - *id015
         - *id016
         - *id017
+        - *id018
+        - *id019
+        - *id020
     expect:
       reason: profile_duplicate_cell
   - name: no_time_in_force
@@ -15575,10 +16080,7 @@ broker_profile:
         - order_type: limit
           quantity_form: fractional
           times_in_force: []
-          protection_forms: *id018
-        - *id007
-        - *id008
-        - *id009
+          protection_forms: *id021
         - *id010
         - *id011
         - *id012
@@ -15587,6 +16089,9 @@ broker_profile:
         - *id015
         - *id016
         - *id017
+        - *id018
+        - *id019
+        - *id020
     expect:
       reason: profile_no_time_in_force
   - name: cells_out_of_order
@@ -15597,11 +16102,8 @@ broker_profile:
       - asset_class: us_equity
         session: regular
         cells:
-        - *id007
-        - *id006
-        - *id008
-        - *id009
         - *id010
+        - *id009
         - *id011
         - *id012
         - *id013
@@ -15609,6 +16111,9 @@ broker_profile:
         - *id015
         - *id016
         - *id017
+        - *id018
+        - *id019
+        - *id020
     expect:
       reason: non_canonical
   - name: times_in_force_out_of_order
@@ -15619,23 +16124,23 @@ broker_profile:
       - asset_class: us_equity
         session: regular
         cells:
-        - *id006
-        - *id007
+        - *id009
+        - *id010
         - order_type: limit
           quantity_form: whole
           times_in_force:
           - gtc
           - day
-          protection_forms: *id019
-        - *id009
-        - *id010
-        - *id011
+          protection_forms: *id022
         - *id012
         - *id013
         - *id014
         - *id015
         - *id016
         - *id017
+        - *id018
+        - *id019
+        - *id020
     expect:
       reason: non_canonical
   - name: a_claim_without_a_client_order_id
@@ -15656,21 +16161,21 @@ broker_profile:
       - asset_class: us_equity
         session: regular
         cells:
-        - *id006
-        - *id007
-        - *id008
         - *id009
         - *id010
         - *id011
-        - order_type: stop_market
-          quantity_form: fractional
-          times_in_force: *id020
-          protection_forms: *id021
+        - *id012
         - *id013
         - *id014
-        - *id015
+        - order_type: stop_market
+          quantity_form: fractional
+          times_in_force: *id023
+          protection_forms: *id024
         - *id016
         - *id017
+        - *id018
+        - *id019
+        - *id020
     expect:
       reason: schema
   - name: a_gtc_expiry_member
@@ -15687,7 +16192,7 @@ broker_profile:
       value:
       - asset_class: us_equity
         session: regular
-        cells: *id022
+        cells: *id025
         venue: xnys
     expect:
       reason: schema
@@ -15701,12 +16206,9 @@ broker_profile:
         cells:
         - order_type: limit
           quantity_form: fractional
-          times_in_force: *id023
-          protection_forms: *id018
+          times_in_force: *id026
+          protection_forms: *id021
           min_qty: '1'
-        - *id007
-        - *id008
-        - *id009
         - *id010
         - *id011
         - *id012
@@ -15715,6 +16217,9 @@ broker_profile:
         - *id015
         - *id016
         - *id017
+        - *id018
+        - *id019
+        - *id020
     expect:
       reason: schema
   - name: a_wrong_kind
@@ -15732,23 +16237,23 @@ broker_profile:
       - asset_class: us_equity
         session: regular
         cells:
-        - *id006
-        - *id007
+        - *id009
+        - *id010
         - order_type: limit
           quantity_form: whole
-          times_in_force: *id024
+          times_in_force: *id027
           protection_forms:
           - oco
           - oco
-        - *id009
-        - *id010
-        - *id011
         - *id012
         - *id013
         - *id014
         - *id015
         - *id016
         - *id017
+        - *id018
+        - *id019
+        - *id020
     expect:
       reason: non_canonical
   - name: protection_forms_out_of_order
@@ -15759,23 +16264,23 @@ broker_profile:
       - asset_class: us_equity
         session: regular
         cells:
-        - *id006
-        - *id007
+        - *id009
+        - *id010
         - order_type: limit
           quantity_form: whole
-          times_in_force: *id024
+          times_in_force: *id027
           protection_forms:
           - oco
           - bracket
-        - *id009
-        - *id010
-        - *id011
         - *id012
         - *id013
         - *id014
         - *id015
         - *id016
         - *id017
+        - *id018
+        - *id019
+        - *id020
     expect:
       reason: non_canonical
 connections:
@@ -15802,12 +16307,12 @@ connections:
         connection_id: conn_alpaca_paper
         broker: alpaca
         environment: paper
-        scopes: &id025
+        scopes: &id028
         - data
         - trading
         account_ref: 01J8Z2ACCT00000000000000A1
         user: user_owner_01
-        step_up: &id026
+        step_up: &id029
           assertion_id: assert_owner_09
           authenticated_at: '2026-09-22T12:59:50.000000000Z'
           method: cli_confirm
@@ -15835,10 +16340,10 @@ connections:
         connection_id: conn_alpaca_paper
         broker: alpaca
         environment: paper
-        scopes: *id025
+        scopes: *id028
         account_ref: 01J8Z2ACCT00000000000000A1
         user: user_owner_01
-        step_up: *id026
+        step_up: *id029
         margin_attestation: null
         risk_clock: '2026-09-22T13:00:00.000000000Z'
       artifact_refs: []
@@ -15862,11 +16367,11 @@ connections:
       config_refs: {}
       payload:
         connection_id: conn_alpaca_paper
-        scopes: &id027
+        scopes: &id030
         - data
         - trading
         user: user_owner_01
-        step_up: *id026
+        step_up: *id029
         risk_clock: '2026-09-22T13:00:00.000000000Z'
       artifact_refs: []
       pii_refs: []
@@ -15896,7 +16401,7 @@ connections:
         reason: fund_movement
         existing_connection_id: null
         user: user_owner_01
-        step_up: *id026
+        step_up: *id029
       artifact_refs: []
       pii_refs: []
     rotated:
@@ -15918,9 +16423,9 @@ connections:
       config_refs: {}
       payload:
         connection_id: conn_alpaca_paper
-        scopes: *id027
+        scopes: *id030
         user: user_owner_01
-        step_up: *id026
+        step_up: *id029
       artifact_refs: []
       pii_refs: []
     checked_start:
@@ -18149,7 +18654,7 @@ connections:
       changes:
       - path: event_id
         value: 01J8Z4S02A0000000000000000
-      - &id028
+      - &id031
         path: payload.scopes
         value:
         - trading
@@ -18157,7 +18662,7 @@ connections:
       changes:
       - path: event_id
         value: 01J8Z4S03A0000000000000000
-      - *id028
+      - *id031
     expect:
       outcome: Valid
   - name: established_twice
@@ -18196,7 +18701,7 @@ connections:
       changes:
       - path: event_id
         value: 01J8Z4S03A0000000000000000
-      - &id046
+      - &id049
         path: payload.account_ref
         value: 01J8Z2ACCT00000000000000B7
     expect:
@@ -18224,13 +18729,13 @@ connections:
       changes:
       - path: event_id
         value: 01J8Z4S03A0000000000000000
-      - &id036
+      - &id039
         path: payload.environment
         value: live
-      - &id037
+      - &id040
         path: environment
         value: live
-      - &id038
+      - &id041
         path: payload.margin_attestation
         value: cash_account
     expect:
@@ -18272,19 +18777,19 @@ connections:
       changes:
       - path: event_id
         value: 01J8Z4S01A0000000000000000
-      - &id029
+      - &id032
         path: schema_version
         value: 1
-      - &id030
+      - &id033
         path: payload.account_ref
         delete: true
-      - &id031
+      - &id034
         path: payload.user
         delete: true
-      - &id032
+      - &id035
         path: payload.step_up
         delete: true
-      - &id033
+      - &id036
         path: payload.margin_attestation
         delete: true
     - base_draft: rotated
@@ -18312,11 +18817,11 @@ connections:
       changes:
       - path: event_id
         value: 01J8Z4S01A0000000000000000
-      - *id029
-      - *id030
-      - *id031
       - *id032
       - *id033
+      - *id034
+      - *id035
+      - *id036
     - base_draft: rotated
       changes:
       - path: event_id
@@ -18330,11 +18835,11 @@ connections:
       changes:
       - path: event_id
         value: 01J8Z4S03A0000000000000000
-      - *id029
-      - *id030
-      - *id031
       - *id032
       - *id033
+      - *id034
+      - *id035
+      - *id036
     expect:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
@@ -18462,7 +18967,7 @@ connections:
       changes:
       - path: event_id
         value: 01J8Z4S02A0000000000000000
-      - *id028
+      - *id031
     - base_draft: rotated
       changes:
       - path: event_id
@@ -18586,7 +19091,7 @@ connections:
   - name: degraded_cleared_acknowledged_then_suspended_and_reauthorized
     clause: 'rule 68: the B1 path: a reauthorize after the suspension, accepted by a rotation, then cleared'
     records:
-    - &id034
+    - &id037
       base_draft: checked_start
       changes:
       - path: event_id
@@ -18604,7 +19109,7 @@ connections:
         - check: scope
           result: passed
           reason: null
-    - &id035
+    - &id038
       base_draft: established_copy
       changes:
       - path: event_id
@@ -18721,8 +19226,8 @@ connections:
   - name: executor_start_after_binding
     clause: 'rule 68: checks after the binding'
     records:
-    - *id034
-    - *id035
+    - *id037
+    - *id038
     - base_draft: checked_start
       changes:
       - path: event_id
@@ -18788,12 +19293,12 @@ connections:
         value: 01J8Z4S02A0000000000000000
       - path: causation_id
         value: 01J8Z4C1A000000000000000C1
-      - &id039
+      - &id042
         path: payload.broker
         value: robinhood
-      - *id036
-      - *id037
-      - *id038
+      - *id039
+      - *id040
+      - *id041
     - base_draft: checked_start
       changes:
       - path: event_id
@@ -18845,10 +19350,10 @@ connections:
         value: 01J8Z4S02A0000000000000000
       - path: causation_id
         value: 01J8Z4C1A000000000000000C1
+      - *id042
       - *id039
-      - *id036
-      - *id037
-      - *id038
+      - *id040
+      - *id041
     - base_draft: checked_start
       changes:
       - path: event_id
@@ -18886,7 +19391,7 @@ connections:
   - name: two_account_streams_interleave
     clause: 'rule 68: each account stream is folded on its own, one connection each (DEC-696)'
     records:
-    - &id040
+    - &id043
       base_draft: checked_start
       changes:
       - path: event_id
@@ -18904,7 +19409,7 @@ connections:
         - check: scope
           result: passed
           reason: null
-    - &id041
+    - &id044
       base_draft: checked_start
       changes:
       - path: event_id
@@ -18926,14 +19431,14 @@ connections:
         value: acct:ws_01J8Z2:01J8Z2ACCT00000000000000B7
       - path: payload.connection_id
         value: conn_alpaca_paper_2
-    - &id042
+    - &id045
       base_draft: established_copy
       changes:
       - path: event_id
         value: 01J8Z4S03A0000000000000000
       - path: causation_id
         value: 01J8Z4C1A000000000000000C1
-    - &id043
+    - &id046
       base_draft: established_copy
       changes:
       - path: event_id
@@ -18946,7 +19451,7 @@ connections:
         value: conn_alpaca_paper_2
       - path: payload.account_ref
         value: 01J8Z2ACCT00000000000000B7
-    - &id044
+    - &id047
       base_draft: checked_start
       changes:
       - path: event_id
@@ -18964,7 +19469,7 @@ connections:
         - check: scope
           result: passed
           reason: null
-    - &id045
+    - &id048
       base_draft: state_degraded
       changes:
       - path: event_id
@@ -18986,12 +19491,12 @@ connections:
   - name: a_reauthorize_on_another_account_stream_admits_no_rotation
     clause: 'rule 68: the rotation''s reauthorize check is on its own stream (DEC-696)'
     records:
-    - *id040
-    - *id041
-    - *id042
     - *id043
     - *id044
     - *id045
+    - *id046
+    - *id047
+    - *id048
     - base_draft: rotated_copy
       changes:
       - path: event_id
@@ -19136,7 +19641,7 @@ connections:
         value: 01J8Z4S02A0000000000000000
       - path: causation_id
         value: 01J8Z4C1A000000000000000C1
-      - *id046
+      - *id049
     expect:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
@@ -19168,10 +19673,10 @@ connections:
         value: 01J8Z4S02A0000000000000000
       - path: causation_id
         value: 01J8Z4C1A000000000000000C1
+      - *id042
       - *id039
-      - *id036
-      - *id037
-      - *id038
+      - *id040
+      - *id041
     expect:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
@@ -19206,10 +19711,10 @@ connections:
         value: 01J8Z4S02A0000000000000000
       - path: causation_id
         value: 01J8Z4C1A000000000000000C1
+      - *id042
       - *id039
-      - *id036
-      - *id037
-      - *id038
+      - *id040
+      - *id041
     - base_draft: checked_start
       changes:
       - path: event_id
@@ -19235,8 +19740,8 @@ connections:
   - name: rotation_copied_without_a_passing_reauthorize
     clause: 'rule 68: a rotation follows a passing reauthorize check'
     records:
-    - *id034
-    - *id035
+    - *id037
+    - *id038
     - base_draft: checked_start
       changes:
       - path: event_id
@@ -19266,9 +19771,9 @@ connections:
   - name: suspension_cleared_without_a_rotation
     clause: 'rule 68: the clearing cause is the copied rotation'
     records:
-    - *id034
-    - *id035
-    - &id047
+    - *id037
+    - *id038
+    - &id050
       base_draft: state_degraded
       changes:
       - path: event_id
@@ -19301,9 +19806,9 @@ connections:
   - name: refused_reauth_check_clears
     clause: 'rule 68: a passing reauthorize the control services refused never clears (no rotation names it)'
     records:
-    - *id034
-    - *id035
-    - *id047
+    - *id037
+    - *id038
+    - *id050
     - base_draft: checked_start
       changes:
       - path: event_id
@@ -19341,8 +19846,8 @@ connections:
   - name: stale_check_clears
     clause: 'rule 68: the reauthorize came after the suspension'
     records:
-    - *id034
-    - *id035
+    - *id037
+    - *id038
     - base_draft: checked_start
       changes:
       - path: event_id
@@ -19396,8 +19901,8 @@ connections:
   - name: stale_rotation_clears
     clause: 'rule 68: the rotation came after the suspension'
     records:
-    - *id034
-    - *id035
+    - *id037
+    - *id038
     - base_draft: checked_start
       changes:
       - path: event_id
@@ -19451,8 +19956,8 @@ connections:
   - name: two_connections_on_one_account_stream
     clause: 'rule 68: one account stream, one connection (CN-5)'
     records:
-    - *id034
-    - *id035
+    - *id037
+    - *id038
     - base_draft: state_degraded
       changes:
       - path: event_id
@@ -19479,8 +19984,8 @@ connections:
   - name: first_change_not_from_active
     clause: rule 68
     records:
-    - *id034
-    - *id035
+    - *id037
+    - *id038
     - base_draft: state_degraded
       changes:
       - path: event_id
@@ -19501,8 +20006,8 @@ connections:
   - name: from_not_the_last_state
     clause: rule 68
     records:
-    - *id034
-    - *id035
+    - *id037
+    - *id038
     - base_draft: state_degraded
       changes:
       - path: event_id
@@ -19535,8 +20040,8 @@ connections:
   - name: acknowledged_before_cleared
     clause: 'rule 68: the acknowledgment never lifts a cause that has not cleared'
     records:
-    - *id034
-    - *id035
+    - *id037
+    - *id038
     - base_draft: state_degraded
       changes:
       - path: event_id
@@ -19569,8 +20074,8 @@ connections:
   - name: acknowledged_after_the_cause_returned
     clause: rule 68
     records:
-    - *id034
-    - *id035
+    - *id037
+    - *id038
     - base_draft: state_degraded
       changes:
       - path: event_id
@@ -19627,10 +20132,10 @@ connections:
   - name: suspended_twice_cleared_after_the_second_entry
     clause: 'rule 68: a reauthorize after the latest entry into suspended, and its rotation, clear it (#1174)'
     records:
-    - *id034
-    - *id035
-    - *id047
-    - &id048
+    - *id037
+    - *id038
+    - *id050
+    - &id051
       base_draft: checked_start
       changes:
       - path: event_id
@@ -19648,12 +20153,12 @@ connections:
         - check: scope
           result: passed
           reason: null
-    - &id049
+    - &id052
       base_draft: rotated_copy
       changes:
       - path: event_id
         value: 01J8Z4S05A0000000000000000
-    - &id050
+    - &id053
       base_draft: state_degraded
       changes:
       - path: event_id
@@ -19666,7 +20171,7 @@ connections:
         value: condition_cleared
       - path: causation_id
         value: 01J8Z4S05A0000000000000000
-    - &id051
+    - &id054
       base_draft: state_degraded
       changes:
       - path: event_id
@@ -19679,7 +20184,7 @@ connections:
         value: acknowledged
       - path: causation_id
         value: 01J8Z4C0A000000000000000K9
-    - &id052
+    - &id055
       base_draft: state_degraded
       changes:
       - path: event_id
@@ -19742,14 +20247,14 @@ connections:
   - name: suspended_twice_cleared_by_the_first_rotation
     clause: 'rule 68: the first suspension''s rotation does not clear the second (#1174)'
     records:
-    - *id034
-    - *id035
-    - *id047
-    - *id048
-    - *id049
+    - *id037
+    - *id038
     - *id050
     - *id051
     - *id052
+    - *id053
+    - *id054
+    - *id055
     - base_draft: state_degraded
       changes:
       - path: event_id
@@ -19770,14 +20275,14 @@ connections:
   - name: suspended_twice_cleared_on_the_first_check
     clause: 'rule 68: a rotation after the second entry that rests on the first suspension''s check (#1174)'
     records:
-    - *id034
-    - *id035
-    - *id047
-    - *id048
-    - *id049
+    - *id037
+    - *id038
     - *id050
     - *id051
     - *id052
+    - *id053
+    - *id054
+    - *id055
     - base_draft: rotated_copy
       changes:
       - path: event_id
@@ -19803,7 +20308,7 @@ connections:
   - name: connect_then_reauthorize
     clause: '§11: every cause on its stream, for its connection, passing'
     records:
-    - &id058
+    - &id061
       base_draft: checked_start
       changes:
       - path: event_id
@@ -19821,30 +20326,30 @@ connections:
         - check: scope
           result: passed
           reason: null
-    - &id053
+    - &id056
       base_draft: established_v2
       changes:
       - path: event_id
         value: 01J8Z4S02A0000000000000000
       - path: causation_id
         value: 01J8Z4S01A0000000000000000
-    - &id054
+    - &id057
       base_draft: established_copy
       changes:
       - path: event_id
         value: 01J8Z4S03A0000000000000000
       - path: causation_id
         value: 01J8Z4S02A0000000000000000
-    - &id055
+    - &id058
       base_draft: checked_start
       changes:
-      - &id061
+      - &id064
         path: event_id
         value: 01J8Z4S04A0000000000000000
-      - &id062
+      - &id065
         path: payload.occasion
         value: reauthorize
-      - &id063
+      - &id066
         path: payload.results
         value:
         - check: account
@@ -19856,16 +20361,16 @@ connections:
         - check: scope
           result: passed
           reason: null
-    - &id056
+    - &id059
       base_draft: rotated
       changes:
-      - &id059
+      - &id062
         path: event_id
         value: 01J8Z4S05A0000000000000000
-      - &id060
+      - &id063
         path: causation_id
         value: 01J8Z4S04A0000000000000000
-    - &id057
+    - &id060
       base_draft: rotated_copy
       changes:
       - path: event_id
@@ -19894,11 +20399,11 @@ connections:
         - check: scope
           result: failed
           reason: scope_mismatch
-    - *id053
-    - *id054
-    - *id055
     - *id056
     - *id057
+    - *id058
+    - *id059
+    - *id060
     expect:
       outcome: Mismatch
       code: connection_cause_mismatch
@@ -19923,11 +20428,11 @@ connections:
         - check: scope
           result: passed
           reason: null
-    - *id053
-    - *id054
-    - *id055
     - *id056
     - *id057
+    - *id058
+    - *id059
+    - *id060
     expect:
       outcome: Mismatch
       code: connection_cause_mismatch
@@ -19954,11 +20459,11 @@ connections:
           reason: null
       - path: payload.connection_id
         value: conn_alpaca_paper_2
-    - *id053
-    - *id054
-    - *id055
     - *id056
     - *id057
+    - *id058
+    - *id059
+    - *id060
     expect:
       outcome: Mismatch
       code: connection_cause_mismatch
@@ -19985,11 +20490,11 @@ connections:
           reason: null
       - path: stream_id
         value: acct:ws_01J8Z2:01J8Z2ACCT00000000000000B7
-    - *id053
-    - *id054
-    - *id055
     - *id056
     - *id057
+    - *id058
+    - *id059
+    - *id060
     expect:
       outcome: Mismatch
       code: connection_cause_mismatch
@@ -20035,17 +20540,17 @@ connections:
   - name: rotated_on_a_connect_check
     clause: '§11: occasion reauthorize'
     records:
+    - *id061
+    - *id056
+    - *id057
     - *id058
-    - *id053
-    - *id054
-    - *id055
     - base_draft: rotated
       changes:
       - path: event_id
         value: 01J8Z4S05A0000000000000000
       - path: causation_id
         value: 01J8Z4S01A0000000000000000
-    - *id057
+    - *id060
     expect:
       outcome: Mismatch
       code: connection_cause_mismatch
@@ -20053,8 +20558,8 @@ connections:
   - name: copy_differs_from_its_original
     clause: '§11: a copy carries its original''s members'
     records:
-    - *id058
-    - *id053
+    - *id061
+    - *id056
     - base_draft: established_copy
       changes:
       - path: event_id
@@ -20064,9 +20569,9 @@ connections:
       - path: payload.scopes
         value:
         - trading
-    - *id055
-    - *id056
-    - *id057
+    - *id058
+    - *id059
+    - *id060
     expect:
       outcome: Mismatch
       code: connection_cause_mismatch
@@ -20074,11 +20579,11 @@ connections:
   - name: copy_of_nothing
     clause: '§11: a copy names its original'
     records:
-    - *id058
-    - *id053
-    - *id054
-    - *id055
+    - *id061
     - *id056
+    - *id057
+    - *id058
+    - *id059
     - base_draft: rotated_copy
       changes:
       - path: event_id
@@ -20200,17 +20705,17 @@ connections:
   - name: rotated_on_another_control_stream
     clause: '§11: a rotation rests on its own control stream''s establishment (DEC-696)'
     records:
+    - *id061
+    - *id056
+    - *id057
     - *id058
-    - *id053
-    - *id054
-    - *id055
     - base_draft: rotated
       changes:
-      - *id059
-      - *id060
+      - *id062
+      - *id063
       - path: stream_id
         value: ctl:ws_01J8Z3
-    - *id057
+    - *id060
     expect:
       outcome: Mismatch
       code: connection_cause_mismatch
@@ -20218,20 +20723,20 @@ connections:
   - name: rotated_in_another_workspace_on_its_check
     clause: '§11: a rotation rests on its own control stream''s establishment (DEC-696)'
     records:
-    - *id058
-    - *id053
-    - *id054
+    - *id061
+    - *id056
+    - *id057
     - base_draft: checked_start
       changes:
-      - *id061
-      - *id062
-      - *id063
+      - *id064
+      - *id065
+      - *id066
       - path: stream_id
         value: acct:ws_01J8Z3:01J8Z2ACCT00000000000000A1
     - base_draft: rotated
       changes:
-      - *id059
-      - *id060
+      - *id062
+      - *id063
       - path: stream_id
         value: ctl:ws_01J8Z3
     expect:
@@ -20267,7 +20772,7 @@ connection_requests:
         - trading
         account_ref: 01J8Z2ACCT00000000000000A1
         user: user_owner_01
-        step_up: &id064
+        step_up: &id067
           assertion_id: assert_owner_09
           authenticated_at: '2026-09-22T12:59:50.000000000Z'
           method: cli_confirm
@@ -20300,7 +20805,7 @@ connection_requests:
         reason: fund_movement
         existing_connection_id: null
         user: user_owner_01
-        step_up: *id064
+        step_up: *id067
       artifact_refs: []
       pii_refs: []
     rotated:
@@ -20326,7 +20831,7 @@ connection_requests:
         - data
         - trading
         user: user_owner_01
-        step_up: *id064
+        step_up: *id067
       artifact_refs: []
       pii_refs: []
     requested:
@@ -20606,7 +21111,7 @@ connection_requests:
   - name: requested_then_established
     clause: 'rule 131: the establishment closes its request'
     records:
-    - &id065
+    - &id068
       base_draft: established_v2
       changes:
       - path: event_id
@@ -20637,7 +21142,7 @@ connection_requests:
   - name: requested_then_refused_by_a_check
     clause: 'rule 131: a connect''s refusal closes its request'
     records:
-    - *id065
+    - *id068
     - base_draft: refused_scope
       changes:
       - path: event_id
@@ -20651,7 +21156,7 @@ connection_requests:
   - name: requested_then_torn_down
     clause: 'rule 131: the teardown closes its request (connections spec §5.2 step 6)'
     records:
-    - *id065
+    - *id068
     - base_draft: refused_scope
       changes:
       - path: event_id
@@ -20660,10 +21165,10 @@ connection_requests:
         value: connect
       - path: payload.connection_id
         value: conn_alpaca_paper
-      - &id066
+      - &id069
         path: payload.check
         value: null
-      - &id067
+      - &id070
         path: payload.reason
         value: timeout
     expect:
@@ -20671,7 +21176,7 @@ connection_requests:
   - name: requested_and_still_connecting
     clause: 'rule 131: a connect in progress leaves its request open'
     records:
-    - *id065
+    - *id068
     expect:
       outcome: Valid
   - name: retried_on_a_new_account_ref
@@ -20706,9 +21211,9 @@ connection_requests:
         value: connect
       - path: payload.connection_id
         value: conn_alpaca_paper
-      - *id066
-      - *id067
-    - *id065
+      - *id069
+      - *id070
+    - *id068
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -20739,7 +21244,7 @@ connection_requests:
             assertion_id: assert_owner_09
             authenticated_at: '2026-09-22T12:59:50.000000000Z'
             method: cli_confirm
-    - *id065
+    - *id068
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -20757,7 +21262,7 @@ connection_requests:
   - name: reconnect_closes_nothing
     clause: 'rule 131: a reconnect and a reauthorize need no request'
     records:
-    - *id065
+    - *id068
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -20804,8 +21309,8 @@ connection_requests:
         value: connect
       - path: payload.connection_id
         value: conn_alpaca_paper_2
-      - *id066
-      - *id067
+      - *id069
+      - *id070
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -20857,8 +21362,8 @@ connection_requests:
         value: connect
       - path: payload.connection_id
         value: conn_alpaca_paper_2
-      - *id066
-      - *id067
+      - *id069
+      - *id070
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -20900,8 +21405,8 @@ connection_requests:
         value: connect
       - path: payload.connection_id
         value: conn_alpaca_paper
-      - *id066
-      - *id067
+      - *id069
+      - *id070
     expect:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
@@ -20996,7 +21501,7 @@ connection_requests:
   - name: revoked_while_connecting
     clause: 'rule 131: a revocation closes the open request and is never refused'
     records:
-    - *id065
+    - *id068
     - base_draft: rotated
       changes:
       - path: event_id
@@ -21038,7 +21543,7 @@ connection_requests:
   - name: revoked_then_torn_down_on_a_retry
     clause: 'rules 67 and 131: a retry after a revocation is torn down'
     records:
-    - *id065
+    - *id068
     - base_draft: rotated
       changes:
       - path: event_id
@@ -21077,8 +21582,8 @@ connection_requests:
         value: connect
       - path: payload.connection_id
         value: conn_alpaca_paper
-      - *id066
-      - *id067
+      - *id069
+      - *id070
     expect:
       outcome: Valid
   - name: version_1_after_the_first_request
@@ -21129,7 +21634,7 @@ connection_requests:
   - name: established_after_its_request_was_revoked
     clause: 'rule 131: nothing is established from a revoked request'
     records:
-    - *id065
+    - *id068
     - base_draft: rotated
       changes:
       - path: event_id
@@ -21151,7 +21656,7 @@ connection_requests:
   - name: teardown_after_its_request_was_revoked
     clause: 'rules 67 and 131: the teardown journals nothing after a revocation'
     records:
-    - *id065
+    - *id068
     - base_draft: rotated
       changes:
       - path: event_id
@@ -21169,8 +21674,8 @@ connection_requests:
         value: connect
       - path: payload.connection_id
         value: conn_alpaca_paper
-      - *id066
-      - *id067
+      - *id069
+      - *id070
     expect:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
@@ -21179,7 +21684,7 @@ connection_requests:
   - name: reconnect_of_a_connection_never_established
     clause: 'rule 67: a revoked request leaves nothing to reconnect'
     records:
-    - *id065
+    - *id068
     - base_draft: rotated
       changes:
       - path: event_id
@@ -21205,7 +21710,7 @@ connection_requests:
   - name: request_closed_twice
     clause: 'rule 131: a request is closed once'
     records:
-    - *id065
+    - *id068
     - base_draft: refused_scope
       changes:
       - path: event_id
@@ -21214,8 +21719,8 @@ connection_requests:
         value: connect
       - path: payload.connection_id
         value: conn_alpaca_paper
-      - *id066
-      - *id067
+      - *id069
+      - *id070
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -21249,7 +21754,7 @@ connection_requests:
             assertion_id: assert_owner_09
             authenticated_at: '2026-09-22T12:59:50.000000000Z'
             method: cli_confirm
-    - *id065
+    - *id068
     expect:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
@@ -21258,7 +21763,7 @@ connection_requests:
   - name: requested_for_an_established_id
     clause: 'rule 131: a request names a new connection'
     records:
-    - *id065
+    - *id068
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -21330,8 +21835,8 @@ connection_requests:
         value: connect
       - path: payload.connection_id
         value: conn_alpaca_paper
-      - *id066
-      - *id067
+      - *id069
+      - *id070
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -21361,7 +21866,7 @@ connection_requests:
   - name: refused_with_another_step_up
     clause: 'rule 131: the refusal repeats its request''s step-up'
     records:
-    - *id065
+    - *id068
     - base_draft: refused_scope
       changes:
       - path: event_id
@@ -21370,7 +21875,7 @@ connection_requests:
         value: connect
       - path: payload.connection_id
         value: conn_alpaca_paper
-      - &id068
+      - &id071
         path: payload.step_up
         value:
           assertion_id: assert_owner_10
@@ -21384,7 +21889,7 @@ connection_requests:
   - name: established_with_another_account_ref
     clause: 'rule 131: the establishment repeats its request''s account_ref'
     records:
-    - *id065
+    - *id068
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -21399,7 +21904,7 @@ connection_requests:
   - name: established_with_another_broker
     clause: 'rule 131: the establishment repeats its request''s broker'
     records:
-    - *id065
+    - *id068
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -21414,7 +21919,7 @@ connection_requests:
   - name: established_with_another_environment
     clause: 'rule 131: the establishment repeats its request''s environment'
     records:
-    - *id065
+    - *id068
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -21433,7 +21938,7 @@ connection_requests:
   - name: established_with_another_user
     clause: 'rule 131: the establishment repeats its request''s user'
     records:
-    - *id065
+    - *id068
     - base_draft: established_v2
       changes:
       - path: event_id
@@ -21448,12 +21953,12 @@ connection_requests:
   - name: established_with_another_step_up
     clause: 'rule 131: the establishment repeats its request''s step_up'
     records:
-    - *id065
+    - *id068
     - base_draft: established_v2
       changes:
       - path: event_id
         value: 01J8Z4S01A0000000000000000
-      - *id068
+      - *id071
     expect:
       outcome: Mismatch
       code: connection_lifecycle_mismatch
@@ -21484,12 +21989,12 @@ connection_ranges:
         connection_id: conn_alpaca_paper
         broker: alpaca
         environment: paper
-        scopes: &id069
+        scopes: &id072
         - data
         - trading
         account_ref: 01J8Z2ACCT00000000000000A1
         user: user_owner_01
-        step_up: &id070
+        step_up: &id073
           assertion_id: assert_owner_09
           authenticated_at: '2026-09-22T12:59:50.000000000Z'
           method: cli_confirm
@@ -21517,10 +22022,10 @@ connection_ranges:
         connection_id: conn_alpaca_paper
         broker: alpaca
         environment: paper
-        scopes: *id069
+        scopes: *id072
         account_ref: 01J8Z2ACCT00000000000000A1
         user: user_owner_01
-        step_up: *id070
+        step_up: *id073
         margin_attestation: null
         risk_clock: '2026-09-22T13:00:00.000000000Z'
       artifact_refs: []
@@ -21544,11 +22049,11 @@ connection_ranges:
       config_refs: {}
       payload:
         connection_id: conn_alpaca_paper
-        scopes: &id071
+        scopes: &id074
         - data
         - trading
         user: user_owner_01
-        step_up: *id070
+        step_up: *id073
         risk_clock: '2026-09-22T13:00:00.000000000Z'
       artifact_refs: []
       pii_refs: []
@@ -21578,7 +22083,7 @@ connection_ranges:
         reason: fund_movement
         existing_connection_id: null
         user: user_owner_01
-        step_up: *id070
+        step_up: *id073
       artifact_refs: []
       pii_refs: []
     rotated:
@@ -21600,9 +22105,9 @@ connection_ranges:
       config_refs: {}
       payload:
         connection_id: conn_alpaca_paper
-        scopes: *id071
+        scopes: *id074
         user: user_owner_01
-        step_up: *id070
+        step_up: *id073
       artifact_refs: []
       pii_refs: []
     checked_start:
@@ -22668,12 +23173,12 @@ connection_revocations:
         connection_id: conn_alpaca_paper
         broker: alpaca
         environment: paper
-        scopes: &id072
+        scopes: &id075
         - data
         - trading
         account_ref: 01J8Z2ACCT00000000000000A1
         user: user_owner_01
-        step_up: &id073
+        step_up: &id076
           assertion_id: assert_owner_09
           authenticated_at: '2026-09-22T12:59:50.000000000Z'
           method: cli_confirm
@@ -22701,10 +23206,10 @@ connection_revocations:
         connection_id: conn_alpaca_paper
         broker: alpaca
         environment: paper
-        scopes: *id072
+        scopes: *id075
         account_ref: 01J8Z2ACCT00000000000000A1
         user: user_owner_01
-        step_up: *id073
+        step_up: *id076
         margin_attestation: null
         risk_clock: '2026-09-22T13:00:00.000000000Z'
       artifact_refs: []
@@ -22728,11 +23233,11 @@ connection_revocations:
       config_refs: {}
       payload:
         connection_id: conn_alpaca_paper
-        scopes: &id074
+        scopes: &id077
         - data
         - trading
         user: user_owner_01
-        step_up: *id073
+        step_up: *id076
         risk_clock: '2026-09-22T13:00:00.000000000Z'
       artifact_refs: []
       pii_refs: []
@@ -22762,7 +23267,7 @@ connection_revocations:
         reason: fund_movement
         existing_connection_id: null
         user: user_owner_01
-        step_up: *id073
+        step_up: *id076
       artifact_refs: []
       pii_refs: []
     rotated:
@@ -22784,9 +23289,9 @@ connection_revocations:
       config_refs: {}
       payload:
         connection_id: conn_alpaca_paper
-        scopes: *id074
+        scopes: *id077
         user: user_owner_01
-        step_up: *id073
+        step_up: *id076
       artifact_refs: []
       pii_refs: []
     checked_start:
@@ -22880,8 +23385,8 @@ connection_revocations:
   - name: account_stream_revocation
     clause: 'rule 68: a ConnectionRevoked belongs to the control stream (DEC-888)'
     records:
-    - *id034
-    - *id035
+    - *id037
+    - *id038
     - base_draft: rotated
       changes:
       - path: event_id
@@ -22937,8 +23442,8 @@ connection_revocations:
   - name: control_stream_revocation_beside_a_bound_stream
     clause: '§9.8: no rule refuses a control-stream ConnectionRevoked'
     records:
-    - *id034
-    - *id035
+    - *id037
+    - *id038
     - base_draft: rotated
       changes:
       - path: event_id
@@ -25196,7 +25701,7 @@ workspace_api:
     - path: payload.attempts
       value: 0
     - path: payload.tokens
-      value: &id075
+      value: &id078
         input: 0
         output: 0
         cached: 0
@@ -25230,7 +25735,7 @@ workspace_api:
     - path: payload.attempts
       value: 0
     - path: payload.tokens
-      value: *id075
+      value: *id078
     - path: payload.cost_usd
       value: '0'
     - path: payload.cost_usd
@@ -25261,7 +25766,7 @@ workspace_api:
     - path: payload.attempts
       value: 0
     - path: payload.tokens
-      value: *id075
+      value: *id078
     - path: payload.cost_usd
       value: '0'
     - path: payload.tokens.input
@@ -25292,7 +25797,7 @@ workspace_api:
     - path: payload.attempts
       value: 0
     - path: payload.tokens
-      value: *id075
+      value: *id078
     - path: payload.cost_usd
       value: '0'
     - path: payload.provider_request_id
@@ -25323,7 +25828,7 @@ workspace_api:
     - path: payload.attempts
       value: 0
     - path: payload.tokens
-      value: *id075
+      value: *id078
     - path: payload.cost_usd
       value: '0'
     - path: payload.response_ref
@@ -25377,7 +25882,7 @@ workspace_api:
     - path: payload.attempts
       value: 0
     - path: payload.tokens
-      value: *id075
+      value: *id078
     - path: payload.cost_usd
       value: '0'
     - path: payload.cache_hit
@@ -25733,7 +26238,7 @@ workspace_api:
     - path: payload.attempts
       value: 0
     - path: payload.tokens
-      value: *id075
+      value: *id078
     - path: payload.cost_usd
       value: '0'
     - path: artifact_refs
@@ -27121,7 +27626,7 @@ client_actor:
       changes:
       - path: causation_id
         value: 01J8Z5C2C000000000000000C7
-    expect: &id076
+    expect: &id079
       outcome: Invalid
       draft_index: 1
       reason: schema
@@ -27135,7 +27640,7 @@ client_actor:
         value: workspace
     - base_draft: revoked_compromised
       changes: []
-    expect: *id076
+    expect: *id079
   - name: a_revocation_after_another_connections_kill_switch
     clause: 'rule 84: the kill switch is this connection''s'
     drafts:
@@ -27145,7 +27650,7 @@ client_actor:
         value: conn_02
     - base_draft: revoked_compromised
       changes: []
-    expect: *id076
+    expect: *id079
   - name: a_revocation_after_a_pause
     clause: 'rule 84: the command is a kill switch'
     drafts:
@@ -27155,7 +27660,7 @@ client_actor:
         value: pause
     - base_draft: revoked_compromised
       changes: []
-    expect: *id076
+    expect: *id079
   - name: a_revocation_alone
     clause: 'rule 84: the kill switch is in the same batch'
     drafts:
@@ -28344,7 +28849,7 @@ hold:
     from_seq: 1
     anchor: null
     events:
-    - &id077
+    - &id080
       event_type: AgentModeChanged
       schema_version: 2
       payload:
@@ -28367,7 +28872,7 @@ hold:
     - event_type: IntentProposed
       schema_version: 1
       payload: {}
-    - &id085
+    - &id088
       event_type: AgentModeChanged
       schema_version: 2
       payload:
@@ -28376,7 +28881,7 @@ hold:
         reason: owner_resume
         lifecycle: normal
         held: true
-    - &id080
+    - &id083
       event_type: AgentModeChanged
       schema_version: 2
       payload:
@@ -28390,11 +28895,11 @@ hold:
     from_seq: 1
     anchor: null
     events:
-    - *id077
+    - *id080
     - event_type: IntentProposed
       schema_version: 1
       payload: {}
-    - &id081
+    - &id084
       event_type: AgentModeChanged
       schema_version: 2
       payload:
@@ -28409,7 +28914,7 @@ hold:
     from_seq: 1
     anchor: null
     events:
-    - *id077
+    - *id080
     - event_type: AgentModeChanged
       schema_version: 2
       payload:
@@ -28438,8 +28943,8 @@ hold:
     from_seq: 1
     anchor: null
     events:
-    - *id077
-    - &id078
+    - *id080
+    - &id081
       event_type: AgentModeChanged
       schema_version: 1
       payload:
@@ -28453,14 +28958,14 @@ hold:
     from_seq: 1
     anchor: null
     events:
-    - *id078
-    - *id077
+    - *id081
+    - *id080
     expect: []
   - name: a_full_chain_opens_with_a_copy_that_holds_nothing
     from_seq: 1
     anchor: null
     events:
-    - &id079
+    - &id082
       event_type: AgentModeChanged
       schema_version: 2
       payload:
@@ -28474,24 +28979,24 @@ hold:
     from_seq: 1
     anchor: null
     events:
-    - *id079
-    - *id078
+    - *id082
+    - *id081
     expect:
     - 1
   - name: a_lift_then_a_copy_that_holds_nothing
     from_seq: 1
     anchor: null
     events:
-    - *id077
     - *id080
-    - *id079
+    - *id083
+    - *id082
     expect: []
   - name: a_lift_then_a_copy_that_keeps_the_hold
     from_seq: 1
     anchor: null
     events:
-    - *id077
     - *id080
+    - *id083
     - event_type: AgentModeChanged
       schema_version: 2
       payload:
@@ -28506,9 +29011,9 @@ hold:
     from_seq: 1
     anchor: null
     events:
-    - *id077
-    - *id081
-    - &id082
+    - *id080
+    - *id084
+    - &id085
       event_type: AgentModeChanged
       schema_version: 2
       payload:
@@ -28523,9 +29028,9 @@ hold:
     from_seq: 1
     anchor: null
     events:
-    - *id077
-    - *id081
-    - *id081
+    - *id080
+    - *id084
+    - *id084
     expect:
     - 1
     - 2
@@ -28541,30 +29046,30 @@ hold:
         reason: owner_hold
         lifecycle: normal
         held: false
-    - *id082
+    - *id085
     expect:
     - 0
   - name: a_later_range_launders_a_dropped_hold
     from_seq: 40
-    anchor: &id084
+    anchor: &id087
       v2_before: true
       held: true
     events:
-    - *id081
+    - *id084
     expect:
     - 0
   - name: a_later_range_starts_with_version_1_after_a_version_2
     from_seq: 40
-    anchor: &id083
+    anchor: &id086
       v2_before: true
       held: false
     events:
-    - *id078
+    - *id081
     expect:
     - 0
   - name: a_later_range_whose_predecessor_was_not_held
     from_seq: 40
-    anchor: *id083
+    anchor: *id086
     events:
     - event_type: AgentModeChanged
       schema_version: 2
@@ -28577,61 +29082,61 @@ hold:
     expect: []
   - name: a_later_range_carries_the_hold_of_a_copy
     from_seq: 40
-    anchor: *id084
+    anchor: *id087
     events:
-    - *id082
     - *id085
+    - *id088
     expect: []
   - name: a_later_range_with_no_version_2_before
     from_seq: 40
     anchor:
       v2_before: false
     events:
-    - *id078
-    - *id079
+    - *id081
+    - *id082
     expect: []
   - name: an_unanchored_range_opens_with_a_hold
     from_seq: 40
     anchor: null
     events:
-    - *id077
-    - *id082
+    - *id080
+    - *id085
     expect: []
   - name: an_unanchored_range_anchors_on_its_own_hold_then_drops_it
     from_seq: 40
     anchor: null
     events:
-    - *id077
-    - *id081
+    - *id080
+    - *id084
     expect:
     - 1
   - name: an_unanchored_range_opens_with_version_1
     from_seq: 40
     anchor: null
     events:
-    - *id078
-    - *id077
+    - *id081
+    - *id080
     expect: []
   - name: an_unanchored_range_opens_with_a_held_copy_and_fails_closed
     from_seq: 40
     anchor: null
     events:
-    - *id082
+    - *id085
     expect:
     - 0
   - name: an_unanchored_range_opens_with_a_clear_copy_and_fails_closed
     from_seq: 40
     anchor: null
     events:
-    - *id081
+    - *id084
     expect:
     - 0
   - name: an_unanchored_range_with_version_1_after_its_hold
     from_seq: 40
     anchor: null
     events:
-    - *id077
-    - *id078
+    - *id080
+    - *id081
     expect:
     - 1
 membership:
@@ -30102,7 +30607,7 @@ membership:
     base_draft: invited
     changes:
     - path: actor
-      value: &id086
+      value: &id089
         kind: system
         id: control_services
         version: 0.1.0
@@ -30765,7 +31270,7 @@ membership:
     base_draft: deactivated
     changes:
     - path: actor
-      value: *id086
+      value: *id089
     - path: payload.by
       value: control_services
     - path: payload.reason
@@ -30779,7 +31284,7 @@ membership:
     base_draft: deactivated
     changes:
     - path: actor
-      value: *id086
+      value: *id089
     - path: payload.by
       value: control_services
     - path: payload.reason
@@ -30793,7 +31298,7 @@ membership:
     base_draft: removed
     changes:
     - path: actor
-      value: *id086
+      value: *id089
     - path: payload.by
       value: control_services
     - path: payload.reason
@@ -32399,7 +32904,7 @@ membership_fold:
   - name: an_invitation_accepted_twice
     clause: '§9.12: an invitation activates at most once'
     records:
-    - &id087
+    - &id090
       event_type: MemberActivated
       event_time: '2026-10-05T14:00:00.000000000Z'
       actor:
@@ -32420,7 +32925,7 @@ membership_fold:
         independent_approval_required: true
         cool_off_ends_at: '2026-10-05T14:00:00.000000000Z'
         session_ref: null
-    - &id088
+    - &id091
       event_type: MemberInvited
       event_time: '2026-10-05T15:00:00.000000000Z'
       actor:
@@ -32440,7 +32945,7 @@ membership_fold:
         invited_at: '2026-10-05T15:00:00.000000000Z'
         expires_at: '2026-10-12T15:00:00.000000000Z'
         session_ref: session_00F1
-    - &id089
+    - &id092
       event_type: MemberActivated
       event_time: '2026-10-05T16:00:00.000000000Z'
       actor:
@@ -32487,9 +32992,9 @@ membership_fold:
   - name: a_second_activation
     clause: '§9.12: a member whose membership is not removed is not activated again'
     records:
-    - *id087
-    - *id088
-    - *id089
+    - *id090
+    - *id091
+    - *id092
     - event_type: MemberInvited
       event_time: '2026-10-05T17:00:00.000000000Z'
       actor:
@@ -32604,9 +33109,9 @@ membership_fold:
   - name: removed_while_active
     clause: '§9.12: only a deactivated member is removed'
     records:
-    - *id087
-    - *id088
-    - *id089
+    - *id090
+    - *id091
+    - *id092
     - event_type: MemberRemoved
       event_time: '2026-10-05T17:00:00.000000000Z'
       actor:
@@ -32629,9 +33134,9 @@ membership_fold:
   - name: removed_then_reactivated
     clause: '§9.12: removed is terminal'
     records:
-    - *id087
-    - *id088
-    - *id089
+    - *id090
+    - *id091
+    - *id092
     - event_type: MemberDeactivated
       event_time: '2026-10-05T17:00:00.000000000Z'
       actor:
@@ -32686,9 +33191,9 @@ membership_fold:
   - name: reactivated_with_other_roles
     clause: '§9.12: a reactivation restores exactly the kept roles'
     records:
-    - *id087
-    - *id088
-    - *id089
+    - *id090
+    - *id091
+    - *id092
     - event_type: MemberDeactivated
       event_time: '2026-10-05T17:00:00.000000000Z'
       actor:
@@ -32731,9 +33236,9 @@ membership_fold:
   - name: a_role_removed_that_is_not_held
     clause: §9.12
     records:
-    - *id087
-    - *id088
-    - *id089
+    - *id090
+    - *id091
+    - *id092
     - event_type: MemberRoleChanged
       event_time: '2026-10-05T17:00:00.000000000Z'
       actor:
@@ -32761,9 +33266,9 @@ membership_fold:
   - name: a_role_added_that_is_held
     clause: §9.12
     records:
-    - *id087
-    - *id088
-    - *id089
+    - *id090
+    - *id091
+    - *id092
     - event_type: MemberRoleChanged
       event_time: '2026-10-05T17:00:00.000000000Z'
       actor:
@@ -32795,9 +33300,9 @@ membership_fold:
   - name: a_role_change_while_deactivated
     clause: §9.12
     records:
-    - *id087
-    - *id088
-    - *id089
+    - *id090
+    - *id091
+    - *id092
     - event_type: MemberDeactivated
       event_time: '2026-10-05T17:00:00.000000000Z'
       actor:
@@ -32841,9 +33346,9 @@ membership_fold:
   - name: a_role_granted_while_deactivated
     clause: '§9.12, DEC-654 item 7: a grant never reaches a deactivated member, even with a removal'
     records:
-    - *id087
-    - *id088
-    - *id089
+    - *id090
+    - *id091
+    - *id092
     - event_type: MemberDeactivated
       event_time: '2026-10-05T17:00:00.000000000Z'
       actor:
@@ -32888,9 +33393,9 @@ membership_fold:
   - name: reactivated_with_a_stripped_role
     clause: '§9.12: a kept role removed while deactivated is not restored'
     records:
-    - *id087
-    - *id088
-    - *id089
+    - *id090
+    - *id091
+    - *id092
     - event_type: MemberDeactivated
       event_time: '2026-10-05T17:00:00.000000000Z'
       actor:
@@ -32950,9 +33455,9 @@ membership_fold:
   - name: a_role_change_after_removal
     clause: '§9.12: removed is terminal'
     records:
-    - *id087
-    - *id088
-    - *id089
+    - *id090
+    - *id091
+    - *id092
     - event_type: MemberDeactivated
       event_time: '2026-10-05T17:00:00.000000000Z'
       actor:
@@ -33008,9 +33513,9 @@ membership_fold:
   - name: a_role_removed_that_is_not_kept_while_deactivated
     clause: '§9.12: a deactivated member''s removal names only roles it keeps'
     records:
-    - *id087
-    - *id088
-    - *id089
+    - *id090
+    - *id091
+    - *id092
     - event_type: MemberDeactivated
       event_time: '2026-10-05T17:00:00.000000000Z'
       actor:
@@ -33050,9 +33555,9 @@ membership_fold:
   - name: a_deactivated_member_activated_again
     clause: '§9.12: only a removed membership starts again by an invitation'
     records:
-    - *id087
-    - *id088
-    - *id089
+    - *id090
+    - *id091
+    - *id092
     - event_type: MemberDeactivated
       event_time: '2026-10-05T17:00:00.000000000Z'
       actor:
@@ -33204,9 +33709,9 @@ membership_fold:
   - name: deactivated_twice
     clause: §9.12
     records:
-    - *id087
-    - *id088
-    - *id089
+    - *id090
+    - *id091
+    - *id092
     - event_type: MemberDeactivated
       event_time: '2026-10-05T17:00:00.000000000Z'
       actor:
@@ -33357,9 +33862,9 @@ membership_fold:
   - name: a_revocation_of_an_accepted_invitation
     clause: '§9.12: only an `invited` invitation is revoked'
     records:
-    - *id087
-    - *id088
-    - *id089
+    - *id090
+    - *id091
+    - *id092
     - event_type: MemberInvitationRevoked
       event_time: '2026-10-05T17:00:00.000000000Z'
       actor:
@@ -34915,13 +35420,13 @@ records_access:
     changes:
     - path: payload.ranges
       value:
-      - &id090
+      - &id093
         stream_id: agent:ws_01J8Z2:agent_a
         from_seq: 12
         to_seq: 30
         prev_hash: '2222222222222222222222222222222222222222222222222222222222222222'
         to_hash: '3333333333333333333333333333333333333333333333333333333333333333'
-      - *id090
+      - *id093
     - path: artifact_refs
       value: []
     expect:
@@ -34986,7 +35491,7 @@ records_access:
     base_draft: records_read
     changes:
     - path: actor
-      value: &id094
+      value: &id097
         kind: agent
         id: agent_a
         version: 0.1.0
@@ -35041,7 +35546,7 @@ records_access:
     base_draft: records_read
     changes:
     - path: actor
-      value: &id091
+      value: &id094
         kind: client
         id: client_01
         version: '1'
@@ -35060,7 +35565,7 @@ records_access:
     base_draft: export_canonical
     changes:
     - path: actor
-      value: *id091
+      value: *id094
     - path: artifact_refs
       value: []
     expect:
@@ -35072,7 +35577,7 @@ records_access:
     base_draft: verification_fail
     changes:
     - path: actor
-      value: *id091
+      value: *id094
     - path: artifact_refs
       value: []
     expect:
@@ -35084,7 +35589,7 @@ records_access:
     base_draft: records_read
     changes:
     - path: actor
-      value: &id092
+      value: &id095
         kind: broker
         id: alpaca
         version: v2
@@ -35102,7 +35607,7 @@ records_access:
     base_draft: records_read
     changes:
     - path: actor
-      value: &id093
+      value: &id096
         kind: platform_operator
         id: operator_01
         version: '1'
@@ -35120,7 +35625,7 @@ records_access:
     base_draft: export_canonical
     changes:
     - path: actor
-      value: *id092
+      value: *id095
     - path: artifact_refs
       value: []
     expect:
@@ -35132,7 +35637,7 @@ records_access:
     base_draft: export_canonical
     changes:
     - path: actor
-      value: *id093
+      value: *id096
     - path: artifact_refs
       value: []
     expect:
@@ -35144,7 +35649,7 @@ records_access:
     base_draft: verification_pass
     changes:
     - path: actor
-      value: *id092
+      value: *id095
     - path: artifact_refs
       value: []
     expect:
@@ -35156,7 +35661,7 @@ records_access:
     base_draft: verification_fail
     changes:
     - path: actor
-      value: *id093
+      value: *id096
     - path: artifact_refs
       value: []
     expect:
@@ -35168,7 +35673,7 @@ records_access:
     base_draft: export_canonical
     changes:
     - path: actor
-      value: *id094
+      value: *id097
     - path: artifact_refs
       value: []
     expect:
@@ -35204,7 +35709,7 @@ records_access:
     base_draft: verification_pass
     changes:
     - path: actor
-      value: &id096
+      value: &id099
         kind: user
         id: user_owner_01
         version: '1'
@@ -35220,7 +35725,7 @@ records_access:
     base_draft: verification_fail
     changes:
     - path: actor
-      value: *id094
+      value: *id097
     - path: artifact_refs
       value: []
     expect:
@@ -35530,7 +36035,7 @@ records_access:
     base_draft: records_read
     changes:
     - path: actor
-      value: &id095
+      value: &id098
         kind: system
         id: control_services
         version: 0.1.0
@@ -35546,7 +36051,7 @@ records_access:
     base_draft: records_read
     changes:
     - path: actor
-      value: *id091
+      value: *id094
     - path: payload.accessor
       value: client_01
     - path: payload.operation
@@ -35560,7 +36065,7 @@ records_access:
     base_draft: records_read
     changes:
     - path: actor
-      value: *id093
+      value: *id096
     - path: payload.accessor
       value: operator_01
     - path: causation_id
@@ -35628,7 +36133,7 @@ records_access:
     base_draft: export_canonical
     changes:
     - path: actor
-      value: *id095
+      value: *id098
     - path: artifact_refs
       value: []
     expect:
@@ -35638,7 +36143,7 @@ records_access:
     base_draft: verification_fail
     changes:
     - path: actor
-      value: *id095
+      value: *id098
     - path: artifact_refs
       value: []
     expect:
@@ -35648,7 +36153,7 @@ records_access:
     base_draft: verification_pass
     changes:
     - path: actor
-      value: *id096
+      value: *id099
     - path: payload.trigger
       value: request
     - path: artifact_refs
@@ -35660,7 +36165,7 @@ records_access:
     base_draft: verification_fail
     changes:
     - path: actor
-      value: *id095
+      value: *id098
     - path: payload.trigger
       value: restore_drill
     - path: payload.ranges
@@ -37032,11 +37537,11 @@ cold_records:
     changes:
     - path: payload.leaves
       value:
-      - &id098
+      - &id101
         hash: 29f0967f5b50589ff2e882a0b5afa034e468d1e92dca6a4c7714189167cf7755
         seq: 5
         stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
-      - &id097
+      - &id100
         hash: '8888888888888888888888888888888888888888888888888888888888888888'
         seq: 12
         stream_id: agent:ws_01J8Z2:agent_a
@@ -37120,9 +37625,9 @@ cold_records:
     changes:
     - path: payload.leaves
       value:
-      - *id097
-      - *id098
-      - &id099
+      - *id100
+      - *id101
+      - &id102
         hash: '9999999999999999999999999999999999999999999999999999999999999999'
         seq: 7
         stream_id: ctl:ws_01J8Z2
@@ -37141,8 +37646,8 @@ cold_records:
     changes:
     - path: payload.leaves
       value:
-      - *id099
-      - *id099
+      - *id102
+      - *id102
     - path: payload.root
       value: 00cad8073293949638b66e7c221e4075f6817ae6d3e8ffc6361ea65dd0467d04
     - path: artifact_refs
@@ -37192,7 +37697,7 @@ cold_records:
     base_draft: anchor
     changes:
     - path: actor
-      value: *id096
+      value: *id099
     - path: artifact_refs
       value:
       - sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
@@ -37299,7 +37804,7 @@ cold_records:
     base_draft: segment
     changes:
     - path: actor
-      value: *id096
+      value: *id099
     - path: artifact_refs
       value: []
     expect:
@@ -37313,7 +37818,7 @@ cold_records:
     changes:
     - path: payload.leaves
       value:
-      - *id099
+      - *id102
     - path: payload.root
       value: 0003c9675ac0c43101293f562cebe3019c5f7a808d0a819c6b7e5ab95c2fe125
     - path: artifact_refs
@@ -39753,7 +40258,7 @@ verification_runs:
     base_draft: run_passed
     changes:
     - path: actor
-      value: *id096
+      value: *id099
     - path: artifact_refs
       value: []
     expect:
@@ -39765,7 +40270,7 @@ verification_runs:
     base_draft: run_incomplete
     changes:
     - path: actor
-      value: *id091
+      value: *id094
     - path: artifact_refs
       value: []
     expect:
@@ -39777,7 +40282,7 @@ verification_runs:
     base_draft: run_incomplete
     changes:
     - path: actor
-      value: *id093
+      value: *id096
     - path: artifact_refs
       value: []
     expect:
@@ -40664,7 +41169,7 @@ verification_runs:
     base_draft: run_incomplete
     changes:
     - path: actor
-      value: *id095
+      value: *id098
     - path: artifact_refs
       value: []
     expect:
@@ -40674,7 +41179,7 @@ verification_runs:
     base_draft: run_incomplete
     changes:
     - path: actor
-      value: *id095
+      value: *id098
     - path: payload.trigger
       value: restore_drill
     - path: artifact_refs
@@ -40686,7 +41191,7 @@ verification_runs:
     base_draft: run_passed
     changes:
     - path: actor
-      value: *id095
+      value: *id098
     - path: payload.trigger
       value: restore_drill
     - path: payload.result
@@ -40764,8 +41269,8 @@ segment_rows:
   ranges:
   - name: rows_match_their_files
     clause: '§11 segment_rows_mismatch: passes'
-    rows: &id105
-    - &id100
+    rows: &id108
+    - &id103
       body:
         envelope_version: 1
         environment: paper
@@ -40794,7 +41299,7 @@ segment_rows:
         pii_refs: []
         prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
       hash: 0942f94bbc98afc15f924d66dc017649e1009630657a0a6a693f093729f9dfd6
-    - &id101
+    - &id104
       body:
         envelope_version: 1
         environment: paper
@@ -40830,7 +41335,7 @@ segment_rows:
         pii_refs: []
         prev_hash: 0942f94bbc98afc15f924d66dc017649e1009630657a0a6a693f093729f9dfd6
       hash: f148896eb87e1997ec3dae72b3a5372f42eac66d3dd492ad659797bb704e6ea5
-    - &id102
+    - &id105
       body:
         envelope_version: 1
         environment: paper
@@ -40872,7 +41377,7 @@ segment_rows:
         pii_refs: []
         prev_hash: f148896eb87e1997ec3dae72b3a5372f42eac66d3dd492ad659797bb704e6ea5
       hash: 8acccd3a9074af1c0b53d031755db6804cd8f6564462dc912ab477e6cd587acc
-    - &id103
+    - &id106
       body:
         envelope_version: 1
         environment: paper
@@ -40930,7 +41435,7 @@ segment_rows:
         pii_refs: []
         prev_hash: 8acccd3a9074af1c0b53d031755db6804cd8f6564462dc912ab477e6cd587acc
       hash: ef91d0b9405b433917998f59d2ce62807a9037b92de170761dd98737ecf5a467
-    - &id104
+    - &id107
       body:
         envelope_version: 1
         environment: paper
@@ -42240,11 +42745,11 @@ segment_rows:
   - name: start_segment_held_in_part
     clause: 'workspace API §4.8.1 step 2.3a: a segment the snapshot does not hold in full fails'
     rows:
-    - *id100
-    - *id101
-    - *id102
     - *id103
     - *id104
+    - *id105
+    - *id106
+    - *id107
     segments:
     - manifest:
         stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
@@ -42299,7 +42804,7 @@ segment_rows:
       seq: null
   - name: start_segment_past_to_seq_matches
     clause: 'workspace API §4.8.1 step 2.3a: the whole start segment is compared, not the range''s part'
-    rows: *id105
+    rows: *id108
     segments:
     - manifest:
         stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
@@ -44996,16 +45501,16 @@ model_gateway:
     clause: 'rule 157: an ok made an attempt'
     base_draft: settled
     changes:
-    - &id106
+    - &id109
       path: payload.attempts
       value: 0
-    - &id107
+    - &id110
       path: payload.tokens
       value:
         input: 0
         output: 0
         cached: 0
-    - &id108
+    - &id111
       path: payload.cost_usd
       value: '0'
     expect:
@@ -45018,9 +45523,9 @@ model_gateway:
     changes:
     - path: payload.outcome
       value: deadline_exceeded
-    - *id106
-    - *id107
-    - *id108
+    - *id109
+    - *id110
+    - *id111
     - path: payload.tokens
       value:
         input: 0
@@ -45036,9 +45541,9 @@ model_gateway:
     changes:
     - path: payload.outcome
       value: credential_invalid
-    - *id106
-    - *id107
-    - *id108
+    - *id109
+    - *id110
+    - *id111
     - path: payload.cost_usd
       value: '0.01'
     expect:
@@ -46325,7 +46830,7 @@ model_gateway:
         cost_usd: '0.02'
       artifact_refs: []
       pii_refs: []
-    expect: &id109
+    expect: &id112
       outcome: Valid
   - name: open
     clause: 'rule 158: a reservation never settled'
@@ -46384,7 +46889,7 @@ model_gateway:
       - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
       - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
       pii_refs: []
-    expect: *id109
+    expect: *id112
   - name: reserved_twice
     clause: 'rule 158: one reservation per call'
     records:
@@ -50559,7 +51064,7 @@ thesis_invalidation:
   - name: the_call_then_its_invalidation
     clause: 'rule 186: one batch, the call first'
     drafts:
-    - &id112
+    - &id115
       envelope_version: 1
       environment: paper
       event_id: 01J9GX11A000000000000000V1
@@ -50649,12 +51154,12 @@ thesis_invalidation:
         source: null
       artifact_refs: []
       pii_refs: []
-    expect: &id110
+    expect: &id113
       outcome: Valid
   - name: two_invalidations
     clause: 'rule 186: each judged verdict its own record'
     drafts:
-    - &id115
+    - &id118
       envelope_version: 1
       environment: paper
       event_id: 01J9GX12A000000000000000V1
@@ -50705,7 +51210,7 @@ thesis_invalidation:
         - 01J9GV00A000000000000000B1
         - 01J9GV00B000000000000000B2
         verdicts:
-        - &id111
+        - &id114
           candidate: 0
           kind: invalidation
           result: judged
@@ -50777,11 +51282,11 @@ thesis_invalidation:
         source: null
       artifact_refs: []
       pii_refs: []
-    expect: *id110
+    expect: *id113
   - name: a_refused_invalidation_has_no_record
     clause: 'rule 186: only a judged verdict is handed on'
     drafts:
-    - &id114
+    - &id117
       envelope_version: 1
       environment: paper
       event_id: 01J9GX13A000000000000000V1
@@ -50832,7 +51337,7 @@ thesis_invalidation:
         - 01J9GV00A000000000000000B1
         - 01J9GV00B000000000000000B2
         verdicts:
-        - *id111
+        - *id114
         - candidate: 1
           kind: invalidation
           result: unknown_thesis
@@ -50872,7 +51377,7 @@ thesis_invalidation:
         source: null
       artifact_refs: []
       pii_refs: []
-    expect: *id110
+    expect: *id113
   - name: after_the_theses
     clause: 'rule 186: a candidate counts the theses before it'
     drafts:
@@ -50968,11 +51473,11 @@ thesis_invalidation:
         source: null
       artifact_refs: []
       pii_refs: []
-    expect: *id110
+    expect: *id113
   - name: a_call_with_theses_only
     clause: 'rule 186: a call with no invalidation names none'
     drafts:
-    - &id113
+    - &id116
       envelope_version: 1
       environment: paper
       event_id: 01J9GX15A000000000000000V1
@@ -51033,7 +51538,7 @@ thesis_invalidation:
       - sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4
       - sha256:e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
       pii_refs: []
-    expect: *id110
+    expect: *id113
   - name: a_revoked_source
     clause: 'rule 186: a revoked source''s invalidation names no call'
     drafts:
@@ -51064,7 +51569,7 @@ thesis_invalidation:
         source: news_wire_a
       artifact_refs: []
       pii_refs: []
-    expect: *id110
+    expect: *id113
   - name: alone
     clause: 'rule 186: the call is in the same batch'
     drafts:
@@ -51134,7 +51639,7 @@ thesis_invalidation:
         source: null
       artifact_refs: []
       pii_refs: []
-    - *id112
+    - *id115
     expect:
       outcome: Invalid
       index: 0
@@ -51143,8 +51648,8 @@ thesis_invalidation:
   - name: names_another_event
     clause: 'rule 186: the cause is the call, not another record of the batch'
     drafts:
-    - *id113
-    - &id116
+    - *id116
+    - &id119
       envelope_version: 1
       environment: paper
       event_id: 01J8ZTA0A000000000000000T1
@@ -51234,7 +51739,7 @@ thesis_invalidation:
   - name: names_a_thesis_verdict
     clause: 'rule 186: the verdict is an invalidation''s'
     drafts:
-    - *id113
+    - *id116
     - envelope_version: 1
       environment: paper
       event_id: 01J9GX21A000000000000000V2
@@ -51272,7 +51777,7 @@ thesis_invalidation:
   - name: names_a_refused_verdict
     clause: 'rule 186: the verdict is judged'
     drafts:
-    - *id114
+    - *id117
     - envelope_version: 1
       environment: paper
       event_id: 01J9GX21A000000000000000V2
@@ -51339,7 +51844,7 @@ thesis_invalidation:
   - name: names_no_verdict
     clause: 'rule 186: the call has a verdict at the candidate'
     drafts:
-    - *id112
+    - *id115
     - envelope_version: 1
       environment: paper
       event_id: 01J9GX21A000000000000000V2
@@ -51406,7 +51911,7 @@ thesis_invalidation:
   - name: one_verdict_twice
     clause: 'rule 186: one record per verdict'
     drafts:
-    - *id112
+    - *id115
     - envelope_version: 1
       environment: paper
       event_id: 01J9GX21A000000000000000V2
@@ -51473,7 +51978,7 @@ thesis_invalidation:
   - name: a_judged_verdict_with_no_record
     clause: 'rule 186: every judged verdict is handed on'
     drafts:
-    - *id112
+    - *id115
     expect:
       outcome: Invalid
       index: 0
@@ -51482,7 +51987,7 @@ thesis_invalidation:
   - name: the_second_verdict_with_no_record
     clause: 'rule 186: every judged verdict, in order'
     drafts:
-    - *id115
+    - *id118
     - envelope_version: 1
       environment: paper
       event_id: 01J9GX21A000000000000000V2
@@ -51521,8 +52026,8 @@ thesis_invalidation:
   - name: invalidated_after_admission
     clause: 'rule 187: an admitted thesis'
     batches:
-    - - *id116
-    - - &id117
+    - - *id119
+    - - &id120
         envelope_version: 1
         environment: paper
         event_id: 01J9GX11A000000000000000V1
@@ -51612,13 +52117,13 @@ thesis_invalidation:
           source: null
         artifact_refs: []
         pii_refs: []
-    expect: &id118
+    expect: &id121
       outcome: Valid
   - name: a_revision_invalidated
     clause: 'rule 187: the revision holds its instrument'
     batches:
-    - - *id116
-    - - &id120
+    - - *id119
+    - - &id123
         envelope_version: 1
         environment: paper
         event_id: 01J8ZTB0A000000000000000T4
@@ -51672,7 +52177,7 @@ thesis_invalidation:
         - sha256:4fe1d5398e5683f558b61a121cafa0cce2a0ce5b30e01481fdfe601d075a7f5b
         - sha256:7a8aa682626ad22c854278ca2ffb553a7e61805b652433ecc526bf9a9d1c4e9a
         pii_refs: []
-    - - *id117
+    - - *id120
       - envelope_version: 1
         environment: paper
         event_id: 01J9GX21A000000000000000V2
@@ -51702,11 +52207,11 @@ thesis_invalidation:
           source: null
         artifact_refs: []
         pii_refs: []
-    expect: *id118
+    expect: *id121
   - name: a_revoked_source
     clause: 'rule 187: a revoked source''s invalidation too'
     batches:
-    - - *id116
+    - - *id119
     - - envelope_version: 1
         environment: paper
         event_id: 01J9GX21A000000000000000V2
@@ -51734,12 +52239,12 @@ thesis_invalidation:
           source: news_wire_a
         artifact_refs: []
         pii_refs: []
-    expect: *id118
+    expect: *id121
   - name: re_admitted_after_its_invalidation
     clause: 'rule 187: an invalidated instrument may be admitted again, in a new lineage'
     batches:
-    - - *id116
-    - - *id117
+    - - *id119
+    - - *id120
       - envelope_version: 1
         environment: paper
         event_id: 01J9GX21A000000000000000V2
@@ -51821,12 +52326,12 @@ thesis_invalidation:
         - sha256:d0f8b4705ac9a45fe85c3eb6612d8c575f10c2d1511914613c6363f2f4819a7b
         - sha256:ee4ee97f3f1674c751d73d6c5281f53225914cb62071b9a8194b84e789332f66
         pii_refs: []
-    expect: *id118
+    expect: *id121
   - name: a_re_admission_invalidated
     clause: 'rule 187: a re-admission is a new thesis, invalidated once too'
     batches:
-    - - *id116
-    - - *id117
+    - - *id119
+    - - *id120
       - envelope_version: 1
         environment: paper
         event_id: 01J9GX21A000000000000000V2
@@ -51908,7 +52413,7 @@ thesis_invalidation:
         - sha256:d0f8b4705ac9a45fe85c3eb6612d8c575f10c2d1511914613c6363f2f4819a7b
         - sha256:ee4ee97f3f1674c751d73d6c5281f53225914cb62071b9a8194b84e789332f66
         pii_refs: []
-    - - &id119
+    - - &id122
         envelope_version: 1
         environment: paper
         event_id: 01J9GX12A000000000000000V1
@@ -51998,11 +52503,11 @@ thesis_invalidation:
           source: null
         artifact_refs: []
         pii_refs: []
-    expect: *id118
+    expect: *id121
   - name: invalidated_then_a_new_thesis_in_one_response
     clause: '§9.22 batch order: the invalidation follows the call and precedes the response''s thesis records'
     batches:
-    - - *id116
+    - - *id119
     - - envelope_version: 1
         environment: paper
         event_id: 01J9GX13A000000000000000V1
@@ -52052,7 +52557,7 @@ thesis_invalidation:
           observations:
           - 01J9GV00A000000000000000B1
           - 01J9GV00B000000000000000B2
-          verdicts: &id121
+          verdicts: &id124
           - candidate: 0
             kind: thesis
             result: judged
@@ -52147,12 +52652,12 @@ thesis_invalidation:
         - sha256:d0f8b4705ac9a45fe85c3eb6612d8c575f10c2d1511914613c6363f2f4819a7b
         - sha256:ee4ee97f3f1674c751d73d6c5281f53225914cb62071b9a8194b84e789332f66
         pii_refs: []
-    expect: *id118
+    expect: *id121
   - name: in_one_batch
     clause: 'rule 187: the admission is earlier in the batch'
     batches:
-    - - *id116
-      - *id117
+    - - *id119
+      - *id120
       - envelope_version: 1
         environment: paper
         event_id: 01J9GX21A000000000000000V2
@@ -52182,11 +52687,11 @@ thesis_invalidation:
           source: null
         artifact_refs: []
         pii_refs: []
-    expect: *id118
+    expect: *id121
   - name: never_admitted
     clause: 'rule 187: a thesis the stream admitted'
     batches:
-    - - *id117
+    - - *id120
       - envelope_version: 1
         environment: paper
         event_id: 01J9GX21A000000000000000V2
@@ -52224,7 +52729,7 @@ thesis_invalidation:
   - name: before_its_admission
     clause: 'rule 187: admitted earlier'
     batches:
-    - - *id117
+    - - *id120
       - envelope_version: 1
         environment: paper
         event_id: 01J9GX21A000000000000000V2
@@ -52254,7 +52759,7 @@ thesis_invalidation:
           source: null
         artifact_refs: []
         pii_refs: []
-      - *id116
+      - *id119
     expect:
       outcome: Invalid
       index: 1
@@ -52315,7 +52820,7 @@ thesis_invalidation:
         - sha256:c57ad9e261f661444bdcf48bdd286994e5c18294f0f309e495c1414b66471aad
         - sha256:eb189164129b8731e3b1af918757f01e290473b0bb7c9e8cf05daee77e77b5c9
         pii_refs: []
-    - - *id117
+    - - *id120
       - envelope_version: 1
         environment: paper
         event_id: 01J9GX21A000000000000000V2
@@ -52353,8 +52858,8 @@ thesis_invalidation:
   - name: invalidated_twice
     clause: 'rule 187: one invalidation per thesis'
     batches:
-    - - *id116
-    - - *id117
+    - - *id119
+    - - *id120
       - envelope_version: 1
         environment: paper
         event_id: 01J9GX21A000000000000000V2
@@ -52384,7 +52889,7 @@ thesis_invalidation:
           source: null
         artifact_refs: []
         pii_refs: []
-    - - *id119
+    - - *id122
       - envelope_version: 1
         environment: paper
         event_id: 01J9GX22A000000000000000V2
@@ -52422,8 +52927,8 @@ thesis_invalidation:
   - name: revoked_after_its_invalidation
     clause: 'rule 187: whatever the second''s cause'
     batches:
-    - - *id116
-    - - *id117
+    - - *id119
+    - - *id120
       - envelope_version: 1
         environment: paper
         event_id: 01J9GX21A000000000000000V2
@@ -52488,8 +52993,8 @@ thesis_invalidation:
   - name: another_lineage
     clause: 'rule 187: the thesis''s own lineage'
     batches:
-    - - *id116
-    - - *id117
+    - - *id119
+    - - *id120
       - envelope_version: 1
         environment: paper
         event_id: 01J9GX21A000000000000000V2
@@ -52527,8 +53032,8 @@ thesis_invalidation:
   - name: a_substituted_instrument
     clause: 'rule 187: the thesis''s own instrument'
     batches:
-    - - *id116
-    - - *id117
+    - - *id119
+    - - *id120
       - envelope_version: 1
         environment: paper
         event_id: 01J9GX21A000000000000000V2
@@ -52566,9 +53071,9 @@ thesis_invalidation:
   - name: superseded_by_its_revision
     clause: 'rule 187: the thesis that holds the instrument now'
     batches:
-    - - *id116
+    - - *id119
+    - - *id123
     - - *id120
-    - - *id117
       - envelope_version: 1
         environment: paper
         event_id: 01J9GX21A000000000000000V2
@@ -52606,7 +53111,7 @@ thesis_invalidation:
   - name: a_new_thesis_before_its_invalidation_a_correct_writer_never_uses
     clause: '§9.22 batch order: a thesis record before the invalidation supersedes it'
     batches:
-    - - *id116
+    - - *id119
     - - envelope_version: 1
         environment: paper
         event_id: 01J9GX14A000000000000000V1
@@ -52656,7 +53161,7 @@ thesis_invalidation:
           observations:
           - 01J9GV00A000000000000000B1
           - 01J9GV00B000000000000000B2
-          verdicts: *id121
+          verdicts: *id124
         artifact_refs:
         - sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
         - sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
@@ -52753,7 +53258,7 @@ thesis_invalidation:
   - name: superseded_by_a_renewal
     clause: 'rule 187: a renewal holds it now'
     batches:
-    - - *id116
+    - - *id119
     - - envelope_version: 1
         environment: paper
         event_id: 01J9GX30A000000000000000T1
@@ -52806,7 +53311,7 @@ thesis_invalidation:
         - sha256:d0f8b4705ac9a45fe85c3eb6612d8c575f10c2d1511914613c6363f2f4819a7b
         - sha256:ee4ee97f3f1674c751d73d6c5281f53225914cb62071b9a8194b84e789332f66
         pii_refs: []
-    - - *id117
+    - - *id120
       - envelope_version: 1
         environment: paper
         event_id: 01J9GX21A000000000000000V2
@@ -53284,12 +53789,12 @@ agent_deployed:
     clause: '§9.2: from the stored document'
     base_draft: deployed_v1
     changes: []
-    stored: &id122
+    stored: &id125
     - mandate_document
     - deployment_record
     expect:
       refused: null
-      fact: &id123
+      fact: &id126
         kind: AgentVersionActive
         agent: agent_a
         connection_id: conn_alpaca_paper_01
@@ -53301,27 +53806,27 @@ agent_deployed:
     clause: '§9.24: the same fact from the same document'
     base_draft: deployed_v2
     changes: []
-    stored: *id122
+    stored: *id125
     expect:
       refused: null
-      fact: *id123
+      fact: *id126
   - name: version_2_live_envelope
     clause: '§9.24: the fact is the document''s, whatever the envelope says'
     base_draft: deployed_v2
     changes:
     - path: environment
       value: live
-    stored: *id122
+    stored: *id125
     expect:
       refused: null
-      fact: *id123
+      fact: *id126
   - name: another_connection
     clause: 'rule 200: refused where the document is read'
     base_draft: deployed_v2
-    changes: &id124
+    changes: &id127
     - path: payload.connection_id
       value: conn_alpaca_paper_02
-    stored: *id122
+    stored: *id125
     expect:
       refused: payload.connection_id
   - name: version_1_not_stored
@@ -53341,7 +53846,7 @@ agent_deployed:
   - name: another_connection_not_stored
     clause: '§9.2: with no document, rule 200 has nothing to compare'
     base_draft: deployed_v2
-    changes: *id124
+    changes: *id127
     stored: []
     expect:
       refused: payload.mandate_version
@@ -53407,9 +53912,9 @@ agent_deployed:
       - sha256:65140816f5d94b5ba7c53811c8c6fddf1cac4c87ce78bdb331e4cd5cf1ec2abe
       - sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43
       pii_refs: []
-    expect: &id125
+    expect: &id128
       outcome: Valid
-    processes: &id126
+    processes: &id129
       runtimes:
       - agent_a
       executors:
@@ -53501,7 +54006,7 @@ agent_deployed:
       - sha256:65140816f5d94b5ba7c53811c8c6fddf1cac4c87ce78bdb331e4cd5cf1ec2abe
       - sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43
       pii_refs: []
-    expect: *id125
+    expect: *id128
     processes:
       runtimes:
       - agent_a
@@ -53627,7 +54132,7 @@ agent_deployed:
       - sha256:65140816f5d94b5ba7c53811c8c6fddf1cac4c87ce78bdb331e4cd5cf1ec2abe
       - sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43
       pii_refs: []
-    expect: *id125
+    expect: *id128
     processes:
       runtimes:
       - agent_a
@@ -53748,8 +54253,8 @@ agent_deployed:
       - sha256:65140816f5d94b5ba7c53811c8c6fddf1cac4c87ce78bdb331e4cd5cf1ec2abe
       - sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43
       pii_refs: []
-    expect: *id125
-    processes: *id126
+    expect: *id128
+    processes: *id129
   - name: stopped
     clause: '§9.21: an `AgentStopped` stops it'
     records:
@@ -53836,8 +54341,8 @@ agent_deployed:
         loss_added: '0'
       artifact_refs: []
       pii_refs: []
-    expect: *id125
-    processes: &id127
+    expect: *id128
+    processes: &id130
       runtimes: []
       executors: []
   - name: stopped_is_final
@@ -53952,8 +54457,8 @@ agent_deployed:
       - sha256:65140816f5d94b5ba7c53811c8c6fddf1cac4c87ce78bdb331e4cd5cf1ec2abe
       - sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43
       pii_refs: []
-    expect: *id125
-    processes: *id127
+    expect: *id128
+    processes: *id130
   - name: revoked_after_the_deployment
     clause: rule 201 judges the deployment only; §9.21 stops nothing for a revocation
     records:
@@ -54035,8 +54540,8 @@ agent_deployed:
         connection_id: conn_alpaca_paper_01
       artifact_refs: []
       pii_refs: []
-    expect: *id125
-    processes: *id126
+    expect: *id128
+    processes: *id129
   - name: version_1_deployment
     clause: 'rule 201 does not judge version 1; §9.21: it names no account, so nothing starts'
     records:
@@ -54097,8 +54602,8 @@ agent_deployed:
       - sha256:65140816f5d94b5ba7c53811c8c6fddf1cac4c87ce78bdb331e4cd5cf1ec2abe
       - sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43
       pii_refs: []
-    expect: *id125
-    processes: *id127
+    expect: *id128
+    processes: *id130
   - name: version_1_with_no_connection
     clause: rule 201 does not judge version 1
     records:
@@ -54127,8 +54632,8 @@ agent_deployed:
       - sha256:65140816f5d94b5ba7c53811c8c6fddf1cac4c87ce78bdb331e4cd5cf1ec2abe
       - sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43
       pii_refs: []
-    expect: *id125
-    processes: *id127
+    expect: *id128
+    processes: *id130
   - name: version_1_then_version_2
     clause: '§9.21: an unread deployment holds nothing back; the next is read'
     records:
@@ -54215,8 +54720,8 @@ agent_deployed:
       - sha256:65140816f5d94b5ba7c53811c8c6fddf1cac4c87ce78bdb331e4cd5cf1ec2abe
       - sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43
       pii_refs: []
-    expect: *id125
-    processes: *id126
+    expect: *id128
+    processes: *id129
   - name: never_established
     clause: 'rule 201: an establishment earlier on the stream'
     records:
@@ -54251,7 +54756,7 @@ agent_deployed:
       index: 0
       rule: 201
       path: payload.connection_id
-    processes: *id127
+    processes: *id130
   - name: established_after
     clause: 'rule 201: earlier; §9.21: a later establishment revives nothing'
     records:
@@ -54318,7 +54823,7 @@ agent_deployed:
       index: 0
       rule: 201
       path: payload.connection_id
-    processes: *id127
+    processes: *id130
   - name: another_connection_established
     clause: 'rule 201: the deployment''s own connection'
     records:
@@ -54385,7 +54890,7 @@ agent_deployed:
       index: 1
       rule: 201
       path: payload.connection_id
-    processes: *id127
+    processes: *id130
   - name: revoked_before
     clause: 'rule 201: not since revoked'
     records:
@@ -54472,7 +54977,7 @@ agent_deployed:
       index: 2
       rule: 201
       path: payload.connection_id
-    processes: *id127
+    processes: *id130
   - name: version_1_establishment
     clause: 'rule 201: established at version 2, with an `account_ref`'
     records:
@@ -54532,7 +55037,7 @@ agent_deployed:
       index: 1
       rule: 201
       path: payload.connection_id
-    processes: *id127
+    processes: *id130
   - name: version_1_stopped_then_version_2
     clause: '§9.21: a stop is final, the deployment it stops read or not'
     records:
@@ -54644,8 +55149,8 @@ agent_deployed:
       - sha256:65140816f5d94b5ba7c53811c8c6fddf1cac4c87ce78bdb331e4cd5cf1ec2abe
       - sha256:e2b30b998595d31df51d58b142d10191d1024db476648f30dd68841e13217d43
       pii_refs: []
-    expect: *id125
-    processes: *id127
+    expect: *id128
+    processes: *id130
   - name: account_stream_copy_only
     clause: 'rule 201: an establishment on the control stream, never an account stream''s copy'
     records:
@@ -54747,14 +55252,14 @@ agent_deployed:
       index: 2
       rule: 201
       path: payload.connection_id
-    processes: *id127
+    processes: *id130
   ranges:
   - name: anchored_after_the_establishment
     clause: '§11: the anchor holds the establishment'
     stream: established_then_deployed
     start: 1
     anchored: true
-    expect: &id128
+    expect: &id131
       outcome: Valid
   - name: unanchored_after_the_establishment
     clause: '§11: with no anchor, a version-2 deployment fails closed'
@@ -54780,13 +55285,13 @@ agent_deployed:
     stream: reconnected
     start: 3
     anchored: true
-    expect: *id128
+    expect: *id131
   - name: anchored_mid_reconnect
     clause: '§11: the range judges the reconnect itself'
     stream: reconnected
     start: 2
     anchored: true
-    expect: *id128
+    expect: *id131
   - name: unanchored_at_an_establishment
     clause: '§11: rule 66''s records fail closed first'
     stream: reconnected
@@ -54801,13 +55306,13 @@ agent_deployed:
     stream: version_1_deployment
     start: 1
     anchored: false
-    expect: *id128
+    expect: *id131
   - name: unanchored_stop_only
     clause: '§11: an `AgentStopped` is not judged'
     stream: stopped
     start: 2
     anchored: false
-    expect: *id128
+    expect: *id131
   - name: from_the_start
     clause: '§11: a full chain is anchored on nothing before it'
     stream: never_established
@@ -54833,7 +55338,7 @@ agent_deployed:
     stream: revoked_after_the_deployment
     start: 2
     anchored: true
-    expect: *id128
+    expect: *id131
   stops:
   - name: claimed_and_retired
     clause: 'rule 246: the service''s claim opens the agent''s stream'
@@ -54944,7 +55449,7 @@ agent_deployed:
         loss_added: '0'
       artifact_refs: []
       pii_refs: []
-    expect: &id129
+    expect: &id132
       outcome: Valid
   - name: version_1_claimed
     clause: 'rule 246: an unread deployment''s stream, claimed'
@@ -55022,7 +55527,7 @@ agent_deployed:
         loss_added: '0'
       artifact_refs: []
       pii_refs: []
-    expect: *id129
+    expect: *id132
   - name: refused_by_rule_201
     clause: 'rule 246: a deployment rule 201 refuses, its stream claimed'
     agent:
@@ -55100,7 +55605,7 @@ agent_deployed:
         loss_added: '0'
       artifact_refs: []
       pii_refs: []
-    expect: *id129
+    expect: *id132
   - name: claimed_by_another_service
     clause: 'rule 246: a claim is any actor but an `agent`'
     agent:
@@ -55210,7 +55715,7 @@ agent_deployed:
         loss_added: '0'
       artifact_refs: []
       pii_refs: []
-    expect: *id129
+    expect: *id132
   - name: unclaimed
     clause: 'rule 246: an empty agent stream is no claim'
     agent: []
@@ -55731,7 +56236,7 @@ agent_deployed:
         cause: restart
       artifact_refs: []
       pii_refs: []
-    expect: *id129
+    expect: *id132
   - name: written_after_the_claim
     clause: 'rule 246: a claimed stream holds nothing after its claim'
     agent:
@@ -56081,7 +56586,7 @@ agent_deployed:
         loss_added: '12.5'
       artifact_refs: []
       pii_refs: []
-    expect: *id129
+    expect: *id132
   - name: a_loss
     clause: 'rule 246: `loss_added` is 0'
     agent:
@@ -57105,7 +57610,7 @@ risk_limits:
     changes:
     - path: payload.warning_ref
       value: 7
-    - &id130
+    - &id133
       path: artifact_refs
       value: []
     expect:
@@ -57118,7 +57623,7 @@ risk_limits:
     changes:
     - path: payload.warning_ref
       value: sha256:short
-    - *id130
+    - *id133
     expect:
       outcome: Invalid
       reason: non_canonical
@@ -58229,19 +58734,19 @@ risk_limits:
     clause: rule 236
     base_draft: owner_released
     changes:
-    - &id131
+    - &id134
       path: payload.cause
       value: goal_release
-    - &id132
+    - &id135
       path: payload.warning_ref
       value: null
-    - &id133
+    - &id136
       path: payload.user_id
       value: null
-    - &id134
+    - &id137
       path: payload.step_up
       value: null
-    - &id135
+    - &id138
       path: artifact_refs
       value: []
     - path: payload.qty
@@ -58521,11 +59026,11 @@ risk_limits:
     clause: rule 236
     base_draft: owner_released
     changes:
-    - *id131
-    - *id132
-    - *id133
     - *id134
     - *id135
+    - *id136
+    - *id137
+    - *id138
     - path: payload.canceled_order_ids
       value: []
     expect:
@@ -58534,11 +59039,11 @@ risk_limits:
     clause: 'rule 236: a goal completes flat or not'
     base_draft: owner_released
     changes:
-    - *id131
-    - *id132
-    - *id133
     - *id134
     - *id135
+    - *id136
+    - *id137
+    - *id138
     - path: payload.qty
       value: '0'
     expect:
@@ -58557,7 +59062,7 @@ risk_limits:
     clause: rule 237
     base_draft: mark_stale
     changes:
-    - &id136
+    - &id139
       path: payload.restriction
       value: removed_instrument
     - path: payload.reason
@@ -58568,7 +59073,7 @@ risk_limits:
     clause: rule 237
     base_draft: mark_stale
     changes:
-    - *id136
+    - *id139
     - path: payload.reason
       value: operator_halt
     expect:
@@ -58577,7 +59082,7 @@ risk_limits:
     clause: rule 237
     base_draft: mark_stale
     changes:
-    - *id136
+    - *id139
     - path: payload.reason
       value: version_applied
     expect:
@@ -58586,7 +59091,7 @@ risk_limits:
     clause: rule 237
     base_draft: mark_stale
     changes:
-    - *id136
+    - *id139
     - path: payload.reason
       value: thesis_admitted
     - path: payload.active
@@ -58597,7 +59102,7 @@ risk_limits:
     clause: rule 237
     base_draft: mark_stale
     changes:
-    - *id136
+    - *id139
     - path: payload.reason
       value: version_applied
     - path: payload.active
@@ -58610,10 +59115,10 @@ risk_limits:
     changes:
     - path: payload.reason
       value: profit_stop_reached
-    - &id137
+    - &id140
       path: payload.then
       value: discretionary_exit_all_then_retire
-    - &id138
+    - &id141
       path: payload.on_complete
       value: null
     expect:
@@ -58622,8 +59127,8 @@ risk_limits:
     clause: rule 238
     base_draft: goal_completed
     changes:
-    - *id137
-    - *id138
+    - *id140
+    - *id141
     expect:
       outcome: Valid
   - name: day_started_at_zero
@@ -59731,10 +60236,10 @@ acknowledgments:
     clause: 'rule 28: only an acknowledgment, on the account stream'
     base_draft: refused_trigger_unknown
     changes:
-    - &id139
+    - &id142
       path: stream_id
       value: agent:ws_01J8Z2:agent_a
-    - &id140
+    - &id143
       path: actor
       value:
         kind: agent
@@ -59751,8 +60256,8 @@ acknowledgments:
     clause: 'rule 28: a lift is refused only for its step-up'
     base_draft: refused_trigger_unknown
     changes:
-    - *id139
-    - *id140
+    - *id142
+    - *id143
     - path: payload.command
       value: lift_hold
     - path: schema_version
@@ -59765,10 +60270,10 @@ acknowledgments:
     clause: 'rule 28: only an acknowledgment, on the account stream'
     base_draft: refused_trigger_superseded
     changes:
-    - &id141
+    - &id144
       path: stream_id
       value: agent:ws_01J8Z2:agent_a
-    - &id142
+    - &id145
       path: actor
       value:
         kind: agent
@@ -59785,8 +60290,8 @@ acknowledgments:
     clause: 'rule 28: a lift is refused only for its step-up'
     base_draft: refused_trigger_superseded
     changes:
-    - *id141
-    - *id142
+    - *id144
+    - *id145
     - path: payload.command
       value: lift_hold
     - path: schema_version
@@ -59799,10 +60304,10 @@ acknowledgments:
     clause: 'rule 28: only an acknowledgment, on the account stream'
     base_draft: refused_request_invalid
     changes:
-    - &id143
+    - &id146
       path: stream_id
       value: agent:ws_01J8Z2:agent_a
-    - &id144
+    - &id147
       path: actor
       value:
         kind: agent
@@ -59819,8 +60324,8 @@ acknowledgments:
     clause: 'rule 28: a lift is refused only for its step-up'
     base_draft: refused_request_invalid
     changes:
-    - *id143
-    - *id144
+    - *id146
+    - *id147
     - path: payload.command
       value: lift_hold
     - path: schema_version
@@ -60024,9 +60529,9 @@ acknowledgments:
           method: cli_confirm
       artifact_refs: []
       pii_refs: []
-    expect: &id145
+    expect: &id148
       outcome: Valid
-    stream_rules: *id145
+    stream_rules: *id148
   - name: plain_acknowledgment
     clause: rules 240 and 241 judge only an acknowledgment naming a request
     records:
@@ -60061,8 +60566,8 @@ acknowledgments:
           method: cli_confirm
       artifact_refs: []
       pii_refs: []
-    expect: *id145
-    stream_rules: *id145
+    expect: *id148
+    stream_rules: *id148
   - name: two_plain_acknowledgments
     clause: 'rule 241: only a non-null request is spent'
     records:
@@ -60128,8 +60633,8 @@ acknowledgments:
           method: cli_confirm
       artifact_refs: []
       pii_refs: []
-    expect: *id145
-    stream_rules: *id145
+    expect: *id148
+    stream_rules: *id148
   - name: interleaved
     clause: 'rule 240: each acknowledgment its own request'
     records:
@@ -60253,8 +60758,8 @@ acknowledgments:
           method: cli_confirm
       artifact_refs: []
       pii_refs: []
-    expect: *id145
-    stream_rules: *id145
+    expect: *id148
+    stream_rules: *id148
   - name: retry_with_a_new_request
     clause: 'rule 241: a retry needs a new request'
     records:
@@ -60378,8 +60883,8 @@ acknowledgments:
           method: cli_confirm
       artifact_refs: []
       pii_refs: []
-    expect: *id145
-    stream_rules: *id145
+    expect: *id148
+    stream_rules: *id148
   - name: reordered
     clause: 'rule 240: a reordered stream breaks it'
     records:
@@ -60443,12 +60948,12 @@ acknowledgments:
           method: cli_confirm
       artifact_refs: []
       pii_refs: []
-    expect: &id146
+    expect: &id149
       outcome: Invalid
       index: 0
       rule: 240
       path: payload.request
-    stream_rules: *id146
+    stream_rules: *id149
   - name: unknown_request
     clause: 'rule 240: the request exists'
     records:
@@ -60512,12 +61017,12 @@ acknowledgments:
           method: cli_confirm
       artifact_refs: []
       pii_refs: []
-    expect: &id147
+    expect: &id150
       outcome: Invalid
       index: 1
       rule: 240
       path: payload.request
-    stream_rules: *id147
+    stream_rules: *id150
   - name: agent_differs
     clause: 'rule 240: `agent` matches'
     records:
@@ -60581,12 +61086,12 @@ acknowledgments:
           method: cli_confirm
       artifact_refs: []
       pii_refs: []
-    expect: &id148
+    expect: &id151
       outcome: Invalid
       index: 1
       rule: 240
       path: payload.request
-    stream_rules: *id148
+    stream_rules: *id151
   - name: event_differs
     clause: 'rule 240: `event` matches'
     records:
@@ -60650,12 +61155,12 @@ acknowledgments:
           method: cli_confirm
       artifact_refs: []
       pii_refs: []
-    expect: &id149
+    expect: &id152
       outcome: Invalid
       index: 1
       rule: 240
       path: payload.request
-    stream_rules: *id149
+    stream_rules: *id152
   - name: requested_by_differs
     clause: 'rule 240: `requested_by` matches'
     records:
@@ -60719,12 +61224,12 @@ acknowledgments:
           method: cli_confirm
       artifact_refs: []
       pii_refs: []
-    expect: &id150
+    expect: &id153
       outcome: Invalid
       index: 1
       rule: 240
       path: payload.request
-    stream_rules: *id150
+    stream_rules: *id153
   - name: requirement_differs
     clause: 'rule 240: `independent_required` matches; rule 239 refuses the request first'
     records:
@@ -60892,12 +61397,12 @@ acknowledgments:
           method: cli_confirm
       artifact_refs: []
       pii_refs: []
-    expect: &id151
+    expect: &id154
       outcome: Invalid
       index: 2
       rule: 241
       path: payload.request
-    stream_rules: *id151
+    stream_rules: *id154
   - name: second_acknowledgment_by_the_same_user
     clause: rule 241
     records:
@@ -60992,12 +61497,12 @@ acknowledgments:
           method: cli_confirm
       artifact_refs: []
       pii_refs: []
-    expect: &id152
+    expect: &id155
       outcome: Invalid
       index: 2
       rule: 241
       path: payload.request
-    stream_rules: *id152
+    stream_rules: *id155
   - name: self_acknowledgment
     clause: 'rule 239: a user never acknowledges their own request'
     records:
@@ -61066,7 +61571,7 @@ acknowledgments:
       index: 1
       rule: 239
       path: payload.requested_by
-    stream_rules: *id145
+    stream_rules: *id148
   - name: self_acknowledgment_naming_another_requester
     clause: 'rule 240: the requester is the request''s'
     records:
@@ -61130,12 +61635,12 @@ acknowledgments:
           method: cli_confirm
       artifact_refs: []
       pii_refs: []
-    expect: &id153
+    expect: &id156
       outcome: Invalid
       index: 1
       rule: 240
       path: payload.request
-    stream_rules: *id153
+    stream_rules: *id156
   - name: acknowledgment_naming_an_acknowledgment
     clause: 'rule 240: the named record is a request'
     records:
@@ -61230,12 +61735,12 @@ acknowledgments:
           method: cli_confirm
       artifact_refs: []
       pii_refs: []
-    expect: &id154
+    expect: &id157
       outcome: Invalid
       index: 2
       rule: 240
       path: payload.request
-    stream_rules: *id154
+    stream_rules: *id157
   executor:
   - name: independent_lifts
     clause: '§9.28: all four checks pass'
@@ -71421,7 +71926,7 @@ owner_confirmations:
   - name: the_intent_then_its_confirmation
     clause: 'rule 248: one batch, the intent first'
     drafts:
-    - &id157
+    - &id160
       envelope_version: 1
       environment: paper
       event_id: 01JAB1N0A000000000000000E1
@@ -71452,7 +71957,7 @@ owner_confirmations:
         risk_clock: '2026-10-19T21:30:01.000000000Z'
       artifact_refs: []
       pii_refs: []
-    - &id155
+    - &id158
       envelope_version: 1
       environment: paper
       event_id: 01JAB1N0A000000000000000E2
@@ -71482,7 +71987,7 @@ owner_confirmations:
         risk_clock: '2026-10-19T21:30:01.000000000Z'
       artifact_refs: []
       pii_refs: []
-    expect: &id156
+    expect: &id159
       outcome: Valid
   - name: a_limit_at_the_floor
     clause: 'rule 248: a limit not below the floor'
@@ -71517,8 +72022,8 @@ owner_confirmations:
         risk_clock: '2026-10-19T21:30:01.000000000Z'
       artifact_refs: []
       pii_refs: []
-    - *id155
-    expect: *id156
+    - *id158
+    expect: *id159
   - name: a_limit_above_the_floor
     clause: 'rule 248: a limit above the floor'
     drafts:
@@ -71552,19 +72057,19 @@ owner_confirmations:
         risk_clock: '2026-10-19T21:30:01.000000000Z'
       artifact_refs: []
       pii_refs: []
-    - *id155
-    expect: *id156
+    - *id158
+    expect: *id159
   - name: an_unconfirmed_owner_exit
     clause: 'rule 248: an owner exit needs no confirmation'
     drafts:
-    - *id157
-    expect: *id156
+    - *id160
+    expect: *id159
   - name: then_another_intent
     clause: 'rule 248: a later intent needs none'
     drafts:
-    - *id157
-    - *id155
-    - &id158
+    - *id160
+    - *id158
+    - &id161
       envelope_version: 1
       environment: paper
       event_id: 01JAB1N0A000000000000000E3
@@ -71595,11 +72100,11 @@ owner_confirmations:
         risk_clock: '2026-10-19T21:30:01.000000000Z'
       artifact_refs: []
       pii_refs: []
-    expect: *id156
+    expect: *id159
   - name: alone
     clause: 'rule 248: the intent is in the batch'
     drafts:
-    - *id155
+    - *id158
     expect:
       outcome: Invalid
       index: 0
@@ -71608,8 +72113,8 @@ owner_confirmations:
   - name: before_its_intent
     clause: 'rule 248: the intent is immediately before it'
     drafts:
-    - *id155
-    - *id157
+    - *id158
+    - *id160
     expect:
       outcome: Invalid
       index: 0
@@ -71618,8 +72123,8 @@ owner_confirmations:
   - name: twice
     clause: 'rule 248: one confirmation per intent'
     drafts:
-    - *id157
-    - *id155
+    - *id160
+    - *id158
     - envelope_version: 1
       environment: paper
       event_id: 01JAB1N0A000000000000000E4
@@ -71657,9 +72162,9 @@ owner_confirmations:
   - name: after_another_intent
     clause: 'rule 248: immediately after its own intent'
     drafts:
-    - *id157
+    - *id160
+    - *id161
     - *id158
-    - *id155
     expect:
       outcome: Invalid
       index: 2
@@ -71668,8 +72173,8 @@ owner_confirmations:
   - name: of_another_intent
     clause: 'rule 248: the same intent'
     drafts:
+    - *id161
     - *id158
-    - *id155
     expect:
       outcome: Invalid
       index: 1
@@ -71708,7 +72213,7 @@ owner_confirmations:
         risk_clock: '2026-10-19T21:30:01.000000000Z'
       artifact_refs: []
       pii_refs: []
-    - *id155
+    - *id158
     expect:
       outcome: Invalid
       index: 1
@@ -71747,7 +72252,7 @@ owner_confirmations:
         risk_clock: '2026-10-19T21:30:01.000000000Z'
       artifact_refs: []
       pii_refs: []
-    - *id155
+    - *id158
     expect:
       outcome: Invalid
       index: 1
@@ -71786,8 +72291,8 @@ owner_confirmations:
         risk_clock: '2026-10-19T21:30:01.000000000Z'
       artifact_refs: []
       pii_refs: []
-    - *id155
-    expect: *id156
+    - *id158
+    expect: *id159
   - name: of_a_risk_exit
     clause: 'rule 248: only an owner''s exit is confirmed'
     drafts:
@@ -71821,7 +72326,7 @@ owner_confirmations:
         risk_clock: '2026-10-19T21:30:01.000000000Z'
       artifact_refs: []
       pii_refs: []
-    - *id155
+    - *id158
     expect:
       outcome: Invalid
       index: 0
@@ -71860,7 +72365,7 @@ owner_confirmations:
         risk_clock: '2026-10-19T21:30:01.000000000Z'
       artifact_refs: []
       pii_refs: []
-    - *id155
+    - *id158
     expect:
       outcome: Invalid
       index: 0
@@ -71869,7 +72374,7 @@ owner_confirmations:
   - name: a_bad_confirmation
     clause: each draft's own rules first
     drafts:
-    - *id157
+    - *id160
     - envelope_version: 1
       environment: paper
       event_id: 01JAB1N0A000000000000000E2
@@ -72647,7 +73152,7 @@ credentials:
     base_draft: first_enrolled
     changes:
     - path: actor
-      value: &id159
+      value: &id162
         kind: system
         id: 01JAA2N0A000000000000000P1
         version: '1'
@@ -72721,7 +73226,7 @@ credentials:
     base_draft: removed
     changes:
     - path: actor
-      value: *id159
+      value: *id162
     expect:
       outcome: Invalid
       reason: schema
@@ -73853,7 +74358,7 @@ step_up_assertions:
     base_draft: step_up_asserted
     changes:
     - path: actor
-      value: *id159
+      value: *id162
     expect:
       outcome: Invalid
       reason: schema
@@ -73946,7 +74451,7 @@ step_up_assertions:
       artifact_refs:
       - sha256:6666666666666666666666666666666666666666666666666666666666666666
       pii_refs: []
-    expect: &id160
+    expect: &id163
       outcome: Valid
   - name: two_events_each_with_its_assertion
     clause: 'rule 253: each immediately after its own'
@@ -74000,7 +74505,7 @@ step_up_assertions:
       artifact_refs:
       - sha256:6666666666666666666666666666666666666666666666666666666666666666
       pii_refs: []
-    - &id161
+    - &id164
       envelope_version: 1
       environment: paper
       event_id: 01JAA3P4A000000000000000S3
@@ -74056,7 +74561,7 @@ step_up_assertions:
       artifact_refs:
       - sha256:6666666666666666666666666666666666666666666666666666666666666666
       pii_refs: []
-    expect: *id160
+    expect: *id163
   - name: alone
     clause: 'rule 253: the event is in the batch'
     drafts:
@@ -74174,7 +74679,7 @@ step_up_assertions:
           method: passkey
       artifact_refs: []
       pii_refs: []
-    - *id161
+    - *id164
     - envelope_version: 1
       environment: paper
       event_id: 01JAA3P4A000000000000000S1

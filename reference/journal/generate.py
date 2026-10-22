@@ -62,6 +62,7 @@ import risk_limits
 import risk_state
 import segment_rows
 import timeouts
+import unapplied
 import verification
 import workspace
 import yaml
@@ -3873,6 +3874,7 @@ def render(
     shape_section: dict,
     approval_section: dict,
     timeout_section: dict,
+    unapplied_section: dict,
     requests_section: dict,
     cancel_section: dict,
     control_plane_section: dict,
@@ -3919,6 +3921,7 @@ def render(
             "protection_shapes": shape_section,
             "approval_answers": approval_section,
             "approval_timeouts": timeout_section,
+            "kill_switch_unapplied": unapplied_section,
             "approval_requests": requests_section,
             "approval_cancellations": cancel_section,
             "control_plane": control_plane_section,
@@ -3996,6 +3999,7 @@ def main(argv: list[str] | None = None) -> int:
     shape_section = account.build_shape_section()
     approval_section = approval.build_section()
     timeout_section = timeouts.build_section()
+    unapplied_section = unapplied.build_section()
     requests_section = requests.build_section()
     cancel_section = canceled.build_section()
     control_plane_section = control_plane.build_section()
@@ -4049,6 +4053,8 @@ def main(argv: list[str] | None = None) -> int:
     problems += approval.run_mutants(approval_section)
     problems += timeouts.check_section(timeout_section)
     problems += timeouts.run_mutants(timeout_section)
+    problems += unapplied.check_section(unapplied_section)
+    problems += unapplied.run_mutants(unapplied_section)
     problems += requests.check_section(requests_section)
     problems += requests.run_mutants(requests_section)
     problems += canceled.check_section(cancel_section)
@@ -4130,6 +4136,7 @@ def main(argv: list[str] | None = None) -> int:
         shape_section,
         approval_section,
         timeout_section,
+        unapplied_section,
         requests_section,
         cancel_section,
         control_plane_section,
@@ -4181,6 +4188,7 @@ def main(argv: list[str] | None = None) -> int:
         or account.check_shape_section(reread["protection_shapes"])
         or approval.check_section(reread["approval_answers"])
         or timeouts.check_section(reread["approval_timeouts"])
+        or unapplied.check_section(reread["kill_switch_unapplied"])
         or canceled.check_section(reread["approval_cancellations"])
         or control_plane.check_section(reread["control_plane"])
         or deployment_manager.check_section(reread["deployment_manager"])
@@ -4259,6 +4267,8 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(timeout_section['invalid_drafts'])} invalid and {len(timeout_section['valid_drafts'])} valid "
         f"approval-timeout drafts, {len(timeouts.VALIDATOR_MUTANTS)} validator and "
         f"{len(timeouts.vector_mutants(timeout_section))} vector mutants caught; "
+        f"{len(unapplied_section['streams'])} rule-266 streams, {len(unapplied.STREAM_MUTANTS)} stream and "
+        f"{len(unapplied.vector_mutants(unapplied_section))} vector mutants caught; "
         f"{len(requests_section['invalid_drafts'])} invalid and {len(requests_section['valid_drafts'])} valid "
         f"approval-request drafts, {len(requests.VALIDATOR_MUTANTS)} validator and "
         f"{len(requests.vector_mutants(requests_section))} vector mutants caught; "
