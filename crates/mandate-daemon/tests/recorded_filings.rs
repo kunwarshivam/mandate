@@ -1,6 +1,7 @@
 //! The cell's recorded plane serves `filings.search` and `filings.get` (backlog E19-16, DEC-2328;
 //! data-plane spec §4.6; agent harness spec §6.10). A search keeps exactly the filings of an asked
-//! form whose form and excerpt hold every term, case-folded, as a whole word or phrase, each with the
+//! form whose form or excerpt holds each term, case-folded, as a whole word or phrase within that one
+//! field, each with the
 //! byte length of the text the store holds. A get answers one range of a filing's stored text, cut on
 //! UTF-8 boundaries: `out_of_range` past the end, and `excerpt_only` for a filing recorded without
 //! its text. A recording's `text` member is optional. The oracle reads the rows it wrote and matches
@@ -96,15 +97,17 @@ fn holds(text: &str, term: &str) -> bool {
     })
 }
 
-/// The filings of an asked form whose form and excerpt hold every term, with the byte length of
-/// the text the store holds: the full text when recorded, else the excerpt.
+/// The filings of an asked form for which every term is in the form or in the excerpt, a phrase
+/// inside one field (DEC-2328 item 2), with the byte length of the text the store holds: the full
+/// text when recorded, else the excerpt.
 fn expected(forms: &[&str], terms: &[&str]) -> Vec<(String, u64)> {
     let mut kept: Vec<(String, u64)> = rows()
         .iter()
         .filter(|row| forms.contains(&member(row, "form").as_str()))
         .filter(|row| {
-            let stored = format!("{} {}", member(row, "form"), member(row, "excerpt"));
-            terms.iter().all(|term| holds(&stored, term))
+            terms.iter().all(|term| {
+                holds(&member(row, "form"), term) || holds(&member(row, "excerpt"), term)
+            })
         })
         .map(|row| {
             let held = row["text"]
@@ -149,6 +152,10 @@ fn a_search_keeps_the_asked_forms_whose_text_holds_every_term() {
         (&all[..], vec!["financial chief"]),
         (&["10-Q"][..], vec!["officer"]),
         (&all[..], vec!["revenue", "annual report"]),
+        (&all[..], vec!["10-q net"]),
+        (&all[..], vec!["ecord"]),
+        (&all[..], vec!["segment."]),
+        (&all[..], vec!["record."]),
     ] {
         assert_eq!(
             searched(&bundle, forms, &terms),
