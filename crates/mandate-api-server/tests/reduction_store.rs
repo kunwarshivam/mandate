@@ -78,7 +78,6 @@ fn client(address: &str, device: &str) -> ClientKey {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn the_store_issues_within_the_gate_and_holds_at_most_4096_in_all() {
     assert_eq!(CHALLENGES_IN_ALL, 4_096);
     assert_eq!(reduction::RESERVE_FROM, 3_072);

@@ -12,7 +12,7 @@
 use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv6Addr};
 use std::num::NonZeroU32;
-use std::sync::Mutex;
+use std::sync::{Mutex, PoisonError};
 
 use axum::http::HeaderMap;
 use axum::http::header::COOKIE;
@@ -210,22 +210,48 @@ impl Reduction {
     /// when the gate refuses, when [`CHALLENGES_IN_ALL`] are outstanding, past [`RESERVE_FROM`]
     /// when `client`'s address already holds one, when the id is already held, or when the
     /// generator fails.
-    #[expect(
-        clippy::todo,
-        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-    )]
     pub fn issue(&self, client: &ClientKey, now: UtcNanos) -> Result<Issued, Unauthenticated> {
-        let _ = (client, now, &self.gate, &self.outstanding, &self.random);
-        todo!()
+        let mut outstanding = self
+            .outstanding
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        outstanding.retain(|_, held| now < held.expires_at);
+        let held = outstanding.len();
+        let holds_one = || {
+            outstanding
+                .values()
+                .any(|issued| issued.address == client.address)
+        };
+        if held >= CHALLENGES_IN_ALL || (held >= RESERVE_FROM && holds_one()) {
+            return Err(Unauthenticated);
+        }
+        let mut bytes = [0_u8; 32];
+        self.random.fill(&mut bytes).map_err(|_| Unauthenticated)?;
+        let id = challenge_id(now, &bytes);
+        if outstanding.contains_key(&id) {
+            return Err(Unauthenticated);
+        }
+        let challenge = self
+            .gate
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .issue(client, bytes, now)?;
+        let issued = Issued {
+            challenge_id: id.clone(),
+            address: client.address.clone(),
+            bytes,
+            issued_at: now,
+            expires_at: challenge.expires_at,
+        };
+        outstanding.insert(id, issued.clone());
+        Ok(issued)
     }
 
     /// Fresh device cookie bytes, unpadded base64url.
-    #[expect(
-        clippy::todo,
-        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-    )]
     pub fn new_device(&self) -> Result<String, Unauthenticated> {
-        todo!()
+        let mut bytes = [0_u8; 32];
+        self.random.fill(&mut bytes).map_err(|_| Unauthenticated)?;
+        Ok(URL_SAFE_NO_PAD.encode(bytes))
     }
 }
 
