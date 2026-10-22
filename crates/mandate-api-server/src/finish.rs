@@ -75,6 +75,11 @@ pub enum Judged {
 /// request's connection and every established one.
 pub trait Fingerprints {
     fn judge(&self, request: &RequestMembers, account_pii_ref: &str) -> Judged;
+
+    /// Frees the fingerprint the closed request of `connection` on `account_ref` held, once its
+    /// deletes have succeeded (DEC-2348 item 2). A restarted pass calls it again, so it is
+    /// idempotent.
+    fn release(&self, connection: &ConnectionId, account_ref: &AccountRef);
 }
 
 /// The port while no fingerprint backing exists (DEC-2342 item 7): it answers nothing, so no
@@ -86,6 +91,8 @@ impl Fingerprints for Unbacked {
     fn judge(&self, _request: &RequestMembers, _account_pii_ref: &str) -> Judged {
         Judged::CannotAnswer
     }
+
+    fn release(&self, _connection: &ConnectionId, _account_ref: &AccountRef) {}
 }
 
 /// What one pass does for a connection.

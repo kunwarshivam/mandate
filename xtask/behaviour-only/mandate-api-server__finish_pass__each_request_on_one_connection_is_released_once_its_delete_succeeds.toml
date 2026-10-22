@@ -1,0 +1,7 @@
+file = "crates/mandate-api-server/tests/finish_pass.rs"
+test = "each_request_on_one_connection_is_released_once_its_delete_succeeds"
+reason = """
+DEC-2348: F2b's pass (DEC-2342) is implemented, and in it nothing calls the port's `release`, so this test fails on
+that behaviour rather than at a stub. DEC-2348's implementation PR raises the alert and calls the
+release, and deletes this file with the test's `#[ignore]` line.
+"""

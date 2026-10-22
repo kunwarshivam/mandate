@@ -34,11 +34,27 @@ pub trait Teardown: Send + Sync {
     fn delete<'a>(&'a self, connection: &'a ConnectionId) -> Deleted<'a>;
 }
 
+/// The opaque operator alert a stalled teardown raises (DEC-2348 item 1).
+pub const TEARDOWN_STALLED: &str = "connect_teardown_stalled";
+
+/// The runbook [`TEARDOWN_STALLED`] names.
+pub const TEARDOWN_RUNBOOK: &str = "docs/runbooks/RB-19-connect-teardown.md";
+
+/// Where the pass raises an operator alert: a code and a runbook, and nothing else (rule 6).
+pub trait Alerts: Send + Sync {
+    fn raise(&self, code: &'static str, runbook: &'static str);
+}
+
 /// The pass over one workspace's connects, and what it remembers between passes.
-pub struct Finisher<F, T> {
+pub struct Finisher<F, T, A> {
     journal: Arc<dyn Journal>,
     fingerprints: F,
     teardown: T,
+    #[expect(
+        dead_code,
+        reason = "raised by the pass in DEC-2348's implementation PR"
+    )]
+    alerts: A,
     workspace: String,
     /// The closed requests, by connection id and `account_ref`, whose deletes succeeded since the
     /// process started: DEC-699 lets a refused connection id be requested again.
@@ -47,13 +63,20 @@ pub struct Finisher<F, T> {
     restarted: bool,
 }
 
-impl<F: Fingerprints, T: Teardown> Finisher<F, T> {
+impl<F: Fingerprints, T: Teardown, A: Alerts> Finisher<F, T, A> {
     /// A finisher whose first pass is the restart pass.
-    pub fn new(journal: Arc<dyn Journal>, fingerprints: F, teardown: T, workspace: String) -> Self {
+    pub fn new(
+        journal: Arc<dyn Journal>,
+        fingerprints: F,
+        teardown: T,
+        alerts: A,
+        workspace: String,
+    ) -> Self {
         Self {
             journal,
             fingerprints,
             teardown,
+            alerts,
             workspace,
             cleared: BTreeSet::new(),
             restarted: true,

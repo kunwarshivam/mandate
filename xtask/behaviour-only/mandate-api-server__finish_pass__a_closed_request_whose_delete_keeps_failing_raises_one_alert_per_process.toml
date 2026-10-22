@@ -1,0 +1,7 @@
+file = "crates/mandate-api-server/tests/finish_pass.rs"
+test = "a_closed_request_whose_delete_keeps_failing_raises_one_alert_per_process"
+reason = """
+DEC-2348: F2b's pass (DEC-2342) is implemented, and in it a closed request whose delete keeps failing past its deadline raises nothing, so this test fails on
+that behaviour rather than at a stub. DEC-2348's implementation PR raises the alert and calls the
+release, and deletes this file with the test's `#[ignore]` line.
+"""

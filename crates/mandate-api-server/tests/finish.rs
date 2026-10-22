@@ -11,7 +11,7 @@ use mandate_connections::checks::Reason;
 use mandate_connections::manager::{
     FinishPlan, FinishRefusal, ManagerEffect, RefusedAs, RequestFold, RequestMembers,
 };
-use mandate_connections::record::{Broker, ConnectionId, Environment};
+use mandate_connections::record::{AccountRef, Broker, ConnectionId, Environment};
 use mandate_journal::StoredEvent;
 use mandate_time::UtcNanos;
 use proptest::prelude::{Just, prop_oneof};
@@ -141,6 +141,7 @@ impl Fingerprints for Answers {
         self.1.borrow_mut().push(account_pii_ref.to_owned());
         self.0.clone()
     }
+    fn release(&self, _connection: &ConnectionId, _account_ref: &AccountRef) {}
 }
 
 fn answering(judged: Judged) -> Answers {

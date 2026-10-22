@@ -8,11 +8,13 @@ use std::sync::{Arc, Mutex};
 
 use common::{MemJournal, Scripted};
 use mandate_api_server::finish::{CONNECT_DEADLINE_SECS, Fingerprints, Judged, Unbacked};
-use mandate_api_server::finish_pass::{DeleteFailed, Deleted, Finisher, Teardown};
+use mandate_api_server::finish_pass::{
+    Alerts, DeleteFailed, Deleted, Finisher, TEARDOWN_RUNBOOK, TEARDOWN_STALLED, Teardown,
+};
 use mandate_api_server::journal::Journal;
 use mandate_canon::Digest;
 use mandate_connections::manager::RequestMembers;
-use mandate_connections::record::ConnectionId;
+use mandate_connections::record::{AccountRef, ConnectionId};
 use mandate_journal::StoredEvent;
 use mandate_time::UtcNanos;
 use serde_json::{Value, json};
@@ -174,6 +176,53 @@ impl Fingerprints for Unique {
     fn judge(&self, _request: &RequestMembers, _account_pii_ref: &str) -> Judged {
         Judged::Unique
     }
+
+    fn release(&self, _connection: &ConnectionId, _account_ref: &AccountRef) {}
+}
+
+/// A fingerprint port that answers `Unique` and records each release with the teardown's deletes
+/// so far.
+#[derive(Clone)]
+struct Releases {
+    deletes: Deletes,
+    calls: Arc<Mutex<Vec<(String, String, usize)>>>,
+}
+
+impl Releases {
+    fn take(&self) -> Vec<(String, String, usize)> {
+        std::mem::take(&mut *self.calls.lock().unwrap())
+    }
+}
+
+impl Fingerprints for Releases {
+    fn judge(&self, _request: &RequestMembers, _account_pii_ref: &str) -> Judged {
+        Judged::Unique
+    }
+
+    fn release(&self, connection: &ConnectionId, account_ref: &AccountRef) {
+        let deletes = self.deletes.calls.lock().unwrap().len();
+        self.calls.lock().unwrap().push((
+            connection.as_str().to_owned(),
+            account_ref.as_str().to_owned(),
+            deletes,
+        ));
+    }
+}
+
+/// The alerts raised, each a code and a runbook.
+#[derive(Clone, Default)]
+struct Raised(Arc<Mutex<Vec<(&'static str, &'static str)>>>);
+
+impl Raised {
+    fn take(&self) -> Vec<(&'static str, &'static str)> {
+        std::mem::take(&mut *self.0.lock().unwrap())
+    }
+}
+
+impl Alerts for Raised {
+    fn raise(&self, code: &'static str, runbook: &'static str) {
+        self.0.lock().unwrap().push((code, runbook));
+    }
 }
 
 /// A teardown that records each delete with the control stream's length when it ran, and fails
@@ -234,16 +283,47 @@ fn runtime() -> tokio::runtime::Runtime {
         .unwrap()
 }
 
+type Pass<F> = Finisher<F, Deletes, Raised>;
+
 /// A journal, its teardown, and a finisher over them with `fingerprints`.
-fn finisher<F: Fingerprints>(fingerprints: F) -> (Arc<MemJournal>, Deletes, Finisher<F, Deletes>) {
+fn finisher<F: Fingerprints>(fingerprints: F) -> (Arc<MemJournal>, Deletes, Pass<F>) {
     let journal = Arc::new(MemJournal::default());
     let deletes = Deletes::new(&journal);
-    let shared: Arc<dyn Journal> = Arc::clone(&journal) as Arc<dyn Journal>;
-    let finisher = Finisher::new(shared, fingerprints, deletes.clone(), WORKSPACE.to_owned());
+    let finisher = restarted(&journal, fingerprints, &deletes, &Raised::default());
     (journal, deletes, finisher)
 }
 
-fn pass<F: Fingerprints>(finisher: &mut Finisher<F, Deletes>, secs: i64) {
+/// A finisher over `journal` as a newly started process sees it.
+fn restarted<F: Fingerprints>(
+    journal: &Arc<MemJournal>,
+    fingerprints: F,
+    deletes: &Deletes,
+    raised: &Raised,
+) -> Pass<F> {
+    let shared: Arc<dyn Journal> = Arc::clone(journal) as Arc<dyn Journal>;
+    Finisher::new(
+        shared,
+        fingerprints,
+        deletes.clone(),
+        raised.clone(),
+        WORKSPACE.to_owned(),
+    )
+}
+
+/// A journal, its teardown, its alerts, and a finisher over them that records its releases.
+fn recorded() -> (Arc<MemJournal>, Deletes, Raised, Releases, Pass<Releases>) {
+    let journal = Arc::new(MemJournal::default());
+    let deletes = Deletes::new(&journal);
+    let releases = Releases {
+        deletes: deletes.clone(),
+        calls: Arc::default(),
+    };
+    let raised = Raised::default();
+    let finisher = restarted(&journal, releases.clone(), &deletes, &raised);
+    (journal, deletes, raised, releases, finisher)
+}
+
+fn pass<F: Fingerprints>(finisher: &mut Pass<F>, secs: i64) {
     runtime().block_on(finisher.pass(at(secs))).unwrap();
 }
 
@@ -507,4 +587,118 @@ fn the_restart_pass_deletes_every_closed_connect_once() {
     pass(&mut finisher, OPENED + 36);
     assert_eq!(deletes.of(), Vec::<String>::new());
     assert_eq!(journal.rows_of(&ctl()).len(), 11, "nothing appended");
+}
+
+const STALLED: (&str, &str) = (TEARDOWN_STALLED, TEARDOWN_RUNBOOK);
+
+/// DEC-2348 item 1: a refusal held by a vault that stays down raises the alert once, at the
+/// deadline and not before, and appends nothing; once the vault recovers, delete, append, delete,
+/// and no second alert.
+#[test]
+#[ignore = "pending E10-13"]
+fn a_held_refusal_past_its_deadline_raises_one_alert() {
+    let (journal, deletes, raised, _, mut finisher) = recorded();
+    request(&journal, A, 2, "oauth");
+    check(&journal, A, false);
+    deletes.failing.lock().unwrap().push(A.to_owned());
+    pass(&mut finisher, OPENED + 31);
+    pass(&mut finisher, OPENED + CONNECT_DEADLINE_SECS - 1);
+    assert_eq!(raised.take(), [], "within its deadline");
+    pass(&mut finisher, OPENED + CONNECT_DEADLINE_SECS);
+    assert_eq!(raised.take(), [STALLED]);
+    pass(&mut finisher, OPENED + CONNECT_DEADLINE_SECS + 5);
+    assert_eq!(raised.take(), [], "once per request");
+    assert_eq!(journal.rows_of(&ctl()).len(), 1, "nothing appended");
+    deletes.failing.lock().unwrap().clear();
+    deletes.take();
+    pass(&mut finisher, OPENED + CONNECT_DEADLINE_SECS + 10);
+    assert_eq!(deletes.take(), [(A.to_owned(), 1), (A.to_owned(), 2)]);
+    assert_eq!(last(&journal).0, "ConnectionRefused");
+    assert_eq!(raised.take(), []);
+}
+
+/// A closed request whose deletes keep failing raises the alert once past its deadline, and a
+/// restarted process raises it again.
+#[test]
+#[ignore = "pending E10-13"]
+fn a_closed_request_whose_delete_keeps_failing_raises_one_alert_per_process() {
+    let (journal, deletes, raised, releases, mut finisher) = recorded();
+    request(&journal, A, 2, "oauth");
+    close(&journal, "ConnectionRevoked", A);
+    deletes.failing.lock().unwrap().push(A.to_owned());
+    pass(&mut finisher, OPENED + 31);
+    assert_eq!(raised.take(), []);
+    pass(&mut finisher, OPENED + CONNECT_DEADLINE_SECS);
+    assert_eq!(raised.take(), [STALLED]);
+    pass(&mut finisher, OPENED + CONNECT_DEADLINE_SECS + 5);
+    assert_eq!(raised.take(), []);
+    let mut again = restarted(&journal, releases.clone(), &deletes, &raised);
+    pass(&mut again, OPENED + CONNECT_DEADLINE_SECS + 10);
+    assert_eq!(raised.take(), [STALLED], "a restart raises it again");
+    assert_eq!(
+        releases.take(),
+        [],
+        "nothing released while the delete fails"
+    );
+}
+
+/// A delete that succeeds raises nothing, past the deadline too.
+#[test]
+fn a_teardown_that_succeeds_raises_nothing() {
+    let (journal, _, raised, _, mut finisher) = recorded();
+    request(&journal, A, 2, "oauth");
+    request(&journal, B, 2, "oauth");
+    close(&journal, "ConnectionRefused", B);
+    pass(&mut finisher, OPENED + CONNECT_DEADLINE_SECS + 1);
+    assert_eq!(last(&journal).1["reason"], "restart_past_deadline");
+    assert_eq!(raised.take(), []);
+}
+
+/// DEC-2348 item 2: each closed request's fingerprint is released once its deletes succeeded,
+/// once per process, and an establishment releases nothing.
+#[test]
+#[ignore = "pending E10-13"]
+fn a_closed_request_is_released_after_its_deletes() {
+    let (journal, deletes, _, releases, mut finisher) = recorded();
+    request(&journal, A, 2, "oauth");
+    request(&journal, B, 2, "oauth");
+    check(&journal, A, false);
+    check(&journal, B, true);
+    pass(&mut finisher, OPENED + 31);
+    assert_eq!(deletes.of(), [A, A]);
+    assert_eq!(releases.take(), [(A.to_owned(), account(A), 2)]);
+    pass(&mut finisher, OPENED + 36);
+    assert_eq!(releases.take(), [], "once per process");
+    let mut again = restarted(&journal, releases.clone(), &deletes, &Raised::default());
+    pass(&mut again, OPENED + 41);
+    assert_eq!(
+        releases.take(),
+        [(A.to_owned(), account(A), 1)],
+        "a restart releases again, after its delete"
+    );
+}
+
+/// The release follows a failed delete only once the delete succeeds, and each request on one
+/// connection id is released on its own.
+#[test]
+#[ignore = "pending E10-13"]
+fn each_request_on_one_connection_is_released_once_its_delete_succeeds() {
+    let second = "01JB3K6F0C9R2V7N4M8Q1T5W6Z";
+    let (journal, deletes, _, releases, mut finisher) = recorded();
+    request(&journal, A, 2, "oauth");
+    close(&journal, "ConnectionRefused", A);
+    request_as(&journal, A, second, 2, "oauth", OPENED + 40);
+    close(&journal, "ConnectionRevoked", A);
+    deletes.failing.lock().unwrap().push(A.to_owned());
+    pass(&mut finisher, OPENED + 71);
+    assert_eq!(releases.take(), []);
+    deletes.failing.lock().unwrap().clear();
+    pass(&mut finisher, OPENED + 76);
+    assert_eq!(
+        releases.take(),
+        [
+            (A.to_owned(), account(A), 3),
+            (A.to_owned(), second.to_owned(), 4)
+        ]
+    );
 }
