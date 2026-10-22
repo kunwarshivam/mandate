@@ -120,8 +120,8 @@ pub fn kubernetes_policy_name(identity: &Identity, mounts: &Mounts) -> Result<St
 /// The templated policy, in HCL, of `identity`'s kind, keyed by the ServiceAccount name in the
 /// login's alias metadata on the auth mount whose accessor is `accessor`, an `x` before an
 /// executor's, so both kinds reach [`crate::policy::connection_segment`]. An executor reads its
-/// connection's token; a token exchange writes it, reads and deletes its code, and reads the
-/// platform's client secret. Anything else, or an accessor that is not one plain path segment (a
+/// connection's token; a token exchange writes it, reads, overwrites, destroys and deletes its code
+/// but never its code's metadata (DEC-2321), and reads the platform's client secret. Anything else, or an accessor that is not one plain path segment (a
 /// quote, a brace or a newline would end the template or the policy), is [`SourceError::Config`].
 pub fn kubernetes_policy(
     identity: &Identity,
@@ -149,9 +149,9 @@ pub fn kubernetes_policy(
             block(
                 "data",
                 &format!("connections/{own}/code"),
-                "\"read\", \"update\"",
+                "\"read\", \"update\", \"delete\"",
             ),
-            block("metadata", &format!("connections/{own}/code"), "\"delete\""),
+            block("destroy", &format!("connections/{own}/code"), "\"update\""),
             block(
                 "data",
                 &format!("connections/{own}/token"),

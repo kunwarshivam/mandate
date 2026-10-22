@@ -1,8 +1,0 @@
-file = "crates/mandate-vault/src/tests/kubernetes.rs"
-test = "the_exchange_never_reaches_metadata_lists_or_creates_a_code"
-reason = """
-DEC-2321 replaces the exchange's delete on its code's metadata with a destroy of the version it
-took and a delete of its data. `kubernetes_policy` is already built (#2095), so this test sees
-the old metadata grant, not a stub's report. It still runs and fails, and the implementation half
-of PRV-2c-3a (#2118) deletes this file with its `#[ignore]` line.
-"""

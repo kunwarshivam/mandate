@@ -618,8 +618,9 @@ impl SecretSource for OpenBaoSource {
         &self.identity
     }
 
-    /// Reads the code with its version, overwrites that version alone with a tombstone, then
-    /// deletes every version: a taker whose overwrite loses, or that reads a tombstone or no code,
+    /// Reads the code with its version, overwrites that version alone with a tombstone, destroys
+    /// the version read and deletes the tombstone, keeping the metadata so the version count never
+    /// restarts (DEC-2321): a taker whose overwrite loses, or that reads a tombstone or no code,
     /// gets `None`.
     async fn take_code(
         &self,
@@ -642,8 +643,19 @@ impl SecretSource for OpenBaoSource {
             Err(SourceError::Denied) => return self.lost_or_denied(&data).await,
             Err(e) => return Err(e),
         }
-        let metadata = format!("{}/metadata/{}", self.mounts.kv, kv_path(&path)?);
-        match self.call(Method::DELETE, &metadata, None).await {
+        let destroy = format!("{}/destroy/{}", self.mounts.kv, kv_path(&path)?);
+        match self
+            .call(
+                Method::POST,
+                &destroy,
+                Some(&json!({ "versions": [version] })),
+            )
+            .await
+        {
+            Ok(_) | Err(SourceError::Missing) => {}
+            Err(e) => return Err(e),
+        }
+        match self.call(Method::DELETE, &data, None).await {
             Ok(_) | Err(SourceError::Missing) => Ok(Some(code)),
             Err(e) => Err(e),
         }

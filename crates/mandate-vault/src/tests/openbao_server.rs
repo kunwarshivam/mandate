@@ -611,7 +611,6 @@ async fn after_a_take_no_version_of_the_code_is_left() {
 /// DEC-2321: a take keeps the code's version count, so a taker that read version 1 and stalled
 /// cannot overwrite a code stored after the take by a re-connect, and that code is taken whole.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending E21-32"]
 async fn a_stalled_taker_never_overwrites_a_code_stored_after_a_take() {
     an_unreachable_take_is_an_outage().await;
     let Some(bao) = Bao::new().await else {
