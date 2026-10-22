@@ -4038,6 +4038,63 @@ fn protection_is_re_placed_at_the_buffer_day() {
     );
 }
 
+/// An OCO the executor could not place again is never the one it cancels (DEC-2312 item 2): at
+/// its buffer day, protection resting on a profile that offers no protective form at all is kept,
+/// not cancelled, and the shortfall is journaled and the owner alerted, as for protection with no
+/// recorded prices (`expiry_unreplaceable`, `protection_expiring`; DEC-367 item 4).
+#[test]
+#[ignore = "pending E7-4"]
+fn an_oco_that_cannot_be_re_placed_is_kept_at_its_buffer_day() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = started();
+    shell.fold_one(&stream_opened()).expect("folds");
+    for event in protected_position_events(2) {
+        shell
+            .fold_one(&event)
+            .expect("the protected position folds");
+    }
+    shell.profile = Some(unprotectable_profile());
+    let mut shell = shell.restart_ready(&ports);
+
+    let day = copied(
+        ACCOUNT_STREAM,
+        shell.head().0.saturating_add(1),
+        "TradingDayStarted",
+        with_clock(&[("date", text("2026-12-14"))], 7_000_000),
+        &EventId(format!("{CLOCK_STREAM}-9")),
+    );
+    shell.fold_one(&day).expect("the trading day folds");
+    let ran = shell.run(Input::Journal(day), &ports);
+
+    assert!(
+        !ran.requests
+            .iter()
+            .any(|r| matches!(r, BrokerRequest::Cancel { .. })),
+        "the OCO is kept: nothing could replace it (§5.4): {:?}",
+        ran.requests
+    );
+    assert!(
+        ran.drafts
+            .iter()
+            .any(|d| d.event_type == "ProtectionChanged"
+                && d.payload
+                    .get("action")
+                    .and_then(mandate_canon::Value::as_str)
+                    == Some("expiry_unreplaceable")),
+        "the shortfall is journaled: {:?}",
+        ran.draft_types()
+    );
+    assert!(
+        ran.notifications.contains(&"protection_expiring"),
+        "and the owner alerted: {:?}",
+        ran.notifications
+    );
+}
+
 #[test]
 fn protection_is_not_re_placed_early() {
     let ids = TestIds;
