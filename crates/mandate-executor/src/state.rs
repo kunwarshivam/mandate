@@ -619,6 +619,13 @@ impl ExecutorState {
             .any(|switch| switch.copied_from.as_ref() == Some(source))
     }
 
+    /// Whether a switch of `agent` this stream journaled copied `source` (DEC-2343 item 4): one
+    /// command applied to several agents is applied to each once. Its stub answers that none was,
+    /// until the implementation PR of DEC-2343.
+    pub fn applied_for(&self, _agent: &AgentId, _source: &EventId) -> bool {
+        false
+    }
+
     pub fn started(&self) -> bool {
         self.started
     }
