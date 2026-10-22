@@ -1,19 +1,26 @@
 //! `mandate vault provision --secrets-namespace` and `--operator-token-stdin` (E21-32, DEC-2630):
 //! the token from a pipe by the file's rules, the credentials printed as Kubernetes Secrets to a
-//! pipe and never a terminal, and every refusal before any vault is reached. The last case runs
-//! against the OpenBao dev server `cargo xtask ci openbao` names, and checks the refusals first,
-//! so it fails the same way without one.
+//! pipe and never a terminal, `--kubernetes-host` required there, and every refusal before any
+//! vault is reached. The last case runs against the OpenBao dev server `cargo xtask ci openbao`
+//! names, and checks the refusals first, so it fails the same way without one.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
-use mandate_cli::vault::{ProvisionArgs, Terminals, run_provision};
+use mandate_cli::vault::{ProvisionArgs, Terminals, kubernetes_auth, run_provision, write_secrets};
+use mandate_connections::record::ConnectionId;
+use mandate_vault::SourceError;
+use mandate_vault::openbao::RoleCredentials;
+use mandate_vault::policy::Identity;
+use secrecy::SecretString;
 use serde_json::Value;
 
 const CANARY: &str = "canary-5be3f1d2-operator-token-do-not-print";
 /// An address no vault listens on: the discard port on the loopback.
 const NOWHERE: &str = "https://127.0.0.1:9";
+/// The `kubernetes` Service's address, as the vault's pod reaches the API server.
+const KUBERNETES_HOST: &str = "https://10.43.0.1:443";
 
 fn ca() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/vault-ca.pem")
@@ -67,12 +74,88 @@ fn a_piped_token_is_read_and_the_vault_reached() {
             "--operator-token-stdin",
             "--secrets-namespace",
             "ws-ws1",
+            "--kubernetes-host",
+            KUBERNETES_HOST,
             "--connection",
             "c1",
         ],
         &format!("{CANARY}\n"),
     );
     refused(&output, "unavailable", "an unreachable vault");
+}
+
+/// The Secrets are the cluster's path, so provisioning them without `--kubernetes-host` is
+/// refused `config` before any vault is reached, and never leaves a vault without Kubernetes
+/// auth.
+#[test]
+fn the_secrets_without_a_kubernetes_host_are_refused_before_any_vault_is_reached() {
+    assert_eq!(
+        kubernetes_auth(None, Some("ws-ws1")),
+        Err(SourceError::Config)
+    );
+    let output = provision(
+        NOWHERE,
+        &ca(),
+        &[
+            "--operator-token-stdin",
+            "--secrets-namespace",
+            "ws-ws1",
+            "--connection",
+            "c1",
+        ],
+        &format!("{CANARY}\n"),
+    );
+    refused(&output, "config", "the Secrets with no Kubernetes host");
+}
+
+/// The Secrets are one `v1` `List` on one line, each an `Opaque` Secret in the namespace holding
+/// its identity's role id and secret id, in the credentials' order.
+#[test]
+fn the_secrets_are_one_list_of_each_identitys_secret() {
+    let credentials = [
+        (Identity::Api, "role-api", "secret-api"),
+        (
+            Identity::Executor(ConnectionId::new("c1").unwrap()),
+            "role-c1",
+            "secret-c1",
+        ),
+    ]
+    .map(|(identity, role_id, secret_id)| RoleCredentials {
+        identity,
+        role_id: role_id.to_owned(),
+        secret_id: SecretString::from(secret_id.to_owned()),
+    });
+    let mut out = Vec::new();
+    write_secrets("ws-ws1", &credentials, &mut out).unwrap();
+    assert_eq!(out.iter().filter(|byte| **byte == b'\n').count(), 1);
+    assert_eq!(out.last(), Some(&b'\n'));
+    let list: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(list["apiVersion"], "v1");
+    assert_eq!(list["kind"], "List");
+    let items = list["items"].as_array().unwrap();
+    let found: Vec<(&str, &str, &str)> = items
+        .iter()
+        .map(|item| {
+            assert_eq!(item["kind"], "Secret");
+            assert_eq!(item["type"], "Opaque");
+            assert_eq!(item["metadata"]["namespace"], "ws-ws1");
+            (
+                item["metadata"]["name"].as_str().unwrap(),
+                item["stringData"]["role-id"].as_str().unwrap(),
+                item["stringData"]["secret-id"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        found,
+        [
+            ("vault-approle-api", "role-api", "secret-api"),
+            ("vault-approle-executor-6331", "role-c1", "secret-c1"),
+        ]
+    );
+    let mut out = Vec::new();
+    assert!(write_secrets("WS", &credentials, &mut out).is_err());
+    assert!(out.is_empty());
 }
 
 #[test]
@@ -218,9 +301,15 @@ fn server() -> Option<(String, PathBuf, PathBuf)> {
     Some((address, PathBuf::from(ca), PathBuf::from(token)))
 }
 
+/// The Secrets are provisioned only with Kubernetes auth set up, which the vault reads its own
+/// pod's CA for. The dev server runs in no pod, so it refuses that setup, and the run fails
+/// closed, `denied`, printing no Secret and no token: no Secret is ever printed for a vault whose
+/// Kubernetes auth is not set up. [`the_secrets_are_one_list_of_each_identitys_secret`] covers
+/// what a run that succeeds prints.
 #[test]
-fn provisioning_prints_each_identitys_secret_and_nothing_else() {
+fn provisioning_the_secrets_outside_a_pod_fails_closed_and_prints_nothing() {
     a_piped_token_is_read_and_the_vault_reached();
+    the_secrets_without_a_kubernetes_host_are_refused_before_any_vault_is_reached();
     let Some((address, ca, operator)) = server() else {
         assert!(
             std::env::var("MANDATE_OPENBAO_REQUIRED").is_err(),
@@ -236,6 +325,8 @@ fn provisioning_prints_each_identitys_secret_and_nothing_else() {
             "--operator-token-stdin",
             "--secrets-namespace",
             "ws-ws1",
+            "--kubernetes-host",
+            "https://127.0.0.1:6443",
             "--connection",
             "c1",
             "--connection",
@@ -243,37 +334,8 @@ fn provisioning_prints_each_identitys_secret_and_nothing_else() {
         ],
         &format!("{}\n", token.trim()),
     );
-    assert!(output.status.success(), "{}", stderr(&output));
-    let list: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(list["apiVersion"], "v1");
-    assert_eq!(list["kind"], "List");
-    let items = list["items"].as_array().unwrap();
-    let mut names: Vec<&str> = items
-        .iter()
-        .map(|item| item["metadata"]["name"].as_str().unwrap())
-        .collect();
-    names.sort_unstable();
-    assert_eq!(
-        names,
-        [
-            "vault-approle-api",
-            "vault-approle-connection-manager",
-            "vault-approle-email-sender",
-            "vault-approle-executor-435f32",
-            "vault-approle-executor-6331",
-            "vault-approle-model-gateway",
-            "vault-approle-runtime",
-            "vault-approle-secret-import",
-        ]
-    );
-    for item in items {
-        assert_eq!(item["kind"], "Secret");
-        assert_eq!(item["metadata"]["namespace"], "ws-ws1");
-        for key in ["role-id", "secret-id"] {
-            let value = item["stringData"][key].as_str().unwrap();
-            assert!(!value.is_empty(), "{key}");
-            assert!(!stderr(&output).contains(value), "{key} on stderr");
-        }
-    }
-    assert!(!String::from_utf8_lossy(&output.stdout).contains(token.trim()));
+    assert!(!output.status.success(), "{}", stderr(&output));
+    assert!(stderr(&output).contains("denied"), "{}", stderr(&output));
+    assert!(output.stdout.is_empty());
+    assert!(!stderr(&output).contains(token.trim()));
 }

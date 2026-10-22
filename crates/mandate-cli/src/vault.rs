@@ -26,7 +26,7 @@ use mandate_vault::credentials::{
 };
 use mandate_vault::kube::kube_secrets;
 use mandate_vault::kubernetes::{KubernetesAuth, kubernetes_mount_requests};
-use mandate_vault::openbao::{OpenBaoConfig, OpenBaoSource, provision};
+use mandate_vault::openbao::{OpenBaoConfig, OpenBaoSource, RoleCredentials, provision};
 use mandate_vault::policy::{Identity, Mounts, PlatformSecret, SecretPath};
 use mandate_vault::source::SecretSource;
 use mandate_vault_local::VaultError;
@@ -113,22 +113,34 @@ pub struct ProvisionArgs {
     #[arg(long)]
     pub secrets_namespace: Option<String>,
     /// Also set Kubernetes auth up for the connections' processes, its TokenReview against the
-    /// cluster's API server at this `https://` address, as the vault's pod reaches it
-    /// (DEC-2060, DEC-2062).
+    /// cluster's API server at `https://<IPv4>:<port>`, as the vault's pod reaches it (DEC-2060,
+    /// DEC-2062). Required with `--secrets-namespace`, the cluster's path; `--out` may omit it.
     #[arg(long)]
     pub kubernetes_host: Option<String>,
 }
 
 /// The Kubernetes auth `--kubernetes-host` asks for: the API server at `host`, with no CA, so the
-/// vault reads the one its own pod projects (DEC-2062 item 3). A host that is not `https://` is
-/// [`SourceError::Config`], refused before the vault is reached.
-pub fn kubernetes_auth(host: &str) -> Result<KubernetesAuth, SourceError> {
-    let auth = KubernetesAuth {
-        host: host.to_owned(),
-        ca_pem: None,
-    };
-    kubernetes_mount_requests(&Mounts::default(), &auth)?;
-    Ok(auth)
+/// vault reads the one its own pod projects (DEC-2062 item 3). No host is no Kubernetes auth,
+/// except with `--secrets-namespace`, the cluster's path, where a missing one is
+/// [`SourceError::Config`], as is a host that is not `https://`, an IPv4 address and a port
+/// ([`mandate_vault::kubernetes::api_server_address`]); both are refused before the vault is
+/// reached.
+pub fn kubernetes_auth(
+    host: Option<&str>,
+    secrets_namespace: Option<&str>,
+) -> Result<Option<KubernetesAuth>, SourceError> {
+    match (host, secrets_namespace) {
+        (None, None) => Ok(None),
+        (None, Some(_)) => Err(SourceError::Config),
+        (Some(host), _) => {
+            let auth = KubernetesAuth {
+                host: host.to_owned(),
+                ca_pem: None,
+            };
+            kubernetes_mount_requests(&Mounts::default(), &auth)?;
+            Ok(Some(auth))
+        }
+    }
 }
 
 /// Which of the process's standard streams are terminals, which `vault provision` refuses for its
@@ -345,12 +357,11 @@ pub fn run_provision(
     if let Some(dir) = &args.out {
         check_credential_dir(dir, &connections).map_err(refused)?;
     }
-    let kubernetes = args
-        .kubernetes_host
-        .as_deref()
-        .map(kubernetes_auth)
-        .transpose()
-        .map_err(refused)?;
+    let kubernetes = kubernetes_auth(
+        args.kubernetes_host.as_deref(),
+        args.secrets_namespace.as_deref(),
+    )
+    .map_err(refused)?;
     let config = OpenBaoConfig {
         address: args.address.clone(),
         ca_pem: fs::read(&args.ca).map_err(|_| refused(SourceError::Config))?,
@@ -374,16 +385,26 @@ pub fn run_provision(
                 writeln!(out, "{name}")?;
             }
         }
-        (None, Some(namespace)) => {
-            let manifests = kube_secrets(namespace, &credentials).map_err(refused)?;
-            write!(out, "{{\"apiVersion\":\"v1\",\"kind\":\"List\",\"items\":[")?;
-            let separators = iter::once("").chain(iter::repeat(","));
-            for (separator, manifest) in separators.zip(&manifests) {
-                write!(out, "{separator}{}", manifest.manifest.expose_secret())?;
-            }
-            writeln!(out, "]}}")?;
-        }
+        (None, Some(namespace)) => write_secrets(namespace, &credentials, out)?,
         (None, None) => return Err(refused(SourceError::Config)),
     }
+    Ok(())
+}
+
+/// Writes `credentials` to `out` as one `v1` `List` of their Secrets in `namespace`, on one line,
+/// for `kubectl apply -f -`.
+pub fn write_secrets(
+    namespace: &str,
+    credentials: &[RoleCredentials],
+    out: &mut impl Write,
+) -> anyhow::Result<()> {
+    let manifests =
+        kube_secrets(namespace, credentials).map_err(|e| anyhow!("{e} ({})", e.code()))?;
+    write!(out, "{{\"apiVersion\":\"v1\",\"kind\":\"List\",\"items\":[")?;
+    let separators = iter::once("").chain(iter::repeat(","));
+    for (separator, manifest) in separators.zip(&manifests) {
+        write!(out, "{separator}{}", manifest.manifest.expose_secret())?;
+    }
+    writeln!(out, "]}}")?;
     Ok(())
 }

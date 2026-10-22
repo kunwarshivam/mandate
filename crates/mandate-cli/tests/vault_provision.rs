@@ -316,15 +316,29 @@ fn provisioning_writes_each_identitys_files_and_prints_only_their_names() {
     );
 }
 
-/// DEC-2062 item 3: `--kubernetes-host` names the API server by an `https://` address, and is
-/// refused `config` before any vault is reached otherwise; an accepted one reaches the vault, so a
-/// vault no one answers for is an outage.
+/// DEC-2062 item 3: `--kubernetes-host` names the API server as `https://`, an IPv4 address and a
+/// port, and anything else, a name, userinfo, a path or a query included, is refused `config`
+/// before any vault is reached; an accepted one reaches the vault, so a vault no one answers for
+/// is an outage.
 #[test]
 fn a_kubernetes_host_that_is_not_https_is_refused_before_any_vault_is_reached() {
     let token = token_file(CANARY, 0o600);
     let out = fresh("out");
     let _removed = Removed(vec![token.clone(), out.clone()]);
-    for host in ["http://10.43.0.1:443", "10.43.0.1:443", "", "https://"] {
+    for host in [
+        "http://10.43.0.1:443",
+        "10.43.0.1:443",
+        "",
+        "https://",
+        "https://u:p@10.43.0.1:443",
+        "https://@",
+        "https:///x",
+        "https://10.43.0.1:443/x",
+        "https://10.43.0.1:443?a=b",
+        "https://evil.example.com:443",
+        "https://10.43.0.1",
+        "https://10.43.0.1:99999",
+    ] {
         let output = provision_with(
             NOWHERE,
             &ca(),
@@ -371,18 +385,52 @@ fn provisioning_with_a_kubernetes_host_asks_the_vault_to_set_kubernetes_auth_up(
     assert!(output.status.success(), "{}", stderr(&output));
 }
 
-/// The host is passed as it is, with no CA: the vault reads the one its own pod projects.
+/// The host is passed as it is, with no CA: the vault reads the one its own pod projects. No
+/// host is no Kubernetes auth with `--out`, and refused with `--secrets-namespace`, the
+/// cluster's path, so a staging vault is never provisioned without it.
 #[test]
 fn a_kubernetes_host_is_the_api_server_with_no_ca() {
+    let in_cluster = Some(KubernetesAuth {
+        host: "https://10.43.0.1:443".to_owned(),
+        ca_pem: None,
+    });
+    for namespace in [None, Some("ws-ws1")] {
+        assert_eq!(
+            kubernetes_auth(Some("https://10.43.0.1:443"), namespace),
+            Ok(in_cluster.clone()),
+            "{namespace:?}"
+        );
+        assert_eq!(
+            kubernetes_auth(Some("http://10.43.0.1:443"), namespace),
+            Err(SourceError::Config),
+            "{namespace:?}"
+        );
+        assert_eq!(
+            kubernetes_auth(Some("https://u:p@10.43.0.1:443"), namespace),
+            Err(SourceError::Config),
+            "{namespace:?}"
+        );
+    }
+    assert_eq!(kubernetes_auth(None, None), Ok(None));
     assert_eq!(
-        kubernetes_auth("https://10.43.0.1:443"),
-        Ok(KubernetesAuth {
-            host: "https://10.43.0.1:443".to_owned(),
-            ca_pem: None,
-        })
-    );
-    assert_eq!(
-        kubernetes_auth("http://10.43.0.1:443"),
+        kubernetes_auth(None, Some("ws-ws1")),
         Err(SourceError::Config)
+    );
+}
+
+/// Provisioning to files, outside the cluster, may omit `--kubernetes-host`: the run reaches the
+/// vault, so a vault no one answers for is an outage, not a refusal.
+#[test]
+fn provisioning_to_files_needs_no_kubernetes_host() {
+    assert_eq!(kubernetes_auth(None, None), Ok(None));
+    let token = token_file(CANARY, 0o600);
+    let out = fresh("out");
+    let _removed = Removed(vec![token.clone(), out.clone()]);
+    let output = provision(NOWHERE, &ca(), &token, &["c1"], &out);
+    refused(
+        &output,
+        "unavailable",
+        &out,
+        "files with no Kubernetes host",
     );
 }

@@ -1,18 +1,26 @@
 {{- /*
 The deployment manager (journal spec §9.21, infrastructure design §3.4, DEC-1170, DEC-1172): one
 replica per workspace, the one pod that holds an API token. Its ServiceAccount's one Role, in this
-namespace only, creates, reads, lists and deletes pods: no Secret, no exec, no other resource or
-verb, and no cluster scope. Creating a pod is itself powerful (a pod can mount any Secret in the
+namespace only, creates, reads, lists and deletes pods, and the ServiceAccount a connection's token
+exchange runs as (DEC-1177, bounded by its own policy below): no Secret, no
+exec, no other resource or verb, and no cluster scope. Creating a pod is itself powerful (a pod can mount any Secret in the
 namespace, name any account, claim any egress label, or run privileged), so the admission policy
-below bounds every pod the manager makes to one shaped like its templates: no token and no account
-but `default`; no host namespace or host path; every container unprivileged, without privilege
-escalation; only the templates' images; only memory, the templates' Secrets and, read-only, the
-claims they mount read-only (the artifact store's, DEC-1016), and no Secret through the
-environment or a pull secret; the manager's, a templated process's and this workspace's labels; and
-exactly that process's egress labels. Residual: what it does not check (command and arguments,
-resources, node placement, pod-level user, capabilities, other labels, and which of its processes
-mounts an allowed claim, since the images, Secrets and claims are the policy's whole lists, not per
-process), so a pod inside the bound can still do what that process's image and role can. Every runtime and executor it starts is a bare pod from the templates
+below bounds every pod the manager makes to one shaped like its own process's template, read from
+the pod's `mandate.dev/process` label (DEC-1177): no service-account token, and no account but
+`default`, or for a token exchange an `x`-and-hex one (DEC-2060) that its environment names once,
+beside its connection, for the exchange to check against each other; no host namespace, host path,
+host alias or node name; no root user and no added capability; every container unprivileged,
+without privilege escalation; only that process's
+images, exactly its containers' commands and arguments; only memory, that process's Secrets, its
+projected vault token and namespace and, read-only, the claims it mounts read-only (the artifact store's,
+DEC-1016), and no Secret through the environment or a pull secret; the manager's, a templated
+process's and this workspace's labels; and exactly that process's egress labels. So a pod labelled
+as one process cannot run another's image, command or credentials: the token exchange, the one
+process that reaches the live token host, runs its own image and launch only. Residual: what it
+does not check (resources, affinity, other labels, the environment's other plain values, and
+whether a token exchange's `x` account is its own connection's hex, which CEL cannot compute and
+the exchange checks itself), so a pod inside the bound can still do what that process's image and
+role can. Every runtime and executor it starts is a bare pod from the templates
 below, which are exactly the pods the chart would build for those processes (their security
 context, egress gate, credentials, colocation, and the labels their network policies select), so
 the manager adds only a pod's name, its own labels, `restartPolicy: Never` and the process's
@@ -37,6 +45,9 @@ metadata:
 rules:
   - apiGroups: [""]
     resources: ["pods"]
+    verbs: ["create", "get", "list", "delete"]
+  - apiGroups: [""]
+    resources: ["serviceaccounts"]
     verbs: ["create", "get", "list", "delete"]
 {{- end -}}
 {{- define "mandate.deployManagerBinding" -}}
@@ -72,7 +83,13 @@ DEC-2031). Its probes are processes.json's `probe`, as a Deployment's are (DEC-1
 {{- if eq .p.name "executor" -}}
 {{- $args = concat $args (include "mandate.executorBroker" .root | fromJsonArray) -}}
 {{- end -}}
-{{- $container := include "mandate.container" (dict "root" .root "p" .p "name" .p.name "args" $args "probe" $probe) }}
+{{- $command := list -}}
+{{- if .p.one_shot -}}
+{{- $command = .p.command | default list -}}
+{{- $args = .p.args | default list -}}
+{{- $probe = dict -}}
+{{- end -}}
+{{- $container := include "mandate.container" (dict "root" .root "p" .p "name" .p.name "command" $command "args" $args "probe" $probe) }}
 {{- fromYaml (include "mandate.pod" (dict "root" .root "p" .p "restartPolicy" "Never" "containers" $container)) | toJson }}
 {{- end -}}
 {{- define "mandate.deployManagerTemplates" -}}
@@ -106,22 +123,51 @@ refuses the pod.
 object.spec.containers.all(c, {{ . }}) && (!has(object.spec.initContainers) || object.spec.initContainers.all(c, {{ . }}))
 {{- end -}}
 {{- define "mandate.deployManagerAdmission" -}}
-{{- $images := list }}
-{{- $secrets := list }}
-{{- $claims := list }}
+{{- $images := dict }}
+{{- $commands := dict }}
+{{- $secrets := dict }}
+{{- $claims := dict }}
+{{- $projected := dict }}
 {{- range $file, $text := .templates }}
+{{- $name := trimSuffix ".json" $file }}
 {{- $pod := fromJson $text }}
+{{- $own := list }}
+{{- $launches := dict }}
 {{- range (concat ($pod.spec.initContainers | default list) $pod.spec.containers) }}
-{{- $images = append $images .image }}
+{{- $own = append $own .image }}
+{{- $_ := set $launches .name (list (.command | default list) (.args | default list)) }}
 {{- end }}
+{{- $_ := set $images $name ($own | uniq | sortAlpha) }}
+{{- $_ := set $commands $name $launches }}
+{{- $mounted := list }}
+{{- $read := list }}
+{{- $tokens := list }}
 {{- range ($pod.spec.volumes | default list) }}
 {{- if .secret }}
-{{- $secrets = append $secrets .secret.secretName }}
+{{- $mounted = append $mounted .secret.secretName }}
 {{- end }}
 {{- if and .persistentVolumeClaim .persistentVolumeClaim.readOnly }}
-{{- $claims = append $claims .persistentVolumeClaim.claimName }}
+{{- $read = append $read .persistentVolumeClaim.claimName }}
+{{- end }}
+{{- if .projected }}
+{{- $token := "" }}
+{{- $item := "" }}
+{{- range .projected.sources }}
+{{- with .serviceAccountToken }}
+{{- $token = printf "%s|%v|%s" .audience .expirationSeconds (.path | default "") }}
+{{- end }}
+{{- with .downwardAPI }}
+{{- range .items }}
+{{- $item = printf "%s=%s" .path .fieldRef.fieldPath }}
 {{- end }}
 {{- end }}
+{{- end }}
+{{- $tokens = append $tokens (printf "%s|%v|%s" $token .projected.defaultMode $item) }}
+{{- end }}
+{{- end }}
+{{- $_ := set $secrets $name ($mounted | uniq | sortAlpha) }}
+{{- $_ := set $claims $name ($read | uniq | sortAlpha) }}
+{{- $_ := set $projected $name $tokens }}
 {{- end }}
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
@@ -144,21 +190,33 @@ spec:
     - name: the-deploy-manager
       expression: {{ printf "request.userInfo.username == 'system:serviceaccount:%s:%s'" .root.Release.Namespace .p.name | quote }}
   variables:
-    - name: allowedImages
-      expression: '{{ $images | uniq | sortAlpha | toJson }}'
-    - name: allowedSecrets
-      expression: '{{ $secrets | uniq | sortAlpha | toJson }}'
-    - name: allowedClaims
-      expression: '{{ $claims | uniq | sortAlpha | toJson }}'
+    - name: process
+      expression: 'has(object.metadata.labels) && "mandate.dev/process" in object.metadata.labels ? object.metadata.labels["mandate.dev/process"] : ""'
+    - name: images
+      expression: '{{ $images | toJson }}'
+    - name: commands
+      expression: '{{ $commands | toJson | replace "'" "''" }}'
+    - name: secrets
+      expression: '{{ $secrets | toJson }}'
+    - name: claims
+      expression: '{{ $claims | toJson }}'
+    - name: projected
+      expression: '{{ $projected | toJson }}'
     - name: egress
       expression: '{{ .egress | toJson }}'
   validations:
     - expression: 'has(object.spec.automountServiceAccountToken) && object.spec.automountServiceAccountToken == false'
       reason: Forbidden
       message: a pod the deployment manager makes mounts no service-account token
-    - expression: '(!has(object.spec.serviceAccountName) || object.spec.serviceAccountName in ["", "default"]) && (!has(object.spec.serviceAccount) || object.spec.serviceAccount in ["", "default"])'
+    - expression: 'variables.process == "token-exchange" ? (has(object.spec.serviceAccountName) && object.spec.serviceAccountName.matches(''^x([0-9a-f]{2}){1,64}$'') && (!has(object.spec.serviceAccount) || object.spec.serviceAccount == "" || object.spec.serviceAccount == object.spec.serviceAccountName)) : ((!has(object.spec.serviceAccountName) || object.spec.serviceAccountName == "" || object.spec.serviceAccountName == "default") && (!has(object.spec.serviceAccount) || object.spec.serviceAccount == "" || object.spec.serviceAccount == "default"))'
       reason: Forbidden
-      message: a pod the deployment manager makes names no service account but the default
+      message: a pod the deployment manager makes names no service account but the default, or a token exchange its own
+    - expression: 'variables.process != "token-exchange" || object.spec.containers.all(c, has(c.env) && size(c.env.filter(e, e.name == "MANDATE_SUBJECT")) == 1 && size(c.env.filter(e, e.name == "MANDATE_SUBJECT_ACCOUNT")) == 1 && c.env.exists(e, e.name == "MANDATE_SUBJECT_ACCOUNT" && has(e.value) && e.value == object.spec.serviceAccountName))'
+      reason: Forbidden
+      message: a token exchange's pod names its own account in its environment once, beside its connection, which the exchange checks against each other
+    - expression: 'has(object.spec.securityContext) && has(object.spec.securityContext.runAsNonRoot) && object.spec.securityContext.runAsNonRoot == true && (!has(object.spec.securityContext.runAsUser) || object.spec.securityContext.runAsUser != 0) && !has(object.spec.hostAliases) && !has(object.spec.nodeName) && {{ include "mandate.everyContainer" "has(c.securityContext) && (!has(c.securityContext.runAsUser) || c.securityContext.runAsUser != 0) && (!has(c.securityContext.runAsNonRoot) || c.securityContext.runAsNonRoot == true) && (!has(c.securityContext.capabilities) || !has(c.securityContext.capabilities.add))" }}'
+      reason: Forbidden
+      message: a pod the deployment manager makes runs as no root user, adds no capability, and names no node or host alias
     - expression: '(!has(object.spec.hostNetwork) || !object.spec.hostNetwork) && (!has(object.spec.hostPID) || !object.spec.hostPID) && (!has(object.spec.hostIPC) || !object.spec.hostIPC)'
       reason: Forbidden
       message: a pod the deployment manager makes shares no host namespace
@@ -171,12 +229,15 @@ spec:
     - expression: '!has(object.spec.ephemeralContainers)'
       reason: Forbidden
       message: a pod the deployment manager makes has no ephemeral container
-    - expression: '{{ include "mandate.everyContainer" "c.image in variables.allowedImages" }}'
+    - expression: '{{ include "mandate.everyContainer" "c.image in variables.images[variables.process]" }}'
       reason: Forbidden
-      message: a pod the deployment manager makes runs only the images of its templates
-    - expression: '!has(object.spec.volumes) || object.spec.volumes.all(v, has(v.emptyDir) || (has(v.secret) && v.secret.secretName in variables.allowedSecrets) || (has(v.persistentVolumeClaim) && v.persistentVolumeClaim.claimName in variables.allowedClaims && has(v.persistentVolumeClaim.readOnly) && v.persistentVolumeClaim.readOnly == true))'
+      message: a pod the deployment manager makes runs only its own process's images
+    - expression: 'size(object.spec.containers) + (has(object.spec.initContainers) ? size(object.spec.initContainers) : 0) == size(variables.commands[variables.process]) && {{ include "mandate.everyContainer" "c.name in variables.commands[variables.process] && variables.commands[variables.process][c.name] == [has(c.command) ? c.command : [], has(c.args) ? c.args : []]" }}'
       reason: Forbidden
-      message: a pod the deployment manager makes mounts only memory, the Secrets of its templates, or their claims read-only
+      message: a pod the deployment manager makes runs exactly its own process's commands and arguments
+    - expression: '!has(object.spec.volumes) || object.spec.volumes.all(v, has(v.emptyDir) || (has(v.secret) && v.secret.secretName in variables.secrets[variables.process]) || (has(v.persistentVolumeClaim) && v.persistentVolumeClaim.claimName in variables.claims[variables.process] && has(v.persistentVolumeClaim.readOnly) && v.persistentVolumeClaim.readOnly == true) || (has(v.projected) && size(v.projected.sources) == 2 && has(v.projected.sources[0].serviceAccountToken) && !has(v.projected.sources[0].secret) && !has(v.projected.sources[0].configMap) && !has(v.projected.sources[0].downwardAPI) && !has(v.projected.sources[0].clusterTrustBundle) && has(v.projected.sources[0].serviceAccountToken.audience) && has(v.projected.sources[0].serviceAccountToken.expirationSeconds) && has(v.projected.sources[1].downwardAPI) && !has(v.projected.sources[1].secret) && !has(v.projected.sources[1].configMap) && !has(v.projected.sources[1].serviceAccountToken) && !has(v.projected.sources[1].clusterTrustBundle) && has(v.projected.sources[1].downwardAPI.items) && size(v.projected.sources[1].downwardAPI.items) == 1 && has(v.projected.sources[1].downwardAPI.items[0].fieldRef) && !has(v.projected.sources[1].downwardAPI.items[0].mode) && !has(v.projected.sources[1].downwardAPI.items[0].resourceFieldRef) && (v.projected.sources[0].serviceAccountToken.audience + "|" + string(v.projected.sources[0].serviceAccountToken.expirationSeconds) + "|" + (has(v.projected.sources[0].serviceAccountToken.path) ? v.projected.sources[0].serviceAccountToken.path : "") + "|" + (has(v.projected.defaultMode) ? string(v.projected.defaultMode) : "") + "|" + v.projected.sources[1].downwardAPI.items[0].path + "=" + v.projected.sources[1].downwardAPI.items[0].fieldRef.fieldPath) in variables.projected[variables.process]))'
+      reason: Forbidden
+      message: a pod the deployment manager makes mounts only memory, its own process's Secrets and projected token, or its claims read-only
     - expression: '!has(object.spec.imagePullSecrets) && {{ include "mandate.everyContainer" "!has(c.envFrom) && (!has(c.env) || c.env.all(e, !has(e.valueFrom)))" }}'
       reason: Forbidden
       message: a pod the deployment manager makes reads no Secret through its environment or a pull secret
@@ -186,6 +247,70 @@ spec:
     - expression: 'has(object.metadata.labels) && "mandate.dev/process" in object.metadata.labels && object.metadata.labels["mandate.dev/process"] in variables.egress && object.metadata.labels.all(k, !k.startsWith("mandate.dev/egress-") || (object.metadata.labels[k] == "true" && k in variables.egress[object.metadata.labels["mandate.dev/process"]])) && variables.egress[object.metadata.labels["mandate.dev/process"]].all(k, k in object.metadata.labels && object.metadata.labels[k] == "true")'
       reason: Forbidden
       message: a pod the deployment manager makes carries exactly its process's egress labels
+{{- end -}}
+{{- /*
+The bound on the manager's `create` and `delete serviceaccounts` (DEC-1177). The manager makes one
+ServiceAccount for a connection's token exchange (`x` and the connection id's bytes in lowercase
+hex, the name DEC-2060's vault role admits) and deletes it when the request closes; an executor's
+account comes with the change that names it on the executor's pod. RBAC cannot shape a name, so
+this policy refuses, on create, update and delete alike (a delete reads the account as it stands),
+any other name, the default account and the manager's own among them, a mounted token, a Secret
+or a pull secret, and labels that are not the manager's, this workspace's and the exchange's.
+Which connection is open is the journal's, which CEL cannot read: the manager creates an account
+only from its record. It fails closed.
+*/ -}}
+{{- define "mandate.deployManagerAccountsName" -}}
+{{ printf "%s-%s-deploy-manager-accounts" .root.Release.Namespace .root.Release.Name }}
+{{- end -}}
+{{- define "mandate.deployManagerAccounts" -}}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ include "mandate.deployManagerAccountsName" . | quote }}
+  labels:
+    {{- include "mandate.labels" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: {{ .root.Release.Namespace | quote }}
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE", "DELETE"]
+        resources: ["serviceaccounts"]
+  matchConditions:
+    - name: the-deploy-manager
+      expression: {{ printf "request.userInfo.username == 'system:serviceaccount:%s:%s'" .root.Release.Namespace .p.name | quote }}
+  variables:
+    - name: account
+      expression: 'request.operation == "DELETE" ? oldObject : object'
+  validations:
+    - expression: 'variables.account.metadata.name.matches(''^x([0-9a-f]{2}){1,64}$'')'
+      reason: Forbidden
+      message: an account the deployment manager makes or deletes is named for a connection's token exchange
+    - expression: 'has(variables.account.automountServiceAccountToken) && variables.account.automountServiceAccountToken == false && !has(variables.account.secrets) && !has(variables.account.imagePullSecrets)'
+      reason: Forbidden
+      message: an account the deployment manager makes or deletes mounts no token and holds no Secret
+    - expression: 'has(variables.account.metadata.labels) && "app.kubernetes.io/managed-by" in variables.account.metadata.labels && variables.account.metadata.labels["app.kubernetes.io/managed-by"] == "mandate-deploy-manager" && "mandate.dev/workspace" in variables.account.metadata.labels && variables.account.metadata.labels["mandate.dev/workspace"] == {{ .root.Values.workspace | toJson }} && "mandate.dev/process" in variables.account.metadata.labels && variables.account.metadata.labels["mandate.dev/process"] == "token-exchange"'
+      reason: Forbidden
+      message: an account the deployment manager makes or deletes is a token exchange's, in this workspace
+{{- end -}}
+{{- define "mandate.deployManagerAccountsBinding" -}}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ include "mandate.deployManagerAccountsName" . | quote }}
+  labels:
+    {{- include "mandate.labels" . | nindent 4 }}
+spec:
+  policyName: {{ include "mandate.deployManagerAccountsName" . | quote }}
+  validationActions: ["Deny"]
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: {{ .root.Release.Namespace | quote }}
 {{- end -}}
 {{- define "mandate.deployManagerAdmissionBinding" -}}
 apiVersion: admissionregistration.k8s.io/v1
@@ -252,6 +377,10 @@ spec:
 {{ include "mandate.emit" (include "mandate.deployManagerAdmission" $ctx) }}
 ---
 {{ include "mandate.emit" (include "mandate.deployManagerAdmissionBinding" $ctx) }}
+---
+{{ include "mandate.emit" (include "mandate.deployManagerAccounts" $ctx) }}
+---
+{{ include "mandate.emit" (include "mandate.deployManagerAccountsBinding" $ctx) }}
 ---
 {{ include "mandate.emit" (include "mandate.deployManagerTemplates" $ctx) }}
 ---

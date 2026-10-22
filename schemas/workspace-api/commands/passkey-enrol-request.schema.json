@@ -45,5 +45,29 @@
       ]
     }
   },
-  "description": "POST /passkeys (\u00a73.6, DEC-2108 items 4 and 5): the authenticator's registration response for the registration challenge `challenge_id`. A member's first passkey carries no step-up; any later one carries passkey step-up of kind credential_enrol, its assertion beside it."
+  "oneOf": [
+    {
+      "description": "A first passkey: no step-up and no assertion.",
+      "properties": {
+        "step_up": {
+          "type": "null"
+        },
+        "step_up_assertion": {
+          "type": "null"
+        }
+      }
+    },
+    {
+      "description": "A later passkey: the step-up and its assertion together.",
+      "properties": {
+        "step_up": {
+          "type": "object"
+        },
+        "step_up_assertion": {
+          "type": "object"
+        }
+      }
+    }
+  ],
+  "description": "POST /passkeys (\u00a73.6, DEC-2108 items 4 and 5): the authenticator's registration response for the registration challenge `challenge_id`. A member's first passkey carries no step-up; any later one carries passkey step-up of kind credential_enrol, its assertion beside it. The two are both null or both set (DEC-2118 item 3)."
 }

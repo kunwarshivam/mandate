@@ -634,7 +634,7 @@ allowed_external = ["thiserror"]
 layer = 7
 safety_critical = true
 pure = false
-allowed_external = ["ring", "secrecy", "thiserror"]
+allowed_external = ["ring", "rustix", "secrecy", "thiserror"]
 
 # The workspace vault behind `SecretSource` (E21-32, DEC-977): the local vault and OpenBao. Above
 # mandate-vault-local, whose store it adapts. No runtime, scheduler, or connector may take it: an

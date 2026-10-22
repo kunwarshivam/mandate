@@ -15,7 +15,7 @@ use mandate_num::{Price, Qty};
 use mandate_research::{AllowlistVersion, SourceAllowlist, SourceId as AllowedSource};
 use mandate_research_run::{
     Bar, BarReader, EntryError, Filing, FilingReader, InstrumentFact, InstrumentReader, ItemId,
-    NewsItem, NewsReader, ReadError, ResearchEntry, SourceId, Symbol, TextQuery,
+    NewsItem, NewsReader, NewsText, ReadError, ResearchEntry, SourceId, Symbol, TextQuery,
 };
 use mandate_time::UtcNanos;
 
@@ -101,6 +101,9 @@ pub struct RecordedPlane {
     pub news: Vec<RecordedNews>,
     pub filings: Vec<RecordedFiling>,
     pub instruments: Vec<InstrumentFact>,
+    /// The source allowlist version the items were recorded under, the only one a get answers
+    /// (data-plane spec §4.6).
+    pub allowlist_version: u32,
 }
 
 /// The cell's recorded research.
@@ -112,6 +115,9 @@ pub struct Bundle {
     pub probe: Reported,
     pub workspace_cap: Usd6,
     pub deployment_cap: Usd6,
+    /// The workspace's `research_run_cost_cap_usd`, recorded as `caps.run_usd`: an agentic run's
+    /// cost ceiling, or `None` when the recording sets none (DEC-2268).
+    pub run_cap: Option<Usd6>,
     pub reply: RecordedReply,
     /// The scripted replies of an agentic run's turns before its final one, turn 1 first; empty
     /// for a bundle with no `turns` (DEC-2266).
@@ -158,6 +164,7 @@ impl Bundle {
             Digest::of(endpoint.text("price_table")?.as_bytes()),
         )
         .map_err(|_| endpoint.malformed("cached_per_million"))?;
+        let allowlist = allowlist(&research)?;
         let plane = RecordedPlane {
             bars: Doc::read(dir, BARS)?
                 .rows()?
@@ -179,9 +186,9 @@ impl Bundle {
                 .iter()
                 .map(instrument)
                 .collect::<Result<_, _>>()?,
+            allowlist_version: allowlist.version.0,
         };
         let halted = halts(&research, &plane.instruments)?;
-        let allowlist = allowlist(&research)?;
         Ok(Self {
             entry: pinned,
             endpoint: Endpoint {
@@ -201,6 +208,11 @@ impl Bundle {
             },
             workspace_cap: caps.usd6("workspace_monthly_usd")?,
             deployment_cap: caps.usd6("deployment_usd")?,
+            run_cap: caps
+                .value
+                .get("run_usd")
+                .map(|_| caps.usd6("run_usd"))
+                .transpose()?,
             reply: RecordedReply {
                 output: reply.text("output")?.to_owned(),
                 latency_ms: reply.int("latency_ms")?,
@@ -274,29 +286,87 @@ impl BarReader for RecordedPlane {
     }
 }
 
+impl RecordedNews {
+    /// The item as a read at `cut_off` gives it, at its age before the cut-off.
+    fn at(&self, cut_off: UtcNanos) -> Option<NewsItem> {
+        Some(NewsItem {
+            item_id: self.item_id.clone(),
+            source: self.source.clone(),
+            symbols: self.symbols.clone(),
+            knowledge_at: before(cut_off, self.age_s)?,
+            published_at: before(cut_off, self.published_age_s)?,
+            headline: self.headline.clone(),
+            summary: self.summary.clone(),
+            link: self.link.clone(),
+            content_hash: Digest::of_parts(&[self.headline.as_bytes(), self.summary.as_bytes()]),
+            licensed: self.licensed,
+        })
+    }
+
+    /// Whether every one of `terms` is in the stored headline or the stored summary, a phrase inside
+    /// one field (data-plane spec §4.6, DEC-2327 item 1).
+    fn matches(&self, terms: &[String]) -> bool {
+        terms
+            .iter()
+            .all(|term| holds_term(&self.headline, term) || holds_term(&self.summary, term))
+    }
+}
+
+/// `term` in `text`, case-folded, as a whole word or phrase: bounded at each end by the text's edge
+/// or by a character that is not an ASCII letter or digit (data-plane spec §4.6). It is matched
+/// here, inside the plane, and sent nowhere (HI-28).
+fn holds_term(text: &str, term: &str) -> bool {
+    let text = text.to_ascii_lowercase();
+    let term = term.to_ascii_lowercase();
+    if term.is_empty() {
+        return false;
+    }
+    let is_word = |c: Option<char>| c.is_some_and(|c| c.is_ascii_alphanumeric());
+    text.match_indices(&term).any(|(start, found)| {
+        let end = start.saturating_add(found.len());
+        let before_ok = !is_word(text.get(..start).and_then(|t| t.chars().next_back()));
+        let after_ok = !is_word(text.get(end..).and_then(|t| t.chars().next()));
+        before_ok && after_ok
+    })
+}
+
 impl NewsReader for RecordedPlane {
     fn news(&self, query: &TextQuery) -> Result<Vec<NewsItem>, ReadError> {
         Ok(self
             .news
             .iter()
-            .filter_map(|item| {
-                Some(NewsItem {
-                    item_id: item.item_id.clone(),
-                    source: item.source.clone(),
-                    symbols: item.symbols.clone(),
-                    knowledge_at: before(query.cut_off, item.age_s)?,
-                    published_at: before(query.cut_off, item.published_age_s)?,
-                    headline: item.headline.clone(),
-                    summary: item.summary.clone(),
-                    link: item.link.clone(),
-                    content_hash: Digest::of_parts(&[
-                        item.headline.as_bytes(),
-                        item.summary.as_bytes(),
-                    ]),
-                    licensed: item.licensed,
-                })
-            })
+            .filter_map(|item| item.at(query.cut_off))
             .collect())
+    }
+
+    fn search(&self, query: &TextQuery, terms: &[String]) -> Result<Vec<NewsItem>, ReadError> {
+        Ok(self
+            .news
+            .iter()
+            .filter(|item| item.matches(terms))
+            .filter_map(|item| item.at(query.cut_off))
+            .collect())
+    }
+
+    /// The recorded item's stored text, its headline and summary, at its age before `cut_off`, for
+    /// the allowlist version the recording holds alone.
+    fn news_text(
+        &self,
+        item: &ItemId,
+        cut_off: UtcNanos,
+        allowlist_version: u32,
+    ) -> Result<NewsText, ReadError> {
+        if allowlist_version != self.allowlist_version {
+            return Err(ReadError::Unavailable);
+        }
+        let recorded = self
+            .news
+            .iter()
+            .find(|recorded| recorded.item_id == *item)
+            .ok_or(ReadError::Unavailable)?;
+        let text = format!("{}\n\n{}", recorded.headline, recorded.summary);
+        let item = recorded.at(cut_off).ok_or(ReadError::Unavailable)?;
+        Ok(NewsText { item, text })
     }
 }
 
