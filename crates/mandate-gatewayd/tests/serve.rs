@@ -272,7 +272,6 @@ fn stopping_ends_the_loop() {
 /// unwinds, so the call in flight reads as lost and the port refuses every connection after it,
 /// rather than accepting connections that nothing will answer.
 #[test]
-#[ignore = "pending E21-62"]
 fn a_panicking_answer_stops_the_listener() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();

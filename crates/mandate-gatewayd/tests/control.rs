@@ -58,7 +58,6 @@ fn row() -> StoredEvent {
 /// The control reads the workspace's own `ctl:` stream and gives its rows back as the store gave
 /// them; a store that cannot read gives none; a workspace that names no stream gives no control.
 #[test]
-#[ignore = "pending E21-62"]
 fn the_control_reads_the_workspace_s_own_stream() {
     let store = Asked {
         rows: Some(vec![row()]),

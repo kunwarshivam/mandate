@@ -45,7 +45,6 @@ fn read(env: &BTreeMap<&'static str, String>) -> Result<Config, ConfigError> {
 
 /// Every value named gives the config, each from its own variable.
 #[test]
-#[ignore = "pending E21-62"]
 fn every_value_named_gives_the_config() {
     assert_eq!(
         read(&full()),
@@ -63,7 +62,6 @@ fn every_value_named_gives_the_config() {
 /// GO's contract and DEC-79: each value unset or empty stops the start with its own code, and
 /// nothing falls back on a default, `MANDATE_ARTIFACTS` and the two budgets included.
 #[test]
-#[ignore = "pending E21-62"]
 fn each_value_unset_or_empty_stops_the_start_with_its_code() {
     for (name, error) in NAMES {
         let mut unset = full();
@@ -88,7 +86,6 @@ fn each_value_unset_or_empty_stops_the_start_with_its_code() {
 
 /// A budget that is not an amount `Usd6` holds stops the start rather than read as another.
 #[test]
-#[ignore = "pending E21-62"]
 fn a_budget_that_is_not_an_amount_stops_the_start() {
     for (name, error) in &NAMES[4..] {
         for text in ["fifty", "-1", "1.0000001", "1e3", " 50"] {
@@ -101,7 +98,6 @@ fn a_budget_that_is_not_an_amount_stops_the_start() {
 
 /// The journal's DSN never shows in the config's `Debug`, nor in any error.
 #[test]
-#[ignore = "pending E21-62"]
 fn the_dsn_shows_in_no_error() {
     for (name, error) in NAMES {
         let mut env = full();

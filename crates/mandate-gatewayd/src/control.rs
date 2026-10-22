@@ -12,26 +12,19 @@ pub struct StoreControl<S: Store> {
     stream: StreamId,
 }
 
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
 impl<S: Store> StoreControl<S> {
     /// The control stream of `workspace` through `store`, or `None` when `workspace` names no
     /// stream.
     pub fn new(store: S, workspace: &str) -> Option<Self> {
-        let _ = (store, workspace);
-        todo!()
+        Some(Self {
+            store,
+            stream: StreamId::parse(&format!("ctl:{workspace}"))?,
+        })
     }
 }
 
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
 impl<S: Store> Control for StoreControl<S> {
     fn rows(&self) -> Option<Vec<StoredEvent>> {
-        let _ = (&self.store, &self.stream);
-        todo!()
+        self.store.rows(&self.stream)
     }
 }

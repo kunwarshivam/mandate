@@ -39,29 +39,45 @@ pub enum ConfigError {
     DeploymentBudget,
 }
 
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
 impl ConfigError {
     /// The code the process exits with.
     pub fn code(self) -> &'static str {
-        let _ = self;
-        todo!()
+        match self {
+            Self::WorkspaceMissing => "workspace_missing",
+            Self::DeploymentMissing => "deployment_missing",
+            Self::JournalMissing => "journal_dsn_missing",
+            Self::ArtifactsMissing => "artifact_store_unavailable",
+            Self::WorkspaceBudget => "workspace_budget_missing",
+            Self::DeploymentBudget => "deployment_budget_missing",
+        }
     }
 }
 
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
 impl Config {
     /// The values `var` gives, an empty one read as missing.
     ///
     /// # Errors
     /// The first [`ConfigError`], in the order of [`Config`]'s fields.
     pub fn from_env(var: &dyn Fn(&str) -> Option<String>) -> Result<Self, ConfigError> {
-        let _ = var;
-        todo!()
+        let named = |name: &str, missing: ConfigError| {
+            var(name).filter(|value| !value.is_empty()).ok_or(missing)
+        };
+        let amount = |name: &str, missing: ConfigError| {
+            named(name, missing).and_then(|text| Usd6::parse(&text).map_err(|_| missing))
+        };
+        Ok(Self {
+            workspace: named("MANDATE_GATEWAY_WORKSPACE", ConfigError::WorkspaceMissing)?,
+            deployment: named("MANDATE_GATEWAY_DEPLOYMENT", ConfigError::DeploymentMissing)?,
+            journal_dsn: named("MANDATE_JOURNAL_DSN", ConfigError::JournalMissing)?,
+            artifacts: named("MANDATE_ARTIFACTS", ConfigError::ArtifactsMissing)?,
+            workspace_monthly: amount(
+                "MANDATE_GATEWAY_WORKSPACE_MONTHLY_USD",
+                ConfigError::WorkspaceBudget,
+            )?,
+            deployment_monthly: amount(
+                "MANDATE_GATEWAY_DEPLOYMENT_MONTHLY_USD",
+                ConfigError::DeploymentBudget,
+            )?,
+        })
     }
 }
