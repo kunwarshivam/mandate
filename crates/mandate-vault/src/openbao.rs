@@ -555,6 +555,19 @@ impl OpenBaoSource {
             .map_err(|_| SourceError::Malformed)
     }
 
+    /// What a refused overwrite of the code at `data` means. The taker may only update, never
+    /// create, so once another taker has deleted the code the overwrite is refused before its
+    /// version is checked: that is a lost race, and `None`, but only if the code is gone or a
+    /// tombstone when read again. Anything else stays [`SourceError::Denied`].
+    async fn lost_or_denied(&self, data: &str) -> Result<Option<SecretSlice<u8>>, SourceError> {
+        match self.call(Method::GET, data, None).await {
+            Err(SourceError::Missing) => Ok(None),
+            Ok(read) if tombstoned(read.as_ref()) => Ok(None),
+            Ok(_) => Err(SourceError::Denied),
+            Err(e) => Err(e),
+        }
+    }
+
     fn role_path(&self, connection: &ConnectionId) -> String {
         format!(
             "auth/{}/role/{}",
@@ -603,6 +616,7 @@ impl SecretSource for OpenBaoSource {
         match overwrite {
             Ok(_) => {}
             Err(SourceError::Missing) => return Ok(None),
+            Err(SourceError::Denied) => return self.lost_or_denied(&data).await,
             Err(e) => return Err(e),
         }
         let metadata = format!("{}/metadata/{}", self.mounts.kv, kv_path(&path)?);
