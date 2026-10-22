@@ -161,8 +161,16 @@ fn blocks(hcl: &str) -> Vec<(String, String)> {
     out
 }
 
+/// Whether DEC-2349's one-segment `+` grants `access` on `path` to the Api or the connection
+/// manager in place of a spelled-out block: a write or a delete of a connection's code or token.
+fn by_prefix(access: Access, path: &SecretPath) -> bool {
+    matches!(access, Access::Write | Access::Delete)
+        && matches!(path, SecretPath::Code(_) | SecretPath::Token(_))
+}
+
 /// Every policy is the table with no wildcard, but the Api's and the connection manager's
-/// one-segment `+` on their connection paths (DEC-2349), which `policy_prefix` pins.
+/// one-segment `+` on their connection write and delete paths (DEC-2349), which `policy_prefix`
+/// pins: only those paths go unchecked here, every read and every other path is checked as before.
 #[test]
 fn each_policy_is_the_table_with_no_wildcard_beyond_dec_2349s() {
     let connections = [c("c1"), c("c2")];
@@ -189,7 +197,7 @@ fn each_policy_is_the_table_with_no_wildcard_beyond_dec_2349s() {
             .iter()
             .flat_map(|a| paths().into_iter().map(move |p| (*a, p)))
             .filter(|(a, p)| allows(&identity, *a, p))
-            .filter(|(_, p)| !prefixed || *p == SecretPath::ClientSecret)
+            .filter(|(a, p)| !(prefixed && by_prefix(*a, p)))
             .count();
         assert_eq!(
             data_blocks, allowed,
@@ -219,7 +227,7 @@ fn each_policy_is_the_table_with_no_wildcard_beyond_dec_2349s() {
                     Access::Delete => ("metadata", "delete"),
                     Access::Take => ("data", "update"),
                 };
-                if prefixed && path != SecretPath::ClientSecret {
+                if prefixed && by_prefix(access, &path) && allows(&identity, access, &path) {
                     continue;
                 }
                 let want = format!("mandate/{prefix}/{}", kv_path(&path));
