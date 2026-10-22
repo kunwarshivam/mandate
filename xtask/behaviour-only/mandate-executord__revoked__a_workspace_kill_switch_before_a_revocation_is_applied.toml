@@ -1,8 +1,0 @@
-file = "crates/mandate-executord/tests/revoked.rs"
-test = "a_workspace_kill_switch_before_a_revocation_is_applied"
-reason = """
-DEC-2343: on main the executor process stops following every agent of a revoked connection, keeps
-only an agent's latest deployment, and learns of a kill switch only from the runtime's copy, so the
-test fails on behaviour rather than at a stub. The E7-4 implementation PR of DEC-2343 deletes this
-row.
-"""

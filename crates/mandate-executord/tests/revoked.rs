@@ -24,7 +24,6 @@ const NOON: &str = support::NOON;
 /// §5.6's compromise batch, the kill switch at the connection's scope then the revocation, with no
 /// runtime copy at all: the executor applies the switch to the agent from the command itself.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_compromise_revocation_applies_its_kill_switch_with_no_copy() -> Result<(), Error> {
     let journal = deployed()?;
     kill_command(&journal, COMMAND, "connection", CONNECTION)?;
@@ -44,7 +43,6 @@ fn a_compromise_revocation_applies_its_kill_switch_with_no_copy() -> Result<(), 
 /// reads the command first and counts the copy that names it as applied, on this pass and after a
 /// restart.
 #[test]
-#[ignore = "pending E7-4"]
 fn the_copy_after_a_direct_read_is_not_applied_again() -> Result<(), Error> {
     let journal = deployed()?;
     kill_command(&journal, COMMAND, "connection", CONNECTION)?;
@@ -86,7 +84,6 @@ fn a_copy_applied_before_the_revocation_is_not_read_again_from_the_command() -> 
 /// A workspace kill switch before a revocation of the agent's connection is applied from the
 /// command too.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_workspace_kill_switch_before_a_revocation_is_applied() -> Result<(), Error> {
     let journal = deployed()?;
     kill_command(&journal, COMMAND, "workspace", WORKSPACE)?;
@@ -104,7 +101,6 @@ fn a_workspace_kill_switch_before_a_revocation_is_applied() -> Result<(), Error>
 /// The stopped agent's case (DEC-2343 "Not covered", but reached by item 3): a kill switch after
 /// `AgentStopped` has no runtime to copy it, and a revocation after it still applies it.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_stopped_agents_switch_is_applied_from_the_command_once_revoked() -> Result<(), Error> {
     let journal = deployed()?;
     stopped(&journal, "c3", AGENT)?;
@@ -123,7 +119,6 @@ fn a_stopped_agents_switch_is_applied_from_the_command_once_revoked() -> Result<
 /// A revoked agent's copy, of a switch issued after the revocation, is still applied: the
 /// revocation does not end the following of an agent deployed before it.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_revoked_agents_later_copy_is_applied() -> Result<(), Error> {
     let journal = deployed()?;
     revoke(&journal, "c3", CONNECTION, false)?;
@@ -140,7 +135,6 @@ fn a_revoked_agents_later_copy_is_applied() -> Result<(), Error> {
 /// the agent stream's rows have no order against the control stream's, and the core abandons an
 /// intent too old to submit.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_revoked_agents_opening_is_not_handed_and_its_exit_is() -> Result<(), Error> {
     let journal = deployed()?;
     revoke(&journal, "c3", CONNECTION, false)?;
@@ -165,7 +159,6 @@ fn a_revoked_agents_opening_is_not_handed_and_its_exit_is() -> Result<(), Error>
 /// Every connection an agent was deployed on counts (DEC-2343 item 2): a later deployment naming
 /// another account's connection does not drop the agent from this account's executor.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_later_deployment_elsewhere_keeps_the_agent_followed_here() -> Result<(), Error> {
     let journal = deployed()?;
     connect(&journal, "c3", OTHER_CONNECTION, OTHER_ACCOUNT)?;
@@ -223,7 +216,6 @@ fn another_accounts_revoked_command_reaches_no_agent_here() -> Result<(), Error>
 /// An agent deployed on the connection after the command is not covered by it: the command reaches
 /// the agents it named when it was issued.
 #[test]
-#[ignore = "pending E7-4"]
 fn an_agent_deployed_after_the_command_is_not_covered_by_it() -> Result<(), Error> {
     let journal = deployed()?;
     kill_command(&journal, COMMAND, "connection", CONNECTION)?;

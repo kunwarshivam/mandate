@@ -8,10 +8,10 @@ use mandate_canon::{Object, parse};
 use mandate_domain::{CapabilityProfile, ProfileError};
 use mandate_executor::{
     AccountScope, ActivityCursor, AgentId, BindingGateSource, BrokerOutcome, BrokerRequest,
-    BrokerSnapshot, BrokerUpdate, Command, ConnectorError, Effect, EventDraft, ExecutorConfig,
-    ExecutorError, ExecutorState, IdGen, Input, InstrumentSnapshot, IntentBody, IntentHandoff,
-    IntentId, KillScope, MandateVersion, MandateView, Ports, ProtectionPrices, ReconcileReason,
-    RiskClock, Seq, WriterEpoch, fold, handle,
+    BrokerSnapshot, BrokerUpdate, Command, ConnectorError, Effect, EventDraft, EventId,
+    ExecutorConfig, ExecutorError, ExecutorState, IdGen, Initiator, Input, InstrumentSnapshot,
+    IntentBody, IntentHandoff, IntentId, KillScope, MandateVersion, MandateView, Ports,
+    ProtectionPrices, ReconcileReason, RiskClock, Seq, WriterEpoch, fold, handle,
 };
 use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId};
 use mandate_num::{Fraction, Price};
@@ -432,16 +432,16 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
     fn switches(&mut self, now: UtcNanos, alerts: &mut Vec<Alert>) -> Option<Followed> {
         let control = self.control.clone()?;
         let rows = self.follow(&control, alerts)?;
-        let Ok(agents) = agents_of(&rows, self.state.scope(), self.environment) else {
+        let Ok(following) = agents_of(&rows, self.state.scope(), self.environment) else {
             self.lifecycle.observe(now, Lifecycled::Failed);
             return None;
         };
-        self.deployed.clone_from(&agents);
+        self.deployed.clone_from(&following.agents);
         let workspace = self.state.scope().workspace.0.clone();
         let mut pending = Vec::new();
         let mut proposed = Vec::new();
         let mut unreadable = false;
-        for agent in agents.into_keys() {
+        for agent in following.agents.keys().cloned() {
             let Some(stream) = StreamId::parse(&format!("agent:{workspace}:{}", agent.0)) else {
                 continue;
             };
@@ -458,9 +458,11 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                 unreadable = true;
                 continue;
             };
+            let revoked = following.revoked.contains(&agent);
             proposed.extend(
                 asked
                     .into_iter()
+                    .filter(|proposal| !(revoked && proposal.purpose.adds_risk()))
                     .filter(|proposal| {
                         self.state
                             .intent(&IntentId(proposal.intent.clone()))
@@ -468,9 +470,38 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                     })
                     .map(|proposal| (agent.clone(), proposal)),
             );
+            let applied = |source: &EventId| self.state.applied_for(&agent, source);
+            let copied: Vec<&EventId> = held
+                .iter()
+                .filter(|switch| self.state.applied_copy(&switch.switch))
+                .filter_map(|switch| switch.cause.as_ref())
+                .collect();
+            let direct: Vec<Switch> = following
+                .commands_for(&agent)
+                .into_iter()
+                .filter(|command| !applied(command) && !copied.contains(&command))
+                .map(|command| Switch {
+                    switch: command,
+                    cause: None,
+                    initiator: Initiator::Owner,
+                    confirmation: None,
+                })
+                .collect();
+            let read: Vec<EventId> = direct.iter().map(|switch| switch.switch.clone()).collect();
+            let copies: Vec<Switch> = held
+                .into_iter()
+                .filter(|switch| !self.state.applied_copy(&switch.switch))
+                .filter(|switch| {
+                    switch
+                        .cause
+                        .as_ref()
+                        .is_none_or(|cause| !applied(cause) && !read.contains(cause))
+                })
+                .collect();
             pending.extend(
-                held.into_iter()
-                    .filter(|switch| !self.state.applied_copy(&switch.switch))
+                direct
+                    .into_iter()
+                    .chain(copies)
                     .map(|switch| (agent.clone(), switch)),
             );
         }

@@ -306,7 +306,6 @@ fn a_stopped_agents_switch_is_still_applied() -> Result<(), Error> {
 /// DEC-2003 item 3's reading, which this test pinned until then): a switch the runtime copies after
 /// the revocation is applied, and establishing the connection again applies nothing a second time.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_revoked_connection_is_followed_again_once_established_again() -> Result<(), Error> {
     let journal = deployed()?;
     journal.write(

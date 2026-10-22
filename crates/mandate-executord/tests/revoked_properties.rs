@@ -300,7 +300,6 @@ fn run(ops: &[Op]) -> Result<Journal, Error> {
 /// DEC-2343 invariant 1: every switch owed is applied exactly once, and no other. A plain test
 /// driving proptest's runner, so its pending marker sits on a function (`cargo xtask markers`).
 #[test]
-#[ignore = "pending E7-4"]
 fn every_switch_owed_is_applied_exactly_once() -> Result<(), Error> {
     let mut runner = TestRunner::new(ProptestConfig {
         cases: 96,
