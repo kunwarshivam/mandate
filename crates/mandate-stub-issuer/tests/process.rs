@@ -312,7 +312,6 @@ fn fixture_flags(owner: &str) -> Vec<String> {
 }
 
 #[test]
-#[ignore = "pending E21-33"]
 fn the_fixture_mode_needs_the_providers_flags_and_a_public_host_and_a_public_host_needs_it() {
     let (owner, _) = secret_files();
     let mut bare = stub(Some("dev"), "0.0.0.0:8897");
@@ -340,7 +339,6 @@ fn the_fixture_mode_needs_the_providers_flags_and_a_public_host_and_a_public_hos
 }
 
 #[test]
-#[ignore = "pending E21-33"]
 fn the_fixture_mode_announces_its_public_host_and_serves_only_the_provider() {
     let (owner, _) = secret_files();
     let (mut child, mut stdout, addr, line) = (0..PORT_ATTEMPTS)

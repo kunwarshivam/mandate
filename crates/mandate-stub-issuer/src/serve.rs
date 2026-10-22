@@ -28,10 +28,11 @@ const JSON: &str = "application/json";
 /// The one media type `POST /alpaca/oauth/token` takes.
 const FORM: &str = "application/x-www-form-urlencoded";
 
-/// What the router serves from: the issuer, and the Alpaca provider when the stub was started with
-/// its client.
+/// What the router serves from: the one `Host` it answers, the issuer unless the provider runs
+/// alone, and the Alpaca provider when the stub was started with its client.
 struct Served {
-    issuer: Arc<Issuer>,
+    host: String,
+    issuer: Option<Arc<Issuer>>,
     alpaca: Option<Arc<Alpaca>>,
 }
 
@@ -40,8 +41,6 @@ struct Served {
 pub enum ServeError {
     /// The listener failed.
     Io,
-    /// What E21-33 has not built yet.
-    Unimplemented { story: &'static str },
 }
 
 /// Serves `issuer` on `listener` until `stop` completes. Stopping drops the server at once: a
@@ -67,20 +66,12 @@ pub async fn serve_with(
     alpaca: Option<Arc<Alpaca>>,
     stop: impl Future<Output = ()> + Send + 'static,
 ) -> Result<(), ServeError> {
-    let served = Arc::new(Served { issuer, alpaca });
-    let router = Router::new().fallback(answer).with_state(served);
-    let mut server = pin!(axum::serve(listener, router).into_future());
-    let mut stop = pin!(stop);
-    std::future::poll_fn(|cx| {
-        if stop.as_mut().poll(cx).is_ready() {
-            return Poll::Ready(Ok(()));
-        }
-        server
-            .as_mut()
-            .poll(cx)
-            .map(|served| served.map_err(|_| ServeError::Io))
-    })
-    .await
+    let served = Served {
+        host: issuer.host.clone(),
+        issuer: Some(issuer),
+        alpaca,
+    };
+    run(listener, served, stop).await
 }
 
 /// Serves the fixture provider `alpaca` alone on `listener` until `stop` completes, answering only
@@ -95,19 +86,43 @@ pub async fn serve_fixture(
     alpaca: Arc<Alpaca>,
     stop: impl Future<Output = ()> + Send + 'static,
 ) -> Result<(), ServeError> {
-    let _ = (listener, host, alpaca, stop);
-    Err(ServeError::Unimplemented { story: "E21-33" })
+    let served = Served {
+        host,
+        issuer: None,
+        alpaca: Some(alpaca),
+    };
+    run(listener, served, stop).await
+}
+
+/// Serves `served` on `listener` until `stop` completes.
+async fn run(
+    listener: TcpListener,
+    served: Served,
+    stop: impl Future<Output = ()> + Send + 'static,
+) -> Result<(), ServeError> {
+    let router = Router::new().fallback(answer).with_state(Arc::new(served));
+    let mut server = pin!(axum::serve(listener, router).into_future());
+    let mut stop = pin!(stop);
+    std::future::poll_fn(|cx| {
+        if stop.as_mut().poll(cx).is_ready() {
+            return Poll::Ready(Ok(()));
+        }
+        server
+            .as_mut()
+            .poll(cx)
+            .map(|served| served.map_err(|_| ServeError::Io))
+    })
+    .await
 }
 
 /// Every request: 421 for any `Host` but the bind exactly, before anything else is read; then
 /// HTTP/1.1 only; then the routes, and 404 for the rest, the provider's included when it is not
 /// served.
 async fn answer(State(served): State<Arc<Served>>, request: Request) -> Response {
-    let issuer = &served.issuer;
     let mut hosts = request.headers().get_all(HOST).iter();
     let ours = matches!(
         (hosts.next(), hosts.next()),
-        (Some(host), None) if host.as_bytes() == issuer.host.as_bytes()
+        (Some(host), None) if host.as_bytes() == served.host.as_bytes()
     );
     if !ours {
         return StatusCode::MISDIRECTED_REQUEST.into_response();
@@ -115,15 +130,19 @@ async fn answer(State(served): State<Arc<Served>>, request: Request) -> Response
     if request.version() != Version::HTTP_11 {
         return StatusCode::HTTP_VERSION_NOT_SUPPORTED.into_response();
     }
-    match (request.method(), request.uri().path()) {
-        (&Method::GET, "/jwks.json") => {
+    match (
+        request.method(),
+        request.uri().path(),
+        served.issuer.as_deref(),
+    ) {
+        (&Method::GET, "/jwks.json", Some(issuer)) => {
             ([(CONTENT_TYPE, JSON)], issuer.jwks.clone()).into_response()
         }
-        (&Method::POST, "/token") => mint(issuer, request).await,
-        (&Method::GET, AUTHORIZE_PATH) if served.alpaca.is_some() => {
+        (&Method::POST, "/token", Some(issuer)) => mint(issuer, request).await,
+        (&Method::GET, AUTHORIZE_PATH, _) if served.alpaca.is_some() => {
             authorize(served.alpaca.as_deref(), &request)
         }
-        (&Method::POST, TOKEN_PATH) if served.alpaca.is_some() => {
+        (&Method::POST, TOKEN_PATH, _) if served.alpaca.is_some() => {
             exchange(served.alpaca.as_deref(), request).await
         }
         _ => StatusCode::NOT_FOUND.into_response(),
