@@ -12,7 +12,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use common::{
     Journal, Manager, accounts, at, block_on, connection_of, deployed, identity, kill, manager,
-    restart, revoked_again, stopped,
+    requested, restart, revoked_again, stopped,
 };
 use mandate_canon::Value;
 use mandate_deploy_manager::fake::Call;
@@ -1017,4 +1017,117 @@ fn a_deploy_and_retire_during_a_kill_switch_run_does_not_stop_it() {
         "its own end is not restarted"
     );
     clean(&mut m);
+}
+
+/// A second connection of [`ACCOUNT`], connecting by OAuth.
+const CONNECT: &str = "conn_01J8Z2CONNECT0000000000C9";
+/// An account with no agent, connecting by OAuth on [`CONNECTING_VIA`].
+const CONNECTING: &str = "01J8Z2ACCT00000000000000A9";
+const CONNECTING_VIA: &str = "conn_01J8Z2CONNECT0000000000C8";
+
+/// Opens an OAuth connect of [`ACCOUNT`] at `secs` and lets its token exchange succeed. The
+/// account's executor ran before, so the connect starts nothing and wants nothing.
+fn connecting(m: &mut Manager, journal: &Journal, secs: i64) {
+    journal.services(&requested(CONNECT, ACCOUNT, Some("oauth")), at(secs));
+    tick(m, secs);
+    m.orchestrator()
+        .fake
+        .succeed(&Slot::token_exchange(CONNECT));
+    tick(m, secs + 1);
+}
+
+/// A manager over [`CONNECTING`]'s connect alone: its token exchange succeeded at 2, so its
+/// executor runs, generation 1, wanted by the open, exchanged request and by no agent.
+fn connect_only(journal: &Journal) -> Manager {
+    let mut m = manager(journal, accounts(&[]));
+    journal.services(&requested(CONNECTING_VIA, CONNECTING, Some("oauth")), at(1));
+    tick(&mut m, 1);
+    m.orchestrator()
+        .fake
+        .succeed(&Slot::token_exchange(CONNECTING_VIA));
+    tick(&mut m, 2);
+    assert_eq!(
+        starts(&mut m, &ex(CONNECTING)),
+        vec![1],
+        "the exchanged start"
+    );
+    m
+}
+
+/// DEC-2351 item 2: a kill switch's start while only an open connect wants the executor holds its
+/// run, since no agent wants it, so the run's crash loop leaves the switch unapplied and the owner
+/// is told.
+#[test]
+#[ignore = "pending E21-33"]
+fn a_kill_switch_start_during_an_open_connect_that_loops_is_unapplied() {
+    let journal = Journal::new();
+    let mut m = connect_only(&journal);
+    m.orchestrator().fake.crash(&ex(CONNECTING));
+    journal.services(&kill("workspace", "ws_01J8Z2", 1).1, at(3));
+    tick(&mut m, 3);
+    let causes: Vec<String> = executor_starts(&journal, CONNECTING)
+        .into_iter()
+        .map(|s| s.0)
+        .collect();
+    assert_eq!(
+        causes.last().map(String::as_str),
+        Some("kill_switch"),
+        "the switch's own start"
+    );
+    crash_until_looped(&mut m, &journal, CONNECTING, 4);
+    let codes: Vec<&str> = m.alerts().0.iter().map(|alert| alert.code).collect();
+    assert_eq!(codes, vec![UNAPPLIED]);
+}
+
+/// DEC-2351 item 2: a connect that opens while a kill switch's run goes on does not end the hold,
+/// so its loop leaves the switch unapplied, and a restarted manager reads it so too.
+#[test]
+#[ignore = "pending E21-33"]
+fn a_connect_opened_during_a_held_run_leaves_its_loop_unapplied_live_and_after_a_restart() {
+    let journal = Journal::new();
+    let mut m = retired(&journal);
+    journal.services(&kill("connection", &connection_of(ACCOUNT), 1).1, at(10));
+    tick(&mut m, 10);
+    connecting(&mut m, &journal, 11);
+    let second = crash_until_looped(&mut m, &journal, ACCOUNT, 13);
+    let codes: Vec<&str> = m.alerts().0.iter().map(|alert| alert.code).collect();
+    assert_eq!(codes, vec![UNAPPLIED], "live");
+    let mut m = restart(m);
+    for s in second..second + 50 {
+        tick(&mut m, s);
+    }
+    let codes: Vec<&str> = m.alerts().0.iter().map(|alert| alert.code).collect();
+    assert_eq!(codes, vec![UNAPPLIED, UNAPPLIED], "and after a restart");
+}
+
+/// An executor an open connect alone wants, with no kill switch, crash-loops as any other:
+/// `crash_loop`, never `kill_switch_unapplied`.
+#[test]
+fn a_connects_executor_that_loops_with_no_kill_switch_is_an_ordinary_loop() {
+    let journal = Journal::new();
+    let mut m = connect_only(&journal);
+    crash_until_looped(&mut m, &journal, CONNECTING, 3);
+    let codes: Vec<&str> = m.alerts().0.iter().map(|alert| alert.code).collect();
+    assert_eq!(codes, vec![CRASH_LOOP.code]);
+}
+
+/// A stop the manager journals after a held run ended is never undone by a restarted manager: the
+/// stop ends the hold in the replay too, so the stopped generation is not restarted.
+#[test]
+#[ignore = "pending E21-33"]
+fn a_stop_after_a_held_run_ended_is_not_undone_by_a_restart() {
+    check(&[
+        Op::Deploy(1),
+        Op::Stop(1),
+        Op::KillAgent(1),
+        Op::KillConnection(0),
+        Op::Succeed(0),
+        Op::Succeed(0),
+        Op::Deploy(0),
+        Op::Advance(1),
+        Op::Stop(0),
+        Op::Restart,
+        Op::Advance(1),
+    ])
+    .unwrap();
 }
