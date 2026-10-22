@@ -1380,7 +1380,11 @@ story buys a service, and none uses a real identity-provider account in tests (s
   provider (`invalid_grant`, a disabled subject, a back-channel logout) ends the session with every
   permission and blocks the local passkey route (§6.4, §11.1); the host CLI commits only as its
   registered principal (`HostCliRegistered`, ID-1); and the log scan finds no
-  canary token from any path (ID-9).
+  canary token from any path (ID-9). Route 2's reduction-only session (workspace API spec §4.10,
+  DEC-2117, DEC-2119) is accepted only with its tests (each signature shape, DER tried first, runs
+  the same verification as a known passkey) and with a runbook for its operator alert
+  `reduction_failures_over_limit`: the alert does not ship until infrastructure design §8.2 names
+  its RB number.
 - **E9-2 (Must; SC)** As an admin, I want organizations, workspaces, and roles.
   *Accepted when:* `authorize` matches spec §4.2's matrix exactly, checked by an exhaustive test over
   every role set, permission, and scope against a table parsed from the spec, not from the code (ID-2);
