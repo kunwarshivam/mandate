@@ -23,11 +23,17 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use super::conformance::{self, Harness, at, c};
 use crate::SourceError;
+use crate::kubernetes::{
+    KubernetesAuth, kubernetes_mount_requests, kubernetes_policy, kubernetes_policy_name,
+    mount_accessor,
+};
 use crate::openbao::{OpenBaoConfig, OpenBaoSource, RoleCredentials, provision};
 use crate::policy::{Identity, Mounts};
 use crate::source::Grant;
 use mandate_time::UtcNanos;
-use secrecy::SecretString;
+use reqwest::Certificate;
+use secrecy::{ExposeSecret, SecretString};
+use serde_json::Value;
 use tokio::io::copy_bidirectional;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::watch;
@@ -115,7 +121,7 @@ impl Bao {
             ca_pem: ca_pem.clone(),
             mounts: mounts.clone(),
         };
-        let credentials = provision(&direct, &operator, &[c("c1"), c("c2")])
+        let credentials = provision(&direct, &operator, &[c("c1"), c("c2")], None)
             .await
             .unwrap();
         let target: SocketAddr = address
@@ -327,3 +333,108 @@ async fn no_debug_or_refusal_shows_a_platform_secret() {
         conformance::no_debug_or_refusal_shows_a_platform_secret(&bao).await;
     }
 }
+
+/// `GET /v1/<path>` as the operator, the vault's answer.
+async fn operator_get(address: &str, ca_pem: &[u8], operator: &SecretString, path: &str) -> Value {
+    reqwest::Client::builder()
+        .add_root_certificate(Certificate::from_pem(ca_pem).unwrap())
+        .build()
+        .unwrap()
+        .get(format!("{address}/v1/{path}"))
+        .header("X-Vault-Token", operator.expose_secret())
+        .send()
+        .await
+        .unwrap()
+        .bytes()
+        .await
+        .map(|body| serde_json::from_slice(&body).unwrap())
+        .unwrap()
+}
+
+/// DEC-2060 items 4 and 7 on a real vault: provisioning, twice, enables both Kubernetes mounts,
+/// points each at the API server, and writes each kind's templated policy keyed by its mount's
+/// own accessor; a login to a role not yet made is `RoleMissing`, which a process may wait out.
+/// The pure requests are checked first, so a run with no server still fails until they hold.
+#[tokio::test(flavor = "current_thread")]
+async fn provisioning_sets_both_kubernetes_mounts_up_with_their_templated_policies() {
+    let auth = |ca_pem: &[u8]| KubernetesAuth {
+        host: "https://127.0.0.1:6443".to_owned(),
+        ca_pem: Some(String::from_utf8(ca_pem.to_vec()).unwrap()),
+    };
+    let listed = kubernetes_mount_requests(&Mounts::default(), &auth(PEM_SHAPE));
+    assert!(listed.is_ok(), "{listed:?}");
+    let Some((address, ca_pem, operator)) = server() else {
+        return;
+    };
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    let suffix = format!("{}-{n}", std::process::id());
+    let config = OpenBaoConfig {
+        address: address.clone(),
+        ca_pem: ca_pem.clone(),
+        mounts: Mounts {
+            kv: format!("kv-{suffix}"),
+            auth: format!("approle-{suffix}"),
+            kubernetes_executor: format!("kubernetes-executor-{suffix}"),
+            kubernetes_exchange: format!("kubernetes-exchange-{suffix}"),
+        },
+    };
+    for round in 0..2 {
+        let provisioned = provision(&config, &operator, &[c("c1")], Some(&auth(&ca_pem))).await;
+        assert!(
+            provisioned.is_ok(),
+            "round {round}: {:?}",
+            provisioned.map(drop)
+        );
+    }
+    let mounts = &config.mounts;
+    let listed = operator_get(&address, &ca_pem, &operator, "sys/auth").await;
+    for (identity, mount) in [
+        (Identity::Executor(c("c1")), &mounts.kubernetes_executor),
+        (
+            Identity::TokenExchange(c("c1")),
+            &mounts.kubernetes_exchange,
+        ),
+    ] {
+        assert_eq!(listed["data"][format!("{mount}/")]["type"], "kubernetes");
+        let accessor = mount_accessor(Some(&listed), mount).unwrap();
+        let name = kubernetes_policy_name(&identity, mounts).unwrap();
+        let stored = operator_get(
+            &address,
+            &ca_pem,
+            &operator,
+            &format!("sys/policies/acl/{name}"),
+        )
+        .await;
+        assert_eq!(
+            stored["data"]["policy"].as_str(),
+            Some(
+                kubernetes_policy(&identity, mounts, &accessor)
+                    .unwrap()
+                    .as_str()
+            ),
+            "{identity:?}"
+        );
+        let configured = operator_get(
+            &address,
+            &ca_pem,
+            &operator,
+            &format!("auth/{mount}/config"),
+        )
+        .await;
+        assert_eq!(
+            configured["data"]["kubernetes_host"],
+            "https://127.0.0.1:6443"
+        );
+    }
+    let login = OpenBaoSource::login_kubernetes(
+        &config,
+        Identity::Executor(c("c1")),
+        &SecretString::from("x.y.z".to_owned()),
+        at(1_000_000),
+    )
+    .await;
+    assert_eq!(login.map(drop), Err(SourceError::RoleMissing));
+}
+
+/// A CA certificate's shape, for the pure check that runs without a server.
+const PEM_SHAPE: &[u8] = b"-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n";
