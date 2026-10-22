@@ -1,0 +1,6 @@
+file = "crates/mandate-executor/tests/hand.rs"
+test = "a_working_sell_holds_the_close_until_its_cancel_is_confirmed"
+reason = """
+E7-4's account kill switch, A1b (DEC-2333): today the confirmed cancel of the last working sell sends no close-position; the close on confirmation is A1b's. That is a behaviour, not a stub's report. It
+still runs and fails, and the slice that implements it deletes this file with its `#[ignore]` line.
+"""

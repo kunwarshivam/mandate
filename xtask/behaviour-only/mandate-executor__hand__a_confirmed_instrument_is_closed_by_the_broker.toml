@@ -1,0 +1,6 @@
+file = "crates/mandate-executor/tests/hand.rs"
+test = "a_confirmed_instrument_is_closed_by_the_broker"
+reason = """
+E7-4's account kill switch, A1b (DEC-2333): today a read that confirms an instrument clear sends no close-position; the close on confirmation is A1b's. That is a behaviour, not a stub's report. It
+still runs and fails, and the slice that implements it deletes this file with its `#[ignore]` line.
+"""

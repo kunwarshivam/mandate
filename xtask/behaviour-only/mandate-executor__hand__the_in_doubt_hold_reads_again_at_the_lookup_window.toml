@@ -1,0 +1,6 @@
+file = "crates/mandate-executor/tests/hand.rs"
+test = "the_in_doubt_hold_reads_again_at_the_lookup_window"
+reason = """
+E7-4's account kill switch, A1b (DEC-2333): today a lost cancel-all answer is read once and never again at unknown_absent_window_s; the in-doubt re-read is A1b's. That is a behaviour, not a stub's report. It
+still runs and fails, and the slice that implements it deletes this file with its `#[ignore]` line.
+"""

@@ -5680,6 +5680,244 @@ fn another_instruments_open_interval_does_not_hide_the_closing_ones_start() {
     assert_eq!(started, vec![BTC], "BTC's own interval starts");
 }
 
+/// The confirming read is one taken after the switch (DEC-2333 item 6): a reconciliation whose
+/// snapshot was taken at a head before the switch's record cannot show what the cancel-all did, so
+/// it confirms nothing and cancels nothing; one taken at or after it does.
+#[test]
+#[ignore = "pending E7-4"]
+fn only_a_read_taken_after_the_switch_confirms_its_cancel_all() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (mut shell, stop) = crypto_stop_account(&ports);
+    let before = shell.head().0;
+    shell.run(account_switch(Initiator::Owner), &ports);
+    let after = shell.head().0;
+    let read = |head: u64| {
+        let mut taken = snapshot(head, ReconcileReason::Scheduled);
+        taken.open_orders = vec![stop("new")];
+        Input::BrokerSnapshot(taken)
+    };
+    let working = stop("new").client_order_id;
+    let cancels = |ran: &common::Ran| {
+        ran.requests.iter().any(|r| {
+            matches!(
+                r,
+                BrokerRequest::Cancel { client_order_id }
+                    if Some(client_order_id.as_str()) == working.as_deref()
+            )
+        })
+    };
+
+    let stale = shell.run(read(before), &ports);
+    let fresh = shell.run(read(after), &ports);
+
+    assert!(
+        !cancels(&stale),
+        "a snapshot taken before the switch confirms nothing: {:?}",
+        stale.requests
+    );
+    assert!(
+        cancels(&fresh),
+        "one taken after it confirms, and cancels the stop by its id: {:?}",
+        fresh.requests
+    );
+}
+
+/// An agent switch's flatten rung in flight when the account switch goes is never followed by
+/// another (DEC-2333 item 6): the flatten is exempt from the agent's mode, so neither the mode nor
+/// the account switch's own guard held it before; the cancel-all cancels the rung, and the
+/// confirmed cancel steps no new rung out beside the switch's close, then or at the next step.
+#[test]
+fn a_ladder_rung_in_flight_is_not_followed_by_another_beside_the_close() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = protected_position(&ports);
+    shell.run(Input::Market(quote(AAPL, "150", "150.2", 20)), &ports);
+    shell.run(
+        Input::Command(Command::KillSwitch {
+            scope: KillScope::Agent(agent(common::AGENT)),
+            initiator: Initiator::RiskLimit,
+            confirmation: None,
+            cause: None,
+        }),
+        &ports,
+    );
+    let sent = shell.run(
+        Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+            client_order_id: "md-oco-1".to_owned(),
+        })),
+        &ports,
+    );
+    let rung = sent
+        .submissions()
+        .first()
+        .map(|o| o.client_order_id.as_str().to_owned())
+        .expect("the agent switch's flatten sends its first rung");
+    shell.run(account_switch(Initiator::Owner), &ports);
+
+    let confirmed = shell.run(
+        Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+            client_order_id: rung.clone(),
+        })),
+        &ports,
+    );
+    let later = shell.run(Input::Tick(clock(40)), &ports);
+
+    let sent: Vec<_> = confirmed
+        .submissions()
+        .into_iter()
+        .chain(later.submissions())
+        .map(|o| o.client_order_id.as_str().to_owned())
+        .collect();
+    assert!(
+        sent.is_empty(),
+        "no rung after {rung} beside the switch's close: {sent:?}"
+    );
+}
+
+/// The close goes once its instrument is confirmed clear (§5.5, DEC-2333 item 2): the cancel-all
+/// accepted, a read showing nothing of ours working in BTC, and the broker's close-position for BTC
+/// is sent, once.
+#[test]
+#[ignore = "pending E7-4"]
+fn a_confirmed_instrument_is_closed_by_the_broker() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (mut shell, _) = crypto_stop_account(&ports);
+    shell.run(account_switch(Initiator::Owner), &ports);
+    shell.run(
+        Input::Broker(Ok(BrokerOutcome::AccountWideAccepted)),
+        &ports,
+    );
+
+    let read = shell.run(
+        Input::Broker(Ok(BrokerOutcome::OpenOrders(Vec::new()))),
+        &ports,
+    );
+
+    let closes: Vec<&str> = read
+        .requests
+        .iter()
+        .filter_map(|r| match r {
+            BrokerRequest::ClosePosition(_, instrument) => Some(instrument.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(closes, vec![BTC], "BTC's close-position, once");
+}
+
+/// An instrument with a sell of ours still working waits for that cancel's confirmation, and
+/// closes then (DEC-2333 item 3): never beside a sell that may still fill.
+#[test]
+#[ignore = "pending E7-4"]
+fn a_working_sell_holds_the_close_until_its_cancel_is_confirmed() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (mut shell, stop) = crypto_stop_account(&ports);
+    shell.run(account_switch(Initiator::Owner), &ports);
+    shell.run(
+        Input::Broker(Ok(BrokerOutcome::AccountWideAccepted)),
+        &ports,
+    );
+    let read = shell.run(
+        Input::Broker(Ok(BrokerOutcome::OpenOrders(vec![stop("new")]))),
+        &ports,
+    );
+    let closing = |ran: &common::Ran| {
+        ran.requests
+            .iter()
+            .any(|r| matches!(r, BrokerRequest::ClosePosition(..)))
+    };
+    assert!(!closing(&read), "no close beside the working stop");
+
+    let confirmed = shell.run(
+        Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+            client_order_id: stop("new").client_order_id.unwrap_or_default(),
+        })),
+        &ports,
+    );
+
+    assert!(
+        closing(&confirmed),
+        "the stop's confirmed cancel releases BTC's close: {:?}",
+        confirmed.requests
+    );
+}
+
+/// The in-doubt hold reads again every `unknown_absent_window_s` while the cancel-all is
+/// unconfirmed (DEC-2333 item 3): a lost answer and a read that never comes back are read again at
+/// the window, never by sending the cancel-all again.
+#[test]
+#[ignore = "pending E7-4"]
+fn the_in_doubt_hold_reads_again_at_the_lookup_window() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (mut shell, _) = crypto_stop_account(&ports);
+    shell.run(account_switch(Initiator::Owner), &ports);
+    shell.run(Input::Broker(Err(BrokerUnknown::Timeout)), &ports);
+
+    let window = config.unknown_absent_window_s;
+    let again = shell.run(Input::Tick(clock(20 + window + 1)), &ports);
+
+    assert!(
+        again
+            .requests
+            .iter()
+            .any(|r| matches!(r, BrokerRequest::ListOpenOrders)),
+        "the open orders are read again at the window: {:?}",
+        again.requests
+    );
+    assert!(
+        !again
+            .requests
+            .iter()
+            .any(|r| matches!(r, BrokerRequest::CancelAll(_))),
+        "never the cancel-all again"
+    );
+}
+
+/// At §5.4's bound, protection is placed again only for the held quantity less every sell not
+/// confirmed cancelled (DEC-2333 item 3): a lost cancel-all confirms nothing, so the original stop,
+/// covering the whole position, still counts, and nothing is placed beside it.
+#[test]
+fn a_lost_cancel_all_at_the_bound_places_nothing_beside_the_original_stop() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (mut shell, _) = crypto_stop_account(&ports);
+    shell.run(account_switch(Initiator::Owner), &ports);
+    shell.run(Input::Broker(Err(BrokerUnknown::Timeout)), &ports);
+
+    let bound = shell.run(Input::Tick(clock(20 + 3_600)), &ports);
+
+    let placed: Vec<_> = bound
+        .submissions()
+        .into_iter()
+        .map(|o| (o.client_order_id.as_str().to_owned(), o.qty))
+        .collect();
+    assert!(
+        placed.is_empty(),
+        "nothing beside the stop not confirmed cancelled: {placed:?}"
+    );
+}
+
 /// A mode lifted after the account switch, as the account stream copies it: `agent` back to
 /// `normal` from `restriction`, citing the control-stream record that lifted it.
 fn lifted(shell: &mut Shell, agent: &str, restriction: &str) {
