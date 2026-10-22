@@ -225,3 +225,46 @@ fn the_verifiers_fold_answers_every_stream_case() {
     }
     assert!(failed.is_empty(), "{}", failed.join("\n"));
 }
+
+/// A stream case's records with `member` of `record`'s payload set to `value`.
+fn edited(case: &Value, record: usize, member: &str, value: &str) -> Value {
+    let mut case = case.clone();
+    let Some(Value::Object(top)) = Some(&mut case) else {
+        unreachable!()
+    };
+    let Some(Value::Array(records)) = top.get_mut("records") else {
+        panic!("no records")
+    };
+    let Some(Value::Object(body)) = records.get_mut(record) else {
+        panic!("no record {record}")
+    };
+    let Some(Value::Object(payload)) = body.get_mut("payload") else {
+        panic!("no payload")
+    };
+    payload.insert(Key::new(member).unwrap(), Value::Str(value.to_owned()));
+    case
+}
+
+/// Rule 263 reads the closer's own kind and the removal's own occasion: a `ConnectionRefused`
+/// of any occasion but `connect` closes no request, and a removal naming a request's close as a
+/// revocation names no closer of its occasion, so each is refused at the removal.
+#[test]
+#[ignore = "pending E21-33"]
+fn a_removal_names_a_connect_refusal_of_its_own_occasion() {
+    let section = section();
+    let closed = list(&section, "streams")
+        .iter()
+        .find(|case| text(case, "name") == "removed_on_close")
+        .unwrap();
+    assert_eq!(verify_connection_roles(&rows(closed)), Ok(()));
+    let broken = Err(ConnectionRolesError::Broken {
+        index: 3,
+        rule: ConnectionRolesRule::Removed,
+    });
+    for occasion in ["reconnect", "reauthorize"] {
+        let case = edited(closed, 2, "occasion", occasion);
+        assert_eq!(verify_connection_roles(&rows(&case)), broken, "{occasion}");
+    }
+    let case = edited(closed, 3, "occasion", "revoked");
+    assert_eq!(verify_connection_roles(&rows(&case)), broken, "revoked");
+}
