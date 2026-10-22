@@ -143,6 +143,15 @@ fn a_forwarded_address_counts_only_from_a_listed_ingress_peer() {
         "203.0.113.9",
         "a forwarded IPv4-mapped address counts as its IPv4 address, never as ::/64"
     );
+    let across = headers(&[
+        ("x-forwarded-for", "198.51.100.1, 203.0.113.9"),
+        ("x-forwarded-for", "127.0.0.1, ::ffff:127.0.0.1"),
+    ]);
+    assert_eq!(
+        reduction::address(loopback, &across, &ingress),
+        "203.0.113.9",
+        "a last line of listed peers only: the answer is on an earlier line"
+    );
     let only = headers(&[("x-forwarded-for", "127.0.0.1")]);
     assert_eq!(reduction::address(loopback, &only, &ingress), "127.0.0.1");
     assert_eq!(
@@ -186,9 +195,21 @@ fn the_device_key_is_a_digest_of_one_well_formed_cookie() {
         format!("{DEVICE_COOKIE}={DEVICE}="),
         format!("{DEVICE_COOKIE}=q83vEjRWeJCrze8SNFZ4kKvN7xI0VniQq83vEjRWeJB"),
         format!("{DEVICE_COOKIE}={DEVICE}; {DEVICE_COOKIE}={other}"),
+        format!("{DEVICE_COOKIE}={}", &DEVICE[..42]),
+        format!("{DEVICE_COOKIE}=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHg"),
+        format!("{DEVICE_COOKIE}=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8g"),
     ] {
         assert_eq!(reduction::device(&cookie(&refused)), None, "{refused}");
     }
+    let split = headers(&[
+        ("cookie", &format!("{DEVICE_COOKIE}={DEVICE}")),
+        ("cookie", &format!("{DEVICE_COOKIE}={other}")),
+    ]);
+    assert_eq!(
+        reduction::device(&split),
+        None,
+        "a second device cookie on another Cookie line"
+    );
     assert_eq!(reduction::device(&HeaderMap::new()), None);
 }
 
