@@ -3042,6 +3042,38 @@ enables `live` (ES-23, OPS-5).
     pass while its request has time left, making and deleting its account each time; a retry
     bound or backoff is left. Open until R1 lands: DEC-2332 items 4 to 6 (the environment pin, the
     vault CA, the exchange's launch).
+  - **The OAuth connect drill** (`cargo xtask cell drill connect`, lane D1), the gate before the
+    founder's staging connect: in the local cell, the owner's connect start through the API, the
+    deployment manager's token exchange, the browser's authorization at the fixture provider
+    (DEC-1176) and its callback, the exchange's redemption and success, the executor's `exchanged`
+    start and its connect check, and the API's `ConnectionEstablished`, then a seeded run with the
+    exchange's egress to the fixture removed, which must refuse the connect. It waits on:
+    - the token-exchange image in the cell (lane D1, #2219): its Dockerfile, the cell's build, and
+      `built` in `processes.json`; `cargo xtask cell up` then turns `oauthFixture.enabled` on only
+      when the stub's and the exchange's images are built;
+    - the exchange itself (lane X, E10-13 slice 5b-3b): `mandate-token-exchange` passes its start
+      checks and exits `token_exchange_not_yet_exchanging`, so its pod fails, no executor starts,
+      and the connect ends by its deadline;
+    - the fixture pod itself: #2213, #2214 and #2215 (DEC-1176);
+    - `MANDATE_ALPACA_AUTHORIZE_URL` in the API (lane X): the API names Alpaca's authorize page
+      alone, so the browser cannot reach the fixture;
+    - the connect's finish in the API (lane X): `mandate_connections::manager::plan_finish` has no
+      caller, so nothing appends `ConnectionEstablished`, or `ConnectionRefused` with occasion
+      `connect`, after the executor's checks (connections spec §5.2 steps 4 to 6);
+    - the exchanged executor's connect check (lane V2 with D1): the manager starts it as `run`,
+      which takes the lease of a connection whose check already passed, so on a fresh connect it
+      never runs the check; and where the check's `--pii-ref` comes from on a connect;
+    - the API's vault binding in the cell (lane D1): the chart's `api.vaultBinding` (DEC-2338)
+      mounts the API's AppRole and the vault's CA, and `cargo xtask cell up` provisions the
+      AppRole Secrets and sets `api.vaultBinding: true`, so the API can write the callback's code;
+    - K2a and K2b (#2203, #2204, #2209, #2210), which start that executor on the exchange's
+      success, as its connection's own account;
+    - the connection manager's AppRole in the API pod (lane D1, #2269, DEC-2348), since the API
+      finishes a connect as the connection manager;
+    - a new connection's paths in the Api and ConnectionManager vault policies (lane D1, DEC-2349):
+      `openbao_policy` writes `connections/<c>/code` and `/token` only for the connections given to
+      `provision`, so a web connect's new connection is `Denied` its code write and its finish's
+      deletes until the policy names it, before the API returns the authorize URL.
 - **E21-34 (Proposed, M8; SC; lane O4)** As an owner, I want the kill switch reachable in the cell
   with nothing running but Postgres, the executor and the broker, so that rule 13 holds when the
   web app, the API and the cell's tooling are down (design §3.6, OPS-4). *Accepted when:*
