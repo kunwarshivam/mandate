@@ -29,6 +29,7 @@ use secrecy::{ExposeSecret, SecretSlice, SecretString};
 use serde_json::{Value, json};
 
 use crate::SourceError;
+use crate::fingerprint::AccountFingerprint;
 use crate::kubernetes::{
     KubernetesAuth, kubernetes_mount_requests, kubernetes_policy, kubernetes_policy_name,
     mount_accessor, service_account_name,
@@ -634,6 +635,24 @@ impl OpenBaoSource {
             self.mounts.auth,
             role_name(&Identity::TokenExchange(connection.clone()))
         )
+    }
+}
+
+impl OpenBaoSource {
+    /// The fingerprint of the broker account id `account` under the deployment's key, by transit's
+    /// HMAC
+    /// (`<transit>/hmac/account-fingerprint`): asked by a connection's executor alone, at its
+    /// connect (DEC-2345 item 2). The key never leaves the vault, and the id is sent only to it.
+    ///
+    /// # Errors
+    /// [`SourceError::Denied`] for any identity but an executor, the vault's refusals, and
+    /// [`SourceError::Malformed`] for an answer that is not a fingerprint.
+    pub async fn hmac_account(
+        &self,
+        account: &SecretString,
+    ) -> Result<AccountFingerprint, SourceError> {
+        let _ = account;
+        Err(SourceError::Unimplemented { story: "E21-32" })
     }
 }
 

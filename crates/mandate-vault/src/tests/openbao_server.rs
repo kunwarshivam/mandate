@@ -23,6 +23,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use super::conformance::{self, Harness, at, c};
 use crate::SourceError;
+use crate::fingerprint::FINGERPRINT_KEY;
 use crate::kubernetes::{
     KubernetesAuth, kubernetes_mount_requests, kubernetes_policy, kubernetes_policy_name,
     mount_accessor, service_account_name,
@@ -1022,4 +1023,89 @@ async fn an_executor_creates_its_own_account_entry_once_and_no_identity_reads_it
         assert_eq!(manager.delete(&revoked).await, Ok(()));
     }
     assert!(stored().await.is_some());
+}
+
+/// DEC-2345 items 1, 2 and 4: provisioning creates the fingerprint key on the transit mount, never
+/// exportable nor deletable, and has the registry entry take only check-and-set writes; a
+/// connection's executor, and no other identity, hashes an account id under that key, the same id
+/// to the same fingerprint for every connection and another id to another. A vault nobody answers
+/// for is an outage, checked first.
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "pending E21-32"]
+async fn only_an_executor_hashes_an_account_under_the_vaults_key() {
+    let ca = include_bytes!("fixtures/isrg-root-x1.pem").to_vec();
+    let id = |text: &str| SecretString::from(text.to_owned());
+    let unreachable = OpenBaoSource::from_token(
+        &nowhere(ca),
+        Identity::Executor(c("c1")),
+        SecretString::from("unused".to_owned()),
+        at(1_000_600),
+    )
+    .unwrap();
+    assert_eq!(
+        unreachable.hmac_account(&id("acct-1")).await,
+        Err(SourceError::Unavailable)
+    );
+    let Some(bao) = Bao::new().await else {
+        return;
+    };
+    let mounts = &bao.config.mounts;
+    let key = bao
+        .operator(
+            Method::GET,
+            &format!("{}/keys/{FINGERPRINT_KEY}", mounts.transit),
+            None,
+        )
+        .await;
+    assert_eq!(
+        key.pointer("/data/exportable"),
+        Some(&json!(false)),
+        "{key}"
+    );
+    assert_eq!(
+        key.pointer("/data/deletion_allowed"),
+        Some(&json!(false)),
+        "{key}"
+    );
+    let claims = bao
+        .operator(
+            Method::GET,
+            &format!("{}/metadata/personal/claims", mounts.kv),
+            None,
+        )
+        .await;
+    assert_eq!(
+        claims.pointer("/data/cas_required"),
+        Some(&json!(true)),
+        "{claims}"
+    );
+    let now = at(1_000_000);
+    let (one, two) = (
+        executor_of(&bao, "c1", now).await,
+        executor_of(&bao, "c2", now).await,
+    );
+    let first = one.hmac_account(&id("acct-1")).await.unwrap();
+    assert_eq!(one.hmac_account(&id("acct-1")).await, Ok(first.clone()));
+    assert_eq!(two.hmac_account(&id("acct-1")).await, Ok(first.clone()));
+    assert_ne!(one.hmac_account(&id("acct-2")).await, Ok(first));
+    for identity in [Identity::ConnectionManager, Identity::Api] {
+        let other = bao.source(identity.clone(), now).await;
+        assert_eq!(
+            other.hmac_account(&id("acct-1")).await,
+            Err(SourceError::Denied),
+            "{identity:?}"
+        );
+    }
+}
+
+/// A session as `connection`'s executor, logged in by its Kubernetes token.
+async fn executor_of(bao: &Bao, connection: &str, now: UtcNanos) -> OpenBaoSource {
+    let identity = Identity::Executor(c(connection));
+    OpenBaoSource::from_token(
+        &bao.config,
+        identity.clone(),
+        bao.kubernetes_token(&identity).await,
+        at(now.secs() + 600),
+    )
+    .unwrap()
 }
