@@ -143,6 +143,8 @@ pub struct Fixture {
     pub connect: Option<Arc<Connect>>,
     pub port: Arc<Port>,
     pub codes: Arc<Codes>,
+    /// The membership records the server reads, which a test may change mid-flight.
+    pub records: Arc<Mutex<Vec<MembershipRecord>>>,
 }
 
 static DIRS: Mutex<u32> = Mutex::new(0);
@@ -183,10 +185,11 @@ pub fn fixture_random(
     std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).expect("mode");
     let key = read_session_key(&dir).expect("the key reads");
     let journal = Arc::new(MemJournal::default());
-    let records = vec![
+    let records = Arc::new(Mutex::new(vec![
         activated(1, principal(ALICE), &[Role::WorkspaceAdmin]),
         activated(2, principal(BOB), &[Role::Viewer]),
-    ];
+    ]));
+    let read_records = Arc::clone(&records);
     let sessions = Arc::new(Sessions::new(&key, Box::new(OsRandom::new())));
     let clock = common::ManualClock::at(T0);
     let config = IssuerConfig::new(
@@ -216,7 +219,9 @@ pub fn fixture_random(
         links: Arc::new(common::LinksAt(dir.join("absent"))),
         clock: Arc::clone(&clock) as Arc<dyn mandate_api_server::clock::Clock>,
         journal: Arc::clone(&journal) as Arc<dyn mandate_api_server::journal::Journal>,
-        members: Arc::new(move |_: &[StoredEvent]| Ok(records.clone())),
+        members: Arc::new(move |_: &[StoredEvent]| {
+            Ok(read_records.lock().expect("unpoisoned").clone())
+        }),
         hosted: hosted(),
         artifacts: None,
         objects: None,
@@ -237,7 +242,13 @@ pub fn fixture_random(
         connect,
         port,
         codes,
+        records,
     }
+}
+
+/// Makes Alice a viewer only, as a demotion while she is at Alpaca would.
+pub fn demote_alice(f: &Fixture) {
+    f.records.lock().expect("unpoisoned")[0] = activated(1, principal(ALICE), &[Role::Viewer]);
 }
 
 pub fn client() -> OAuthClient {
