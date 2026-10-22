@@ -54,9 +54,8 @@ impl SecretSource for Codeless {
 #[tokio::test(flavor = "current_thread")]
 async fn a_source_that_holds_no_codes_refuses_a_take() {
     let connection = ConnectionId::new("c1").map_err(drop);
-    let account = AccountRef::new("01J8Z2ACCT0000000000000001").map_err(drop);
-    assert!(connection.is_ok() && account.is_ok());
-    if let (Ok(connection), Ok(account)) = (connection, account) {
+    assert!(connection.is_ok());
+    if let Ok(connection) = connection {
         let source = Codeless(Identity::TokenExchange(connection.clone()));
         let took = source
             .take_code(&connection)
