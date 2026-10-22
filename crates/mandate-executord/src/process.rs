@@ -458,11 +458,11 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                 unreadable = true;
                 continue;
             };
-            let revoked = following.revoked.contains(&agent);
+            let openings_held = following.held.contains(&agent);
             proposed.extend(
                 asked
                     .into_iter()
-                    .filter(|proposal| !(revoked && proposal.purpose.adds_risk()))
+                    .filter(|proposal| !(openings_held && proposal.purpose.adds_risk()))
                     .filter(|proposal| {
                         self.state
                             .intent(&IntentId(proposal.intent.clone()))

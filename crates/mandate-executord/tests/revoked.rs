@@ -264,7 +264,6 @@ fn a_later_deployment_elsewhere_keeps_the_agent_followed_here() -> Result<(), Er
 /// blocker): this account still reads its kill switch and hands its exit, but not its opening, since
 /// its latest deployment names another account.
 #[test]
-#[ignore = "pending E7-4"]
 fn an_agent_redeployed_elsewhere_gets_no_opening_here_but_its_exit_and_switch() -> Result<(), Error>
 {
     let journal = deployed()?;

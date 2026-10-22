@@ -51,9 +51,10 @@ pub fn folded(row: &StoredEvent) -> Result<FoldedEvent, Unreadable> {
 /// version-2 `ConnectionEstablished` in this environment ever named this `account_ref` for, and a
 /// later deployment naming another connection never drops it (DEC-2343 item 2). A revocation never
 /// ends the following either (DEC-2343 item 1): the agent's kill switches, exits and protective
-/// re-placements are still read, and it is `revoked`, so none of its openings is handed, while any
-/// of those connections' latest establishment or revocation is not a version-2 establishment
-/// naming this account. A version-1 deployment names no connection, so it neither begins nor ends
+/// re-placements are still read. Its openings are `held` unless its latest version-2 deployment, on
+/// any connection, names a connection whose latest establishment or revocation is a version-2
+/// establishment naming this account: none after a revocation, and none once a later deployment
+/// names another account's connection. A version-1 deployment names no connection, so it neither begins nor ends
 /// any following (DEC-1171 item 3), and an agent whose deployment stopped is still followed, since
 /// it may still hold orders or a position its kill switch must reach (`AGENTS.md` rule 13). Each
 /// agent comes with the `mandate_version` of its latest version-2 deployment on this account, the
@@ -61,7 +62,8 @@ pub fn folded(row: &StoredEvent) -> Result<FoldedEvent, Unreadable> {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Following {
     pub agents: BTreeMap<AgentId, MandateVersion>,
-    pub revoked: BTreeSet<AgentId>,
+    /// The followed agents whose openings are not handed (DEC-2343 item 1).
+    pub held: BTreeSet<AgentId>,
     /// Each followed agent's deployments on this account's connections, by control-stream `seq`.
     deployments: BTreeMap<AgentId, Vec<(u64, String)>>,
     /// Each of this account's connections' revocations, by control-stream `seq`.
@@ -185,6 +187,9 @@ pub fn agents_of(
         ..Following::default()
     };
     for (agent, deployments) in deployed {
+        let latest_live = deployments
+            .last()
+            .is_some_and(|(_, connection, _)| live.get(connection).copied().unwrap_or(false));
         let here: Vec<(u64, String, String)> = deployments
             .into_iter()
             .filter(|(_, connection, _)| ours.contains(connection))
@@ -196,11 +201,8 @@ pub fn agents_of(
         following
             .agents
             .insert(agent.clone(), MandateVersion(version.clone()));
-        if here
-            .iter()
-            .any(|(_, connection, _)| !live.get(connection).copied().unwrap_or(false))
-        {
-            following.revoked.insert(agent.clone());
+        if !latest_live {
+            following.held.insert(agent.clone());
         }
         following.deployments.insert(
             agent,
