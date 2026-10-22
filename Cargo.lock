@@ -1703,6 +1703,7 @@ dependencies = [
  "mandate-release",
  "mandate-spec",
  "mandate-time",
+ "mandate-vault",
  "proptest",
  "reqwest",
  "ring",
