@@ -60,6 +60,9 @@ struct SlotState {
     /// The kill switches a start already answered, so a row read again never asks for another.
     answered: BTreeSet<String>,
     stopping: BTreeSet<u64>,
+    /// The generations whose stop this manager saw carried out: a token exchange's account is
+    /// deleted then, listed pod or not, so its stop is not asked again.
+    swept: BTreeSet<u64>,
     /// This manager journaled the current generation's start and the orchestrator has not yet
     /// carried it out. Never set by a replay: after a restart, a generation the orchestrator does
     /// not list counts as exited, so its next start is journaled and counted.
@@ -277,6 +280,13 @@ impl Manager {
         }
     }
 
+    /// Records that the orchestrator carried out the stop of `generation` of `slot`.
+    pub fn stopped(&mut self, slot: &Slot, generation: u64) {
+        if let Some(state) = self.slots.get_mut(slot) {
+            state.swept.insert(generation);
+        }
+    }
+
     /// Records that the orchestrator carried out the start of `generation` of `slot`.
     pub fn launched(&mut self, slot: &Slot, generation: u64) {
         if let Some(state) = self.slots.get_mut(slot)
@@ -431,7 +441,9 @@ fn step(
 /// A token exchange's step (DEC-1175 items 2 to 4, DEC-1177 item 12): one start, at generation 1, while its request
 /// is open and has at least a second left, asked of the orchestrator again only while this
 /// manager has not seen it carried out; never a restart; and once the request closes, a stop of
-/// every instance still listed, exited or not, so its pod and account are deleted. The deadline
+/// every instance still listed, exited or not, so its pod and account are deleted, and of the last
+/// generation started even when none is listed, until this manager sees one carried out, so an
+/// account whose pod never ran is deleted too. The deadline
 /// stops nothing: the pod ends by it.
 fn exchange_step(
     slot: &Slot,
@@ -441,7 +453,11 @@ fn exchange_step(
     instances: &[&Instance],
 ) -> Option<Decision> {
     if !open {
-        let generation = instances.iter().map(|i| i.generation).max()?;
+        let listed = instances.iter().map(|i| i.generation).max();
+        let generation = listed.or((state.generation >= 1).then_some(state.generation))?;
+        if listed.is_none() && state.swept.contains(&generation) {
+            return None;
+        }
         return Some(if state.stopping.contains(&generation) {
             Decision::Retry(Effect::Stop {
                 slot: slot.clone(),

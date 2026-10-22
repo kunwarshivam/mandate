@@ -163,7 +163,9 @@ impl<J: ControlJournal, O: Orchestrator, A: Alerts> Deployer<J, O, A> {
                 }
             }
             Effect::Stop { slot, generation } => {
-                let _retried_next_pass = self.orchestrator.stop(&slot, generation).await;
+                if self.orchestrator.stop(&slot, generation).await.is_ok() {
+                    self.manager.stopped(&slot, generation);
+                }
             }
             Effect::Alert(alert) => self.alerts.raise(alert),
         }

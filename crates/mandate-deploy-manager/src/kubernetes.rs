@@ -281,10 +281,26 @@ impl Kubernetes {
         )
     }
 
-    /// Creates `body` at `url`; one that already exists is made.
-    async fn create(&self, url: String, body: &Value) -> Result<(), Unavailable> {
-        let (status, _) = self.send(Method::POST, url, Some(body)).await?;
-        if status.is_success() || status == StatusCode::CONFLICT {
+    /// Makes `slot`'s account, or finds the one already made; an account of that name the manager
+    /// would not have made (another manager's, a mounted token, a Secret) is refused, so no pod
+    /// runs as it (DEC-1177 item 4).
+    async fn make_account(&self, slot: &Slot) -> Result<(), Unavailable> {
+        let made = self.account(slot).ok_or(Unavailable)?;
+        let (status, _) = self
+            .send(Method::POST, self.accounts(), Some(&made))
+            .await?;
+        if status.is_success() {
+            return Ok(());
+        }
+        let name = self.account_name(slot).ok_or(Unavailable)?;
+        if status != StatusCode::CONFLICT {
+            return Err(Unavailable);
+        }
+        let (status, body) = self
+            .send(Method::GET, format!("{}/{name}", self.accounts()), None)
+            .await?;
+        let found: Value = serde_json::from_slice(&body).map_err(|_| Unavailable)?;
+        if status == StatusCode::OK && same_account(&found, &made) {
             Ok(())
         } else {
             Err(Unavailable)
@@ -361,11 +377,21 @@ impl Orchestrator for Kubernetes {
         let pod = self
             .manifest(slot, generation, lifetime)
             .ok_or(Unavailable)?;
-        if self.account_name(slot).is_some() {
-            let account = self.account(slot).ok_or(Unavailable)?;
-            self.create(self.accounts(), &account).await?;
+        let account = self.account_name(slot);
+        if account.is_some() {
+            self.make_account(slot).await?;
         }
-        self.create(self.pods(), &pod).await
+        let (status, _) = self.send(Method::POST, self.pods(), Some(&pod)).await?;
+        if status.is_success() || status == StatusCode::CONFLICT {
+            return Ok(());
+        }
+        if let Some(account) = account
+            && refused(status)
+        {
+            let _swept_again_when_the_request_closes =
+                self.delete(format!("{}/{account}", self.accounts())).await;
+        }
+        Err(Unavailable)
     }
 
     /// Deletes the account first, then the pod: a stop that fails leaves the pod listed, so the
@@ -378,6 +404,33 @@ impl Orchestrator for Kubernetes {
         let pod = format!("{}/{}", self.pods(), self.pod_name(slot, generation));
         self.delete(pod).await
     }
+}
+
+/// Whether the API server refused a create outright: a client error other than a conflict or a
+/// rate limit, so nothing was made. A server error or a lost answer may have made it.
+fn refused(status: StatusCode) -> bool {
+    status.is_client_error()
+        && status != StatusCode::CONFLICT
+        && status != StatusCode::TOO_MANY_REQUESTS
+}
+
+/// Whether `found` is the account the manager makes, `made`: its labels, no mounted token, and
+/// no Secret or pull secret.
+fn same_account(found: &Value, made: &Value) -> bool {
+    let label =
+        |account: &Value, name: &str| account.get("metadata")?.get("labels")?.get(name).cloned();
+    let labelled = [MANAGED_BY, CHART_WORKSPACE, PROCESS]
+        .iter()
+        .all(|name| label(found, name).is_some() && label(found, name) == label(made, name));
+    let empty = |member: &str| {
+        found
+            .get(member)
+            .is_none_or(|v| v.is_null() || v.as_array().is_some_and(Vec::is_empty))
+    };
+    labelled
+        && found.get("automountServiceAccountToken") == Some(&Value::Bool(false))
+        && empty("secrets")
+        && empty("imagePullSecrets")
 }
 
 /// One listed pod as an instance. A pod of this manager that cannot be read makes the whole list
