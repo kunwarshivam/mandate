@@ -12,6 +12,7 @@
 use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::num::NonZeroU32;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use axum::body::Bytes;
@@ -211,6 +212,8 @@ pub struct Reduction {
     outstanding: Mutex<BTreeMap<String, Issued>>,
     ingress: Vec<IpAddr>,
     random: Box<dyn Random>,
+    /// How many `reduction_failures_over_limit` alerts this process has raised.
+    alerts: AtomicU64,
 }
 
 impl Reduction {
@@ -221,7 +224,22 @@ impl Reduction {
             outstanding: Mutex::new(BTreeMap::new()),
             ingress,
             random,
+            alerts: AtomicU64::new(0),
         }
+    }
+
+    /// Raises the operator alert `reduction_failures_over_limit` once: its opaque code on standard
+    /// error, naming no address, device, member, or passkey (rule 6), and one more in
+    /// [`Reduction::alerts_raised`].
+    pub fn alerted(&self) {
+        self.alerts.fetch_add(1, Ordering::Relaxed);
+        eprintln!("alert: {FAILURES_OVER_LIMIT}");
+    }
+
+    /// How many `reduction_failures_over_limit` alerts this process has raised, for the tests and
+    /// a future metric.
+    pub fn alerts_raised(&self) -> u64 {
+        self.alerts.load(Ordering::Relaxed)
     }
 
     /// The ingress peers the store reads forwarded addresses from.
@@ -432,7 +450,7 @@ pub async fn open(
         .reduction
         .settle(&client, taken.as_ref(), judged.is_some(), now)
     {
-        eprintln!("alert: {FAILURES_OVER_LIMIT}");
+        app.reduction.alerted();
     }
     let opened = judged.and_then(|opened| {
         let replaced = session_cookie(&headers);

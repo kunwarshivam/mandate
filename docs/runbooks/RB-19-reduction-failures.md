@@ -20,6 +20,14 @@ alert alone tells you that someone failed many times, never who.
   therefore writes one line, not one per request.
 - The count lives in the server's memory and nowhere else. A restart forgets it, and the alert is
   never journaled.
+- Known gaps in what it counts (the review of #2174):
+  - An assertion that verifies but whose session cannot then be opened (the session store full,
+    or a deprovision since the sign-in) answers the one 401 and counts no failure: the gate saw a
+    verified assertion.
+  - Each presentation that names an outstanding challenge reads and parses the whole control
+    stream once. There is no metric for that cost yet; one is owed before production.
+  - A presentation naming an unknown or expired challenge skips verification and is faster, as
+    DEC-2119 item 8 accepts; it tells nothing about any member.
 - An address is the TCP peer, or, behind the ingress, the `X-Forwarded-For` entry the server trusts
   (`MANDATE_API_INGRESS_PEERS`); a native IPv6 address counts as its /64. A device is the
   `__Host-mandate_device` cookie. A client without a device cookie shares one device budget with
