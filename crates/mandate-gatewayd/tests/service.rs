@@ -445,3 +445,39 @@ fn unknown_agent_names_leave_the_held_caps_unchanged() {
     );
     assert_eq!(service.daily_caps().held(), 0);
 }
+
+/// The coordinator's bound, on a stop: every control read prunes what the service holds to the
+/// agents deployed now, so an agent stopped since leaves no entry even when it never calls again,
+/// and the counts stay at the deployed count after calls from many unique names.
+#[test]
+fn every_control_read_prunes_what_is_held_to_the_deployed_agents() {
+    let world = World::new();
+    world.deploy(AGENT, &world.version("5"));
+    world.deploy("agent_b", &world.version("3"));
+    let (mut service, model) = world.service();
+    service.ready().unwrap();
+    assert_eq!(service.gateway().meter().caps().research_agents().len(), 2);
+    assert_eq!(service.daily_caps().held(), 2);
+
+    let payload = r#"{"agent_id":"agent_b","connection_id":"conn_alpaca_paper_01","loss_added":"0","reason":"owner_stop","retired_on":"2026-10-16"}"#;
+    world.push("AgentStopped", payload);
+    let first = outcome(&mut service, &request(&model, 1, Purpose::Research));
+    assert!(
+        !matches!(first, Outcome::BudgetExhausted | Outcome::MeterUnavailable),
+        "{first:?}"
+    );
+    assert_eq!(
+        service.gateway().meter().caps().research_agents(),
+        BTreeSet::from([AGENT.to_owned()]),
+        "agent_b, stopped and silent since, is pruned by agent_a's call"
+    );
+    assert_eq!(service.daily_caps().held(), 1);
+
+    for n in 2..40 {
+        let mut call = request(&model, n, Purpose::Research);
+        call.agent_id = Some(format!("ghost_{n}"));
+        assert_eq!(outcome(&mut service, &call), Outcome::BudgetExhausted);
+    }
+    assert_eq!(service.gateway().meter().caps().research_agents().len(), 1);
+    assert_eq!(service.daily_caps().held(), 1);
+}
