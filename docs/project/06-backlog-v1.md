@@ -426,7 +426,7 @@ the spec invariants (DP-n) its tests cover.
 - **E6-5 (Must)** As an owner, I want kill switches per agent, connection, and workspace so
   that I can stop everything immediately.
   - **Retirement leaves nothing of the agent's** ([DEC-2344](decisions/DEC-2344.md) item 2; mandate
-    spec v0.9 §3.1, journal spec v0.75 §9.2). Once the runtime writes `AgentStopped` for an agent
+    spec v0.9 §3.1, journal spec v0.76 §9.2). Once the runtime writes `AgentStopped` for an agent
     that ran (goal completion, `release`, and the owner's Stop under DEC-136's flat-or-release
     precondition), it writes it only when the account stream's fold shows no position attributed to
     the agent and no working order of its own, none `Unknown`. The deployment manager stops the
