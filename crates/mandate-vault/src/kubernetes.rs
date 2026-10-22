@@ -239,3 +239,68 @@ pub fn role_request(
         }),
     ))
 }
+
+/// How the vault reaches the cluster's API server for TokenReview (DEC-2060 item 7): its
+/// `https://` address and, outside a pod, the PEM certificate of the CA that signed it. In the
+/// cluster the vault reads its own pod's CA and ServiceAccount token, so `ca_pem` is `None`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KubernetesAuth {
+    pub host: String,
+    pub ca_pem: Option<String>,
+}
+
+/// The requests that set both Kubernetes auth mounts up, executor's first: for each, enabling
+/// the mount (`sys/auth/<mount>`, type `kubernetes`), then its configuration
+/// (`auth/<mount>/config`). Mounts that are not plain path segments, a host that is not
+/// `https://`, or a CA that is not one PEM certificate is [`SourceError::Config`].
+pub fn kubernetes_mount_requests(
+    mounts: &Mounts,
+    auth: &KubernetesAuth,
+) -> Result<Vec<(String, Value)>, SourceError> {
+    let plain = is_segment(&mounts.kubernetes_executor) && is_segment(&mounts.kubernetes_exchange);
+    let https = auth
+        .host
+        .strip_prefix("https://")
+        .is_some_and(|rest| !rest.is_empty());
+    let ca = auth.ca_pem.as_deref().is_none_or(is_certificate);
+    if !(plain && https && ca) {
+        return Err(SourceError::Config);
+    }
+    let mut config = serde_json::Map::new();
+    config.insert("kubernetes_host".to_owned(), json!(auth.host));
+    if let Some(pem) = &auth.ca_pem {
+        config.insert("kubernetes_ca_cert".to_owned(), json!(pem));
+    }
+    Ok([&mounts.kubernetes_executor, &mounts.kubernetes_exchange]
+        .into_iter()
+        .flat_map(|mount| {
+            [
+                (format!("sys/auth/{mount}"), json!({"type": "kubernetes"})),
+                (
+                    format!("auth/{mount}/config"),
+                    Value::Object(config.clone()),
+                ),
+            ]
+        })
+        .collect())
+}
+
+/// Whether `pem` is one PEM certificate block, begun and ended.
+fn is_certificate(pem: &str) -> bool {
+    let pem = pem.trim();
+    pem.starts_with("-----BEGIN CERTIFICATE-----") && pem.ends_with("-----END CERTIFICATE-----")
+}
+
+/// The accessor of `mount` in the vault's `sys/auth` answer, the name the templated policies
+/// key the login's alias by. One missing, or one that is not a plain path segment, so that it
+/// could end the template, is [`SourceError::Malformed`].
+pub fn mount_accessor(sys_auth: Option<&Value>, mount: &str) -> Result<String, SourceError> {
+    sys_auth
+        .and_then(|listed| listed.get("data"))
+        .and_then(|data| data.get(format!("{mount}/")))
+        .and_then(|entry| entry.get("accessor"))
+        .and_then(Value::as_str)
+        .filter(|accessor| is_segment(accessor))
+        .map(str::to_owned)
+        .ok_or(SourceError::Malformed)
+}
