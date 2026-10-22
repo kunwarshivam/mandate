@@ -4248,6 +4248,16 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   covers only stopped agents, and the executor exits 0 once no agent it follows is desired and every
   covering switch it read is applied, with nothing in flight and no `Unknown` order in scope. The
   executor's half, a tighter exit, is [DEC-2347](decisions/DEC-2347.md)'s.
+- **E7-4 (executor process), from [DEC-2347](decisions/DEC-2347.md) item 6, with DEC-2333's slice
+  A2b:** the exit's `owes_nothing` reads agent-scoped work only; once the account-scope switch
+  lands, an account switch still closing (`closing_all`) keeps the executor running too, with a
+  test.
+- **E7-4 (deployment manager and executor), from lane D1 on [DEC-2347](decisions/DEC-2347.md):** an
+  executor that never followed an agent never exits `completed` (item 3.2), so one started by a
+  kill switch on an account whose `exchanged` connect closed with no agent ever deployed stays up
+  until the manager stops it. Harmless but a leaked process: either the manager stops it on the
+  connection's close whatever started it, or the executor exits when it follows no agent and every
+  `exchanged` start of its account is closed.
 - **E7-4 slices 5 and 6's tests correction (stream K), from #286 round 1 (minor 2):**
   `properties::no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding` counts a cancel as
   outstanding until the order is terminal, abandoned or its protection cancelled, so it would fail on
