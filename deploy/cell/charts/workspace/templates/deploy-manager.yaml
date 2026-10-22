@@ -130,10 +130,10 @@ object.spec.containers.all(c, {{ . }}) && (!has(object.spec.initContainers) || o
 {{- $name := trimSuffix ".json" $file }}
 {{- $pod := fromJson $text }}
 {{- $own := list }}
-{{- $launches := list }}
+{{- $launches := dict }}
 {{- range (concat ($pod.spec.initContainers | default list) $pod.spec.containers) }}
 {{- $own = append $own .image }}
-{{- $launches = append $launches (dict "name" .name "command" (.command | default list) "args" (.args | default list)) }}
+{{- $_ := set $launches .name (list (.command | default list) (.args | default list)) }}
 {{- end }}
 {{- $_ := set $images $name ($own | uniq | sortAlpha) }}
 {{- $_ := set $commands $name $launches }}
@@ -150,7 +150,7 @@ object.spec.containers.all(c, {{ . }}) && (!has(object.spec.initContainers) || o
 {{- if .projected }}
 {{- range .projected.sources }}
 {{- with .serviceAccountToken }}
-{{- $tokens = append $tokens (dict "audience" .audience "expirationSeconds" .expirationSeconds "path" .path) }}
+{{- $tokens = append $tokens (printf "%s|%v|%s" .audience .expirationSeconds (.path | default "")) }}
 {{- end }}
 {{- end }}
 {{- end }}
@@ -198,7 +198,7 @@ spec:
     - expression: 'has(object.spec.automountServiceAccountToken) && object.spec.automountServiceAccountToken == false'
       reason: Forbidden
       message: a pod the deployment manager makes mounts no service-account token
-    - expression: 'variables.process == "token-exchange" ? (has(object.spec.serviceAccountName) && object.spec.serviceAccountName.matches(''^x[0-9a-f]+$'') && (!has(object.spec.serviceAccount) || object.spec.serviceAccount in ["", object.spec.serviceAccountName])) : ((!has(object.spec.serviceAccountName) || object.spec.serviceAccountName in ["", "default"]) && (!has(object.spec.serviceAccount) || object.spec.serviceAccount in ["", "default"]))'
+    - expression: 'variables.process == "token-exchange" ? (has(object.spec.serviceAccountName) && object.spec.serviceAccountName.matches(''^x[0-9a-f]+$'') && (!has(object.spec.serviceAccount) || object.spec.serviceAccount == "" || object.spec.serviceAccount == object.spec.serviceAccountName)) : ((!has(object.spec.serviceAccountName) || object.spec.serviceAccountName == "" || object.spec.serviceAccountName == "default") && (!has(object.spec.serviceAccount) || object.spec.serviceAccount == "" || object.spec.serviceAccount == "default"))'
       reason: Forbidden
       message: a pod the deployment manager makes names no service account but the default, or a token exchange its own
     - expression: '(!has(object.spec.hostNetwork) || !object.spec.hostNetwork) && (!has(object.spec.hostPID) || !object.spec.hostPID) && (!has(object.spec.hostIPC) || !object.spec.hostIPC)'
@@ -216,10 +216,10 @@ spec:
     - expression: '{{ include "mandate.everyContainer" "c.image in variables.images[variables.process]" }}'
       reason: Forbidden
       message: a pod the deployment manager makes runs only its own process's images
-    - expression: 'size(object.spec.containers) + (has(object.spec.initContainers) ? size(object.spec.initContainers) : 0) == size(variables.commands[variables.process]) && {{ include "mandate.everyContainer" "variables.commands[variables.process].exists(t, t.name == c.name && t.command == (has(c.command) ? c.command : []) && t.args == (has(c.args) ? c.args : []))" }}'
+    - expression: 'size(object.spec.containers) + (has(object.spec.initContainers) ? size(object.spec.initContainers) : 0) == size(variables.commands[variables.process]) && {{ include "mandate.everyContainer" "c.name in variables.commands[variables.process] && variables.commands[variables.process][c.name] == [has(c.command) ? c.command : [], has(c.args) ? c.args : []]" }}'
       reason: Forbidden
       message: a pod the deployment manager makes runs exactly its own process's commands and arguments
-    - expression: '!has(object.spec.volumes) || object.spec.volumes.all(v, has(v.emptyDir) || (has(v.secret) && v.secret.secretName in variables.secrets[variables.process]) || (has(v.persistentVolumeClaim) && v.persistentVolumeClaim.claimName in variables.claims[variables.process] && has(v.persistentVolumeClaim.readOnly) && v.persistentVolumeClaim.readOnly == true) || (has(v.projected) && size(v.projected.sources) == 1 && has(v.projected.sources[0].serviceAccountToken) && !has(v.projected.sources[0].secret) && !has(v.projected.sources[0].configMap) && !has(v.projected.sources[0].downwardAPI) && !has(v.projected.sources[0].clusterTrustBundle) && has(v.projected.sources[0].serviceAccountToken.audience) && has(v.projected.sources[0].serviceAccountToken.expirationSeconds) && variables.projected[variables.process].exists(t, t.audience == v.projected.sources[0].serviceAccountToken.audience && t.expirationSeconds == v.projected.sources[0].serviceAccountToken.expirationSeconds && t.path == v.projected.sources[0].serviceAccountToken.path)))'
+    - expression: '!has(object.spec.volumes) || object.spec.volumes.all(v, has(v.emptyDir) || (has(v.secret) && v.secret.secretName in variables.secrets[variables.process]) || (has(v.persistentVolumeClaim) && v.persistentVolumeClaim.claimName in variables.claims[variables.process] && has(v.persistentVolumeClaim.readOnly) && v.persistentVolumeClaim.readOnly == true) || (has(v.projected) && size(v.projected.sources) == 1 && has(v.projected.sources[0].serviceAccountToken) && !has(v.projected.sources[0].secret) && !has(v.projected.sources[0].configMap) && !has(v.projected.sources[0].downwardAPI) && !has(v.projected.sources[0].clusterTrustBundle) && has(v.projected.sources[0].serviceAccountToken.audience) && has(v.projected.sources[0].serviceAccountToken.expirationSeconds) && (v.projected.sources[0].serviceAccountToken.audience + "|" + string(v.projected.sources[0].serviceAccountToken.expirationSeconds) + "|" + (has(v.projected.sources[0].serviceAccountToken.path) ? v.projected.sources[0].serviceAccountToken.path : "")) in variables.projected[variables.process]))'
       reason: Forbidden
       message: a pod the deployment manager makes mounts only memory, its own process's Secrets and projected token, or its claims read-only
     - expression: '!has(object.spec.imagePullSecrets) && {{ include "mandate.everyContainer" "!has(c.envFrom) && (!has(c.env) || c.env.all(e, !has(e.valueFrom)))" }}'

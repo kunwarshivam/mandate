@@ -1197,15 +1197,13 @@ def per_process(v: dict, name: str, pod: dict) -> list:
     return v[name].get(process_of(pod), [])
 
 
-def launch(container: dict) -> dict:
-    return {
-        "name": container["name"],
-        "command": container.get("command", []),
-        "args": container.get("args", []),
-    }
+def launches(pod: dict) -> dict:
+    """Each container's launch, by name, as the policy's `commands` holds it: `[command, args]`, a
+    list of string lists, so every literal in the variable has one type and CEL compiles it."""
+    return {c["name"]: [c.get("command", []), c.get("args", [])] for c in all_containers(pod)}
 
 
-def token_of(projected: dict) -> dict | None:
+def token_of(projected: dict) -> str | None:
     """A projected volume's one source, read as its service-account token, or `None` when it
     projects anything else, or more than one source."""
     sources = projected.get("sources", [])
@@ -1214,11 +1212,7 @@ def token_of(projected: dict) -> dict | None:
     token = sources[0]["serviceAccountToken"]
     if not {"audience", "expirationSeconds"} <= set(token):
         return None
-    return {
-        "audience": token["audience"],
-        "expirationSeconds": token["expirationSeconds"],
-        "path": token.get("path"),
-    }
+    return f"{token['audience']}|{token['expirationSeconds']}|{token.get('path', '')}"
 
 
 def account_holds(pod: dict) -> bool:
@@ -1241,7 +1235,7 @@ BOUNDS = {
         lambda pod, v: pod["spec"].get("automountServiceAccountToken") is False,
     ),
     "a pod the deployment manager makes names no service account but the default, or a token exchange its own": (
-        ["serviceAccountName", '["", "default"]', '"token-exchange"', "matches('^x[0-9a-f]+$')"],
+        ["serviceAccountName", 'object.spec.serviceAccountName == "default"', '"token-exchange"', "matches('^x[0-9a-f]+$')"],
         lambda pod, v: account_holds(pod),
     ),
     "a pod the deployment manager makes shares no host namespace": (
@@ -1270,10 +1264,7 @@ BOUNDS = {
     ),
     "a pod the deployment manager makes runs exactly its own process's commands and arguments": (
         ["variables.commands[variables.process]", "c.command", "c.args"],
-        lambda pod, v: (
-            sorted((launch(c) for c in all_containers(pod)), key=lambda c: c["name"])
-            == sorted(per_process(v, "commands", pod), key=lambda c: c["name"])
-        ),
+        lambda pod, v: launches(pod) == v["commands"].get(process_of(pod), {}),
     ),
     "a pod the deployment manager makes mounts only memory, its own process's Secrets and projected token, or its claims read-only": (
         [
@@ -1283,7 +1274,7 @@ BOUNDS = {
             "v.persistentVolumeClaim.readOnly == true",
             "size(v.projected.sources) == 1",
             "!has(v.projected.sources[0].secret)",
-            "variables.projected[variables.process].exists(t, t.audience ==",
+            "in variables.projected[variables.process]",
         ],
         lambda pod, v: all(
             set(vol) - {"name"} == {"emptyDir"}
@@ -1554,17 +1545,14 @@ def deploy_manager_admission(docs: list[dict]) -> list[str]:
     role = lambda n: process(n)["db_role"]  # noqa: E731
     want = {
         "images": {n: sorted({c["image"] for c in all_containers(t)}) for n, t in templates.items()},
-        "commands": {
-            n: sorted((launch(c) for c in all_containers(t)), key=lambda c: c["name"])
-            for n, t in templates.items()
-        },
+        "commands": {n: launches(t) for n, t in templates.items()},
         "secrets": {
             n: sorted({"journal-ca", "journal-role-" + role(n).replace("_", "-")}) if role(n) else []
             for n in names
         },
         "claims": {n: ["artifacts"] if n == "runtime" and claimed else [] for n in names},
         "projected": {
-            n: [{"audience": "mandate-vault", "expirationSeconds": 600, "path": "token"}]
+            n: ["mandate-vault|600|token"]
             if n == EXCHANGE
             else []
             for n in names
@@ -1576,8 +1564,6 @@ def deploy_manager_admission(docs: list[dict]) -> list[str]:
     except (json.JSONDecodeError, KeyError) as e:
         return [*problems, f"the policy's lists do not read: {e}"]
     for key, value in want.items():
-        if key == "commands" and isinstance(got.get(key), dict):
-            got[key] = {n: sorted(cs, key=lambda c: c["name"]) for n, cs in got[key].items()}
         if got.get(key) != value:
             problems.append(f"the policy's {key} is {got.get(key)}, want {value}")
     if set(got) != set(want):
@@ -1802,6 +1788,35 @@ def test_the_manager_role_seeded_bugs_are_caught():
         lambda r: r["rules"].pop(1),
     ):
         assert deploy_manager_contained(mutate(docs, MANAGER, "Role", change)), change
+
+
+def cel_shape(value, at: str = "$"):
+    """The CEL type of a JSON literal, or `TypeError` naming where it mixes two: the API server
+    refuses a policy whose map or list literal holds values of different types (#2077's cell run),
+    so a mirror of the rules over a mixed literal could pass while the cell cannot install it. An
+    empty list takes the type of the lists beside it."""
+    def merge(shapes, where):
+        known = {s for s in shapes if s is not None}
+        if len(known) > 1:
+            raise TypeError(f"{where} mixes {sorted(map(str, known))}")
+        return next(iter(known), None)
+
+    if isinstance(value, dict):
+        return ("map", merge([cel_shape(v, f"{at}.{k}") for k, v in value.items()], at))
+    if isinstance(value, list):
+        return ("list", merge([cel_shape(v, f"{at}[{i}]") for i, v in enumerate(value)], at)) if value else None
+    return type(value).__name__
+
+
+def test_every_admission_literal_has_one_type_so_cel_compiles_it():
+    for docs in (render_all(), render_all("--set", f"images.{EXCHANGE}=")):
+        for policy in (d for d in docs if d["kind"] == POLICY):
+            for name, value in policy_variables(policy).items():
+                cel_shape(value, name)
+    with pytest.raises(TypeError, match="commands"):
+        cel_shape({"executor": [{"name": "executor", "args": ["run"]}]}, "commands")
+    with pytest.raises(TypeError, match="projected"):
+        cel_shape({"token-exchange": [{"audience": "mandate-vault", "expirationSeconds": 600}]}, "projected")
 
 
 def test_deploy_manager_admission():
@@ -2585,7 +2600,7 @@ ADMISSION_SEEDED = [
         policy_of(d),
         POLICY,
         widen(
-            "projected", EXCHANGE, {"audience": "mandate-vault", "expirationSeconds": 86400, "path": "token"}
+            "projected", EXCHANGE, "mandate-vault|86400|token"
         ),
     ),
     lambda d: mutate(
