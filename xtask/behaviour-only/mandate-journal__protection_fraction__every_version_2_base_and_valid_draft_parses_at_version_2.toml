@@ -1,0 +1,8 @@
+file = "crates/mandate-journal/tests/protection_fraction.rs"
+test = "every_version_2_base_and_valid_draft_parses_at_version_2"
+reason = """
+E7-4's fractional slice (DEC-2312): `ProtectionChanged` version 2 is not registered yet, so the
+journal refuses every version-2 draft as `unknown_schema` at `payload` rather than at a stub. It
+still runs and fails, and the change that registers version 2 deletes this file with its
+`#[ignore]` line.
+"""
