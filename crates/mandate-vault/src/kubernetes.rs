@@ -57,19 +57,17 @@ struct Kind<'a> {
 /// What the provisioner may do to one kind's roles: make them, and remove them only when
 /// `removable`, the token exchange's (DEC-2350 items 3 and 5).
 fn provisioner_capabilities(removable: bool) -> Result<&'static str, SourceError> {
-    let _ = (
-        removable,
-        EXCHANGE_ROLE_CAPABILITIES,
-        EXECUTOR_ROLE_CAPABILITIES,
-    );
-    Err(SourceError::Unimplemented { story: "E21-33" })
+    Ok(if removable {
+        EXCHANGE_ROLE_CAPABILITIES
+    } else {
+        EXECUTOR_ROLE_CAPABILITIES
+    })
 }
 
 /// A pinned list parameter's value, as [`provisioner_policy`]'s pin admits it: a plain string,
 /// never an array, which the pin refuses however it is filled (DEC-2350 item 5).
 fn pinned(value: &str) -> Result<Value, SourceError> {
-    let _ = value;
-    Err(SourceError::Unimplemented { story: "E21-33" })
+    Ok(Value::String(value.to_owned()))
 }
 
 /// Whether `segment` is one plain path segment: letters, digits, `_` and `-`, and not empty.

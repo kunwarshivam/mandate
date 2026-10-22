@@ -481,7 +481,6 @@ async fn request_as(
 /// The pure policy and request are checked first, so a run with no server still fails until they
 /// hold.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending E21-33"]
 async fn the_provisioner_makes_both_roles_and_removes_only_the_exchanges() {
     let written = provisioner_policy(&Mounts::default(), "ws-ws1");
     assert!(written.is_ok(), "{written:?}");
