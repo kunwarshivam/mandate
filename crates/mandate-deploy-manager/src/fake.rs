@@ -32,6 +32,9 @@ pub struct Fake {
     pub unavailable: bool,
     /// While set, starts and stops answer [`Unavailable`] and change nothing; listing still works.
     pub refuse_effects: bool,
+    /// While set, a start is carried out and then answers [`Unavailable`], as one whose answer was
+    /// lost would.
+    pub lose_start_answers: bool,
 }
 
 impl Fake {
@@ -137,6 +140,9 @@ impl Orchestrator for Fake {
         self.instances
             .entry((slot.clone(), generation))
             .or_insert(Phase::Running { ready: false });
+        if self.lose_start_answers {
+            return Err(Unavailable);
+        }
         Ok(())
     }
 

@@ -194,6 +194,23 @@ fn a_start_the_orchestrator_refused_is_asked_again_only_while_its_request_has_ti
 }
 
 #[test]
+fn a_start_whose_answer_was_lost_is_not_asked_again_once_its_pod_is_listed() {
+    let (journal, mut m) = requested_at(0);
+    m.orchestrator().fake.lose_start_answers = true;
+    tick(&mut m, 1);
+    m.orchestrator().fake.lose_start_answers = false;
+    tick(&mut m, 2);
+    tick(&mut m, 3);
+    assert_eq!(
+        starts(&mut m).len(),
+        1,
+        "its pod is listed, so it was carried out"
+    );
+    assert_eq!(records(&journal), [start_record()]);
+    clean(&mut m);
+}
+
+#[test]
 fn each_record_that_closes_the_request_stops_its_exchange_journaled_first() {
     let closers = [
         ("established", established(CONNECTION, ACCOUNT)),
