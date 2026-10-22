@@ -8,6 +8,7 @@
  },
  "caps": {
   "deployment_usd": "20",
+  "run_usd": "1.5",
   "workspace_monthly_usd": "50"
  },
  "endpoint": {
