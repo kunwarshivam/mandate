@@ -31,12 +31,13 @@ use serde_json::{Value, json};
 use crate::SourceError;
 use crate::kubernetes::{
     KubernetesAuth, kubernetes_mount_requests, kubernetes_policy, kubernetes_policy_name,
-    mount_accessor, provisioner_policy, service_account_name,
+    mount_accessor, provisioner_policy, role_request, service_account_name,
 };
 use crate::lease::{LEASE_SECS, Lease, lease_times};
 use crate::policy::{
     Identity, Mounts, SecretPath, kv_path, openbao_policy, policy_name, role_name,
 };
+use crate::provisioner::{RoleProvisioner, RoleRefusal};
 use crate::source::{GRANT_SECS, Grant, SecretSource};
 
 /// How long one request may take before the vault counts as unreachable.
@@ -500,6 +501,26 @@ impl OpenBaoSource {
             self.mounts.auth,
             role_name(&Identity::TokenExchange(connection.clone()))
         )
+    }
+}
+
+impl RoleProvisioner for OpenBaoSource {
+    async fn make_roles(
+        &self,
+        connection: &ConnectionId,
+        namespace: &str,
+    ) -> Result<(), RoleRefusal> {
+        let _ = (connection, namespace, role_request);
+        Err(RoleRefusal::Unimplemented { story: "E21-33" })
+    }
+
+    async fn remove_exchange_role(
+        &self,
+        connection: &ConnectionId,
+        namespace: &str,
+    ) -> Result<(), RoleRefusal> {
+        let _ = (connection, namespace);
+        Err(RoleRefusal::Unimplemented { story: "E21-33" })
     }
 }
 

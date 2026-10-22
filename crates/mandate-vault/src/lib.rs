@@ -36,6 +36,7 @@ pub mod local;
 pub mod mounted;
 pub mod openbao;
 pub mod policy;
+pub mod provisioner;
 pub mod source;
 
 pub use error::SourceError;

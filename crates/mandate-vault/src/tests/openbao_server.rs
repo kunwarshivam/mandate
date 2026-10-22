@@ -31,6 +31,7 @@ use crate::openbao::{
     OpenBaoConfig, OpenBaoSource, RoleCredentials, provision, provision_kubernetes_auth,
 };
 use crate::policy::{Identity, Mounts, policy_name, role_name};
+use crate::provisioner::{RoleProvisioner, RoleRefusal};
 use crate::source::Grant;
 use mandate_time::UtcNanos;
 use reqwest::{Certificate, Method};
@@ -611,6 +612,108 @@ async fn the_provisioner_makes_both_roles_and_removes_only_the_exchanges() {
         let (status, _) = as_provisioner(Method::GET, path.clone(), None).await;
         assert_eq!(status, 403, "{path}");
     }
+}
+
+/// DEC-2350 items 1 and 3 through the provisioner's own session: logged in with its AppRole, it
+/// makes a connection's executor and token-exchange roles, bound to their ServiceAccounts in the
+/// workspace's namespace, and makes them again with nothing changed; it removes the token
+/// exchange's role, and again, and the executor's stays. Another identity's session is refused a
+/// role, and so is another namespace. The refusals' mapping is checked first, so a run with no
+/// server still fails until it holds.
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "pending E21-33"]
+async fn the_provisioner_makes_a_connections_roles_and_removes_only_the_exchanges() {
+    assert_eq!(
+        RoleRefusal::of(&SourceError::Unavailable),
+        RoleRefusal::VaultUnavailable
+    );
+    let Some((address, ca_pem, operator)) = server() else {
+        return;
+    };
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    let suffix = format!("{}-{n}", std::process::id());
+    let config = OpenBaoConfig {
+        address: address.clone(),
+        ca_pem: ca_pem.clone(),
+        mounts: Mounts {
+            kv: format!("kv-{suffix}"),
+            auth: format!("approle-{suffix}"),
+            kubernetes_executor: format!("kubernetes-executor-{suffix}"),
+            kubernetes_exchange: format!("kubernetes-exchange-{suffix}"),
+        },
+    };
+    let mounts = &config.mounts;
+    let auth = KubernetesAuth {
+        host: "https://127.0.0.1:6443".to_owned(),
+        ca_pem: Some(String::from_utf8(ca_pem.clone()).unwrap()),
+        namespace: Some("ws-ws1".to_owned()),
+    };
+    let credentials = provision(&config, &operator, &[c("c1")], Some(&auth))
+        .await
+        .unwrap();
+    let login = |identity: Identity| {
+        let role = credentials.iter().find(|r| r.identity == identity).unwrap();
+        OpenBaoSource::login(
+            &config,
+            identity,
+            &role.role_id,
+            &role.secret_id,
+            at(1_000_000),
+        )
+    };
+    let provisioner = login(Identity::Provisioner).await.unwrap();
+    let role_of = |identity: Identity| role_request(&identity, mounts, "ws-ws1").unwrap().0;
+    let executor = role_of(Identity::Executor(c("c2")));
+    let exchange = role_of(Identity::TokenExchange(c("c2")));
+    let stored = |path: String| {
+        let (address, ca_pem, operator) = (address.clone(), ca_pem.clone(), operator.clone());
+        async move {
+            request_as(
+                &address,
+                &ca_pem,
+                Some(operator.expose_secret()),
+                Method::GET,
+                &path,
+                None,
+            )
+            .await
+        }
+    };
+    for round in 0..2 {
+        assert_eq!(
+            provisioner.make_roles(&c("c2"), "ws-ws1").await,
+            Ok(()),
+            "round {round}"
+        );
+        for path in [&executor, &exchange] {
+            let (status, role) = stored(path.clone()).await;
+            assert_eq!(status, 200, "round {round}: {path}");
+            assert_eq!(
+                role["data"]["bound_service_account_namespaces"],
+                json!(["ws-ws1"]),
+                "round {round}: {path}"
+            );
+        }
+    }
+    for round in 0..2 {
+        assert_eq!(
+            provisioner.remove_exchange_role(&c("c2"), "ws-ws1").await,
+            Ok(()),
+            "round {round}"
+        );
+        assert_eq!(stored(exchange.clone()).await.0, 404, "round {round}");
+        assert_eq!(stored(executor.clone()).await.0, 200, "round {round}");
+    }
+    let api = login(Identity::Api).await.unwrap();
+    assert_eq!(
+        api.make_roles(&c("c3"), "ws-ws1").await,
+        Err(RoleRefusal::RoleRefused)
+    );
+    assert_eq!(
+        provisioner.make_roles(&c("c3"), "kube-system").await,
+        Err(RoleRefusal::RoleRefused)
+    );
+    assert_eq!(stored(role_of(Identity::Executor(c("c3")))).await.0, 404);
 }
 
 /// A CA certificate's shape, for the pure check that runs without a server.
