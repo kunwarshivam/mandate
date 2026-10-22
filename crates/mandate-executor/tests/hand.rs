@@ -5612,7 +5612,6 @@ fn protection_the_cancel_all_cancels_opens_a_bounded_alerted_interval() {
 /// instrument has one open (DEC-2333 item 3): with an AAPL bracket partly filled, its interval
 /// open, the BTC stop the cancel-all cancels still starts BTC's interval.
 #[test]
-#[ignore = "pending E7-4"]
 fn another_instruments_open_interval_does_not_hide_the_closing_ones_start() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL, BTC]);
