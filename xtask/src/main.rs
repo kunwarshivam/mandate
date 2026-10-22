@@ -1365,8 +1365,9 @@ const INFRA_CLOSE_SECRETS: [&str; 2] = ["DIGITAL_OCEAN_API_KEY", "KUBE_API_ALLOW
 /// secrets, since GitHub prints a variable in a step's environment in the public log (DEC-2030
 /// items 2 and 6). The model provider's key, staging's alone, goes to the vault on the CLI's
 /// stdin under a `MANDATE_` name, never `TF_VAR_`, so OpenTofu never reads it (DEC-2630). So does
-/// the founder's identity-provider subject, staging's alone, to the built CLI's stdin (DEC-2114).
-const INFRA_SECRETS: [&str; 7] = [
+/// the founder's identity-provider subject, staging's alone, to the built CLI's stdin (DEC-2114),
+/// and the Alpaca OAuth client secret, staging's alone, to the vault like the model key (DEC-2636).
+const INFRA_SECRETS: [&str; 8] = [
     "DIGITAL_OCEAN_API_KEY",
     "CF_INFRA_API_TOKEN",
     "TOFU_STATE_PASSPHRASE",
@@ -1374,7 +1375,11 @@ const INFRA_SECRETS: [&str; 7] = [
     "KUBE_API_ALLOWED_CIDRS",
     "OPENROUTER_API_KEY",
     "FOUNDER_OIDC_SUBJECT",
+    "ALPACA_OAUTH_CLIENT_SECRET",
 ];
+/// The infra step's environment variable holding the Alpaca OAuth client secret (DEC-2636).
+const ALPACA_CLIENT_SECRET_VAR: &str = "MANDATE_ALPACA_OAUTH_CLIENT_SECRET";
+
 /// The list inputs `infra.yml` hands OpenTofu as JSON, which `infra` leaves out of `tofu`'s
 /// environment when blank or empty, so a root with a default takes it and a root without one
 /// fails on the missing variable by name, never on `""`, which is no list (DEC-2030 item 3).
@@ -1736,6 +1741,10 @@ fn bootstrap_staging(tofu: &dyn Fn(&[String]) -> Command, chdir: &str, run: &str
     if !model_key.is_empty() {
         mask::add_mask(&model_key);
     }
+    let alpaca_client_secret = env::var(ALPACA_CLIENT_SECRET_VAR).unwrap_or_default();
+    if !alpaca_client_secret.is_empty() {
+        mask::add_mask(&alpaca_client_secret);
+    }
     let founder_subject = env::var(founding::SUBJECT_VAR).unwrap_or_default();
     if !founder_subject.is_empty() {
         mask::add_mask(&founder_subject);
@@ -1820,10 +1829,11 @@ fn bootstrap_staging(tofu: &dyn Fn(&[String]) -> Command, chdir: &str, run: &str
             provision: &|stdin| {
                 in_vault_cli(&vault_provision::provision_command(&connections), stdin)
             },
-            put: &|stdin| in_vault_cli(&vault_provision::put_command(), stdin),
+            put: &|secret, stdin| in_vault_cli(&vault_provision::put_command(secret), stdin),
         },
         &listed,
         &model_key,
+        &alpaca_client_secret,
     )?;
     for word in words {
         eprintln!("    vault-provision: {word} (DEC-2630)");
@@ -2166,6 +2176,10 @@ const GUARDED_WORKFLOW_LINES: &[(&str, &str)] = &[
     (
         INFRA_WORKFLOW,
         "MANDATE_FOUNDER_OIDC_SUBJECT: ${{ secrets.FOUNDER_OIDC_SUBJECT }}",
+    ),
+    (
+        INFRA_WORKFLOW,
+        "MANDATE_ALPACA_OAUTH_CLIENT_SECRET: ${{ secrets.ALPACA_OAUTH_CLIENT_SECRET }}",
     ),
 ];
 
@@ -5679,6 +5693,7 @@ const READ_ENV_NAMES: &[&str] = &[
     "MANDATE_INFRA_SHA",
     "MANDATE_OPENROUTER_API_KEY",
     "MANDATE_FOUNDER_OIDC_SUBJECT",
+    "MANDATE_ALPACA_OAUTH_CLIENT_SECRET",
     "MANDATE_TOFU_REQUIRED",
     "DIGITALOCEAN_TOKEN",
     "TF_VAR_state_passphrase",
