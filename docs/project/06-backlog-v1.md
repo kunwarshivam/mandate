@@ -1432,11 +1432,13 @@ after U-A1 to U-A5 are recorded.
     manager writes exactly one `OwnerAlertSent` per such loop and none for any other loop or after
     a restart.
   - `retirement_held` (DEC-2344 item 2, [DEC-2352](decisions/DEC-2352.md); journal spec v0.79
-    §9.34, notifications spec v0.10): `mandate-journal`'s `RetirementHeld` schema, rule 264, and
-    stream rule 265, turning the `retirements` refcases from pending to passing; the kind in
+    §9.34, notifications spec v0.10): `mandate-journal`'s `RetirementHeld` schema, rule 265, and
+    stream rule 266, turning the `retirements` refcases from pending to passing; the kind in
     `mandate-notify` and `mandate-journal`; and the runtime's writer (E6-5's): period n at the first
-    tick at or after `held_since` plus n days while the agent still holds anything of its own, with
-    its `OwnerAlertSent`, none after `AgentStopped`, and none twice across a restart.
+    tick at or after it is due while the agent still holds anything of its own, in every mode, with
+    its `OwnerAlertSent` as the next row, one sequence per agent, none after the retirement ends
+    (`AgentStopped`, a resume, a version applied), the next period after downtime, and none twice
+    across a restart.
 
 ### E9 Identity, tenancy, and policy
 

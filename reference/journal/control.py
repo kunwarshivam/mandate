@@ -2848,7 +2848,7 @@ def deployment_manager_violations(event_type: str, draft: dict, skip: frozenset[
 
 
 def retirement_held_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
-    """§9.34's rule 264, on a well-typed payload: the runtime's own record, caused by what began
+    """§9.34's rule 265, on a well-typed payload: the runtime's own record, caused by what began
     the retirement; a period from 1, reached no sooner than that many 24 hours after it began; and
     what it waits on, once each and in order."""
     if event_type != "RetirementHeld":
@@ -2860,16 +2860,16 @@ def retirement_held_violations(event_type: str, draft: dict, skip: frozenset[str
         if not holds and f"rule.{name}" not in skip:
             out.append(Violation(f"rule.{name}", "schema", path))
 
-    rule("264.agent", draft["actor"]["kind"] == "agent", "actor.kind")
-    rule("264.cause", draft["causation_id"] is not None, "causation_id")
+    rule("265.agent", draft["actor"]["kind"] == "agent", "actor.kind")
+    rule("265.cause", draft["causation_id"] is not None, "causation_id")
     period, since, now, waiting = p["period"], p["held_since"], p["risk_clock"], p["waiting_on"]
     if isinstance(period, int):
-        rule("264.period", period >= 1, "payload.period")
-        if isinstance(since, str) and isinstance(now, str) and is_timestamp(since) and is_timestamp(now) and (period >= 1 or "rule.264.period" in skip):
+        rule("265.period", period >= 1, "payload.period")
+        if isinstance(since, str) and isinstance(now, str) and is_timestamp(since) and is_timestamp(now) and (period >= 1 or "rule.265.period" in skip):
             due = epoch_seconds(since) + HELD_PERIOD_S * period
-            rule("264.due", epoch_seconds(now) >= due, "payload.risk_clock")
+            rule("265.due", epoch_seconds(now) >= due, "payload.risk_clock")
     if isinstance(waiting, list):
-        rule("264.waiting", bool(waiting) and ascending(waiting), "payload.waiting_on")
+        rule("265.waiting", bool(waiting) and ascending(waiting), "payload.waiting_on")
     return out
 
 

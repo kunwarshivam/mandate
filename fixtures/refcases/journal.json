@@ -17329,7 +17329,7 @@
    },
    {
     "name": "by_a_user",
-    "clause": "rule 264: the runtime's own record",
+    "clause": "rule 265: the runtime's own record",
     "base_draft": "held",
     "changes": [
      {
@@ -17344,8 +17344,24 @@
     }
    },
    {
+    "name": "by_the_system",
+    "clause": "rule 265: the runtime's own record, not a workspace service's",
+    "base_draft": "held",
+    "changes": [
+     {
+      "path": "actor.kind",
+      "value": "system"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
     "name": "uncaused",
-    "clause": "rule 264: caused by what began the retirement",
+    "clause": "rule 265: caused by what began the retirement",
     "base_draft": "held",
     "changes": [
      {
@@ -17361,7 +17377,7 @@
    },
    {
     "name": "period_zero",
-    "clause": "rule 264: periods count from 1",
+    "clause": "rule 265: periods count from 1",
     "base_draft": "held",
     "changes": [
      {
@@ -17377,7 +17393,7 @@
    },
    {
     "name": "too_soon",
-    "clause": "rule 264: period n no sooner than n times 24 hours after it began",
+    "clause": "rule 265: period n no sooner than n times 24 hours after it began",
     "base_draft": "held",
     "changes": [
      {
@@ -17397,7 +17413,7 @@
    },
    {
     "name": "second_period_too_soon",
-    "clause": "rule 264: period 2 waits 48 hours",
+    "clause": "rule 265: period 2 waits 48 hours",
     "base_draft": "held",
     "changes": [
      {
@@ -17417,7 +17433,7 @@
    },
    {
     "name": "waiting_on_nothing",
-    "clause": "rule 264: it waits on something",
+    "clause": "rule 265: it waits on something",
     "base_draft": "held",
     "changes": [
      {
@@ -17433,7 +17449,7 @@
    },
    {
     "name": "waiting_on_twice",
-    "clause": "rule 264: each thing once",
+    "clause": "rule 265: each thing once",
     "base_draft": "held",
     "changes": [
      {
@@ -17452,7 +17468,7 @@
    },
    {
     "name": "waiting_on_out_of_order",
-    "clause": "rule 264: in order",
+    "clause": "rule 265: in order",
     "base_draft": "held",
     "changes": [
      {
@@ -17521,7 +17537,7 @@
   "valid_drafts": [
    {
     "name": "exactly_due",
-    "clause": "rule 264: at the 24-hour mark itself",
+    "clause": "rule 265: at the 24-hour mark itself",
     "base_draft": "held",
     "changes": [],
     "expect": {
@@ -17530,7 +17546,7 @@
    },
    {
     "name": "late",
-    "clause": "rule 264: a late period is fine; no sooner, not no later",
+    "clause": "rule 265: a late period is fine; no sooner, not no later",
     "base_draft": "held",
     "changes": [
      {
@@ -17544,7 +17560,7 @@
    },
    {
     "name": "both",
-    "clause": "rule 264: a position and a working order",
+    "clause": "rule 265: a position and a working order",
     "base_draft": "held",
     "changes": [
      {
@@ -17561,7 +17577,7 @@
    },
    {
     "name": "working_order_alone",
-    "clause": "rule 264: a working order alone",
+    "clause": "rule 265: a working order alone",
     "base_draft": "held",
     "changes": [
      {
@@ -17577,7 +17593,7 @@
    },
    {
     "name": "third_period",
-    "clause": "rule 264: period 3 at 72 hours",
+    "clause": "rule 265: period 3 at 72 hours",
     "base_draft": "held",
     "changes": [
      {
@@ -17597,52 +17613,12 @@
   "streams": [
    {
     "name": "one_period",
-    "clause": "rule 265: the first period is 1",
+    "clause": "rule 266: the first period is 1",
     "records": [
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01J8Z5RH21S000000000000000",
-      "stream_id": "agent:ws_01J8Z2:agent_a",
-      "event_type": "RetirementHeld",
-      "schema_version": 1,
-      "event_time": "2026-09-22T15:00:00.000000000Z",
-      "clock_source": "scheduler",
-      "causation_id": "01J8Z5RH0A000000000000000S",
-      "correlation_id": null,
-      "actor": {
-       "kind": "agent",
-       "id": "agent_a",
-       "version": "0.1.0",
-       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
-      },
-      "config_refs": {
-       "mandate_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
-      },
-      "payload": {
-       "held_since": "2026-09-21T15:00:00.000000000Z",
-       "period": 1,
-       "waiting_on": [
-        "position"
-       ],
-       "risk_clock": "2026-09-22T15:00:00.000000000Z"
-      },
-      "artifact_refs": [],
-      "pii_refs": []
-     }
-    ],
-    "expect": {
-     "outcome": "Valid"
-    }
-   },
-   {
-    "name": "three_periods",
-    "clause": "rule 265: each next period is one more",
-    "records": [
-     {
-      "envelope_version": 1,
-      "environment": "paper",
-      "event_id": "01J8Z5RH21S000000000000000",
+      "event_id": "01J8Z5RH901000000000000000",
       "stream_id": "agent:ws_01J8Z2:agent_a",
       "event_type": "RetirementHeld",
       "schema_version": 1,
@@ -17671,9 +17647,71 @@
       "pii_refs": []
      },
      {
+      "event_id": "01J8Z5RHA01000000000000000",
+      "event_type": "OwnerAlertSent",
+      "causation_id": "01J8Z5RH901000000000000000",
+      "config_refs": {},
+      "payload": {
+       "subject": "01J8Z5RH901000000000000000",
+       "kind": "retirement_held",
+       "owner_command": null
+      }
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "three_periods",
+    "clause": "rule 266: each next period is one more",
+    "records": [
+     {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01J8Z5RH22S000000000000000",
+      "event_id": "01J8Z5RH902000000000000000",
+      "stream_id": "agent:ws_01J8Z2:agent_a",
+      "event_type": "RetirementHeld",
+      "schema_version": 1,
+      "event_time": "2026-09-22T15:00:00.000000000Z",
+      "clock_source": "scheduler",
+      "causation_id": "01J8Z5RH0A000000000000000S",
+      "correlation_id": null,
+      "actor": {
+       "kind": "agent",
+       "id": "agent_a",
+       "version": "0.1.0",
+       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "config_refs": {
+       "mandate_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "payload": {
+       "held_since": "2026-09-21T15:00:00.000000000Z",
+       "period": 1,
+       "waiting_on": [
+        "position"
+       ],
+       "risk_clock": "2026-09-22T15:00:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "event_id": "01J8Z5RHA02000000000000000",
+      "event_type": "OwnerAlertSent",
+      "causation_id": "01J8Z5RH902000000000000000",
+      "config_refs": {},
+      "payload": {
+       "subject": "01J8Z5RH902000000000000000",
+       "kind": "retirement_held",
+       "owner_command": null
+      }
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z5RH903000000000000000",
       "stream_id": "agent:ws_01J8Z2:agent_a",
       "event_type": "RetirementHeld",
       "schema_version": 1,
@@ -17702,9 +17740,20 @@
       "pii_refs": []
      },
      {
+      "event_id": "01J8Z5RHA03000000000000000",
+      "event_type": "OwnerAlertSent",
+      "causation_id": "01J8Z5RH903000000000000000",
+      "config_refs": {},
+      "payload": {
+       "subject": "01J8Z5RH903000000000000000",
+       "kind": "retirement_held",
+       "owner_command": null
+      }
+     },
+     {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01J8Z5RH23S000000000000000",
+      "event_id": "01J8Z5RH904000000000000000",
       "stream_id": "agent:ws_01J8Z2:agent_a",
       "event_type": "RetirementHeld",
       "schema_version": 1,
@@ -17731,6 +17780,17 @@
       },
       "artifact_refs": [],
       "pii_refs": []
+     },
+     {
+      "event_id": "01J8Z5RHA04000000000000000",
+      "event_type": "OwnerAlertSent",
+      "causation_id": "01J8Z5RH904000000000000000",
+      "config_refs": {},
+      "payload": {
+       "subject": "01J8Z5RH904000000000000000",
+       "kind": "retirement_held",
+       "owner_command": null
+      }
      }
     ],
     "expect": {
@@ -17739,12 +17799,12 @@
    },
    {
     "name": "between_others",
-    "clause": "rule 265: other records between periods are not read",
+    "clause": "rule 266: other records between periods are not read",
     "records": [
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01J8Z5RH21S000000000000000",
+      "event_id": "01J8Z5RH905000000000000000",
       "stream_id": "agent:ws_01J8Z2:agent_a",
       "event_type": "RetirementHeld",
       "schema_version": 1,
@@ -17773,40 +17833,29 @@
       "pii_refs": []
      },
      {
-      "envelope_version": 1,
-      "environment": "paper",
+      "event_id": "01J8Z5RHA05000000000000000",
+      "event_type": "OwnerAlertSent",
+      "causation_id": "01J8Z5RH905000000000000000",
+      "config_refs": {},
+      "payload": {
+       "subject": "01J8Z5RH905000000000000000",
+       "kind": "retirement_held",
+       "owner_command": null
+      }
+     },
+     {
       "event_id": "01J8Z5RH310000000000000000",
-      "stream_id": "agent:ws_01J8Z2:agent_a",
       "event_type": "ApprovalTimedOut",
-      "schema_version": 1,
-      "event_time": "2026-09-22T15:00:00.000000000Z",
-      "clock_source": "scheduler",
-      "causation_id": "01J8Z5RH0A000000000000000S",
-      "correlation_id": null,
-      "actor": {
-       "kind": "agent",
-       "id": "agent_a",
-       "version": "0.1.0",
-       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
-      },
+      "causation_id": null,
       "config_refs": {
        "mandate_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
       },
-      "payload": {
-       "held_since": "2026-09-21T15:00:00.000000000Z",
-       "period": 1,
-       "waiting_on": [
-        "position"
-       ],
-       "risk_clock": "2026-09-22T15:00:00.000000000Z"
-      },
-      "artifact_refs": [],
-      "pii_refs": []
+      "payload": {}
      },
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01J8Z5RH22S000000000000000",
+      "event_id": "01J8Z5RH906000000000000000",
       "stream_id": "agent:ws_01J8Z2:agent_a",
       "event_type": "RetirementHeld",
       "schema_version": 1,
@@ -17833,6 +17882,17 @@
       },
       "artifact_refs": [],
       "pii_refs": []
+     },
+     {
+      "event_id": "01J8Z5RHA06000000000000000",
+      "event_type": "OwnerAlertSent",
+      "causation_id": "01J8Z5RH906000000000000000",
+      "config_refs": {},
+      "payload": {
+       "subject": "01J8Z5RH906000000000000000",
+       "kind": "retirement_held",
+       "owner_command": null
+      }
      }
     ],
     "expect": {
@@ -17840,13 +17900,13 @@
     }
    },
    {
-    "name": "two_causes",
-    "clause": "rule 265: each cause counts its own periods",
+    "name": "after_downtime",
+    "clause": "rule 266: a runtime back after three days writes the next period, not the missed ones",
     "records": [
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01J8Z5RH21S000000000000000",
+      "event_id": "01J8Z5RH907000000000000000",
       "stream_id": "agent:ws_01J8Z2:agent_a",
       "event_type": "RetirementHeld",
       "schema_version": 1,
@@ -17875,44 +17935,24 @@
       "pii_refs": []
      },
      {
-      "envelope_version": 1,
-      "environment": "paper",
-      "event_id": "01J8Z5RH21M000000000000000",
-      "stream_id": "agent:ws_01J8Z2:agent_a",
-      "event_type": "RetirementHeld",
-      "schema_version": 1,
-      "event_time": "2026-09-22T15:00:00.000000000Z",
-      "clock_source": "scheduler",
-      "causation_id": "01J8Z5RH0B000000000000000M",
-      "correlation_id": null,
-      "actor": {
-       "kind": "agent",
-       "id": "agent_a",
-       "version": "0.1.0",
-       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
-      },
-      "config_refs": {
-       "mandate_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
-      },
+      "event_id": "01J8Z5RHA07000000000000000",
+      "event_type": "OwnerAlertSent",
+      "causation_id": "01J8Z5RH907000000000000000",
+      "config_refs": {},
       "payload": {
-       "held_since": "2026-09-21T15:00:00.000000000Z",
-       "period": 1,
-       "waiting_on": [
-        "position"
-       ],
-       "risk_clock": "2026-09-22T15:00:00.000000000Z"
-      },
-      "artifact_refs": [],
-      "pii_refs": []
+       "subject": "01J8Z5RH907000000000000000",
+       "kind": "retirement_held",
+       "owner_command": null
+      }
      },
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01J8Z5RH22S000000000000000",
+      "event_id": "01J8Z5RH908000000000000000",
       "stream_id": "agent:ws_01J8Z2:agent_a",
       "event_type": "RetirementHeld",
       "schema_version": 1,
-      "event_time": "2026-09-23T15:00:00.000000000Z",
+      "event_time": "2026-09-26T15:00:00.000000000Z",
       "clock_source": "scheduler",
       "causation_id": "01J8Z5RH0A000000000000000S",
       "correlation_id": null,
@@ -17931,41 +17971,21 @@
        "waiting_on": [
         "position"
        ],
-       "risk_clock": "2026-09-23T15:00:00.000000000Z"
+       "risk_clock": "2026-09-26T15:00:00.000000000Z"
       },
       "artifact_refs": [],
       "pii_refs": []
      },
      {
-      "envelope_version": 1,
-      "environment": "paper",
-      "event_id": "01J8Z5RH22M000000000000000",
-      "stream_id": "agent:ws_01J8Z2:agent_a",
-      "event_type": "RetirementHeld",
-      "schema_version": 1,
-      "event_time": "2026-09-23T15:00:00.000000000Z",
-      "clock_source": "scheduler",
-      "causation_id": "01J8Z5RH0B000000000000000M",
-      "correlation_id": null,
-      "actor": {
-       "kind": "agent",
-       "id": "agent_a",
-       "version": "0.1.0",
-       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
-      },
-      "config_refs": {
-       "mandate_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
-      },
+      "event_id": "01J8Z5RHA08000000000000000",
+      "event_type": "OwnerAlertSent",
+      "causation_id": "01J8Z5RH908000000000000000",
+      "config_refs": {},
       "payload": {
-       "held_since": "2026-09-21T15:00:00.000000000Z",
-       "period": 2,
-       "waiting_on": [
-        "position"
-       ],
-       "risk_clock": "2026-09-23T15:00:00.000000000Z"
-      },
-      "artifact_refs": [],
-      "pii_refs": []
+       "subject": "01J8Z5RH908000000000000000",
+       "kind": "retirement_held",
+       "owner_command": null
+      }
      }
     ],
     "expect": {
@@ -17974,12 +17994,12 @@
    },
    {
     "name": "what_it_waits_on_changes",
-    "clause": "rule 265: what it waits on may change between periods",
+    "clause": "rule 266: what it waits on may change between periods",
     "records": [
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01J8Z5RH21S000000000000000",
+      "event_id": "01J8Z5RH909000000000000000",
       "stream_id": "agent:ws_01J8Z2:agent_a",
       "event_type": "RetirementHeld",
       "schema_version": 1,
@@ -18009,9 +18029,20 @@
       "pii_refs": []
      },
      {
+      "event_id": "01J8Z5RHA09000000000000000",
+      "event_type": "OwnerAlertSent",
+      "causation_id": "01J8Z5RH909000000000000000",
+      "config_refs": {},
+      "payload": {
+       "subject": "01J8Z5RH909000000000000000",
+       "kind": "retirement_held",
+       "owner_command": null
+      }
+     },
+     {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01J8Z5RH22S000000000000000",
+      "event_id": "01J8Z5RH910000000000000000",
       "stream_id": "agent:ws_01J8Z2:agent_a",
       "event_type": "RetirementHeld",
       "schema_version": 1,
@@ -18038,6 +18069,17 @@
       },
       "artifact_refs": [],
       "pii_refs": []
+     },
+     {
+      "event_id": "01J8Z5RHA10000000000000000",
+      "event_type": "OwnerAlertSent",
+      "causation_id": "01J8Z5RH910000000000000000",
+      "config_refs": {},
+      "payload": {
+       "subject": "01J8Z5RH910000000000000000",
+       "kind": "retirement_held",
+       "owner_command": null
+      }
      }
     ],
     "expect": {
@@ -18045,55 +18087,13 @@
     }
    },
    {
-    "name": "starts_at_two",
-    "clause": "rule 265: the first period is 1",
+    "name": "a_new_cause_after_a_stop",
+    "clause": "rule 266: after its end, a later retirement is a new sequence from 1",
     "records": [
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01J8Z5RH22S000000000000000",
-      "stream_id": "agent:ws_01J8Z2:agent_a",
-      "event_type": "RetirementHeld",
-      "schema_version": 1,
-      "event_time": "2026-09-23T15:00:00.000000000Z",
-      "clock_source": "scheduler",
-      "causation_id": "01J8Z5RH0A000000000000000S",
-      "correlation_id": null,
-      "actor": {
-       "kind": "agent",
-       "id": "agent_a",
-       "version": "0.1.0",
-       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
-      },
-      "config_refs": {
-       "mandate_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
-      },
-      "payload": {
-       "held_since": "2026-09-21T15:00:00.000000000Z",
-       "period": 2,
-       "waiting_on": [
-        "position"
-       ],
-       "risk_clock": "2026-09-23T15:00:00.000000000Z"
-      },
-      "artifact_refs": [],
-      "pii_refs": []
-     }
-    ],
-    "expect": {
-     "outcome": "Invalid",
-     "rule": "rule 265",
-     "index": 0
-    }
-   },
-   {
-    "name": "skips_a_period",
-    "clause": "rule 265: each next period is one more",
-    "records": [
-     {
-      "envelope_version": 1,
-      "environment": "paper",
-      "event_id": "01J8Z5RH21S000000000000000",
+      "event_id": "01J8Z5RH911000000000000000",
       "stream_id": "agent:ws_01J8Z2:agent_a",
       "event_type": "RetirementHeld",
       "schema_version": 1,
@@ -18122,15 +18122,35 @@
       "pii_refs": []
      },
      {
+      "event_id": "01J8Z5RHA11000000000000000",
+      "event_type": "OwnerAlertSent",
+      "causation_id": "01J8Z5RH911000000000000000",
+      "config_refs": {},
+      "payload": {
+       "subject": "01J8Z5RH911000000000000000",
+       "kind": "retirement_held",
+       "owner_command": null
+      }
+     },
+     {
+      "event_id": "01J8Z5RHE01000000000000000",
+      "event_type": "AgentStopped",
+      "causation_id": null,
+      "config_refs": {},
+      "payload": {
+       "agent_id": "agent_a"
+      }
+     },
+     {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01J8Z5RH23S000000000000000",
+      "event_id": "01J8Z5RH912000000000000000",
       "stream_id": "agent:ws_01J8Z2:agent_a",
       "event_type": "RetirementHeld",
       "schema_version": 1,
-      "event_time": "2026-09-24T15:00:00.000000000Z",
+      "event_time": "2026-09-22T15:00:00.000000000Z",
       "clock_source": "scheduler",
-      "causation_id": "01J8Z5RH0A000000000000000S",
+      "causation_id": "01J8Z5RH0B000000000000000M",
       "correlation_id": null,
       "actor": {
        "kind": "agent",
@@ -18143,30 +18163,39 @@
       },
       "payload": {
        "held_since": "2026-09-21T15:00:00.000000000Z",
-       "period": 3,
+       "period": 1,
        "waiting_on": [
         "position"
        ],
-       "risk_clock": "2026-09-24T15:00:00.000000000Z"
+       "risk_clock": "2026-09-22T15:00:00.000000000Z"
       },
       "artifact_refs": [],
       "pii_refs": []
+     },
+     {
+      "event_id": "01J8Z5RHA12000000000000000",
+      "event_type": "OwnerAlertSent",
+      "causation_id": "01J8Z5RH912000000000000000",
+      "config_refs": {},
+      "payload": {
+       "subject": "01J8Z5RH912000000000000000",
+       "kind": "retirement_held",
+       "owner_command": null
+      }
      }
     ],
     "expect": {
-     "outcome": "Invalid",
-     "rule": "rule 265",
-     "index": 1
+     "outcome": "Valid"
     }
    },
    {
-    "name": "repeats_a_period",
-    "clause": "rule 265: each period once",
+    "name": "a_new_cause_after_a_resume",
+    "clause": "rule 266: a resume ends the sequence",
     "records": [
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01J8Z5RH21S000000000000000",
+      "event_id": "01J8Z5RH913000000000000000",
       "stream_id": "agent:ws_01J8Z2:agent_a",
       "event_type": "RetirementHeld",
       "schema_version": 1,
@@ -18195,88 +18224,37 @@
       "pii_refs": []
      },
      {
-      "envelope_version": 1,
-      "environment": "paper",
-      "event_id": "01J8Z5RH22S000000000000000",
-      "stream_id": "agent:ws_01J8Z2:agent_a",
-      "event_type": "RetirementHeld",
-      "schema_version": 1,
-      "event_time": "2026-09-23T15:00:00.000000000Z",
-      "clock_source": "scheduler",
-      "causation_id": "01J8Z5RH0A000000000000000S",
-      "correlation_id": null,
-      "actor": {
-       "kind": "agent",
-       "id": "agent_a",
-       "version": "0.1.0",
-       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
-      },
-      "config_refs": {
-       "mandate_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
-      },
+      "event_id": "01J8Z5RHA13000000000000000",
+      "event_type": "OwnerAlertSent",
+      "causation_id": "01J8Z5RH913000000000000000",
+      "config_refs": {},
       "payload": {
-       "held_since": "2026-09-21T15:00:00.000000000Z",
-       "period": 2,
-       "waiting_on": [
-        "position"
-       ],
-       "risk_clock": "2026-09-23T15:00:00.000000000Z"
-      },
-      "artifact_refs": [],
-      "pii_refs": []
+       "subject": "01J8Z5RH913000000000000000",
+       "kind": "retirement_held",
+       "owner_command": null
+      }
+     },
+     {
+      "event_id": "01J8Z5RHE02000000000000000",
+      "event_type": "OwnerCommandIssued",
+      "causation_id": null,
+      "config_refs": {},
+      "payload": {
+       "command": "resume",
+       "scope": "agent",
+       "subject": "agent_a"
+      }
      },
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01J8Z5RH22S000000000000000",
-      "stream_id": "agent:ws_01J8Z2:agent_a",
-      "event_type": "RetirementHeld",
-      "schema_version": 1,
-      "event_time": "2026-09-23T15:00:00.000000000Z",
-      "clock_source": "scheduler",
-      "causation_id": "01J8Z5RH0A000000000000000S",
-      "correlation_id": null,
-      "actor": {
-       "kind": "agent",
-       "id": "agent_a",
-       "version": "0.1.0",
-       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
-      },
-      "config_refs": {
-       "mandate_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
-      },
-      "payload": {
-       "held_since": "2026-09-21T15:00:00.000000000Z",
-       "period": 2,
-       "waiting_on": [
-        "position"
-       ],
-       "risk_clock": "2026-09-23T15:00:00.000000000Z"
-      },
-      "artifact_refs": [],
-      "pii_refs": []
-     }
-    ],
-    "expect": {
-     "outcome": "Invalid",
-     "rule": "rule 265",
-     "index": 2
-    }
-   },
-   {
-    "name": "another_since",
-    "clause": "rule 265: one retirement began once",
-    "records": [
-     {
-      "envelope_version": 1,
-      "environment": "paper",
-      "event_id": "01J8Z5RH21S000000000000000",
+      "event_id": "01J8Z5RH914000000000000000",
       "stream_id": "agent:ws_01J8Z2:agent_a",
       "event_type": "RetirementHeld",
       "schema_version": 1,
       "event_time": "2026-09-22T15:00:00.000000000Z",
       "clock_source": "scheduler",
-      "causation_id": "01J8Z5RH0A000000000000000S",
+      "causation_id": "01J8Z5RH0B000000000000000M",
       "correlation_id": null,
       "actor": {
        "kind": "agent",
@@ -18299,124 +18277,29 @@
       "pii_refs": []
      },
      {
-      "envelope_version": 1,
-      "environment": "paper",
-      "event_id": "01J8Z5RH22S000000000000000",
-      "stream_id": "agent:ws_01J8Z2:agent_a",
-      "event_type": "RetirementHeld",
-      "schema_version": 1,
-      "event_time": "2026-09-23T16:00:00.000000000Z",
-      "clock_source": "scheduler",
-      "causation_id": "01J8Z5RH0A000000000000000S",
-      "correlation_id": null,
-      "actor": {
-       "kind": "agent",
-       "id": "agent_a",
-       "version": "0.1.0",
-       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
-      },
-      "config_refs": {
-       "mandate_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
-      },
+      "event_id": "01J8Z5RHA14000000000000000",
+      "event_type": "OwnerAlertSent",
+      "causation_id": "01J8Z5RH914000000000000000",
+      "config_refs": {},
       "payload": {
-       "held_since": "2026-09-21T16:00:00.000000000Z",
-       "period": 2,
-       "waiting_on": [
-        "position"
-       ],
-       "risk_clock": "2026-09-23T16:00:00.000000000Z"
-      },
-      "artifact_refs": [],
-      "pii_refs": []
+       "subject": "01J8Z5RH914000000000000000",
+       "kind": "retirement_held",
+       "owner_command": null
+      }
      }
     ],
     "expect": {
-     "outcome": "Invalid",
-     "rule": "rule 265",
-     "index": 1
-    }
-   },
-   {
-    "name": "under_a_newer_version",
-    "clause": "rule 265: a newer mandate version ends the retirement it was held under",
-    "records": [
-     {
-      "envelope_version": 1,
-      "environment": "paper",
-      "event_id": "01J8Z5RH21S000000000000000",
-      "stream_id": "agent:ws_01J8Z2:agent_a",
-      "event_type": "RetirementHeld",
-      "schema_version": 1,
-      "event_time": "2026-09-22T15:00:00.000000000Z",
-      "clock_source": "scheduler",
-      "causation_id": "01J8Z5RH0A000000000000000S",
-      "correlation_id": null,
-      "actor": {
-       "kind": "agent",
-       "id": "agent_a",
-       "version": "0.1.0",
-       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
-      },
-      "config_refs": {
-       "mandate_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
-      },
-      "payload": {
-       "held_since": "2026-09-21T15:00:00.000000000Z",
-       "period": 1,
-       "waiting_on": [
-        "position"
-       ],
-       "risk_clock": "2026-09-22T15:00:00.000000000Z"
-      },
-      "artifact_refs": [],
-      "pii_refs": []
-     },
-     {
-      "envelope_version": 1,
-      "environment": "paper",
-      "event_id": "01J8Z5RH22S000000000000000",
-      "stream_id": "agent:ws_01J8Z2:agent_a",
-      "event_type": "RetirementHeld",
-      "schema_version": 1,
-      "event_time": "2026-09-23T15:00:00.000000000Z",
-      "clock_source": "scheduler",
-      "causation_id": "01J8Z5RH0A000000000000000S",
-      "correlation_id": null,
-      "actor": {
-       "kind": "agent",
-       "id": "agent_a",
-       "version": "0.1.0",
-       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
-      },
-      "config_refs": {
-       "mandate_version": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
-      },
-      "payload": {
-       "held_since": "2026-09-21T15:00:00.000000000Z",
-       "period": 2,
-       "waiting_on": [
-        "position"
-       ],
-       "risk_clock": "2026-09-23T15:00:00.000000000Z"
-      },
-      "artifact_refs": [],
-      "pii_refs": []
-     }
-    ],
-    "expect": {
-     "outcome": "Invalid",
-     "rule": "rule 265",
-     "index": 1
+     "outcome": "Valid"
     }
    },
    {
     "name": "retired_again_under_the_newer_version",
-    "clause": "rule 265: a retirement the newer version begins is a new cause, from 1",
+    "clause": "rule 266: a version applied ends the sequence; one the newer version begins counts from 1",
     "records": [
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01J8Z5RH21S000000000000000",
+      "event_id": "01J8Z5RH915000000000000000",
       "stream_id": "agent:ws_01J8Z2:agent_a",
       "event_type": "RetirementHeld",
       "schema_version": 1,
@@ -18445,9 +18328,29 @@
       "pii_refs": []
      },
      {
+      "event_id": "01J8Z5RHA15000000000000000",
+      "event_type": "OwnerAlertSent",
+      "causation_id": "01J8Z5RH915000000000000000",
+      "config_refs": {},
+      "payload": {
+       "subject": "01J8Z5RH915000000000000000",
+       "kind": "retirement_held",
+       "owner_command": null
+      }
+     },
+     {
+      "event_id": "01J8Z5RHE03000000000000000",
+      "event_type": "MandateVersionApplied",
+      "causation_id": null,
+      "config_refs": {},
+      "payload": {
+       "agent_id": "agent_a"
+      }
+     },
+     {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01J8Z5RH21M000000000000000",
+      "event_id": "01J8Z5RH916000000000000000",
       "stream_id": "agent:ws_01J8Z2:agent_a",
       "event_type": "RetirementHeld",
       "schema_version": 1,
@@ -18476,9 +18379,20 @@
       "pii_refs": []
      },
      {
+      "event_id": "01J8Z5RHA16000000000000000",
+      "event_type": "OwnerAlertSent",
+      "causation_id": "01J8Z5RH916000000000000000",
+      "config_refs": {},
+      "payload": {
+       "subject": "01J8Z5RH916000000000000000",
+       "kind": "retirement_held",
+       "owner_command": null
+      }
+     },
+     {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01J8Z5RH22M000000000000000",
+      "event_id": "01J8Z5RH917000000000000000",
       "stream_id": "agent:ws_01J8Z2:agent_a",
       "event_type": "RetirementHeld",
       "schema_version": 1,
@@ -18505,6 +18419,17 @@
       },
       "artifact_refs": [],
       "pii_refs": []
+     },
+     {
+      "event_id": "01J8Z5RHA17000000000000000",
+      "event_type": "OwnerAlertSent",
+      "causation_id": "01J8Z5RH917000000000000000",
+      "config_refs": {},
+      "payload": {
+       "subject": "01J8Z5RH917000000000000000",
+       "kind": "retirement_held",
+       "owner_command": null
+      }
      }
     ],
     "expect": {
@@ -18512,13 +18437,66 @@
     }
    },
    {
-    "name": "another_cause_restarts_at_one",
-    "clause": "rule 265: another cause starts from 1",
+    "name": "starts_at_two",
+    "clause": "rule 266: the first period is 1",
     "records": [
      {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01J8Z5RH21S000000000000000",
+      "event_id": "01J8Z5RH918000000000000000",
+      "stream_id": "agent:ws_01J8Z2:agent_a",
+      "event_type": "RetirementHeld",
+      "schema_version": 1,
+      "event_time": "2026-09-23T15:00:00.000000000Z",
+      "clock_source": "scheduler",
+      "causation_id": "01J8Z5RH0A000000000000000S",
+      "correlation_id": null,
+      "actor": {
+       "kind": "agent",
+       "id": "agent_a",
+       "version": "0.1.0",
+       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "config_refs": {
+       "mandate_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "payload": {
+       "held_since": "2026-09-21T15:00:00.000000000Z",
+       "period": 2,
+       "waiting_on": [
+        "position"
+       ],
+       "risk_clock": "2026-09-23T15:00:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "event_id": "01J8Z5RHA18000000000000000",
+      "event_type": "OwnerAlertSent",
+      "causation_id": "01J8Z5RH918000000000000000",
+      "config_refs": {},
+      "payload": {
+       "subject": "01J8Z5RH918000000000000000",
+       "kind": "retirement_held",
+       "owner_command": null
+      }
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "rule": "rule 266",
+     "index": 0
+    }
+   },
+   {
+    "name": "skips_a_period",
+    "clause": "rule 266: each next period is one more",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z5RH919000000000000000",
       "stream_id": "agent:ws_01J8Z2:agent_a",
       "event_type": "RetirementHeld",
       "schema_version": 1,
@@ -18547,9 +18525,115 @@
       "pii_refs": []
      },
      {
+      "event_id": "01J8Z5RHA19000000000000000",
+      "event_type": "OwnerAlertSent",
+      "causation_id": "01J8Z5RH919000000000000000",
+      "config_refs": {},
+      "payload": {
+       "subject": "01J8Z5RH919000000000000000",
+       "kind": "retirement_held",
+       "owner_command": null
+      }
+     },
+     {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01J8Z5RH22S000000000000000",
+      "event_id": "01J8Z5RH920000000000000000",
+      "stream_id": "agent:ws_01J8Z2:agent_a",
+      "event_type": "RetirementHeld",
+      "schema_version": 1,
+      "event_time": "2026-09-24T15:00:00.000000000Z",
+      "clock_source": "scheduler",
+      "causation_id": "01J8Z5RH0A000000000000000S",
+      "correlation_id": null,
+      "actor": {
+       "kind": "agent",
+       "id": "agent_a",
+       "version": "0.1.0",
+       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "config_refs": {
+       "mandate_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "payload": {
+       "held_since": "2026-09-21T15:00:00.000000000Z",
+       "period": 3,
+       "waiting_on": [
+        "position"
+       ],
+       "risk_clock": "2026-09-24T15:00:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "event_id": "01J8Z5RHA20000000000000000",
+      "event_type": "OwnerAlertSent",
+      "causation_id": "01J8Z5RH920000000000000000",
+      "config_refs": {},
+      "payload": {
+       "subject": "01J8Z5RH920000000000000000",
+       "kind": "retirement_held",
+       "owner_command": null
+      }
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "rule": "rule 266",
+     "index": 2
+    }
+   },
+   {
+    "name": "repeats_a_period",
+    "clause": "rule 266: each period once",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z5RH921000000000000000",
+      "stream_id": "agent:ws_01J8Z2:agent_a",
+      "event_type": "RetirementHeld",
+      "schema_version": 1,
+      "event_time": "2026-09-22T15:00:00.000000000Z",
+      "clock_source": "scheduler",
+      "causation_id": "01J8Z5RH0A000000000000000S",
+      "correlation_id": null,
+      "actor": {
+       "kind": "agent",
+       "id": "agent_a",
+       "version": "0.1.0",
+       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "config_refs": {
+       "mandate_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "payload": {
+       "held_since": "2026-09-21T15:00:00.000000000Z",
+       "period": 1,
+       "waiting_on": [
+        "position"
+       ],
+       "risk_clock": "2026-09-22T15:00:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "event_id": "01J8Z5RHA21000000000000000",
+      "event_type": "OwnerAlertSent",
+      "causation_id": "01J8Z5RH921000000000000000",
+      "config_refs": {},
+      "payload": {
+       "subject": "01J8Z5RH921000000000000000",
+       "kind": "retirement_held",
+       "owner_command": null
+      }
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z5RH922000000000000000",
       "stream_id": "agent:ws_01J8Z2:agent_a",
       "event_type": "RetirementHeld",
       "schema_version": 1,
@@ -18578,9 +18662,400 @@
       "pii_refs": []
      },
      {
+      "event_id": "01J8Z5RHA22000000000000000",
+      "event_type": "OwnerAlertSent",
+      "causation_id": "01J8Z5RH922000000000000000",
+      "config_refs": {},
+      "payload": {
+       "subject": "01J8Z5RH922000000000000000",
+       "kind": "retirement_held",
+       "owner_command": null
+      }
+     },
+     {
       "envelope_version": 1,
       "environment": "paper",
-      "event_id": "01J8Z5RH22M000000000000000",
+      "event_id": "01J8Z5RH923000000000000000",
+      "stream_id": "agent:ws_01J8Z2:agent_a",
+      "event_type": "RetirementHeld",
+      "schema_version": 1,
+      "event_time": "2026-09-23T15:00:00.000000000Z",
+      "clock_source": "scheduler",
+      "causation_id": "01J8Z5RH0A000000000000000S",
+      "correlation_id": null,
+      "actor": {
+       "kind": "agent",
+       "id": "agent_a",
+       "version": "0.1.0",
+       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "config_refs": {
+       "mandate_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "payload": {
+       "held_since": "2026-09-21T15:00:00.000000000Z",
+       "period": 2,
+       "waiting_on": [
+        "position"
+       ],
+       "risk_clock": "2026-09-23T15:00:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "event_id": "01J8Z5RHA23000000000000000",
+      "event_type": "OwnerAlertSent",
+      "causation_id": "01J8Z5RH923000000000000000",
+      "config_refs": {},
+      "payload": {
+       "subject": "01J8Z5RH923000000000000000",
+       "kind": "retirement_held",
+       "owner_command": null
+      }
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "rule": "rule 266",
+     "index": 4
+    }
+   },
+   {
+    "name": "another_since",
+    "clause": "rule 266: one retirement began once",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z5RH924000000000000000",
+      "stream_id": "agent:ws_01J8Z2:agent_a",
+      "event_type": "RetirementHeld",
+      "schema_version": 1,
+      "event_time": "2026-09-22T15:00:00.000000000Z",
+      "clock_source": "scheduler",
+      "causation_id": "01J8Z5RH0A000000000000000S",
+      "correlation_id": null,
+      "actor": {
+       "kind": "agent",
+       "id": "agent_a",
+       "version": "0.1.0",
+       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "config_refs": {
+       "mandate_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "payload": {
+       "held_since": "2026-09-21T15:00:00.000000000Z",
+       "period": 1,
+       "waiting_on": [
+        "position"
+       ],
+       "risk_clock": "2026-09-22T15:00:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "event_id": "01J8Z5RHA24000000000000000",
+      "event_type": "OwnerAlertSent",
+      "causation_id": "01J8Z5RH924000000000000000",
+      "config_refs": {},
+      "payload": {
+       "subject": "01J8Z5RH924000000000000000",
+       "kind": "retirement_held",
+       "owner_command": null
+      }
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z5RH925000000000000000",
+      "stream_id": "agent:ws_01J8Z2:agent_a",
+      "event_type": "RetirementHeld",
+      "schema_version": 1,
+      "event_time": "2026-09-23T16:00:00.000000000Z",
+      "clock_source": "scheduler",
+      "causation_id": "01J8Z5RH0A000000000000000S",
+      "correlation_id": null,
+      "actor": {
+       "kind": "agent",
+       "id": "agent_a",
+       "version": "0.1.0",
+       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "config_refs": {
+       "mandate_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "payload": {
+       "held_since": "2026-09-21T16:00:00.000000000Z",
+       "period": 2,
+       "waiting_on": [
+        "position"
+       ],
+       "risk_clock": "2026-09-23T16:00:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "event_id": "01J8Z5RHA25000000000000000",
+      "event_type": "OwnerAlertSent",
+      "causation_id": "01J8Z5RH925000000000000000",
+      "config_refs": {},
+      "payload": {
+       "subject": "01J8Z5RH925000000000000000",
+       "kind": "retirement_held",
+       "owner_command": null
+      }
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "rule": "rule 266",
+     "index": 2
+    }
+   },
+   {
+    "name": "under_a_newer_version",
+    "clause": "rule 266: a newer version with no end between is no continuation",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z5RH926000000000000000",
+      "stream_id": "agent:ws_01J8Z2:agent_a",
+      "event_type": "RetirementHeld",
+      "schema_version": 1,
+      "event_time": "2026-09-22T15:00:00.000000000Z",
+      "clock_source": "scheduler",
+      "causation_id": "01J8Z5RH0A000000000000000S",
+      "correlation_id": null,
+      "actor": {
+       "kind": "agent",
+       "id": "agent_a",
+       "version": "0.1.0",
+       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "config_refs": {
+       "mandate_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "payload": {
+       "held_since": "2026-09-21T15:00:00.000000000Z",
+       "period": 1,
+       "waiting_on": [
+        "position"
+       ],
+       "risk_clock": "2026-09-22T15:00:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "event_id": "01J8Z5RHA26000000000000000",
+      "event_type": "OwnerAlertSent",
+      "causation_id": "01J8Z5RH926000000000000000",
+      "config_refs": {},
+      "payload": {
+       "subject": "01J8Z5RH926000000000000000",
+       "kind": "retirement_held",
+       "owner_command": null
+      }
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z5RH927000000000000000",
+      "stream_id": "agent:ws_01J8Z2:agent_a",
+      "event_type": "RetirementHeld",
+      "schema_version": 1,
+      "event_time": "2026-09-23T15:00:00.000000000Z",
+      "clock_source": "scheduler",
+      "causation_id": "01J8Z5RH0A000000000000000S",
+      "correlation_id": null,
+      "actor": {
+       "kind": "agent",
+       "id": "agent_a",
+       "version": "0.1.0",
+       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "config_refs": {
+       "mandate_version": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+      },
+      "payload": {
+       "held_since": "2026-09-21T15:00:00.000000000Z",
+       "period": 2,
+       "waiting_on": [
+        "position"
+       ],
+       "risk_clock": "2026-09-23T15:00:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "event_id": "01J8Z5RHA27000000000000000",
+      "event_type": "OwnerAlertSent",
+      "causation_id": "01J8Z5RH927000000000000000",
+      "config_refs": {},
+      "payload": {
+       "subject": "01J8Z5RH927000000000000000",
+       "kind": "retirement_held",
+       "owner_command": null
+      }
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "rule": "rule 266",
+     "index": 2
+    }
+   },
+   {
+    "name": "a_second_cause_while_one_holds",
+    "clause": "rule 266: one sequence per agent; a second cause starts nothing",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z5RH928000000000000000",
+      "stream_id": "agent:ws_01J8Z2:agent_a",
+      "event_type": "RetirementHeld",
+      "schema_version": 1,
+      "event_time": "2026-09-22T15:00:00.000000000Z",
+      "clock_source": "scheduler",
+      "causation_id": "01J8Z5RH0A000000000000000S",
+      "correlation_id": null,
+      "actor": {
+       "kind": "agent",
+       "id": "agent_a",
+       "version": "0.1.0",
+       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "config_refs": {
+       "mandate_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "payload": {
+       "held_since": "2026-09-21T15:00:00.000000000Z",
+       "period": 1,
+       "waiting_on": [
+        "position"
+       ],
+       "risk_clock": "2026-09-22T15:00:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "event_id": "01J8Z5RHA28000000000000000",
+      "event_type": "OwnerAlertSent",
+      "causation_id": "01J8Z5RH928000000000000000",
+      "config_refs": {},
+      "payload": {
+       "subject": "01J8Z5RH928000000000000000",
+       "kind": "retirement_held",
+       "owner_command": null
+      }
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z5RH929000000000000000",
+      "stream_id": "agent:ws_01J8Z2:agent_a",
+      "event_type": "RetirementHeld",
+      "schema_version": 1,
+      "event_time": "2026-09-22T15:00:00.000000000Z",
+      "clock_source": "scheduler",
+      "causation_id": "01J8Z5RH0B000000000000000M",
+      "correlation_id": null,
+      "actor": {
+       "kind": "agent",
+       "id": "agent_a",
+       "version": "0.1.0",
+       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "config_refs": {
+       "mandate_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "payload": {
+       "held_since": "2026-09-21T15:00:00.000000000Z",
+       "period": 1,
+       "waiting_on": [
+        "position"
+       ],
+       "risk_clock": "2026-09-22T15:00:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "event_id": "01J8Z5RHA29000000000000000",
+      "event_type": "OwnerAlertSent",
+      "causation_id": "01J8Z5RH929000000000000000",
+      "config_refs": {},
+      "payload": {
+       "subject": "01J8Z5RH929000000000000000",
+       "kind": "retirement_held",
+       "owner_command": null
+      }
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "rule": "rule 266",
+     "index": 2
+    }
+   },
+   {
+    "name": "a_second_cause_continuing_the_count",
+    "clause": "rule 266: a period of another cause is no continuation, whatever its number",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z5RH930000000000000000",
+      "stream_id": "agent:ws_01J8Z2:agent_a",
+      "event_type": "RetirementHeld",
+      "schema_version": 1,
+      "event_time": "2026-09-22T15:00:00.000000000Z",
+      "clock_source": "scheduler",
+      "causation_id": "01J8Z5RH0A000000000000000S",
+      "correlation_id": null,
+      "actor": {
+       "kind": "agent",
+       "id": "agent_a",
+       "version": "0.1.0",
+       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "config_refs": {
+       "mandate_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "payload": {
+       "held_since": "2026-09-21T15:00:00.000000000Z",
+       "period": 1,
+       "waiting_on": [
+        "position"
+       ],
+       "risk_clock": "2026-09-22T15:00:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "event_id": "01J8Z5RHA30000000000000000",
+      "event_type": "OwnerAlertSent",
+      "causation_id": "01J8Z5RH930000000000000000",
+      "config_refs": {},
+      "payload": {
+       "subject": "01J8Z5RH930000000000000000",
+       "kind": "retirement_held",
+       "owner_command": null
+      }
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z5RH931000000000000000",
       "stream_id": "agent:ws_01J8Z2:agent_a",
       "event_type": "RetirementHeld",
       "schema_version": 1,
@@ -18607,22 +19082,471 @@
       },
       "artifact_refs": [],
       "pii_refs": []
+     },
+     {
+      "event_id": "01J8Z5RHA31000000000000000",
+      "event_type": "OwnerAlertSent",
+      "causation_id": "01J8Z5RH931000000000000000",
+      "config_refs": {},
+      "payload": {
+       "subject": "01J8Z5RH931000000000000000",
+       "kind": "retirement_held",
+       "owner_command": null
+      }
      }
     ],
     "expect": {
      "outcome": "Invalid",
-     "rule": "rule 265",
+     "rule": "rule 266",
      "index": 2
+    }
+   },
+   {
+    "name": "after_its_stop",
+    "clause": "rule 266: none after the agent's AgentStopped",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z5RH932000000000000000",
+      "stream_id": "agent:ws_01J8Z2:agent_a",
+      "event_type": "RetirementHeld",
+      "schema_version": 1,
+      "event_time": "2026-09-22T15:00:00.000000000Z",
+      "clock_source": "scheduler",
+      "causation_id": "01J8Z5RH0A000000000000000S",
+      "correlation_id": null,
+      "actor": {
+       "kind": "agent",
+       "id": "agent_a",
+       "version": "0.1.0",
+       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "config_refs": {
+       "mandate_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "payload": {
+       "held_since": "2026-09-21T15:00:00.000000000Z",
+       "period": 1,
+       "waiting_on": [
+        "position"
+       ],
+       "risk_clock": "2026-09-22T15:00:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "event_id": "01J8Z5RHA32000000000000000",
+      "event_type": "OwnerAlertSent",
+      "causation_id": "01J8Z5RH932000000000000000",
+      "config_refs": {},
+      "payload": {
+       "subject": "01J8Z5RH932000000000000000",
+       "kind": "retirement_held",
+       "owner_command": null
+      }
+     },
+     {
+      "event_id": "01J8Z5RHE04000000000000000",
+      "event_type": "AgentStopped",
+      "causation_id": null,
+      "config_refs": {},
+      "payload": {
+       "agent_id": "agent_a"
+      }
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z5RH933000000000000000",
+      "stream_id": "agent:ws_01J8Z2:agent_a",
+      "event_type": "RetirementHeld",
+      "schema_version": 1,
+      "event_time": "2026-09-23T15:00:00.000000000Z",
+      "clock_source": "scheduler",
+      "causation_id": "01J8Z5RH0A000000000000000S",
+      "correlation_id": null,
+      "actor": {
+       "kind": "agent",
+       "id": "agent_a",
+       "version": "0.1.0",
+       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "config_refs": {
+       "mandate_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "payload": {
+       "held_since": "2026-09-21T15:00:00.000000000Z",
+       "period": 2,
+       "waiting_on": [
+        "position"
+       ],
+       "risk_clock": "2026-09-23T15:00:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "event_id": "01J8Z5RHA33000000000000000",
+      "event_type": "OwnerAlertSent",
+      "causation_id": "01J8Z5RH933000000000000000",
+      "config_refs": {},
+      "payload": {
+       "subject": "01J8Z5RH933000000000000000",
+       "kind": "retirement_held",
+       "owner_command": null
+      }
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "rule": "rule 266",
+     "index": 3
+    }
+   },
+   {
+    "name": "after_a_resume",
+    "clause": "rule 266: none after a resume",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z5RH934000000000000000",
+      "stream_id": "agent:ws_01J8Z2:agent_a",
+      "event_type": "RetirementHeld",
+      "schema_version": 1,
+      "event_time": "2026-09-22T15:00:00.000000000Z",
+      "clock_source": "scheduler",
+      "causation_id": "01J8Z5RH0A000000000000000S",
+      "correlation_id": null,
+      "actor": {
+       "kind": "agent",
+       "id": "agent_a",
+       "version": "0.1.0",
+       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "config_refs": {
+       "mandate_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "payload": {
+       "held_since": "2026-09-21T15:00:00.000000000Z",
+       "period": 1,
+       "waiting_on": [
+        "position"
+       ],
+       "risk_clock": "2026-09-22T15:00:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "event_id": "01J8Z5RHA34000000000000000",
+      "event_type": "OwnerAlertSent",
+      "causation_id": "01J8Z5RH934000000000000000",
+      "config_refs": {},
+      "payload": {
+       "subject": "01J8Z5RH934000000000000000",
+       "kind": "retirement_held",
+       "owner_command": null
+      }
+     },
+     {
+      "event_id": "01J8Z5RHE05000000000000000",
+      "event_type": "OwnerCommandIssued",
+      "causation_id": null,
+      "config_refs": {},
+      "payload": {
+       "command": "resume",
+       "scope": "agent",
+       "subject": "agent_a"
+      }
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z5RH935000000000000000",
+      "stream_id": "agent:ws_01J8Z2:agent_a",
+      "event_type": "RetirementHeld",
+      "schema_version": 1,
+      "event_time": "2026-09-22T15:00:00.000000000Z",
+      "clock_source": "scheduler",
+      "causation_id": "01J8Z5RH0A000000000000000S",
+      "correlation_id": null,
+      "actor": {
+       "kind": "agent",
+       "id": "agent_a",
+       "version": "0.1.0",
+       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "config_refs": {
+       "mandate_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "payload": {
+       "held_since": "2026-09-21T15:00:00.000000000Z",
+       "period": 1,
+       "waiting_on": [
+        "position"
+       ],
+       "risk_clock": "2026-09-22T15:00:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "event_id": "01J8Z5RHA35000000000000000",
+      "event_type": "OwnerAlertSent",
+      "causation_id": "01J8Z5RH935000000000000000",
+      "config_refs": {},
+      "payload": {
+       "subject": "01J8Z5RH935000000000000000",
+       "kind": "retirement_held",
+       "owner_command": null
+      }
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "rule": "rule 266",
+     "index": 3
+    }
+   },
+   {
+    "name": "after_a_version_applied",
+    "clause": "rule 266: none of its cause after a version applied",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z5RH936000000000000000",
+      "stream_id": "agent:ws_01J8Z2:agent_a",
+      "event_type": "RetirementHeld",
+      "schema_version": 1,
+      "event_time": "2026-09-22T15:00:00.000000000Z",
+      "clock_source": "scheduler",
+      "causation_id": "01J8Z5RH0A000000000000000S",
+      "correlation_id": null,
+      "actor": {
+       "kind": "agent",
+       "id": "agent_a",
+       "version": "0.1.0",
+       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "config_refs": {
+       "mandate_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "payload": {
+       "held_since": "2026-09-21T15:00:00.000000000Z",
+       "period": 1,
+       "waiting_on": [
+        "position"
+       ],
+       "risk_clock": "2026-09-22T15:00:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "event_id": "01J8Z5RHA36000000000000000",
+      "event_type": "OwnerAlertSent",
+      "causation_id": "01J8Z5RH936000000000000000",
+      "config_refs": {},
+      "payload": {
+       "subject": "01J8Z5RH936000000000000000",
+       "kind": "retirement_held",
+       "owner_command": null
+      }
+     },
+     {
+      "event_id": "01J8Z5RHE06000000000000000",
+      "event_type": "MandateVersionApplied",
+      "causation_id": null,
+      "config_refs": {},
+      "payload": {
+       "agent_id": "agent_a"
+      }
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z5RH937000000000000000",
+      "stream_id": "agent:ws_01J8Z2:agent_a",
+      "event_type": "RetirementHeld",
+      "schema_version": 1,
+      "event_time": "2026-09-22T15:00:00.000000000Z",
+      "clock_source": "scheduler",
+      "causation_id": "01J8Z5RH0A000000000000000S",
+      "correlation_id": null,
+      "actor": {
+       "kind": "agent",
+       "id": "agent_a",
+       "version": "0.1.0",
+       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "config_refs": {
+       "mandate_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "payload": {
+       "held_since": "2026-09-21T15:00:00.000000000Z",
+       "period": 1,
+       "waiting_on": [
+        "position"
+       ],
+       "risk_clock": "2026-09-22T15:00:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "event_id": "01J8Z5RHA37000000000000000",
+      "event_type": "OwnerAlertSent",
+      "causation_id": "01J8Z5RH937000000000000000",
+      "config_refs": {},
+      "payload": {
+       "subject": "01J8Z5RH937000000000000000",
+       "kind": "retirement_held",
+       "owner_command": null
+      }
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "rule": "rule 266",
+     "index": 3
+    }
+   },
+   {
+    "name": "without_its_alert",
+    "clause": "rule 266: each record with its alert in the batch",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z5RH8000000000000000B1",
+      "stream_id": "agent:ws_01J8Z2:agent_a",
+      "event_type": "RetirementHeld",
+      "schema_version": 1,
+      "event_time": "2026-09-22T15:00:00.000000000Z",
+      "clock_source": "scheduler",
+      "causation_id": "01J8Z5RH0A000000000000000S",
+      "correlation_id": null,
+      "actor": {
+       "kind": "agent",
+       "id": "agent_a",
+       "version": "0.1.0",
+       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "config_refs": {
+       "mandate_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "payload": {
+       "held_since": "2026-09-21T15:00:00.000000000Z",
+       "period": 1,
+       "waiting_on": [
+        "position"
+       ],
+       "risk_clock": "2026-09-22T15:00:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "event_id": "01J8Z5RH320000000000000000",
+      "event_type": "ApprovalTimedOut",
+      "causation_id": null,
+      "config_refs": {
+       "mandate_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "payload": {}
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "rule": "rule 266",
+     "index": 0
+    }
+   },
+   {
+    "name": "an_alert_without_its_record",
+    "clause": "rule 266: a `retirement_held` alert names the record just before it",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z5RH938000000000000000",
+      "stream_id": "agent:ws_01J8Z2:agent_a",
+      "event_type": "RetirementHeld",
+      "schema_version": 1,
+      "event_time": "2026-09-22T15:00:00.000000000Z",
+      "clock_source": "scheduler",
+      "causation_id": "01J8Z5RH0A000000000000000S",
+      "correlation_id": null,
+      "actor": {
+       "kind": "agent",
+       "id": "agent_a",
+       "version": "0.1.0",
+       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "config_refs": {
+       "mandate_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "payload": {
+       "held_since": "2026-09-21T15:00:00.000000000Z",
+       "period": 1,
+       "waiting_on": [
+        "position"
+       ],
+       "risk_clock": "2026-09-22T15:00:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "event_id": "01J8Z5RHA38000000000000000",
+      "event_type": "OwnerAlertSent",
+      "causation_id": "01J8Z5RH938000000000000000",
+      "config_refs": {},
+      "payload": {
+       "subject": "01J8Z5RH938000000000000000",
+       "kind": "retirement_held",
+       "owner_command": null
+      }
+     },
+     {
+      "event_id": "01J8Z5RH330000000000000000",
+      "event_type": "ApprovalTimedOut",
+      "causation_id": null,
+      "config_refs": {
+       "mandate_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "payload": {}
+     },
+     {
+      "event_id": "01J8Z5RHA90000000000000000",
+      "event_type": "OwnerAlertSent",
+      "causation_id": "01J8Z5RH8000000000000000B1",
+      "config_refs": {},
+      "payload": {
+       "subject": "01J8Z5RH8000000000000000B1",
+       "kind": "retirement_held",
+       "owner_command": null
+      }
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "rule": "rule 266",
+     "index": 3
     }
    }
   ]
  },
  "kill_switch_unapplied": {
-  "spec": "docs/specs/journal.md v0.78 §9.15, rule 266 (DEC-2351)",
+  "spec": "docs/specs/journal.md v0.78 §9.15, rule 264 (DEC-2351)",
   "streams": [
    {
     "name": "after_restarts",
-    "clause": "rule 266: the run's first start was the switch's, whatever restarts followed",
+    "clause": "rule 264: the run's first start was the switch's, whatever restarts followed",
     "records": [
      {
       "event_id": "01J8Z6U0000000000000000000",
@@ -18711,7 +19635,7 @@
    },
    {
     "name": "at_once",
-    "clause": "rule 266: a loop of the switch's own start",
+    "clause": "rule 264: a loop of the switch's own start",
     "records": [
      {
       "event_id": "01J8Z6U0000000000000000000",
@@ -18776,7 +19700,7 @@
    },
    {
     "name": "an_ordinary_loop",
-    "clause": "rule 266: a run that began with a deployment is ordinary",
+    "clause": "rule 264: a run that began with a deployment is ordinary",
     "records": [
      {
       "event_id": "01J8Z6U0000000000000000000",
@@ -18837,13 +19761,13 @@
     ],
     "expect": {
      "outcome": "Invalid",
-     "rule": "rule 266",
+     "rule": "rule 264",
      "index": 4
     }
    },
    {
     "name": "redeployed",
-    "clause": "rule 266: a deployment on the account since the switch's start makes the loop ordinary",
+    "clause": "rule 264: a deployment on the account since the switch's start makes the loop ordinary",
     "records": [
      {
       "event_id": "01J8Z6U0000000000000000000",
@@ -18926,13 +19850,13 @@
     ],
     "expect": {
      "outcome": "Invalid",
-     "rule": "rule 266",
+     "rule": "rule 264",
      "index": 6
     }
    },
    {
     "name": "deployed_elsewhere",
-    "clause": "rule 266: a deployment on another account's connection does not end this run",
+    "clause": "rule 264: a deployment on another account's connection does not end this run",
     "records": [
      {
       "event_id": "01J8Z6U0000000000000000000",
@@ -19029,7 +19953,7 @@
    },
    {
     "name": "retired_before_the_switch",
-    "clause": "rule 266: an agent deployed and retired before the switch's start leaves it wanted by none",
+    "clause": "rule 264: an agent deployed and retired before the switch's start leaves it wanted by none",
     "records": [
      {
       "event_id": "01J8Z6U0000000000000000000",
@@ -19113,7 +20037,7 @@
    },
    {
     "name": "switched_while_wanted",
-    "clause": "rule 266: a switch's start of an executor an agent still wants is no held run",
+    "clause": "rule 264: a switch's start of an executor an agent still wants is no held run",
     "records": [
      {
       "event_id": "01J8Z6U0000000000000000000",
@@ -19196,13 +20120,13 @@
     ],
     "expect": {
      "outcome": "Invalid",
-     "rule": "rule 266",
+     "rule": "rule 264",
      "index": 6
     }
    },
    {
     "name": "a_new_run_after_a_loop",
-    "clause": "rule 266: a later switch's start after an unapplied loop is a new run, and its loop is unapplied too",
+    "clause": "rule 264: a later switch's start after an unapplied loop is a new run, and its loop is unapplied too",
     "records": [
      {
       "event_id": "01J8Z6U0000000000000000000",
@@ -19313,7 +20237,7 @@
    },
    {
     "name": "a_runtime_loop",
-    "clause": "rule 266: only an executor's loop",
+    "clause": "rule 264: only an executor's loop",
     "records": [
      {
       "event_id": "01J8Z6U0000000000000000000",
@@ -19374,13 +20298,13 @@
     ],
     "expect": {
      "outcome": "Invalid",
-     "rule": "rule 266",
+     "rule": "rule 264",
      "index": 4
     }
    },
    {
     "name": "another_accounts_switch",
-    "clause": "rule 266: the run is the looping executor's own",
+    "clause": "rule 264: the run is the looping executor's own",
     "records": [
      {
       "event_id": "01J8Z6U0000000000000000000",
@@ -19453,13 +20377,13 @@
     ],
     "expect": {
      "outcome": "Invalid",
-     "rule": "rule 266",
+     "rule": "rule 264",
      "index": 5
     }
    },
    {
     "name": "names_a_start",
-    "clause": "rule 266: the subject is the loop, not the start",
+    "clause": "rule 264: the subject is the loop, not the start",
     "records": [
      {
       "event_id": "01J8Z6U0000000000000000000",
@@ -19520,13 +20444,13 @@
     ],
     "expect": {
      "outcome": "Invalid",
-     "rule": "rule 266",
+     "rule": "rule 264",
      "index": 4
     }
    },
    {
     "name": "an_ordinary_alert_on_an_ordinary_loop",
-    "clause": "rule 266 reads only `kill_switch_unapplied`",
+    "clause": "rule 264 reads only `kill_switch_unapplied`",
     "records": [
      {
       "event_id": "01J8Z6U0000000000000000000",
