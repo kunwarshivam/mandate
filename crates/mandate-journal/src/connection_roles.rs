@@ -132,11 +132,13 @@ pub fn verify_connection_roles(rows: &[StoredEvent]) -> Result<(), ConnectionRol
     Ok(())
 }
 
-/// How a closer closed its connection's roles: the request's own refusal, or a revocation.
+/// How a closer closed its connection's roles: the request's own refusal, or a revocation; and
+/// the occasion a removal names that is neither, which no closer is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Closer {
     RequestClosed,
     Revoked,
+    Unnamed,
 }
 
 /// The provisioner's fold of one control stream, as §9.33 reads it.
@@ -202,13 +204,12 @@ impl Fold {
                     .and_then(|closers| closers.get(&cause))
                     .copied();
                 let named = match member("occasion").as_str() {
-                    "request_closed" => Some(Closer::RequestClosed),
-                    "revoked" => Some(Closer::Revoked),
-                    _ => None,
+                    "request_closed" => Closer::RequestClosed,
+                    "revoked" => Closer::Revoked,
+                    _ => Closer::Unnamed,
                 };
                 let first = !self.removed.contains(&connection);
-                if !self.made.contains(&connection) || !first || closer.is_none() || closer != named
-                {
+                if !self.made.contains(&connection) || !first || closer != Some(named) {
                     return Err(ConnectionRolesRule::Removed);
                 }
                 self.removed.insert(connection);

@@ -249,7 +249,6 @@ fn edited(case: &Value, record: usize, member: &str, value: &str) -> Value {
 /// of any occasion but `connect` closes no request, and a removal naming a request's close as a
 /// revocation names no closer of its occasion, so each is refused at the removal.
 #[test]
-#[ignore = "pending E21-33"]
 fn a_removal_names_a_connect_refusal_of_its_own_occasion() {
     let section = section();
     let closed = list(&section, "streams")
