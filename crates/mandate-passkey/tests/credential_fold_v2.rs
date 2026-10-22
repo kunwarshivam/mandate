@@ -4,7 +4,7 @@
 //! a replay that keeps each credential's counter apart from the fold. Step-up's view fails closed
 //! on a breaking assertion; route 2's view reads no counter.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use mandate_canon::{Key, Object, Value, decode_ulid, parse};
@@ -267,16 +267,13 @@ fn step_up_reads_the_greatest_kept_counter_and_fails_closed_on_rule_254() {
             .cloned()
             .collect();
         let route_two = CredentialFold::new(without);
-        let mut holders: BTreeMap<String, PrincipalId> = BTreeMap::new();
         let mut last: BTreeMap<String, u32> = BTreeMap::new();
         for record in &all {
             match record {
                 CredentialRecord::Enrolled(e) => {
-                    holders.insert(e.credential.clone(), e.member);
                     last.insert(e.credential.clone(), e.sign_count);
                 }
                 CredentialRecord::Removed(r) => {
-                    holders.remove(&r.credential);
                     last.remove(&r.credential);
                 }
                 CredentialRecord::Asserted(a) => {
@@ -286,11 +283,19 @@ fn step_up_reads_the_greatest_kept_counter_and_fails_closed_on_rule_254() {
                 }
             }
         }
-        for credential in holders.keys() {
+        let ids: BTreeSet<&str> = all
+            .iter()
+            .map(|r| match r {
+                CredentialRecord::Enrolled(e) => e.credential.as_str(),
+                CredentialRecord::Removed(r) => r.credential.as_str(),
+                CredentialRecord::Asserted(a) => a.credential.as_str(),
+            })
+            .collect();
+        for credential in ids {
             assert_eq!(
-                fold.held(credential).map(|e| e.member),
-                route_two.held(credential).map(|e| e.member),
-                "{name}: route 2 reads no assertion"
+                fold.held(credential),
+                route_two.held(credential),
+                "{name}: route 2 reads no assertion, for {credential}"
             );
         }
         let Some(index) = expected_break(stream) else {
@@ -494,8 +499,9 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(512))]
 
     /// Over random streams of enrolments, removals and assertions among two members and three
-    /// ids, the fold agrees with the replay on every member's step-up, every held id's last
-    /// count, and whether the next record is admitted.
+    /// ids, the fold agrees with the replay on every id's last count (asked first, so a pending run
+    /// stops at the stub), every member's step-up, and whether the next record is admitted; and
+    /// route 2 holds for every id what the same records hold with the assertions taken out.
     #[test]
     #[ignore = "pending E9-4"]
     fn the_fold_reads_counters_as_an_independent_replay_does(
@@ -506,12 +512,21 @@ proptest! {
             steps.iter().zip(1..).map(|(s, seq)| record(seq, *s)).collect();
         let Replayed { broken, holder, last, .. } = replay(&steps);
         let fold = CredentialFold::new(stream.iter().cloned());
-        for (id, count) in &last {
-            let want = match holder.get(id).and_then(|h| broken.get(h)) {
-                Some(seq) => Err(CredentialError::Broken { seq: *seq }),
-                None => Ok(Some(*count)),
+        let route_two = CredentialFold::new(
+            stream.iter().filter(|r| !matches!(r, CredentialRecord::Asserted(_))).cloned(),
+        );
+        for id in (0..3).map(credential) {
+            let want = match (holder.get(&id), last.get(&id)) {
+                (Some(h), _) if broken.contains_key(h) => {
+                    Err(CredentialError::Broken { seq: broken[h] })
+                }
+                (Some(_), Some(count)) => Ok(Some(*count)),
+                _ => Ok(None),
             };
-            prop_assert_eq!(fold.last_count(id), want);
+            prop_assert_eq!(fold.last_count(&id), want, "last count of {}", &id);
+        }
+        for id in (0..3).map(credential) {
+            prop_assert_eq!(fold.held(&id), route_two.held(&id), "route 2 holds {}", &id);
         }
         for m in (0..2).map(member) {
             let got = fold.passkeys(m).map(|_| ());
