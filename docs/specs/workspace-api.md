@@ -1988,7 +1988,8 @@ positions, on fills, or on the regular session. The executor processes the batch
      therefore reads the control stream's `OwnerCommandIssued` `kill_switch` of connection or
      workspace scope itself, in `seq` order, for every agent it follows that was deployed before the
      command and whose connection has a `ConnectionRevoked` at or after the command, or that has an
-     `AgentStopped`. A revocation never
+     `AgentStopped`; it reads an agent-scope `kill_switch` naming a stopped agent the same way. A
+     revocation never
      ends the following of an agent whose version-2 deployment named the connection before it: the
      executor keeps reading that agent's kill switches, exits, and protective re-placements, and
      hands none of its openings. The runtime's copy of a switch already applied this way counts as
