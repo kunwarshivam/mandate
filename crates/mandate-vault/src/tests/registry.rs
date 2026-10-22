@@ -76,7 +76,6 @@ impl Registry for Scripted {
 /// A registry that keeps moving under a claim fails it closed after [`CLAIM_TRIES`] reads, with
 /// nothing written, and leaves it unclaimed.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending E21-32"]
 async fn a_claim_under_a_moving_registry_fails_closed_with_nothing_written() {
     let registry = Scripted {
         moving: true,
@@ -94,7 +93,6 @@ async fn a_claim_under_a_moving_registry_fails_closed_with_nothing_written() {
 /// A registry that keeps moving under a release fails it closed after [`CLAIM_TRIES`] reads, with
 /// nothing written, and the claim kept: never reported given back while it is not.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending E21-32"]
 async fn a_release_under_a_moving_registry_fails_closed_with_nothing_written() {
     let registry = Scripted::holding("c1", true);
     assert_eq!(
@@ -113,7 +111,6 @@ async fn a_release_under_a_moving_registry_fails_closed_with_nothing_written() {
 /// another, writes nothing and answers `Claimed` or `HeldBy` it; a holder that is not a
 /// connection id is `Unavailable`.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending E21-32"]
 async fn a_claim_writes_only_a_free_fingerprint() {
     let free = Scripted::default();
     assert_eq!(claim_in(&free, &c("c1"), &held()).await, Ok(Claim::Claimed));
@@ -139,7 +136,6 @@ async fn a_claim_writes_only_a_free_fingerprint() {
 /// A release by the holder writes the registry without its pair once; one by a connection that
 /// does not hold the fingerprint, or of one nobody holds, writes nothing.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending E21-32"]
 async fn a_release_writes_only_the_holders_pair_away() {
     let holder = Scripted::holding("c1", false);
     assert_eq!(release_in(&holder, &c("c1"), &held()).await, Ok(()));

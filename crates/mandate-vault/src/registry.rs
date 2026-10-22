@@ -1,13 +1,6 @@
 //! The fingerprint registry's claim and release (DEC-2345 item 4) over any [`Registry`], so the
 //! check-and-set loop is the same code whether the registry is the vault's entry or a scripted
 //! one, and its bound is tested without a race (review F-a).
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the connection manager's claim and release run over it once F3b-2 lands"
-    )
-)]
 
 use std::collections::BTreeMap;
 
@@ -43,14 +36,26 @@ pub(crate) async fn claim_in(
     connection: &ConnectionId,
     fingerprint: &AccountFingerprint,
 ) -> Result<Claim, FingerprintError> {
-    let _ = (
-        registry.claims(),
-        registry.write_claims(0, &BTreeMap::new()),
-        connection,
-        fingerprint,
-        CLAIM_TRIES,
-    );
-    Err(FingerprintError::Unimplemented { story: "E21-32" })
+    for _ in 0..CLAIM_TRIES {
+        let (version, mut claims) = registry.claims().await?;
+        match claims.get(fingerprint.as_str()) {
+            Some(holder) if holder == connection.as_str() => return Ok(Claim::Claimed),
+            Some(holder) => {
+                return ConnectionId::new(holder)
+                    .map(Claim::HeldBy)
+                    .map_err(|_| FingerprintError::Unavailable);
+            }
+            None => {}
+        }
+        claims.insert(
+            fingerprint.as_str().to_owned(),
+            connection.as_str().to_owned(),
+        );
+        if registry.write_claims(version, &claims).await? {
+            return Ok(Claim::Claimed);
+        }
+    }
+    Err(FingerprintError::Unavailable)
 }
 
 /// Gives back `connection`'s claim of `fingerprint` in `registry`, when it holds it; one it does
@@ -61,12 +66,15 @@ pub(crate) async fn release_in(
     connection: &ConnectionId,
     fingerprint: &AccountFingerprint,
 ) -> Result<(), FingerprintError> {
-    let _ = (
-        registry.claims(),
-        registry.write_claims(0, &BTreeMap::new()),
-        connection,
-        fingerprint,
-        CLAIM_TRIES,
-    );
-    Err(FingerprintError::Unimplemented { story: "E21-32" })
+    for _ in 0..CLAIM_TRIES {
+        let (version, mut claims) = registry.claims().await?;
+        if claims.get(fingerprint.as_str()).map(String::as_str) != Some(connection.as_str()) {
+            return Ok(());
+        }
+        claims.remove(fingerprint.as_str());
+        if registry.write_claims(version, &claims).await? {
+            return Ok(());
+        }
+    }
+    Err(FingerprintError::Unavailable)
 }

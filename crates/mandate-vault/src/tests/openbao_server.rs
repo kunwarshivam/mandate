@@ -1330,7 +1330,6 @@ async fn the_manager_claims_each_fingerprint_for_one_connection() {
 /// stays claimed by a connection that can no longer give it back. A vault nobody answers for is an
 /// outage, checked first.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending E21-32"]
 async fn a_release_over_an_unreadable_entry_fails_closed() {
     let ca = include_bytes!("fixtures/isrg-root-x1.pem").to_vec();
     let unreachable = OpenBaoSource::from_token(
