@@ -320,12 +320,14 @@ fn a_deployment_without_a_connect_answers_not_found_before_the_session() {
 fn an_admin_demoted_while_at_alpaca_gets_no_code() {
     let s = started();
     demote_alice(&s.f);
+    let rows_before = appended(&s.f).len();
     let query = format!("state={}&code=abc", s.state);
     redirected(&callback(&s.f, Some(&s.cookie), &query), &to_connection(&s));
     assert!(
         puts(&s.f).is_empty(),
         "a demoted admin gets no code written"
     );
+    assert_eq!(appended(&s.f).len(), rows_before, "nothing is journaled");
     assert!(!held(&s), "the state is spent");
 }
 
