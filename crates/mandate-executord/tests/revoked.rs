@@ -116,6 +116,76 @@ fn a_stopped_agents_switch_is_applied_from_the_command_once_revoked() -> Result<
     Ok(())
 }
 
+/// A stopped agent's kill switch with no revocation (DEC-2343 item 3): no runtime runs to copy it,
+/// so the executor applies it from the command, whether the stop came before the command or after.
+#[test]
+#[ignore = "pending E7-4"]
+fn a_stopped_agents_switch_is_applied_from_the_command_with_no_revocation() -> Result<(), Error> {
+    for stopped_first in [true, false] {
+        let journal = deployed()?;
+        if stopped_first {
+            stopped(&journal, "c3", AGENT)?;
+            kill_command(&journal, COMMAND, "connection", CONNECTION)?;
+        } else {
+            kill_command(&journal, COMMAND, "connection", CONNECTION)?;
+            stopped(&journal, "c4", AGENT)?;
+        }
+        let broker = Paper::new(&journal);
+        let mut process = start(&journal, &broker)?;
+        process.step(at(NOON)?);
+        assert_eq!(
+            journal.applications(),
+            [(AGENT.to_owned(), COMMAND.to_owned())],
+            "stopped before the command: {stopped_first}"
+        );
+    }
+    Ok(())
+}
+
+/// A stopped agent's copy, if a runtime wrote one before the stop, is the one applied: the command
+/// is not read again for it.
+#[test]
+fn a_stopped_agents_copy_applied_first_is_not_read_again_from_the_command() -> Result<(), Error> {
+    let journal = deployed()?;
+    kill_command(&journal, COMMAND, "connection", CONNECTION)?;
+    copy_of(&journal, AGENT, COPY, COMMAND, "connection", CONNECTION)?;
+    let broker = Paper::new(&journal);
+    let mut process = start(&journal, &broker)?;
+    process.step(at(NOON)?);
+    stopped(&journal, "c4", AGENT)?;
+    process.step(at(NOON)?);
+    assert_eq!(
+        journal.applications(),
+        [(AGENT.to_owned(), COPY.to_owned())]
+    );
+    Ok(())
+}
+
+/// One command is applied to each agent it covers, once each (`ExecutorState::applied_for`): the
+/// first agent's switch does not count for the second.
+#[test]
+#[ignore = "pending E7-4"]
+fn one_command_is_applied_to_each_agent_it_covers() -> Result<(), Error> {
+    let journal = deployed()?;
+    deploy(&journal, "c3", OTHER_AGENT, CONNECTION)?;
+    kill_command(&journal, COMMAND, "connection", CONNECTION)?;
+    revoke(&journal, "c5", CONNECTION, true)?;
+    let broker = Paper::new(&journal);
+    let mut process = start(&journal, &broker)?;
+    process.step(at(NOON)?);
+    process.step(at(NOON)?);
+    let mut applied = journal.applications();
+    applied.sort();
+    assert_eq!(
+        applied,
+        [
+            (AGENT.to_owned(), COMMAND.to_owned()),
+            (OTHER_AGENT.to_owned(), COMMAND.to_owned())
+        ]
+    );
+    Ok(())
+}
+
 /// A revoked agent's copy, of a switch issued after the revocation, is still applied: the
 /// revocation does not end the following of an agent deployed before it.
 #[test]

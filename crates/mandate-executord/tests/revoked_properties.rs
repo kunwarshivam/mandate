@@ -8,7 +8,8 @@
 //! followed agent owes a command's switch once when the runtime copied the command onto its stream
 //! (the runtime judged it covered), or when the command covers it, deployed before it on its
 //! connection (or, for the workspace, on any of the account's connections), and that connection is
-//! revoked after the command; and never otherwise. Seeded followers that drop an agent on revocation, or keep only its latest
+//! revoked after the command or the agent has an `AgentStopped`, so no runtime copies it; and never
+//! otherwise. Seeded followers that drop an agent on revocation, or keep only its latest
 //! deployment, are shown rejected by the same comparison.
 
 mod support;
@@ -84,6 +85,7 @@ struct Control {
     deployed: BTreeMap<String, Vec<(u64, String)>>,
     commands: Vec<Command>,
     revoked: BTreeMap<String, Vec<u64>>,
+    stopped: BTreeSet<String>,
 }
 
 fn control(rows: &[StoredEvent]) -> Control {
@@ -92,6 +94,7 @@ fn control(rows: &[StoredEvent]) -> Control {
         deployed: BTreeMap::new(),
         commands: Vec::new(),
         revoked: BTreeMap::new(),
+        stopped: BTreeSet::new(),
     };
     for row in rows {
         let p = payload(row);
@@ -111,6 +114,9 @@ fn control(rows: &[StoredEvent]) -> Control {
                     connection: (member(&p, "scope") == "connection")
                         .then(|| member(&p, "subject")),
                 });
+            }
+            ("AgentStopped", _) => {
+                out.stopped.insert(member(&p, "agent_id"));
             }
             ("ConnectionRevoked", _) => out
                 .revoked
@@ -175,13 +181,15 @@ fn owed(journal: &Journal) -> BTreeSet<(String, String)> {
         }
         let copied: BTreeSet<String> = copies(journal, agent).into_values().collect();
         for command in &control.commands {
-            let revoked_after = covering(&control, agent, command).iter().any(|connection| {
+            let covering = covering(&control, agent, command);
+            let revoked_after = covering.iter().any(|connection| {
                 control
                     .revoked
                     .get(connection)
                     .is_some_and(|seqs| seqs.iter().any(|seq| *seq > command.seq))
             });
-            if revoked_after || copied.contains(&command.id) {
+            let unrun = !covering.is_empty() && control.stopped.contains(agent);
+            if revoked_after || unrun || copied.contains(&command.id) {
                 out.insert((agent.to_owned(), command.id.clone()));
             }
         }
