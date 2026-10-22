@@ -318,6 +318,20 @@ pub fn kubernetes_login_verdict(
     }
 }
 
+/// Whether the vault's answer to a Kubernetes login names `namespace` as the ServiceAccount's,
+/// beside the role's own binding, as defence in depth. An answer without it is
+/// [`SourceError::Malformed`]; another namespace is [`SourceError::Denied`].
+pub fn kubernetes_namespace_verdict(
+    auth: Option<&Value>,
+    namespace: &str,
+) -> Result<(), SourceError> {
+    if text(auth, "/metadata/service_account_namespace")? == namespace {
+        Ok(())
+    } else {
+        Err(SourceError::Denied)
+    }
+}
+
 impl OpenBaoSource {
     /// Logs in as `identity` with its AppRole `role_id` and `secret_id` (read by the caller from
     /// mounted files, never the environment). The login is refused unless the role it reaches
@@ -338,16 +352,19 @@ impl OpenBaoSource {
     /// Logs in as `identity`, a connection's executor or token exchange, with the projected
     /// ServiceAccount token `jwt` its pod was given (audience [`crate::kubernetes::AUDIENCE`],
     /// read by the caller with [`crate::mounted::read_service_account_token`] at each login), on
-    /// its kind's Kubernetes auth mount, its role named by its connection id (DEC-2060). The vault
-    /// checks the token with the cluster on every login, and admits only the one ServiceAccount
-    /// the role binds. Any other identity is [`SourceError::Config`]; a login refused, or one that
-    /// reaches a role that is not `identity`'s own, is [`SourceError::Denied`]; a vault that cannot
-    /// reach the cluster is [`SourceError::Unavailable`]. The token is never logged, never put in
-    /// an error, and dropped once the login is done.
+    /// its kind's Kubernetes auth mount, its role named by its ServiceAccount (DEC-2060). The
+    /// vault checks the token with the cluster on every login, and admits only the one
+    /// ServiceAccount the role binds, which must be in `namespace`, the workspace's. Any other
+    /// identity is [`SourceError::Config`]; a login refused, or one that reaches a role,
+    /// ServiceAccount or namespace that is not `identity`'s own, is [`SourceError::Denied`]; a
+    /// role not yet made is [`SourceError::RoleMissing`]; a vault that cannot reach the cluster is
+    /// [`SourceError::Unavailable`]. The token is never logged, never put in an error, and dropped
+    /// once the login is done.
     pub async fn login_kubernetes(
         config: &OpenBaoConfig,
         identity: Identity,
         jwt: &SecretString,
+        namespace: &str,
         now: UtcNanos,
     ) -> Result<Self, SourceError> {
         let (path, role) = kubernetes_login_path(&identity, &config.mounts)?;
@@ -369,7 +386,9 @@ impl OpenBaoSource {
             token,
             token_expires_at: Mutex::new(after(now, ttl)?),
         };
-        if let Err(refused) = kubernetes_login_verdict(&session.identity, auth) {
+        let verdict = kubernetes_login_verdict(&session.identity, auth)
+            .and_then(|()| kubernetes_namespace_verdict(auth, namespace));
+        if let Err(refused) = verdict {
             let _ = session.revoke_token().await;
             return Err(refused);
         }
@@ -687,6 +706,19 @@ async fn provision_kubernetes(
         .await?;
     }
     Ok(())
+}
+
+/// Sets Kubernetes auth alone up on a vault already provisioned, with an operator's token: both
+/// mounts, each enabled only where it is not there, their configuration, and their templated
+/// policies, as [`provision`] sets them given `kubernetes`. It touches no AppRole role and mints
+/// no secret id, so running it on a vault whose credentials are in use rotates none of them.
+pub async fn provision_kubernetes_auth(
+    config: &OpenBaoConfig,
+    operator_token: &SecretString,
+    auth: &KubernetesAuth,
+) -> Result<(), SourceError> {
+    let http = Http::new(config)?;
+    provision_kubernetes(&http, Some(operator_token), &config.mounts, auth).await
 }
 
 /// Sets a vault up for `connections`, with an operator's token: the KV v2 mount, the AppRole

@@ -4,7 +4,7 @@ use mandate_canon::{Digest, Int, Key, Value, encode_ulid, to_canonical};
 use mandate_process::CRASH_LOOP_WINDOW;
 use mandate_time::UtcNanos;
 
-use crate::control::{Cause, Fact, Slot};
+use crate::control::{Cause, Fact, Process, Slot};
 use crate::orchestrator::{CRASH_LOOP, Effect};
 
 /// Who writes the records: the workspace, and the manager as a `system` actor with its build.
@@ -33,7 +33,7 @@ pub enum Record {
         cause: Cause,
         kill_switch: Option<String>,
     },
-    /// `ProcessStopIssued`, for an agent stopped.
+    /// `ProcessStopIssued`: for an agent stopped, or for a token exchange whose request closed.
     Stop { slot: Slot, generation: u64 },
     /// `ProcessCrashLooped`: the pause.
     CrashLooped {
@@ -133,7 +133,13 @@ impl Record {
                     causation = text(id);
                 }
             }
-            Self::Stop { .. } => payload.push(("cause", text("agent_stopped"))),
+            Self::Stop { slot, .. } => {
+                let cause = match slot.process {
+                    Process::TokenExchange => "request_closed",
+                    Process::Runtime | Process::Executor => "agent_stopped",
+                };
+                payload.push(("cause", text(cause)));
+            }
             Self::CrashLooped { restarts, .. } => {
                 payload.push(("restarts", int(*restarts)));
                 payload.push(("window_seconds", int(CRASH_LOOP_WINDOW.as_secs())));
