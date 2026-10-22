@@ -98,8 +98,9 @@ pub fn judge(
 }
 
 /// The key `held` names, read from `keys` and parsed, when it is the algorithm the enrolment
-/// recorded; `None` otherwise. The store is read for every request, a decoy reference when no
-/// passkey is held, so whether one is held costs no difference in reads.
+/// recorded; `None` otherwise. The store is read and a key parsed for every request: a decoy
+/// reference when no passkey is held, and the decoy key when the read finds nothing, so whether one
+/// is held costs no difference in reads or parses.
 fn resolve(
     held: Option<&Enrolment>,
     keys: Option<&(dyn ArtifactSource + Send + Sync)>,
@@ -107,7 +108,8 @@ fn resolve(
     let named = held.and_then(|enrolment| ArtifactRef::parse(&enrolment.public_key));
     let reference = named.unwrap_or_else(|| ArtifactRef::of(DECOY_KEY_BYTES));
     let bytes = keys.and_then(|keys| get_artifact(keys, &reference).ok());
-    let key = cose_key(&bytes?).ok()?;
+    let parsed = cose_key(bytes.as_deref().unwrap_or(&DECOY_COSE_KEY));
+    let key = bytes.and(parsed.ok())?;
     let recorded = match (&key, held?.alg) {
         (PublicKey::Es256 { .. }, PasskeyAlg::Es256) => true,
         (PublicKey::Ed25519 { .. }, PasskeyAlg::EdDsa) => true,
@@ -115,6 +117,16 @@ fn resolve(
     };
     recorded.then_some(key)
 }
+
+/// A COSE_Key (RFC 9053) for the P-256 base point, the bytes a read that found no key parses
+/// instead, so a store hit and a miss cost the same parse; the key it gives is never used.
+const DECOY_COSE_KEY: [u8; 77] = [
+    0xa5, 0x01, 0x02, 0x03, 0x26, 0x20, 0x01, 0x21, 0x58, 0x20, 0x6b, 0x17, 0xd1, 0xf2, 0xe1, 0x2c,
+    0x42, 0x47, 0xf8, 0xbc, 0xe6, 0xe5, 0x63, 0xa4, 0x40, 0xf2, 0x77, 0x03, 0x7d, 0x81, 0x2d, 0xeb,
+    0x33, 0xa0, 0xf4, 0xa1, 0x39, 0x45, 0xd8, 0x98, 0xc2, 0x96, 0x22, 0x58, 0x20, 0x4f, 0xe3, 0x42,
+    0xe2, 0xfe, 0x1a, 0x7f, 0x9b, 0x8e, 0xe7, 0xeb, 0x4a, 0x7c, 0x0f, 0x9e, 0x16, 0x2b, 0xce, 0x33,
+    0x57, 0x6b, 0x31, 0x5e, 0xce, 0xcb, 0xb6, 0x40, 0x68, 0x37, 0xbf, 0x51, 0xf5,
+];
 
 /// The bytes whose reference an unknown passkey's read asks the store for: no key is stored as
 /// them, so the read finds nothing.

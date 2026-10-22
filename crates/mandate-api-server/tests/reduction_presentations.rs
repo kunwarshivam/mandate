@@ -137,3 +137,52 @@ fn failures_count_only_when_nothing_opened_and_the_limit_raises_the_alert_once()
         "once its failures lapsed below the limit, reaching it again raises the alert again"
     );
 }
+
+#[test]
+#[ignore = "pending E9-1"]
+fn refused_presentations_of_taken_challenges_count_and_the_tenth_raises_the_alert() {
+    let store = store();
+    let guesser = client("198.51.100.4", "guesser");
+    let raised: Vec<bool> = (0..12)
+        .map(|i| {
+            let issued = store.issue(&guesser, at(T0 + i)).expect("issued");
+            let taken = store.take(&issued.challenge_id, at(T0 + i));
+            assert!(taken.is_some(), "a real challenge, taken");
+            store.settle(&guesser, taken.as_ref(), false, at(T0 + i))
+        })
+        .collect();
+    assert_eq!(
+        raised,
+        [vec![false; 9], vec![true], vec![false; 2]].concat(),
+        "each refused presentation of a taken challenge is a failure"
+    );
+    let member = client("198.51.100.4", "member");
+    for i in 0..12 {
+        let issued = store.issue(&member, at(T0 + 20 + i)).expect("issued");
+        let taken = store.take(&issued.challenge_id, at(T0 + 20 + i));
+        assert!(!store.settle(&member, taken.as_ref(), true, at(T0 + 20 + i)));
+    }
+    let issued = store.issue(&member, at(T0 + 40)).expect("issued");
+    let taken = store.take(&issued.challenge_id, at(T0 + 40));
+    assert!(
+        !store.settle(&member, taken.as_ref(), false, at(T0 + 40)),
+        "the member's twelve openings counted none, so this failure is its first"
+    );
+}
+
+#[test]
+#[ignore = "pending E9-1"]
+fn an_address_reaches_its_limit_at_its_hundredth_failure_across_devices() {
+    let store = store();
+    let raised: Vec<bool> = (0..104)
+        .map(|i| {
+            let device = format!("device-{}", i / 4);
+            store.settle(&client("203.0.113.9", &device), None, false, at(T0 + i))
+        })
+        .collect();
+    let expected: Vec<bool> = (0..104).map(|i| i == 99).collect();
+    assert_eq!(
+        raised, expected,
+        "no device reaches its 10; the address reaches its 100 at the hundredth failure, once"
+    );
+}
