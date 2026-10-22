@@ -567,7 +567,7 @@ fn the_journal_admits_the_copy() -> Result<(), Error> {
         return Err("members".into());
     };
     let due = ToCopy {
-        original: EventId("01J8Z2CTL00000000000000001".to_owned()),
+        original: EventId("01J8Z2CCCC0000000000000001".to_owned()),
         members,
     };
     let stream_id = format!("acct:{WORKSPACE}:{ULID_ACCOUNT}");
