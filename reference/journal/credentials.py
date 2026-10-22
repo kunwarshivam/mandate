@@ -207,7 +207,10 @@ def invalid_drafts() -> list[dict]:
     return [
         *member_drafts(),
         *rule_drafts(),
-        invalid("enrolled_at_version_2", "§9.31: closed at schema version 1 only", FIRST, [change("schema_version", 2)], "unknown_schema", "payload"),
+        invalid("enrolled_at_version_3", "§9.31: closed at schema versions 1 and 2", FIRST, [change("schema_version", 3)], "unknown_schema", "payload"),
+        *(invalid(f"version_1_with_backup_eligible.{value}".lower(), "§9.31: `backup_eligible` is version 2's only", FIRST,
+                  [change("payload.backup_eligible", value)], "schema", "payload.backup_eligible")
+          for value in (True, False)),
         invalid("removed_at_version_2", "§9.31: closed at schema version 1 only", REMOVED, [change("schema_version", 2)], "unknown_schema", "payload"),
     ]
 
@@ -438,6 +441,125 @@ def run_mutants(section: dict) -> list[str]:
         if check not in caught_by:
             escaped.append(f"credential vector mutant: {name} (not caught by {check}; caught by {sorted(caught_by)})")
     return escaped
+
+
+# --------------------------------------------------------------------------- version 2
+
+# v0.71 (DEC-2122): `CredentialEnrolled` version 2 adds `backup_eligible`, the registration's BE flag,
+# which `stepup::consume` holds every later assertion to. Its own section, so the version 1 vectors
+# above stay what a version 1 reader checks.
+SPEC_V2 = "docs/specs/journal.md v0.71 §9.31 (DEC-2108, DEC-2122)"
+V2_CHECKS = ("v2.drafts", "v2.invalid_drafts", "v2.valid_drafts")
+
+
+def enrolled_v2(stepped: bool = False) -> dict:
+    record = enrolled(stepped=stepped)
+    record["schema_version"] = 2
+    record["payload"]["backup_eligible"] = False
+    return record
+
+
+def v2_base_drafts() -> dict[str, dict]:
+    return {FIRST: enrolled_v2(), STEPPED: enrolled_v2(stepped=True)}
+
+
+def v2_invalid_drafts() -> list[dict]:
+    """`backup_eligible` of every wrong kind and absent, the record closed, and every clause of
+    rule 249 that version 1's enrolments are refused by, read again at version 2."""
+    path = "payload.backup_eligible"
+    rule_249 = [
+        {**copy.deepcopy(case), "clause": case["clause"] + " (version 2)"}
+        for case in rule_drafts()
+        if case["base_draft"] in (FIRST, STEPPED)
+    ]
+    return [
+        *(invalid(f"backup_eligible.{name}", "§9.31 version 2: `backup_eligible` is a boolean", FIRST, [change(path, value)], "schema", path)
+          for name, value in (("text", "true"), ("integer", 1), ("null", None))),
+        invalid("backup_eligible.missing", "§9.31 version 2: `backup_eligible` is required", FIRST, [delete(path)], "schema", path),
+        invalid("extra", "§9.31 version 2: closed", FIRST, [change("payload.reason", "lost")], "schema", "payload.reason"),
+        *rule_249,
+    ]
+
+
+def v2_valid_drafts() -> list[dict]:
+    """A backup-eligible passkey, and every enrolment version 1 admits, admitted again at version 2."""
+    return [
+        valid("backup_eligible", "§9.31 version 2: a backup-eligible passkey", STEPPED, [change("payload.backup_eligible", True)]),
+        *({**copy.deepcopy(case), "clause": case["clause"] + " (version 2)"}
+          for case in valid_drafts() if case["base_draft"] in (FIRST, STEPPED)),
+    ]
+
+
+def found_v2(check: str, message: str) -> str:
+    if check not in V2_CHECKS:
+        raise ValueError(f"unregistered check {check}")
+    return f"{check}: {message}"
+
+
+def check_v2_section(section: dict) -> list[str]:
+    """Every failure, so seeded bugs can be shown caught."""
+    problems = []
+    for name, draft in section["drafts"].items():
+        payload = draft["payload"]
+        got = violations(draft)
+        if got or draft["schema_version"] != 2 or not isinstance(payload.get("backup_eligible"), bool):
+            problems.append(found_v2("v2.drafts", f"base draft {name}: version {draft['schema_version']}, {got}"))
+    for case in section["invalid_drafts"]:
+        got = violations(draft_for(section, case))
+        if not reported(got, case["expect"]):
+            problems.append(found_v2("v2.invalid_drafts", f"{case['name']}: expected {case['expect']}, got {got}"))
+    for case in section["valid_drafts"]:
+        got = violations(draft_for(section, case))
+        if got:
+            problems.append(found_v2("v2.valid_drafts", f"{case['name']}: expected Valid, got {got}"))
+    return problems
+
+
+V2_VALIDATOR_MUTANTS = (
+    "versions.credential_enrolled_v2",
+    "loose.payload.backup_eligible",
+    "record.missing",
+    "record.extra",
+    "rule.249.v2_cool_off_only",
+)
+
+
+def run_v2_mutants(section: dict) -> list[str]:
+    """Every seeded bug caught; a vector mutant only by the check it is registered against."""
+    escaped = []
+    cases = [(copy.deepcopy(d), None) for d in section["drafts"].values()]
+    cases += [(draft_for(section, c), None) for c in section["valid_drafts"]]
+    cases += [(draft_for(section, c), c["expect"]) for c in section["invalid_drafts"]]
+    for mutant in V2_VALIDATOR_MUTANTS:
+        skip = frozenset([mutant])
+        caught = any(bool(violations(d, skip)) if want is None else not reported(violations(d, skip), want) for d, want in cases)
+        if not caught:
+            escaped.append(f"credential version 2 validator mutant {mutant}")
+
+    def mutated(fn) -> dict:
+        out = copy.deepcopy(section)
+        fn(out)
+        return out
+
+    registered = [
+        ("a base draft stays at version 1", "v2.drafts", mutated(lambda s: s["drafts"][FIRST].update(schema_version=1))),
+        ("an invalid draft's expectation differs", "v2.invalid_drafts",
+         mutated(lambda s: s["invalid_drafts"][0]["expect"].update(path="payload.kind"))),
+        ("a valid draft names a text flag", "v2.valid_drafts",
+         mutated(lambda s: s["valid_drafts"][0]["changes"].append(change("payload.backup_eligible", "yes")))),
+    ]
+    for check in V2_CHECKS:
+        if not any(c == check for _, c, _ in registered):
+            escaped.append(f"credential version 2 check {check} has no vector mutant registered against it")
+    for name, check, out in registered:
+        caught_by = {check_of(problem) for problem in check_v2_section(out)}
+        if check not in caught_by:
+            escaped.append(f"credential version 2 vector mutant: {name} (not caught by {check}; caught by {sorted(caught_by)})")
+    return escaped
+
+
+def build_v2_section() -> dict:
+    return {"spec": SPEC_V2, "drafts": v2_base_drafts(), "invalid_drafts": v2_invalid_drafts(), "valid_drafts": v2_valid_drafts()}
 
 
 # --------------------------------------------------------------------------- output
