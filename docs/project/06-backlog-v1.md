@@ -590,6 +590,12 @@ the spec invariants (DP-n) its tests cover.
     refuses at deploy a mandate whose `universe.max_instruments` exceeds 1 until the multi-instrument
     risk state lands, and B2b-2 adds the held-position version of the not-sane-bid test, which a flat
     position cannot exercise.
+  - **Follow-up ([DEC-2313](decisions/DEC-2313.md) items 2 and 3):** the mark and fill writers (slice C,
+    E7) journal canonical asset ids in `instrument_id`, with a writer-side test, and B2b-2b's tests
+    cover a flat opening bound by a mark to a non-canonical id and then held through a fill.
+  - **Follow-up (slice C, the #2120 review):** slice C's caller treats an `Err` from
+    `AccountRiskFold::open` as an unreadable view, at least `exits_only`, never as "no risk state",
+    and reads the view, not a `fold` error, after the view becomes unreadable.
   - **Follow-up ([DEC-2305](decisions/DEC-2305.md)):** a last-trade risk mark (trading spec §8.2,
     "in-session and fresh") needs a `MarkUpdated` version 3 or a new member before any writer uses
     one. Version 2 records a quote's bid only, so until then no last-trade mark updates E, which
