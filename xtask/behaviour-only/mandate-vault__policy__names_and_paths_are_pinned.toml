@@ -1,0 +1,8 @@
+file = "crates/mandate-vault/src/tests/policy.rs"
+test = "names_and_paths_are_pinned"
+reason = """
+DEC-2349 (E21-33): an older policy test brought to DEC-2349's rule in this tests PR. `openbao_policy`
+is implemented, and today it spells out the Api's and the connection manager's code and token blocks
+per listed connection, so this test fails on its own answer, not at a stub. The implementation PR
+deletes this file with the test's `#[ignore]`.
+"""

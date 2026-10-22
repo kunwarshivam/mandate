@@ -30,15 +30,12 @@ fn blocks(hcl: &str) -> Vec<(String, String)> {
     out
 }
 
-/// Whether `pattern`, a policy path whose `+` stands for exactly one segment, names `path`.
+/// Whether `pattern`, a policy path whose `+` stands for exactly one segment, names `path`, as
+/// OpenBao's ACL reads it: a `+` matches any one segment, an empty one included.
 fn names(pattern: &str, path: &str) -> bool {
     let (pattern, path): (Vec<&str>, Vec<&str>) =
         (pattern.split('/').collect(), path.split('/').collect());
-    pattern.len() == path.len()
-        && pattern
-            .iter()
-            .zip(&path)
-            .all(|(p, s)| *p == "+" && !s.is_empty() || p == s)
+    pattern.len() == path.len() && pattern.iter().zip(&path).all(|(p, s)| *p == "+" || p == s)
 }
 
 /// Whether `hcl` grants `access` on `path`, read the way OpenBao reads it: a block whose path names
@@ -176,10 +173,13 @@ fn the_templated_policies_stay_exact() {
 }
 
 #[test]
-fn the_pattern_reader_names_one_segment_for_a_plus_and_nothing_else() {
+fn the_pattern_reader_names_any_one_segment_for_a_plus_and_nothing_else() {
     assert!(names("a/+/b", "a/x1/b"));
     assert!(!names("a/+/b", "a/x1/y/b"));
-    assert!(!names("a/+/b", "a//b"));
+    assert!(
+        names("a/+/b", "a//b"),
+        "OpenBao's `+` matches an empty segment too"
+    );
     assert!(!names("a/+/b", "a/x1/c"));
     assert!(names("a/x1/b", "a/x1/b"));
     assert!(!names("a/x1/b", "a/x2/b"));
