@@ -5,7 +5,7 @@ use mandate_process::CRASH_LOOP_WINDOW;
 use mandate_time::UtcNanos;
 
 use crate::control::{Cause, Fact, Slot, StopCause};
-use crate::orchestrator::{CRASH_LOOP, Effect};
+use crate::orchestrator::{Effect, OperatorAlert};
 
 /// Who writes the records: the workspace, and the manager as a `system` actor with its build.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,11 +40,13 @@ pub enum Record {
         generation: u64,
         cause: StopCause,
     },
-    /// `ProcessCrashLooped`: the pause.
+    /// `ProcessCrashLooped`: the pause, and the operator alert it raises, which the journal does
+    /// not carry.
     CrashLooped {
         slot: Slot,
         generation: u64,
         restarts: u64,
+        alert: OperatorAlert,
     },
 }
 
@@ -80,7 +82,7 @@ impl Record {
         match self {
             Self::Start { .. } => Effect::Start { slot, generation },
             Self::Stop { .. } => Effect::Stop { slot, generation },
-            Self::CrashLooped { .. } => Effect::Alert(CRASH_LOOP),
+            Self::CrashLooped { alert, .. } => Effect::Alert(*alert),
         }
     }
 

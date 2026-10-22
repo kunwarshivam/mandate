@@ -1,0 +1,6 @@
+file = "crates/mandate-deploy-manager/tests/retired.rs"
+test = "a_revoked_connections_kill_switch_start_runs_as_its_account_and_is_unapplied_if_it_cannot_log_in"
+reason = """
+DEC-2344 item 1 (E21-33): today's manager gives a revoked connection's executor no kill-switch start. So this test fails on the manager's own answer, not at a stub. The implementation PR (DEC-2344
+items 1 and 3) deletes this file with the test's `#[ignore]`.
+"""

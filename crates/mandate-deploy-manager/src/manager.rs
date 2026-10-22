@@ -556,6 +556,7 @@ fn step(
             slot: slot.clone(),
             generation: state.generation,
             restarts: u64::try_from(restarts).unwrap_or(u64::MAX),
+            alert: CRASH_LOOP,
         }));
     }
     let wait = backoff(within_window(&state.restarts, now));
