@@ -1589,7 +1589,7 @@ fn stop_after(
         .checked_add(unapplied)?
         .checked_sub(committed)
         .unwrap_or(Qty::ZERO);
-    let qty = held_after_fees(batch.ports, &instrument, filled)?.min(room);
+    let qty = held_after_fees(batch.ports, &instrument, filled, &detail.fill_qtys)?.min(room);
     if qty == Qty::ZERO {
         changed(batch, &instrument, "unprotected_end", named)?;
         return Ok(());
@@ -1637,21 +1637,27 @@ fn stop_after(
     Ok(())
 }
 
-/// What a buy of `bought` leaves held once its fee posts (§5.4, §6.3): a crypto buy withholds its
-/// fee from the asset bought, at the maker or the taker rate, so a stop-limit sized before the
-/// rate is known takes the larger one and never outlasts the position (DEC-349 item 2; RC-07,
-/// RC-20). An equity keeps what it bought.
+/// What a buy of `bought` leaves held once its fees post (§5.4, §6.3): a crypto buy withholds
+/// each fill's fee from the asset that fill bought, rounded at the ninth place half up fill by
+/// fill as `mandate-accounting` rounds it, at the maker or the taker rate, so a stop-limit sized
+/// before the rate is known takes the larger one and never outlasts the position (DEC-349 item 2;
+/// RC-07). It counts only the `fills` the fold applied, each net of its own fee: one rounding over
+/// their sum could leave a nano-unit more than is held. An equity keeps what it bought.
 pub(crate) fn held_after_fees(
     ports: &Ports<'_>,
     instrument: &InstrumentId,
     bought: Qty,
+    fills: &[Qty],
 ) -> Result<Qty, ExecutorError> {
     if ports.instruments.asset_class(instrument) != Some(AssetClass::Crypto) {
         return Ok(bought);
     }
     let crypto = &ports.fees.crypto;
-    let withheld = bought.times_bps(crypto.maker.max(crypto.taker), Rounding::HalfUp)?;
-    Ok(bought.checked_sub(withheld)?)
+    let rate = crypto.maker.max(crypto.taker);
+    fills.iter().try_fold(Qty::ZERO, |held, fill| {
+        let withheld = fill.times_bps(rate, Rounding::HalfUp)?;
+        Ok(held.checked_add(fill.checked_sub(withheld)?)?)
+    })
 }
 
 /// The `created_on` a protective order placed now records: the trading day the latest copied
