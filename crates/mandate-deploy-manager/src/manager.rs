@@ -443,7 +443,10 @@ fn step(
 /// manager has not seen it carried out; never a restart; and once the request closes, a stop of
 /// every instance still listed, exited or not, so its pod and account are deleted, and of the last
 /// generation started even when none is listed, until this manager sees one carried out, so an
-/// account whose pod never ran is deleted too. The deadline
+/// account whose pod never ran is deleted too (DEC-2332 item 3). A connection id is one connect's
+/// alone (journal spec rule 131), so a closed request's exchange is never started again. The
+/// deadline stops nothing here: the pod ends by it, and the connection manager's teardown journals
+/// the request's closing record (connections spec §5.2 step 6), which this step then answers. The deadline
 /// stops nothing: the pod ends by it.
 fn exchange_step(
     slot: &Slot,

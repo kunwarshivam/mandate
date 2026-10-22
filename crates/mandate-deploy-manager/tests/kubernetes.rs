@@ -640,7 +640,11 @@ fn an_existing_account_is_used_only_if_it_is_the_one_the_manager_makes() {
         a["metadata"].as_object_mut().unwrap().remove("labels");
     });
     for (name, other) in altered {
-        let (api, seen) = server(vec![(409, "{}".to_owned()), (200, other.to_string())]);
+        let (api, seen) = server(vec![
+            (409, "{}".to_owned()),
+            (200, other.to_string()),
+            (201, "{}".to_owned()),
+        ]);
         assert_eq!(
             block_on(adapter(api).start(&exchange(), 1, lifetime)),
             Err(Unavailable),
@@ -652,6 +656,7 @@ fn an_existing_account_is_used_only_if_it_is_the_one_the_manager_makes() {
         let (api, seen) = server(vec![
             (409, "{}".to_owned()),
             (unread.0, unread.1.to_owned()),
+            (201, "{}".to_owned()),
         ]);
         assert_eq!(
             block_on(adapter(api).start(&exchange(), 1, lifetime)),
@@ -692,8 +697,12 @@ fn a_pod_the_api_server_refused_takes_its_new_account_with_it() {
         ],
         "an account no pod will run as is not left behind"
     );
-    for unsure in [500, 503] {
-        let (api, seen) = server(vec![(201, "{}".to_owned()), (unsure, "{}".to_owned())]);
+    for unsure in [500, 503, 429] {
+        let (api, seen) = server(vec![
+            (201, "{}".to_owned()),
+            (unsure, "{}".to_owned()),
+            (200, "{}".to_owned()),
+        ]);
         assert_eq!(
             block_on(adapter(api).start(&exchange(), 1, lifetime)),
             Err(Unavailable)

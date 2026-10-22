@@ -281,16 +281,16 @@ impl Kubernetes {
         )
     }
 
-    /// Makes `slot`'s account, or finds the one already made; an account of that name the manager
-    /// would not have made (another manager's, a mounted token, a Secret) is refused, so no pod
-    /// runs as it (DEC-1177 item 4).
-    async fn make_account(&self, slot: &Slot) -> Result<(), Unavailable> {
+    /// Makes `slot`'s account, `true`, or finds the one already made, `false`; an account of that
+    /// name the manager would not have made (another manager's, a mounted token, a Secret) is
+    /// refused, so no pod runs as it (DEC-2332 item 1).
+    async fn make_account(&self, slot: &Slot) -> Result<bool, Unavailable> {
         let made = self.account(slot).ok_or(Unavailable)?;
         let (status, _) = self
             .send(Method::POST, self.accounts(), Some(&made))
             .await?;
         if status.is_success() {
-            return Ok(());
+            return Ok(true);
         }
         let name = self.account_name(slot).ok_or(Unavailable)?;
         if status != StatusCode::CONFLICT {
@@ -301,7 +301,7 @@ impl Kubernetes {
             .await?;
         let found: Value = serde_json::from_slice(&body).map_err(|_| Unavailable)?;
         if status == StatusCode::OK && same_account(&found, &made) {
-            Ok(())
+            Ok(false)
         } else {
             Err(Unavailable)
         }
@@ -378,14 +378,16 @@ impl Orchestrator for Kubernetes {
             .manifest(slot, generation, lifetime)
             .ok_or(Unavailable)?;
         let account = self.account_name(slot);
-        if account.is_some() {
-            self.make_account(slot).await?;
-        }
+        let made = match account {
+            Some(_) => self.make_account(slot).await?,
+            None => false,
+        };
         let (status, _) = self.send(Method::POST, self.pods(), Some(&pod)).await?;
         if status.is_success() || status == StatusCode::CONFLICT {
             return Ok(());
         }
         if let Some(account) = account
+            && made
             && refused(status)
         {
             let _swept_again_when_the_request_closes =
