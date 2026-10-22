@@ -16,6 +16,9 @@ pub enum Phase {
     Running { ready: bool },
     /// Exited, and never restarted by the orchestrator itself.
     Exited,
+    /// Exited successfully, and never restarted by the orchestrator itself: a token exchange that
+    /// wrote its connection's token (DEC-2336 item 1).
+    Succeeded,
     /// Neither running nor exited as far as the orchestrator can tell (a lost node, or a stop in
     /// progress): it may still be running, so it counts as live.
     Unknown,
@@ -24,7 +27,7 @@ pub enum Phase {
 impl Phase {
     /// Whether the instance may still be running, and so still be its stream's writer.
     pub fn live(self) -> bool {
-        !matches!(self, Self::Exited)
+        !matches!(self, Self::Exited | Self::Succeeded)
     }
 }
 

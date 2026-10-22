@@ -85,6 +85,16 @@ impl Fake {
         );
     }
 
+    /// The running instance of `slot` exits successfully, as a token exchange that wrote its
+    /// connection's token would.
+    pub fn succeed(&mut self, slot: &Slot) {
+        self.shift(
+            slot,
+            |p| matches!(p, Phase::Running { .. } | Phase::Pending),
+            Phase::Succeeded,
+        );
+    }
+
     /// The running instance of `slot` reports `ready`.
     pub fn ready(&mut self, slot: &Slot, ready: bool) {
         self.shift(
@@ -103,9 +113,9 @@ impl Fake {
         );
     }
 
-    /// Every exited instance is removed, as the orchestrator's garbage collection would.
+    /// Every exited instance, succeeded or not, is removed, as the orchestrator's garbage collection would.
     pub fn collect(&mut self) {
-        self.instances.retain(|_, phase| *phase != Phase::Exited);
+        self.instances.retain(|_, phase| phase.live());
     }
 
     /// Every unknown instance of `slot` is confirmed gone.
@@ -157,7 +167,7 @@ impl Orchestrator for Fake {
         let key = (slot.clone(), generation);
         if matches!(
             self.instances.get(&key),
-            Some(Phase::Running { .. } | Phase::Pending | Phase::Exited)
+            Some(Phase::Running { .. } | Phase::Pending | Phase::Exited | Phase::Succeeded)
         ) {
             self.instances.remove(&key);
         }
