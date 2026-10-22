@@ -230,7 +230,7 @@ pub(crate) fn payload(
     crate::risk_limits::rules(event_type, &payload, causation_id)?;
     crate::acknowledgments::rules(event_type, &payload)?;
     crate::confirmations::rules(event_type, &payload, environment, actor, event_time)?;
-    crate::credentials::rules(event_type, &payload, actor, event_time)?;
+    crate::credentials::rules(event_type, &payload, actor, event_time, causation_id)?;
     let p = Payload(&payload);
     match event_type {
         "MandateVersionCreated" => {

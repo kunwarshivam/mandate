@@ -164,7 +164,6 @@ fn version_2() -> Value {
 /// Each version 2 base and valid draft parses as `CredentialEnrolled` at version 2, with
 /// `backup_eligible` and rule 249 read as at version 1.
 #[test]
-#[ignore = "pending E9-4"]
 fn each_version_2_base_and_valid_enrolment_parses() {
     let section = version_2();
     let drafts = section.get("drafts").and_then(Value::as_object).unwrap();
@@ -187,7 +186,6 @@ fn each_version_2_base_and_valid_enrolment_parses() {
 /// Every invalid version 2 enrolment is refused with its reason at its path: `backup_eligible` of
 /// another kind or absent, the record closed, and every clause of rule 249.
 #[test]
-#[ignore = "pending E9-4"]
 fn every_invalid_version_2_enrolment_is_refused_with_its_reason_at_its_path() {
     let section = version_2();
     let invalid = list(&section, "invalid_drafts");

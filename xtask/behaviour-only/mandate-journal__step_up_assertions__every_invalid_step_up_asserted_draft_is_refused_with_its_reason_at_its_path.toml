@@ -1,7 +1,0 @@
-file = "crates/mandate-journal/tests/step_up_assertions.rs"
-test = "every_invalid_step_up_asserted_draft_is_refused_with_its_reason_at_its_path"
-reason = """
-Registering journal spec v0.71's StepUpAsserted and CredentialEnrolled version 2 (E9-4, DEC-2122) is a
-schema change with no stub to fail at: before it the journal refuses the records as unknown_event_type or
-unknown_schema. The registration deletes this row with the test's #[ignore] line.
-"""

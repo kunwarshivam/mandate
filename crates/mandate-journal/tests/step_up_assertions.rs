@@ -79,7 +79,6 @@ fn the_step_up_assertion_section_holds_every_part() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn each_base_and_every_valid_step_up_asserted_draft_parse() {
     let section = section();
     let drafts = section.get("drafts").and_then(Value::as_object).unwrap();
@@ -99,7 +98,6 @@ fn each_base_and_every_valid_step_up_asserted_draft_parse() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn every_invalid_step_up_asserted_draft_is_refused_with_its_reason_at_its_path() {
     let section = section();
     let mut failed = Vec::new();
@@ -121,7 +119,6 @@ fn every_invalid_step_up_asserted_draft_is_refused_with_its_reason_at_its_path()
 /// Rule 253 over each batch vector: each draft's own rules first, then each assertion against the
 /// record immediately before it, reported by its index in the batch.
 #[test]
-#[ignore = "pending E9-4"]
 fn every_step_up_assertion_batch_is_judged_as_its_vector_says() {
     let section = section();
     let mut failed = Vec::new();
@@ -161,7 +158,6 @@ fn every_step_up_assertion_batch_is_judged_as_its_vector_says() {
 /// the writer's: every record of every stream case parses, the ones rule 254 refuses included,
 /// and [`check_stream`] refuses none of them (§9.32).
 #[test]
-#[ignore = "pending E9-4"]
 fn append_leaves_rule_254_to_the_writer() {
     let section = section();
     let mut failed = Vec::new();
@@ -184,7 +180,6 @@ fn append_leaves_rule_254_to_the_writer() {
 /// `StepUpAsserted` is closed on the control stream at version 1 and nowhere else, and
 /// `CredentialEnrolled` there at versions 1 and 2 (v0.71).
 #[test]
-#[ignore = "pending E9-4"]
 fn the_catalogue_closes_step_up_asserted_and_credential_enrolled_version_2_on_the_control_stream() {
     assert!(closes("StepUpAsserted", 1, StreamType::Control));
     assert!(!closes("StepUpAsserted", 2, StreamType::Control));

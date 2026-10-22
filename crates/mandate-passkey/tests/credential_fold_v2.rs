@@ -95,7 +95,6 @@ fn expected_break(stream: &Value) -> Option<usize> {
 /// Each version 2 base and valid enrolment maps with its `backup_eligible` read, and a version 1
 /// enrolment maps with none.
 #[test]
-#[ignore = "pending E9-4"]
 fn version_2_enrolments_map_with_their_backup_flag() {
     let v2 = section("credential_enrolled_v2");
     let drafts = v2.get("drafts").and_then(Value::as_object).unwrap();
@@ -130,7 +129,6 @@ fn version_2_enrolments_map_with_their_backup_flag() {
 /// Every invalid version 2 enrolment whose fault is `backup_eligible` is refused there; a
 /// journal `unknown_schema` at `payload` is the mapping's `schema_version`.
 #[test]
-#[ignore = "pending E9-4"]
 fn each_invalid_version_2_flag_is_refused_at_backup_eligible() {
     let section = section("credential_enrolled_v2");
     let mut checked = 0;
@@ -156,7 +154,6 @@ fn each_invalid_version_2_flag_is_refused_at_backup_eligible() {
 /// `StepUpAsserted`'s base and valid drafts map to an assertion: its actor as member, credential,
 /// challenge and counter.
 #[test]
-#[ignore = "pending E9-4"]
 fn step_up_asserted_maps_its_member_credential_challenge_and_counter() {
     let section = section("step_up_assertions");
     let base = section
@@ -189,7 +186,6 @@ fn step_up_asserted_maps_its_member_credential_challenge_and_counter() {
 /// Every invalid `StepUpAsserted` whose fault is a member the mapping reads is refused at that
 /// member's path, and another schema version at `schema_version`.
 #[test]
-#[ignore = "pending E9-4"]
 fn each_invalid_step_up_asserted_is_refused_at_the_member_the_mapping_reads() {
     let section = section("step_up_assertions");
     let read = [
@@ -226,7 +222,6 @@ fn each_invalid_step_up_asserted_is_refused_at_the_member_the_mapping_reads() {
 /// Every rule-254 stream's records are admitted one by one up to the index the vectors name, and
 /// the record there is refused `Breaks`.
 #[test]
-#[ignore = "pending E9-4"]
 fn admits_refuses_each_rule_254_stream_at_the_index_the_vectors_name() {
     let section = section("step_up_assertions");
     for stream in list(&section, "streams") {
@@ -254,7 +249,6 @@ fn admits_refuses_each_rule_254_stream_at_the_index_the_vectors_name() {
 /// are disabled for step-up from the breaking `seq`, and route 2 still holds what the records
 /// that keep rule 251 leave.
 #[test]
-#[ignore = "pending E9-4"]
 fn step_up_reads_the_greatest_kept_counter_and_fails_closed_on_rule_254() {
     let section = section("step_up_assertions");
     for stream in list(&section, "streams") {
@@ -324,7 +318,6 @@ fn step_up_reads_the_greatest_kept_counter_and_fails_closed_on_rule_254() {
 
 /// A version 1 credential and a version 2 one on one stream: each keeps its own flag and counter.
 #[test]
-#[ignore = "pending E9-4"]
 fn a_version_1_and_a_version_2_credential_keep_their_own_flag_and_counter() {
     let section = section("step_up_assertions");
     let stream = list(&section, "streams")
@@ -503,7 +496,6 @@ proptest! {
     /// stops at the stub), every member's step-up, and whether the next record is admitted; and
     /// route 2 holds for every id what the same records hold with the assertions taken out.
     #[test]
-    #[ignore = "pending E9-4"]
     fn the_fold_reads_counters_as_an_independent_replay_does(
         steps in prop::collection::vec(step(), 0..20),
         next in step(),
