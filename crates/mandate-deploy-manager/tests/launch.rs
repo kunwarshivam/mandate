@@ -7,11 +7,11 @@
 mod common;
 
 use common::{
-    Journal, Manager, accounts, at, block_on, connection_of, deployed, manager, refused, requested,
-    restart, stopped,
+    Journal, Manager, accounts, at, block_on, connection_of, deployed, established, manager,
+    refused, requested, restart, revoked, stopped,
 };
-use mandate_deploy_manager::Slot;
 use mandate_deploy_manager::fake::Call;
+use mandate_deploy_manager::{Process, Slot};
 
 const AGENT: &str = "agent_l0";
 const DEPLOYED: &str = "01J8Z2ACCT00000000000000M1";
@@ -149,6 +149,157 @@ fn two_connects_of_one_account_that_succeed_in_one_pass_start_its_executor_once(
     assert_eq!(
         starts, 1,
         "one journaled start, asked of the orchestrator once"
+    );
+    clean(&mut m);
+}
+
+/// A connection of [`DEPLOYED`]'s account that sorts before its current one, established and then
+/// revoked before the agent is deployed on the current one.
+const OLD: &str = "conn_00J8Z2OLD";
+
+#[test]
+#[ignore = "pending E21-33"]
+fn a_deployments_executor_names_the_connection_the_deployment_names_not_a_revoked_one() {
+    let journal = Journal::new();
+    let mut m = manager(&journal, accounts(&[]));
+    journal.services(&established(OLD, DEPLOYED), at(0));
+    journal.services(&revoked(OLD), at(0));
+    journal.services(&established(&connection_of(DEPLOYED), DEPLOYED), at(0));
+    journal.services(&deployed(AGENT, DEPLOYED), at(1));
+    tick(&mut m, 2);
+    journal.services(&stopped(AGENT, DEPLOYED), at(3));
+    tick(&mut m, 4);
+    let executor: Vec<(&str, Option<String>)> = calls(&mut m)
+        .into_iter()
+        .filter(|(_, slot, _)| *slot == Slot::executor(DEPLOYED))
+        .map(|(kind, _, connection)| (kind, connection))
+        .collect();
+    let current = Some(connection_of(DEPLOYED));
+    assert_eq!(
+        executor,
+        [("start", current.clone()), ("stop", current)],
+        "the deployment's connection, never the revoked one"
+    );
+    clean(&mut m);
+}
+
+#[test]
+#[ignore = "pending E21-33"]
+fn a_restart_after_the_connect_ended_names_the_deployments_connection_across_the_managers_restart()
+{
+    let journal = Journal::new();
+    let mut m = manager(&journal, accounts(&[]));
+    let current = connection_of(CONNECTING);
+    journal.services(&requested(CONNECT, CONNECTING, Some("oauth")), at(0));
+    tick(&mut m, 1);
+    m.orchestrator()
+        .fake
+        .succeed(&Slot::token_exchange(CONNECT));
+    tick(&mut m, 2);
+    journal.services(&established(&current, CONNECTING), at(3));
+    journal.services(&deployed(AGENT, CONNECTING), at(3));
+    tick(&mut m, 4);
+    journal.services(&refused(CONNECT, "connect"), at(5));
+    tick(&mut m, 6);
+    m.orchestrator().fake.crash(&Slot::executor(CONNECTING));
+    let mut m = restart(m);
+    tick(&mut m, 7);
+    tick(&mut m, 20);
+    journal.services(&stopped(AGENT, CONNECTING), at(21));
+    tick(&mut m, 22);
+    let mut m = restart(m);
+    tick(&mut m, 23);
+    let executor: Vec<(&str, Option<String>)> = calls(&mut m)
+        .into_iter()
+        .filter(|(_, slot, _)| *slot == Slot::executor(CONNECTING))
+        .map(|(kind, _, connection)| (kind, connection))
+        .collect();
+    assert_eq!(
+        executor,
+        [
+            ("start", Some(CONNECT.to_owned())),
+            ("start", Some(current.clone())),
+            ("stop", Some(current)),
+        ],
+        "the connect's generation by its connect, the restart after it by the deployment's"
+    );
+    clean(&mut m);
+}
+
+#[test]
+#[ignore = "pending E21-33"]
+fn a_stop_names_the_connection_its_generation_started_with_once_nothing_names_one() {
+    let journal = Journal::new();
+    let mut m = manager(&journal, accounts(&[]));
+    journal.services(&requested(CONNECT, CONNECTING, Some("oauth")), at(0));
+    tick(&mut m, 1);
+    m.orchestrator()
+        .fake
+        .succeed(&Slot::token_exchange(CONNECT));
+    tick(&mut m, 2);
+    journal.services(&established(&connection_of(CONNECTING), CONNECTING), at(3));
+    journal.services(&deployed(AGENT, CONNECTING), at(3));
+    tick(&mut m, 4);
+    journal.services(&stopped(AGENT, CONNECTING), at(5));
+    journal.services(&refused(CONNECT, "connect"), at(5));
+    let mut m = restart(m);
+    tick(&mut m, 6);
+    let executor: Vec<(&str, Option<String>)> = calls(&mut m)
+        .into_iter()
+        .filter(|(_, slot, _)| *slot == Slot::executor(CONNECTING))
+        .map(|(kind, _, connection)| (kind, connection))
+        .collect();
+    assert_eq!(
+        executor,
+        [
+            ("start", Some(CONNECT.to_owned())),
+            ("stop", Some(CONNECT.to_owned())),
+        ],
+        "the account its start made is the one its stop deletes"
+    );
+    clean(&mut m);
+}
+
+#[test]
+#[ignore = "pending E21-33"]
+fn each_executor_names_its_own_accounts_connection_beside_other_accounts_deployments_and_connects()
+{
+    let first = "01J8Z2ACCT00000000000000P1";
+    let second = "01J8Z2ACCT00000000000000Q1";
+    let third = "01J8Z2ACCT00000000000000R1";
+    let fourth = "01J8Z2ACCT00000000000000S1";
+    let journal = Journal::new();
+    let mut m = manager(
+        &journal,
+        accounts(&[("agent_a", first), ("agent_b", second)]),
+    );
+    journal.services(&requested("conn_01J8Z2X", third, Some("oauth")), at(0));
+    journal.services(&requested("conn_01J8Z2Y", fourth, Some("oauth")), at(0));
+    tick(&mut m, 1);
+    for connection in ["conn_01J8Z2X", "conn_01J8Z2Y"] {
+        m.orchestrator()
+            .fake
+            .succeed(&Slot::token_exchange(connection));
+    }
+    journal.services(&deployed("agent_a", first), at(2));
+    journal.services(&deployed("agent_b", second), at(2));
+    tick(&mut m, 3);
+    let mut starts: Vec<(Slot, Option<String>)> = calls(&mut m)
+        .into_iter()
+        .filter(|(kind, slot, _)| *kind == "start" && slot.process == Process::Executor)
+        .map(|(_, slot, connection)| (slot, connection))
+        .collect();
+    starts.sort();
+    let mut want = vec![
+        (Slot::executor(first), Some(connection_of(first))),
+        (Slot::executor(second), Some(connection_of(second))),
+        (Slot::executor(third), Some("conn_01J8Z2X".to_owned())),
+        (Slot::executor(fourth), Some("conn_01J8Z2Y".to_owned())),
+    ];
+    want.sort();
+    assert_eq!(
+        starts, want,
+        "no executor takes another account's connection"
     );
     clean(&mut m);
 }
