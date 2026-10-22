@@ -16,18 +16,23 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   [DEC-176](../project/04-decision-log.md#decisions)):** §9.34 adds the agent stream's
   `RetirementHeld` at schema version 1, the runtime's record that a retirement has waited another
   24 hours for what the agent still holds (DEC-2344 item 2), with rule 264 on the record and stream
-  rule 265 on its periods; §9.15's closed set of kinds gains `retirement_held` (safety), 34 to 35.
-  The `retirements` vectors are new: 24 invalid and 5 valid drafts and 10 streams, judged by the
-  reference fold and an independent oracle, with 16 validator, 2 stream, and 5 vector mutants
+  rule 265 on its periods, which end with the retirement: at its `AgentStopped`, or when a newer
+  mandate version takes effect; §9.15's closed set of kinds gains `retirement_held` (safety), 34
+  to 35. The `retirements` vectors are new: 24 invalid and 5 valid drafts and 12 streams, judged by
+  the reference fold and an independent oracle, with 16 validator, 3 stream, and 5 vector mutants
   caught. **Versions and numbers:** v0.77 and rules 261 to 263 are #2278's (§9.33), so this takes
   v0.79, §9.34, and rules 264 and 265, and renumbers at merge if that order changes.
 - **v0.78 ([DEC-2351](../project/decisions/DEC-2351.md), an agent reading under
   [DEC-176](../project/04-decision-log.md#decisions)):** §9.15's closed set of kinds gains
   `kill_switch_unapplied` (safety, after `kill_switch`), 33 kinds to 34: the deployment manager's
-  `OwnerAlertSent` for its own `ProcessCrashLooped` of an executor last started for a kill switch
-  (notifications spec §3.2, DEC-2344 item 1). No member, rule, or reference vector changes; the
-  kind's parser vectors are the code's, in E8-17. **Versions:** v0.77 is #2278's (DEC-2350), so this
-  takes v0.78 and renumbers at merge if that order changes.
+  `OwnerAlertSent` for its own unapplied crash loop (notifications spec §3.2, DEC-2344 item 1).
+  Stream rule 266 holds the kind to that subject, which the control stream alone shows: no record
+  gains a member. The new `kill_switch_unapplied` vectors are 12 control streams, the redeploy, a
+  new run after a loop, an executor still wanted, and a runtime's loop among them, judged by the
+  fold and an independent oracle, with 5 stream and 2 vector mutants caught. **Versions and
+  numbers:** v0.77 is held by #2278 (DEC-2350) and lane V2's #2292 and #2293 stacked on it, and
+  rules 261 to 265 by #2278 and #2295, so this takes v0.78 and rule 266, and renumbers at merge if
+  that order changes.
 - **v0.76 ([DEC-2344](../project/decisions/DEC-2344.md), an agent reading under
   [DEC-176](../project/04-decision-log.md#decisions)):** §9.2 states its writer's precondition for
   an `AgentStopped` that retires an agent that ran: the account stream's fold shows no position
@@ -4126,6 +4131,21 @@ does `address_retired`, which records only that the address left the set.
      the batch names the same subject (`payload.subject`, at the first alert that breaks it):
      notifications spec §3.2's "in the subject's own batch" and §3.4's "one subject, one kind",
      checked at append.
+266. **Stream rule** (control stream, [DEC-2351](../project/decisions/DEC-2351.md), v0.78; numbered
+     on after the open changes' rules 261 to 265, renumbering none). An `OwnerAlertSent` whose
+     `kind` is `kill_switch_unapplied` names as its `subject` an **unapplied crash loop**
+     (`payload.subject`): a `ProcessCrashLooped` of an executor whose **run**, from the latest of
+     its `ProcessStartIssued` records before the loop whose `cause` is not `restart`, began with
+     one whose `cause` is `kill_switch`, journaled while every `AgentDeployed` on a connection of
+     the executor's account (by its `ConnectionEstablished`'s `account_ref`) already had its
+     `AgentStopped`, and with no `AgentDeployed` on such a connection between that start and the
+     loop. So a run a deployment began or rejoined is an ordinary one, whose loop is `crash_loop`
+     alone, and a later covering switch's start after an unapplied loop begins a new run, whose
+     own loop is unapplied too ([DEC-2344](../project/decisions/DEC-2344.md) item 1). The
+     manager writes exactly one such `OwnerAlertSent`, in the batch, for each unapplied crash
+     loop, and none for any other: the writer's half, which E8-17's tests pin. The
+     `kill_switch_unapplied` vectors' streams are judged by the fold and by an independent oracle
+     that reads each alert's subject backwards, and each seeded bug is shown caught.
 134. `NoticeAttempted` version 2 ([DEC-706](../project/decisions/DEC-706.md)), numbered on after
      rule 133 and renumbering none: `verdict` is non-null exactly when `status` is `failed`, and
      where notifications spec §5.2 to §5.4 fix a reason's verdict, it is that one
@@ -6132,8 +6152,13 @@ position, instrument, or quantity (`AGENTS.md` rule 6).
      `waiting_on` is non-empty, each value once, in ascending order (`payload.waiting_on`).
 265. **Stream rule (agent stream).** For each `causation_id`, the first `RetirementHeld` has
      `period` 1, each later one has the next period, and every one carries the first one's
-     `held_since`; other records between them are not read. The stream fold reports the first
-     record that breaks it.
+     `held_since` and `config_refs.mandate_version`; other records between them are not read. The
+     stream fold reports the first record that breaks it. So a retirement's periods end when it
+     does: with the agent's `AgentStopped`, after which the runtime writes none (the writer's
+     rule), or when a newer confirmed mandate version takes effect, which ends the retirement it
+     was held under. If the newer version retires the agent too, that retirement is a new cause and
+     counts from 1. A redeploy is a new agent id on its own stream ([DEC-1173](../project/decisions/DEC-1173.md)),
+     so no period carries over to it.
 
 **Vectors.** The `retirements` section of the reference cases: a base draft, an invalid draft for
 every member type and for each part of rule 264, valid drafts for a late period, both values, a

@@ -32,6 +32,7 @@ from control import (
 
 SPEC = "docs/specs/journal.md v0.79 §9.34 (DEC-2352)"
 BOUND = "sha256:" + "1" * 64
+NEWER = "sha256:" + "2" * 64
 STOP = "01J8Z5RH0A000000000000000S"
 LIMIT = "01J8Z5RH0B000000000000000M"
 HELD = "01J8Z5RH10000000000000000H"
@@ -56,6 +57,7 @@ def held(
     after: int | None = None,
     waiting: tuple[str, ...] = ("position",),
     event_id: str | None = None,
+    version: str = BOUND,
 ) -> dict:
     payload = {
         "held_since": since,
@@ -75,7 +77,7 @@ def held(
         "causation_id": cause,
         "correlation_id": None,
         "actor": dict(RUNTIME),
-        "config_refs": {"mandate_version": BOUND},
+        "config_refs": {"mandate_version": version},
         "payload": payload,
         "artifact_refs": sorted(digest_strings(payload)),
         "pii_refs": [],
@@ -205,20 +207,24 @@ def valid_drafts() -> list[dict]:
 
 def stream_failure(records: list[dict], skip: frozenset[str] = frozenset()) -> int | None:
     """Rule 265 over one agent stream's records in `seq` order, folded once: the index of the first
-    `RetirementHeld` that does not continue its cause's run of periods, or `None`."""
-    last: dict[str, tuple[int, str]] = {}
+    `RetirementHeld` that does not continue its cause's run of periods, under one `held_since` and
+    one mandate version, or `None`."""
+    last: dict[str, tuple[int, str, str]] = {}
     for i, record in enumerate(records):
         if record["event_type"] != "RetirementHeld":
             continue
         cause = record["causation_id"]
         p = record["payload"]
+        version = record["config_refs"]["mandate_version"]
         before = last.get(cause)
         expected = 1 if before is None else before[0] + 1
         if p["period"] != expected and "stream.265.period" not in skip:
             return i
         if before is not None and p["held_since"] != before[1] and "stream.265.since" not in skip:
             return i
-        last[cause] = (p["period"], p["held_since"] if before is None else before[1])
+        if before is not None and version != before[2] and "stream.265.version" not in skip:
+            return i
+        last[cause] = (p["period"], *(before[1:] if before is not None else (p["held_since"], version)))
     return None
 
 
@@ -260,6 +266,19 @@ def stream_cases() -> list[dict]:
             1,
         ),
         case(
+            "under_a_newer_version",
+            "rule 265: a newer mandate version ends the retirement it was held under",
+            [held(1), held(2, version=NEWER)],
+            1,
+        ),
+        case(
+            "retired_again_under_the_newer_version",
+            "rule 265: a retirement the newer version begins is a new cause, from 1",
+            [held(1), held(1, cause=LIMIT, since=clock(3600), after=DAY + 3600, version=NEWER),
+             held(2, cause=LIMIT, since=clock(3600), after=2 * DAY + 3600, version=NEWER)],
+            None,
+        ),
+        case(
             "another_cause_restarts_at_one",
             "rule 265: another cause starts from 1",
             [held(1), held(2), held(2, cause=LIMIT)],
@@ -281,16 +300,21 @@ def found(check: str, message: str) -> str:
 
 def oracle(records: list[dict]) -> int | None:
     """Rule 265 read another way: group each cause's held periods, then require them to be exactly
-    1, 2, ... in stream order with one `held_since`, and report the earliest record that is not."""
+    1, 2, ... in stream order with the first one's `held_since` and mandate version, and report the
+    earliest record that is not."""
     groups: dict[str, list[tuple[int, dict]]] = {}
     for i, record in enumerate(records):
         if record["event_type"] == "RetirementHeld":
-            groups.setdefault(record["causation_id"], []).append((i, record["payload"]))
+            groups.setdefault(record["causation_id"], []).append((i, record))
     bad = []
     for runs in groups.values():
-        began = runs[0][1]["held_since"]
-        for n, (i, payload) in enumerate(runs, start=1):
-            if payload["period"] != n or payload["held_since"] != began:
+        first = runs[0][1]
+        for n, (i, record) in enumerate(runs, start=1):
+            same = (
+                record["payload"]["held_since"] == first["payload"]["held_since"]
+                and record["config_refs"] == first["config_refs"]
+            )
+            if record["payload"]["period"] != n or not same:
                 bad.append(i)
                 break
     return min(bad) if bad else None
@@ -337,7 +361,7 @@ VALIDATOR_MUTANTS = (
     *(f"loose.payload.{member}" for member, _, _, _ in MEMBER_CASES),
     *(f"nullable.payload.{member}" for member in NULLED),
 )
-STREAM_MUTANTS = ("stream.265.period", "stream.265.since")
+STREAM_MUTANTS = ("stream.265.period", "stream.265.since", "stream.265.version")
 
 
 def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:

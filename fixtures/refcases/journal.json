@@ -18337,6 +18337,181 @@
     }
    },
    {
+    "name": "under_a_newer_version",
+    "clause": "rule 265: a newer mandate version ends the retirement it was held under",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z5RH21S000000000000000",
+      "stream_id": "agent:ws_01J8Z2:agent_a",
+      "event_type": "RetirementHeld",
+      "schema_version": 1,
+      "event_time": "2026-09-22T15:00:00.000000000Z",
+      "clock_source": "scheduler",
+      "causation_id": "01J8Z5RH0A000000000000000S",
+      "correlation_id": null,
+      "actor": {
+       "kind": "agent",
+       "id": "agent_a",
+       "version": "0.1.0",
+       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "config_refs": {
+       "mandate_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "payload": {
+       "held_since": "2026-09-21T15:00:00.000000000Z",
+       "period": 1,
+       "waiting_on": [
+        "position"
+       ],
+       "risk_clock": "2026-09-22T15:00:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z5RH22S000000000000000",
+      "stream_id": "agent:ws_01J8Z2:agent_a",
+      "event_type": "RetirementHeld",
+      "schema_version": 1,
+      "event_time": "2026-09-23T15:00:00.000000000Z",
+      "clock_source": "scheduler",
+      "causation_id": "01J8Z5RH0A000000000000000S",
+      "correlation_id": null,
+      "actor": {
+       "kind": "agent",
+       "id": "agent_a",
+       "version": "0.1.0",
+       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "config_refs": {
+       "mandate_version": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+      },
+      "payload": {
+       "held_since": "2026-09-21T15:00:00.000000000Z",
+       "period": 2,
+       "waiting_on": [
+        "position"
+       ],
+       "risk_clock": "2026-09-23T15:00:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "rule": "rule 265",
+     "index": 1
+    }
+   },
+   {
+    "name": "retired_again_under_the_newer_version",
+    "clause": "rule 265: a retirement the newer version begins is a new cause, from 1",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z5RH21S000000000000000",
+      "stream_id": "agent:ws_01J8Z2:agent_a",
+      "event_type": "RetirementHeld",
+      "schema_version": 1,
+      "event_time": "2026-09-22T15:00:00.000000000Z",
+      "clock_source": "scheduler",
+      "causation_id": "01J8Z5RH0A000000000000000S",
+      "correlation_id": null,
+      "actor": {
+       "kind": "agent",
+       "id": "agent_a",
+       "version": "0.1.0",
+       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "config_refs": {
+       "mandate_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "payload": {
+       "held_since": "2026-09-21T15:00:00.000000000Z",
+       "period": 1,
+       "waiting_on": [
+        "position"
+       ],
+       "risk_clock": "2026-09-22T15:00:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z5RH21M000000000000000",
+      "stream_id": "agent:ws_01J8Z2:agent_a",
+      "event_type": "RetirementHeld",
+      "schema_version": 1,
+      "event_time": "2026-09-22T16:00:00.000000000Z",
+      "clock_source": "scheduler",
+      "causation_id": "01J8Z5RH0B000000000000000M",
+      "correlation_id": null,
+      "actor": {
+       "kind": "agent",
+       "id": "agent_a",
+       "version": "0.1.0",
+       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "config_refs": {
+       "mandate_version": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+      },
+      "payload": {
+       "held_since": "2026-09-21T16:00:00.000000000Z",
+       "period": 1,
+       "waiting_on": [
+        "position"
+       ],
+       "risk_clock": "2026-09-22T16:00:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z5RH22M000000000000000",
+      "stream_id": "agent:ws_01J8Z2:agent_a",
+      "event_type": "RetirementHeld",
+      "schema_version": 1,
+      "event_time": "2026-09-23T16:00:00.000000000Z",
+      "clock_source": "scheduler",
+      "causation_id": "01J8Z5RH0B000000000000000M",
+      "correlation_id": null,
+      "actor": {
+       "kind": "agent",
+       "id": "agent_a",
+       "version": "0.1.0",
+       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "config_refs": {
+       "mandate_version": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+      },
+      "payload": {
+       "held_since": "2026-09-21T16:00:00.000000000Z",
+       "period": 2,
+       "waiting_on": [
+        "position"
+       ],
+       "risk_clock": "2026-09-23T16:00:00.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
     "name": "another_cause_restarts_at_one",
     "clause": "rule 265: another cause starts from 1",
     "records": [
@@ -18438,6 +18613,969 @@
      "outcome": "Invalid",
      "rule": "rule 265",
      "index": 2
+    }
+   }
+  ]
+ },
+ "kill_switch_unapplied": {
+  "spec": "docs/specs/journal.md v0.78 §9.15, rule 266 (DEC-2351)",
+  "streams": [
+   {
+    "name": "after_restarts",
+    "clause": "rule 266: the run's first start was the switch's, whatever restarts followed",
+    "records": [
+     {
+      "event_id": "01J8Z6U0000000000000000000",
+      "event_type": "ConnectionEstablished",
+      "schema_version": 2,
+      "causation_id": null,
+      "payload": {
+       "connection_id": "conn_01J8Z2CONN000000000000C1",
+       "account_ref": "01J8Z2ACCT00000000000000A1"
+      }
+     },
+     {
+      "event_id": "01J8Z6U0100000000000000000",
+      "event_type": "ProcessStartIssued",
+      "schema_version": 1,
+      "causation_id": null,
+      "payload": {
+       "process": "executor",
+       "subject": "01J8Z2ACCT00000000000000A1",
+       "generation": 1,
+       "cause": "deployed"
+      }
+     },
+     {
+      "event_id": "01J8Z6U0200000000000000000",
+      "event_type": "ProcessStartIssued",
+      "schema_version": 1,
+      "causation_id": "01J8Z6KS00000000000000000S",
+      "payload": {
+       "process": "executor",
+       "subject": "01J8Z2ACCT00000000000000A1",
+       "generation": 2,
+       "cause": "kill_switch"
+      }
+     },
+     {
+      "event_id": "01J8Z6U0300000000000000000",
+      "event_type": "ProcessStartIssued",
+      "schema_version": 1,
+      "causation_id": null,
+      "payload": {
+       "process": "executor",
+       "subject": "01J8Z2ACCT00000000000000A1",
+       "generation": 3,
+       "cause": "restart"
+      }
+     },
+     {
+      "event_id": "01J8Z6U0400000000000000000",
+      "event_type": "ProcessStartIssued",
+      "schema_version": 1,
+      "causation_id": null,
+      "payload": {
+       "process": "executor",
+       "subject": "01J8Z2ACCT00000000000000A1",
+       "generation": 4,
+       "cause": "restart"
+      }
+     },
+     {
+      "event_id": "01J8Z6U0500000000000000000",
+      "event_type": "ProcessCrashLooped",
+      "schema_version": 1,
+      "causation_id": null,
+      "payload": {
+       "process": "executor",
+       "subject": "01J8Z2ACCT00000000000000A1",
+       "generation": 4
+      }
+     },
+     {
+      "event_id": "01J8Z6U0600000000000000000",
+      "event_type": "OwnerAlertSent",
+      "schema_version": 1,
+      "causation_id": "01J8Z6U0500000000000000000",
+      "payload": {
+       "subject": "01J8Z6U0500000000000000000",
+       "kind": "kill_switch_unapplied",
+       "owner_command": null
+      }
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "at_once",
+    "clause": "rule 266: a loop of the switch's own start",
+    "records": [
+     {
+      "event_id": "01J8Z6U0000000000000000000",
+      "event_type": "ConnectionEstablished",
+      "schema_version": 2,
+      "causation_id": null,
+      "payload": {
+       "connection_id": "conn_01J8Z2CONN000000000000C1",
+       "account_ref": "01J8Z2ACCT00000000000000A1"
+      }
+     },
+     {
+      "event_id": "01J8Z6U0100000000000000000",
+      "event_type": "ProcessStartIssued",
+      "schema_version": 1,
+      "causation_id": null,
+      "payload": {
+       "process": "executor",
+       "subject": "01J8Z2ACCT00000000000000A1",
+       "generation": 1,
+       "cause": "deployed"
+      }
+     },
+     {
+      "event_id": "01J8Z6U0200000000000000000",
+      "event_type": "ProcessStartIssued",
+      "schema_version": 1,
+      "causation_id": "01J8Z6KS00000000000000000S",
+      "payload": {
+       "process": "executor",
+       "subject": "01J8Z2ACCT00000000000000A1",
+       "generation": 2,
+       "cause": "kill_switch"
+      }
+     },
+     {
+      "event_id": "01J8Z6U0300000000000000000",
+      "event_type": "ProcessCrashLooped",
+      "schema_version": 1,
+      "causation_id": null,
+      "payload": {
+       "process": "executor",
+       "subject": "01J8Z2ACCT00000000000000A1",
+       "generation": 2
+      }
+     },
+     {
+      "event_id": "01J8Z6U0400000000000000000",
+      "event_type": "OwnerAlertSent",
+      "schema_version": 1,
+      "causation_id": "01J8Z6U0300000000000000000",
+      "payload": {
+       "subject": "01J8Z6U0300000000000000000",
+       "kind": "kill_switch_unapplied",
+       "owner_command": null
+      }
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "an_ordinary_loop",
+    "clause": "rule 266: a run that began with a deployment is ordinary",
+    "records": [
+     {
+      "event_id": "01J8Z6U0000000000000000000",
+      "event_type": "ConnectionEstablished",
+      "schema_version": 2,
+      "causation_id": null,
+      "payload": {
+       "connection_id": "conn_01J8Z2CONN000000000000C1",
+       "account_ref": "01J8Z2ACCT00000000000000A1"
+      }
+     },
+     {
+      "event_id": "01J8Z6U0100000000000000000",
+      "event_type": "ProcessStartIssued",
+      "schema_version": 1,
+      "causation_id": null,
+      "payload": {
+       "process": "executor",
+       "subject": "01J8Z2ACCT00000000000000A1",
+       "generation": 1,
+       "cause": "deployed"
+      }
+     },
+     {
+      "event_id": "01J8Z6U0200000000000000000",
+      "event_type": "ProcessStartIssued",
+      "schema_version": 1,
+      "causation_id": null,
+      "payload": {
+       "process": "executor",
+       "subject": "01J8Z2ACCT00000000000000A1",
+       "generation": 2,
+       "cause": "restart"
+      }
+     },
+     {
+      "event_id": "01J8Z6U0300000000000000000",
+      "event_type": "ProcessCrashLooped",
+      "schema_version": 1,
+      "causation_id": null,
+      "payload": {
+       "process": "executor",
+       "subject": "01J8Z2ACCT00000000000000A1",
+       "generation": 2
+      }
+     },
+     {
+      "event_id": "01J8Z6U0400000000000000000",
+      "event_type": "OwnerAlertSent",
+      "schema_version": 1,
+      "causation_id": "01J8Z6U0300000000000000000",
+      "payload": {
+       "subject": "01J8Z6U0300000000000000000",
+       "kind": "kill_switch_unapplied",
+       "owner_command": null
+      }
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "rule": "rule 266",
+     "index": 4
+    }
+   },
+   {
+    "name": "redeployed",
+    "clause": "rule 266: a deployment on the account since the switch's start makes the loop ordinary",
+    "records": [
+     {
+      "event_id": "01J8Z6U0000000000000000000",
+      "event_type": "ConnectionEstablished",
+      "schema_version": 2,
+      "causation_id": null,
+      "payload": {
+       "connection_id": "conn_01J8Z2CONN000000000000C1",
+       "account_ref": "01J8Z2ACCT00000000000000A1"
+      }
+     },
+     {
+      "event_id": "01J8Z6U0100000000000000000",
+      "event_type": "ProcessStartIssued",
+      "schema_version": 1,
+      "causation_id": null,
+      "payload": {
+       "process": "executor",
+       "subject": "01J8Z2ACCT00000000000000A1",
+       "generation": 1,
+       "cause": "deployed"
+      }
+     },
+     {
+      "event_id": "01J8Z6U0200000000000000000",
+      "event_type": "ProcessStartIssued",
+      "schema_version": 1,
+      "causation_id": "01J8Z6KS00000000000000000S",
+      "payload": {
+       "process": "executor",
+       "subject": "01J8Z2ACCT00000000000000A1",
+       "generation": 2,
+       "cause": "kill_switch"
+      }
+     },
+     {
+      "event_id": "01J8Z6U0300000000000000000",
+      "event_type": "AgentDeployed",
+      "schema_version": 2,
+      "causation_id": null,
+      "payload": {
+       "agent_id": "agent_3",
+       "connection_id": "conn_01J8Z2CONN000000000000C1"
+      }
+     },
+     {
+      "event_id": "01J8Z6U0400000000000000000",
+      "event_type": "ProcessStartIssued",
+      "schema_version": 1,
+      "causation_id": null,
+      "payload": {
+       "process": "executor",
+       "subject": "01J8Z2ACCT00000000000000A1",
+       "generation": 3,
+       "cause": "restart"
+      }
+     },
+     {
+      "event_id": "01J8Z6U0500000000000000000",
+      "event_type": "ProcessCrashLooped",
+      "schema_version": 1,
+      "causation_id": null,
+      "payload": {
+       "process": "executor",
+       "subject": "01J8Z2ACCT00000000000000A1",
+       "generation": 3
+      }
+     },
+     {
+      "event_id": "01J8Z6U0600000000000000000",
+      "event_type": "OwnerAlertSent",
+      "schema_version": 1,
+      "causation_id": "01J8Z6U0500000000000000000",
+      "payload": {
+       "subject": "01J8Z6U0500000000000000000",
+       "kind": "kill_switch_unapplied",
+       "owner_command": null
+      }
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "rule": "rule 266",
+     "index": 6
+    }
+   },
+   {
+    "name": "deployed_elsewhere",
+    "clause": "rule 266: a deployment on another account's connection does not end this run",
+    "records": [
+     {
+      "event_id": "01J8Z6U0000000000000000000",
+      "event_type": "ConnectionEstablished",
+      "schema_version": 2,
+      "causation_id": null,
+      "payload": {
+       "connection_id": "conn_01J8Z2CONN000000000000C1",
+       "account_ref": "01J8Z2ACCT00000000000000A1"
+      }
+     },
+     {
+      "event_id": "01J8Z6U0100000000000000000",
+      "event_type": "ConnectionEstablished",
+      "schema_version": 2,
+      "causation_id": null,
+      "payload": {
+       "connection_id": "conn_01J8Z2CONN000000000000C2",
+       "account_ref": "01J8Z2ACCT00000000000000A2"
+      }
+     },
+     {
+      "event_id": "01J8Z6U0200000000000000000",
+      "event_type": "ProcessStartIssued",
+      "schema_version": 1,
+      "causation_id": null,
+      "payload": {
+       "process": "executor",
+       "subject": "01J8Z2ACCT00000000000000A1",
+       "generation": 1,
+       "cause": "deployed"
+      }
+     },
+     {
+      "event_id": "01J8Z6U0300000000000000000",
+      "event_type": "ProcessStartIssued",
+      "schema_version": 1,
+      "causation_id": "01J8Z6KS00000000000000000S",
+      "payload": {
+       "process": "executor",
+       "subject": "01J8Z2ACCT00000000000000A1",
+       "generation": 2,
+       "cause": "kill_switch"
+      }
+     },
+     {
+      "event_id": "01J8Z6U0400000000000000000",
+      "event_type": "AgentDeployed",
+      "schema_version": 2,
+      "causation_id": null,
+      "payload": {
+       "agent_id": "agent_4",
+       "connection_id": "conn_01J8Z2CONN000000000000C2"
+      }
+     },
+     {
+      "event_id": "01J8Z6U0500000000000000000",
+      "event_type": "ProcessStartIssued",
+      "schema_version": 1,
+      "causation_id": null,
+      "payload": {
+       "process": "executor",
+       "subject": "01J8Z2ACCT00000000000000A1",
+       "generation": 3,
+       "cause": "restart"
+      }
+     },
+     {
+      "event_id": "01J8Z6U0600000000000000000",
+      "event_type": "ProcessCrashLooped",
+      "schema_version": 1,
+      "causation_id": null,
+      "payload": {
+       "process": "executor",
+       "subject": "01J8Z2ACCT00000000000000A1",
+       "generation": 3
+      }
+     },
+     {
+      "event_id": "01J8Z6U0700000000000000000",
+      "event_type": "OwnerAlertSent",
+      "schema_version": 1,
+      "causation_id": "01J8Z6U0600000000000000000",
+      "payload": {
+       "subject": "01J8Z6U0600000000000000000",
+       "kind": "kill_switch_unapplied",
+       "owner_command": null
+      }
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "retired_before_the_switch",
+    "clause": "rule 266: an agent deployed and retired before the switch's start leaves it wanted by none",
+    "records": [
+     {
+      "event_id": "01J8Z6U0000000000000000000",
+      "event_type": "ConnectionEstablished",
+      "schema_version": 2,
+      "causation_id": null,
+      "payload": {
+       "connection_id": "conn_01J8Z2CONN000000000000C1",
+       "account_ref": "01J8Z2ACCT00000000000000A1"
+      }
+     },
+     {
+      "event_id": "01J8Z6U1100000000000000000",
+      "event_type": "AgentDeployed",
+      "schema_version": 2,
+      "causation_id": null,
+      "payload": {
+       "agent_id": "agent_11",
+       "connection_id": "conn_01J8Z2CONN000000000000C1"
+      }
+     },
+     {
+      "event_id": "01J8Z6U0100000000000000000",
+      "event_type": "ProcessStartIssued",
+      "schema_version": 1,
+      "causation_id": null,
+      "payload": {
+       "process": "executor",
+       "subject": "01J8Z2ACCT00000000000000A1",
+       "generation": 1,
+       "cause": "deployed"
+      }
+     },
+     {
+      "event_id": "01J8Z6U1200000000000000000",
+      "event_type": "AgentStopped",
+      "schema_version": 1,
+      "causation_id": null,
+      "payload": {
+       "agent_id": "agent_11"
+      }
+     },
+     {
+      "event_id": "01J8Z6U0300000000000000000",
+      "event_type": "ProcessStartIssued",
+      "schema_version": 1,
+      "causation_id": "01J8Z6KS00000000000000000S",
+      "payload": {
+       "process": "executor",
+       "subject": "01J8Z2ACCT00000000000000A1",
+       "generation": 2,
+       "cause": "kill_switch"
+      }
+     },
+     {
+      "event_id": "01J8Z6U0400000000000000000",
+      "event_type": "ProcessCrashLooped",
+      "schema_version": 1,
+      "causation_id": null,
+      "payload": {
+       "process": "executor",
+       "subject": "01J8Z2ACCT00000000000000A1",
+       "generation": 2
+      }
+     },
+     {
+      "event_id": "01J8Z6U0500000000000000000",
+      "event_type": "OwnerAlertSent",
+      "schema_version": 1,
+      "causation_id": "01J8Z6U0400000000000000000",
+      "payload": {
+       "subject": "01J8Z6U0400000000000000000",
+       "kind": "kill_switch_unapplied",
+       "owner_command": null
+      }
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "switched_while_wanted",
+    "clause": "rule 266: a switch's start of an executor an agent still wants is no held run",
+    "records": [
+     {
+      "event_id": "01J8Z6U0000000000000000000",
+      "event_type": "ConnectionEstablished",
+      "schema_version": 2,
+      "causation_id": null,
+      "payload": {
+       "connection_id": "conn_01J8Z2CONN000000000000C1",
+       "account_ref": "01J8Z2ACCT00000000000000A1"
+      }
+     },
+     {
+      "event_id": "01J8Z6U1100000000000000000",
+      "event_type": "AgentDeployed",
+      "schema_version": 2,
+      "causation_id": null,
+      "payload": {
+       "agent_id": "agent_11",
+       "connection_id": "conn_01J8Z2CONN000000000000C1"
+      }
+     },
+     {
+      "event_id": "01J8Z6U0100000000000000000",
+      "event_type": "ProcessStartIssued",
+      "schema_version": 1,
+      "causation_id": null,
+      "payload": {
+       "process": "executor",
+       "subject": "01J8Z2ACCT00000000000000A1",
+       "generation": 1,
+       "cause": "deployed"
+      }
+     },
+     {
+      "event_id": "01J8Z6U0200000000000000000",
+      "event_type": "ProcessStartIssued",
+      "schema_version": 1,
+      "causation_id": "01J8Z6KS00000000000000000S",
+      "payload": {
+       "process": "executor",
+       "subject": "01J8Z2ACCT00000000000000A1",
+       "generation": 2,
+       "cause": "kill_switch"
+      }
+     },
+     {
+      "event_id": "01J8Z6U0300000000000000000",
+      "event_type": "ProcessStartIssued",
+      "schema_version": 1,
+      "causation_id": null,
+      "payload": {
+       "process": "executor",
+       "subject": "01J8Z2ACCT00000000000000A1",
+       "generation": 3,
+       "cause": "restart"
+      }
+     },
+     {
+      "event_id": "01J8Z6U0400000000000000000",
+      "event_type": "ProcessCrashLooped",
+      "schema_version": 1,
+      "causation_id": null,
+      "payload": {
+       "process": "executor",
+       "subject": "01J8Z2ACCT00000000000000A1",
+       "generation": 3
+      }
+     },
+     {
+      "event_id": "01J8Z6U0500000000000000000",
+      "event_type": "OwnerAlertSent",
+      "schema_version": 1,
+      "causation_id": "01J8Z6U0400000000000000000",
+      "payload": {
+       "subject": "01J8Z6U0400000000000000000",
+       "kind": "kill_switch_unapplied",
+       "owner_command": null
+      }
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "rule": "rule 266",
+     "index": 6
+    }
+   },
+   {
+    "name": "a_new_run_after_a_loop",
+    "clause": "rule 266: a later switch's start after an unapplied loop is a new run, and its loop is unapplied too",
+    "records": [
+     {
+      "event_id": "01J8Z6U0000000000000000000",
+      "event_type": "ConnectionEstablished",
+      "schema_version": 2,
+      "causation_id": null,
+      "payload": {
+       "connection_id": "conn_01J8Z2CONN000000000000C1",
+       "account_ref": "01J8Z2ACCT00000000000000A1"
+      }
+     },
+     {
+      "event_id": "01J8Z6U0100000000000000000",
+      "event_type": "ProcessStartIssued",
+      "schema_version": 1,
+      "causation_id": null,
+      "payload": {
+       "process": "executor",
+       "subject": "01J8Z2ACCT00000000000000A1",
+       "generation": 1,
+       "cause": "deployed"
+      }
+     },
+     {
+      "event_id": "01J8Z6U0200000000000000000",
+      "event_type": "ProcessStartIssued",
+      "schema_version": 1,
+      "causation_id": "01J8Z6KS00000000000000000S",
+      "payload": {
+       "process": "executor",
+       "subject": "01J8Z2ACCT00000000000000A1",
+       "generation": 2,
+       "cause": "kill_switch"
+      }
+     },
+     {
+      "event_id": "01J8Z6U0300000000000000000",
+      "event_type": "ProcessCrashLooped",
+      "schema_version": 1,
+      "causation_id": null,
+      "payload": {
+       "process": "executor",
+       "subject": "01J8Z2ACCT00000000000000A1",
+       "generation": 2
+      }
+     },
+     {
+      "event_id": "01J8Z6U0400000000000000000",
+      "event_type": "OwnerAlertSent",
+      "schema_version": 1,
+      "causation_id": "01J8Z6U0300000000000000000",
+      "payload": {
+       "subject": "01J8Z6U0300000000000000000",
+       "kind": "kill_switch_unapplied",
+       "owner_command": null
+      }
+     },
+     {
+      "event_id": "01J8Z6U0500000000000000000",
+      "event_type": "ProcessStartIssued",
+      "schema_version": 1,
+      "causation_id": "01J8Z6KS00000000000000000S",
+      "payload": {
+       "process": "executor",
+       "subject": "01J8Z2ACCT00000000000000A1",
+       "generation": 3,
+       "cause": "kill_switch"
+      }
+     },
+     {
+      "event_id": "01J8Z6U0600000000000000000",
+      "event_type": "ProcessStartIssued",
+      "schema_version": 1,
+      "causation_id": null,
+      "payload": {
+       "process": "executor",
+       "subject": "01J8Z2ACCT00000000000000A1",
+       "generation": 4,
+       "cause": "restart"
+      }
+     },
+     {
+      "event_id": "01J8Z6U0700000000000000000",
+      "event_type": "ProcessCrashLooped",
+      "schema_version": 1,
+      "causation_id": null,
+      "payload": {
+       "process": "executor",
+       "subject": "01J8Z2ACCT00000000000000A1",
+       "generation": 4
+      }
+     },
+     {
+      "event_id": "01J8Z6U0800000000000000000",
+      "event_type": "OwnerAlertSent",
+      "schema_version": 1,
+      "causation_id": "01J8Z6U0700000000000000000",
+      "payload": {
+       "subject": "01J8Z6U0700000000000000000",
+       "kind": "kill_switch_unapplied",
+       "owner_command": null
+      }
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "a_runtime_loop",
+    "clause": "rule 266: only an executor's loop",
+    "records": [
+     {
+      "event_id": "01J8Z6U0000000000000000000",
+      "event_type": "ConnectionEstablished",
+      "schema_version": 2,
+      "causation_id": null,
+      "payload": {
+       "connection_id": "conn_01J8Z2CONN000000000000C1",
+       "account_ref": "01J8Z2ACCT00000000000000A1"
+      }
+     },
+     {
+      "event_id": "01J8Z6U0100000000000000000",
+      "event_type": "ProcessStartIssued",
+      "schema_version": 1,
+      "causation_id": null,
+      "payload": {
+       "process": "executor",
+       "subject": "01J8Z2ACCT00000000000000A1",
+       "generation": 1,
+       "cause": "deployed"
+      }
+     },
+     {
+      "event_id": "01J8Z6U0200000000000000000",
+      "event_type": "ProcessStartIssued",
+      "schema_version": 1,
+      "causation_id": "01J8Z6KS00000000000000000S",
+      "payload": {
+       "process": "executor",
+       "subject": "01J8Z2ACCT00000000000000A1",
+       "generation": 2,
+       "cause": "kill_switch"
+      }
+     },
+     {
+      "event_id": "01J8Z6U0300000000000000000",
+      "event_type": "ProcessCrashLooped",
+      "schema_version": 1,
+      "causation_id": null,
+      "payload": {
+       "process": "runtime",
+       "subject": "01J8Z2ACCT00000000000000A1",
+       "generation": 2
+      }
+     },
+     {
+      "event_id": "01J8Z6U0400000000000000000",
+      "event_type": "OwnerAlertSent",
+      "schema_version": 1,
+      "causation_id": "01J8Z6U0300000000000000000",
+      "payload": {
+       "subject": "01J8Z6U0300000000000000000",
+       "kind": "kill_switch_unapplied",
+       "owner_command": null
+      }
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "rule": "rule 266",
+     "index": 4
+    }
+   },
+   {
+    "name": "another_accounts_switch",
+    "clause": "rule 266: the run is the looping executor's own",
+    "records": [
+     {
+      "event_id": "01J8Z6U0000000000000000000",
+      "event_type": "ConnectionEstablished",
+      "schema_version": 2,
+      "causation_id": null,
+      "payload": {
+       "connection_id": "conn_01J8Z2CONN000000000000C1",
+       "account_ref": "01J8Z2ACCT00000000000000A1"
+      }
+     },
+     {
+      "event_id": "01J8Z6U0100000000000000000",
+      "event_type": "ProcessStartIssued",
+      "schema_version": 1,
+      "causation_id": null,
+      "payload": {
+       "process": "executor",
+       "subject": "01J8Z2ACCT00000000000000A1",
+       "generation": 1,
+       "cause": "deployed"
+      }
+     },
+     {
+      "event_id": "01J8Z6U0200000000000000000",
+      "event_type": "ProcessStartIssued",
+      "schema_version": 1,
+      "causation_id": "01J8Z6KS00000000000000000S",
+      "payload": {
+       "process": "executor",
+       "subject": "01J8Z2ACCT00000000000000A2",
+       "generation": 2,
+       "cause": "kill_switch"
+      }
+     },
+     {
+      "event_id": "01J8Z6U0300000000000000000",
+      "event_type": "ProcessStartIssued",
+      "schema_version": 1,
+      "causation_id": null,
+      "payload": {
+       "process": "executor",
+       "subject": "01J8Z2ACCT00000000000000A1",
+       "generation": 2,
+       "cause": "restart"
+      }
+     },
+     {
+      "event_id": "01J8Z6U0400000000000000000",
+      "event_type": "ProcessCrashLooped",
+      "schema_version": 1,
+      "causation_id": null,
+      "payload": {
+       "process": "executor",
+       "subject": "01J8Z2ACCT00000000000000A1",
+       "generation": 2
+      }
+     },
+     {
+      "event_id": "01J8Z6U0500000000000000000",
+      "event_type": "OwnerAlertSent",
+      "schema_version": 1,
+      "causation_id": "01J8Z6U0400000000000000000",
+      "payload": {
+       "subject": "01J8Z6U0400000000000000000",
+       "kind": "kill_switch_unapplied",
+       "owner_command": null
+      }
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "rule": "rule 266",
+     "index": 5
+    }
+   },
+   {
+    "name": "names_a_start",
+    "clause": "rule 266: the subject is the loop, not the start",
+    "records": [
+     {
+      "event_id": "01J8Z6U0000000000000000000",
+      "event_type": "ConnectionEstablished",
+      "schema_version": 2,
+      "causation_id": null,
+      "payload": {
+       "connection_id": "conn_01J8Z2CONN000000000000C1",
+       "account_ref": "01J8Z2ACCT00000000000000A1"
+      }
+     },
+     {
+      "event_id": "01J8Z6U0100000000000000000",
+      "event_type": "ProcessStartIssued",
+      "schema_version": 1,
+      "causation_id": null,
+      "payload": {
+       "process": "executor",
+       "subject": "01J8Z2ACCT00000000000000A1",
+       "generation": 1,
+       "cause": "deployed"
+      }
+     },
+     {
+      "event_id": "01J8Z6U0200000000000000000",
+      "event_type": "ProcessStartIssued",
+      "schema_version": 1,
+      "causation_id": "01J8Z6KS00000000000000000S",
+      "payload": {
+       "process": "executor",
+       "subject": "01J8Z2ACCT00000000000000A1",
+       "generation": 2,
+       "cause": "kill_switch"
+      }
+     },
+     {
+      "event_id": "01J8Z6U0300000000000000000",
+      "event_type": "ProcessCrashLooped",
+      "schema_version": 1,
+      "causation_id": null,
+      "payload": {
+       "process": "executor",
+       "subject": "01J8Z2ACCT00000000000000A1",
+       "generation": 2
+      }
+     },
+     {
+      "event_id": "01J8Z6U0400000000000000000",
+      "event_type": "OwnerAlertSent",
+      "schema_version": 1,
+      "causation_id": "01J8Z6U0200000000000000000",
+      "payload": {
+       "subject": "01J8Z6U0200000000000000000",
+       "kind": "kill_switch_unapplied",
+       "owner_command": null
+      }
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "rule": "rule 266",
+     "index": 4
+    }
+   },
+   {
+    "name": "an_ordinary_alert_on_an_ordinary_loop",
+    "clause": "rule 266 reads only `kill_switch_unapplied`",
+    "records": [
+     {
+      "event_id": "01J8Z6U0000000000000000000",
+      "event_type": "ConnectionEstablished",
+      "schema_version": 2,
+      "causation_id": null,
+      "payload": {
+       "connection_id": "conn_01J8Z2CONN000000000000C1",
+       "account_ref": "01J8Z2ACCT00000000000000A1"
+      }
+     },
+     {
+      "event_id": "01J8Z6U0100000000000000000",
+      "event_type": "ProcessStartIssued",
+      "schema_version": 1,
+      "causation_id": null,
+      "payload": {
+       "process": "executor",
+       "subject": "01J8Z2ACCT00000000000000A1",
+       "generation": 1,
+       "cause": "deployed"
+      }
+     },
+     {
+      "event_id": "01J8Z6U0200000000000000000",
+      "event_type": "ProcessStartIssued",
+      "schema_version": 1,
+      "causation_id": null,
+      "payload": {
+       "process": "executor",
+       "subject": "01J8Z2ACCT00000000000000A1",
+       "generation": 2,
+       "cause": "restart"
+      }
+     },
+     {
+      "event_id": "01J8Z6U0300000000000000000",
+      "event_type": "ProcessCrashLooped",
+      "schema_version": 1,
+      "causation_id": null,
+      "payload": {
+       "process": "executor",
+       "subject": "01J8Z2ACCT00000000000000A1",
+       "generation": 2
+      }
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
     }
    }
   ]
