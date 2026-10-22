@@ -128,7 +128,7 @@ pub fn allows(identity: &Identity, access: Access, path: &SecretPath) -> bool {
         )
         | (Identity::TokenExchange(own), Access::Write, SecretPath::Token(c))
         | (Identity::Executor(own), Access::Read, SecretPath::Token(c))
-        | (Identity::Executor(own), Access::Create, SecretPath::AccountId(c)) => own == c,
+        | (Identity::Executor(own), Access::Create, SecretPath::AccountId(c, _)) => own == c,
         (identity, Access::Read, SecretPath::Platform(secret)) => {
             holders(*secret).is_ok_and(|h| h.reads == *identity)
         }

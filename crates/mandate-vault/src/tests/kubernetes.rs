@@ -295,7 +295,6 @@ fn the_executors_policy_reads_its_own_token_alone() {
 /// creates only, so a request again on the connection to another account stream (DEC-699) has its
 /// own entry. No other path of a templated policy holds `+` or `*`.
 #[test]
-#[ignore = "pending E21-32"]
 fn the_executors_one_wildcard_is_below_its_own_account_entries() {
     let wildcards = |policy: &str| -> Vec<(String, String)> {
         policy
