@@ -1,0 +1,5 @@
+file = "crates/mandate-vault/src/tests/policy.rs"
+test = "tests::policy::only_a_token_exchange_takes_and_only_its_own_connections_code"
+reason = """
+DEC-2061 widens an implemented table, not a stub: allows does not yet grant Access::Take, so the test fails on that answer. PRV-2c-2b grants it and deletes this row.
+"""

@@ -123,6 +123,15 @@ pub fn read_service_account_token(dir: &Path) -> Result<SecretString, SourceErro
     one_line(&token)
 }
 
+/// Reads the pod's own namespace, `dir/namespace`, which the projected volume holds beside the
+/// token from the downward API (`metadata.namespace`), so no pod names its namespace in its
+/// arguments: by [`read_service_account_token`]'s rules, at most 64 bytes, and a Kubernetes label.
+/// Anything else is [`SourceError::CredentialFile`].
+pub fn read_service_account_namespace(dir: &Path) -> Result<String, SourceError> {
+    let _ = dir;
+    Err(SourceError::Unimplemented { story: "E21-32" })
+}
+
 /// The most bytes a projected ServiceAccount token may hold; a real one is about a kilobyte.
 pub const SERVICE_ACCOUNT_TOKEN_MAX: u64 = 16384;
 

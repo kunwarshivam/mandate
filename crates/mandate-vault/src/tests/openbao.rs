@@ -5,12 +5,12 @@ use reqwest::StatusCode;
 
 use mandate_connections::record::ConnectionId;
 use mandate_time::UtcNanos;
-use serde_json::json;
+use serde_json::{Value, json};
 
 use crate::openbao::{
     OpenBaoConfig, OpenBaoSource, kubernetes_login_path, kubernetes_login_refusal,
-    kubernetes_login_verdict, provision, provisioned_identities, refusal, role_settings,
-    seal_verdict, secret_id_identities,
+    kubernetes_login_verdict, kubernetes_namespace_verdict, provision, provisioned_identities,
+    refusal, role_settings, seal_verdict, secret_id_identities,
 };
 use crate::policy::{Identity, Mounts};
 use secrecy::SecretString;
@@ -193,6 +193,9 @@ fn unreachable() -> OpenBaoConfig {
     }
 }
 
+/// The workspace's namespace.
+const NAMESPACE: &str = "ws-ws1";
+
 const JWT: &str = "canary-3e91-projected-service-account-token-do-not-print";
 
 fn at_start() -> UtcNanos {
@@ -215,6 +218,7 @@ async fn only_a_connections_processes_log_in_with_kubernetes_auth() {
             &unreachable(),
             identity.clone(),
             &SecretString::from(JWT.to_owned()),
+            NAMESPACE,
             at_start(),
         )
         .await;
@@ -234,6 +238,7 @@ async fn a_kubernetes_login_to_an_unreachable_vault_is_an_outage_that_shows_no_t
             &unreachable(),
             identity.clone(),
             &SecretString::from(JWT.to_owned()),
+            NAMESPACE,
             at_start(),
         )
         .await;
@@ -379,4 +384,38 @@ fn a_missing_role_is_its_own_refusal_and_every_other_answer_keeps_its_meaning() 
     }
     let shown = format!("{:?}", kubernetes_login_refusal(400, missing, "6331"));
     assert!(!shown.contains("6331"), "{shown}");
+}
+
+/// The ServiceAccount the vault checked must be in the workspace's namespace, exactly; an answer
+/// that does not say is malformed.
+#[test]
+#[ignore = "pending E21-32"]
+fn a_kubernetes_login_is_accepted_only_in_the_workspaces_namespace() {
+    let auth = |namespace: Value| json!({"metadata": {"service_account_namespace": namespace}});
+    assert_eq!(
+        kubernetes_namespace_verdict(Some(&auth(json!("ws-ws1"))), NAMESPACE),
+        Ok(())
+    );
+    for other in ["ws-ws2", "WS-WS1", "ws-ws1 ", "", "kube-system"] {
+        assert_eq!(
+            kubernetes_namespace_verdict(Some(&auth(json!(other))), NAMESPACE),
+            Err(SourceError::Denied),
+            "{other:?}"
+        );
+    }
+    for answer in [
+        json!({"metadata": {}}),
+        json!({"metadata": {"service_account_namespace": 7}}),
+        json!({}),
+    ] {
+        assert_eq!(
+            kubernetes_namespace_verdict(Some(&answer), NAMESPACE),
+            Err(SourceError::Malformed),
+            "{answer}"
+        );
+    }
+    assert_eq!(
+        kubernetes_namespace_verdict(None, NAMESPACE),
+        Err(SourceError::Malformed)
+    );
 }

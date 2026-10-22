@@ -213,6 +213,7 @@ fn each_policy_is_the_table_with_no_wildcard() {
                     Access::Read => ("data", "read"),
                     Access::Write => ("data", "create,update"),
                     Access::Delete => ("metadata", "delete"),
+                    Access::Take => ("data", "update"),
                 };
                 let want = format!("mandate/{prefix}/{}", kv_path(&path));
                 let present = got.iter().any(|(p, c)| p == &want && c == caps);
@@ -262,5 +263,31 @@ fn the_manager_may_issue_and_revoke_only_exchange_grants() {
             let hcl = openbao_policy(&identity, &[c("c1")], &Mounts::default());
             assert!(!hcl.contains("auth/"), "{identity:?}: {hcl}");
         }
+    }
+}
+
+/// DEC-2061: only a connection's token exchange may take, and only its own connection's code: no
+/// other identity, no other connection's code, and no token or secret.
+#[test]
+#[ignore = "pending E21-32"]
+fn only_a_token_exchange_takes_and_only_its_own_connections_code() {
+    let exchange = Identity::TokenExchange(c("c1"));
+    assert!(allows(&exchange, Access::Take, &SecretPath::Code(c("c1"))));
+    for identity in identities() {
+        for path in paths() {
+            let want = identity == exchange && path == SecretPath::Code(c("c1"));
+            assert_eq!(
+                allows(&identity, Access::Take, &path),
+                want,
+                "{identity:?} {path:?}"
+            );
+        }
+    }
+    for identity in identities() {
+        let hcl = openbao_policy(&identity, &[c("c1"), c("c2")], &Mounts::default());
+        assert!(
+            !blocks(&hcl).iter().any(|(_, caps)| caps == "update"),
+            "an AppRole policy never grants a take: {identity:?}: {hcl}"
+        );
     }
 }

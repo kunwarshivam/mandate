@@ -1,0 +1,5 @@
+file = "crates/mandate-vault/src/tests/kubernetes.rs"
+test = "tests::kubernetes::the_exchanges_policy_writes_its_token_and_reads_takes_and_deletes_its_code"
+reason = """
+DEC-2061 widens an implemented table, not a stub: kubernetes_policy does not yet give the exchange's code update, so the test fails on that answer. PRV-2c-2b grants it and deletes this row.
+"""
