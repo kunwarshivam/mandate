@@ -431,7 +431,6 @@ fn the_internal_paper_setting_starts_only_on_a_journal_shown_paper() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_malformed_or_non_unicode_ingress_peers_setting_refuses_the_start() {
     let mut non_unicode = command(&LOCAL, &[]);
     non_unicode.env(

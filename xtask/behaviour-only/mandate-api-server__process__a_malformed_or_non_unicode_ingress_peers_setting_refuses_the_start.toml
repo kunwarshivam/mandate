@@ -1,7 +1,0 @@
-file = "crates/mandate-api-server/tests/process.rs"
-test = "a_malformed_or_non_unicode_ingress_peers_setting_refuses_the_start"
-reason = """
-main.rs does not read MANDATE_API_INGRESS_PEERS until S1c's implementation, so the binary starts
-and this test fails on the process's answer, not at a stub; the parser it will call is already
-implemented (S1a). The row goes with S1c's implementation PR.
-"""

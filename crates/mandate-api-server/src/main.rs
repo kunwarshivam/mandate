@@ -199,7 +199,13 @@ fn checked() -> Result<(Args, Start), StartRefusal> {
         name: "MANDATE_API_JWKS_URL",
     })?;
     let artifacts = artifact_store(env::var_os("MANDATE_API_ARTIFACTS").as_deref())?;
-    let ingress = reduction::ingress_peers(env::var(reduction::INGRESS_PEERS).ok().as_deref())?;
+    let ingress_setting = env::var_os(reduction::INGRESS_PEERS)
+        .map(|value| value.into_string())
+        .transpose()
+        .map_err(|_| StartRefusal::Setting {
+            name: reduction::INGRESS_PEERS,
+        })?;
+    let ingress = reduction::ingress_peers(ingress_setting.as_deref())?;
     let start = Start {
         settings,
         key,

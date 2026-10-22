@@ -340,7 +340,6 @@ fn cookie(value: &str) -> String {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_refused_request_spends_nothing_and_each_device_keeps_its_own_budget() {
     let f = fixture(Reduction::new(Vec::new(), Box::new(Wide::default())));
     let mine = cookie(DEVICE);
@@ -375,7 +374,6 @@ fn a_refused_request_spends_nothing_and_each_device_keeps_its_own_budget() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn over_the_address_limit_a_device_with_a_cookie_gets_the_one_401_too() {
     let f = fixture(Reduction::new(Vec::new(), Box::new(Wide::default())));
     for n in 0..32 {

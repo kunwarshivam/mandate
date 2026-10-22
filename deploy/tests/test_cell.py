@@ -759,6 +759,23 @@ def test_api_contained():
         assert helm(CHART, *args).returncode != 0, refused
 
 
+def api_env(rendered: list[dict]) -> dict[str, str]:
+    """The api container's environment, name to value."""
+    return {e["name"]: e.get("value", "") for e in first_container(owner_workload(rendered)).get("env", [])}
+
+
+def test_ingress_peers_are_exact_addresses_set_only_when_named():
+    """Route 2's ingress peers (workspace API spec §4.10, DEC-2119 item 11): no variable when the
+    list is empty, the comma-joined list otherwise, and only exact addresses admitted, IPv4 with
+    each octet 0 to 255, IPv6, or IPv4-mapped IPv6."""
+    assert "MANDATE_API_INGRESS_PEERS" not in api_env(render_all())
+    peers = render_all("--set-json", 'api.ingressPeers=["127.0.0.1","::ffff:127.0.0.1","::1"]')
+    assert api_env(peers)["MANDATE_API_INGRESS_PEERS"] == "127.0.0.1,::ffff:127.0.0.1,::1"
+    base = ["-f", str(CELL / "values" / "k3d.yaml"), *every_image()]
+    for refused in ('["999.1.1.1"]', '["256.0.0.1"]', '["10.0.0.0/8"]', '["localhost"]', '["127.0.0.1","127.0.0.1"]'):
+        assert helm(CHART, *base, "--set-json", f"api.ingressPeers={refused}").returncode != 0, refused
+
+
 FOUNDER = "01KDEM0000000000000000000F"
 FOUNDING = ("--set", "founding.enabled=true", "--set", f"founding.member={FOUNDER}")
 FOUNDING_HOOK = "post-install,post-upgrade"
