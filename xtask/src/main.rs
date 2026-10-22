@@ -861,7 +861,7 @@ const TOKEN_URL_IN_RELEASE: &str = "token_exchange_token_url_in_release\n";
 /// (DEC-1190), and runs it as a cell would: a dev tier with a token URL its debug build admits, a
 /// dev tier with an empty one, and a production tier with one. Each run must be
 /// [`release_exchange_refused`]. It first refuses an environment that turns debug assertions back
-/// on in the release profile (DEC-2633 item 4), which would make the build it checks not the one
+/// on in the release profile (DEC-2322), which would make the build it checks not the one
 /// the image ships.
 fn exchange_release() -> Result<()> {
     if !selection()?.crates.contains(TOKEN_EXCHANGE) {
@@ -895,21 +895,21 @@ fn exchange_release() -> Result<()> {
     Ok(())
 }
 
-/// DEC-2633 item 4: the release profile's debug assertions stay off. Refuses an environment that
+/// DEC-2322: the release profile's debug assertions stay off. Refuses an environment that
 /// sets `CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS` at all, or passes `debug-assertions` through
 /// `RUSTFLAGS` or `CARGO_ENCODED_RUSTFLAGS`.
 fn release_profile_untouched(var: impl Fn(&str) -> Option<String>) -> Result<()> {
     if var("CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS").is_some() {
         bail!(
             "CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS is set: the release build must keep debug \
-             assertions off (DEC-2633 item 4)"
+             assertions off (DEC-2322)"
         );
     }
     for name in ["RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS"] {
         if var(name).is_some_and(|flags| flags.contains("debug-assertions")) {
             bail!(
                 "{name} names debug-assertions: the release build must keep them off \
-                 (DEC-2633 item 4)"
+                 (DEC-2322)"
             );
         }
     }
@@ -12800,7 +12800,7 @@ mod tests {
         assert!(FULL_JOB.contains(&"exchange-release") && PR_JOBS.contains(&"exchange-release"));
     }
 
-    /// DEC-2633 item 4: `exchange-release` refuses an environment that turns the release profile's
+    /// DEC-2322: `exchange-release` refuses an environment that turns the release profile's
     /// debug assertions back on, and accepts one that leaves them alone.
     #[test]
     fn the_release_exchange_check_refuses_debug_assertions_turned_on() {
