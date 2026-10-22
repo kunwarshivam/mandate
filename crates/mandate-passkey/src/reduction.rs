@@ -17,7 +17,11 @@
 //! [DEC-2121]: ../../../docs/project/decisions/DEC-2121.md
 //! [DEC-2324]: ../../../docs/project/decisions/DEC-2324.md
 
-use crate::{Assertion, Challenge, PublicKey, Refusal, RelyingParty};
+use mandate_canon::Digest;
+
+use crate::auth_data::AuthData;
+use crate::client_data::{self, Ceremony};
+use crate::{Assertion, Challenge, PublicKey, Refusal, RelyingParty, cbor, cose};
 
 /// The ES256 decoy: the P-256 base point, a valid key, so checking a signature against it costs
 /// a full verification. Its private key is 1, so anyone can sign for it; the caller never accepts
@@ -45,17 +49,42 @@ pub const DECOY_ED25519: PublicKey = PublicKey::Ed25519 {
     ],
 };
 
+/// An Ed25519 signature's length.
+const ED25519_SIGNATURE_LEN: usize = 64;
+
+/// The DER tags of a `SEQUENCE` and an `INTEGER`.
+const SEQUENCE: u8 = 0x30;
+const INTEGER: u8 = 0x02;
+
+/// Whether `signature` is a DER `SEQUENCE` of exactly two `INTEGER`s, an ECDSA signature's shape,
+/// with short-form lengths, as every P-256 signature has.
+fn ecdsa_der(signature: &[u8]) -> bool {
+    let [SEQUENCE, len, body @ ..] = signature else {
+        return false;
+    };
+    usize::from(*len) == body.len() && integer(body).and_then(integer) == Some(&[][..])
+}
+
+/// What follows one DER `INTEGER` at the front of `input`, or `None` when none is there.
+fn integer(input: &[u8]) -> Option<&[u8]> {
+    let [INTEGER, len, rest @ ..] = input else {
+        return None;
+    };
+    rest.get(usize::from(*len)..)
+}
+
 /// The decoy for an assertion whose passkey is unknown, chosen by its signature's encoding, since
 /// an assertion's authenticator data names no algorithm (§4.10 item 4): an ECDSA signature's DER
 /// structure, a SEQUENCE of two INTEGERs, is tried first and gets [`DECOY_ES256`]; any other 64
 /// bytes get [`DECOY_ED25519`]; any other shape gets [`DECOY_ES256`].
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
 pub fn decoy_for(signature: &[u8]) -> &'static PublicKey {
-    let _ = signature;
-    todo!()
+    if ecdsa_der(signature) {
+        &DECOY_ES256
+    } else if signature.len() == ED25519_SIGNATURE_LEN {
+        &DECOY_ED25519
+    } else {
+        &DECOY_ES256
+    }
 }
 
 /// The public key a COSE_Key's bytes encode (RFC 9053), as a `CredentialEnrolled`'s `public_key`
@@ -64,13 +93,9 @@ pub fn decoy_for(signature: &[u8]) -> &'static PublicKey {
 /// # Errors
 /// [`Refusal::PublicKeyMalformed`] for bytes that are not one well-formed key, and
 /// [`Refusal::AlgorithmUnsupported`] for another algorithm.
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
 pub fn cose_key(bytes: &[u8]) -> Result<PublicKey, Refusal> {
-    let _ = bytes;
-    todo!()
+    let key = cbor::read_all(bytes).map_err(|_| Refusal::PublicKeyMalformed)?;
+    cose::public_key(&key)
 }
 
 /// Judges `assertion` for route 2 against `challenge`, `rp`, and `key`: the passkey's own key,
@@ -83,16 +108,21 @@ pub fn cose_key(bytes: &[u8]) -> Result<PublicKey, Refusal> {
 /// # Errors
 /// [`Refusal::SignatureInvalid`] for a signature that does not verify; otherwise the client
 /// data's refusal, then the authenticator data's.
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
 pub fn verify_reduction(
     rp: &RelyingParty,
     challenge: &Challenge,
     key: &PublicKey,
     assertion: &Assertion<'_>,
 ) -> Result<(), Refusal> {
-    let _ = (rp, challenge, key, assertion);
-    todo!()
+    let client_data_hash = Digest::of(assertion.client_data_json);
+    let message = [assertion.authenticator_data, client_data_hash.as_bytes()].concat();
+    let signed = cose::verify(key, &message, assertion.signature);
+    let client_data = client_data::check(assertion.client_data_json, Ceremony::Get, rp, challenge);
+    let authenticator_data = AuthData::parse(assertion.authenticator_data).and_then(|parsed| {
+        if parsed.attested.is_some() {
+            return Err(Refusal::AuthenticatorDataMalformed);
+        }
+        parsed.check(rp)
+    });
+    signed.and(client_data).and(authenticator_data)
 }

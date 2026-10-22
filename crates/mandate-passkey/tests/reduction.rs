@@ -77,7 +77,6 @@ fn malformed() -> Vec<Malformation> {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_held_key_verifies_whatever_id_flag_or_counter_the_assertion_carries() {
     for alg in [Alg::Es256, Alg::Ed25519] {
         let authenticator = Authenticator::new(alg);
@@ -96,7 +95,6 @@ fn a_held_key_verifies_whatever_id_flag_or_counter_the_assertion_carries() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_bad_signature_is_the_answer_whatever_else_is_wrong_for_a_held_key_or_a_decoy() {
     for alg in [Alg::Es256, Alg::Ed25519] {
         let held = Authenticator::new(alg);
@@ -161,7 +159,6 @@ fn der(r: usize, s: usize) -> Vec<u8> {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn the_decoy_is_chosen_by_the_signatures_encoding_der_first() {
     let es256 = Authenticator::new(Alg::Es256);
     let signature = es256.sign(b"anything");
@@ -240,7 +237,6 @@ fn decoy_signers() -> (EcdsaKeyPair, Ed25519KeyPair) {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn each_decoy_is_a_valid_key_so_its_check_is_a_full_verification() {
     let (p256, ed25519) = decoy_signers();
     let ceremony = Ceremony::get(&CHALLENGE, 1);
@@ -275,7 +271,6 @@ fn each_decoy_is_a_valid_key_so_its_check_is_a_full_verification() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn a_cose_key_reads_as_its_algorithms_key_and_nothing_else_does() {
     for alg in [Alg::Es256, Alg::Ed25519] {
         let authenticator = Authenticator::new(alg);
