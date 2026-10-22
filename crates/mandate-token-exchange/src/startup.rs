@@ -5,6 +5,8 @@
 //! has no code that could follow one, so it refuses to start whenever `MANDATE_TOKEN_URL` is set at
 //! all. A debug build admits one only through [`crate::cell::parse`], in the `dev` and `ci` tiers.
 
+use std::ffi::{OsStr, OsString};
+
 use mandate_connections::record::ConnectionId;
 
 #[cfg(debug_assertions)]
@@ -60,13 +62,16 @@ impl StartRefused {
     }
 }
 
-/// The settings `var` gives, the token URL judged before the subject.
+/// The settings `var` gives, read as the process's environment is: raw, so a value that is not
+/// UTF-8 is still a value set. The token URL is judged before the subject.
 ///
 /// # Errors
 /// [`endpoint`]'s refusal first, then [`StartRefused::Subject`].
-pub fn settings(var: impl Fn(&str) -> Option<String>) -> Result<Settings, StartRefused> {
-    let endpoint = endpoint(var(TIER).as_deref(), var(TOKEN_URL).as_deref())?;
+pub fn settings(var: impl Fn(&str) -> Option<OsString>) -> Result<Settings, StartRefused> {
+    let tier = var(TIER).and_then(|tier| tier.into_string().ok());
+    let endpoint = endpoint(tier.as_deref(), var(TOKEN_URL).as_deref())?;
     let connection = var(SUBJECT)
+        .and_then(|subject| subject.into_string().ok())
         .and_then(|subject| ConnectionId::new(&subject).ok())
         .ok_or(StartRefused::Subject)?;
     Ok(Settings {
@@ -80,13 +85,15 @@ pub fn settings(var: impl Fn(&str) -> Option<String>) -> Result<Settings, StartR
 ///
 /// # Errors
 /// [`StartRefused::Cell`] in a debug build for a token URL [`crate::cell::parse`] refuses;
-/// [`StartRefused::TokenUrlInRelease`] in any other build for any token URL, even an empty one.
-pub fn endpoint(tier: Option<&str>, token_url: Option<&str>) -> Result<Endpoint, StartRefused> {
+/// [`StartRefused::TokenUrlInRelease`] in any other build for any token URL, even an empty one or
+/// one that is not UTF-8. A debug build judges one that is not UTF-8 with its bytes replaced, which
+/// the cell check never admits.
+pub fn endpoint(tier: Option<&str>, token_url: Option<&OsStr>) -> Result<Endpoint, StartRefused> {
     let Some(text) = token_url else {
         return Ok(Endpoint::Live);
     };
     #[cfg(debug_assertions)]
-    let judged = cell::parse(tier, text)
+    let judged = cell::parse(tier, &text.to_string_lossy())
         .map(Endpoint::Cell)
         .map_err(StartRefused::Cell);
     #[cfg(not(debug_assertions))]

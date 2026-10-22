@@ -2,6 +2,8 @@
 //! settings in the environment, and a refusal written as its code alone with exit 2 (DEC-2633
 //! item 2). The release binary is run by `cargo xtask ci exchange-release`.
 
+use std::ffi::OsStr;
+use std::os::unix::ffi::OsStrExt;
 use std::process::{Command, Output};
 
 const CONNECTION: &str = "conn_01JB3K6F0C9R2V7N4M8Q1T5W50";
@@ -33,6 +35,29 @@ fn a_token_url_outside_dev_and_ci_refuses_the_start() {
             ),
         ]);
         refused_with(&output, "token_exchange_cell_tier");
+    }
+}
+
+/// A token URL that is not UTF-8 is a value set, never read as unset (DEC-2633 item 2).
+#[test]
+fn a_token_url_that_is_not_utf8_refuses_the_start() {
+    for tier in ["production", "dev"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_mandate-token-exchange"))
+            .env_clear()
+            .env("MANDATE_SUBJECT", CONNECTION)
+            .env("MANDATE_DEPLOYMENT_TIER", tier)
+            .env(
+                "MANDATE_TOKEN_URL",
+                OsStr::from_bytes(b"http://127.0.0.1:8091/\xff"),
+            )
+            .output()
+            .expect("the binary runs");
+        let code = if tier == "dev" {
+            "token_exchange_cell_url"
+        } else {
+            "token_exchange_cell_tier"
+        };
+        refused_with(&output, code);
     }
 }
 

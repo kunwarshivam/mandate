@@ -858,32 +858,62 @@ const TOKEN_URL_IN_RELEASE: &str = "token_exchange_token_url_in_release\n";
 
 /// DEC-2633 item 2: a build without debug assertions refuses to start when `MANDATE_TOKEN_URL` is
 /// set at all. Builds the exchange with `--release` once, only when the diff selects its crate
-/// (DEC-1190), runs it as a `dev` cell would with a token URL its debug build admits, and requires
-/// [`release_exchange_refused`].
+/// (DEC-1190), and runs it as a cell would: a dev tier with a token URL its debug build admits, a
+/// dev tier with an empty one, and a production tier with one. Each run must be
+/// [`release_exchange_refused`]. It first refuses an environment that turns debug assertions back
+/// on in the release profile (DEC-2633 item 4), which would make the build it checks not the one
+/// the image ships.
 fn exchange_release() -> Result<()> {
     if !selection()?.crates.contains(TOKEN_EXCHANGE) {
         eprintln!("    exchange-release: {TOKEN_EXCHANGE} is not affected (DEC-1190)");
         return Ok(());
     }
-    let output = released(
-        TOKEN_EXCHANGE,
-        &[],
-        &[
-            ("MANDATE_DEPLOYMENT_TIER", "dev"),
-            ("MANDATE_SUBJECT", "conn_01JB3K6F0C9R2V7N4M8Q1T5W50"),
-            (
-                "MANDATE_TOKEN_URL",
-                "http://127.0.0.1:8091/alpaca/oauth/token",
-            ),
-        ],
-    )?
-    .with_context(|| {
-        format!(
-            "the release build of {TOKEN_EXCHANGE} kept running instead of refusing its token URL \
-             (DEC-2633 item 2)"
-        )
-    })?;
-    release_exchange_refused(&output)
+    release_profile_untouched(|name| env::var(name).ok())?;
+    for (tier, url) in [
+        ("dev", "http://127.0.0.1:8091/alpaca/oauth/token"),
+        ("dev", ""),
+        ("production", "http://127.0.0.1:8091/alpaca/oauth/token"),
+    ] {
+        let output = released(
+            TOKEN_EXCHANGE,
+            &[],
+            &[
+                ("MANDATE_DEPLOYMENT_TIER", tier),
+                ("MANDATE_SUBJECT", "conn_01JB3K6F0C9R2V7N4M8Q1T5W50"),
+                ("MANDATE_TOKEN_URL", url),
+            ],
+        )?
+        .with_context(|| {
+            format!(
+                "the release build of {TOKEN_EXCHANGE} kept running instead of refusing its \
+                 token URL in tier {tier} (DEC-2633 item 2)"
+            )
+        })?;
+        release_exchange_refused(&output)
+            .with_context(|| format!("tier {tier}, token URL {url:?}"))?;
+    }
+    Ok(())
+}
+
+/// DEC-2633 item 4: the release profile's debug assertions stay off. Refuses an environment that
+/// sets `CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS` at all, or passes `debug-assertions` through
+/// `RUSTFLAGS` or `CARGO_ENCODED_RUSTFLAGS`.
+fn release_profile_untouched(var: impl Fn(&str) -> Option<String>) -> Result<()> {
+    if var("CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS").is_some() {
+        bail!(
+            "CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS is set: the release build must keep debug \
+             assertions off (DEC-2633 item 4)"
+        );
+    }
+    for name in ["RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS"] {
+        if var(name).is_some_and(|flags| flags.contains("debug-assertions")) {
+            bail!(
+                "{name} names debug-assertions: the release build must keep them off \
+                 (DEC-2633 item 4)"
+            );
+        }
+    }
+    Ok(())
 }
 
 /// Whether a release exchange's run is DEC-2633 item 2's refusal: exit 2,
@@ -11601,11 +11631,11 @@ mod tests {
         mutants_scheduled, mutated_crates, names_a_stub, output_in, pending_nextest,
         pending_problems, pending_tests, per_shard_value, plain_comment_lines, preflight_args,
         proptest_seeds_in, registry_problems, registry_rows, rehearsal_runs,
-        release_exchange_refused, release_stub_refused, repo_root, schema_mutants, shard_packages,
-        shellcheck_scripts, simulator_harnesses, simulator_oracles, spec_guard_problems,
-        spec_guard_problems_for_pr, status_flip_problems, test_binary, test_order_config,
-        test_outcomes, unique_temp_path, unjudged_mutants, used_by, verdicts, workspace_closure,
-        workspace_packages,
+        release_exchange_refused, release_profile_untouched, release_stub_refused, repo_root,
+        schema_mutants, shard_packages, shellcheck_scripts, simulator_harnesses, simulator_oracles,
+        spec_guard_problems, spec_guard_problems_for_pr, status_flip_problems, test_binary,
+        test_order_config, test_outcomes, unique_temp_path, unjudged_mutants, used_by, verdicts,
+        workspace_closure, workspace_packages,
     };
     use super::{
         BINARY_COUPLINGS, CrateGraph, MATRIX_LIMIT, RUNNER_CRATE, SWEEP_ROTATION,
@@ -12768,6 +12798,34 @@ mod tests {
             );
         }
         assert!(FULL_JOB.contains(&"exchange-release") && PR_JOBS.contains(&"exchange-release"));
+    }
+
+    /// DEC-2633 item 4: `exchange-release` refuses an environment that turns the release profile's
+    /// debug assertions back on, and accepts one that leaves them alone.
+    #[test]
+    fn the_release_exchange_check_refuses_debug_assertions_turned_on() {
+        let with = |pairs: &'static [(&'static str, &'static str)]| {
+            move |name: &str| {
+                pairs
+                    .iter()
+                    .find(|(key, _)| *key == name)
+                    .map(|(_, value)| (*value).to_owned())
+            }
+        };
+        assert!(release_profile_untouched(with(&[])).is_ok());
+        assert!(release_profile_untouched(with(&[("RUSTFLAGS", "-C target-cpu=native")])).is_ok());
+        for refused in [
+            &[("CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS", "true")][..],
+            &[("CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS", "false")][..],
+            &[("RUSTFLAGS", "-C debug-assertions")][..],
+            &[("RUSTFLAGS", "-Cdebug-assertions=on")][..],
+            &[("CARGO_ENCODED_RUSTFLAGS", "-C\u{1f}debug-assertions")][..],
+        ] {
+            assert!(
+                release_profile_untouched(with(refused)).is_err(),
+                "{refused:?}"
+            );
+        }
     }
 
     /// DEC-931: every package built on a mutated one stays unoptimised, so a mutant rebuilds only

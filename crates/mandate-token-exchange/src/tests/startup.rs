@@ -3,6 +3,8 @@
 //! release binary.
 
 use std::collections::BTreeMap;
+use std::ffi::OsString;
+use std::os::unix::ffi::OsStringExt;
 
 use crate::cell::{Refused, parse};
 use crate::startup::{Endpoint, Settings, StartRefused, settings};
@@ -13,11 +15,26 @@ const CELL_URL: &str = "http://127.0.0.1:8091/alpaca/oauth/token";
 
 /// The settings `vars` give, as the process reads its environment.
 fn from(vars: &[(&str, &str)]) -> Result<Settings, StartRefused> {
-    let vars: BTreeMap<String, String> = vars
+    from_raw(
+        &vars
+            .iter()
+            .map(|(name, value)| (*name, OsString::from(value)))
+            .collect::<Vec<_>>(),
+    )
+}
+
+/// The settings raw `vars` give, values that need not be UTF-8.
+fn from_raw(vars: &[(&str, OsString)]) -> Result<Settings, StartRefused> {
+    let vars: BTreeMap<String, OsString> = vars
         .iter()
-        .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
+        .map(|(name, value)| ((*name).to_owned(), value.clone()))
         .collect();
     settings(|name| vars.get(name).cloned())
+}
+
+/// A token URL that is not UTF-8.
+fn not_utf8() -> OsString {
+    OsString::from_vec(b"http://127.0.0.1:8091/\xff".to_vec())
 }
 
 #[test]
@@ -98,6 +115,28 @@ fn a_token_url_the_cell_check_refuses_refuses_the_start_in_dev() {
 
 /// The token URL is judged before the subject, so a refused URL is the refusal named even when
 /// the subject is missing too.
+/// A token URL that is not UTF-8 is still set, and refuses the start in every tier (DEC-2633
+/// item 2): outside dev and ci by the tier, in them by the URL.
+#[test]
+fn a_token_url_that_is_not_utf8_refuses_the_start() {
+    for (tier, refused) in [
+        ("production", Refused::Tier),
+        ("staging", Refused::Tier),
+        ("dev", Refused::Url),
+        ("ci", Refused::Url),
+    ] {
+        assert_eq!(
+            from_raw(&[
+                ("MANDATE_SUBJECT", OsString::from(CONNECTION)),
+                ("MANDATE_DEPLOYMENT_TIER", OsString::from(tier)),
+                ("MANDATE_TOKEN_URL", not_utf8()),
+            ]),
+            Err(StartRefused::Cell(refused)),
+            "{tier}"
+        );
+    }
+}
+
 #[test]
 fn the_token_url_is_judged_before_the_subject() {
     assert_eq!(
