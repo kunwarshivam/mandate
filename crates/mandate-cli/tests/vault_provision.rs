@@ -11,6 +11,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU32, Ordering};
 
+use mandate_cli::vault::kubernetes_auth;
+use mandate_vault::SourceError;
+use mandate_vault::kubernetes::KubernetesAuth;
+
 const CANARY: &str = "canary-71c4e0aa-operator-token-do-not-print";
 /// An address no vault listens on: the discard port on the loopback.
 const NOWHERE: &str = "https://127.0.0.1:9";
@@ -58,6 +62,18 @@ impl Drop for Removed {
 }
 
 fn provision(address: &str, ca: &Path, token: &Path, connections: &[&str], out: &Path) -> Output {
+    provision_with(address, ca, token, connections, out, &[])
+}
+
+/// As [`provision`], with `extra` arguments after the rest.
+fn provision_with(
+    address: &str,
+    ca: &Path,
+    token: &Path,
+    connections: &[&str],
+    out: &Path,
+    extra: &[&str],
+) -> Output {
     let mut args = vec![
         "vault".to_owned(),
         "provision".to_owned(),
@@ -73,6 +89,7 @@ fn provision(address: &str, ca: &Path, token: &Path, connections: &[&str], out: 
     for c in connections {
         args.extend(["--connection".to_owned(), (*c).to_owned()]);
     }
+    args.extend(extra.iter().map(|a| (*a).to_owned()));
     Command::new(env!("CARGO_BIN_EXE_mandate"))
         .args(&args)
         .env_clear()
@@ -296,5 +313,92 @@ fn provisioning_writes_each_identitys_files_and_prints_only_their_names() {
     assert_eq!(
         fs::metadata(&out).unwrap().permissions().mode() & 0o777,
         0o700
+    );
+}
+
+/// DEC-2062 item 3: `--kubernetes-host` names the API server by an `https://` address, and is
+/// refused `config` before any vault is reached otherwise; an accepted one reaches the vault, so a
+/// vault no one answers for is an outage.
+#[test]
+#[ignore = "pending E21-32"]
+fn a_kubernetes_host_that_is_not_https_is_refused_before_any_vault_is_reached() {
+    let token = token_file(CANARY, 0o600);
+    let out = fresh("out");
+    let _removed = Removed(vec![token.clone(), out.clone()]);
+    for host in ["http://10.43.0.1:443", "10.43.0.1:443", "", "https://"] {
+        let output = provision_with(
+            NOWHERE,
+            &ca(),
+            &token,
+            &["c1"],
+            &out,
+            &["--kubernetes-host", host],
+        );
+        refused(
+            &output,
+            "config",
+            &out,
+            &format!("the Kubernetes host {host:?}"),
+        );
+    }
+    let output = provision_with(
+        NOWHERE,
+        &ca(),
+        &token,
+        &["c1"],
+        &out,
+        &["--kubernetes-host", "https://10.43.0.1:443"],
+    );
+    refused(&output, "unavailable", &out, "an https Kubernetes host");
+}
+
+/// With `--kubernetes-host`, provisioning the dev server also sets Kubernetes auth up, twice
+/// without harm, and prints only the names of the files it wrote.
+#[test]
+#[ignore = "pending E21-32"]
+fn provisioning_with_a_kubernetes_host_sets_kubernetes_auth_up() {
+    a_kubernetes_host_that_is_not_https_is_refused_before_any_vault_is_reached();
+    let Some((address, ca, operator)) = server() else {
+        return;
+    };
+    let token = token_file(fs::read_to_string(operator).unwrap().trim(), 0o600);
+    let _removed = Removed(vec![token.clone()]);
+    for round in 0..2 {
+        let out = fresh("out");
+        let _out = Removed(vec![out.clone()]);
+        let output = provision_with(
+            &address,
+            &ca,
+            &token,
+            &["c1"],
+            &out,
+            &["--kubernetes-host", "https://127.0.0.1:6443"],
+        );
+        assert!(
+            output.status.success(),
+            "round {round}: {}",
+            stderr(&output)
+        );
+        assert!(
+            !String::from_utf8_lossy(&output.stdout).contains("://"),
+            "round {round}"
+        );
+    }
+}
+
+/// The host is passed as it is, with no CA: the vault reads the one its own pod projects.
+#[test]
+#[ignore = "pending E21-32"]
+fn a_kubernetes_host_is_the_api_server_with_no_ca() {
+    assert_eq!(
+        kubernetes_auth("https://10.43.0.1:443"),
+        Ok(KubernetesAuth {
+            host: "https://10.43.0.1:443".to_owned(),
+            ca_pem: None,
+        })
+    );
+    assert_eq!(
+        kubernetes_auth("http://10.43.0.1:443"),
+        Err(SourceError::Config)
     );
 }

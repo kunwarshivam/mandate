@@ -120,6 +120,7 @@ fn a_terminal_never_receives_the_secrets() {
         connections: vec!["c1".to_owned()],
         out: None,
         secrets_namespace: Some("ws-ws1".to_owned()),
+        kubernetes_host: None,
     };
     let stdin = format!("{CANARY}\n");
     let mut piped = stdin.as_bytes();
@@ -155,6 +156,7 @@ fn a_token_is_never_read_from_a_terminal() {
         connections: vec!["c1".to_owned()],
         out: None,
         secrets_namespace: Some("ws-ws1".to_owned()),
+        kubernetes_host: None,
     };
     let terminals = Terminals {
         stdin: true,

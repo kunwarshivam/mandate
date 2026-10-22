@@ -25,6 +25,7 @@ use mandate_vault::credentials::{
     check_credential_dir, read_token, read_token_file, write_credentials,
 };
 use mandate_vault::kube::kube_secrets;
+use mandate_vault::kubernetes::KubernetesAuth;
 use mandate_vault::openbao::{OpenBaoConfig, OpenBaoSource, provision};
 use mandate_vault::policy::{Identity, Mounts, PlatformSecret, SecretPath};
 use mandate_vault::source::SecretSource;
@@ -111,6 +112,19 @@ pub struct ProvisionArgs {
     /// file, it leaves every secret id there at your umask (DEC-2630).
     #[arg(long)]
     pub secrets_namespace: Option<String>,
+    /// Also set Kubernetes auth up for the connections' processes, its TokenReview against the
+    /// cluster's API server at this `https://` address, as the vault's pod reaches it
+    /// (DEC-2060, DEC-2062).
+    #[arg(long)]
+    pub kubernetes_host: Option<String>,
+}
+
+/// The Kubernetes auth `--kubernetes-host` asks for: the API server at `host`, with no CA, so the
+/// vault reads the one its own pod projects (DEC-2062 item 3). A host that is not `https://` is
+/// [`SourceError::Config`], refused before the vault is reached.
+pub fn kubernetes_auth(host: &str) -> Result<KubernetesAuth, SourceError> {
+    let _ = host;
+    Err(SourceError::Unimplemented { story: "E21-32" })
 }
 
 /// Which of the process's standard streams are terminals, which `vault provision` refuses for its
@@ -327,6 +341,12 @@ pub fn run_provision(
     if let Some(dir) = &args.out {
         check_credential_dir(dir, &connections).map_err(refused)?;
     }
+    let kubernetes = args
+        .kubernetes_host
+        .as_deref()
+        .map(kubernetes_auth)
+        .transpose()
+        .map_err(refused)?;
     let config = OpenBaoConfig {
         address: args.address.clone(),
         ca_pem: fs::read(&args.ca).map_err(|_| refused(SourceError::Config))?,
@@ -337,7 +357,12 @@ pub fn run_provision(
         .build()
         .context("starting the provisioning's runtime")?;
     let credentials = runtime
-        .block_on(provision(&config, &operator, &connections, None))
+        .block_on(provision(
+            &config,
+            &operator,
+            &connections,
+            kubernetes.as_ref(),
+        ))
         .map_err(refused)?;
     match (&args.out, &args.secrets_namespace) {
         (Some(dir), _) => {
