@@ -15,13 +15,14 @@
 //! A grant is a single-use AppRole secret id for that connection's exchange role, valid
 //! [`crate::source::GRANT_SECS`], whose token lives no longer.
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Mutex;
 use std::time::Duration;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
-use mandate_connections::record::ConnectionId;
+use mandate_connections::record::{AccountPiiRef, AccountRef, ConnectionId};
 use mandate_time::UtcNanos;
 use reqwest::{Certificate, Method, StatusCode, redirect};
 use secrecy::zeroize::Zeroize;
@@ -29,6 +30,9 @@ use secrecy::{ExposeSecret, SecretSlice, SecretString};
 use serde_json::{Value, json};
 
 use crate::SourceError;
+use crate::fingerprint::{
+    AccountFingerprint, Claim, FINGERPRINT_KEY, FingerprintError, decode_entry,
+};
 use crate::kubernetes::{
     KubernetesAuth, kubernetes_mount_requests, kubernetes_policy, kubernetes_policy_name,
     mount_accessor, service_account_name,
@@ -637,6 +641,204 @@ impl OpenBaoSource {
     }
 }
 
+impl OpenBaoSource {
+    /// The fingerprint of the broker account id `account` under the deployment's key, by transit's
+    /// HMAC
+    /// (`<transit>/hmac/account-fingerprint`): asked by a connection's executor alone, at its
+    /// connect (DEC-2345 item 2). The key never leaves the vault, and the id is sent only to it.
+    ///
+    /// # Errors
+    /// [`SourceError::Denied`] for any identity but an executor, the vault's refusals, and
+    /// [`SourceError::Malformed`] for an answer that is not a fingerprint.
+    pub async fn hmac_account(
+        &self,
+        account: &SecretString,
+    ) -> Result<AccountFingerprint, SourceError> {
+        if !matches!(self.identity, Identity::Executor(_)) {
+            return Err(SourceError::Denied);
+        }
+        let mut input = STANDARD.encode(account.expose_secret());
+        let body = json!({ "input": input });
+        input.zeroize();
+        let path = format!("{}/hmac/{FINGERPRINT_KEY}", self.mounts.transit);
+        let answer = self.call(Method::POST, &path, Some(&body)).await?;
+        AccountFingerprint::new(text(answer.as_ref(), "/data/hmac")?)
+    }
+
+    /// The fingerprint and reference of the request `account` of `connection`, from the
+    /// fingerprint entry its executor wrote at connect: asked by the connection manager, which
+    /// must find the reference equal to the journaled `account_pii_ref` before it uses the hash
+    /// (DEC-2345 item 3).
+    ///
+    /// # Errors
+    /// [`FingerprintError::Rotating`] while the key rotates, [`FingerprintError::Missing`] for no
+    /// entry, or one that does not read, and [`FingerprintError::Unavailable`] for an outage or a
+    /// refused session.
+    pub async fn fingerprint(
+        &self,
+        connection: &ConnectionId,
+        account: &AccountRef,
+    ) -> Result<(AccountFingerprint, AccountPiiRef), FingerprintError> {
+        if self.rotating().await? {
+            return Err(FingerprintError::Rotating);
+        }
+        self.fingerprint_entry(connection, account).await
+    }
+
+    /// Claims `fingerprint` for `connection` in the registry, by check-and-set on the version read:
+    /// [`Claim::Claimed`] when it is now this connection's or was already, and
+    /// [`Claim::HeldBy`] another connection that holds it. Of two concurrent claims one wins, and
+    /// the other reads it again and answers `HeldBy` the winner (DEC-2345 item 4).
+    ///
+    /// # Errors
+    /// [`FingerprintError::Rotating`] while the key rotates, and
+    /// [`FingerprintError::Unavailable`] for an outage, a refused session, or a registry that
+    /// keeps moving under it.
+    pub async fn claim(
+        &self,
+        connection: &ConnectionId,
+        fingerprint: &AccountFingerprint,
+    ) -> Result<Claim, FingerprintError> {
+        if self.rotating().await? {
+            return Err(FingerprintError::Rotating);
+        }
+        for _ in 0..CLAIM_TRIES {
+            let (version, mut claims) = self.claims().await?;
+            match claims.get(fingerprint.as_str()) {
+                Some(holder) if holder == connection.as_str() => return Ok(Claim::Claimed),
+                Some(holder) => {
+                    return ConnectionId::new(holder)
+                        .map(Claim::HeldBy)
+                        .map_err(|_| FingerprintError::Unavailable);
+                }
+                None => {}
+            }
+            claims.insert(
+                fingerprint.as_str().to_owned(),
+                connection.as_str().to_owned(),
+            );
+            if self.write_claims(version, &claims).await? {
+                return Ok(Claim::Claimed);
+            }
+        }
+        Err(FingerprintError::Unavailable)
+    }
+
+    /// Gives back the claim of the request `account` of `connection`, when it holds it: on a
+    /// refusal and on a revoke. A connection with no fingerprint entry, or that holds no claim,
+    /// changes nothing, so a release is idempotent and a non-holder's deletes nothing.
+    ///
+    /// # Errors
+    /// [`FingerprintError::Unavailable`] for an outage, a refused session, or a registry that
+    /// keeps moving under it.
+    pub async fn release(
+        &self,
+        connection: &ConnectionId,
+        account: &AccountRef,
+    ) -> Result<(), FingerprintError> {
+        let fingerprint = match self.fingerprint_entry(connection, account).await {
+            Ok((fingerprint, _)) => fingerprint,
+            Err(FingerprintError::Missing) => return Ok(()),
+            Err(e) => return Err(e),
+        };
+        for _ in 0..CLAIM_TRIES {
+            let (version, mut claims) = self.claims().await?;
+            if claims.get(fingerprint.as_str()).map(String::as_str) != Some(connection.as_str()) {
+                return Ok(());
+            }
+            claims.remove(fingerprint.as_str());
+            if self.write_claims(version, &claims).await? {
+                return Ok(());
+            }
+        }
+        Err(FingerprintError::Unavailable)
+    }
+
+    /// Whether the marker that the fingerprint key rotates is there.
+    async fn rotating(&self) -> Result<bool, FingerprintError> {
+        require(&self.identity, Access::Read, &SecretPath::Rotating).map_err(unavailable)?;
+        self.read_value(&SecretPath::Rotating)
+            .await
+            .map(|marker| marker.is_some())
+            .map_err(unavailable)
+    }
+
+    /// The fingerprint entry of the request `account` of `connection`, by its one reader.
+    async fn fingerprint_entry(
+        &self,
+        connection: &ConnectionId,
+        account: &AccountRef,
+    ) -> Result<(AccountFingerprint, AccountPiiRef), FingerprintError> {
+        let path = SecretPath::Fingerprint(connection.clone(), account.clone());
+        require(&self.identity, Access::Read, &path).map_err(unavailable)?;
+        let entry = self
+            .read_value(&path)
+            .await
+            .map_err(unavailable)?
+            .ok_or(FingerprintError::Missing)?;
+        decode_entry(entry.expose_secret()).map_err(|_| FingerprintError::Missing)
+    }
+
+    /// The registry and the version it was read at; an empty one at version 0 where there is none.
+    async fn claims(&self) -> Result<(u64, BTreeMap<String, String>), FingerprintError> {
+        require(&self.identity, Access::Read, &SecretPath::Claims).map_err(unavailable)?;
+        let read = self
+            .call(
+                Method::GET,
+                &self.data_path(&SecretPath::Claims).map_err(unavailable)?,
+                None,
+            )
+            .await;
+        match taken_read(read).map_err(unavailable)? {
+            None => Ok((0, BTreeMap::new())),
+            Some((version, bytes)) => serde_json::from_slice::<Value>(bytes.expose_secret())
+                .ok()
+                .filter(|registry| registry.get("format") == Some(&json!(CLAIMS_FORMAT)))
+                .and_then(|registry| {
+                    serde_json::from_value::<BTreeMap<String, String>>(
+                        registry.get("claims")?.clone(),
+                    )
+                    .ok()
+                })
+                .map(|claims| (version, claims))
+                .ok_or(FingerprintError::Unavailable),
+        }
+    }
+
+    /// Writes the registry `claims` by check-and-set on `version`: `false` when it moved since.
+    async fn write_claims(
+        &self,
+        version: u64,
+        claims: &BTreeMap<String, String>,
+    ) -> Result<bool, FingerprintError> {
+        require(&self.identity, Access::Write, &SecretPath::Claims).map_err(unavailable)?;
+        let registry = json!({ "claims": claims, "format": CLAIMS_FORMAT });
+        let encoded = STANDARD.encode(registry.to_string());
+        let body = json!({ "options": { "cas": version }, "data": { "value": encoded } });
+        let path = self.data_path(&SecretPath::Claims).map_err(unavailable)?;
+        match self
+            .http
+            .post_judged(&path, Some(&self.token), &body, cas_refusal)
+            .await
+        {
+            Ok(_) => Ok(true),
+            Err(SourceError::Missing) => Ok(false),
+            Err(e) => Err(unavailable(e)),
+        }
+    }
+}
+
+/// How many times a claim or a release reads the registry again when it moved under it.
+const CLAIM_TRIES: usize = 8;
+
+/// The version of the registry's form.
+const CLAIMS_FORMAT: u8 = 1;
+
+/// A vault refusal, as the fingerprint operations answer every one: unavailable.
+fn unavailable(_: SourceError) -> FingerprintError {
+    FingerprintError::Unavailable
+}
+
 impl SecretSource for OpenBaoSource {
     fn identity(&self) -> &Identity {
         &self.identity
@@ -922,8 +1124,46 @@ pub async fn provision_kubernetes_auth(
     provision_kubernetes(&http, Some(operator_token), &config.mounts, auth).await
 }
 
-/// Sets a vault up for `connections`, with an operator's token: the KV v2 mount, the AppRole
-/// auth method, one policy and one role per identity, and a secret id for every identity but the
+/// The fingerprint key and registry (DEC-2345): the transit mount, its key, never exportable nor
+/// deletable, and the registry entry made to take only check-and-set writes.
+async fn provision_fingerprints(
+    http: &Http,
+    token: Option<&SecretString>,
+    mounts: &Mounts,
+) -> Result<(), SourceError> {
+    let transit = format!("sys/mounts/{}", mounts.transit);
+    if http.call(Method::GET, &transit, token, None).await.is_err() {
+        http.call(
+            Method::POST,
+            &transit,
+            token,
+            Some(&json!({ "type": "transit" })),
+        )
+        .await?;
+    }
+    let key = format!("{}/keys/{FINGERPRINT_KEY}", mounts.transit);
+    if http.call(Method::GET, &key, token, None).await.is_err() {
+        http.call(
+            Method::POST,
+            &key,
+            token,
+            Some(&json!({ "exportable": false })),
+        )
+        .await?;
+    }
+    let claims = format!("{}/metadata/{}", mounts.kv, kv_path(&SecretPath::Claims)?);
+    http.call(
+        Method::POST,
+        &claims,
+        token,
+        Some(&json!({ "cas_required": true })),
+    )
+    .await
+    .map(drop)
+}
+
+/// Sets a vault up for `connections`, with an operator's token: the KV v2 mount, the fingerprint
+/// key and registry ([`provision_fingerprints`]), the AppRole auth method, one policy and one role per identity, and a secret id for every identity but the
 /// token exchanges, whose secret ids are grants; and, given `kubernetes`, both Kubernetes auth
 /// mounts and their templated policies. Running it again rewrites the policies and roles, so
 /// adding a connection is running it with the longer list.
@@ -954,6 +1194,7 @@ pub async fn provision(
         )
         .await?;
     }
+    provision_fingerprints(&http, token, mounts).await?;
     let auth_mounted = http
         .call(
             Method::GET,
