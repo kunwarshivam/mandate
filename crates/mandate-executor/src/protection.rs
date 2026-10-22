@@ -1845,11 +1845,7 @@ fn re_cover(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         .collect();
     for instrument in instruments {
         if batch.view.closing_all.contains(&instrument) {
-            let open =
-                batch.view.unprotected.iter().any(|interval| {
-                    interval.instrument == instrument && interval.ended_at.is_none()
-                });
-            if !open {
+            if !interval_open(&batch.view, &instrument) {
                 changed(batch, &instrument, "unprotected_start", Vec::new())?;
             }
             continue;
