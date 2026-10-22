@@ -79,6 +79,8 @@ struct KillCommand {
     id: EventId,
     seq: u64,
     connection: Option<String>,
+    /// The agent an agent-scope command names, which the executor reads only for a stopped agent.
+    agent: Option<AgentId>,
 }
 
 /// Reads [`Following`] from the control stream.
@@ -152,15 +154,17 @@ pub fn agents_of(
                 if text("command")? != "kill_switch" {
                     continue;
                 }
-                let connection = match text("scope")?.as_str() {
-                    "connection" => Some(text("subject")?),
-                    "workspace" if text("subject")? == scope.workspace.0 => None,
+                let (connection, agent) = match text("scope")?.as_str() {
+                    "connection" => (Some(text("subject")?), None),
+                    "workspace" if text("subject")? == scope.workspace.0 => (None, None),
+                    "agent" => (None, Some(AgentId(text("subject")?))),
                     _ => continue,
                 };
                 commands.push(KillCommand {
                     id: event.event_id.clone(),
                     seq: row.seq,
                     connection,
+                    agent,
                 });
             }
             ("AgentStopped", _) => {
@@ -213,8 +217,9 @@ impl Following {
     /// control-stream order: each command of its connection's or the workspace's scope issued
     /// after the agent was deployed on one of this account's connections it names, when one of
     /// those connections is revoked at or after the command, or the agent has an `AgentStopped`, so
-    /// no runtime will copy it. Every other covered agent waits for the runtime's copy, which
-    /// carries the owner's confirmation.
+    /// no runtime will copy it; and each agent-scope command naming the agent when it has an
+    /// `AgentStopped`. Every other covered agent waits for the runtime's copy, which carries the
+    /// owner's confirmation.
     pub fn commands_for(&self, agent: &AgentId) -> Vec<EventId> {
         let deployments = self
             .deployments
@@ -224,8 +229,9 @@ impl Following {
         let stopped = self.stopped.contains(agent);
         self.commands
             .iter()
-            .filter(|command| {
-                deployments.iter().any(|(deployed, connection)| {
+            .filter(|command| match &command.agent {
+                Some(named) => named == agent && stopped,
+                None => deployments.iter().any(|(deployed, connection)| {
                     *deployed < command.seq
                         && command
                             .connection
@@ -236,7 +242,7 @@ impl Following {
                                 .revocations
                                 .get(connection)
                                 .is_some_and(|seqs| seqs.iter().any(|seq| *seq >= command.seq)))
-                })
+                }),
             })
             .map(|command| command.id.clone())
             .collect()

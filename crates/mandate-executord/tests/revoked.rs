@@ -145,7 +145,6 @@ fn a_stopped_agents_switch_is_applied_from_the_command_with_no_revocation() -> R
 /// An agent-scope kill switch naming a stopped agent (DEC-2343 item 3): no runtime runs to copy it,
 /// so the executor applies it from the command; one naming a running agent waits for its copy.
 #[test]
-#[ignore = "pending E7-4"]
 fn an_agent_scope_switch_naming_a_stopped_agent_is_applied_from_the_command() -> Result<(), Error> {
     let journal = deployed()?;
     deploy(&journal, "c3", OTHER_AGENT, CONNECTION)?;
