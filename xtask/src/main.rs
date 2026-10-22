@@ -12153,6 +12153,7 @@ mod tests {
                 "mandate-cp-site",
                 "mandate-deploy-manager",
                 "mandate-deployd",
+                "mandate-provisioner",
                 "mandate-dispatcher",
                 "mandate-gatewayd"
             ]
