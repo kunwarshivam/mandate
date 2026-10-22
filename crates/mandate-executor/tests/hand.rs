@@ -5977,7 +5977,6 @@ fn a_close_is_asked_again_only_on_a_later_read_showing_it_still_held() {
 /// reported, no interval opened under the switch, so the close's fill leaving nothing held journals
 /// no `unprotected_end`.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_close_with_no_interval_open_ends_none() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[BTC]);
