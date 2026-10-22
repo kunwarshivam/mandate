@@ -666,7 +666,6 @@ fn the_journal_admits_the_copy() -> Result<(), Error> {
 /// Items 3 and 6: an executor left connecting, with no establishment and no refusal, opens no
 /// risk however many passes it runs, while a risk exit behind the held opening is still received.
 #[test]
-#[ignore = "pending E21-32"]
 fn a_connecting_executor_opens_nothing_and_still_exits() -> Result<(), Error> {
     let journal = deployed()?;
     opened(&journal)?;
@@ -717,7 +716,6 @@ fn a_connecting_executor_opens_nothing_and_still_exits() -> Result<(), Error> {
 /// executor that served before DEC-2341 among them, writes the copy on its first pass once it has
 /// started, opens, and never writes it again; before it has started it copies nothing.
 #[test]
-#[ignore = "pending E21-32"]
 fn the_first_pass_copies_a_due_establishment_once_and_opens() -> Result<(), Error> {
     let journal = deployed()?;
     opened(&journal)?;
@@ -760,7 +758,6 @@ fn the_first_pass_copies_a_due_establishment_once_and_opens() -> Result<(), Erro
 /// Item 1: an executor restarted on an account stream that already holds its copy is established
 /// on its first pass, before it has stepped, and opens; it writes no second copy.
 #[test]
-#[ignore = "pending E21-32"]
 fn a_restarted_established_executor_opens_on_its_first_pass() -> Result<(), Error> {
     let journal = deployed()?;
     opened(&journal)?;
@@ -816,7 +813,6 @@ fn a_restarted_established_executor_opens_on_its_first_pass() -> Result<(), Erro
 /// still takes every exit and no opening, until the manager stops it. (A revoked connection's
 /// agents are no longer followed at all, by `follow::agents_of`, so none of theirs is received.)
 #[test]
-#[ignore = "pending E21-32"]
 fn a_refused_connection_is_closed_and_stays_shut() -> Result<(), Error> {
     for event_type in ["ConnectionRefused", "ConnectionRevoked"] {
         let journal = deployed()?;
@@ -875,7 +871,6 @@ fn a_refused_connection_is_closed_and_stays_shut() -> Result<(), Error> {
 /// ambiguity, so the pass answers its code, copies nothing, opens nothing and stops nothing; the
 /// process goes on taking every exit.
 #[test]
-#[ignore = "pending E21-32"]
 fn an_unreadable_record_keeps_the_gate_shut_and_every_exit_going() -> Result<(), Error> {
     let journal = deployed()?;
     opened(&journal)?;
@@ -934,7 +929,6 @@ fn an_unreadable_record_keeps_the_gate_shut_and_every_exit_going() -> Result<(),
 /// Item 4's log: a closed or unreadable connection's code is printed when it starts and again
 /// only after it changed, never once per pass, and nothing is printed while open or connecting.
 #[test]
-#[ignore = "pending E21-32"]
 fn the_gate_reports_each_code_once_per_change() {
     let mut report = GateReport::default();
     let printed: Vec<_> = [

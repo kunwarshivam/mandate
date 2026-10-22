@@ -27,8 +27,12 @@
 //! the lease on the connection the account stream's latest connect check passed for, and only
 //! then takes the account stream; each pass ticks the
 //! lease, a lost or rotated credential drains the process, and the lease is given back when it
-//! stops ([`credential`]). It runs the fixture wiring ([`fixture`]), which admits no opening. This
-//! is the one place the host clock is read (ES-05).
+//! stops ([`credential`]). It runs the fixture wiring ([`fixture`]), which admits no opening, behind
+//! journal rule 68's gate: until its account stream holds its establishment's copy, which each pass
+//! writes once it is due, no opening reaches the binding gate. A connection refused or revoked
+//! before it, or a record that does not read, is reported once and keeps the gate shut, never
+//! stopping the process, so every exit still goes until the manager stops it ([`establish`],
+//! DEC-2341 item 4). This is the one place the host clock is read (ES-05).
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -45,6 +49,7 @@ use mandate_executord::credential::{
     RunLease, SUBJECT_ACCOUNT_ENV, VaultMount, WORKSPACE_NAMESPACE_ENV, checked_connection,
     paper_broker, paper_settings, subject_account, vault_config, vault_login, workspace_namespace,
 };
+use mandate_executord::establish::{GateReport, OpeningGate, pass};
 use mandate_executord::paper::FixturePaper;
 use mandate_executord::{Broker, Config, ExecutorProcess, fixture, launch};
 use mandate_journal::Environment;
@@ -247,28 +252,41 @@ fn serve_on<S: Store, B: Broker>(
         liveness: LIVENESS,
         max_chain: MAX_CHAIN,
     };
-    let mut process =
-        ExecutorProcess::start(store, broker, fixture::wiring()?, &config, host_now());
+    let gate = OpeningGate::default();
+    let mut wiring = fixture::wiring()?;
+    wiring.gate = gate.guard(wiring.gate);
+    let mut process = ExecutorProcess::start(store, broker, wiring, &config, host_now());
     let status = Status::new(process.lifecycle().snapshot());
     probe::serve(socket, status.clone(), host_now).map_err(|_| "probe_socket_unavailable")?;
+    let mut report = GateReport::default();
     loop {
-        let credential_stop = lease.as_deref_mut().and_then(|held| held.pass(host_now()));
-        let terminated = credential_stop.is_some() || terminate.load(Ordering::SeqCst);
+        let stop = lease.as_deref_mut().and_then(|held| held.pass(host_now()));
+        let terminated = stop.is_some() || terminate.load(Ordering::SeqCst);
         if terminated {
             process.drain(host_now());
         }
         if let State::Exited(stopped) = process.lifecycle().state() {
             status.publish(process.lifecycle().snapshot());
-            if let Some(code) = credential_stop {
+            if let Some(code) = stop {
                 eprintln!("{code}");
             }
             eprintln!("{}", stopped.code());
             return Ok(stopped.exit_status());
         }
         if terminated {
-            return Err(credential_stop.unwrap_or("drain_unfinished"));
+            return Err(stop.unwrap_or("drain_unfinished"));
         }
         process.step(host_now());
+        let passed = pass(
+            &mut process,
+            &gate,
+            &config.scope,
+            config.environment,
+            host_now(),
+        );
+        if let Some(code) = report.changed(passed) {
+            eprintln!("{code}");
+        }
         status.publish(process.lifecycle().snapshot());
         thread::sleep(PASS);
     }
