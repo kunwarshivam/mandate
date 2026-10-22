@@ -3063,6 +3063,9 @@ enables `live` (ES-23, OPS-5).
     - the exchanged executor's connect check (lane V2 with D1): the manager starts it as `run`,
       which takes the lease of a connection whose check already passed, so on a fresh connect it
       never runs the check; and where the check's `--pii-ref` comes from on a connect;
+    - the API's vault binding in the cell (lane D1): the chart's `api.vaultBinding` (DEC-2338)
+      mounts the API's AppRole and the vault's CA, and `cargo xtask cell up` provisions the
+      AppRole Secrets and sets `api.vaultBinding: true`, so the API can write the callback's code;
     - K2a and K2b (#2203, #2204, #2209, #2210), which start that executor on the exchange's
       success, as its connection's own account.
 - **E21-34 (Proposed, M8; SC; lane O4)** As an owner, I want the kill switch reachable in the cell
