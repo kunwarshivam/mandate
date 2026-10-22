@@ -4,16 +4,18 @@
 //! named (DEC-79). Each is read once, at start.
 
 use mandate_gateway::money::Usd6;
+use secrecy::SecretString;
 
-/// The service's start-up values.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// The service's start-up values. Its `Debug` shows the journal's DSN only as redacted, since a
+/// DSN carries a password (`AGENTS.md` rule 7).
+#[derive(Debug)]
 pub struct Config {
     /// The one workspace it serves (DEC-2265 item 7), `MANDATE_GATEWAY_WORKSPACE`.
     pub workspace: String,
     /// The deployment whose meter stream it writes (DEC-2207), `MANDATE_GATEWAY_DEPLOYMENT`.
     pub deployment: String,
-    /// The workspace journal, `MANDATE_JOURNAL_DSN`. Never printed.
-    pub journal_dsn: String,
+    /// The workspace journal, `MANDATE_JOURNAL_DSN`, held so that nothing prints it.
+    journal_dsn: SecretString,
     /// The artifact store, mounted read-only (DEC-2272 item 7), `MANDATE_ARTIFACTS`.
     pub artifacts: String,
     /// The workspace's monthly model budget, `MANDATE_GATEWAY_WORKSPACE_MONTHLY_USD`.
@@ -56,6 +58,12 @@ impl ConfigError {
     reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
 )]
 impl Config {
+    /// The journal's DSN, for opening the journal and nothing else.
+    pub fn journal_dsn(&self) -> &str {
+        let _ = &self.journal_dsn;
+        todo!()
+    }
+
     /// The values `var` gives, an empty one read as missing.
     ///
     /// # Errors
