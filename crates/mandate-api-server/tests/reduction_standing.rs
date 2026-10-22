@@ -55,7 +55,6 @@ fn parsed(rows: &Rows) -> Result<Vec<CredentialRecord>, RowsRefused> {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn the_hosted_streams_passkey_records_are_read_in_order_and_every_other_row_passed_over() {
     let mut rows = Rows::opened();
     rows.hosted("CredentialEnrolled", T0 - 100, enrolled(ALICE, CREDENTIAL));
@@ -85,7 +84,6 @@ fn the_hosted_streams_passkey_records_are_read_in_order_and_every_other_row_pass
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn an_unreadable_record_another_environment_or_an_unopened_stream_refuses_every_record() {
     let mut bad_id = Rows::opened();
     bad_id.hosted("CredentialEnrolled", T0, enrolled(ALICE, "not base64url!"));
@@ -133,7 +131,6 @@ fn an_unreadable_record_another_environment_or_an_unopened_stream_refuses_every_
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn the_last_sign_in_is_kept_per_member_and_never_moves_back() {
     let standings = Standings::new();
     let none = SubjectStanding::default();
@@ -162,7 +159,6 @@ fn the_last_sign_in_is_kept_per_member_and_never_moves_back() {
 }
 
 #[test]
-#[ignore = "pending E9-1"]
 fn route_two_is_refused_without_a_sign_in_or_after_a_membership_record_naming_the_member() {
     let signed_in = |secs: i64| SubjectStanding {
         last_sign_in: Some(at(secs)),

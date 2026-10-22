@@ -10,10 +10,10 @@
 //! [DEC-2319]: ../../../docs/project/decisions/DEC-2319.md
 
 use std::collections::BTreeMap;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use mandate_authn::SubjectStanding;
-use mandate_identity::{MembershipRecord, PrincipalId};
+use mandate_identity::{MembershipEvent, MembershipRecord, PrincipalId};
 use mandate_time::UtcNanos;
 
 /// Each member's last successful sign-in this process has seen.
@@ -30,26 +30,30 @@ impl Standings {
 
     /// Keeps `member`'s successful sign-in at `at`. A sign-in earlier than the one kept moves
     /// nothing back.
-    #[expect(
-        clippy::todo,
-        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-    )]
     pub fn signed_in(&self, member: PrincipalId, at: UtcNanos) {
-        let _ = (member, at, &self.signed_in);
-        todo!()
+        self.held()
+            .entry(member)
+            .and_modify(|kept| *kept = (*kept).max(at))
+            .or_insert(at);
+    }
+
+    /// The sign-ins, recovered if a panic poisoned the lock: they are plain data, and refusing on a
+    /// poisoned lock would refuse every route-2 opening (`AGENTS.md` rule 13).
+    fn held(&self) -> MutexGuard<'_, BTreeMap<PrincipalId, UtcNanos>> {
+        self.signed_in
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
     }
 
     /// `member`'s standing: the last sign-in kept, and no deprovision, which has no source yet
     /// ([DEC-2319] item 1).
     ///
     /// [DEC-2319]: ../../../docs/project/decisions/DEC-2319.md
-    #[expect(
-        clippy::todo,
-        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-    )]
     pub fn standing(&self, member: PrincipalId) -> SubjectStanding {
-        let _ = member;
-        todo!()
+        SubjectStanding {
+            last_sign_in: self.held().get(&member).copied(),
+            last_deprovision: None,
+        }
     }
 }
 
@@ -58,15 +62,31 @@ impl Standings {
 /// record is read whatever the answer, so the work does not depend on where a match is.
 ///
 /// [DEC-2319]: ../../../docs/project/decisions/DEC-2319.md
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
 pub fn interim_refuses(
     standing: SubjectStanding,
     records: &[MembershipRecord],
     member: PrincipalId,
 ) -> bool {
-    let _ = (standing, records, member);
-    todo!()
+    let named_since = records
+        .iter()
+        .filter(|record| {
+            named(record.event()) == Some(member)
+                && standing
+                    .last_sign_in
+                    .is_some_and(|signed_in| record.event_time() >= signed_in)
+        })
+        .count();
+    standing.last_sign_in.is_none() || named_since > 0
+}
+
+/// The member a membership record names; `None` for an invitation's, which names none yet.
+fn named(event: &MembershipEvent) -> Option<PrincipalId> {
+    match event {
+        MembershipEvent::Invited { .. } | MembershipEvent::InvitationRevoked { .. } => None,
+        MembershipEvent::Activated { member, .. }
+        | MembershipEvent::RoleChanged { member, .. }
+        | MembershipEvent::Deactivated { member }
+        | MembershipEvent::Reactivated { member, .. }
+        | MembershipEvent::Removed { member } => Some(*member),
+    }
 }

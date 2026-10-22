@@ -12,7 +12,7 @@ use mandate_identity::{
 };
 use mandate_identity_seal::{LookupSeal, Seal};
 use mandate_journal::StoredEvent;
-use mandate_passkey::credentials::CredentialRecord;
+use mandate_passkey::credentials::{CredentialRecord, credential_record};
 use mandate_time::UtcNanos;
 
 /// Turns the control stream's rows into its membership records, refusing a `Member*` record
@@ -54,9 +54,51 @@ pub fn membership_records(
     workspace: WorkspaceId,
     rows: &[StoredEvent],
 ) -> Result<Vec<MembershipRecord>, RowsRefused> {
-    let stream = format!("ctl:{}", encode_ulid(workspace.0));
-    let mut environment = None;
     let mut records = Vec::new();
+    for row in hosted_rows(workspace, rows)? {
+        let unreadable = RowsRefused::Unreadable { seq: row.seq };
+        let entry = control_entry(row.seq, &row.envelope).map_err(|_| unreadable)?;
+        let ControlEntry::Membership(record) = entry else {
+            continue;
+        };
+        row.same_environment()?;
+        if row.envelope.get("schema_version").and_then(Value::as_int) != Some(MEMBERSHIP_VERSION) {
+            return Err(RowsRefused::UnknownVersion { seq: row.seq });
+        }
+        records.push(record);
+    }
+    Ok(records)
+}
+
+/// One row of the hosted control stream: its `seq`, its envelope, and the environment it and the
+/// stream's `StreamOpened` were written in.
+struct HostedRow {
+    seq: u64,
+    envelope: Value,
+    written: String,
+    opened: String,
+}
+
+impl HostedRow {
+    /// Refuses a record written in another environment than the stream's.
+    fn same_environment(&self) -> Result<(), RowsRefused> {
+        if self.written != self.opened {
+            return Err(RowsRefused::OtherEnvironment { seq: self.seq });
+        }
+        Ok(())
+    }
+}
+
+/// The rows of `workspace`'s control stream among `rows`, in stream order, each envelope read: a
+/// row of another stream is passed over, and the stream must open with its `StreamOpened` at
+/// `seq` 1, whose environment every later row is compared with.
+fn hosted_rows(
+    workspace: WorkspaceId,
+    rows: &[StoredEvent],
+) -> Result<Vec<HostedRow>, RowsRefused> {
+    let stream = format!("ctl:{}", encode_ulid(workspace.0));
+    let mut environment: Option<String> = None;
+    let mut hosted = Vec::new();
     for row in rows {
         let unreadable = RowsRefused::Unreadable { seq: row.seq };
         let envelope = mandate_canon::parse(&row.body).map_err(|_| unreadable.clone())?;
@@ -64,27 +106,23 @@ pub fn membership_records(
         if text("stream_id") != Some(stream.as_str()) {
             continue;
         }
-        let entry = control_entry(row.seq, &envelope).map_err(|_| unreadable.clone())?;
-        let written = text("environment").ok_or(unreadable)?;
+        control_entry(row.seq, &envelope).map_err(|_| unreadable.clone())?;
+        let written = text("environment").ok_or(unreadable)?.to_owned();
         let opened = match &environment {
-            Some(opened) => opened,
+            Some(opened) => opened.clone(),
             None if row.seq == 1 && text("event_type") == Some(STREAM_OPENED) => {
-                environment.insert(written.to_owned())
+                environment.insert(written.clone()).clone()
             }
             None => return Err(RowsRefused::NotOpened),
         };
-        let ControlEntry::Membership(record) = entry else {
-            continue;
-        };
-        if written != opened {
-            return Err(RowsRefused::OtherEnvironment { seq: row.seq });
-        }
-        if envelope.get("schema_version").and_then(Value::as_int) != Some(MEMBERSHIP_VERSION) {
-            return Err(RowsRefused::UnknownVersion { seq: row.seq });
-        }
-        records.push(record);
+        hosted.push(HostedRow {
+            seq: row.seq,
+            envelope,
+            written,
+            opened,
+        });
     }
-    Ok(records)
+    Ok(hosted)
 }
 
 /// The passkey records of `workspace`'s control stream among `rows` (journal spec §9.31, read by
@@ -96,16 +134,21 @@ pub fn membership_records(
 /// # Errors
 /// [`RowsRefused`] for a stream not opened, an unreadable row, a credential record that does not
 /// map (at any schema version but 1 too), or one written in another environment.
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
 pub fn credential_records(
     workspace: WorkspaceId,
     rows: &[StoredEvent],
 ) -> Result<Vec<CredentialRecord>, RowsRefused> {
-    let _ = (workspace, rows);
-    todo!()
+    let mut records = Vec::new();
+    for row in hosted_rows(workspace, rows)? {
+        let record = credential_record(row.seq, &row.envelope)
+            .map_err(|_| RowsRefused::Unreadable { seq: row.seq })?;
+        let Some(record) = record else {
+            continue;
+        };
+        row.same_environment()?;
+        records.push(record);
+    }
+    Ok(records)
 }
 
 /// The parser of the hosted `workspace`'s control stream: [`membership_records`], any refusal a
