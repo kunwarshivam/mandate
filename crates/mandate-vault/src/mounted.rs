@@ -14,6 +14,7 @@ use secrecy::{ExposeSecret, SecretString};
 
 use crate::SourceError;
 use crate::credentials::{ROLE_ID_SUFFIX, SECRET_ID_SUFFIX};
+use crate::kube::is_label;
 use crate::policy::{Identity, role_name};
 
 /// The permission bits of group and others, none of which a mounted file may carry.
@@ -122,6 +123,30 @@ pub fn read_service_account_token(dir: &Path) -> Result<SecretString, SourceErro
     )?;
     one_line(&token)
 }
+
+/// Reads the pod's own namespace, `dir/namespace`, which the projected volume holds beside the
+/// token from the downward API (`metadata.namespace`), so no pod names its namespace in its
+/// arguments: by [`read_service_account_token`]'s rules, at most 64 bytes, and a Kubernetes label.
+/// Anything else is [`SourceError::CredentialFile`].
+pub fn read_service_account_namespace(dir: &Path) -> Result<String, SourceError> {
+    let namespace = read_bounded(
+        dir,
+        "namespace",
+        &|_| {},
+        WRITABLE_BY_OTHERS,
+        SERVICE_ACCOUNT_NAMESPACE_MAX,
+    )?;
+    let line = one_line(&namespace)?;
+    let text = line.expose_secret();
+    if is_label(text) {
+        Ok(text.to_owned())
+    } else {
+        Err(SourceError::CredentialFile)
+    }
+}
+
+/// The most bytes the projected namespace may hold: a 63-byte label and its newline.
+const SERVICE_ACCOUNT_NAMESPACE_MAX: u64 = 64;
 
 /// The most bytes a projected ServiceAccount token may hold; a real one is about a kilobyte.
 pub const SERVICE_ACCOUNT_TOKEN_MAX: u64 = 16384;
