@@ -10,7 +10,7 @@
 //! connection (or, for the workspace, on any of the account's connections), and that connection is
 //! revoked after the command or the agent has an `AgentStopped`, so no runtime copies it, or when an
 //! agent-scope command names a stopped agent; and never otherwise. Seeded followers that drop an agent on revocation, or keep only its latest
-//! deployment, are shown rejected by the same comparison.
+//! deployment, are shown reported by the same comparison (a unit check of it).
 
 mod support;
 
@@ -350,11 +350,12 @@ fn seeded(
         .collect()
 }
 
-/// The oracle is not the follower's own reading: a follower that drops an agent once its
-/// connection's latest record is a revocation (the defect), and one that keeps only an agent's
-/// latest deployment, are each rejected by the comparison the property makes.
+/// A unit check of the property's comparison, not mutation evidence: a follower that drops an agent
+/// once its connection is revoked (the defect), or keeps only an agent's latest deployment, would
+/// apply less than the oracle owes, and `violations` reports it. The implementation's own mutants
+/// (`cargo mutants --in-diff`) are the mutation evidence.
 #[test]
-fn the_comparison_rejects_the_seeded_followers() -> Result<(), Error> {
+fn violations_reports_what_a_seeded_follower_would_drop() -> Result<(), Error> {
     let compromise = run(&[Op::Deploy(0, 0), Op::Command(Some(0)), Op::Revoke(0, true)])?;
     let drop_on_revocation = |control: &Control, agent: &str| {
         control
