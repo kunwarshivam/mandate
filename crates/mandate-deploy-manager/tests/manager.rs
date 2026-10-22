@@ -39,6 +39,7 @@ fn starts(m: &mut Manager, slot: &Slot) -> Vec<u64> {
             Call::Start {
                 slot: s,
                 generation,
+                ..
             } if s == slot => Some(*generation),
             _ => None,
         })
