@@ -256,6 +256,14 @@ impl Reduction {
         Ok(issued)
     }
 
+    /// Whether the challenge `challenge_id` is held, issued and not yet taken or found expired.
+    pub fn contains(&self, challenge_id: &str) -> bool {
+        self.outstanding
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .contains_key(challenge_id)
+    }
+
     /// Fresh device cookie bytes, unpadded base64url.
     pub fn new_device(&self) -> Result<String, Unauthenticated> {
         let mut bytes = [0_u8; 32];
