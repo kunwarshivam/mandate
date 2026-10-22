@@ -1,7 +1,8 @@
-//! The model gateway's meter stream, journaled (DEC-2258, E21-61): `meter:{workspace_id}` through
-//! a [`Store`], so a restarted gateway folds every reservation it made, an open one at its
-//! maximum, and its caps hold across a crash (DEC-998 items 5 and 8). One writer per workspace: the
-//! store's writer epoch, taken at open, fences an older writer.
+//! The model gateway's meter streams, journaled (DEC-2258, E21-61, E21-62): a workspace's
+//! `meter:{workspace_id}` and the deployment's `dmeter:{deployment_id}` (journal spec §9.19,
+//! DEC-2207) through a [`Store`], so a restarted gateway folds every reservation it made, an open
+//! one at its maximum, and its caps hold across a crash (DEC-998 items 5 and 8). One writer per
+//! stream: the store's writer epoch, taken at open, fences an older writer.
 
 use std::rc::Rc;
 
@@ -14,11 +15,11 @@ use mandate_time::UtcNanos;
 use crate::Store;
 use crate::envelope::{Envelope, Fields, draft_bytes, object, text};
 
-/// A meter store over a workspace's journaled meter stream.
+/// A meter store over one journaled meter stream, a workspace's or the deployment's.
 pub struct JournalMeter<S: Store> {
     store: S,
     stream: Option<StreamId>,
-    workspace: String,
+    opened: Opened,
     environment: Environment,
     epoch: Option<u64>,
     now: Rc<dyn Fn() -> UtcNanos>,
@@ -31,34 +32,24 @@ impl<S: Store> JournalMeter<S> {
     /// at the next of `ids`. A workspace that names no stream, or a store that grants no epoch,
     /// gives a meter whose every read and append fails `Unavailable` (DEC-2258 item 4).
     pub fn open(
-        mut store: S,
+        store: S,
         workspace: &str,
         environment: Environment,
         now: Rc<dyn Fn() -> UtcNanos>,
         ids: Box<dyn IdSource>,
     ) -> Self {
-        let stream = StreamId::parse(&format!("meter:{workspace}"));
-        let epoch = stream
-            .as_ref()
-            .and_then(|stream| store.take_ownership(stream));
-        Self {
-            store,
-            stream,
-            workspace: workspace.to_owned(),
-            environment,
-            epoch,
-            now,
-            ids,
-        }
+        let opened = Opened {
+            prefix: "meter",
+            stream_type: "meter",
+            member: "workspace_id",
+            id: workspace.to_owned(),
+        };
+        Self::over(store, opened, environment, now, ids)
     }
 
     /// As [`JournalMeter::open`], over the deployment's meter stream `dmeter:{deployment_id}`,
     /// which holds a copy of every workspace's meter records for the deployment's cap and opens
     /// with `{stream_type: "deployment_meter", deployment_id}` (journal spec §9.19, DEC-2207).
-    #[expect(
-        clippy::todo,
-        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-    )]
     pub fn open_deployment(
         store: S,
         deployment_id: &str,
@@ -66,8 +57,35 @@ impl<S: Store> JournalMeter<S> {
         now: Rc<dyn Fn() -> UtcNanos>,
         ids: Box<dyn IdSource>,
     ) -> Self {
-        let _ = (store, deployment_id, environment, now, ids);
-        todo!()
+        let opened = Opened {
+            prefix: "dmeter",
+            stream_type: "deployment_meter",
+            member: "deployment_id",
+            id: deployment_id.to_owned(),
+        };
+        Self::over(store, opened, environment, now, ids)
+    }
+
+    fn over(
+        mut store: S,
+        opened: Opened,
+        environment: Environment,
+        now: Rc<dyn Fn() -> UtcNanos>,
+        ids: Box<dyn IdSource>,
+    ) -> Self {
+        let stream = StreamId::parse(&format!("{}:{}", opened.prefix, opened.id));
+        let epoch = stream
+            .as_ref()
+            .and_then(|stream| store.take_ownership(stream));
+        Self {
+            store,
+            stream,
+            opened,
+            environment,
+            epoch,
+            now,
+            ids,
+        }
     }
 
     /// The stream, this writer's epoch, and the stream's rows, or `Unavailable`.
@@ -78,6 +96,15 @@ impl<S: Store> JournalMeter<S> {
         let rows = self.store.rows(stream).ok_or(StoreError::Unavailable)?;
         Ok((stream, epoch, rows))
     }
+}
+
+/// What a meter stream is named for and opens with: its prefix, its `StreamOpened`'s
+/// `stream_type`, and the member naming whose stream it is.
+struct Opened {
+    prefix: &'static str,
+    stream_type: &'static str,
+    member: &'static str,
+    id: String,
 }
 
 /// The meter records of `rows`, the stream's `StreamOpened` aside, each read back from its
@@ -133,8 +160,8 @@ impl<S: Store> MeterStore for JournalMeter<S> {
         let mut drafts = Vec::new();
         if rows.is_empty() {
             let opened = object(vec![
-                ("stream_type", text("meter")),
-                ("workspace_id", text(&self.workspace)),
+                ("stream_type", text(self.opened.stream_type)),
+                (self.opened.member, text(&self.opened.id)),
             ])
             .ok_or(StoreError::Unavailable)?;
             drafts.push(draft(&self.ids.next_id(), OPENED, &opened)?);

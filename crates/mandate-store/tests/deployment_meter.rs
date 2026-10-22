@@ -89,7 +89,6 @@ fn event_types(store: &MemoryStore, stream: &StreamId) -> Vec<String> {
 /// record's batch with `{stream_type: "deployment_meter", deployment_id}`, and each record the
 /// journal accepts reads back as itself, in order.
 #[test]
-#[ignore = "pending E21-62"]
 fn the_deployment_s_stream_opens_as_its_own_and_reads_back() {
     let store = MemoryStore::default();
     let mut meter = open(store.clone(), 1 << 70);
@@ -126,7 +125,6 @@ fn the_deployment_s_stream_opens_as_its_own_and_reads_back() {
 /// copy of an open reservation still counted at its maximum, and the workspace's stream and the
 /// deployment's are each written once per admitted call.
 #[test]
-#[ignore = "pending E21-62"]
 fn the_deployment_s_cap_holds_across_a_restart() {
     let store = MemoryStore::default();
     let meter = |workspace_ids: u128, deployment_ids: u128| {
@@ -172,7 +170,6 @@ fn the_deployment_s_cap_holds_across_a_restart() {
 /// DEC-2258 item 1 on the deployment's stream: a newer writer fences an older one, whose appends
 /// then fail `Fenced` and write nothing.
 #[test]
-#[ignore = "pending E21-62"]
 fn a_newer_deployment_writer_fences_an_older_one() {
     let store = MemoryStore::default();
     let mut older = open(store.clone(), 1 << 70);
@@ -196,7 +193,6 @@ fn a_newer_deployment_writer_fences_an_older_one() {
 /// DEC-2258 item 4: a deployment id that names no stream gives a meter whose every read and append
 /// fails `Unavailable`, writing nothing.
 #[test]
-#[ignore = "pending E21-62"]
 fn a_deployment_that_names_no_stream_fails_closed() {
     let mut unnamed = JournalMeter::open_deployment(
         MemoryStore::default(),
