@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use mandate_canon::{Value, parse};
 use mandate_connections::account_entry::{BrokerAccountId, decode};
 use mandate_connections::grant::{GrantedScopes, check_scope};
+use mandate_connections::record::AccountRef as StreamRef;
 use mandate_connections::record::{AccountPiiRef, ConnectionId};
 use mandate_executor::{AccountRef, AccountScope, WorkspaceId};
 use mandate_executord::fixture::Ids;
@@ -158,7 +159,10 @@ fn a_read_account_is_kept_in_its_entry_and_only_its_reference_is_journaled() -> 
         now()?,
     )?;
     assert!(checked.passed);
-    let path = format!("{:?}", SecretPath::AccountId(connection()?));
+    let path = format!(
+        "{:?}",
+        SecretPath::AccountId(connection()?, StreamRef::new(ACCOUNT)?)
+    );
     assert_eq!(vault.asked.borrow().as_slice(), std::slice::from_ref(&path));
     let entries = vault.entries.borrow();
     let entry = decode(entries.get(&path).ok_or("no entry")?)?;
@@ -253,7 +257,10 @@ fn a_retry_after_a_crash_before_the_record_fails_closed() -> Result<(), Error> {
         "failed".to_owned(),
         Some("account_unreadable".to_owned())
     )));
-    let path = format!("{:?}", SecretPath::AccountId(connection()?));
+    let path = format!(
+        "{:?}",
+        SecretPath::AccountId(connection()?, StreamRef::new(ACCOUNT)?)
+    );
     let entries = vault.entries.borrow();
     assert_eq!(
         decode(entries.get(&path).ok_or("no entry")?)?
