@@ -813,17 +813,16 @@ def api_vault(docs: list[dict], on: bool) -> list[str]:
         vaulted = {n for n, v in volumes.items() if n in ("vault", "vault-sources") or "projected" in v}
         copies = [c for c in spec.get("initContainers", []) if c["name"] == "vault-credentials"]
         mounts = {m["mountPath"]: m for m in api.get("volumeMounts", [])}
-        egress = {
-            (t.get("podSelector", {}).get("matchLabels", {}).get("mandate.dev/process"), p["port"])
-            for r in policies(docs)["egress-api"]["spec"]["egress"]
-            for t in r["to"]
-            for p in r.get("ports", [])
-        }
-        labelled = pod_spec(w) and w["spec"]["template"]["metadata"]["labels"].get("mandate.dev/egress-vault")
+        labels = w["spec"]["template"]["metadata"]["labels"]
+        rules = policies(docs)["egress-api"]["spec"]["egress"]
+        if any("to" not in r or "ports" not in r for r in rules):
+            problems.append(f"an api egress rule names no peer or no port, so it reaches the vault: {rules}")
+        reaching = [r for r in rules if '"vault"' in json.dumps(r) or any(p.get("port") == 8200 for p in r.get("ports", []))]
+        labelled = labels.get("mandate.dev/egress-vault")
         if not on:
             if vaulted or copies or API_VAULT_DIR in mounts or "MANDATE_API_VAULT_DIR" in env:
                 problems.append(f"the api is bound to the vault while off: {sorted(vaulted)}")
-            if ("vault", 8200) in egress or labelled:
+            if reaching or labelled:
                 problems.append("the api reaches the vault while off")
             continue
         if vaulted != {"vault", "vault-sources"}:
@@ -842,22 +841,55 @@ def api_vault(docs: list[dict], on: bool) -> list[str]:
             problems.append(f"the api mounts its vault directory as {mounted}")
         if any(m["name"] == "vault-sources" for m in api.get("volumeMounts", [])):
             problems.append("the api mounts the AppRole's Secret itself")
-        if env.get("MANDATE_API_VAULT_DIR") != API_VAULT_DIR or not str(env.get("MANDATE_API_VAULT_ADDRESS", "")).startswith("https://"):
+        if env.get("MANDATE_API_VAULT_DIR") != API_VAULT_DIR or env.get("MANDATE_API_VAULT_ADDRESS") != api_vault_address(labels):
             problems.append(f"the api's vault settings are {env.get('MANDATE_API_VAULT_DIR')}, {env.get('MANDATE_API_VAULT_ADDRESS')}")
         if any(n.startswith("MANDATE_API_VAULT") and n not in ("MANDATE_API_VAULT_DIR", "MANDATE_API_VAULT_ADDRESS") for n in env):
             problems.append(f"the api's environment names another vault setting: {sorted(env)}")
-        if ("vault", 8200) not in egress or {e for e in egress if e[0] == "vault"} != {("vault", 8200)}:
-            problems.append(f"the api's egress to the vault is {sorted(e for e in egress if e[0] == 'vault')}")
+        if reaching != [api_vault_rule(labels)]:
+            problems.append(f"the api's egress to the vault is {reaching}")
         if labelled != "true":
             problems.append("the api's pod carries no egress-vault label, so the vault refuses it")
+    holders = [
+        (w["kind"], w["metadata"]["name"])
+        for w in workloads(docs)
+        for _ in range(json.dumps(w).count('"vault-approle-api"'))
+    ]
+    if holders != ([("Deployment", "api")] if on else []):
+        problems.append(f"the api's AppRole is named by {holders}")
     return problems
 
 
+def api_vault_address(labels: dict) -> str:
+    """The vault's address in the api's workspace namespace, the executor's own."""
+    return f"https://vault.ws-{labels.get('mandate.dev/workspace')}.svc:8200"
+
+
+def api_vault_rule(labels: dict) -> dict:
+    """The api's one egress rule to the vault: its workspace's vault pod, on 8200 alone."""
+    return {
+        "ports": [{"port": 8200, "protocol": "TCP"}],
+        "to": [{"podSelector": {"matchLabels": {"mandate.dev/process": "vault", "mandate.dev/workspace": labels.get("mandate.dev/workspace")}}}],
+    }
+
+
+def api_egress_bound(on: list[dict], off: list[dict]) -> list[str]:
+    """The api's whole egress with its binding: the rules it has without it, with the vault rule
+    after the journal's and nothing else added, widened or dropped."""
+    rules = policies(off)["egress-api"]["spec"]["egress"]
+    api = next(w for w in workloads(on) if w["metadata"]["name"] == "api")
+    wanted = rules[:2] + [api_vault_rule(api["spec"]["template"]["metadata"]["labels"])] + rules[2:]
+    got = policies(on)["egress-api"]["spec"]["egress"]
+    return [] if got == wanted else [f"the api's egress is {got}, not {wanted}"]
+
+
 def test_the_api_is_bound_to_the_vault_only_with_its_binding():
-    off = render_all()
-    on = render_all("--set", "api.vaultBinding=true")
+    identity = ("--set-json", 'egress.identity-provider=["192.0.2.0/24"]')
+    off = render_all(*identity)
+    on = render_all(*identity, "--set", "api.vaultBinding=true")
+    assert any(p["port"] == 443 for r in policies(on)["egress-api"]["spec"]["egress"] for p in r["ports"])
     assert api_vault(off, on=False) == []
     assert api_vault(on, on=True) == []
+    assert api_egress_bound(on, off) == []
     for check in (hardened, gated, secrets_as_files, api_contained, default_deny):
         assert check(on) == [], check.__name__
     assert api_vault(on, on=False), "a binding while off is caught"
@@ -872,11 +904,43 @@ def test_the_api_is_bound_to_the_vault_only_with_its_binding():
         ("Deployment", lambda w: next(m for m in next(c for c in pod_spec(w)["containers"] if c["name"] == "api")["volumeMounts"] if m["mountPath"] == API_VAULT_DIR).update(readOnly=False)),
         ("Deployment", lambda w: next(c for c in pod_spec(w)["containers"] if c["name"] == "api")["env"].append({"name": "MANDATE_API_VAULT_SECRET_ID", "value": "x"})),
         ("Deployment", lambda w: w["spec"]["template"]["metadata"]["labels"].pop("mandate.dev/egress-vault")),
-        ("NetworkPolicy", lambda p: next(r for r in p["spec"]["egress"] if any(t.get("podSelector", {}).get("matchLabels", {}).get("mandate.dev/process") == "vault" for t in r["to"]))["ports"].append({"protocol": "TCP", "port": 8201})),
+        ("NetworkPolicy", lambda p: vault_rule(p)["ports"].append({"protocol": "TCP", "port": 8201})),
+        ("NetworkPolicy", lambda p: vault_rule(p)["to"].append({"ipBlock": {"cidr": "0.0.0.0/0"}})),
+        ("NetworkPolicy", lambda p: vault_rule(p)["to"][0].update(namespaceSelector={})),
+        ("NetworkPolicy", lambda p: p["spec"]["egress"].append({"to": [{"ipBlock": {"cidr": "0.0.0.0/0"}}], "ports": [{"protocol": "TCP", "port": 8200}]})),
+        ("NetworkPolicy", lambda p: p["spec"]["egress"].append({"to": [{"podSelector": {}}]})),
+        ("Deployment", lambda w: next(c for c in pod_spec(w)["containers"] if c["name"] == "api")["env"].__setitem__(
+            next(i for i, e in enumerate(next(c for c in pod_spec(w)["containers"] if c["name"] == "api")["env"]) if e["name"] == "MANDATE_API_VAULT_ADDRESS"),
+            {"name": "MANDATE_API_VAULT_ADDRESS", "value": "https://vault.example.com:8200"})),
     ]
     for kind, seed in seeds:
         name = "api" if kind == "Deployment" else "egress-api"
         assert api_vault(mutate(on, name, kind, seed), on=True), seed
+    widened = [
+        lambda p: next(r for r in p["spec"]["egress"] if any(q["port"] == 443 for q in r["ports"]))["to"].append({"podSelector": {}}),
+        lambda p: p["spec"]["egress"].pop(),
+        lambda p: p["spec"]["egress"][1]["to"][0].update(namespaceSelector={}),
+    ]
+    for seed in widened:
+        assert api_egress_bound(mutate(on, "egress-api", "NetworkPolicy", seed), off), seed
+    leaks = [
+        ("Deployment", other, lambda w: pod_spec(w).setdefault("volumes", []).append({"name": "leak", "secret": {"secretName": "vault-approle-api"}}))
+        for other in ("deploy-manager", "scheduler", "model-gateway", "exporter", "data")
+    ] + [
+        ("Deployment", "scheduler", lambda w: containers(w)[0].setdefault("envFrom", []).append({"secretRef": {"name": "vault-approle-api"}})),
+        ("Deployment", "data", lambda w: containers(w)[0].setdefault("env", []).append({"name": "X", "valueFrom": {"secretKeyRef": {"name": "vault-approle-api", "key": "secret-id"}}})),
+        ("Deployment", "exporter", lambda w: pod_spec(w).setdefault("initContainers", []).append({"name": "leak", "image": "x", "args": ["vault-approle-api"]})),
+        ("Pod", "executor", lambda w: pod_spec(w).setdefault("volumes", []).append({"name": "leak", "secret": {"secretName": "vault-approle-api"}})),
+        ("Deployment", "api", lambda w: pod_spec(w)["volumes"].append({"name": "again", "secret": {"secretName": "vault-approle-api"}})),
+    ]
+    for kind, name, seed in leaks:
+        assert api_vault(mutate(on, name, kind, seed), on=True), (name, seed)
+    assert api_vault(mutate(off, "scheduler", "Deployment", leaks[1][2]), on=False), "a leak while off is caught"
+
+
+def vault_rule(policy: dict) -> dict:
+    """The rule of an egress policy that names the vault's pods."""
+    return next(r for r in policy["spec"]["egress"] if any(t.get("podSelector", {}).get("matchLabels", {}).get("mandate.dev/process") == "vault" for t in r["to"]))
 
 
 def api_env(rendered: list[dict]) -> dict[str, str]:
