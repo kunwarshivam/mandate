@@ -268,6 +268,39 @@ impl Reduction {
             .contains_key(challenge_id)
     }
 
+    /// Takes the challenge `challenge_id` out of memory on its first presentation, whatever
+    /// follows, so it is presented at most once (§4.10 route 2 item 1): the challenge, or `None`
+    /// when it is unknown, already taken, or expired at `now`.
+    #[expect(
+        clippy::todo,
+        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+    )]
+    pub fn take(&self, challenge_id: &str, now: UtcNanos) -> Option<Issued> {
+        let _ = (challenge_id, now);
+        todo!()
+    }
+
+    /// Settles a presentation from `client` at `now` with the gate: the challenge `taken` is
+    /// consumed there too, and a presentation that `opened` nothing counts one failure against
+    /// `client`'s address and device, a request that named no challenge included. Returns whether
+    /// this failure is the one that brought the address or device to its failure limit, when the
+    /// operator alert `reduction_failures_over_limit` is raised, once (§4.10 route 2 item 3). No
+    /// answer depends on it.
+    #[expect(
+        clippy::todo,
+        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+    )]
+    pub fn settle(
+        &self,
+        client: &ClientKey,
+        taken: Option<&Issued>,
+        opened: bool,
+        now: UtcNanos,
+    ) -> bool {
+        let _ = (client, taken, opened, now);
+        todo!()
+    }
+
     /// Fresh device cookie bytes, unpadded base64url.
     pub fn new_device(&self) -> Result<String, Unauthenticated> {
         let mut bytes = [0_u8; 32];
