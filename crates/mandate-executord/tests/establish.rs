@@ -758,7 +758,6 @@ fn the_first_pass_copies_a_due_establishment_once_and_opens() -> Result<(), Erro
 /// Item 1: an executor restarted on an account stream that already holds its copy is established
 /// on its first pass, before it has stepped, and opens; it writes no second copy.
 #[test]
-#[ignore = "pending E21-32"]
 fn a_restarted_established_executor_opens_on_its_first_pass() -> Result<(), Error> {
     let journal = deployed()?;
     opened(&journal)?;
@@ -930,7 +929,6 @@ fn an_unreadable_record_keeps_the_gate_shut_and_every_exit_going() -> Result<(),
 /// Item 4's log: a closed or unreadable connection's code is printed when it starts and again
 /// only after it changed, never once per pass, and nothing is printed while open or connecting.
 #[test]
-#[ignore = "pending E21-32"]
 fn the_gate_reports_each_code_once_per_change() {
     let mut report = GateReport::default();
     let printed: Vec<_> = [

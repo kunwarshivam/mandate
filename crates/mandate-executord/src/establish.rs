@@ -253,7 +253,13 @@ impl GateReport {
     /// connection and the pass's own code for an error, unless it is the code printed last;
     /// nothing while open or connecting, which a later code is printed after again.
     pub fn changed(&mut self, outcome: Result<Connected, &'static str>) -> Option<&'static str> {
-        let _ = (&self.0, outcome);
-        Some(Unimplemented)
+        let gated = match outcome {
+            Ok(Connected::Closed) => Some("connection_closed"),
+            Ok(Connected::Open | Connected::Connecting) => None,
+            Err(code) => Some(code),
+        };
+        let changed = gated.filter(|_| gated != self.0);
+        self.0 = gated;
+        changed
     }
 }

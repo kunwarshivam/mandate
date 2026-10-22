@@ -49,7 +49,7 @@ use mandate_executord::credential::{
     RunLease, SUBJECT_ACCOUNT_ENV, VaultMount, WORKSPACE_NAMESPACE_ENV, checked_connection,
     paper_broker, paper_settings, subject_account, vault_config, vault_login, workspace_namespace,
 };
-use mandate_executord::establish::{Connected, OpeningGate, pass};
+use mandate_executord::establish::{GateReport, OpeningGate, pass};
 use mandate_executord::paper::FixturePaper;
 use mandate_executord::{Broker, Config, ExecutorProcess, fixture, launch};
 use mandate_journal::Environment;
@@ -258,7 +258,7 @@ fn serve_on<S: Store, B: Broker>(
     let mut process = ExecutorProcess::start(store, broker, wiring, &config, host_now());
     let status = Status::new(process.lifecycle().snapshot());
     probe::serve(socket, status.clone(), host_now).map_err(|_| "probe_socket_unavailable")?;
-    let mut reported = None;
+    let mut report = GateReport::default();
     loop {
         let stop = lease.as_deref_mut().and_then(|held| held.pass(host_now()));
         let terminated = stop.is_some() || terminate.load(Ordering::SeqCst);
@@ -277,21 +277,16 @@ fn serve_on<S: Store, B: Broker>(
             return Err(stop.unwrap_or("drain_unfinished"));
         }
         process.step(host_now());
-        let gated = match pass(
+        let passed = pass(
             &mut process,
             &gate,
             &config.scope,
             config.environment,
             host_now(),
-        ) {
-            Ok(Connected::Closed) => Some("connection_closed"),
-            Ok(Connected::Open | Connected::Connecting) => None,
-            Err(code) => Some(code),
-        };
-        if gated.is_some() && gated != reported {
-            eprintln!("{}", gated.unwrap_or_default());
+        );
+        if let Some(code) = report.changed(passed) {
+            eprintln!("{code}");
         }
-        reported = gated;
         status.publish(process.lifecycle().snapshot());
         thread::sleep(PASS);
     }
