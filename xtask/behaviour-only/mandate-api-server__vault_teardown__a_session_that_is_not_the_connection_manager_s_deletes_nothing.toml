@@ -1,7 +1,0 @@
-file = "crates/mandate-api-server/tests/vault_teardown.rs"
-test = "a_session_that_is_not_the_connection_manager_s_deletes_nothing"
-reason = """
-DEC-2348 items 3 and 4: W2's teardown requires the API's identity, so this test fails on that
-behaviour rather than at a stub. The implementation PR requires the connection manager's, and
-deletes this file with the test's `#[ignore]` line.
-"""

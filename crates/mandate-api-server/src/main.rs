@@ -44,8 +44,9 @@ use mandate_api_server::config::{
     read_session_key,
 };
 use mandate_api_server::confirm::CliConfirm;
-use mandate_api_server::connect_binding::{ConnectBinding, bound, connect_binding, teardown};
-use mandate_api_server::finish::Unbacked;
+use mandate_api_server::connect_binding::{
+    ConnectBinding, bound, connect_binding, fingerprints, teardown,
+};
 use mandate_api_server::finish_pass::{Finisher, LineAlerts, PASS_SECS, passes};
 use mandate_api_server::http::{self, App, Settings};
 use mandate_api_server::journal::{Journal, JournalUnavailable, Postgres};
@@ -280,7 +281,10 @@ async fn run(args: Args, start: Start) -> io::Result<()> {
             tokio::time::sleep(REFETCH).await;
         }
     });
-    if let Some(teardown) = teardown(&start.connect, Arc::new(SystemClock)) {
+    if let (Some(fingerprints), Some(teardown)) = (
+        fingerprints(&start.connect, Arc::new(SystemClock)),
+        teardown(&start.connect, Arc::new(SystemClock)),
+    ) {
         let journal: Arc<dyn Journal> = Arc::new(Postgres(
             PgJournal::from_dsn(&start.database_url)
                 .map_err(|_| io::Error::other("the journal's connection settings are refused"))?,
@@ -292,7 +296,7 @@ async fn run(args: Args, start: Start) -> io::Result<()> {
             .map_err(|_| io::Error::other("the workspace id is refused"))?;
         let finisher = Finisher::new(
             journal,
-            Unbacked,
+            fingerprints,
             teardown,
             LineAlerts(Mutex::new(io::stderr())),
             workspace,

@@ -44,8 +44,15 @@ impl ApiLogin for OpenBaoLogin {
     type Session = OpenBaoSource;
 
     async fn login(&self, now: UtcNanos) -> Result<OpenBaoSource, SourceError> {
-        let (role_id, secret_id) = read_mounted_credentials(&self.dir, &Identity::Api)?;
-        OpenBaoSource::login(&self.config, Identity::Api, &role_id, &secret_id, now).await
+        let (role_id, secret_id) = read_mounted_credentials(&self.dir, &self.identity)?;
+        OpenBaoSource::login(
+            &self.config,
+            self.identity.clone(),
+            &role_id,
+            &secret_id,
+            now,
+        )
+        .await
     }
 }
 

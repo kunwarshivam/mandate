@@ -273,7 +273,6 @@ fn the_api_s_vault_identity_writes_codes_and_reads_no_token() {
 /// connection manager's pair alone gets the manager's login past its credentials, to the vault,
 /// and refuses the API's for its missing files.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_login_reads_the_mounted_pair_of_its_own_identity() {
     let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
         "mandate-api-server-vault-login-{}",

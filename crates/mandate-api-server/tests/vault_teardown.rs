@@ -47,7 +47,6 @@ fn manager() -> Script {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn the_teardown_deletes_the_code_then_the_token_as_the_connection_manager() {
     let script = Script::new(Identity::ConnectionManager);
     assert_eq!(deleted(&script, ManualClock::at(NOW)), Ok(()));
@@ -62,7 +61,6 @@ fn the_teardown_deletes_the_code_then_the_token_as_the_connection_manager() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_failed_delete_still_deletes_the_other_and_fails() {
     for failing in [
         SecretPath::Code(connection()),
@@ -111,7 +109,6 @@ fn a_login_that_fails_deletes_nothing() {
 /// The teardown deletes as the connection manager alone (DEC-694 item 2); a session holding
 /// another identity, the API's among them, is not used.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_session_that_is_not_the_connection_manager_s_deletes_nothing() {
     let script = Script::new(Identity::Api);
     assert_eq!(deleted(&script, ManualClock::at(NOW)), Err(DeleteFailed));

@@ -13,10 +13,11 @@ use mandate_connections::manager::RequestMembers;
 use mandate_connections::record::{AccountPiiRef, AccountRef, ConnectionId};
 use mandate_vault::fingerprint::{AccountFingerprint, Claim, FingerprintError};
 use mandate_vault::openbao::OpenBaoSource;
+use mandate_vault::policy::Identity;
 use mandate_vault::source::SecretSource;
 
 use crate::clock::Clock;
-use crate::finish::{Fingerprints, Judging, Released};
+use crate::finish::{Fingerprints, Judged, Judging, ReleaseFailed, Released};
 use crate::vault_codes::ApiLogin;
 
 /// The connection manager's fingerprint operations on its vault session (DEC-2345 items 3
@@ -82,23 +83,92 @@ where
     L: ApiLogin + 'static,
     L::Session: ManagerSession,
 {
-    #[expect(
-        clippy::todo,
-        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-    )]
-    fn judge<'a>(&'a self, _request: &'a RequestMembers, _account_pii_ref: &'a str) -> Judging<'a> {
-        todo!()
+    fn judge<'a>(&'a self, request: &'a RequestMembers, account_pii_ref: &'a str) -> Judging<'a> {
+        let login = Arc::clone(&self.login);
+        let clock = Arc::clone(&self.clock);
+        let connection = request.connection_id.clone();
+        let account = request.account_ref.clone();
+        let pii_ref = account_pii_ref.to_owned();
+        Box::pin(async move {
+            tokio::task::spawn_blocking(move || {
+                off_runtime(async {
+                    let session = session(login.as_ref(), clock.as_ref()).await?;
+                    Ok(judged(&session, &connection, &account, &pii_ref).await)
+                })
+                .unwrap_or(Judged::CannotAnswer)
+            })
+            .await
+            .unwrap_or(Judged::CannotAnswer)
+        })
     }
 
-    #[expect(
-        clippy::todo,
-        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-    )]
     fn release<'a>(
         &'a self,
-        _connection: &'a ConnectionId,
-        _account_ref: &'a AccountRef,
+        connection: &'a ConnectionId,
+        account_ref: &'a AccountRef,
     ) -> Released<'a> {
-        todo!()
+        let login = Arc::clone(&self.login);
+        let clock = Arc::clone(&self.clock);
+        let connection = connection.clone();
+        let account = account_ref.clone();
+        Box::pin(async move {
+            tokio::task::spawn_blocking(move || {
+                off_runtime(async {
+                    let session = session(login.as_ref(), clock.as_ref()).await?;
+                    session
+                        .release(&connection, &account)
+                        .await
+                        .map_err(|_| Unreached)
+                })
+                .map_err(|Unreached| ReleaseFailed)
+            })
+            .await
+            .unwrap_or(Err(ReleaseFailed))
+        })
+    }
+}
+
+/// A call that did not reach the connection manager's vault session, or that it refused.
+struct Unreached;
+
+/// The answer of `work`, run on a current-thread runtime of its own, since a vault session's
+/// futures are not `Send`; [`Unreached`] when no runtime can be built.
+fn off_runtime<T>(work: impl Future<Output = Result<T, Unreached>>) -> Result<T, Unreached> {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|_| Unreached)
+        .and_then(|runtime| runtime.block_on(work))
+}
+
+/// A fresh session at the clock's time, required to be the connection manager's.
+async fn session<L: ApiLogin>(login: &L, clock: &dyn Clock) -> Result<L::Session, Unreached> {
+    let now = clock.now().ok_or(Unreached)?;
+    let session = login.login(now).await.map_err(|_| Unreached)?;
+    if session.identity() == &Identity::ConnectionManager {
+        Ok(session)
+    } else {
+        Err(Unreached)
+    }
+}
+
+/// Checks 3 and 4 for the request `account` of `connection`: its fingerprint entry, whose
+/// reference must be the check's `pii_ref`, then a claim of its hash (DEC-2345 items 3 and 4).
+async fn judged<S: ManagerSession>(
+    session: &S,
+    connection: &ConnectionId,
+    account: &AccountRef,
+    pii_ref: &str,
+) -> Judged {
+    let Ok((fingerprint, entry_pii_ref)) = session.fingerprint(connection, account).await else {
+        return Judged::CannotAnswer;
+    };
+    if entry_pii_ref.as_str() != pii_ref {
+        return Judged::CannotAnswer;
+    }
+    match session.claim(connection, &fingerprint).await {
+        Ok(Claim::Claimed) => Judged::Unique,
+        Ok(Claim::HeldBy(holder)) => Judged::AlreadyConnected(holder),
+        Err(_) => Judged::CannotAnswer,
     }
 }

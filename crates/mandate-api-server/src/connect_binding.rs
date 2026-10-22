@@ -172,7 +172,7 @@ pub fn teardown(
 ) -> Option<VaultTeardown<OpenBaoLogin>> {
     match binding {
         ConnectBinding::On(bound) => Some(VaultTeardown {
-            login: Arc::new(bound.login.clone()),
+            login: Arc::new(manager_login(bound)),
             clock,
         }),
         ConnectBinding::Off | ConnectBinding::Incomplete(_) => None,
@@ -181,15 +181,25 @@ pub fn teardown(
 
 /// The finish's fingerprint port for a bound connect, over its own copy of the connect's vault
 /// login as the connection manager; `None` for no connect and an incomplete one (DEC-2348 item 4).
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
 pub fn fingerprints(
-    _binding: &ConnectBinding,
-    _clock: Arc<dyn Clock>,
+    binding: &ConnectBinding,
+    clock: Arc<dyn Clock>,
 ) -> Option<VaultFingerprints<OpenBaoLogin>> {
-    todo!()
+    match binding {
+        ConnectBinding::On(bound) => Some(VaultFingerprints {
+            login: Arc::new(manager_login(bound)),
+            clock,
+        }),
+        ConnectBinding::Off | ConnectBinding::Incomplete(_) => None,
+    }
+}
+
+/// The connect's vault login, as the connection manager: the finish's identity (DEC-694 item 2).
+fn manager_login(bound: &BoundConnect) -> OpenBaoLogin {
+    OpenBaoLogin {
+        identity: Identity::ConnectionManager,
+        ..bound.login.clone()
+    }
 }
 
 /// The connect `binding` binds: for [`ConnectBinding::On`], its page and client, states drawn from

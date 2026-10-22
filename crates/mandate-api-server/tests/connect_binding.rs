@@ -248,7 +248,6 @@ fn only_a_bound_connect_is_offered() {
 /// DEC-2348 item 3: a bound connect's teardown logs in at the connect's vault, over its own copy
 /// of the login, as the connection manager; no connect and an incomplete one have none.
 #[test]
-#[ignore = "pending E10-13"]
 fn only_a_bound_connect_has_a_teardown() {
     let clock = || Arc::new(SystemClock) as Arc<dyn Clock>;
     let dir = vault_dir(Some(0o600));
@@ -278,7 +277,6 @@ fn only_a_bound_connect_has_a_teardown() {
 /// DEC-2348 item 4: a bound connect's fingerprint port logs in at the connect's vault, over its
 /// own copy of the login, as the connection manager; no connect and an incomplete one have none.
 #[test]
-#[ignore = "pending E10-13"]
 fn only_a_bound_connect_has_fingerprints() {
     let clock = || Arc::new(SystemClock) as Arc<dyn Clock>;
     let dir = vault_dir(Some(0o600));

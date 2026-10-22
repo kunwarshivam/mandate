@@ -34,7 +34,7 @@ impl<L: ApiLogin + 'static> Teardown for VaultTeardown<L> {
     }
 }
 
-/// Logs in at the clock's time, requires [`Identity::Api`], then deletes `connection`'s code and
+/// Logs in at the clock's time, requires [`Identity::ConnectionManager`], then deletes `connection`'s code and
 /// its token, both even when the first fails, on a current-thread runtime of its own.
 fn deleted<L: ApiLogin>(
     login: &L,
@@ -48,7 +48,7 @@ fn deleted<L: ApiLogin>(
         .map_err(|_| DeleteFailed)?
         .block_on(async {
             let session = login.login(now).await.map_err(|_| DeleteFailed)?;
-            if session.identity() != &Identity::Api {
+            if session.identity() != &Identity::ConnectionManager {
                 return Err(DeleteFailed);
             }
             let code = session.delete(&SecretPath::Code(connection.clone())).await;

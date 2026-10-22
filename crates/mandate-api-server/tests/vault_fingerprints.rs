@@ -106,7 +106,6 @@ impl Clock for NoClock {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_unique_account_is_claimed_as_the_connection_manager() {
     let (answer, script) = judged(entry(PII), ManualClock::at(NOW), PII);
     assert_eq!(answer, Judged::Unique);
@@ -122,7 +121,6 @@ fn a_unique_account_is_claimed_as_the_connection_manager() {
 
 /// Check 4: an account another connection holds is already connected, to that connection.
 #[test]
-#[ignore = "pending E10-13"]
 fn an_account_held_by_another_connection_is_already_connected() {
     let holder = ConnectionId::new(HOLDER).expect("a connection id");
     let (answer, _) = judged(
@@ -139,7 +137,6 @@ fn an_account_held_by_another_connection_is_already_connected() {
 /// DEC-2345 item 3: an entry whose reference is not the check's is not this request's account,
 /// so its hash is never claimed.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_reference_that_is_not_the_check_s_cannot_answer_and_claims_nothing() {
     let (answer, script) = judged(entry(OTHER_PII), ManualClock::at(NOW), PII);
     assert_eq!(answer, Judged::CannotAnswer);
@@ -147,7 +144,6 @@ fn a_reference_that_is_not_the_check_s_cannot_answer_and_claims_nothing() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn an_entry_that_cannot_be_read_cannot_answer_and_claims_nothing() {
     for error in [
         FingerprintError::Rotating,
@@ -168,7 +164,6 @@ fn an_entry_that_cannot_be_read_cannot_answer_and_claims_nothing() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_claim_that_fails_cannot_answer() {
     for error in [FingerprintError::Rotating, FingerprintError::Unavailable] {
         let (answer, _) = judged(
@@ -186,7 +181,6 @@ fn a_claim_that_fails_cannot_answer() {
 /// No clock, a failed login, or a session that is not the connection manager's asks nothing and
 /// cannot answer.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_judgement_without_the_manager_s_session_asks_nothing() {
     let (answer, script) = judged(entry(PII), Arc::new(NoClock), PII);
     assert_eq!(answer, Judged::CannotAnswer);
@@ -215,7 +209,6 @@ fn a_judgement_without_the_manager_s_session_asks_nothing() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_release_releases_the_request_s_claim_as_the_connection_manager() {
     let (answer, script) = released(manager(), ManualClock::at(NOW));
     assert_eq!(answer, Ok(()));
@@ -224,7 +217,6 @@ fn a_release_releases_the_request_s_claim_as_the_connection_manager() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_release_that_fails_or_cannot_be_made_fails() {
     for error in [FingerprintError::Rotating, FingerprintError::Unavailable] {
         let (answer, _) = released(

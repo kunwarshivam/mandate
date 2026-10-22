@@ -1,7 +1,0 @@
-file = "crates/mandate-api-server/tests/vault_codes.rs"
-test = "a_login_reads_the_mounted_pair_of_its_own_identity"
-reason = """
-DEC-2348 items 3 and 4: W2's `OpenBaoLogin` logs in as the API whatever its `identity`, so this test
-fails on that behaviour rather than at a stub. The implementation PR logs in as the login's own
-identity, and deletes this file with the test's `#[ignore]` line.
-"""
