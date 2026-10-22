@@ -1600,7 +1600,7 @@ workspace exists to name before it is authorized (identity spec §4.5, §6.4).
 
 | Operation | Method and path | Event | Notes |
 |---|---|---|---|
-| One's own session | `GET /v1/me/session` | — | On the authentication plane, outside the matrix (identity spec §4.2, §4.5; DEC-816 item 7): reads only the caller's own session record and yields no context. Answers `{principal_id, kind, expires_at}` with `as_of` `[]`: the caller's own principal id, never a session reference, cookie, token, digest, subject, or issuer; `expires_at` is the earlier of the idle and absolute deadlines. A session an outage narrowed is refused `reduction_only`, and no live session gets the one 401. A session route 2 opened answers `kind: "reduction_only"`, its absolute `expires_at`, and `workspaces` as route 2 item 6 gives them Shape: `read-models/session` ([DEC-2113](../project/decisions/DEC-2113.md)) |
+| One's own session | `GET /v1/me/session` | — | On the authentication plane, outside the matrix (identity spec §4.2, §4.5; DEC-816 item 7): reads only the caller's own session record and yields no context. Answers `{principal_id, kind, expires_at}` with `as_of` `[]`: the caller's own principal id, never a session reference, cookie, token, digest, subject, or issuer; `expires_at` is the earlier of the idle and absolute deadlines. A session an outage narrowed is refused `reduction_only`, and no live session gets the one 401. A session route 2 opened answers `kind: "reduction_only"`, its absolute `expires_at`, and `workspaces` as route 2 item 6 gives them. Shape: `read-models/session` ([DEC-2113](../project/decisions/DEC-2113.md)) |
 | List one's own workspace memberships | `GET /v1/me/workspaces` | — | Authorized by the `self` row "List one's own workspace memberships" (identity spec §4.2): a full session of a user principal only. Returns the caller's `active` memberships as `{workspace_id, label, roles}` from the membership index, reading no workspace's data; absent and foreign workspaces look the same. A failed index read is `membership_unavailable` ([DEC-816](../project/decisions/DEC-816.md) item 1). A hosted deployment's index is its control stream's membership fold; `label` is `null` until one is recorded; `as_of` is `[]`. Shape: `read-models/my-workspaces` ([DEC-2113](../project/decisions/DEC-2113.md)) |
 
 Owed to the identity spec's lanes, and listed so the prefix rule above is complete:
@@ -1634,8 +1634,15 @@ id and is used once, so a retried opening asks for a new challenge.
    signature counter; detecting a cloned authenticator is out of its scope. The session is refused
    when the passkey's member holds no membership that reaches the hosted workspace (`active` or
    `cooling_off`, identity spec §5.1), or when the member's identity-provider subject was refused by
-   the provider since their last successful sign-in (route 1's deprovision signal). An enrolment
-   cool-off does not bar it: a cooling-off passkey can pause and kill switch (identity spec §10.1).
+   the provider since their last successful sign-in (route 1's deprovision signal). That signal has
+   no server-side source yet, so until the founder chooses one, the server applies
+   [DEC-2319](../project/decisions/DEC-2319.md) item 2's interim (Proposed) in its place: it keeps
+   each member's last successful sign-in (`POST /v1/sessions`) in memory and also refuses the
+   session when this process has seen no successful sign-in of the member since it started, so
+   after a restart each member signs in once before route 2 serves them again, or when the
+   control stream holds a membership record naming the member committed at or after that sign-in,
+   an instant both share counting as after. An enrolment cool-off does not bar it: a cooling-off
+   passkey can pause and kill switch (identity spec §10.1).
 3. **Limits** (DEC-834, the founder's; DEC-653; numbers by DEC-2117 item 3 and DEC-2119). A request
    is counted against its address and its device:
    - **Address:** the TCP peer of the API listener. Only when the peer is one
@@ -1682,12 +1689,11 @@ id and is used once, so a retried opening asks for a new challenge.
      verifies is never refused for a limit.**
    - **Bounded memory.** Besides the 4,096 outstanding challenges, failures are kept for at most
      65,536 addresses and devices in all, the oldest dropped first. Dropping one changes no answer,
-     since failures only report. These bounds are owed to the gate itself by S2's gate change
-     (E9-1): `mandate_authn`'s `ReductionLimits` gains `max_outstanding` (4,096) and `reserve`
-     (3,072), past which it refuses a challenge with its one refusal as above, and
-     `max_failure_keys` (65,536), evicting the oldest failure key first. Until that lands, the
-     challenge route holds the 4,096 bound and the reserve itself, in front of the gate, and the
-     gate holds only its per-key limits.
+     since failures only report. The gate holds these bounds itself (E9-1 S2): `mandate_authn`'s
+     `ReductionLimits` carries `max_outstanding` (4,096) and `reserve` (3,072), past which it
+     refuses a challenge with its one refusal as above, and `max_failure_keys` (65,536), evicting
+     the key whose latest failure is oldest first. The challenge route also holds the 4,096 bound
+     and the reserve in front of the gate.
 4. **No membership oracle, by structure.** Every refusal of `POST /v1/reduction-sessions` after the
    browser check (an invalid body; an unknown, expired, or reused challenge; an unknown passkey id;
    a passkey removed, or whose member is deactivated, removed, or deprovisioned; a bad signature; a
@@ -1720,10 +1726,10 @@ id and is used once, so a retried opening asks for a new challenge.
    memory as item 5's do. Opening one commits `SessionOpened` (identity spec §12.1) with the method
    `passkey_local` once the journal registers that event; until then it journals nothing.
 6. **Its reach.** It covers each workspace in which the member holds a membership that reaches its
-   scope (`active` or `cooling_off`, identity spec §5.1) when it opens (one, on a hosted
-   deployment), with the roles in effect then, as identity spec §8.3 allows, as its snapshot. In
-   each, it authorizes only pause and the kill switch at their scopes, and only where the
-   snapshot's roles grant them (identity spec §4.2's rows for the two), and sign-out
+   scope (`active` or `cooling_off`, identity spec §5.1). Its roles are read live at each request,
+   as a full session's are (DEC-1007 item 8), not snapshotted at the opening. In each workspace, it
+   authorizes only pause and the kill switch at their scopes, and only where the member's roles
+   grant them then (identity spec §4.2's rows for the two), and sign-out
    (`DELETE /v1/sessions/current`). The kill switch is the stop alone: its privileges beyond the
    stop need step-up, and the step-up challenge route refuses this session `reduction_only` (§3.6),
    so a kill switch it sends is routed without them, as §5.4 routes any kill switch without valid
