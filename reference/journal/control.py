@@ -1144,19 +1144,20 @@ REQUIRED_REFS["EvaluationRunRecorded"] = ("rule_set",)
 # the control stream. No member is free text: IDs, enumerations, and integers only.
 DM_PROCESSES = ("runtime", "executor")
 # v0.70 (DEC-1175): an OAuth connect's token exchange is started once, stopped only when its request
-# closes, and never looped.
+# closes, and never looped. v0.74 (DEC-2335): the connect's executor is started on the exchange's
+# success (`exchanged`) and stopped when its connection closes (`connection_closed`), rule 257.
 DM_STARTED_PROCESSES = (*DM_PROCESSES, "token_exchange")
 SCHEMAS[("ctl", "ProcessStartIssued")] = rec(
     ("process", one_of(*DM_STARTED_PROCESSES)),
     ("subject", IDENT_T),
     ("generation", INT),
-    ("cause", one_of("deployed", "restart", "kill_switch", "requested")),
+    ("cause", one_of("deployed", "restart", "kill_switch", "requested", "exchanged")),
 )
 SCHEMAS[("ctl", "ProcessStopIssued")] = rec(
     ("process", one_of(*DM_STARTED_PROCESSES)),
     ("subject", IDENT_T),
     ("generation", INT),
-    ("cause", one_of("agent_stopped", "request_closed")),
+    ("cause", one_of("agent_stopped", "request_closed", "connection_closed")),
 )
 SCHEMAS[("ctl", "ProcessCrashLooped")] = rec(
     ("process", one_of(*DM_PROCESSES)),
@@ -2823,7 +2824,7 @@ def deployment_manager_violations(event_type: str, draft: dict, skip: frozenset[
     rule("165", draft["actor"]["kind"] == "system", "actor.kind")
     rule("166", p["generation"] >= least, "payload.generation")
     if event_type == "ProcessStartIssued":
-        first = p["cause"] in ("deployed", "requested")
+        first = p["cause"] in ("deployed", "requested", "exchanged")
         rule("167", first == (p["generation"] == 1), "payload.cause")
     if event_type == "ProcessCrashLooped":
         rule("168.restarts", p["restarts"] >= 1, "payload.restarts")
@@ -2833,6 +2834,11 @@ def deployment_manager_violations(event_type: str, draft: dict, skip: frozenset[
         rule("256", (p["cause"] == "requested") == exchange, "payload.cause")
     if event_type == "ProcessStopIssued":
         rule("256.stop", (p["cause"] == "request_closed") == exchange, "payload.cause")
+    executor = p["process"] == "executor"
+    if event_type == "ProcessStartIssued":
+        rule("257", p["cause"] != "exchanged" or executor, "payload.cause")
+    if event_type == "ProcessStopIssued":
+        rule("257.stop", p["cause"] != "connection_closed" or executor, "payload.cause")
     return out
 
 

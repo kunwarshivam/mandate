@@ -15213,6 +15213,42 @@ deployment_manager:
       outcome: Invalid
       reason: schema
       path: payload.cause
+  - name: ProcessStartIssued.executor_exchanged_twice
+    clause: 'rule 167: a connect''s executor is exchanged at generation 1 only'
+    base_draft: process_start_issued
+    changes:
+    - path: payload.process
+      value: executor
+    - path: payload.subject
+      value: 01J8Z2ACCT00000000000000A1
+    - path: payload.generation
+      value: 2
+    - path: payload.cause
+      value: exchanged
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.cause
+  - name: ProcessStartIssued.runtime_exchanged
+    clause: 'rule 257: only an executor is started on an exchange''s success'
+    base_draft: process_start_issued
+    changes:
+    - path: payload.cause
+      value: exchanged
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.cause
+  - name: ProcessStopIssued.runtime_stopped_as_connection_closed
+    clause: 'rule 257: only an executor stops as its connection closed'
+    base_draft: process_stop_issued
+    changes:
+    - path: payload.cause
+      value: connection_closed
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.cause
   - name: ProcessCrashLooped.exchange_looped
     clause: '§9.21 types: a token exchange never crash-loops'
     base_draft: process_crash_looped
@@ -15320,6 +15356,32 @@ deployment_manager:
       value: conn_01J8Z2CONN000000000000C1
     - path: payload.cause
       value: requested
+    expect:
+      outcome: Valid
+  - name: ProcessStartIssued.executor_exchanged
+    clause: 'rule 257: a connect''s executor, started on its exchange''s success'
+    base_draft: process_start_issued
+    changes:
+    - path: payload.process
+      value: executor
+    - path: payload.subject
+      value: 01J8Z2ACCT00000000000000A1
+    - path: payload.cause
+      value: exchanged
+    expect:
+      outcome: Valid
+  - name: ProcessStopIssued.executor_connection_closed
+    clause: 'rule 257: a connect''s executor stopped as its connection closed'
+    base_draft: process_stop_issued
+    changes:
+    - path: payload.process
+      value: executor
+    - path: payload.subject
+      value: 01J8Z2ACCT00000000000000A1
+    - path: payload.generation
+      value: 1
+    - path: payload.cause
+      value: connection_closed
     expect:
       outcome: Valid
   - name: ProcessStopIssued.token_exchange_closed
