@@ -267,3 +267,36 @@ fn stopping_ends_the_loop() {
         .and_then(|mut connection| frame::call(&mut connection, &request("after")));
     assert!(after.is_err(), "{after:?}");
 }
+
+/// The coordinator's guard on #2086: an `answer` that panics stops the listener as the panic
+/// unwinds, so the call in flight reads as lost and the port refuses every connection after it,
+/// rather than accepting connections that nothing will answer.
+#[test]
+fn a_panicking_answer_stops_the_listener() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = Server::new(
+        listener,
+        limits(2_000, 4),
+        Arc::new(Lines::default()) as Arc<dyn Log>,
+    );
+    let (end, ended) = mpsc::channel();
+    thread::spawn(move || {
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            server.run(|_request| panic!("the gateway failed"))
+        }));
+        end.send(outcome.is_err()).unwrap();
+    });
+    let lost = frame::call(&mut connect(address), &request("in flight"));
+    assert!(lost.is_err(), "{lost:?}");
+    assert_eq!(
+        ended.recv_timeout(Duration::from_secs(5)),
+        Ok(true),
+        "the panic ended the loop"
+    );
+    let refused = (0..200).any(|_| {
+        thread::sleep(Duration::from_millis(10));
+        TcpStream::connect(address).is_err()
+    });
+    assert!(refused, "the listener still accepts after the panic");
+}

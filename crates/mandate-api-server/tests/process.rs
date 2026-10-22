@@ -3,9 +3,11 @@
 
 mod common;
 
+use std::ffi::OsStr;
 use std::fs;
 use std::io::{BufRead, BufReader, Read};
 use std::net::SocketAddr;
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
@@ -425,5 +427,25 @@ fn the_internal_paper_setting_starts_only_on_a_journal_shown_paper() {
         assert_eq!(get(probes, "/livez").status, 200, "{off:?}");
         terminate(&child.0);
         assert_eq!(wait(&mut child.0, Duration::from_secs(10)), Some(0));
+    }
+}
+
+#[test]
+fn a_malformed_or_non_unicode_ingress_peers_setting_refuses_the_start() {
+    let mut non_unicode = command(&LOCAL, &[]);
+    non_unicode.env(
+        "MANDATE_API_INGRESS_PEERS",
+        OsStr::from_bytes(b"127.0.0.1\xff"),
+    );
+    let ranges = command(&LOCAL, &[("MANDATE_API_INGRESS_PEERS", "10.0.0.0/8")]);
+    for command in [non_unicode, ranges] {
+        let (code, text) = refused(command);
+        assert_eq!(code, Some(2), "{text}");
+        assert!(text.starts_with("refused: "), "{text}");
+        assert!(text.contains("MANDATE_API_INGRESS_PEERS"), "{text}");
+        assert!(
+            !text.contains("10.0.0.0"),
+            "the setting's name, never its value: {text}"
+        );
     }
 }

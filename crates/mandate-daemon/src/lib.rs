@@ -51,6 +51,17 @@ pub mod fixture;
 pub mod launch;
 pub mod meter;
 pub mod recorded;
+#[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    reason = "ADR-0001 ES-09 excepts tests from the safety-critical denies"
+)]
+#[path = "../tests/research_rig/mod.rs"]
+mod research_rig;
 pub mod runtime;
 pub mod source;
 pub mod wake;

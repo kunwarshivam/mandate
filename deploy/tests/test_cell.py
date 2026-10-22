@@ -8,14 +8,18 @@ sets it (`cargo xtask ci cell`).
 """
 
 import copy
+import functools
 import json
 import os
 import re
 import shutil
 import subprocess
+from collections.abc import Iterator
 from pathlib import Path
 
+import celpy
 import pytest
+from celpy import celtypes
 
 CELL = Path(__file__).resolve().parents[1] / "cell"
 CHART = CELL / "charts" / "workspace"
@@ -169,9 +173,10 @@ def policies(docs: list[dict]) -> dict[str, dict]:
 
 def one_workload_per_process(docs: list[dict], run_process: str = "control") -> list[str]:
     """Every process type renders exactly one Deployment (a service) or Job, and nothing else; once
-    the deployment manager renders, the runtime and the executor are only its pod templates, which
-    it alone starts (DEC-1170). Of the `run` processes, only the one a run names renders, `control`
-    unless it names another (DEC-2035)."""
+    the deployment manager renders, the processes it starts (`started_by`) are only its pod
+    templates, which it alone starts (DEC-1170), and a `one_shot` one (the token exchange) is never
+    a Deployment, with or without it (DEC-1175). Of the `run` processes, only the one a run names
+    renders, `control` unless it names another (DEC-2035)."""
     kinds = {"service": "Deployment", "migration": "Job", "run": "Job", "verify": "Job"}
     manager = any(is_manager(w) for w in workloads(docs))
     problems = []
@@ -179,7 +184,9 @@ def one_workload_per_process(docs: list[dict], run_process: str = "control") -> 
         found = [
             w for w in workloads(docs) if w["metadata"]["labels"].get("mandate.dev/process") == p["name"]
         ]
-        want = "Pod" if manager and p["name"] in ("runtime", "executor") else kinds[p["kind"]]
+        want = "Pod" if manager and p.get("started_by") == MANAGER else kinds[p["kind"]]
+        if p.get("one_shot") and not manager:
+            want = None
         if p["kind"] == "run" and p["name"] != run_process:
             want = None
         if [w["kind"] for w in found] != ([want] if want else []):
@@ -466,9 +473,14 @@ ALLOWED_APIS = {
 
 def portable(docs: list[dict]) -> list[str]:
     """No k3s-only, provider-only or cloud-only API (DEC-967 item 6): core Kubernetes APIs only, no
-    storage class, node name or ingress class in the workspace chart."""
+    storage class, node name or ingress class in the workspace chart. An admission policy's
+    validations, which refuse such a field (DEC-1177), name none."""
     problems = [f"{d['kind']} uses {d['apiVersion']}" for d in docs if d["apiVersion"] not in ALLOWED_APIS]
-    text = json.dumps(docs)
+    named = [
+        {**d, "spec": {k: v for k, v in d["spec"].items() if k != "validations"}} if d["kind"] == POLICY else d
+        for d in docs
+    ]
+    text = json.dumps(named)
     for word in (
         "storageClassName",
         "nodeName",
@@ -611,7 +623,7 @@ the processes it starts render as Deployments of their own; its pod templates ar
 `test_deploy_manager_contained`'s."""
     docs = render_all("--set", f"images.{MANAGER}=")
     for p in PROCESSES:
-        if p["kind"] != "service" or not (p.get("args") or p.get("probe")):
+        if p["kind"] != "service" or not (p.get("args") or p.get("probe")) or p.get("one_shot"):
             continue
         w = next(w for w in workloads(docs) if w["metadata"]["name"] == p["name"])
         c = first_container(w)
@@ -757,6 +769,23 @@ def test_api_contained():
     for refused in ("api.org=", "api.workspace=", "api.jwksUrl=http://issuer.example/jwks"):
         args = ["-f", str(CELL / "values" / "k3d.yaml"), *every_image(), "--set", refused]
         assert helm(CHART, *args).returncode != 0, refused
+
+
+def api_env(rendered: list[dict]) -> dict[str, str]:
+    """The api container's environment, name to value."""
+    return {e["name"]: e.get("value", "") for e in first_container(owner_workload(rendered)).get("env", [])}
+
+
+def test_ingress_peers_are_exact_addresses_set_only_when_named():
+    """Route 2's ingress peers (workspace API spec §4.10, DEC-2119 item 11): no variable when the
+    list is empty, the comma-joined list otherwise, and only exact addresses admitted, IPv4 with
+    each octet 0 to 255, IPv6, or IPv4-mapped IPv6."""
+    assert "MANDATE_API_INGRESS_PEERS" not in api_env(render_all())
+    peers = render_all("--set-json", 'api.ingressPeers=["127.0.0.1","::ffff:127.0.0.1","::1"]')
+    assert api_env(peers)["MANDATE_API_INGRESS_PEERS"] == "127.0.0.1,::ffff:127.0.0.1,::1"
+    base = ["-f", str(CELL / "values" / "k3d.yaml"), *every_image()]
+    for refused in ('["999.1.1.1"]', '["256.0.0.1"]', '["10.0.0.0/8"]', '["localhost"]', '["127.0.0.1","127.0.0.1"]'):
+        assert helm(CHART, *base, "--set-json", f"api.ingressPeers={refused}").returncode != 0, refused
 
 
 FOUNDER = "01KDEM0000000000000000000F"
@@ -910,6 +939,9 @@ def test_only_the_api_gets_the_ca_bundle():
 
 
 POD_RULE = {"apiGroups": [""], "resources": ["pods"], "verbs": ["create", "delete", "get", "list"]}
+# The ServiceAccount the manager makes for a connection's token exchange (DEC-1177): the same four
+# verbs, so it can create one before its pod and delete it at the close.
+ACCOUNT_RULE = {"apiGroups": [""], "resources": ["serviceaccounts"], "verbs": ["create", "delete", "get", "list"]}
 TOKEN_PATH = "/var/run/secrets/kubernetes.io/serviceaccount"
 
 
@@ -941,8 +973,10 @@ def deploy_manager_contained(docs: list[dict]) -> list[str]:
     accounts = [d for d in docs if d["kind"] == "ServiceAccount"]
     if managers:
         rules = [{k: sorted(v) for k, v in r.items()} for role in roles for r in role.get("rules") or []]
-        if [r["metadata"]["name"] for r in roles] != [MANAGER] or rules != [POD_RULE]:
-            problems.append(f"the manager's Role is not exactly pods' create, get, list, delete: {rules}")
+        if [r["metadata"]["name"] for r in roles] != [MANAGER] or rules != [POD_RULE, ACCOUNT_RULE]:
+            problems.append(
+                f"the manager's Role is not exactly pods' and ServiceAccounts' create, get, list, delete: {rules}"
+            )
         if [a["metadata"]["name"] for a in accounts] != [MANAGER]:
             problems.append(f"service accounts {[a['metadata']['name'] for a in accounts]}")
         binds = [(b.get("roleRef"), b.get("subjects")) for b in bindings]
@@ -1027,10 +1061,17 @@ def deploy_manager_contained(docs: list[dict]) -> list[str]:
 def test_deploy_manager_contained():
     docs = render_all()
     assert deploy_manager_contained(docs) == []
-    assert sorted(w["metadata"]["name"] for w in managed_pods(docs)) == ["executor", "runtime"]
+    assert sorted(w["metadata"]["name"] for w in managed_pods(docs)) == ["executor", "runtime", EXCHANGE]
     for pod in managed_pods(docs):
         spec = pod_spec(pod)
         container = first_container(pod)
+        if pod["metadata"]["name"] == EXCHANGE:
+            assert container["command"] == ["/mandate-token-exchange"], container.get("command")
+            assert "args" not in container, container.get("args")
+            assert "livenessProbe" not in container and "readinessProbe" not in container
+            assert spec["restartPolicy"] == "Never" and spec["automountServiceAccountToken"] is False
+            assert "serviceAccountName" not in spec
+            continue
         assert "command" not in container, container.get("command")
         research = ["--research", RESEARCH] if pod["metadata"]["name"] == "runtime" else []
         assert container["args"] == ["run", "--probe", "/tmp/process.sock", *research], container["args"]
@@ -1042,7 +1083,7 @@ def test_deploy_manager_contained():
             "/mandate-daemon", "probe", "{probe}", "--probe", "/tmp/process.sock"
         ]
         assert probes == [[x.replace("{probe}", k) for x in words] for k in ("livez", "readyz")], probes
-    only_runtime = render_all("--set", "images.executor=")
+    only_runtime = render_all("--set", "images.executor=", "--set", f"images.{EXCHANGE}=")
     assert [w["metadata"]["name"] for w in managed_pods(only_runtime)] == ["runtime"]
     assert deploy_manager_contained(only_runtime) == []
     deny_all = render_all("--set", "runtime.research=")
@@ -1050,6 +1091,7 @@ def test_deploy_manager_contained():
     assert all(
         first_container(pod)["args"] == ["run", "--probe", "/tmp/process.sock"]
         for pod in managed_pods(deny_all)
+        if pod["metadata"]["name"] != EXCHANGE
     )
 
 
@@ -1079,7 +1121,7 @@ def test_the_executor_runs_on_alpaca_paper_where_staging_names_it():
     and nothing else changes: the runtime's args, and the manager's containment."""
     docs = render_all(*ALPACA_PAPER)
     assert deploy_manager_contained(docs) == []
-    args = {p["metadata"]["name"]: first_container(p)["args"] for p in managed_pods(docs)}
+    args = {p["metadata"]["name"]: first_container(p)["args"] for p in managed_pods(docs) if p["metadata"]["name"] != EXCHANGE}
     assert args == {
         "executor": ["run", "--probe", "/tmp/process.sock", *PAPER_ARGS],
         "runtime": ["run", "--probe", "/tmp/process.sock", "--research", RESEARCH],
@@ -1148,6 +1190,16 @@ MANAGER_USER = f"system:serviceaccount:ws-ws1:{MANAGER}"
 POD_RULES = [
     {"apiGroups": [""], "apiVersions": ["v1"], "operations": ["CREATE", "UPDATE"], "resources": ["pods"]}
 ]
+ACCOUNT_RULES = [
+    {
+        "apiGroups": [""],
+        "apiVersions": ["v1"],
+        "operations": ["CREATE", "UPDATE", "DELETE"],
+        "resources": ["serviceaccounts"],
+    }
+]
+PODS_POLICY = "-deploy-manager-pods"
+ACCOUNTS_POLICY = "-deploy-manager-accounts"
 NAMESPACE_SELECTOR = {"matchLabels": {"kubernetes.io/metadata.name": "ws-ws1"}}
 # The labels the manager's adapter adds to a template (crates/mandate-deploy-manager kubernetes.rs).
 ADDED_LABELS = {
@@ -1170,121 +1222,181 @@ def is_true(spec: dict, key: str) -> bool:
     return spec.get(key) is True
 
 
-# Each bound the admission policy must hold (DEC-1172 item 4), by its validation's message: the
-# words its CEL must name, and the same rule computed here in Python over the policy's own lists,
-# so a rule that is dropped, or a list that is widened, admits a pod the attacks below must not get.
+EXCHANGE = "token-exchange"
+PROCESS_VARIABLE = (
+    'has(object.metadata.labels) && "mandate.dev/process" in object.metadata.labels'
+    ' ? object.metadata.labels["mandate.dev/process"] : ""'
+)
+# The connection a test's token exchange is for, and the account DEC-2060 names for it: `x` and the
+# id's bytes in lowercase hex.
+CONNECTION = "conn_01J8Z2AB"
+CONNECTION_ACCOUNT = "x" + CONNECTION.encode().hex()
+# The evaluator the tests run the rendered policies' CEL on: cel-python, pinned in python/pyproject
+# (DEC-1177), so a loosened expression is caught by what it admits, not by how it reads.
+CEL = celpy.Environment()
+
+
+@functools.cache
+def cel_program(expression: str):
+    return CEL.program(CEL.compile(expression))
+
+
+def cel_holds(expression: str, activation: dict) -> bool:
+    """Whether `expression` is `true`; an error refuses, as the policies' `failurePolicy: Fail` does."""
+    try:
+        result = cel_program(expression).evaluate(activation)
+    except Exception:  # noqa: BLE001
+        return False
+    return isinstance(result, celtypes.BoolType) and bool(result)
+
+
+@functools.cache
+def cel_literal(expression: str):
+    """A variable that reads no request, evaluated once: the policies' per-process literals."""
+    return cel_program(expression).evaluate({})
+
+
+def cel_refusals(
+    policy: dict, obj: dict | None, old: dict | None = None, operation: str = "CREATE", first: bool = False
+) -> list[str]:
+    """The messages of the policy's validations that refuse `obj` (or, on a delete, `old`) in a
+    request by the manager, evaluated as the API server evaluates them: match conditions, then the
+    variables in order, then each validation; with `first`, only the first that refuses."""
+    spec = policy["spec"]
+    activation = {
+        "object": celpy.json_to_cel(obj),
+        "oldObject": celpy.json_to_cel(old),
+        "request": celpy.json_to_cel({"operation": operation, "userInfo": {"username": MANAGER_USER}}),
+    }
+    if not all(cel_holds(c["expression"], activation) for c in spec.get("matchConditions", [])):
+        return []
+    variables = {}
+    for v in spec.get("variables", []):
+        reads = any(word in v["expression"] for word in ("object", "request", "variables"))
+        activation["variables"] = celtypes.MapType(variables)
+        try:
+            value = cel_program(v["expression"]).evaluate(activation) if reads else cel_literal(v["expression"])
+        except Exception:  # noqa: BLE001
+            return [r["message"] for r in spec.get("validations", [])]
+        variables[celtypes.StringType(v["name"])] = value
+    activation["variables"] = celtypes.MapType(variables)
+    refused = []
+    for r in spec.get("validations", []):
+        if not cel_holds(r["expression"], activation):
+            refused.append(r["message"])
+            if first:
+                break
+    return refused
+
+
+def process_of(pod: dict) -> str:
+    return pod["metadata"].get("labels", {}).get("mandate.dev/process", "")
+
+
+def launches(pod: dict) -> dict:
+    """Each container's launch, by name, as the policy's `commands` holds it: `[command, args]`, a
+    list of string lists, so every literal in the variable has one type and CEL compiles it."""
+    return {c["name"]: [c.get("command", []), c.get("args", [])] for c in all_containers(pod)}
+
+
+# Each bound the admission policy must hold (DEC-1172 item 4, DEC-1177), by its validation's
+# message, and the words its CEL must name. What each admits is the policy's CEL itself, evaluated
+# (`cel_refusals`), so a rule that is dropped or loosened, or a list that is widened, admits a pod
+# the attacks below must not get.
 BOUNDS = {
-    "a pod the deployment manager makes mounts no service-account token": (
-        ["object.spec.automountServiceAccountToken == false"],
-        lambda pod, v: pod["spec"].get("automountServiceAccountToken") is False,
-    ),
-    "a pod the deployment manager makes names no service account but the default": (
-        ["serviceAccountName", '["", "default"]'],
-        lambda pod, v: (
-            pod["spec"].get("serviceAccountName", "") in ("", "default")
-            and pod["spec"].get("serviceAccount", "") in ("", "default")
-        ),
-    ),
-    "a pod the deployment manager makes shares no host namespace": (
-        ["hostNetwork", "hostPID", "hostIPC"],
-        lambda pod, v: not any(is_true(pod["spec"], k) for k in ("hostNetwork", "hostPID", "hostIPC")),
-    ),
-    "a pod the deployment manager makes mounts no host path": (
-        ["!has(v.hostPath)"],
-        lambda pod, v: not any("hostPath" in vol for vol in pod["spec"].get("volumes", [])),
-    ),
-    "every container of a pod the deployment manager makes is unprivileged, with no privilege escalation": (
-        ["object.spec.initContainers.all(c,", "allowPrivilegeEscalation == false", "privileged == false"],
-        lambda pod, v: all(
-            c.get("securityContext", {}).get("allowPrivilegeEscalation") is False
-            and c.get("securityContext", {}).get("privileged", False) is False
-            for c in all_containers(pod)
-        ),
-    ),
-    "a pod the deployment manager makes has no ephemeral container": (
-        ["!has(object.spec.ephemeralContainers)"],
-        lambda pod, v: "ephemeralContainers" not in pod["spec"],
-    ),
-    "a pod the deployment manager makes runs only the images of its templates": (
-        ["object.spec.initContainers.all(c, c.image in variables.allowedImages)"],
-        lambda pod, v: all(c["image"] in v["allowedImages"] for c in all_containers(pod)),
-    ),
-    "a pod the deployment manager makes mounts only memory, the Secrets of its templates, or their claims read-only": (
-        [
-            "has(v.emptyDir)",
-            "v.secret.secretName in variables.allowedSecrets",
-            "v.persistentVolumeClaim.claimName in variables.allowedClaims",
-            "v.persistentVolumeClaim.readOnly == true",
-        ],
-        lambda pod, v: all(
-            set(vol) - {"name"} == {"emptyDir"}
-            or (set(vol) - {"name"} == {"secret"} and vol["secret"]["secretName"] in v["allowedSecrets"])
-            or (
-                set(vol) - {"name"} == {"persistentVolumeClaim"}
-                and vol["persistentVolumeClaim"]["claimName"] in v["allowedClaims"]
-                and vol["persistentVolumeClaim"].get("readOnly") is True
-            )
-            for vol in pod["spec"].get("volumes", [])
-        ),
-    ),
-    "a pod the deployment manager makes reads no Secret through its environment or a pull secret": (
-        ["!has(object.spec.imagePullSecrets)", "!has(c.envFrom)", "!has(e.valueFrom)"],
-        lambda pod, v: (
-            "imagePullSecrets" not in pod["spec"]
-            and all(
-                "envFrom" not in c and all("valueFrom" not in e for e in c.get("env", []))
-                for c in all_containers(pod)
-            )
-        ),
-    ),
-    "a pod the deployment manager makes is one of its processes, in this workspace": (
-        [
-            '["app.kubernetes.io/managed-by"] == "mandate-deploy-manager"',
-            '["mandate.dev/process"] in variables.egress',
-            '["mandate.dev/workspace"] == "ws1"',
-        ],
-        lambda pod, v: (
-            pod["metadata"]["labels"].get("app.kubernetes.io/managed-by") == "mandate-deploy-manager"
-            and pod["metadata"]["labels"].get("mandate.dev/process") in v["egress"]
-            and pod["metadata"]["labels"].get("mandate.dev/workspace") == "ws1"
-        ),
-    ),
-    "a pod the deployment manager makes carries exactly its process's egress labels": (
-        [
-            'startsWith("mandate.dev/egress-")',
-            'variables.egress[object.metadata.labels["mandate.dev/process"]].all(',
-        ],
-        lambda pod, v: (
-            (labels := pod["metadata"]["labels"]).get("mandate.dev/process") in v["egress"]
-            and egress_labels(labels) == set(v["egress"][labels["mandate.dev/process"]])
-            and all(labels[k] == "true" for k in egress_labels(labels))
-        ),
-    ),
+    "a pod the deployment manager makes mounts no service-account token": [
+        "object.spec.automountServiceAccountToken == false"
+    ],
+    "a pod the deployment manager makes names no service account but the default, or a token exchange its own": [
+        "serviceAccountName",
+        'object.spec.serviceAccountName == "default"',
+        '"token-exchange"',
+        "matches('^x([0-9a-f]{2}){1,64}$')",
+    ],
+    "a token exchange's pod names its own account in its environment once, beside its connection, which the exchange checks against each other": [
+        'e.name == "MANDATE_SUBJECT_ACCOUNT"',
+        "e.value == object.spec.serviceAccountName",
+    ],
+    "a pod the deployment manager makes runs as no root user, adds no capability, and names no node or host alias": [
+        "runAsNonRoot == true",
+        "runAsUser != 0",
+        "!has(c.securityContext.capabilities.add)",
+        "!has(object.spec.hostAliases)",
+        "!has(object.spec.nodeName)",
+    ],
+    "a pod the deployment manager makes shares no host namespace": ["hostNetwork", "hostPID", "hostIPC"],
+    "a pod the deployment manager makes mounts no host path": ["!has(v.hostPath)"],
+    "every container of a pod the deployment manager makes is unprivileged, with no privilege escalation": [
+        "object.spec.initContainers.all(c,",
+        "allowPrivilegeEscalation == false",
+        "privileged == false",
+    ],
+    "a pod the deployment manager makes has no ephemeral container": ["!has(object.spec.ephemeralContainers)"],
+    "a pod the deployment manager makes runs only its own process's images": [
+        "object.spec.initContainers.all(c, c.image in variables.images[variables.process])"
+    ],
+    "a pod the deployment manager makes runs exactly its own process's commands and arguments": [
+        "variables.commands[variables.process]",
+        "c.command",
+        "c.args",
+    ],
+    "a pod the deployment manager makes mounts only memory, its own process's Secrets and projected token, or its claims read-only": [
+        "has(v.emptyDir)",
+        "v.secret.secretName in variables.secrets[variables.process]",
+        "v.persistentVolumeClaim.claimName in variables.claims[variables.process]",
+        "v.persistentVolumeClaim.readOnly == true",
+        "size(v.projected.sources) == 2",
+        "size(v.projected.sources[1].downwardAPI.items) == 1",
+        "in variables.projected[variables.process]",
+    ],
+    "a pod the deployment manager makes reads no Secret through its environment or a pull secret": [
+        "!has(object.spec.imagePullSecrets)",
+        "!has(c.envFrom)",
+        "!has(e.valueFrom)",
+    ],
+    "a pod the deployment manager makes is one of its processes, in this workspace": [
+        '["app.kubernetes.io/managed-by"] == "mandate-deploy-manager"',
+        '["mandate.dev/process"] in variables.egress',
+        '["mandate.dev/workspace"] == "ws1"',
+    ],
+    "a pod the deployment manager makes carries exactly its process's egress labels": [
+        'startsWith("mandate.dev/egress-")',
+        'variables.egress[object.metadata.labels["mandate.dev/process"]].all(',
+    ],
 }
 
 
 def policy_variables(policy: dict) -> dict:
-    """The policy's list and map literals, which are JSON as well as CEL."""
-    return {v["name"]: json.loads(v["expression"]) for v in policy["spec"].get("variables", [])}
+    """The policy's list and map literals, which are JSON as well as CEL; `process`, the pod's own
+    process label, and `account`, the account a request is about, are the variables that read the
+    request."""
+    return {
+        v["name"]: json.loads(v["expression"])
+        for v in policy["spec"].get("variables", [])
+        if v["name"] not in ("process", "account")
+    }
 
 
-def refusals(policy: dict, pod: dict) -> list[str]:
-    """The bounds the policy holds, by its own validations and lists, that `pod` breaks."""
-    variables = policy_variables(policy)
-    present = {v["message"] for v in policy["spec"].get("validations", [])}
-    return [m for m, (_, rule) in BOUNDS.items() if m in present and not rule(pod, variables)]
+def refusals(policy: dict, pod: dict, first: bool = False) -> list[str]:
+    """The policy's validations that refuse `pod`, its CEL evaluated."""
+    return cel_refusals(policy, pod, first=first)
 
 
 def as_started(pod: dict) -> dict:
-    """A template as the manager creates it: its labels added, and the default account named, as
-    the API server's ServiceAccount admission names it before any policy runs."""
+    """A template as the manager creates it (crates/mandate-deploy-manager kubernetes.rs): its
+    labels added, and the default account named, as the API server's ServiceAccount admission names
+    it before any policy runs; a token exchange's account its connection's (DEC-2060), which its
+    environment names beside the connection (DEC-1177)."""
     pod = copy.deepcopy(pod)
     pod["metadata"]["labels"].update(ADDED_LABELS)
-    pod["spec"]["serviceAccountName"] = "default"
+    exchange = pod["metadata"]["labels"]["mandate.dev/process"] == EXCHANGE
+    pod["spec"]["serviceAccountName"] = CONNECTION_ACCOUNT if exchange else "default"
+    process_code = pod["metadata"]["labels"]["mandate.dev/process"].replace("-", "_")
     for c in pod["spec"]["containers"]:
-        c["env"].append(
-            {"name": "MANDATE_PROCESS", "value": pod["metadata"]["labels"]["mandate.dev/process"]}
-        )
+        c["env"].append({"name": "MANDATE_PROCESS", "value": process_code})
+        c["env"].append({"name": "MANDATE_SUBJECT", "value": CONNECTION if exchange else "subject_1"})
+        if exchange:
+            c["env"].append({"name": "MANDATE_SUBJECT_ACCOUNT", "value": CONNECTION_ACCOUNT})
     return pod
 
 
@@ -1303,10 +1415,117 @@ def attacks(pod: dict) -> list[tuple[str, dict]]:
     foreign = sorted(
         {f"mandate.dev/egress-{t}" for t in process(other)["egress"]} - egress_labels(labels(pod))
     )
+    first = lambda b: spec(b)["containers"][0]  # noqa: E731
+    vault_token = {
+        "defaultMode": 292,
+        "sources": [
+            {"serviceAccountToken": {"audience": "mandate-vault", "expirationSeconds": 600, "path": "token"}},
+            {"downwardAPI": {"items": [{"path": "namespace", "fieldRef": {"fieldPath": "metadata.namespace"}}]}},
+        ],
+    }
+    projected = lambda b: next(v for v in spec(b)["volumes"] if "projected" in v)["projected"]  # noqa: E731
+    item = lambda b: projected(b)["sources"][1]["downwardAPI"]["items"][0]  # noqa: E731
+    env = lambda b, name: next(e for e in first(b)["env"] if e["name"] == name)  # noqa: E731
+    as_exchange = {
+        "mandate.dev/process": EXCHANGE,
+        **{f"mandate.dev/egress-{t}": "true" for t in process(EXCHANGE)["egress"]},
+    }
+    exchange_only = lambda: [  # noqa: E731
+        changed(
+            "another connection's form of account", lambda b: spec(b).update(serviceAccountName="exchange-1")
+        ),
+        changed("the default account", lambda b: spec(b).update(serviceAccountName="default")),
+        changed("an executor's account", lambda b: spec(b).update(serviceAccountName="0123456789abcdef")),
+        changed("an even-length x account", lambda b: spec(b).update(serviceAccountName="x0123456789abcde")),
+        changed("an account longer than any id", lambda b: spec(b).update(serviceAccountName="x" + "ab" * 65)),
+        changed("an account its environment does not name", lambda b: env(b, "MANDATE_SUBJECT_ACCOUNT").update(value="xab")),
+        changed(
+            "no account in its environment",
+            lambda b: first(b)["env"].remove(env(b, "MANDATE_SUBJECT_ACCOUNT")),
+        ),
+        changed(
+            "a second account in its environment",
+            lambda b: first(b)["env"].append({"name": "MANDATE_SUBJECT_ACCOUNT", "value": "xab"}),
+        ),
+        changed(
+            "a second connection in its environment",
+            lambda b: first(b)["env"].append({"name": "MANDATE_SUBJECT", "value": "conn_other"}),
+        ),
+        changed("no namespace file", lambda b: projected(b)["sources"].pop(1)),
+        changed("the namespace file first", lambda b: projected(b)["sources"].reverse()),
+        changed("another downward field", lambda b: item(b)["fieldRef"].update(fieldPath="metadata.labels")),
+        changed("a second downward item", lambda b: projected(b)["sources"][1]["downwardAPI"]["items"].append(
+            {"path": "name", "fieldRef": {"fieldPath": "metadata.name"}}
+        )),
+        changed("a downward item's own mode", lambda b: item(b).update(mode=511)),
+        changed("a wider projected mode", lambda b: projected(b).update(defaultMode=511)),
+        changed(
+            "the journal's Secret",
+            lambda b: spec(b)["volumes"].append({"name": "c", "secret": {"secretName": "journal-ca"}}),
+        ),
+        changed(
+            "a longer-lived token",
+            lambda b: next(v for v in spec(b)["volumes"] if "projected" in v)["projected"]["sources"][0][
+                "serviceAccountToken"
+            ].update(expirationSeconds=86400),
+        ),
+        changed(
+            "a third projected source",
+            lambda b: projected(b)["sources"].append({"secret": {"name": "journal-ca"}}),
+        ),
+        changed(
+            "a Secret in place of the namespace file",
+            lambda b: projected(b)["sources"].__setitem__(1, {"secret": {"name": "journal-ca"}}),
+        ),
+        changed(
+            "a token for another audience",
+            lambda b: next(v for v in spec(b)["volumes"] if "projected" in v)["projected"]["sources"][0][
+                "serviceAccountToken"
+            ].update(audience="kubernetes"),
+        ),
+    ]
+    others_only = lambda: [  # noqa: E731
+        changed("an exchange's account", lambda b: spec(b).update(serviceAccountName="x0123456789abcdef")),
+        changed(
+            "the vault token", lambda b: spec(b)["volumes"].append({"name": "v", "projected": vault_token})
+        ),
+        changed(
+            "the token exchange's labels",
+            lambda b: (
+                [labels(b).pop(k) for k in sorted(egress_labels(labels(b)))],
+                labels(b).update(as_exchange),
+                spec(b).update(serviceAccountName="x0123456789abcdef"),
+            ),
+        ),
+    ]
     return [
+        *(exchange_only() if process_name == EXCHANGE else others_only()),
+        changed("an altered command", lambda b: first(b).update(command=["/bin/sh", "-c", "id"])),
+        changed("altered arguments", lambda b: first(b).update(args=[*first(b).get("args", []), "--extra"])),
+        changed(
+            "an added container",
+            lambda b: spec(b)["containers"].append({**copy.deepcopy(first(b)), "name": "y"}),
+        ),
+        changed(
+            "another process's image",
+            lambda b: first(b).update(image=PLACEHOLDER.format(process(other)["image"])),
+        ),
         changed("a token", lambda b: spec(b).update(automountServiceAccountToken=True)),
         changed("the manager's account", lambda b: spec(b).update(serviceAccountName=MANAGER)),
         changed("the host network", lambda b: spec(b).update(hostNetwork=True)),
+        changed("root, for the pod", lambda b: spec(b)["securityContext"].update(runAsUser=0)),
+        changed("root allowed", lambda b: spec(b)["securityContext"].update(runAsNonRoot=False)),
+        changed("root, for a container", lambda b: first(b)["securityContext"].update(runAsUser=0)),
+        changed(
+            "root allowed, for an init container",
+            lambda b: spec(b)["initContainers"][0]["securityContext"].update(runAsNonRoot=False),
+        ),
+        changed(
+            "an added capability",
+            lambda b: first(b)["securityContext"]["capabilities"].update(add=["NET_ADMIN"]),
+        ),
+        changed("a host alias", lambda b: spec(b).update(hostAliases=[{"ip": "10.0.0.1", "hostnames": ["vault"]}])),
+        changed("a chosen node", lambda b: spec(b).update(nodeName="node-1")),
         changed("the host's PIDs", lambda b: spec(b).update(hostPID=True)),
         changed("a host path", lambda b: spec(b)["volumes"].append({"name": "h", "hostPath": {"path": "/"}})),
         changed("privileged", lambda b: spec(b)["containers"][0]["securityContext"].update(privileged=True)),
@@ -1363,7 +1582,7 @@ def attacks(pod: dict) -> list[tuple[str, dict]]:
     ]
 
 
-def deploy_manager_admission(docs: list[dict]) -> list[str]:
+def admission_problems(docs: list[dict]) -> Iterator[str]:
     """The manager's `create pods` is bounded to pods shaped like its templates (DEC-1172 item 4):
     one ValidatingAdmissionPolicy and its binding exactly when the manager renders, failing closed,
     matching core pods' create and update in the namespace and only requests by the manager's own
@@ -1371,66 +1590,340 @@ def deploy_manager_admission(docs: list[dict]) -> list[str]:
     are exactly the started processes' roles and the journal's CA, its claims only the artifact store
     the runtime reads (DEC-1016), and its egress labels are each
     process's from processes.json. Each template as started passes it, and each attack fails it."""
-    problems = []
     manager = any(is_manager(w) for w in workloads(docs))
-    found = [d for d in docs if d["kind"] in (POLICY, POLICY_BINDING)]
+    found = [
+        d for d in docs if d["kind"] in (POLICY, POLICY_BINDING) and d["metadata"]["name"].endswith(PODS_POLICY)
+    ]
     if [d["kind"] for d in found] != ([POLICY, POLICY_BINDING] if manager else []):
-        return [
-            f"admission objects {[d['kind'] for d in found]} with the manager {'on' if manager else 'off'}"
-        ]
+        yield f"admission objects {[d['kind'] for d in found]} with the manager {'on' if manager else 'off'}"
+        return
     if not manager:
-        return []
+        return
     policy, binding = found
     spec = policy["spec"]
     if spec.get("failurePolicy") != "Fail":
-        problems.append(f"the policy's failurePolicy is {spec.get('failurePolicy')}")
+        yield f"the policy's failurePolicy is {spec.get('failurePolicy')}"
     if spec.get("matchConstraints") != {"namespaceSelector": NAMESPACE_SELECTOR, "resourceRules": POD_RULES}:
-        problems.append(f"the policy matches {spec.get('matchConstraints')}")
+        yield f"the policy matches {spec.get('matchConstraints')}"
     conditions = [c["expression"] for c in spec.get("matchConditions", [])]
     if conditions != [f"request.userInfo.username == '{MANAGER_USER}'"]:
-        problems.append(f"the policy's match conditions are {conditions}")
+        yield f"the policy's match conditions are {conditions}"
     if binding["spec"] != {
         "policyName": policy["metadata"]["name"],
         "validationActions": ["Deny"],
         "matchResources": {"namespaceSelector": NAMESPACE_SELECTOR},
     }:
-        problems.append(f"the binding is {binding['spec']}")
+        yield f"the binding is {binding['spec']}"
     if not policy["metadata"]["name"].startswith("ws-ws1-cell-"):
-        problems.append(f"the policy's name {policy['metadata']['name']} carries no release prefix")
+        yield f"the policy's name {policy['metadata']['name']} carries no release prefix"
     started = managed_pods(docs)
     names = {w["metadata"]["name"] for w in started}
     claimed = any(d["kind"] == "PersistentVolumeClaim" and d["metadata"]["name"] == "artifacts" for d in docs)
+    templates = {w["metadata"]["name"]: w["spec"]["template"] for w in started}
+    role = lambda n: process(n)["db_role"]  # noqa: E731
     want = {
-        "allowedImages": sorted({c["image"] for w in started for c in all_containers(w["spec"]["template"])}),
-        "allowedSecrets": sorted(
-            {"journal-ca"} | {"journal-role-" + process(n)["db_role"].replace("_", "-") for n in names}
-        ),
-        "allowedClaims": ["artifacts"] if "runtime" in names and claimed else [],
+        "images": {n: sorted({c["image"] for c in all_containers(t)}) for n, t in templates.items()},
+        "commands": {n: launches(t) for n, t in templates.items()},
+        "secrets": {
+            n: sorted({"journal-ca", "journal-role-" + role(n).replace("_", "-")}) if role(n) else []
+            for n in names
+        },
+        "claims": {n: ["artifacts"] if n == "runtime" and claimed else [] for n in names},
+        "projected": {
+            n: ["mandate-vault|600|token|292|namespace=metadata.namespace"]
+            if n == EXCHANGE
+            else []
+            for n in names
+        },
         "egress": {n: [f"mandate.dev/egress-{t}" for t in process(n)["egress"]] for n in names},
     }
     try:
         got = policy_variables(policy)
     except (json.JSONDecodeError, KeyError) as e:
-        return [*problems, f"the policy's lists do not read: {e}"]
+        yield f"the policy's lists do not read: {e}"
+        return
     for key, value in want.items():
         if got.get(key) != value:
-            problems.append(f"the policy's {key} is {got.get(key)}, want {value}")
+            yield f"the policy's {key} is {got.get(key)}, want {value}"
+    if set(got) != set(want):
+        yield f"the policy's variables are {sorted(got)}, want {sorted(want)}"
+    reads = [v for v in spec.get("variables", []) if v["name"] == "process"]
+    if [v["name"] for v in spec.get("variables", [])][:1] != ["process"] or [
+        v["expression"] for v in reads
+    ] != [PROCESS_VARIABLE]:
+        yield f"the policy does not read the pod's process first: {reads}"
     rules = {v["message"]: v["expression"] for v in spec.get("validations", [])}
-    for message, (words, _) in BOUNDS.items():
+    for message, words in BOUNDS.items():
         if message not in rules:
-            problems.append(f"the policy does not hold: {message}")
+            yield f"the policy does not hold: {message}"
         elif not all(w in rules[message] for w in words):
-            problems.append(f"the policy's rule `{message}` does not name {words}: {rules[message]}")
+            yield f"the policy's rule `{message}` does not name {words}: {rules[message]}"
     for w in started:
         pod = as_started(w["spec"]["template"])
         if refusals(policy, pod):
-            problems.append(
+            yield (
                 f"the policy refuses the {w['metadata']['name']} template: {refusals(policy, pod)}"
             )
         for attack, bad in attacks(pod):
-            if not refusals(policy, bad):
-                problems.append(f"the policy admits a {w['metadata']['name']} pod with {attack}")
+            if not refusals(policy, bad, first=True):
+                yield f"the policy admits a {w['metadata']['name']} pod with {attack}"
+
+
+def deploy_manager_admission(docs: list[dict]) -> list[str]:
+    return list(admission_problems(docs))
+
+
+@functools.cache
+def admission_holds() -> bool:
+    """The unseeded chart's pod admission, checked once for every seeded bug."""
+    return deploy_manager_admission(render_all()) == []
+
+
+@functools.cache
+def accounts_hold() -> bool:
+    """The unseeded chart's account admission, checked once for every seeded bug."""
+    return deploy_manager_accounts(render_all()) == []
+
+
+# Each bound the ServiceAccounts policy must hold (DEC-1177), as BOUNDS for pods: the words its CEL
+# must name; what it admits is its CEL, evaluated.
+ACCOUNT_BOUNDS = {
+    "an account the deployment manager makes or deletes is named for a connection's token exchange": [
+        "variables.account.metadata.name.matches('^x([0-9a-f]{2}){1,64}$')"
+    ],
+    "an account the deployment manager makes or deletes mounts no token and holds no Secret": [
+        "variables.account.automountServiceAccountToken == false",
+        "!has(variables.account.secrets)",
+        "!has(variables.account.imagePullSecrets)",
+    ],
+    "an account the deployment manager makes or deletes is a token exchange's, in this workspace": [
+        '["app.kubernetes.io/managed-by"] == "mandate-deploy-manager"',
+        '["mandate.dev/workspace"] == "ws1"',
+        '["mandate.dev/process"] == "token-exchange"',
+    ],
+}
+ACCOUNT_VARIABLE = 'request.operation == "DELETE" ? oldObject : object'
+
+
+def account(name: str = CONNECTION_ACCOUNT, process_name: str = EXCHANGE) -> dict:
+    """A ServiceAccount as the manager creates it for a connection's token exchange (DEC-1177)."""
+    return {
+        "apiVersion": "v1",
+        "kind": "ServiceAccount",
+        "metadata": {
+            "name": name,
+            "labels": {
+                "app.kubernetes.io/managed-by": "mandate-deploy-manager",
+                "mandate.dev/workspace": "ws1",
+                "mandate.dev/process": process_name,
+            },
+        },
+        "automountServiceAccountToken": False,
+    }
+
+
+def account_refusals(policy: dict, sa: dict, operation: str = "CREATE", first: bool = False) -> list[str]:
+    """The policy's validations that refuse the manager's `operation` on `sa`, its CEL evaluated; a
+    delete reads the account as it stands."""
+    if operation == "DELETE":
+        return cel_refusals(policy, None, sa, operation, first)
+    return cel_refusals(policy, sa, None, operation, first)
+
+
+def account_attacks() -> list[tuple[str, dict]]:
+    def changed(name: str, change) -> tuple[str, dict]:
+        bad = account()
+        change(bad)
+        return name, bad
+
+    meta = lambda b: b["metadata"]  # noqa: E731
+    labels = lambda b: b["metadata"]["labels"]  # noqa: E731
+    return [
+        changed("the manager's own name", lambda b: meta(b).update(name=MANAGER)),
+        changed("the default account", lambda b: meta(b).update(name="default")),
+        changed("an upper-case name", lambda b: meta(b).update(name=CONNECTION_ACCOUNT.upper())),
+        changed("a bare x", lambda b: meta(b).update(name="x")),
+        changed("an odd count of hex digits", lambda b: meta(b).update(name=CONNECTION_ACCOUNT[:-1])),
+        changed("a name longer than any id", lambda b: meta(b).update(name="x" + "ab" * 65)),
+        changed("an executor's name", lambda b: meta(b).update(name=CONNECTION_ACCOUNT[1:])),
+        changed("a mounted token", lambda b: b.update(automountServiceAccountToken=True)),
+        changed("no automount setting", lambda b: b.pop("automountServiceAccountToken")),
+        changed("a Secret", lambda b: b.update(secrets=[{"name": "journal-ca"}])),
+        changed("a pull secret", lambda b: b.update(imagePullSecrets=[{"name": "s"}])),
+        changed("not the manager's", lambda b: labels(b).pop("app.kubernetes.io/managed-by")),
+        changed("another workspace", lambda b: labels(b).update({"mandate.dev/workspace": "ws2"})),
+        changed("an executor's label", lambda b: labels(b).update({"mandate.dev/process": "executor"})),
+        changed("a runtime's label", lambda b: labels(b).update({"mandate.dev/process": "runtime"})),
+    ]
+
+
+def deploy_manager_accounts(docs: list[dict]) -> list[str]:
+    """The manager's `create` and `delete serviceaccounts` are bounded as its pods are (DEC-1177):
+    one policy and its binding exactly when the manager renders, failing closed, matching core
+    ServiceAccounts' create, update and delete in the namespace and only the manager's own
+    requests, denying, with every bound in ACCOUNT_BOUNDS. A token exchange's account as the
+    manager makes it passes on create, update and delete; each attack fails on each, so the manager
+    can neither make nor delete the default account, its own, or another workload's."""
+    manager = any(is_manager(w) for w in workloads(docs))
+    found = [
+        d for d in docs if d["kind"] in (POLICY, POLICY_BINDING) and d["metadata"]["name"].endswith(ACCOUNTS_POLICY)
+    ]
+    if [d["kind"] for d in found] != ([POLICY, POLICY_BINDING] if manager else []):
+        return [f"account admission objects {[d['kind'] for d in found]} with the manager {'on' if manager else 'off'}"]
+    if not manager:
+        return []
+    problems = []
+    policy, binding = found
+    spec = policy["spec"]
+    if spec.get("failurePolicy") != "Fail":
+        problems.append(f"the account policy's failurePolicy is {spec.get('failurePolicy')}")
+    if spec.get("matchConstraints") != {"namespaceSelector": NAMESPACE_SELECTOR, "resourceRules": ACCOUNT_RULES}:
+        problems.append(f"the account policy matches {spec.get('matchConstraints')}")
+    conditions = [c["expression"] for c in spec.get("matchConditions", [])]
+    if conditions != [f"request.userInfo.username == '{MANAGER_USER}'"]:
+        problems.append(f"the account policy's match conditions are {conditions}")
+    if [(v["name"], v["expression"]) for v in spec.get("variables", [])] != [("account", ACCOUNT_VARIABLE)]:
+        problems.append(f"the account policy does not read a delete's account as it stands: {spec.get('variables')}")
+    if binding["spec"] != {
+        "policyName": policy["metadata"]["name"],
+        "validationActions": ["Deny"],
+        "matchResources": {"namespaceSelector": NAMESPACE_SELECTOR},
+    }:
+        problems.append(f"the account binding is {binding['spec']}")
+    rules = {v["message"]: v["expression"] for v in spec.get("validations", [])}
+    for message, words in ACCOUNT_BOUNDS.items():
+        if message not in rules:
+            problems.append(f"the account policy does not hold: {message}")
+        elif not all(w in rules[message] for w in words):
+            problems.append(f"the account policy's rule `{message}` does not name {words}: {rules[message]}")
+    for operation in ("CREATE", "UPDATE", "DELETE"):
+        if account_refusals(policy, account(), operation):
+            problems.append(f"the account policy refuses the exchange's {operation}: {account_refusals(policy, account(), operation)}")
+        for attack, bad in account_attacks():
+            if not account_refusals(policy, bad, operation, first=True):
+                problems.append(f"the account policy admits {operation} of an account with {attack}")
     return problems
+
+
+def test_deploy_manager_accounts():
+    docs = render_all()
+    assert deploy_manager_accounts(docs) == []
+    without = render_all("--set", f"images.{MANAGER}=")
+    assert deploy_manager_accounts(without) == []
+
+
+ACCOUNTS_SEEDED = [
+    lambda d: [x for x in d if not (x["kind"] == POLICY and x["metadata"]["name"].endswith(ACCOUNTS_POLICY))],
+    lambda d: mutate(
+        d, policy_of(d, ACCOUNTS_POLICY), POLICY, lambda p: p["spec"].update(failurePolicy="Ignore")
+    ),
+    lambda d: mutate(d, policy_of(d, ACCOUNTS_POLICY), POLICY, lambda p: p["spec"].pop("matchConditions")),
+    lambda d: mutate(
+        d,
+        policy_of(d, ACCOUNTS_POLICY),
+        POLICY,
+        drop_rule("an account the deployment manager makes or deletes is named for a connection's token exchange"),
+    ),
+    lambda d: mutate(
+        d,
+        policy_of(d, ACCOUNTS_POLICY),
+        POLICY,
+        rewrite_rule(
+            "an account the deployment manager makes or deletes is named for a connection's token exchange",
+            "matches('^x([0-9a-f]{2}){1,64}$')",
+            "matches('^x?[0-9a-f]+$')",
+        ),
+    ),
+    lambda d: mutate(
+        d,
+        policy_of(d, ACCOUNTS_POLICY),
+        POLICY,
+        drop_rule("an account the deployment manager makes or deletes mounts no token and holds no Secret"),
+    ),
+    lambda d: mutate(
+        d,
+        policy_of(d, ACCOUNTS_POLICY),
+        POLICY,
+        drop_rule("an account the deployment manager makes or deletes is a token exchange's, in this workspace"),
+    ),
+    lambda d: mutate(
+        d,
+        policy_of(d, ACCOUNTS_POLICY),
+        POLICY_BINDING,
+        lambda b: b["spec"].update(validationActions=["Warn"]),
+    ),
+    lambda d: mutate(
+        d,
+        policy_of(d, ACCOUNTS_POLICY),
+        POLICY,
+        loosen("an account the deployment manager makes or deletes is named for a connection's token exchange"),
+    ),
+    lambda d: mutate(
+        d,
+        policy_of(d, ACCOUNTS_POLICY),
+        POLICY,
+        loosen("an account the deployment manager makes or deletes mounts no token and holds no Secret"),
+    ),
+    lambda d: mutate(
+        d,
+        policy_of(d, ACCOUNTS_POLICY),
+        POLICY,
+        lambda p: p["spec"]["variables"][0].update(expression="object"),
+    ),
+    lambda d: mutate(
+        d,
+        policy_of(d, ACCOUNTS_POLICY),
+        POLICY,
+        lambda p: p["spec"]["matchConstraints"]["resourceRules"][0]["operations"].remove("DELETE"),
+    ),
+]
+
+
+@pytest.mark.parametrize("seed", ACCOUNTS_SEEDED, ids=[f"accounts-{i}" for i in range(len(ACCOUNTS_SEEDED))])
+def test_each_account_seeded_bug_is_caught(seed):
+    docs = render_all()
+    assert accounts_hold(), "the unseeded chart already fails"
+    assert deploy_manager_accounts(seed(docs)), "deploy_manager_accounts missed its seeded bug"
+
+
+def test_the_manager_role_seeded_bugs_are_caught():
+    docs = render_all()
+    assert deploy_manager_contained(docs) == []
+    for change in (
+        lambda r: r["rules"][1]["verbs"].append("update"),
+        lambda r: r["rules"][1]["resources"].append("secrets"),
+        lambda r: r["rules"].pop(1),
+    ):
+        assert deploy_manager_contained(mutate(docs, MANAGER, "Role", change)), change
+
+
+def cel_shape(value, at: str = "$"):
+    """The CEL type of a JSON literal, or `TypeError` naming where it mixes two: the API server
+    refuses a policy whose map or list literal holds values of different types (#2077's cell run),
+    so a mirror of the rules over a mixed literal could pass while the cell cannot install it. An
+    empty list takes the type of the lists beside it."""
+    def merge(shapes, where):
+        known = {s for s in shapes if s is not None}
+        if len(known) > 1:
+            raise TypeError(f"{where} mixes {sorted(map(str, known))}")
+        return next(iter(known), None)
+
+    if isinstance(value, dict):
+        return ("map", merge([cel_shape(v, f"{at}.{k}") for k, v in value.items()], at))
+    if isinstance(value, list):
+        return ("list", merge([cel_shape(v, f"{at}[{i}]") for i, v in enumerate(value)], at)) if value else None
+    return type(value).__name__
+
+
+def test_every_admission_literal_has_one_type_so_cel_compiles_it():
+    for docs in (render_all(), render_all("--set", f"images.{EXCHANGE}=")):
+        for policy in (d for d in docs if d["kind"] == POLICY):
+            for name, value in policy_variables(policy).items():
+                cel_shape(value, name)
+    with pytest.raises(TypeError, match="commands"):
+        cel_shape({"executor": [{"name": "executor", "args": ["run"]}]}, "commands")
+    with pytest.raises(TypeError, match="projected"):
+        cel_shape({"token-exchange": [{"audience": "mandate-vault", "expirationSeconds": 600}]}, "projected")
 
 
 def test_deploy_manager_admission():
@@ -1441,10 +1934,40 @@ def test_deploy_manager_admission():
     assert deploy_manager_admission(without) == [] and not [
         d for d in without if d["kind"] in (POLICY, POLICY_BINDING)
     ]
-    only_runtime = render_all("--set", "images.executor=")
+    only_runtime = render_all("--set", "images.executor=", "--set", f"images.{EXCHANGE}=")
     assert deploy_manager_admission(only_runtime) == []
     policy = next(d for d in only_runtime if d["kind"] == POLICY)
-    assert policy_variables(policy)["allowedSecrets"] == ["journal-ca", "journal-role-mandate-runtime"]
+    assert policy_variables(policy)["secrets"] == {"runtime": ["journal-ca", "journal-role-mandate-runtime"]}
+
+
+def test_the_token_exchange_is_a_managed_one_shot_pod():
+    """DEC-2627, DEC-1175: with its image named, the token exchange is a template the manager
+    starts, never a standing workload; no Secret, only its projected vault token (DEC-2060)."""
+    docs = render_all()
+    assert not [d for d in docs if d["kind"] in ("Deployment", "Job") and d["metadata"]["name"] == EXCHANGE]
+    pod = next(w for w in managed_pods(docs) if w["metadata"]["name"] == EXCHANGE)["spec"]["template"]
+    volumes = pod["spec"]["volumes"]
+    assert not [v for v in volumes if "secret" in v]
+    assert [v["projected"] for v in volumes if "projected" in v] == [
+        {
+            "defaultMode": 292,
+            "sources": [
+                {
+                    "serviceAccountToken": {
+                        "audience": "mandate-vault",
+                        "expirationSeconds": 600,
+                        "path": "token",
+                    }
+                },
+                {"downwardAPI": {"items": [{"path": "namespace", "fieldRef": {"fieldPath": "metadata.namespace"}}]}},
+            ],
+        }
+    ]
+    mounts = [m for c in pod["spec"]["containers"] for m in c["volumeMounts"] if m["name"] == "vault-token"]
+    assert mounts == [{"name": "vault-token", "mountPath": "/run/mandate/vault-token", "readOnly": True}]
+    assert pod["spec"]["automountServiceAccountToken"] is False
+    assert pod["metadata"]["labels"]["mandate.dev/process"] == EXCHANGE
+    assert pod["metadata"]["labels"]["mandate.dev/workspace"] == "ws1"
 STUB = "mandate.local/stub-issuer:0123456789ab"
 STUB_BIND = "127.0.0.1:8090"
 
@@ -1706,6 +2229,73 @@ def test_the_tunnel_runs_beside_the_api():
     ]
     for seeded in seeds:
         assert tunnel_route(seeded), seeded
+
+
+ALPACA_SET_VALUES = {
+    "MANDATE_ALPACA_CLIENT_ID": "PKTESTCLIENT01",
+    "MANDATE_ALPACA_REDIRECT_URI": "https://api.example/v1/oauth/alpaca/callback",
+}
+ALPACA_PROCESSES = {"api", "token-exchange"}
+ALPACA_SET = (
+    "--set",
+    f"alpacaOAuth.clientId={ALPACA_SET_VALUES['MANDATE_ALPACA_CLIENT_ID']}",
+    "--set",
+    f"alpacaOAuth.redirectUri={ALPACA_SET_VALUES['MANDATE_ALPACA_REDIRECT_URI']}",
+)
+
+
+def alpaca_oauth_env(docs: list[dict], expected: dict[str, str]) -> list[str]:
+    """DEC-2636: the Alpaca OAuth client id and redirect URI reach only the API's and the token
+    exchange's own containers, each exactly as `expected` names them (so both send the identical
+    URI), neither when `expected` is empty, and no other container at all."""
+    problems = []
+    for w in workloads(docs):
+        process = w["metadata"].get("labels", {}).get("mandate.dev/process")
+        for c in pod_spec(w)["containers"]:
+            carried = {e["name"]: e.get("value") for e in c.get("env", []) if e["name"] in ALPACA_SET_VALUES}
+            wanted = expected if process in ALPACA_PROCESSES and c["name"] == process else {}
+            if carried != wanted:
+                problems.append(f"{w['metadata']['name']}/{c['name']} carries {carried}")
+    return problems
+
+
+def test_the_alpaca_oauth_settings_reach_the_api_and_the_token_exchange_only():
+    assert alpaca_oauth_env(render_all(), {}) == []
+    docs = render_all(*ALPACA_SET)
+    assert alpaca_oauth_env(docs, ALPACA_SET_VALUES) == []
+    leaked = mutate(
+        docs,
+        "scheduler",
+        "Deployment",
+        lambda w: first_container(w).setdefault("env", []).append({"name": "MANDATE_ALPACA_CLIENT_ID", "value": "x"}),
+    )
+    assert alpaca_oauth_env(leaked, ALPACA_SET_VALUES), "a third process given the client id is caught"
+    dropped = mutate(
+        docs,
+        "token-exchange",
+        "Pod",
+        lambda w: first_container(w).update(
+            env=[e for e in first_container(w)["env"] if e["name"] != "MANDATE_ALPACA_REDIRECT_URI"]
+        ),
+    )
+    assert alpaca_oauth_env(dropped, ALPACA_SET_VALUES), "the exchange without the redirect URI is caught"
+    differs = mutate(
+        docs,
+        "token-exchange",
+        "Pod",
+        lambda w: next(e for e in first_container(w)["env"] if e["name"] == "MANDATE_ALPACA_REDIRECT_URI").update(
+            value="https://other.example/v1/oauth/alpaca/callback"
+        ),
+    )
+    assert alpaca_oauth_env(differs, ALPACA_SET_VALUES), "an exchange sending another URI is caught"
+    for refused in (
+        "alpacaOAuth.clientId=has space",
+        "alpacaOAuth.redirectUri=http://evil.example/v1/oauth/alpaca/callback",
+        "alpacaOAuth.redirectUri=https://api.example/elsewhere",
+        "alpacaOAuth.redirectUri=https://api.example/v1/oauth/alpaca/callback?x=1",
+        "alpacaOAuth.redirectUri=https://api.example/v1/oauth/alpaca/callback#f",
+    ):
+        assert helm(CHART, "--set", refused).returncode != 0, refused
 
 
 def test_environment_is_paper_or_backtest():
@@ -2118,16 +2708,37 @@ def test_each_seeded_bug_is_caught(check, seed):
     assert check(seed(docs)), f"{check.__name__} missed its seeded bug"
 
 
-def policy_of(docs: list[dict]) -> str:
-    return next(d["metadata"]["name"] for d in docs if d["kind"] == POLICY)
+def policy_of(docs: list[dict], suffix: str = PODS_POLICY) -> str:
+    return next(d["metadata"]["name"] for d in docs if d["kind"] == POLICY and d["metadata"]["name"].endswith(suffix))
 
 
-def widen(variable: str, extra: str):
+def replace_variable(variable: str, how):
     def change(policy: dict) -> None:
         entry = next(v for v in policy["spec"]["variables"] if v["name"] == variable)
-        entry["expression"] = json.dumps([*json.loads(entry["expression"]), extra])
+        entry["expression"] = json.dumps(how(json.loads(entry["expression"])))
 
     return change
+
+
+def widen(variable: str, name: str, extra: str):
+    """One process's list in a per-process map, widened by `extra`."""
+    return replace_variable(variable, lambda lists: {**lists, name: [*lists.get(name, []), extra]})
+
+
+def rewrite_rule(message: str, old: str, new: str):
+    def change(policy: dict) -> None:
+        rule = next(v for v in policy["spec"]["validations"] if v["message"] == message)
+        rule["expression"] = rule["expression"].replace(old, new)
+
+    return change
+
+
+def loosen(message: str):
+    """The rule of `message` made to admit everything, as `|| true` would."""
+    return lambda policy: rewrite_rule(
+        message, (rule := next(v for v in policy["spec"]["validations"] if v["message"] == message))["expression"],
+        f"({rule['expression']}) || true",
+    )(policy)
 
 
 def drop_rule(message: str):
@@ -2150,9 +2761,93 @@ ADMISSION_SEEDED = [
         ),
     ),
     lambda d: mutate(d, policy_of(d), POLICY, lambda p: p["spec"].pop("matchConditions")),
-    lambda d: mutate(d, policy_of(d), POLICY, widen("allowedSecrets", "journal-role-mandate-control")),
-    lambda d: mutate(d, policy_of(d), POLICY, widen("allowedImages", "registry.example/shell:1")),
-    lambda d: mutate(d, policy_of(d), POLICY, widen("allowedClaims", "journal-1")),
+    lambda d: mutate(d, policy_of(d), POLICY, widen("secrets", "runtime", "journal-role-mandate-control")),
+    lambda d: mutate(d, policy_of(d), POLICY, widen("images", "runtime", "registry.example/shell:1")),
+    lambda d: mutate(d, policy_of(d), POLICY, widen("claims", "runtime", "journal-1")),
+    lambda d: mutate(d, policy_of(d), POLICY, widen("secrets", EXCHANGE, "journal-ca")),
+    lambda d: mutate(d, policy_of(d), POLICY, widen("images", EXCHANGE, PLACEHOLDER.format("runtime"))),
+    lambda d: mutate(
+        d,
+        policy_of(d),
+        POLICY,
+        drop_rule("a pod the deployment manager makes runs exactly its own process's commands and arguments"),
+    ),
+    lambda d: mutate(
+        d,
+        policy_of(d),
+        POLICY,
+        replace_variable(
+            "images", lambda images: {n: sorted({i for v in images.values() for i in v}) for n in images}
+        ),
+    ),
+    lambda d: mutate(
+        d,
+        policy_of(d),
+        POLICY,
+        replace_variable("projected", lambda projected: {n: projected[EXCHANGE] for n in projected}),
+    ),
+    lambda d: mutate(
+        d,
+        policy_of(d),
+        POLICY,
+        widen(
+            "projected", EXCHANGE, "mandate-vault|86400|token|292|namespace=metadata.namespace"
+        ),
+    ),
+    lambda d: mutate(
+        d,
+        policy_of(d),
+        POLICY,
+        rewrite_rule(
+            "a pod the deployment manager makes names no service account but the default, or a token exchange its own",
+            "matches('^x([0-9a-f]{2}){1,64}$')",
+            "matches('^x[0-9a-f]+$')",
+        ),
+    ),
+    lambda d: mutate(
+        d,
+        policy_of(d),
+        POLICY,
+        rewrite_rule(
+            "a pod the deployment manager makes runs exactly its own process's commands and arguments",
+            "variables.commands[variables.process][c.name] ==",
+            "variables.commands[variables.process][c.name] !=",
+        ),
+    ),
+    lambda d: mutate(
+        d,
+        policy_of(d),
+        POLICY,
+        loosen("a pod the deployment manager makes reads no Secret through its environment or a pull secret"),
+    ),
+    lambda d: mutate(
+        d,
+        policy_of(d),
+        POLICY,
+        loosen(
+            "a pod the deployment manager makes mounts only memory, its own process's Secrets and projected token, or its claims read-only"
+        ),
+    ),
+    lambda d: mutate(
+        d,
+        policy_of(d),
+        POLICY,
+        loosen(
+            "a token exchange's pod names its own account in its environment once, beside its connection, which the exchange checks against each other"
+        ),
+    ),
+    lambda d: mutate(
+        d,
+        policy_of(d),
+        POLICY,
+        loosen("a pod the deployment manager makes runs as no root user, adds no capability, and names no node or host alias"),
+    ),
+    lambda d: mutate(
+        d,
+        policy_of(d),
+        POLICY,
+        loosen("a pod the deployment manager makes names no service account but the default, or a token exchange its own"),
+    ),
     lambda d: mutate(
         d,
         policy_of(d),
@@ -2171,8 +2866,8 @@ ADMISSION_SEEDED = [
 )
 def test_each_admission_seeded_bug_is_caught(seed):
     docs = render_all()
-    assert deploy_manager_admission(docs) == []
-    assert deploy_manager_admission(seed(docs)), "deploy_manager_admission missed its seeded bug"
+    assert admission_holds(), "the unseeded chart already fails"
+    assert next(admission_problems(seed(docs)), None), "deploy_manager_admission missed its seeded bug"
 
 
 def test_roles_and_compose_seeded_bugs_are_caught():
@@ -2207,6 +2902,9 @@ def probe_binaries(docs: list[dict]) -> list[str]:
                 command = c.get(kind, {}).get("exec", {}).get("command")
                 if command and not re.fullmatch(r"/mandate-[a-z-]+", command[0]):
                     problems.append(f"{w['metadata']['name']}/{c['name']} {kind} runs {command[0]}")
+            launch = c.get("command", [])
+            if launch and "mandate-" in launch[0] and not re.fullmatch(r"/mandate-[a-z-]+", launch[0]):
+                problems.append(f"{w['metadata']['name']}/{c['name']} runs {launch[0]}")
     return problems
 
 
@@ -2225,6 +2923,13 @@ def test_probes_name_the_binary_at_the_image_root():
         ),
     )
     assert probe_binaries(moved)
+    exchange = mutate(
+        docs,
+        EXCHANGE,
+        "Pod",
+        lambda w: first_container(w).update(command=["/usr/local/bin/mandate-token-exchange"]),
+    )
+    assert probe_binaries(exchange), "a launch outside the image root went unseen"
 
 
 def test_the_journal_reaches_the_kubernetes_api_by_ipv4_hosts_only():

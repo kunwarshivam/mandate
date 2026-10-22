@@ -58,6 +58,7 @@ fn app() -> App {
         step_up: Arc::new(mandate_api_server::stepup::Unbound),
         challenges: Arc::default(),
         connect: None,
+        reduction: Arc::default(),
     }
 }
 
