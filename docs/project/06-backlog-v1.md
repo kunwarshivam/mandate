@@ -3366,6 +3366,19 @@ enables `live` (ES-23, OPS-5).
   - egress to OpenRouter's host is open for the model-gateway pod alone;
   - every test and CI job uses recorded responses only.
 
+  *Follow-ups, outside the acceptance above:*
+  - **An earlier turn's response by reference.** An agentic request carries each earlier turn's
+    provider response as hex, so a single 2 MiB response fills the 4 MiB request frame and a longer
+    run is refused `too_long` before any spend. Carry an earlier turn's response by its artifact
+    digest, not inline. Don't raise the frame bound, since a bigger bound widens what any peer may
+    make the service read (DEC-2265 item 1).
+  - **A deadline per frame.** The serve loop's socket timeout bounds each read, not the whole
+    frame, so a peer sending one byte at a time holds its slot past the timeout. Give each frame a
+    total deadline.
+  - **Wipe the provider key when dropped.** `ProviderKey` holds a plain `String` (DEC-2326 item 5).
+    Hold it in a type that zeroizes on drop, adding `secrecy` to `mandate-gateway`'s allowed
+    dependencies.
+
 ## Won't (v1)
 
 Live retail trading before counsel signs off; users outside the US; options; Interactive Brokers and Coinbase connectors; native mobile apps; WebAssembly plug-ins; SAML and SCIM;
