@@ -1,9 +1,0 @@
-file = "crates/mandate-daemon/tests/recorded_news.rs"
-test = "a_get_answers_a_recorded_item_s_stored_text_at_its_age"
-reason = """
-The cell's recorded plane keeps the news reader's default `search` and `news_text`, which answer
-`unavailable`, the real behaviour of a reader that cannot match terms or store text (rule 3): the
-test fails on that answer, not at a stub, since a panicking stub would break the bench and the
-injection tests that already ask these reads. E19-16's news slice implements both and deletes this
-row.
-"""
