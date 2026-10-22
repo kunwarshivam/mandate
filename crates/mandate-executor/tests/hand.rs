@@ -5976,7 +5976,6 @@ fn a_close_is_asked_again_only_on_a_later_read_showing_it_still_held() {
 /// A later read showing BTC no longer held asks no close again (DEC-2337 item 3): only a read that
 /// shows the instrument still held does.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_later_read_showing_the_instrument_flat_asks_no_close_again() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[BTC]);
@@ -6015,7 +6014,6 @@ fn a_later_read_showing_the_instrument_flat_asks_no_close_again() {
 /// The in-doubt re-read stops once nothing the switch closes is held (DEC-2333 item 3): after the
 /// close's fill leaves BTC flat, a tick past the window reads nothing again.
 #[test]
-#[ignore = "pending E7-4"]
 fn the_switch_reads_nothing_again_once_nothing_is_held() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[BTC]);
