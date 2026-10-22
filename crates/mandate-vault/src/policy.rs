@@ -57,6 +57,14 @@ pub enum SecretPath {
     AccountId(ConnectionId),
     /// A secret of the platform's own that one process type reads (DEC-2020).
     Platform(PlatformSecret),
+    /// A connection's account fingerprint and the reference it was computed beside, in the
+    /// personal-data vault, written once by its executor (DEC-2345).
+    Fingerprint(ConnectionId),
+    /// The fingerprint registry: which connection holds each fingerprint, the connection
+    /// manager's alone, changed by check-and-set (DEC-2345).
+    Claims,
+    /// The marker that the fingerprint key is rotating (connections spec §3.1).
+    Rotating,
 }
 
 /// A secret of the platform's own, held for one process type, never an environment variable or a
@@ -148,16 +156,20 @@ pub struct Mounts {
     pub kubernetes_executor: String,
     /// The Kubernetes auth mount a connection's token exchange logs in on (DEC-2060).
     pub kubernetes_exchange: String,
+    /// The transit mount that holds the fingerprint key (DEC-2345).
+    pub transit: String,
 }
 
 impl Default for Mounts {
-    /// `mandate`, `approle`, `kubernetes-executor` and `kubernetes-exchange`, the cell's.
+    /// `mandate`, `approle`, `kubernetes-executor`, `kubernetes-exchange` and `transit`, the
+    /// cell's.
     fn default() -> Self {
         Self {
             kv: "mandate".to_owned(),
             auth: "approle".to_owned(),
             kubernetes_executor: "kubernetes-executor".to_owned(),
             kubernetes_exchange: "kubernetes-exchange".to_owned(),
+            transit: "transit".to_owned(),
         }
     }
 }
@@ -216,6 +228,9 @@ pub fn kv_path(path: &SecretPath) -> Result<String, SourceError> {
         }
         SecretPath::Platform(PlatformSecret::EmailCredential) => {
             "platform/email-credential".to_owned()
+        }
+        SecretPath::Fingerprint(_) | SecretPath::Claims | SecretPath::Rotating => {
+            return Err(SourceError::Unimplemented { story: "E21-32" });
         }
     })
 }

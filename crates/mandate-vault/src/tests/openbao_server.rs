@@ -171,6 +171,7 @@ impl Bao {
             auth: format!("approle-{suffix}"),
             kubernetes_executor: format!("kubernetes-executor-{suffix}"),
             kubernetes_exchange: format!("kubernetes-exchange-{suffix}"),
+            transit: format!("transit-{suffix}"),
         };
         let direct = OpenBaoConfig {
             address: address.clone(),
@@ -458,6 +459,7 @@ async fn provisioning_sets_both_kubernetes_mounts_up_with_their_templated_polici
             auth: format!("approle-{suffix}"),
             kubernetes_executor: format!("kubernetes-executor-{suffix}"),
             kubernetes_exchange: format!("kubernetes-exchange-{suffix}"),
+            transit: format!("transit-{suffix}"),
         },
     };
     for round in 0..2 {
@@ -583,6 +585,7 @@ async fn kubernetes_auth_alone_adds_only_the_missing_mount_and_mints_no_secret_i
             auth: format!("approle-{suffix}"),
             kubernetes_executor: format!("kubernetes-executor-{suffix}"),
             kubernetes_exchange: format!("kubernetes-exchange-{suffix}"),
+            transit: format!("transit-{suffix}"),
         },
     };
     let mounts = &config.mounts;
@@ -869,6 +872,7 @@ async fn provisioning_replaces_a_policy_left_under_its_name() {
             auth: format!("approle-{suffix}"),
             kubernetes_executor: format!("kubernetes-executor-{suffix}"),
             kubernetes_exchange: format!("kubernetes-exchange-{suffix}"),
+            transit: format!("transit-{suffix}"),
         },
     };
     let exchange = Identity::TokenExchange(c("c1"));

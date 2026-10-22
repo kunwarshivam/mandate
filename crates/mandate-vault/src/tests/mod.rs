@@ -5,6 +5,7 @@ mod conformance;
 mod credentials;
 mod debug;
 mod errors;
+mod fingerprint;
 mod kube;
 mod kubernetes;
 mod lease;

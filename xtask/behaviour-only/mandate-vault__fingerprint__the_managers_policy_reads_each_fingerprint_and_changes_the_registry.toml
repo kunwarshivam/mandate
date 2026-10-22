@@ -1,0 +1,7 @@
+file = "crates/mandate-vault/src/tests/fingerprint.rs"
+test = "the_managers_policy_reads_each_fingerprint_and_changes_the_registry"
+reason = """
+The policy table and the policies it renders are already implemented and answer `false`, or no
+block, for the fingerprint paths, so the test fails on that answer, not at a stub. E21-32's F3a
+implementation grants them (DEC-2345) and deletes this row.
+"""
