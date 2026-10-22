@@ -21,8 +21,9 @@ pub enum Call {
     },
 }
 
-/// The fake. A start creates a running instance that is not ready; a stop removes a running or
-/// pending instance at once and leaves an unknown one unknown, as a lost node would.
+/// The fake. A start creates a running instance that is not ready; a stop removes a running,
+/// pending or exited instance at once, as deleting its pod would, and leaves an unknown one
+/// unknown, as a lost node would.
 #[derive(Debug, Clone, Default)]
 pub struct Fake {
     instances: BTreeMap<(Slot, u64), Phase>,
@@ -150,7 +151,7 @@ impl Orchestrator for Fake {
         let key = (slot.clone(), generation);
         if matches!(
             self.instances.get(&key),
-            Some(Phase::Running { .. } | Phase::Pending)
+            Some(Phase::Running { .. } | Phase::Pending | Phase::Exited)
         ) {
             self.instances.remove(&key);
         }

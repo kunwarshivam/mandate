@@ -38,6 +38,13 @@ pub enum Decision {
     Retry(Effect),
 }
 
+/// A connection's OAuth request: its token exchange's deadline, and whether a record closed it.
+#[derive(Debug, Clone)]
+struct Request {
+    deadline: UtcNanos,
+    closed: bool,
+}
+
 #[derive(Debug, Clone)]
 struct Agent {
     account: String,
@@ -83,6 +90,10 @@ pub struct Manager {
     /// whether this manager has reported each (DEC-2038).
     unconnected: BTreeMap<String, bool>,
     slots: BTreeMap<Slot, SlotState>,
+    /// Each connection's OAuth request, by `connection_id` (DEC-1175).
+    requests: BTreeMap<String, Request>,
+    /// Every connection a record closed a request of, so a request read after one starts nothing.
+    closed: BTreeSet<String>,
 }
 
 impl Manager {
@@ -108,10 +119,28 @@ impl Manager {
                     .entry(connection.clone())
                     .or_insert_with(|| account.clone());
                 self.established.insert(connection.clone());
+                self.close(connection);
             }
             Fact::Revoked { connection } => {
                 self.established.remove(connection);
+                self.close(connection);
             }
+            Fact::Requested {
+                connection,
+                deadline,
+            } => {
+                let closed = self.closed.contains(connection);
+                self.requests
+                    .entry(connection.clone())
+                    .or_insert_with(|| Request {
+                        deadline: *deadline,
+                        closed,
+                    });
+                self.slots
+                    .entry(Slot::token_exchange(connection))
+                    .or_default();
+            }
+            Fact::RequestClosed { connection } => self.close(connection),
             Fact::DeployedUnread { agent } => {
                 if !self.agents.contains_key(agent) && !self.stopped.contains(agent) {
                     self.unread.entry(agent.clone()).or_insert(false);
@@ -191,7 +220,7 @@ impl Manager {
                     state.awaiting_launch = false;
                     state.down_since = None;
                     match cause {
-                        Cause::Deployed => state.restarts.clear(),
+                        Cause::Deployed | Cause::Requested => state.restarts.clear(),
                         Cause::Restart => state.restarts.push(*at),
                         Cause::KillSwitch => {}
                     }
@@ -205,6 +234,26 @@ impl Manager {
                     .insert(*generation);
             }
             Fact::CrashLooped { slot } => self.slots.entry(slot.clone()).or_default().looped = true,
+        }
+    }
+
+    /// Closes `connection`'s request, read or still to come (rule 131).
+    fn close(&mut self, connection: &str) {
+        self.closed.insert(connection.to_owned());
+        if let Some(request) = self.requests.get_mut(connection) {
+            request.closed = true;
+        }
+    }
+
+    /// What a token exchange's request has left at `now`, which its pod is given to end by; `None`
+    /// for every other process, which runs until it is stopped.
+    pub fn lifetime(&self, slot: &Slot, now: UtcNanos) -> Option<Duration> {
+        match slot.process {
+            Process::TokenExchange => self
+                .requests
+                .get(&slot.subject)
+                .map(|request| elapsed(now, request.deadline)),
+            Process::Runtime | Process::Executor => None,
         }
     }
 
@@ -238,8 +287,8 @@ impl Manager {
     }
 
     /// Whether the control stream wants `slot` running: a runtime for an agent deployed and not
-    /// stopped, and an executor for an account with such an agent. No token exchange is wanted yet:
-    /// the manager reads no request.
+    /// stopped, an executor for an account with such an agent, and a token exchange for a
+    /// connection whose OAuth request is open.
     pub fn desired(&self, slot: &Slot) -> bool {
         match slot.process {
             Process::Runtime => self
@@ -250,7 +299,10 @@ impl Manager {
                 .agents
                 .values()
                 .any(|agent| !agent.stopped && agent.account == slot.subject),
-            Process::TokenExchange => false,
+            Process::TokenExchange => self
+                .requests
+                .get(&slot.subject)
+                .is_some_and(|request| !request.closed),
         }
     }
 
@@ -298,9 +350,13 @@ impl Manager {
         let slots: Vec<Slot> = self.slots.keys().cloned().collect();
         decisions.extend(slots.into_iter().filter_map(|slot| {
             let desired = self.desired(&slot);
+            let lifetime = self.lifetime(&slot, now);
             let state = self.slots.get_mut(&slot)?;
             let instances: Vec<&Instance> = observed.iter().filter(|i| i.slot == slot).collect();
-            step(&slot, state, desired, &instances, now)
+            match lifetime {
+                Some(lifetime) => exchange_step(&slot, state, desired, lifetime, &instances),
+                None => step(&slot, state, desired, &instances, now),
+            }
         }));
         decisions
     }
@@ -370,6 +426,47 @@ fn step(
     }
     let wait = backoff(within_window(&state.restarts, now));
     (elapsed(down_since, now) >= wait).then(|| start(slot, next, Cause::Restart, None))
+}
+
+/// A token exchange's step (DEC-1175 items 2 to 4): one start, at generation 1, while its request
+/// is open and has at least a second left, asked of the orchestrator again only while this
+/// manager has not seen it carried out; never a restart; and once the request closes, a stop of
+/// every instance still listed, exited or not, so its pod and account are deleted. The deadline
+/// stops nothing: the pod ends by it.
+fn exchange_step(
+    slot: &Slot,
+    state: &mut SlotState,
+    open: bool,
+    lifetime: Duration,
+    instances: &[&Instance],
+) -> Option<Decision> {
+    if !open {
+        let generation = instances.iter().map(|i| i.generation).max()?;
+        return Some(if state.stopping.contains(&generation) {
+            Decision::Retry(Effect::Stop {
+                slot: slot.clone(),
+                generation,
+            })
+        } else {
+            Decision::Journal(Record::Stop {
+                slot: slot.clone(),
+                generation,
+            })
+        });
+    }
+    if lifetime < Duration::from_secs(1) {
+        return None;
+    }
+    if state.generation == 0 {
+        return Some(start(slot, 1, Cause::Requested, None));
+    }
+    let listed = instances.iter().any(|i| i.generation == state.generation);
+    (state.awaiting_launch && !listed).then(|| {
+        Decision::Retry(Effect::Start {
+            slot: slot.clone(),
+            generation: state.generation,
+        })
+    })
 }
 
 fn start(slot: &Slot, generation: u64, cause: Cause, kill_switch: Option<String>) -> Decision {
