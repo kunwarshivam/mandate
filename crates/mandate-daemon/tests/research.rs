@@ -698,3 +698,91 @@ fn the_demo_agent_opted_in_runs_no_research_and_spends_nothing() {
         kinds(&researching)
     );
 }
+
+/// DEC-2316 item 1: a run may take every turn its loop allows. The cell's worker over the agentic
+/// bundle with seven scripted turns, each one note, and the final reply runs the `v0_2` loop's eight
+/// turns within one minute, each answered `ok`, and ends `done`. The cell's gateway rate cap is
+/// derived from the pinned loop, so it never cuts a run inside its own bounds.
+#[test]
+#[ignore = "pending E19-6"]
+fn an_agentic_run_takes_every_turn_its_loop_allows_and_ends_done() {
+    let rig = Rig::default();
+    reconciled(&rig);
+    established(&rig);
+    let mut bundle = Bundle::load(Path::new(AGENTIC_BUNDLE)).unwrap();
+    let scripted = usize::try_from(bundle.entry.agentic.unwrap().max_turns - 1).unwrap();
+    let note = bundle.turns[1].clone();
+    while bundle.turns.len() < scripted {
+        let mut next = note.clone();
+        next.calls = vec![(
+            "note".to_owned(),
+            format!(r#"{{"text":"turn {} reads on"}}"#, bundle.turns.len() + 1),
+        )];
+        bundle.turns.push(next);
+    }
+    let pin = bundle.entry.content().model_ref();
+    let mut entry = config_entry();
+    entry.pin = pin.clone();
+    entry.agentic = Some(cell::agentic_config(&bundle).unwrap_or_else(|e| panic!("{e:?}")));
+    let clock = Rc::new(Cell::new(NOW));
+    let read = Rc::clone(&clock);
+    let who = WorkerFor {
+        workspace: WORKSPACE.to_owned(),
+        agent: AGENT.to_owned(),
+        description: entry.description.clone(),
+    };
+    let shelf = Shelf::default();
+    let worker = RecordedWorker::new(
+        &bundle,
+        who,
+        Box::new(shelf.clone()),
+        Box::new(move || at(read.get())),
+    )
+    .unwrap();
+    let research = ResearchWiring {
+        config: entry,
+        source: Box::new(Open::default()),
+        worker: Box::new(worker),
+        artifacts: Box::new(shelf),
+    };
+    let mut process = RuntimeProcess::start(
+        rig.clone(),
+        wiring_with(Some(research), Box::new(BundleRefs(pin.content_hash))),
+        &config(),
+        at(NOW),
+    );
+    for second in 60..120 {
+        tick(&rig, NOW + second);
+        clock.set(NOW + second);
+        process.step(at(NOW + second));
+    }
+    let rows = rig
+        .journal
+        .rows(&StreamId::parse(AGENT_STREAM).unwrap())
+        .unwrap();
+    let payloads = |kind: &str| -> Vec<Value> {
+        rows.iter()
+            .filter(|row| row.event_type == kind)
+            .map(|row| parse(&row.body).unwrap())
+            .map(|body| body.get("payload").unwrap().clone())
+            .collect()
+    };
+    let outcomes: Vec<String> = payloads("ModelInvocationRecorded")
+        .iter()
+        .map(|payload| format!("{:?}", payload.get("outcome")))
+        .collect();
+    assert_eq!(outcomes.len(), scripted + 1, "every turn: {outcomes:?}");
+    assert!(
+        outcomes.iter().all(|outcome| outcome.contains("\"ok\"")),
+        "{outcomes:?}"
+    );
+    let ends = payloads("RunEnded");
+    let [end] = ends.as_slice() else {
+        panic!("one end: {ends:?}");
+    };
+    assert_eq!(
+        format!("{:?}", end.get("reason")),
+        format!("{:?}", Some(&Value::Str("done".to_owned()))),
+        "{end:?}"
+    );
+}

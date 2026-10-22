@@ -1,0 +1,8 @@
+file = "crates/mandate-daemon/tests/worker_turn.rs"
+test = "a_fault_that_calls_again_within_a_minute_is_refused_past_the_loop_s_turns"
+reason = """
+The cell worker's gateway rate cap is a fixed 6 calls a minute, so the seventh call is refused
+where the loop's eight turns and the margin's two must be answered: the test fails on that
+behaviour, not at a stub, since no code is stubbed. DEC-2316's implementation derives the cap from
+the pinned loop's `max_turns` and deletes this row.
+"""
