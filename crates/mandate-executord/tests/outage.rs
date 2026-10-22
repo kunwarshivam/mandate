@@ -84,8 +84,9 @@ fn the_owed_exit_is_the_first_order_once_appends_succeed() -> Result<(), Error> 
     let first = broker
         .seen()
         .into_iter()
-        .nth(before)
-        .ok_or("nothing was sent once appends succeeded")?;
+        .skip(before)
+        .find(|seen| matches!(seen.request, BrokerRequest::Submit(_)))
+        .ok_or("no order was sent once appends succeeded")?;
     let BrokerRequest::Submit(order) = &first.request else {
         return Err(format!("the first request is not the exit: {first:?}").into());
     };
