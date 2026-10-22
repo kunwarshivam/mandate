@@ -8,14 +8,15 @@ use std::cell::{Cell, RefCell};
 use std::time::Duration;
 
 use mandate_canon::Value;
-use mandate_executord::serve::{Edge, Waited, serve, wait};
+use mandate_executord::serve::{Edge, STARTUP, Waited, serve, starting, wait};
 use mandate_journal::Environment;
 use mandate_process::probe::{Probe, Status, answer};
 use mandate_process::{Exit, Snapshot, State};
 use mandate_time::UtcNanos;
 use support::{
     ACCOUNT, ACCOUNT_STREAM, AGENT, Allowing, CONNECTION, CONTROL_STREAM, Error, Journal, NOON,
-    Paper, TwoPercentStop, at, deployed, object, opened, process_config, propose, wired,
+    Paper, TwoPercentStop, at, connect, deployed, object, opened, process_config, propose, tick,
+    wired,
 };
 
 const CHECK: &str = "e1h1o1";
@@ -31,6 +32,21 @@ fn text(s: &str) -> Value {
 fn connecting() -> Result<Journal, Error> {
     let journal = deployed()?;
     opened(&journal)?;
+    checked(&journal)?;
+    propose(
+        &journal,
+        AGENT,
+        "01JINTENT0000000000000000A",
+        "buy",
+        "10",
+        "150",
+        "open",
+    )?;
+    Ok(journal)
+}
+
+/// The account stream's `connect` check of the connection, every result passed.
+fn checked(journal: &Journal) -> Result<(), Error> {
     let row = |check: &str| {
         object(vec![
             ("check", text(check)),
@@ -54,17 +70,7 @@ fn connecting() -> Result<Journal, Error> {
             ),
             ("risk_clock", text("2026-09-21T14:59:00.000000000Z")),
         ])?,
-    )?;
-    propose(
-        &journal,
-        AGENT,
-        "01JINTENT0000000000000000A",
-        "buy",
-        "10",
-        "150",
-        "open",
-    )?;
-    Ok(journal)
+    )
 }
 
 /// The control services' version-2 `ConnectionEstablished` of that check.
@@ -156,7 +162,7 @@ fn with_edge<T>(
     Ok(out)
 }
 
-fn starting() -> Status {
+fn starting_status() -> Status {
     Status::new(Snapshot::unbounded(State::Starting))
 }
 
@@ -180,7 +186,7 @@ fn the_run_holds_an_opening_until_its_copy_and_passes_after_each_step() -> Resul
         Ok(())
     };
     let wiring = wired(Box::new(Allowing), Box::new(TwoPercentStop))?;
-    let status = starting();
+    let status = starting_status();
     let exit = with_edge(9, None, &each, |edge, _| {
         serve(
             journal.clone(),
@@ -222,7 +228,7 @@ fn a_gate_code_is_said_once_per_change() -> Result<(), Error> {
             broker.clone(),
             wiring,
             &process_config(Environment::Paper),
-            &starting(),
+            &starting_status(),
             edge,
         );
         (exit, seen.passes.get(), seen.said.borrow().clone())
@@ -252,7 +258,7 @@ fn a_lapsed_lease_drains_the_run() -> Result<(), Error> {
             broker.clone(),
             wiring,
             &process_config(Environment::Paper),
-            &starting(),
+            &starting_status(),
             edge,
         );
         (exit, seen.said.borrow().clone())
@@ -273,7 +279,7 @@ fn a_lapsed_lease_drains_the_run() -> Result<(), Error> {
 fn the_wait_appends_nothing_until_the_connection_is_due() -> Result<(), Error> {
     let journal = connecting()?;
     let rows = journal.rows_of(ACCOUNT_STREAM).len();
-    let status = starting();
+    let status = starting_status();
     let probed = RefCell::new(Vec::new());
     let each = |pass: usize| {
         let snapshot = status.snapshot();
@@ -311,7 +317,7 @@ fn an_established_or_due_stream_ends_the_wait_at_once() -> Result<(), Error> {
         let waited = wait(
             &journal,
             &process_config(Environment::Paper),
-            &starting(),
+            &starting_status(),
             &mut edge,
         );
         (waited, seen.passes.get())
@@ -352,12 +358,63 @@ fn the_wait_ends_fail_safe() -> Result<(), Error> {
             wait(
                 &journal,
                 &process_config(Environment::Paper),
-                &starting(),
+                &starting_status(),
                 &mut edge,
             )
         })?;
         assert_eq!(waited, expected);
         assert_eq!(journal.rows_of(ACCOUNT_STREAM).len(), rows);
     }
+    Ok(())
+}
+
+/// DEC-2346 item 2 and DEC-2347: a connection refused before its copy, on an account where no
+/// agent is deployed, ends the wait cleanly, since nothing was started and nothing is owed; with
+/// an agent deployed it ends as `connection_closed`, for the manager.
+#[test]
+fn a_closed_connection_with_no_agent_ends_the_wait_cleanly() -> Result<(), Error> {
+    let agentless = Journal::default();
+    connect(&agentless, "c1", CONNECTION, ACCOUNT)?;
+    tick(&agentless, "t1", NOON)?;
+    let deployed = connecting()?;
+    for journal in [&agentless, &deployed] {
+        if journal.types(ACCOUNT_STREAM).is_empty() {
+            opened(journal)?;
+            checked(journal)?;
+        }
+        refuse(journal)?;
+    }
+    let ended = |journal: &Journal| {
+        with_edge(usize::MAX, None, &|_| Ok(()), |mut edge, _| {
+            wait(
+                journal,
+                &process_config(Environment::Paper),
+                &starting_status(),
+                &mut edge,
+            )
+        })
+    };
+    assert_eq!(ended(&agentless)?, Ok(Waited::Closed));
+    assert_eq!(ended(&deployed)?, Err("connection_closed"));
+    Ok(())
+}
+
+/// The probe holds a start live for [`STARTUP`] and no longer, so a start that hangs (a vault
+/// login that never answers) is restarted.
+#[test]
+fn a_start_is_live_only_within_its_bound() -> Result<(), Error> {
+    let start = at(NOON)?;
+    let snapshot = starting(start);
+    assert_eq!(snapshot.state(), State::Starting);
+    let after = |secs: u64| -> Result<UtcNanos, Error> {
+        Ok(UtcNanos::from_parts(
+            start.secs() + i64::try_from(secs)?,
+            0,
+        )?)
+    };
+    assert!(answer(Probe::Live, snapshot, start).ok);
+    assert!(answer(Probe::Live, snapshot, after(STARTUP.as_secs())?).ok);
+    assert!(!answer(Probe::Live, snapshot, after(STARTUP.as_secs() + 1)?).ok);
+    assert!(!answer(Probe::Ready, snapshot, start).ok);
     Ok(())
 }

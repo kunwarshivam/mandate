@@ -60,7 +60,6 @@ use mandate_executord::serve::{self, Edge, Waited, wait};
 use mandate_executord::{Broker, Config, fixture, launch};
 use mandate_journal::Environment;
 use mandate_process::probe::{self, Probe, Status};
-use mandate_process::{Snapshot, State};
 use mandate_store::{MemoryStore, PgStore, Store};
 use mandate_time::UtcNanos;
 use mandate_vault::mounted::{
@@ -210,7 +209,7 @@ fn serve<S: Store>(
         liveness: LIVENESS,
         max_chain: MAX_CHAIN,
     };
-    let status = Status::new(Snapshot::unbounded(State::Starting));
+    let status = Status::new(serve::starting(host_now()));
     probe::serve(socket, status.clone(), host_now).map_err(|_| "probe_socket_unavailable")?;
     let wiring = fixture::wiring()?;
     let terminated = || terminate.load(Ordering::SeqCst);
@@ -248,6 +247,10 @@ fn serve<S: Store>(
     let served = match wait(&store, &config, &status, &mut edge) {
         Ok(Waited::Ready) => serve::serve(store, broker, wiring, &config, &status, edge),
         Ok(Waited::Stopped) => Ok(0),
+        Ok(Waited::Closed) => {
+            (edge.say)("connection_closed");
+            Ok(0)
+        }
         Err(code) => Err(code),
     };
     if let Err(code) = lease.give_back() {
