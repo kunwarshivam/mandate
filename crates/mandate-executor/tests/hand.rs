@@ -4414,7 +4414,6 @@ fn a_crypto_stop_limit_is_re_placed_for_the_new_net_quantity() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn a_fractional_position_protects_the_whole_shares_and_discloses_the_fraction() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[FRAC]);
@@ -4554,7 +4553,6 @@ fn fractional_position(ports: &mandate_executor::Ports<'_>, held: &str) -> Shell
 /// protective prices it carries, on a profile that offers brackets, and only that form (DEC-2312
 /// item 1). A whole-share entry in the same instrument still goes as its bracket.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_fractional_entry_goes_as_a_plain_day_limit_whatever_its_prices() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[FRAC]);
@@ -4621,7 +4619,6 @@ fn a_fractional_entry_goes_as_a_plain_day_limit_whatever_its_prices() {
 /// denies it as `add_blocked_by_protective_order`, as it denies any plain equity add: the
 /// conservative reading (DEC-2312 item 1). Nothing is sent and the resting OCO is not touched.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_fractional_add_where_protection_rests_is_denied_as_a_plain_add() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[FRAC]);
@@ -4668,7 +4665,6 @@ fn a_fractional_add_where_protection_rests_is_denied_as_a_plain_add() {
 /// protective order is sent, the interval it started ends, and the start discloses the whole
 /// position as the fraction left unprotected (DEC-2312 items 2 and 3).
 #[test]
-#[ignore = "pending E7-4"]
 fn a_position_under_one_share_places_nothing_and_discloses_its_fraction() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[FRAC]);
@@ -4740,7 +4736,6 @@ fn a_position_under_one_share_places_nothing_and_discloses_its_fraction() {
 /// nears its GTC expiry is cancelled, confirmed, and re-placed for ten, never 10.4, and the
 /// placement discloses the 0.4 it leaves unprotected (DEC-2312 items 2 and 3).
 #[test]
-#[ignore = "pending E7-4"]
 fn a_re_placement_before_expiry_covers_only_the_whole_shares() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[FRAC]);
@@ -4808,7 +4803,6 @@ fn a_re_placement_before_expiry_covers_only_the_whole_shares() {
 /// on every record and null where nothing is disclosed (journal spec §9.5, rule 44; DEC-2312 item 3):
 /// here the `intended` record of a whole-share entry.
 #[test]
-#[ignore = "pending E7-4"]
 fn every_protection_changed_is_written_at_version_2() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
