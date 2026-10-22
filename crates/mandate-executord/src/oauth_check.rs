@@ -9,25 +9,19 @@
 //! included, journals the account as unreadable, a null `account_pii_ref` (rule 62), and the API
 //! refuses the connect; the owner reconnects under a new connection id (DEC-2339 item 6).
 
-use mandate_connections::account_entry::BrokerAccountId;
+use mandate_connections::account_entry::{BrokerAccountId, encode};
+use mandate_connections::checks::{AccountRead, CheckInput, Granted, Occasion, run};
 use mandate_connections::grant::GrantedScopes;
-use mandate_connections::record::{AccountPiiRef, ConnectionId};
+use mandate_connections::record::{AccountPiiRef, AuthKind, Broker, ConnectionId, Environment};
+use mandate_connections::token_entry;
 use mandate_executor::{AccountScope, IdGen};
 use mandate_store::Store;
 use mandate_time::UtcNanos;
 use mandate_vault::SourceError;
 use mandate_vault::policy::SecretPath;
-use secrecy::SecretSlice;
+use secrecy::{ExposeSecret, SecretSlice};
 
-use crate::connect::Checked;
-
-/// The report of a function E21-32 has not implemented yet, which its pending tests fail on
-/// (DEC-77); the implementation PR replaces the stubs and removes it.
-#[allow(
-    non_upper_case_globals,
-    reason = "the pending gate recognises a stub by the name `Unimplemented` (DEC-137)"
-)]
-pub const Unimplemented: &str = "unimplemented";
+use crate::connect::{Checked, journal_check};
 
 /// What the OAuth connect check is given: the connection, the scopes its token entry was stored
 /// with, the account id the paper host answered (`None` when it could not be read), and the
@@ -57,8 +51,40 @@ pub fn oauth_connect_check<S: Store>(
     create: impl FnOnce(&SecretPath, &SecretSlice<u8>) -> Result<(), SourceError>,
     now: UtcNanos,
 ) -> Result<Checked, &'static str> {
-    let _ = (store, ids, scope, check, create, now);
-    Err(Unimplemented)
+    let OAuthCheck {
+        connection,
+        granted,
+        account,
+        pii_ref,
+    } = check;
+    journal_check(store, ids, scope, now, || {
+        let stored = account.is_some_and(|id| {
+            encode(&pii_ref, &id).is_ok_and(|entry| {
+                let bytes = SecretSlice::from(entry.expose_secret().as_bytes().to_vec());
+                create(&SecretPath::AccountId(connection.clone()), &bytes).is_ok()
+            })
+        });
+        let account = if stored {
+            AccountRead::Read {
+                pii_ref,
+                dedicated: None,
+            }
+        } else {
+            AccountRead::Unreadable
+        };
+        run(&CheckInput {
+            connection_id: connection,
+            broker: Broker::Alpaca,
+            environment: Environment::Paper,
+            auth_kind: AuthKind::Oauth,
+            occasion: Occasion::Connect,
+            granted: Granted::OAuth(granted),
+            account,
+            contract: None,
+            pinned_contract: None,
+        })
+        .map_err(|_| "check_refused")
+    })
 }
 
 /// The scopes a leased secret's token entry was stored with (DEC-2624), by its one reader.
@@ -66,6 +92,7 @@ pub fn oauth_connect_check<S: Store>(
 /// # Errors
 /// `credential_malformed` for bytes that are not a token entry; it names nothing of them.
 pub fn leased_scopes(secret: &[u8]) -> Result<GrantedScopes, &'static str> {
-    let _ = secret;
-    Err(Unimplemented)
+    token_entry::decode(secret)
+        .map(|entry| entry.scopes)
+        .map_err(|_| "credential_malformed")
 }

@@ -146,7 +146,6 @@ fn results(payload: &Value) -> Vec<(String, String, Option<String>)> {
 /// reference; the journal opens the stream and records every check passed as an Alpaca paper
 /// OAuth connection, holding the reference and never the id.
 #[test]
-#[ignore = "pending E21-32"]
 fn a_read_account_is_kept_in_its_entry_and_only_its_reference_is_journaled() -> Result<(), Error> {
     let mut store = MemoryStore::default();
     let vault = CreateOnce::default();
@@ -191,7 +190,6 @@ fn a_read_account_is_kept_in_its_entry_and_only_its_reference_is_journaled() -> 
 /// An account the paper host did not answer creates no entry and is journaled as unreadable: a
 /// null reference in the payload and none in the envelope (rule 62).
 #[test]
-#[ignore = "pending E21-32"]
 fn an_unread_account_creates_nothing_and_journals_a_null_reference() -> Result<(), Error> {
     let mut store = MemoryStore::default();
     let vault = CreateOnce::default();
@@ -220,7 +218,6 @@ fn an_unread_account_creates_nothing_and_journals_a_null_reference() -> Result<(
 /// finds its retry's create refused, cannot read the entry back, and so fails closed: the retry
 /// journals the account as unreadable, under no reference, and the first entry is left as it was.
 #[test]
-#[ignore = "pending E21-32"]
 fn a_retry_after_a_crash_before_the_record_fails_closed() -> Result<(), Error> {
     let journal = MemoryStore::default();
     let vault = CreateOnce::default();
@@ -270,7 +267,6 @@ fn a_retry_after_a_crash_before_the_record_fails_closed() -> Result<(), Error> {
 /// Every refusal of the create, not only `Denied`, is an unreadable account: the check never
 /// journals a reference it did not store.
 #[test]
-#[ignore = "pending E21-32"]
 fn every_refused_create_journals_a_null_reference() -> Result<(), Error> {
     for refusal in [
         SourceError::Denied,
@@ -302,7 +298,6 @@ fn every_refused_create_journals_a_null_reference() -> Result<(), Error> {
 /// The entry is created only once the account stream is this writer's: a journal that cannot give
 /// the stream stops the check before any create.
 #[test]
-#[ignore = "pending E21-32"]
 fn nothing_is_created_before_the_stream_is_taken() -> Result<(), Error> {
     let vault = CreateOnce::default();
     let refused = oauth_connect_check(
@@ -324,7 +319,6 @@ fn nothing_is_created_before_the_stream_is_taken() -> Result<(), Error> {
 /// The scopes are read from the leased token entry by its one reader; any other bytes are
 /// refused, naming nothing of them.
 #[test]
-#[ignore = "pending E21-32"]
 fn the_scopes_are_read_from_the_leased_token_entry() -> Result<(), Error> {
     let entry =
         br#"{"access_token":"tok-1","format":1,"scope":["data","trading"],"token_type":"bearer"}"#;
