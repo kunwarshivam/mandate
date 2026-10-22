@@ -1,0 +1,6 @@
+file = "crates/mandate-deploy-manager/tests/roles.rs"
+test = "refused_or_absent_roles_start_nothing_and_the_connect_ends_at_its_deadline"
+reason = """
+The manager's exchange start is a fold over the control stream with no seam to stub:
+the manager starts a token exchange whatever the provisioner answered, or before it answered. E21-33's S6 (DEC-2350) reads it and deletes this row.
+"""
