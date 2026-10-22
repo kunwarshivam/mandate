@@ -234,26 +234,30 @@ fn a_fresh_stream_is_checked_once_over_the_lease_which_is_given_back() -> Result
     Ok(())
 }
 
-/// Item (a): the scopes checked are the ones the lease's own token entry holds. A token stored with
-/// fewer scopes than the request fails the scope check, whatever the caller holds.
+/// Item (a): the scopes checked are read from the lease's own token entry and nothing else. A lease
+/// whose secret is not a token entry stored with exactly the request (one with fewer scopes, or
+/// any other bytes) refuses the start as `credential_malformed`, before any create or record, and
+/// the lease is given back.
 #[test]
 #[ignore = "pending E21-32"]
-fn the_scopes_checked_are_the_leases_own() -> Result<(), Error> {
-    let mut store = MemoryStore::default();
-    let (session, _) = Session::new(Ok(entry(r#""data""#)))?;
-    let answer = started(
-        &mut store,
-        &session,
-        Some(BROKER_ID),
-        true,
-        &RefCell::default(),
-    )?;
-    assert_eq!(answer, Ok(Some(false)));
-    assert!(
-        results(&store)?.contains(&("scope".to_owned(), "failed".to_owned())),
-        "{:?}",
-        results(&store)?
-    );
+fn the_scopes_are_read_from_the_lease_alone() -> Result<(), Error> {
+    for secret in [entry(r#""data""#), b"not a token entry".to_vec()] {
+        let mut store = MemoryStore::default();
+        let (session, calls) = Session::new(Ok(secret))?;
+        let answer = started(
+            &mut store,
+            &session,
+            Some(BROKER_ID),
+            true,
+            &RefCell::default(),
+        )?;
+        assert_eq!(answer, Err("credential_malformed"));
+        let calls = calls.borrow();
+        assert_eq!(calls.leased, ["conn1"]);
+        assert!(calls.created.is_empty());
+        assert_eq!(calls.revoked, 1);
+        assert!(rows(&store).is_empty());
+    }
     Ok(())
 }
 
@@ -355,7 +359,12 @@ type Route = (
 fn the_account_id_is_in_no_record_and_no_code() -> Result<(), Error> {
     let routes: [Route; 4] = [
         (full(), Ok(()), true, Ok(Some(true))),
-        (entry(r#""data""#), Ok(()), true, Ok(Some(false))),
+        (
+            entry(r#""data""#),
+            Ok(()),
+            true,
+            Err("credential_malformed"),
+        ),
         (full(), Err(SourceError::Denied), true, Ok(Some(false))),
         (full(), Ok(()), false, Err("entropy_unavailable")),
     ];

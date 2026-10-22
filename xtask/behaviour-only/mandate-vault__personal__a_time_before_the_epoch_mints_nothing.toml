@@ -1,7 +1,0 @@
-file = "crates/mandate-vault/src/tests/personal.rs"
-test = "a_time_before_the_epoch_mints_nothing"
-reason = """
-`mint_pii_ref` is already implemented and mints at a negative time's distance from the epoch, so
-the test fails on that answer, not at a stub. E21-32's E2c implementation refuses the time and
-deletes this row.
-"""
