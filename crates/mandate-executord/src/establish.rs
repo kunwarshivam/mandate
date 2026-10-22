@@ -206,7 +206,8 @@ pub enum Connected {
     Open,
     /// Still connecting: `gate` stays shut.
     Connecting,
-    /// Refused or revoked before its copy: the caller drains.
+    /// Refused or revoked before its copy: `gate` stays shut and the process goes on taking every
+    /// exit; its stop is the deployment manager's (DEC-2341 item 4).
     Closed,
 }
 
