@@ -808,3 +808,106 @@ fn any_meter_record_reads_back_from_its_payload() {
         panic!("{failure}");
     }
 }
+
+/// DEC-2272 item 5: a daily cap replaced on a running meter binds the next reservation, lowered or
+/// raised, and only the agent it names.
+#[test]
+#[ignore = "pending E21-62"]
+fn a_replaced_research_daily_cap_binds_the_next_reservation() {
+    let caps = common::caps()
+        .with_research_daily("a", Usd6::parse("1").unwrap())
+        .unwrap();
+    let mut meter = Meter::new(MemoryMeter::new(), caps, common::deployment());
+    meter
+        .reserve(reservation(1, Some("a"), Purpose::Research, "0.4", day(5)))
+        .unwrap();
+    meter
+        .set_research_daily("a", Some(Usd6::parse("0.5").unwrap()))
+        .unwrap();
+    assert_eq!(
+        meter.reserve(reservation(2, Some("a"), Purpose::Research, "0.2", day(5))),
+        Err(MeterRefusal::BudgetExhausted),
+        "the lowered cap binds"
+    );
+    meter
+        .set_research_daily("a", Some(Usd6::parse("0.6").unwrap()))
+        .unwrap();
+    assert!(
+        meter
+            .reserve(reservation(3, Some("a"), Purpose::Research, "0.2", day(5)))
+            .is_ok(),
+        "the raised cap admits up to itself"
+    );
+    meter.set_research_daily("b", Some(Usd6::ZERO)).unwrap();
+    assert!(
+        meter
+            .reserve(reservation(4, Some("a"), Purpose::Research, "0", day(5)))
+            .is_ok(),
+        "another agent's cap leaves this one's alone"
+    );
+    assert_eq!(
+        meter.reserve(reservation(5, Some("b"), Purpose::Research, "0.01", day(5))),
+        Err(MeterRefusal::BudgetExhausted)
+    );
+}
+
+/// DEC-2272 item 5: an agent whose cap did not read has its research calls refused `Unavailable`,
+/// reserving nothing on either stream, while its other calls and other agents' are untouched; a
+/// cap set again lifts it, and a cap above the workspace's budget leaves it unread.
+#[test]
+#[ignore = "pending E21-62"]
+fn an_agent_whose_cap_did_not_read_is_refused_unavailable_and_reserves_nothing() {
+    let caps = common::caps()
+        .with_research_daily("a", Usd6::parse("1").unwrap())
+        .unwrap()
+        .with_research_daily("b", Usd6::parse("1").unwrap())
+        .unwrap();
+    let mut meter = Meter::new(MemoryMeter::new(), caps, common::deployment());
+    meter.set_research_daily("a", None).unwrap();
+    assert!(meter.caps().research_unreadable("a"));
+    assert_eq!(
+        meter.reserve(reservation(1, Some("a"), Purpose::Research, "0.1", day(5))),
+        Err(MeterRefusal::Unavailable)
+    );
+    assert_eq!(meter.store().read(), Ok(Vec::new()), "nothing reserved");
+    assert_eq!(
+        meter.deployment().spend(Period::month_of(day(5))),
+        Ok(Usd6::ZERO),
+        "no copy on the deployment's stream"
+    );
+    assert!(
+        meter
+            .reserve(reservation(2, Some("a"), Purpose::LlmSignal, "0.1", day(5)))
+            .is_ok(),
+        "not a research call"
+    );
+    assert!(
+        meter
+            .reserve(reservation(3, Some("b"), Purpose::Research, "0.1", day(5)))
+            .is_ok(),
+        "another agent"
+    );
+    assert_eq!(
+        meter.set_research_daily("a", Some(Usd6::parse("50.000001").unwrap())),
+        Err(CapError::AboveWorkspace)
+    );
+    assert!(meter.caps().research_unreadable("a"), "still unread");
+    assert_eq!(
+        meter.reserve(reservation(4, Some("a"), Purpose::Research, "0.1", day(5))),
+        Err(MeterRefusal::Unavailable)
+    );
+    assert_eq!(
+        meter.set_research_daily("b", Some(Usd6::parse("50").unwrap())),
+        Ok(()),
+        "exactly the workspace's budget"
+    );
+    meter
+        .set_research_daily("a", Some(Usd6::parse("0.5").unwrap()))
+        .unwrap();
+    assert!(!meter.caps().research_unreadable("a"));
+    assert!(
+        meter
+            .reserve(reservation(5, Some("a"), Purpose::Research, "0.1", day(5)))
+            .is_ok()
+    );
+}

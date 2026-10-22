@@ -442,6 +442,17 @@ impl Caps {
         Ok(self)
     }
 
+    /// Whether `agent`'s research daily cap is marked as one that did not read, so its research
+    /// calls are refused `Unavailable` (DEC-2272 item 5).
+    #[expect(
+        clippy::todo,
+        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+    )]
+    pub fn research_unreadable(&self, agent: &str) -> bool {
+        let _ = (self, agent);
+        todo!()
+    }
+
     /// Every cap a call of `agent` for `purpose` on `day` must fit under, with its scope and
     /// period, workspace first.
     pub fn applying(
@@ -600,6 +611,22 @@ impl<S: MeterStore> Meter<S> {
 
     pub fn caps(&self) -> &Caps {
         &self.caps
+    }
+
+    /// Replaces `agent`'s research daily cap on a running meter (DEC-2272 item 5): `Some` sets it,
+    /// at most the workspace's monthly budget; `None` marks it unread, so the agent's research calls
+    /// are refused `Unavailable`, reserving nothing, until a cap is set again.
+    ///
+    /// # Errors
+    /// [`CapError::AboveWorkspace`] for a cap above the workspace's monthly budget, which leaves the
+    /// agent marked unread rather than holding its earlier cap.
+    #[expect(
+        clippy::todo,
+        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+    )]
+    pub fn set_research_daily(&mut self, agent: &str, cap: Option<Usd6>) -> Result<(), CapError> {
+        let _ = (&mut self.caps, agent, cap);
+        todo!()
     }
 
     /// Appends `reservation` only if, for every cap that applies, spend plus its maximum is at

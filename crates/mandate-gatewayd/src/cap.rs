@@ -4,7 +4,7 @@
 //! tightened by the internal research profile. Nothing the caller sends sets it, and anything that
 //! does not read refuses with its code rather than leaving a cap the confirmed mandate did not give.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_canon::{Value, parse};
 use mandate_gateway::money::Usd6;
@@ -71,6 +71,23 @@ pub fn deployment(
     Ok(Deployment::NotDeployed)
 }
 
+/// Every agent an `AgentDeployed` in `environment` names, deployed now or stopped since: the agents
+/// whose caps the start reads (DEC-2272 item 4).
+///
+/// # Errors
+/// [`CapError::ControlUnreadable`] for an `AgentDeployed` whose body does not read.
+#[expect(
+    clippy::todo,
+    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+)]
+pub fn agents(
+    control: &[StoredEvent],
+    environment: Environment,
+) -> Result<BTreeSet<String>, CapError> {
+    let _ = (control, environment);
+    todo!()
+}
+
 /// The cap `deployment` gives (DEC-2272 items 1 to 4): zero when not deployed or when the
 /// document's `behavior.research` is `null`.
 ///
@@ -128,6 +145,11 @@ impl DailyCaps {
             workspace_monthly,
             held: BTreeMap::new(),
         }
+    }
+
+    /// The environment whose deployments the caps are read for.
+    pub fn environment(&self) -> Environment {
+        self.environment
     }
 
     /// `agent`'s cap for the deployment `control` names now: the one held when it is unchanged,
