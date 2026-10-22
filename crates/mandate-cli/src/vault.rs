@@ -25,7 +25,7 @@ use mandate_vault::credentials::{
     check_credential_dir, read_token, read_token_file, write_credentials,
 };
 use mandate_vault::kube::kube_secrets;
-use mandate_vault::kubernetes::KubernetesAuth;
+use mandate_vault::kubernetes::{KubernetesAuth, kubernetes_mount_requests};
 use mandate_vault::openbao::{OpenBaoConfig, OpenBaoSource, provision};
 use mandate_vault::policy::{Identity, Mounts, PlatformSecret, SecretPath};
 use mandate_vault::source::SecretSource;
@@ -123,8 +123,12 @@ pub struct ProvisionArgs {
 /// vault reads the one its own pod projects (DEC-2062 item 3). A host that is not `https://` is
 /// [`SourceError::Config`], refused before the vault is reached.
 pub fn kubernetes_auth(host: &str) -> Result<KubernetesAuth, SourceError> {
-    let _ = host;
-    Err(SourceError::Unimplemented { story: "E21-32" })
+    let auth = KubernetesAuth {
+        host: host.to_owned(),
+        ca_pem: None,
+    };
+    kubernetes_mount_requests(&Mounts::default(), &auth)?;
+    Ok(auth)
 }
 
 /// Which of the process's standard streams are terminals, which `vault provision` refuses for its
