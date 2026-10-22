@@ -1,0 +1,6 @@
+file = "crates/mandate-deploy-manager/tests/retired.rs"
+test = "a_redeploy_after_a_kill_switch_run_makes_a_later_crash_loop_an_ordinary_one"
+reason = """
+DEC-2344 item 1 (E21-33): today's manager starts no kill-switch run, so there is none for a deployment to end. So this test fails on the manager's own answer, not at a stub. The implementation PR (DEC-2344
+items 1 and 3) deletes this file with the test's `#[ignore]`.
+"""

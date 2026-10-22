@@ -17,7 +17,7 @@ use common::{
 use mandate_canon::Value;
 use mandate_deploy_manager::fake::Call;
 use mandate_deploy_manager::orchestrator::CRASH_LOOP;
-use mandate_deploy_manager::{Cause, Record, Slot, StopCause};
+use mandate_deploy_manager::{Cause, Record, Slot, StopCause, backoff};
 use proptest::collection::vec;
 use proptest::prelude::*;
 use proptest::test_runner::{Config, TestRunner};
@@ -338,7 +338,8 @@ struct Oracle {
     pending: BTreeMap<&'static str, BTreeSet<String>>,
     /// The accounts whose executor, no agent wanting it, crashed and has not been started since.
     crashed: BTreeSet<&'static str>,
-    /// The accounts whose executor's crash loop is journaled: only a switch starts it again.
+    /// The accounts whose executor's crash loop is journaled: only a switch starts it again, and
+    /// that start begins a new run, which may crash, restart, and loop again.
     looped: BTreeSet<&'static str>,
     /// The accounts whose running generations began with a kill switch's start no agent wanted:
     /// its restarts carry the switch, and its crash loop leaves the switch unapplied.
@@ -656,6 +657,7 @@ fn check_seeded(ops: &[Op], bug: Bug) -> Result<(), TestCaseError> {
             if let Some(last) = started.last() {
                 if !oracle.wanted(account) && last.cause == "kill_switch" {
                     oracle.unapplied_if_looped.insert(account);
+                    oracle.looped.remove(account);
                 }
                 oracle.pending.remove(account);
                 oracle.crashed.remove(account);
@@ -829,6 +831,154 @@ fn a_wanted_executor_that_exits_with_success_is_restarted() {
             .last()
             .map(|s| s.0.as_str()),
         Some("restart")
+    );
+    clean(&mut m);
+}
+
+/// Crashes the executor of `account` after each start, from `second`, until its crash loop is
+/// journaled, and returns the second after it.
+fn crash_until_looped(m: &mut Manager, journal: &Journal, account: &str, mut second: i64) -> i64 {
+    let loops = |journal: &Journal| {
+        journal
+            .rows()
+            .iter()
+            .filter(|row| row.event_type == "ProcessCrashLooped")
+            .count()
+    };
+    let before_loops = loops(journal);
+    while loops(journal) == before_loops && second < 8000 {
+        let before = starts(m, &ex(account)).len();
+        m.orchestrator().fake.crash(&ex(account));
+        while second < 8000
+            && starts(m, &ex(account)).len() == before
+            && loops(journal) == before_loops
+        {
+            tick(m, second);
+            second += 1;
+        }
+    }
+    second
+}
+
+/// DEC-2344 item 1, and DEC-2351 item 2: a deployment on the account while a kill switch's
+/// generation runs makes the executor wanted again, so a later crash loop of it is an ordinary one:
+/// `crash_loop`, never `kill_switch_unapplied`, and a restarted manager agrees.
+#[test]
+#[ignore = "pending E21-33"]
+fn a_redeploy_after_a_kill_switch_run_makes_a_later_crash_loop_an_ordinary_one() {
+    let journal = Journal::new();
+    let mut m = manager(
+        &journal,
+        accounts(&[
+            ("agent_a", ACCOUNT),
+            ("agent_c", ACCOUNT),
+            ("agent_b", OTHER),
+        ]),
+    );
+    journal.services(&journal.deployed("agent_a"), at(1));
+    tick(&mut m, 1);
+    journal.services(&stopped("agent_a", ACCOUNT), at(2));
+    tick(&mut m, 2);
+    tick(&mut m, 3);
+    journal.services(&kill("connection", &connection_of(ACCOUNT), 1).1, at(10));
+    tick(&mut m, 10);
+    assert_eq!(
+        starts(&mut m, &ex(ACCOUNT)),
+        vec![1, 2],
+        "the switch's one start"
+    );
+    journal.services(&journal.deployed("agent_c"), at(11));
+    tick(&mut m, 11);
+    let second = crash_until_looped(&mut m, &journal, ACCOUNT, 12);
+    let codes: Vec<&str> = m.alerts().0.iter().map(|alert| alert.code).collect();
+    assert_eq!(
+        codes,
+        vec![CRASH_LOOP.code],
+        "an agent wants it again: an ordinary loop"
+    );
+    let mut m = restart(m);
+    for s in second..second + 50 {
+        tick(&mut m, s);
+    }
+    let codes: Vec<&str> = m.alerts().0.iter().map(|alert| alert.code).collect();
+    assert_eq!(
+        codes,
+        vec![CRASH_LOOP.code, CRASH_LOOP.code],
+        "and a restarted manager raises crash_loop again, never kill_switch_unapplied"
+    );
+}
+
+/// DEC-2344 item 1 and rule 13: a switch that covers the executor after an unapplied loop starts a
+/// new run, which is restarted after a crash like the first; its own loop is a second
+/// `ProcessCrashLooped` and a second `kill_switch_unapplied`.
+#[test]
+#[ignore = "pending E21-33"]
+fn a_covering_switch_after_an_unapplied_loop_starts_a_new_run_that_can_loop_again() {
+    let journal = Journal::new();
+    let mut m = retired(&journal);
+    journal.services(&kill("connection", &connection_of(ACCOUNT), 1).1, at(10));
+    tick(&mut m, 10);
+    let second = crash_until_looped(&mut m, &journal, ACCOUNT, 11);
+    let first_run = starts(&mut m, &ex(ACCOUNT)).len();
+    journal.services(&kill("workspace", "ws_01J8Z2", 2).1, at(second));
+    tick(&mut m, second);
+    assert_eq!(
+        starts(&mut m, &ex(ACCOUNT)).len(),
+        first_run + 1,
+        "the later switch's one start"
+    );
+    let causes: Vec<String> = executor_starts(&journal, ACCOUNT)
+        .into_iter()
+        .map(|s| s.0)
+        .collect();
+    assert_eq!(causes.last().map(String::as_str), Some("kill_switch"));
+    crash_until_looped(&mut m, &journal, ACCOUNT, second + 1);
+    assert!(
+        starts(&mut m, &ex(ACCOUNT)).len() > first_run + 2,
+        "the new run's crash is restarted"
+    );
+    let loops = journal
+        .rows()
+        .iter()
+        .filter(|row| row.event_type == "ProcessCrashLooped")
+        .count();
+    assert_eq!(loops, 2, "each run's loop is journaled");
+    let codes: Vec<&str> = m.alerts().0.iter().map(|alert| alert.code).collect();
+    assert_eq!(
+        codes,
+        vec![UNAPPLIED, UNAPPLIED],
+        "each unapplied switch is reported"
+    );
+    clean(&mut m);
+}
+
+/// DEC-2344 item 1: a crashed generation a switch started waits the usual back-off before its
+/// restart, as a wanted one does.
+#[test]
+#[ignore = "pending E21-33"]
+fn a_crashed_kill_switch_generation_waits_its_back_off_before_one_restart() {
+    let journal = Journal::new();
+    let mut m = retired(&journal);
+    journal.services(&kill("connection", &connection_of(ACCOUNT), 1).1, at(10));
+    tick(&mut m, 10);
+    assert_eq!(starts(&mut m, &ex(ACCOUNT)), vec![1, 2]);
+    m.orchestrator().fake.crash(&ex(ACCOUNT));
+    let wait = i64::try_from(backoff(0).as_secs()).unwrap();
+    for s in 20..20 + wait {
+        tick(&mut m, s);
+    }
+    assert_eq!(
+        starts(&mut m, &ex(ACCOUNT)),
+        vec![1, 2],
+        "no restart before its back-off, counted from the tick that saw the crash"
+    );
+    for s in 20 + wait..20 + wait + 3 {
+        tick(&mut m, s);
+    }
+    assert_eq!(
+        starts(&mut m, &ex(ACCOUNT)),
+        vec![1, 2, 3],
+        "exactly one restart once it passes"
     );
     clean(&mut m);
 }
