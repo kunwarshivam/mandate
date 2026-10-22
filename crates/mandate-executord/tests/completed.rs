@@ -394,7 +394,6 @@ fn lane_d1s_probe_keeps_it_running() -> Result<(), Error> {
 /// DEC-2353, rule 13, end to end: the paper broker's fill names only the broker's order id, as
 /// Alpaca's does, yet it is the agent's, so the agent's kill switch sells exactly those 10 shares.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_kill_switch_sells_the_lots_a_broker_id_fill_bought() -> Result<(), Error> {
     let journal = deployed()?;
     journal.seed(ACCOUNT_STREAM, OPENED)?;

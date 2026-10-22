@@ -223,6 +223,10 @@ pub(crate) struct OrderDetail {
     /// latest report carried: a bracket entry's filled quantity before its fills are ingested
     /// (§5.4's "the filled quantity", DEC-346 item 3).
     pub(crate) reported_filled: Option<Qty>,
+    /// Every `broker_order_id` the order's version-2 `OrderStateChanged` records carried (journal
+    /// spec v0.80 §9.16, DEC-2353): one id attributes a fill that names only it; two, or none,
+    /// attribute nothing.
+    pub(crate) broker_ids: BTreeSet<String>,
     /// What of `reported_filled` beyond the applied `filled_qty` an unattributed sell fill applied
     /// after this order was submitted has already taken off the position (DEC-421 item 5).
     pub(crate) netted: Option<Qty>,

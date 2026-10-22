@@ -1,8 +1,0 @@
-file = "crates/mandate-executor/tests/hand.rs"
-test = "the_agents_switch_sells_the_lots_a_broker_id_fill_bought"
-reason = """
-Until E7-4's broker-id attribution (DEC-2353) lands, the fill path attributes a fill by its
-`client_order_id` alone, so a fill naming only the broker's order id is applied unattributed: the
-test fails on that answer, not at a stub, since the fill path has no stub to stop at. The
-implementation PR deletes this row.
-"""

@@ -4978,7 +4978,6 @@ fn switch_sells(shell: &mut Shell, ports: &mandate_executor::Ports<'_>) -> Vec<S
 /// DEC-2353 item 2: a fill naming only the broker's order id the order's acknowledgment journaled
 /// is that order's, so its quantity is applied to it and the agent holds the lots.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_fill_naming_only_the_broker_id_is_its_orders() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -5003,7 +5002,6 @@ fn a_fill_naming_only_the_broker_id_is_its_orders() {
 
 /// DEC-2353, rule 13: once the broker-id fill is the agent's, its kill switch sells exactly it.
 #[test]
-#[ignore = "pending E7-4"]
 fn the_agents_switch_sells_the_lots_a_broker_id_fill_bought() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -5019,7 +5017,6 @@ fn the_agents_switch_sells_the_lots_a_broker_id_fill_bought() {
 /// DEC-2353 invariant 4: the broker id is folded from the journaled acknowledgment, so after a
 /// restart the fill is still the order's.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_broker_id_fill_is_the_orders_after_a_restart() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
