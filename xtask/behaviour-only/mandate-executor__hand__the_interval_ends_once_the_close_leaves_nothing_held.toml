@@ -1,0 +1,7 @@
+file = "crates/mandate-executor/tests/hand.rs"
+test = "the_interval_ends_once_the_close_leaves_nothing_held"
+reason = """
+The account kill switch's close step (DEC-2337, journal v0.75's `AccountCloseRequested`) is
+A1b's: on A1a the executor sends no close-position and journals no close record, so the test fails
+on behaviour rather than at a stub. The E7-4 A1b implementation PR deletes this row.
+"""

@@ -5815,6 +5815,151 @@ fn a_confirmed_instrument_is_closed_by_the_broker() {
     assert_eq!(closes, vec![BTC], "BTC's close-position, once");
 }
 
+/// The account switch, accepted and read clear, up to the run that closes BTC: the shell, the
+/// switch's `KillSwitchActivated` event id, and that run.
+fn closed_btc(ports: &mandate_executor::Ports<'_>) -> (Shell, String, common::Ran) {
+    let (mut shell, _) = crypto_stop_account(ports);
+    let switched = shell.run(account_switch(Initiator::Owner), ports);
+    let switch = switched
+        .draft("KillSwitchActivated")
+        .map(|d| d.event_id.0.clone())
+        .expect("the switch is journaled");
+    shell.run(Input::Broker(Ok(BrokerOutcome::AccountWideAccepted)), ports);
+    let read = shell.run(
+        Input::Broker(Ok(BrokerOutcome::OpenOrders(Vec::new()))),
+        ports,
+    );
+    (shell, switch, read)
+}
+
+/// Each close-position is journaled before it is sent (DEC-2337 items 1 and 3, `AGENTS.md` rule
+/// 5): one `AccountCloseRequested` naming BTC, the quantity held, and the switch it carries out,
+/// ahead of the close-position.
+#[test]
+#[ignore = "pending E7-4"]
+fn a_close_is_journaled_before_it_is_sent() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (shell, switch, read) = closed_btc(&ports);
+
+    let record = read
+        .effects
+        .iter()
+        .position(|e| matches!(e, Effect::Journal(d) if d.event_type == "AccountCloseRequested"))
+        .expect("the close is journaled");
+    let close = read
+        .effects
+        .iter()
+        .position(|e| matches!(e, Effect::Broker(BrokerRequest::ClosePosition(..))))
+        .expect("the close-position goes");
+    assert!(record < close, "journaled before it is sent");
+    let journaled = read.draft("AccountCloseRequested").expect("the record");
+    let field = |name: &str| {
+        journaled
+            .payload
+            .get(name)
+            .and_then(mandate_canon::Value::as_str)
+            .map(str::to_owned)
+    };
+    let held = shell
+        .state
+        .positions()
+        .get(&instrument(BTC))
+        .map(ToString::to_string);
+    assert_eq!(
+        (
+            field("instrument_id"),
+            field("qty"),
+            field("kill_switch_event")
+        ),
+        (Some(BTC.to_owned()), held, Some(switch)),
+        "BTC, the quantity held, and the switch"
+    );
+}
+
+/// A journaled close is read as sent (DEC-2337 item 3): after a restart, the startup read finds
+/// BTC still held and clear, and no close-position goes again under the same switch.
+#[test]
+#[ignore = "pending E7-4"]
+fn a_journaled_close_is_never_resent_after_a_restart() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (shell, _, read) = closed_btc(&ports);
+    assert!(
+        read.requests
+            .iter()
+            .any(|r| matches!(r, BrokerRequest::ClosePosition(..))),
+        "the close went before the restart: {:?}",
+        read.requests
+    );
+
+    let (mut restarted, started) = shell.restart(&ports);
+    let again = restarted.run(
+        Input::BrokerSnapshot(snapshot(restarted.head().0, ReconcileReason::Startup)),
+        &ports,
+    );
+
+    let resent: Vec<&BrokerRequest> = started
+        .requests
+        .iter()
+        .chain(&again.requests)
+        .filter(|r| matches!(r, BrokerRequest::ClosePosition(..)))
+        .collect();
+    assert!(resent.is_empty(), "never closed again: {resent:?}");
+}
+
+/// BTC's unprotected interval ends on its close (DEC-2337 item 4): the close is journaled, and its
+/// fill, which names no order of ours, leaves nothing held, so the interval journals
+/// `unprotected_end` after the `AccountCloseRequested`.
+#[test]
+#[ignore = "pending E7-4"]
+fn the_interval_ends_once_the_close_leaves_nothing_held() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (mut shell, _, _) = closed_btc(&ports);
+    let held = shell
+        .state
+        .positions()
+        .get(&instrument(BTC))
+        .map(ToString::to_string)
+        .unwrap_or_default();
+
+    shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Fill(mandate_executor::BrokerFill {
+            instrument: instrument(BTC),
+            side: Side::Sell,
+            broker_order_id: Some("b-close".to_owned()),
+            ..broker_fill("f-btc-close", None, &held, "59000")
+        })),
+        &ports,
+    );
+
+    let close = shell
+        .account_journal
+        .iter()
+        .position(|e| e.event_type == "AccountCloseRequested");
+    let end = shell.account_journal.iter().position(|e| {
+        e.event_type == "ProtectionChanged"
+            && e.payload
+                .get("action")
+                .and_then(mandate_canon::Value::as_str)
+                == Some("unprotected_end")
+    });
+    assert!(
+        close.is_some() && end.is_some() && close < end,
+        "the interval ends after the close: close at {close:?}, end at {end:?}"
+    );
+}
+
 /// An instrument with a sell of ours still working waits for that cancel's confirmation, and
 /// closes then (DEC-2333 item 3): never beside a sell that may still fill.
 #[test]
