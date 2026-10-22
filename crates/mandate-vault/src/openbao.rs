@@ -42,6 +42,7 @@ use crate::lease::{LEASE_SECS, Lease, lease_times};
 use crate::policy::{
     Access, Identity, Mounts, SecretPath, kv_path, openbao_policy, policy_name, require, role_name,
 };
+use crate::registry::{Registry, claim_in, release_in};
 use crate::source::{GRANT_SECS, Grant, SecretSource};
 
 /// How long one request may take before the vault counts as unreachable.
@@ -368,6 +369,39 @@ pub fn seal_verdict(body: &[u8], allow_dev: bool) -> Result<(), SourceError> {
     }
 }
 
+/// Whether the mount the fingerprint key is on, from its `sys/mounts/<transit>` answer, is a
+/// transit mount: one of any other type is [`SourceError::Config`], so provisioning never takes
+/// another engine for the key's (DEC-2345 item 1).
+///
+/// # Errors
+/// [`SourceError::Config`] for any other answer.
+pub fn transit_mount_verdict(answer: Option<&Value>) -> Result<(), SourceError> {
+    let transit = answer.and_then(|mount| mount.pointer("/data/type")) == Some(&json!("transit"));
+    if transit {
+        Ok(())
+    } else {
+        Err(SourceError::Config)
+    }
+}
+
+/// Whether a fingerprint key already there, from its `<transit>/keys/<key>` answer, is as
+/// provisioning makes it: never exportable, never deletable, and with no plaintext backup. A key
+/// that is any of them, or an answer that does not say, is [`SourceError::Config`]: provisioning
+/// fails rather than keep a key that can leave the vault (DEC-2345 item 1).
+///
+/// # Errors
+/// [`SourceError::Config`] for any other answer.
+pub fn fingerprint_key_verdict(answer: Option<&Value>) -> Result<(), SourceError> {
+    let never = |field: &str| {
+        answer.and_then(|key| key.pointer(&format!("/data/{field}"))) == Some(&json!(false))
+    };
+    if never("exportable") && never("deletion_allowed") && never("allow_plaintext_backup") {
+        Ok(())
+    } else {
+        Err(SourceError::Config)
+    }
+}
+
 /// A logged-in session as one identity.
 pub struct OpenBaoSource {
     identity: Identity,
@@ -680,26 +714,7 @@ impl OpenBaoSource {
         if self.rotating().await? {
             return Err(FingerprintError::Rotating);
         }
-        for _ in 0..CLAIM_TRIES {
-            let (version, mut claims) = self.claims().await?;
-            match claims.get(fingerprint.as_str()) {
-                Some(holder) if holder == connection.as_str() => return Ok(Claim::Claimed),
-                Some(holder) => {
-                    return ConnectionId::new(holder)
-                        .map(Claim::HeldBy)
-                        .map_err(|_| FingerprintError::Unavailable);
-                }
-                None => {}
-            }
-            claims.insert(
-                fingerprint.as_str().to_owned(),
-                connection.as_str().to_owned(),
-            );
-            if self.write_claims(version, &claims).await? {
-                return Ok(Claim::Claimed);
-            }
-        }
-        Err(FingerprintError::Unavailable)
+        claim_in(self, connection, fingerprint).await
     }
 
     /// Gives back the claim of the request `account` of `connection`, when it holds it: on a
@@ -714,22 +729,12 @@ impl OpenBaoSource {
         connection: &ConnectionId,
         account: &AccountRef,
     ) -> Result<(), FingerprintError> {
-        let fingerprint = match self.fingerprint_entry(connection, account).await {
-            Ok((fingerprint, _)) => fingerprint,
-            Err(FingerprintError::Missing) => return Ok(()),
-            Err(e) => return Err(e),
+        let Some(entry) = self.fingerprint_bytes(connection, account).await? else {
+            return Ok(());
         };
-        for _ in 0..CLAIM_TRIES {
-            let (version, mut claims) = self.claims().await?;
-            if claims.get(fingerprint.as_str()).map(String::as_str) != Some(connection.as_str()) {
-                return Ok(());
-            }
-            claims.remove(fingerprint.as_str());
-            if self.write_claims(version, &claims).await? {
-                return Ok(());
-            }
-        }
-        Err(FingerprintError::Unavailable)
+        let (fingerprint, _) =
+            decode_entry(entry.expose_secret()).map_err(|_| FingerprintError::Unavailable)?;
+        release_in(self, connection, &fingerprint).await
     }
 
     /// Whether the marker that the fingerprint key rotates is there.
@@ -747,17 +752,32 @@ impl OpenBaoSource {
         connection: &ConnectionId,
         account: &AccountRef,
     ) -> Result<(AccountFingerprint, AccountPiiRef), FingerprintError> {
-        let path = SecretPath::Fingerprint(connection.clone(), account.clone());
-        require(&self.identity, Access::Read, &path).map_err(unavailable)?;
         let entry = self
-            .read_value(&path)
-            .await
-            .map_err(unavailable)?
+            .fingerprint_bytes(connection, account)
+            .await?
             .ok_or(FingerprintError::Missing)?;
         decode_entry(entry.expose_secret()).map_err(|_| FingerprintError::Missing)
     }
 
-    /// The registry and the version it was read at; an empty one at version 0 where there is none.
+    /// The bytes of the fingerprint entry of the request `account` of `connection`, `None` where
+    /// there is none.
+    async fn fingerprint_bytes(
+        &self,
+        connection: &ConnectionId,
+        account: &AccountRef,
+    ) -> Result<Option<SecretSlice<u8>>, FingerprintError> {
+        let path = SecretPath::Fingerprint(connection.clone(), account.clone());
+        require(&self.identity, Access::Read, &path).map_err(unavailable)?;
+        self.read_value(&path).await.map_err(unavailable)
+    }
+}
+
+/// The version of the registry's form.
+const CLAIMS_FORMAT: u8 = 1;
+
+impl Registry for OpenBaoSource {
+    /// The registry entry, by check-and-set's version; an empty one at version 0 where there is
+    /// none.
     async fn claims(&self) -> Result<(u64, BTreeMap<String, String>), FingerprintError> {
         require(&self.identity, Access::Read, &SecretPath::Claims).map_err(unavailable)?;
         let read = self
@@ -783,7 +803,8 @@ impl OpenBaoSource {
         }
     }
 
-    /// Writes the registry `claims` by check-and-set on `version`: `false` when it moved since.
+    /// The registry entry written by check-and-set on `version`; a refused check-and-set is
+    /// `false`.
     async fn write_claims(
         &self,
         version: u64,
@@ -805,12 +826,6 @@ impl OpenBaoSource {
         }
     }
 }
-
-/// How many times a claim or a release reads the registry again when it moved under it.
-const CLAIM_TRIES: usize = 8;
-
-/// The version of the registry's form.
-const CLAIMS_FORMAT: u8 = 1;
 
 /// A vault refusal, as the fingerprint operations answer every one: unavailable.
 fn unavailable(_: SourceError) -> FingerprintError {
@@ -837,11 +852,14 @@ impl SecretSource for OpenBaoSource {
             return Err(SourceError::Denied);
         }
         let mut input = STANDARD.encode(account.secret().expose_secret());
-        let body = json!({ "input": input });
+        let mut body = json!({ "input": input });
         input.zeroize();
         let path = format!("{}/hmac/{FINGERPRINT_KEY}", self.mounts.transit);
-        let answer = self.call(Method::POST, &path, Some(&body)).await?;
-        AccountFingerprint::new(text(answer.as_ref(), "/data/hmac")?)
+        let answer = self.call(Method::POST, &path, Some(&body)).await;
+        if let Some(Value::String(sent)) = body.get_mut("input") {
+            sent.zeroize();
+        }
+        AccountFingerprint::new(text(answer?.as_ref(), "/data/hmac")?)
     }
 
     /// A check-and-set write at version 0, which the vault takes only where no version is there,
@@ -1132,24 +1150,30 @@ async fn provision_fingerprints(
     mounts: &Mounts,
 ) -> Result<(), SourceError> {
     let transit = format!("sys/mounts/{}", mounts.transit);
-    if http.call(Method::GET, &transit, token, None).await.is_err() {
-        http.call(
-            Method::POST,
-            &transit,
-            token,
-            Some(&json!({ "type": "transit" })),
-        )
-        .await?;
+    match http.call(Method::GET, &transit, token, None).await {
+        Ok(mount) => transit_mount_verdict(mount.as_ref())?,
+        Err(_) => {
+            http.call(
+                Method::POST,
+                &transit,
+                token,
+                Some(&json!({ "type": "transit" })),
+            )
+            .await?;
+        }
     }
     let key = format!("{}/keys/{FINGERPRINT_KEY}", mounts.transit);
-    if http.call(Method::GET, &key, token, None).await.is_err() {
-        http.call(
-            Method::POST,
-            &key,
-            token,
-            Some(&json!({ "exportable": false })),
-        )
-        .await?;
+    match http.call(Method::GET, &key, token, None).await {
+        Ok(found) => fingerprint_key_verdict(found.as_ref())?,
+        Err(_) => {
+            http.call(
+                Method::POST,
+                &key,
+                token,
+                Some(&json!({ "exportable": false })),
+            )
+            .await?;
+        }
     }
     let claims = format!("{}/metadata/{}", mounts.kv, kv_path(&SecretPath::Claims)?);
     http.call(
