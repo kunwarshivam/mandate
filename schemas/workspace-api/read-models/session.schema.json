@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://mandate.dev/schemas/workspace-api/v1/read-models/session.schema.json",
-  "description": "GET /v1/me/session (\u00a74.10; identity spec \u00a74.5, DEC-816 item 7, DEC-2113): the caller's own session, on the authentication plane. principal_id is the session's own principal in the form the journal records as the actor's id; no session reference, cookie, token, digest, subject, or issuer is ever served. expires_at is the earlier of the idle and absolute deadlines. workspaces is present only on a reduction-only session (\u00a76.4 route 2). as_of is empty: one's own session is no stream.",
+  "description": "GET /v1/me/session (\u00a74.10; identity spec \u00a74.5, DEC-816 item 7, DEC-2113): the caller's own session, on the authentication plane. principal_id is the session's own principal in the form the journal records as the actor's id; no session reference, cookie, token, digest, subject, or issuer is ever served. expires_at is the earlier of the idle and absolute deadlines. workspaces is present only on a reduction-only session (\u00a76.4 route 2), each with the agent and connection ids it may act on. as_of is empty: one's own session is no stream.",
   "type": "object",
   "allOf": [
     {
@@ -61,7 +61,9 @@
         "additionalProperties": false,
         "required": [
           "workspace_id",
-          "label"
+          "label",
+          "agent_ids",
+          "connection_ids"
         ],
         "properties": {
           "workspace_id": {
@@ -69,6 +71,22 @@
           },
           "label": {
             "$ref": "my-workspaces.schema.json#/$defs/Label"
+          },
+          "agent_ids": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "$ref": "../common.schema.json#/$defs/Id"
+            },
+            "description": "The agents this reduction-only session may pause or kill switch in the workspace, read from its control stream at the answer (\u00a74.10 route 2 item 6)"
+          },
+          "connection_ids": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "$ref": "../common.schema.json#/$defs/Id"
+            },
+            "description": "The connections this reduction-only session may kill switch in the workspace, read from its control stream at the answer (\u00a74.10 route 2 item 6)"
           }
         }
       }

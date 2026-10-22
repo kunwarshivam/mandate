@@ -58,10 +58,11 @@ fn draft(section: &Value, case: &Value) -> Vec<u8> {
     to_canonical(&Value::Object(body))
 }
 
-/// The version-2 bases and the 5 valid drafts parse as `ProtectionChanged` at schema version 2: a
-/// fractional entry's first-fill start and its whole shares' placement each disclose a fraction
-/// strictly between 0 and 1, and a whole position discloses none. The version-1 base still parses
-/// at version 1 (§8: version 1 is never edited and stays registered).
+/// The version-2 bases and the 7 valid drafts parse as `ProtectionChanged` at schema version 2: a
+/// fractional entry's first-fill start, its whole shares' placement and its interval's end
+/// (DEC-2315) each disclose a fraction strictly between 0 and 1, an exponent form is normalized on
+/// the way in (§4.6), and a whole position discloses none. The version-1 base still parses at
+/// version 1 (§8: version 1 is never edited and stays registered).
 #[test]
 fn every_version_2_base_and_valid_draft_parses_at_version_2() {
     let section = section();
@@ -94,7 +95,7 @@ fn every_version_2_base_and_valid_draft_parses_at_version_2() {
         }
     }
     assert!(failed.is_empty(), "{}", failed.join("\n"));
-    assert_eq!((drafts.len(), valid.len()), (3, 5));
+    assert_eq!((drafts.len(), valid.len()), (3, 7));
     let names: Vec<&str> = valid.iter().map(|c| text(c, "name")).collect();
     for name in [
         "fraction_on_first_fill_start",
@@ -102,14 +103,17 @@ fn every_version_2_base_and_valid_draft_parses_at_version_2() {
         "fraction_smallest",
         "fraction_largest",
         "no_fraction_on_a_whole_position",
+        "fraction_in_exponent_form",
+        "fraction_on_the_end",
     ] {
         assert!(names.contains(&name), "`{name}` is a valid draft");
     }
 }
 
-/// The 8 invalid drafts are refused as `schema` at `payload.unprotected_fraction`: a fraction on
-/// `cancelled`, an end or a passive start, a fraction of 0, below 0, of 1 or above 1 (rule 44), and
-/// a fraction on version 1, which has no such member (§8).
+/// The 17 invalid drafts are refused at `payload.unprotected_fraction`, with the reason each names: a
+/// fraction on each of the nine actions that disclose none, a fraction of 0, below 0, of 1, of 1 in
+/// exponent form or above 1 (rule 44), a JSON number or text that is no decimal (§9.1), and a
+/// fraction on version 1, which has no such member (§8).
 #[test]
 fn every_invalid_fraction_draft_is_refused_at_its_path() {
     let section = section();
@@ -129,7 +133,7 @@ fn every_invalid_fraction_draft_is_refused_at_its_path() {
         }
     }
     assert!(failed.is_empty(), "{}", failed.join("\n"));
-    assert_eq!(invalid.len(), 8);
+    assert_eq!(invalid.len(), 17);
     assert!(
         invalid
             .iter()
