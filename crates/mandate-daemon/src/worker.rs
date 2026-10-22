@@ -699,6 +699,17 @@ mod model_tests;
 )]
 mod injection_tests;
 
+#[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    reason = "ADR-0001 ES-09 excepts tests from the safety-critical denies"
+)]
+mod bench_tests;
+
 /// The recorded fake, primed by replacing any reply a call never sent took with `reply`.
 fn recorded() -> (RecordedTransport, fn(&mut RecordedTransport, Recorded)) {
     (RecordedTransport::new(), |transport, reply| {
