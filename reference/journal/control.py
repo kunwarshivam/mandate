@@ -537,10 +537,27 @@ SCHEMAS[("ctl", "CredentialEnrolled")] = rec(
     ("cool_off_ends", opt(TS)),
     ("step_up", opt(STEP_UP)),
 )
+# v0.71 (DEC-2122): version 2 adds the backup-eligible flag the registration carried, which
+# `stepup::consume` holds every later assertion to. Version 1 stays registered and unchanged; the
+# API writes version 2 only, and the verifier never counts a version 1 credential.
+CREDENTIAL_ENROLLED_V2 = rec(
+    *SCHEMAS[("ctl", "CredentialEnrolled")].fields[:6],
+    ("backup_eligible", BOOL),
+    *SCHEMAS[("ctl", "CredentialEnrolled")].fields[6:],
+)
 SCHEMAS[("ctl", "CredentialRemoved")] = rec(
     ("member", ULID),
     ("credential", CREDENTIAL_ID),
     ("step_up", STEP_UP),
+)
+
+# §9.32 v0.71 (DEC-2108 item 3, DEC-2122): the assertion behind one passkey step-up, appended immediately
+# after the event it authorized in one batch (rule 253, judged in `step_up_assertions.py`).
+SCHEMAS[("ctl", "StepUpAsserted")] = rec(
+    ("challenge", ULID),
+    ("credential", CREDENTIAL_ID),
+    ("sign_count", SIGN_COUNT),
+    ("assertion", REF),
 )
 
 # §9.8 (DEC-800): a connection's history. The control stream's three records and the account
@@ -1149,6 +1166,19 @@ SCHEMAS[("ctl", "ProcessCrashLooped")] = rec(
     ("window_seconds", INT),
 )
 DM_RECORDS = ("ProcessStartIssued", "ProcessStopIssued", "ProcessCrashLooped")
+# §9.33 v0.77 (DEC-2350): the role provisioner's records of one OAuth connect's Kubernetes-auth roles,
+# on the control stream. IDs and enumerations only.
+SCHEMAS[("ctl", "ConnectionRolesMade")] = rec(("connection_id", IDENT_T))
+SCHEMAS[("ctl", "ConnectionRolesRefused")] = rec(
+    ("connection_id", IDENT_T),
+    ("reason", one_of("vault_unavailable", "role_refused")),
+)
+SCHEMAS[("ctl", "ConnectionRolesRemoved")] = rec(
+    ("connection_id", IDENT_T),
+    ("role", one_of("token_exchange")),
+    ("occasion", one_of("request_closed", "revoked")),
+)
+CR_RECORDS = ("ConnectionRolesMade", "ConnectionRolesRefused", "ConnectionRolesRemoved")
 
 # §9.5 (DEC-446, DEC-447): the account stream's executor records. The three records §9.5 closes at
 # `schema_version` 2 carry both versions here; the companion and `ProtectionChanged` close at 1.
@@ -1410,6 +1440,8 @@ REQUEST_TOP = (
     ("timeout_s", INT),
     ("on_timeout", one_of("skip")),
 )
+VERSIONED_VERSIONS[("ctl", "CredentialEnrolled")] = (1, 2)
+VERSIONED_SCHEMAS[("ctl", "CredentialEnrolled", 2)] = CREDENTIAL_ENROLLED_V2
 VERSIONED_VERSIONS[("agent", "ApprovalRequested")] = (1, 2)
 VERSIONED_SCHEMAS[("agent", "ApprovalRequested", 1)] = rec(
     *REQUEST_TOP, ("content", REQUEST_CONTENT_V1), ("content_hash", REF)
@@ -1823,14 +1855,18 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
             rule("242.user", False, "schema", "actor.kind")
     if event_type in ("CredentialEnrolled", "CredentialRemoved"):
         number = "249" if event_type == "CredentialEnrolled" else "250"
-        if event_type == "CredentialEnrolled":
+        # A seeded bug: version 2 read by the cool-off clause alone (DEC-2122).
+        cool_off_only = draft["schema_version"] == 2 and "rule.249.v2_cool_off_only" in skip
+        if event_type == "CredentialEnrolled" and not cool_off_only:
             rule("249.kind", p["kind"] == "passkey", "schema", "payload.kind")
-        if rule_holds(f"{number}.user", draft["actor"]["kind"] == "user", skip):
+        if cool_off_only:
+            pass
+        elif rule_holds(f"{number}.user", draft["actor"]["kind"] == "user", skip):
             rule(f"{number}.member", draft["actor"]["id"] == p["member"], "schema", "actor.id")
         else:
             rule(f"{number}.user", False, "schema", "actor.kind")
         step_up = p["step_up"]
-        if step_up is not None:
+        if step_up is not None and not cool_off_only:
             rule(f"{number}.passkey", step_up["method"] == "passkey", "schema", "payload.step_up.method")
         if event_type == "CredentialEnrolled":
             ends = p["cool_off_ends"]
@@ -1839,6 +1875,9 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
             else:
                 due = ends is None or "rule.249.stepped_up_cools" in skip
             rule("249.cool_off", due, "schema", "payload.cool_off_ends")
+    if event_type == "StepUpAsserted":
+        rule("252.cause", draft["causation_id"] is not None, "schema", "causation_id")
+        rule("252.user", draft["actor"]["kind"] == "user", "schema", "actor.kind")
     if event_type == "MandateVersionCreated":
         paths = [(entry["path"] or "").encode() for entry in p["provenance"]]
         rule("17", ascending(paths), "non_canonical", "payload.provenance")
@@ -2016,6 +2055,7 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
     out += control_plane_violations(event_type, draft, skip)
     out += backtest_violations(event_type, draft, skip)
     out += deployment_manager_violations(event_type, draft, skip)
+    out += connection_role_violations(event_type, draft, skip)
     return out
 
 
@@ -2810,6 +2850,21 @@ def deployment_manager_violations(event_type: str, draft: dict, skip: frozenset[
     return out
 
 
+def connection_role_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
+    """§9.33's rule 261, on a well-typed payload: a system actor, and a cause."""
+    if event_type not in CR_RECORDS:
+        return []
+    out: list[Violation] = []
+
+    def rule(name: str, holds: bool, path: str) -> None:
+        if not holds and f"rule.{name}" not in skip:
+            out.append(Violation(f"rule.{name}", "schema", path))
+
+    rule("261.system", draft["actor"]["kind"] == "system", "actor.kind")
+    rule("261.cause", draft["causation_id"] is not None, "causation_id")
+    return out
+
+
 def anchor_self_failure(entries: list[dict], skip: frozenset[str] = frozenset()) -> dict | None:
     """§11's `anchor_self_mismatch` over one control stream's entries in `seq` order: each
     `AnchorComputed` has a leaf for its own stream naming the event just before it, by `seq` and by
@@ -3247,6 +3302,8 @@ def violations(draft: dict, skip: frozenset[str] = frozenset()) -> list[Violatio
         ]
     versions = VERSIONED_VERSIONS.get((stream[0], event_type), (1,))
     if event_type == "AgentDeployed" and "versions.agent_deployed_v2" in skip:
+        versions = (1,)
+    if event_type == "CredentialEnrolled" and "versions.credential_enrolled_v2" in skip:
         versions = (1,)
     if event_type == "MarkUpdated" and "versions.mark_updated_v1" in skip:
         versions = (2,)

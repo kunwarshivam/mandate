@@ -2346,6 +2346,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-provisioner"
+version = "0.0.0"
+dependencies = [
+ "mandate-canon",
+ "mandate-connections",
+ "mandate-deploy-manager",
+ "mandate-journal",
+ "mandate-time",
+ "mandate-vault",
+ "tokio",
+]
+
+[[package]]
+name = "mandate-provisionerd"
+version = "0.0.0"
+dependencies = [
+ "mandate-canon",
+ "mandate-connections",
+ "mandate-deploy-manager",
+ "mandate-deployd",
+ "mandate-journal",
+ "mandate-journal-pg",
+ "mandate-process",
+ "mandate-provisioner",
+ "mandate-time",
+ "mandate-vault",
+ "secrecy",
+ "tokio",
+]
+
+[[package]]
 name = "mandate-push-relay"
 version = "0.0.0"
 dependencies = [

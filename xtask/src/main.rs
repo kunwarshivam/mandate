@@ -1935,9 +1935,7 @@ fn bootstrap_staging(tofu: &dyn Fn(&[String]) -> Command, chdir: &str, run: &str
     let words = vault_provision::vault_provision(
         &vault_provision::Steps {
             kubectl: &in_cluster,
-            provision: &|stdin| {
-                in_vault_cli(&vault_provision::provision_command(&connections), stdin)
-            },
+            provision: &|command, stdin| in_vault_cli(command, stdin),
             put: &|secret, stdin| in_vault_cli(&vault_provision::put_command(secret), stdin),
         },
         &listed,
@@ -12155,6 +12153,8 @@ mod tests {
                 "mandate-cp-site",
                 "mandate-deploy-manager",
                 "mandate-deployd",
+                "mandate-provisioner",
+                "mandate-provisionerd",
                 "mandate-dispatcher",
                 "mandate-gatewayd"
             ]

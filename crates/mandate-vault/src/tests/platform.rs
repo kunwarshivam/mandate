@@ -52,6 +52,7 @@ fn identity() -> impl Strategy<Value = Identity> {
         Just(Identity::SecretImport),
         Just(Identity::ModelGateway),
         Just(Identity::EmailSender),
+        Just(Identity::Provisioner),
     ]
 }
 
