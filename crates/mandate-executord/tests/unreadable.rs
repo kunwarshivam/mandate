@@ -146,7 +146,6 @@ fn a_version_1_establishment_reads_and_a_later_one_hands_openings_again() -> Res
 /// not read is still followed while unsure, so its risk exit is handed and its kill switch applied,
 /// never left silent.
 #[test]
-#[ignore = "pending E7-4"]
 fn an_agent_on_an_unreadable_establishment_still_gets_its_exit_and_switch() -> Result<(), Error> {
     let journal = Journal::default();
     journal.write(
@@ -177,7 +176,6 @@ fn an_agent_on_an_unreadable_establishment_still_gets_its_exit_and_switch() -> R
 /// revocation DEC-2343 reads a connection's kill command for, so while unsure the executor applies
 /// the command itself, with no runtime copy.
 #[test]
-#[ignore = "pending E7-4"]
 fn an_unreadable_revocation_still_applies_the_connections_kill_command() -> Result<(), Error> {
     let journal = deployed()?;
     kill_command(

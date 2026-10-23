@@ -77,9 +77,9 @@ pub struct Following {
     /// Whether the account's connection is closed (DEC-2347 item 3.2): a connect or a connection
     /// was journaled for it, no connect is open, and none of its connections is live.
     closed: bool,
-    /// Whether a connection record on the control stream did not read (DEC-2357): every followed
-    /// agent's openings are held, and the executor is never released, while exits and kill
-    /// switches go on.
+    /// Whether a connection record on the control stream did not read (DEC-2357): every agent with a
+    /// version-2 deployment is followed, with its openings held, every kill-switch command covering
+    /// it is applied directly, and the executor is never released, while exits go on.
     unsure: bool,
 }
 
@@ -270,7 +270,7 @@ pub fn agents_of(
         let Some((_, _, version)) = deployments
             .iter()
             .rev()
-            .find(|(_, connection, _)| ours.contains(connection))
+            .find(|(_, connection, _)| unsure || ours.contains(connection))
         else {
             continue;
         };
@@ -309,7 +309,9 @@ impl Following {
     /// those connections is revoked at or after the command, or the agent has an `AgentStopped`, so
     /// no runtime will copy it; and each agent-scope command naming the agent when it has an
     /// `AgentStopped`. Every other covered agent waits for the runtime's copy, which carries the
-    /// owner's confirmation.
+    /// owner's confirmation. While the reading is unsure, a connection record having not read, a
+    /// command covering the agent on any connection is applied as if revoked at or after it
+    /// (DEC-2357 item 3).
     pub fn commands_for(&self, agent: &AgentId) -> Vec<EventId> {
         let stopped = self.stopped.contains(agent);
         self.commands
@@ -318,12 +320,13 @@ impl Following {
                 Some(named) => named == agent && stopped,
                 None => command.before.iter().any(|(deployed, connection)| {
                     deployed == &agent.0
-                        && self.ours.contains(connection)
+                        && (self.unsure || self.ours.contains(connection))
                         && command
                             .connection
                             .as_ref()
                             .is_none_or(|named| named == connection)
                         && (stopped
+                            || self.unsure
                             || self
                                 .revocations
                                 .get(connection)

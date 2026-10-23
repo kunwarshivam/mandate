@@ -1,7 +1,0 @@
-file = "crates/mandate-executord/tests/unreadable.rs"
-test = "an_unreadable_revocation_still_applies_the_connections_kill_command"
-reason = """
-DEC-2357: a connection record on the control stream that does not read makes `agents_of` answer
-`Unreadable`, and the process stops, taking no exit. This test reaches no stub and fails on that
-behaviour until DEC-2357's implementation deletes this file with its `#[ignore]` line.
-"""
