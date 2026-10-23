@@ -12,8 +12,19 @@ tests (deploy/tests/test_cell.py) and the drills (`cargo xtask cell drill`) read
 {{ toJson $doc }}
 {{- end -}}
 
+{{- /* The processes of processes.json; with `api.vaultBinding` the API's egress also names the
+vault, so its pod carries the label the vault's policy admits on 8200 and an egress rule to it
+alone (DEC-2338). */ -}}
 {{- define "mandate.processes" -}}
-{{- (fromJson (.Files.Get "processes.json")).processes | toJson -}}
+{{- $all := (fromJson (.Files.Get "processes.json")).processes -}}
+{{- $out := list -}}
+{{- range $all -}}
+{{- if and (eq .name "api") $.Values.api.vaultBinding -}}
+{{- $_ := set . "egress" (concat (list (first .egress) "vault") (rest .egress)) -}}
+{{- end -}}
+{{- $out = append $out . -}}
+{{- end -}}
+{{- $out | toJson -}}
 {{- end -}}
 
 {{/* A process renders only when its image is named (processes.json "about"). */}}
