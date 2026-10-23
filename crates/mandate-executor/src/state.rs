@@ -12,9 +12,9 @@ use crate::ids::{ClientOrderId, IntentId};
 use crate::kill::sub_ledger;
 use crate::shape::transitional_alpaca;
 use crate::types::{
-    AccountScope, AccountState, ActivityCursor, AgentId, BracketLegs, EventId, FillId, IntentBody,
-    MarketObservation, Mode, OcoLegs, Order, OrderState, Protection, ProtectionPrices, Purpose,
-    RiskClock, Seq, SubmitOrder, UnprotectedInterval, WriterEpoch,
+    AccountRef, AccountScope, AccountState, ActivityCursor, AgentId, BracketLegs, EventId, FillId,
+    IntentBody, MarketObservation, Mode, OcoLegs, Order, OrderState, Protection, ProtectionPrices,
+    Purpose, RiskClock, Seq, SubmitOrder, UnprotectedInterval, WriterEpoch,
 };
 
 pub use crate::fold::fold;
@@ -133,6 +133,25 @@ pub struct ExecutorState {
     /// Each agent-scoped kill switch as its `KillSwitchActivated` journaled it, by that record's
     /// id, with the closes it has not yet raised as flatten intents (§5.5, DEC-485).
     pub(crate) switches: BTreeMap<EventId, Switch>,
+    /// The instruments an account-scoped kill switch closes through the broker's close-position,
+    /// from its `KillSwitchActivated`: their protection is never placed again beside that close,
+    /// which would sell the same shares twice (§5.4, §5.5). They all leave once the account's
+    /// kill-switch mode is lifted; while it holds, no entry can open them again.
+    pub(crate) closing_all: BTreeSet<InstrumentId>,
+    /// The account-scoped kill switch while its mode holds, from its `KillSwitchActivated` and
+    /// each `AccountCloseRequested` under it (DEC-2333, DEC-2337): its cancel-all's answer,
+    /// accepted or lost, asks an open-orders read, and each instrument it closes is requested
+    /// through the broker's close-position once a read taken at or after it shows no sell there.
+    pub(crate) account_switch: Option<AccountSwitch>,
+    /// The latest broker read noted since the account switch's cancel-all was answered, as the
+    /// read showed it: process-local, an input never journaled (like `quotes`), so a restart waits
+    /// for its startup reconciliation before it closes anything (DEC-2333 item 2, DEC-2337 item 3).
+    /// Each account switch folded clears it, so no switch closes on an earlier one's read.
+    pub(crate) switch_read: Option<SwitchRead>,
+    /// The account switch's cancel-all is answered, accepted or lost, or the process restarted
+    /// since, which reads as lost (DEC-2333 items 2 and 3): only a read after that may release a
+    /// close. Process-local; each account switch folded clears it.
+    pub(crate) cancel_all_answered: bool,
     /// The owner's confirmation each owner's exit was received with, by intent, from its
     /// `OwnerConfirmationReceived` (journal spec §9.5, DEC-2040 item 2).
     pub(crate) confirmations: BTreeMap<IntentId, Confirmed>,
@@ -147,6 +166,29 @@ pub struct ExecutorState {
     /// transitional Alpaca table. `None` only if that table failed to build, which protection
     /// reads as no shape offered (journaled and alerted, DEC-838 item 1).
     pub(crate) profile: Option<CapabilityProfile>,
+}
+
+/// The account-scoped kill switch (trading-domain spec §5.5, DEC-2333): the record that journaled
+/// it, the account its broker requests name, the risk-clock second it went, and the latest
+/// close-position request of each instrument, by attempt and journal position (DEC-2337).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AccountSwitch {
+    pub(crate) event: EventId,
+    pub(crate) seq: Seq,
+    pub(crate) reference: AccountRef,
+    pub(crate) at: RiskClock,
+    pub(crate) requests: BTreeMap<InstrumentId, (u64, Seq)>,
+}
+
+/// One broker read noted after the account switch's cancel-all was answered (DEC-2333 item 2,
+/// DEC-2337 item 3): the head it was taken at, which [`crate::kill::closes_due`] holds to the
+/// switch's, the sells it showed working in each instrument, by our id or `None` for
+/// one that is not ours, and, for a reconciliation, the positions it showed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SwitchRead {
+    pub(crate) taken_at: Seq,
+    pub(crate) sells: BTreeMap<InstrumentId, Vec<Option<ClientOrderId>>>,
+    pub(crate) held: Option<BTreeMap<InstrumentId, SignedQty>>,
 }
 
 /// One agent-scoped kill switch (trading-domain spec §5.5): whose sub-ledger it sells, as what
@@ -370,6 +412,10 @@ impl ExecutorState {
             uncompensated: BTreeMap::new(),
             pending_requests: BTreeMap::new(),
             switches: BTreeMap::new(),
+            closing_all: BTreeSet::new(),
+            account_switch: None,
+            switch_read: None,
+            cancel_all_answered: false,
             confirmations: BTreeMap::new(),
             now: None,
             previous_now: None,
