@@ -6582,7 +6582,8 @@ fn the_bound_never_sells_beside_the_account_switch() {
 /// Protection the cancel-all cancels leaves its position unprotected under §5.4's bound, journaled
 /// and never silent (DEC-2333 item 3): the cancel starts an interval (`unprotected_start`), and at
 /// `max_unprotected_s` the interval is journaled (`interval_limit`) and the owner alerted
-/// (`unprotected_interval_limit`), while nothing is placed or sold beside the switch's close.
+/// (`unprotected_interval_limit`), while nothing is sold beside the switch's close. What the bound
+/// places again is A1c's ([`protection_is_placed_again_at_the_bound_for_the_held_quantity`]).
 #[test]
 fn protection_the_cancel_all_cancels_opens_a_bounded_alerted_interval() {
     let ids = TestIds;
@@ -6623,13 +6624,344 @@ fn protection_the_cancel_all_cancels_opens_a_bounded_alerted_interval() {
         actions(&bound),
         bound.notifications
     );
-    let sent: Vec<_> = cancelled
+    let sold: Vec<_> = cancelled
         .submissions()
         .into_iter()
         .chain(bound.submissions())
+        .filter(|o| o.purpose != Purpose::Protective)
         .map(|o| o.client_order_id.as_str().to_owned())
         .collect();
-    assert!(sent.is_empty(), "nothing placed or sold: {sent:?}");
+    assert!(sold.is_empty(), "nothing sold: {sold:?}");
+    assert!(
+        cancelled.submissions().is_empty(),
+        "and nothing placed beside the cancel: {:?}",
+        cancelled.submissions()
+    );
+}
+
+/// The account switch on the BTC position whose stop the cancel-all cancelled, up to §5.4's bound
+/// (DEC-2333 item 3, DEC-2356): if `foreign` names a quantity, the cancel-all is accepted and a
+/// read shows a sell that is not ours working for it in BTC, so the close waits; then the stop's
+/// cancel is confirmed, which starts BTC's interval, and the bound passes. The shell, the run at
+/// the bound, and the position the fold holds, which §5.4 sizes protection against.
+fn at_the_bound(
+    ports: &mandate_executor::Ports<'_>,
+    foreign: Option<&str>,
+) -> (Shell, common::Ran, String) {
+    let (mut shell, stop) = crypto_stop_account(ports);
+    let held = shell
+        .state
+        .positions()
+        .get(&instrument(BTC))
+        .map(ToString::to_string)
+        .expect("BTC is held");
+    shell.run(account_switch(Initiator::Owner), ports);
+    if let Some(working) = foreign {
+        shell.run(Input::Broker(Ok(BrokerOutcome::AccountWideAccepted)), ports);
+        shell.run(
+            Input::Broker(Ok(BrokerOutcome::OpenOrders(vec![foreign_sell(working)]))),
+            ports,
+        );
+    }
+    shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(stop("canceled"))),
+        ports,
+    );
+    let bound = shell.run(Input::Tick(clock(20 + 3_600)), ports);
+    (shell, bound, held)
+}
+
+/// A sell of `qty` BTC working at the broker that the platform did not place.
+fn foreign_sell(qty: &str) -> mandate_executor::BrokerOrder {
+    broker_order("b-ext", None, BTC, Side::Sell, qty, "0", "new")
+}
+
+/// The protective orders a run sends: their ids and quantities.
+fn protective_sent(ran: &common::Ran) -> Vec<(String, String)> {
+    ran.submissions()
+        .into_iter()
+        .filter(|o| o.purpose == Purpose::Protective)
+        .map(|o| (o.client_order_id.as_str().to_owned(), o.qty.to_string()))
+        .collect()
+}
+
+/// DEC-2333 item 3 (A1c): at §5.4's bound, protection is placed again for the held quantity less
+/// every sell not confirmed cancelled. The stop's cancel is confirmed and nothing else sells, so
+/// one protective sell goes for the whole position, journaled first, and nothing else is sent: no
+/// close, no exit.
+#[test]
+#[ignore = "pending E7-4"]
+fn protection_is_placed_again_at_the_bound_for_the_held_quantity() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (_, bound, held) = at_the_bound(&ports, None);
+
+    let placed = protective_sent(&bound);
+    assert_eq!(
+        placed
+            .iter()
+            .map(|(_, qty)| qty.as_str())
+            .collect::<Vec<_>>(),
+        vec![held.as_str()],
+        "one protective sell for the held quantity: {placed:?}"
+    );
+    let submitted = bound
+        .effects
+        .iter()
+        .position(|e| matches!(e, Effect::Broker(BrokerRequest::Submit(_))))
+        .expect("the protection is sent");
+    let journaled = bound.effects.iter().position(|e| {
+        matches!(e, Effect::Journal(d) if d.event_type == "ProtectionChanged"
+            && d.payload.get("action").and_then(mandate_canon::Value::as_str) == Some("placed"))
+    });
+    assert!(
+        journaled.is_some_and(|at| at < submitted),
+        "journaled before it is sent"
+    );
+    assert!(
+        !bound.requests.iter().any(|r| matches!(
+            r,
+            BrokerRequest::ClosePosition(..) | BrokerRequest::CancelAll(_)
+        )),
+        "and nothing else: {:?}",
+        bound.requests
+    );
+    assert!(
+        bound
+            .submissions()
+            .iter()
+            .all(|o| o.purpose == Purpose::Protective),
+        "no exit beside it"
+    );
+}
+
+/// DEC-2356 item 1: a sell the read shows working that is not ours counts as not confirmed
+/// cancelled, so the protection placed at the bound covers only what it leaves.
+#[test]
+#[ignore = "pending E7-4"]
+fn the_bound_protection_leaves_out_a_sell_the_read_shows_working() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (_, bound, held) = at_the_bound(&ports, Some("0.2"));
+
+    let left = qty(&held)
+        .checked_sub(qty("0.2"))
+        .expect("the position holds more than the foreign sell")
+        .to_string();
+    let placed = protective_sent(&bound);
+    assert_eq!(
+        placed
+            .iter()
+            .map(|(_, qty)| qty.as_str())
+            .collect::<Vec<_>>(),
+        vec![left.as_str()],
+        "protection for what the foreign sell leaves: {placed:?}"
+    );
+}
+
+/// DEC-2356 item 3: a read that still shows another sell working in BTC leaves the bound's
+/// protection resting, since the close cannot go yet; a read showing it alone cancels it by its
+/// id, and the close goes only once that cancel is confirmed, never beside it.
+#[test]
+#[ignore = "pending E7-4"]
+fn the_bound_protection_is_cancelled_only_when_the_close_can_go() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (mut shell, bound, _) = at_the_bound(&ports, Some("0.2"));
+    let (id, size) = protective_sent(&bound)
+        .into_iter()
+        .next()
+        .expect("the bound places protection");
+    let protection =
+        |status: &str| broker_order("b-bound", Some(&id), BTC, Side::Sell, &size, "0", status);
+    let cancels = |ran: &common::Ran| {
+        ran.requests.iter().any(|r| {
+            matches!(
+                r,
+                BrokerRequest::Cancel { client_order_id } if client_order_id.as_str() == id
+            )
+        })
+    };
+    let closes = |ran: &common::Ran| {
+        ran.requests
+            .iter()
+            .any(|r| matches!(r, BrokerRequest::ClosePosition(..)))
+    };
+    shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(protection("new"))),
+        &ports,
+    );
+
+    let blocked = shell.run(
+        Input::Broker(Ok(BrokerOutcome::OpenOrders(vec![
+            foreign_sell("0.2"),
+            protection("new"),
+        ]))),
+        &ports,
+    );
+    assert!(
+        !cancels(&blocked) && !closes(&blocked),
+        "kept while another sell blocks the close: {:?}",
+        blocked.requests
+    );
+
+    let clear = shell.run(
+        Input::Broker(Ok(BrokerOutcome::OpenOrders(vec![protection("new")]))),
+        &ports,
+    );
+    assert!(
+        cancels(&clear),
+        "cancelled by its id once the close can go: {:?}",
+        clear.requests
+    );
+    assert!(
+        !closes(&clear),
+        "and the close waits on its cancel: {:?}",
+        clear.requests
+    );
+
+    let confirmed = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(protection("canceled"))),
+        &ports,
+    );
+    assert!(
+        closes(&confirmed),
+        "the close goes once it is confirmed: {:?}",
+        confirmed.requests
+    );
+    assert!(
+        protective_sent(&confirmed).is_empty(),
+        "and nothing is placed beside it: {:?}",
+        protective_sent(&confirmed)
+    );
+}
+
+/// DEC-2356 item 3, replayed: the protection the bound placed is folded from its `placed` record,
+/// so a restarted executor still keeps it while another sell blocks the close.
+#[test]
+#[ignore = "pending E7-4"]
+fn a_restart_keeps_the_bound_protection_while_the_close_is_blocked() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (shell, bound, _) = at_the_bound(&ports, Some("0.2"));
+    let (id, size) = protective_sent(&bound)
+        .into_iter()
+        .next()
+        .expect("the bound places protection");
+
+    let (mut restarted, _) = shell.restart(&ports);
+    let read = restarted.run(
+        Input::BrokerSnapshot({
+            let mut taken = snapshot(restarted.head().0, ReconcileReason::Startup);
+            taken.open_orders = vec![
+                foreign_sell("0.2"),
+                broker_order("b-bound", Some(&id), BTC, Side::Sell, &size, "0", "new"),
+            ];
+            taken
+        }),
+        &ports,
+    );
+    assert!(
+        !read.requests.iter().any(|r| matches!(
+            r,
+            BrokerRequest::Cancel { client_order_id } if client_order_id.as_str() == id
+        )),
+        "the replayed executor keeps it: {:?}",
+        read.requests
+    );
+}
+
+/// DEC-2333 item 5: once BTC's close-position has gone out, nothing is placed there, at the bound
+/// or anywhere else, even with the stop's cancel confirmed and the interval it opens at its bound.
+#[test]
+fn nothing_is_placed_at_the_bound_once_the_close_is_requested() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (mut shell, stop) = crypto_stop_account(&ports);
+    shell.run(account_switch(Initiator::Owner), &ports);
+    shell.run(
+        Input::Broker(Ok(BrokerOutcome::AccountWideAccepted)),
+        &ports,
+    );
+    let read = shell.run(
+        Input::Broker(Ok(BrokerOutcome::OpenOrders(Vec::new()))),
+        &ports,
+    );
+    assert!(
+        read.requests
+            .iter()
+            .any(|r| matches!(r, BrokerRequest::ClosePosition(..))),
+        "BTC's close is requested"
+    );
+    shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(stop("canceled"))),
+        &ports,
+    );
+
+    let bound = shell.run(Input::Tick(clock(20 + 3_600)), &ports);
+
+    assert!(
+        bound.submissions().is_empty(),
+        "nothing beside the close: {:?}",
+        bound.submissions()
+    );
+}
+
+/// DEC-2333 item 3, carried from A1b: the cancel-all's answer lost, then a restart, whose startup
+/// reconciliation is the read that confirms it, so the close goes on it and the cancel-all is never
+/// sent again.
+#[test]
+fn a_lost_cancel_all_then_a_restart_closes_on_the_startup_read() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (mut shell, stop) = crypto_stop_account(&ports);
+    shell.run(account_switch(Initiator::Owner), &ports);
+    shell.run(Input::Broker(Err(BrokerUnknown::Timeout)), &ports);
+
+    let (mut restarted, started) = shell.restart(&ports);
+    let held = stop("new").qty.to_string();
+    let read = restarted.run(
+        Input::BrokerSnapshot({
+            let mut taken = snapshot(restarted.head().0, ReconcileReason::Startup);
+            taken.positions = vec![broker_position(BTC, &held)];
+            taken
+        }),
+        &ports,
+    );
+
+    assert!(
+        read.requests
+            .iter()
+            .any(|r| matches!(r, BrokerRequest::ClosePosition(_, i) if i.as_str() == BTC)),
+        "the startup read confirms the cancel-all and BTC closes: {:?}",
+        read.requests
+    );
+    assert!(
+        !started
+            .requests
+            .iter()
+            .chain(&read.requests)
+            .any(|r| matches!(r, BrokerRequest::CancelAll(_))),
+        "never a second cancel-all"
+    );
 }
 
 /// The interval protection's loss opens is the closing instrument's own, whatever other
