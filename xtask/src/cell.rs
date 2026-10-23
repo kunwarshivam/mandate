@@ -317,8 +317,9 @@ pub fn tools_missing() -> Option<String> {
     None
 }
 
-/// `cargo xtask ci cell`: the chart checks, then the cell itself, every drill, every drill again
-/// with its bug planted, and the demo without `web/`, which upgrades the releases in place. Skipped without docker, k3d and helm unless CI requires it.
+/// `cargo xtask ci cell`: the chart checks, then the cell itself and every drill; the drills with
+/// their bugs planted are `ci cell-seeded`'s, and the upgrade in place is `ci cell-upgrade`'s.
+/// Skipped without docker, k3d and helm unless CI requires it.
 pub fn ci() -> Result<()> {
     if let Some(reason) = tools_missing() {
         if env::var_os(CELL_REQUIRED_ENV).is_some() {
@@ -329,8 +330,36 @@ pub fn ci() -> Result<()> {
     }
     chart_checks()?;
     up()?;
-    drill(&DRILLS, false)?;
-    drill(&DRILLS, true)?;
+    drill(&DRILLS, false)
+}
+
+/// `cargo xtask ci cell-seeded`: the cell, then every drill of [`DRILLS`] again with its bug planted,
+/// which each must catch. It ran in `ci cell` until that job came within reach of its ten minutes
+/// (DEC-464). Skipped as `ci cell` is.
+pub fn ci_seeded() -> Result<()> {
+    if let Some(reason) = tools_missing() {
+        if env::var_os(CELL_REQUIRED_ENV).is_some() {
+            bail!("{CELL_REQUIRED_ENV} is set but {reason}");
+        }
+        eprintln!("    cell-seeded: {reason}; skipping (see deploy/cell/README.md)");
+        return Ok(());
+    }
+    up()?;
+    drill(&DRILLS, true)
+}
+
+/// `cargo xtask ci cell-upgrade`: the cell, then `cell demo --no-web`, whose own `up` upgrades every
+/// release in place, with the demo's workspace, readiness, port-forward and sign-in. It ran at the
+/// end of `ci cell` until that job outgrew its ten minutes (DEC-464). Skipped as `ci cell` is.
+pub fn ci_upgrade() -> Result<()> {
+    if let Some(reason) = tools_missing() {
+        if env::var_os(CELL_REQUIRED_ENV).is_some() {
+            bail!("{CELL_REQUIRED_ENV} is set but {reason}");
+        }
+        eprintln!("    cell-upgrade: {reason}; skipping (see deploy/cell/README.md)");
+        return Ok(());
+    }
+    up()?;
     demo(false)
 }
 
