@@ -3478,6 +3478,8 @@ struct Finding {
 /// "Amazon's documented SigV4 example key ID" exception: that exact value, in that file alone. The
 /// ULID rows prove the API server's process-test exception: a workspace or organization ULID is
 /// allowed in that test file alone, and any other value under the same setting there is reported.
+/// The image rows prove the placeholder API image tag's exception: that exact tag is allowed in the
+/// cell module and the OAuth fixture's chart test alone, and another tag there is reported.
 /// The build-output rows prove the `target/` exception: a key under the workspace root's `target/`
 /// is allowed, and the same key under a crate's own `target` or under `targets/` is reported.
 fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
@@ -3522,6 +3524,14 @@ fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
     let cell = "xtask/src/cell.rs";
     let image = format!("                \"mandate.local/api:{}\",", "0123456789ab");
     let not_image = format!("                \"mandate.local/api:{page}\",");
+    let fixture_test = "deploy/tests/test_oauth_fixture.py";
+    let fixture_image = format!(
+        "        lambda w: fixture_container(w).update(image=\"mandate.local/api:{}\"),",
+        "0123456789ab"
+    );
+    let not_fixture_image = format!(
+        "        lambda w: fixture_container(w).update(image=\"mandate.local/api:{page}\"),"
+    );
     let challenges = "schemas/workspace-api/examples/commands.step-up-challenge.json";
     let challenge = format!(
         "  \"webauthn_challenge\": \"{}\",",
@@ -3609,6 +3619,9 @@ fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
         (cell.to_owned(), image.clone(), None),
         ("stray-cell.rs".to_owned(), image, generic),
         (cell.to_owned(), not_image, generic),
+        (fixture_test.to_owned(), fixture_image.clone(), None),
+        ("stray-test.py".to_owned(), fixture_image, generic),
+        (fixture_test.to_owned(), not_fixture_image, generic),
         (challenges.to_owned(), challenge.clone(), None),
         ("stray-challenge.json".to_owned(), challenge, generic),
         (challenges.to_owned(), not_challenge, generic),
