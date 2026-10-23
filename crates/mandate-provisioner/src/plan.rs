@@ -91,7 +91,7 @@ struct Fold {
     /// Every version-2 OAuth request's connection, by the request's `event_id`, open or closed.
     of: BTreeMap<String, String>,
     /// Each request's first closer: the roles made for it after it closed owe their removal at once,
-    /// citing it (journal spec v0.78 rule 263, DEC-2350 item 7).
+    /// citing it (journal spec v0.81 rule 263, DEC-2350 item 7).
     first_closers: BTreeMap<String, (String, Occasion)>,
 }
 

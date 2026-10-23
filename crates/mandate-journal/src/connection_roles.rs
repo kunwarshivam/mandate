@@ -156,7 +156,7 @@ struct Fold {
     /// Each request's connection's closers journaled after it, by `event_id`.
     closers: BTreeMap<String, BTreeMap<String, Closer>>,
     /// The request each connection's latest roles were made for: its removal cites a closer
-    /// journaled after that request, before those roles' record or after it (v0.78 rule 263).
+    /// journaled after that request, before those roles' record or after it (v0.81 rule 263).
     made_for: BTreeMap<String, String>,
 }
 
