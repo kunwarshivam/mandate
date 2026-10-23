@@ -155,7 +155,7 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
         "FillApplied" | "LateFillApplied" => fill_applied(state, payload, event.seq),
         "FeesCharged" => fees_charged(state, payload),
         "ExternalActivityIngested" => Ok(()),
-        "ConnectionChecked" => connection_checked(),
+        "ConnectionChecked" | "ConnectionEstablished" => connection_checked(),
         "AccountRestrictionChanged" => {
             state.account_state = match required_text(payload, "restriction")? {
                 "closing_only" => AccountState::ClosingOnly,
@@ -207,7 +207,9 @@ fn net_after(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorE
 /// `degraded` or `suspended`, the executor commits `AccountRestrictionChanged` and
 /// `AgentModeApplied` before the failed check, so the halt is never behind this record and a
 /// replay that reads it adds nothing to hold. Its risk clock is read like every account event's
-/// (DEC-969 item 5).
+/// (DEC-969 item 5). The executor's copy of its `ConnectionEstablished` folds the same way
+/// (DEC-2341 item 2): it ends rule 68's `connecting` at the executor, which reads it from the
+/// journal, and holds no account state; E7-3's later slice interprets it if one ever needs to.
 fn connection_checked() -> Result<(), ExecutorError> {
     Ok(())
 }
@@ -263,6 +265,7 @@ fn owner_elsewhere(kind: &str) -> Option<&'static str> {
         | "OwnerConfirmationReceived"
         | "AccountCloseRequested"
         | "ConnectionChecked"
+        | "ConnectionEstablished"
         | "PositionReleased" => None,
         "RelatedAccountsCoordination" => Some("E7-5"),
         "MandateVersionApplied"

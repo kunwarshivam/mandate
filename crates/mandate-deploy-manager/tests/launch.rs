@@ -8,7 +8,7 @@ mod common;
 
 use common::{
     Journal, Manager, accounts, at, block_on, connection_of, deployed, established, manager,
-    refused, requested, restart, revoked, stopped,
+    refused, requested, restart, revoked, roles_made, stopped,
 };
 use mandate_deploy_manager::fake::Call;
 use mandate_deploy_manager::{Process, Slot};
@@ -81,6 +81,7 @@ fn a_connects_executor_starts_and_stops_naming_its_connect() {
     let journal = Journal::new();
     let mut m = manager(&journal, accounts(&[]));
     journal.services(&requested(CONNECT, CONNECTING, Some("oauth")), at(0));
+    journal.services(&roles_made(CONNECT), at(0));
     tick(&mut m, 1);
     m.orchestrator()
         .fake
@@ -109,6 +110,7 @@ fn each_executor_names_its_own_accounts_connection_beside_another_accounts_conne
     let journal = Journal::new();
     let mut m = manager(&journal, accounts(&[(AGENT, DEPLOYED)]));
     journal.services(&requested(CONNECT, CONNECTING, Some("oauth")), at(0));
+    journal.services(&roles_made(CONNECT), at(0));
     tick(&mut m, 1);
     m.orchestrator()
         .fake
@@ -134,7 +136,9 @@ fn two_connects_of_one_account_that_succeed_in_one_pass_start_its_executor_once(
     let mut m = manager(&journal, accounts(&[]));
     let other = "conn_01J8Z2LAUNCH2";
     journal.services(&requested(CONNECT, CONNECTING, Some("oauth")), at(0));
+    journal.services(&roles_made(CONNECT), at(0));
     journal.services(&requested(other, CONNECTING, Some("oauth")), at(0));
+    journal.services(&roles_made(other), at(0));
     tick(&mut m, 1);
     for connection in [CONNECT, other] {
         m.orchestrator()
@@ -189,6 +193,7 @@ fn a_restart_after_the_connect_ended_names_the_deployments_connection_across_the
     let mut m = manager(&journal, accounts(&[]));
     let current = connection_of(CONNECTING);
     journal.services(&requested(CONNECT, CONNECTING, Some("oauth")), at(0));
+    journal.services(&roles_made(CONNECT), at(0));
     tick(&mut m, 1);
     m.orchestrator()
         .fake
@@ -229,6 +234,7 @@ fn a_stop_names_the_connection_its_generation_started_with_once_nothing_names_on
     let journal = Journal::new();
     let mut m = manager(&journal, accounts(&[]));
     journal.services(&requested(CONNECT, CONNECTING, Some("oauth")), at(0));
+    journal.services(&roles_made(CONNECT), at(0));
     tick(&mut m, 1);
     m.orchestrator()
         .fake
@@ -270,7 +276,9 @@ fn each_executor_names_its_own_accounts_connection_beside_other_accounts_deploym
         accounts(&[("agent_a", first), ("agent_b", second)]),
     );
     journal.services(&requested("conn_01J8Z2X", third, Some("oauth")), at(0));
+    journal.services(&roles_made("conn_01J8Z2X"), at(0));
     journal.services(&requested("conn_01J8Z2Y", fourth, Some("oauth")), at(0));
+    journal.services(&roles_made("conn_01J8Z2Y"), at(0));
     tick(&mut m, 1);
     for connection in ["conn_01J8Z2X", "conn_01J8Z2Y"] {
         m.orchestrator()

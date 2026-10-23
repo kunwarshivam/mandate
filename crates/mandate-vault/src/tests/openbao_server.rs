@@ -39,6 +39,7 @@ use crate::policy::{
 };
 use crate::provisioner::{RoleProvisioner, RoleRefusal};
 use crate::source::{Grant, SecretSource};
+use mandate_connections::account_entry::BrokerAccountId;
 use mandate_connections::record::{AccountPiiRef, AccountRef, ConnectionId};
 use mandate_time::UtcNanos;
 use reqwest::{Certificate, Method};
@@ -1318,7 +1319,7 @@ async fn an_executor_creates_its_own_account_entry_once_and_no_identity_reads_it
 #[tokio::test(flavor = "current_thread")]
 async fn only_an_executor_hashes_an_account_under_the_vaults_key() {
     let ca = include_bytes!("fixtures/isrg-root-x1.pem").to_vec();
-    let id = |text: &str| SecretString::from(text.to_owned());
+    let id = |text: &str| BrokerAccountId::new(text).unwrap();
     let unreachable = OpenBaoSource::from_token(
         &nowhere(ca),
         Identity::Executor(c("c1")),
@@ -1453,16 +1454,38 @@ async fn provisioning_fails_on_a_fingerprint_key_that_can_leave_the_vault() {
         };
         for (path, body) in steps {
             let path = path.replace("{transit}", &config.mounts.transit);
-            operator_call(
-                &address,
-                &ca_pem,
-                &operator,
-                Method::POST,
-                &path,
-                Some(body),
-            )
-            .await;
+            let mut set_up = false;
+            for _ in 0..50 {
+                let answer = operator_call(
+                    &address,
+                    &ca_pem,
+                    &operator,
+                    Method::POST,
+                    &path,
+                    Some(body.clone()),
+                )
+                .await;
+                if answer.get("errors").is_none() {
+                    set_up = true;
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+            assert!(set_up, "{case}: {path} was never set up");
         }
+        let key = operator_call(
+            &address,
+            &ca_pem,
+            &operator,
+            Method::GET,
+            &format!("{}/keys/{FINGERPRINT_KEY}", config.mounts.transit),
+            None,
+        )
+        .await;
+        let planted = key.pointer("/data/exportable") == Some(&json!(true))
+            || key.pointer("/data/deletion_allowed") == Some(&json!(true))
+            || case == "another engine";
+        assert!(planted, "{case}: the set-up left {key}");
         assert_eq!(
             provision(&config, &operator, &[c("c1")], None)
                 .await
@@ -1525,7 +1548,7 @@ fn request(n: u8) -> AccountRef {
 async fn fingerprinted(bao: &Bao, connection: &str, n: u8, now: UtcNanos) -> AccountFingerprint {
     let executor = executor_of(bao, connection, now).await;
     let fingerprint = executor
-        .hmac_account(&SecretString::from("acct-1".to_owned()))
+        .hmac_account(&BrokerAccountId::new("acct-1").unwrap())
         .await
         .unwrap();
     let pii_ref = AccountPiiRef::new(&format!("pii_01J8Z2PQ00000000000000000{n}")).unwrap();

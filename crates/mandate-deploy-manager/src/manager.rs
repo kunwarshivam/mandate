@@ -40,11 +40,14 @@ pub enum Decision {
 }
 
 /// A connection's OAuth request: its token exchange's deadline, whether a record closed it, its
-/// account, whether its executor's `exchanged` start is journaled, and whether a refusal or a
-/// revocation ended the connection since (DEC-2335).
+/// account, whether its executor's `exchanged` start is journaled, whether a refusal or a
+/// revocation ended the connection since (DEC-2335), its event id, and whether the provisioner's
+/// `ConnectionRolesMade` for it is read (DEC-2350).
 #[derive(Debug, Clone)]
 struct Request {
     deadline: UtcNanos,
+    id: String,
+    roles_made: bool,
     closed: bool,
     account: String,
     exchanged: bool,
@@ -163,6 +166,7 @@ impl Manager {
                 connection,
                 account,
                 deadline,
+                request,
             } => {
                 let closed = self.closed.contains(connection);
                 let ended = self.ended.contains(connection);
@@ -170,6 +174,8 @@ impl Manager {
                     .entry(connection.clone())
                     .or_insert_with(|| Request {
                         deadline: *deadline,
+                        id: request.clone(),
+                        roles_made: false,
                         closed,
                         account: account.clone(),
                         exchanged: false,
@@ -178,6 +184,16 @@ impl Manager {
                 self.slots
                     .entry(Slot::token_exchange(connection))
                     .or_default();
+            }
+            Fact::RolesMade {
+                connection,
+                request,
+            } => {
+                if let Some(open) = self.requests.get_mut(connection)
+                    && open.id == *request
+                {
+                    open.roles_made = true;
+                }
             }
             Fact::RequestClosed { connection } => self.close(connection),
             Fact::Refused { connection } => {
@@ -433,7 +449,7 @@ impl Manager {
 
     /// Whether the control stream wants `slot` running: a runtime for an agent deployed and not
     /// stopped, an executor for an account with such an agent, and a token exchange for a
-    /// connection whose OAuth request is open.
+    /// connection whose OAuth request is open and has its roles made (§9.21, DEC-2350).
     pub fn desired(&self, slot: &Slot) -> bool {
         match slot.process {
             Process::Runtime => self
@@ -451,7 +467,7 @@ impl Manager {
             Process::TokenExchange => self
                 .requests
                 .get(&slot.subject)
-                .is_some_and(|request| !request.closed),
+                .is_some_and(|request| !request.closed && request.roles_made),
         }
     }
 

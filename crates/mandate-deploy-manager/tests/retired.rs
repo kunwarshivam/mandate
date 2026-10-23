@@ -12,7 +12,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use common::{
     Journal, Manager, accounts, at, block_on, connection_of, deployed, identity, kill, manager,
-    requested, restart, revoked_again, stopped,
+    requested, restart, revoked_again, roles_made, stopped,
 };
 use mandate_canon::Value;
 use mandate_deploy_manager::fake::Call;
@@ -1029,6 +1029,7 @@ const CONNECTING_VIA: &str = "conn_01J8Z2CONNECT0000000000C8";
 /// account's executor ran before, so the connect starts nothing and wants nothing.
 fn connecting(m: &mut Manager, journal: &Journal, secs: i64) {
     journal.services(&requested(CONNECT, ACCOUNT, Some("oauth")), at(secs));
+    journal.services(&roles_made(CONNECT), at(secs));
     tick(m, secs);
     m.orchestrator()
         .fake
@@ -1041,6 +1042,7 @@ fn connecting(m: &mut Manager, journal: &Journal, secs: i64) {
 fn connect_only(journal: &Journal) -> Manager {
     let mut m = manager(journal, accounts(&[]));
     journal.services(&requested(CONNECTING_VIA, CONNECTING, Some("oauth")), at(1));
+    journal.services(&roles_made(CONNECTING_VIA), at(1));
     tick(&mut m, 1);
     m.orchestrator()
         .fake

@@ -11,7 +11,7 @@ mod common;
 
 use common::{
     Journal, Manager, Seed, accounts, at, block_on, connection_of, deployed, established, kill,
-    manager, refused, requested, restart, revoked, stopped,
+    manager, refused, requested, restart, revoked, roles_made, stopped,
 };
 use mandate_canon::Value;
 use mandate_deploy_manager::Slot;
@@ -108,6 +108,7 @@ fn exchanging() -> (Journal, Manager) {
     let journal = Journal::new();
     let mut m = manager(&journal, accounts(&[]));
     journal.services(&requested(&connection(), ACCOUNT, Some("oauth")), at(0));
+    journal.services(&roles_made(&connection()), at(0));
     tick(&mut m, 1);
     assert_eq!(m.orchestrator().fake.live(&exchange()), 1);
     (journal, m)
@@ -321,6 +322,7 @@ fn an_account_whose_executor_already_ran_journals_no_exchanged_start() {
         &requested("conn_01J8Z2AGAIN", ACCOUNT, Some("oauth")),
         at(5),
     );
+    journal.services(&roles_made("conn_01J8Z2AGAIN"), at(5));
     tick(&mut m, 6);
     m.orchestrator().fake.succeed(&again);
     tick(&mut m, 7);
@@ -401,6 +403,7 @@ fn run(ops: &[Op], seed: Seed) {
     let mut m = manager(&journal, accounts(&[]));
     m.orchestrator().seed = seed;
     journal.services(&requested(&connection(), ACCOUNT, Some("oauth")), at(0));
+    journal.services(&roles_made(&connection()), at(0));
     let mut oracle = Oracle::default();
     let mut now = 1_i64;
     let mut seen = 0;
