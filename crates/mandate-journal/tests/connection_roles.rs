@@ -119,7 +119,7 @@ fn the_connection_roles_section_holds_every_part() {
     let section = section();
     assert_eq!(
         text(&section, "spec"),
-        "docs/specs/journal.md v0.78 §9.33 (DEC-2350)"
+        "docs/specs/journal.md v0.81 §9.33 (DEC-2350)"
     );
     let drafts = section.get("drafts").and_then(Value::as_object).unwrap();
     let names: Vec<&str> = drafts.keys().map(|k| k.as_str()).collect();
