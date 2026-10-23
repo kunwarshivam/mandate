@@ -559,8 +559,9 @@ fn finish_vault_dir(role: &str) -> String {
     dir.to_str().expect("a UTF-8 path").to_owned()
 }
 
-/// SIGTERM drains the finish (DEC-2348 item 3): the pass in flight runs to its end, and the
-/// process exits 0 with nothing more on stdout.
+/// SIGTERM drains the finish (DEC-2348 item 3): the pass in flight, here held by a journal and a
+/// vault nobody answers for, gets the drain bound, and the process exits 0 with nothing more on
+/// stdout.
 #[test]
 #[ignore = "pending E10-13"]
 fn the_finish_mode_exits_0_on_sigterm() {
@@ -581,7 +582,7 @@ fn the_finish_mode_exits_0_on_sigterm() {
     stdout.read_line(&mut line).expect("its first line");
     assert_eq!(line, "finishing\n");
     terminate(&child.0);
-    let code = wait(&mut child.0, Duration::from_secs(10));
+    let code = wait(&mut child.0, Duration::from_secs(15));
     let mut rest = String::new();
     stdout
         .read_to_string(&mut rest)

@@ -26,6 +26,9 @@ use crate::journal::{Journal, JournalUnavailable};
 /// How long the pass waits between passes while a connect is bound (DEC-2342 item 10).
 pub const PASS_SECS: u64 = 5;
 
+/// How long a stopped finish lets the pass in flight run, well inside a pod's 30-second grace.
+pub const DRAIN: Duration = Duration::from_secs(5);
+
 /// A delete that did not reach the vault, or that the vault refused; the next pass retries it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DeleteFailed;
@@ -82,8 +85,10 @@ pub async fn passes<F, T, A>(
     }
 }
 
-/// [`passes`] until `stop` resolves: a pass in flight runs to its end, and the wait after it ends
-/// at once, so a stopped process ends between passes and never inside one (DEC-2348 item 3).
+/// [`passes`] until `stop` resolves (DEC-2348 item 3): the wait between passes ends at once, and a
+/// pass in flight gets [`DRAIN`] to end. One still running then is abandoned, which is safe, since
+/// every pass reads the control stream again, appends at the head it read, and deletes and releases
+/// idempotently: the next start's pass does what it left.
 #[expect(
     clippy::todo,
     reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
