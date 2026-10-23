@@ -973,7 +973,6 @@ impl Teardown for Hung {
 /// DEC-2348 item 3: a stop ends the finish within the drain even while a vault call it abandoned
 /// still runs on a blocking thread, so the process exits inside its pod's grace.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_hung_vault_call_does_not_hold_the_stop_past_the_drain() {
     let journal = Arc::new(MemJournal::default());
     request(&journal, A, 2, "oauth");
@@ -1002,7 +1001,6 @@ fn a_hung_vault_call_does_not_hold_the_stop_past_the_drain() {
 
 /// A stop that cannot be made is the finish's error, and no pass runs.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_stop_that_cannot_be_made_is_an_error() {
     let (journal, deletes, finisher) = finisher(Unbacked);
     request(&journal, A, 2, "oauth");

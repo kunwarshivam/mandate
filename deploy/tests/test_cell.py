@@ -947,6 +947,8 @@ def connect_finish(docs: list[dict], on: bool, workspace: str) -> list[str]:
     labels = w["spec"]["template"]["metadata"]["labels"]
     if w["spec"].get("replicas") != 1:
         problems.append(f"the connect finish runs {w['spec'].get('replicas')} replicas")
+    if spec.get("terminationGracePeriodSeconds") != 30:
+        problems.append(f"the connect finish's grace is {spec.get('terminationGracePeriodSeconds')}, not the 30 seconds its drain fits")
     if spec.get("automountServiceAccountToken") is not False or spec.get("serviceAccountName", "default") != "default":
         problems.append("the connect finish's pod holds a service-account token or an account of its own")
     main = next((c for c in spec["containers"] if c["name"] == FINISH), None)
@@ -1025,6 +1027,8 @@ def test_the_connect_finish_alone_holds_the_connection_managers_approle():
     manager = copy.deepcopy(FINISH_VAULT_SOURCES["sources"][0])
     seeds = [
         ("Deployment", FINISH, lambda w: w["spec"].update(replicas=2)),
+        ("Deployment", FINISH, lambda w: pod_spec(w).update(terminationGracePeriodSeconds=60)),
+        ("Deployment", FINISH, lambda w: pod_spec(w).pop("terminationGracePeriodSeconds")),
         ("Deployment", FINISH, lambda w: pod_spec(w).update(automountServiceAccountToken=True)),
         ("Deployment", FINISH, lambda w: main(w).update(args=["--bind", "127.0.0.1:8080"])),
         ("Deployment", FINISH, lambda w: main(w).update(image="other@sha256:" + "0" * 64)),

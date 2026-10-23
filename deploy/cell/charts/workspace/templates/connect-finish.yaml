@@ -5,8 +5,9 @@ API's image as `mandate-api-server finish`, finishing each OAuth connect on the 
 vault credential is the connection manager's AppRole, the Secret `vault-approle-connection-manager`,
 with the vault's CA, as owner-only files in its vault directory (`mandate.vaultCopy`); no other pod
 names that Secret, the API's among them. It reaches the journal as its own role and the vault on
-8200, nothing else. SIGTERM lets the pass in flight end, at most five seconds, well inside the pod's
-grace, and the process exits 0.
+8200, nothing else. SIGTERM lets the pass in flight end, at most five seconds, and the process
+exits 0 without waiting for a vault call it abandoned, inside the pod's grace, set to 30 seconds
+here so the bound the finish keeps is stated.
 */ -}}
 {{- define "mandate.connectFinishEnv" -}}
 {{- $j := .root.Values.journal -}}
@@ -39,7 +40,7 @@ spec:
     {{- $container = replace "  env:\n" (printf "  env:\n%s\n" (include "mandate.connectFinishEnv" . | indent 4)) $container }}
     {{- $init := include "mandate.vaultCopy" (dict "root" .root "role" "connection-manager") }}
     {{- $volumes := include "mandate.vaultVolumes" (dict "root" .root "role" "connection-manager") }}
-    {{- include "mandate.pod" (dict "root" .root "p" .p "restartPolicy" "Always" "containers" $container "initContainers" $init "volumes" $volumes) | nindent 4 }}
+    {{- include "mandate.pod" (dict "root" .root "p" .p "restartPolicy" "Always" "grace" 30 "containers" $container "initContainers" $init "volumes" $volumes) | nindent 4 }}
 {{- end -}}
 {{- $root := . }}
 {{- range (include "mandate.rendered" (dict "root" . "kind" "service") | fromJsonArray) }}

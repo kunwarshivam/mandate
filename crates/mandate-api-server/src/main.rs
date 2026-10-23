@@ -51,7 +51,7 @@ use mandate_api_server::config::{
 use mandate_api_server::confirm::CliConfirm;
 use mandate_api_server::connect_binding::{ConnectBinding, bound, connect_binding};
 use mandate_api_server::finish_binding::{finish_binding, off_line};
-use mandate_api_server::finish_pass::{Finisher, LineAlerts, PASS_SECS, passes_until};
+use mandate_api_server::finish_pass::{Finisher, LineAlerts, PASS_SECS, run_until_stopped};
 use mandate_api_server::http::{self, App, Settings};
 use mandate_api_server::journal::{Journal, JournalUnavailable, Postgres};
 use mandate_api_server::keys::{FetchedKeys, REFETCH};
@@ -402,7 +402,7 @@ fn finish() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    let _in_the_runtime_the_pool_needs = runtime.enter();
+    let in_the_runtime_the_pool_needs = runtime.enter();
     let Ok(journal) = PgJournal::from_dsn(&bound.database_url) else {
         eprintln!("refused: the journal's connection settings are refused");
         return ExitCode::from(2);
@@ -421,20 +421,20 @@ fn finish() -> ExitCode {
         LineAlerts(Mutex::new(io::stderr())),
         bound.workspace,
     );
-    let drained = runtime.block_on(async {
-        let mut term = signal(SignalKind::terminate())?;
-        println!("finishing");
-        passes_until(
-            finisher,
-            Arc::new(SystemClock),
-            Duration::from_secs(PASS_SECS),
-            async move {
+    drop(in_the_runtime_the_pool_needs);
+    let drained = run_until_stopped(
+        runtime,
+        finisher,
+        Arc::new(SystemClock),
+        Duration::from_secs(PASS_SECS),
+        || {
+            let mut term = signal(SignalKind::terminate())?;
+            println!("finishing");
+            Ok(async move {
                 term.recv().await;
-            },
-        )
-        .await;
-        io::Result::Ok(())
-    });
+            })
+        },
+    );
     match drained {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {

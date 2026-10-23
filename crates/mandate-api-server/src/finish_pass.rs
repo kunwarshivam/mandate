@@ -122,16 +122,12 @@ pub async fn passes_until<F, T, A>(
 ///
 /// # Errors
 /// `stop`'s failure to make the stop; no pass runs then.
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
 pub fn run_until_stopped<F, T, A, S>(
-    _runtime: tokio::runtime::Runtime,
-    _finisher: Finisher<F, T, A>,
-    _clock: Arc<dyn Clock>,
-    _every: Duration,
-    _stop: impl FnOnce() -> io::Result<S>,
+    runtime: tokio::runtime::Runtime,
+    finisher: Finisher<F, T, A>,
+    clock: Arc<dyn Clock>,
+    every: Duration,
+    stop: impl FnOnce() -> io::Result<S>,
 ) -> io::Result<()>
 where
     F: Fingerprints,
@@ -139,7 +135,13 @@ where
     A: Alerts,
     S: Future<Output = ()> + Send,
 {
-    todo!()
+    let ran = runtime.block_on(async {
+        let stop = stop()?;
+        passes_until(finisher, clock, every, stop).await;
+        io::Result::Ok(())
+    });
+    runtime.shutdown_background();
+    ran
 }
 
 /// The pass over one workspace's connects, and what it remembers between passes.

@@ -331,6 +331,9 @@ spec:
   {{- end }}
   enableServiceLinks: false
   restartPolicy: {{ .restartPolicy }}
+  {{- with .grace }}
+  terminationGracePeriodSeconds: {{ . }}
+  {{- end }}
   securityContext:
     runAsNonRoot: true
     runAsUser: 65532
