@@ -478,16 +478,12 @@ fn an_unreadable_row_stops_the_process_after_the_readable_switches() -> Result<(
     Ok(())
 }
 
-/// A deployment or connection record on the control stream that cannot be read is never skipped:
-/// the process stops rather than drop an agent it may owe a kill switch (DEC-85).
+/// A deployment record on the control stream that cannot be read is never skipped: the process
+/// stops rather than drop an agent it may owe a kill switch (DEC-85). A connection record that does
+/// not read holds openings only (DEC-2357, `unreadable.rs`).
 #[test]
 fn an_unreadable_control_record_stops_the_process() -> Result<(), Error> {
-    for (event_type, version) in [
-        ("AgentDeployed", 2),
-        ("ConnectionEstablished", 2),
-        ("AgentStopped", 1),
-        ("ConnectionRevoked", 1),
-    ] {
+    for (event_type, version) in [("AgentDeployed", 2), ("AgentStopped", 1)] {
         let journal = deployed()?;
         journal.write(
             CONTROL_STREAM,
