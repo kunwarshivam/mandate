@@ -3100,6 +3100,20 @@ enables `live` (ES-23, OPS-5).
     per connection whose request closed without an establishment or that was revoked, once no
     executor of its account runs; the manager does not journal a held generation's own exit
     (DEC-2344), so the sweep needs a signal it does not have yet.
+  - From DEC-2336 item 2 (K2a): a reconnect that reuses its `account_ref` (connections spec
+    CN-12) starts no executor for its connect, since that account's executor already used
+    generation 1 and rule 167 holds `exchanged` to it, so the connect fails by its deadline until a
+    reconnect start is specified (a new cause, or `exchanged` at the next generation). This reaches
+    the staging reconnect path.
+  - K2b, after K2a: the executor's `<hex>` account, its vault-token volume and vault CA,
+    `MANDATE_WORKSPACE_NAMESPACE` among the manager's names, the pod-policy pin of the executor's
+    account, and the Kubernetes adapter reporting a pod's `Succeeded` as its own phase; until then
+    the adapter reports it `Exited`, so no connect's executor starts in the cell.
+  - Lane V2, a dependency of K2b (DEC-2336 risks): `mandate-executord` refuses to start unless
+    `MANDATE_SUBJECT_ACCOUNT` is the lowercase hex of its connection id's bytes, beside #2196's
+    namespace check, as DEC-1177 item 6 has the token exchange do.
+  - After K2b: the chart's Deployment executor moves from `default` to its connection's `<hex>`
+    account, once the manager owns every executor.
 - **E21-34 (Proposed, M8; SC; lane O4)** As an owner, I want the kill switch reachable in the cell
   with nothing running but Postgres, the executor and the broker, so that rule 13 holds when the
   web app, the API and the cell's tooling are down (design §3.6, OPS-4). *Accepted when:*
@@ -4335,6 +4349,21 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   written after an agent's kill switch has sized its flatten sells does not shrink them, so the
   switch can still offer the released shares. Re-size an agent flatten sell not yet sent against
   the sub-ledger at send time, or cancel the part a later release takes.
+- **E21-30 (executor process), from [DEC-2358](decisions/DEC-2358.md):** `mandate-executord` hands
+  the core no quote, so §5.6's ladder never prices an exit there and every exit beside resting
+  protection goes at its own limit or is held for want of a price. Add a quote feed: poll
+  `mandate-alpaca`'s `DataClient::latest_quote` for each instrument with a held or sequenced exit,
+  with the data host's credential from the vault, and hand each as `Input::Market` with its sanity
+  verdict; a recorded fake for the tests. A design note on claim #137 first. Once it lands, the
+  founder may revert DEC-2358 to DEC-160 (12)'s hold.
+- **E7-4 (executor process), from the review of [DEC-2357](decisions/DEC-2357.md):** while a
+  connection record does not read, `agents_of` follows every agent with a version-2 deployment,
+  those deployed only on another account's connection included: journal noise, no risk. Skip an
+  agent whose every deployment names a connection a readable establishment shows is another
+  account's.
+- **E7-4 (executor), from the review of [DEC-2358](decisions/DEC-2358.md):** pin a discretionary
+  exit with a limit of its own whose price vanishes mid-sequence: it falls back to its limit, and
+  the sequence goes on, rather than ending and re-protecting as an exit with no limit does.
 - **E7-4 A1c (stream K), from [DEC-2333](decisions/DEC-2333.md) item 3:** at §5.4's bound, re-place
   protection in an instrument the account kill switch closes for the held quantity less every sell
   not confirmed cancelled, placing nothing where that leaves none, with its own DEC-77 pair. Until
