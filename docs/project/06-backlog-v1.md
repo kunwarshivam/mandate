@@ -1928,6 +1928,16 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   - the version applies only after the second user's approval, and V-047 is checked again at
     application;
   - the interim refusal and its tests are replaced, not kept beside the flow.
+- **E11-13 (Should; lane W2)** As an owner, I want every agent the API lists to open in the web app,
+  so that no agent of mine is a 404. `web/src/lib/ids.ts`'s `AGENT_ID` admits only `agt_` and a
+  ULID, and every agent route calls `notFound()` for any other id, while the workspace API types
+  `agent_id` as the opaque `Id`, `^[A-Za-z0-9_-]{1,64}$` (`schemas/workspace-api/common.schema.json`),
+  which the CLI deploys under. The cell demo's second agent was `demo-web` and its page never
+  loaded; the demo now names it `agt_01KDEM00000000000000000WEB`, which hides the gap without
+  closing it.
+  *Accepted when:* `web/`'s agent routes, the demo router and the messages routes admit exactly the
+  API's `Id` grammar for an agent id; an id outside it is still a 404; a static segment such as
+  `new` still wins over the dynamic one; and a test opens an agent whose id is not `agt_`-shaped.
 
 ### E12 Audit explorer
 
