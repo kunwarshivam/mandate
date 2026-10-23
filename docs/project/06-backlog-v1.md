@@ -4241,6 +4241,37 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   after `max_unprotected_s` ended its sell; register the executor's own intent ids (`w-<record>`, `k-<switch>-<n>`)
   in journal spec §9.5's `IntentReceived`; and, with the account scope, add `KillSwitchActivated` to
   `properties::every_catalogue_event_is_interpreted_or_named`'s `INTERPRETED`.
+- **E7-4 (executor process), from [DEC-2343](decisions/DEC-2343.md) Alternatives option (1), for
+  the founder:** whether the executor reads every connection- and workspace-scope kill switch from
+  the control stream itself, independent of the runtime (`AGENTS.md` rule 13), at the cost of the
+  owner's confirmed bid on those switches. Until the founder decides, it reads one only for an agent
+  whose connection is revoked at or after it.
+- **E7-4 (executor process), from the review of [DEC-2343](decisions/DEC-2343.md), a follow-on
+  tightening:** an opening an agent proposed while deployed on another account is handed here once
+  the agent is deployed back on this account, unless the core abandons it as too old. Hold any
+  proposal older than the agent's latest deployment on this account; the agent stream's rows have
+  no order against the control stream's, so how to tell "older" (event time, or a deployment
+  marker the runtime writes on the agent stream) is the follow-on's to decide.
+- **E7-4 (deployment manager and executor), from [DEC-2343](decisions/DEC-2343.md) Not covered
+  here:** lane D1's [DEC-2344](decisions/DEC-2344.md) starts the executor for a kill switch that
+  covers only stopped agents, and the executor exits 0 once no agent it follows is desired and every
+  covering switch it read is applied, with nothing in flight and no `Unknown` order in scope. The
+  executor's half, a tighter exit, is [DEC-2347](decisions/DEC-2347.md)'s.
+- **E7-4 (executor process), from [DEC-2347](decisions/DEC-2347.md) item 6, with DEC-2333's slice
+  A2b:** the exit's `owes_nothing` reads agent-scoped work only; once the account-scope switch
+  lands, an account switch still closing (`closing_all`) keeps the executor running too, with a
+  test.
+- **E7-4 (kill switch sizing), from [DEC-2347](decisions/DEC-2347.md) item 9, rule 13:** a buy
+  the broker reports filled whose fill named no order (Alpaca's fill activity names only the
+  broker's order id, so the reconciliation applies it unattributed) leaves nothing in `kill.rs`'s
+  `sub_ledger`, so the agent's kill switch sells none of those shares. Attribute such a fill to the
+  order through the broker's order id (DEC-955 item 3), with a test that the switch then sells the
+  agent's whole position.
+- **E6-4 (executor fold), from [DEC-2347](decisions/DEC-2347.md) item 8:** when the executor's fold
+  interprets `PositionReleased`, the released quantity leaves the agent's sub-ledger (`kill.rs`'s
+  `sub_ledger`, read by the kill switch and by `ExecutorState::holds_lots`), so the switch sells
+  none of the owner's shares and the exit's item 3.6 no longer waits on them. Tests: released lots
+  let the executor exit `completed`; unreleased lots still hold it.
 - **E7-4 A1c (stream K), from [DEC-2333](decisions/DEC-2333.md) item 3:** at §5.4's bound, re-place
   protection in an instrument the account kill switch closes for the held quantity less every sell
   not confirmed cancelled, placing nothing where that leaves none, with its own DEC-77 pair. Until
