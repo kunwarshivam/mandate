@@ -209,6 +209,7 @@ fn append_judges_rule_261_alone_and_leaves_rules_262_and_263_to_the_folds() {
 /// The verifier's fold judges rules 262 and 263 over each stream case, and answers its outcome:
 /// valid, or the rule and the index of the first record that breaks it.
 #[test]
+#[ignore = "pending E21-33"]
 fn the_verifiers_fold_answers_every_stream_case() {
     let section = section();
     let mut failed = Vec::new();

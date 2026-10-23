@@ -786,3 +786,94 @@ fn each_connections_made_roles_are_its_own() {
     not_a_close.push(refused(6, "c1", "reauthorize"));
     assert_eq!(owes(&not_a_close), []);
 }
+
+/// Roles made for a request that had already closed, since the provisioner writes the vault before
+/// it journals, are owed their removal at once, citing that close (journal spec v0.78 rule 263,
+/// DEC-2350 item 7); a closer of an earlier request is never cited, so a second request's roles
+/// made after the first one's close owe nothing until their own.
+#[test]
+#[ignore = "pending E21-33"]
+fn roles_made_after_their_request_closed_are_owed_their_removal() {
+    let oauth = r#"{"connection_id":"c1","credential":"oauth"}"#;
+    let made = |seq: u64, request: &str| {
+        row(
+            seq,
+            "ConnectionRolesMade",
+            1,
+            r#"{"connection_id":"c1"}"#,
+            Some(request),
+        )
+    };
+    for (closer, occasion) in [
+        (
+            row(
+                3,
+                "ConnectionRefused",
+                1,
+                r#"{"connection_id":"c1","occasion":"connect"}"#,
+                None,
+            ),
+            Occasion::RequestClosed,
+        ),
+        (
+            row(3, "ConnectionRevoked", 1, r#"{"connection_id":"c1"}"#, None),
+            Occasion::Revoked,
+        ),
+    ] {
+        let rows = [
+            opened(),
+            row(2, "ConnectionRequested", 2, oauth, None),
+            closer,
+            made(4, &id(2)),
+        ];
+        assert_eq!(
+            owes(&rows),
+            [Step::Remove {
+                connection: "c1".to_owned(),
+                cause: id(3),
+                occasion,
+            }],
+            "{occasion:?}"
+        );
+    }
+    let again = [
+        opened(),
+        row(2, "ConnectionRequested", 2, oauth, None),
+        row(
+            3,
+            "ConnectionRefused",
+            1,
+            r#"{"connection_id":"c1","occasion":"connect"}"#,
+            None,
+        ),
+        row(4, "ConnectionRequested", 2, oauth, None),
+        made(5, &id(4)),
+    ];
+    assert!(owes(&again).is_empty(), "{:?}", owes(&again));
+}
+
+/// A pass over roles recorded after their request closed removes the token exchange's role once,
+/// journals the removal the verifier's fold accepts, and owes nothing after.
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "pending E21-33"]
+async fn a_pass_removes_the_exchanges_role_of_roles_made_after_the_close() {
+    let stream = Stream::opened();
+    let records = world("removed_after_roles_made_once_closed");
+    for record in &records[..3] {
+        stream.push(record);
+    }
+    let mut provisioner = provisioner(&stream, Vault::default());
+    assert_eq!(provisioner.tick(at(1)).await, Ok(()));
+    assert_eq!(provisioner.tick(at(2)).await, Ok(()));
+    assert_eq!(
+        provisioner.vault().removed.borrow().as_slice(),
+        [CONNECTION]
+    );
+    let removed = stream.of("ConnectionRolesRemoved");
+    assert_eq!(removed.len(), 1);
+    assert_eq!(
+        text(&removed[0], "causation_id"),
+        text(&records[1], "event_id")
+    );
+    assert_eq!(verify_connection_roles(&stream.rows()), Ok(()));
+}

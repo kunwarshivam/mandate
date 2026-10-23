@@ -1,0 +1,7 @@
+file = "crates/mandate-journal/tests/connection_roles.rs"
+test = "the_verifiers_fold_answers_every_stream_case"
+reason = """
+The fold has no seam to stub: its fold still reads a removal's closer only after the latest `ConnectionRolesMade`, so it refuses v0.78's two streams of roles made after their request closed (journal spec v0.78
+rule 263, DEC-2350 item 7). The pair's implementation reads the closer after the latest roles'
+request and deletes this row.
+"""
