@@ -152,6 +152,7 @@ impl LocalSource {
             SecretPath::Platform(_) => {
                 Entry::client_secret(KeyRef::new(&kv_path(path)?).map_err(|_| SourceError::Config)?)
             }
+            SecretPath::AccountId(..) => return Err(SourceError::Config),
         })
     }
 

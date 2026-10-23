@@ -86,4 +86,12 @@ pub trait SecretSource {
         let _ = connection;
         Err(SourceError::Denied)
     }
+
+    /// Writes `secret` at `path` only where nothing is there, as [`crate::policy::Access::Create`] allows: an
+    /// entry already there is [`SourceError::Denied`], and is left as it is. A source that holds
+    /// no personal data refuses, as [`SourceError::Denied`] (DEC-2339).
+    async fn create(&self, path: &SecretPath, secret: &SecretSlice<u8>) -> Result<(), SourceError> {
+        let _ = (path, secret);
+        Err(SourceError::Denied)
+    }
 }

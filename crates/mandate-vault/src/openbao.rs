@@ -642,6 +642,29 @@ impl SecretSource for OpenBaoSource {
         &self.identity
     }
 
+    /// A check-and-set write at version 0, which the vault takes only where no version is there,
+    /// after the client-side check of [`Access::Create`].
+    async fn create(&self, path: &SecretPath, secret: &SecretSlice<u8>) -> Result<(), SourceError> {
+        require(&self.identity, Access::Create, path)?;
+        let mut encoded = STANDARD.encode(secret.expose_secret());
+        let body = json!({ "options": { "cas": 0 }, "data": { "value": encoded } });
+        encoded.zeroize();
+        let created = self
+            .http
+            .post_judged(
+                &self.data_path(path)?,
+                Some(&self.token),
+                &body,
+                cas_refusal,
+            )
+            .await;
+        match created {
+            Ok(_) => Ok(()),
+            Err(SourceError::Missing) => Err(SourceError::Denied),
+            Err(e) => Err(e),
+        }
+    }
+
     /// Reads the code with its version, overwrites that version alone with a tombstone, destroys
     /// the version read and deletes the tombstone's version alone, keeping the metadata so the
     /// version count never restarts and a code stored since is never hidden (DEC-2321): a taker

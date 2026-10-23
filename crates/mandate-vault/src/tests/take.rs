@@ -1,7 +1,7 @@
 //! A source that holds no codes refuses a take, so a source written before DEC-2061 fails closed
 //! rather than reporting a code as gone.
 
-use mandate_connections::record::ConnectionId;
+use mandate_connections::record::{AccountRef, ConnectionId};
 use mandate_time::UtcNanos;
 use secrecy::SecretSlice;
 
@@ -62,5 +62,24 @@ async fn a_source_that_holds_no_codes_refuses_a_take() {
             .await
             .map(|code| code.is_some());
         assert_eq!(took, Err(SourceError::Denied));
+    }
+}
+
+/// A source that holds no personal data refuses to create a connection's account entry, by the
+/// trait's default (DEC-2339).
+#[tokio::test(flavor = "current_thread")]
+async fn a_source_that_holds_no_personal_data_refuses_a_create() {
+    let connection = ConnectionId::new("c1").map_err(drop);
+    let account = AccountRef::new("01J8Z2ACCT0000000000000001").map_err(drop);
+    assert!(connection.is_ok() && account.is_ok());
+    if let (Ok(connection), Ok(account)) = (connection, account) {
+        let source = Codeless(Identity::Executor(connection.clone()));
+        let created = source
+            .create(
+                &SecretPath::AccountId(connection, account),
+                &SecretSlice::from(b"acct".to_vec()),
+            )
+            .await;
+        assert_eq!(created, Err(SourceError::Denied));
     }
 }

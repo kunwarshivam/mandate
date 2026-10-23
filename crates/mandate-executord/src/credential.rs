@@ -194,6 +194,34 @@ pub fn vault_login<V>(
     login(Identity::Executor(connection.clone()), token).map_err(|_| "vault_login_failed")
 }
 
+/// The variable the workspace chart sets to the namespace the deployment manager creates the
+/// executor's pod in (lane D1, K2).
+pub const WORKSPACE_NAMESPACE_ENV: &str = "MANDATE_WORKSPACE_NAMESPACE";
+
+/// The namespace the executor's Kubernetes login must be in: `configured`, the chart's
+/// [`WORKSPACE_NAMESPACE_ENV`], checked before `projected` reads the pod's own namespace from the
+/// downward API, and only when the two are the same. So the vault's answer is held to what the
+/// chart configured, never to what the pod alone says it is.
+///
+/// # Errors
+/// `workspace_namespace_missing` when `configured` is absent or empty, before `projected` is
+/// read; `vault_credentials_unreadable` when the pod's namespace cannot be read;
+/// `workspace_namespace_mismatch` when the two differ.
+pub fn workspace_namespace(
+    configured: Option<String>,
+    projected: impl FnOnce() -> Result<String, SourceError>,
+) -> Result<String, &'static str> {
+    let configured = configured
+        .filter(|name| !name.is_empty())
+        .ok_or("workspace_namespace_missing")?;
+    let projected = projected().map_err(|_| "vault_credentials_unreadable")?;
+    if configured == projected {
+        Ok(configured)
+    } else {
+        Err("workspace_namespace_mismatch")
+    }
+}
+
 /// How a renewed secret is read: as the access token.
 pub type TokenReader = fn(&[u8]) -> Result<AccessToken, &'static str>;
 
