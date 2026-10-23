@@ -15,5 +15,6 @@ mod openbao;
 mod openbao_server;
 mod platform;
 mod policy;
+mod policy_prefix;
 mod registry;
 mod take;
