@@ -27,7 +27,8 @@
 //! adds rule 245 on `IntentReceived` at either version (DEC-2037), and v0.67 the owner's
 //! confirmation `OwnerConfirmationReceived` with rule 247 and the batch rule 248 (DEC-2040), and
 //! v0.72 `ProtectionChanged` version 2, which discloses a fractional position's unprotected
-//! fraction under rule 44 (DEC-2312).
+//! fraction under rule 44 (DEC-2312), and v0.75 the account kill switch's `AccountCloseRequested`
+//! with rules 258 and 259 and the stream rule 260 (DEC-2337).
 
 use mandate_canon::Value;
 use mandate_domain::ThesisRefusal;
@@ -68,8 +69,8 @@ const THESIS: [&str; 2] = ["ThesisProposed", "ThesisRevised"];
 /// (DEC-2312); `IntentReceived`,
 /// `GateDecided`, and `OrderSubmitted` close at version 2 and stay at version 1, and so does
 /// `OrderStateChanged` (journal spec §9.16, DEC-869). `OwnerConfirmationReceived` closes at
-/// version 1 (DEC-2040).
-const EXECUTOR: [&str; 10] = [
+/// version 1 (DEC-2040), and so does `AccountCloseRequested` (DEC-2337).
+const EXECUTOR: [&str; 11] = [
     "IntentReceived",
     "GateDecided",
     "OrderSubmitted",
@@ -77,6 +78,7 @@ const EXECUTOR: [&str; 10] = [
     "OrderStateChanged",
     "ProtectionChanged",
     CONFIRMATION,
+    CLOSE,
     "BrokerPositionObserved",
     "AgentModeApplied",
     "CompensatingEvent",
@@ -87,6 +89,10 @@ const ACCOUNT_STATE: &str = "AccountStateObserved";
 /// The owner's confirmed bid journaled beside an owner exit's `IntentReceived` (§9.5, DEC-2040):
 /// rule 247 on its own members and the batch rule 248 on the intent before it.
 const CONFIRMATION: &str = "OwnerConfirmationReceived";
+
+/// One request of one instrument's close-position under an account kill switch, journaled before
+/// it is sent (§9.5, DEC-2337): rules 258 and 259 on its own members, rule 260 on the stream.
+const CLOSE: &str = "AccountCloseRequested";
 
 /// The companion's (§9.5): an `OrderSubmitted` at `schema_version` 2 must be immediately preceded
 /// in its `append` batch by exactly one `OrderRequestRecorded`, which its `causation_id` names.
@@ -369,6 +375,7 @@ pub(crate) fn payload(
         COMPANION => companion_rules(p)?,
         "IntentReceived" => intent_received_rules(p)?,
         CONFIRMATION => confirmation_rules(p)?,
+        CLOSE => close_rules(p, causation_id)?,
         "ProtectionChanged" => protection_changed_rules(p)?,
         SNAPSHOT => {
             let compared = !p.is_null("model_cash");
@@ -511,6 +518,54 @@ fn confirmation_rules(p: Payload<'_>) -> Result<(), Invalid> {
             .is_some_and(|at| at > 0),
         InvalidReason::Schema,
         "payload.expires_at",
+    )
+}
+
+/// Rules 258 and 259 (DEC-2337 item 2): the quantity is positive, then the attempt is at least 1,
+/// then the request is caused by the switch it names.
+fn close_rules(p: Payload<'_>, causation_id: Option<&Value>) -> Result<(), Invalid> {
+    ensure(
+        crate::scheduler::positive(p.text("qty")),
+        InvalidReason::Schema,
+        "payload.qty",
+    )?;
+    ensure(
+        p.0.get("attempt")
+            .and_then(Value::as_int)
+            .is_some_and(|attempt| attempt >= 1),
+        InvalidReason::Schema,
+        "payload.attempt",
+    )?;
+    ensure(
+        causation_id.and_then(Value::as_str) == Some(p.text("kill_switch_event")),
+        InvalidReason::Schema,
+        "causation_id",
+    )
+}
+
+/// Rule 260 (DEC-2337 item 2), a stream rule: an `AccountCloseRequested` names a switch,
+/// instrument, and attempt no earlier one of its stream names together, so a duplicate request is
+/// refused and its second send never happens.
+pub(crate) fn stream_rule(before: &[&Draft], draft: &Draft) -> Result<(), Invalid> {
+    if draft.event_type() != CLOSE {
+        return Ok(());
+    }
+    let request = |d: &Draft| {
+        let payload = d.fields().get("payload").cloned().unwrap_or(Value::Null);
+        let p = Payload(&payload);
+        (
+            p.text("kill_switch_event").to_owned(),
+            p.text("instrument_id").to_owned(),
+            payload.get("attempt").and_then(Value::as_int),
+        )
+    };
+    let mine = request(draft);
+    ensure(
+        !before
+            .iter()
+            .any(|d| d.event_type() == CLOSE && request(d) == mine),
+        InvalidReason::Schema,
+        "payload.attempt",
     )
 }
 
@@ -832,6 +887,7 @@ fn schema(event_type: &str, schema_version: u64) -> Option<&'static Ty> {
         ("ProtectionChanged", 1) => Some(&PROTECTION_CHANGED),
         ("ProtectionChanged", 2) => Some(&PROTECTION_CHANGED_V2),
         (CONFIRMATION, 1) => Some(&OWNER_CONFIRMATION_RECEIVED),
+        (CLOSE, 1) => Some(&ACCOUNT_CLOSE_REQUESTED),
         ("BrokerPositionObserved", 1) => Some(&BROKER_POSITION_OBSERVED),
         ("AgentModeApplied", 1) => Some(&AGENT_MODE_APPLIED),
         ("CompensatingEvent", 1) => Some(&COMPENSATING_EVENT),
@@ -1168,6 +1224,15 @@ static OWNER_CONFIRMATION_RECEIVED: Ty = Ty::Record(&[
     ("floor", Ty::Decimal),
     ("expires_at", Ty::Int),
     ("copied_from", Ty::Ulid),
+    ("risk_clock", Ty::RiskClock),
+]);
+
+/// §9.5's `AccountCloseRequested` (DEC-2337 item 1).
+static ACCOUNT_CLOSE_REQUESTED: Ty = Ty::Record(&[
+    ("instrument_id", Ty::Str),
+    ("qty", Ty::Decimal),
+    ("kill_switch_event", Ty::Ulid),
+    ("attempt", Ty::Int),
     ("risk_clock", Ty::RiskClock),
 ]);
 

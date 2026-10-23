@@ -180,7 +180,8 @@ pub enum Drill {
     /// `mandate vault provision` sets the cell's vault up, then each AppRole logs in from a pod
     /// labelled as the executor and reads only what DEC-977 item 2's table gives it: a runtime
     /// nothing, an executor exactly its own connection's token, the model gateway its key; and
-    /// no policy of the cell's holds a wildcard (E21-32, DEC-2022 item 3).
+    /// no policy of the cell's holds a wildcard but DEC-2349's prefix grants, each in its own policy
+    /// (E21-32, DEC-2022 item 3).
     Vault,
 }
 
@@ -1751,19 +1752,62 @@ const VAULT_DRILL_READS: [(&str, &str, bool); 13] = [
 /// has proved nothing about wildcards.
 const VAULT_DRILL_POLICIES: usize = 10;
 
+/// The only stanzas holding a wildcard that the vault drill admits, each in the one policy it may
+/// appear in: DEC-2349's one-segment `+` for a connection the web made after the vault was
+/// provisioned, on the API's write of a connect's code and its and the connection manager's deletes,
+/// and the connection manager's read of each request's account fingerprint, a pseudonymous hash and
+/// no credential (DEC-2345). Each is as the scan prints it, whitespace squeezed and the closing
+/// brace dropped, so another path, another capability, a `*`, the same stanza in another policy, or
+/// a wildcard outside a stanza is still reported.
+const VAULT_DRILL_PREFIX_GRANTS: [(&str, &str); 6] = [
+    (
+        "mandate-api",
+        "path \"mandate/data/connections/+/code\" { capabilities = [\"create\", \"update\"]",
+    ),
+    (
+        "mandate-api",
+        "path \"mandate/metadata/connections/+/code\" { capabilities = [\"delete\"]",
+    ),
+    (
+        "mandate-api",
+        "path \"mandate/metadata/connections/+/token\" { capabilities = [\"delete\"]",
+    ),
+    (
+        "mandate-connection-manager",
+        "path \"mandate/metadata/connections/+/code\" { capabilities = [\"delete\"]",
+    ),
+    (
+        "mandate-connection-manager",
+        "path \"mandate/metadata/connections/+/token\" { capabilities = [\"delete\"]",
+    ),
+    (
+        "mandate-connection-manager",
+        "path \"mandate/data/personal/fingerprints/+/+\" { capabilities = [\"read\"]",
+    ),
+];
+
+/// Whether a scan line `wildcard in <policy>: <stanza>` names one of [`VAULT_DRILL_PREFIX_GRANTS`]
+/// in its own policy.
+fn admitted_wildcard(line: &str) -> bool {
+    line.strip_prefix("wildcard in ")
+        .and_then(|rest| rest.split_once(": "))
+        .is_some_and(|(policy, stanza)| VAULT_DRILL_PREFIX_GRANTS.contains(&(policy, stanza)))
+}
+
 /// The container of the vault drill's Job that logs in and reads; only its lines are judged, as
 /// `kubectl logs --prefix` writes them (see [`scenario::lines_of`]).
 const VAULT_DRILL_PROBE: &str = "probe";
 
 /// What a vault drill's check lines must say: exactly one `<role> <path> allowed` or `denied`
-/// line for each of [`VAULT_DRILL_READS`], as the table has it, no `wildcard in` line, and exactly
+/// line for each of [`VAULT_DRILL_READS`], as the table has it, no `wildcard in` line but those of
+/// [`VAULT_DRILL_PREFIX_GRANTS`], and exactly
 /// one `checked <n> mandate policies` line with [`VAULT_DRILL_POLICIES`]. A missing line, a second
 /// line for the same read, and a scan of fewer policies are problems too.
 fn vault_drill_problems(logs: &str) -> Vec<String> {
     let said = scenario::lines_of(logs, VAULT_DRILL_PROBE);
     let mut problems: Vec<String> = said
         .iter()
-        .filter(|l| l.starts_with("wildcard in "))
+        .filter(|l| l.starts_with("wildcard in ") && !admitted_wildcard(l))
         .map(|l| l.to_string())
         .collect();
     for (role, path, allowed) in VAULT_DRILL_READS {
@@ -1806,7 +1850,9 @@ fn vault_drill_problems(logs: &str) -> Vec<String> {
 
 /// The drill's script, run by the vault's own image: it puts a fake value at each path tried,
 /// as the operator, then logs in as each role from the files `mandate vault provision` wrote and
-/// prints one line per read, and one per policy of the cell's that holds `*` or `+`. Seeded, it
+/// prints one line per read, and one per stanza of a policy of the cell's that holds `*` or `+`,
+/// whitespace squeezed and its closing brace dropped, for [`vault_drill_problems`] to judge against
+/// [`VAULT_DRILL_PREFIX_GRANTS`]. Seeded, it
 /// first rewrites the runtime's policy to read every connection's token through `+`, and puts the
 /// policy it read back when the script exits, printing what the restore says so a failed one is
 /// seen. Each read first looks its token up, so a token the vault does not honour is an `error`,
@@ -1856,7 +1902,7 @@ fn vault_drill_script(seeded: bool) -> String {
            case \"$p\" in mandate-*)\n\
              body=$(BAO_TOKEN=\"$op\" bao policy read \"$p\")\n\
              n=$((n + 1))\n\
-             case \"$body\" in *'*'*|*'+'*) echo \"wildcard in $p\";; esac;;\n\
+             printf '%s\\n' \"$body\" | tr '\\t\\n' '  ' | tr -s ' ' | awk -v p=\"$p\" 'BEGIN {{ RS = \"}}\" }} /[*+]/ {{ gsub(/^ +| +$/, \"\"); print \"wildcard in \" p \": \" $0 }}';;\n\
            esac\n\
          done\n\
          echo \"checked $n mandate policies\"\n"
@@ -5303,7 +5349,8 @@ mod tests {
     }
 
     /// The vault drill passes only these answers, written out here rather than built from
-    /// [`VAULT_DRILL_READS`]: one line per read, every read as written, no wildcard, and a scan of
+    /// [`VAULT_DRILL_READS`]: one line per read, every read as written, no wildcard but DEC-2349's
+    /// prefix grants, each in its own policy, and a scan of
     /// every `mandate-*` policy. A second line for a read, a missing or failed scan, an error, or a
     /// line from another container fails it; the seeded symptom is the runtime policy's wildcard.
     #[test]
@@ -5332,6 +5379,36 @@ mod tests {
         };
         let held = probe(&expected);
         assert_eq!(vault_drill_problems(&held), Vec::<String>::new());
+        let granted = [
+            r#"wildcard in mandate-api: path "mandate/data/connections/+/code" { capabilities = ["create", "update"]"#,
+            r#"wildcard in mandate-api: path "mandate/metadata/connections/+/code" { capabilities = ["delete"]"#,
+            r#"wildcard in mandate-api: path "mandate/metadata/connections/+/token" { capabilities = ["delete"]"#,
+            r#"wildcard in mandate-connection-manager: path "mandate/metadata/connections/+/code" { capabilities = ["delete"]"#,
+            r#"wildcard in mandate-connection-manager: path "mandate/metadata/connections/+/token" { capabilities = ["delete"]"#,
+            r#"wildcard in mandate-connection-manager: path "mandate/data/personal/fingerprints/+/+" { capabilities = ["read"]"#,
+        ];
+        let prefixed = format!("{held}{}", probe(&granted));
+        assert_eq!(
+            vault_drill_problems(&prefixed),
+            Vec::<String>::new(),
+            "DEC-2349's prefix grants, each in its own policy, are admitted"
+        );
+        for wider in [
+            r#"wildcard in mandate-api: path "mandate/data/connections/+/token" { capabilities = ["read"]"#,
+            r#"wildcard in mandate-api: path "mandate/data/connections/+/code" { capabilities = ["create", "update", "read"]"#,
+            r#"wildcard in mandate-api: path "mandate/data/connections/*" { capabilities = ["create", "update"]"#,
+            r#"wildcard in mandate-api: path "mandate/data/personal/fingerprints/+/+" { capabilities = ["read"]"#,
+            r#"wildcard in mandate-connection-manager: path "mandate/data/personal/+" { capabilities = ["read"]"#,
+            r#"wildcard in mandate-runtime: path "mandate/metadata/connections/+/token" { capabilities = ["delete"]"#,
+            r#"wildcard in mandate-api: # any + path "mandate/metadata/connections/+/code" { capabilities = ["delete"]"#,
+            "wildcard in mandate-api",
+        ] {
+            assert_eq!(
+                vault_drill_problems(&format!("{prefixed}{}", probe(&[wider]))),
+                [wider],
+                "a wildcard wider than DEC-2349's, or in another policy, is still caught"
+            );
+        }
         let unprefixed = held.replace("[pod/vault-drill-1-x/probe] ", "");
         assert_eq!(
             vault_drill_problems(&unprefixed).len(),

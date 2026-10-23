@@ -241,7 +241,7 @@ start without them (AGENTS.md rule 3).
   mountPath: {{ include "mandate.artifactsPath" $ | quote }}
   readOnly: {{ ne . "rw" }}
 {{- end }}
-{{- if .p.vault_token }}
+{{- if include "mandate.vaultToken" . }}
 - name: vault-token
   mountPath: /run/mandate/vault-token
   readOnly: true
@@ -413,7 +413,7 @@ spec:
         claimName: artifacts
         readOnly: {{ eq (include "mandate.artifactsAccess" .) "ro" }}
     {{- end }}
-    {{- if $p.vault_token }}
+    {{- if include "mandate.vaultToken" . }}
     - name: vault-token
       projected:
         defaultMode: 292
@@ -658,6 +658,15 @@ ConfigMap `vault-ca`, read-only at /run/mandate/vault (DEC-2332 item 5): a `vaul
 the executor's only when its broker reaches the vault. */ -}}
 {{- define "mandate.vaultCa" -}}
 {{- if and .p.vault_ca (or (ne .p.name "executor") (eq .root.Values.executor.broker "alpaca-paper")) -}}true{{- end -}}
+{{- end -}}
+
+{{- /* Whether process `p` mounts a projected ServiceAccount token for the vault (DEC-2060): a
+`vault_token` process's, only as a pod the deployment manager starts, which runs as its
+connection's own account (DEC-2336), and the executor's only when its broker reaches the vault. A
+process the chart runs as a Deployment of its own runs as `default`, which no vault role names, and
+mounts none. */ -}}
+{{- define "mandate.vaultToken" -}}
+{{- if and .p.vault_token (include "mandate.startedElsewhere" .) (or (ne .p.name "executor") (eq .root.Values.executor.broker "alpaca-paper")) -}}true{{- end -}}
 {{- end -}}
 
 {{- /* The vault's address: the executor's `vaultAddress` where it is set, else this namespace's

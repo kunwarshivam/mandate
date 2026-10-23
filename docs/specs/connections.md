@@ -254,6 +254,16 @@ DEC-690 item 4; DEC-441 item 21). A live Alpaca OAuth connection needs a new dec
    and tears the connection down at once (step 6, reason `start_failed`).
 4. **Exchange (token-exchange process), then checks (executor, `connecting`).**
 
+   **The roles first** ([DEC-2350](../project/decisions/DEC-2350.md)). The exchange and the executor
+   each log in with a Kubernetes-auth role made for this connection alone (DEC-2060). On the
+   `ConnectionRequested`, the role provisioner, a process with no power but making and removing those
+   roles (DEC-2630 item 7), makes both and journals `ConnectionRolesMade` (journal §9.33); the
+   exchange starts only once that record is read (journal §9.21). A refusal
+   (`ConnectionRolesRefused`, with an opaque alert) or no record starts nothing, and the connect ends
+   by its deadline (step 6). The provisioner removes the exchange's role when the request closes without
+   an establishment or the connection is revoked. It never removes the executor's, so a kill switch
+   can always be applied; the revocation destroys the executor's token instead.
+
    **The exchange.** The connection manager starts one token-exchange process for the pending
    connection; it serves that one exchange and stops (infrastructure §3.1, §3.5). It:
    - redeems the single-use grant on the platform's client secret, valid only while the connection
