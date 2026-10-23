@@ -236,7 +236,7 @@ pub(crate) fn exit_price(
 /// on a fresh, sane latest quote (§4.4: no presumed halt) that shows a bid, so a market order never
 /// goes into a book with no buyer. With no bid the exit is laddered from the last sane bid or
 /// trade, or held with nothing to price from (DEC-2037 items 4 and 5).
-fn market_allowed(batch: &Batch<'_, '_>, instrument: &InstrumentId) -> bool {
+pub(crate) fn market_allowed(batch: &Batch<'_, '_>, instrument: &InstrumentId) -> bool {
     venue(batch.ports, instrument, batch.at()) == Venue::Regular
         && current_quote(batch, instrument).is_some_and(|quote| quote.bid.is_some())
 }
@@ -1129,7 +1129,7 @@ const CLOSED_MEMBERS: [(&str, &[&str]); 14] = [
 
 /// Journals one `ProtectionChanged` for `instrument` in §9.5's closed form (DEC-446 item 4,
 /// DEC-859): every member present, `orders` and `awaiting` as lists, the owner as `agent_id`.
-fn changed(
+pub(crate) fn changed(
     batch: &mut Batch<'_, '_>,
     instrument: &InstrumentId,
     action: &str,
@@ -1401,6 +1401,9 @@ fn bracket(
         changed(batch, &instrument, "unprotected_start", named.clone())?;
     }
     if order.state.is_terminal() {
+        if batch.view.closing_all.contains(&instrument) {
+            return Ok(());
+        }
         let unapplied = filled.checked_sub(order.filled_qty)?;
         let committed = covered(&batch.view, &instrument)?
             .checked_add(still_selling(&batch.view, &instrument)?)?;
@@ -1544,7 +1547,7 @@ fn stop_after(
     let filled = order
         .filled_qty
         .max(detail.reported_filled.unwrap_or(Qty::ZERO));
-    if filled == Qty::ZERO {
+    if filled == Qty::ZERO || batch.view.closing_all.contains(&order.instrument) {
         return Ok(());
     }
     let named = vec![("bracket", text(entry.as_str()))];
@@ -1688,6 +1691,7 @@ pub(crate) fn new_day(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         .filter(|(instrument, protection)| {
             !protection.resting.is_empty()
                 && !batch.view.exiting.contains_key(*instrument)
+                && !batch.view.closing_all.contains(*instrument)
                 && !batch.view.replacing.contains_key(*instrument)
                 && protection.resting.iter().any(|id| {
                     batch
@@ -1786,6 +1790,10 @@ fn unprotectable(
 /// at once ([`re_place`]), its interval started first, for what the protection and the exits
 /// still working leave uncovered. The prices are the resting protection's, or else the ended
 /// protective order's own.
+/// Nor is protection in an instrument an account kill switch closes through the broker's
+/// close-position: a stop beside that close would sell the same shares twice (§5.5, rule 12).
+/// Its loss starts the instrument's interval instead, naming no order, so §5.4's bound journals
+/// and alerts it (DEC-2333 item 3).
 /// Protection the broker refuses, or cancels before acknowledging it, is not re-placed here: its
 /// interval stays open and bounded (DEC-348 item 2), so neither loops, nor restarts the bound.
 /// With no prices anywhere to place from, the shortfall is journaled and the owner alerted
@@ -1836,6 +1844,12 @@ fn re_cover(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         .filter_map(|instrument| InstrumentId::new(instrument).ok())
         .collect();
     for instrument in instruments {
+        if batch.view.closing_all.contains(&instrument) {
+            if !interval_open(&batch.view, &instrument) {
+                changed(batch, &instrument, "unprotected_start", Vec::new())?;
+            }
+            continue;
+        }
         if batch.view.exiting.contains_key(&instrument)
             || batch.view.replacing.contains_key(&instrument)
             || stepping_alone(&batch.view, &instrument, &ended)
@@ -2233,7 +2247,7 @@ fn covered(view: &ExecutorState, instrument: &InstrumentId) -> Result<Qty, Execu
         .map_err(ExecutorError::from)
 }
 
-fn interval_open(view: &ExecutorState, instrument: &InstrumentId) -> bool {
+pub(crate) fn interval_open(view: &ExecutorState, instrument: &InstrumentId) -> bool {
     view.unprotected
         .iter()
         .any(|interval| &interval.instrument == instrument && interval.ended_at.is_none())
@@ -2309,6 +2323,9 @@ fn re_place(
     instrument: &InstrumentId,
     sequence: &Replacement,
 ) -> Result<(), ExecutorError> {
+    if batch.view.closing_all.contains(instrument) {
+        return Ok(());
+    }
     let committed =
         covered(&batch.view, instrument)?.checked_add(working_exits(&batch.view, instrument)?)?;
     let qty = long(&batch.view, instrument)?
@@ -2553,7 +2570,8 @@ pub(crate) fn bound(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         }
         let alerted = changed(batch, &instrument, "interval_limit", Vec::new())?;
         batch.notify(alerted.clone(), "unprotected_interval_limit");
-        let Some(entry) = entry.filter(|_| !exiting) else {
+        let closing = batch.view.closing_all.contains(&instrument);
+        let Some(entry) = entry.filter(|_| !exiting && !closing) else {
             continue;
         };
         let plain = batch
@@ -14175,7 +14193,7 @@ mod closed_form {
     use std::collections::BTreeSet;
     use std::panic::catch_unwind;
 
-    use mandate_canon::{Key, Object, Value, parse, to_canonical};
+    use mandate_canon::{Int, Key, Object, Value, parse, to_canonical};
     use mandate_journal::{AppendOutcome, Draft, Invalid, InvalidReason, MemoryJournal, StreamId};
     use mandate_time::UtcNanos;
 
@@ -14242,18 +14260,32 @@ mod closed_form {
         )
     }
 
-    /// Asserts `draft` is §9.5's closed version-1 record of `action` on `AAPL`: the members
-    /// `named` as given, every other list empty and every other member null, its own `risk_clock`,
-    /// and no other member, so no legacy `instrument`, `agent`, `limit`, `reason`, or joined
-    /// `orders`; and that the journal admits it.
+    /// Asserts `draft` is §9.5's closed record of `action` on `AAPL`, at the version the executor
+    /// writes (`schema_version`): the members `named` as given, every other list empty and every
+    /// other member null, its own `risk_clock`, and no other member, so no legacy `instrument`,
+    /// `agent`, `limit`, `reason`, or joined `orders`; and that the journal admits it at that
+    /// version. Version 2 adds `unprotected_fraction` before `risk_clock` (journal spec v0.72,
+    /// DEC-2312).
     pub(super) fn assert_closed(
         draft: &EventDraft,
         action: &str,
         named: &[(&str, Value)],
     ) -> Result<(), ExecutorError> {
         let mut expected = Object::new();
-        let members: Vec<&str> = MEMBERS.split_whitespace().collect();
-        assert_eq!(members.len(), 17, "§9.5's table has seventeen members");
+        let version = crate::batch::schema_version("ProtectionChanged");
+        assert!(
+            matches!(version, 1 | 2),
+            "§9.5 registers `ProtectionChanged` at versions 1 and 2 only, not {version}"
+        );
+        let mut members: Vec<&str> = MEMBERS.split_whitespace().collect();
+        assert_eq!(
+            members.len(),
+            17,
+            "§9.5's version-1 table has seventeen members"
+        );
+        if version == 2 {
+            members.insert(16, "unprotected_fraction");
+        }
         for member in members.iter().copied() {
             let given = named.iter().find(|(name, _)| *name == member);
             let value = match (member, given) {
@@ -14274,10 +14306,10 @@ mod closed_form {
         }
         assert_eq!(
             (draft.schema_version, &draft.payload),
-            (1, &Value::Object(expected)),
+            (version, &Value::Object(expected)),
             "{action}: §9.5's closed record"
         );
-        let refused = Draft::parse(&to_canonical(&envelope(&draft.payload)?)).err();
+        let refused = Draft::parse(&to_canonical(&envelope(&draft.payload, version)?)).err();
         assert!(
             refused.is_none(),
             "{action}: the journal refuses it: {refused:?}"
@@ -14320,7 +14352,7 @@ mod closed_form {
             closed.insert(Key::new(member).map_err(|_| missing(member))?, value);
         }
         let judged = |payload: &Object| -> Result<Option<Invalid>, ExecutorError> {
-            let draft = envelope(&Value::Object(payload.clone()))?;
+            let draft = envelope(&Value::Object(payload.clone()), 1)?;
             Ok(Draft::parse(&to_canonical(&draft)).err())
         };
         assert_eq!(judged(&closed)?, None, "the closed watchdog is admitted");
@@ -14337,13 +14369,16 @@ mod closed_form {
     }
 
     /// The vectors' `placed` chain event, seq 7 (`fixtures/refcases/journal.json`), less what only
-    /// a sealed row carries, with `payload` in place of its own.
-    fn envelope(payload: &Value) -> Result<Value, ExecutorError> {
+    /// a sealed row carries, with `payload` in place of its own, at `version`.
+    fn envelope(payload: &Value, version: u64) -> Result<Value, ExecutorError> {
         let mut body = chain_body(7)?;
-        body.remove(&Key::new("payload").map_err(|_| missing("payload"))?);
         body.insert(
             Key::new("payload").map_err(|_| missing("payload"))?,
             payload.clone(),
+        );
+        body.insert(
+            Key::new("schema_version").map_err(|_| missing("schema_version"))?,
+            Value::Int(Int::new(version).ok_or_else(|| missing("schema_version"))?),
         );
         Ok(Value::Object(body))
     }
@@ -14396,7 +14431,7 @@ mod closed_form {
         }
         let mut bodies = Vec::new();
         for (index, draft) in drafted.iter().enumerate() {
-            let mut body = envelope(&draft.payload)?;
+            let mut body = envelope(&draft.payload, draft.schema_version)?;
             if let Value::Object(fields) = &mut body {
                 let id = Key::new("event_id").map_err(|_| missing("event_id"))?;
                 fields.insert(id, Value::Str(format!("01J8ZQB{index:019}")));

@@ -15,7 +15,8 @@ use mandate_connections::record::ConnectionId;
 use mandate_connections::vault::AccessToken;
 use mandate_executord::Broker;
 use mandate_executord::credential::{
-    RunLease, VaultMount, lease_verdict, paper_broker, paper_settings, vault_config, vault_login,
+    RunLease, VaultMount, WORKSPACE_NAMESPACE_ENV, lease_verdict, paper_broker, paper_settings,
+    vault_config, vault_login, workspace_namespace,
 };
 use mandate_executord::lease::Held;
 use mandate_time::UtcNanos;
@@ -132,6 +133,9 @@ fn mount_dir() -> Result<PathBuf, Error> {
 /// Writes `name` in `dir` with `mode`, as the kubelet would.
 fn put(dir: &Path, name: &str, bytes: &[u8], mode: u32) -> Result<(), Error> {
     let path = dir.join(name);
+    if path.exists() {
+        fs::remove_file(&path)?;
+    }
     fs::write(&path, bytes)?;
     fs::set_permissions(&path, fs::Permissions::from_mode(mode))?;
     Ok(())
@@ -191,8 +195,9 @@ fn the_flags_name_the_paper_run_and_its_vault() -> Result<(), Error> {
     Ok(())
 }
 
-/// The vault's CA is the mount's `ca.crt`, read whole; a missing CA, or one group or others may
-/// read, is refused.
+/// The vault's CA is the mount's `ca.crt`, read whole at the modes a ConfigMap mounts, 0444 and,
+/// under an `fsGroup`, 0440 (DEC-2340); a missing CA, or one group or others may write, is
+/// refused.
 #[test]
 fn the_vault_ca_is_read_from_the_mount() -> Result<(), Error> {
     let dir = mount_dir()?;
@@ -201,13 +206,21 @@ fn the_vault_ca_is_read_from_the_mount() -> Result<(), Error> {
         dir: dir.clone(),
     };
     assert_eq!(vault_config(&mount).err(), Some("vault_ca_unreadable"));
-    put(&dir, "ca.crt", CA, 0o644)?;
-    assert_eq!(vault_config(&mount).err(), Some("vault_ca_unreadable"));
-    put(&dir, "ca.crt", CA, 0o400)?;
-    let config = vault_config(&mount)?;
-    assert_eq!(config.address, ADDRESS);
-    assert_eq!(config.ca_pem, CA);
-    assert_eq!(config.mounts, Mounts::default());
+    for writable in [0o646, 0o664] {
+        put(&dir, "ca.crt", CA, writable)?;
+        assert_eq!(
+            vault_config(&mount).err(),
+            Some("vault_ca_unreadable"),
+            "{writable:o}"
+        );
+    }
+    for mode in [0o444, 0o440, 0o400] {
+        put(&dir, "ca.crt", CA, mode)?;
+        let config = vault_config(&mount)?;
+        assert_eq!(config.address, ADDRESS);
+        assert_eq!(config.ca_pem, CA);
+        assert_eq!(config.mounts, Mounts::default());
+    }
     Ok(())
 }
 
@@ -333,4 +346,40 @@ fn a_stopped_run_gives_its_lease_back() -> Result<(), Error> {
     lease.give_back()?;
     assert_eq!(calls.borrow().revoked, [entry(TOKEN)]);
     Ok(())
+}
+
+/// The login is held to the namespace the chart configured, which must be set and equal the pod's
+/// own: a missing or empty one is refused before the pod's namespace is read, and one the pod
+/// does not share, or a pod namespace that cannot be read, refuses the start.
+#[test]
+fn the_login_is_held_to_the_charts_namespace_when_the_pod_shares_it() {
+    assert_eq!(WORKSPACE_NAMESPACE_ENV, "MANDATE_WORKSPACE_NAMESPACE");
+    let pod = || Ok("ws-ws1".to_owned());
+    assert_eq!(
+        workspace_namespace(Some("ws-ws1".to_owned()), pod),
+        Ok("ws-ws1".to_owned())
+    );
+    for configured in [None, Some(String::new())] {
+        let read = std::cell::Cell::new(false);
+        let answer = workspace_namespace(configured.clone(), || {
+            read.set(true);
+            Ok("ws-ws1".to_owned())
+        });
+        assert_eq!(answer, Err("workspace_namespace_missing"), "{configured:?}");
+        assert!(!read.get(), "{configured:?}: the pod's namespace was read");
+    }
+    for configured in ["ws-ws2", "WS-WS1", "ws-ws1 ", "kube-system", "ws-ws1\n"] {
+        assert_eq!(
+            workspace_namespace(Some(configured.to_owned()), pod),
+            Err("workspace_namespace_mismatch"),
+            "{configured:?}"
+        );
+    }
+    for unreadable in [SourceError::CredentialFile, SourceError::Config] {
+        assert_eq!(
+            workspace_namespace(Some("ws-ws1".to_owned()), || Err(unreadable.clone())),
+            Err("vault_credentials_unreadable"),
+            "{unreadable:?}"
+        );
+    }
 }

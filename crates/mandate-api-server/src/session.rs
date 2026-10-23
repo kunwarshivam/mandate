@@ -108,6 +108,9 @@ pub struct Authenticated {
     pub reference: SessionRef,
     /// Full, or reduction-only once an outage narrowed it (identity spec §6.4 route 1).
     pub kind: SessionKind,
+    /// The sign-in that opened the session; a refresh renews its tokens and leaves this
+    /// ([DEC-2124](../../../docs/project/decisions/DEC-2124.md) item 4).
+    pub signed_in: UtcNanos,
 }
 
 struct Entry {
@@ -121,6 +124,8 @@ struct Entry {
     passkey: Option<[u8; 32]>,
     reference: SessionRef,
     opened: u64,
+    /// When the sign-in opened it, which no refresh moves.
+    signed_in: UtcNanos,
     absolute_until: i64,
     last_active: i64,
     /// The digest of the secret the last granted refresh rotated away, and when.
@@ -203,6 +208,7 @@ impl Sessions {
             passkey: None,
             reference: SessionRef(u128::from_be_bytes(reference)),
             opened: 0,
+            signed_in: now,
             absolute_until: now.secs().saturating_add(limits.absolute_s()),
             last_active: now.secs(),
             previous: None,
@@ -240,6 +246,7 @@ impl Sessions {
             passkey: Some(digest_of(&secret)),
             reference: SessionRef(u128::from_be_bytes(reference)),
             opened: 0,
+            signed_in: now,
             absolute_until: now.secs().saturating_add(REDUCTION_ONLY_LIFETIME_S),
             last_active: now.secs(),
             previous: None,
@@ -415,6 +422,7 @@ impl Sessions {
                 Ok(Authenticated {
                     principal: entry.principal,
                     reference: entry.reference,
+                    signed_in: entry.signed_in,
                     kind: match entry.record.reach() {
                         Reach::Full => SessionKind::Full,
                         Reach::Outage | Reach::ReductionOnly => SessionKind::ReductionOnly,
