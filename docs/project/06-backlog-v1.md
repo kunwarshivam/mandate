@@ -425,6 +425,21 @@ the spec invariants (DP-n) its tests cover.
   to MC-L09 pass.
 - **E6-5 (Must)** As an owner, I want kill switches per agent, connection, and workspace so
   that I can stop everything immediately.
+  - **Retirement leaves nothing of the agent's** ([DEC-2344](decisions/DEC-2344.md) item 2; mandate
+    spec v0.9 §3.1, journal spec v0.76 §9.2). Once the runtime writes `AgentStopped` for an agent
+    that ran (goal completion, `release`, and the owner's Stop under DEC-136's flat-or-release
+    precondition), it writes it only when the account stream's fold shows no position attributed to
+    the agent and no working order of its own (every non-terminal trading §5.7 state); a release
+    cancels every working order of the agent's first, and a retirement waiting 24 hours raises
+    `retirement_held`, then each 24 hours. The deployment manager stops the
+    runtime, and the account's last executor, on that record alone. Nothing writes it for an agent
+    that ran today, so this lands with that writer. *Accepted when:* a property test over random
+    sequences of fills, exits, protective cancels, releases, `Unknown` orders and Stops shows no
+    `AgentStopped` while the account fold, computed by its own accumulator, holds a position or a
+    working order of the agent's, and that oracle is shown to catch a seeded retirement on a sent but
+    unfilled exit and on an unconfirmed cancel. An agent that ran and crash-looped holding nothing has
+    no writer for its retirement yet (DEC-2344 Risks). Safety-critical (autonomy policy and kill
+    switches), DEC-77 sequence.
 - **E6-6 (Must)** As an owner, I want US account rules (day-trading regime, settlement, short
   sales, market hours) enforced by the risk gate so that agents never get my account restricted.
   *Accepted when:* simulation tests for each rule pass; blocked orders are journaled with the rule.
@@ -1405,6 +1420,25 @@ after U-A1 to U-A5 are recorded.
   `ApprovalRevalidated` with `act` (API-12); `/n/{notice_id}` resolves a random notice id, never
   the request's event id, and only after sign-in (spec §3.9, DEC-436 item 19; the payload is the
   notifications spec's, E8-9).
+
+- **E8-17 (Must, M7; SC; needed before staging)** As an owner, I want to hear when a kill switch
+  did not reach my account, and when an agent's retirement is held, so that I can act in the
+  broker's own console ([DEC-2344](decisions/DEC-2344.md) items 1 and 2,
+  [DEC-2351](decisions/DEC-2351.md)). Today only the operator is told (RB-14).
+  - `kill_switch_unapplied` (notifications spec v0.9 §3.2, journal spec v0.78): the kind in
+    `mandate-notify` and `mandate-journal`'s closed set, its class and text key, and the deployment
+    manager's `OwnerAlertSent` in its `ProcessCrashLooped`'s batch for an executor last started for
+    a kill switch. Tests first: the kind parses and maps to `safety` and `attention_needed`; the
+    manager writes exactly one `OwnerAlertSent` per such loop and none for any other loop or after
+    a restart.
+  - `retirement_held` (DEC-2344 item 2, [DEC-2352](decisions/DEC-2352.md); journal spec v0.79
+    §9.34, notifications spec v0.10): `mandate-journal`'s `RetirementHeld` schema, rule 265, and
+    stream rule 266, turning the `retirements` refcases from pending to passing; the kind in
+    `mandate-notify` and `mandate-journal`; and the runtime's writer (E6-5's): period n at the first
+    tick at or after it is due while the agent still holds anything of its own, in every mode, with
+    its `OwnerAlertSent` as the next row, one sequence per agent, none after the retirement ends
+    (`AgentStopped`, a resume, a version applied), the next period after downtime, and none twice
+    across a restart.
 
 ### E9 Identity, tenancy, and policy
 
