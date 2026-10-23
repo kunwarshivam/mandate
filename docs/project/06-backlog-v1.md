@@ -1785,6 +1785,15 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   retried until it succeeds or the entry is absent; and tests show a code written between the
   callback's open-request check and its vault write, and a token an exchange wrote after the
   close, both gone once the close is journaled.
+- **E10-22 (Must, M8, with or after lane D1's K1; before the founder's staging connect; SC)** As
+  the owner, I want the real token-exchange pod proven against the cell's fixture provider and the
+  cell's vault, so that the first exchange on staging is not the first time the pod, its vault
+  login and its token write run together ([DEC-2330](decisions/DEC-2330.md) item 5). *Accepted
+  when:* a cell drill starts the exchange pod the deployment manager starts, with its pinned
+  `run --vault-address <address> --vault-dir <dir>`, its projected ServiceAccount token and the
+  cell vault's CA, against `oauth-fixture` with a code entry the API wrote; the pod exits 0, the
+  code is taken, and the connection's token entry, format 1, is in the vault; the drill runs in the
+  cell jobs, plain and seeded; and the founder's staging connect waits on it.
 
 ### E11 Web app: dashboard and controls
 
