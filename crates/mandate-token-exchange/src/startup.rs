@@ -26,7 +26,10 @@ pub const PROCESS: &str = "MANDATE_PROCESS";
 pub const TOKEN_EXCHANGE: &str = "token_exchange";
 
 /// The ServiceAccount the pod runs as: `x` and the lowercase hex of the subject's bytes, which the
-/// deployment manager's admission policy pins (DEC-2060, DEC-1177).
+/// deployment manager's admission policy pins (DEC-2060, DEC-1177). The value is self-reported:
+/// checking it only catches a misconfigured pod early. What binds the process to its connection
+/// is the vault's Kubernetes-auth login, which admits only that ServiceAccount, together with the
+/// admission policy that pins the ServiceAccount to the subject (DEC-2330 item 4).
 pub const SUBJECT_ACCOUNT: &str = "MANDATE_SUBJECT_ACCOUNT";
 
 /// The platform's OAuth client id, public (DEC-2636 item 3).
