@@ -1253,6 +1253,17 @@ PROTECTION_CHANGED = rec(
     ("acknowledged", opt(BOOL)),
     ("risk_clock", RISK_CLOCK),
 )
+# §9.5 (DEC-2312): `ProtectionChanged` version 2 adds the unprotected fraction of a fractional equity
+# position, disclosed beside version 1's members, with `risk_clock` last; version 1 stays registered.
+PROTECTION_CHANGED_V2 = rec(
+    *PROTECTION_CHANGED.fields[:-1],
+    ("unprotected_fraction", opt(DEC)),
+    ("risk_clock", RISK_CLOCK),
+)
+# The actions that may disclose a fraction: the start of a fractional entry's interval, the
+# protection placed for its whole shares, and the end, which carries the final size of a position
+# built from several fills (rule 44, DEC-2312 item 3, DEC-2315).
+FRACTION_ACTIONS = ("unprotected_start", "placed", "unprotected_end")
 ESTABLISHED_V2 = rec(
     *SCHEMAS[("ctl", "ConnectionEstablished")].fields,
     ("account_ref", ULID),
@@ -1266,7 +1277,7 @@ VERSIONED_VERSIONS: dict[tuple[str, str], tuple[int, ...]] = {
     ("acct", "GateDecided"): (1, 2),
     ("acct", "OrderSubmitted"): (1, 2),
     ("acct", "OrderRequestRecorded"): (1,),
-    ("acct", "ProtectionChanged"): (1,),
+    ("acct", "ProtectionChanged"): (1, 2),
     ("acct", "OwnerConfirmationReceived"): (1,),
     ("ctl", "ConnectionEstablished"): (1, 2),
     ("acct", "ConnectionEstablished"): (2,),
@@ -1312,6 +1323,7 @@ VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
     ("acct", "OrderSubmitted", 2): rec(*SUBMITTED_V1.fields, ("risk_clock", RISK_CLOCK)),
     ("acct", "OrderRequestRecorded", 1): COMPANION,
     ("acct", "ProtectionChanged", 1): PROTECTION_CHANGED,
+    ("acct", "ProtectionChanged", 2): PROTECTION_CHANGED_V2,
     ("acct", "OwnerConfirmationReceived", 1): rec(
         ("intent_id", ULID),
         ("instrument_id", STR),
@@ -2041,6 +2053,14 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
             rule("44.uncovered", False, "schema", "payload.uncovered")
         if p["acknowledged"] is not None and action != "unprotected_end":
             rule("44.acknowledged", False, "schema", "payload.acknowledged")
+        fraction = p.get("unprotected_fraction")
+        if fraction is not None:
+            disclosing = action in FRACTION_ACTIONS or f"widen.44.{action}" in skip
+            if "tighten.44.fraction_placed" in skip:
+                disclosing = action == "unprotected_start"
+            rule("44.fraction", disclosing, "schema", "payload.unprotected_fraction")
+            if disclosing:
+                rule("44.fraction_range", 0 < Decimal(fraction) < 1, "schema", "payload.unprotected_fraction")
     out += request_violations(event_type, draft, skip)
     out += answer_violations(event_type, draft, skip)
     out += acknowledgment_violations(event_type, draft, skip)
