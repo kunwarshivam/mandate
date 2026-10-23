@@ -1,4 +1,4 @@
-"""Journal spec v0.78 §9.33's reference vectors for the role provisioner's records (DEC-2350): the
+"""Journal spec v0.81 §9.33's reference vectors for the role provisioner's records (DEC-2350): the
 Kubernetes-auth roles one OAuth connect's token exchange and executor log in with, made on the
 request; the exchange's is removed when the request closes without an establishment or the
 connection is revoked, and the executor's never is.
@@ -40,7 +40,7 @@ from control import (
     valid as control_valid,
 )
 
-SPEC = "docs/specs/journal.md v0.78 §9.33 (DEC-2350)"
+SPEC = "docs/specs/journal.md v0.81 §9.33 (DEC-2350)"
 AT = "2026-10-22T16:00:00.000000000Z"
 CONNECTION = connections.CONNECTION
 OTHER_CONNECTION = connections.OTHER_CONNECTION
