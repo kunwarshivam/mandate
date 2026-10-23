@@ -257,8 +257,10 @@ const E77_ATOMIC_MARKER: &str = "ES-22-atomic-exception: E7-7 PR #598 (DEC-462)"
 /// old reference cases by the new one — cannot be split at all, so it ships whole with a marker
 /// that names its own DEC. The list is finite and each entry is one PR: nothing here is a standing
 /// loosening, and deleting the entry restores the guard for that PR.
-const ATOMIC_EXCEPTIONS: [(u64, &str); 1] =
-    [(2022, "ES-22-atomic-exception: J1 PR #2022 (DEC-2635)")];
+const ATOMIC_EXCEPTIONS: [(u64, &str); 2] = [
+    (2022, "ES-22-atomic-exception: J1 PR #2022 (DEC-2635)"),
+    (2200, "ES-22-atomic-exception: J2 PR #2200 (DEC-2335)"),
+];
 
 /// The verification skill's map of features to code, tests, and commands (AGENTS.md): one Markdown
 /// file a feature, so a PR adding a feature adds a file and one changing a feature edits only
