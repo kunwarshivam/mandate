@@ -110,6 +110,22 @@
       }
     },
     {
+      "name": "connect-finish",
+      "row": "Connect finish (`mandate-api-server finish`, DEC-2348 item 3): Postgres and the vault only. It finishes each OAuth connect on the control stream, deletes a closed connect's code and token, and judges and releases its account's fingerprint, logged in by the connection manager's AppRole alone; it listens on nothing. Rendered with `api.connectFinish`, from the API's image. Kubernetes only, so it is not in the Compose file",
+      "kind": "service",
+      "image": "api",
+      "built": true,
+      "compose": false,
+      "db_role": "mandate_connect_finish",
+      "guaranteed": false,
+      "colocate": false,
+      "egress": ["postgres", "vault"],
+      "resources": {
+        "requests": {"cpu": "50m", "memory": "32Mi"},
+        "limits": {"cpu": "100m", "memory": "64Mi"}
+      }
+    },
+    {
       "name": "runtime",
       "row": "Agent runtime, one per agent deployment: no broker credential and no route to a broker (rule 12); on the deny-all wiring until the post-R0 hook (DEC-1013)",
       "kind": "service",

@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from test_cell import api_vault, approle_copied
+from test_cell import api_vault, approle_copied, connect_finish
 
 ROOT = Path(__file__).resolve().parents[2]
 GITOPS = ROOT / "deploy" / "gitops"
@@ -397,8 +397,8 @@ def values_policy(values: dict[str, dict], environment: str) -> list[str]:
         problems.append("workspace: local images allowed")
     if (workspace.get("api") or {}).get("vaultBinding") and environment != "staging":
         problems.append(f"workspace: the API's vault binding is on in {environment}, where only staging runs a vault (DEC-2338)")
-    if (workspace.get("api") or {}).get("connectionManagerBinding") and environment != "staging":
-        problems.append(f"workspace: the API holds the connection manager's AppRole in {environment}, where only staging runs a vault (DEC-2348)")
+    if (workspace.get("api") or {}).get("connectFinish") and environment != "staging":
+        problems.append(f"workspace: the connect finish runs in {environment}, where only staging runs a vault (DEC-2348)")
     if (workspace.get("oauthFixture") or {}).get("enabled"):
         problems.append("workspace: the cell's fixture OAuth provider is on (DEC-1176)")
     for image, reference in (workspace.get("images") or {}).items():
@@ -1354,14 +1354,16 @@ def test_the_api_is_bound_to_the_vault_in_staging_alone(overlay):
     egress to the vault on 8200; production, which runs no vault, carries none of it."""
     environment, _, values, rendered, directory = overlay
     bound = bool((values["workspace"].get("api") or {}).get("vaultBinding"))
-    manager = bool((values["workspace"].get("api") or {}).get("connectionManagerBinding"))
+    finish = bool((values["workspace"].get("api") or {}).get("connectFinish"))
     if directory == GITOPS / "clusters" / "staging":
         assert bound, "staging's API is bound to its vault"
-        assert manager, "and holds the connection manager's AppRole (DEC-2348)"
-    assert api_vault(rendered, on=bound, manager=manager) == []
+        assert finish, "and runs the connect finish as the connection manager (DEC-2348)"
+    assert api_vault(rendered, on=bound) == []
+    workspace = (values["workspace"].get("api") or {}).get("workspace", "")
+    assert connect_finish(rendered, on=finish, workspace=workspace) == []
     assert approle_copied(rendered) == []
     if environment != "staging":
-        for setting in ("vaultBinding", "connectionManagerBinding"):
+        for setting in ("vaultBinding", "connectFinish"):
             bad = copy.deepcopy(values)
             bad["workspace"] = merge(bad["workspace"], {"api": {setting: True}})
             assert values_policy(bad, environment), f"{setting} where no vault runs is caught"

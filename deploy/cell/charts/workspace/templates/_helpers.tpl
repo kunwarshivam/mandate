@@ -335,6 +335,9 @@ spec:
   {{- end }}
   enableServiceLinks: false
   restartPolicy: {{ .restartPolicy }}
+  {{- with .grace }}
+  terminationGracePeriodSeconds: {{ . }}
+  {{- end }}
   securityContext:
     runAsNonRoot: true
     runAsUser: 65532
@@ -692,8 +695,7 @@ process whose vault role is `role`: the Secret the vault's provisioning makes fo
 into one source directory, mounted 0440 for the pod's fsGroup, and copied by an init container into
 a memory-backed directory, `/run/mandate/vault`, as `<role>.role-id`, `<role>.secret-id` and
 `ca.crt` at 0600 with nothing else in it, since `mandate_vault`'s reader refuses a file any group or
-other can read. Each role named in `extras` rides the same projection and copy, its Secret
-`vault-approle-<extra>` as `<extra>.role-id` and `<extra>.secret-id`. The process mounts that directory read-only and reads them there as files, never
+other can read. The process mounts that directory read-only and reads them there as files, never
 from its environment; it never mounts the Secret itself.
 */ -}}
 {{- define "mandate.vaultCopy" -}}
@@ -701,12 +703,7 @@ from its environment; it never mounts the Secret itself.
 - name: vault-credentials
   image: {{ .root.Values.images.postgres | quote }}
   imagePullPolicy: IfNotPresent
-  {{- $files := list (printf "%s/%s.role-id" $sources .role) (printf "%s/%s.secret-id" $sources .role) }}
-  {{- range (.extras | default list) }}
-  {{- $files = concat $files (list (printf "%s/%s.role-id" $sources .) (printf "%s/%s.secret-id" $sources .)) }}
-  {{- end }}
-  {{- $files = append $files (printf "%s/ca.crt" $sources) }}
-  command: ["install", "-m", "0600", {{ range $files }}{{ . | quote }}, {{ end }}"/run/mandate/vault/"]
+  command: ["install", "-m", "0600", {{ printf "%s/%s.role-id" $sources .role | quote }}, {{ printf "%s/%s.secret-id" $sources .role | quote }}, {{ printf "%s/ca.crt" $sources | quote }}, "/run/mandate/vault/"]
   securityContext:
     {{- include "mandate.containerSecurity" . | nindent 4 }}
   resources:
@@ -728,13 +725,6 @@ from its environment; it never mounts the Secret itself.
           items:
             - {key: role-id, path: {{ printf "%s.role-id" .role }}}
             - {key: secret-id, path: {{ printf "%s.secret-id" .role }}}
-      {{- range (.extras | default list) }}
-      - secret:
-          name: {{ printf "vault-approle-%s" . }}
-          items:
-            - {key: role-id, path: {{ printf "%s.role-id" . }}}
-            - {key: secret-id, path: {{ printf "%s.secret-id" . }}}
-      {{- end }}
       - configMap:
           name: vault-ca
           items:
