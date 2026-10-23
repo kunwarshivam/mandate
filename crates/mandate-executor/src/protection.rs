@@ -1792,6 +1792,13 @@ pub(crate) fn new_day(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
 /// cancelled: the profile offers a form for the whole shares [`re_place`] would cover, or nothing
 /// is left to cover. An OCO the executor cannot re-place is never the one it cancels: the position
 /// keeps it, and the shortfall is journaled and alerted instead (DEC-2312 item 2).
+///
+/// It sizes as [`re_place`] will: the long position less the working exits and less what other
+/// protection covers. Here that other protection is none. Every non-terminal protective order is
+/// in `protection.resting`, since each placer journals `placed` in its own batch and an order
+/// leaves only on a terminal state or a confirmed `cancelled`, and [`new_day`] cancels all of
+/// them. So `re_place`'s `covered` is zero once those cancels are confirmed, and subtracting the
+/// resting orders here would count the very protection being replaced (DEC-2355).
 fn replaceable(
     batch: &Batch<'_, '_>,
     instrument: &InstrumentId,

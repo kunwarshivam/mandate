@@ -19,6 +19,7 @@ fn every_error_has_its_stable_code() {
         (ConnectError::RedirectUriInvalid, "redirect_uri_invalid"),
         (ConnectError::TokenEntryInvalid, "token_entry_invalid"),
         (ConnectError::CodeEntryInvalid, "code_entry_invalid"),
+        (ConnectError::AccountEntryInvalid, "account_entry_invalid"),
         (ConnectError::RequestRefused, "request_refused"),
         (ConnectError::ScopeMismatch, "scope_mismatch"),
         (ConnectError::TokenType, "token_type"),

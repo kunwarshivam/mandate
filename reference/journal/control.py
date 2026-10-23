@@ -1168,6 +1168,19 @@ SCHEMAS[("ctl", "ProcessCrashLooped")] = rec(
     ("window_seconds", INT),
 )
 DM_RECORDS = ("ProcessStartIssued", "ProcessStopIssued", "ProcessCrashLooped")
+# §9.33 v0.77 (DEC-2350): the role provisioner's records of one OAuth connect's Kubernetes-auth roles,
+# on the control stream. IDs and enumerations only.
+SCHEMAS[("ctl", "ConnectionRolesMade")] = rec(("connection_id", IDENT_T))
+SCHEMAS[("ctl", "ConnectionRolesRefused")] = rec(
+    ("connection_id", IDENT_T),
+    ("reason", one_of("vault_unavailable", "role_refused")),
+)
+SCHEMAS[("ctl", "ConnectionRolesRemoved")] = rec(
+    ("connection_id", IDENT_T),
+    ("role", one_of("token_exchange")),
+    ("occasion", one_of("request_closed", "revoked")),
+)
+CR_RECORDS = ("ConnectionRolesMade", "ConnectionRolesRefused", "ConnectionRolesRemoved")
 # §9.34 v0.79 (DEC-2352): the runtime's record that a retirement has waited another 24 hours of risk
 # clock for what the agent still holds (DEC-2344 item 2). No order, position, or quantity.
 SCHEMAS[("agent", "RetirementHeld")] = rec(
@@ -2099,6 +2112,7 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
     out += control_plane_violations(event_type, draft, skip)
     out += backtest_violations(event_type, draft, skip)
     out += deployment_manager_violations(event_type, draft, skip)
+    out += connection_role_violations(event_type, draft, skip)
     out += retirement_held_violations(event_type, draft, skip)
     return out
 
@@ -2896,6 +2910,21 @@ def deployment_manager_violations(event_type: str, draft: dict, skip: frozenset[
         rule("257", p["cause"] != "exchanged" or executor, "payload.cause")
     if event_type == "ProcessStopIssued":
         rule("257.stop", p["cause"] != "connection_closed" or executor, "payload.cause")
+    return out
+
+
+def connection_role_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
+    """§9.33's rule 261, on a well-typed payload: a system actor, and a cause."""
+    if event_type not in CR_RECORDS:
+        return []
+    out: list[Violation] = []
+
+    def rule(name: str, holds: bool, path: str) -> None:
+        if not holds and f"rule.{name}" not in skip:
+            out.append(Violation(f"rule.{name}", "schema", path))
+
+    rule("261.system", draft["actor"]["kind"] == "system", "actor.kind")
+    rule("261.cause", draft["causation_id"] is not None, "causation_id")
     return out
 
 
