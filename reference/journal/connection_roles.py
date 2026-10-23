@@ -1,4 +1,4 @@
-"""Journal spec v0.77 §9.33's reference vectors for the role provisioner's records (DEC-2350): the
+"""Journal spec v0.78 §9.33's reference vectors for the role provisioner's records (DEC-2350): the
 Kubernetes-auth roles one OAuth connect's token exchange and executor log in with, made on the
 request; the exchange's is removed when the request closes without an establishment or the
 connection is revoked, and the executor's never is.
@@ -40,7 +40,7 @@ from control import (
     valid as control_valid,
 )
 
-SPEC = "docs/specs/journal.md v0.77 §9.33 (DEC-2350)"
+SPEC = "docs/specs/journal.md v0.78 §9.33 (DEC-2350)"
 AT = "2026-10-22T16:00:00.000000000Z"
 CONNECTION = connections.CONNECTION
 OTHER_CONNECTION = connections.OTHER_CONNECTION
@@ -260,18 +260,20 @@ def removed(index: int, cause: dict, role: str, occasion: str) -> dict:
 def stream_failure(records: list[dict], skip: frozenset[str] = frozenset()) -> int | None:
     """The index of the first §9.33 record that breaks rule 262 or 263, or None."""
     requests: dict[str, dict] = {}
+    requested_at: dict[str, int] = {}
     answered: set[str] = set()
-    made_for: set[str] = set()
+    made_for: dict[str, int] = {}
     gone: set[str] = set()
-    closers: dict[str, dict[str, str]] = {}
+    closers: dict[str, dict[str, tuple[int, str]]] = {}
     for i, record in enumerate(records):
         t, p = record["event_type"], record["payload"]
         if t == "ConnectionRequested":
             requests[record["event_id"]] = record
+            requested_at[record["event_id"]] = i
         elif t == "ConnectionRefused" and p.get("occasion") == "connect":
-            closers.setdefault(p["connection_id"], {})[record["event_id"]] = "request_closed"
+            closers.setdefault(p["connection_id"], {})[record["event_id"]] = (i, "request_closed")
         elif t == "ConnectionRevoked":
-            closers.setdefault(p["connection_id"], {})[record["event_id"]] = "revoked"
+            closers.setdefault(p["connection_id"], {})[record["event_id"]] = (i, "revoked")
         elif t in ("ConnectionRolesMade", "ConnectionRolesRefused"):
             request = requests.get(record["causation_id"])
             oauth = request is not None and request["schema_version"] == 2 and request["payload"].get("credential") == "oauth"
@@ -283,16 +285,17 @@ def stream_failure(records: list[dict], skip: frozenset[str] = frozenset()) -> i
                 return i
             answered.add(record["causation_id"])
             if t == "ConnectionRolesMade" and request is not None:
-                made_for.add(p["connection_id"])
+                made_for[p["connection_id"]] = requested_at[record["causation_id"]]
                 gone.discard(p["connection_id"])
-                closers[p["connection_id"]] = {}
         elif t == "ConnectionRolesRemoved":
             connection = p["connection_id"]
             if connection not in made_for and "stream.263.made" not in skip:
                 return i
             if connection in gone and "stream.263.once" not in skip:
                 return i
-            closer = closers.get(connection, {}).get(record["causation_id"])
+            at, closer = closers.get(connection, {}).get(record["causation_id"], (-1, None))
+            if at < made_for.get(connection, -1) and "stream.263.request" not in skip:
+                closer = None
             if p["occasion"] == "request_closed" and closer != "request_closed" and "stream.263.closed" not in skip:
                 return i
             if p["occasion"] == "revoked" and closer != "revoked" and "stream.263.revoked" not in skip:
@@ -381,6 +384,18 @@ def stream_cases() -> list[dict]:
             None,
         ),
         case(
+            "removed_after_roles_made_once_closed",
+            "rule 263: the exchange's role of roles made after their request closed",
+            [oauth, refusal, made(2, oauth), removed(3, refusal, "token_exchange", "request_closed")],
+            None,
+        ),
+        case(
+            "removed_after_roles_made_once_revoked",
+            "rule 263: the exchange's role of roles made after their connection was revoked",
+            [oauth, revocation, made(2, oauth), removed(3, revocation, "token_exchange", "revoked")],
+            None,
+        ),
+        case(
             "removed_twice_on_revoke",
             "rule 263: at most once after its roles were made",
             [oauth, made(1, oauth), revocation, removed(4, revocation, "token_exchange", "revoked"),
@@ -440,7 +455,8 @@ def oracle(records: list[dict]) -> int | None:
             since = before[makes[-1]:]
             if any(r["event_type"] == "ConnectionRolesRemoved" and r["payload"]["connection_id"] == connection for r in since):
                 return i
-            named = [r for r in since if r["event_id"] == record["causation_id"]]
+            request = next(j for j, r in enumerate(before) if r["event_id"] == before[makes[-1]]["causation_id"])
+            named = [r for r in before[request:] if r["event_id"] == record["causation_id"]]
             kinds = {"request_closed": "ConnectionRefused", "revoked": "ConnectionRevoked"}
             if not named or named[0]["event_type"] != kinds[p["occasion"]] or named[0]["payload"]["connection_id"] != connection:
                 return i
@@ -494,6 +510,7 @@ STREAM_MUTANTS = (
     "stream.263.once",
     "stream.263.closed",
     "stream.263.revoked",
+    "stream.263.request",
 )
 
 
@@ -543,6 +560,12 @@ def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
             "a stream case lets a removal repeat",
             "streams.rule",
             mutated(lambda s: case(s, "streams", "removed_twice").update(expect={"outcome": "Valid"})),
+        ),
+        (
+            "a stream case refuses the removal of roles made after their request closed",
+            "streams.rule",
+            mutated(lambda s: case(s, "streams", "removed_after_roles_made_once_closed").update(
+                expect={"outcome": "Invalid", "rule": "rule 263", "index": 3})),
         ),
         (
             "a stream case lets a removal cite an earlier request's closer",
