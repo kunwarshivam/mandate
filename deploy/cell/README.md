@@ -322,8 +322,11 @@ is always provisioned, so no Secret left from an earlier vault keeps a stale sec
 a cell where that Secret is already there is left as it is, so a second `cell up` rotates no
 credential. The provisioner's policy adds a `+`, on the role path under each Kubernetes-auth
 mount, whose parameters it pins. The `vault` drill admits exactly those two stanzas, every
-parameter as written, in that one policy, beside DEC-2349's grants; it then reads thirteen
-`mandate-*` policies, not ten.
+parameter as written, in that one policy, beside DEC-2349's grants. Kubernetes auth also writes
+the executors' templated policy, whose two one-segment `create` grants below the executor's own
+connection, its account and fingerprint entries (DEC-2339, DEC-2345), the drill admits whole too,
+with only the mount's accessor, which each vault names afresh, read as a placeholder. It then
+reads thirteen `mandate-*` policies, not ten.
 
 A production cell is initialized and unsealed by the founder, by hand (DEC-977 item 5):
 

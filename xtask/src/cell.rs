@@ -1967,7 +1967,7 @@ const VAULT_DRILL_POLICIES: usize = 10;
 /// ([`vault_drill_scan`]), whitespace squeezed, so another path, another capability anywhere in
 /// the stanza, a `*`, the same stanza in another policy, or
 /// a wildcard outside a stanza is still reported.
-const VAULT_DRILL_PREFIX_GRANTS: [(&str, &str); 8] = [
+const VAULT_DRILL_PREFIX_GRANTS: [(&str, &str); 10] = [
     (
         "mandate-api",
         "path \"mandate/data/connections/+/code\" { capabilities = [\"create\", \"update\"] }",
@@ -1994,7 +1994,25 @@ const VAULT_DRILL_PREFIX_GRANTS: [(&str, &str); 8] = [
     ),
     (PROVISIONER_POLICY, PROVISIONER_EXECUTOR_ROLES),
     (PROVISIONER_POLICY, PROVISIONER_EXCHANGE_ROLES),
+    (
+        KUBERNETES_EXECUTOR_POLICY,
+        "path \"mandate/data/personal/accounts/x{{identity.entity.aliases.<accessor>.metadata.service_account_name}}/+\" { capabilities = [\"create\"] }",
+    ),
+    (
+        KUBERNETES_EXECUTOR_POLICY,
+        "path \"mandate/data/personal/fingerprints/x{{identity.entity.aliases.<accessor>.metadata.service_account_name}}/+\" { capabilities = [\"create\"] }",
+    ),
 ];
+
+/// The Kubernetes-auth executors' templated policy, which `cell up`'s provisioning writes once the
+/// role provisioner runs: its two one-segment `create` grants below the executor's own templated
+/// connection segment, its account entries (DEC-2339 item 2) and its fingerprint entries (DEC-2345
+/// item 3), are in [`VAULT_DRILL_PREFIX_GRANTS`] with the mount's accessor as `<accessor>`.
+const KUBERNETES_EXECUTOR_POLICY: &str = "mandate-kubernetes-executor";
+
+/// What a templated policy's alias reference holds in place of the Kubernetes mount's accessor,
+/// which OpenBao names `auth_kubernetes_<hex>` afresh for each vault ([`normalised_accessor`]).
+const ACCESSOR_PLACEHOLDER: &str = "<accessor>";
 
 /// The role provisioner's policy (DEC-2350), as `mandate vault provision --secrets-namespace`
 /// writes it once `cell up` provisions for the provisioner ([`provision_vault`]).
@@ -2006,11 +2024,50 @@ const PROVISIONER_EXECUTOR_ROLES: &str = "path \"auth/kubernetes-executor/role/+
 const PROVISIONER_EXCHANGE_ROLES: &str = "path \"auth/kubernetes-exchange/role/+\" { capabilities = [\"create\", \"update\", \"delete\"] required_parameters = [\"alias_name_source\", \"audience\", \"bound_service_account_names\", \"bound_service_account_namespaces\", \"token_max_ttl\", \"token_no_default_policy\", \"token_policies\", \"token_ttl\"] allowed_parameters = { \"alias_name_source\" = [\"serviceaccount_uid\"] \"audience\" = [\"mandate-vault\"] \"bound_service_account_names\" = [] \"bound_service_account_namespaces\" = [\"ws-ws1\"] \"token_max_ttl\" = [\"600\"] \"token_no_default_policy\" = [\"false\"] \"token_policies\" = [\"mandate-kubernetes-exchange\"] \"token_ttl\" = [\"600\"] } }";
 
 /// Whether a scan line `wildcard in <policy>: <stanza>` names one of [`VAULT_DRILL_PREFIX_GRANTS`]
-/// in its own policy.
+/// in its own policy, the stanza's mount accessors made [`ACCESSOR_PLACEHOLDER`] first and nothing
+/// else changed. A stanza that already holds the placeholder is never admitted, so only a real
+/// accessor can stand for it.
 fn admitted_wildcard(line: &str) -> bool {
     line.strip_prefix("wildcard in ")
         .and_then(|rest| rest.split_once(": "))
-        .is_some_and(|(policy, stanza)| VAULT_DRILL_PREFIX_GRANTS.contains(&(policy, stanza)))
+        .is_some_and(|(policy, stanza)| {
+            if stanza.contains(ACCESSOR_PLACEHOLDER) {
+                return false;
+            }
+            let stanza = normalised_accessor(stanza);
+            VAULT_DRILL_PREFIX_GRANTS.contains(&(policy, stanza.as_str()))
+        })
+}
+
+/// `stanza` with each `aliases.auth_kubernetes_<hex>.metadata`, the alias reference a templated
+/// policy keys its ServiceAccount by, `<hex>` one or more lowercase hexadecimal digits, made
+/// `aliases.<accessor>.metadata`. Nothing else is touched: another accessor's shape, another
+/// mount type, or the reference anywhere but between `aliases.` and `.metadata` stays as it is,
+/// so it matches no grant.
+fn normalised_accessor(stanza: &str) -> String {
+    const BEFORE: &str = "aliases.auth_kubernetes_";
+    const AFTER: &str = ".metadata";
+    let mut out = String::new();
+    let mut rest = stanza;
+    while let Some(at) = rest.find(BEFORE) {
+        let (head, tail) = rest.split_at(at);
+        out.push_str(head);
+        let after_prefix = &tail[BEFORE.len()..];
+        let hex = after_prefix
+            .bytes()
+            .take_while(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+            .count();
+        if hex > 0 && after_prefix[hex..].starts_with(AFTER) {
+            out.push_str("aliases.");
+            out.push_str(ACCESSOR_PLACEHOLDER);
+            rest = &after_prefix[hex..];
+        } else {
+            out.push_str(BEFORE);
+            rest = after_prefix;
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 /// The `mandate-*` policies `cell up`'s own provisioning adds once the role provisioner runs
@@ -5982,6 +6039,90 @@ mod tests {
         assert_eq!(process["image"], ROLE_PROVISIONER_PROCESS);
         assert_eq!(process["built"], true);
         Ok(())
+    }
+
+    /// DEC-2339 item 2's and DEC-2345 item 3's two `create` grants of the Kubernetes-auth
+    /// executors' policy, as the cell's drill printed them on CI, are admitted for any accessor;
+    /// another capability, a path outside the executor's own `personal/accounts/x{{…}}/` or
+    /// `personal/fingerprints/x{{…}}/`, the stanzas in another policy, a change inside the template
+    /// but the accessor, or an accessor of another shape, is reported.
+    #[test]
+    fn the_vault_drill_admits_the_kubernetes_executors_personal_grants() {
+        let line = |accessor: &str, path: &str, capabilities: &str| {
+            format!(
+                "wildcard in mandate-kubernetes-executor: path \"mandate/data/personal/{path}/x{{{{identity.entity.aliases.{accessor}.metadata.service_account_name}}}}/+\" {{ capabilities = [{capabilities}] }}"
+            )
+        };
+        for accessor in [
+            "auth_kubernetes_050c14a4",
+            "auth_kubernetes_0123456789abcdef",
+        ] {
+            for path in ["accounts", "fingerprints"] {
+                let held = line(accessor, path, "\"create\"");
+                assert!(admitted_wildcard(&held), "{held}");
+            }
+        }
+        let held = line("auth_kubernetes_050c14a4", "accounts", "\"create\"");
+        for (bad, why) in [
+            (
+                line(
+                    "auth_kubernetes_050c14a4",
+                    "accounts",
+                    "\"create\", \"update\"",
+                ),
+                "another capability",
+            ),
+            (
+                line("auth_kubernetes_050c14a4", "accounts", "\"read\""),
+                "a read for its create",
+            ),
+            (
+                line("auth_kubernetes_050c14a4", "tokens", "\"create\""),
+                "a path outside its personal entries",
+            ),
+            (held.replace("/+\" {", "/*\" {"), "a `*` for its `+`"),
+            (held.replace("/+\" {", "/+/+\" {"), "a second segment"),
+            (
+                held.replace("mandate-kubernetes-executor", "mandate-kubernetes-exchange"),
+                "the stanza in another policy",
+            ),
+            (
+                held.replace("service_account_name", "service_account_namespace"),
+                "a change inside the template but the accessor",
+            ),
+            (
+                held.replace("{{identity.", "{{ identity."),
+                "the template spelled another way",
+            ),
+            (
+                held.replace("auth_kubernetes_050c14a4", "auth_kubernetes_050C14A4"),
+                "an accessor not in lowercase hex",
+            ),
+            (
+                held.replace("auth_kubernetes_050c14a4", "auth_approle_050c14a4"),
+                "another mount type's accessor",
+            ),
+            (
+                held.replace("auth_kubernetes_050c14a4", "auth_kubernetes_"),
+                "an accessor with no digits",
+            ),
+            (
+                held.replace("auth_kubernetes_050c14a4", ACCESSOR_PLACEHOLDER),
+                "the placeholder itself",
+            ),
+        ] {
+            assert!(!admitted_wildcard(&bad), "{why} is admitted: {bad}");
+        }
+        assert_eq!(
+            normalised_accessor(
+                "a aliases.auth_kubernetes_ab.metadata b aliases.auth_kubernetes_cd.metadata"
+            ),
+            "a aliases.<accessor>.metadata b aliases.<accessor>.metadata"
+        );
+        assert_eq!(
+            normalised_accessor("aliases.auth_kubernetes_ab.other"),
+            "aliases.auth_kubernetes_ab.other"
+        );
     }
 
     /// The cell's vault turns Kubernetes auth on exactly when the role provisioner runs, as
