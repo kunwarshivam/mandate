@@ -859,9 +859,15 @@ fn roles_made_after_their_request_closed_are_owed_their_removal() {
 async fn a_pass_removes_the_exchanges_role_of_roles_made_after_the_close() {
     let stream = Stream::opened();
     let records = world("removed_after_roles_made_once_closed");
-    for record in &records[..3] {
+    for record in &records {
         stream.push(record);
     }
+    let request = Step::Make {
+        connection: CONNECTION.to_owned(),
+        request: text(&records[0], "event_id").to_owned(),
+    };
+    let made = draft(&identity(), &request, Outcome::Made, "paper", at(0));
+    stream.push(&parse(&made).unwrap());
     let mut provisioner = provisioner(&stream, Vault::default());
     assert_eq!(provisioner.tick(at(1)).await, Ok(()));
     assert_eq!(provisioner.tick(at(2)).await, Ok(()));
