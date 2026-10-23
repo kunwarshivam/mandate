@@ -4301,6 +4301,13 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   written after an agent's kill switch has sized its flatten sells does not shrink them, so the
   switch can still offer the released shares. Re-size an agent flatten sell not yet sent against
   the sub-ledger at send time, or cancel the part a later release takes.
+- **E21-30 (executor process), from [DEC-2358](decisions/DEC-2358.md):** `mandate-executord` hands
+  the core no quote, so §5.6's ladder never prices an exit there and every exit beside resting
+  protection goes at its own limit or is held for want of a price. Add a quote feed: poll
+  `mandate-alpaca`'s `DataClient::latest_quote` for each instrument with a held or sequenced exit,
+  with the data host's credential from the vault, and hand each as `Input::Market` with its sanity
+  verdict; a recorded fake for the tests. A design note on claim #137 first. Once it lands, the
+  founder may revert DEC-2358 to DEC-160 (12)'s hold.
 - **E7-4 A1c (stream K), from [DEC-2333](decisions/DEC-2333.md) item 3:** at §5.4's bound, re-place
   protection in an instrument the account kill switch closes for the held quantity less every sell
   not confirmed cancelled, placing nothing where that leaves none, with its own DEC-77 pair. Until

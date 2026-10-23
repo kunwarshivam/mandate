@@ -1,0 +1,7 @@
+file = "crates/mandate-executor/src/protection.rs"
+test = "sequence_tests::a_discretionary_exit_with_its_own_limit_and_nothing_to_price_from_goes_at_it"
+reason = """
+DEC-2358: `exit_price` holds a discretionary exit with nothing to price from even when it has a
+limit of its own (DEC-160 (12) as written), so this test reaches no stub and fails on that
+behaviour until DEC-2358's implementation deletes this file with its `#[ignore]` line.
+"""
