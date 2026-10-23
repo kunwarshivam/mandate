@@ -141,7 +141,8 @@ commands:
 /// its required `full` verdict depend on every shard (DEC-464); the local `check` command still
 /// runs every entry in [`PR_JOBS`] once, unsharded. `schema-mutants` is CI's own job beside them,
 /// which the required `full` verdict also needs, so `full-checks` stays under ten minutes (DEC-688);
-/// CI splits `full`'s parts between `full-checks` and `full-checks-2` for the same reason (DEC-2334).
+/// CI splits `full`'s parts between `full-checks`, `full-checks-2` and `full-checks-3` for the same
+/// reason (DEC-2334).
 /// CI runs `fast`'s parts in parallel jobs, `test` split into [`TEST_PARTS`] and its nextest run
 /// partitioned, and its required `fast` verdict is an aggregate over them (DEC-871); `cargo xtask
 /// ci fast` still runs this whole group unsharded. `portable` runs on macOS in CI (DEC-954).
@@ -5858,6 +5859,7 @@ const READ_ENV_NAMES: &[&str] = &[
     "FLUX_SHA256",
     "FLUX_VERSION",
     "FULL_CHECKS_2_RESULT",
+    "FULL_CHECKS_3_RESULT",
     "FULL_CHECKS_RESULT",
     "FULL_CHECKS_SELECTED",
     "FULL_RESULT",
@@ -16113,7 +16115,7 @@ mod tests {
         assert!(
             full.iter()
                 .any(|l| l
-                    == "needs: [select, full-checks, full-checks-2, mutants-plan, mutants, schema-mutants]"),
+                    == "needs: [select, full-checks, full-checks-2, full-checks-3, mutants-plan, mutants, schema-mutants]"),
             "`full` needs the selection and the plan as well as the matrix"
         );
         Ok(())
@@ -16146,7 +16148,8 @@ mod tests {
     /// matrix's skip passes only beside a plan that succeeded and counted zero. DEC-1190 adds the
     /// selection: `full-checks` passes as skipped only when `select` did not select it, and a
     /// `full-checks` that ran when unselected, or a selection that failed, fails `full`. DEC-2334
-    /// splits it: `full-checks-2` follows the same selection, and either one off its verdict fails.
+    /// splits it: `full-checks-2` and `full-checks-3` follow the same selection, and any one off its
+    /// verdict fails.
     #[test]
     fn full_accepts_a_skipped_matrix_only_beside_a_plan_of_zero() -> Result<()> {
         let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/ci.yml"))?;
@@ -16180,6 +16183,7 @@ mod tests {
                                     .env("SCHEMA_MUTANTS_SELECTED", "true")
                                     .env("FULL_CHECKS_RESULT", checks)
                                     .env("FULL_CHECKS_2_RESULT", checks)
+                                    .env("FULL_CHECKS_3_RESULT", checks)
                                     .env("PLAN_RESULT", plan)
                                     .env("PLANNED_MUTANTS", planned)
                                     .env("MUTANTS_RESULT", matrix)
@@ -16200,15 +16204,19 @@ mod tests {
             }
         }
         assert_eq!(checked, 3072);
-        for (selected, first, second, passes) in [
-            ("true", "success", "success", true),
-            ("true", "success", "failure", false),
-            ("true", "success", "cancelled", false),
-            ("true", "success", "skipped", false),
-            ("true", "failure", "success", false),
-            ("false", "skipped", "skipped", true),
-            ("false", "skipped", "success", false),
-            ("false", "success", "skipped", false),
+        for (selected, first, second, third, passes) in [
+            ("true", "success", "success", "success", true),
+            ("true", "success", "failure", "success", false),
+            ("true", "success", "cancelled", "success", false),
+            ("true", "success", "skipped", "success", false),
+            ("true", "failure", "success", "success", false),
+            ("true", "success", "success", "failure", false),
+            ("true", "success", "success", "cancelled", false),
+            ("true", "success", "success", "skipped", false),
+            ("false", "skipped", "skipped", "skipped", true),
+            ("false", "skipped", "success", "skipped", false),
+            ("false", "success", "skipped", "skipped", false),
+            ("false", "skipped", "skipped", "success", false),
         ] {
             let status = Command::new("bash")
                 .args(["-e", "-c", &script])
@@ -16218,6 +16226,7 @@ mod tests {
                 .env("SCHEMA_MUTANTS_SELECTED", "true")
                 .env("FULL_CHECKS_RESULT", first)
                 .env("FULL_CHECKS_2_RESULT", second)
+                .env("FULL_CHECKS_3_RESULT", third)
                 .env("PLAN_RESULT", "success")
                 .env("PLANNED_MUTANTS", "0")
                 .env("MUTANTS_RESULT", "skipped")
@@ -16227,7 +16236,8 @@ mod tests {
             assert_eq!(
                 status.success(),
                 passes,
-                "full-checks selected {selected}: {first}, full-checks-2 {second} (DEC-2334)"
+                "full-checks selected {selected}: {first}, full-checks-2 {second}, \
+                 full-checks-3 {third} (DEC-2334)"
             );
         }
         for (selected, result, passes) in [
@@ -16245,6 +16255,7 @@ mod tests {
                 .env("SCHEMA_MUTANTS_SELECTED", selected)
                 .env("FULL_CHECKS_RESULT", "success")
                 .env("FULL_CHECKS_2_RESULT", "success")
+                .env("FULL_CHECKS_3_RESULT", "success")
                 .env("PLAN_RESULT", "success")
                 .env("PLANNED_MUTANTS", "0")
                 .env("MUTANTS_RESULT", "skipped")
@@ -16351,6 +16362,7 @@ mod tests {
                 .env("SCHEMA_MUTANTS_SELECTED", "true")
                 .env("FULL_CHECKS_RESULT", "success")
                 .env("FULL_CHECKS_2_RESULT", "success")
+                .env("FULL_CHECKS_3_RESULT", "success")
                 .env("PLAN_RESULT", "success")
                 .env("PLANNED_MUTANTS", "0")
                 .env("MUTANTS_RESULT", "skipped")
@@ -16453,6 +16465,7 @@ mod tests {
             ("fast", AGGREGATE_GUARD),
             ("full-checks", "needs: select"),
             ("full-checks-2", "needs: select"),
+            ("full-checks-3", "needs: select"),
             ("schema-mutants", "needs: select"),
             (
                 "mutants-plan",
@@ -16690,8 +16703,9 @@ mod tests {
 
     /// DEC-2334: the jobs that run `cargo xtask ci full`'s parts, each with its parts in order.
     /// `full-checks` keeps the parts that need its services (Postgres, OpenBao, the S3 store) and
-    /// `refcases`, which warms the build they share; `full-checks-2` runs the rest.
-    const FULL_CI_JOBS: [(&str, &[&str]); 2] = [
+    /// `refcases`, which warms the build they share; `full-checks-3` the API server's release
+    /// build (DEC-2338 item 5), about five minutes alone; `full-checks-2` runs the rest.
+    const FULL_CI_JOBS: [(&str, &[&str]); 3] = [
         (
             "full-checks",
             &["refcases", "postgres", "openbao", "objectstore"],
@@ -16707,6 +16721,7 @@ mod tests {
                 "exchange-release",
             ],
         ),
+        ("full-checks-3", &["api-release"]),
     ];
 
     /// DEC-2334: CI's full jobs together run exactly what `cargo xtask ci full` runs, each part
@@ -17104,7 +17119,7 @@ mod tests {
     }
 
     /// The jobs `select` scopes, each with the output that starts it (DEC-1190 item 2).
-    const SELECT_GATES: [(&str, &str); 16] = [
+    const SELECT_GATES: [(&str, &str); 17] = [
         ("fast-test", "tests"),
         ("fast-pending", "tests"),
         ("fast-python", "python"),
@@ -17112,6 +17127,7 @@ mod tests {
         ("fast-rh-sim-live", "rh_sim_live"),
         ("full-checks", "full_checks"),
         ("full-checks-2", "full_checks"),
+        ("full-checks-3", "full_checks"),
         ("schema-mutants", "schema_mutants"),
         ("cell", "cell"),
         ("cell-demo", "cell"),
@@ -19359,10 +19375,10 @@ mod tests {
             .collect();
         assert_eq!(
             checkouts.len(),
-            22,
+            23,
             "one checkout in each source-reading job: `select` (DEC-1190), `fast-lint`, \
              `fast-test`, `fast-pending`, `fast-python`, `fast-portable`, `fast-rh-sim-live`, \
-             `full-checks`, `full-checks-2` (DEC-2334), the mutation plan, the mutants matrix, `mutants-costs` (DEC-2607), \
+             `full-checks`, `full-checks-2`, `full-checks-3` (DEC-2334), the mutation plan, the mutants matrix, `mutants-costs` (DEC-2607), \
              `schema-mutants`, `cell`, `cell-demo` (DEC-2002), `cell-demo-web` (DEC-2609), \
              `cell-journal`, `cell-failover`, `cell-kill-switch` (DEC-2602), `cell-executor` \
              (DEC-2615), `cell-vault` (DEC-2616), and `hosted-k3d` \
