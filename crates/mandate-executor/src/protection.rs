@@ -203,8 +203,9 @@ pub(crate) enum ExitPrice {
     /// Nothing to price from: the intent's own limit, never below an owner exit's floor,
     /// journaled with an owner alert.
     Fallback(Price),
-    /// Nothing to price from, for a discretionary exit or an exit with no limit of its own: held,
-    /// protection resting, until a price arrives (DEC-2037 item 5).
+    /// Nothing to price from, for an exit with no limit of its own: held, protection resting,
+    /// until a price arrives (DEC-2037 item 5). An exit with a limit of its own, a discretionary
+    /// one included, falls back to it instead (DEC-2358).
     Held,
     /// An exit with no limit, unsequenced, where §5.1 lets a market order go (DEC-2037 item 4).
     Market,
@@ -225,9 +226,7 @@ pub(crate) fn exit_price(
     };
     match (ladder_price(tier, observations, step, now, floor), limit) {
         (Ok(rung), _) => ExitPrice::Laddered(rung.limit),
-        (Err(_), Some(limit)) if purpose != Purpose::DiscretionaryExit => {
-            ExitPrice::Fallback(floor.map_or(limit, |floor| limit.max(floor)))
-        }
+        (Err(_), Some(limit)) => ExitPrice::Fallback(floor.map_or(limit, |floor| limit.max(floor))),
         (Err(_), _) => ExitPrice::Held,
     }
 }
@@ -4388,7 +4387,6 @@ mod sequence_tests {
     /// starts, the exit goes at its own limit, and the fallback is journaled and alerted. At the
     /// next priceable quote the ladder steps it again from that quote, never from the fallback.
     #[test]
-    #[ignore = "pending E7-4"]
     fn a_discretionary_exit_with_its_own_limit_and_nothing_to_price_from_goes_at_it()
     -> Result<(), ExecutorError> {
         let (config, fees) = (executor_config(), fees()?);
@@ -15060,7 +15058,6 @@ mod ladder_tests {
     /// limit of its own falls back to it, as every other exit does, whatever its floor; one with no
     /// limit of its own is still held (DEC-2037 item 5); an opening keeps its own limit.
     #[test]
-    #[ignore = "pending E7-4"]
     fn a_discretionary_exit_with_its_own_limit_falls_back_to_it() -> Result<(), ExecutorError> {
         let stale = [seen(Some("150"), None, true, 0)?];
         let now = RiskClock::from_secs(1_000);
