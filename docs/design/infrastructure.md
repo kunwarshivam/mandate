@@ -726,7 +726,7 @@ are authoritative; a few come from metrics.
 | An executor no agent wants, started for a kill switch, crash-looped before applying it (`kill_switch_unapplied`, in place of `crash_loop`) | Deployment manager ([DEC-2344](../project/decisions/DEC-2344.md) item 1) | SEV-1 | RB-14 |
 | A version-1 deployment the manager cannot run (`deployment_unread`) | Deployment manager ([DEC-1173](../project/decisions/DEC-1173.md)) | SEV-3 | RB-14 |
 | A version-2 deployment rule 201 refuses, which the manager cannot run (`deployment_unconnected`) | Deployment manager ([DEC-2038](../project/decisions/DEC-2038.md)) | SEV-3 | RB-14 |
-| A connect's teardown stalled past its deadline (`connect_teardown_stalled`): its code and token cannot be deleted from the vault | Workspace API server ([DEC-2348](../project/decisions/DEC-2348.md)) | SEV-2 | RB-19 |
+| A connect's teardown stalled past its deadline (`connect_teardown_stalled`): its code and token cannot be deleted from the vault | Connect finish, `mandate-api-server finish` ([DEC-2348](../project/decisions/DEC-2348.md)) | SEV-2 | RB-19 |
 | Approval not delivered | Approval service | SEV-2 (07) | RB-15 |
 | Route 2's failed-assertion limit reached (`reduction_failures_over_limit`): opaque, generic text, naming no address, device, member, or passkey | Workspace API server ([workspace API spec](../specs/workspace-api.md) §4.10 route 2 item 3, [DEC-2119](../project/decisions/DEC-2119.md)) | SEV-3 | None yet: owed with E9-1's route 2 |
 | Backup failed; drill overdue or failed | Backup job metrics; the drill events E21-25 defines | SEV-2 | RB-16 |
