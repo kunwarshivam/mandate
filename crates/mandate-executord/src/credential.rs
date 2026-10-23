@@ -29,7 +29,7 @@ use mandate_store::Store;
 use mandate_time::UtcNanos;
 use mandate_vault::SourceError;
 use mandate_vault::lease::{Lease, LeaseKeeper};
-use mandate_vault::mounted::read_mounted;
+use mandate_vault::mounted::read_mounted_ca;
 use mandate_vault::openbao::OpenBaoConfig;
 use mandate_vault::policy::{Identity, Mounts};
 use mandate_vault::source::SecretSource;
@@ -37,9 +37,6 @@ use secrecy::{ExposeSecret, SecretString};
 
 use crate::alpaca::AlpacaBroker;
 use crate::lease::{Held, Leased, runtime};
-
-/// The mounted file holding the vault's CA (DEC-2630).
-const VAULT_CA: &str = "ca.crt";
 
 /// Which broker the process runs over.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -172,10 +169,10 @@ pub fn paper_settings(
 /// # Errors
 /// `vault_ca_unreadable` when the CA is not a mounted file the reader accepts.
 pub fn vault_config(mount: &VaultMount) -> Result<OpenBaoConfig, &'static str> {
-    let ca = read_mounted(&mount.dir, VAULT_CA).map_err(|_| "vault_ca_unreadable")?;
+    let ca = read_mounted_ca(&mount.dir).map_err(|_| "vault_ca_unreadable")?;
     Ok(OpenBaoConfig {
         address: mount.address.clone(),
-        ca_pem: ca.expose_secret().as_bytes().to_vec(),
+        ca_pem: ca.into_bytes(),
         mounts: Mounts::default(),
     })
 }
@@ -195,6 +192,34 @@ pub fn vault_login<V>(
 ) -> Result<V, &'static str> {
     let token = service_account_token().map_err(|_| "vault_credentials_unreadable")?;
     login(Identity::Executor(connection.clone()), token).map_err(|_| "vault_login_failed")
+}
+
+/// The variable the workspace chart sets to the namespace the deployment manager creates the
+/// executor's pod in (lane D1, K2).
+pub const WORKSPACE_NAMESPACE_ENV: &str = "MANDATE_WORKSPACE_NAMESPACE";
+
+/// The namespace the executor's Kubernetes login must be in: `configured`, the chart's
+/// [`WORKSPACE_NAMESPACE_ENV`], checked before `projected` reads the pod's own namespace from the
+/// downward API, and only when the two are the same. So the vault's answer is held to what the
+/// chart configured, never to what the pod alone says it is.
+///
+/// # Errors
+/// `workspace_namespace_missing` when `configured` is absent or empty, before `projected` is
+/// read; `vault_credentials_unreadable` when the pod's namespace cannot be read;
+/// `workspace_namespace_mismatch` when the two differ.
+pub fn workspace_namespace(
+    configured: Option<String>,
+    projected: impl FnOnce() -> Result<String, SourceError>,
+) -> Result<String, &'static str> {
+    let configured = configured
+        .filter(|name| !name.is_empty())
+        .ok_or("workspace_namespace_missing")?;
+    let projected = projected().map_err(|_| "vault_credentials_unreadable")?;
+    if configured == projected {
+        Ok(configured)
+    } else {
+        Err("workspace_namespace_mismatch")
+    }
 }
 
 /// How a renewed secret is read: as the access token.
