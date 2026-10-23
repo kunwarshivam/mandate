@@ -139,7 +139,8 @@ commands:
 /// reuses the test binaries that `test` has just built. CI shards `mutants` separately and makes
 /// its required `full` verdict depend on every shard (DEC-464); the local `check` command still
 /// runs every entry in [`PR_JOBS`] once, unsharded. `schema-mutants` is CI's own job beside them,
-/// which the required `full` verdict also needs, so `full-checks` stays under ten minutes (DEC-688).
+/// which the required `full` verdict also needs, so `full-checks` stays under ten minutes (DEC-688);
+/// CI splits `full`'s parts between `full-checks` and `full-checks-2` for the same reason (DEC-2334).
 /// CI runs `fast`'s parts in parallel jobs, `test` split into [`TEST_PARTS`] and its nextest run
 /// partitioned, and its required `fast` verdict is an aggregate over them (DEC-871); `cargo xtask
 /// ci fast` still runs this whole group unsharded. `portable` runs on macOS in CI (DEC-954).
@@ -256,8 +257,10 @@ const E77_ATOMIC_MARKER: &str = "ES-22-atomic-exception: E7-7 PR #598 (DEC-462)"
 /// old reference cases by the new one — cannot be split at all, so it ships whole with a marker
 /// that names its own DEC. The list is finite and each entry is one PR: nothing here is a standing
 /// loosening, and deleting the entry restores the guard for that PR.
-const ATOMIC_EXCEPTIONS: [(u64, &str); 1] =
-    [(2022, "ES-22-atomic-exception: J1 PR #2022 (DEC-2635)")];
+const ATOMIC_EXCEPTIONS: [(u64, &str); 2] = [
+    (2022, "ES-22-atomic-exception: J1 PR #2022 (DEC-2635)"),
+    (2200, "ES-22-atomic-exception: J2 PR #2200 (DEC-2335)"),
+];
 
 /// The verification skill's map of features to code, tests, and commands (AGENTS.md): one Markdown
 /// file a feature, so a PR adding a feature adds a file and one changing a feature edits only
@@ -712,12 +715,22 @@ fn rehearsal_runs(
 /// build: every workspace crate that declares it (DEC-922, DEC-963, DEC-962 item 2).
 const REHEARSAL_TESTED: [&str; 3] = ["mandate-mcp", "mandate-paper", "mandate-cli"];
 
+/// The workspace's nextest settings, under `xtask/` rather than nextest's default `.config/`, a
+/// top-level directory whose name the outside-path scan reads in any `.config` field access
+/// (DEC-2325).
+const NEXTEST_CONFIG: &str = "xtask/nextest.toml";
+
 /// The arguments of the workspace's nextest run over `packages`, or the whole workspace when
 /// there are none to scope it to (DEC-1190): every test of them or, with `partition` (`K/N`, `1
 /// <= K <= N`, plain decimal), nextest's counted `K`th of `N` shards, which together run every
-/// test once (DEC-871).
+/// test once (DEC-871). Every run reads [`NEXTEST_CONFIG`], so its longest tests start first
+/// (DEC-2325).
 fn nextest_args(partition: Option<&str>, packages: Option<&[String]>) -> Result<Vec<String>> {
-    let mut args: Vec<String> = ["nextest", "run"].map(String::from).to_vec();
+    let config = repo_root()?.join(NEXTEST_CONFIG);
+    let mut args: Vec<String> = ["nextest", "run", "--config-file"]
+        .map(String::from)
+        .to_vec();
+    args.push(config.to_string_lossy().into_owned());
     match packages {
         None => args.push("--workspace".to_owned()),
         Some(packages) => {
@@ -5757,6 +5770,7 @@ const READ_ENV_NAMES: &[&str] = &[
     "FAST_RESULT",
     "FLUX_SHA256",
     "FLUX_VERSION",
+    "FULL_CHECKS_2_RESULT",
     "FULL_CHECKS_RESULT",
     "FULL_CHECKS_SELECTED",
     "FULL_RESULT",
@@ -12485,7 +12499,7 @@ mod tests {
     fn every_mutation_shard_has_the_database_the_postgres_tests_need() -> Result<()> {
         let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/ci.yml"))?;
         for (job, gate) in [
-            ("full-checks", "run: cargo xtask ci full"),
+            ("full-checks", "run: cargo xtask ci postgres"),
             ("mutants", "run: cargo xtask ci mutants"),
         ] {
             let lines = workflow_job(&workflow, job)
@@ -12523,7 +12537,7 @@ mod tests {
     fn every_mutation_shard_has_the_store_the_objectstore_tests_need() -> Result<()> {
         let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/ci.yml"))?;
         for (job, gate) in [
-            ("full-checks", "run: cargo xtask ci full"),
+            ("full-checks", "run: cargo xtask ci objectstore"),
             ("mutants", "run: cargo xtask ci mutants"),
         ] {
             let lines = workflow_job(&workflow, job)
@@ -15971,7 +15985,8 @@ mod tests {
         let full = trimmed("full")?;
         assert!(
             full.iter()
-                .any(|l| l == "needs: [select, full-checks, mutants-plan, mutants, schema-mutants]"),
+                .any(|l| l
+                    == "needs: [select, full-checks, full-checks-2, mutants-plan, mutants, schema-mutants]"),
             "`full` needs the selection and the plan as well as the matrix"
         );
         Ok(())
@@ -16003,7 +16018,8 @@ mod tests {
     /// three jobs' results and the plan's count, against a truth table written out here: the
     /// matrix's skip passes only beside a plan that succeeded and counted zero. DEC-1190 adds the
     /// selection: `full-checks` passes as skipped only when `select` did not select it, and a
-    /// `full-checks` that ran when unselected, or a selection that failed, fails `full`.
+    /// `full-checks` that ran when unselected, or a selection that failed, fails `full`. DEC-2334
+    /// splits it: `full-checks-2` follows the same selection, and either one off its verdict fails.
     #[test]
     fn full_accepts_a_skipped_matrix_only_beside_a_plan_of_zero() -> Result<()> {
         let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/ci.yml"))?;
@@ -16036,6 +16052,7 @@ mod tests {
                                     .env("FULL_CHECKS_SELECTED", selected)
                                     .env("SCHEMA_MUTANTS_SELECTED", "true")
                                     .env("FULL_CHECKS_RESULT", checks)
+                                    .env("FULL_CHECKS_2_RESULT", checks)
                                     .env("PLAN_RESULT", plan)
                                     .env("PLANNED_MUTANTS", planned)
                                     .env("MUTANTS_RESULT", matrix)
@@ -16056,6 +16073,36 @@ mod tests {
             }
         }
         assert_eq!(checked, 3072);
+        for (selected, first, second, passes) in [
+            ("true", "success", "success", true),
+            ("true", "success", "failure", false),
+            ("true", "success", "cancelled", false),
+            ("true", "success", "skipped", false),
+            ("true", "failure", "success", false),
+            ("false", "skipped", "skipped", true),
+            ("false", "skipped", "success", false),
+            ("false", "success", "skipped", false),
+        ] {
+            let status = Command::new("bash")
+                .args(["-e", "-c", &script])
+                .env("GITHUB_STEP_SUMMARY", "/dev/null")
+                .env("SELECT_RESULT", "success")
+                .env("FULL_CHECKS_SELECTED", selected)
+                .env("SCHEMA_MUTANTS_SELECTED", "true")
+                .env("FULL_CHECKS_RESULT", first)
+                .env("FULL_CHECKS_2_RESULT", second)
+                .env("PLAN_RESULT", "success")
+                .env("PLANNED_MUTANTS", "0")
+                .env("MUTANTS_RESULT", "skipped")
+                .env("SCHEMA_MUTANTS_RESULT", "success")
+                .stdout(Stdio::null())
+                .status()?;
+            assert_eq!(
+                status.success(),
+                passes,
+                "full-checks selected {selected}: {first}, full-checks-2 {second} (DEC-2334)"
+            );
+        }
         for (selected, result, passes) in [
             ("true", "success", true),
             ("true", "skipped", false),
@@ -16070,6 +16117,7 @@ mod tests {
                 .env("FULL_CHECKS_SELECTED", "true")
                 .env("SCHEMA_MUTANTS_SELECTED", selected)
                 .env("FULL_CHECKS_RESULT", "success")
+                .env("FULL_CHECKS_2_RESULT", "success")
                 .env("PLAN_RESULT", "success")
                 .env("PLANNED_MUTANTS", "0")
                 .env("MUTANTS_RESULT", "skipped")
@@ -16175,6 +16223,7 @@ mod tests {
                 .env("FULL_CHECKS_SELECTED", "true")
                 .env("SCHEMA_MUTANTS_SELECTED", "true")
                 .env("FULL_CHECKS_RESULT", "success")
+                .env("FULL_CHECKS_2_RESULT", "success")
                 .env("PLAN_RESULT", "success")
                 .env("PLANNED_MUTANTS", "0")
                 .env("MUTANTS_RESULT", "skipped")
@@ -16276,6 +16325,7 @@ mod tests {
             ("fast-rh-sim-live", "needs: select"),
             ("fast", AGGREGATE_GUARD),
             ("full-checks", "needs: select"),
+            ("full-checks-2", "needs: select"),
             ("schema-mutants", "needs: select"),
             (
                 "mutants-plan",
@@ -16511,6 +16561,88 @@ mod tests {
             .collect()
     }
 
+    /// DEC-2334: the jobs that run `cargo xtask ci full`'s parts, each with its parts in order.
+    /// `full-checks` keeps the parts that need its services (Postgres, OpenBao, the S3 store) and
+    /// `refcases`, which warms the build they share; `full-checks-2` runs the rest.
+    const FULL_CI_JOBS: [(&str, &[&str]); 2] = [
+        (
+            "full-checks",
+            &["refcases", "postgres", "openbao", "objectstore"],
+        ),
+        (
+            "full-checks-2",
+            &[
+                "reference",
+                "schemas",
+                "supply-chain",
+                "tofu",
+                "stub-release",
+                "exchange-release",
+            ],
+        ),
+    ];
+
+    /// DEC-2334: CI's full jobs together run exactly what `cargo xtask ci full` runs, each part
+    /// once and in no other job, each capped at ten minutes (DEC-464), each started by the same
+    /// selection, and the required `full` verdict needs both.
+    #[test]
+    fn the_full_jobs_run_exactly_the_full_group() -> Result<()> {
+        let split: Vec<&str> = FULL_CI_JOBS
+            .iter()
+            .flat_map(|(_, parts)| parts.iter().copied())
+            .collect();
+        assert_eq!(
+            split.iter().copied().collect::<BTreeSet<_>>(),
+            FULL_JOB.iter().copied().collect::<BTreeSet<_>>(),
+            "the full jobs' parts are `cargo xtask ci full`'s"
+        );
+        assert_eq!(
+            split.len(),
+            FULL_JOB.len(),
+            "each full part runs in exactly one job: {split:?}"
+        );
+        let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/ci.yml"))?;
+        let mut elsewhere = Vec::new();
+        for job in workflow_jobs(&workflow) {
+            let lines = workflow_job(&workflow, job)
+                .with_context(|| format!("ci.yml has a `{job}` job"))?;
+            let parts = xtask_parts(&lines);
+            match FULL_CI_JOBS.iter().find(|(name, _)| *name == job) {
+                Some((_, expected)) => {
+                    assert_eq!(&parts, expected, "`{job}` runs {expected:?}, in that order");
+                    let trimmed: Vec<&str> = lines.iter().map(|l| l.trim()).collect();
+                    for line in [
+                        "timeout-minutes: 10",
+                        "needs: select",
+                        "if: needs.select.outputs.full_checks == 'true'",
+                    ] {
+                        assert!(trimmed.contains(&line), "`{job}` has `{line}`");
+                    }
+                }
+                None => elsewhere.extend(
+                    parts
+                        .into_iter()
+                        .filter(|part| FULL_JOB.contains(&part.as_str()) || part == "full")
+                        .map(|part| format!("{job}: {part}")),
+                ),
+            }
+        }
+        assert_eq!(
+            elsewhere,
+            Vec::<String>::new(),
+            "no other job runs a full part"
+        );
+        let full = workflow_job(&workflow, "full").context("ci.yml has `full`")?;
+        for (job, _) in FULL_CI_JOBS {
+            assert!(
+                full.iter()
+                    .any(|l| l.trim().starts_with("needs: [") && l.contains(&format!(" {job},"))),
+                "`full` needs `{job}`"
+            );
+        }
+        Ok(())
+    }
+
     /// DEC-871: CI's fast jobs together run exactly what `cargo xtask ci fast` runs, each part once:
     /// `test` is its three parts, and the nextest part runs in a matrix whose partitions are `1/N`
     /// to `N/N`, each once, so every test runs in exactly one shard. No other job runs a fast part.
@@ -16618,7 +16750,7 @@ mod tests {
             "fail-fast: false",
             partition_env.as_str(),
             "shared-key: fast-test",
-            "save-if: ${{ matrix.shard == '1/3' }}",
+            "save-if: ${{ matrix.shard == '1/4' }}",
         ] {
             assert!(test.contains(&line), "`fast-test` has `{line}`");
         }
@@ -16802,14 +16934,22 @@ mod tests {
     #[test]
     fn the_nextest_partition_is_checked() -> Result<()> {
         let plain = super::nextest_args(None, None)?;
+        let config = repo_root()?.join(super::NEXTEST_CONFIG);
+        assert!(
+            config.is_file(),
+            "{} is the nextest config",
+            config.display()
+        );
         assert_eq!(
             plain,
             [
-                "nextest",
-                "run",
-                "--workspace",
-                "--locked",
-                "--no-tests=pass"
+                "nextest".to_owned(),
+                "run".to_owned(),
+                "--config-file".to_owned(),
+                config.to_string_lossy().into_owned(),
+                "--workspace".to_owned(),
+                "--locked".to_owned(),
+                "--no-tests=pass".to_owned(),
             ]
         );
         for (partition, shard) in [
@@ -16837,13 +16977,14 @@ mod tests {
     }
 
     /// The jobs `select` scopes, each with the output that starts it (DEC-1190 item 2).
-    const SELECT_GATES: [(&str, &str); 15] = [
+    const SELECT_GATES: [(&str, &str); 16] = [
         ("fast-test", "tests"),
         ("fast-pending", "tests"),
         ("fast-python", "python"),
         ("fast-portable", "portable"),
         ("fast-rh-sim-live", "rh_sim_live"),
         ("full-checks", "full_checks"),
+        ("full-checks-2", "full_checks"),
         ("schema-mutants", "schema_mutants"),
         ("cell", "cell"),
         ("cell-demo", "cell"),
@@ -19091,10 +19232,10 @@ mod tests {
             .collect();
         assert_eq!(
             checkouts.len(),
-            21,
+            22,
             "one checkout in each source-reading job: `select` (DEC-1190), `fast-lint`, \
              `fast-test`, `fast-pending`, `fast-python`, `fast-portable`, `fast-rh-sim-live`, \
-             `full-checks`, the mutation plan, the mutants matrix, `mutants-costs` (DEC-2607), \
+             `full-checks`, `full-checks-2` (DEC-2334), the mutation plan, the mutants matrix, `mutants-costs` (DEC-2607), \
              `schema-mutants`, `cell`, `cell-demo` (DEC-2002), `cell-demo-web` (DEC-2609), \
              `cell-journal`, `cell-failover`, `cell-kill-switch` (DEC-2602), `cell-executor` \
              (DEC-2615), `cell-vault` (DEC-2616), and `hosted-k3d` \

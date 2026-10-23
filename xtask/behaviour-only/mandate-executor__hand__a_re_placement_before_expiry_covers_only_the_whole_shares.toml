@@ -1,0 +1,9 @@
+file = "crates/mandate-executor/tests/hand.rs"
+test = "a_re_placement_before_expiry_covers_only_the_whole_shares"
+reason = """
+E7-4's fractional slice (DEC-2312 item 2): `re_place` sizes the re-placement at the held 10.4,
+for which the profile offers no OCO, so the executor journals `expiry_unreplaceable` and ends the
+interval uncovered instead of protecting the whole ten. That is a behaviour, not a stub's report.
+It still runs and fails, and the slice that implements it deletes this file with its `#[ignore]`
+line.
+"""
