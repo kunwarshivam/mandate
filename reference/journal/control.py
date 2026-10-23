@@ -1145,19 +1145,20 @@ REQUIRED_REFS["EvaluationRunRecorded"] = ("rule_set",)
 # the control stream. No member is free text: IDs, enumerations, and integers only.
 DM_PROCESSES = ("runtime", "executor")
 # v0.70 (DEC-1175): an OAuth connect's token exchange is started once, stopped only when its request
-# closes, and never looped.
+# closes, and never looped. v0.74 (DEC-2335): the connect's executor is started on the exchange's
+# success (`exchanged`) and stopped when its connection closes (`connection_closed`), rule 257.
 DM_STARTED_PROCESSES = (*DM_PROCESSES, "token_exchange")
 SCHEMAS[("ctl", "ProcessStartIssued")] = rec(
     ("process", one_of(*DM_STARTED_PROCESSES)),
     ("subject", IDENT_T),
     ("generation", INT),
-    ("cause", one_of("deployed", "restart", "kill_switch", "requested")),
+    ("cause", one_of("deployed", "restart", "kill_switch", "requested", "exchanged")),
 )
 SCHEMAS[("ctl", "ProcessStopIssued")] = rec(
     ("process", one_of(*DM_STARTED_PROCESSES)),
     ("subject", IDENT_T),
     ("generation", INT),
-    ("cause", one_of("agent_stopped", "request_closed")),
+    ("cause", one_of("agent_stopped", "request_closed", "connection_closed")),
 )
 SCHEMAS[("ctl", "ProcessCrashLooped")] = rec(
     ("process", one_of(*DM_PROCESSES)),
@@ -1279,6 +1280,7 @@ VERSIONED_VERSIONS: dict[tuple[str, str], tuple[int, ...]] = {
     ("acct", "OrderRequestRecorded"): (1,),
     ("acct", "ProtectionChanged"): (1, 2),
     ("acct", "OwnerConfirmationReceived"): (1,),
+    ("acct", "AccountCloseRequested"): (1,),
     ("ctl", "ConnectionEstablished"): (1, 2),
     ("acct", "ConnectionEstablished"): (2,),
     ("ctl", "MandateConfirmed"): (1, 2),
@@ -1333,6 +1335,15 @@ VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
         ("floor", DEC),
         ("expires_at", INT),
         ("copied_from", ULID),
+        ("risk_clock", RISK_CLOCK),
+    ),
+    # v0.75 §9.5 (DEC-2337): one instrument's close-position under an account kill switch,
+    # journaled before it is sent.
+    ("acct", "AccountCloseRequested", 1): rec(
+        ("instrument_id", STR),
+        ("qty", DEC),
+        ("kill_switch_event", ULID),
+        ("attempt", INT),
         ("risk_clock", RISK_CLOCK),
     ),
     ("ctl", "ConnectionEstablished", 2): ESTABLISHED_V2,
@@ -1854,6 +1865,22 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
 
         wrong = next((m for m in prices if not positive(m)), None)
         rule("247", wrong is None, "schema", f"payload.{wrong}" if wrong else "")
+    if event_type == "AccountCloseRequested":
+        qty = normalize_decimal(p["qty"])
+        if qty is None:
+            positive = True
+        elif "boundary.rule_258_zero" in skip:
+            positive = Decimal(qty) >= 0
+        else:
+            positive = Decimal(qty) > 0
+        first = 0 if "boundary.rule_258_attempt" in skip else 1
+        clauses = [("258.qty", positive, "payload.qty"), ("258.attempt", p["attempt"] >= first, "payload.attempt")]
+        if "order.rule_258_attempt_first" in skip:
+            clauses.reverse()
+        wrong = next(((n, at) for n, ok, at in clauses if not ok and f"rule.{n}" not in skip), None)
+        if wrong is not None:
+            rule("258", False, "schema", wrong[1])
+        rule("259", draft["causation_id"] == p["kill_switch_event"], "schema", "causation_id")
     if event_type == "StepUpConfirmed":
         rule("242.kind", p["action_kind"] == "approve", "schema", "payload.action_kind")
         rule("242.paper", draft["environment"] == "paper", "schema", "environment")
@@ -2854,7 +2881,7 @@ def deployment_manager_violations(event_type: str, draft: dict, skip: frozenset[
     rule("165", draft["actor"]["kind"] == "system", "actor.kind")
     rule("166", p["generation"] >= least, "payload.generation")
     if event_type == "ProcessStartIssued":
-        first = p["cause"] in ("deployed", "requested")
+        first = p["cause"] in ("deployed", "requested", "exchanged")
         rule("167", first == (p["generation"] == 1), "payload.cause")
     if event_type == "ProcessCrashLooped":
         rule("168.restarts", p["restarts"] >= 1, "payload.restarts")
@@ -2864,6 +2891,11 @@ def deployment_manager_violations(event_type: str, draft: dict, skip: frozenset[
         rule("256", (p["cause"] == "requested") == exchange, "payload.cause")
     if event_type == "ProcessStopIssued":
         rule("256.stop", (p["cause"] == "request_closed") == exchange, "payload.cause")
+    executor = p["process"] == "executor"
+    if event_type == "ProcessStartIssued":
+        rule("257", p["cause"] != "exchanged" or executor, "payload.cause")
+    if event_type == "ProcessStopIssued":
+        rule("257.stop", p["cause"] != "connection_closed" or executor, "payload.cause")
     return out
 
 

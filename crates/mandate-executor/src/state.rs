@@ -2,18 +2,19 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use mandate_accounting::InstrumentId;
+use mandate_accounting::{InstrumentId, Side};
 use mandate_domain::CapabilityProfile;
 use mandate_num::{Price, Qty, Rounding, SignedQty, Usd};
 use mandate_time::Date;
 
 use crate::error::ExecutorError;
 use crate::ids::{ClientOrderId, IntentId};
+use crate::kill::sub_ledger;
 use crate::shape::transitional_alpaca;
 use crate::types::{
-    AccountScope, AccountState, ActivityCursor, AgentId, BracketLegs, EventId, FillId, IntentBody,
-    MarketObservation, Mode, OcoLegs, Order, OrderState, Protection, ProtectionPrices, Purpose,
-    RiskClock, Seq, SubmitOrder, UnprotectedInterval, WriterEpoch,
+    AccountRef, AccountScope, AccountState, ActivityCursor, AgentId, BracketLegs, EventId, FillId,
+    IntentBody, MarketObservation, Mode, OcoLegs, Order, OrderState, Protection, ProtectionPrices,
+    Purpose, RiskClock, Seq, SubmitOrder, UnprotectedInterval, WriterEpoch,
 };
 
 pub use crate::fold::fold;
@@ -132,6 +133,25 @@ pub struct ExecutorState {
     /// Each agent-scoped kill switch as its `KillSwitchActivated` journaled it, by that record's
     /// id, with the closes it has not yet raised as flatten intents (§5.5, DEC-485).
     pub(crate) switches: BTreeMap<EventId, Switch>,
+    /// The instruments an account-scoped kill switch closes through the broker's close-position,
+    /// from its `KillSwitchActivated`: their protection is never placed again beside that close,
+    /// which would sell the same shares twice (§5.4, §5.5). They all leave once the account's
+    /// kill-switch mode is lifted; while it holds, no entry can open them again.
+    pub(crate) closing_all: BTreeSet<InstrumentId>,
+    /// The account-scoped kill switch while its mode holds, from its `KillSwitchActivated` and
+    /// each `AccountCloseRequested` under it (DEC-2333, DEC-2337): its cancel-all's answer,
+    /// accepted or lost, asks an open-orders read, and each instrument it closes is requested
+    /// through the broker's close-position once a read taken at or after it shows no sell there.
+    pub(crate) account_switch: Option<AccountSwitch>,
+    /// The latest broker read noted since the account switch's cancel-all was answered, as the
+    /// read showed it: process-local, an input never journaled (like `quotes`), so a restart waits
+    /// for its startup reconciliation before it closes anything (DEC-2333 item 2, DEC-2337 item 3).
+    /// Each account switch folded clears it, so no switch closes on an earlier one's read.
+    pub(crate) switch_read: Option<SwitchRead>,
+    /// The account switch's cancel-all is answered, accepted or lost, or the process restarted
+    /// since, which reads as lost (DEC-2333 items 2 and 3): only a read after that may release a
+    /// close. Process-local; each account switch folded clears it.
+    pub(crate) cancel_all_answered: bool,
     /// The owner's confirmation each owner's exit was received with, by intent, from its
     /// `OwnerConfirmationReceived` (journal spec §9.5, DEC-2040 item 2).
     pub(crate) confirmations: BTreeMap<IntentId, Confirmed>,
@@ -146,6 +166,29 @@ pub struct ExecutorState {
     /// transitional Alpaca table. `None` only if that table failed to build, which protection
     /// reads as no shape offered (journaled and alerted, DEC-838 item 1).
     pub(crate) profile: Option<CapabilityProfile>,
+}
+
+/// The account-scoped kill switch (trading-domain spec §5.5, DEC-2333): the record that journaled
+/// it, the account its broker requests name, the risk-clock second it went, and the latest
+/// close-position request of each instrument, by attempt and journal position (DEC-2337).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AccountSwitch {
+    pub(crate) event: EventId,
+    pub(crate) seq: Seq,
+    pub(crate) reference: AccountRef,
+    pub(crate) at: RiskClock,
+    pub(crate) requests: BTreeMap<InstrumentId, (u64, Seq)>,
+}
+
+/// One broker read noted after the account switch's cancel-all was answered (DEC-2333 item 2,
+/// DEC-2337 item 3): the head it was taken at, which [`crate::kill::closes_due`] holds to the
+/// switch's, the sells it showed working in each instrument, by our id or `None` for
+/// one that is not ours, and, for a reconciliation, the positions it showed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SwitchRead {
+    pub(crate) taken_at: Seq,
+    pub(crate) sells: BTreeMap<InstrumentId, Vec<Option<ClientOrderId>>>,
+    pub(crate) held: Option<BTreeMap<InstrumentId, SignedQty>>,
 }
 
 /// One agent-scoped kill switch (trading-domain spec §5.5): whose sub-ledger it sells, as what
@@ -222,6 +265,10 @@ pub(crate) struct OrderDetail {
     /// latest report carried: a bracket entry's filled quantity before its fills are ingested
     /// (§5.4's "the filled quantity", DEC-346 item 3).
     pub(crate) reported_filled: Option<Qty>,
+    /// Every `broker_order_id` the order's version-2 `OrderStateChanged` records carried (journal
+    /// spec v0.80 §9.16, DEC-2353): one id attributes a fill that names only it; two, or none,
+    /// attribute nothing.
+    pub(crate) broker_ids: BTreeSet<String>,
     /// What of `reported_filled` beyond the applied `filled_qty` an unattributed sell fill applied
     /// after this order was submitted has already taken off the position (DEC-421 item 5).
     pub(crate) netted: Option<Qty>,
@@ -365,6 +412,10 @@ impl ExecutorState {
             uncompensated: BTreeMap::new(),
             pending_requests: BTreeMap::new(),
             switches: BTreeMap::new(),
+            closing_all: BTreeSet::new(),
+            account_switch: None,
+            switch_read: None,
+            cancel_all_answered: false,
             confirmations: BTreeMap::new(),
             now: None,
             previous_now: None,
@@ -617,6 +668,52 @@ impl ExecutorState {
         self.switches
             .values()
             .any(|switch| switch.copied_from.as_ref() == Some(source))
+    }
+
+    /// Whether a switch of `agent` this stream journaled copied `source` (DEC-2343 item 4): one
+    /// command applied to several agents is applied to each once.
+    pub fn applied_for(&self, agent: &AgentId, source: &EventId) -> bool {
+        self.switches
+            .values()
+            .any(|switch| &switch.agent == agent && switch.copied_from.as_ref() == Some(source))
+    }
+
+    /// Whether `agent` may hold lots in any instrument the account holds (DEC-2347 item 3.6): its
+    /// sub-ledger, the quantity its kill switch would sell (trading-domain spec §5.5), is above
+    /// zero there, or one of its buys there, in any state but `Rejected` or `Abandoned`, has other
+    /// than its quantity applied to it, as when the broker's fill named no order the fold could
+    /// attribute it to: filled, or partly filled and then canceled or expired. The second reading
+    /// keeps an agent's shares from passing for the owner's; an unfilled buy canceled with the
+    /// account holding the instrument only holds the exit longer, which is safe.
+    pub fn holds_lots(&self, agent: &AgentId) -> Result<bool, ExecutorError> {
+        for (instrument, position) in &self.positions {
+            if sub_ledger(self, agent, instrument)? > Qty::ZERO {
+                return Ok(true);
+            }
+            let unattributed = self.orders.values().any(|order| {
+                order.agent.as_ref() == Some(agent)
+                    && &order.instrument == instrument
+                    && order.side == Side::Buy
+                    && !matches!(order.state, OrderState::Rejected | OrderState::Abandoned)
+                    && order.filled_qty != order.qty
+            });
+            if unattributed && *position > SignedQty::ZERO {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    /// This state with what the fold kept of each order's broker order ids forgotten, every other
+    /// field as folded (journal spec v0.80 §9.16, DEC-2353): what a test compares to show the
+    /// member is read for fill attribution alone.
+    #[doc(hidden)]
+    pub fn without_broker_ids(&self) -> Self {
+        let mut state = self.clone();
+        for detail in state.details.values_mut() {
+            detail.broker_ids.clear();
+        }
+        state
     }
 
     pub fn started(&self) -> bool {

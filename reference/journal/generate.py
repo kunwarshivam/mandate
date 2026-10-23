@@ -32,6 +32,7 @@ from fractions import Fraction
 from pathlib import Path
 
 import account
+import account_closes
 import acknowledgments
 import approval
 import audit
@@ -3910,6 +3911,7 @@ def render(
     credentials_section: dict,
     credential_enrolled_v2_section: dict,
     step_up_assertions_section: dict,
+    account_closes_section: dict,
 ) -> str:
     head, _ = split_file(v3_text)
     body = yaml.dump(
@@ -3959,6 +3961,7 @@ def render(
             "credentials": credentials_section,
             "credential_enrolled_v2": credential_enrolled_v2_section,
             "step_up_assertions": step_up_assertions_section,
+            "account_closes": account_closes_section,
         },
         Dumper=Dumper,
         sort_keys=False,
@@ -4039,6 +4042,7 @@ def main(argv: list[str] | None = None) -> int:
     credentials_section = credentials.build_section()
     credential_enrolled_v2_section = credentials.build_v2_section()
     step_up_assertions_section = step_up_assertions.build_section()
+    account_closes_section = account_closes.build_section()
 
     problems = check_chain(section, v3)
     problems += run_mutants(section, v3)
@@ -4100,6 +4104,8 @@ def main(argv: list[str] | None = None) -> int:
     problems += market_intents.run_mutants(market_intents_section)
     problems += owner_confirmations.check_section(owner_confirmations_section)
     problems += owner_confirmations.run_mutants(owner_confirmations_section)
+    problems += account_closes.check_section(account_closes_section)
+    problems += account_closes.run_mutants(account_closes_section)
     problems += connection_requested.check_section(connection_requested_section)
     problems += connection_requested.run_mutants(connection_requested_section)
     problems += check_broker_profile(broker_profile)
@@ -4182,6 +4188,7 @@ def main(argv: list[str] | None = None) -> int:
         credentials_section,
         credential_enrolled_v2_section,
         step_up_assertions_section,
+        account_closes_section,
     )
     reread = yaml.safe_load(rendered)
     canonical_self_test()
@@ -4232,6 +4239,7 @@ def main(argv: list[str] | None = None) -> int:
         or marks.check_section(reread["risk_marks"])
         or market_intents.check_section(reread["market_intents"])
         or owner_confirmations.check_section(reread["owner_confirmations"])
+        or account_closes.check_section(reread["account_closes"])
         or connection_requested.check_section(reread["connection_requested"])
     ):
         print(
@@ -4313,6 +4321,10 @@ def main(argv: list[str] | None = None) -> int:
         f"rule-247 drafts and {len(owner_confirmations_section['batches'])} rule-248 batches, "
         f"{len(owner_confirmations.VALIDATOR_MUTANTS)} validator, {len(owner_confirmations.BATCH_MUTANTS)} batch and "
         f"{len(owner_confirmations.vector_mutants(owner_confirmations_section))} vector mutants caught; "
+        f"{len(account_closes_section['invalid_drafts'])} invalid and {len(account_closes_section['valid_drafts'])} valid "
+        f"AccountCloseRequested drafts and {len(account_closes_section['streams'])} rule-260 streams, "
+        f"{len(account_closes.VALIDATOR_MUTANTS)} validator, {len(account_closes.STREAM_MUTANTS)} stream and "
+        f"{len(account_closes.vector_mutants(account_closes_section))} vector mutants caught; "
         f"{len(connection_requested_section['invalid_drafts'])} invalid and {len(connection_requested_section['valid_drafts'])} valid "
         f"rule-255 ConnectionRequested drafts, {len(connection_requested.VALIDATOR_MUTANTS)} validator and "
         f"{len(connection_requested.vector_mutants(connection_requested_section))} vector mutants caught; "

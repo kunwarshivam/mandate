@@ -1,8 +1,9 @@
 //! The policy table, checked against a matrix written out by hand, and the OpenBao policies it
 //! generates: every path spelled out, no wildcard, a runtime's empty.
 
-use mandate_connections::record::ConnectionId;
+use mandate_connections::record::{AccountRef, ConnectionId};
 
+use crate::kubernetes::kubernetes_policy;
 use crate::policy::{
     Access, Identity, Mounts, PlatformSecret, SecretPath, allows, policy_name, role_name,
 };
@@ -20,6 +21,11 @@ fn openbao_policy(identity: &Identity, connections: &[ConnectionId], mounts: &Mo
 
 fn c(id: &str) -> ConnectionId {
     ConnectionId::new(id).unwrap()
+}
+
+/// The account stream of a connect: the first, or a second request on the same connection.
+fn a(n: u8) -> AccountRef {
+    AccountRef::new(&format!("01J8Z2ACCT000000000000000{n}")).unwrap()
 }
 
 fn identities() -> Vec<Identity> {
@@ -40,13 +46,16 @@ fn paths() -> Vec<SecretPath> {
         SecretPath::Code(c("c2")),
         SecretPath::Token(c("c2")),
         SecretPath::ClientSecret,
+        SecretPath::AccountId(c("c1"), a(1)),
+        SecretPath::AccountId(c("c1"), a(2)),
+        SecretPath::AccountId(c("c2"), a(1)),
     ]
 }
 
 /// The oracle: every allowed triple, written out from infrastructure §5.2; anything else is
 /// refused.
 fn expected() -> Vec<(Identity, Access, SecretPath)> {
-    use Access::{Delete, Read, Write};
+    use Access::{Create, Delete, Read, Write};
     let mut out = Vec::new();
     for id in ["c1", "c2"] {
         out.push((Identity::Api, Write, SecretPath::Code(c(id))));
@@ -57,6 +66,13 @@ fn expected() -> Vec<(Identity, Access, SecretPath)> {
             Identity::ConnectionManager,
             Delete,
             SecretPath::Token(c(id)),
+        ));
+    }
+    for n in [1, 2] {
+        out.push((
+            Identity::Executor(c("c1")),
+            Create,
+            SecretPath::AccountId(c("c1"), a(n)),
         ));
     }
     let exchange = Identity::TokenExchange(c("c1"));
@@ -73,11 +89,14 @@ fn expected() -> Vec<(Identity, Access, SecretPath)> {
     out
 }
 
+/// DEC-2339: the account entry is created only by its own connection's executor, and read, written
+/// over or deleted by no one: the connection manager receives only the vault's keyed hash of it
+/// (connections spec §3.1), which F3 adds.
 #[test]
 fn the_table_allows_exactly_the_matrix() {
     let expected = expected();
     for identity in identities() {
-        for access in [Access::Read, Access::Write, Access::Delete] {
+        for access in [Access::Read, Access::Write, Access::Delete, Access::Create] {
             for path in paths() {
                 let want = expected
                     .iter()
@@ -164,6 +183,18 @@ fn blocks(hcl: &str) -> Vec<(String, String)> {
     out
 }
 
+/// Whether `path` is one of the fingerprint's, which `tests/fingerprint.rs` checks block by block
+/// (DEC-2345).
+fn fingerprint(path: &str) -> bool {
+    [
+        "mandate/data/personal/fingerprints/",
+        "mandate/data/personal/claims",
+        "mandate/data/fingerprints/",
+    ]
+    .iter()
+    .any(|prefix| path.starts_with(prefix))
+}
+
 #[test]
 fn each_policy_is_the_table_with_no_wildcard() {
     let connections = [c("c1"), c("c2")];
@@ -180,7 +211,9 @@ fn each_policy_is_the_table_with_no_wildcard() {
         let got = blocks(&hcl);
         let data_blocks = got
             .iter()
-            .filter(|(p, _)| p.starts_with("mandate/") && !platform_paths.contains(p))
+            .filter(|(p, _)| {
+                p.starts_with("mandate/") && !platform_paths.contains(p) && !fingerprint(p)
+            })
             .count();
         let allowed = [Access::Read, Access::Write, Access::Delete]
             .iter()
@@ -202,9 +235,10 @@ fn each_policy_is_the_table_with_no_wildcard() {
             0
         };
         assert_eq!(auth_blocks, want_auth, "{identity:?}: {hcl}");
+        let fingerprint_blocks = got.iter().filter(|(p, _)| fingerprint(p)).count();
         assert_eq!(
             got.len(),
-            data_blocks + auth_blocks + platform_blocks,
+            data_blocks + auth_blocks + platform_blocks + fingerprint_blocks,
             "{identity:?}: {hcl}"
         );
         for access in [Access::Read, Access::Write, Access::Delete] {
@@ -214,6 +248,7 @@ fn each_policy_is_the_table_with_no_wildcard() {
                     Access::Write => ("data", "create,update"),
                     Access::Delete => ("metadata", "delete"),
                     Access::Take => ("data", "update"),
+                    Access::Create => ("data", "create"),
                 };
                 let want = format!("mandate/{prefix}/{}", kv_path(&path));
                 let present = got.iter().any(|(p, c)| p == &want && c == caps);
@@ -291,4 +326,78 @@ fn only_a_token_exchange_takes_and_only_its_own_connections_code() {
             "an AppRole policy never grants a take on a secret: {identity:?}: {hcl}"
         );
     }
+}
+
+/// DEC-2339: a connect's account entry is kept under `personal/`, below its connection and its
+/// account stream, outside every path of the connection's code and token, which are all a revoke
+/// deletes, and no identity may delete it.
+#[test]
+fn the_account_entry_is_kept_outside_every_path_a_revoke_deletes() {
+    for id in ["c1", "c2", "x6331"] {
+        let account = kv_path(&SecretPath::AccountId(c(id), a(1)));
+        let segment = crate::policy::connection_segment(&c(id)).unwrap();
+        assert_eq!(
+            account,
+            format!("personal/accounts/{segment}/01J8Z2ACCT0000000000000001"),
+            "{id}"
+        );
+        for kept in [SecretPath::Code(c(id)), SecretPath::Token(c(id))] {
+            assert!(!kv_path(&kept).starts_with("personal/"), "{id}");
+        }
+        for identity in identities() {
+            assert!(
+                !allows(
+                    &identity,
+                    Access::Delete,
+                    &SecretPath::AccountId(c(id), a(1))
+                ),
+                "{identity:?} {id}"
+            );
+        }
+    }
+}
+
+/// DEC-2339 and connections spec §3.1: no policy the vault is given reaches `personal/` but the
+/// executor's templated one, and that one only to create its own entry. No AppRole identity's
+/// policy names the personal-data vault, and the token exchange's templated policy does not either.
+#[test]
+fn only_the_executors_create_reaches_the_personal_data_vault() {
+    let connections = [c("c1"), c("c2")];
+    for identity in [
+        Identity::Api,
+        Identity::ConnectionManager,
+        Identity::Runtime,
+        Identity::SecretImport,
+        Identity::ModelGateway,
+        Identity::EmailSender,
+        Identity::TokenExchange(c("c1")),
+        Identity::Executor(c("c1")),
+    ] {
+        let hcl =
+            crate::policy::openbao_policy(&identity, &connections, &Mounts::default()).unwrap();
+        assert!(!hcl.contains("personal/accounts/"), "{identity:?}: {hcl}");
+    }
+    let accessor = "auth_kubernetes_1a2b";
+    let exchange = kubernetes_policy(
+        &Identity::TokenExchange(c("c1")),
+        &Mounts::default(),
+        accessor,
+    )
+    .unwrap();
+    assert!(!exchange.contains("personal/accounts/"), "{exchange}");
+    let executor =
+        kubernetes_policy(&Identity::Executor(c("c1")), &Mounts::default(), accessor).unwrap();
+    let personal: Vec<&str> = executor
+        .split("path ")
+        .filter(|block| block.contains("personal/accounts/"))
+        .collect();
+    assert_eq!(personal.len(), 1, "{executor}");
+    assert!(
+        personal
+            .iter()
+            .all(|block| block.contains("personal/accounts/x{{")
+                && block.contains("}}/+\"")
+                && block.contains("capabilities = [\"create\"]")),
+        "{executor}"
+    );
 }
