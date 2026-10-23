@@ -77,7 +77,6 @@ fn released(switched: bool) -> Result<(support::Journal, Paper), Error> {
 /// DEC-2347 item 8: once the owner releases the position, the 10 shares are the owner's, so the
 /// retired account's executor exits.
 #[test]
-#[ignore = "pending E6-4"]
 fn a_released_position_lets_the_retired_executor_exit() -> Result<(), Error> {
     let (journal, broker) = released(false)?;
     let mut process = start(&journal, &broker)?;
@@ -92,7 +91,6 @@ fn a_released_position_lets_the_retired_executor_exit() -> Result<(), Error> {
 /// start the manager gives the retired account's executor for it, is applied to what the owner
 /// holds there, and the executor then exits.
 #[test]
-#[ignore = "pending E6-4"]
 fn a_released_position_lets_the_kill_switch_start_exit_once_the_switch_is_applied()
 -> Result<(), Error> {
     let (journal, broker) = released(true)?;

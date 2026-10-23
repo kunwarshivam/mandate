@@ -1,5 +1,0 @@
-file = "crates/mandate-executord/tests/released.rs"
-test = "a_released_position_lets_the_kill_switch_start_exit_once_the_switch_is_applied"
-reason = """
-The executor's fold answers `PositionReleased` with `NotInterpreted` (story E6-4), so the process never becomes ready: it fails on that answer, not at a stub. E6-4's fold slice, which takes the released quantity off the agent's sub-ledger (DEC-2347 item 8), deletes the row.
-"""

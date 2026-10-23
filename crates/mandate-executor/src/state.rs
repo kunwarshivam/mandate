@@ -9,7 +9,6 @@ use mandate_time::Date;
 
 use crate::error::ExecutorError;
 use crate::ids::{ClientOrderId, IntentId};
-use crate::kill::sub_ledger;
 use crate::shape::transitional_alpaca;
 use crate::types::{
     AccountScope, AccountState, ActivityCursor, AgentId, BracketLegs, EventId, FillId, IntentBody,
@@ -133,6 +132,9 @@ pub struct ExecutorState {
     /// Each agent-scoped kill switch as its `KillSwitchActivated` journaled it, by that record's
     /// id, with the closes it has not yet raised as flatten intents (§5.5, DEC-485).
     pub(crate) switches: BTreeMap<EventId, Switch>,
+    /// What each agent released to the owner in each instrument, from its `PositionReleased`
+    /// records (journal spec §9.27, mandate spec §3.1, DEC-2354): shares no longer its lots.
+    pub(crate) released: BTreeMap<(AgentId, InstrumentId), Qty>,
     /// The owner's confirmation each owner's exit was received with, by intent, from its
     /// `OwnerConfirmationReceived` (journal spec §9.5, DEC-2040 item 2).
     pub(crate) confirmations: BTreeMap<IntentId, Confirmed>,
@@ -366,6 +368,7 @@ impl ExecutorState {
             uncompensated: BTreeMap::new(),
             pending_requests: BTreeMap::new(),
             switches: BTreeMap::new(),
+            released: BTreeMap::new(),
             confirmations: BTreeMap::new(),
             now: None,
             previous_now: None,
@@ -628,26 +631,37 @@ impl ExecutorState {
             .any(|switch| &switch.agent == agent && switch.copied_from.as_ref() == Some(source))
     }
 
-    /// Whether `agent` may hold lots in any instrument the account holds (DEC-2347 item 3.6): its
-    /// sub-ledger, the quantity its kill switch would sell (trading-domain spec §5.5), is above
-    /// zero there, or one of its buys there, in any state but `Rejected` or `Abandoned`, has other
-    /// than its quantity applied to it, as when the broker's fill named no order the fold could
-    /// attribute it to: filled, or partly filled and then canceled or expired. The second reading
-    /// keeps an agent's shares from passing for the owner's; an unfilled buy canceled with the
-    /// account holding the instrument only holds the exit longer, which is safe.
+    /// Whether `agent` may hold lots in any instrument the account holds (DEC-2347 item 3.6,
+    /// DEC-2354): an upper bound on its lots there is above zero. The bound is its buys, net of its
+    /// sells and of what it released to the owner, capped at the position, where a buy in any
+    /// state but `Rejected` or `Abandoned` with other than its quantity applied to it counts at its
+    /// whole quantity: its fill may have named no order the fold could attribute it to. The bound
+    /// only ever holds the exit longer; the kill switch sells the sub-ledger, never the bound.
     pub fn holds_lots(&self, agent: &AgentId) -> Result<bool, ExecutorError> {
         for (instrument, position) in &self.positions {
-            if sub_ledger(self, agent, instrument)? > Qty::ZERO {
-                return Ok(true);
+            let mut bound = SignedQty::ZERO;
+            for order in self.orders.values().filter(|order| {
+                order.agent.as_ref() == Some(agent) && &order.instrument == instrument
+            }) {
+                let applied = SignedQty::from(order.filled_qty);
+                bound = bound.checked_add(match order.side {
+                    Side::Buy
+                        if !matches!(order.state, OrderState::Rejected | OrderState::Abandoned)
+                            && order.filled_qty != order.qty =>
+                    {
+                        SignedQty::from(order.qty)
+                    }
+                    Side::Buy => applied,
+                    Side::Sell => applied.negated(),
+                })?;
             }
-            let unattributed = self.orders.values().any(|order| {
-                order.agent.as_ref() == Some(agent)
-                    && &order.instrument == instrument
-                    && order.side == Side::Buy
-                    && !matches!(order.state, OrderState::Rejected | OrderState::Abandoned)
-                    && order.filled_qty != order.qty
-            });
-            if unattributed && *position > SignedQty::ZERO {
+            let released = self
+                .released
+                .get(&(agent.clone(), instrument.clone()))
+                .copied()
+                .unwrap_or(Qty::ZERO);
+            bound = bound.checked_add(SignedQty::from(released).negated())?;
+            if bound.min(*position) > SignedQty::ZERO {
                 return Ok(true);
             }
         }

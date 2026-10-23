@@ -5066,7 +5066,6 @@ fn protected_switch_sells(shell: &mut Shell, ports: &mandate_executor::Ports<'_>
 /// DEC-2354 item 2: a release of part of the agent's 10 leaves its switch only the remainder,
 /// and a release of all of it leaves the switch nothing to sell and the agent no lots.
 #[test]
-#[ignore = "pending E6-4"]
 fn a_release_leaves_the_switch_only_what_the_agent_still_holds() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -5084,7 +5083,6 @@ fn a_release_leaves_the_switch_only_what_the_agent_still_holds() {
 
 /// DEC-2354 item 2: another agent's release takes nothing off this agent's lots.
 #[test]
-#[ignore = "pending E6-4"]
 fn another_agents_release_leaves_this_agents_lots() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -5100,7 +5098,6 @@ fn another_agents_release_leaves_this_agents_lots() {
 /// DEC-2354 item 1: the release is folded from the journal, so a replay reads the agent's lots as
 /// released too.
 #[test]
-#[ignore = "pending E6-4"]
 fn a_release_is_read_again_on_replay() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -5117,7 +5114,6 @@ fn a_release_is_read_again_on_replay() {
 /// order, then released, leaves the switch nothing to sell: it sells the attributed lots alone,
 /// never the bound `holds_lots` reads, which still counts the buy whole and so keeps the exit.
 #[test]
-#[ignore = "pending E6-4"]
 fn a_released_unattributed_partial_fill_leaves_the_switch_nothing() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
