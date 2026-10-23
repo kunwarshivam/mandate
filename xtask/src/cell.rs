@@ -116,6 +116,9 @@ const DEMO_RESEARCH_FILES: [&str; 5] = [
     "instruments.json",
 ];
 const EXECUTOR_DOCKERFILE: &str = "deploy/cell/images/executor.Dockerfile";
+/// The token-exchange process's image (DEC-1175), which the deployment manager starts once per
+/// OAuth connect.
+const EXCHANGE_DOCKERFILE: &str = "deploy/cell/images/token-exchange.Dockerfile";
 /// Where the cell keeps what it derives: the kubeconfig, the downloaded operator chart, and the
 /// image build context. Under `target/`, so nothing derived is ever committed.
 const STATE: &str = "target/cell";
@@ -581,14 +584,19 @@ const RUNNER: &str = "mandate-backtest-runner";
 
 /// The packages [`build_binary`] always builds for the cell's images, the backtest runner among
 /// them.
-const BUILT_PACKAGES: [&str; 6] = [
+const BUILT_PACKAGES: [&str; 7] = [
     "mandate-cli",
     RUNNER,
     "mandate-api-server",
     "mandate-daemon",
     "mandate-deployd",
     "mandate-executord",
+    EXCHANGE_PACKAGE,
 ];
+
+/// The token exchange's package (DEC-1175), a dev-profile build like the rest, so its cell token
+/// URL compiles in (DEC-2633).
+const EXCHANGE_PACKAGE: &str = "mandate-token-exchange";
 
 /// The stub issuer's package, which [`build_binary`] adds once [`stub_ready`].
 const STUB_PACKAGE: &str = "mandate-stub-issuer";
@@ -596,13 +604,14 @@ const STUB_PACKAGE: &str = "mandate-stub-issuer";
 /// Every package whose binary the cell's images can hold: what [`build_binary`] builds. A change
 /// that reaches none of them, and no path under `deploy/`, cannot change what a cell job runs, so
 /// `cargo xtask ci select` starts the cell jobs only for one that does (DEC-2609).
-pub const IMAGE_PACKAGES: [&str; 7] = [
+pub const IMAGE_PACKAGES: [&str; 8] = [
     BUILT_PACKAGES[0],
     BUILT_PACKAGES[1],
     BUILT_PACKAGES[2],
     BUILT_PACKAGES[3],
     BUILT_PACKAGES[4],
     BUILT_PACKAGES[5],
+    BUILT_PACKAGES[6],
     STUB_PACKAGE,
 ];
 
@@ -780,6 +789,34 @@ fn executor_image() -> Result<Option<String>> {
     local_tag("executor", &["mandate-executord"]).map(Some)
 }
 
+/// The cell's `token-exchange` image, this checkout's build of `mandate-token-exchange`: none
+/// without the deployment manager, the one process that starts it, as for the manager itself.
+fn exchange_image() -> Result<Option<String>> {
+    if deploy_manager_image_tag()?.is_none() {
+        return Ok(None);
+    }
+    local_tag("token-exchange", &[EXCHANGE_PACKAGE]).map(Some)
+}
+
+/// The fixture OAuth app the cell's API, token exchange and fixture provider share (DEC-1176 item
+/// 6): a fixed fake client id, and the API's callback through the port-forward the browser uses.
+const FIXTURE_CLIENT_ID: &str = "cell-fixture-client";
+const FIXTURE_REDIRECT_URI: &str = "http://127.0.0.1:8080/v1/oauth/alpaca/callback";
+
+/// The fixture provider's settings (DEC-1176): on only when the cell runs both the stub issuer,
+/// whose image the fixture runs, and the token exchange, the one process that reaches it; else
+/// none, so the chart renders no fixture.
+fn fixture_values(stub: Option<&str>, exchange: Option<&str>) -> Vec<String> {
+    if stub.is_none() || exchange.is_none() {
+        return Vec::new();
+    }
+    vec![
+        "oauthFixture.enabled=true".to_owned(),
+        format!("alpacaOAuth.clientId={FIXTURE_CLIENT_ID}"),
+        format!("alpacaOAuth.redirectUri={FIXTURE_REDIRECT_URI}"),
+    ]
+}
+
 /// The `images.*` settings for the images this cell runs, so `up` and every render agree.
 fn image_sets() -> Result<Vec<String>> {
     let mut sets = vec![
@@ -790,7 +827,13 @@ fn image_sets() -> Result<Vec<String>> {
             deploy_manager_image_tag()?.unwrap_or_default()
         ),
     ];
-    sets.extend(signin_values(stub_image_tag()?.as_deref()));
+    let stub = stub_image_tag()?;
+    let exchange = exchange_image()?;
+    sets.extend(signin_values(stub.as_deref()));
+    if let Some(exchange) = &exchange {
+        sets.push(format!("images.token-exchange={exchange}"));
+    }
+    sets.extend(fixture_values(stub.as_deref(), exchange.as_deref()));
     if let Some(runtime) = runtime_image()? {
         sets.push(format!("images.runtime={runtime}"));
     }
@@ -815,6 +858,7 @@ pub fn up() -> Result<()> {
     let runtime = runtime_image()?;
     let executor = executor_image()?;
     let stub = stub_image_tag()?;
+    let exchange = exchange_image()?;
     if source == ImageSource::Build {
         let runner = static_binary(RUNNER);
         build_image(&image, IMAGE_DOCKERFILE, "mandate", &[(&runner, RUNNER)])?;
@@ -832,6 +876,9 @@ pub fn up() -> Result<()> {
     }
     if let Some(stub) = &stub {
         build_image(stub, STUB_DOCKERFILE, "mandate-stub-issuer", &[])?;
+    }
+    if let Some(exchange) = &exchange {
+        build_image(exchange, EXCHANGE_DOCKERFILE, EXCHANGE_PACKAGE, &[])?;
     }
     if let Some(manager) = &manager {
         build_image(manager, DEPLOY_MANAGER_DOCKERFILE, "mandate-deployd", &[])?;
@@ -854,6 +901,7 @@ pub fn up() -> Result<()> {
         runtime.as_ref(),
         executor.as_ref(),
         stub.as_ref(),
+        exchange.as_ref(),
         manager.as_ref(),
     ]
     .into_iter()
@@ -924,6 +972,28 @@ pub fn up() -> Result<()> {
     ])?;
     eprintln!("    journal: failure domains: {}", domain.trim());
     vault()?;
+    fixture_client_secret(
+        || {
+            kubectl(&[
+                "get",
+                "secret",
+                FIXTURE_CLIENT_SECRET,
+                "--namespace",
+                NAMESPACE,
+                "--ignore-not-found",
+                "-o",
+                "name",
+            ])
+        },
+        || {
+            let mut bytes = [0u8; FIXTURE_CLIENT_SECRET_BYTES];
+            fs::File::open("/dev/urandom")
+                .and_then(|mut random| random.read_exact(&mut bytes))
+                .context("reading /dev/urandom")?;
+            Ok(hex_of(&bytes))
+        },
+        |secret| apply(&[secret]),
+    )?;
     if stub.is_some() {
         demo_links(&image)?;
     }
@@ -1509,8 +1579,9 @@ fn vault() -> Result<()> {
     Ok(())
 }
 
-/// The Secret the workspace chart makes in a dev or ci cell for the `oauth-fixture` pod, and its
-/// key, which holds the fake Alpaca OAuth client secret as plain text (DEC-1176 item 6).
+/// The Secret the local cell makes for the `oauth-fixture` pod, which the workspace chart only
+/// mounts, and its key, which holds the fake Alpaca OAuth client secret as plain text (DEC-1176
+/// item 6; the chart makes no Secret, DEC-822 item 4).
 const FIXTURE_CLIENT_SECRET: &str = "oauth-fixture-client";
 const FIXTURE_CLIENT_SECRET_KEY: &str = "client-secret";
 
@@ -1529,11 +1600,60 @@ fn client_secret_seed_stdin(root: &str, encoded: &str) -> String {
     format!("{root}\n{encoded}")
 }
 
+/// The length of the fixture client's fake secret, in random bytes, written as hex.
+const FIXTURE_CLIENT_SECRET_BYTES: usize = 32;
+
+/// Whether the cell keeps the fixture client's Secret it already holds: `found` is kubectl's
+/// `get secret -o name` answer, empty when there is none.
+fn keep_existing(found: &str) -> bool {
+    !found.trim().is_empty()
+}
+
+/// Makes [`FIXTURE_CLIENT_SECRET`] once, before the workspace release whose `oauth-fixture` pod
+/// mounts it, and keeps one already made, so the pod and the vault's seed agree across every
+/// `cell up` (DEC-1176 item 6): `found` reads what the cell holds, `value` draws a fake client's
+/// secret, random bytes in hex, which no real provider knows, and `create` applies the Secret,
+/// which kubectl reads from stdin, so the value reaches no argument. `Ok(true)` when it was made;
+/// any failure fails `cell up`.
+fn fixture_client_secret(
+    found: impl FnOnce() -> Result<String>,
+    value: impl FnOnce() -> Result<String>,
+    create: impl FnOnce(Value) -> Result<()>,
+) -> Result<bool> {
+    if keep_existing(&found()?) {
+        eprintln!("    oauth-fixture: its client secret is kept");
+        return Ok(false);
+    }
+    create(fixture_client_secret_object(&value()?))?;
+    eprintln!("    oauth-fixture: its client secret is made");
+    Ok(true)
+}
+
+/// The fixture client's Secret holding `value` at its one key.
+fn fixture_client_secret_object(value: &str) -> Value {
+    json!({
+        "apiVersion": "v1",
+        "kind": "Secret",
+        "metadata": {
+            "name": FIXTURE_CLIENT_SECRET,
+            "namespace": NAMESPACE,
+            "labels": {"app.kubernetes.io/name": "mandate-cell", "mandate.dev/process": "oauth-fixture"}
+        },
+        "type": "Opaque",
+        "stringData": {FIXTURE_CLIENT_SECRET_KEY: value}
+    })
+}
+
+/// `bytes` in lowercase hex, two digits each.
+fn hex_of(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
 /// Seeds a dev or ci cell's vault with the fake client secret the `oauth-fixture` pod checks, read
-/// from [`FIXTURE_CLIENT_SECRET`] once the workspace release, which makes it, is installed, so
-/// the token exchange redeems the fixture's codes (DEC-1176 item 6, DEC-2636). Only the local
-/// cell runs it, with its fake root token; the chart makes the Secret only in a dev or ci cell, so
-/// a release without it is told so and the vault is left as it is. The value is never decoded.
+/// from [`FIXTURE_CLIENT_SECRET`] once the workspace release is installed, so the token exchange
+/// redeems the fixture's codes (DEC-1176 item 6, DEC-2636). Only the local cell runs it, with its
+/// fake root token; a cell without the Secret is told so and the vault is left as it is. The value
+/// is never decoded.
 fn seed_client_secret() -> Result<()> {
     let jsonpath = format!("jsonpath={{.data.{FIXTURE_CLIENT_SECRET_KEY}}}");
     let encoded = kubectl(&[
@@ -5115,23 +5235,117 @@ mod tests {
         assert_eq!(stdin, "fake-root\nZmFrZS1jbGllbnQtc2VjcmV0");
     }
 
-    /// The cell seeds the client secret only once the workspace release, which makes its Secret,
-    /// is installed.
+    /// The fixture renders only where the cell runs both the stub, whose image it runs, and the
+    /// exchange, the one process that reaches it; then it takes the cell's fake client and the
+    /// API's loopback callback, which the chart's schema admits.
     #[test]
-    fn the_client_secret_is_seeded_after_the_workspace_release() {
+    fn the_fixture_is_on_only_with_the_stub_and_the_exchange() {
+        assert!(fixture_values(None, None).is_empty());
+        assert!(fixture_values(Some("mandate.local/stub-issuer:a"), None).is_empty());
+        assert!(fixture_values(None, Some("mandate.local/token-exchange:a")).is_empty());
+        assert_eq!(
+            fixture_values(
+                Some("mandate.local/stub-issuer:a"),
+                Some("mandate.local/token-exchange:a")
+            ),
+            [
+                "oauthFixture.enabled=true",
+                "alpacaOAuth.clientId=cell-fixture-client",
+                "alpacaOAuth.redirectUri=http://127.0.0.1:8080/v1/oauth/alpaca/callback",
+            ]
+        );
+    }
+
+    /// A Secret the cell already holds is kept, unread and unchanged; none is made, from a value
+    /// drawn once; and a failure to read, draw or create fails the step, so `cell up` stops.
+    #[test]
+    fn the_fixture_client_secret_is_kept_or_made_once_and_its_failures_stop_cell_up() {
+        assert!(keep_existing("secret/oauth-fixture-client\n"));
+        assert!(!keep_existing(""));
+        assert!(!keep_existing("  \n"));
+        let kept = fixture_client_secret(
+            || Ok("secret/oauth-fixture-client\n".to_owned()),
+            || panic!("a kept Secret draws no value"),
+            |_| panic!("a kept Secret is not made again"),
+        );
+        assert!(matches!(kept, Ok(false)));
+        let mut made = Vec::new();
+        let created = fixture_client_secret(
+            || Ok(String::new()),
+            || Ok("ab01".to_owned()),
+            |secret| {
+                made.push(secret);
+                Ok(())
+            },
+        );
+        assert!(matches!(created, Ok(true)));
+        assert_eq!(made, [fixture_client_secret_object("ab01")]);
+        let unread = fixture_client_secret(
+            || bail!("kubectl failed"),
+            || Ok("ab01".to_owned()),
+            |_| panic!("nothing is made when the cell cannot be read"),
+        );
+        assert!(unread.is_err());
+        let undrawn = fixture_client_secret(
+            || Ok(String::new()),
+            || bail!("no randomness"),
+            |_| panic!("nothing is made without a value"),
+        );
+        assert!(undrawn.is_err());
+        let refused = fixture_client_secret(
+            || Ok(String::new()),
+            || Ok("ab01".to_owned()),
+            |_| bail!("kubectl apply failed"),
+        );
+        assert!(refused.is_err());
+    }
+
+    /// The fixture client's Secret holds its one key as written, in the cell's namespace, and its
+    /// value is hex.
+    #[test]
+    fn the_fixture_client_secret_is_one_key_in_the_cells_namespace() {
+        let made = fixture_client_secret_object("ab01");
+        assert_eq!(made["metadata"]["name"], "oauth-fixture-client");
+        assert_eq!(made["metadata"]["namespace"], NAMESPACE);
+        assert_eq!(made["type"], "Opaque");
+        assert_eq!(made["stringData"], json!({"client-secret": "ab01"}));
+        assert!(made.get("data").is_none());
+        assert_eq!(hex_of(&[0, 1, 0xab, 0xff]), "0001abff");
+        assert_eq!(FIXTURE_CLIENT_SECRET_BYTES, 32);
+    }
+
+    /// The cell makes the fixture's Secret before the workspace release that mounts it, and seeds
+    /// the vault from it only once that release is installed.
+    #[test]
+    fn the_client_secret_is_made_before_and_seeded_after_the_workspace_release() {
         let source = include_str!("cell.rs");
         let up = source
             .split("pub fn up() -> Result<()> {")
             .nth(1)
             .and_then(|rest| rest.split("\n}\n").next())
             .unwrap_or_default();
+        let made = up.find("    fixture_client_secret(").unwrap_or(usize::MAX);
+        let made_call = up
+            .get(made..)
+            .and_then(|rest| rest.split("\n    if stub.is_some()").next())
+            .unwrap_or_default();
+        assert!(
+            made_call.trim_end().ends_with(")?;"),
+            "a failure to make the Secret fails `cell up`: {made_call}"
+        );
+        let install = up.find("let installed = helm(&install);").unwrap_or(0);
         let installed = up.find("    installed?;").unwrap_or(usize::MAX);
         let seeded = up.find("    seed_client_secret()?;").unwrap_or(0);
+        assert!(
+            made < install,
+            "the Secret is made before the workspace install"
+        );
         assert!(
             installed < seeded,
             "the seed runs after the workspace install"
         );
         assert_eq!(up.matches("seed_client_secret()").count(), 1);
+        assert_eq!(up.matches("fixture_client_secret(").count(), 1);
     }
 
     /// The vault drill passes only these answers, written out here rather than built from
