@@ -33,6 +33,7 @@ use mandate_identity::{Permission, StepUpActionKind};
 use mandate_journal::StoredEvent;
 use mandate_time::UtcNanos;
 use secrecy::SecretString;
+use tokio::task::JoinError;
 
 use crate::backtests::paper;
 use crate::commands::{Event, Settled, Writer, envelope};
@@ -183,12 +184,17 @@ async fn redeemed(
     if let Some(code) = code
         && still_open(app, admitted, now, &redeemed.binding).await
     {
-        let _failed_write_is_closed_by_the_teardown: Result<(), ConnectError> =
-            connect.codes.put_code(
-                &redeemed.binding,
-                AuthorizationCode(SecretString::from(code)),
-                redeemed.verifier,
-            );
+        let codes = Arc::clone(&connect.codes);
+        let (binding, verifier) = (redeemed.binding, redeemed.verifier);
+        let _failed_write_is_closed_by_the_teardown: Result<Result<(), ConnectError>, JoinError> =
+            tokio::task::spawn_blocking(move || {
+                codes.put_code(
+                    &binding,
+                    AuthorizationCode(SecretString::from(code)),
+                    verifier,
+                )
+            })
+            .await;
     }
     Some(connection)
 }

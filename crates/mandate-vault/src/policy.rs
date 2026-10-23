@@ -58,6 +58,15 @@ pub enum SecretPath {
     AccountId(ConnectionId, AccountRef),
     /// A secret of the platform's own that one process type reads (DEC-2020).
     Platform(PlatformSecret),
+    /// The account fingerprint of one connect of a connection, to one account stream, and the
+    /// reference it was computed beside, in the personal-data vault, written once by its executor
+    /// beside the account entry (DEC-2345).
+    Fingerprint(ConnectionId, AccountRef),
+    /// The fingerprint registry: which connection holds each fingerprint, the connection
+    /// manager's alone, changed by check-and-set (DEC-2345).
+    Claims,
+    /// The marker that the fingerprint key is rotating (connections spec §3.1).
+    Rotating,
 }
 
 /// A secret of the platform's own, held for one process type, never an environment variable or a
@@ -120,7 +129,13 @@ pub fn allows(identity: &Identity, access: Access, path: &SecretPath) -> bool {
             SecretPath::Code(_) | SecretPath::Token(_),
         )
         | (Identity::TokenExchange(_), Access::Read, SecretPath::ClientSecret)
-        | (Identity::SecretImport, Access::Write, SecretPath::ClientSecret) => true,
+        | (Identity::SecretImport, Access::Write, SecretPath::ClientSecret)
+        | (
+            Identity::ConnectionManager,
+            Access::Read,
+            SecretPath::Fingerprint(..) | SecretPath::Claims | SecretPath::Rotating,
+        )
+        | (Identity::ConnectionManager, Access::Write, SecretPath::Claims) => true,
         (
             Identity::TokenExchange(own),
             Access::Read | Access::Delete | Access::Take,
@@ -128,7 +143,11 @@ pub fn allows(identity: &Identity, access: Access, path: &SecretPath) -> bool {
         )
         | (Identity::TokenExchange(own), Access::Write, SecretPath::Token(c))
         | (Identity::Executor(own), Access::Read, SecretPath::Token(c))
-        | (Identity::Executor(own), Access::Create, SecretPath::AccountId(c, _)) => own == c,
+        | (
+            Identity::Executor(own),
+            Access::Create,
+            SecretPath::AccountId(c, _) | SecretPath::Fingerprint(c, _),
+        ) => own == c,
         (identity, Access::Read, SecretPath::Platform(secret)) => {
             holders(*secret).is_ok_and(|h| h.reads == *identity)
         }
@@ -149,16 +168,20 @@ pub struct Mounts {
     pub kubernetes_executor: String,
     /// The Kubernetes auth mount a connection's token exchange logs in on (DEC-2060).
     pub kubernetes_exchange: String,
+    /// The transit mount that holds the fingerprint key (DEC-2345).
+    pub transit: String,
 }
 
 impl Default for Mounts {
-    /// `mandate`, `approle`, `kubernetes-executor` and `kubernetes-exchange`, the cell's.
+    /// `mandate`, `approle`, `kubernetes-executor`, `kubernetes-exchange` and `transit`, the
+    /// cell's.
     fn default() -> Self {
         Self {
             kv: "mandate".to_owned(),
             auth: "approle".to_owned(),
             kubernetes_executor: "kubernetes-executor".to_owned(),
             kubernetes_exchange: "kubernetes-exchange".to_owned(),
+            transit: "transit".to_owned(),
         }
     }
 }
@@ -222,6 +245,13 @@ pub fn kv_path(path: &SecretPath) -> Result<String, SourceError> {
         SecretPath::Platform(PlatformSecret::EmailCredential) => {
             "platform/email-credential".to_owned()
         }
+        SecretPath::Fingerprint(c, account) => format!(
+            "personal/fingerprints/{}/{}",
+            connection_segment(c)?,
+            account.as_str()
+        ),
+        SecretPath::Claims => "personal/claims".to_owned(),
+        SecretPath::Rotating => "fingerprints/rotating".to_owned(),
     })
 }
 
@@ -239,6 +269,7 @@ pub fn openbao_policy(
         paths.push(SecretPath::Code(connection.clone()));
         paths.push(SecretPath::Token(connection.clone()));
     }
+    paths.extend([SecretPath::Claims, SecretPath::Rotating]);
     let mut hcl = String::new();
     for path in &paths {
         for (access, prefix, capabilities) in [
