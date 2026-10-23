@@ -8,8 +8,8 @@ mod support;
 use mandate_canon::Value;
 use mandate_process::State;
 use support::{
-    AGENT, CONTROL_STREAM, Error, Journal, NOON, Paper, at, deployed, kill, object, propose, start,
-    start_allowing, stopped,
+    AGENT, CONNECTION, CONTROL_STREAM, Error, Journal, NOON, Paper, at, deploy, deployed, kill,
+    kill_command, object, propose, start, start_allowing, stopped, tick,
 };
 
 const OPEN: &str = "01JINTENT0000000000000000A";
@@ -138,6 +138,69 @@ fn a_version_1_establishment_reads_and_a_later_one_hands_openings_again() -> Res
         journal.received(),
         [OPEN],
         "established again, the opening is handed"
+    );
+    Ok(())
+}
+
+/// DEC-2357 item 1, the review of #2329 (P1): an agent whose connection's only establishment does
+/// not read is still followed while unsure, so its risk exit is handed and its kill switch applied,
+/// never left silent.
+#[test]
+#[ignore = "pending E7-4"]
+fn an_agent_on_an_unreadable_establishment_still_gets_its_exit_and_switch() -> Result<(), Error> {
+    let journal = Journal::default();
+    journal.write(
+        CONTROL_STREAM,
+        "c1",
+        "ConnectionEstablished",
+        2,
+        None,
+        object(vec![
+            ("account_ref", text(support::ACCOUNT)),
+            ("environment", text("paper")),
+        ])?,
+    )?;
+    deploy(&journal, "c2", AGENT, CONNECTION)?;
+    tick(&journal, "t1", NOON)?;
+    propose(&journal, AGENT, EXIT, "sell", "10", "150", "risk_exit")?;
+    kill(&journal, AGENT, COPY)?;
+    let broker = Paper::new(&journal);
+    let mut process = start_allowing(&journal, &broker)?;
+    process.step(at(NOON)?);
+    process.step(at(NOON)?);
+    assert_eq!(journal.received(), [EXIT], "the exit is handed");
+    assert_eq!(journal.switched(), [AGENT], "and the switch applied");
+    Ok(())
+}
+
+/// DEC-2357 item 1, the review of #2329 (P2): a revocation that does not read may be the compromise
+/// revocation DEC-2343 reads a connection's kill command for, so while unsure the executor applies
+/// the command itself, with no runtime copy.
+#[test]
+#[ignore = "pending E7-4"]
+fn an_unreadable_revocation_still_applies_the_connections_kill_command() -> Result<(), Error> {
+    let journal = deployed()?;
+    kill_command(
+        &journal,
+        "01JCMD000000000000000000AA",
+        "connection",
+        CONNECTION,
+    )?;
+    journal.write(
+        CONTROL_STREAM,
+        "c4",
+        "ConnectionRevoked",
+        1,
+        None,
+        object(vec![])?,
+    )?;
+    let broker = Paper::new(&journal);
+    let mut process = start(&journal, &broker)?;
+    process.step(at(NOON)?);
+    assert_eq!(
+        journal.applications(),
+        [(AGENT.to_owned(), "01JCMD000000000000000000AA".to_owned())],
+        "the command is applied with no copy"
     );
     Ok(())
 }
