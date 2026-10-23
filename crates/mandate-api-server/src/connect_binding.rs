@@ -20,8 +20,6 @@ use crate::config::{AUTHORIZE_URL, StartRefusal, authorize_page};
 use crate::connect::Connect;
 use crate::session::Random;
 use crate::vault_codes::{OpenBaoLogin, VaultCodes};
-use crate::vault_fingerprints::VaultFingerprints;
-use crate::vault_teardown::VaultTeardown;
 
 /// The platform's registered OAuth client id.
 pub const CLIENT_ID: &str = "MANDATE_ALPACA_CLIENT_ID";
@@ -148,7 +146,7 @@ fn client_id_in_form(id: &str) -> bool {
 }
 
 /// Whether `address` is `https://` and an authority with nothing after it.
-fn address_in_form(address: &str) -> bool {
+pub(crate) fn address_in_form(address: &str) -> bool {
     address.strip_prefix("https://").is_some_and(|authority| {
         !authority.is_empty()
             && authority
@@ -158,48 +156,10 @@ fn address_in_form(address: &str) -> bool {
 }
 
 /// The CA certificate in `dir`, read by `mandate-vault`'s mounted-file rules.
-fn ca_pem(dir: &Path) -> Option<Vec<u8>> {
+pub(crate) fn ca_pem(dir: &Path) -> Option<Vec<u8>> {
     read_mounted(dir, VAULT_CA)
         .ok()
         .map(|pem| pem.expose_secret().as_bytes().to_vec())
-}
-
-/// The finish's teardown for a bound connect, over its own copy of the connect's vault login as
-/// the connection manager; `None` for no connect and an incomplete one (DEC-2348 item 3).
-pub fn teardown(
-    binding: &ConnectBinding,
-    clock: Arc<dyn Clock>,
-) -> Option<VaultTeardown<OpenBaoLogin>> {
-    match binding {
-        ConnectBinding::On(bound) => Some(VaultTeardown {
-            login: Arc::new(manager_login(bound)),
-            clock,
-        }),
-        ConnectBinding::Off | ConnectBinding::Incomplete(_) => None,
-    }
-}
-
-/// The finish's fingerprint port for a bound connect, over its own copy of the connect's vault
-/// login as the connection manager; `None` for no connect and an incomplete one (DEC-2348 item 4).
-pub fn fingerprints(
-    binding: &ConnectBinding,
-    clock: Arc<dyn Clock>,
-) -> Option<VaultFingerprints<OpenBaoLogin>> {
-    match binding {
-        ConnectBinding::On(bound) => Some(VaultFingerprints {
-            login: Arc::new(manager_login(bound)),
-            clock,
-        }),
-        ConnectBinding::Off | ConnectBinding::Incomplete(_) => None,
-    }
-}
-
-/// The connect's vault login, as the connection manager: the finish's identity (DEC-694 item 2).
-fn manager_login(bound: &BoundConnect) -> OpenBaoLogin {
-    OpenBaoLogin {
-        identity: Identity::ConnectionManager,
-        ..bound.login.clone()
-    }
 }
 
 /// The connect `binding` binds: for [`ConnectBinding::On`], its page and client, states drawn from
