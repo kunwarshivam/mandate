@@ -15,7 +15,7 @@ use mandate_api_server::finish::{
 };
 use mandate_api_server::finish_pass::{
     Alerts, DeleteFailed, Deleted, Finisher, LineAlerts, TEARDOWN_RUNBOOK, TEARDOWN_STALLED,
-    Teardown, passes, passes_until,
+    Teardown, passes, passes_until, run_until_stopped,
 };
 use mandate_api_server::journal::Journal;
 use mandate_canon::Digest;
@@ -949,4 +949,62 @@ fn without_a_stop_the_passes_go_on() {
     ));
     assert_eq!(last(&journal).0, "ConnectionRefused");
     assert!(deletes.of().len() >= 2);
+}
+
+/// A teardown whose every delete runs twelve seconds on a blocking thread, as a vault that accepts
+/// the connection and never answers holds `VaultTeardown`'s.
+struct Hung;
+
+impl Teardown for Hung {
+    fn delete<'a>(&'a self, _connection: &'a ConnectionId) -> Deleted<'a> {
+        Box::pin(async {
+            let _ =
+                tokio::task::spawn_blocking(|| std::thread::sleep(Duration::from_secs(12))).await;
+            Ok(())
+        })
+    }
+}
+
+/// DEC-2348 item 3: a stop ends the finish within the drain even while a vault call it abandoned
+/// still runs on a blocking thread, so the process exits inside its pod's grace.
+#[test]
+#[ignore = "pending E10-13"]
+fn a_hung_vault_call_does_not_hold_the_stop_past_the_drain() {
+    let journal = Arc::new(MemJournal::default());
+    request(&journal, A, 2, "oauth");
+    let shared: Arc<dyn Journal> = Arc::clone(&journal) as Arc<dyn Journal>;
+    let finisher = Finisher::new(
+        shared,
+        Unbacked,
+        Hung,
+        Raised::default(),
+        WORKSPACE.to_owned(),
+    );
+    let clock = ManualClock::at(OPENED + CONNECT_DEADLINE_SECS);
+    let (sent, ended) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let ran = run_until_stopped(finisher, clock, Duration::from_secs(3600), || {
+            Ok(async { tokio::time::sleep(Duration::from_millis(100)).await })
+        });
+        let _ = sent.send(ran.is_ok());
+    });
+    assert_eq!(
+        ended.recv_timeout(Duration::from_secs(8)),
+        Ok(true),
+        "the stop must end the finish within the drain, not when the abandoned vault call returns"
+    );
+}
+
+/// A stop that cannot be made is the finish's error, and no pass runs.
+#[test]
+#[ignore = "pending E10-13"]
+fn a_stop_that_cannot_be_made_is_an_error() {
+    let (journal, deletes, finisher) = finisher(Unbacked);
+    request(&journal, A, 2, "oauth");
+    let clock = ManualClock::at(OPENED + CONNECT_DEADLINE_SECS);
+    let ran = run_until_stopped(finisher, clock, Duration::from_millis(1), || {
+        Err::<std::future::Ready<()>, _>(io::Error::other("no handler"))
+    });
+    assert!(ran.is_err());
+    assert!(deletes.of().is_empty(), "no pass");
 }
