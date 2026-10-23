@@ -14,6 +14,7 @@ use std::net::SocketAddrV4;
 use serde_json::{Value, json};
 
 use crate::SourceError;
+use crate::fingerprint::FINGERPRINT_KEY;
 use crate::kube::is_label;
 use crate::lease::LEASE_SECS;
 use crate::openbao::EXECUTOR_TOKEN_MAX_SECS;
@@ -35,13 +36,39 @@ const REQUIRED: [&str; 8] = [
     "token_ttl",
 ];
 
-/// One kind's place: its auth mount, its namespace, its policy, and its token's lifetimes.
+/// What the provisioner may do to an executor's role: make it, never remove it, so an executor
+/// started for any reason, a kill switch's among them, can always log in (DEC-2350 item 3).
+const EXECUTOR_ROLE_CAPABILITIES: &str = "\"create\", \"update\"";
+
+/// What the provisioner may do to a token exchange's role: make it, and remove it when its request
+/// closes or its connection is revoked (DEC-2350 items 3 and 5).
+const EXCHANGE_ROLE_CAPABILITIES: &str = "\"create\", \"update\", \"delete\"";
+
+/// One kind's place: its auth mount, its namespace, its policy, its token's lifetimes, and
+/// whether the provisioner may remove its roles.
 struct Kind<'a> {
     mount: &'a str,
     namespace: &'a str,
     policy: String,
     ttl: i64,
     max_ttl: i64,
+    removable: bool,
+}
+
+/// What the provisioner may do to one kind's roles: make them, and remove them only when
+/// `removable`, the token exchange's (DEC-2350 items 3 and 5).
+fn provisioner_capabilities(removable: bool) -> Result<&'static str, SourceError> {
+    Ok(if removable {
+        EXCHANGE_ROLE_CAPABILITIES
+    } else {
+        EXECUTOR_ROLE_CAPABILITIES
+    })
+}
+
+/// A pinned list parameter's value, as [`provisioner_policy`]'s pin admits it: a plain string,
+/// never an array, which the pin refuses however it is filled (DEC-2350 item 5).
+fn pinned(value: &str) -> Result<Value, SourceError> {
+    Ok(Value::String(value.to_owned()))
 }
 
 /// Whether `segment` is one plain path segment: letters, digits, `_` and `-`, and not empty.
@@ -74,6 +101,7 @@ fn kinds<'a>(mounts: &'a Mounts, namespace: &'a str) -> [Kind<'a>; 2] {
             policy: format!("{}-kubernetes-executor", mounts.kv),
             ttl: LEASE_SECS,
             max_ttl: EXECUTOR_TOKEN_MAX_SECS,
+            removable: false,
         },
         Kind {
             mount: &mounts.kubernetes_exchange,
@@ -81,6 +109,7 @@ fn kinds<'a>(mounts: &'a Mounts, namespace: &'a str) -> [Kind<'a>; 2] {
             policy: format!("{}-kubernetes-exchange", mounts.kv),
             ttl: GRANT_SECS,
             max_ttl: GRANT_SECS,
+            removable: true,
         },
     ]
 }
@@ -101,7 +130,8 @@ pub fn service_account_name(identity: &Identity) -> Result<String, SourceError> 
         | Identity::Runtime
         | Identity::SecretImport
         | Identity::ModelGateway
-        | Identity::EmailSender => Err(SourceError::Config),
+        | Identity::EmailSender
+        | Identity::Provisioner => Err(SourceError::Config),
     }
 }
 
@@ -115,16 +145,21 @@ pub fn kubernetes_policy_name(identity: &Identity, mounts: &Mounts) -> Result<St
         | Identity::Runtime
         | Identity::SecretImport
         | Identity::ModelGateway
-        | Identity::EmailSender => Err(SourceError::Config),
+        | Identity::EmailSender
+        | Identity::Provisioner => Err(SourceError::Config),
     }
 }
 
 /// The templated policy, in HCL, of `identity`'s kind, keyed by the ServiceAccount name in the
 /// login's alias metadata on the auth mount whose accessor is `accessor`, an `x` before an
 /// executor's, so both kinds reach [`crate::policy::connection_segment`]. An executor reads its
-/// connection's token; a token exchange writes it, reads and deletes its code, and reads the
-/// platform's client secret. Anything else, or an accessor that is not one plain path segment (a
-/// quote, a brace or a newline would end the template or the policy), is [`SourceError::Config`].
+/// connection's token, creates its account entries and its fingerprint entries in the personal-data
+/// vault, one per request below its own connection (DEC-2339, DEC-2345), and asks transit for the
+/// fingerprint key's HMAC alone; a token
+/// exchange writes the token, reads, overwrites, destroys and deletes its code but never its
+/// code's metadata (DEC-2321), and reads the platform's client secret. Anything else, or an
+/// accessor that is not one plain path segment (a quote, a brace or a newline would end the
+/// template or the policy), is [`SourceError::Config`].
 pub fn kubernetes_policy(
     identity: &Identity,
     mounts: &Mounts,
@@ -141,11 +176,28 @@ pub fn kubernetes_policy(
         )
     };
     match identity {
-        Identity::Executor(_) => Ok(block(
-            "data",
-            &format!("connections/{SEGMENT_PREFIX}{own}/token"),
-            "\"read\"",
-        )),
+        Identity::Executor(_) => Ok([
+            block(
+                "data",
+                &format!("connections/{SEGMENT_PREFIX}{own}/token"),
+                "\"read\"",
+            ),
+            block(
+                "data",
+                &format!("personal/accounts/{SEGMENT_PREFIX}{own}/+"),
+                "\"create\"",
+            ),
+            block(
+                "data",
+                &format!("personal/fingerprints/{SEGMENT_PREFIX}{own}/+"),
+                "\"create\"",
+            ),
+            format!(
+                "path \"{}/hmac/{FINGERPRINT_KEY}\" {{\n  capabilities = [\"update\"]\n}}\n",
+                mounts.transit
+            ),
+        ]
+        .concat()),
         Identity::TokenExchange(_) => Ok([
             block("data", &kv_path(&SecretPath::ClientSecret)?, "\"read\""),
             block(
@@ -153,7 +205,8 @@ pub fn kubernetes_policy(
                 &format!("connections/{own}/code"),
                 "\"read\", \"update\"",
             ),
-            block("metadata", &format!("connections/{own}/code"), "\"delete\""),
+            block("delete", &format!("connections/{own}/code"), "\"update\""),
+            block("destroy", &format!("connections/{own}/code"), "\"update\""),
             block(
                 "data",
                 &format!("connections/{own}/token"),
@@ -166,13 +219,15 @@ pub fn kubernetes_policy(
         | Identity::Runtime
         | Identity::SecretImport
         | Identity::ModelGateway
-        | Identity::EmailSender => Err(SourceError::Config),
+        | Identity::EmailSender
+        | Identity::Provisioner => Err(SourceError::Config),
     }
 }
 
-/// The provisioner's policy, in HCL: it may create, update and read roles on the two Kubernetes
-/// auth mounts and nothing else, every parameter but the ServiceAccount's name pinned to its one
-/// value, so it can neither widen a role's namespace, policy, audience or lifetime nor reach a
+/// The provisioner's policy, in HCL: it may create and update roles on the two Kubernetes auth
+/// mounts, and delete them on the token exchange's alone, and nothing else; no `read`, which
+/// OpenBao refuses under `required_parameters` however it is granted (DEC-2350 item 5), every parameter
+/// but the ServiceAccount's name pinned to its one value, so it can neither widen a role's namespace, policy, audience or lifetime nor reach a
 /// policy, a token or a secret. Both kinds' ServiceAccounts are in `namespace`, the workspace's
 /// own, so its default deny, egress policies and admission rules cover them. Kubernetes mounts
 /// that are not one plain path segment, or a namespace that is not a Kubernetes label, are
@@ -180,12 +235,12 @@ pub fn kubernetes_policy(
 pub fn provisioner_policy(mounts: &Mounts, namespace: &str) -> Result<String, SourceError> {
     checked(mounts, namespace)?;
     let required: Vec<String> = REQUIRED.iter().map(|name| format!("\"{name}\"")).collect();
-    Ok(kinds(mounts, namespace)
+    kinds(mounts, namespace)
         .iter()
         .map(|kind| {
-            format!(
+            Ok(format!(
                 "path \"auth/{mount}/role/+\" {{\n  \
-                 capabilities = [\"create\", \"update\", \"read\"]\n  \
+                 capabilities = [{capabilities}]\n  \
                  required_parameters = [{required}]\n  \
                  allowed_parameters = {{\n    \
                  \"alias_name_source\" = [\"serviceaccount_uid\"]\n    \
@@ -198,19 +253,23 @@ pub fn provisioner_policy(mounts: &Mounts, namespace: &str) -> Result<String, So
                  \"token_ttl\" = [\"{ttl}\"]\n  \
                  }}\n}}\n",
                 mount = kind.mount,
+                capabilities = provisioner_capabilities(kind.removable)?,
                 required = required.join(", "),
                 namespace = kind.namespace,
                 max_ttl = kind.max_ttl,
                 policy = kind.policy,
                 ttl = kind.ttl,
-            )
+            ))
         })
-        .collect())
+        .collect()
 }
 
 /// The request that makes `identity`'s role: its path, `auth/<mount>/role/<name>`, the role named
 /// by its ServiceAccount, since OpenBao folds role names to lowercase and two ids differing in case
-/// would otherwise share one, and its body, bound to exactly its ServiceAccount in exactly `namespace`, the workspace's. Anything
+/// would otherwise share one, and its body, bound to exactly its ServiceAccount in exactly
+/// `namespace`, the workspace's. The pinned list parameters, the namespace and the policy, are
+/// sent as plain strings: [`provisioner_policy`]'s pin admits a string and refuses an array
+/// (DEC-2350 item 5). Anything
 /// but an executor or a token exchange, or mounts or a namespace [`provisioner_policy`] refuses, is
 /// [`SourceError::Config`].
 pub fn role_request(
@@ -228,17 +287,18 @@ pub fn role_request(
         | Identity::Runtime
         | Identity::SecretImport
         | Identity::ModelGateway
-        | Identity::EmailSender => return Err(SourceError::Config),
+        | Identity::EmailSender
+        | Identity::Provisioner => return Err(SourceError::Config),
     };
     let name = service_account_name(identity)?;
     Ok((
         format!("auth/{}/role/{name}", kind.mount),
         json!({
             "bound_service_account_names": [name],
-            "bound_service_account_namespaces": [kind.namespace],
+            "bound_service_account_namespaces": pinned(kind.namespace)?,
             "audience": AUDIENCE,
             "alias_name_source": "serviceaccount_uid",
-            "token_policies": [kind.policy],
+            "token_policies": pinned(&kind.policy)?,
             "token_ttl": kind.ttl.to_string(),
             "token_max_ttl": kind.max_ttl.to_string(),
             "token_no_default_policy": "false"
@@ -249,10 +309,14 @@ pub fn role_request(
 /// How the vault reaches the cluster's API server for TokenReview (DEC-2060 item 7): its
 /// `https://` address and, outside a pod, the PEM certificate of the CA that signed it. In the
 /// cluster the vault reads its own pod's CA and ServiceAccount token, so `ca_pem` is `None`.
+/// `namespace` is the workspace's, where the connections' ServiceAccounts run: given, provisioning
+/// also makes the role provisioner's AppRole, whose policy binds every role it makes there
+/// (DEC-2350 item 1); `None` makes none.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KubernetesAuth {
     pub host: String,
     pub ca_pem: Option<String>,
+    pub namespace: Option<String>,
 }
 
 /// The API server's address in `host`, which must be exactly `https://`, an IPv4 address and a
