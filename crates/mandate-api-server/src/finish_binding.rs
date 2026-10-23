@@ -18,7 +18,8 @@ pub const WORKSPACE: &str = "MANDATE_API_WORKSPACE";
 pub const FINISH_VAULT_ADDRESS: &str = "MANDATE_FINISH_VAULT_ADDRESS";
 
 /// The directory holding `ca.crt`, `connection-manager.role-id` and
-/// `connection-manager.secret-id`, each readable by the process alone.
+/// `connection-manager.secret-id`, each readable by the process alone. The connection manager's
+/// pair must be there: any other identity's pair is never read in its place.
 pub const FINISH_VAULT_DIR: &str = "MANDATE_FINISH_VAULT_DIR";
 
 /// The four settings the finish needs, in the order they are judged and named.

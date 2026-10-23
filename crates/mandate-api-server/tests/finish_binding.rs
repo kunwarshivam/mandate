@@ -1,6 +1,7 @@
 //! The connect finish's own process binds only with its four settings set and valid, and logs in as
 //! the connection manager alone (DEC-2348 item 3); otherwise it names the settings that are
-//! missing or invalid, in order, and binds nothing.
+//! missing or invalid, in order, and binds nothing. Its vault directory must hold the connection
+//! manager's own credential pair: the API's pair there is never a fallback.
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -22,8 +23,29 @@ const CA: &str = "-----BEGIN CERTIFICATE-----\nca-canary\n-----END CERTIFICATE--
 
 static DIRS: Mutex<u32> = Mutex::new(0);
 
-/// A fresh directory holding `ca.crt` with `mode`, or no `ca.crt` when `mode` is `None`.
+/// A fresh directory holding `ca.crt` with `mode`, or no `ca.crt` when `mode` is `None`, and the
+/// connection manager's credential pair.
 fn vault_dir(mode: Option<u32>) -> PathBuf {
+    let dir = bare_dir(mode);
+    write_pair(&dir, "connection-manager", 0o600);
+    dir
+}
+
+/// Writes `role`'s role id and secret id into `dir` with `mode`.
+fn write_pair(dir: &Path, role: &str, mode: u32) {
+    for (suffix, value) in [
+        ("role-id", "role-canary\n"),
+        ("secret-id", "secret-canary\n"),
+    ] {
+        let file = dir.join(format!("{role}.{suffix}"));
+        std::fs::write(&file, value).expect("a credential");
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(mode)).expect("mode");
+    }
+}
+
+/// A fresh directory holding `ca.crt` with `mode`, or no `ca.crt` when `mode` is `None`, and no
+/// credentials.
+fn bare_dir(mode: Option<u32>) -> PathBuf {
     let mut n = DIRS.lock().expect("unpoisoned");
     *n += 1;
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
@@ -79,7 +101,7 @@ fn none_set_names_all_four_in_order() {
 #[ignore = "pending E10-13"]
 fn a_missing_or_invalid_setting_is_named_alone() {
     let dir = vault_dir(Some(0o600));
-    let invalid: [(&str, OsString); 13] = [
+    let invalid: [(&str, OsString); 14] = [
         (DATABASE_URL, OsString::new()),
         (
             DATABASE_URL,
@@ -99,6 +121,7 @@ fn a_missing_or_invalid_setting_is_named_alone() {
         (FINISH_VAULT_DIR, OsString::from("relative/dir")),
         (FINISH_VAULT_DIR, vault_dir(None).into_os_string()),
         (FINISH_VAULT_DIR, vault_dir(Some(0o644)).into_os_string()),
+        (FINISH_VAULT_DIR, bare_dir(Some(0o600)).into_os_string()),
         (DATABASE_URL, OsString::from_vec(vec![0xff])),
         (WORKSPACE, OsString::from_vec(vec![0xff])),
         (FINISH_VAULT_ADDRESS, OsString::from_vec(vec![0xff])),
@@ -121,4 +144,25 @@ fn the_off_line_names_the_settings_and_nothing_they_hold() {
         off_line(&[WORKSPACE, FINISH_VAULT_DIR]),
         "refused: finish off: MANDATE_API_WORKSPACE MANDATE_FINISH_VAULT_DIR missing or invalid"
     );
+}
+
+/// A vault directory holding the API's pair, or the connection manager's role id alone, or its pair
+/// readable by others, binds nothing: the finish never logs in as another identity.
+#[test]
+#[ignore = "pending E10-13"]
+fn without_the_connection_managers_own_pair_the_finish_binds_nothing() {
+    let api_only = bare_dir(Some(0o600));
+    write_pair(&api_only, "api", 0o600);
+    let role_only = bare_dir(Some(0o600));
+    write_pair(&role_only, "connection-manager", 0o600);
+    std::fs::remove_file(role_only.join("connection-manager.secret-id")).expect("removed");
+    let open = bare_dir(Some(0o600));
+    write_pair(&open, "connection-manager", 0o644);
+    for dir in [api_only, role_only, open] {
+        assert_eq!(
+            bind(&all(&dir)).err(),
+            Some(vec![FINISH_VAULT_DIR]),
+            "{dir:?}"
+        );
+    }
 }

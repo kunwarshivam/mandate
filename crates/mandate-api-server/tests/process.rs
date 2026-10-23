@@ -488,15 +488,7 @@ fn the_finish_mode_without_its_vault_settings_names_them() {
 #[test]
 #[ignore = "pending E10-13"]
 fn the_finish_mode_with_its_settings_runs_until_stopped() {
-    let dir = credentials();
-    let ca = dir.join("ca.crt");
-    fs::write(
-        &ca,
-        "-----BEGIN CERTIFICATE-----\nca\n-----END CERTIFICATE-----\n",
-    )
-    .expect("the CA");
-    fs::set_permissions(&ca, fs::Permissions::from_mode(0o600)).expect("its mode");
-    let dir = dir.to_str().expect("a UTF-8 path").to_owned();
+    let dir = finish_vault_dir("connection-manager");
     let mut child = Running(
         command(
             &["finish"],
@@ -530,4 +522,42 @@ fn the_finish_mode_with_its_settings_runs_until_stopped() {
         None,
         "still running"
     );
+}
+
+/// A vault directory with the CA and the API's pair, but not the connection manager's, refuses
+/// the finish: it never falls back to another identity (DEC-2348 item 3).
+#[test]
+#[ignore = "pending E10-13"]
+fn the_finish_mode_without_the_connection_managers_pair_is_refused() {
+    let dir = finish_vault_dir("api");
+    let (code, text) = refused(command(
+        &["finish"],
+        &[
+            ("MANDATE_FINISH_VAULT_ADDRESS", "https://127.0.0.1:9"),
+            ("MANDATE_FINISH_VAULT_DIR", &dir),
+        ],
+    ));
+    assert_eq!(code, Some(2), "{text}");
+    assert_eq!(
+        text,
+        "refused: finish off: MANDATE_FINISH_VAULT_DIR missing or invalid\n"
+    );
+}
+
+/// A fresh directory holding the CA and `role`'s credential pair, each at 0600.
+fn finish_vault_dir(role: &str) -> String {
+    let dir = credentials();
+    for (name, value) in [
+        (
+            "ca.crt".to_owned(),
+            "-----BEGIN CERTIFICATE-----\nca\n-----END CERTIFICATE-----\n",
+        ),
+        (format!("{role}.role-id"), "role-canary\n"),
+        (format!("{role}.secret-id"), "secret-canary\n"),
+    ] {
+        let file = dir.join(name);
+        fs::write(&file, value).expect("a file");
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o600)).expect("its mode");
+    }
+    dir.to_str().expect("a UTF-8 path").to_owned()
 }
