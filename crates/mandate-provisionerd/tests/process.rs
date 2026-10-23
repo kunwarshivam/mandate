@@ -43,6 +43,7 @@ fn a_pass_that_could_not_finish_is_a_heartbeat_and_a_refused_record_stops_the_pr
     for halt in [Halt::Journal, Halt::NotOpened] {
         assert_eq!(input(&Err(halt)), Input::Heartbeat);
     }
+    assert_eq!(input(&Err(Halt::SessionExpired)), Input::Failed);
     let refused = Halt::Refused {
         event_type: "ConnectionRolesMade",
     };

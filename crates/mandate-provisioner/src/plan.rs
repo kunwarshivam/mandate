@@ -86,8 +86,13 @@ struct Fold {
     answered: BTreeSet<String>,
     /// The connections whose roles were made, in the order they were made, and not removed since.
     made: Vec<String>,
-    /// Each made connection's first closer since its roles were made.
+    /// Each made connection's first closer since the request its latest roles were made for.
     closers: BTreeMap<String, (String, Occasion)>,
+    /// Every version-2 OAuth request's connection, by the request's `event_id`, open or closed.
+    of: BTreeMap<String, String>,
+    /// Each request's first closer: the roles made for it after it closed owe their removal at once,
+    /// citing it (journal spec v0.81 rule 263, DEC-2350 item 7).
+    first_closers: BTreeMap<String, (String, Occasion)>,
 }
 
 impl Fold {
@@ -108,6 +113,7 @@ impl Fold {
         match row.event_type.as_str() {
             "ConnectionRequested" => {
                 if row.schema_version == 2 && member("credential") == "oauth" {
+                    self.of.insert(row.event_id.clone(), connection.clone());
                     self.requests.push((row.event_id.clone(), connection));
                 }
             }
@@ -116,10 +122,13 @@ impl Fold {
             }
             "ConnectionRevoked" => self.close(&connection, &row.event_id, Occasion::Revoked),
             "ConnectionRolesMade" | "ConnectionRolesRefused" => {
-                self.answered.insert(cause);
+                self.answered.insert(cause.clone());
                 if row.event_type == "ConnectionRolesMade" {
                     self.made.retain(|made| *made != connection);
-                    self.closers.remove(&connection);
+                    match self.first_closers.get(&cause) {
+                        Some(closer) => self.closers.insert(connection.clone(), closer.clone()),
+                        None => self.closers.remove(&connection),
+                    };
                     self.made.push(connection);
                 }
             }
@@ -134,6 +143,13 @@ impl Fold {
     /// Closes `connection`'s open requests not yet answered, and is the first closer of its made
     /// roles, if they have none yet.
     fn close(&mut self, connection: &str, closer: &str, occasion: Occasion) {
+        for (request, of) in &self.of {
+            if of == connection {
+                self.first_closers
+                    .entry(request.clone())
+                    .or_insert_with(|| (closer.to_owned(), occasion));
+            }
+        }
         let answered = &self.answered;
         self.requests
             .retain(|(request, of)| of != connection || answered.contains(request));

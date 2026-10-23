@@ -18,7 +18,7 @@
 use std::path::Path;
 
 use mandate_process::Input;
-use mandate_provisioner::driver::Halt;
+use mandate_provisioner::driver::{DEADLINE, Halt};
 use mandate_time::UtcNanos;
 use mandate_vault::SourceError;
 use mandate_vault::lease::LEASE_SECS;
@@ -52,14 +52,20 @@ const _RENEWED_BEFORE_THE_END: () = assert!(
     "a session is renewed well before it stops being usable"
 );
 
+const _NO_STEP_OUTLIVES_THE_MARGIN: () = assert!(
+    DEADLINE.as_secs() < EXPIRY_MARGIN_SECS.unsigned_abs(),
+    "a step the session was asked about ends before its token does"
+);
+
 /// What one pass reports to the lifecycle. A pass that could not read or write the journal, or
 /// that found the stream not yet opened, is a heartbeat, and the next pass starts again from the
 /// journal; a record the journal refuses is a defect, so the process stops rather than retry it
-/// blind.
+/// blind; and a session that reached its token's end mid-pass stops it too, so it starts again
+/// and logs in afresh.
 pub fn input(pass: &Result<(), Halt>) -> Input {
     match pass {
         Ok(()) => Input::Heartbeat,
-        Err(Halt::Refused { .. }) => Input::Failed,
+        Err(Halt::Refused { .. } | Halt::SessionExpired) => Input::Failed,
         Err(Halt::Journal | Halt::NotOpened) => Input::Heartbeat,
     }
 }
