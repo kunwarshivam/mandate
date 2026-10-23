@@ -4038,6 +4038,63 @@ fn protection_is_re_placed_at_the_buffer_day() {
     );
 }
 
+/// An OCO the executor could not place again is never the one it cancels (DEC-2312 item 2): at
+/// its buffer day, protection resting on a profile that offers no protective form at all is kept,
+/// not cancelled, and the shortfall is journaled and the owner alerted, as for protection with no
+/// recorded prices (`expiry_unreplaceable`, `protection_expiring`; DEC-367 item 4).
+#[test]
+#[ignore = "pending E7-4"]
+fn an_oco_that_cannot_be_re_placed_is_kept_at_its_buffer_day() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = started();
+    shell.fold_one(&stream_opened()).expect("folds");
+    for event in protected_position_events(2) {
+        shell
+            .fold_one(&event)
+            .expect("the protected position folds");
+    }
+    shell.profile = Some(unprotectable_profile());
+    let mut shell = shell.restart_ready(&ports);
+
+    let day = copied(
+        ACCOUNT_STREAM,
+        shell.head().0.saturating_add(1),
+        "TradingDayStarted",
+        with_clock(&[("date", text("2026-12-14"))], 7_000_000),
+        &EventId(format!("{CLOCK_STREAM}-9")),
+    );
+    shell.fold_one(&day).expect("the trading day folds");
+    let ran = shell.run(Input::Journal(day), &ports);
+
+    assert!(
+        !ran.requests
+            .iter()
+            .any(|r| matches!(r, BrokerRequest::Cancel { .. })),
+        "the OCO is kept: nothing could replace it (§5.4): {:?}",
+        ran.requests
+    );
+    assert!(
+        ran.drafts
+            .iter()
+            .any(|d| d.event_type == "ProtectionChanged"
+                && d.payload
+                    .get("action")
+                    .and_then(mandate_canon::Value::as_str)
+                    == Some("expiry_unreplaceable")),
+        "the shortfall is journaled: {:?}",
+        ran.draft_types()
+    );
+    assert!(
+        ran.notifications.contains(&"protection_expiring"),
+        "and the owner alerted: {:?}",
+        ran.notifications
+    );
+}
+
 #[test]
 fn protection_is_not_re_placed_early() {
     let ids = TestIds;
@@ -4645,6 +4702,12 @@ fn a_fractional_position_protects_the_whole_shares_and_discloses_the_fraction() 
         qty("10"),
         "only the whole shares: a fractional leg is not allowed in an OCO or a bracket (§5.2)"
     );
+    assert_eq!(
+        protective.oco.as_ref().map(|legs| legs.qty),
+        Some(qty("10")),
+        "on Alpaca one OCO at the entry's prices, both legs for the whole ten, never the 0.4 \
+         (DEC-2312 item 2)"
+    );
     let disclosed = ran
         .draft("ProtectionChanged")
         .and_then(|d| d.payload.get("unprotected_fraction"))
@@ -4653,6 +4716,633 @@ fn a_fractional_position_protects_the_whole_shares_and_discloses_the_fraction() 
         disclosed,
         Some("0.4"),
         "and the unprotected fraction is disclosed rather than hidden"
+    );
+}
+
+/// A fractionable position of `held` shares of `FRAC`, its whole ten protected by one resting GTC
+/// OCO created on 2026-09-22, as the fractional slice leaves it after its entry fills (DEC-2312
+/// item 2).
+fn fractional_position(ports: &mandate_executor::Ports<'_>, held: &str) -> Shell {
+    let mut shell = started();
+    shell.fold_one(&stream_opened()).expect("folds");
+    for held in [
+        event(
+            ACCOUNT_STREAM,
+            2,
+            "OrderSubmitted",
+            with_clock(
+                &[
+                    ("client_order_id", text("md-held-frac")),
+                    ("agent", text(common::AGENT)),
+                    ("instrument", text(FRAC)),
+                    ("side", text("buy")),
+                    ("qty", text(held)),
+                    ("limit", text("20")),
+                ],
+                10,
+            ),
+        ),
+        event(
+            ACCOUNT_STREAM,
+            3,
+            "FillApplied",
+            with_clock(
+                &[
+                    ("fill_id", text("f-0")),
+                    ("client_order_id", text("md-held-frac")),
+                    ("instrument", text(FRAC)),
+                    ("side", text("buy")),
+                    ("qty_gross", text(held)),
+                    ("price", text("20")),
+                ],
+                10,
+            ),
+        ),
+        event(
+            ACCOUNT_STREAM,
+            4,
+            "OrderStateChanged",
+            with_clock(
+                &[
+                    ("client_order_id", text("md-held-frac")),
+                    ("state", text("filled")),
+                ],
+                10,
+            ),
+        ),
+        event(
+            ACCOUNT_STREAM,
+            5,
+            "ProtectionChanged",
+            with_clock(
+                &[
+                    ("instrument", text(FRAC)),
+                    ("action", text("placed")),
+                    ("orders", text("md-oco-1")),
+                    ("qty", text("10")),
+                    ("take_profit", text("24")),
+                    ("stop", text("18")),
+                    ("created_on", text("2026-09-22")),
+                ],
+                11,
+            ),
+        ),
+    ] {
+        shell
+            .fold_one(&held)
+            .expect("the fractional position and its whole shares' protection fold");
+    }
+    shell.restart_ready(ports)
+}
+
+/// §5.2's Alpaca table keeps a fractional equity order out of OCO and bracket orders and makes it
+/// TIF day, and §5.3 rule 7 says the same: a fractional entry goes as a plain DAY limit whatever
+/// protective prices it carries, on a profile that offers brackets, and only that form (DEC-2312
+/// item 1). A whole-share entry in the same instrument still goes as its bracket.
+#[test]
+#[ignore = "pending E7-4"]
+fn a_fractional_entry_goes_as_a_plain_day_limit_whatever_its_prices() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[FRAC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    for (quantity, take_profit) in [("10.4", Some("24")), ("10.4", None), ("0.4", Some("24"))] {
+        let mut shell = started();
+        shell.fold_one(&stream_opened()).expect("folds");
+        let mut shell = shell.restart_ready(&ports);
+        shell.run(Input::Market(quote(FRAC, "20", "20.1", 20)), &ports);
+        let ran = shell.run(
+            handoff(
+                INTENT,
+                common::AGENT,
+                protected_opening(FRAC, quantity, "20", "18", take_profit),
+            ),
+            &ports,
+        );
+        let entry = ran
+            .submissions()
+            .first()
+            .copied()
+            .unwrap_or_else(|| panic!("the fractional entry of {quantity} is sent"));
+        assert_eq!(
+            (
+                entry.qty,
+                entry.bracket.is_some(),
+                entry.tif,
+                entry.order_type
+            ),
+            (
+                qty(quantity),
+                false,
+                mandate_executor::TimeInForce::Day,
+                mandate_executor::OrderType::Limit
+            ),
+            "{quantity} with take-profit {take_profit:?}: never a bracket, always a DAY limit (§5.2)"
+        );
+        let intended = ran
+            .drafts
+            .iter()
+            .find(|d| {
+                d.event_type == "ProtectionChanged"
+                    && d.payload
+                        .get("action")
+                        .and_then(mandate_canon::Value::as_str)
+                        == Some("intended")
+            })
+            .unwrap_or_else(|| {
+                panic!("{quantity}: the protective prices are journaled as intended")
+            });
+        assert_eq!(
+            (
+                intended
+                    .payload
+                    .get("stop")
+                    .and_then(mandate_canon::Value::as_str),
+                intended
+                    .payload
+                    .get("take_profit")
+                    .and_then(mandate_canon::Value::as_str)
+            ),
+            (Some("18"), take_profit),
+            "{quantity}: going plain keeps the prices its protection follows its fill at (DEC-446 \
+             item 4)"
+        );
+    }
+
+    let mut shell = started();
+    shell.fold_one(&stream_opened()).expect("folds");
+    let mut shell = shell.restart_ready(&ports);
+    shell.run(Input::Market(quote(FRAC, "20", "20.1", 20)), &ports);
+    let whole = shell.run(
+        handoff(
+            INTENT,
+            common::AGENT,
+            protected_opening(FRAC, "10", "20", "18", Some("24")),
+        ),
+        &ports,
+    );
+    assert!(
+        whole
+            .submissions()
+            .first()
+            .is_some_and(|entry| entry.bracket.is_some()),
+        "a whole-share entry in a fractionable instrument is still its bracket (§5.4)"
+    );
+}
+
+/// A fractional add is a plain order, not a bracket, so where protection already rests §5.3 rule 8
+/// denies it as `add_blocked_by_protective_order`, as it denies any plain equity add: the
+/// conservative reading (DEC-2312 item 1). Nothing is sent and the resting OCO is not touched.
+#[test]
+#[ignore = "pending E7-4"]
+fn a_fractional_add_where_protection_rests_is_denied_as_a_plain_add() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[FRAC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = fractional_position(&ports, "10");
+    shell.run(Input::Market(quote(FRAC, "20", "20.1", 20)), &ports);
+
+    let ran = shell.run(
+        handoff(
+            INTENT,
+            common::AGENT,
+            common::protected_add(FRAC, "0.5", "20", "18", Some("24")),
+        ),
+        &ports,
+    );
+
+    let decided = ran
+        .draft("GateDecided")
+        .expect("the add is gated and the decision journaled");
+    assert_eq!(
+        (
+            decided
+                .payload
+                .get("verdict")
+                .and_then(mandate_canon::Value::as_str),
+            decided
+                .payload
+                .get("reason_code")
+                .and_then(mandate_canon::Value::as_str)
+        ),
+        (Some("deny"), Some("add_blocked_by_protective_order")),
+        "a plain add beside resting protection (§5.3 rule 8)"
+    );
+    assert!(
+        ran.requests.is_empty(),
+        "nothing is sent and the OCO keeps resting: {:?}",
+        ran.requests
+    );
+}
+
+/// A position under one share has no whole share to protect (§5.4): once its entry fills, no
+/// protective order is sent, the interval it started ends, and both the start and the end
+/// disclose the whole position as the fraction left unprotected (DEC-2312 items 2 and 3, DEC-2315).
+#[test]
+#[ignore = "pending E7-4"]
+fn a_position_under_one_share_places_nothing_and_discloses_its_fraction() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[FRAC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = started();
+    shell.fold_one(&stream_opened()).expect("folds");
+    let mut shell = shell.restart_ready(&ports);
+    shell.run(Input::Market(quote(FRAC, "20", "20.1", 20)), &ports);
+    let submitted = shell.run(
+        handoff(
+            INTENT,
+            common::AGENT,
+            protected_opening(FRAC, "0.4", "20", "18", Some("24")),
+        ),
+        &ports,
+    );
+    let id = submitted
+        .submissions()
+        .first()
+        .map(|o| o.client_order_id.as_str().to_owned())
+        .expect("the entry under one share is sent");
+
+    let ran = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+            "b-1",
+            Some(&id),
+            FRAC,
+            Side::Buy,
+            "0.4",
+            "0.4",
+            "filled",
+        ))),
+        &ports,
+    );
+
+    assert!(
+        ran.submissions().is_empty(),
+        "no whole share, so no protective order: {:?}",
+        ran.requests
+    );
+    let changes: Vec<(Option<&str>, Option<&str>)> = ran
+        .drafts
+        .iter()
+        .filter(|d| d.event_type == "ProtectionChanged")
+        .map(|d| {
+            (
+                d.payload
+                    .get("action")
+                    .and_then(mandate_canon::Value::as_str),
+                d.payload
+                    .get("unprotected_fraction")
+                    .and_then(mandate_canon::Value::as_str),
+            )
+        })
+        .collect();
+    assert_eq!(
+        changes,
+        vec![
+            (Some("unprotected_start"), Some("0.4")),
+            (Some("unprotected_end"), Some("0.4"))
+        ],
+        "the start discloses the fraction, and the interval ends with nothing to cover and the \
+         position's final fraction"
+    );
+}
+
+/// §5.4's re-placement before expiry re-places the whole shares only: a held 10.4 whose OCO for ten
+/// nears its GTC expiry is cancelled, confirmed, and re-placed for ten, never 10.4, and the
+/// placement discloses the 0.4 it leaves unprotected (DEC-2312 items 2 and 3).
+#[test]
+#[ignore = "pending E7-4"]
+fn a_re_placement_before_expiry_covers_only_the_whole_shares() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[FRAC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = fractional_position(&ports, "10.4");
+    let day = copied(
+        ACCOUNT_STREAM,
+        shell.head().0.saturating_add(1),
+        "TradingDayStarted",
+        with_clock(&[("date", text("2026-12-14"))], 7_000_000),
+        &EventId(format!("{CLOCK_STREAM}-9")),
+    );
+    shell.fold_one(&day).expect("the trading day folds");
+    let cancelled = shell.run(Input::Journal(day), &ports);
+    assert!(
+        cancelled
+            .requests
+            .iter()
+            .any(|r| matches!(r, BrokerRequest::Cancel { .. })),
+        "the OCO created 2026-09-22 is cancelled at its buffer day (§5.4): {:?}",
+        cancelled.requests
+    );
+
+    let ran = shell.run(
+        Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+            client_order_id: "md-oco-1".to_owned(),
+        })),
+        &ports,
+    );
+
+    let protective = ran
+        .submissions()
+        .into_iter()
+        .find(|o| o.purpose == Purpose::Protective)
+        .expect("the whole shares are protected again");
+    assert_eq!(
+        protective.qty,
+        qty("10"),
+        "the whole shares only: a fraction is not allowed in an OCO (§5.2)"
+    );
+    let placed = ran
+        .drafts
+        .iter()
+        .find(|d| {
+            d.event_type == "ProtectionChanged"
+                && d.payload
+                    .get("action")
+                    .and_then(mandate_canon::Value::as_str)
+                    == Some("placed")
+        })
+        .expect("the re-placement is journaled");
+    assert_eq!(
+        placed
+            .payload
+            .get("unprotected_fraction")
+            .and_then(mandate_canon::Value::as_str),
+        Some("0.4"),
+        "and discloses the fraction it leaves"
+    );
+}
+
+/// A profile that offers a US equity a plain limit and no form at all to protect a position with:
+/// an entry on it goes plain, and its fill leaves nothing to place, which is journaled and alerted
+/// (`expiry_unreplaceable`, DEC-838 item 1).
+fn unprotectable_profile() -> mandate_domain::CapabilityProfile {
+    use mandate_domain::{
+        AssetClass, Cell, Idempotency, MarketSession, OrderType as Kind, QuantityForm, Retry, Row,
+        TimeInForce as Tif,
+    };
+    let row = Row {
+        asset_class: AssetClass::UsEquity,
+        session: MarketSession::Regular,
+        cells: vec![Cell {
+            order_type: Kind::Limit,
+            quantity_form: QuantityForm::Whole,
+            times_in_force: [Tif::Day, Tif::Gtc].into_iter().collect(),
+            protection_forms: Default::default(),
+        }],
+    };
+    let idempotency = Idempotency {
+        client_order_id: true,
+        retry: Retry::Unknown,
+        query_by_client_order_id: true,
+    };
+    mandate_domain::CapabilityProfile::new(1, vec![row], idempotency).expect("a valid profile")
+}
+
+/// Every `ProtectionChanged` the executor writes is version 2, with `unprotected_fraction` present
+/// on every record and null where nothing is disclosed (journal spec §9.5, rule 44; DEC-2312 item
+/// 3). Three runs between them write `intended`, `unprotected_start`, `cancelled`, `placed`,
+/// `unprotected_end` and `expiry_unreplaceable`: a whole-share entry, a fractional position's
+/// re-placement before expiry, and an entry on a profile with nothing to protect it with.
+#[test]
+#[ignore = "pending E7-4"]
+fn every_protection_changed_is_written_at_version_2() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL, FRAC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut drafts = Vec::new();
+
+    let mut shell = started();
+    shell.fold_one(&stream_opened()).expect("folds");
+    let mut shell = shell.restart_ready(&ports);
+    shell.run(Input::Market(quote(AAPL, "150", "150.1", 20)), &ports);
+    let intended = shell.run(
+        handoff(
+            INTENT,
+            common::AGENT,
+            protected_opening(AAPL, "10", "150", "140", Some("170")),
+        ),
+        &ports,
+    );
+    drafts.extend(intended.drafts);
+
+    let mut shell = fractional_position(&ports, "10.4");
+    let day = copied(
+        ACCOUNT_STREAM,
+        shell.head().0.saturating_add(1),
+        "TradingDayStarted",
+        with_clock(&[("date", text("2026-12-14"))], 7_000_000),
+        &EventId(format!("{CLOCK_STREAM}-9")),
+    );
+    shell.fold_one(&day).expect("the trading day folds");
+    drafts.extend(shell.run(Input::Journal(day), &ports).drafts);
+    let replaced = shell.run(
+        Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+            client_order_id: "md-oco-1".to_owned(),
+        })),
+        &ports,
+    );
+    drafts.extend(replaced.drafts);
+
+    let mut shell = started();
+    shell.fold_one(&stream_opened()).expect("folds");
+    shell.profile = Some(unprotectable_profile());
+    let mut shell = shell.restart_ready(&ports);
+    shell.run(Input::Market(quote(AAPL, "150", "150.1", 20)), &ports);
+    let submitted = shell.run(
+        handoff(
+            INTENT,
+            common::AGENT,
+            protected_opening(AAPL, "10", "150", "140", Some("170")),
+        ),
+        &ports,
+    );
+    let id = submitted
+        .submissions()
+        .first()
+        .map(|o| o.client_order_id.as_str().to_owned())
+        .expect("the plain entry is sent");
+    drafts.extend(submitted.drafts);
+    let filled = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+            "b-1",
+            Some(&id),
+            AAPL,
+            Side::Buy,
+            "10",
+            "10",
+            "filled",
+        ))),
+        &ports,
+    );
+    drafts.extend(filled.drafts);
+
+    let records: Vec<_> = drafts
+        .iter()
+        .filter(|d| d.event_type == "ProtectionChanged")
+        .collect();
+    let off: Vec<_> = records
+        .iter()
+        .filter(|d| d.schema_version != 2 || d.payload.get("unprotected_fraction").is_none())
+        .map(|d| (d.schema_version, d.payload.get("action")))
+        .collect();
+    assert!(
+        off.is_empty(),
+        "every record is version 2 and carries the fraction, null or not: {off:?}"
+    );
+    let actions: std::collections::BTreeSet<&str> = records
+        .iter()
+        .filter_map(|d| {
+            d.payload
+                .get("action")
+                .and_then(mandate_canon::Value::as_str)
+        })
+        .collect();
+    for action in [
+        "intended",
+        "unprotected_start",
+        "cancelled",
+        "placed",
+        "unprotected_end",
+        "expiry_unreplaceable",
+    ] {
+        assert!(
+            actions.contains(action),
+            "the runs write `{action}`: {actions:?}"
+        );
+    }
+}
+
+/// The fractional rule is an equity rule (§5.2's equities row; DEC-2312 item 1): a crypto quantity
+/// is fractional by nature and still goes as crypto's GTC simple limit, allowed by the gate, never
+/// held to the equity's DAY form.
+#[test]
+fn a_crypto_entry_is_never_held_to_the_fractional_equity_rule() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = started();
+    shell.fold_one(&stream_opened()).expect("folds");
+    let mut shell = shell.restart_ready(&ports);
+    shell.run(Input::Market(quote(BTC, "60000", "60010", 20)), &ports);
+
+    let ran = shell.run(
+        handoff(
+            INTENT,
+            common::AGENT,
+            protected_opening(BTC, "0.5", "60000", "54000", None),
+        ),
+        &ports,
+    );
+
+    let entry = ran
+        .submissions()
+        .first()
+        .copied()
+        .expect("the crypto entry is sent");
+    assert_eq!(
+        (
+            entry.qty,
+            entry.bracket.is_some(),
+            entry.tif,
+            entry.order_type
+        ),
+        (
+            qty("0.5"),
+            false,
+            mandate_executor::TimeInForce::Gtc,
+            mandate_executor::OrderType::Limit
+        ),
+        "crypto's own GTC simple limit (§5.2, §5.4)"
+    );
+}
+
+/// A fractional hold at its protection's buffer day keeps its whole shares covered: the OCO for ten
+/// is cancelled only to be re-placed for ten, and once the broker acknowledges the new one the
+/// position is protected again, its interval ending with the 0.4 it leaves (§5.4; DEC-2312 item 2,
+/// DEC-2315). An OCO the executor cannot re-place is never the one it cancels.
+#[test]
+#[ignore = "pending E7-4"]
+fn a_fractional_hold_keeps_its_whole_shares_covered_through_the_buffer_day() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[FRAC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = fractional_position(&ports, "10.4");
+    let frac = instrument(FRAC);
+    assert_eq!(
+        mandate_executor::is_protected(&shell.state, &frac, &ports),
+        Ok(true),
+        "the whole ten are covered before the buffer day"
+    );
+    let day = copied(
+        ACCOUNT_STREAM,
+        shell.head().0.saturating_add(1),
+        "TradingDayStarted",
+        with_clock(&[("date", text("2026-12-14"))], 7_000_000),
+        &EventId(format!("{CLOCK_STREAM}-9")),
+    );
+    shell.fold_one(&day).expect("the trading day folds");
+    shell.run(Input::Journal(day), &ports);
+    let replaced = shell.run(
+        Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+            client_order_id: "md-oco-1".to_owned(),
+        })),
+        &ports,
+    );
+    let new = replaced
+        .submissions()
+        .into_iter()
+        .find(|o| o.purpose == Purpose::Protective)
+        .map(|o| o.client_order_id.as_str().to_owned())
+        .expect("the whole ten are protected again");
+    let ended = replaced
+        .drafts
+        .iter()
+        .find(|d| {
+            d.event_type == "ProtectionChanged"
+                && d.payload
+                    .get("action")
+                    .and_then(mandate_canon::Value::as_str)
+                    == Some("unprotected_end")
+        })
+        .expect("the re-placement ends its interval");
+    assert_eq!(
+        ended
+            .payload
+            .get("unprotected_fraction")
+            .and_then(mandate_canon::Value::as_str),
+        Some("0.4"),
+        "and discloses the fraction it leaves (DEC-2315)"
+    );
+
+    shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+            "b-2",
+            Some(&new),
+            FRAC,
+            Side::Sell,
+            "10",
+            "0",
+            "accepted",
+        ))),
+        &ports,
+    );
+    assert_eq!(
+        mandate_executor::is_protected(&shell.state, &frac, &ports),
+        Ok(true),
+        "once the broker acknowledges the new OCO, the whole ten are covered again"
     );
 }
 
@@ -4925,6 +5615,348 @@ fn an_agent_kill_switch_cancels_only_that_agents_orders() {
     );
 }
 
+/// DEC-2347 item 3.5: the agent whose own buy filled holds lots, the quantity its kill switch would
+/// sell, and another agent, with none of its own, holds none in the same position.
+#[test]
+fn only_the_agent_whose_buy_filled_holds_lots() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let shell = protected_position(&ports);
+    assert_eq!(shell.state.holds_lots(&agent(common::AGENT)), Ok(true));
+    assert_eq!(shell.state.holds_lots(&agent(OTHER_AGENT)), Ok(false));
+}
+
+/// A reconciliation whose broker reports one fill of 10 AAPL at 150 naming only the broker's order
+/// id `broker`, as Alpaca's `FILL` activity does, lists no open order (a filled order is not open),
+/// and holds `held` AAPL.
+fn fill_by_broker_id(
+    shell: &mut Shell,
+    ports: &mandate_executor::Ports<'_>,
+    broker: &str,
+    held: &str,
+) -> common::Ran {
+    let mut taken = snapshot(shell.head().0, ReconcileReason::Startup);
+    let mut fill = broker_fill("f-1", None, "10", "150");
+    fill.broker_order_id = Some(broker.to_owned());
+    taken.fills = vec![fill];
+    taken.positions = vec![broker_position(AAPL, held)];
+    shell.run(Input::BrokerSnapshot(taken), ports)
+}
+
+/// The agent's switch after a quote, and the quantities of the sells it sends.
+fn switch_sells(shell: &mut Shell, ports: &mandate_executor::Ports<'_>) -> Vec<String> {
+    shell.run(Input::Market(quote(AAPL, "155", "155.1", 20)), ports);
+    let ran = shell.run(
+        Input::Command(Command::KillSwitch {
+            scope: KillScope::Agent(agent(common::AGENT)),
+            initiator: Initiator::Owner,
+            confirmation: Some(owner_confirmation()),
+            cause: None,
+        }),
+        ports,
+    );
+    ran.submissions()
+        .into_iter()
+        .filter(|order| order.side == Side::Sell)
+        .map(|order| order.qty.to_string())
+        .collect()
+}
+
+/// DEC-2353 item 2: a fill naming only the broker's order id the order's acknowledgment journaled
+/// is that order's, so its quantity is applied to it and the agent holds the lots.
+#[test]
+fn a_fill_naming_only_the_broker_id_is_its_orders() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = reconciling(&ports);
+    let id = accepted_order(&mut shell, &ports, INTENT);
+    let ran = fill_by_broker_id(&mut shell, &ports, "b-1", "10");
+    let applied = ran.draft("FillApplied").expect("the fill is applied");
+    assert_eq!(
+        applied.payload.get("client_order_id"),
+        Some(&text(&id)),
+        "{:?}",
+        ran.draft_types()
+    );
+    assert!(!ran.draft_types().contains(&"ExternalActivityIngested"));
+    let order = shell.state.orders().values().next().expect("the order");
+    assert_eq!(order.filled_qty, qty("10"));
+    assert_eq!(shell.state.holds_lots(&agent(common::AGENT)), Ok(true));
+}
+
+/// DEC-2353, rule 13: once the broker-id fill is the agent's, its kill switch sells exactly it.
+#[test]
+fn the_agents_switch_sells_the_lots_a_broker_id_fill_bought() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = reconciling(&ports);
+    accepted_order(&mut shell, &ports, INTENT);
+    fill_by_broker_id(&mut shell, &ports, "b-1", "10");
+    assert_eq!(switch_sells(&mut shell, &ports), ["10"]);
+}
+
+/// DEC-2353, the review of #2270: a buy that filled 5 of its 10 and then ended canceled or expired,
+/// its fill naming only the broker's order id, is the agent's, so its switch sells exactly the 5.
+#[test]
+fn the_agents_switch_sells_what_an_ended_buys_broker_id_fill_bought() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    for status in ["canceled", "expired"] {
+        let mut shell = reconciling(&ports);
+        let id = accepted_order(&mut shell, &ports, INTENT);
+        let mut taken = snapshot(shell.head().0, ReconcileReason::Startup);
+        taken.open_orders = vec![broker_order(
+            "b-1",
+            Some(&id),
+            AAPL,
+            Side::Buy,
+            "10",
+            "5",
+            status,
+        )];
+        let mut fill = broker_fill("f-1", None, "5", "150");
+        fill.broker_order_id = Some("b-1".to_owned());
+        taken.fills = vec![fill];
+        taken.positions = vec![broker_position(AAPL, "5")];
+        shell.run(Input::BrokerSnapshot(taken), &ports);
+        assert!(
+            shell
+                .state
+                .orders()
+                .values()
+                .all(|order| order.state.is_terminal() && order.state != OrderState::Filled),
+            "{status}: the order ended"
+        );
+        assert_eq!(switch_sells(&mut shell, &ports), ["5"], "{status}");
+    }
+}
+
+/// DEC-2353 item 3 (the review of #2299): a fill naming only the broker's order id is no order's
+/// when that order's records carry two ids, and it is not taken past the order's own checks: more
+/// than the order has left, the other side, or another instrument. Each stays external activity,
+/// every agent goes `exits_only`, and nothing is applied to the order; the account holds what the
+/// fill bought, so no position difference is in play.
+#[test]
+fn a_broker_id_fill_failing_its_orders_checks_stays_external() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    for case in ["two ids", "overfill", "side", "instrument"] {
+        let mut shell = reconciling(&ports);
+        let id = accepted_order(&mut shell, &ports, INTENT);
+        let mut fill = broker_fill("f-1", None, "10", "150");
+        fill.broker_order_id = Some("b-1".to_owned());
+        let mut held = (AAPL, "10");
+        match case {
+            "two ids" => {
+                shell.run(
+                    Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+                        "b-2",
+                        Some(&id),
+                        AAPL,
+                        Side::Buy,
+                        "10",
+                        "0",
+                        "accepted",
+                    ))),
+                    &ports,
+                );
+            }
+            "overfill" => {
+                fill.qty = qty("11");
+                held = (AAPL, "11");
+            }
+            "side" => {
+                fill.side = Side::Sell;
+                held = (AAPL, "-10");
+            }
+            _ => {
+                fill.instrument = instrument(FixedInstruments::THIN_EQUITY);
+                held = (FixedInstruments::THIN_EQUITY, "10");
+            }
+        }
+        let mut taken = snapshot(shell.head().0, ReconcileReason::Startup);
+        taken.fills = vec![fill];
+        taken.positions = vec![broker_position(held.0, held.1)];
+        let ran = shell.run(Input::BrokerSnapshot(taken), &ports);
+        assert!(
+            ran.draft_types().contains(&"ExternalActivityIngested"),
+            "{case}: {:?}",
+            ran.draft_types()
+        );
+        assert_eq!(
+            ran.draft("FillApplied")
+                .and_then(|applied| applied.payload.get("client_order_id")),
+            None,
+            "{case}"
+        );
+        assert!(
+            shell
+                .state
+                .orders()
+                .values()
+                .all(|order| order.filled_qty == qty("0")),
+            "{case}"
+        );
+        assert_eq!(
+            shell.state.effective_mode(&agent(common::AGENT)),
+            Mode::ExitsOnly,
+            "{case}"
+        );
+    }
+}
+
+/// DEC-2353 invariant 4: the broker id is folded from the journaled acknowledgment, so after a
+/// restart the fill is still the order's.
+#[test]
+fn a_broker_id_fill_is_the_orders_after_a_restart() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = reconciling(&ports);
+    let id = accepted_order(&mut shell, &ports, INTENT);
+    let (mut restarted, _) = shell.restart(&ports);
+    let ran = fill_by_broker_id(&mut restarted, &ports, "b-1", "10");
+    let applied = ran.draft("FillApplied").expect("the fill is applied");
+    assert_eq!(applied.payload.get("client_order_id"), Some(&text(&id)));
+}
+
+/// DEC-2353 item 3, invariant 3: a fill whose broker id no order's records carry, or two orders'
+/// records carry, is no agent's. It is external activity, every agent goes `exits_only`, and the
+/// agent's switch sells none of it.
+#[test]
+fn a_fill_whose_broker_id_names_no_one_order_stays_external() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    for two_orders in [false, true] {
+        let mut shell = reconciling(&ports);
+        accepted_order(&mut shell, &ports, INTENT);
+        let broker = if two_orders {
+            accepted_order(&mut shell, &ports, OTHER_INTENT);
+            "b-1"
+        } else {
+            "b-unknown"
+        };
+        let ran = fill_by_broker_id(&mut shell, &ports, broker, "10");
+        assert!(
+            ran.draft_types().contains(&"ExternalActivityIngested"),
+            "two orders: {two_orders}, {:?}",
+            ran.draft_types()
+        );
+        assert_eq!(
+            ran.draft("FillApplied")
+                .and_then(|applied| applied.payload.get("client_order_id")),
+            None,
+            "two orders: {two_orders}"
+        );
+        assert_eq!(
+            shell.state.effective_mode(&agent(common::AGENT)),
+            Mode::ExitsOnly,
+            "two orders: {two_orders}"
+        );
+        assert!(
+            switch_sells(&mut shell, &ports).is_empty(),
+            "two orders: {two_orders}"
+        );
+    }
+}
+
+/// The agent's buy of 10 the broker reports in `status` with `filled` of it filled, after a
+/// reconciliation, with its fill naming no order.
+fn ended_without_its_fill(
+    status: &str,
+    filled: &str,
+    fills: Vec<mandate_executor::BrokerFill>,
+    held: &str,
+) -> Shell {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = reconciling(&ports);
+    let id = accepted_order(&mut shell, &ports, INTENT);
+    let mut taken = snapshot(shell.head().0, ReconcileReason::Startup);
+    taken.open_orders = vec![broker_order(
+        "b-1",
+        Some(&id),
+        AAPL,
+        Side::Buy,
+        "10",
+        filled,
+        status,
+    )];
+    taken.fills = fills;
+    taken.positions = vec![broker_position(AAPL, held)];
+    shell.run(Input::BrokerSnapshot(taken), &ports);
+    shell
+}
+
+/// DEC-2347 item 3.6 (lane D1's finding): a buy the broker reports filled whose fill named no
+/// order leaves no lots in the sub-ledger, but the shares the account holds are the agent's, so it
+/// still holds lots; once the account holds none of the instrument, it holds none.
+#[test]
+fn a_filled_buy_whose_fill_named_no_order_still_holds_lots() {
+    let bought = broker_fill("f-1", None, "10", "150");
+    let mut sold = broker_fill("f-2", None, "10", "151");
+    sold.side = Side::Sell;
+    let holding = ended_without_its_fill("filled", "10", vec![bought.clone()], "10");
+    assert!(
+        holding
+            .state
+            .orders()
+            .values()
+            .all(|order| order.filled_qty == qty("0")),
+        "the fill is applied to no order"
+    );
+    assert_eq!(holding.state.holds_lots(&agent(common::AGENT)), Ok(true));
+    assert_eq!(holding.state.holds_lots(&agent(OTHER_AGENT)), Ok(false));
+    let flat = ended_without_its_fill("filled", "10", vec![bought, sold], "0");
+    assert_eq!(flat.state.holds_lots(&agent(common::AGENT)), Ok(false));
+}
+
+/// DEC-2347 item 3.6 (the review of #2270): a buy that filled 5 of its 10 and then ended canceled
+/// or expired, its fill naming no order, still holds the 5 the account holds.
+#[test]
+fn a_partly_filled_buy_that_ended_with_its_fill_named_no_order_still_holds_lots() {
+    for status in ["canceled", "expired"] {
+        let fill = broker_fill("f-1", None, "5", "150");
+        let ended = ended_without_its_fill(status, "5", vec![fill], "5");
+        assert!(
+            ended.state.orders().values().all(|order| {
+                order.state.is_terminal()
+                    && order.state != OrderState::Filled
+                    && order.filled_qty == qty("0")
+            }),
+            "{status}: the order ended unfilled in the fold"
+        );
+        assert_eq!(
+            ended.state.holds_lots(&agent(common::AGENT)),
+            Ok(true),
+            "{status}"
+        );
+    }
+}
+
 #[test]
 fn an_agent_kill_switch_sells_exactly_the_sub_ledger_quantity() {
     let ids = TestIds;
@@ -4964,8 +5996,7 @@ fn an_agent_kill_switch_sells_exactly_the_sub_ledger_quantity() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
-fn an_account_kill_switch_uses_cancel_all_and_close_position() {
+fn an_account_kill_switch_uses_cancel_all() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
     let instruments = FixedInstruments;
@@ -4994,7 +6025,6 @@ fn an_account_kill_switch_uses_cancel_all_and_close_position() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn an_account_cancel_all_covers_unknown_orders() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL, CPHC]);
@@ -5018,6 +6048,7 @@ fn an_account_cancel_all_covers_unknown_orders() {
             .is_some_and(|o| o.state == OrderState::Unknown),
         "there is an Unknown order on the account"
     );
+    shell.run(Input::Market(quote(AAPL, "155", "155.1", 20)), &ports);
 
     let ran = shell.run(
         Input::Command(Command::KillSwitch {
@@ -5042,6 +6073,1753 @@ fn an_account_cancel_all_covers_unknown_orders() {
         )),
         "and the executor does not also cancel the Unknown one by id"
     );
+}
+
+/// A position of `qty` in `instrument` held by `holder`, folded as the journaled facts of its
+/// filled buy from `seq` on: what an account kill switch finds to close.
+fn held_by(shell: &mut Shell, seq: u64, holder: &str, instrument: &str, qty: &str, id: &str) {
+    for fact in [
+        event(
+            ACCOUNT_STREAM,
+            seq,
+            "OrderSubmitted",
+            with_clock(
+                &[
+                    ("client_order_id", text(id)),
+                    ("agent", text(holder)),
+                    ("instrument", text(instrument)),
+                    ("side", text("buy")),
+                    ("qty", text(qty)),
+                    ("limit", text("100")),
+                ],
+                12,
+            ),
+        ),
+        event(
+            ACCOUNT_STREAM,
+            seq.saturating_add(1),
+            "FillApplied",
+            with_clock(
+                &[
+                    ("fill_id", text(&format!("f-{id}"))),
+                    ("client_order_id", text(id)),
+                    ("instrument", text(instrument)),
+                    ("side", text("buy")),
+                    ("qty_gross", text(qty)),
+                    ("price", text("100")),
+                ],
+                12,
+            ),
+        ),
+        event(
+            ACCOUNT_STREAM,
+            seq.saturating_add(2),
+            "OrderStateChanged",
+            with_clock(
+                &[("client_order_id", text(id)), ("state", text("filled"))],
+                12,
+            ),
+        ),
+    ] {
+        shell.fold_one(&fact).expect("the held position folds");
+    }
+}
+
+/// An account with two agents: `AGENT`'s protected `AAPL` and `OTHER_AGENT`'s `BTC`, in the
+/// regular session with a fresh quote for each, where §5.5 lets a close go at the market.
+fn two_agent_account(ports: &mandate_executor::Ports<'_>) -> Shell {
+    let mut shell = started();
+    shell.fold_one(&stream_opened()).expect("folds");
+    for event in protected_position_events(2) {
+        shell
+            .fold_one(&event)
+            .expect("the protected position folds");
+    }
+    held_by(&mut shell, 6, OTHER_AGENT, BTC, "0.5", "md-held-btc");
+    let mut shell = shell.restart_ready(ports);
+    shell.run(Input::Market(quote(AAPL, "155", "155.1", 20)), ports);
+    shell.run(Input::Market(quote(BTC, "60000", "60010", 20)), ports);
+    shell
+}
+
+fn account_switch(initiator: Initiator) -> Input {
+    Input::Command(Command::KillSwitch {
+        scope: KillScope::Account(mandate_executor::AccountRef(common::ACCOUNT.to_owned())),
+        initiator,
+        confirmation: (initiator == Initiator::Owner).then(owner_confirmation),
+        cause: None,
+    })
+}
+
+/// §5.5's sequence for the account scope: the final mode first, for every agent on the account,
+/// then the cancel. It is one `AgentModeApplied` for `*`, every agent of the account, those the
+/// executor has not yet seen included: an owner's switch stops them, a mandate limit's pauses them
+/// (DEC-100), journaled before the broker's cancel-all goes, so nothing an agent hands in meanwhile
+/// is gated under its old mode (`AGENTS.md` rule 13).
+#[test]
+fn an_account_kill_switch_applies_every_agents_mode_before_its_cancel_all() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL, BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    for (initiator, mode, name) in [
+        (Initiator::Owner, Mode::Stopped, "stopped"),
+        (Initiator::RiskLimit, Mode::Paused, "paused"),
+    ] {
+        let mut shell = two_agent_account(&ports);
+
+        let ran = shell.run(account_switch(initiator), &ports);
+
+        let cancel_all = ran
+            .effects
+            .iter()
+            .position(|e| matches!(e, Effect::Broker(BrokerRequest::CancelAll(_))))
+            .unwrap_or_else(|| panic!("{initiator:?}: the cancel-all goes"));
+        let every = ran.effects.iter().position(|e| {
+            matches!(e, Effect::Journal(d) if d.event_type == "AgentModeApplied"
+                && d.payload.get("agent").and_then(mandate_canon::Value::as_str) == Some("*")
+                && d.payload.get("to").and_then(mandate_canon::Value::as_str) == Some(name))
+        });
+        assert!(
+            every.is_some_and(|at| at < cancel_all),
+            "{initiator:?}: every agent `{name}` before the cancel-all: {:?}",
+            ran.draft_types()
+        );
+        for holder in [common::AGENT, OTHER_AGENT, "agent-unseen"] {
+            assert_eq!(
+                shell.state.effective_mode(&agent(holder)),
+                mode,
+                "{initiator:?}: {holder} is {name}"
+            );
+        }
+    }
+}
+
+/// A crypto position whose stop-limit the executor placed after its entry filled, acknowledged by
+/// the broker, in the regular session: protection the fold knows as an order with its request,
+/// which `re_cover` would place again once cancelled. Answers the shell and the stop as the broker
+/// describes it in `status`.
+fn crypto_stop_account(
+    ports: &mandate_executor::Ports<'_>,
+) -> (Shell, impl Fn(&str) -> mandate_executor::BrokerOrder) {
+    let mut shell = started();
+    shell.fold_one(&stream_opened()).expect("folds");
+    let mut shell = shell.restart_ready(ports);
+    shell.run(Input::Market(quote(BTC, "60000", "60010", 20)), ports);
+    let submitted = shell.run(
+        handoff(
+            INTENT,
+            common::AGENT,
+            protected_opening(BTC, "0.5", "60000", "54000", None),
+        ),
+        ports,
+    );
+    let entry = submitted
+        .submissions()
+        .first()
+        .map(|o| o.client_order_id.as_str().to_owned())
+        .expect("the crypto entry is sent");
+    shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+            "b-1",
+            Some(&entry),
+            BTC,
+            Side::Buy,
+            "0.5",
+            "0.5",
+            "filled",
+        ))),
+        ports,
+    );
+    let filled = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Fill(btc_fill(&entry, "0.5"))),
+        ports,
+    );
+    let (id, size) = filled
+        .submissions()
+        .into_iter()
+        .find(|o| o.purpose == Purpose::Protective)
+        .map(|o| (o.client_order_id.as_str().to_owned(), o.qty.to_string()))
+        .expect("the stop-limit is placed");
+    let stop =
+        move |status: &str| broker_order("b-stop", Some(&id), BTC, Side::Sell, &size, "0", status);
+    shell.run(Input::BrokerUpdate(BrokerUpdate::Order(stop("new"))), ports);
+    (shell, stop)
+}
+
+/// §5.5's cancel → confirm → close (DEC-2333 items 1 and 2): the account switch's step sends the
+/// cancel-all and nothing else. No order is cancelled by its id beside it, and no close-position
+/// goes before the cancel-all is confirmed, so no sell still working can fill beside a close.
+#[test]
+fn an_account_kill_switch_cancels_nothing_by_id_and_closes_nothing_before_its_cancel_all_is_confirmed()
+ {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL, BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = two_agent_account(&ports);
+
+    let ran = shell.run(account_switch(Initiator::Owner), &ports);
+
+    let sent: Vec<&BrokerRequest> = ran.requests.iter().collect();
+    assert!(
+        matches!(sent[..], [BrokerRequest::CancelAll(_)]),
+        "the cancel-all alone: {sent:?}"
+    );
+}
+
+/// The cancel-all is confirmed by the broker's answer and then a fresh read of its open orders
+/// (DEC-2333 item 2): once the broker accepts it, the executor lists the account's open orders,
+/// and still closes nothing until that read answers.
+#[test]
+fn an_accepted_cancel_all_is_confirmed_by_reading_the_open_orders() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL, BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = two_agent_account(&ports);
+    shell.run(account_switch(Initiator::Owner), &ports);
+
+    let accepted = shell.run(
+        Input::Broker(Ok(BrokerOutcome::AccountWideAccepted)),
+        &ports,
+    );
+
+    assert!(
+        matches!(accepted.requests[..], [BrokerRequest::ListOpenOrders]),
+        "one open-orders read, and no close yet: {:?}",
+        accepted.requests
+    );
+}
+
+/// A cancel-all whose answer is lost is never sent again without its own idempotency key
+/// (DEC-2333 item 3): the executor reads the open orders by listing instead, in that step and on
+/// every step after it, and closes nothing meanwhile.
+#[test]
+fn a_lost_cancel_all_answer_is_read_by_listing_and_never_resent() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL, BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = two_agent_account(&ports);
+    shell.run(account_switch(Initiator::Owner), &ports);
+
+    let lost = shell.run(Input::Broker(Err(BrokerUnknown::Timeout)), &ports);
+    let later = shell.run(Input::Market(quote(AAPL, "155", "155.1", 30)), &ports);
+
+    assert!(
+        lost.requests
+            .iter()
+            .any(|r| matches!(r, BrokerRequest::ListOpenOrders)),
+        "the lost answer is read by listing the open orders: {:?}",
+        lost.requests
+    );
+    let after: Vec<&BrokerRequest> = lost.requests.iter().chain(&later.requests).collect();
+    assert!(
+        !after.iter().any(|r| matches!(
+            r,
+            BrokerRequest::CancelAll(_) | BrokerRequest::ClosePosition(..)
+        )),
+        "never a second cancel-all, and no close before a read confirms: {after:?}"
+    );
+}
+
+/// A sell the open-orders read shows still working after the cancel-all is cancelled by its own id
+/// (DEC-2333 item 3), and that instrument closes nothing until the cancel is confirmed.
+#[test]
+fn a_sell_still_working_after_the_cancel_all_is_cancelled_by_its_id() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (mut shell, stop) = crypto_stop_account(&ports);
+    shell.run(account_switch(Initiator::Owner), &ports);
+    shell.run(
+        Input::Broker(Ok(BrokerOutcome::AccountWideAccepted)),
+        &ports,
+    );
+
+    let read = shell.run(
+        Input::Broker(Ok(BrokerOutcome::OpenOrders(vec![stop("new")]))),
+        &ports,
+    );
+
+    let working = stop("new").client_order_id;
+    assert!(
+        read.requests.iter().any(|r| matches!(
+            r,
+            BrokerRequest::Cancel { client_order_id }
+                if Some(client_order_id.as_str()) == working.as_deref()
+        )),
+        "the stop still working is cancelled by its id: {:?}",
+        read.requests
+    );
+    assert!(
+        !read
+            .requests
+            .iter()
+            .any(|r| matches!(r, BrokerRequest::ClosePosition(..))),
+        "and its instrument does not close beside it: {:?}",
+        read.requests
+    );
+}
+
+/// The protection the cancel-all cancelled is never placed again while the switch waits for its
+/// close (DEC-2333 item 5; §5.4, `AGENTS.md` rule 12): without a guard the executor re-places this
+/// crypto stop-limit, which would sell the same coins twice once the close-position goes. The
+/// cancel is folded, and nothing protective is sent, in that step or the next.
+#[test]
+fn an_account_kill_switch_never_re_places_the_protection_its_cancel_all_cancelled() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (mut shell, stop) = crypto_stop_account(&ports);
+    shell.run(account_switch(Initiator::Owner), &ports);
+
+    let cancelled = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(stop("canceled"))),
+        &ports,
+    );
+    let later = shell.run(Input::Market(quote(BTC, "60000", "60010", 40)), &ports);
+
+    let protective: Vec<_> = cancelled
+        .submissions()
+        .into_iter()
+        .chain(later.submissions())
+        .filter(|o| o.purpose == Purpose::Protective)
+        .map(|o| o.client_order_id.as_str().to_owned())
+        .collect();
+    assert!(
+        protective.is_empty(),
+        "no protection re-placed while the switch closes: {protective:?}"
+    );
+}
+
+/// A bracket entry the cancel-all leaves partly filled gets no OCO (DEC-2333 item 5, rule 12):
+/// filled 60 of 100 when the account switch goes, the entry is reported canceled at 60, and the
+/// GTC OCO `bracket` would place for those 60 would sell them twice beside the switch's close.
+#[test]
+fn a_bracket_the_cancel_all_leaves_partly_filled_gets_no_oco() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = started();
+    shell.fold_one(&stream_opened()).expect("folds");
+    let mut shell = shell.restart_ready(&ports);
+    shell.run(Input::Market(quote(AAPL, "150", "150.1", 20)), &ports);
+    let submitted = shell.run(
+        handoff(
+            INTENT,
+            common::AGENT,
+            protected_opening(AAPL, "100", "150", "140", Some("170")),
+        ),
+        &ports,
+    );
+    let entry = submitted
+        .submissions()
+        .first()
+        .map(|o| o.client_order_id.as_str().to_owned())
+        .expect("the bracket is sent");
+    let reported = |status: &str| {
+        Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+            "b-1",
+            Some(&entry),
+            AAPL,
+            Side::Buy,
+            "100",
+            "60",
+            status,
+        )))
+    };
+    shell.run(reported("partially_filled"), &ports);
+    shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Fill(broker_fill(
+            "f-1",
+            Some(&entry),
+            "60",
+            "150",
+        ))),
+        &ports,
+    );
+    shell.run(account_switch(Initiator::Owner), &ports);
+
+    let cancelled = shell.run(reported("canceled"), &ports);
+
+    let protective: Vec<_> = cancelled
+        .submissions()
+        .into_iter()
+        .filter(|o| o.purpose == Purpose::Protective)
+        .map(|o| (o.client_order_id.as_str().to_owned(), o.qty))
+        .collect();
+    assert!(
+        protective.is_empty(),
+        "no OCO for the 60 beside the switch's close: {protective:?}"
+    );
+}
+
+/// A re-placement before expiry under way when the account switch goes never places protection
+/// once its cancel is confirmed (DEC-2333 item 5): the buffer day cancels the OCO, the switch
+/// goes, and the confirmed cancel places nothing beside the switch's close.
+#[test]
+fn a_re_placement_under_way_across_the_account_switch_places_nothing() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = protected_position(&ports);
+    let buffer = copied(
+        ACCOUNT_STREAM,
+        shell.head().0.saturating_add(1),
+        "TradingDayStarted",
+        with_clock(&[("date", text("2026-12-14"))], 6_100_000),
+        &EventId(format!("{CLOCK_STREAM}-9")),
+    );
+    shell.fold_one(&buffer).expect("the buffer day folds");
+    let begun = shell.run(Input::Journal(buffer), &ports);
+    assert!(
+        begun.requests.iter().any(|r| matches!(
+            r,
+            BrokerRequest::Cancel { client_order_id } if client_order_id.as_str() == "md-oco-1"
+        )),
+        "the buffer day starts the re-placement: {:?}",
+        begun.requests
+    );
+    shell.run(
+        Input::Market(quote(AAPL, "155", "155.1", 6_100_010)),
+        &ports,
+    );
+    shell.run(account_switch(Initiator::Owner), &ports);
+
+    let confirmed = shell.run(
+        Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+            client_order_id: "md-oco-1".to_owned(),
+        })),
+        &ports,
+    );
+
+    let protective: Vec<_> = confirmed
+        .submissions()
+        .into_iter()
+        .filter(|o| o.purpose == Purpose::Protective)
+        .map(|o| o.client_order_id.as_str().to_owned())
+        .collect();
+    assert!(
+        protective.is_empty(),
+        "no re-placement beside the switch's close: {protective:?}"
+    );
+}
+
+/// §5.4's bound never sells beside the account switch's close (DEC-2333 items 3 and 5): an entry
+/// partly filled when the switch goes leaves its interval open, and at `max_unprotected_s` the
+/// interval is journaled and alerted, but nothing is sent to exit it.
+#[test]
+fn the_bound_never_sells_beside_the_account_switch() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = started();
+    shell.fold_one(&stream_opened()).expect("folds");
+    let mut shell = shell.restart_ready(&ports);
+    shell.run(Input::Market(quote(BTC, "60000", "60010", 20)), &ports);
+    let submitted = shell.run(
+        handoff(
+            INTENT,
+            common::AGENT,
+            protected_opening(BTC, "0.5", "60000", "54000", None),
+        ),
+        &ports,
+    );
+    let entry = submitted
+        .submissions()
+        .first()
+        .map(|o| o.client_order_id.as_str().to_owned())
+        .expect("the crypto entry is sent");
+    let order = |filled: &str, status: &str| {
+        Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+            "b-1",
+            Some(&entry),
+            BTC,
+            Side::Buy,
+            "0.5",
+            filled,
+            status,
+        )))
+    };
+    shell.run(order("0.2", "partially_filled"), &ports);
+    shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Fill(mandate_executor::BrokerFill {
+            instrument: instrument(BTC),
+            ..broker_fill("f-btc-1", Some(&entry), "0.2", "60000")
+        })),
+        &ports,
+    );
+    shell.run(account_switch(Initiator::Owner), &ports);
+    shell.run(order("0.2", "canceled"), &ports);
+
+    let bound = shell.run(Input::Tick(clock(20 + 3_600)), &ports);
+
+    let sells: Vec<_> = bound
+        .submissions()
+        .into_iter()
+        .filter(|o| o.side == Side::Sell)
+        .map(|o| (o.client_order_id.as_str().to_owned(), o.purpose))
+        .collect();
+    assert!(
+        sells.is_empty(),
+        "the bound sells nothing beside the switch's close: {sells:?}"
+    );
+    assert!(
+        !bound.draft_types().contains(&"IntentReceived"),
+        "nor raises a flatten of its own, held or not: {:?}",
+        bound.draft_types()
+    );
+}
+
+/// Protection the cancel-all cancels leaves its position unprotected under §5.4's bound, journaled
+/// and never silent (DEC-2333 item 3): the cancel starts an interval (`unprotected_start`), and at
+/// `max_unprotected_s` the interval is journaled (`interval_limit`) and the owner alerted
+/// (`unprotected_interval_limit`), while nothing is placed or sold beside the switch's close.
+#[test]
+fn protection_the_cancel_all_cancels_opens_a_bounded_alerted_interval() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (mut shell, stop) = crypto_stop_account(&ports);
+    shell.run(account_switch(Initiator::Owner), &ports);
+
+    let cancelled = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(stop("canceled"))),
+        &ports,
+    );
+    let bound = shell.run(Input::Tick(clock(20 + 3_600)), &ports);
+
+    let actions = |ran: &common::Ran| -> Vec<String> {
+        ran.drafts
+            .iter()
+            .filter(|d| d.event_type == "ProtectionChanged")
+            .filter_map(|d| {
+                d.payload
+                    .get("action")
+                    .and_then(mandate_canon::Value::as_str)
+            })
+            .map(str::to_owned)
+            .collect()
+    };
+    assert!(
+        actions(&cancelled).iter().any(|a| a == "unprotected_start"),
+        "the cancel starts the interval: {:?}",
+        actions(&cancelled)
+    );
+    assert!(
+        actions(&bound).iter().any(|a| a == "interval_limit")
+            && bound.notifications.contains(&"unprotected_interval_limit"),
+        "the bound journals the interval and alerts the owner: {:?} {:?}",
+        actions(&bound),
+        bound.notifications
+    );
+    let sent: Vec<_> = cancelled
+        .submissions()
+        .into_iter()
+        .chain(bound.submissions())
+        .map(|o| o.client_order_id.as_str().to_owned())
+        .collect();
+    assert!(sent.is_empty(), "nothing placed or sold: {sent:?}");
+}
+
+/// The interval protection's loss opens is the closing instrument's own, whatever other
+/// instrument has one open (DEC-2333 item 3): with an AAPL bracket partly filled, its interval
+/// open, the BTC stop the cancel-all cancels still starts BTC's interval.
+#[test]
+fn another_instruments_open_interval_does_not_hide_the_closing_ones_start() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL, BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (mut shell, stop) = crypto_stop_account(&ports);
+    shell.run(Input::Market(quote(AAPL, "150", "150.1", 20)), &ports);
+    let submitted = shell.run(
+        handoff(
+            OTHER_INTENT,
+            common::AGENT,
+            protected_opening(AAPL, "100", "150", "140", Some("170")),
+        ),
+        &ports,
+    );
+    let entry = submitted
+        .submissions()
+        .first()
+        .map(|o| o.client_order_id.as_str().to_owned())
+        .expect("the AAPL bracket is sent");
+    shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+            "b-2",
+            Some(&entry),
+            AAPL,
+            Side::Buy,
+            "100",
+            "60",
+            "partially_filled",
+        ))),
+        &ports,
+    );
+    shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Fill(broker_fill(
+            "f-aapl-1",
+            Some(&entry),
+            "60",
+            "150",
+        ))),
+        &ports,
+    );
+    shell.run(account_switch(Initiator::Owner), &ports);
+
+    let cancelled = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(stop("canceled"))),
+        &ports,
+    );
+
+    let started: Vec<_> = cancelled
+        .drafts
+        .iter()
+        .filter(|d| {
+            d.event_type == "ProtectionChanged"
+                && d.payload
+                    .get("action")
+                    .and_then(mandate_canon::Value::as_str)
+                    == Some("unprotected_start")
+        })
+        .filter_map(|d| {
+            d.payload
+                .get("instrument_id")
+                .and_then(mandate_canon::Value::as_str)
+        })
+        .collect();
+    assert_eq!(started, vec![BTC], "BTC's own interval starts");
+}
+
+/// The confirming read is one taken after the switch (DEC-2333 item 6): a reconciliation whose
+/// snapshot was taken at a head before the switch's record cannot show what the cancel-all did, so
+/// it confirms nothing and cancels nothing; one taken at or after it does.
+#[test]
+fn only_a_read_taken_after_the_switch_confirms_its_cancel_all() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (mut shell, stop) = crypto_stop_account(&ports);
+    let before = shell.head().0;
+    shell.run(account_switch(Initiator::Owner), &ports);
+    let after = shell.head().0;
+    let read = |head: u64| {
+        let mut taken = snapshot(head, ReconcileReason::Scheduled);
+        taken.open_orders = vec![stop("new")];
+        Input::BrokerSnapshot(taken)
+    };
+    let working = stop("new").client_order_id;
+    let cancels = |ran: &common::Ran| {
+        ran.requests.iter().any(|r| {
+            matches!(
+                r,
+                BrokerRequest::Cancel { client_order_id }
+                    if Some(client_order_id.as_str()) == working.as_deref()
+            )
+        })
+    };
+
+    let stale = shell.run(read(before), &ports);
+    let fresh = shell.run(read(after), &ports);
+
+    assert!(
+        !cancels(&stale),
+        "a snapshot taken before the switch confirms nothing: {:?}",
+        stale.requests
+    );
+    assert!(
+        cancels(&fresh),
+        "one taken after it confirms, and cancels the stop by its id: {:?}",
+        fresh.requests
+    );
+}
+
+/// An agent switch's flatten rung in flight when the account switch goes is never followed by
+/// another (DEC-2333 item 6): the flatten is exempt from the agent's mode, so neither the mode nor
+/// the account switch's own guard held it before; the cancel-all cancels the rung, and the
+/// confirmed cancel steps no new rung out beside the switch's close, then or at the next step.
+#[test]
+fn a_ladder_rung_in_flight_is_not_followed_by_another_beside_the_close() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = protected_position(&ports);
+    shell.run(Input::Market(quote(AAPL, "150", "150.2", 20)), &ports);
+    shell.run(
+        Input::Command(Command::KillSwitch {
+            scope: KillScope::Agent(agent(common::AGENT)),
+            initiator: Initiator::RiskLimit,
+            confirmation: None,
+            cause: None,
+        }),
+        &ports,
+    );
+    let sent = shell.run(
+        Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+            client_order_id: "md-oco-1".to_owned(),
+        })),
+        &ports,
+    );
+    let rung = sent
+        .submissions()
+        .first()
+        .map(|o| o.client_order_id.as_str().to_owned())
+        .expect("the agent switch's flatten sends its first rung");
+    shell.run(account_switch(Initiator::Owner), &ports);
+
+    let confirmed = shell.run(
+        Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+            client_order_id: rung.clone(),
+        })),
+        &ports,
+    );
+    let later = shell.run(Input::Tick(clock(40)), &ports);
+
+    let sent: Vec<_> = confirmed
+        .submissions()
+        .into_iter()
+        .chain(later.submissions())
+        .map(|o| o.client_order_id.as_str().to_owned())
+        .collect();
+    assert!(
+        sent.is_empty(),
+        "no rung after {rung} beside the switch's close: {sent:?}"
+    );
+}
+
+/// The close goes once its instrument is confirmed clear (§5.5, DEC-2333 item 2): the cancel-all
+/// accepted, a read showing nothing of ours working in BTC, and the broker's close-position for BTC
+/// is sent, once.
+#[test]
+fn a_confirmed_instrument_is_closed_by_the_broker() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (mut shell, _) = crypto_stop_account(&ports);
+    shell.run(account_switch(Initiator::Owner), &ports);
+    shell.run(
+        Input::Broker(Ok(BrokerOutcome::AccountWideAccepted)),
+        &ports,
+    );
+
+    let read = shell.run(
+        Input::Broker(Ok(BrokerOutcome::OpenOrders(Vec::new()))),
+        &ports,
+    );
+
+    let closes: Vec<&str> = read
+        .requests
+        .iter()
+        .filter_map(|r| match r {
+            BrokerRequest::ClosePosition(_, instrument) => Some(instrument.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(closes, vec![BTC], "BTC's close-position, once");
+}
+
+/// The account switch, accepted and read clear, up to the run that closes BTC: the shell, the
+/// switch's `KillSwitchActivated` event id, that run, and the stop the cancel-all cancelled.
+fn closed_btc(
+    ports: &mandate_executor::Ports<'_>,
+) -> (
+    Shell,
+    String,
+    common::Ran,
+    impl Fn(&str) -> mandate_executor::BrokerOrder,
+) {
+    let (mut shell, stop) = crypto_stop_account(ports);
+    let switched = shell.run(account_switch(Initiator::Owner), ports);
+    let switch = switched
+        .draft("KillSwitchActivated")
+        .map(|d| d.event_id.0.clone())
+        .expect("the switch is journaled");
+    shell.run(Input::Broker(Ok(BrokerOutcome::AccountWideAccepted)), ports);
+    let read = shell.run(
+        Input::Broker(Ok(BrokerOutcome::OpenOrders(Vec::new()))),
+        ports,
+    );
+    (shell, switch, read, stop)
+}
+
+/// Each close-position is journaled before it is sent (DEC-2337 items 1 and 3, `AGENTS.md` rule
+/// 5): one `AccountCloseRequested` naming BTC, the quantity held, and the switch it carries out,
+/// ahead of the close-position.
+#[test]
+fn a_close_is_journaled_before_it_is_sent() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (shell, switch, read, _) = closed_btc(&ports);
+    let switch_id = switch.clone();
+
+    let record = read
+        .effects
+        .iter()
+        .position(|e| matches!(e, Effect::Journal(d) if d.event_type == "AccountCloseRequested"))
+        .expect("the close is journaled");
+    let close = read
+        .effects
+        .iter()
+        .position(|e| matches!(e, Effect::Broker(BrokerRequest::ClosePosition(..))))
+        .expect("the close-position goes");
+    assert!(record < close, "journaled before it is sent");
+    let journaled = read.draft("AccountCloseRequested").expect("the record");
+    let field = |name: &str| {
+        journaled
+            .payload
+            .get(name)
+            .and_then(mandate_canon::Value::as_str)
+            .map(str::to_owned)
+    };
+    let held = shell
+        .state
+        .positions()
+        .get(&instrument(BTC))
+        .map(ToString::to_string);
+    assert_eq!(
+        (
+            field("instrument_id"),
+            field("qty"),
+            field("kill_switch_event")
+        ),
+        (Some(BTC.to_owned()), held, Some(switch.clone())),
+        "BTC, the quantity held, and the switch"
+    );
+    assert_eq!(
+        journaled
+            .payload
+            .get("attempt")
+            .and_then(mandate_canon::Value::as_int),
+        Some(1),
+        "the first request"
+    );
+    let named = shell
+        .account_journal
+        .iter()
+        .find(|e| e.event_id.0 == switch_id)
+        .filter(|e| e.event_type == "KillSwitchActivated")
+        .and_then(|e| {
+            e.payload
+                .get("closes")
+                .and_then(mandate_canon::Value::as_array)
+        })
+        .is_some_and(|closes| closes.iter().any(|name| name.as_str() == Some(BTC)));
+    assert!(
+        named,
+        "the switch it names lists BTC in its closes (DEC-2337 item 5, until rule-checked)"
+    );
+}
+
+/// A journaled close is read as sent, and asked again only on a later read (DEC-2337 item 3): a
+/// restart resends nothing; a read taken before the request shows nothing new; a read taken after
+/// it, showing BTC still held with nothing of ours working, journals `attempt` 2 before the
+/// close-position goes again.
+#[test]
+fn a_close_is_asked_again_only_on_a_later_read_showing_it_still_held() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (shell, _, _, _) = closed_btc(&ports);
+    let requested = shell
+        .account_journal
+        .iter()
+        .find(|e| e.event_type == "AccountCloseRequested")
+        .map(|e| e.seq.0)
+        .expect("the first request is journaled");
+    let held = shell
+        .state
+        .positions()
+        .get(&instrument(BTC))
+        .map(ToString::to_string)
+        .unwrap_or_default();
+    let read = |head: u64| {
+        let mut taken = snapshot(head, ReconcileReason::Startup);
+        taken.positions = vec![broker_position(BTC, &held)];
+        Input::BrokerSnapshot(taken)
+    };
+    let closes = |ran: &common::Ran| {
+        ran.requests
+            .iter()
+            .filter(|r| matches!(r, BrokerRequest::ClosePosition(..)))
+            .count()
+    };
+
+    let (mut restarted, started) = shell.restart(&ports);
+    let stale = restarted.run(read(requested - 1), &ports);
+    let fresh = restarted.run(read(restarted.head().0), &ports);
+
+    assert_eq!(
+        (closes(&started), closes(&stale)),
+        (0, 0),
+        "nothing again before a read taken after the request"
+    );
+    let attempt = fresh.draft("AccountCloseRequested").and_then(|d| {
+        d.payload
+            .get("attempt")
+            .and_then(mandate_canon::Value::as_int)
+    });
+    assert_eq!(attempt, Some(2), "the re-request is attempt 2");
+    let record = fresh
+        .effects
+        .iter()
+        .position(|e| matches!(e, Effect::Journal(d) if d.event_type == "AccountCloseRequested"));
+    let close = fresh
+        .effects
+        .iter()
+        .position(|e| matches!(e, Effect::Broker(BrokerRequest::ClosePosition(..))));
+    assert!(
+        record.is_some() && close.is_some() && record < close,
+        "journaled before it goes again: record at {record:?}, close at {close:?}"
+    );
+}
+
+/// A later read showing BTC no longer held asks no close again (DEC-2337 item 3): only a read that
+/// shows the instrument still held does.
+#[test]
+fn a_later_read_showing_the_instrument_flat_asks_no_close_again() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (shell, _, _, _) = closed_btc(&ports);
+    assert!(
+        shell
+            .account_journal
+            .iter()
+            .any(|e| e.event_type == "AccountCloseRequested"),
+        "the first request is journaled"
+    );
+
+    let (mut restarted, _) = shell.restart(&ports);
+    let flat = restarted.run(
+        Input::BrokerSnapshot({
+            let mut taken = snapshot(restarted.head().0, ReconcileReason::Startup);
+            taken.positions = vec![broker_position(BTC, "0")];
+            taken
+        }),
+        &ports,
+    );
+
+    assert!(
+        !flat
+            .requests
+            .iter()
+            .any(|r| matches!(r, BrokerRequest::ClosePosition(..))),
+        "nothing held, nothing asked again: {:?}",
+        flat.requests
+    );
+}
+
+/// The in-doubt re-read stops once nothing the switch closes is held (DEC-2333 item 3): after the
+/// close's fill leaves BTC flat, a tick past the window reads nothing again.
+#[test]
+fn the_switch_reads_nothing_again_once_nothing_is_held() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (mut shell, _, _, _) = closed_btc(&ports);
+    assert!(
+        shell
+            .account_journal
+            .iter()
+            .any(|e| e.event_type == "AccountCloseRequested"),
+        "the close is requested"
+    );
+    let held = shell
+        .state
+        .positions()
+        .get(&instrument(BTC))
+        .map(ToString::to_string)
+        .unwrap_or_default();
+    shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Fill(mandate_executor::BrokerFill {
+            instrument: instrument(BTC),
+            side: Side::Sell,
+            broker_order_id: Some("b-close".to_owned()),
+            ..broker_fill("f-btc-close", None, &held, "59000")
+        })),
+        &ports,
+    );
+
+    let later = shell.run(
+        Input::Tick(clock(20 + config.unknown_absent_window_s + 1)),
+        &ports,
+    );
+
+    assert!(
+        !later
+            .requests
+            .iter()
+            .any(|r| matches!(r, BrokerRequest::ListOpenOrders)),
+        "nothing held, nothing read again: {:?}",
+        later.requests
+    );
+}
+
+/// The close ends only an interval that is open (DEC-2337 item 4): with the stop's cancel never
+/// reported, no interval opened under the switch, so the close's fill leaving nothing held journals
+/// no `unprotected_end`.
+#[test]
+fn a_close_with_no_interval_open_ends_none() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (mut shell, _, _, _) = closed_btc(&ports);
+    let close = shell
+        .account_journal
+        .iter()
+        .position(|e| e.event_type == "AccountCloseRequested")
+        .expect("the close is requested");
+    let held = shell
+        .state
+        .positions()
+        .get(&instrument(BTC))
+        .map(ToString::to_string)
+        .unwrap_or_default();
+
+    shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Fill(mandate_executor::BrokerFill {
+            instrument: instrument(BTC),
+            side: Side::Sell,
+            broker_order_id: Some("b-close".to_owned()),
+            ..broker_fill("f-btc-close", None, &held, "59000")
+        })),
+        &ports,
+    );
+
+    let ended: Vec<usize> = shell
+        .account_journal
+        .iter()
+        .enumerate()
+        .skip(close)
+        .filter(|(_, e)| {
+            e.event_type == "ProtectionChanged"
+                && e.payload
+                    .get("action")
+                    .and_then(mandate_canon::Value::as_str)
+                    == Some("unprotected_end")
+        })
+        .map(|(at, _)| at)
+        .collect();
+    assert!(ended.is_empty(), "no interval to end: {ended:?}");
+}
+
+/// Whether a run sent a close-position.
+fn sends_a_close(ran: &common::Ran) -> bool {
+    ran.requests
+        .iter()
+        .any(|r| matches!(r, BrokerRequest::ClosePosition(..)))
+}
+
+/// A second account switch after a close confirms nothing by the first switch's read (rule 13,
+/// DEC-2333 items 2 and 4): its batch sends the cancel-all and no close, its answer alone sends no
+/// close, and only a read after it closes BTC again, as that switch's first request.
+#[test]
+fn a_second_account_switch_closes_nothing_until_its_own_cancel_all_is_read() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (mut shell, first, _, _) = closed_btc(&ports);
+
+    let second = shell.run(account_switch(Initiator::RiskLimit), &ports);
+    let switch = second
+        .draft("KillSwitchActivated")
+        .map(|d| d.event_id.0.clone())
+        .expect("the second switch is journaled");
+    let accepted = shell.run(
+        Input::Broker(Ok(BrokerOutcome::AccountWideAccepted)),
+        &ports,
+    );
+    let read = shell.run(
+        Input::Broker(Ok(BrokerOutcome::OpenOrders(Vec::new()))),
+        &ports,
+    );
+
+    assert!(
+        second
+            .requests
+            .iter()
+            .any(|r| matches!(r, BrokerRequest::CancelAll(_))),
+        "the second switch sends its cancel-all: {:?}",
+        second.requests
+    );
+    assert!(
+        !sends_a_close(&second) && !sends_a_close(&accepted),
+        "no close beside the cancel-all or on its answer alone: {:?} then {:?}",
+        second.requests,
+        accepted.requests
+    );
+    assert!(sends_a_close(&read), "the read after it closes BTC");
+    let request = read
+        .draft("AccountCloseRequested")
+        .expect("journaled first");
+    let payload = &request.payload;
+    assert_eq!(
+        (
+            payload
+                .get("kill_switch_event")
+                .and_then(mandate_canon::Value::as_str),
+            payload
+                .get("attempt")
+                .and_then(mandate_canon::Value::as_int)
+        ),
+        (Some(switch.as_str()), Some(1)),
+        "the second switch's first request, not the first switch's ({first})"
+    );
+}
+
+/// The close waits for the cancel-all's answer (DEC-2333 item 2): an open-orders read that comes
+/// before the cancel-all is accepted or lost releases no close, and the read after the answer
+/// does.
+#[test]
+fn a_read_before_the_cancel_all_is_answered_releases_no_close() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (mut shell, _) = crypto_stop_account(&ports);
+    shell.run(account_switch(Initiator::Owner), &ports);
+
+    let early = shell.run(
+        Input::Broker(Ok(BrokerOutcome::OpenOrders(Vec::new()))),
+        &ports,
+    );
+    shell.run(
+        Input::Broker(Ok(BrokerOutcome::AccountWideAccepted)),
+        &ports,
+    );
+    let read = shell.run(
+        Input::Broker(Ok(BrokerOutcome::OpenOrders(Vec::new()))),
+        &ports,
+    );
+
+    assert!(
+        !sends_a_close(&early),
+        "no close before the cancel-all is answered: {:?}",
+        early.requests
+    );
+    assert!(
+        sends_a_close(&read),
+        "the read after the answer closes BTC: {:?}",
+        read.requests
+    );
+}
+
+/// A reconciliation whose snapshot was taken before the switch releases no close (DEC-2333 item
+/// 2), even after the cancel-all is answered; one taken at or after it does.
+#[test]
+fn a_read_taken_before_the_switch_releases_no_close() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (mut shell, _) = crypto_stop_account(&ports);
+    let held = shell
+        .state
+        .positions()
+        .get(&instrument(BTC))
+        .map(ToString::to_string)
+        .unwrap_or_default();
+    let before = shell.head().0;
+    shell.run(account_switch(Initiator::Owner), &ports);
+    shell.run(
+        Input::Broker(Ok(BrokerOutcome::AccountWideAccepted)),
+        &ports,
+    );
+    let read = |head: u64| {
+        let mut taken = snapshot(head, ReconcileReason::Scheduled);
+        taken.positions = vec![broker_position(BTC, &held)];
+        Input::BrokerSnapshot(taken)
+    };
+
+    let stale = shell.run(read(before), &ports);
+    let fresh = shell.run(read(shell.head().0), &ports);
+
+    assert!(
+        !sends_a_close(&stale),
+        "a snapshot taken before the switch releases nothing: {:?}",
+        stale.requests
+    );
+    assert!(
+        sends_a_close(&fresh),
+        "one taken after it closes BTC: {:?}",
+        fresh.requests
+    );
+}
+
+/// BTC's unprotected interval ends on its close (DEC-2337 item 4): the close is journaled, the
+/// broker reports the stop the cancel-all cancelled, which opens BTC's interval, and the close's
+/// fill, which names no order of ours, leaves nothing held, so the interval journals
+/// `unprotected_end` after the `AccountCloseRequested`: the last end, since the entry's own interval
+/// ended before the switch.
+#[test]
+fn the_interval_ends_once_the_close_leaves_nothing_held() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (mut shell, _, _, stop) = closed_btc(&ports);
+    shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(stop("canceled"))),
+        &ports,
+    );
+    let held = shell
+        .state
+        .positions()
+        .get(&instrument(BTC))
+        .map(ToString::to_string)
+        .unwrap_or_default();
+
+    shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Fill(mandate_executor::BrokerFill {
+            instrument: instrument(BTC),
+            side: Side::Sell,
+            broker_order_id: Some("b-close".to_owned()),
+            ..broker_fill("f-btc-close", None, &held, "59000")
+        })),
+        &ports,
+    );
+
+    let close = shell
+        .account_journal
+        .iter()
+        .position(|e| e.event_type == "AccountCloseRequested");
+    let end = shell.account_journal.iter().rposition(|e| {
+        e.event_type == "ProtectionChanged"
+            && e.payload
+                .get("action")
+                .and_then(mandate_canon::Value::as_str)
+                == Some("unprotected_end")
+    });
+    assert!(
+        close.is_some() && end.is_some() && close < end,
+        "the interval ends after the close: close at {close:?}, end at {end:?}"
+    );
+}
+
+/// An instrument with a sell of ours still working waits for that cancel's confirmation, and
+/// closes then (DEC-2333 item 3): never beside a sell that may still fill.
+#[test]
+fn a_working_sell_holds_the_close_until_its_cancel_is_confirmed() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (mut shell, stop) = crypto_stop_account(&ports);
+    shell.run(account_switch(Initiator::Owner), &ports);
+    shell.run(
+        Input::Broker(Ok(BrokerOutcome::AccountWideAccepted)),
+        &ports,
+    );
+    let read = shell.run(
+        Input::Broker(Ok(BrokerOutcome::OpenOrders(vec![stop("new")]))),
+        &ports,
+    );
+    let closing = |ran: &common::Ran| {
+        ran.requests
+            .iter()
+            .any(|r| matches!(r, BrokerRequest::ClosePosition(..)))
+    };
+    assert!(!closing(&read), "no close beside the working stop");
+
+    let confirmed = shell.run(
+        Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+            client_order_id: stop("new").client_order_id.unwrap_or_default(),
+        })),
+        &ports,
+    );
+
+    assert!(
+        closing(&confirmed),
+        "the stop's confirmed cancel releases BTC's close: {:?}",
+        confirmed.requests
+    );
+}
+
+/// The in-doubt hold reads again every `unknown_absent_window_s` while the cancel-all is
+/// unconfirmed (DEC-2333 item 3): a lost answer and a read that never comes back are read again at
+/// the window, never by sending the cancel-all again, and not before it.
+#[test]
+fn the_in_doubt_hold_reads_again_at_the_lookup_window() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (mut shell, _) = crypto_stop_account(&ports);
+    shell.run(Input::Tick(clock(20)), &ports);
+    shell.run(account_switch(Initiator::Owner), &ports);
+    shell.run(Input::Broker(Err(BrokerUnknown::Timeout)), &ports);
+
+    let window = config.unknown_absent_window_s;
+    let early = shell.run(Input::Tick(clock(20 + window - 1)), &ports);
+    let again = shell.run(Input::Tick(clock(20 + window + 1)), &ports);
+
+    assert!(
+        !early
+            .requests
+            .iter()
+            .any(|r| matches!(r, BrokerRequest::ListOpenOrders)),
+        "nothing read again inside the window: {:?}",
+        early.requests
+    );
+
+    assert!(
+        again
+            .requests
+            .iter()
+            .any(|r| matches!(r, BrokerRequest::ListOpenOrders)),
+        "the open orders are read again at the window: {:?}",
+        again.requests
+    );
+    assert!(
+        !again
+            .requests
+            .iter()
+            .any(|r| matches!(r, BrokerRequest::CancelAll(_))),
+        "never the cancel-all again"
+    );
+}
+
+/// At §5.4's bound, protection is placed again only for the held quantity less every sell not
+/// confirmed cancelled (DEC-2333 item 3): a lost cancel-all confirms nothing, so the original stop,
+/// covering the whole position, still counts, and nothing is placed beside it.
+#[test]
+fn a_lost_cancel_all_at_the_bound_places_nothing_beside_the_original_stop() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (mut shell, _) = crypto_stop_account(&ports);
+    shell.run(account_switch(Initiator::Owner), &ports);
+    shell.run(Input::Broker(Err(BrokerUnknown::Timeout)), &ports);
+
+    let bound = shell.run(Input::Tick(clock(20 + 3_600)), &ports);
+
+    let placed: Vec<_> = bound
+        .submissions()
+        .into_iter()
+        .map(|o| (o.client_order_id.as_str().to_owned(), o.qty))
+        .collect();
+    assert!(
+        placed.is_empty(),
+        "nothing beside the stop not confirmed cancelled: {placed:?}"
+    );
+}
+
+/// A mode lifted after the account switch, as the account stream copies it: `agent` back to
+/// `normal` from `restriction`, citing the control-stream record that lifted it.
+fn lifted(shell: &mut Shell, agent: &str, restriction: &str) {
+    let lift = copied(
+        ACCOUNT_STREAM,
+        shell.head().0.saturating_add(1),
+        "AgentModeApplied",
+        with_clock(
+            &[
+                ("agent", text(agent)),
+                ("to", text("normal")),
+                ("restriction", text(restriction)),
+            ],
+            30,
+        ),
+        &EventId(format!("{CLOCK_STREAM}-21")),
+    );
+    shell.fold_one(&lift).expect("the lift folds");
+}
+
+/// Whether a stop the broker cancels after the account switch, and a lift of `restriction` for
+/// `agent`, is placed again: what decides whether the switch still guards its instrument.
+fn re_placed_after(agent: &str, restriction: &str) -> bool {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (mut shell, stop) = crypto_stop_account(&ports);
+    shell.run(account_switch(Initiator::Owner), &ports);
+    lifted(&mut shell, agent, restriction);
+    let cancelled = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(stop("canceled"))),
+        &ports,
+    );
+    cancelled
+        .submissions()
+        .into_iter()
+        .any(|o| o.purpose == Purpose::Protective)
+}
+
+/// Lifting the account's kill switch, `*`'s `kill_switch` restriction, ends the switch's guard:
+/// a stop the broker cancels afterwards is placed again, as it would be with no switch (§5.4,
+/// DEC-2333 item 5).
+#[test]
+fn lifting_the_account_kill_switch_protects_the_position_again() {
+    assert!(
+        re_placed_after("*", "kill_switch"),
+        "once the account's kill switch is lifted, lost protection is placed again"
+    );
+}
+
+/// Only the account's own kill-switch lift ends the guard: one agent's kill switch lifted, or
+/// another restriction of every agent lifted, leaves the account switch's close unfinished, and
+/// nothing is placed beside it (DEC-2333 item 5, rule 12).
+#[test]
+fn only_the_account_kill_switch_lift_ends_its_guard() {
+    for (agent, restriction) in [(common::AGENT, "kill_switch"), ("*", "daily_loss")] {
+        assert!(
+            !re_placed_after(agent, restriction),
+            "{agent}'s {restriction} lifted: the account switch still guards its instrument"
+        );
+    }
+}
+
+/// The account switch closes only what is held: an instrument bought and sold back to flat, with
+/// no fresh quote, is neither named in `closes` nor holds the switch back for want of a market
+/// (§5.5, DEC-2333 item 1).
+#[test]
+fn an_account_kill_switch_passes_over_a_flat_instrument() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL, CPHC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = started();
+    shell.fold_one(&stream_opened()).expect("folds");
+    for event in protected_position_events(2) {
+        shell
+            .fold_one(&event)
+            .expect("the protected position folds");
+    }
+    held_by(&mut shell, 6, common::AGENT, CPHC, "5", "md-flat-buy");
+    for fact in [
+        event(
+            ACCOUNT_STREAM,
+            9,
+            "OrderSubmitted",
+            with_clock(
+                &[
+                    ("client_order_id", text("md-flat-sell")),
+                    ("agent", text(common::AGENT)),
+                    ("instrument", text(CPHC)),
+                    ("side", text("sell")),
+                    ("qty", text("5")),
+                    ("limit", text("100")),
+                ],
+                12,
+            ),
+        ),
+        event(
+            ACCOUNT_STREAM,
+            10,
+            "FillApplied",
+            with_clock(
+                &[
+                    ("fill_id", text("f-md-flat-sell")),
+                    ("client_order_id", text("md-flat-sell")),
+                    ("instrument", text(CPHC)),
+                    ("side", text("sell")),
+                    ("qty_gross", text("5")),
+                    ("price", text("100")),
+                ],
+                12,
+            ),
+        ),
+        event(
+            ACCOUNT_STREAM,
+            11,
+            "OrderStateChanged",
+            with_clock(
+                &[
+                    ("client_order_id", text("md-flat-sell")),
+                    ("state", text("filled")),
+                ],
+                12,
+            ),
+        ),
+    ] {
+        shell.fold_one(&fact).expect("the round trip folds");
+    }
+    let mut shell = shell.restart_ready(&ports);
+    shell.run(Input::Market(quote(AAPL, "155", "155.1", 20)), &ports);
+
+    let ran = shell.run(account_switch(Initiator::Owner), &ports);
+
+    let closes: Vec<&str> = ran
+        .draft("KillSwitchActivated")
+        .expect("the switch goes, CPHC's missing quote notwithstanding")
+        .payload
+        .get("closes")
+        .and_then(mandate_canon::Value::as_array)
+        .map(|names| {
+            names
+                .iter()
+                .filter_map(mandate_canon::Value::as_str)
+                .collect()
+        })
+        .unwrap_or_default();
+    assert_eq!(closes, vec![AAPL], "only the held instrument");
+}
+
+/// Any order of ours the open-orders read shows still working after the cancel-all is cancelled
+/// by its own id, a buy as much as a sell: a buy left working would add the risk the switch exists
+/// to remove (DEC-2333 item 3).
+#[test]
+fn a_buy_still_working_after_the_cancel_all_is_cancelled_by_its_id() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL, CPHC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (mut shell, buy) = protected_position_with_a_resting_buy(&ports);
+    shell.run(Input::Market(quote(AAPL, "155", "155.1", 20)), &ports);
+    shell.run(account_switch(Initiator::Owner), &ports);
+    shell.run(
+        Input::Broker(Ok(BrokerOutcome::AccountWideAccepted)),
+        &ports,
+    );
+
+    let read = shell.run(
+        Input::Broker(Ok(BrokerOutcome::OpenOrders(vec![broker_order(
+            "b-buy",
+            Some(&buy),
+            AAPL,
+            Side::Buy,
+            "10",
+            "0",
+            "new",
+        )]))),
+        &ports,
+    );
+
+    assert!(
+        read.requests.iter().any(|r| matches!(
+            r,
+            BrokerRequest::Cancel { client_order_id } if client_order_id.as_str() == buy
+        )),
+        "the buy still working is cancelled by its id: {:?}",
+        read.requests
+    );
+}
+
+/// A fill that arrives after the account switch never places protection: the entry was partly
+/// filled when the switch went, so its instrument is one the switch closes, and the close on
+/// confirmation sells the whole position then. A stop placed for the late fill beside that close
+/// would sell the same coins twice (DEC-2333 item 5, rule 12).
+#[test]
+fn a_fill_after_the_account_switch_places_no_protection() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = started();
+    shell.fold_one(&stream_opened()).expect("folds");
+    let mut shell = shell.restart_ready(&ports);
+    shell.run(Input::Market(quote(BTC, "60000", "60010", 20)), &ports);
+    let submitted = shell.run(
+        handoff(
+            INTENT,
+            common::AGENT,
+            protected_opening(BTC, "0.5", "60000", "54000", None),
+        ),
+        &ports,
+    );
+    let entry = submitted
+        .submissions()
+        .first()
+        .map(|o| o.client_order_id.as_str().to_owned())
+        .expect("the crypto entry is sent");
+    let order = |filled: &str, status: &str| {
+        Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+            "b-1",
+            Some(&entry),
+            BTC,
+            Side::Buy,
+            "0.5",
+            filled,
+            status,
+        )))
+    };
+    shell.run(order("0.2", "partially_filled"), &ports);
+    shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Fill(mandate_executor::BrokerFill {
+            instrument: instrument(BTC),
+            ..broker_fill("f-btc-1", Some(&entry), "0.2", "60000")
+        })),
+        &ports,
+    );
+    shell.run(account_switch(Initiator::Owner), &ports);
+
+    let ended = shell.run(order("0.5", "filled"), &ports);
+    let late = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Fill(mandate_executor::BrokerFill {
+            instrument: instrument(BTC),
+            ..broker_fill("f-btc-2", Some(&entry), "0.3", "60000")
+        })),
+        &ports,
+    );
+
+    let protective: Vec<_> = ended
+        .submissions()
+        .into_iter()
+        .chain(late.submissions())
+        .filter(|o| o.purpose == Purpose::Protective)
+        .map(|o| (o.client_order_id.as_str().to_owned(), o.qty))
+        .collect();
+    assert!(
+        protective.is_empty(),
+        "no stop beside the switch's close: {protective:?}"
+    );
+}
+
+/// The account switch's records replay (ES-21), and the switch resumes where it stopped: a restart
+/// folds every record it journaled, every agent stays stopped, the startup reconciliation's open
+/// orders confirm the cancel-all, so the stop still working is cancelled by its id and never
+/// placed again (DEC-2333 items 2, 3 and 5).
+#[test]
+fn an_account_kill_switch_replays_after_a_restart() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (mut shell, stop) = crypto_stop_account(&ports);
+    shell.run(account_switch(Initiator::Owner), &ports);
+    assert!(
+        shell
+            .account_journal
+            .iter()
+            .any(|e| e.event_type == "KillSwitchActivated"),
+        "the switch is on the journal"
+    );
+
+    let (mut restarted, started) = shell.restart(&ports);
+    let read = restarted.run(
+        Input::BrokerSnapshot({
+            let mut taken = snapshot(restarted.head().0, ReconcileReason::Startup);
+            taken.open_orders = vec![stop("new")];
+            taken
+        }),
+        &ports,
+    );
+
+    assert_eq!(
+        restarted.state.effective_mode(&agent(common::AGENT)),
+        Mode::Stopped,
+        "the agent stays stopped after the replay"
+    );
+    let working = stop("new").client_order_id;
+    assert!(
+        read.requests.iter().any(|r| matches!(
+            r,
+            BrokerRequest::Cancel { client_order_id }
+                if Some(client_order_id.as_str()) == working.as_deref()
+        )),
+        "the startup read confirms the cancel-all and cancels the stop by its id: {:?}",
+        read.requests
+    );
+    let sent: Vec<&BrokerRequest> = started.requests.iter().chain(&read.requests).collect();
+    assert!(
+        !sent
+            .iter()
+            .any(|r| matches!(r, BrokerRequest::CancelAll(_) | BrokerRequest::Submit(_))),
+        "never a second cancel-all, and nothing placed: {sent:?}"
+    );
+}
+
+/// The account switch is journaled before anything is sent (`AGENTS.md` rule 5): one
+/// `KillSwitchActivated` of scope `account`, naming the account as its subject and the
+/// instruments it closes, ahead of the cancel-all.
+#[test]
+fn an_account_kill_switch_is_journaled_naming_the_account_before_it_acts() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL, BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = two_agent_account(&ports);
+
+    let ran = shell.run(account_switch(Initiator::Owner), &ports);
+
+    let record = ran
+        .effects
+        .iter()
+        .position(|e| matches!(e, Effect::Journal(d) if d.event_type == "KillSwitchActivated"))
+        .expect("the switch is journaled");
+    let cancel_all = ran
+        .effects
+        .iter()
+        .position(|e| matches!(e, Effect::Broker(BrokerRequest::CancelAll(_))))
+        .expect("the cancel-all goes");
+    assert!(record < cancel_all, "journaled before it acts");
+    let switch = ran.draft("KillSwitchActivated").expect("the record");
+    let field = |name: &str| {
+        switch
+            .payload
+            .get(name)
+            .and_then(mandate_canon::Value::as_str)
+    };
+    assert_eq!(
+        (field("scope"), field("subject")),
+        (Some("account"), Some(common::ACCOUNT)),
+        "scope account, subject the account"
+    );
+    let mut closes: Vec<&str> = switch
+        .payload
+        .get("closes")
+        .and_then(mandate_canon::Value::as_array)
+        .map(|names| {
+            names
+                .iter()
+                .filter_map(mandate_canon::Value::as_str)
+                .collect()
+        })
+        .unwrap_or_default();
+    closes.sort_unstable();
+    assert_eq!(closes, vec![AAPL, BTC], "naming every instrument it closes");
 }
 
 #[test]
@@ -6947,5 +9725,43 @@ fn a_restart_in_a_parked_night_alerts_nothing_more() {
         at_the_open(&mut restarted, &ports),
         vec![(format!("{rung}-l1"), true)],
         "the exit still goes at the open"
+    );
+}
+
+/// One command applied as the switch of two agents counts as applied for each of them, and for no
+/// other agent or record (DEC-2343 item 4, `ExecutorState::applied_for`): the executor process
+/// dedupes a command against the runtime's copy per agent.
+#[test]
+fn a_switch_copied_from_one_record_is_applied_for_its_own_agents_only() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = started();
+    shell.fold_one(&stream_opened()).expect("folds");
+    let mut shell = shell.restart_ready(&ports);
+    let command = EventId("01JCMD000000000000000000AA".to_owned());
+    for named in [common::AGENT, OTHER_AGENT] {
+        shell.run(
+            Input::Command(Command::KillSwitch {
+                scope: KillScope::Agent(agent(named)),
+                initiator: Initiator::RiskLimit,
+                confirmation: None,
+                cause: Some(command.clone()),
+            }),
+            &ports,
+        );
+    }
+    let other = EventId("01JCMD000000000000000000AB".to_owned());
+    assert_eq!(
+        (
+            shell.state.applied_for(&agent(common::AGENT), &command),
+            shell.state.applied_for(&agent(OTHER_AGENT), &command),
+            shell.state.applied_for(&agent("agent-c"), &command),
+            shell.state.applied_for(&agent(common::AGENT), &other),
+        ),
+        (true, true, false, false),
+        "each named agent once, no other agent or record"
     );
 }
