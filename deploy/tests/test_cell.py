@@ -798,13 +798,42 @@ API_VAULT_COPY = [
     f"{API_VAULT_DIR}/",
 ]
 
+CONNECTION_MANAGER_SOURCE = {
+    "secret": {
+        "name": "vault-approle-connection-manager",
+        "items": [
+            {"key": "role-id", "path": "connection-manager.role-id"},
+            {"key": "secret-id", "path": "connection-manager.secret-id"},
+        ],
+    }
+}
+CONNECTION_MANAGER_FILES = [
+    "/run/secrets/vault-api/connection-manager.role-id",
+    "/run/secrets/vault-api/connection-manager.secret-id",
+]
+APPROLE_NAME = re.compile(r'"(vault-approle-[a-z0-9-]+)"')
 
-def api_vault(docs: list[dict], on: bool) -> list[str]:
+
+def api_vault_sources(manager: bool) -> dict:
+    """The projected sources of the api's vault binding: the API's AppRole, the connection
+    manager's beside it when `manager`, then the vault's CA."""
+    sources = API_VAULT_SOURCES["sources"]
+    return {**API_VAULT_SOURCES, "sources": sources[:1] + ([CONNECTION_MANAGER_SOURCE] if manager else []) + sources[1:]}
+
+
+def api_vault_copy(manager: bool) -> list[str]:
+    """The copy's command: the connection manager's two files after the API's when `manager`."""
+    return API_VAULT_COPY[:5] + (CONNECTION_MANAGER_FILES if manager else []) + API_VAULT_COPY[5:]
+
+
+def api_vault(docs: list[dict], on: bool, manager: bool = False) -> list[str]:
     """The API's vault binding (DEC-2338), exactly, when `on`, and none of it otherwise: its
     AppRole's two keys and the vault's CA projected read-only into one source directory, copied by
     one init container into a memory-backed directory at 0600 with nothing else in it, which the API
     mounts read-only and names in `MANDATE_API_VAULT_DIR`, never a credential in its environment;
-    and its egress to the vault on 8200 alone."""
+    and its egress to the vault on 8200 alone. With `manager` (DEC-2348), the connection manager's
+    AppRole rides the same projection and copy, since the API finishes a connect as the connection
+    manager; no other pod names either AppRole."""
     problems = []
     for w in [w for w in workloads(docs) if w["metadata"]["name"] == "api"]:
         spec = pod_spec(w)
@@ -837,11 +866,11 @@ def api_vault(docs: list[dict], on: bool) -> list[str]:
             continue
         if vaulted != {"vault", "vault-sources"}:
             problems.append(f"the api's vault volumes are {sorted(vaulted)}")
-        if volumes.get("vault-sources", {}).get("projected") != API_VAULT_SOURCES:
+        if volumes.get("vault-sources", {}).get("projected") != api_vault_sources(manager):
             problems.append(f"the api's vault sources are {volumes.get('vault-sources')}")
         if volumes.get("vault", {}).get("emptyDir", {}).get("medium") != "Memory":
             problems.append(f"the api's vault directory is {volumes.get('vault')}")
-        if [c.get("command") for c in copies] != [API_VAULT_COPY]:
+        if [c.get("command") for c in copies] != [api_vault_copy(manager)]:
             problems.append(f"the api's credentials are copied by {[c.get('command') for c in copies]}")
         copy_mounts = sorted((m["name"], m["mountPath"], m.get("readOnly", False)) for c in copies for m in c["volumeMounts"])
         if copy_mounts != [("vault", API_VAULT_DIR, False), ("vault-sources", "/run/secrets/vault-api", True)]:
@@ -859,14 +888,48 @@ def api_vault(docs: list[dict], on: bool) -> list[str]:
             problems.append(f"the api's egress to the vault is {reaching}")
         if labelled != "true":
             problems.append("the api's pod carries no egress-vault label, so the vault refuses it")
-    holders = [
-        (w["kind"], w["metadata"]["name"])
+    holders = sorted(
+        (w["kind"], w["metadata"]["name"], name)
         for w in workloads(docs)
-        for _ in range(json.dumps(w).count('"vault-approle-api"'))
-    ]
-    if holders != ([("Deployment", "api")] if on else []):
-        problems.append(f"the api's AppRole is named by {holders}")
+        for name in APPROLE_NAME.findall(json.dumps(w))
+        if (w["metadata"]["name"], name) != (PROVISIONER, "vault-approle-provisioner")
+    )
+    named = ["vault-approle-api"] + (["vault-approle-connection-manager"] if manager else [])
+    if holders != ([("Deployment", "api", name) for name in sorted(named)] if on else []):
+        problems.append(f"the AppRoles are named by {holders}")
     return problems
+
+
+def test_the_api_holds_the_connection_managers_approle_only_with_its_binding():
+    """DEC-2348: the API finishes a connect as the connection manager, so with
+    `api.connectionManagerBinding` its pod holds that AppRole too, copied as the API's is, and
+    nothing else holds it; the setting needs the API's own binding."""
+    bound = render_all("--set", "api.vaultBinding=true")
+    both = render_all("--set", "api.vaultBinding=true", "--set", "api.connectionManagerBinding=true")
+    assert api_vault(bound, on=True, manager=False) == []
+    assert api_vault(both, on=True, manager=True) == []
+    for check in (hardened, gated, secrets_as_files, api_contained, default_deny, approle_copied):
+        assert check(both) == [], check.__name__
+    assert api_vault(both, on=True, manager=False), "the connection manager's AppRole while off is caught"
+    assert api_vault(bound, on=True, manager=True), "no connection manager's AppRole while on is caught"
+    base = ["-f", str(CELL / "values" / "k3d.yaml"), *every_image()]
+    assert helm(CHART, *base, "--set", "api.connectionManagerBinding=true").returncode != 0, "it needs the API's binding"
+    sources = lambda w: next(v for v in pod_spec(w)["volumes"] if v["name"] == "vault-sources")["projected"]["sources"]
+    copier = lambda w: next(c for c in pod_spec(w)["initContainers"] if c["name"] == "vault-credentials")
+    leak = {"name": "leak", "secret": {"secretName": "vault-approle-connection-manager"}}
+    seeds = [
+        ("api", lambda w: sources(w).pop(1)),
+        ("api", lambda w: sources(w)[1]["secret"]["items"].reverse()),
+        ("api", lambda w: sources(w)[1]["secret"]["items"][0].update(path="api.role-id")),
+        ("api", lambda w: copier(w)["command"].remove(CONNECTION_MANAGER_FILES[1])),
+        ("api", lambda w: sources(w).append(copy.deepcopy(CONNECTION_MANAGER_SOURCE))),
+        ("api", lambda w: pod_spec(w)["volumes"].append(copy.deepcopy(leak))),
+        ("scheduler", lambda w: pod_spec(w).setdefault("volumes", []).append(copy.deepcopy(leak))),
+        ("deploy-manager", lambda w: pod_spec(w)["containers"][0].setdefault("envFrom", []).append({"secretRef": {"name": "vault-approle-connection-manager"}})),
+    ]
+    for name, seed in seeds:
+        assert api_vault(mutate(both, name, "Deployment", seed), on=True, manager=True), (name, seed)
+    assert api_vault(mutate(both, "api", "Deployment", lambda w: sources(w)[1]["secret"].update(name="vault-approle-runtime")), on=True, manager=True)
 
 
 def beside_api(w: dict, where: str, volume: str) -> None:
@@ -951,7 +1014,7 @@ def test_the_api_is_bound_to_the_vault_only_with_its_binding():
         ("Deployment", other, lambda w: pod_spec(w).setdefault("volumes", []).append({"name": "leak", "secret": {"secretName": "vault-approle-api"}}))
         for other in ("deploy-manager", "scheduler", "model-gateway", "exporter", "data")
     ] + [
-        ("Deployment", "scheduler", lambda w: containers(w)[0].setdefault("envFrom", []).append({"secretRef": {"name": "vault-approle-api"}})),
+        ("Deployment", "scheduler", lambda w: pod_spec(w)["containers"][0].setdefault("envFrom", []).append({"secretRef": {"name": "vault-approle-api"}})),
         ("Deployment", "data", lambda w: containers(w)[0].setdefault("env", []).append({"name": "X", "valueFrom": {"secretKeyRef": {"name": "vault-approle-api", "key": "secret-id"}}})),
         ("Deployment", "exporter", lambda w: pod_spec(w).setdefault("initContainers", []).append({"name": "leak", "image": "x", "args": ["vault-approle-api"]})),
         ("Pod", "executor", lambda w: pod_spec(w).setdefault("volumes", []).append({"name": "leak", "secret": {"secretName": "vault-approle-api"}})),
@@ -960,6 +1023,126 @@ def test_the_api_is_bound_to_the_vault_only_with_its_binding():
     for kind, name, seed in leaks:
         assert api_vault(mutate(on, name, kind, seed), on=True), (name, seed)
     assert api_vault(mutate(off, "scheduler", "Deployment", leaks[1][2]), on=False), "a leak while off is caught"
+
+
+APPROLE_SECRET = "vault-approle-"
+APPROLE_COPY_MODES = (["install", "-m", "0600"], ["install", "-m", "0400"])
+POD_KINDS = {"Deployment", "Job", "CronJob", "StatefulSet", "DaemonSet", "ReplicaSet", "ReplicationController"}
+
+
+def other_pods(docs: list[dict]) -> list[dict]:
+    """The pod templates of every kind but the workspace's own (Deployments, Jobs, managed pods),
+    each shaped as a workload: a bare Pod's own spec, a CronJob's job template's, and the rest's own."""
+    shaped = {
+        "Pod": lambda d: {"template": {"metadata": d["metadata"], "spec": d["spec"]}},
+        "CronJob": lambda d: d["spec"]["jobTemplate"]["spec"],
+    }
+    return [
+        {"kind": d["kind"], "metadata": d["metadata"], "spec": shaped.get(d["kind"], lambda d: d["spec"])(d)}
+        for d in docs
+        if d["kind"] in POD_KINDS - {"Deployment", "Job"} or d["kind"] == "Pod"
+    ]
+
+
+def approle_copied(docs: list[dict]) -> list[str]:
+    """No process reads a vault AppRole Secret (`vault-approle-*`, DEC-2630) where it is mounted:
+    under the pods' fsGroup the kubelet makes each file 0440, which `read_mounted_credentials`
+    refuses, as it must for a secret. A volume that names one is mounted only by an init container
+    that runs to completion and `install`s its files owner-only into a memory-backed directory, the
+    pgpass pattern; no container, sidecar included, mounts it or names it in its environment,
+    command or arguments."""
+    problems = [
+        f"{d['kind']} {d['metadata']['name']} runs pods this check does not read"
+        for d in docs
+        if d["kind"] not in POD_KINDS and ("template" in d.get("spec", {}) or "jobTemplate" in d.get("spec", {}))
+    ]
+    for w in workloads(docs) + other_pods(docs):
+        spec = pod_spec(w)
+        name = w["metadata"]["name"]
+        volumes = spec.get("volumes", [])
+        held = {v["name"] for v in volumes if APPROLE_SECRET in json.dumps(v)}
+        memory = {v["name"] for v in volumes if (v.get("emptyDir") or {}).get("medium") == "Memory"}
+        copies = [c for c in spec.get("initContainers", []) if c.get("restartPolicy") != "Always"]
+        readers = spec.get("containers", []) + [c for c in spec.get("initContainers", []) if c not in copies]
+        for c in readers + copies:
+            named = json.dumps({k: c.get(k) for k in ("env", "envFrom", "command", "args")})
+            if APPROLE_SECRET in named:
+                problems.append(f"{name}/{c['name']} names an AppRole Secret in its environment or command")
+        for c in readers:
+            if held & {m["name"] for m in c.get("volumeMounts", [])}:
+                problems.append(f"{name}/{c['name']} mounts an AppRole Secret it would read at 0440")
+        for c in copies:
+            mounts = c.get("volumeMounts", [])
+            if not held & {m["name"] for m in mounts}:
+                continue
+            into = {m["name"] for m in mounts if not m.get("readOnly")}
+            if c.get("command", [])[:3] not in APPROLE_COPY_MODES or c.get("args"):
+                problems.append(f"{name}/{c['name']} copies an AppRole Secret by {c.get('command')} {c.get('args')}")
+            if not into or not into <= memory or into & held:
+                problems.append(f"{name}/{c['name']} copies an AppRole Secret into {sorted(into)}, not memory alone")
+            targets = {m["mountPath"].rstrip("/") for m in mounts if not m.get("readOnly") and m["name"] in memory}
+            if not c.get("command") or c["command"][-1].rstrip("/") not in targets:
+                problems.append(f"{name}/{c['name']} installs an AppRole Secret's files into {c.get('command', [None])[-1:]}, not its memory mount")
+            if any(m["name"] in held and not m.get("readOnly") for m in mounts):
+                problems.append(f"{name}/{c['name']} mounts an AppRole Secret writable")
+        everyone = spec.get("containers", []) + spec.get("initContainers", [])
+        for volume in held:
+            by = [c["name"] for c in everyone if volume in {m["name"] for m in c.get("volumeMounts", [])}]
+            if len(by) > 1:
+                problems.append(f"{name}: the AppRole volume {volume} is mounted by {by}, not its one copy")
+        for c in copies:
+            if not held & {m["name"] for m in c.get("volumeMounts", [])}:
+                continue
+            for target in {m["name"] for m in c.get("volumeMounts", []) if not m.get("readOnly")}:
+                others = [(o["name"], m.get("readOnly", False), o in copies) for o in everyone if o is not c for m in o.get("volumeMounts", []) if m["name"] == target]
+                if len(others) > 1 or any(not read_only or init for _, read_only, init in others):
+                    problems.append(f"{name}: the copied credentials in {target} are mounted by {others}, not one reader read-only")
+    return problems
+
+
+def test_no_process_reads_an_approle_secret_where_it_is_mounted():
+    for docs in (render_all(), render_all("--set", "api.vaultBinding=true")):
+        assert approle_copied(docs) == []
+    on = render_all("--set", "api.vaultBinding=true")
+    copier = lambda w: next(c for c in pod_spec(w)["initContainers"] if c["name"] == "vault-credentials")
+    leak = {"name": "leak", "secret": {"secretName": "vault-approle-model-gateway", "defaultMode": 256}}
+    seeds = [
+        ("Deployment", "api", lambda w: next(c for c in pod_spec(w)["containers"] if c["name"] == "api")["volumeMounts"].append({"name": "vault-sources", "mountPath": "/run/secrets/vault-api", "readOnly": True})),
+        ("Deployment", "api", lambda w: copier(w).update(restartPolicy="Always")),
+        ("Deployment", "api", lambda w: copier(w).update(command=["cp", "-r", "/run/secrets/vault-api/.", API_VAULT_DIR])),
+        ("Deployment", "api", lambda w: copier(w)["command"].__setitem__(2, "0640")),
+        ("Deployment", "api", lambda w: next(v for v in pod_spec(w)["volumes"] if v["name"] == "vault")["emptyDir"].pop("medium")),
+        ("Deployment", "api", lambda w: next(m for m in copier(w)["volumeMounts"] if m["name"] == "vault-sources").update(readOnly=False)),
+        ("Deployment", "model-gateway", lambda w: (pod_spec(w).setdefault("volumes", []).append(leak), pod_spec(w)["containers"][0].setdefault("volumeMounts", []).append({"name": "leak", "mountPath": "/run/mandate/vault", "readOnly": True}))),
+        ("Deployment", "scheduler", lambda w: pod_spec(w)["containers"][0].setdefault("envFrom", []).append({"secretRef": {"name": "vault-approle-runtime"}})),
+        ("Pod", "runtime", lambda w: (pod_spec(w).setdefault("volumes", []).append(leak), pod_spec(w)["containers"][0].setdefault("volumeMounts", []).append({"name": "leak", "mountPath": "/run/mandate/vault", "readOnly": True}))),
+    ]
+    for kind, name, seed in seeds:
+        assert approle_copied(mutate(on, name, kind, seed)), (name, seed)
+    named = [
+        lambda w: copier(w).setdefault("env", []).append({"name": "X", "valueFrom": {"secretKeyRef": {"name": "vault-approle-api", "key": "secret-id"}}}),
+        lambda w: copier(w).setdefault("envFrom", []).append({"secretRef": {"name": "vault-approle-api"}}),
+        lambda w: copier(w)["command"].append("vault-approle-api"),
+        lambda w: copier(w)["command"].__setitem__(-1, "/etc/"),
+    ]
+    for seed in named:
+        assert approle_copied(mutate(on, "api", "Deployment", seed)), seed
+    assert {d["kind"] for d in on if d["kind"] in POD_KINDS} == {"Deployment", "Job"}, "the workspace runs pods as Deployments and Jobs alone"
+    leaked = next(d for d in on if d["kind"] == "Deployment" and d["metadata"]["name"] == "scheduler")
+    leaked = copy.deepcopy(leaked)
+    pod_spec(leaked).setdefault("volumes", []).append(leak)
+    pod_spec(leaked)["containers"][0].setdefault("volumeMounts", []).append({"name": "leak", "mountPath": "/run/leak", "readOnly": True})
+    for kind in ("StatefulSet", "DaemonSet", "ReplicaSet", "CronJob", "Rollout"):
+        escaped = copy.deepcopy(leaked)
+        escaped["kind"] = kind
+        if kind == "CronJob":
+            escaped["spec"] = {"jobTemplate": {"spec": escaped["spec"]}}
+        assert approle_copied([d for d in on if d["metadata"]["name"] != "scheduler"] + [escaped]), kind
+    bare = {"kind": "Pod", "metadata": {"name": "bare"}, "spec": copy.deepcopy(pod_spec(leaked))}
+    assert approle_copied(on + [bare]), "a bare Pod is read"
+    assert not any(d["kind"] == "Pod" for d in on), "the workspace runs no bare Pod"
+    for where, volume in (("containers", "vault"), ("containers", "vault-sources"), ("initContainers", "vault-sources"), ("initContainers", "vault")):
+        assert approle_copied(mutate(on, "api", "Deployment", lambda w: beside_api(w, where, volume))), (where, volume)
 
 
 def vault_rule(policy: dict) -> dict:

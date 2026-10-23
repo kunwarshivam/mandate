@@ -13595,6 +13595,901 @@
    }
   ]
  },
+ "protection_fraction": {
+  "spec": "docs/specs/journal.md v0.72 §9.5 rule 44 (DEC-2312, DEC-2315)",
+  "drafts": {
+   "placed_v1": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8ZQA6A000000000000000E7",
+    "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2",
+    "event_type": "ProtectionChanged",
+    "schema_version": 1,
+    "event_time": "2026-09-21T14:00:30.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "executor",
+     "version": "0.1.0",
+     "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "config_refs": {},
+    "payload": {
+     "instrument_id": "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+     "action": "placed",
+     "orders": [
+      "md-01J8ZT90A000000000000000P1-p1"
+     ],
+     "awaiting": [],
+     "qty": "10",
+     "stop": "139",
+     "take_profit": "159",
+     "intent_id": null,
+     "bracket": null,
+     "entry": null,
+     "agent_id": null,
+     "replacing": null,
+     "created_on": "2026-09-21",
+     "sent": null,
+     "uncovered": null,
+     "acknowledged": null,
+     "risk_clock": "2026-09-21T14:00:30.000000000Z"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "placed": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8ZQA6A000000000000000E7",
+    "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2",
+    "event_type": "ProtectionChanged",
+    "schema_version": 2,
+    "event_time": "2026-09-21T14:00:30.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "executor",
+     "version": "0.1.0",
+     "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "config_refs": {},
+    "payload": {
+     "instrument_id": "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+     "action": "placed",
+     "orders": [
+      "md-01J8ZT90A000000000000000P1-p1"
+     ],
+     "awaiting": [],
+     "qty": "10",
+     "stop": "139",
+     "take_profit": "159",
+     "intent_id": null,
+     "bracket": null,
+     "entry": null,
+     "agent_id": null,
+     "replacing": null,
+     "created_on": "2026-09-21",
+     "sent": null,
+     "uncovered": null,
+     "acknowledged": null,
+     "unprotected_fraction": null,
+     "risk_clock": "2026-09-21T14:00:30.000000000Z"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "start": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8ZQA7A000000000000000E8",
+    "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2",
+    "event_type": "ProtectionChanged",
+    "schema_version": 2,
+    "event_time": "2026-09-21T14:00:35.000000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "executor",
+     "version": "0.1.0",
+     "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "config_refs": {},
+    "payload": {
+     "instrument_id": "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+     "action": "unprotected_start",
+     "orders": [
+      "md-01J8ZT90A000000000000000P1-p1"
+     ],
+     "awaiting": [],
+     "qty": null,
+     "stop": "139",
+     "take_profit": "159",
+     "intent_id": "01J8ZT90A000000000000000P1",
+     "bracket": null,
+     "entry": "md-01J8ZT90A000000000000000P1",
+     "agent_id": "agent_a",
+     "replacing": true,
+     "created_on": null,
+     "sent": null,
+     "uncovered": null,
+     "acknowledged": null,
+     "unprotected_fraction": null,
+     "risk_clock": "2026-09-21T14:00:35.000000000Z"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   }
+  },
+  "invalid_drafts": [
+   {
+    "name": "fraction_on_cancelled",
+    "clause": "rule 44: only a start, a placement and an end disclose a fraction",
+    "base_draft": "placed",
+    "changes": [
+     {
+      "path": "payload.action",
+      "value": "cancelled"
+     },
+     {
+      "path": "payload.stop",
+      "value": null
+     },
+     {
+      "path": "payload.take_profit",
+      "value": null
+     },
+     {
+      "path": "payload.created_on",
+      "value": null
+     },
+     {
+      "path": "payload.unprotected_fraction",
+      "value": "0.4"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.unprotected_fraction"
+    }
+   },
+   {
+    "name": "fraction_on_intended",
+    "clause": "rule 44: intended discloses no fraction",
+    "base_draft": "start",
+    "changes": [
+     {
+      "path": "payload.stop",
+      "value": null
+     },
+     {
+      "path": "payload.take_profit",
+      "value": null
+     },
+     {
+      "path": "payload.intent_id",
+      "value": null
+     },
+     {
+      "path": "payload.entry",
+      "value": null
+     },
+     {
+      "path": "payload.agent_id",
+      "value": null
+     },
+     {
+      "path": "payload.orders",
+      "value": []
+     },
+     {
+      "path": "payload.replacing",
+      "value": null
+     },
+     {
+      "path": "payload.action",
+      "value": "intended"
+     },
+     {
+      "path": "payload.intent_id",
+      "value": "01J8ZT90A000000000000000P1"
+     },
+     {
+      "path": "payload.stop",
+      "value": "139"
+     },
+     {
+      "path": "payload.unprotected_fraction",
+      "value": "0.4"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.unprotected_fraction"
+    }
+   },
+   {
+    "name": "fraction_on_watchdog",
+    "clause": "rule 44: watchdog discloses no fraction",
+    "base_draft": "start",
+    "changes": [
+     {
+      "path": "payload.stop",
+      "value": null
+     },
+     {
+      "path": "payload.take_profit",
+      "value": null
+     },
+     {
+      "path": "payload.intent_id",
+      "value": null
+     },
+     {
+      "path": "payload.entry",
+      "value": null
+     },
+     {
+      "path": "payload.agent_id",
+      "value": null
+     },
+     {
+      "path": "payload.orders",
+      "value": []
+     },
+     {
+      "path": "payload.replacing",
+      "value": null
+     },
+     {
+      "path": "payload.action",
+      "value": "watchdog"
+     },
+     {
+      "path": "payload.unprotected_fraction",
+      "value": "0.4"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.unprotected_fraction"
+    }
+   },
+   {
+    "name": "fraction_on_exit_unpriced",
+    "clause": "rule 44: exit_unpriced discloses no fraction",
+    "base_draft": "start",
+    "changes": [
+     {
+      "path": "payload.stop",
+      "value": null
+     },
+     {
+      "path": "payload.take_profit",
+      "value": null
+     },
+     {
+      "path": "payload.intent_id",
+      "value": null
+     },
+     {
+      "path": "payload.entry",
+      "value": null
+     },
+     {
+      "path": "payload.agent_id",
+      "value": null
+     },
+     {
+      "path": "payload.orders",
+      "value": []
+     },
+     {
+      "path": "payload.replacing",
+      "value": null
+     },
+     {
+      "path": "payload.action",
+      "value": "exit_unpriced"
+     },
+     {
+      "path": "payload.unprotected_fraction",
+      "value": "0.4"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.unprotected_fraction"
+    }
+   },
+   {
+    "name": "fraction_on_ladder_floor",
+    "clause": "rule 44: ladder_floor discloses no fraction",
+    "base_draft": "start",
+    "changes": [
+     {
+      "path": "payload.stop",
+      "value": null
+     },
+     {
+      "path": "payload.take_profit",
+      "value": null
+     },
+     {
+      "path": "payload.intent_id",
+      "value": null
+     },
+     {
+      "path": "payload.entry",
+      "value": null
+     },
+     {
+      "path": "payload.agent_id",
+      "value": null
+     },
+     {
+      "path": "payload.orders",
+      "value": []
+     },
+     {
+      "path": "payload.replacing",
+      "value": null
+     },
+     {
+      "path": "payload.action",
+      "value": "ladder_floor"
+     },
+     {
+      "path": "payload.unprotected_fraction",
+      "value": "0.4"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.unprotected_fraction"
+    }
+   },
+   {
+    "name": "fraction_on_expiry_unreplaceable",
+    "clause": "rule 44: expiry_unreplaceable discloses no fraction",
+    "base_draft": "start",
+    "changes": [
+     {
+      "path": "payload.stop",
+      "value": null
+     },
+     {
+      "path": "payload.take_profit",
+      "value": null
+     },
+     {
+      "path": "payload.intent_id",
+      "value": null
+     },
+     {
+      "path": "payload.entry",
+      "value": null
+     },
+     {
+      "path": "payload.agent_id",
+      "value": null
+     },
+     {
+      "path": "payload.orders",
+      "value": []
+     },
+     {
+      "path": "payload.replacing",
+      "value": null
+     },
+     {
+      "path": "payload.action",
+      "value": "expiry_unreplaceable"
+     },
+     {
+      "path": "payload.unprotected_fraction",
+      "value": "0.4"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.unprotected_fraction"
+    }
+   },
+   {
+    "name": "fraction_on_rung_short",
+    "clause": "rule 44: rung_short discloses no fraction",
+    "base_draft": "start",
+    "changes": [
+     {
+      "path": "payload.stop",
+      "value": null
+     },
+     {
+      "path": "payload.take_profit",
+      "value": null
+     },
+     {
+      "path": "payload.intent_id",
+      "value": null
+     },
+     {
+      "path": "payload.entry",
+      "value": null
+     },
+     {
+      "path": "payload.agent_id",
+      "value": null
+     },
+     {
+      "path": "payload.orders",
+      "value": []
+     },
+     {
+      "path": "payload.replacing",
+      "value": null
+     },
+     {
+      "path": "payload.action",
+      "value": "rung_short"
+     },
+     {
+      "path": "payload.intent_id",
+      "value": "01J8ZT90A000000000000000P1"
+     },
+     {
+      "path": "payload.sent",
+      "value": "2"
+     },
+     {
+      "path": "payload.unprotected_fraction",
+      "value": "0.4"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.unprotected_fraction"
+    }
+   },
+   {
+    "name": "fraction_on_interval_limit",
+    "clause": "rule 44: interval_limit discloses no fraction",
+    "base_draft": "start",
+    "changes": [
+     {
+      "path": "payload.stop",
+      "value": null
+     },
+     {
+      "path": "payload.take_profit",
+      "value": null
+     },
+     {
+      "path": "payload.intent_id",
+      "value": null
+     },
+     {
+      "path": "payload.entry",
+      "value": null
+     },
+     {
+      "path": "payload.agent_id",
+      "value": null
+     },
+     {
+      "path": "payload.orders",
+      "value": []
+     },
+     {
+      "path": "payload.replacing",
+      "value": null
+     },
+     {
+      "path": "payload.action",
+      "value": "interval_limit"
+     },
+     {
+      "path": "payload.unprotected_fraction",
+      "value": "0.4"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.unprotected_fraction"
+    }
+   },
+   {
+    "name": "fraction_on_a_passive_start",
+    "clause": "rule 44: a passive start discloses no fraction",
+    "base_draft": "start",
+    "changes": [
+     {
+      "path": "payload.action",
+      "value": "passive_start"
+     },
+     {
+      "path": "payload.unprotected_fraction",
+      "value": "0.4"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.unprotected_fraction"
+    }
+   },
+   {
+    "name": "fraction_zero",
+    "clause": "rule 44: a disclosed fraction is above zero",
+    "base_draft": "placed",
+    "changes": [
+     {
+      "path": "payload.unprotected_fraction",
+      "value": "0"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.unprotected_fraction"
+    }
+   },
+   {
+    "name": "fraction_negative",
+    "clause": "rule 44: a disclosed fraction is above zero",
+    "base_draft": "placed",
+    "changes": [
+     {
+      "path": "payload.unprotected_fraction",
+      "value": "-0.4"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.unprotected_fraction"
+    }
+   },
+   {
+    "name": "fraction_one",
+    "clause": "rule 44: a disclosed fraction is below one share",
+    "base_draft": "placed",
+    "changes": [
+     {
+      "path": "payload.unprotected_fraction",
+      "value": "1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.unprotected_fraction"
+    }
+   },
+   {
+    "name": "fraction_above_one",
+    "clause": "rule 44: a disclosed fraction is below one share",
+    "base_draft": "start",
+    "changes": [
+     {
+      "path": "payload.stop",
+      "value": null
+     },
+     {
+      "path": "payload.take_profit",
+      "value": null
+     },
+     {
+      "path": "payload.intent_id",
+      "value": null
+     },
+     {
+      "path": "payload.entry",
+      "value": null
+     },
+     {
+      "path": "payload.agent_id",
+      "value": null
+     },
+     {
+      "path": "payload.orders",
+      "value": []
+     },
+     {
+      "path": "payload.replacing",
+      "value": null
+     },
+     {
+      "path": "payload.bracket",
+      "value": "md-01J8ZT90A000000000000000P1"
+     },
+     {
+      "path": "payload.unprotected_fraction",
+      "value": "1.4"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.unprotected_fraction"
+    }
+   },
+   {
+    "name": "version_1_carries_no_fraction",
+    "clause": "§8: version 1 is never edited",
+    "base_draft": "placed_v1",
+    "changes": [
+     {
+      "path": "payload.unprotected_fraction",
+      "value": "0.4"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.unprotected_fraction"
+    }
+   },
+   {
+    "name": "fraction_a_json_number",
+    "clause": "§9.1 decimal: a JSON number is not a decimal",
+    "base_draft": "placed",
+    "changes": [
+     {
+      "path": "payload.unprotected_fraction",
+      "value": 1
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.unprotected_fraction"
+    }
+   },
+   {
+    "name": "fraction_not_a_number",
+    "clause": "§9.1 decimal",
+    "base_draft": "placed",
+    "changes": [
+     {
+      "path": "payload.unprotected_fraction",
+      "value": "abc"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.unprotected_fraction"
+    }
+   },
+   {
+    "name": "one_share_in_exponent_form",
+    "clause": "rule 44 on the normalized decimal: 1e0 is one share",
+    "base_draft": "placed",
+    "changes": [
+     {
+      "path": "payload.unprotected_fraction",
+      "value": "1e0"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.unprotected_fraction"
+    }
+   }
+  ],
+  "valid_drafts": [
+   {
+    "name": "fraction_on_first_fill_start",
+    "clause": "rule 44: a fractional entry's first fill discloses its fraction",
+    "base_draft": "start",
+    "changes": [
+     {
+      "path": "payload.stop",
+      "value": null
+     },
+     {
+      "path": "payload.take_profit",
+      "value": null
+     },
+     {
+      "path": "payload.intent_id",
+      "value": null
+     },
+     {
+      "path": "payload.entry",
+      "value": null
+     },
+     {
+      "path": "payload.agent_id",
+      "value": null
+     },
+     {
+      "path": "payload.orders",
+      "value": []
+     },
+     {
+      "path": "payload.replacing",
+      "value": null
+     },
+     {
+      "path": "payload.bracket",
+      "value": "md-01J8ZT90A000000000000000P1"
+     },
+     {
+      "path": "payload.unprotected_fraction",
+      "value": "0.4"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "fraction_on_placed",
+    "clause": "rule 44: the whole shares' protection discloses the fraction it leaves",
+    "base_draft": "placed",
+    "changes": [
+     {
+      "path": "payload.unprotected_fraction",
+      "value": "0.4"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "fraction_smallest",
+    "clause": "rule 44: the smallest fraction a fractionable share has",
+    "base_draft": "placed",
+    "changes": [
+     {
+      "path": "payload.unprotected_fraction",
+      "value": "0.000000001"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "fraction_largest",
+    "clause": "rule 44: the largest fraction below one share",
+    "base_draft": "placed",
+    "changes": [
+     {
+      "path": "payload.unprotected_fraction",
+      "value": "0.999999999"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "no_fraction_on_a_whole_position",
+    "clause": "rule 44: a whole-share position discloses nothing",
+    "base_draft": "start",
+    "changes": [
+     {
+      "path": "payload.stop",
+      "value": null
+     },
+     {
+      "path": "payload.take_profit",
+      "value": null
+     },
+     {
+      "path": "payload.intent_id",
+      "value": null
+     },
+     {
+      "path": "payload.entry",
+      "value": null
+     },
+     {
+      "path": "payload.agent_id",
+      "value": null
+     },
+     {
+      "path": "payload.orders",
+      "value": []
+     },
+     {
+      "path": "payload.replacing",
+      "value": null
+     },
+     {
+      "path": "payload.bracket",
+      "value": "md-01J8ZT90A000000000000000P1"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "fraction_in_exponent_form",
+    "clause": "§4.6: an exponent form is normalized on the way in, 4e-1 is 0.4",
+    "base_draft": "placed",
+    "changes": [
+     {
+      "path": "payload.unprotected_fraction",
+      "value": "4e-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "fraction_on_the_end",
+    "clause": "rule 44: the end discloses the final fraction of a position built from several fills (DEC-2315)",
+    "base_draft": "start",
+    "changes": [
+     {
+      "path": "payload.stop",
+      "value": null
+     },
+     {
+      "path": "payload.take_profit",
+      "value": null
+     },
+     {
+      "path": "payload.intent_id",
+      "value": null
+     },
+     {
+      "path": "payload.entry",
+      "value": null
+     },
+     {
+      "path": "payload.agent_id",
+      "value": null
+     },
+     {
+      "path": "payload.action",
+      "value": "unprotected_end"
+     },
+     {
+      "path": "payload.orders",
+      "value": []
+     },
+     {
+      "path": "payload.replacing",
+      "value": null
+     },
+     {
+      "path": "payload.bracket",
+      "value": "md-01J8ZT90A000000000000000P1"
+     },
+     {
+      "path": "payload.unprotected_fraction",
+      "value": "0.4"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   }
+  ]
+ },
  "approval_answers": {
   "spec": "docs/specs/journal.md v0.17 §9.7 (DEC-533)",
   "drafts": {
@@ -23596,6 +24491,66 @@
     }
    },
    {
+    "name": "ProcessStartIssued.executor_exchanged_twice",
+    "clause": "rule 167: a connect's executor is exchanged at generation 1 only",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "payload.process",
+      "value": "executor"
+     },
+     {
+      "path": "payload.subject",
+      "value": "01J8Z2ACCT00000000000000A1"
+     },
+     {
+      "path": "payload.generation",
+      "value": 2
+     },
+     {
+      "path": "payload.cause",
+      "value": "exchanged"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cause"
+    }
+   },
+   {
+    "name": "ProcessStartIssued.runtime_exchanged",
+    "clause": "rule 257: only an executor is started on an exchange's success",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "payload.cause",
+      "value": "exchanged"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cause"
+    }
+   },
+   {
+    "name": "ProcessStopIssued.runtime_stopped_as_connection_closed",
+    "clause": "rule 257: only an executor stops as its connection closed",
+    "base_draft": "process_stop_issued",
+    "changes": [
+     {
+      "path": "payload.cause",
+      "value": "connection_closed"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cause"
+    }
+   },
+   {
     "name": "ProcessCrashLooped.exchange_looped",
     "clause": "§9.21 types: a token exchange never crash-loops",
     "base_draft": "process_crash_looped",
@@ -23783,6 +24738,54 @@
      {
       "path": "payload.cause",
       "value": "requested"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "ProcessStartIssued.executor_exchanged",
+    "clause": "rule 257: a connect's executor, started on its exchange's success",
+    "base_draft": "process_start_issued",
+    "changes": [
+     {
+      "path": "payload.process",
+      "value": "executor"
+     },
+     {
+      "path": "payload.subject",
+      "value": "01J8Z2ACCT00000000000000A1"
+     },
+     {
+      "path": "payload.cause",
+      "value": "exchanged"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "ProcessStopIssued.executor_connection_closed",
+    "clause": "rule 257: a connect's executor stopped as its connection closed",
+    "base_draft": "process_stop_issued",
+    "changes": [
+     {
+      "path": "payload.process",
+      "value": "executor"
+     },
+     {
+      "path": "payload.subject",
+      "value": "01J8Z2ACCT00000000000000A1"
+     },
+     {
+      "path": "payload.generation",
+      "value": 1
+     },
+     {
+      "path": "payload.cause",
+      "value": "connection_closed"
      }
     ],
     "expect": {
@@ -116362,19 +117365,51 @@
     }
    },
    {
-    "name": "enrolled_at_version_2",
-    "clause": "§9.31: closed at schema version 1 only",
+    "name": "enrolled_at_version_3",
+    "clause": "§9.31: closed at schema versions 1 and 2",
     "base_draft": "first_enrolled",
     "changes": [
      {
       "path": "schema_version",
-      "value": 2
+      "value": 3
      }
     ],
     "expect": {
      "outcome": "Invalid",
      "reason": "unknown_schema",
      "path": "payload"
+    }
+   },
+   {
+    "name": "version_1_with_backup_eligible.true",
+    "clause": "§9.31: `backup_eligible` is version 2's only",
+    "base_draft": "first_enrolled",
+    "changes": [
+     {
+      "path": "payload.backup_eligible",
+      "value": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.backup_eligible"
+    }
+   },
+   {
+    "name": "version_1_with_backup_eligible.false",
+    "clause": "§9.31: `backup_eligible` is version 2's only",
+    "base_draft": "first_enrolled",
+    "changes": [
+     {
+      "path": "payload.backup_eligible",
+      "value": false
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.backup_eligible"
     }
    },
    {
@@ -117167,6 +118202,3430 @@
       },
       "artifact_refs": [
        "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+      ],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   }
+  ]
+ },
+ "credential_enrolled_v2": {
+  "spec": "docs/specs/journal.md v0.71 §9.31 (DEC-2108, DEC-2122)",
+  "drafts": {
+   "first_enrolled": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01JAA3P4A000000000000000E1",
+    "stream_id": "ctl:ws_01J8Z2",
+    "event_type": "CredentialEnrolled",
+    "schema_version": 2,
+    "event_time": "2026-10-19T15:00:05.250000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "user",
+     "id": "01JAA2N0A000000000000000P1",
+     "version": "1",
+     "build": null
+    },
+    "config_refs": {},
+    "payload": {
+     "member": "01JAA2N0A000000000000000P1",
+     "kind": "passkey",
+     "credential": "AAECAwQFBgcICQoLDA0ODw",
+     "public_key": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+     "alg": "es256",
+     "sign_count": 0,
+     "cool_off_ends": "2026-10-20T15:00:05.250000000Z",
+     "step_up": null,
+     "backup_eligible": false
+    },
+    "artifact_refs": [
+     "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+    ],
+    "pii_refs": []
+   },
+   "stepped_up_enrolled": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01JAA3P4A000000000000000E1",
+    "stream_id": "ctl:ws_01J8Z2",
+    "event_type": "CredentialEnrolled",
+    "schema_version": 2,
+    "event_time": "2026-10-19T15:00:05.250000000Z",
+    "clock_source": "local",
+    "causation_id": null,
+    "correlation_id": null,
+    "actor": {
+     "kind": "user",
+     "id": "01JAA2N0A000000000000000P1",
+     "version": "1",
+     "build": null
+    },
+    "config_refs": {},
+    "payload": {
+     "member": "01JAA2N0A000000000000000P1",
+     "kind": "passkey",
+     "credential": "AAECAwQFBgcICQoLDA0ODw",
+     "public_key": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+     "alg": "es256",
+     "sign_count": 0,
+     "cool_off_ends": null,
+     "step_up": {
+      "assertion_id": "01JAA3P0A000000000000000H1",
+      "authenticated_at": "2026-10-19T15:00:05.250000000Z",
+      "method": "passkey"
+     },
+     "backup_eligible": false
+    },
+    "artifact_refs": [
+     "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+    ],
+    "pii_refs": []
+   }
+  },
+  "invalid_drafts": [
+   {
+    "name": "backup_eligible.text",
+    "clause": "§9.31 version 2: `backup_eligible` is a boolean",
+    "base_draft": "first_enrolled",
+    "changes": [
+     {
+      "path": "payload.backup_eligible",
+      "value": "true"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.backup_eligible"
+    }
+   },
+   {
+    "name": "backup_eligible.integer",
+    "clause": "§9.31 version 2: `backup_eligible` is a boolean",
+    "base_draft": "first_enrolled",
+    "changes": [
+     {
+      "path": "payload.backup_eligible",
+      "value": 1
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.backup_eligible"
+    }
+   },
+   {
+    "name": "backup_eligible.null",
+    "clause": "§9.31 version 2: `backup_eligible` is a boolean",
+    "base_draft": "first_enrolled",
+    "changes": [
+     {
+      "path": "payload.backup_eligible",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.backup_eligible"
+    }
+   },
+   {
+    "name": "backup_eligible.missing",
+    "clause": "§9.31 version 2: `backup_eligible` is required",
+    "base_draft": "first_enrolled",
+    "changes": [
+     {
+      "path": "payload.backup_eligible",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.backup_eligible"
+    }
+   },
+   {
+    "name": "extra",
+    "clause": "§9.31 version 2: closed",
+    "base_draft": "first_enrolled",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "lost"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "another_kind",
+    "clause": "rule 249: the one kind is `passkey` (version 2)",
+    "base_draft": "first_enrolled",
+    "changes": [
+     {
+      "path": "payload.kind",
+      "value": "recovery_code"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.kind"
+    }
+   },
+   {
+    "name": "enrolled_by_a_system",
+    "clause": "rule 249: the actor is a user (version 2)",
+    "base_draft": "first_enrolled",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "system",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      }
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "enrolled_for_another",
+    "clause": "rule 249: the actor is the member (version 2)",
+    "base_draft": "first_enrolled",
+    "changes": [
+     {
+      "path": "actor.id",
+      "value": "01JAA2N0A000000000000000P2"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.id"
+    }
+   },
+   {
+    "name": "enrolled_with_cli_confirm",
+    "clause": "rule 249: a passkey step-up (version 2)",
+    "base_draft": "stepped_up_enrolled",
+    "changes": [
+     {
+      "path": "payload.step_up.method",
+      "value": "cli_confirm"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.step_up.method"
+    }
+   },
+   {
+    "name": "first_without_cool_off",
+    "clause": "rule 249: a first enrolment cools off (version 2)",
+    "base_draft": "first_enrolled",
+    "changes": [
+     {
+      "path": "payload.cool_off_ends",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cool_off_ends"
+    }
+   },
+   {
+    "name": "first_cools_a_second_short",
+    "clause": "rule 249: exactly 86 400 s (version 2)",
+    "base_draft": "first_enrolled",
+    "changes": [
+     {
+      "path": "payload.cool_off_ends",
+      "value": "2026-10-20T15:00:04.250000000Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cool_off_ends"
+    }
+   },
+   {
+    "name": "first_cools_from_the_whole_second",
+    "clause": "rule 249: to the nanosecond (version 2)",
+    "base_draft": "first_enrolled",
+    "changes": [
+     {
+      "path": "payload.cool_off_ends",
+      "value": "2026-10-20T15:00:05.000000000Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cool_off_ends"
+    }
+   },
+   {
+    "name": "stepped_up_cools_off",
+    "clause": "rule 249: one stepped up never cools off (version 2)",
+    "base_draft": "stepped_up_enrolled",
+    "changes": [
+     {
+      "path": "payload.cool_off_ends",
+      "value": "2026-10-20T15:00:05.250000000Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.cool_off_ends"
+    }
+   }
+  ],
+  "valid_drafts": [
+   {
+    "name": "backup_eligible",
+    "clause": "§9.31 version 2: a backup-eligible passkey",
+    "base_draft": "stepped_up_enrolled",
+    "changes": [
+     {
+      "path": "payload.backup_eligible",
+      "value": true
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "eddsa",
+    "clause": "§9.31 `passkey_alg` (version 2)",
+    "base_draft": "first_enrolled",
+    "changes": [
+     {
+      "path": "payload.alg",
+      "value": "eddsa"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "kept_counter",
+    "clause": "§9.31 `sign_count`: the top of 32 bits (version 2)",
+    "base_draft": "first_enrolled",
+    "changes": [
+     {
+      "path": "payload.sign_count",
+      "value": 4294967295
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "shortest_id",
+    "clause": "§9.31 `credential_id`: 16 bytes (version 2)",
+    "base_draft": "first_enrolled",
+    "changes": [
+     {
+      "path": "payload.credential",
+      "value": "EBESExQVFhcYGRobHB0eHw"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "longest_id",
+    "clause": "§9.31 `credential_id`: 1023 bytes (version 2)",
+    "base_draft": "first_enrolled",
+    "changes": [
+     {
+      "path": "payload.credential",
+      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "another_member_as_its_own_actor",
+    "clause": "rules 249 and 250: a member enrols for itself (version 2)",
+    "base_draft": "first_enrolled",
+    "changes": [
+     {
+      "path": "payload.member",
+      "value": "01JAA2N0A000000000000000P2"
+     },
+     {
+      "path": "actor.id",
+      "value": "01JAA2N0A000000000000000P2"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "whole_second",
+    "clause": "rule 249: a whole-second enrolment cools off from its whole second (version 2)",
+    "base_draft": "first_enrolled",
+    "changes": [
+     {
+      "path": "event_time",
+      "value": "2026-10-19T15:00:05.000000000Z"
+     },
+     {
+      "path": "payload.cool_off_ends",
+      "value": "2026-10-20T15:00:05.000000000Z"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   }
+  ]
+ },
+ "step_up_assertions": {
+  "spec": "docs/specs/journal.md v0.71 §9.32 (DEC-2108 item 3)",
+  "drafts": {
+   "step_up_asserted": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01JAA3P4A000000000000000S1",
+    "stream_id": "ctl:ws_01J8Z2",
+    "event_type": "StepUpAsserted",
+    "schema_version": 1,
+    "event_time": "2026-10-19T15:00:05.250000000Z",
+    "clock_source": "local",
+    "causation_id": "01JAA3P4A000000000000000E2",
+    "correlation_id": null,
+    "actor": {
+     "kind": "user",
+     "id": "01JAA2N0A000000000000000P1",
+     "version": "1",
+     "build": null
+    },
+    "config_refs": {},
+    "payload": {
+     "challenge": "01JAA3P0A000000000000000H1",
+     "credential": "AAECAwQFBgcICQoLDA0ODw",
+     "sign_count": 7,
+     "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+    },
+    "artifact_refs": [
+     "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+    ],
+    "pii_refs": []
+   }
+  },
+  "invalid_drafts": [
+   {
+    "name": "challenge.kind",
+    "clause": "§9.32 types",
+    "base_draft": "step_up_asserted",
+    "changes": [
+     {
+      "path": "payload.challenge",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.challenge"
+    }
+   },
+   {
+    "name": "challenge.form",
+    "clause": "§9.32 types",
+    "base_draft": "step_up_asserted",
+    "changes": [
+     {
+      "path": "payload.challenge",
+      "value": "not-a-ulid"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.challenge"
+    }
+   },
+   {
+    "name": "credential.kind",
+    "clause": "§9.32 types",
+    "base_draft": "step_up_asserted",
+    "changes": [
+     {
+      "path": "payload.credential",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.credential"
+    }
+   },
+   {
+    "name": "credential.form",
+    "clause": "§9.32 types",
+    "base_draft": "step_up_asserted",
+    "changes": [
+     {
+      "path": "payload.credential",
+      "value": "AAECAwQFBgcICQoLDA0ODw=="
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.credential"
+    }
+   },
+   {
+    "name": "assertion.kind",
+    "clause": "§9.32 types",
+    "base_draft": "step_up_asserted",
+    "changes": [
+     {
+      "path": "payload.assertion",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.assertion",
+     "also": [
+      {
+       "reason": "artifact_refs",
+       "path": "artifact_refs"
+      }
+     ]
+    }
+   },
+   {
+    "name": "assertion.form",
+    "clause": "§9.32 types",
+    "base_draft": "step_up_asserted",
+    "changes": [
+     {
+      "path": "payload.assertion",
+      "value": "6666666666666666666666666666666666666666666666666666666666666666"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.assertion",
+     "also": [
+      {
+       "reason": "artifact_refs",
+       "path": "artifact_refs"
+      }
+     ]
+    }
+   },
+   {
+    "name": "sign_count.past_32_bits",
+    "clause": "§9.31 `sign_count`",
+    "base_draft": "step_up_asserted",
+    "changes": [
+     {
+      "path": "payload.sign_count",
+      "value": 4294967296
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.sign_count"
+    }
+   },
+   {
+    "name": "sign_count.text",
+    "clause": "§9.31 `sign_count`",
+    "base_draft": "step_up_asserted",
+    "changes": [
+     {
+      "path": "payload.sign_count",
+      "value": "7"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.sign_count"
+    }
+   },
+   {
+    "name": "challenge.null",
+    "clause": "§9.32 types",
+    "base_draft": "step_up_asserted",
+    "changes": [
+     {
+      "path": "payload.challenge",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.challenge"
+    }
+   },
+   {
+    "name": "credential.null",
+    "clause": "§9.32 types",
+    "base_draft": "step_up_asserted",
+    "changes": [
+     {
+      "path": "payload.credential",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.credential"
+    }
+   },
+   {
+    "name": "sign_count.null",
+    "clause": "§9.32 types",
+    "base_draft": "step_up_asserted",
+    "changes": [
+     {
+      "path": "payload.sign_count",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.sign_count"
+    }
+   },
+   {
+    "name": "assertion.null",
+    "clause": "§9.32 types",
+    "base_draft": "step_up_asserted",
+    "changes": [
+     {
+      "path": "payload.assertion",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.assertion",
+     "also": [
+      {
+       "reason": "artifact_refs",
+       "path": "artifact_refs"
+      }
+     ]
+    }
+   },
+   {
+    "name": "missing",
+    "clause": "§9.32 closed",
+    "base_draft": "step_up_asserted",
+    "changes": [
+     {
+      "path": "payload.assertion",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.assertion",
+     "also": [
+      {
+       "reason": "artifact_refs",
+       "path": "artifact_refs"
+      }
+     ]
+    }
+   },
+   {
+    "name": "extra",
+    "clause": "§9.32 closed",
+    "base_draft": "step_up_asserted",
+    "changes": [
+     {
+      "path": "payload.method",
+      "value": "passkey"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.method"
+    }
+   },
+   {
+    "name": "uncaused",
+    "clause": "rule 252: names the event it authorized",
+    "base_draft": "step_up_asserted",
+    "changes": [
+     {
+      "path": "causation_id",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "causation_id"
+    }
+   },
+   {
+    "name": "by_a_system",
+    "clause": "rule 252: the actor is a user",
+    "base_draft": "step_up_asserted",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "system",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      }
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "at_version_2",
+    "clause": "§9.32: closed at schema version 1 only",
+    "base_draft": "step_up_asserted",
+    "changes": [
+     {
+      "path": "schema_version",
+      "value": 2
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "unknown_schema",
+     "path": "payload"
+    }
+   }
+  ],
+  "valid_drafts": [
+   {
+    "name": "uncounted",
+    "clause": "§9.31 `sign_count`: 0, a counter not kept",
+    "base_draft": "step_up_asserted",
+    "changes": [
+     {
+      "path": "payload.sign_count",
+      "value": 0
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "in_live",
+    "clause": "§9.32: a passkey serves `live` too (identity spec §7.3)",
+    "base_draft": "step_up_asserted",
+    "changes": [
+     {
+      "path": "environment",
+      "value": "live"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "another_credential",
+    "clause": "§9.32: any credential id",
+    "base_draft": "step_up_asserted",
+    "changes": [
+     {
+      "path": "payload.credential",
+      "value": "EBESExQVFhcYGRobHB0eHw"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   }
+  ],
+  "batches": [
+   {
+    "name": "the_event_then_its_assertion",
+    "clause": "rule 253: one batch, the event first",
+    "drafts": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000E2",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "CredentialRemoved",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "member": "01JAA2N0A000000000000000P1",
+       "credential": "EBESExQVFhcYGRobHB0eHw",
+       "step_up": {
+        "assertion_id": "01JAA3P0A000000000000000H1",
+        "authenticated_at": "2026-10-19T15:00:05.250000000Z",
+        "method": "passkey"
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H1",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 7,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "two_events_each_with_its_assertion",
+    "clause": "rule 253: each immediately after its own",
+    "drafts": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000E2",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "CredentialRemoved",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "member": "01JAA2N0A000000000000000P1",
+       "credential": "EBESExQVFhcYGRobHB0eHw",
+       "step_up": {
+        "assertion_id": "01JAA3P0A000000000000000H1",
+        "authenticated_at": "2026-10-19T15:00:05.250000000Z",
+        "method": "passkey"
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H1",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 7,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S3",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "CredentialEnrolled",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "member": "01JAA2N0A000000000000000P1",
+       "kind": "passkey",
+       "credential": "EBESExQVFhcYGRobHB0eHw",
+       "public_key": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+       "alg": "es256",
+       "sign_count": 0,
+       "cool_off_ends": null,
+       "step_up": {
+        "assertion_id": "01JAA3P0A000000000000000H1",
+        "authenticated_at": "2026-10-19T15:00:05.250000000Z",
+        "method": "passkey"
+       }
+      },
+      "artifact_refs": [
+       "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S2",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000S3",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H1",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 7,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "alone",
+    "clause": "rule 253: the event is in the batch",
+    "drafts": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H1",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 7,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "index": 0,
+     "reason": "schema",
+     "path": "event_type"
+    }
+   },
+   {
+    "name": "before_its_event",
+    "clause": "rule 253: the event comes first",
+    "drafts": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H1",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 7,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000E2",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "CredentialRemoved",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "member": "01JAA2N0A000000000000000P1",
+       "credential": "EBESExQVFhcYGRobHB0eHw",
+       "step_up": {
+        "assertion_id": "01JAA3P0A000000000000000H1",
+        "authenticated_at": "2026-10-19T15:00:05.250000000Z",
+        "method": "passkey"
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "index": 0,
+     "reason": "schema",
+     "path": "event_type"
+    }
+   },
+   {
+    "name": "after_another_event",
+    "clause": "rule 253: immediately after the event it names",
+    "drafts": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000E2",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "CredentialRemoved",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "member": "01JAA2N0A000000000000000P1",
+       "credential": "EBESExQVFhcYGRobHB0eHw",
+       "step_up": {
+        "assertion_id": "01JAA3P0A000000000000000H1",
+        "authenticated_at": "2026-10-19T15:00:05.250000000Z",
+        "method": "passkey"
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S3",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "CredentialEnrolled",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "member": "01JAA2N0A000000000000000P1",
+       "kind": "passkey",
+       "credential": "EBESExQVFhcYGRobHB0eHw",
+       "public_key": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+       "alg": "es256",
+       "sign_count": 0,
+       "cool_off_ends": null,
+       "step_up": {
+        "assertion_id": "01JAA3P0A000000000000000H1",
+        "authenticated_at": "2026-10-19T15:00:05.250000000Z",
+        "method": "passkey"
+       }
+      },
+      "artifact_refs": [
+       "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H1",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 7,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "index": 2,
+     "reason": "schema",
+     "path": "event_type"
+    }
+   },
+   {
+    "name": "naming_another_event",
+    "clause": "rule 253: the event its cause names",
+    "drafts": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000E2",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "CredentialRemoved",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "member": "01JAA2N0A000000000000000P1",
+       "credential": "EBESExQVFhcYGRobHB0eHw",
+       "step_up": {
+        "assertion_id": "01JAA3P0A000000000000000H1",
+        "authenticated_at": "2026-10-19T15:00:05.250000000Z",
+        "method": "passkey"
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000S3",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H1",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 7,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "index": 1,
+     "reason": "schema",
+     "path": "event_type"
+    }
+   },
+   {
+    "name": "by_another_member",
+    "clause": "rule 253: the same actor",
+    "drafts": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000E2",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "CredentialRemoved",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "member": "01JAA2N0A000000000000000P1",
+       "credential": "EBESExQVFhcYGRobHB0eHw",
+       "step_up": {
+        "assertion_id": "01JAA3P0A000000000000000H1",
+        "authenticated_at": "2026-10-19T15:00:05.250000000Z",
+        "method": "passkey"
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P2",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H1",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 7,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "index": 1,
+     "reason": "schema",
+     "path": "actor.id"
+    }
+   },
+   {
+    "name": "of_an_event_without_step_up",
+    "clause": "rule 253: the event carries step-up",
+    "drafts": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S3",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "CredentialEnrolled",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "member": "01JAA2N0A000000000000000P1",
+       "kind": "passkey",
+       "credential": "EBESExQVFhcYGRobHB0eHw",
+       "public_key": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+       "alg": "es256",
+       "sign_count": 0,
+       "cool_off_ends": "2026-10-20T15:00:05.250000000Z",
+       "step_up": null
+      },
+      "artifact_refs": [
+       "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000S3",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H1",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 7,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "index": 1,
+     "reason": "schema",
+     "path": "payload.step_up"
+    }
+   },
+   {
+    "name": "of_an_event_without_a_passkey",
+    "clause": "rule 253: its step-up is a passkey's",
+    "drafts": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000E2",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ApprovalResponseSubmitted",
+      "schema_version": 1,
+      "event_time": "2026-09-21T13:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "user_owner_01",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "approval": "01J8Z3P0A000000000000000Q1",
+       "verdict": "approved",
+       "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+       "submitted_at": 1790000000,
+       "step_up": {
+        "assertion_id": "assert_owner_02",
+        "authenticated_at": 1789999990,
+        "method": "cli_confirm"
+       },
+       "responder": "user_owner_01",
+       "role": "approver"
+      },
+      "artifact_refs": [
+       "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "user_owner_01",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H1",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 7,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "index": 1,
+     "reason": "schema",
+     "path": "payload.step_up"
+    }
+   },
+   {
+    "name": "of_another_challenge",
+    "clause": "rule 253: the challenge the event names",
+    "drafts": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000E2",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "CredentialRemoved",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "member": "01JAA2N0A000000000000000P1",
+       "credential": "EBESExQVFhcYGRobHB0eHw",
+       "step_up": {
+        "assertion_id": "01JAA3P0A000000000000000H1",
+        "authenticated_at": "2026-10-19T15:00:05.250000000Z",
+        "method": "passkey"
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H2",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 7,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "index": 1,
+     "reason": "schema",
+     "path": "payload.challenge"
+    }
+   },
+   {
+    "name": "a_bad_assertion",
+    "clause": "each draft's own rules first",
+    "drafts": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000E2",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "CredentialRemoved",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "member": "01JAA2N0A000000000000000P1",
+       "credential": "EBESExQVFhcYGRobHB0eHw",
+       "step_up": {
+        "assertion_id": "01JAA3P0A000000000000000H1",
+        "authenticated_at": "2026-10-19T15:00:05.250000000Z",
+        "method": "passkey"
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H1",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 7,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "index": 1,
+     "reason": "schema",
+     "path": "causation_id"
+    }
+   }
+  ],
+  "streams": [
+   {
+    "name": "rising",
+    "clause": "rule 254: above the last",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000E1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "CredentialEnrolled",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "member": "01JAA2N0A000000000000000P1",
+       "kind": "passkey",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "public_key": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+       "alg": "es256",
+       "sign_count": 5,
+       "cool_off_ends": "2026-10-20T15:00:05.250000000Z",
+       "step_up": null
+      },
+      "artifact_refs": [
+       "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H1",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 6,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S2",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H2",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 9,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "not_kept",
+    "clause": "rule 254: 0 on both sides",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000E1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "CredentialEnrolled",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "member": "01JAA2N0A000000000000000P1",
+       "kind": "passkey",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "public_key": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+       "alg": "es256",
+       "sign_count": 0,
+       "cool_off_ends": "2026-10-20T15:00:05.250000000Z",
+       "step_up": null
+      },
+      "artifact_refs": [
+       "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H1",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 0,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S2",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H2",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 0,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "first_kept",
+    "clause": "rule 254: from 0 at enrolment to 1, the first count kept",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000E1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "CredentialEnrolled",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "member": "01JAA2N0A000000000000000P1",
+       "kind": "passkey",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "public_key": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+       "alg": "es256",
+       "sign_count": 0,
+       "cool_off_ends": "2026-10-20T15:00:05.250000000Z",
+       "step_up": null
+      },
+      "artifact_refs": [
+       "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H1",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 1,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "equal_to_enrolment",
+    "clause": "rule 254: not equal",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000E1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "CredentialEnrolled",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "member": "01JAA2N0A000000000000000P1",
+       "kind": "passkey",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "public_key": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+       "alg": "es256",
+       "sign_count": 5,
+       "cool_off_ends": "2026-10-20T15:00:05.250000000Z",
+       "step_up": null
+      },
+      "artifact_refs": [
+       "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H1",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 5,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "rule": "254",
+     "index": 1
+    }
+   },
+   {
+    "name": "below_the_last",
+    "clause": "rule 254: never backwards",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000E1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "CredentialEnrolled",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "member": "01JAA2N0A000000000000000P1",
+       "kind": "passkey",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "public_key": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+       "alg": "es256",
+       "sign_count": 5,
+       "cool_off_ends": "2026-10-20T15:00:05.250000000Z",
+       "step_up": null
+      },
+      "artifact_refs": [
+       "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H1",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 9,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S2",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H2",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 8,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "rule": "254",
+     "index": 2
+    }
+   },
+   {
+    "name": "zero_after_kept",
+    "clause": "rule 254: 0 only when never kept",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000E1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "CredentialEnrolled",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "member": "01JAA2N0A000000000000000P1",
+       "kind": "passkey",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "public_key": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+       "alg": "es256",
+       "sign_count": 5,
+       "cool_off_ends": "2026-10-20T15:00:05.250000000Z",
+       "step_up": null
+      },
+      "artifact_refs": [
+       "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H1",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 0,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "rule": "254",
+     "index": 1
+    }
+   },
+   {
+    "name": "another_members",
+    "clause": "rule 254: the actor's own",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000E1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "CredentialEnrolled",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "member": "01JAA2N0A000000000000000P1",
+       "kind": "passkey",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "public_key": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+       "alg": "es256",
+       "sign_count": 5,
+       "cool_off_ends": "2026-10-20T15:00:05.250000000Z",
+       "step_up": null
+      },
+      "artifact_refs": [
+       "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P2",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H1",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 6,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "rule": "254",
+     "index": 1
+    }
+   },
+   {
+    "name": "after_removal",
+    "clause": "rule 254: not removed",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000E1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "CredentialEnrolled",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "member": "01JAA2N0A000000000000000P1",
+       "kind": "passkey",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "public_key": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+       "alg": "es256",
+       "sign_count": 5,
+       "cool_off_ends": "2026-10-20T15:00:05.250000000Z",
+       "step_up": null
+      },
+      "artifact_refs": [
+       "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000E2",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "CredentialRemoved",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "member": "01JAA2N0A000000000000000P1",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "step_up": {
+        "assertion_id": "01JAA3P0A000000000000000H1",
+        "authenticated_at": "2026-10-19T15:00:05.250000000Z",
+        "method": "passkey"
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H1",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 6,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "rule": "254",
+     "index": 2
+    }
+   },
+   {
+    "name": "challenge_twice",
+    "clause": "rule 254: one assertion per challenge",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000E1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "CredentialEnrolled",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "member": "01JAA2N0A000000000000000P1",
+       "kind": "passkey",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "public_key": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+       "alg": "es256",
+       "sign_count": 5,
+       "cool_off_ends": "2026-10-20T15:00:05.250000000Z",
+       "step_up": null
+      },
+      "artifact_refs": [
+       "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H1",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 6,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S2",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H1",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 9,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "rule": "254",
+     "index": 2
+    }
+   },
+   {
+    "name": "never_enrolled",
+    "clause": "rule 254: an enrolled credential",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H1",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 7,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "rule": "254",
+     "index": 0
+    }
+   },
+   {
+    "name": "rising_v2",
+    "clause": "rule 254: above the last (a version 2 enrolment)",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000E1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "CredentialEnrolled",
+      "schema_version": 2,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "member": "01JAA2N0A000000000000000P1",
+       "kind": "passkey",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "public_key": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+       "alg": "es256",
+       "sign_count": 5,
+       "cool_off_ends": "2026-10-20T15:00:05.250000000Z",
+       "step_up": null,
+       "backup_eligible": false
+      },
+      "artifact_refs": [
+       "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H1",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 6,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S2",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H2",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 9,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "not_kept_v2",
+    "clause": "rule 254: 0 on both sides (a version 2 enrolment)",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000E1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "CredentialEnrolled",
+      "schema_version": 2,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "member": "01JAA2N0A000000000000000P1",
+       "kind": "passkey",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "public_key": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+       "alg": "es256",
+       "sign_count": 0,
+       "cool_off_ends": "2026-10-20T15:00:05.250000000Z",
+       "step_up": null,
+       "backup_eligible": false
+      },
+      "artifact_refs": [
+       "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H1",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 0,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S2",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H2",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 0,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "first_kept_v2",
+    "clause": "rule 254: from 0 at enrolment to 1, the first count kept (a version 2 enrolment)",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000E1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "CredentialEnrolled",
+      "schema_version": 2,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "member": "01JAA2N0A000000000000000P1",
+       "kind": "passkey",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "public_key": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+       "alg": "es256",
+       "sign_count": 0,
+       "cool_off_ends": "2026-10-20T15:00:05.250000000Z",
+       "step_up": null,
+       "backup_eligible": false
+      },
+      "artifact_refs": [
+       "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H1",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 1,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "equal_to_enrolment_v2",
+    "clause": "rule 254: not equal (a version 2 enrolment)",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000E1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "CredentialEnrolled",
+      "schema_version": 2,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "member": "01JAA2N0A000000000000000P1",
+       "kind": "passkey",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "public_key": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+       "alg": "es256",
+       "sign_count": 5,
+       "cool_off_ends": "2026-10-20T15:00:05.250000000Z",
+       "step_up": null,
+       "backup_eligible": false
+      },
+      "artifact_refs": [
+       "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H1",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 5,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "rule": "254",
+     "index": 1
+    }
+   },
+   {
+    "name": "below_the_last_v2",
+    "clause": "rule 254: never backwards (a version 2 enrolment)",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000E1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "CredentialEnrolled",
+      "schema_version": 2,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "member": "01JAA2N0A000000000000000P1",
+       "kind": "passkey",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "public_key": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+       "alg": "es256",
+       "sign_count": 5,
+       "cool_off_ends": "2026-10-20T15:00:05.250000000Z",
+       "step_up": null,
+       "backup_eligible": false
+      },
+      "artifact_refs": [
+       "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H1",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 9,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S2",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H2",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 8,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "rule": "254",
+     "index": 2
+    }
+   },
+   {
+    "name": "zero_after_kept_v2",
+    "clause": "rule 254: 0 only when never kept (a version 2 enrolment)",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000E1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "CredentialEnrolled",
+      "schema_version": 2,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "member": "01JAA2N0A000000000000000P1",
+       "kind": "passkey",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "public_key": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+       "alg": "es256",
+       "sign_count": 5,
+       "cool_off_ends": "2026-10-20T15:00:05.250000000Z",
+       "step_up": null,
+       "backup_eligible": false
+      },
+      "artifact_refs": [
+       "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H1",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 0,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "rule": "254",
+     "index": 1
+    }
+   },
+   {
+    "name": "another_members_v2",
+    "clause": "rule 254: the actor's own (a version 2 enrolment)",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000E1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "CredentialEnrolled",
+      "schema_version": 2,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "member": "01JAA2N0A000000000000000P1",
+       "kind": "passkey",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "public_key": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+       "alg": "es256",
+       "sign_count": 5,
+       "cool_off_ends": "2026-10-20T15:00:05.250000000Z",
+       "step_up": null,
+       "backup_eligible": false
+      },
+      "artifact_refs": [
+       "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P2",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H1",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 6,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "rule": "254",
+     "index": 1
+    }
+   },
+   {
+    "name": "after_removal_v2",
+    "clause": "rule 254: not removed (a version 2 enrolment)",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000E1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "CredentialEnrolled",
+      "schema_version": 2,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "member": "01JAA2N0A000000000000000P1",
+       "kind": "passkey",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "public_key": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+       "alg": "es256",
+       "sign_count": 5,
+       "cool_off_ends": "2026-10-20T15:00:05.250000000Z",
+       "step_up": null,
+       "backup_eligible": false
+      },
+      "artifact_refs": [
+       "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000E2",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "CredentialRemoved",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "member": "01JAA2N0A000000000000000P1",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "step_up": {
+        "assertion_id": "01JAA3P0A000000000000000H1",
+        "authenticated_at": "2026-10-19T15:00:05.250000000Z",
+        "method": "passkey"
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H1",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 6,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "rule": "254",
+     "index": 2
+    }
+   },
+   {
+    "name": "challenge_twice_v2",
+    "clause": "rule 254: one assertion per challenge (a version 2 enrolment)",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000E1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "CredentialEnrolled",
+      "schema_version": 2,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "member": "01JAA2N0A000000000000000P1",
+       "kind": "passkey",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "public_key": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+       "alg": "es256",
+       "sign_count": 5,
+       "cool_off_ends": "2026-10-20T15:00:05.250000000Z",
+       "step_up": null,
+       "backup_eligible": false
+      },
+      "artifact_refs": [
+       "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H1",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 6,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S2",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H1",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 9,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "rule": "254",
+     "index": 2
+    }
+   },
+   {
+    "name": "version_1_then_version_2",
+    "clause": "rule 254: each credential's own counter, whichever version enrolled it",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000E1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "CredentialEnrolled",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "member": "01JAA2N0A000000000000000P1",
+       "kind": "passkey",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "public_key": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+       "alg": "es256",
+       "sign_count": 5,
+       "cool_off_ends": "2026-10-20T15:00:05.250000000Z",
+       "step_up": null
+      },
+      "artifact_refs": [
+       "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S3",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "CredentialEnrolled",
+      "schema_version": 2,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "member": "01JAA2N0A000000000000000P1",
+       "kind": "passkey",
+       "credential": "EBESExQVFhcYGRobHB0eHw",
+       "public_key": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+       "alg": "es256",
+       "sign_count": 3,
+       "cool_off_ends": null,
+       "step_up": {
+        "assertion_id": "01JAA3P0A000000000000000H1",
+        "authenticated_at": "2026-10-19T15:00:05.250000000Z",
+        "method": "passkey"
+       },
+       "backup_eligible": false
+      },
+      "artifact_refs": [
+       "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S1",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H1",
+       "credential": "AAECAwQFBgcICQoLDA0ODw",
+       "sign_count": 6,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      ],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAA3P4A000000000000000S2",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "StepUpAsserted",
+      "schema_version": 1,
+      "event_time": "2026-10-19T15:00:05.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAA3P4A000000000000000E2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "user",
+       "id": "01JAA2N0A000000000000000P1",
+       "version": "1",
+       "build": null
+      },
+      "config_refs": {},
+      "payload": {
+       "challenge": "01JAA3P0A000000000000000H2",
+       "credential": "EBESExQVFhcYGRobHB0eHw",
+       "sign_count": 4,
+       "assertion": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "artifact_refs": [
+       "sha256:6666666666666666666666666666666666666666666666666666666666666666"
       ],
       "pii_refs": []
      }

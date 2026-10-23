@@ -445,7 +445,8 @@
         "appOrigin",
         "subjectLinks",
         "ingressPeers",
-        "vaultBinding"
+        "vaultBinding",
+        "connectionManagerBinding"
       ],
       "properties": {
         "org": {
@@ -495,6 +496,10 @@
         "vaultBinding": {
           "type": "boolean",
           "description": "The API's vault binding (DEC-2338): its AppRole and the vault's CA as owner-only files, and egress to the vault on 8200."
+        },
+        "connectionManagerBinding": {
+          "type": "boolean",
+          "description": "The connection manager's AppRole beside the API's, copied owner-only as the API's is (DEC-2348); it needs vaultBinding."
         }
       }
     },

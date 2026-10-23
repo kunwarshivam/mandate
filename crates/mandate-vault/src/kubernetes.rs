@@ -9,6 +9,8 @@
 //! one role per connection, bound to exactly that ServiceAccount in exactly that namespace, with
 //! the one policy, audience and lifetimes pinned.
 
+use std::net::SocketAddrV4;
+
 use serde_json::{Value, json};
 
 use crate::SourceError;
@@ -120,9 +122,12 @@ pub fn kubernetes_policy_name(identity: &Identity, mounts: &Mounts) -> Result<St
 /// The templated policy, in HCL, of `identity`'s kind, keyed by the ServiceAccount name in the
 /// login's alias metadata on the auth mount whose accessor is `accessor`, an `x` before an
 /// executor's, so both kinds reach [`crate::policy::connection_segment`]. An executor reads its
-/// connection's token; a token exchange writes it, reads and deletes its code, and reads the
-/// platform's client secret. Anything else, or an accessor that is not one plain path segment (a
-/// quote, a brace or a newline would end the template or the policy), is [`SourceError::Config`].
+/// connection's token and creates its account entries in the personal-data vault, one per request
+/// below its own connection (DEC-2339); a token
+/// exchange writes the token, reads, overwrites, destroys and deletes its code but never its
+/// code's metadata (DEC-2321), and reads the platform's client secret. Anything else, or an
+/// accessor that is not one plain path segment (a quote, a brace or a newline would end the
+/// template or the policy), is [`SourceError::Config`].
 pub fn kubernetes_policy(
     identity: &Identity,
     mounts: &Mounts,
@@ -139,11 +144,19 @@ pub fn kubernetes_policy(
         )
     };
     match identity {
-        Identity::Executor(_) => Ok(block(
-            "data",
-            &format!("connections/{SEGMENT_PREFIX}{own}/token"),
-            "\"read\"",
-        )),
+        Identity::Executor(_) => Ok([
+            block(
+                "data",
+                &format!("connections/{SEGMENT_PREFIX}{own}/token"),
+                "\"read\"",
+            ),
+            block(
+                "data",
+                &format!("personal/accounts/{SEGMENT_PREFIX}{own}/+"),
+                "\"create\"",
+            ),
+        ]
+        .concat()),
         Identity::TokenExchange(_) => Ok([
             block("data", &kv_path(&SecretPath::ClientSecret)?, "\"read\""),
             block(
@@ -151,7 +164,8 @@ pub fn kubernetes_policy(
                 &format!("connections/{own}/code"),
                 "\"read\", \"update\"",
             ),
-            block("metadata", &format!("connections/{own}/code"), "\"delete\""),
+            block("delete", &format!("connections/{own}/code"), "\"update\""),
+            block("destroy", &format!("connections/{own}/code"), "\"update\""),
             block(
                 "data",
                 &format!("connections/{own}/token"),
@@ -253,19 +267,31 @@ pub struct KubernetesAuth {
     pub ca_pem: Option<String>,
 }
 
+/// The API server's address in `host`, which must be exactly `https://`, an IPv4 address and a
+/// port from 1 to 65535, written the one way [`SocketAddrV4`] writes it: the vault sends its own
+/// ServiceAccount token there on every TokenReview, so a name, userinfo, a path, a query, a
+/// fragment, whitespace, a leading zero or a missing port is [`SourceError::Config`].
+pub fn api_server_address(host: &str) -> Result<SocketAddrV4, SourceError> {
+    let address: SocketAddrV4 = host
+        .strip_prefix("https://")
+        .and_then(|rest| rest.parse().ok())
+        .ok_or(SourceError::Config)?;
+    if address.port() == 0 || format!("https://{address}") != host {
+        return Err(SourceError::Config);
+    }
+    Ok(address)
+}
+
 /// The requests that set both Kubernetes auth mounts up, executor's first: for each, enabling
 /// the mount (`sys/auth/<mount>`, type `kubernetes`), then its configuration
 /// (`auth/<mount>/config`). Mounts that are not plain path segments, a host that is not
-/// `https://`, or a CA that is not one PEM certificate is [`SourceError::Config`].
+/// [`api_server_address`]'s form, or a CA that is not one PEM certificate is [`SourceError::Config`].
 pub fn kubernetes_mount_requests(
     mounts: &Mounts,
     auth: &KubernetesAuth,
 ) -> Result<Vec<(String, Value)>, SourceError> {
     let plain = is_segment(&mounts.kubernetes_executor) && is_segment(&mounts.kubernetes_exchange);
-    let https = auth
-        .host
-        .strip_prefix("https://")
-        .is_some_and(|rest| !rest.is_empty());
+    let https = api_server_address(&auth.host).is_ok();
     let ca = auth.ca_pem.as_deref().is_none_or(is_certificate);
     if !(plain && https && ca) {
         return Err(SourceError::Config);
