@@ -104,9 +104,9 @@ fn closed<S: Store>(store: &S, config: &Config) -> Result<Waited, &'static str> 
     let control = StreamId::parse(&format!("ctl:{}", config.scope.workspace.0))
         .and_then(|stream| store.rows(&stream))
         .ok_or("stream_unavailable")?;
-    let agents = agents_of(&control, &config.scope, config.environment)
+    let following = agents_of(&control, &config.scope, config.environment)
         .map_err(|_| "connection_record_unreadable")?;
-    if agents.is_empty() {
+    if following.agents.is_empty() {
         Ok(Waited::Closed)
     } else {
         Err("connection_closed")

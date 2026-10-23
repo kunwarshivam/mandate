@@ -8,7 +8,7 @@
 
 use std::fmt;
 
-use mandate_connections::record::{AccountPiiRef, ConnectionId};
+use mandate_connections::record::{AccountPiiRef, AccountRef, ConnectionId};
 use secrecy::{ExposeSecret, SecretSlice};
 use serde_json::Value;
 
@@ -70,6 +70,54 @@ pub enum Claim {
     Claimed,
     /// Another connection holds it: the account is already connected (connections spec check 4).
     HeldBy(ConnectionId),
+}
+
+/// The connection manager's three fingerprint operations (DEC-2345 items 3 and 4): a trait, so
+/// the connect's callers script them in their own tests and drive the vault's through the same
+/// calls. [`crate::openbao::OpenBaoSource`] implements it.
+#[allow(
+    async_fn_in_trait,
+    reason = "every caller is in this workspace and awaits on its own runtime; no Send bound is needed"
+)]
+pub trait ManagerFingerprints {
+    /// The fingerprint and reference of the request `account` of `connection`, from the
+    /// fingerprint entry its executor wrote at connect; the caller must find the reference equal
+    /// to the journaled `account_pii_ref` before it uses the hash (DEC-2345 item 3).
+    ///
+    /// # Errors
+    /// [`FingerprintError::Rotating`] while the key rotates, [`FingerprintError::Missing`] for no
+    /// entry, or one that does not read, and [`FingerprintError::Unavailable`] for an outage or a
+    /// refused session.
+    async fn fingerprint(
+        &self,
+        connection: &ConnectionId,
+        account: &AccountRef,
+    ) -> Result<(AccountFingerprint, AccountPiiRef), FingerprintError>;
+
+    /// Claims `fingerprint` for `connection`: [`Claim::Claimed`] when it is now this connection's
+    /// or was already, and [`Claim::HeldBy`] another connection that holds it (DEC-2345 item 4).
+    ///
+    /// # Errors
+    /// [`FingerprintError::Rotating`] while the key rotates, and
+    /// [`FingerprintError::Unavailable`] for an outage, a refused session, or a registry that
+    /// keeps moving under it.
+    async fn claim(
+        &self,
+        connection: &ConnectionId,
+        fingerprint: &AccountFingerprint,
+    ) -> Result<Claim, FingerprintError>;
+
+    /// Gives back the claim of the request `account` of `connection`, when it holds it: on a
+    /// refusal and on a revoke. No fingerprint entry, or no claim held, changes nothing.
+    ///
+    /// # Errors
+    /// [`FingerprintError::Unavailable`] for an outage, a refused session, a fingerprint entry
+    /// that does not read, or a registry that keeps moving under it.
+    async fn release(
+        &self,
+        connection: &ConnectionId,
+        account: &AccountRef,
+    ) -> Result<(), FingerprintError>;
 }
 
 /// Why the vault cannot answer for a fingerprint. Every one of them fails the connect closed.

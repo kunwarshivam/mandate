@@ -33,7 +33,7 @@ use mandate_time::UtcNanos;
 use mandate_vault::SourceError;
 use mandate_vault::kubernetes::service_account_name;
 use mandate_vault::lease::{Lease, LeaseKeeper};
-use mandate_vault::mounted::read_mounted;
+use mandate_vault::mounted::read_mounted_ca;
 use mandate_vault::openbao::OpenBaoConfig;
 use mandate_vault::policy::{Identity, Mounts};
 use mandate_vault::source::SecretSource;
@@ -41,9 +41,6 @@ use secrecy::{ExposeSecret, SecretString};
 
 use crate::alpaca::AlpacaBroker;
 use crate::lease::{Held, Leased, runtime};
-
-/// The mounted file holding the vault's CA (DEC-2630).
-const VAULT_CA: &str = "ca.crt";
 
 /// Which broker the process runs over.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -209,10 +206,10 @@ pub fn paper_settings(
 /// # Errors
 /// `vault_ca_unreadable` when the CA is not a mounted file the reader accepts.
 pub fn vault_config(mount: &VaultMount) -> Result<OpenBaoConfig, &'static str> {
-    let ca = read_mounted(&mount.dir, VAULT_CA).map_err(|_| "vault_ca_unreadable")?;
+    let ca = read_mounted_ca(&mount.dir).map_err(|_| "vault_ca_unreadable")?;
     Ok(OpenBaoConfig {
         address: mount.address.clone(),
-        ca_pem: ca.expose_secret().as_bytes().to_vec(),
+        ca_pem: ca.into_bytes(),
         mounts: Mounts::default(),
     })
 }

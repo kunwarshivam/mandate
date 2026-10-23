@@ -809,9 +809,9 @@ fn a_restarted_established_executor_opens_on_its_first_pass() -> Result<(), Erro
 }
 
 /// Item 4 and rule 13: a connection refused or revoked before its copy is closed, and the gate
-/// stays shut; the pass stops nothing, so the process goes on running, and after a refusal it
-/// still takes every exit and no opening, until the manager stops it. (A revoked connection's
-/// agents are no longer followed at all, by `follow::agents_of`, so none of theirs is received.)
+/// stays shut; the pass stops nothing, so the process goes on running, and after either it still
+/// takes every exit and no opening, until the manager stops it. A revoked connection's agents stay
+/// followed for their exits and kill switches (DEC-2343 item 1), so their exits are taken.
 #[test]
 fn a_refused_connection_is_closed_and_stays_shut() -> Result<(), Error> {
     for event_type in ["ConnectionRefused", "ConnectionRevoked"] {
@@ -857,12 +857,11 @@ fn a_refused_connection_is_closed_and_stays_shut() -> Result<(), Error> {
             !matches!(process.lifecycle().state(), State::Exited(_)),
             "{event_type}"
         );
-        let exits: &[&str] = if event_type == "ConnectionRefused" {
-            &["01JINTENT0000000000000000C"]
-        } else {
-            &[]
-        };
-        assert_eq!(journal.received(), exits, "{event_type}");
+        assert_eq!(
+            journal.received(),
+            ["01JINTENT0000000000000000C"],
+            "{event_type}"
+        );
     }
     Ok(())
 }

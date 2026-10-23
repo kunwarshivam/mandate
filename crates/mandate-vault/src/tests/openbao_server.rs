@@ -24,7 +24,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use super::conformance::{self, Harness, at, c};
 use crate::SourceError;
 use crate::fingerprint::{
-    AccountFingerprint, Claim, FINGERPRINT_KEY, FingerprintError, encode_entry,
+    AccountFingerprint, Claim, FINGERPRINT_KEY, FingerprintError, ManagerFingerprints, encode_entry,
 };
 use crate::kubernetes::{
     KubernetesAuth, kubernetes_mount_requests, kubernetes_policy, kubernetes_policy_name,
