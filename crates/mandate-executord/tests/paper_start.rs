@@ -132,6 +132,9 @@ fn mount_dir() -> Result<PathBuf, Error> {
 /// Writes `name` in `dir` with `mode`, as the kubelet would.
 fn put(dir: &Path, name: &str, bytes: &[u8], mode: u32) -> Result<(), Error> {
     let path = dir.join(name);
+    if path.exists() {
+        fs::remove_file(&path)?;
+    }
     fs::write(&path, bytes)?;
     fs::set_permissions(&path, fs::Permissions::from_mode(mode))?;
     Ok(())
@@ -191,8 +194,9 @@ fn the_flags_name_the_paper_run_and_its_vault() -> Result<(), Error> {
     Ok(())
 }
 
-/// The vault's CA is the mount's `ca.crt`, read whole; a missing CA, or one group or others may
-/// read, is refused.
+/// The vault's CA is the mount's `ca.crt`, read whole at the modes a ConfigMap mounts, 0444 and,
+/// under an `fsGroup`, 0440 (DEC-2340); a missing CA, or one group or others may write, is
+/// refused.
 #[test]
 fn the_vault_ca_is_read_from_the_mount() -> Result<(), Error> {
     let dir = mount_dir()?;
@@ -201,13 +205,21 @@ fn the_vault_ca_is_read_from_the_mount() -> Result<(), Error> {
         dir: dir.clone(),
     };
     assert_eq!(vault_config(&mount).err(), Some("vault_ca_unreadable"));
-    put(&dir, "ca.crt", CA, 0o644)?;
-    assert_eq!(vault_config(&mount).err(), Some("vault_ca_unreadable"));
-    put(&dir, "ca.crt", CA, 0o400)?;
-    let config = vault_config(&mount)?;
-    assert_eq!(config.address, ADDRESS);
-    assert_eq!(config.ca_pem, CA);
-    assert_eq!(config.mounts, Mounts::default());
+    for writable in [0o646, 0o664] {
+        put(&dir, "ca.crt", CA, writable)?;
+        assert_eq!(
+            vault_config(&mount).err(),
+            Some("vault_ca_unreadable"),
+            "{writable:o}"
+        );
+    }
+    for mode in [0o444, 0o440, 0o400] {
+        put(&dir, "ca.crt", CA, mode)?;
+        let config = vault_config(&mount)?;
+        assert_eq!(config.address, ADDRESS);
+        assert_eq!(config.ca_pem, CA);
+        assert_eq!(config.mounts, Mounts::default());
+    }
     Ok(())
 }
 
