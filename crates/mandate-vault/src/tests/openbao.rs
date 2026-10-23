@@ -9,12 +9,14 @@ use serde_json::{Value, json};
 
 use crate::openbao::provisioned_policy;
 use crate::openbao::{
-    OpenBaoConfig, OpenBaoSource, kubernetes_login_path, kubernetes_login_refusal,
-    kubernetes_login_verdict, kubernetes_namespace_verdict, provision, provisioned_identities,
-    refusal, role_settings, seal_verdict, secret_id_identities,
+    OpenBaoConfig, OpenBaoSource, cas_refusal, kubernetes_login_path, kubernetes_login_refusal,
+    kubernetes_login_verdict, kubernetes_namespace_verdict, lost_or_denied_verdict, provision,
+    provisioned_identities, refusal, role_settings, seal_verdict, secret_id_identities, taken_read,
 };
 use crate::policy::{Identity, Mounts};
-use secrecy::SecretString;
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD;
+use secrecy::{ExposeSecret, SecretString};
 
 const UNSEALED_RAFT: &[u8] =
     br#"{"type":"shamir","initialized":true,"sealed":false,"t":3,"n":5,"storage_type":"raft"}"#;
@@ -494,4 +496,134 @@ fn provisioning_writes_the_provisioners_own_policy_for_its_role() {
         provisioned_policy(&Identity::Provisioner, &connections, &mounts, None),
         crate::policy::openbao_policy(&Identity::Provisioner, &connections, &mounts)
     );
+}
+
+/// A check-and-set overwrite that finds the version moved on lost to another taker, which is no
+/// code; every other answer keeps `refusal`'s meaning.
+#[test]
+fn an_overwrite_that_finds_the_version_moved_on_lost_its_race() {
+    let moved = br#"{"errors":["check-and-set parameter did not match the current version"]}"#;
+    assert_eq!(cas_refusal(400, moved), Err(SourceError::Missing));
+    assert_eq!(cas_refusal(200, moved), Ok(()));
+    for (status, body, want) in [
+        (403_u16, &moved[..], SourceError::Denied),
+        (500, &moved[..], SourceError::Unavailable),
+        (
+            400,
+            br#"{"errors":["permission denied"]}"#,
+            SourceError::Denied,
+        ),
+        (
+            400,
+            br#"{"errors":["check-and-set parameter did not match the current version","more"]}"#,
+            SourceError::Denied,
+        ),
+        (
+            400,
+            b"check-and-set parameter did not match the current version",
+            SourceError::Denied,
+        ),
+        (400, b"", SourceError::Denied),
+    ] {
+        assert_eq!(
+            cas_refusal(status, body),
+            Err(want),
+            "{status} {}",
+            String::from_utf8_lossy(body)
+        );
+    }
+}
+
+/// A code the take read, as text, its version beside it.
+fn read_code(
+    read: Result<Option<Value>, SourceError>,
+) -> Result<Option<(u64, String)>, SourceError> {
+    taken_read(read).map(|found| {
+        found.map(|(version, code)| {
+            (
+                version,
+                String::from_utf8(code.expose_secret().to_vec()).unwrap(),
+            )
+        })
+    })
+}
+
+/// The code the take read is its version and its bytes; no code and a tombstone are no code; and
+/// a read missing either half, or with a value that is not base64, is malformed. Nothing of the
+/// code is ever in what the read's answer shows.
+#[test]
+fn a_read_before_a_take_is_the_codes_version_and_bytes_or_no_code() {
+    let canary = "code-canary-9f2e";
+    let encoded = STANDARD.encode(canary);
+    let found = json!({"data": {"data": {"value": encoded}, "metadata": {"version": 3}}});
+    assert_eq!(
+        read_code(Ok(Some(found.clone()))),
+        Ok(Some((3, canary.to_owned())))
+    );
+    let shown = format!("{:?}", taken_read(Ok(Some(found))));
+    assert!(
+        !shown.contains(canary) && !shown.contains(&encoded),
+        "{shown}"
+    );
+    for padded in ["abc", "abcd", "abcde", "a"] {
+        let found = json!({"data": {"data": {"value": STANDARD.encode(padded)}, "metadata": {"version": 1}}});
+        assert_eq!(
+            read_code(Ok(Some(found))),
+            Ok(Some((1, padded.to_owned()))),
+            "{padded:?}"
+        );
+    }
+    assert_eq!(read_code(Err(SourceError::Missing)), Ok(None));
+    let tombstone = json!({"data": {"data": {"taken": true}, "metadata": {"version": 4}}});
+    assert_eq!(read_code(Ok(Some(tombstone))), Ok(None));
+    for malformed in [
+        json!({"data": {"data": {"value": encoded}, "metadata": {}}}),
+        json!({"data": {"data": {"value": encoded}, "metadata": {"version": "3"}}}),
+        json!({"data": {"data": {}, "metadata": {"version": 3}}}),
+        json!({"data": {"data": {"value": "not base64!"}, "metadata": {"version": 3}}}),
+        json!({"data": {"data": {"value": "YWJj="}, "metadata": {"version": 3}}}),
+        json!({"data": {"data": {"value": "YWJ"}, "metadata": {"version": 3}}}),
+        json!({"data": {"data": {"value": "Y==="}, "metadata": {"version": 3}}}),
+        json!({"data": {"data": {"taken": false, "value": 7}, "metadata": {"version": 3}}}),
+    ] {
+        let read = taken_read(Ok(Some(malformed.clone())));
+        assert!(!format!("{read:?}").contains(canary));
+        assert_eq!(
+            read.map(|r| r.map(|(v, _)| v)),
+            Err(SourceError::Malformed),
+            "{malformed}"
+        );
+    }
+    assert_eq!(read_code(Ok(None)), Err(SourceError::Malformed));
+    assert_eq!(
+        read_code(Err(SourceError::Unavailable)),
+        Err(SourceError::Unavailable)
+    );
+    assert_eq!(
+        read_code(Err(SourceError::Denied)),
+        Err(SourceError::Denied)
+    );
+}
+
+/// After a refused overwrite, the code gone is a lost race, no code; a code still there, or a
+/// tombstone, is not this taker's to take; a failed read again is that failure.
+#[test]
+fn a_refused_overwrite_read_again_is_a_lost_race_only_when_the_code_is_gone() {
+    let verdict = |reread| lost_or_denied_verdict(reread).map(|code| code.is_some());
+    assert_eq!(verdict(Err(SourceError::Missing)), Ok(false));
+    for there in [
+        json!({"data": {"data": {"value": "eA=="}, "metadata": {"version": 1}}}),
+        json!({"data": {"data": {"taken": true}, "metadata": {"version": 2}}}),
+    ] {
+        assert_eq!(
+            verdict(Ok(Some(there.clone()))),
+            Err(SourceError::Denied),
+            "{there}"
+        );
+    }
+    assert_eq!(
+        verdict(Err(SourceError::Unavailable)),
+        Err(SourceError::Unavailable)
+    );
+    assert_eq!(verdict(Err(SourceError::Sealed)), Err(SourceError::Sealed));
 }

@@ -37,6 +37,10 @@ pub trait Harness {
     async fn outage(&self);
     /// Ends the outage.
     async fn restore(&self);
+    /// A session as `connection`'s token exchange that may take its code (DEC-2061): the local
+    /// exchange through its grant, and on OpenBao one holding the Kubernetes-auth exchange's
+    /// policy, which alone grants the take.
+    async fn taker(&self, connection: &ConnectionId, now: UtcNanos) -> Self::Source;
 }
 
 pub fn c(id: &str) -> ConnectionId {
@@ -480,5 +484,74 @@ pub async fn no_debug_or_refusal_shows_a_platform_secret<H: Harness>(h: &H) {
     }
     for output in outputs {
         assert!(!output.contains(&CANARY[..16]), "{output}");
+    }
+}
+
+/// What `session` took of `connection`'s code, as text.
+pub async fn taken<S: SecretSource>(
+    session: &S,
+    connection: &str,
+) -> Result<Option<String>, SourceError> {
+    session
+        .take_code(&c(connection))
+        .await
+        .map(|code| code.as_ref().map(text))
+}
+
+/// DEC-2061: a code is taken once, and only by its own connection's exchange. No other identity,
+/// and no other connection's exchange, takes it; a taker finds nothing where no code is, and
+/// nothing once it is taken, by take or by read; a new code is taken anew.
+pub async fn a_code_is_taken_once_and_only_by_its_own_exchange<H: Harness>(h: &H) {
+    let now = at(1_000_000);
+    let api = h.source(Identity::Api, now).await;
+    let code = SecretPath::Code(c("c1"));
+    let taker = h.taker(&c("c1"), now).await;
+    assert_eq!(taken(&taker, "c1").await, Ok(None), "no code yet");
+    api.put(&code, &secret("code-1")).await.unwrap();
+    for identity in [
+        Identity::Api,
+        Identity::ConnectionManager,
+        Identity::Executor(c("c1")),
+        Identity::Runtime,
+    ] {
+        let session = h.source(identity.clone(), now).await;
+        assert_eq!(
+            taken(&session, "c1").await,
+            Err(SourceError::Denied),
+            "{identity:?}"
+        );
+    }
+    let other = h.taker(&c("c2"), now).await;
+    assert_eq!(taken(&other, "c1").await, Err(SourceError::Denied));
+    assert_eq!(taken(&taker, "c2").await, Err(SourceError::Denied));
+    assert_eq!(taken(&taker, "c1").await, Ok(Some("code-1".to_owned())));
+    assert_eq!(taken(&taker, "c1").await, Ok(None), "taken once");
+    assert!(
+        matches!(taker.read(&code).await, Ok(None)),
+        "nothing left to read"
+    );
+    api.put(&code, &secret("code-2")).await.unwrap();
+    assert_eq!(taken(&taker, "c1").await, Ok(Some("code-2".to_owned())));
+}
+
+/// DEC-2061: of two takers racing for one code, exactly one gets it, round after round, and
+/// nothing is left behind.
+pub async fn of_two_racing_takers_exactly_one_gets_the_code<H: Harness>(h: &H) {
+    let now = at(1_000_000);
+    let api = h.source(Identity::Api, now).await;
+    let first = h.taker(&c("c1"), now).await;
+    let second = h.taker(&c("c1"), now).await;
+    for round in 0..16 {
+        let code = format!("code-{round}");
+        api.put(&SecretPath::Code(c("c1")), &secret(&code))
+            .await
+            .unwrap();
+        let (one, two) = tokio::join!(taken(&first, "c1"), taken(&second, "c1"));
+        let won: Vec<String> = [one, two]
+            .into_iter()
+            .filter_map(|took| took.unwrap())
+            .collect();
+        assert_eq!(won, vec![code], "round {round}");
+        assert_eq!(taken(&first, "c1").await, Ok(None), "round {round}");
     }
 }
