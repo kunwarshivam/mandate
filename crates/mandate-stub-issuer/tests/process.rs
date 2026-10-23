@@ -295,3 +295,87 @@ fn with_its_three_flags_the_stub_serves_the_alpaca_provider() {
         serde_json::json!({"error": "invalid_request"})
     );
 }
+
+/// The fixture provider's flags (DEC-1176 item 8) with the owner-only secret file `owner`.
+fn fixture_flags(owner: &str) -> Vec<String> {
+    [
+        "--alpaca-only",
+        "--alpaca-client-id",
+        "client-1",
+        "--alpaca-client-secret-file",
+        owner,
+        "--alpaca-redirect-uri",
+        REDIRECT,
+    ]
+    .map(str::to_owned)
+    .to_vec()
+}
+
+#[test]
+fn the_fixture_mode_needs_the_providers_flags_and_a_public_host_and_a_public_host_needs_it() {
+    let (owner, _) = secret_files();
+    let mut bare = stub(Some("dev"), "0.0.0.0:8897");
+    bare.args(["--alpaca-only", "--public-host", "oauth-fixture:8897"]);
+    refused(&output(bare), "stub_issuer_alpaca");
+    let mut no_host = stub(Some("dev"), "0.0.0.0:8897");
+    no_host.args(fixture_flags(&owner));
+    refused(&output(no_host), "stub_issuer_public_host");
+    let mut bad_host = stub(Some("dev"), "0.0.0.0:8897");
+    bad_host
+        .args(fixture_flags(&owner))
+        .args(["--public-host", "http://oauth-fixture:8897"]);
+    refused(&output(bad_host), "stub_issuer_public_host");
+    let mut issuer = stub(Some("dev"), "127.0.0.1:8897");
+    issuer.args(["--public-host", "oauth-fixture:8897"]);
+    refused(&output(issuer), "stub_issuer_public_host");
+    let mut wide = stub(Some("dev"), "0.0.0.0:8897");
+    wide.args(["--public-host", "oauth-fixture:8897"]);
+    refused(&output(wide), "stub_issuer_bind");
+    let mut staging = stub(Some("staging"), "0.0.0.0:8897");
+    staging
+        .args(fixture_flags(&owner))
+        .args(["--public-host", "oauth-fixture:8897"]);
+    refused(&output(staging), "stub_issuer_tier");
+}
+
+#[test]
+fn the_fixture_mode_announces_its_public_host_and_serves_only_the_provider() {
+    let (owner, _) = secret_files();
+    let (mut child, mut stdout, addr, line) = (0..PORT_ATTEMPTS)
+        .find_map(|_| {
+            let free = std::net::TcpListener::bind("127.0.0.1:0").expect("a port");
+            let addr = free.local_addr().expect("its address");
+            drop(free);
+            let host = format!("oauth-fixture:{}", addr.port());
+            let mut child = Running(
+                stub(Some("ci"), &addr.to_string())
+                    .args(fixture_flags(&owner))
+                    .args(["--public-host", &host])
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .spawn()
+                    .expect("started"),
+            );
+            let mut stdout = BufReader::new(child.0.stdout.take().expect("stdout"));
+            let mut line = String::new();
+            stdout.read_line(&mut line).expect("a line");
+            (!line.is_empty()).then_some((child, stdout, addr, line))
+        })
+        .expect("a free port within the attempts");
+    let host = format!("oauth-fixture:{}", addr.port());
+    assert_eq!(line, format!("alpaca_fixture http://{host}\n"));
+    for (path, status) in [("/alpaca/oauth/authorize", 400), ("/jwks.json", 404)] {
+        let reply = common::send(addr, &host, "GET", path, &[], b"");
+        assert_eq!(reply.status, status, "{path}");
+    }
+    let wrong = common::send(addr, &addr.to_string(), "GET", "/jwks.json", &[], b"");
+    assert_eq!(wrong.status, 421, "its bind is not its public host");
+    let _ = Command::new("kill")
+        .args(["-TERM", &child.0.id().to_string()])
+        .status();
+    let status = child.0.wait().expect("an exit");
+    assert!(status.success(), "{status:?}");
+    let mut rest = String::new();
+    stdout.read_to_string(&mut rest).expect("the rest");
+    assert!(rest.is_empty(), "nothing after the announce line: {rest:?}");
+}

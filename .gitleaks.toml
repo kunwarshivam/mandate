@@ -159,13 +159,14 @@ regexes = [
   '''^auth: "BTBZMqHH6r4Tts7J_aSIgg"$''',
 ]
 
-# The cell test's placeholder API image tag: `api:` and twelve fixed hex digits, an image
-# reference, not a credential. Allowed only as that exact tag and only in the cell module.
+# The cell tests' placeholder API image tag: `api:` and twelve fixed hex digits, an image
+# reference, not a credential. Allowed only as that exact tag, and only in the cell module and the
+# OAuth fixture's chart test, which plants it as a wrong image.
 [[allowlists]]
-description = "Placeholder API image tag in the cell test"
+description = "Placeholder API image tag in the cell tests"
 targetRules = ["generic-api-key"]
 condition = "AND"
-paths = ['''^xtask/src/cell\.rs$''']
+paths = ['''^xtask/src/cell\.rs$''', '''^deploy/tests/test_oauth_fixture\.py$''']
 regexTarget = "match"
 regexes = ['''^api:0123456789ab"$''']
 

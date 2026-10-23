@@ -36,12 +36,15 @@
 pub mod alpaca;
 pub mod connect;
 pub mod credential;
+pub mod establish;
 pub mod fixture;
 pub mod follow;
 pub mod launch;
 pub mod lease;
+pub mod oauth_check;
 pub mod paper;
 mod process;
+pub mod serve;
 
 pub use process::{
     Alert, Broker, Config, ExecutorProcess, Protections, Unplanned, VERSION, Wiring,

@@ -403,6 +403,9 @@ SECRET_KEY = re.compile(
 # Variables that name where a credential file is, never hold one: libpq's pgpass file and systemd's
 # credentials directory, which the API server reads its session key from (workspace API §3.11).
 FILE_PATH_NAMES = ("PGPASSFILE", "CREDENTIALS_DIRECTORY")
+# Variables that name an address and hold no credential, each with the one value it may take: the
+# token exchange's token URL, pointed at a dev or ci cell's fixture pod (DEC-1176 item 5).
+ADDRESS_NAMES = {"MANDATE_TOKEN_URL": "http://oauth-fixture:8091/alpaca/oauth/token"}
 
 
 def secrets_as_files(docs: list[dict]) -> list[str]:
@@ -418,7 +421,8 @@ def secrets_as_files(docs: list[dict]) -> list[str]:
                     problems.append(f"{c['name']}: {e['name']} from {e['valueFrom']}")
                 if re.search(r"://[^/@]*:[^/@]*@", e.get("value", "")):
                     problems.append(f"{c['name']}: {e['name']} carries a password")
-                if SECRET_KEY.search(e["name"]) and e["name"] not in FILE_PATH_NAMES:
+                address = ADDRESS_NAMES.get(e["name"]) == e.get("value")
+                if SECRET_KEY.search(e["name"]) and e["name"] not in FILE_PATH_NAMES and not address:
                     problems.append(f"{c['name']}: {e['name']} looks like a secret")
     return problems
 

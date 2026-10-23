@@ -21,7 +21,8 @@
     "artifacts",
     "founding",
     "executor",
-    "alpacaOAuth"
+    "alpacaOAuth",
+    "oauthFixture"
   ],
   "properties": {
     "workspace": {
@@ -567,6 +568,19 @@
           "description": "MANDATE_ALPACA_REDIRECT_URI: the callback on this deployment's API host (DEC-2623 item 2)"
         }
       }
+    },
+    "oauthFixture": {
+      "description": "The fixture OAuth provider's own pod (DEC-1176): dev and ci cells only, and the token exchange's token URL pointed at it. Any other tier refuses it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      }
     }
   },
   "allOf": [
@@ -589,6 +603,38 @@
         "properties": {
           "deploymentTier": {
             "const": "staging"
+          }
+        },
+        "required": [
+          "deploymentTier"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "oauthFixture": {
+            "properties": {
+              "enabled": {
+                "const": true
+              }
+            },
+            "required": [
+              "enabled"
+            ]
+          }
+        },
+        "required": [
+          "oauthFixture"
+        ]
+      },
+      "then": {
+        "properties": {
+          "deploymentTier": {
+            "enum": [
+              "dev",
+              "ci"
+            ]
           }
         },
         "required": [

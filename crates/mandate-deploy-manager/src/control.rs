@@ -174,13 +174,22 @@ pub enum Fact {
     Revoked {
         connection: String,
     },
-    /// A version-2 `ConnectionRequested` with `credential` `oauth` (§9.8): its connection's token
-    /// exchange runs until `deadline`, the request's `recorded_at` plus 600 seconds (DEC-2627), and
-    /// its success starts `account`'s executor (DEC-2335).
+    /// A version-2 `ConnectionRequested` with `credential` `oauth` (§9.8), whose event id is
+    /// `request`: its connection's token exchange runs, once its roles are made, until `deadline`,
+    /// the request's `recorded_at` plus 600 seconds (DEC-2627), and its success starts `account`'s
+    /// executor (DEC-2335).
     Requested {
         connection: String,
         account: String,
         deadline: UtcNanos,
+        request: String,
+    },
+    /// The role provisioner's `ConnectionRolesMade` (§9.33): `connection`'s Kubernetes-auth roles
+    /// are made for the request whose event id is `request`, its cause, so that request's token
+    /// exchange can log in and may start (§9.21, DEC-2350).
+    RolesMade {
+        connection: String,
+        request: String,
     },
     /// A version-1 `ConnectionEstablished`, which closes the connection's request (rule 131) and
     /// names no account.
@@ -260,8 +269,13 @@ pub fn fact(row: &StoredEvent) -> Option<Fact> {
                 connection: text("connection_id")?.to_owned(),
                 account: text("account_ref")?.to_owned(),
                 deadline: UtcNanos::from_parts(deadline, recorded.nanos()).ok()?,
+                request: row.event_id.clone(),
             })
         }
+        "ConnectionRolesMade" => Some(Fact::RolesMade {
+            connection: text("connection_id")?.to_owned(),
+            request: body.get("causation_id")?.as_str()?.to_owned(),
+        }),
         "ConnectionRefused" if text("occasion") == Some("connect") => Some(Fact::Refused {
             connection: text("connection_id")?.to_owned(),
         }),

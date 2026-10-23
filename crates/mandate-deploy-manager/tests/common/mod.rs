@@ -572,6 +572,63 @@ pub fn requested(connection: &str, account: &str, credential: Option<&str>) -> V
     }
 }
 
+/// The role provisioner's actor (journal spec §9.33 rule 261: a system actor).
+const PROVISIONER: &str = r#"{"kind":"system","id":"role_provisioner","version":"0.1.0","build":"sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}"#;
+
+/// The event id of [`requested`]'s request of `connection`.
+pub fn request_id(connection: &str) -> String {
+    event_id(&format!("requested {connection}"))
+}
+
+/// A role provisioner's answer to the request whose event id is `request` (journal spec §9.33):
+/// `ConnectionRolesMade` of `connection` when `refused` is `None`, else `ConnectionRolesRefused`
+/// with that reason, each caused by the request.
+fn roles(connection: &str, request: &str, refused: Option<&str>) -> Vec<u8> {
+    let (event_type, payload) = match refused {
+        None => (
+            "ConnectionRolesMade",
+            format!(r#"{{"connection_id":"{connection}"}}"#),
+        ),
+        Some(reason) => (
+            "ConnectionRolesRefused",
+            format!(r#"{{"connection_id":"{connection}","reason":"{reason}"}}"#),
+        ),
+    };
+    let draft = envelope(
+        &event_id(&format!("{event_type} {connection} {request}")),
+        event_type,
+        PROVISIONER,
+        "{}",
+        &payload,
+        "[]",
+    );
+    let mandate_canon::Value::Object(mut body) = parse(&draft).unwrap() else {
+        unreachable!("an envelope is an object")
+    };
+    body.insert(
+        mandate_canon::Key::new("causation_id").unwrap(),
+        mandate_canon::Value::Str(request.to_owned()),
+    );
+    mandate_canon::to_canonical(&mandate_canon::Value::Object(body))
+}
+
+/// The provisioner's `ConnectionRolesMade` for [`requested`]'s request of `connection`: what a
+/// connect's token exchange waits for (journal spec §9.21, DEC-2350).
+pub fn roles_made(connection: &str) -> Vec<u8> {
+    roles(connection, &request_id(connection), None)
+}
+
+/// A `ConnectionRolesMade` of `connection` that answers the request `request`, which need not be
+/// that connection's latest.
+pub fn roles_made_for(connection: &str, request: &str) -> Vec<u8> {
+    roles(connection, request, None)
+}
+
+/// The provisioner's `ConnectionRolesRefused` for [`requested`]'s request of `connection`.
+pub fn roles_refused(connection: &str, reason: &str) -> Vec<u8> {
+    roles(connection, &request_id(connection), Some(reason))
+}
+
 /// A teardown's `ConnectionRefused` of `connection` with `occasion` (journal spec §9.8): with
 /// occasion `connect` it closes the connection's request.
 pub fn refused(connection: &str, occasion: &str) -> Vec<u8> {

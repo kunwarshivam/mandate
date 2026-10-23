@@ -1928,6 +1928,16 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   - the version applies only after the second user's approval, and V-047 is checked again at
     application;
   - the interim refusal and its tests are replaced, not kept beside the flow.
+- **E11-13 (Should; lane W2)** As an owner, I want every agent the API lists to open in the web app,
+  so that no agent of mine is a 404. `web/src/lib/ids.ts`'s `AGENT_ID` admits only `agt_` and a
+  ULID, and every agent route calls `notFound()` for any other id, while the workspace API types
+  `agent_id` as the opaque `Id`, `^[A-Za-z0-9_-]{1,64}$` (`schemas/workspace-api/common.schema.json`),
+  which the CLI deploys under. The cell demo's second agent was `demo-web` and its page never
+  loaded; the demo now names it `agt_01KDEM00000000000000000WEB`, which hides the gap without
+  closing it.
+  *Accepted when:* `web/`'s agent routes, the demo router and the messages routes admit exactly the
+  API's `Id` grammar for an agent id; an id outside it is still a 404; a static segment such as
+  `new` still wins over the dynamic one; and a test opens an agent whose id is not `agt_`-shaped.
 
 ### E12 Audit explorer
 
@@ -3085,6 +3095,35 @@ enables `live` (ES-23, OPS-5).
     pass while its request has time left, making and deleting its account each time; a retry
     bound or backoff is left. Open until R1 lands: DEC-2332 items 4 to 6 (the environment pin, the
     vault CA, the exchange's launch).
+  - From DEC-2336 item 2 (K2a): a reconnect that reuses its `account_ref` (connections spec
+    CN-12) starts no executor for its connect, since that account's executor already used
+    generation 1 and rule 167 holds `exchanged` to it, so the connect fails by its deadline until a
+    reconnect start is specified (a new cause, or `exchanged` at the next generation). This reaches
+    the staging reconnect path.
+  - K2b, after K2a: the executor's `<hex>` account, its vault-token volume and vault CA,
+    `MANDATE_WORKSPACE_NAMESPACE` among the manager's names, the pod-policy pin of the executor's
+    account, and the Kubernetes adapter reporting a pod's `Succeeded` as its own phase; until then
+    the adapter reports it `Exited`, so no connect's executor starts in the cell.
+  - Lane V2, a dependency of K2b (DEC-2336 risks): `mandate-executord` refuses to start unless
+    `MANDATE_SUBJECT_ACCOUNT` is the lowercase hex of its connection id's bytes, beside #2196's
+    namespace check, as DEC-1177 item 6 has the token exchange do.
+  - After K2b: the chart's Deployment executor moves from `default` to its connection's `<hex>`
+    account, once the manager owns every executor.
+  - **The role provisioner** ([DEC-2350](decisions/DEC-2350.md), DEC-2630 item 7; journal spec v0.77
+    §9.33). Nothing makes a connection's Kubernetes-auth roles today, so every exchange's and every
+    managed executor's login is refused. Spec first (this row's first PR), then: the vault side with
+    lane V2 (the provisioner identity and AppRole, `delete` on the token exchange's mount alone in `provisioner_policy`, making and
+    removing a connection's roles); the journal crate's three records (the `connection_roles`
+    vectors, pending until then); the `provisioner` process; its chart, with vault-only egress to
+    lane GO's pattern; and the manager's wait for `ConnectionRolesMade` before an exchange starts.
+    *Accepted when:* a property test over requests, closes, revocations, executor starts and stops,
+    crashes and vault refusals shows every record the provisioner journals keeps rules 262 and 263,
+    against an oracle rebuilt from the stream, with no executor's role ever removed, a revocation
+    right after a kill switch among them; and the manager starts no exchange before its
+    `ConnectionRolesMade`. Left: a sweep of the executor's roles the provisioner never removes, one
+    per connection whose request closed without an establishment or that was revoked, once no
+    executor of its account runs; the manager does not journal a held generation's own exit
+    (DEC-2344), so the sweep needs a signal it does not have yet.
   - **The role provisioner** ([DEC-2350](decisions/DEC-2350.md), DEC-2630 item 7; journal spec v0.77
     §9.33). Nothing makes a connection's Kubernetes-auth roles today, so every exchange's and every
     managed executor's login is refused. Spec first (this row's first PR), then: the vault side with
