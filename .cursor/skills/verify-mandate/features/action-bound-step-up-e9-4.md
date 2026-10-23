@@ -25,5 +25,10 @@
   The route: `crates/mandate-api-server/tests/stepup_http.rs` (who obtains a challenge, the
   record it binds recomputed from §7.2, retries, expiry, live, the bounds, and a seeded walk
   against an independent model of the store).
+  One's own passkeys: `crates/mandate-api-server/tests/passkeys_http.rs` (the registration
+  challenge and the list, workspace API §3.6, DEC-2124: who asks, a fresh sign-in for a first
+  passkey, retries and tombstones, the shared bounds, a broken fold, and a seeded walk against an
+  independent fold), against `src/passkeys.rs` and the store's registration challenges and
+  tombstones in `src/challenges.rs`.
 - **Run:** `cargo nextest run -p mandate-passkey`, `cargo test -p mandate-passkey --doc`, and
-  `cargo nextest run -p mandate-api-server --test stepup_http`.
+  `cargo nextest run -p mandate-api-server --test stepup_http --test passkeys_http`.
