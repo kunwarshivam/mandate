@@ -474,7 +474,8 @@ def cancels(cause: dict, held_under: dict, new: dict, skip: frozenset[str] = fro
 def silent(case: dict, skip: frozenset[str] = frozenset()) -> bool:
     """The verifier's `retirement_held_silent` finding at risk clock `now`: the sequence's last
     `RetirementHeld` is more than 48 hours old, with no end and no version that cancels it since."""
-    mandates, cause = case["mandates"], case["cause"]
+    mandates = {mandate["version"]: mandate["terms"] for mandate in case["mandates"]}
+    cause = case["cause"]
     last = None
     held_under = None
     for record in case["records"]:
@@ -529,7 +530,10 @@ def silence_cases() -> list[dict]:
     goal = goal_completed(None, "release")
 
     def case(name, clause, cause, records, now, is_silent, newer=None):
-        mandates = {BOUND: held_under, NEWER: {**held_under, **(newer or {})}}
+        mandates = [
+            {"version": BOUND, "terms": held_under},
+            {"version": NEWER, "terms": {**held_under, **(newer or {})}},
+        ]
         return {"name": name, "clause": clause, "cause": cause, "mandates": mandates, "records": records,
                 "now": now, "silent": is_silent}
 
