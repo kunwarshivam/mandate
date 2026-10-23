@@ -37,14 +37,16 @@ const THRESHOLD: usize = 2;
 /// The label every provisioned Secret carries (`mandate_vault::kube::MANAGED_BY_LABEL`).
 const MANAGED_BY: &str = "app.kubernetes.io/managed-by=mandate-vault-provision";
 /// The Secrets of the identities that are not per connection, as `mandate_vault::kube::secret_name`
-/// names them.
-const PLATFORM_SECRETS: [&str; 6] = [
+/// names them, the role provisioner's among them, which `--secrets-namespace` issues (DEC-2350). A
+/// vault provisioned before it was listed lacks it, so the next apply provisions once more.
+const PLATFORM_SECRETS: [&str; 7] = [
     "vault-approle-api",
     "vault-approle-connection-manager",
     "vault-approle-runtime",
     "vault-approle-secret-import",
     "vault-approle-model-gateway",
     "vault-approle-email-sender",
+    "vault-approle-provisioner",
 ];
 /// The ConfigMap that records the API server address the vault's Kubernetes auth was last set up
 /// at, and its key.
@@ -860,6 +862,28 @@ mod tests {
         );
         assert_eq!(fake.calls.borrow().len(), 3);
         assert!(fake.commands.borrow().is_empty());
+        Ok(())
+    }
+
+    /// A staging vault provisioned before the role provisioner (DEC-2350) holds every platform
+    /// Secret but `vault-approle-provisioner`, so the next apply provisions it once, and
+    /// `--secrets-namespace` issues that Secret with the others.
+    #[test]
+    fn a_vault_without_the_provisioners_secret_is_provisioned() -> Result<()> {
+        assert!(PLATFORM_SECRETS.contains(&"vault-approle-provisioner"));
+        let mut present = all_present(&["c1"]);
+        present.retain(|name| name != "vault-approle-provisioner");
+        let fake = Fake {
+            present,
+            ..Fake::default()
+        };
+        assert!(fake.run(&["c1"])?.contains(&"credentials: provisioned"));
+        assert!(
+            fake.commands
+                .borrow()
+                .iter()
+                .any(|command| command.iter().any(|a| a == "--secrets-namespace"))
+        );
         Ok(())
     }
 
