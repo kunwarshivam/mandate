@@ -559,7 +559,7 @@ pub(crate) fn flatten_closes(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorEr
 /// §5.5: exactly the agent's sub-ledger quantity, its attributed lots (§8.1: its own orders'
 /// fills, buys net of sells), capped at the long position, so another agent's and the owner's
 /// unattributed shares are untouched.
-fn sub_ledger(
+pub(crate) fn sub_ledger(
     view: &ExecutorState,
     agent: &AgentId,
     instrument: &InstrumentId,
