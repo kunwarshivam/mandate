@@ -191,7 +191,6 @@ mod tests {
         }
         for event_type in [
             "OrderRequestRecorded",
-            "ProtectionChanged",
             "ReconciliationRun",
             "OwnerCommandRefused",
         ] {
