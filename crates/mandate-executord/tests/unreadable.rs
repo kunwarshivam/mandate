@@ -114,3 +114,30 @@ fn an_unreadable_connection_record_never_lets_the_executor_complete() -> Result<
     }
     Ok(())
 }
+
+/// DEC-2357 item 3: a version-1 establishment reads, so it sets nothing aside. It holds openings
+/// as before (DEC-1171 item 3), and once the connection is established again at version 2 the
+/// agent's opening is handed.
+#[test]
+fn a_version_1_establishment_reads_and_a_later_one_hands_openings_again() -> Result<(), Error> {
+    let journal = deployed()?;
+    journal.write(
+        CONTROL_STREAM,
+        "c3",
+        "ConnectionEstablished",
+        1,
+        None,
+        object(vec![("connection_id", text(support::CONNECTION))])?,
+    )?;
+    support::connect(&journal, "c4", support::CONNECTION, support::ACCOUNT)?;
+    propose(&journal, AGENT, OPEN, "buy", "10", "150", "open")?;
+    let broker = Paper::new(&journal);
+    let mut process = start_allowing(&journal, &broker)?;
+    process.step(at(NOON)?);
+    assert_eq!(
+        journal.received(),
+        [OPEN],
+        "established again, the opening is handed"
+    );
+    Ok(())
+}
