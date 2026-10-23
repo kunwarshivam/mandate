@@ -66,6 +66,7 @@ fn released(switched: bool) -> Result<(support::Journal, Paper), Error> {
             ])?,
         )?;
     }
+    broker.canceled("md-protect")?;
     stopped(&journal, "c3", AGENT)?;
     if switched {
         kill_command(&journal, COMMAND, "connection", CONNECTION)?;

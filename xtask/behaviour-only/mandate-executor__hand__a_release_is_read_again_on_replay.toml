@@ -1,0 +1,7 @@
+file = "crates/mandate-executor/tests/hand.rs"
+test = "a_release_is_read_again_on_replay"
+reason = """
+Until E6-4's fold of `PositionReleased` (DEC-2354) lands, the fold refuses the record as
+`NotInterpreted`, naming E6-4: the test fails on that answer, which names no stub. The
+implementation PR deletes this row.
+"""
