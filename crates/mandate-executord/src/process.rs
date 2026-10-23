@@ -359,7 +359,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
     /// followed holds lots its kill switch or exits would still sell. A pass that reads a switch
     /// or a proposal, or reaches here with anything in doubt or unsent, never asks: it returned
     /// earlier, or reads again on the next pass.
-    fn owes_nothing(&self) -> bool {
+    fn owes_nothing(&mut self) -> bool {
         self.ready()
             && !self.reconcile
             && self
@@ -371,6 +371,23 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                 .deployed
                 .keys()
                 .all(|agent| self.state.holds_lots(agent) == Ok(false))
+            && self.broker_quiet()
+    }
+
+    /// Whether the broker, read now, lists no order on the account that may still work, ours or
+    /// one the fold never held (an order the platform did not place is external activity, never
+    /// one of the fold's orders): every status it reports is final. A read that fails, or a status
+    /// it does not name, keeps the executor running (DEC-2347 item 3.5).
+    fn broker_quiet(&mut self) -> bool {
+        match self.read(&BrokerRequest::ListOpenOrders) {
+            Ok(BrokerOutcome::OpenOrders(orders)) => orders.iter().all(|order| {
+                matches!(
+                    order.status.as_str(),
+                    "filled" | "canceled" | "expired" | "rejected" | "replaced"
+                )
+            }),
+            _ => false,
+        }
     }
 
     /// Drains at `now`: no new input; an input in doubt is handed once more, then the process exits

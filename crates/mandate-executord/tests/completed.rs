@@ -10,7 +10,7 @@ use support::{
     ACCOUNT, ACCOUNT_STREAM, AGENT, CONNECTION, CONTROL_STREAM, Error, Journal, NOON, OPENED,
     OPENING, OTHER_ACCOUNT, OTHER_AGENT, OTHER_CONNECTION, Paper, agent_stream, at, connect,
     deploy, deployed, exchanged, kill, kill_command, refused, requested, revoke, start,
-    start_issued, stopped, tick,
+    start_allowing, start_issued, stopped, tick,
 };
 
 const COMMAND: &str = "01JCMD000000000000000000AA";
@@ -316,5 +316,75 @@ fn an_unreadable_agent_stream_keeps_it_running() -> Result<(), Error> {
     assert_eq!(journal.switched(), [AGENT]);
     process.step(at(NOON)?);
     assert_eq!(process.lifecycle().state(), COMPLETED);
+    Ok(())
+}
+
+/// Item 3.6 (lane D1's finding): the stopped agent's opening filled, its fill naming no order (as
+/// Alpaca's activity does), so no fill is applied to the order; the shares the account holds are
+/// still the agent's lots, and the executor keeps running.
+#[test]
+fn a_stopped_agents_fill_named_no_order_and_still_holds_it() -> Result<(), Error> {
+    let journal = deployed()?;
+    journal.seed(ACCOUNT_STREAM, OPENED)?;
+    let broker = Paper::new(&journal);
+    broker.resting(OPENING, "AAPL", "10", "150")?;
+    broker.fill(OPENING, "150")?;
+    let mut first = start(&journal, &broker)?;
+    first.step(at(NOON)?);
+    drop(first);
+    stopped(&journal, "c3", AGENT)?;
+    let mut process = start(&journal, &broker)?;
+    for _ in 0..3 {
+        process.step(at(NOON)?);
+    }
+    assert_eq!(process.lifecycle().state(), State::Ready);
+    Ok(())
+}
+
+/// Item 3.5 (lane D1's finding): an order resting at the broker that the platform did not place
+/// is no order of the fold's, yet it keeps the executor running until the broker reports it final.
+#[test]
+fn an_order_the_platform_did_not_place_keeps_it_running() -> Result<(), Error> {
+    let journal = deployed()?;
+    stopped(&journal, "c3", AGENT)?;
+    let broker = Paper::new(&journal);
+    broker.resting("owner-order", "AAPL", "10", "140")?;
+    let mut process = start(&journal, &broker)?;
+    for _ in 0..3 {
+        process.step(at(NOON)?);
+    }
+    assert!(
+        !matches!(process.lifecycle().state(), State::Exited(_)),
+        "{:?}",
+        process.lifecycle().state()
+    );
+    broker.canceled("owner-order")?;
+    process.step(at(NOON)?);
+    assert_eq!(process.lifecycle().state(), COMPLETED);
+    Ok(())
+}
+
+/// Lane D1's probe whole: the agent's opening filled with its fill naming no order and a
+/// protective order resting that the fold never held, then the agent stopped; a fresh start keeps
+/// running.
+#[test]
+fn lane_d1s_probe_keeps_it_running() -> Result<(), Error> {
+    let journal = deployed()?;
+    journal.seed(ACCOUNT_STREAM, OPENED)?;
+    let broker = Paper::new(&journal);
+    broker.resting(OPENING, "AAPL", "10", "150")?;
+    broker.fill(OPENING, "150")?;
+    broker.resting("md-protect", "AAPL", "10", "147")?;
+    let mut first = start_allowing(&journal, &broker)?;
+    first.step(at(NOON)?);
+    drop(first);
+    stopped(&journal, "c3", AGENT)?;
+    let mut process = start(&journal, &broker)?;
+    process.step(at(NOON)?);
+    assert!(
+        !matches!(process.lifecycle().state(), State::Exited(_)),
+        "{:?}",
+        process.lifecycle().state()
+    );
     Ok(())
 }
