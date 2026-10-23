@@ -61,6 +61,7 @@ SECTION_3_1 = {
     "data": {("market-data", "TCP", 443)},
     "deploy-manager": {("postgres", "TCP", 5432), ("kube-api", "TCP", 6443)},
     "role-provisioner": {("postgres", "TCP", 5432), ("vault", "TCP", 8200)},
+    "connect-finish": {("postgres", "TCP", 5432), ("vault", "TCP", 8200)},
 }
 # The API server's endpoint the tests give the deployment manager (DEC-1172), as `cargo xtask cell
 # up` gives it the cell's own; the manager is the one process that may reach it.
@@ -99,7 +100,9 @@ def render(*args: str, chart: Path = CHART) -> list[dict]:
 
 def every_image() -> list[str]:
     sets = [
-        f"images.{p['image']}={PLACEHOLDER.format(p['image'])}" for p in PROCESSES if p["image"] != "postgres"
+        f"images.{image}={PLACEHOLDER.format(image)}"
+        for image in dict.fromkeys(p["image"] for p in PROCESSES)
+        if image != "postgres"
     ]
     return [arg for s in sets for arg in ("--set", s)]
 
@@ -177,7 +180,8 @@ def one_workload_per_process(docs: list[dict], run_process: str = "control") -> 
     the deployment manager renders, the processes it starts (`started_by`) are only its pod
     templates, which it alone starts (DEC-1170), and a `one_shot` one (the token exchange) is never
     a Deployment, with or without it (DEC-1175). Of the `run` processes, only the one a run names
-    renders, `control` unless it names another (DEC-2035)."""
+    renders, `control` unless it names another (DEC-2035). The connect finish renders only with
+    `api.connectFinish`, which `connect_finish` checks (DEC-2348 item 3)."""
     kinds = {"service": "Deployment", "migration": "Job", "run": "Job", "verify": "Job"}
     manager = any(is_manager(w) for w in workloads(docs))
     problems = []
@@ -189,6 +193,8 @@ def one_workload_per_process(docs: list[dict], run_process: str = "control") -> 
         if p.get("one_shot") and not manager:
             want = None
         if p["kind"] == "run" and p["name"] != run_process:
+            want = None
+        if p["name"] == FINISH and not found:
             want = None
         if [w["kind"] for w in found] != ([want] if want else []):
             problems.append(f"{p['name']}: {[w['kind'] for w in found]}")
@@ -798,42 +804,16 @@ API_VAULT_COPY = [
     f"{API_VAULT_DIR}/",
 ]
 
-CONNECTION_MANAGER_SOURCE = {
-    "secret": {
-        "name": "vault-approle-connection-manager",
-        "items": [
-            {"key": "role-id", "path": "connection-manager.role-id"},
-            {"key": "secret-id", "path": "connection-manager.secret-id"},
-        ],
-    }
-}
-CONNECTION_MANAGER_FILES = [
-    "/run/secrets/vault-api/connection-manager.role-id",
-    "/run/secrets/vault-api/connection-manager.secret-id",
-]
 APPROLE_NAME = re.compile(r'"(vault-approle-[a-z0-9-]+)"')
 
 
-def api_vault_sources(manager: bool) -> dict:
-    """The projected sources of the api's vault binding: the API's AppRole, the connection
-    manager's beside it when `manager`, then the vault's CA."""
-    sources = API_VAULT_SOURCES["sources"]
-    return {**API_VAULT_SOURCES, "sources": sources[:1] + ([CONNECTION_MANAGER_SOURCE] if manager else []) + sources[1:]}
-
-
-def api_vault_copy(manager: bool) -> list[str]:
-    """The copy's command: the connection manager's two files after the API's when `manager`."""
-    return API_VAULT_COPY[:5] + (CONNECTION_MANAGER_FILES if manager else []) + API_VAULT_COPY[5:]
-
-
-def api_vault(docs: list[dict], on: bool, manager: bool = False) -> list[str]:
+def api_vault(docs: list[dict], on: bool) -> list[str]:
     """The API's vault binding (DEC-2338), exactly, when `on`, and none of it otherwise: its
     AppRole's two keys and the vault's CA projected read-only into one source directory, copied by
     one init container into a memory-backed directory at 0600 with nothing else in it, which the API
     mounts read-only and names in `MANDATE_API_VAULT_DIR`, never a credential in its environment;
-    and its egress to the vault on 8200 alone. With `manager` (DEC-2348), the connection manager's
-    AppRole rides the same projection and copy, since the API finishes a connect as the connection
-    manager; no other pod names either AppRole."""
+    and its egress to the vault on 8200 alone. No other pod names its AppRole, and the API pod names
+    no other: the connection manager's is the connect finish's alone (DEC-2348 item 3)."""
     problems = []
     for w in [w for w in workloads(docs) if w["metadata"]["name"] == "api"]:
         spec = pod_spec(w)
@@ -866,11 +846,11 @@ def api_vault(docs: list[dict], on: bool, manager: bool = False) -> list[str]:
             continue
         if vaulted != {"vault", "vault-sources"}:
             problems.append(f"the api's vault volumes are {sorted(vaulted)}")
-        if volumes.get("vault-sources", {}).get("projected") != api_vault_sources(manager):
+        if volumes.get("vault-sources", {}).get("projected") != API_VAULT_SOURCES:
             problems.append(f"the api's vault sources are {volumes.get('vault-sources')}")
         if volumes.get("vault", {}).get("emptyDir", {}).get("medium") != "Memory":
             problems.append(f"the api's vault directory is {volumes.get('vault')}")
-        if [c.get("command") for c in copies] != [api_vault_copy(manager)]:
+        if [c.get("command") for c in copies] != [API_VAULT_COPY]:
             problems.append(f"the api's credentials are copied by {[c.get('command') for c in copies]}")
         copy_mounts = sorted((m["name"], m["mountPath"], m.get("readOnly", False)) for c in copies for m in c["volumeMounts"])
         if copy_mounts != [("vault", API_VAULT_DIR, False), ("vault-sources", "/run/secrets/vault-api", True)]:
@@ -892,44 +872,186 @@ def api_vault(docs: list[dict], on: bool, manager: bool = False) -> list[str]:
         (w["kind"], w["metadata"]["name"], name)
         for w in workloads(docs)
         for name in APPROLE_NAME.findall(json.dumps(w))
-        if (w["metadata"]["name"], name) != (PROVISIONER, "vault-approle-provisioner")
+        if (w["metadata"]["name"], name)
+        not in ((PROVISIONER, "vault-approle-provisioner"), (FINISH, "vault-approle-connection-manager"))
     )
-    named = ["vault-approle-api"] + (["vault-approle-connection-manager"] if manager else [])
-    if holders != ([("Deployment", "api", name) for name in sorted(named)] if on else []):
+    if holders != ([("Deployment", "api", "vault-approle-api")] if on else []):
         problems.append(f"the AppRoles are named by {holders}")
     return problems
 
 
-def test_the_api_holds_the_connection_managers_approle_only_with_its_binding():
-    """DEC-2348: the API finishes a connect as the connection manager, so with
-    `api.connectionManagerBinding` its pod holds that AppRole too, copied as the API's is, and
-    nothing else holds it; the setting needs the API's own binding."""
-    bound = render_all("--set", "api.vaultBinding=true")
-    both = render_all("--set", "api.vaultBinding=true", "--set", "api.connectionManagerBinding=true")
-    assert api_vault(bound, on=True, manager=False) == []
-    assert api_vault(both, on=True, manager=True) == []
-    for check in (hardened, gated, secrets_as_files, api_contained, default_deny, approle_copied):
-        assert check(both) == [], check.__name__
-    assert api_vault(both, on=True, manager=False), "the connection manager's AppRole while off is caught"
-    assert api_vault(bound, on=True, manager=True), "no connection manager's AppRole while on is caught"
-    base = ["-f", str(CELL / "values" / "k3d.yaml"), *every_image()]
-    assert helm(CHART, *base, "--set", "api.connectionManagerBinding=true").returncode != 0, "it needs the API's binding"
-    sources = lambda w: next(v for v in pod_spec(w)["volumes"] if v["name"] == "vault-sources")["projected"]["sources"]
-    copier = lambda w: next(c for c in pod_spec(w)["initContainers"] if c["name"] == "vault-credentials")
-    leak = {"name": "leak", "secret": {"secretName": "vault-approle-connection-manager"}}
-    seeds = [
-        ("api", lambda w: sources(w).pop(1)),
-        ("api", lambda w: sources(w)[1]["secret"]["items"].reverse()),
-        ("api", lambda w: sources(w)[1]["secret"]["items"][0].update(path="api.role-id")),
-        ("api", lambda w: copier(w)["command"].remove(CONNECTION_MANAGER_FILES[1])),
-        ("api", lambda w: sources(w).append(copy.deepcopy(CONNECTION_MANAGER_SOURCE))),
-        ("api", lambda w: pod_spec(w)["volumes"].append(copy.deepcopy(leak))),
-        ("scheduler", lambda w: pod_spec(w).setdefault("volumes", []).append(copy.deepcopy(leak))),
-        ("deploy-manager", lambda w: pod_spec(w)["containers"][0].setdefault("envFrom", []).append({"secretRef": {"name": "vault-approle-connection-manager"}})),
+FINISH = "connect-finish"
+FINISH_VAULT_SOURCES = {
+    "defaultMode": 288,
+    "sources": [
+        {
+            "secret": {
+                "name": "vault-approle-connection-manager",
+                "items": [
+                    {"key": "role-id", "path": "connection-manager.role-id"},
+                    {"key": "secret-id", "path": "connection-manager.secret-id"},
+                ],
+            }
+        },
+        {"configMap": {"name": "vault-ca", "items": [{"key": "ca.crt", "path": "ca.crt"}]}},
+    ],
+}
+FINISH_VAULT_COPY = [
+    "install",
+    "-m",
+    "0600",
+    "/run/secrets/vault-connection-manager/connection-manager.role-id",
+    "/run/secrets/vault-connection-manager/connection-manager.secret-id",
+    "/run/secrets/vault-connection-manager/ca.crt",
+    f"{API_VAULT_DIR}/",
+]
+FINISH_ENV = {
+    "MANDATE_JOURNAL_DSN",
+    "PGPASSFILE",
+    "HOME",
+    "MANDATE_DEPLOYMENT_TIER",
+    "MANDATE_API_DATABASE_URL",
+    "MANDATE_API_WORKSPACE",
+    "MANDATE_FINISH_VAULT_ADDRESS",
+    "MANDATE_FINISH_VAULT_DIR",
+}
+
+
+def connect_finish(docs: list[dict], on: bool, workspace: str) -> list[str]:
+    """DEC-2348 item 3: with `api.connectFinish` the connect finish is one Deployment, the API's
+    image as `finish`, holding the connection manager's AppRole and the vault's CA alone, copied
+    owner-only, and no Kubernetes credential; it reads the hosted workspace `workspace`'s control
+    stream as its own journal role; its egress is the journal and its vault on 8200, nothing else.
+    Nothing but it names that AppRole, the API pod least of all, which holds no
+    `connection-manager.*` file in any volume, copy or mount. Off, none of it renders."""
+    problems = []
+    found = [w for w in workloads(docs) if w["metadata"]["name"] == FINISH]
+    named = sorted(
+        (d["kind"], d["metadata"]["name"])
+        for d in workloads(docs)
+        for _ in range(json.dumps(d).count('"vault-approle-connection-manager"'))
+    )
+    api = [w for w in workloads(docs) if w["metadata"]["name"] == "api"]
+    if any("connection-manager" in json.dumps(w) for w in api):
+        problems.append("the api pod names the connection manager's AppRole or its files")
+    if not on:
+        if found or named:
+            problems.append(f"the connect finish renders while off: {[w['kind'] for w in found]}, {named}")
+        return problems
+    if named != [("Deployment", FINISH)]:
+        problems.append(f"the connection manager's AppRole is named by {named}")
+    if [w["kind"] for w in found] != ["Deployment"]:
+        return problems + [f"the connect finish renders as {[w['kind'] for w in found]}"]
+    w = found[0]
+    spec = pod_spec(w)
+    labels = w["spec"]["template"]["metadata"]["labels"]
+    if w["spec"].get("replicas") != 1:
+        problems.append(f"the connect finish runs {w['spec'].get('replicas')} replicas")
+    if spec.get("automountServiceAccountToken") is not False or spec.get("serviceAccountName", "default") != "default":
+        problems.append("the connect finish's pod holds a service-account token or an account of its own")
+    main = next((c for c in spec["containers"] if c["name"] == FINISH), None)
+    if main is None or len(spec["containers"]) != 1:
+        return problems + [f"the connect finish's containers are {[c['name'] for c in spec['containers']]}"]
+    if main.get("args") != ["finish"] or main.get("command"):
+        problems.append(f"the connect finish starts as {main.get('command')} {main.get('args')}")
+    if api and main.get("image") != next(c for c in pod_spec(api[0])["containers"] if c["name"] == "api").get("image"):
+        problems.append(f"the connect finish runs {main.get('image')}, not the API's image")
+    env = {e["name"]: e for e in main.get("env", [])}
+    if set(env) != FINISH_ENV or any("valueFrom" in e for e in env.values()) or main.get("envFrom"):
+        problems.append(f"the connect finish's environment is {sorted(env)}")
+    value = lambda name: env.get(name, {}).get("value", "")
+    if not value("MANDATE_API_DATABASE_URL").startswith("postgres://mandate_connect_finish@"):
+        problems.append("the connect finish reaches the journal as another role")
+    if value("MANDATE_API_WORKSPACE") != workspace:
+        problems.append(f"the connect finish finishes the workspace {value('MANDATE_API_WORKSPACE')}")
+    if value("MANDATE_FINISH_VAULT_DIR") != API_VAULT_DIR or value("MANDATE_FINISH_VAULT_ADDRESS") != api_vault_address(labels):
+        problems.append(f"the connect finish's vault is {value('MANDATE_FINISH_VAULT_ADDRESS')} {value('MANDATE_FINISH_VAULT_DIR')}")
+    volumes = {v["name"]: v for v in spec.get("volumes", [])}
+    secrets = sorted(
+        [v["secret"]["secretName"] for v in volumes.values() if "secret" in v]
+        + [x["secret"]["name"] for v in volumes.values() if "projected" in v for x in v["projected"]["sources"] if "secret" in x]
+    )
+    if secrets != ["journal-ca", "journal-role-mandate-connect-finish", "vault-approle-connection-manager"]:
+        problems.append(f"the connect finish's pod mounts the Secrets {secrets}")
+    projected = {n: sorted(k for x in v["projected"]["sources"] for k in x) for n, v in volumes.items() if "projected" in v}
+    if any(k not in ("name", "emptyDir", "secret", "projected") for v in volumes.values() for k in v) or projected != {"vault-sources": ["configMap", "secret"]}:
+        problems.append(f"the connect finish's pod has the volumes {sorted(volumes)}, projecting {projected}")
+    if volumes.get("vault-sources", {}).get("projected") != FINISH_VAULT_SOURCES:
+        problems.append(f"the connect finish's vault sources are {volumes.get('vault-sources')}")
+    if volumes.get("vault", {}).get("emptyDir", {}).get("medium") != "Memory":
+        problems.append(f"the connect finish's vault directory is {volumes.get('vault')}")
+    copies = [c for c in spec.get("initContainers", []) if c["name"] == "vault-credentials"]
+    if [c.get("command") for c in copies] != [FINISH_VAULT_COPY]:
+        problems.append(f"the connect finish's credentials are copied by {[c.get('command') for c in copies]}")
+    holders = sorted(
+        (m["name"], c["name"], m.get("mountPath"), m.get("readOnly", False))
+        for c in spec.get("containers", []) + spec.get("initContainers", [])
+        for m in c.get("volumeMounts", [])
+        if m["name"] in ("vault", "vault-sources")
+    )
+    wanted = [
+        ("vault", FINISH, API_VAULT_DIR, True),
+        ("vault", "vault-credentials", API_VAULT_DIR, False),
+        ("vault-sources", "vault-credentials", "/run/secrets/vault-connection-manager", True),
     ]
-    for name, seed in seeds:
-        assert api_vault(mutate(both, name, "Deployment", seed), on=True, manager=True), (name, seed)
-    assert api_vault(mutate(both, "api", "Deployment", lambda w: sources(w)[1]["secret"].update(name="vault-approle-runtime")), on=True, manager=True)
+    if holders != wanted:
+        problems.append(f"the connect finish's vault volumes are mounted by {holders}")
+    egress = sorted(k for k, v in labels.items() if k.startswith("mandate.dev/egress-") and v == "true")
+    if egress != ["mandate.dev/egress-postgres", "mandate.dev/egress-vault"]:
+        problems.append(f"the connect finish's pod carries the egress labels {egress}")
+    rules = policies(docs)[f"egress-{FINISH}"]["spec"]["egress"]
+    reaching = [r for r in rules if '"vault"' in json.dumps(r) or any(p.get("port") == 8200 for p in r.get("ports", []))]
+    if reaching != [api_vault_rule(labels)] or len(rules) != 3 or any("to" not in r or "ports" not in r for r in rules):
+        problems.append(f"the connect finish's egress is {rules}")
+    return problems
+
+
+def test_the_connect_finish_alone_holds_the_connection_managers_approle():
+    """DEC-2348 item 3: the connect finish runs in its own pod with the connection manager's
+    AppRole alone, the API pod holds no `connection-manager.*` file, and off, nothing renders."""
+    off = render_all("--set", "api.vaultBinding=true")
+    on = render_all("--set", "api.vaultBinding=true", "--set", "api.connectFinish=true")
+    workspace = api_env(on)["MANDATE_API_WORKSPACE"]
+    assert connect_finish(off, on=False, workspace=workspace) == []
+    assert connect_finish(on, on=True, workspace=workspace) == []
+    assert api_vault(on, on=True) == []
+    for check in (hardened, gated, secrets_as_files, default_deny, approle_copied):
+        assert check(on) == [], check.__name__
+    assert connect_finish(on, on=False, workspace=workspace), "the finish while off is caught"
+    assert connect_finish(off, on=True, workspace=workspace), "no finish while on is caught"
+    main = lambda w: next(c for c in pod_spec(w)["containers"] if c["name"] in (FINISH, PROVISIONER))
+    volume = lambda w, n: next(v for v in pod_spec(w)["volumes"] if v["name"] == n)
+    copier = lambda w: next(c for c in pod_spec(w)["initContainers"] if c["name"] == "vault-credentials")
+    manager = copy.deepcopy(FINISH_VAULT_SOURCES["sources"][0])
+    seeds = [
+        ("Deployment", FINISH, lambda w: w["spec"].update(replicas=2)),
+        ("Deployment", FINISH, lambda w: pod_spec(w).update(automountServiceAccountToken=True)),
+        ("Deployment", FINISH, lambda w: main(w).update(args=["--bind", "127.0.0.1:8080"])),
+        ("Deployment", FINISH, lambda w: main(w).update(image="other@sha256:" + "0" * 64)),
+        ("Deployment", FINISH, lambda w: main(w)["env"].append({"name": "MANDATE_API_VAULT_DIR", "value": API_VAULT_DIR})),
+        ("Deployment", FINISH, lambda w: next(e for e in main(w)["env"] if e["name"] == "MANDATE_API_DATABASE_URL").update(value="postgres://mandate_api@journal-rw:5432/mandate")),
+        ("Deployment", FINISH, lambda w: next(e for e in main(w)["env"] if e["name"] == "MANDATE_API_WORKSPACE").update(value="01JB3K6F0C9R2V7N4M8Q1T5W3Z")),
+        ("Deployment", FINISH, lambda w: next(e for e in main(w)["env"] if e["name"] == "MANDATE_FINISH_VAULT_ADDRESS").update(value="https://vault.example.com:8200")),
+        ("Deployment", FINISH, lambda w: volume(w, "vault-sources")["projected"]["sources"][0]["secret"].update(name="vault-approle-api")),
+        ("Deployment", FINISH, lambda w: volume(w, "vault-sources")["projected"]["sources"].insert(1, {"secret": {"name": "vault-approle-api", "items": [{"key": "role-id", "path": "api.role-id"}]}})),
+        ("Deployment", FINISH, lambda w: volume(w, "vault-sources")["projected"].update(defaultMode=292)),
+        ("Deployment", FINISH, lambda w: volume(w, "vault").update(emptyDir={})),
+        ("Deployment", FINISH, lambda w: copier(w)["command"].__setitem__(2, "0640")),
+        ("Deployment", FINISH, lambda w: main(w)["volumeMounts"].append({"name": "vault-sources", "mountPath": "/run/secrets/vault-connection-manager", "readOnly": True})),
+        ("Deployment", FINISH, lambda w: pod_spec(w)["volumes"].append({"name": "kube", "projected": {"sources": [{"serviceAccountToken": {"path": "token"}}]}})),
+        ("Deployment", FINISH, lambda w: w["spec"]["template"]["metadata"]["labels"].update({"mandate.dev/egress-kube-api": "true"})),
+        ("NetworkPolicy", f"egress-{FINISH}", lambda p: vault_rule(p)["ports"].append({"protocol": "TCP", "port": 8201})),
+        ("NetworkPolicy", f"egress-{FINISH}", lambda p: p["spec"]["egress"].append({"to": [{"ipBlock": {"cidr": "0.0.0.0/0"}}], "ports": [{"protocol": "TCP", "port": 443}]})),
+        ("Deployment", "api", lambda w: volume(w, "vault-sources")["projected"]["sources"].insert(1, copy.deepcopy(manager))),
+        ("Deployment", "api", lambda w: copier(w)["command"].insert(5, "/run/secrets/vault-api/connection-manager.role-id")),
+        ("Deployment", "api", lambda w: pod_spec(w)["volumes"].append({"name": "leak", "secret": {"secretName": "vault-approle-connection-manager"}})),
+        ("Deployment", "scheduler", lambda w: pod_spec(w).setdefault("volumes", []).append({"name": "leak", "secret": {"secretName": "vault-approle-connection-manager"}})),
+        ("Deployment", PROVISIONER, lambda w: main(w).setdefault("envFrom", []).append({"secretRef": {"name": "vault-approle-connection-manager"}})),
+    ]
+    for kind, name, seed in seeds:
+        assert connect_finish(mutate(on, name, kind, seed), on=True, workspace=workspace), (name, seed)
+    base = ["-f", str(CELL / "values" / "k3d.yaml"), *every_image()]
+    assert helm(CHART, *base, "--set", "api.connectionManagerBinding=true").returncode != 0, "the API's old binding is gone"
 
 
 def beside_api(w: dict, where: str, volume: str) -> None:

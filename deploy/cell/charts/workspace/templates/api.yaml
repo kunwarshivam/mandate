@@ -90,21 +90,9 @@ its memory until they move to Postgres (item 6).
 {{- end }}
 {{- end -}}
 {{- /* The API's vault binding (DEC-2338), with `api.vaultBinding`: its AppRole, the Secret
-`vault-approle-api`, and the vault's CA in its vault directory, by `mandate.vaultCopy`. With
-`api.connectionManagerBinding` (DEC-2348), the connection manager's AppRole, the Secret
-`vault-approle-connection-manager`, rides the same projection and copy, since the API finishes a
-connect as the connection manager. */ -}}
-{{- define "mandate.apiVaultExtras" -}}
-{{- if .root.Values.api.connectionManagerBinding -}}
-["connection-manager"]
-{{- else -}}
-[]
-{{- end -}}
-{{- end -}}
+`vault-approle-api`, and the vault's CA in its vault directory, by `mandate.vaultCopy`, and nothing
+else: the connection manager's AppRole is the connect finish's alone (DEC-2348 item 3). */ -}}
 {{- define "mandate.api" -}}
-{{- if and .root.Values.api.connectionManagerBinding (not .root.Values.api.vaultBinding) }}
-{{- fail "api.connectionManagerBinding needs api.vaultBinding: the connection manager's AppRole rides the API's vault copy (DEC-2348)" }}
-{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -148,14 +136,14 @@ spec:
     {{- $init = printf "%s\n%s" $init (include "mandate.stubIssuer" .) }}
     {{- end }}
     {{- if .root.Values.api.vaultBinding }}
-    {{- $init = printf "%s\n%s" $init (include "mandate.vaultCopy" (dict "root" .root "role" "api" "extras" (include "mandate.apiVaultExtras" . | fromJsonArray))) }}
+    {{- $init = printf "%s\n%s" $init (include "mandate.vaultCopy" (dict "root" .root "role" "api")) }}
     {{- end }}
     {{- $volumes := "- {name: ca-bundle, emptyDir: {sizeLimit: 1Mi}}\n- {name: credentials, emptyDir: {medium: Memory, sizeLimit: 1Mi}}" }}
     {{- if .root.Values.ingress.cloudflared.enabled }}
     {{- $volumes = printf "%s\n%s" $volumes (include "mandate.tunnelVolume" $tunnel) }}
     {{- end }}
     {{- if .root.Values.api.vaultBinding }}
-    {{- $volumes = printf "%s\n%s" $volumes (include "mandate.vaultVolumes" (dict "root" .root "role" "api" "extras" (include "mandate.apiVaultExtras" . | fromJsonArray))) }}
+    {{- $volumes = printf "%s\n%s" $volumes (include "mandate.vaultVolumes" (dict "root" .root "role" "api")) }}
     {{- end }}
     {{- with .root.Values.api.subjectLinks }}
     {{- $volumes = printf "%s\n- {name: subject-links, configMap: {name: %q, defaultMode: 292, items: [{key: subject-links, path: subject-links}]}}" $volumes . }}

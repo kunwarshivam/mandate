@@ -81,11 +81,10 @@ api:
   # to the vault on 8200 alone. Off until that Secret exists: staging provisions it, production runs
   # no vault, and the local cell turns it on once `cargo xtask cell up` provisions it.
   vaultBinding: false
-  # The connection manager's AppRole beside the API's (DEC-2348): the API finishes an OAuth connect
-  # as the connection manager, so with `vaultBinding` on, the Secret
-  # `vault-approle-connection-manager` rides the same owner-only copy. Off until that Secret exists;
-  # staging only, as `vaultBinding` is.
-  connectionManagerBinding: false
+  # The connect finish (DEC-2348 item 3): its own Deployment, from the API's image, holding the
+  # connection manager's AppRole alone, the Secret `vault-approle-connection-manager`; the API pod
+  # never holds it. Off until that Secret exists; staging only, as `vaultBinding` is.
+  connectFinish: false
 
 # The workspace's shared artifact store (mandate documents, backtest reports), mounted at
 # /var/lib/mandate/artifacts. Which process may write it is fixed by the chart, never a value.

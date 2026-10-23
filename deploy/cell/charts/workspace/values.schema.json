@@ -446,7 +446,7 @@
         "subjectLinks",
         "ingressPeers",
         "vaultBinding",
-        "connectionManagerBinding"
+        "connectFinish"
       ],
       "properties": {
         "org": {
@@ -497,9 +497,9 @@
           "type": "boolean",
           "description": "The API's vault binding (DEC-2338): its AppRole and the vault's CA as owner-only files, and egress to the vault on 8200."
         },
-        "connectionManagerBinding": {
+        "connectFinish": {
           "type": "boolean",
-          "description": "The connection manager's AppRole beside the API's, copied owner-only as the API's is (DEC-2348); it needs vaultBinding."
+          "description": "The connect finish's Deployment, from the API's image, holding the connection manager's AppRole alone as owner-only files, with egress to the journal and the vault on 8200 (DEC-2348 item 3)."
         }
       }
     },
