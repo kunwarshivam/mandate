@@ -204,6 +204,10 @@ start without them (AGENTS.md rule 3).
   value: {{ . | quote }}
 {{- end }}
 {{- end }}
+{{- if and (eq .p.name "token-exchange") (include "mandate.oauthFixtureOn" .root) }}
+- name: MANDATE_TOKEN_URL
+  value: http://oauth-fixture:8091/alpaca/oauth/token
+{{- end }}
 {{- if include "mandate.artifactsAccess" . }}
 - name: {{ ternary "MANDATE_API_ARTIFACTS" "MANDATE_ARTIFACTS" (eq .p.name "api") }}
   value: {{ include "mandate.artifactsPath" . | quote }}
@@ -229,6 +233,11 @@ start without them (AGENTS.md rule 3).
 {{- if .p.vault_token }}
 - name: vault-token
   mountPath: /run/mandate/vault-token
+  readOnly: true
+{{- end }}
+{{- if include "mandate.vaultCa" . }}
+- name: vault-ca
+  mountPath: /run/mandate/vault
   readOnly: true
 {{- end }}
 {{- end -}}
@@ -408,6 +417,15 @@ spec:
                   fieldRef:
                     fieldPath: metadata.namespace
     {{- end }}
+    {{- if include "mandate.vaultCa" . }}
+    - name: vault-ca
+      configMap:
+        name: vault-ca
+        defaultMode: 292
+        items:
+          - key: ca.crt
+            path: ca.crt
+    {{- end }}
     {{- with .volumes }}
     {{- . | nindent 4 }}
     {{- end }}
@@ -429,6 +447,7 @@ process for no deployment.
 {{- if contains "{connection}" $w }}{{ $w = replace "{connection}" (required "runtime.connection is required once images.runtime is named" $v.runtime.connection) $w }}{{ end -}}
 {{- if contains "{owner}" $w }}{{ $w = replace "{owner}" (required "runtime.owner is required once images.runtime is named" $v.runtime.owner) $w }}{{ end -}}
 {{- if contains "{probe}" $w }}{{ $w = replace "{probe}" $.probe $w }}{{ end -}}
+{{- if contains "{vault}" $w }}{{ $w = replace "{vault}" (include "mandate.vaultAddress" $.root) $w }}{{ end -}}
 {{- $out = append $out $w -}}
 {{- end -}}
 {{- $out | toJson -}}
@@ -517,6 +536,17 @@ its port from values, since a policy cannot select it by pod label.
   ports:
     - {protocol: TCP, port: {{ $v.egress.kubeApiPort }}}
 {{- end }}
+{{- else if and (eq . "token-host") (include "mandate.oauthFixtureOn" $root) }}
+{{- if index $v.egress "token-host" }}
+{{- fail "egress.token-host names CIDRs, but with oauthFixture.enabled a dev or ci cell's token exchange reaches the fixture pod alone (DEC-1176 item 4)" }}
+{{- end }}
+- to:
+    - podSelector:
+        matchLabels:
+          mandate.dev/workspace: {{ $v.workspace | quote }}
+          mandate.dev/process: oauth-fixture
+  ports:
+    - {protocol: TCP, port: 8091}
 {{- else if eq . "model-gateway" }}
 - to:
     - podSelector:
@@ -587,6 +617,19 @@ spec:
         - {protocol: TCP, port: {{ .port }}}
 {{- end -}}
 
+{{- /* "true" when the fixture OAuth provider renders (DEC-1176 item 2): `oauthFixture.enabled`,
+which fails the render in any tier but dev or ci, whether or not `images.stub-issuer` is named,
+and needs that image in dev and ci. Called with the chart's root. */ -}}
+{{- define "mandate.oauthFixtureOn" -}}
+{{- if .Values.oauthFixture.enabled -}}
+{{- if not (has .Values.deploymentTier (list "dev" "ci")) -}}
+{{- fail (printf "oauthFixture.enabled runs only in a dev or ci cell, and deploymentTier is %q (DEC-1176)" .Values.deploymentTier) -}}
+{{- end -}}
+{{- $_ := required "images.stub-issuer is required once oauthFixture.enabled is set (DEC-1176)" (index .Values.images "stub-issuer") -}}
+true
+{{- end -}}
+{{- end -}}
+
 {{/* A `mandate.local/` image only where the values allow it: the local cell's alone. */}}
 {{- define "mandate.checkImages" -}}
 {{- range $key, $image := .Values.images -}}
@@ -599,6 +642,19 @@ spec:
 {{- /* The executor's broker flags (DEC-2306 item 1), as JSON: none for the fixture broker, and for
 `alpaca-paper` the paper host's, the vault's address, and the directory the vault's CA is mounted
 in. */ -}}
+{{- /* Whether process `p` trusts the vault: the vault chart's CA certificate alone, the
+ConfigMap `vault-ca`, read-only at /run/mandate/vault (DEC-2332 item 5): a `vault_ca` process's,
+the executor's only when its broker reaches the vault. */ -}}
+{{- define "mandate.vaultCa" -}}
+{{- if and .p.vault_ca (or (ne .p.name "executor") (eq .root.Values.executor.broker "alpaca-paper")) -}}true{{- end -}}
+{{- end -}}
+
+{{- /* The vault's address: the executor's `vaultAddress` where it is set, else this namespace's
+vault Service, which the vault chart's certificate names. */ -}}
+{{- define "mandate.vaultAddress" -}}
+{{- .Values.executor.vaultAddress | default (printf "https://vault.%s.svc:8200" .Release.Namespace) -}}
+{{- end -}}
+
 {{- define "mandate.executorBroker" -}}
 {{- $e := .Values.executor -}}
 {{- if eq $e.broker "alpaca-paper" -}}

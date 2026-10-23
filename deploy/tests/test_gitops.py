@@ -12,6 +12,7 @@ takes the seeded bugs.
 """
 
 import copy
+import json
 import os
 import re
 import shutil
@@ -393,6 +394,8 @@ def values_policy(values: dict[str, dict], environment: str) -> list[str]:
         problems.append(f"workspace: deploymentTier {tier} in {environment}")
     if workspace.get("localImages"):
         problems.append("workspace: local images allowed")
+    if (workspace.get("oauthFixture") or {}).get("enabled"):
+        problems.append("workspace: the cell's fixture OAuth provider is on (DEC-1176)")
     for image, reference in (workspace.get("images") or {}).items():
         if image == "stub-issuer" and reference:
             problems.append("workspace: the stub issuer is named")
@@ -449,11 +452,15 @@ def containers(doc: dict):
 
 
 def rendered_policy(rendered: list[dict], environment: str) -> list[str]:
-    """What the charts render: every image by digest, and no process told a stub tier, another
-    environment's tier, or `live`."""
+    """What the charts render: every image by digest, no process told a stub tier, another
+    environment's tier, or `live`, and nothing of a dev or ci cell's fixture OAuth provider: no
+    `oauth-fixture` object, and no token URL that repoints the exchange (DEC-1176 items 2 and 5)."""
     problems = []
     for doc in rendered:
         where = f"{doc.get('kind')} {doc.get('metadata', {}).get('name')}"
+        text = json.dumps(doc)
+        if "oauth-fixture" in text or "MANDATE_TOKEN_URL" in text:
+            problems.append(f"{where}: the cell's fixture OAuth provider or a token URL (DEC-1176)")
         for container in containers(doc):
             image = container.get("image", "")
             if not PINNED.search(image):
@@ -1309,6 +1316,7 @@ VALUE_BUGS = [
     ("workspace", {"environment": "live"}),
     ("workspace", {"api": {"issuer": "live"}}),
     ("workspace", {"localImages": True}),
+    ("workspace", {"oauthFixture": {"enabled": True}}),
     ("policy-controller", {"webhook": {"failurePolicy": "Ignore"}}),
     ("policy-controller", {"webhook": {"configData": {"no-match-policy": "deny"}}}),
     ("policy-controller", {"webhook": {"image": {"version": "v0.13.1"}}}),
@@ -1356,6 +1364,14 @@ def test_rendered_seeded_bugs_are_caught(overlay):
     live = copy.deepcopy(deployment)
     containers(live)[0].setdefault("env", []).append({"name": "MANDATE_ENVIRONMENT", "value": "live"})
     assert rendered_policy([live], environment)
+    fixture = copy.deepcopy(deployment)
+    fixture["metadata"]["name"] = "oauth-fixture"
+    assert rendered_policy([fixture], environment)
+    repointed = copy.deepcopy(deployment)
+    containers(repointed)[0].setdefault("env", []).append(
+        {"name": "MANDATE_TOKEN_URL", "value": "http://oauth-fixture:8091/alpaca/oauth/token"}
+    )
+    assert rendered_policy([repointed], environment)
     cluster = copy.deepcopy(next(d for d in rendered if d["kind"] == "Cluster"))
     cluster["spec"]["imageName"] = "ghcr.io/cloudnative-pg/postgresql:18"
     assert rendered_policy([cluster], environment)
