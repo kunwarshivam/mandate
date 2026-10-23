@@ -4043,7 +4043,6 @@ fn protection_is_re_placed_at_the_buffer_day() {
 /// not cancelled, and the shortfall is journaled and the owner alerted, as for protection with no
 /// recorded prices (`expiry_unreplaceable`, `protection_expiring`; DEC-367 item 4).
 #[test]
-#[ignore = "pending E7-4"]
 fn an_oco_that_cannot_be_re_placed_is_kept_at_its_buffer_day() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -4654,7 +4653,6 @@ fn a_crypto_position_never_takes_an_oco_even_where_the_profile_lists_one() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn a_fractional_position_protects_the_whole_shares_and_discloses_the_fraction() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[FRAC]);
@@ -4800,7 +4798,6 @@ fn fractional_position(ports: &mandate_executor::Ports<'_>, held: &str) -> Shell
 /// protective prices it carries, on a profile that offers brackets, and only that form (DEC-2312
 /// item 1). A whole-share entry in the same instrument still goes as its bracket.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_fractional_entry_goes_as_a_plain_day_limit_whatever_its_prices() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[FRAC]);
@@ -4895,7 +4892,6 @@ fn a_fractional_entry_goes_as_a_plain_day_limit_whatever_its_prices() {
 /// denies it as `add_blocked_by_protective_order`, as it denies any plain equity add: the
 /// conservative reading (DEC-2312 item 1). Nothing is sent and the resting OCO is not touched.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_fractional_add_where_protection_rests_is_denied_as_a_plain_add() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[FRAC]);
@@ -4942,7 +4938,6 @@ fn a_fractional_add_where_protection_rests_is_denied_as_a_plain_add() {
 /// protective order is sent, the interval it started ends, and both the start and the end
 /// disclose the whole position as the fraction left unprotected (DEC-2312 items 2 and 3, DEC-2315).
 #[test]
-#[ignore = "pending E7-4"]
 fn a_position_under_one_share_places_nothing_and_discloses_its_fraction() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[FRAC]);
@@ -5015,7 +5010,6 @@ fn a_position_under_one_share_places_nothing_and_discloses_its_fraction() {
 /// nears its GTC expiry is cancelled, confirmed, and re-placed for ten, never 10.4, and the
 /// placement discloses the 0.4 it leaves unprotected (DEC-2312 items 2 and 3).
 #[test]
-#[ignore = "pending E7-4"]
 fn a_re_placement_before_expiry_covers_only_the_whole_shares() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[FRAC]);
@@ -5111,7 +5105,6 @@ fn unprotectable_profile() -> mandate_domain::CapabilityProfile {
 /// `unprotected_end` and `expiry_unreplaceable`: a whole-share entry, a fractional position's
 /// re-placement before expiry, and an entry on a profile with nothing to protect it with.
 #[test]
-#[ignore = "pending E7-4"]
 fn every_protection_changed_is_written_at_version_2() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL, FRAC]);
@@ -5272,7 +5265,6 @@ fn a_crypto_entry_is_never_held_to_the_fractional_equity_rule() {
 /// position is protected again, its interval ending with the 0.4 it leaves (§5.4; DEC-2312 item 2,
 /// DEC-2315). An OCO the executor cannot re-place is never the one it cancels.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_fractional_hold_keeps_its_whole_shares_covered_through_the_buffer_day() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[FRAC]);

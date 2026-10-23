@@ -12,6 +12,10 @@
 //! [--drain-bound-s <1 to 90>]`: the workspace API process (§3.11, E21-31, DEC-978). The drain
 //! bound may only be shortened from [`DRAIN_BOUND`].
 //!
+//! `mandate-api-server finish`: the connect finish's own process (DEC-2348 item 3), which holds
+//! the connection manager's vault identity alone and runs the finish pass until it is stopped.
+//! Without its settings it refuses with exit status 2 and one line naming them.
+//!
 //! It makes every start check before it listens, and refuses with exit status 2 and one line on
 //! stderr naming the check. Once both listeners are bound it prints
 //! `listening api=<addr> probes=<addr>` and nothing else. SIGTERM starts the drain: readiness
@@ -44,9 +48,8 @@ use mandate_api_server::config::{
     read_session_key,
 };
 use mandate_api_server::confirm::CliConfirm;
-use mandate_api_server::connect_binding::{
-    ConnectBinding, bound, connect_binding, fingerprints, teardown,
-};
+use mandate_api_server::connect_binding::{ConnectBinding, bound, connect_binding};
+use mandate_api_server::finish_binding::{finish_binding, off_line};
 use mandate_api_server::finish_pass::{Finisher, LineAlerts, PASS_SECS, passes};
 use mandate_api_server::http::{self, App, Settings};
 use mandate_api_server::journal::{Journal, JournalUnavailable, Postgres};
@@ -58,6 +61,8 @@ use mandate_api_server::reduction::{self, Reduction};
 use mandate_api_server::session::{OsRandom, Sessions};
 use mandate_api_server::subject;
 use mandate_api_server::token::Issuer;
+use mandate_api_server::vault_fingerprints::VaultFingerprints;
+use mandate_api_server::vault_teardown::VaultTeardown;
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_authn::{Algorithm, IssuerConfig};
 use mandate_identity::{OrgId, WorkspaceId};
@@ -281,32 +286,6 @@ async fn run(args: Args, start: Start) -> io::Result<()> {
             tokio::time::sleep(REFETCH).await;
         }
     });
-    if let (Some(fingerprints), Some(teardown)) = (
-        fingerprints(&start.connect, Arc::new(SystemClock)),
-        teardown(&start.connect, Arc::new(SystemClock)),
-    ) {
-        let journal: Arc<dyn Journal> = Arc::new(Postgres(
-            PgJournal::from_dsn(&start.database_url)
-                .map_err(|_| io::Error::other("the journal's connection settings are refused"))?,
-        ));
-        let workspace = start
-            .hosted
-            .workspace
-            .to_ulid_text()
-            .map_err(|_| io::Error::other("the workspace id is refused"))?;
-        let finisher = Finisher::new(
-            journal,
-            fingerprints,
-            teardown,
-            LineAlerts(Mutex::new(io::stderr())),
-            workspace,
-        );
-        tokio::spawn(passes(
-            finisher,
-            Arc::new(SystemClock),
-            Duration::from_secs(PASS_SECS),
-        ));
-    }
     let challenges = Arc::new(Challenges::default());
     let step_up = CliConfirm {
         challenges: Arc::clone(&challenges),
@@ -394,10 +373,69 @@ async fn wait_for(mut stop: watch::Receiver<bool>) {
     let _ = stop.wait_for(|stopped| *stopped).await;
 }
 
+/// The finish's own process: the pass over the hosted workspace's connects, every
+/// [`PASS_SECS`], as the connection manager, until the process is stopped.
+fn finish() -> ExitCode {
+    if env::args_os().nth(2).is_some() {
+        eprintln!("refused: {}", StartRefusal::Setting { name: "arguments" });
+        return ExitCode::from(2);
+    }
+    if let Err(refusal) = check_environment(env::vars_os()) {
+        eprintln!("refused: {refusal}");
+        return ExitCode::from(2);
+    }
+    let bound = match finish_binding(|name| env::var_os(name)) {
+        Ok(bound) => bound,
+        Err(names) => {
+            eprintln!("{}", off_line(&names));
+            return ExitCode::from(2);
+        }
+    };
+    let runtime = match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            eprintln!("refused: the runtime could not start: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let _in_the_runtime_the_pool_needs = runtime.enter();
+    let Ok(journal) = PgJournal::from_dsn(&bound.database_url) else {
+        eprintln!("refused: the journal's connection settings are refused");
+        return ExitCode::from(2);
+    };
+    let login = Arc::new(bound.login);
+    let finisher = Finisher::new(
+        Arc::new(Postgres(journal)),
+        VaultFingerprints {
+            login: Arc::clone(&login),
+            clock: Arc::new(SystemClock),
+        },
+        VaultTeardown {
+            login,
+            clock: Arc::new(SystemClock),
+        },
+        LineAlerts(Mutex::new(io::stderr())),
+        bound.workspace,
+    );
+    println!("finishing");
+    runtime.block_on(passes(
+        finisher,
+        Arc::new(SystemClock),
+        Duration::from_secs(PASS_SECS),
+    ));
+    ExitCode::SUCCESS
+}
+
 fn main() -> ExitCode {
     if let Err(refused) = mandate_release::startup::check_running() {
         eprintln!("{}", refused.code());
         return ExitCode::from(2);
+    }
+    if env::args_os().nth(1).is_some_and(|mode| mode == "finish") {
+        return finish();
     }
     let (args, start) = match checked() {
         Ok(checked) => checked,
