@@ -121635,5 +121635,921 @@
     }
    }
   ]
+ },
+ "account_closes": {
+  "spec": "docs/specs/journal.md v0.75 §9.5 rules 258 to 260 (DEC-2337)",
+  "drafts": {
+   "close": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01JAD2K0A000000000000000E1",
+    "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+    "event_type": "AccountCloseRequested",
+    "schema_version": 1,
+    "event_time": "2026-10-22T15:00:00.250000000Z",
+    "clock_source": "local",
+    "causation_id": "01JAD2K0S000000000000000K1",
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "executor",
+     "version": "0.1.0",
+     "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "config_refs": {},
+    "payload": {
+     "instrument_id": "AAPL",
+     "qty": "10",
+     "kill_switch_event": "01JAD2K0S000000000000000K1",
+     "attempt": 1,
+     "risk_clock": "2026-10-22T15:00:01.000000000Z"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   }
+  },
+  "invalid_drafts": [
+   {
+    "name": "zero_qty",
+    "clause": "rule 258: `qty` is positive",
+    "base_draft": "close",
+    "changes": [
+     {
+      "path": "payload.qty",
+      "value": "0"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.qty"
+    }
+   },
+   {
+    "name": "negative_qty",
+    "clause": "rule 258: `qty` is positive",
+    "base_draft": "close",
+    "changes": [
+     {
+      "path": "payload.qty",
+      "value": "-10"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.qty"
+    }
+   },
+   {
+    "name": "negative_zero_qty",
+    "clause": "rule 258: `-0` normalizes to 0 (§4.6)",
+    "base_draft": "close",
+    "changes": [
+     {
+      "path": "payload.qty",
+      "value": "-0"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.qty"
+    }
+   },
+   {
+    "name": "zero_qty_with_an_exponent",
+    "clause": "rule 258: `0e5` normalizes to 0 (§4.6)",
+    "base_draft": "close",
+    "changes": [
+     {
+      "path": "payload.qty",
+      "value": "0e5"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.qty"
+    }
+   },
+   {
+    "name": "zero_qty_written_otherwise",
+    "clause": "rule 258: `qty` compared as a decimal",
+    "base_draft": "close",
+    "changes": [
+     {
+      "path": "payload.qty",
+      "value": "0.000"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.qty"
+    }
+   },
+   {
+    "name": "zero_attempt",
+    "clause": "rule 258: `attempt` is at least 1",
+    "base_draft": "close",
+    "changes": [
+     {
+      "path": "payload.attempt",
+      "value": 0
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.attempt"
+    }
+   },
+   {
+    "name": "zero_qty_and_attempt",
+    "clause": "rule 258: reported at the first that fails, `qty` before `attempt`",
+    "base_draft": "close",
+    "changes": [
+     {
+      "path": "payload.qty",
+      "value": "0"
+     },
+     {
+      "path": "payload.attempt",
+      "value": 0
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.qty"
+    }
+   },
+   {
+    "name": "another_cause",
+    "clause": "rule 259: `causation_id` is the switch",
+    "base_draft": "close",
+    "changes": [
+     {
+      "path": "causation_id",
+      "value": "01JAD2K0S000000000000000K2"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "causation_id"
+    }
+   },
+   {
+    "name": "no_cause",
+    "clause": "rule 259: `causation_id` is the switch",
+    "base_draft": "close",
+    "changes": [
+     {
+      "path": "causation_id",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "causation_id"
+    }
+   },
+   {
+    "name": "null_qty",
+    "clause": "§9.5: `qty` is a decimal, never null",
+    "base_draft": "close",
+    "changes": [
+     {
+      "path": "payload.qty",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.qty"
+    }
+   },
+   {
+    "name": "qty_as_number",
+    "clause": "§9.5: `qty` is a decimal string",
+    "base_draft": "close",
+    "changes": [
+     {
+      "path": "payload.qty",
+      "value": 10
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.qty"
+    }
+   },
+   {
+    "name": "qty_beyond_28_places",
+    "clause": "§4.6: at most 28 fractional digits",
+    "base_draft": "close",
+    "changes": [
+     {
+      "path": "payload.qty",
+      "value": "0.00000000000000000000000000001"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.qty"
+    }
+   },
+   {
+    "name": "no_qty",
+    "clause": "§9.5: every member present",
+    "base_draft": "close",
+    "changes": [
+     {
+      "path": "payload.qty",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.qty"
+    }
+   },
+   {
+    "name": "no_instrument",
+    "clause": "§9.5: every member present",
+    "base_draft": "close",
+    "changes": [
+     {
+      "path": "payload.instrument_id",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.instrument_id"
+    }
+   },
+   {
+    "name": "null_instrument",
+    "clause": "§9.5: `instrument_id` is text, never null",
+    "base_draft": "close",
+    "changes": [
+     {
+      "path": "payload.instrument_id",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.instrument_id"
+    }
+   },
+   {
+    "name": "empty_instrument",
+    "clause": "§9.5: `instrument_id` is non-empty text",
+    "base_draft": "close",
+    "changes": [
+     {
+      "path": "payload.instrument_id",
+      "value": ""
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.instrument_id"
+    }
+   },
+   {
+    "name": "switch_not_ulid",
+    "clause": "§9.5: `kill_switch_event` is a ulid",
+    "base_draft": "close",
+    "changes": [
+     {
+      "path": "payload.kill_switch_event",
+      "value": "switch-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.kill_switch_event"
+    }
+   },
+   {
+    "name": "no_switch",
+    "clause": "§9.5: every member present",
+    "base_draft": "close",
+    "changes": [
+     {
+      "path": "payload.kill_switch_event",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.kill_switch_event"
+    }
+   },
+   {
+    "name": "attempt_as_text",
+    "clause": "§9.5: `attempt` is an integer",
+    "base_draft": "close",
+    "changes": [
+     {
+      "path": "payload.attempt",
+      "value": "1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.attempt"
+    }
+   },
+   {
+    "name": "no_attempt",
+    "clause": "§9.5: every member present",
+    "base_draft": "close",
+    "changes": [
+     {
+      "path": "payload.attempt",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.attempt"
+    }
+   },
+   {
+    "name": "no_risk_clock",
+    "clause": "§9.5: every member present",
+    "base_draft": "close",
+    "changes": [
+     {
+      "path": "payload.risk_clock",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.risk_clock"
+    }
+   },
+   {
+    "name": "extra_client_order_id",
+    "clause": "§9.5: the schema is closed",
+    "base_draft": "close",
+    "changes": [
+     {
+      "path": "payload.client_order_id",
+      "value": "md-k-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.client_order_id"
+    }
+   },
+   {
+    "name": "version_2",
+    "clause": "§9.5: registered at `schema_version` 1 only",
+    "base_draft": "close",
+    "changes": [
+     {
+      "path": "schema_version",
+      "value": 2
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "unknown_schema",
+     "path": "payload"
+    }
+   },
+   {
+    "name": "on_the_control_stream",
+    "clause": "§9.5: an account-stream record",
+    "base_draft": "close",
+    "changes": [
+     {
+      "path": "stream_id",
+      "value": "ctl:ws_01J8Z2"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "wrong_stream",
+     "path": "event_type"
+    }
+   }
+  ],
+  "valid_drafts": [
+   {
+    "name": "a_fraction_of_a_share",
+    "clause": "rule 258: positive, however small",
+    "base_draft": "close",
+    "changes": [
+     {
+      "path": "payload.qty",
+      "value": "0.0001"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "twelve_places",
+    "clause": "rule 258: positive at 12 places (§4.6 allows 28)",
+    "base_draft": "close",
+    "changes": [
+     {
+      "path": "payload.qty",
+      "value": "0.000000000001"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "trailing_zeros",
+    "clause": "rule 258: compared as a decimal",
+    "base_draft": "close",
+    "changes": [
+     {
+      "path": "payload.qty",
+      "value": "10.500"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "an_exponent",
+    "clause": "rule 258: `1e2` normalizes to 100 (§4.6)",
+    "base_draft": "close",
+    "changes": [
+     {
+      "path": "payload.qty",
+      "value": "1e2"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "a_negative_exponent",
+    "clause": "rule 258: `5E-1` normalizes to 0.5 (§4.6)",
+    "base_draft": "close",
+    "changes": [
+     {
+      "path": "payload.qty",
+      "value": "5E-1"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "a_later_attempt",
+    "clause": "rule 258: a re-request's attempt",
+    "base_draft": "close",
+    "changes": [
+     {
+      "path": "payload.attempt",
+      "value": 3
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "crypto",
+    "clause": "rule 258: any instrument the switch named, as it names it",
+    "base_draft": "close",
+    "changes": [
+     {
+      "path": "payload.instrument_id",
+      "value": "BTC/USD"
+     },
+     {
+      "path": "payload.qty",
+      "value": "0.25"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   }
+  ],
+  "streams": [
+   {
+    "name": "each_instrument_once",
+    "clause": "rule 260: one request per instrument per attempt",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAD2K0A00000000000000001",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AccountCloseRequested",
+      "schema_version": 1,
+      "event_time": "2026-10-22T15:00:00.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAD2K0S000000000000000K1",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "instrument_id": "AAPL",
+       "qty": "10",
+       "kill_switch_event": "01JAD2K0S000000000000000K1",
+       "attempt": 1,
+       "risk_clock": "2026-10-22T15:00:01.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAD2K0A00000000000000002",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AccountCloseRequested",
+      "schema_version": 1,
+      "event_time": "2026-10-22T15:00:00.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAD2K0S000000000000000K1",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "instrument_id": "BTC/USD",
+       "qty": "10",
+       "kill_switch_event": "01JAD2K0S000000000000000K1",
+       "attempt": 1,
+       "risk_clock": "2026-10-22T15:00:01.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "a_re_request",
+    "clause": "rule 260: a re-request takes the next attempt",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAD2K0A00000000000000001",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AccountCloseRequested",
+      "schema_version": 1,
+      "event_time": "2026-10-22T15:00:00.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAD2K0S000000000000000K1",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "instrument_id": "AAPL",
+       "qty": "10",
+       "kill_switch_event": "01JAD2K0S000000000000000K1",
+       "attempt": 1,
+       "risk_clock": "2026-10-22T15:00:01.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAD2K0A00000000000000002",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AccountCloseRequested",
+      "schema_version": 1,
+      "event_time": "2026-10-22T15:00:00.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAD2K0S000000000000000K1",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "instrument_id": "AAPL",
+       "qty": "10",
+       "kill_switch_event": "01JAD2K0S000000000000000K1",
+       "attempt": 2,
+       "risk_clock": "2026-10-22T15:00:01.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "under_a_later_switch",
+    "clause": "rule 260: a later switch closes the instrument again from attempt 1",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAD2K0A00000000000000001",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AccountCloseRequested",
+      "schema_version": 1,
+      "event_time": "2026-10-22T15:00:00.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAD2K0S000000000000000K1",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "instrument_id": "AAPL",
+       "qty": "10",
+       "kill_switch_event": "01JAD2K0S000000000000000K1",
+       "attempt": 1,
+       "risk_clock": "2026-10-22T15:00:01.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAD2K0A00000000000000002",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AccountCloseRequested",
+      "schema_version": 1,
+      "event_time": "2026-10-22T15:00:00.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAD2K0S000000000000000K2",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "instrument_id": "AAPL",
+       "qty": "10",
+       "kill_switch_event": "01JAD2K0S000000000000000K2",
+       "attempt": 1,
+       "risk_clock": "2026-10-22T15:00:01.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "duplicate",
+    "clause": "rule 260: the same switch, instrument and attempt twice",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAD2K0A00000000000000001",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AccountCloseRequested",
+      "schema_version": 1,
+      "event_time": "2026-10-22T15:00:00.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAD2K0S000000000000000K1",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "instrument_id": "AAPL",
+       "qty": "10",
+       "kill_switch_event": "01JAD2K0S000000000000000K1",
+       "attempt": 1,
+       "risk_clock": "2026-10-22T15:00:01.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAD2K0A00000000000000002",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AccountCloseRequested",
+      "schema_version": 1,
+      "event_time": "2026-10-22T15:00:00.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAD2K0S000000000000000K1",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "instrument_id": "AAPL",
+       "qty": "10",
+       "kill_switch_event": "01JAD2K0S000000000000000K1",
+       "attempt": 1,
+       "risk_clock": "2026-10-22T15:00:01.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "index": 1,
+     "reason": "schema",
+     "path": "payload.attempt"
+    }
+   },
+   {
+    "name": "duplicate_after_another",
+    "clause": "rule 260: earlier records of the stream count, not only the last",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAD2K0A00000000000000001",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AccountCloseRequested",
+      "schema_version": 1,
+      "event_time": "2026-10-22T15:00:00.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAD2K0S000000000000000K1",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "instrument_id": "AAPL",
+       "qty": "10",
+       "kill_switch_event": "01JAD2K0S000000000000000K1",
+       "attempt": 1,
+       "risk_clock": "2026-10-22T15:00:01.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAD2K0A00000000000000002",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AccountCloseRequested",
+      "schema_version": 1,
+      "event_time": "2026-10-22T15:00:00.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAD2K0S000000000000000K1",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "instrument_id": "BTC/USD",
+       "qty": "10",
+       "kill_switch_event": "01JAD2K0S000000000000000K1",
+       "attempt": 1,
+       "risk_clock": "2026-10-22T15:00:01.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAD2K0A00000000000000003",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AccountCloseRequested",
+      "schema_version": 1,
+      "event_time": "2026-10-22T15:00:00.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAD2K0S000000000000000K1",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "instrument_id": "AAPL",
+       "qty": "10",
+       "kill_switch_event": "01JAD2K0S000000000000000K1",
+       "attempt": 2,
+       "risk_clock": "2026-10-22T15:00:01.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JAD2K0A00000000000000004",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AccountCloseRequested",
+      "schema_version": 1,
+      "event_time": "2026-10-22T15:00:00.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JAD2K0S000000000000000K1",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "instrument_id": "AAPL",
+       "qty": "10",
+       "kill_switch_event": "01JAD2K0S000000000000000K1",
+       "attempt": 1,
+       "risk_clock": "2026-10-22T15:00:01.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "index": 3,
+     "reason": "schema",
+     "path": "payload.attempt"
+    }
+   }
+  ]
  }
 }
