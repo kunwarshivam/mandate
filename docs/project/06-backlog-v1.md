@@ -4290,7 +4290,17 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   interprets `PositionReleased`, the released quantity leaves the agent's sub-ledger (`kill.rs`'s
   `sub_ledger`, read by the kill switch and by `ExecutorState::holds_lots`), so the switch sells
   none of the owner's shares and the exit's item 3.6 no longer waits on them. Tests: released lots
-  let the executor exit `completed`; unreleased lots still hold it.
+  let the executor exit `completed`; unreleased lots still hold it. The first two are
+  `mandate-executord/tests/released.rs`, pending E6-4 (a release alone, and a connection's kill
+  switch after it). Until this lands, an account stream holding a `PositionReleased` cannot be
+  folded by its executor, so a kill switch on that account cannot be applied by the executor
+  (`AGENTS.md` rule 13), and the only signal is the manager's `kill_switch_unapplied`
+  ([DEC-2344](decisions/DEC-2344.md) item 1): rank this staging-relevant if a release can happen on
+  staging. Done by [DEC-2354](decisions/DEC-2354.md)'s pair, for `PositionReleased`; §9.27's other records stay E6-4's.
+- **E6-4 (executor kill switch), from the review of [DEC-2354](decisions/DEC-2354.md):** a release
+  written after an agent's kill switch has sized its flatten sells does not shrink them, so the
+  switch can still offer the released shares. Re-size an agent flatten sell not yet sent against
+  the sub-ledger at send time, or cancel the part a later release takes.
 - **E7-4 A1c (stream K), from [DEC-2333](decisions/DEC-2333.md) item 3:** at §5.4's bound, re-place
   protection in an instrument the account kill switch closes for the held quantity less every sell
   not confirmed cancelled, placing nothing where that leaves none, with its own DEC-77 pair. Until
