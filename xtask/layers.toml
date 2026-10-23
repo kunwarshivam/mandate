@@ -130,6 +130,8 @@ workspace_services = [
     "mandate-cp-site",
     "mandate-deploy-manager",
     "mandate-deployd",
+    "mandate-provisioner",
+    "mandate-provisionerd",
     "mandate-dispatcher",
     "mandate-gatewayd",
 ]
@@ -798,6 +800,32 @@ pure = false
 allowed_external = ["reqwest", "rustls", "secrecy", "tokio"]
 allowed_dependents = []
 
+# The role provisioner's process (E21-33, DEC-2350): mandate-provisioner over the Postgres control
+# stream, written as the deployment manager's process writes it (mandate-deployd's PgControl), and
+# the vault, logged in by AppRole, with mandate-process's lifecycle and probes. tokio drives the
+# journal, the vault's HTTPS and the SIGTERM listener; secrecy holds the vault's CA as it is read.
+# Like the provisioner it wires, it may never reach a crate that writes an agent or account stream,
+# holds a broker credential, or edits a mandate.
+[crates.mandate-provisionerd]
+layer = 10
+safety_critical = true
+pure = false
+allowed_external = ["secrecy", "tokio"]
+forbidden_internal = [
+    "mandate-agentd",
+    "mandate-alpaca",
+    "mandate-builder",
+    "mandate-cli",
+    "mandate-executor",
+    "mandate-mcp",
+    "mandate-paper",
+    "mandate-risk",
+    "mandate-robinhood",
+    "mandate-runtime",
+    "mandate-shell",
+    "mandate-spec",
+]
+
 # The workspace scheduler process (E21-29, DEC-1010): the clock stream's single writer, over
 # mandate-store, with mandate-process's lifecycle and probes. tokio drives the Postgres journal
 # The workspace API server (E21-31, DEC-978): the one door into a workspace deployment for people
@@ -831,6 +859,31 @@ layer = 8
 safety_critical = true
 pure = false
 allowed_external = ["serde_json", "tokio"]
+forbidden_internal = [
+    "mandate-agentd",
+    "mandate-alpaca",
+    "mandate-builder",
+    "mandate-cli",
+    "mandate-executor",
+    "mandate-mcp",
+    "mandate-paper",
+    "mandate-risk",
+    "mandate-robinhood",
+    "mandate-runtime",
+    "mandate-shell",
+    "mandate-spec",
+]
+
+# The role provisioner (E21-33, DEC-2350, DEC-2630 item 7): the one workspace process that makes a
+# connection's Kubernetes-auth roles and removes a token exchange's, reading only the control stream
+# and appending its three records there through mandate-deploy-manager's journal port. It is above
+# mandate-vault, whose role operations it calls, and like the deployment manager it may never reach
+# a crate that writes an agent or account stream, holds a broker credential, or edits a mandate.
+[crates.mandate-provisioner]
+layer = 9
+safety_critical = true
+pure = false
+allowed_external = ["tokio"]
 forbidden_internal = [
     "mandate-agentd",
     "mandate-alpaca",

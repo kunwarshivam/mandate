@@ -27,6 +27,7 @@ mod backtest_records;
 mod catalogue;
 mod confirmations;
 mod connection_fold;
+mod connection_roles;
 mod connections;
 mod control;
 mod control_plane;
@@ -187,6 +188,7 @@ pub use connection_fold::{
     verify_connection_causes_from_genesis, verify_connection_lifecycle,
     verify_connection_lifecycle_from,
 };
+pub use connection_roles::{ConnectionRolesError, ConnectionRolesRule, verify_connection_roles};
 pub use control_verify::{
     ControlStreamCheck, ControlStreamFailure, ControlVerifyError, verify_anchor_self,
     verify_break_glass_causes,

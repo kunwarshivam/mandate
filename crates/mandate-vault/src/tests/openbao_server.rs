@@ -28,13 +28,16 @@ use crate::fingerprint::{
 };
 use crate::kubernetes::{
     KubernetesAuth, kubernetes_mount_requests, kubernetes_policy, kubernetes_policy_name,
-    mount_accessor, service_account_name,
+    mount_accessor, provisioner_policy, role_request, service_account_name,
 };
 use crate::openbao::{
     OpenBaoConfig, OpenBaoSource, RoleCredentials, provision, provision_kubernetes_auth,
 };
 use crate::openbao::{fingerprint_key_verdict, transit_mount_verdict};
-use crate::policy::{Identity, Mounts, SecretPath, kv_path, openbao_policy, role_name};
+use crate::policy::{
+    Identity, Mounts, SecretPath, kv_path, openbao_policy, policy_name, role_name,
+};
+use crate::provisioner::{RoleProvisioner, RoleRefusal};
 use crate::source::{Grant, SecretSource};
 use mandate_connections::record::{AccountPiiRef, AccountRef, ConnectionId};
 use mandate_time::UtcNanos;
@@ -184,7 +187,7 @@ impl Bao {
         };
         let credentials = provision(&direct, &operator, &[c("c1"), c("c2")], None)
             .await
-            .unwrap();
+            .unwrap_or_else(|e| panic!("provisioning the test vault at {address}: {e:?}"));
         let target: SocketAddr = address
             .trim_start_matches("https://")
             .parse()
@@ -447,6 +450,7 @@ async fn provisioning_sets_both_kubernetes_mounts_up_with_their_templated_polici
     let auth = |ca_pem: &[u8]| KubernetesAuth {
         host: "https://127.0.0.1:6443".to_owned(),
         ca_pem: Some(String::from_utf8(ca_pem.to_vec()).unwrap()),
+        namespace: None,
     };
     let listed = kubernetes_mount_requests(&Mounts::default(), &auth(PEM_SHAPE));
     assert!(listed.is_ok(), "{listed:?}");
@@ -525,6 +529,282 @@ async fn provisioning_sets_both_kubernetes_mounts_up_with_their_templated_polici
     assert_eq!(login.map(drop), Err(SourceError::RoleMissing));
 }
 
+/// One request with `token`, or none: the status the vault answered and its body, `null` when
+/// it has none.
+async fn request_as(
+    address: &str,
+    ca_pem: &[u8],
+    token: Option<&str>,
+    method: Method,
+    path: &str,
+    body: Option<&Value>,
+) -> (u16, Value) {
+    let mut request = reqwest::Client::builder()
+        .add_root_certificate(Certificate::from_pem(ca_pem).unwrap())
+        .build()
+        .unwrap()
+        .request(method, format!("{address}/v1/{path}"));
+    if let Some(token) = token {
+        request = request.header("X-Vault-Token", token);
+    }
+    if let Some(body) = body {
+        request = request.body(body.to_string());
+    }
+    let answer = request.send().await.unwrap();
+    let status = answer.status().as_u16();
+    let bytes = answer.bytes().await.unwrap();
+    let value = if bytes.is_empty() {
+        Value::Null
+    } else {
+        serde_json::from_slice(&bytes).unwrap()
+    };
+    (status, value)
+}
+
+/// DEC-2350 items 1, 3 and 5 on a real vault: provisioning with the workspace's namespace makes
+/// the role provisioner's AppRole, its policy [`provisioner_policy`] exactly. Logged in as it, the
+/// provisioner makes a connection's executor role and token-exchange role as
+/// [`role_request`] asks, bound to that namespace and policy, and reads neither; it is refused a
+/// role in another namespace, a pinned parameter sent as an array, the removal of an executor's role, a policy and
+/// a secret; and it removes the token exchange's role, once and again, which changes nothing.
+/// The pure policy and request are checked first, so a run with no server still fails until they
+/// hold.
+#[tokio::test(flavor = "current_thread")]
+async fn the_provisioner_makes_both_roles_and_removes_only_the_exchanges() {
+    let written = provisioner_policy(&Mounts::default(), "ws-ws1");
+    assert!(written.is_ok(), "{written:?}");
+    let request = role_request(&Identity::Executor(c("c1")), &Mounts::default(), "ws-ws1");
+    assert!(request.is_ok(), "{request:?}");
+    let Some((address, ca_pem, operator)) = server() else {
+        return;
+    };
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    let suffix = format!("{}-{n}", std::process::id());
+    let config = OpenBaoConfig {
+        address: address.clone(),
+        ca_pem: ca_pem.clone(),
+        mounts: Mounts {
+            kv: format!("kv-{suffix}"),
+            auth: format!("approle-{suffix}"),
+            kubernetes_executor: format!("kubernetes-executor-{suffix}"),
+            kubernetes_exchange: format!("kubernetes-exchange-{suffix}"),
+            transit: format!("transit-{suffix}"),
+        },
+    };
+    let mounts = &config.mounts;
+    let auth = KubernetesAuth {
+        host: "https://127.0.0.1:6443".to_owned(),
+        ca_pem: Some(String::from_utf8(ca_pem.clone()).unwrap()),
+        namespace: Some("ws-ws1".to_owned()),
+    };
+    let credentials = provision(&config, &operator, &[c("c1")], Some(&auth))
+        .await
+        .unwrap();
+    let stored = operator_get(
+        &address,
+        &ca_pem,
+        &operator,
+        &format!(
+            "sys/policies/acl/{}",
+            policy_name(&Identity::Provisioner, mounts)
+        ),
+    )
+    .await;
+    assert_eq!(
+        stored["data"]["policy"].as_str(),
+        Some(provisioner_policy(mounts, "ws-ws1").unwrap().as_str())
+    );
+    let own = credentials
+        .iter()
+        .find(|r| r.identity == Identity::Provisioner)
+        .unwrap();
+    let (status, login) = request_as(
+        &address,
+        &ca_pem,
+        None,
+        Method::POST,
+        &format!("auth/{}/login", mounts.auth),
+        Some(&json!({
+            "role_id": own.role_id,
+            "secret_id": own.secret_id.expose_secret(),
+        })),
+    )
+    .await;
+    assert_eq!(status, 200, "{login}");
+    let token = login["auth"]["client_token"].as_str().unwrap().to_owned();
+    let operator_token = operator.expose_secret().to_owned();
+    let as_provisioner = |method: Method, path: String, body: Option<Value>| {
+        let (address, ca_pem, token) = (address.clone(), ca_pem.clone(), token.clone());
+        async move {
+            request_as(
+                &address,
+                &ca_pem,
+                Some(&token),
+                method,
+                &path,
+                body.as_ref(),
+            )
+            .await
+        }
+    };
+    let as_operator = |path: String| {
+        let (address, ca_pem, token) = (address.clone(), ca_pem.clone(), operator_token.clone());
+        async move { request_as(&address, &ca_pem, Some(&token), Method::GET, &path, None).await }
+    };
+    let executor = Identity::Executor(c("c1"));
+    let exchange = Identity::TokenExchange(c("c1"));
+    for identity in [&executor, &exchange] {
+        let (path, body) = role_request(identity, mounts, "ws-ws1").unwrap();
+        let (status, answer) = as_provisioner(Method::POST, path.clone(), Some(body)).await;
+        assert_eq!(status, 204, "{identity:?}: {answer}");
+        let (status, _) = as_provisioner(Method::GET, path.clone(), None).await;
+        assert_eq!(status, 403, "{identity:?}: the provisioner reads no role");
+        let (status, made) = as_operator(path).await;
+        assert_eq!(status, 200, "{identity:?}");
+        assert_eq!(
+            made["data"]["bound_service_account_namespaces"],
+            json!(["ws-ws1"])
+        );
+        assert_eq!(
+            made["data"]["token_policies"],
+            json!([kubernetes_policy_name(identity, mounts).unwrap()])
+        );
+    }
+    let (path, body) = role_request(&executor, mounts, "ws-ws1").unwrap();
+    for (key, value) in [
+        ("bound_service_account_namespaces", json!("kube-system")),
+        ("bound_service_account_namespaces", json!(["ws-ws1"])),
+        ("token_policies", json!("default")),
+    ] {
+        let mut widened = body.clone();
+        widened[key] = value.clone();
+        let (status, _) = as_provisioner(Method::POST, path.clone(), Some(widened)).await;
+        assert_eq!(status, 403, "{key} = {value}");
+    }
+    let (status, _) = as_provisioner(Method::DELETE, path.clone(), None).await;
+    assert_eq!(status, 403, "an executor's role is never removed");
+    assert_eq!(as_operator(path).await.0, 200);
+    let (path, _) = role_request(&exchange, mounts, "ws-ws1").unwrap();
+    for round in 0..2 {
+        let (status, _) = as_provisioner(Method::DELETE, path.clone(), None).await;
+        assert_eq!(status, 204, "round {round}");
+    }
+    assert_eq!(as_operator(path).await.0, 404);
+    for path in [
+        format!(
+            "sys/policies/acl/{}",
+            policy_name(&Identity::Provisioner, mounts)
+        ),
+        format!("{}/data/platform/alpaca-oauth-client-secret", mounts.kv),
+        "sys/auth".to_owned(),
+    ] {
+        let (status, _) = as_provisioner(Method::GET, path.clone(), None).await;
+        assert_eq!(status, 403, "{path}");
+    }
+}
+
+/// DEC-2350 items 1 and 3 through the provisioner's own session: logged in with its AppRole, it
+/// makes a connection's executor and token-exchange roles, bound to their ServiceAccounts in the
+/// workspace's namespace, and makes them again with nothing changed; it removes the token
+/// exchange's role, and again, and the executor's stays. Another identity's session is refused a
+/// role, and so is another namespace. The refusals' mapping is checked first, so a run with no
+/// server still fails until it holds.
+#[tokio::test(flavor = "current_thread")]
+async fn the_provisioner_makes_a_connections_roles_and_removes_only_the_exchanges() {
+    assert_eq!(
+        RoleRefusal::of(&SourceError::Unavailable),
+        RoleRefusal::VaultUnavailable
+    );
+    let Some((address, ca_pem, operator)) = server() else {
+        return;
+    };
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    let suffix = format!("{}-{n}", std::process::id());
+    let config = OpenBaoConfig {
+        address: address.clone(),
+        ca_pem: ca_pem.clone(),
+        mounts: Mounts {
+            kv: format!("kv-{suffix}"),
+            auth: format!("approle-{suffix}"),
+            kubernetes_executor: format!("kubernetes-executor-{suffix}"),
+            kubernetes_exchange: format!("kubernetes-exchange-{suffix}"),
+            transit: format!("transit-{suffix}"),
+        },
+    };
+    let mounts = &config.mounts;
+    let auth = KubernetesAuth {
+        host: "https://127.0.0.1:6443".to_owned(),
+        ca_pem: Some(String::from_utf8(ca_pem.clone()).unwrap()),
+        namespace: Some("ws-ws1".to_owned()),
+    };
+    let credentials = provision(&config, &operator, &[c("c1")], Some(&auth))
+        .await
+        .unwrap();
+    let login = |identity: Identity| {
+        let role = credentials.iter().find(|r| r.identity == identity).unwrap();
+        OpenBaoSource::login(
+            &config,
+            identity,
+            &role.role_id,
+            &role.secret_id,
+            at(1_000_000),
+        )
+    };
+    let provisioner = login(Identity::Provisioner).await.unwrap();
+    let role_of = |identity: Identity| role_request(&identity, mounts, "ws-ws1").unwrap().0;
+    let executor = role_of(Identity::Executor(c("c2")));
+    let exchange = role_of(Identity::TokenExchange(c("c2")));
+    let stored = |path: String| {
+        let (address, ca_pem, operator) = (address.clone(), ca_pem.clone(), operator.clone());
+        async move {
+            request_as(
+                &address,
+                &ca_pem,
+                Some(operator.expose_secret()),
+                Method::GET,
+                &path,
+                None,
+            )
+            .await
+        }
+    };
+    for round in 0..2 {
+        assert_eq!(
+            provisioner.make_roles(&c("c2"), "ws-ws1").await,
+            Ok(()),
+            "round {round}"
+        );
+        for path in [&executor, &exchange] {
+            let (status, role) = stored(path.clone()).await;
+            assert_eq!(status, 200, "round {round}: {path}");
+            assert_eq!(
+                role["data"]["bound_service_account_namespaces"],
+                json!(["ws-ws1"]),
+                "round {round}: {path}"
+            );
+        }
+    }
+    for round in 0..2 {
+        assert_eq!(
+            provisioner.remove_exchange_role(&c("c2"), "ws-ws1").await,
+            Ok(()),
+            "round {round}"
+        );
+        assert_eq!(stored(exchange.clone()).await.0, 404, "round {round}");
+        assert_eq!(stored(executor.clone()).await.0, 200, "round {round}");
+    }
+    let api = login(Identity::Api).await.unwrap();
+    assert_eq!(
+        api.make_roles(&c("c3"), "ws-ws1").await,
+        Err(RoleRefusal::RoleRefused)
+    );
+    assert_eq!(
+        provisioner.make_roles(&c("c3"), "kube-system").await,
+        Err(RoleRefusal::RoleRefused)
+    );
+    assert_eq!(stored(role_of(Identity::Executor(c("c3")))).await.0, 404);
+}
+
 /// A CA certificate's shape, for the pure check that runs without a server.
 /// One request as the operator: its answer, or `null` when it has none.
 async fn operator_request(
@@ -561,6 +841,7 @@ async fn kubernetes_auth_alone_adds_only_the_missing_mount_and_mints_no_secret_i
     let auth = |ca_pem: &[u8], host: &str| KubernetesAuth {
         host: host.to_owned(),
         ca_pem: Some(String::from_utf8(ca_pem.to_vec()).unwrap()),
+        namespace: None,
     };
     let nowhere = OpenBaoConfig {
         address: "https://127.0.0.1:9".to_owned(),
@@ -894,6 +1175,7 @@ async fn provisioning_replaces_a_policy_left_under_its_name() {
     let auth = KubernetesAuth {
         host: "https://127.0.0.1:6443".to_owned(),
         ca_pem: Some(String::from_utf8(ca_pem.clone()).unwrap()),
+        namespace: None,
     };
     provision(&config, &operator, &[c("c1")], Some(&auth))
         .await
