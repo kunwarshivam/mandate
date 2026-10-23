@@ -225,6 +225,7 @@ REQUIRED_REFS = {
     "ApprovalRevalidated": ("mandate_version",),
     "AgentDeployed": ("mandate_version",),
     "AgentStopped": ("mandate_version",),
+    "RetirementHeld": ("mandate_version",),
     "MandateVersionApplied": ("mandate_version",),
     "UniverseChanged": ("mandate_version",),
     **{event_type: ("mandate_version",) for event_type in (
@@ -1167,6 +1168,28 @@ SCHEMAS[("ctl", "ProcessCrashLooped")] = rec(
     ("window_seconds", INT),
 )
 DM_RECORDS = ("ProcessStartIssued", "ProcessStopIssued", "ProcessCrashLooped")
+# §9.33 v0.77 (DEC-2350): the role provisioner's records of one OAuth connect's Kubernetes-auth roles,
+# on the control stream. IDs and enumerations only.
+SCHEMAS[("ctl", "ConnectionRolesMade")] = rec(("connection_id", IDENT_T))
+SCHEMAS[("ctl", "ConnectionRolesRefused")] = rec(
+    ("connection_id", IDENT_T),
+    ("reason", one_of("vault_unavailable", "role_refused")),
+)
+SCHEMAS[("ctl", "ConnectionRolesRemoved")] = rec(
+    ("connection_id", IDENT_T),
+    ("role", one_of("token_exchange")),
+    ("occasion", one_of("request_closed", "revoked")),
+)
+CR_RECORDS = ("ConnectionRolesMade", "ConnectionRolesRefused", "ConnectionRolesRemoved")
+# §9.34 v0.79 (DEC-2352): the runtime's record that a retirement has waited another 24 hours of risk
+# clock for what the agent still holds (DEC-2344 item 2). No order, position, or quantity.
+SCHEMAS[("agent", "RetirementHeld")] = rec(
+    ("held_since", RISK_CLOCK),
+    ("period", INT),
+    ("waiting_on", list_of(one_of("position", "working_order"))),
+    ("risk_clock", RISK_CLOCK),
+)
+HELD_PERIOD_S = 86_400
 
 # §9.5 (DEC-446, DEC-447): the account stream's executor records. The three records §9.5 closes at
 # `schema_version` 2 carry both versions here; the companion and `ProtectionChanged` close at 1.
@@ -2089,6 +2112,8 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
     out += control_plane_violations(event_type, draft, skip)
     out += backtest_violations(event_type, draft, skip)
     out += deployment_manager_violations(event_type, draft, skip)
+    out += connection_role_violations(event_type, draft, skip)
+    out += retirement_held_violations(event_type, draft, skip)
     return out
 
 
@@ -2885,6 +2910,48 @@ def deployment_manager_violations(event_type: str, draft: dict, skip: frozenset[
         rule("257", p["cause"] != "exchanged" or executor, "payload.cause")
     if event_type == "ProcessStopIssued":
         rule("257.stop", p["cause"] != "connection_closed" or executor, "payload.cause")
+    return out
+
+
+def connection_role_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
+    """§9.33's rule 261, on a well-typed payload: a system actor, and a cause."""
+    if event_type not in CR_RECORDS:
+        return []
+    out: list[Violation] = []
+
+    def rule(name: str, holds: bool, path: str) -> None:
+        if not holds and f"rule.{name}" not in skip:
+            out.append(Violation(f"rule.{name}", "schema", path))
+
+    rule("261.system", draft["actor"]["kind"] == "system", "actor.kind")
+    rule("261.cause", draft["causation_id"] is not None, "causation_id")
+    return out
+
+
+def retirement_held_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
+    """§9.34's rule 265, on a well-typed payload: the runtime's own record, caused by what began
+    the retirement; a period from 1, no sooner than 24 hours after it began (the 24 hours between
+    records are rule 266's); and
+    what it waits on, once each and in order."""
+    if event_type != "RetirementHeld":
+        return []
+    p = draft["payload"]
+    out: list[Violation] = []
+
+    def rule(name: str, holds: bool, path: str) -> None:
+        if not holds and f"rule.{name}" not in skip:
+            out.append(Violation(f"rule.{name}", "schema", path))
+
+    rule("265.agent", draft["actor"]["kind"] == "agent", "actor.kind")
+    rule("265.cause", draft["causation_id"] is not None, "causation_id")
+    period, since, now, waiting = p["period"], p["held_since"], p["risk_clock"], p["waiting_on"]
+    if isinstance(period, int):
+        rule("265.period", period >= 1, "payload.period")
+        if isinstance(since, str) and isinstance(now, str) and is_timestamp(since) and is_timestamp(now) and (period >= 1 or "rule.265.period" in skip):
+            due = epoch_seconds(since) + HELD_PERIOD_S
+            rule("265.due", epoch_seconds(now) >= due, "payload.risk_clock")
+    if isinstance(waiting, list):
+        rule("265.waiting", bool(waiting) and ascending(waiting), "payload.waiting_on")
     return out
 
 

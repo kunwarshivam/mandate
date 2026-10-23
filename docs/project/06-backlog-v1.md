@@ -425,6 +425,21 @@ the spec invariants (DP-n) its tests cover.
   to MC-L09 pass.
 - **E6-5 (Must)** As an owner, I want kill switches per agent, connection, and workspace so
   that I can stop everything immediately.
+  - **Retirement leaves nothing of the agent's** ([DEC-2344](decisions/DEC-2344.md) item 2; mandate
+    spec v0.9 §3.1, journal spec v0.76 §9.2). Once the runtime writes `AgentStopped` for an agent
+    that ran (goal completion, `release`, and the owner's Stop under DEC-136's flat-or-release
+    precondition), it writes it only when the account stream's fold shows no position attributed to
+    the agent and no working order of its own (every non-terminal trading §5.7 state); a release
+    cancels every working order of the agent's first, and a retirement waiting 24 hours raises
+    `retirement_held`, then each 24 hours. The deployment manager stops the
+    runtime, and the account's last executor, on that record alone. Nothing writes it for an agent
+    that ran today, so this lands with that writer. *Accepted when:* a property test over random
+    sequences of fills, exits, protective cancels, releases, `Unknown` orders and Stops shows no
+    `AgentStopped` while the account fold, computed by its own accumulator, holds a position or a
+    working order of the agent's, and that oracle is shown to catch a seeded retirement on a sent but
+    unfilled exit and on an unconfirmed cancel. An agent that ran and crash-looped holding nothing has
+    no writer for its retirement yet (DEC-2344 Risks). Safety-critical (autonomy policy and kill
+    switches), DEC-77 sequence.
 - **E6-6 (Must)** As an owner, I want US account rules (day-trading regime, settlement, short
   sales, market hours) enforced by the risk gate so that agents never get my account restricted.
   *Accepted when:* simulation tests for each rule pass; blocked orders are journaled with the rule.
@@ -1405,6 +1420,25 @@ after U-A1 to U-A5 are recorded.
   `ApprovalRevalidated` with `act` (API-12); `/n/{notice_id}` resolves a random notice id, never
   the request's event id, and only after sign-in (spec §3.9, DEC-436 item 19; the payload is the
   notifications spec's, E8-9).
+
+- **E8-17 (Must, M7; SC; needed before staging)** As an owner, I want to hear when a kill switch
+  did not reach my account, and when an agent's retirement is held, so that I can act in the
+  broker's own console ([DEC-2344](decisions/DEC-2344.md) items 1 and 2,
+  [DEC-2351](decisions/DEC-2351.md)). Today only the operator is told (RB-14).
+  - `kill_switch_unapplied` (notifications spec v0.9 §3.2, journal spec v0.78): the kind in
+    `mandate-notify` and `mandate-journal`'s closed set, its class and text key, and the deployment
+    manager's `OwnerAlertSent` in its `ProcessCrashLooped`'s batch for an executor last started for
+    a kill switch. Tests first: the kind parses and maps to `safety` and `attention_needed`; the
+    manager writes exactly one `OwnerAlertSent` per such loop and none for any other loop or after
+    a restart.
+  - `retirement_held` (DEC-2344 item 2, [DEC-2352](decisions/DEC-2352.md); journal spec v0.79
+    §9.34, notifications spec v0.10): `mandate-journal`'s `RetirementHeld` schema, rule 265, and
+    stream rule 266, turning the `retirements` refcases from pending to passing; the kind in
+    `mandate-notify` and `mandate-journal`; and the runtime's writer (E6-5's): period n at the first
+    tick at or after it is due while the agent still holds anything of its own, in every mode, with
+    its `OwnerAlertSent` as the next row, one sequence per agent, none after the retirement ends
+    (`AgentStopped`, a resume, a version applied), the next period after downtime, and none twice
+    across a restart.
 
 ### E9 Identity, tenancy, and policy
 
@@ -3051,6 +3085,21 @@ enables `live` (ES-23, OPS-5).
     pass while its request has time left, making and deleting its account each time; a retry
     bound or backoff is left. Open until R1 lands: DEC-2332 items 4 to 6 (the environment pin, the
     vault CA, the exchange's launch).
+  - **The role provisioner** ([DEC-2350](decisions/DEC-2350.md), DEC-2630 item 7; journal spec v0.77
+    §9.33). Nothing makes a connection's Kubernetes-auth roles today, so every exchange's and every
+    managed executor's login is refused. Spec first (this row's first PR), then: the vault side with
+    lane V2 (the provisioner identity and AppRole, `delete` on the token exchange's mount alone in `provisioner_policy`, making and
+    removing a connection's roles); the journal crate's three records (the `connection_roles`
+    vectors, pending until then); the `provisioner` process; its chart, with vault-only egress to
+    lane GO's pattern; and the manager's wait for `ConnectionRolesMade` before an exchange starts.
+    *Accepted when:* a property test over requests, closes, revocations, executor starts and stops,
+    crashes and vault refusals shows every record the provisioner journals keeps rules 262 and 263,
+    against an oracle rebuilt from the stream, with no executor's role ever removed, a revocation
+    right after a kill switch among them; and the manager starts no exchange before its
+    `ConnectionRolesMade`. Left: a sweep of the executor's roles the provisioner never removes, one
+    per connection whose request closed without an establishment or that was revoked, once no
+    executor of its account runs; the manager does not journal a held generation's own exit
+    (DEC-2344), so the sweep needs a signal it does not have yet.
   - From DEC-2336 item 2 (K2a): a reconnect that reuses its `account_ref` (connections spec
     CN-12) starts no executor for its connect, since that account's executor already used
     generation 1 and rule 167 holds `exchanged` to it, so the connect fails by its deadline until a
@@ -4289,7 +4338,17 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   interprets `PositionReleased`, the released quantity leaves the agent's sub-ledger (`kill.rs`'s
   `sub_ledger`, read by the kill switch and by `ExecutorState::holds_lots`), so the switch sells
   none of the owner's shares and the exit's item 3.6 no longer waits on them. Tests: released lots
-  let the executor exit `completed`; unreleased lots still hold it.
+  let the executor exit `completed`; unreleased lots still hold it. The first two are
+  `mandate-executord/tests/released.rs`, pending E6-4 (a release alone, and a connection's kill
+  switch after it). Until this lands, an account stream holding a `PositionReleased` cannot be
+  folded by its executor, so a kill switch on that account cannot be applied by the executor
+  (`AGENTS.md` rule 13), and the only signal is the manager's `kill_switch_unapplied`
+  ([DEC-2344](decisions/DEC-2344.md) item 1): rank this staging-relevant if a release can happen on
+  staging. Done by [DEC-2354](decisions/DEC-2354.md)'s pair, for `PositionReleased`; §9.27's other records stay E6-4's.
+- **E6-4 (executor kill switch), from the review of [DEC-2354](decisions/DEC-2354.md):** a release
+  written after an agent's kill switch has sized its flatten sells does not shrink them, so the
+  switch can still offer the released shares. Re-size an agent flatten sell not yet sent against
+  the sub-ledger at send time, or cancel the part a later release takes.
 - **E7-4 A1c (stream K), from [DEC-2333](decisions/DEC-2333.md) item 3:** at §5.4's bound, re-place
   protection in an instrument the account kill switch closes for the held quantity less every sell
   not confirmed cancelled, placing nothing where that leaves none, with its own DEC-77 pair. Until

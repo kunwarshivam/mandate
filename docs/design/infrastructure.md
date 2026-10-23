@@ -723,6 +723,7 @@ are authoritative; a few come from metrics.
 | Vault lease renewal failing | Executor metrics | SEV-2 | RB-12 |
 | Broker API errors, rate limits, or outage | Connector metrics | SEV-2 | RB-13 |
 | Crash loop; agent left paused | Deployment manager | SEV-2 | RB-14 |
+| A retirement held another 24 hours (`retirement_held`) | The agent runtime, from its `RetirementHeld` (journal §9.34, [DEC-2352](../project/decisions/DEC-2352.md)) | SEV-3 | RB-04 for a held `Unknown` order; otherwise the owner's release or kill switch (DEC-136) |
 | An executor no agent wants, started for a kill switch, crash-looped before applying it (`kill_switch_unapplied`, in place of `crash_loop`) | Deployment manager ([DEC-2344](../project/decisions/DEC-2344.md) item 1) | SEV-1 | RB-14 |
 | A version-1 deployment the manager cannot run (`deployment_unread`) | Deployment manager ([DEC-1173](../project/decisions/DEC-1173.md)) | SEV-3 | RB-14 |
 | A version-2 deployment rule 201 refuses, which the manager cannot run (`deployment_unconnected`) | Deployment manager ([DEC-2038](../project/decisions/DEC-2038.md)) | SEV-3 | RB-14 |
