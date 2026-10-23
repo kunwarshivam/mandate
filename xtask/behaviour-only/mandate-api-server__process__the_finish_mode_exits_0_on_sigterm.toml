@@ -1,0 +1,7 @@
+file = "crates/mandate-api-server/tests/process.rs"
+test = "the_finish_mode_exits_0_on_sigterm"
+reason = """
+The finish process has no SIGTERM handler until `passes_until` lands, so the signal ends it by
+default and it reports no exit status; it never reaches the stub. DEC-2348 item 3's drain deletes
+this row.
+"""

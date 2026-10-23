@@ -15,7 +15,7 @@ use mandate_api_server::finish::{
 };
 use mandate_api_server::finish_pass::{
     Alerts, DeleteFailed, Deleted, Finisher, LineAlerts, TEARDOWN_RUNBOOK, TEARDOWN_STALLED,
-    Teardown, passes,
+    Teardown, passes, passes_until,
 };
 use mandate_api_server::journal::Journal;
 use mandate_canon::Digest;
@@ -869,4 +869,84 @@ fn a_release_that_keeps_failing_raises_one_alert_past_the_deadline() {
     assert_eq!(raised.take(), [STALLED]);
     pass(&mut finisher, OPENED + CONNECT_DEADLINE_SECS + 5);
     assert_eq!(raised.take(), [], "once per request");
+}
+
+/// Runs `passes_until` over `finisher` at `clock`, every `every`, until `stop`; whether it ended
+/// within a second.
+fn run_until<F: Fingerprints>(
+    finisher: Pass<F>,
+    clock: Arc<dyn Clock>,
+    every: Duration,
+    stop: impl std::future::Future<Output = ()> + Send,
+) -> bool {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .unwrap();
+    runtime
+        .block_on(async {
+            tokio::time::timeout(
+                Duration::from_secs(1),
+                passes_until(finisher, clock, every, stop),
+            )
+            .await
+        })
+        .is_ok()
+}
+
+/// DEC-2348 item 3: a stop given before the first pass still lets that pass run to its end, and
+/// then ends the passes.
+#[test]
+#[ignore = "pending E10-13"]
+fn a_stop_already_given_ends_the_passes_after_the_pass_in_flight() {
+    let (journal, deletes, finisher) = finisher(Unbacked);
+    request(&journal, A, 2, "oauth");
+    let clock = ManualClock::at(OPENED + CONNECT_DEADLINE_SECS);
+    assert!(run_until(
+        finisher,
+        clock,
+        Duration::from_millis(1),
+        std::future::ready(())
+    ));
+    assert_eq!(last(&journal).0, "ConnectionRefused");
+    assert_eq!(
+        deletes.of(),
+        [A, A],
+        "one pass: the deletes before and after the refusal"
+    );
+}
+
+/// A stop during the wait between passes ends the wait at once, and no other pass runs.
+#[test]
+#[ignore = "pending E10-13"]
+fn a_stop_during_the_wait_ends_it_without_another_pass() {
+    let (journal, deletes, finisher) = finisher(Unbacked);
+    request(&journal, A, 2, "oauth");
+    let rows = journal.rows_of(&ctl()).len();
+    let clock = ManualClock::at(OPENED + CONNECT_DEADLINE_SECS);
+    assert!(run_until(
+        finisher,
+        clock,
+        Duration::from_secs(3600),
+        async { tokio::time::sleep(Duration::from_millis(20)).await }
+    ));
+    assert_eq!(journal.rows_of(&ctl()).len(), rows + 1, "one refusal");
+    assert_eq!(deletes.of(), [A, A], "one pass");
+}
+
+/// Without a stop the passes go on: a stop that never comes never ends them.
+#[test]
+#[ignore = "pending E10-13"]
+fn without_a_stop_the_passes_go_on() {
+    let (journal, deletes, finisher) = finisher(Unbacked);
+    request(&journal, A, 2, "oauth");
+    let clock = ManualClock::at(OPENED + CONNECT_DEADLINE_SECS);
+    assert!(!run_until(
+        finisher,
+        clock,
+        Duration::from_millis(1),
+        std::future::pending()
+    ));
+    assert_eq!(last(&journal).0, "ConnectionRefused");
+    assert!(deletes.of().len() >= 2);
 }

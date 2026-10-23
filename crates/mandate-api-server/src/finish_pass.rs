@@ -82,6 +82,25 @@ pub async fn passes<F, T, A>(
     }
 }
 
+/// [`passes`] until `stop` resolves: a pass in flight runs to its end, and the wait after it ends
+/// at once, so a stopped process ends between passes and never inside one (DEC-2348 item 3).
+#[expect(
+    clippy::todo,
+    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+)]
+pub async fn passes_until<F, T, A>(
+    _finisher: Finisher<F, T, A>,
+    _clock: Arc<dyn Clock>,
+    _every: Duration,
+    _stop: impl Future<Output = ()> + Send,
+) where
+    F: Fingerprints,
+    T: Teardown,
+    A: Alerts,
+{
+    todo!()
+}
+
 /// The pass over one workspace's connects, and what it remembers between passes.
 pub struct Finisher<F, T, A> {
     journal: Arc<dyn Journal>,
