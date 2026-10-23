@@ -26,13 +26,14 @@ use mandate_connections::manager::{
 };
 use mandate_connections::record::{AccountRef, Broker, ConnectionId, Environment};
 use mandate_connections::start::{
-    Binding, Environment as Bound, OAuthClient, PendingStates, PkceVerifier, STATE_LIFETIME_SECS,
+    Authorizer, Binding, Environment as Bound, PendingStates, PkceVerifier, STATE_LIFETIME_SECS,
 };
 use mandate_connections::vault::AuthorizationCode;
 use mandate_identity::{Permission, StepUpActionKind};
 use mandate_journal::StoredEvent;
 use mandate_time::UtcNanos;
 use secrecy::SecretString;
+use tokio::task::JoinError;
 
 use crate::backtests::paper;
 use crate::commands::{Event, Settled, Writer, envelope};
@@ -83,7 +84,9 @@ pub trait CodeVault: Send + Sync {
 /// values issued and not yet redeemed, the random source they are drawn from (DEC-2623 items
 /// 2, 4 and 7), and the vault port the callback writes codes through (DEC-2626 item 4).
 pub struct Connect {
-    pub client: OAuthClient,
+    /// The page the browser is sent to, Alpaca's or a dev or CI cell's (DEC-2633 item 3), and the
+    /// registered OAuth client.
+    pub authorizer: Authorizer,
     pub states: Mutex<PendingStates>,
     pub random: Box<dyn Random>,
     pub codes: Arc<dyn CodeVault>,
@@ -104,9 +107,9 @@ struct Answered {
 }
 
 impl Connect {
-    pub fn new(client: OAuthClient, random: Box<dyn Random>, codes: Arc<dyn CodeVault>) -> Self {
+    pub fn new(authorizer: Authorizer, random: Box<dyn Random>, codes: Arc<dyn CodeVault>) -> Self {
         Self {
-            client,
+            authorizer,
             states: Mutex::new(PendingStates::default()),
             random,
             codes,
@@ -181,12 +184,17 @@ async fn redeemed(
     if let Some(code) = code
         && still_open(app, admitted, now, &redeemed.binding).await
     {
-        let _failed_write_is_closed_by_the_teardown: Result<(), ConnectError> =
-            connect.codes.put_code(
-                &redeemed.binding,
-                AuthorizationCode(SecretString::from(code)),
-                redeemed.verifier,
-            );
+        let codes = Arc::clone(&connect.codes);
+        let (binding, verifier) = (redeemed.binding, redeemed.verifier);
+        let _failed_write_is_closed_by_the_teardown: Result<Result<(), ConnectError>, JoinError> =
+            tokio::task::spawn_blocking(move || {
+                codes.put_code(
+                    &binding,
+                    AuthorizationCode(SecretString::from(code)),
+                    verifier,
+                )
+            })
+            .await;
     }
     Some(connection)
 }
@@ -605,7 +613,14 @@ fn issued(connect: &Connect, reader: &Reader, ids: &Ids, gate: &Gate) -> Option<
         states.prune(now);
         answered.retain(|_, kept| states.holds(&kept.state, now));
         states
-            .begin(&connect.client, binding, &state, verifier, &challenge, now)
+            .begin(
+                &connect.authorizer,
+                binding,
+                &state,
+                verifier,
+                &challenge,
+                now,
+            )
             .ok()?
     };
     let expires_at =

@@ -1,6 +1,7 @@
 //! The deployment manager's records journal spec v0.48 §9.21 closes at schema version 1
 //! (DEC-1170): the starts, stops, and crash loops of the processes it runs, on the workspace
-//! control stream, with consistency rules 165 to 168 and v0.70's rule 256 (DEC-1175), each
+//! control stream, with consistency rules 165 to 168, v0.70's rule 256 (DEC-1175) and v0.74's
+//! rule 257 (DEC-2335), each
 //! refusing at its member. No member is free text: IDs, closed enumerations, and integers only.
 //! Workspace control services write them as a `system` actor (rule 165). Every rule only refuses a
 //! draft, and none compares one record with another: a slot's generations, and a token exchange's
@@ -41,7 +42,7 @@ pub(crate) fn schema(
     }
 }
 
-/// Rules 165 to 168 and 256 on a payload its schema has normalized, in rule order: the first that fails
+/// Rules 165 to 168, 256 and 257 on a payload its schema has normalized, in rule order: the first that fails
 /// is reported. `actor` is the envelope's.
 pub(crate) fn rules(
     event_type: &str,
@@ -61,7 +62,7 @@ pub(crate) fn rules(
     ensure(generation >= 1, "payload.generation")?;
     let text = |member: &str| payload.get(member).and_then(Value::as_str);
     if event_type == STARTED {
-        let first = matches!(text("cause"), Some("deployed" | "requested"));
+        let first = matches!(text("cause"), Some("deployed" | "requested" | "exchanged"));
         ensure(first == (generation == 1), "payload.cause")?;
     }
     if event_type == LOOPED {
@@ -78,6 +79,19 @@ pub(crate) fn rules(
     if event_type == STOPPED {
         ensure(
             (text("cause") == Some("request_closed")) == exchange,
+            "payload.cause",
+        )?;
+    }
+    let executor = text("process") == Some("executor");
+    if event_type == STARTED {
+        ensure(
+            text("cause") != Some("exchanged") || executor,
+            "payload.cause",
+        )?;
+    }
+    if event_type == STOPPED {
+        ensure(
+            text("cause") != Some("connection_closed") || executor,
             "payload.cause",
         )?;
     }
@@ -98,7 +112,13 @@ static PROCESS_START_ISSUED: Ty = Ty::Record(&[
     ("generation", Ty::Int),
     (
         "cause",
-        Ty::OneOf(&["deployed", "restart", "kill_switch", "requested"]),
+        Ty::OneOf(&[
+            "deployed",
+            "restart",
+            "kill_switch",
+            "requested",
+            "exchanged",
+        ]),
     ),
 ]);
 
@@ -106,7 +126,10 @@ static PROCESS_STOP_ISSUED: Ty = Ty::Record(&[
     ("process", Ty::OneOf(STARTED_PROCESSES)),
     ("subject", Ty::Ident),
     ("generation", Ty::Int),
-    ("cause", Ty::OneOf(&["agent_stopped", "request_closed"])),
+    (
+        "cause",
+        Ty::OneOf(&["agent_stopped", "request_closed", "connection_closed"]),
+    ),
 ]);
 
 static PROCESS_CRASH_LOOPED: Ty = Ty::Record(&[

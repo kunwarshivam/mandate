@@ -1785,6 +1785,15 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   retried until it succeeds or the entry is absent; and tests show a code written between the
   callback's open-request check and its vault write, and a token an exchange wrote after the
   close, both gone once the close is journaled.
+- **E10-22 (Must, M8, with or after lane D1's K1; before the founder's staging connect; SC)** As
+  the owner, I want the real token-exchange pod proven against the cell's fixture provider and the
+  cell's vault, so that the first exchange on staging is not the first time the pod, its vault
+  login and its token write run together ([DEC-2330](decisions/DEC-2330.md) item 5). *Accepted
+  when:* a cell drill starts the exchange pod the deployment manager starts, with its pinned
+  `run --vault-address <address> --vault-dir <dir>`, its projected ServiceAccount token and the
+  cell vault's CA, against `oauth-fixture` with a code entry the API wrote; the pod exits 0, the
+  code is taken, and the connection's token entry, format 1, is in the vault; the drill runs in the
+  cell jobs, plain and seeded; and the founder's staging connect waits on it.
 
 ### E11 Web app: dashboard and controls
 
@@ -4269,6 +4278,10 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   (`AGENTS.md` rule 13), and the only signal is the manager's `kill_switch_unapplied`
   ([DEC-2344](decisions/DEC-2344.md) item 1): rank this staging-relevant if a release can happen on
   staging. Done by [DEC-2354](decisions/DEC-2354.md)'s pair, for `PositionReleased`; §9.27's other records stay E6-4's.
+- **E7-4 A1c (stream K), from [DEC-2333](decisions/DEC-2333.md) item 3:** at §5.4's bound, re-place
+  protection in an instrument the account kill switch closes for the held quantity less every sell
+  not confirmed cancelled, placing nothing where that leaves none, with its own DEC-77 pair. Until
+  then the bound journals `interval_limit` and alerts, and places nothing there.
 - **E7-4 slices 5 and 6's tests correction (stream K), from #286 round 1 (minor 2):**
   `properties::no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding` counts a cancel as
   outstanding until the order is terminal, abandoned or its protection cancelled, so it would fail on
