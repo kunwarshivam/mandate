@@ -61,7 +61,6 @@ fn with_unreadable(event_type: &str, version: u64, payload: Value) -> Result<Jou
 /// Rule 13: the agent's risk exit is handed and its opening is not, and the process keeps running
 /// rather than stop on the record.
 #[test]
-#[ignore = "pending E7-4"]
 fn an_unreadable_connection_record_holds_openings_and_hands_every_exit() -> Result<(), Error> {
     for (event_type, version, payload) in unreadable()? {
         let journal = with_unreadable(event_type, version, payload)?;
@@ -83,7 +82,6 @@ fn an_unreadable_connection_record_holds_openings_and_hands_every_exit() -> Resu
 
 /// Rule 13: the agent's kill switch is applied beside an unreadable connection record.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_kill_switch_applies_beside_an_unreadable_connection_record() -> Result<(), Error> {
     for (event_type, version, payload) in unreadable()? {
         let journal = with_unreadable(event_type, version, payload)?;
@@ -99,7 +97,6 @@ fn a_kill_switch_applies_beside_an_unreadable_connection_record() -> Result<(), 
 /// Rule 3: with every agent stopped, a connection record that does not read keeps the executor
 /// running, never `completed`, since the connection it may name could still want it.
 #[test]
-#[ignore = "pending E7-4"]
 fn an_unreadable_connection_record_never_lets_the_executor_complete() -> Result<(), Error> {
     for (event_type, version, payload) in unreadable()? {
         let journal = with_unreadable(event_type, version, payload)?;
