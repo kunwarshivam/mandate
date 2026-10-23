@@ -39,7 +39,8 @@
 //! - [`journal_reads`]: the journal's audit reads, a stream's events page (§4.8.1, E12-6).
 //! - [`finish`]: the connect's finish, from the open request and the executor's check to
 //!   `plan_finish`'s answer (DEC-2342), [`finish_records`], the records it appends, and
-//!   [`finish_pass`], the pass that appends them and tears closed connects down.
+//!   [`finish_pass`], the pass that appends them and tears closed connects down, run by its own
+//!   process from [`finish_binding`] (DEC-2348).
 //! - [`connections`]: the connections read's fold, references only (DEC-2620).
 //! - [`reduction`]: route 2's challenge route, its store and request keys, and the address and
 //!   device its limits count against (DEC-2117, DEC-2119).
@@ -62,6 +63,7 @@ pub mod connect_binding;
 pub mod connections;
 pub mod documents;
 pub mod finish;
+pub mod finish_binding;
 pub mod finish_pass;
 pub mod finish_records;
 pub mod http;
