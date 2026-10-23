@@ -317,8 +317,10 @@ staging's apply does (DEC-2630), before the workspace chart: it copies its stati
 the k3s node, which runs `mandate vault provision --secrets-namespace ws-ws1 --kubernetes-host`
 through a port-forward on the node's loopback, the root token on its standard input, into `kubectl
 apply`. That issues every AppRole Secret, `vault-approle-provisioner` among them, and sets
-Kubernetes auth up at the `kubernetes` Service's address. A cell where that Secret is already there
-is left as it is, so a second `cell up` rotates no credential. The provisioner's policy adds a `+`,
+Kubernetes auth up at the `kubernetes` Service's address. A vault that `cell up` has just initialized
+is always provisioned, so no Secret left from an earlier vault keeps a stale secret id; otherwise
+a cell where that Secret is already there is left as it is, so a second `cell up` rotates no
+credential. The provisioner's policy adds a `+`,
 on the role path under each Kubernetes-auth mount whose parameters it pins, and the `vault` drill
 drops exactly those two lines of that one policy before it looks for wildcards; it then reads
 thirteen `mandate-*` policies, not ten.

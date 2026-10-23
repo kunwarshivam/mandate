@@ -956,9 +956,9 @@ pub fn up() -> Result<()> {
         "jsonpath={.metadata.annotations.mandate\\.dev/failure-domain}",
     ])?;
     eprintln!("    journal: failure domains: {}", domain.trim());
-    vault()?;
+    let fresh = vault()?;
     if provisioner.is_some() {
-        provision_vault()?;
+        provision_vault(fresh)?;
     }
     if stub.is_some() {
         demo_links(&image)?;
@@ -1460,8 +1460,9 @@ fn in_vault_pod(command: &[&str], stdin: &[u8]) -> Result<(bool, String)> {
 /// `target/cell` (mode 0600, set again on a file that was already there; the cell holds fake
 /// secrets only), and unsealed with it, the key
 /// passed on stdin and never as an argument. A hosted cell is initialized and unsealed by hand
-/// (deploy/cell/README.md, "The vault").
-fn vault() -> Result<()> {
+/// (deploy/cell/README.md, "The vault"). Answers whether this run initialized it, so a vault made
+/// afresh is provisioned afresh ([`provision_vault`]).
+fn vault() -> Result<bool> {
     helm(&[
         "upgrade",
         "--install",
@@ -1485,6 +1486,7 @@ fn vault() -> Result<()> {
     }
     let mut seal = vault_state(&answer.context("the vault never answered `bao status`")?)?;
     let init = state()?.join(VAULT_INIT);
+    let mut fresh = false;
     if seal == VaultState::Uninitialized {
         let (ok, made) = bao(
             &[
@@ -1509,6 +1511,7 @@ fn vault() -> Result<()> {
         file.set_permissions(fs::Permissions::from_mode(0o600))?;
         file.write_all(made.as_bytes())?;
         seal = VaultState::Sealed;
+        fresh = true;
     }
     if seal == VaultState::Sealed {
         let kept = fs::read_to_string(&init).with_context(|| {
@@ -1542,7 +1545,7 @@ fn vault() -> Result<()> {
         "--timeout=120s",
     ])?;
     eprintln!("    vault: unsealed, on raft storage");
-    Ok(())
+    Ok(fresh)
 }
 
 /// The Secret the workspace chart makes in a dev or ci cell for the `oauth-fixture` pod, and its
@@ -1667,12 +1670,20 @@ fn kubernetes_host_from(found: &str) -> Result<String> {
     Ok(format!("https://{ip}:{port}"))
 }
 
+/// Whether `cell up` provisions the vault: always for a vault this run initialized (`fresh`), whose
+/// roles and secret ids are new, so a Secret left from the vault before would hold a stale secret
+/// id; otherwise only when [`ROLE_PROVISIONER_SECRET`] is missing (`held` false), so a second
+/// `cell up` rotates no credential in use.
+fn must_provision(fresh: bool, held: bool) -> bool {
+    fresh || !held
+}
+
 /// Issues the vault's AppRole Secrets in the workspace's namespace (DEC-2350, DEC-2630), the role
 /// provisioner's [`ROLE_PROVISIONER_SECRET`] among them, and sets Kubernetes auth up at
-/// [`kubernetes_host`], unless that Secret is already there, so a second `cell up` rotates no
-/// credential in use. The host's static `mandate` CLI is copied into the k3s node and run there by
+/// [`kubernetes_host`], unless [`must_provision`] says the Secrets there are still the vault's.
+/// The host's static `mandate` CLI is copied into the k3s node and run there by
 /// [`provision_script`], with the cell's fake root token on its standard input.
-fn provision_vault() -> Result<()> {
+fn provision_vault(fresh: bool) -> Result<()> {
     let held = kubectl(&[
         "get",
         "secret",
@@ -1683,7 +1694,7 @@ fn provision_vault() -> Result<()> {
         "-o",
         "name",
     ])?;
-    if !held.trim().is_empty() {
+    if !must_provision(fresh, !held.trim().is_empty()) {
         eprintln!("    vault: {ROLE_PROVISIONER_SECRET} is there, so nothing is provisioned");
         return Ok(());
     }
@@ -5546,6 +5557,12 @@ mod tests {
             "wildcard in mandate-runtime\nchecked 1 mandate policies\n",
             "the role paths are exempt in the provisioner's policy alone"
         );
+        let body_plus = provisioner.replace("[\"ws-ws1\"]", "[\"ws-+\"]");
+        assert_eq!(
+            scan(&[(PROVISIONER_POLICY, &body_plus)])?,
+            "wildcard in mandate-provisioner\nchecked 1 mandate policies\n",
+            "a `+` inside an exempt block's body is still found"
+        );
         let indented = provisioner.replace(
             "path \"auth/kubernetes-executor",
             "  path \"auth/kubernetes-executor",
@@ -5578,6 +5595,16 @@ mod tests {
         assert_eq!(process["image"], ROLE_PROVISIONER_PROCESS);
         assert_eq!(process["built"], true);
         Ok(())
+    }
+
+    /// A vault this run initialized is provisioned even where the Secret is left from the vault
+    /// before; an existing vault only where the Secret is missing.
+    #[test]
+    fn a_fresh_vault_is_always_provisioned() {
+        assert!(must_provision(true, true));
+        assert!(must_provision(true, false));
+        assert!(must_provision(false, false));
+        assert!(!must_provision(false, true));
     }
 
     /// The vault's Kubernetes auth host is the `kubernetes` Service's IPv4 address and port, and
