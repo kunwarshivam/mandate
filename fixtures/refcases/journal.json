@@ -122551,5 +122551,3223 @@
     }
    }
   ]
+ },
+ "connection_roles": {
+  "spec": "docs/specs/journal.md v0.77 §9.33 (DEC-2350)",
+  "drafts": {
+   "connection_roles_made": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z4CR000000000000000000",
+    "stream_id": "ctl:ws_01J8Z2",
+    "event_type": "ConnectionRolesMade",
+    "schema_version": 1,
+    "event_time": "2026-10-22T16:00:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": "01JAB1R0A000000000000000Q1",
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "control_services",
+     "version": "0.1.0",
+     "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    },
+    "config_refs": {},
+    "payload": {
+     "connection_id": "conn_alpaca_paper"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "connection_roles_refused": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z4CR010000000000000000",
+    "stream_id": "ctl:ws_01J8Z2",
+    "event_type": "ConnectionRolesRefused",
+    "schema_version": 1,
+    "event_time": "2026-10-22T16:00:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": "01JAB1R0A000000000000000Q1",
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "control_services",
+     "version": "0.1.0",
+     "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    },
+    "config_refs": {},
+    "payload": {
+     "connection_id": "conn_alpaca_paper",
+     "reason": "vault_unavailable"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   },
+   "connection_roles_removed": {
+    "envelope_version": 1,
+    "environment": "paper",
+    "event_id": "01J8Z4CR020000000000000000",
+    "stream_id": "ctl:ws_01J8Z2",
+    "event_type": "ConnectionRolesRemoved",
+    "schema_version": 1,
+    "event_time": "2026-10-22T16:00:00.000000000Z",
+    "clock_source": "local",
+    "causation_id": "01J8Z4CR0A000000000000000C",
+    "correlation_id": null,
+    "actor": {
+     "kind": "system",
+     "id": "control_services",
+     "version": "0.1.0",
+     "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    },
+    "config_refs": {},
+    "payload": {
+     "connection_id": "conn_alpaca_paper",
+     "role": "token_exchange",
+     "occasion": "request_closed"
+    },
+    "artifact_refs": [],
+    "pii_refs": []
+   }
+  },
+  "invalid_drafts": [
+   {
+    "name": "ConnectionRolesMade.connection_id.kind",
+    "clause": "§9.33 types",
+    "base_draft": "connection_roles_made",
+    "changes": [
+     {
+      "path": "payload.connection_id",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.connection_id"
+    }
+   },
+   {
+    "name": "ConnectionRolesMade.connection_id.form",
+    "clause": "§9.33 types",
+    "base_draft": "connection_roles_made",
+    "changes": [
+     {
+      "path": "payload.connection_id",
+      "value": "not an id"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.connection_id"
+    }
+   },
+   {
+    "name": "ConnectionRolesMade.connection_id.null",
+    "clause": "§9.33 types",
+    "base_draft": "connection_roles_made",
+    "changes": [
+     {
+      "path": "payload.connection_id",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.connection_id"
+    }
+   },
+   {
+    "name": "ConnectionRolesMade.missing",
+    "clause": "§9.33 closed",
+    "base_draft": "connection_roles_made",
+    "changes": [
+     {
+      "path": "payload.connection_id",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.connection_id"
+    }
+   },
+   {
+    "name": "ConnectionRolesMade.extra",
+    "clause": "§9.33 closed",
+    "base_draft": "connection_roles_made",
+    "changes": [
+     {
+      "path": "payload.role_name",
+      "value": "x"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.role_name"
+    }
+   },
+   {
+    "name": "ConnectionRolesRefused.connection_id.kind",
+    "clause": "§9.33 types",
+    "base_draft": "connection_roles_refused",
+    "changes": [
+     {
+      "path": "payload.connection_id",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.connection_id"
+    }
+   },
+   {
+    "name": "ConnectionRolesRefused.connection_id.form",
+    "clause": "§9.33 types",
+    "base_draft": "connection_roles_refused",
+    "changes": [
+     {
+      "path": "payload.connection_id",
+      "value": "not an id"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.connection_id"
+    }
+   },
+   {
+    "name": "ConnectionRolesRefused.connection_id.null",
+    "clause": "§9.33 types",
+    "base_draft": "connection_roles_refused",
+    "changes": [
+     {
+      "path": "payload.connection_id",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.connection_id"
+    }
+   },
+   {
+    "name": "ConnectionRolesRefused.reason.kind",
+    "clause": "§9.33 types",
+    "base_draft": "connection_roles_refused",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "ConnectionRolesRefused.reason.form",
+    "clause": "§9.33 types",
+    "base_draft": "connection_roles_refused",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "not_listed"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "ConnectionRolesRefused.reason.null",
+    "clause": "§9.33 types",
+    "base_draft": "connection_roles_refused",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.reason"
+    }
+   },
+   {
+    "name": "ConnectionRolesRefused.missing",
+    "clause": "§9.33 closed",
+    "base_draft": "connection_roles_refused",
+    "changes": [
+     {
+      "path": "payload.connection_id",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.connection_id"
+    }
+   },
+   {
+    "name": "ConnectionRolesRefused.extra",
+    "clause": "§9.33 closed",
+    "base_draft": "connection_roles_refused",
+    "changes": [
+     {
+      "path": "payload.role_name",
+      "value": "x"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.role_name"
+    }
+   },
+   {
+    "name": "ConnectionRolesRemoved.connection_id.kind",
+    "clause": "§9.33 types",
+    "base_draft": "connection_roles_removed",
+    "changes": [
+     {
+      "path": "payload.connection_id",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.connection_id"
+    }
+   },
+   {
+    "name": "ConnectionRolesRemoved.connection_id.form",
+    "clause": "§9.33 types",
+    "base_draft": "connection_roles_removed",
+    "changes": [
+     {
+      "path": "payload.connection_id",
+      "value": "not an id"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.connection_id"
+    }
+   },
+   {
+    "name": "ConnectionRolesRemoved.connection_id.null",
+    "clause": "§9.33 types",
+    "base_draft": "connection_roles_removed",
+    "changes": [
+     {
+      "path": "payload.connection_id",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.connection_id"
+    }
+   },
+   {
+    "name": "ConnectionRolesRemoved.role.kind",
+    "clause": "§9.33 types",
+    "base_draft": "connection_roles_removed",
+    "changes": [
+     {
+      "path": "payload.role",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.role"
+    }
+   },
+   {
+    "name": "ConnectionRolesRemoved.role.form",
+    "clause": "§9.33 types",
+    "base_draft": "connection_roles_removed",
+    "changes": [
+     {
+      "path": "payload.role",
+      "value": "not_listed"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.role"
+    }
+   },
+   {
+    "name": "ConnectionRolesRemoved.role.null",
+    "clause": "§9.33 types",
+    "base_draft": "connection_roles_removed",
+    "changes": [
+     {
+      "path": "payload.role",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.role"
+    }
+   },
+   {
+    "name": "ConnectionRolesRemoved.occasion.kind",
+    "clause": "§9.33 types",
+    "base_draft": "connection_roles_removed",
+    "changes": [
+     {
+      "path": "payload.occasion",
+      "value": 7
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.occasion"
+    }
+   },
+   {
+    "name": "ConnectionRolesRemoved.occasion.form",
+    "clause": "§9.33 types",
+    "base_draft": "connection_roles_removed",
+    "changes": [
+     {
+      "path": "payload.occasion",
+      "value": "not_listed"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.occasion"
+    }
+   },
+   {
+    "name": "ConnectionRolesRemoved.occasion.null",
+    "clause": "§9.33 types",
+    "base_draft": "connection_roles_removed",
+    "changes": [
+     {
+      "path": "payload.occasion",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.occasion"
+    }
+   },
+   {
+    "name": "ConnectionRolesRemoved.missing",
+    "clause": "§9.33 closed",
+    "base_draft": "connection_roles_removed",
+    "changes": [
+     {
+      "path": "payload.connection_id",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.connection_id"
+    }
+   },
+   {
+    "name": "ConnectionRolesRemoved.extra",
+    "clause": "§9.33 closed",
+    "base_draft": "connection_roles_removed",
+    "changes": [
+     {
+      "path": "payload.role_name",
+      "value": "x"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.role_name"
+    }
+   },
+   {
+    "name": "ConnectionRolesMade.by_a_user",
+    "clause": "rule 261: the provisioner writes it as a system actor",
+    "base_draft": "connection_roles_made",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "user",
+       "id": "user_owner_01",
+       "version": "1",
+       "build": null
+      }
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "ConnectionRolesMade.uncaused",
+    "clause": "rule 261: it names its cause",
+    "base_draft": "connection_roles_made",
+    "changes": [
+     {
+      "path": "causation_id",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "causation_id"
+    }
+   },
+   {
+    "name": "ConnectionRolesMade.on_an_agent_stream",
+    "clause": "§9 row: a control-stream record",
+    "base_draft": "connection_roles_made",
+    "changes": [
+     {
+      "path": "stream_id",
+      "value": "agent:ws_01J8Z2:agent_a"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "wrong_stream",
+     "path": "event_type"
+    }
+   },
+   {
+    "name": "ConnectionRolesMade.at_version_2",
+    "clause": "§9.33: closed at schema version 1 only",
+    "base_draft": "connection_roles_made",
+    "changes": [
+     {
+      "path": "schema_version",
+      "value": 2
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "unknown_schema",
+     "path": "payload"
+    }
+   },
+   {
+    "name": "ConnectionRolesRefused.by_a_user",
+    "clause": "rule 261: the provisioner writes it as a system actor",
+    "base_draft": "connection_roles_refused",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "user",
+       "id": "user_owner_01",
+       "version": "1",
+       "build": null
+      }
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "ConnectionRolesRefused.uncaused",
+    "clause": "rule 261: it names its cause",
+    "base_draft": "connection_roles_refused",
+    "changes": [
+     {
+      "path": "causation_id",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "causation_id"
+    }
+   },
+   {
+    "name": "ConnectionRolesRefused.on_an_agent_stream",
+    "clause": "§9 row: a control-stream record",
+    "base_draft": "connection_roles_refused",
+    "changes": [
+     {
+      "path": "stream_id",
+      "value": "agent:ws_01J8Z2:agent_a"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "wrong_stream",
+     "path": "event_type"
+    }
+   },
+   {
+    "name": "ConnectionRolesRefused.at_version_2",
+    "clause": "§9.33: closed at schema version 1 only",
+    "base_draft": "connection_roles_refused",
+    "changes": [
+     {
+      "path": "schema_version",
+      "value": 2
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "unknown_schema",
+     "path": "payload"
+    }
+   },
+   {
+    "name": "ConnectionRolesRemoved.by_a_user",
+    "clause": "rule 261: the provisioner writes it as a system actor",
+    "base_draft": "connection_roles_removed",
+    "changes": [
+     {
+      "path": "actor",
+      "value": {
+       "kind": "user",
+       "id": "user_owner_01",
+       "version": "1",
+       "build": null
+      }
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "actor.kind"
+    }
+   },
+   {
+    "name": "ConnectionRolesRemoved.uncaused",
+    "clause": "rule 261: it names its cause",
+    "base_draft": "connection_roles_removed",
+    "changes": [
+     {
+      "path": "causation_id",
+      "value": null
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "causation_id"
+    }
+   },
+   {
+    "name": "ConnectionRolesRemoved.on_an_agent_stream",
+    "clause": "§9 row: a control-stream record",
+    "base_draft": "connection_roles_removed",
+    "changes": [
+     {
+      "path": "stream_id",
+      "value": "agent:ws_01J8Z2:agent_a"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "wrong_stream",
+     "path": "event_type"
+    }
+   },
+   {
+    "name": "ConnectionRolesRemoved.at_version_2",
+    "clause": "§9.33: closed at schema version 1 only",
+    "base_draft": "connection_roles_removed",
+    "changes": [
+     {
+      "path": "schema_version",
+      "value": 2
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "unknown_schema",
+     "path": "payload"
+    }
+   },
+   {
+    "name": "ConnectionRolesRemoved.of_the_executor",
+    "clause": "§9.33: the executor's role is never removed",
+    "base_draft": "connection_roles_removed",
+    "changes": [
+     {
+      "path": "payload.role",
+      "value": "executor"
+     },
+     {
+      "path": "payload.occasion",
+      "value": "revoked"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "non_canonical",
+     "path": "payload.role"
+    }
+   }
+  ],
+  "valid_drafts": [
+   {
+    "name": "ConnectionRolesRefused.refused_by_the_vault",
+    "clause": "§9.33: a role the vault refused",
+    "base_draft": "connection_roles_refused",
+    "changes": [
+     {
+      "path": "payload.reason",
+      "value": "role_refused"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "ConnectionRolesRemoved.exchange_on_revoke",
+    "clause": "§9.33: the exchange's role, on a revocation",
+    "base_draft": "connection_roles_removed",
+    "changes": [
+     {
+      "path": "payload.occasion",
+      "value": "revoked"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "ConnectionRolesMade.in_live",
+    "clause": "§9.33: either environment",
+    "base_draft": "connection_roles_made",
+    "changes": [
+     {
+      "path": "environment",
+      "value": "live"
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   }
+  ],
+  "streams": [
+   {
+    "name": "made",
+    "clause": "rule 262: after its OAuth request",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS000000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRequested",
+      "schema_version": 2,
+      "event_time": "2026-10-19T15:30:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "account_ref": "01J8Z2ACCT00000000000000A1",
+       "broker": "alpaca",
+       "environment": "paper",
+       "user": "user_owner_01",
+       "step_up": {
+        "assertion_id": "assert_owner_09",
+        "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+        "method": "cli_confirm"
+       },
+       "credential": "oauth",
+       "breadth": {
+        "other_environment": "may_reach",
+        "disclosure": {
+         "document": "alpaca_oauth_token_breadth",
+         "version": "1"
+        }
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS010000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRolesMade",
+      "schema_version": 1,
+      "event_time": "2026-10-22T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01J8Z4CS000000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "refused",
+    "clause": "rule 262: a refusal after its OAuth request",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS000000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRequested",
+      "schema_version": 2,
+      "event_time": "2026-10-19T15:30:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "account_ref": "01J8Z2ACCT00000000000000A1",
+       "broker": "alpaca",
+       "environment": "paper",
+       "user": "user_owner_01",
+       "step_up": {
+        "assertion_id": "assert_owner_09",
+        "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+        "method": "cli_confirm"
+       },
+       "credential": "oauth",
+       "breadth": {
+        "other_environment": "may_reach",
+        "disclosure": {
+         "document": "alpaca_oauth_token_breadth",
+         "version": "1"
+        }
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS010000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRolesRefused",
+      "schema_version": 1,
+      "event_time": "2026-10-22T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01J8Z4CS000000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "reason": "vault_unavailable"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "made_without_a_request",
+    "clause": "rule 262: names a request",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS000000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRolesMade",
+      "schema_version": 1,
+      "event_time": "2026-10-22T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01J8Z4CS000000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "rule": "rule 262",
+     "index": 0
+    }
+   },
+   {
+    "name": "made_for_an_api_key_connect",
+    "clause": "rule 262: an OAuth request alone",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS000000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRequested",
+      "schema_version": 2,
+      "event_time": "2026-10-19T15:30:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "account_ref": "01J8Z2ACCT00000000000000A1",
+       "broker": "alpaca",
+       "environment": "paper",
+       "user": "user_owner_01",
+       "step_up": {
+        "assertion_id": "assert_owner_09",
+        "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+        "method": "cli_confirm"
+       },
+       "credential": "api_key",
+       "breadth": null
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS010000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRolesMade",
+      "schema_version": 1,
+      "event_time": "2026-10-22T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01J8Z4CS000000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "rule": "rule 262",
+     "index": 1
+    }
+   },
+   {
+    "name": "made_for_another_connection",
+    "clause": "rule 262: of the same connection",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS000000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRequested",
+      "schema_version": 2,
+      "event_time": "2026-10-19T15:30:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "account_ref": "01J8Z2ACCT00000000000000A1",
+       "broker": "alpaca",
+       "environment": "paper",
+       "user": "user_owner_01",
+       "step_up": {
+        "assertion_id": "assert_owner_09",
+        "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+        "method": "cli_confirm"
+       },
+       "credential": "oauth",
+       "breadth": {
+        "other_environment": "may_reach",
+        "disclosure": {
+         "document": "alpaca_oauth_token_breadth",
+         "version": "1"
+        }
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS010000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRolesMade",
+      "schema_version": 1,
+      "event_time": "2026-10-22T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01J8Z4CS000000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper_2"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "rule": "rule 262",
+     "index": 1
+    }
+   },
+   {
+    "name": "made_twice",
+    "clause": "rule 262: at most one per request",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS000000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRequested",
+      "schema_version": 2,
+      "event_time": "2026-10-19T15:30:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "account_ref": "01J8Z2ACCT00000000000000A1",
+       "broker": "alpaca",
+       "environment": "paper",
+       "user": "user_owner_01",
+       "step_up": {
+        "assertion_id": "assert_owner_09",
+        "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+        "method": "cli_confirm"
+       },
+       "credential": "oauth",
+       "breadth": {
+        "other_environment": "may_reach",
+        "disclosure": {
+         "document": "alpaca_oauth_token_breadth",
+         "version": "1"
+        }
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS010000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRolesMade",
+      "schema_version": 1,
+      "event_time": "2026-10-22T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01J8Z4CS000000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS020000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRolesMade",
+      "schema_version": 1,
+      "event_time": "2026-10-22T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01J8Z4CS000000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "rule": "rule 262",
+     "index": 2
+    }
+   },
+   {
+    "name": "made_then_refused",
+    "clause": "rule 262: at most one of either per request",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS000000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRequested",
+      "schema_version": 2,
+      "event_time": "2026-10-19T15:30:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "account_ref": "01J8Z2ACCT00000000000000A1",
+       "broker": "alpaca",
+       "environment": "paper",
+       "user": "user_owner_01",
+       "step_up": {
+        "assertion_id": "assert_owner_09",
+        "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+        "method": "cli_confirm"
+       },
+       "credential": "oauth",
+       "breadth": {
+        "other_environment": "may_reach",
+        "disclosure": {
+         "document": "alpaca_oauth_token_breadth",
+         "version": "1"
+        }
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS010000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRolesMade",
+      "schema_version": 1,
+      "event_time": "2026-10-22T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01J8Z4CS000000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS020000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRolesRefused",
+      "schema_version": 1,
+      "event_time": "2026-10-22T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01J8Z4CS000000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "reason": "vault_unavailable"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "rule": "rule 262",
+     "index": 2
+    }
+   },
+   {
+    "name": "two_requests",
+    "clause": "rule 262: one per request, each its own",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS000000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRequested",
+      "schema_version": 2,
+      "event_time": "2026-10-19T15:30:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "account_ref": "01J8Z2ACCT00000000000000A1",
+       "broker": "alpaca",
+       "environment": "paper",
+       "user": "user_owner_01",
+       "step_up": {
+        "assertion_id": "assert_owner_09",
+        "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+        "method": "cli_confirm"
+       },
+       "credential": "oauth",
+       "breadth": {
+        "other_environment": "may_reach",
+        "disclosure": {
+         "document": "alpaca_oauth_token_breadth",
+         "version": "1"
+        }
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS010000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRequested",
+      "schema_version": 2,
+      "event_time": "2026-10-19T15:30:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper_2",
+       "account_ref": "01J8Z2ACCT00000000000000B7",
+       "broker": "alpaca",
+       "environment": "paper",
+       "user": "user_owner_01",
+       "step_up": {
+        "assertion_id": "assert_owner_09",
+        "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+        "method": "cli_confirm"
+       },
+       "credential": "oauth",
+       "breadth": {
+        "other_environment": "may_reach",
+        "disclosure": {
+         "document": "alpaca_oauth_token_breadth",
+         "version": "1"
+        }
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS020000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRolesMade",
+      "schema_version": 1,
+      "event_time": "2026-10-22T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01J8Z4CS000000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS030000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRolesMade",
+      "schema_version": 1,
+      "event_time": "2026-10-22T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01J8Z4CS010000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper_2"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "removed_on_close",
+    "clause": "rule 263: the exchange's role once the request closed",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS000000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRequested",
+      "schema_version": 2,
+      "event_time": "2026-10-19T15:30:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "account_ref": "01J8Z2ACCT00000000000000A1",
+       "broker": "alpaca",
+       "environment": "paper",
+       "user": "user_owner_01",
+       "step_up": {
+        "assertion_id": "assert_owner_09",
+        "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+        "method": "cli_confirm"
+       },
+       "credential": "oauth",
+       "breadth": {
+        "other_environment": "may_reach",
+        "disclosure": {
+         "document": "alpaca_oauth_token_breadth",
+         "version": "1"
+        }
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS010000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRolesMade",
+      "schema_version": 1,
+      "event_time": "2026-10-22T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01J8Z4CS000000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS020000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRefused",
+      "schema_version": 1,
+      "event_time": "2026-09-22T13:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "broker": "alpaca",
+       "environment": "paper",
+       "occasion": "connect",
+       "check": "scope",
+       "reason": "fund_movement",
+       "existing_connection_id": null,
+       "user": "user_owner_01",
+       "step_up": {
+        "assertion_id": "assert_owner_09",
+        "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+        "method": "cli_confirm"
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS030000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRolesRemoved",
+      "schema_version": 1,
+      "event_time": "2026-10-22T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01J8Z4CS020000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "role": "token_exchange",
+       "occasion": "request_closed"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "removed_never_made",
+    "clause": "rule 263: after its roles were made",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS000000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRequested",
+      "schema_version": 2,
+      "event_time": "2026-10-19T15:30:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "account_ref": "01J8Z2ACCT00000000000000A1",
+       "broker": "alpaca",
+       "environment": "paper",
+       "user": "user_owner_01",
+       "step_up": {
+        "assertion_id": "assert_owner_09",
+        "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+        "method": "cli_confirm"
+       },
+       "credential": "oauth",
+       "breadth": {
+        "other_environment": "may_reach",
+        "disclosure": {
+         "document": "alpaca_oauth_token_breadth",
+         "version": "1"
+        }
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS020000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRefused",
+      "schema_version": 1,
+      "event_time": "2026-09-22T13:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "broker": "alpaca",
+       "environment": "paper",
+       "occasion": "connect",
+       "check": "scope",
+       "reason": "fund_movement",
+       "existing_connection_id": null,
+       "user": "user_owner_01",
+       "step_up": {
+        "assertion_id": "assert_owner_09",
+        "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+        "method": "cli_confirm"
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS030000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRolesRemoved",
+      "schema_version": 1,
+      "event_time": "2026-10-22T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01J8Z4CS020000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "role": "token_exchange",
+       "occasion": "request_closed"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "rule": "rule 263",
+     "index": 2
+    }
+   },
+   {
+    "name": "removed_twice",
+    "clause": "rule 263: at most once after its roles were made",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS000000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRequested",
+      "schema_version": 2,
+      "event_time": "2026-10-19T15:30:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "account_ref": "01J8Z2ACCT00000000000000A1",
+       "broker": "alpaca",
+       "environment": "paper",
+       "user": "user_owner_01",
+       "step_up": {
+        "assertion_id": "assert_owner_09",
+        "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+        "method": "cli_confirm"
+       },
+       "credential": "oauth",
+       "breadth": {
+        "other_environment": "may_reach",
+        "disclosure": {
+         "document": "alpaca_oauth_token_breadth",
+         "version": "1"
+        }
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS010000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRolesMade",
+      "schema_version": 1,
+      "event_time": "2026-10-22T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01J8Z4CS000000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS020000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRefused",
+      "schema_version": 1,
+      "event_time": "2026-09-22T13:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "broker": "alpaca",
+       "environment": "paper",
+       "occasion": "connect",
+       "check": "scope",
+       "reason": "fund_movement",
+       "existing_connection_id": null,
+       "user": "user_owner_01",
+       "step_up": {
+        "assertion_id": "assert_owner_09",
+        "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+        "method": "cli_confirm"
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS030000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRolesRemoved",
+      "schema_version": 1,
+      "event_time": "2026-10-22T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01J8Z4CS020000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "role": "token_exchange",
+       "occasion": "request_closed"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS040000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRolesRemoved",
+      "schema_version": 1,
+      "event_time": "2026-10-22T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01J8Z4CS020000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "role": "token_exchange",
+       "occasion": "request_closed"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "rule": "rule 263",
+     "index": 4
+    }
+   },
+   {
+    "name": "removed_on_close_while_open",
+    "clause": "rule 263: a closed request's",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS000000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRequested",
+      "schema_version": 2,
+      "event_time": "2026-10-19T15:30:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "account_ref": "01J8Z2ACCT00000000000000A1",
+       "broker": "alpaca",
+       "environment": "paper",
+       "user": "user_owner_01",
+       "step_up": {
+        "assertion_id": "assert_owner_09",
+        "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+        "method": "cli_confirm"
+       },
+       "credential": "oauth",
+       "breadth": {
+        "other_environment": "may_reach",
+        "disclosure": {
+         "document": "alpaca_oauth_token_breadth",
+         "version": "1"
+        }
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS010000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRolesMade",
+      "schema_version": 1,
+      "event_time": "2026-10-22T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01J8Z4CS000000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS020000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRolesRemoved",
+      "schema_version": 1,
+      "event_time": "2026-10-22T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01J8Z4CS020000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "role": "token_exchange",
+       "occasion": "request_closed"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "rule": "rule 263",
+     "index": 2
+    }
+   },
+   {
+    "name": "removed_on_revoke_before_it",
+    "clause": "rule 263: a revoked connection's",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS000000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRequested",
+      "schema_version": 2,
+      "event_time": "2026-10-19T15:30:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "account_ref": "01J8Z2ACCT00000000000000A1",
+       "broker": "alpaca",
+       "environment": "paper",
+       "user": "user_owner_01",
+       "step_up": {
+        "assertion_id": "assert_owner_09",
+        "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+        "method": "cli_confirm"
+       },
+       "credential": "oauth",
+       "breadth": {
+        "other_environment": "may_reach",
+        "disclosure": {
+         "document": "alpaca_oauth_token_breadth",
+         "version": "1"
+        }
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS010000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRolesMade",
+      "schema_version": 1,
+      "event_time": "2026-10-22T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01J8Z4CS000000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS020000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRolesRemoved",
+      "schema_version": 1,
+      "event_time": "2026-10-22T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01J8Z4CS030000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "role": "token_exchange",
+       "occasion": "revoked"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "rule": "rule 263",
+     "index": 2
+    }
+   },
+   {
+    "name": "revoked_exchange_at_once",
+    "clause": "rule 263: the exchange's role at once on a revocation, its executor still running",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS000000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRequested",
+      "schema_version": 2,
+      "event_time": "2026-10-19T15:30:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "account_ref": "01J8Z2ACCT00000000000000A1",
+       "broker": "alpaca",
+       "environment": "paper",
+       "user": "user_owner_01",
+       "step_up": {
+        "assertion_id": "assert_owner_09",
+        "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+        "method": "cli_confirm"
+       },
+       "credential": "oauth",
+       "breadth": {
+        "other_environment": "may_reach",
+        "disclosure": {
+         "document": "alpaca_oauth_token_breadth",
+         "version": "1"
+        }
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS010000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRolesMade",
+      "schema_version": 1,
+      "event_time": "2026-10-22T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01J8Z4CS000000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS020000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ProcessStartIssued",
+      "schema_version": 1,
+      "event_time": "2026-10-22T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "process": "executor",
+       "subject": "01J8Z2ACCT00000000000000A1",
+       "generation": 1,
+       "cause": "deployed"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS030000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRevoked",
+      "schema_version": 1,
+      "event_time": "2026-09-22T13:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01J8Z4C4A000000000000000C4",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS040000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRolesRemoved",
+      "schema_version": 1,
+      "event_time": "2026-10-22T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01J8Z4CS030000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "role": "token_exchange",
+       "occasion": "revoked"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "removed_by_an_earlier_requests_refusal",
+    "clause": "rule 263: names the closer of the request its roles were made for",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS000000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRequested",
+      "schema_version": 2,
+      "event_time": "2026-10-19T15:30:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "account_ref": "01J8Z2ACCT00000000000000A1",
+       "broker": "alpaca",
+       "environment": "paper",
+       "user": "user_owner_01",
+       "step_up": {
+        "assertion_id": "assert_owner_09",
+        "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+        "method": "cli_confirm"
+       },
+       "credential": "oauth",
+       "breadth": {
+        "other_environment": "may_reach",
+        "disclosure": {
+         "document": "alpaca_oauth_token_breadth",
+         "version": "1"
+        }
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS010000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRolesMade",
+      "schema_version": 1,
+      "event_time": "2026-10-22T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01J8Z4CS000000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS020000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRefused",
+      "schema_version": 1,
+      "event_time": "2026-09-22T13:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "broker": "alpaca",
+       "environment": "paper",
+       "occasion": "connect",
+       "check": "scope",
+       "reason": "fund_movement",
+       "existing_connection_id": null,
+       "user": "user_owner_01",
+       "step_up": {
+        "assertion_id": "assert_owner_09",
+        "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+        "method": "cli_confirm"
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS030000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRolesRemoved",
+      "schema_version": 1,
+      "event_time": "2026-10-22T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01J8Z4CS020000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "role": "token_exchange",
+       "occasion": "request_closed"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS090000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRequested",
+      "schema_version": 2,
+      "event_time": "2026-10-19T15:30:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "account_ref": "01J8Z2ACCT00000000000000A1",
+       "broker": "alpaca",
+       "environment": "paper",
+       "user": "user_owner_01",
+       "step_up": {
+        "assertion_id": "assert_owner_09",
+        "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+        "method": "cli_confirm"
+       },
+       "credential": "oauth",
+       "breadth": {
+        "other_environment": "may_reach",
+        "disclosure": {
+         "document": "alpaca_oauth_token_breadth",
+         "version": "1"
+        }
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS050000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRolesMade",
+      "schema_version": 1,
+      "event_time": "2026-10-22T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01J8Z4CS090000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS060000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRolesRemoved",
+      "schema_version": 1,
+      "event_time": "2026-10-22T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01J8Z4CS020000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "role": "token_exchange",
+       "occasion": "request_closed"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "rule": "rule 263",
+     "index": 6
+    }
+   },
+   {
+    "name": "removed_by_a_revocation_before_its_roles",
+    "clause": "rule 263: names the closer of the request its roles were made for",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS000000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRequested",
+      "schema_version": 2,
+      "event_time": "2026-10-19T15:30:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "account_ref": "01J8Z2ACCT00000000000000A1",
+       "broker": "alpaca",
+       "environment": "paper",
+       "user": "user_owner_01",
+       "step_up": {
+        "assertion_id": "assert_owner_09",
+        "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+        "method": "cli_confirm"
+       },
+       "credential": "oauth",
+       "breadth": {
+        "other_environment": "may_reach",
+        "disclosure": {
+         "document": "alpaca_oauth_token_breadth",
+         "version": "1"
+        }
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS010000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRolesMade",
+      "schema_version": 1,
+      "event_time": "2026-10-22T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01J8Z4CS000000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS030000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRevoked",
+      "schema_version": 1,
+      "event_time": "2026-09-22T13:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01J8Z4C4A000000000000000C4",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS040000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRolesRemoved",
+      "schema_version": 1,
+      "event_time": "2026-10-22T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01J8Z4CS030000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "role": "token_exchange",
+       "occasion": "revoked"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS090000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRequested",
+      "schema_version": 2,
+      "event_time": "2026-10-19T15:30:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "account_ref": "01J8Z2ACCT00000000000000A1",
+       "broker": "alpaca",
+       "environment": "paper",
+       "user": "user_owner_01",
+       "step_up": {
+        "assertion_id": "assert_owner_09",
+        "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+        "method": "cli_confirm"
+       },
+       "credential": "oauth",
+       "breadth": {
+        "other_environment": "may_reach",
+        "disclosure": {
+         "document": "alpaca_oauth_token_breadth",
+         "version": "1"
+        }
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS050000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRolesMade",
+      "schema_version": 1,
+      "event_time": "2026-10-22T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01J8Z4CS090000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS060000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRolesRemoved",
+      "schema_version": 1,
+      "event_time": "2026-10-22T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01J8Z4CS030000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "role": "token_exchange",
+       "occasion": "revoked"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "rule": "rule 263",
+     "index": 6
+    }
+   },
+   {
+    "name": "removed_by_another_connections_refusal",
+    "clause": "rule 263: names its own connection's closer",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS000000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRequested",
+      "schema_version": 2,
+      "event_time": "2026-10-19T15:30:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "account_ref": "01J8Z2ACCT00000000000000A1",
+       "broker": "alpaca",
+       "environment": "paper",
+       "user": "user_owner_01",
+       "step_up": {
+        "assertion_id": "assert_owner_09",
+        "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+        "method": "cli_confirm"
+       },
+       "credential": "oauth",
+       "breadth": {
+        "other_environment": "may_reach",
+        "disclosure": {
+         "document": "alpaca_oauth_token_breadth",
+         "version": "1"
+        }
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS010000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRequested",
+      "schema_version": 2,
+      "event_time": "2026-10-19T15:30:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper_2",
+       "account_ref": "01J8Z2ACCT00000000000000B7",
+       "broker": "alpaca",
+       "environment": "paper",
+       "user": "user_owner_01",
+       "step_up": {
+        "assertion_id": "assert_owner_09",
+        "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+        "method": "cli_confirm"
+       },
+       "credential": "oauth",
+       "breadth": {
+        "other_environment": "may_reach",
+        "disclosure": {
+         "document": "alpaca_oauth_token_breadth",
+         "version": "1"
+        }
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS020000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRolesMade",
+      "schema_version": 1,
+      "event_time": "2026-10-22T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01J8Z4CS000000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS030000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRefused",
+      "schema_version": 1,
+      "event_time": "2026-09-22T13:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper_2",
+       "broker": "alpaca",
+       "environment": "paper",
+       "occasion": "connect",
+       "check": "scope",
+       "reason": "fund_movement",
+       "existing_connection_id": null,
+       "user": "user_owner_01",
+       "step_up": {
+        "assertion_id": "assert_owner_09",
+        "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+        "method": "cli_confirm"
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS040000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRolesRemoved",
+      "schema_version": 1,
+      "event_time": "2026-10-22T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01J8Z4CS030000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper_2",
+       "role": "token_exchange",
+       "occasion": "request_closed"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "rule": "rule 263",
+     "index": 4
+    }
+   },
+   {
+    "name": "removed_after_a_second_request_closed",
+    "clause": "rule 263: once per made roles, the second request's own",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS000000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRequested",
+      "schema_version": 2,
+      "event_time": "2026-10-19T15:30:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "account_ref": "01J8Z2ACCT00000000000000A1",
+       "broker": "alpaca",
+       "environment": "paper",
+       "user": "user_owner_01",
+       "step_up": {
+        "assertion_id": "assert_owner_09",
+        "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+        "method": "cli_confirm"
+       },
+       "credential": "oauth",
+       "breadth": {
+        "other_environment": "may_reach",
+        "disclosure": {
+         "document": "alpaca_oauth_token_breadth",
+         "version": "1"
+        }
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS010000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRolesMade",
+      "schema_version": 1,
+      "event_time": "2026-10-22T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01J8Z4CS000000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS020000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRefused",
+      "schema_version": 1,
+      "event_time": "2026-09-22T13:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "broker": "alpaca",
+       "environment": "paper",
+       "occasion": "connect",
+       "check": "scope",
+       "reason": "fund_movement",
+       "existing_connection_id": null,
+       "user": "user_owner_01",
+       "step_up": {
+        "assertion_id": "assert_owner_09",
+        "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+        "method": "cli_confirm"
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS030000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRolesRemoved",
+      "schema_version": 1,
+      "event_time": "2026-10-22T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01J8Z4CS020000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "role": "token_exchange",
+       "occasion": "request_closed"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS090000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRequested",
+      "schema_version": 2,
+      "event_time": "2026-10-19T15:30:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "account_ref": "01J8Z2ACCT00000000000000A1",
+       "broker": "alpaca",
+       "environment": "paper",
+       "user": "user_owner_01",
+       "step_up": {
+        "assertion_id": "assert_owner_09",
+        "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+        "method": "cli_confirm"
+       },
+       "credential": "oauth",
+       "breadth": {
+        "other_environment": "may_reach",
+        "disclosure": {
+         "document": "alpaca_oauth_token_breadth",
+         "version": "1"
+        }
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS050000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRolesMade",
+      "schema_version": 1,
+      "event_time": "2026-10-22T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01J8Z4CS090000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS070000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRefused",
+      "schema_version": 1,
+      "event_time": "2026-09-22T13:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "broker": "alpaca",
+       "environment": "paper",
+       "occasion": "connect",
+       "check": "scope",
+       "reason": "fund_movement",
+       "existing_connection_id": null,
+       "user": "user_owner_01",
+       "step_up": {
+        "assertion_id": "assert_owner_09",
+        "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+        "method": "cli_confirm"
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS080000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRolesRemoved",
+      "schema_version": 1,
+      "event_time": "2026-10-22T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01J8Z4CS070000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "role": "token_exchange",
+       "occasion": "request_closed"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
+    "name": "removed_twice_on_revoke",
+    "clause": "rule 263: at most once after its roles were made",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS000000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRequested",
+      "schema_version": 2,
+      "event_time": "2026-10-19T15:30:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "account_ref": "01J8Z2ACCT00000000000000A1",
+       "broker": "alpaca",
+       "environment": "paper",
+       "user": "user_owner_01",
+       "step_up": {
+        "assertion_id": "assert_owner_09",
+        "authenticated_at": "2026-09-22T12:59:50.000000000Z",
+        "method": "cli_confirm"
+       },
+       "credential": "oauth",
+       "breadth": {
+        "other_environment": "may_reach",
+        "disclosure": {
+         "document": "alpaca_oauth_token_breadth",
+         "version": "1"
+        }
+       }
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS010000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRolesMade",
+      "schema_version": 1,
+      "event_time": "2026-10-22T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01J8Z4CS000000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS030000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRevoked",
+      "schema_version": 1,
+      "event_time": "2026-09-22T13:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01J8Z4C4A000000000000000C4",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS040000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRolesRemoved",
+      "schema_version": 1,
+      "event_time": "2026-10-22T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01J8Z4CS030000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "role": "token_exchange",
+       "occasion": "revoked"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01J8Z4CS050000000000000000",
+      "stream_id": "ctl:ws_01J8Z2",
+      "event_type": "ConnectionRolesRemoved",
+      "schema_version": 1,
+      "event_time": "2026-10-22T16:00:00.000000000Z",
+      "clock_source": "local",
+      "causation_id": "01J8Z4CS030000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "control_services",
+       "version": "0.1.0",
+       "build": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_alpaca_paper",
+       "role": "token_exchange",
+       "occasion": "revoked"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "rule": "rule 263",
+     "index": 4
+    }
+   }
+  ]
  }
 }
