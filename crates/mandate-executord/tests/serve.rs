@@ -124,8 +124,17 @@ struct Seen {
     said: RefCell<Vec<String>>,
 }
 
+/// The pass at which a test's edge stops a run that neither SIGTERM nor a stop code drained: its
+/// tick answers [`UNDRAINED`] and SIGTERM arrives together, so such a run ends there, and saying
+/// that code, instead of spinning until the mutation run's timeout.
+const PASS_BOUND: usize = 1_000;
+
+/// The stop code of a run that reached [`PASS_BOUND`].
+const UNDRAINED: &str = "undrained_at_pass_bound";
+
 /// Runs `body` with an edge at noon whose tick counts a pass, runs `each` at that pass's number,
-/// and answers `lapse` once that many passes have run; SIGTERM arrives after `stop` passes.
+/// and answers `lapse` once that many passes have run; SIGTERM arrives after `stop` passes. Either
+/// alone must drain the run; [`PASS_BOUND`] ends one that did not.
 fn with_edge<T>(
     stop: usize,
     lapse: Option<usize>,
@@ -142,11 +151,14 @@ fn with_edge<T>(
         if let Err(e) = each(pass) {
             failed.borrow_mut().get_or_insert(e.to_string());
         }
+        if pass >= PASS_BOUND {
+            return Some(UNDRAINED);
+        }
         lapse
             .filter(|after| pass >= *after)
             .map(|_| "credential_lost")
     };
-    let terminated = || seen.passes.get() >= stop;
+    let terminated = || seen.passes.get() >= stop.min(PASS_BOUND);
     let mut say = |line: &str| seen.said.borrow_mut().push(line.to_owned());
     let edge = Edge {
         now: &now,
@@ -215,7 +227,7 @@ fn the_run_holds_an_opening_until_its_copy_and_passes_after_each_step() -> Resul
 }
 
 /// A closed connection's code is said once, however many passes keep the gate shut, then the
-/// drain's own; the run is not stopped by it.
+/// drain's own; the run is not stopped by it, and SIGTERM alone drains it at its pass.
 #[test]
 fn a_gate_code_is_said_once_per_change() -> Result<(), Error> {
     let journal = connecting()?;
@@ -245,7 +257,8 @@ fn a_gate_code_is_said_once_per_change() -> Result<(), Error> {
     Ok(())
 }
 
-/// A lease that stops the run drains it, and the lease's code is said before the drain's.
+/// A lease that stops the run drains it at that pass, with no SIGTERM, and the lease's code is
+/// said before the drain's.
 #[test]
 fn a_lapsed_lease_drains_the_run() -> Result<(), Error> {
     let journal = connecting()?;
@@ -261,12 +274,13 @@ fn a_lapsed_lease_drains_the_run() -> Result<(), Error> {
             &starting_status(),
             edge,
         );
-        (exit, seen.said.borrow().clone())
+        (exit, seen.passes.get(), seen.said.borrow().clone())
     })?;
     assert_eq!(
         said,
         (
             Ok(0),
+            3,
             vec!["credential_lost".to_owned(), "drained".to_owned()]
         )
     );
