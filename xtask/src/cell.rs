@@ -1843,33 +1843,34 @@ const VAULT_DRILL_POLICIES: usize = 10;
 /// and the connection manager's read of each request's account fingerprint, a pseudonymous hash and
 /// no credential (DEC-2345); and the role provisioner's role under each Kubernetes-auth mount, the
 /// `+` naming the role, with every parameter but the ServiceAccount's name pinned (DEC-2350 item
-/// 1). Each is as the scan prints it, whitespace squeezed and the closing
-/// brace dropped, so another path, another capability, a `*`, the same stanza in another policy, or
+/// 1). Each is a whole stanza, its closing brace included, as the scan prints it
+/// ([`vault_drill_scan`]), whitespace squeezed, so another path, another capability anywhere in
+/// the stanza, a `*`, the same stanza in another policy, or
 /// a wildcard outside a stanza is still reported.
 const VAULT_DRILL_PREFIX_GRANTS: [(&str, &str); 8] = [
     (
         "mandate-api",
-        "path \"mandate/data/connections/+/code\" { capabilities = [\"create\", \"update\"]",
+        "path \"mandate/data/connections/+/code\" { capabilities = [\"create\", \"update\"] }",
     ),
     (
         "mandate-api",
-        "path \"mandate/metadata/connections/+/code\" { capabilities = [\"delete\"]",
+        "path \"mandate/metadata/connections/+/code\" { capabilities = [\"delete\"] }",
     ),
     (
         "mandate-api",
-        "path \"mandate/metadata/connections/+/token\" { capabilities = [\"delete\"]",
+        "path \"mandate/metadata/connections/+/token\" { capabilities = [\"delete\"] }",
     ),
     (
         "mandate-connection-manager",
-        "path \"mandate/metadata/connections/+/code\" { capabilities = [\"delete\"]",
+        "path \"mandate/metadata/connections/+/code\" { capabilities = [\"delete\"] }",
     ),
     (
         "mandate-connection-manager",
-        "path \"mandate/metadata/connections/+/token\" { capabilities = [\"delete\"]",
+        "path \"mandate/metadata/connections/+/token\" { capabilities = [\"delete\"] }",
     ),
     (
         "mandate-connection-manager",
-        "path \"mandate/data/personal/fingerprints/+/+\" { capabilities = [\"read\"]",
+        "path \"mandate/data/personal/fingerprints/+/+\" { capabilities = [\"read\"] }",
     ),
     (PROVISIONER_POLICY, PROVISIONER_EXECUTOR_ROLES),
     (PROVISIONER_POLICY, PROVISIONER_EXCHANGE_ROLES),
@@ -1880,9 +1881,9 @@ const VAULT_DRILL_PREFIX_GRANTS: [(&str, &str); 8] = [
 const PROVISIONER_POLICY: &str = "mandate-provisioner";
 /// Its stanza on the executors' Kubernetes-auth roles, as the scan prints it: create and update, a
 /// lease's TTL, the executor's maximum, bound to the workspace's namespace.
-const PROVISIONER_EXECUTOR_ROLES: &str = "path \"auth/kubernetes-executor/role/+\" { capabilities = [\"create\", \"update\"] required_parameters = [\"alias_name_source\", \"audience\", \"bound_service_account_names\", \"bound_service_account_namespaces\", \"token_max_ttl\", \"token_no_default_policy\", \"token_policies\", \"token_ttl\"] allowed_parameters = { \"alias_name_source\" = [\"serviceaccount_uid\"] \"audience\" = [\"mandate-vault\"] \"bound_service_account_names\" = [] \"bound_service_account_namespaces\" = [\"ws-ws1\"] \"token_max_ttl\" = [\"2592000\"] \"token_no_default_policy\" = [\"false\"] \"token_policies\" = [\"mandate-kubernetes-executor\"] \"token_ttl\" = [\"86400\"]";
+const PROVISIONER_EXECUTOR_ROLES: &str = "path \"auth/kubernetes-executor/role/+\" { capabilities = [\"create\", \"update\"] required_parameters = [\"alias_name_source\", \"audience\", \"bound_service_account_names\", \"bound_service_account_namespaces\", \"token_max_ttl\", \"token_no_default_policy\", \"token_policies\", \"token_ttl\"] allowed_parameters = { \"alias_name_source\" = [\"serviceaccount_uid\"] \"audience\" = [\"mandate-vault\"] \"bound_service_account_names\" = [] \"bound_service_account_namespaces\" = [\"ws-ws1\"] \"token_max_ttl\" = [\"2592000\"] \"token_no_default_policy\" = [\"false\"] \"token_policies\" = [\"mandate-kubernetes-executor\"] \"token_ttl\" = [\"86400\"] } }";
 /// Its stanza on the token exchanges' roles: as the executors', with delete, and a grant's TTL.
-const PROVISIONER_EXCHANGE_ROLES: &str = "path \"auth/kubernetes-exchange/role/+\" { capabilities = [\"create\", \"update\", \"delete\"] required_parameters = [\"alias_name_source\", \"audience\", \"bound_service_account_names\", \"bound_service_account_namespaces\", \"token_max_ttl\", \"token_no_default_policy\", \"token_policies\", \"token_ttl\"] allowed_parameters = { \"alias_name_source\" = [\"serviceaccount_uid\"] \"audience\" = [\"mandate-vault\"] \"bound_service_account_names\" = [] \"bound_service_account_namespaces\" = [\"ws-ws1\"] \"token_max_ttl\" = [\"600\"] \"token_no_default_policy\" = [\"false\"] \"token_policies\" = [\"mandate-kubernetes-exchange\"] \"token_ttl\" = [\"600\"]";
+const PROVISIONER_EXCHANGE_ROLES: &str = "path \"auth/kubernetes-exchange/role/+\" { capabilities = [\"create\", \"update\", \"delete\"] required_parameters = [\"alias_name_source\", \"audience\", \"bound_service_account_names\", \"bound_service_account_namespaces\", \"token_max_ttl\", \"token_no_default_policy\", \"token_policies\", \"token_ttl\"] allowed_parameters = { \"alias_name_source\" = [\"serviceaccount_uid\"] \"audience\" = [\"mandate-vault\"] \"bound_service_account_names\" = [] \"bound_service_account_namespaces\" = [\"ws-ws1\"] \"token_max_ttl\" = [\"600\"] \"token_no_default_policy\" = [\"false\"] \"token_policies\" = [\"mandate-kubernetes-exchange\"] \"token_ttl\" = [\"600\"] } }";
 
 /// Whether a scan line `wildcard in <policy>: <stanza>` names one of [`VAULT_DRILL_PREFIX_GRANTS`]
 /// in its own policy.
@@ -1960,7 +1961,7 @@ fn vault_drill_problems(logs: &str, policies: usize) -> Vec<String> {
 /// The drill's script, run by the vault's own image: it puts a fake value at each path tried,
 /// as the operator, then logs in as each role from the files `mandate vault provision` wrote and
 /// prints one line per read, and one per stanza of a policy of the cell's that holds `*` or `+`,
-/// whitespace squeezed and its closing brace dropped, for [`vault_drill_problems`] to judge against
+/// whole and whitespace squeezed ([`vault_drill_scan`]), for [`vault_drill_problems`] to judge against
 /// [`VAULT_DRILL_PREFIX_GRANTS`]. Seeded, it
 /// first rewrites the runtime's policy to read every connection's token through `+`, and puts the
 /// policy it read back when the script exits, printing what the restore says so a failed one is
@@ -2011,8 +2012,11 @@ fn vault_drill_script(seeded: bool) -> String {
 }
 
 /// The vault drill's policy scan, run with the operator's token in `$op`: each `mandate-*`
-/// policy's text, whitespace squeezed and split at each `}`, and one `wildcard in <name>: <stanza>`
-/// line for each piece holding `*` or `+`, then `checked <n> mandate policies`. A failed read ends
+/// policy's text cut into whole stanzas, each ending at a line that is `}` alone, as every
+/// policy `mandate vault provision` writes ends its stanzas, so a nested block's brace ends none;
+/// whatever follows the last such line, or a policy with none, is one more piece, so text the cut
+/// misses is still judged. Each piece, whitespace squeezed, that holds `*` or `+` is one
+/// `wildcard in <name>: <stanza>` line; then `checked <n> mandate policies`. A failed read ends
 /// the script, under its `set -eu`.
 fn vault_drill_scan() -> String {
     "n=0\n\
@@ -2020,7 +2024,7 @@ fn vault_drill_scan() -> String {
        case \"$p\" in mandate-*)\n\
          body=$(BAO_TOKEN=\"$op\" bao policy read \"$p\")\n\
          n=$((n + 1))\n\
-         printf '%s\\n' \"$body\" | tr '\\t\\n' '  ' | tr -s ' ' | awk -v p=\"$p\" 'BEGIN { RS = \"}\" } /[*+]/ { gsub(/^ +| +$/, \"\"); print \"wildcard in \" p \": \" $0 }';;\n\
+         printf '%s\\n' \"$body\" | awk -v p=\"$p\" 'function judge(r) { gsub(/[ \\t]+/, \" \", r); sub(/^ /, \"\", r); sub(/ $/, \"\", r); if (r ~ /[*+]/) print \"wildcard in \" p \": \" r } { rec = rec \" \" $0 } /^}$/ { judge(rec); rec = \"\" } END { judge(rec) }';;\n\
        esac\n\
      done\n\
      echo \"checked $n mandate policies\"\n"
@@ -5410,12 +5414,12 @@ mod tests {
             Vec::<String>::new()
         );
         let granted = [
-            r#"wildcard in mandate-api: path "mandate/data/connections/+/code" { capabilities = ["create", "update"]"#,
-            r#"wildcard in mandate-api: path "mandate/metadata/connections/+/code" { capabilities = ["delete"]"#,
-            r#"wildcard in mandate-api: path "mandate/metadata/connections/+/token" { capabilities = ["delete"]"#,
-            r#"wildcard in mandate-connection-manager: path "mandate/metadata/connections/+/code" { capabilities = ["delete"]"#,
-            r#"wildcard in mandate-connection-manager: path "mandate/metadata/connections/+/token" { capabilities = ["delete"]"#,
-            r#"wildcard in mandate-connection-manager: path "mandate/data/personal/fingerprints/+/+" { capabilities = ["read"]"#,
+            r#"wildcard in mandate-api: path "mandate/data/connections/+/code" { capabilities = ["create", "update"] }"#,
+            r#"wildcard in mandate-api: path "mandate/metadata/connections/+/code" { capabilities = ["delete"] }"#,
+            r#"wildcard in mandate-api: path "mandate/metadata/connections/+/token" { capabilities = ["delete"] }"#,
+            r#"wildcard in mandate-connection-manager: path "mandate/metadata/connections/+/code" { capabilities = ["delete"] }"#,
+            r#"wildcard in mandate-connection-manager: path "mandate/metadata/connections/+/token" { capabilities = ["delete"] }"#,
+            r#"wildcard in mandate-connection-manager: path "mandate/data/personal/fingerprints/+/+" { capabilities = ["read"] }"#,
         ];
         let prefixed = format!("{held}{}", probe(&granted));
         assert_eq!(
@@ -5424,13 +5428,13 @@ mod tests {
             "DEC-2349's prefix grants, each in its own policy, are admitted"
         );
         for wider in [
-            r#"wildcard in mandate-api: path "mandate/data/connections/+/token" { capabilities = ["read"]"#,
-            r#"wildcard in mandate-api: path "mandate/data/connections/+/code" { capabilities = ["create", "update", "read"]"#,
-            r#"wildcard in mandate-api: path "mandate/data/connections/*" { capabilities = ["create", "update"]"#,
-            r#"wildcard in mandate-api: path "mandate/data/personal/fingerprints/+/+" { capabilities = ["read"]"#,
-            r#"wildcard in mandate-connection-manager: path "mandate/data/personal/+" { capabilities = ["read"]"#,
-            r#"wildcard in mandate-runtime: path "mandate/metadata/connections/+/token" { capabilities = ["delete"]"#,
-            r#"wildcard in mandate-api: # any + path "mandate/metadata/connections/+/code" { capabilities = ["delete"]"#,
+            r#"wildcard in mandate-api: path "mandate/data/connections/+/token" { capabilities = ["read"] }"#,
+            r#"wildcard in mandate-api: path "mandate/data/connections/+/code" { capabilities = ["create", "update", "read"] }"#,
+            r#"wildcard in mandate-api: path "mandate/data/connections/*" { capabilities = ["create", "update"] }"#,
+            r#"wildcard in mandate-api: path "mandate/data/personal/fingerprints/+/+" { capabilities = ["read"] }"#,
+            r#"wildcard in mandate-connection-manager: path "mandate/data/personal/+" { capabilities = ["read"] }"#,
+            r#"wildcard in mandate-runtime: path "mandate/metadata/connections/+/token" { capabilities = ["delete"] }"#,
+            r#"wildcard in mandate-api: # any + path "mandate/metadata/connections/+/code" { capabilities = ["delete"] }"#,
             "wildcard in mandate-api",
         ] {
             assert_eq!(
@@ -5672,6 +5676,22 @@ mod tests {
              policy but `mandate-*`"
         );
         assert_eq!(reported(&held), Vec::<String>::new());
+        let api = "path \"mandate/data/connections/+/code\" {\n  capabilities = [\"create\", \"update\"]\n}\n\
+                   path \"mandate/metadata/connections/+/code\" {\n  capabilities = [\"delete\"]\n}\n\
+                   path \"mandate/metadata/connections/+/token\" {\n  capabilities = [\"delete\"]\n}\n";
+        let manager = "path \"mandate/metadata/connections/+/code\" {\n  capabilities = [\"delete\"]\n}\n\
+                       path \"mandate/metadata/connections/+/token\" {\n  capabilities = [\"delete\"]\n}\n\
+                       path \"mandate/data/personal/fingerprints/+/+\" {\n  capabilities = [\"read\"]\n}\n";
+        let granted = scan(&[
+            ("mandate-api", api),
+            ("mandate-connection-manager", manager),
+        ])?;
+        assert_eq!(granted.len(), 7, "six stanzas and the count: {granted:?}");
+        assert_eq!(
+            reported(&granted),
+            Vec::<String>::new(),
+            "DEC-2349's grants, as `mandate-vault` writes them, are still admitted whole"
+        );
         let elsewhere = format!(
             "{provisioner}path \"mandate/data/connections/+/token\" {{\n  capabilities = [\"read\"]\n}}\n"
         );
@@ -5704,6 +5724,20 @@ mod tests {
                 "mandate-runtime",
                 provisioner.clone(),
                 "the same stanzas in another policy",
+            ),
+            (
+                PROVISIONER_POLICY,
+                provisioner.replacen(
+                    "\"token_ttl\" = [\"86400\"]\n  }\n",
+                    "\"token_ttl\" = [\"86400\"]\n  }\n  capabilities = [\"create\", \"update\", \"delete\", \"sudo\"]\n",
+                    1,
+                ),
+                "a key repeated after the nested block, which the vault merges",
+            ),
+            (
+                PROVISIONER_POLICY,
+                provisioner.replace("}\n}\n", "} }\n"),
+                "a stanza whose closing brace is not alone on its line",
             ),
         ] {
             assert!(
