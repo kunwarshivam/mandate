@@ -79,6 +79,13 @@ const API_DOCKERFILE: &str = "deploy/cell/images/api.Dockerfile";
 const DEPLOY_MANAGER_DOCKERFILE: &str = "deploy/cell/images/deploy-manager.Dockerfile";
 /// The deployment manager's process name, which is also its image's key in the chart's values.
 const DEPLOY_MANAGER_PROCESS: &str = "deploy-manager";
+/// The role provisioner's image (DEC-2350), built beside `mandate` from the same static build.
+const ROLE_PROVISIONER_DOCKERFILE: &str = "deploy/cell/images/role-provisioner.Dockerfile";
+/// The role provisioner's process name, which is also its image's key in the chart's values.
+const ROLE_PROVISIONER_PROCESS: &str = "role-provisioner";
+/// The role provisioner's own AppRole Secret, which its pod mounts (`mandate.vaultCopy`) and
+/// `mandate vault provision --secrets-namespace` issues.
+const ROLE_PROVISIONER_SECRET: &str = "vault-approle-provisioner";
 /// The local stub token issuer's image (DEC-2100, DEC-1025), a sidecar in the API pod.
 const STUB_DOCKERFILE: &str = "deploy/cell/images/stub-issuer.Dockerfile";
 /// Lane SI's stub issuer crate (E21-52); the cell runs it only once it is in the workspace.
@@ -580,13 +587,14 @@ const RUNNER: &str = "mandate-backtest-runner";
 
 /// The packages [`build_binary`] always builds for the cell's images, the backtest runner among
 /// them.
-const BUILT_PACKAGES: [&str; 6] = [
+const BUILT_PACKAGES: [&str; 7] = [
     "mandate-cli",
     RUNNER,
     "mandate-api-server",
     "mandate-daemon",
     "mandate-deployd",
     "mandate-executord",
+    "mandate-provisionerd",
 ];
 
 /// The stub issuer's package, which [`build_binary`] adds once [`stub_ready`].
@@ -595,13 +603,14 @@ const STUB_PACKAGE: &str = "mandate-stub-issuer";
 /// Every package whose binary the cell's images can hold: what [`build_binary`] builds. A change
 /// that reaches none of them, and no path under `deploy/`, cannot change what a cell job runs, so
 /// `cargo xtask ci select` starts the cell jobs only for one that does (DEC-2609).
-pub const IMAGE_PACKAGES: [&str; 7] = [
+pub const IMAGE_PACKAGES: [&str; 8] = [
     BUILT_PACKAGES[0],
     BUILT_PACKAGES[1],
     BUILT_PACKAGES[2],
     BUILT_PACKAGES[3],
     BUILT_PACKAGES[4],
     BUILT_PACKAGES[5],
+    BUILT_PACKAGES[6],
     STUB_PACKAGE,
 ];
 
@@ -622,6 +631,16 @@ fn deploy_manager_image_tag() -> Result<Option<String>> {
         return Ok(None);
     }
     local_tag(DEPLOY_MANAGER_PROCESS, &["mandate-deployd"]).map(Some)
+}
+
+/// The cell's `role-provisioner` image (DEC-2350), this checkout's build of `mandate-provisionerd`:
+/// none when the cell pulls its `mandate` image, as for the deployment manager, so the chart leaves
+/// the provisioner out and no AppRole of its own is issued.
+fn role_provisioner_image_tag() -> Result<Option<String>> {
+    if let ImageSource::Pull(_) = host_image_source()? {
+        return Ok(None);
+    }
+    local_tag(ROLE_PROVISIONER_PROCESS, &["mandate-provisionerd"]).map(Some)
 }
 
 /// The workspace chart's settings, each a `--set-json` pair, that `cell up` installs it with and
@@ -788,6 +807,10 @@ fn image_sets() -> Result<Vec<String>> {
             "images.{DEPLOY_MANAGER_PROCESS}={}",
             deploy_manager_image_tag()?.unwrap_or_default()
         ),
+        format!(
+            "images.{ROLE_PROVISIONER_PROCESS}={}",
+            role_provisioner_image_tag()?.unwrap_or_default()
+        ),
     ];
     sets.extend(signin_values(stub_image_tag()?.as_deref()));
     if let Some(runtime) = runtime_image()? {
@@ -799,10 +822,11 @@ fn image_sets() -> Result<Vec<String>> {
     Ok(sets)
 }
 
-/// `cargo xtask cell up`: build the `mandate`, `api`, `runtime`, `executor` and `deploy-manager`
-/// images from this checkout (never with the `live` feature), bring up the k3d cluster if it is not
-/// up, install the CloudNativePG operator, the journal's Postgres and the workspace chart, and wait
-/// until every pod is ready and the migration Job has finished.
+/// `cargo xtask cell up`: build the `mandate`, `api`, `runtime`, `executor`, `deploy-manager` and
+/// `role-provisioner` images from this checkout (never with the `live` feature), bring up the k3d
+/// cluster if it is not up, install the CloudNativePG operator, the journal's Postgres and the
+/// vault, issue the vault's AppRole Secrets once the provisioner runs ([`provision_vault`]), install
+/// the workspace chart, and wait until every pod is ready and the migration Job has finished.
 pub fn up() -> Result<()> {
     let source = host_image_source()?;
     if source == ImageSource::Build {
@@ -811,6 +835,7 @@ pub fn up() -> Result<()> {
     let image = image_tag()?;
     let api = api_image_tag()?;
     let manager = deploy_manager_image_tag()?;
+    let provisioner = role_provisioner_image_tag()?;
     let runtime = runtime_image()?;
     let executor = executor_image()?;
     let stub = stub_image_tag()?;
@@ -835,6 +860,14 @@ pub fn up() -> Result<()> {
     if let Some(manager) = &manager {
         build_image(manager, DEPLOY_MANAGER_DOCKERFILE, "mandate-deployd", &[])?;
     }
+    if let Some(provisioner) = &provisioner {
+        build_image(
+            provisioner,
+            ROLE_PROVISIONER_DOCKERFILE,
+            "mandate-provisionerd",
+            &[],
+        )?;
+    }
     if let Some(api) = &api {
         build_image(
             api,
@@ -854,6 +887,7 @@ pub fn up() -> Result<()> {
         executor.as_ref(),
         stub.as_ref(),
         manager.as_ref(),
+        provisioner.as_ref(),
     ]
     .into_iter()
     .flatten()
@@ -923,6 +957,9 @@ pub fn up() -> Result<()> {
     ])?;
     eprintln!("    journal: failure domains: {}", domain.trim());
     vault()?;
+    if provisioner.is_some() {
+        provision_vault()?;
+    }
     if stub.is_some() {
         demo_links(&image)?;
     }
@@ -1564,6 +1601,149 @@ fn seed_client_secret() -> Result<()> {
     Ok(())
 }
 
+/// Where [`provision_vault`] copies the host's static `mandate` CLI in the k3s node: under k3s's
+/// own data volume, which every node has.
+const NODE_CLI: &str = "/var/lib/rancher/k3s/mandate-provision";
+
+/// The script [`provision_vault`] runs in the k3s node, which holds `kubectl` and reaches the
+/// vault's pod by a port-forward on its own loopback, the listener the vault's certificate names:
+/// it reads the vault's CA, forwards a free port, and pipes `mandate vault provision
+/// --secrets-namespace` into `kubectl apply`, as staging's apply does (DEC-2630). The root token is
+/// the script's standard input, which only the CLI reads, so it is never an argument, a file or an
+/// environment variable; `kubectl`'s own calls read `/dev/null`. The Kubernetes auth host is `$1`.
+/// The forward is stopped, and the CA's directory and the copied CLI removed, however it ends. A
+/// CLI that fails prints nothing, so `kubectl apply`, given no object, fails the script too.
+fn provision_script() -> String {
+    format!(
+        "set -eu\n\
+         pf=\n\
+         dir=$(mktemp -d /var/lib/rancher/k3s/provision.XXXXXX)\n\
+         trap '[ -z \"$pf\" ] || kill \"$pf\"; rm -rf \"$dir\" {NODE_CLI}' EXIT\n\
+         kubectl get configmap vault-ca --namespace {NAMESPACE} -o 'jsonpath={{.data.ca\\.crt}}' \
+           </dev/null >\"$dir/ca.crt\"\n\
+         kubectl port-forward --namespace {NAMESPACE} pod/{VAULT_POD} :8200 \
+           </dev/null >\"$dir/forward\" 2>/dev/null &\n\
+         pf=$!\n\
+         port=\n\
+         for _ in $(seq 100); do\n\
+           port=$(sed -n 's/^Forwarding from 127.0.0.1:\\([0-9]*\\) .*/\\1/p' \"$dir/forward\")\n\
+           [ -z \"$port\" ] || break\n\
+           sleep 0.1\n\
+         done\n\
+         [ -n \"$port\" ]\n\
+         {NODE_CLI} vault provision --address \"https://127.0.0.1:$port\" --ca \"$dir/ca.crt\" \
+           --operator-token-stdin --secrets-namespace {NAMESPACE} --kubernetes-host \"$1\" \
+           | kubectl apply --namespace {NAMESPACE} -f - >/dev/null\n"
+    )
+}
+
+/// The cell's `kubernetes` Service as the vault's Kubernetes auth reaches it, `https://` its
+/// cluster address and its `https` port, as staging's apply reads it.
+fn kubernetes_host() -> Result<String> {
+    let found = kubectl(&[
+        "get",
+        "service",
+        "kubernetes",
+        "--namespace",
+        "default",
+        "-o",
+        "jsonpath={.spec.clusterIP}:{.spec.ports[?(@.name==\"https\")].port}",
+    ])?;
+    kubernetes_host_from(&found)
+}
+
+/// [`kubernetes_host`] from what `kubectl` printed: an IPv4 address and a port, or an error.
+fn kubernetes_host_from(found: &str) -> Result<String> {
+    let found = found.trim();
+    let (ip, port) = found
+        .split_once(':')
+        .with_context(|| format!("the kubernetes Service read as `{found}`"))?;
+    let ip: Ipv4Addr = ip
+        .parse()
+        .with_context(|| format!("the kubernetes Service's address `{ip}` is not IPv4"))?;
+    let port: u16 = port
+        .parse()
+        .with_context(|| format!("the kubernetes Service's port `{port}` is not a port"))?;
+    Ok(format!("https://{ip}:{port}"))
+}
+
+/// Issues the vault's AppRole Secrets in the workspace's namespace (DEC-2350, DEC-2630), the role
+/// provisioner's [`ROLE_PROVISIONER_SECRET`] among them, and sets Kubernetes auth up at
+/// [`kubernetes_host`], unless that Secret is already there, so a second `cell up` rotates no
+/// credential in use. The host's static `mandate` CLI is copied into the k3s node and run there by
+/// [`provision_script`], with the cell's fake root token on its standard input.
+fn provision_vault() -> Result<()> {
+    let held = kubectl(&[
+        "get",
+        "secret",
+        ROLE_PROVISIONER_SECRET,
+        "--namespace",
+        NAMESPACE,
+        "--ignore-not-found",
+        "-o",
+        "name",
+    ])?;
+    if !held.trim().is_empty() {
+        eprintln!("    vault: {ROLE_PROVISIONER_SECRET} is there, so nothing is provisioned");
+        return Ok(());
+    }
+    let init = fs::read_to_string(state()?.join(VAULT_INIT)).context("reading the vault's init")?;
+    let init: Value = serde_json::from_str(&init).context("reading the vault's init")?;
+    let root = init["root_token"]
+        .as_str()
+        .context("the vault's init holds no root token")?;
+    let host = kubernetes_host()?;
+    sh(
+        "docker",
+        &[
+            "cp",
+            &static_binary("mandate"),
+            &format!("{NODE}:{NODE_CLI}"),
+        ],
+    )?;
+    let mut child = Command::new("docker")
+        .args([
+            "exec",
+            "-i",
+            NODE,
+            "sh",
+            "-c",
+            &provision_script(),
+            "provision",
+            &host,
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .spawn()
+        .context("starting the vault's provisioning")?;
+    child
+        .stdin
+        .take()
+        .context("the provisioning's stdin")?
+        .write_all(root.as_bytes())?;
+    let status = child.wait()?;
+    ensure!(
+        status.success(),
+        "provisioning the vault failed with {status}"
+    );
+    let issued = kubectl(&[
+        "get",
+        "secret",
+        ROLE_PROVISIONER_SECRET,
+        "--namespace",
+        NAMESPACE,
+        "--ignore-not-found",
+        "-o",
+        "name",
+    ])?;
+    ensure!(
+        !issued.trim().is_empty(),
+        "the vault's provisioning issued no {ROLE_PROVISIONER_SECRET}"
+    );
+    eprintln!("    vault: provisioned, its AppRole Secrets issued");
+    Ok(())
+}
+
 /// The connections the vault drill provisions: the cell's demo connection and one other, so an
 /// executor's reach to a connection not its own is tried.
 const VAULT_DRILL_CONNECTIONS: [&str; 2] = ["demo-paper", "drill-other"];
@@ -1631,15 +1811,36 @@ const VAULT_DRILL_READS: [(&str, &str, bool); 13] = [
 /// has proved nothing about wildcards.
 const VAULT_DRILL_POLICIES: usize = 10;
 
+/// The `mandate-*` policies `cell up`'s own provisioning adds once the role provisioner runs
+/// ([`provision_vault`]): the provisioner's, and the two Kubernetes-auth kinds', the executor's and
+/// the token exchange's (DEC-2350 item 1, DEC-2062).
+const PROVISIONED_POLICIES: usize = 3;
+
+/// The one policy allowed a wildcard, and exactly where: the role provisioner's, on the path of a
+/// role under each Kubernetes-auth mount, the `+` that names the role, whose parameters the policy
+/// pins (DEC-2350 item 1). The drill drops exactly these lines of that policy alone before it looks
+/// for `*` or `+`, so a wildcard anywhere else in it, or in any other policy, is still found.
+const PROVISIONER_POLICY: &str = "mandate-provisioner";
+const PROVISIONER_ROLE_PATHS: [&str; 2] = [
+    "path \"auth/kubernetes-executor/role/+\" {",
+    "path \"auth/kubernetes-exchange/role/+\" {",
+];
+
+/// How many `mandate-*` policies the vault drill must read: [`VAULT_DRILL_POLICIES`], and
+/// [`PROVISIONED_POLICIES`] more where `cell up` provisioned for the role provisioner.
+fn vault_drill_policies(provisioned: bool) -> usize {
+    VAULT_DRILL_POLICIES + if provisioned { PROVISIONED_POLICIES } else { 0 }
+}
+
 /// The container of the vault drill's Job that logs in and reads; only its lines are judged, as
 /// `kubectl logs --prefix` writes them (see [`scenario::lines_of`]).
 const VAULT_DRILL_PROBE: &str = "probe";
 
 /// What a vault drill's check lines must say: exactly one `<role> <path> allowed` or `denied`
 /// line for each of [`VAULT_DRILL_READS`], as the table has it, no `wildcard in` line, and exactly
-/// one `checked <n> mandate policies` line with [`VAULT_DRILL_POLICIES`]. A missing line, a second
-/// line for the same read, and a scan of fewer policies are problems too.
-fn vault_drill_problems(logs: &str) -> Vec<String> {
+/// one `checked <n> mandate policies` line with `policies` ([`vault_drill_policies`]). A missing
+/// line, a second line for the same read, and a scan of fewer policies are problems too.
+fn vault_drill_problems(logs: &str, policies: usize) -> Vec<String> {
     let said = scenario::lines_of(logs, VAULT_DRILL_PROBE);
     let mut problems: Vec<String> = said
         .iter()
@@ -1670,7 +1871,7 @@ fn vault_drill_problems(logs: &str) -> Vec<String> {
         .filter(|l| l.starts_with("checked "))
         .copied()
         .collect();
-    let want = format!("checked {VAULT_DRILL_POLICIES} mandate policies");
+    let want = format!("checked {policies} mandate policies");
     if scanned != [want.as_str()] {
         problems.push(format!(
             "want `{want}`, got `{}`",
@@ -1730,16 +1931,31 @@ fn vault_drill_script(seeded: bool) -> String {
            elif echo \"$out\" | grep -q 'permission denied'; then echo \"$1 $2 denied\"\n\
            else echo \"$1 $2 error\"; fi\n\
          }}\n\
-         {reads}\
-         n=0\n\
+         {reads}{scan}",
+        scan = vault_drill_scan(),
+    )
+}
+
+/// The vault drill's policy scan, run with the operator's token in `$op`: one `wildcard in <name>`
+/// line for each `mandate-*` policy holding `*` or `+`, the role provisioner's role paths
+/// ([`PROVISIONER_ROLE_PATHS`]) dropped from its own policy alone first, then `checked <n> mandate
+/// policies`. A failed read ends the script, under its `set -eu`.
+fn vault_drill_scan() -> String {
+    format!(
+        "n=0\n\
          for p in $(BAO_TOKEN=\"$op\" bao policy list); do\n\
            case \"$p\" in mandate-*)\n\
              body=$(BAO_TOKEN=\"$op\" bao policy read \"$p\")\n\
+             if [ \"$p\" = {PROVISIONER_POLICY} ]; then\n\
+               body=$(printf '%s\\n' \"$body\" | grep -vxF -e '{exempt_executor}' -e '{exempt_exchange}' || true)\n\
+             fi\n\
              n=$((n + 1))\n\
              case \"$body\" in *'*'*|*'+'*) echo \"wildcard in $p\";; esac;;\n\
            esac\n\
          done\n\
-         echo \"checked $n mandate policies\"\n"
+         echo \"checked $n mandate policies\"\n",
+        exempt_executor = PROVISIONER_ROLE_PATHS[0],
+        exempt_exchange = PROVISIONER_ROLE_PATHS[1],
     )
 }
 
@@ -1855,7 +2071,10 @@ fn vault_drill(seeded: bool) -> Result<Verdict> {
             "the vault drill's Job failed:\n{logs}"
         )));
     }
-    let problems = vault_drill_problems(&logs);
+    let problems = vault_drill_problems(
+        &logs,
+        vault_drill_policies(role_provisioner_image_tag()?.is_some()),
+    );
     if problems.is_empty() {
         Ok(Verdict::Held)
     } else {
@@ -5117,21 +5336,27 @@ mod tests {
                 .collect()
         };
         let held = probe(&expected);
-        assert_eq!(vault_drill_problems(&held), Vec::<String>::new());
+        assert_eq!(
+            vault_drill_problems(&held, VAULT_DRILL_POLICIES),
+            Vec::<String>::new()
+        );
         let unprefixed = held.replace("[pod/vault-drill-1-x/probe] ", "");
         assert_eq!(
-            vault_drill_problems(&unprefixed).len(),
+            vault_drill_problems(&unprefixed, VAULT_DRILL_POLICIES).len(),
             expected.len(),
             "only the probe's lines, as kubectl prefixes them, are judged"
         );
         let elsewhere = held.replace("/probe] ", "/provision] ");
-        assert_eq!(vault_drill_problems(&elsewhere).len(), expected.len());
+        assert_eq!(
+            vault_drill_problems(&elsewhere, VAULT_DRILL_POLICIES).len(),
+            expected.len()
+        );
         let leaked = held.replace(
             "runtime connections/x64656d6f2d7061706572/token denied",
             "runtime connections/x64656d6f2d7061706572/token allowed",
         );
         let wildcard = format!("{leaked}{}", probe(&["wildcard in mandate-runtime"]));
-        let found = vault_drill_problems(&wildcard).join("\n");
+        let found = vault_drill_problems(&wildcard, VAULT_DRILL_POLICIES).join("\n");
         assert!(found.contains(Drill::Vault.seeded_symptom()), "{found}");
         assert!(
             found.contains("want `runtime connections/x64656d6f2d7061706572/token denied`"),
@@ -5142,7 +5367,7 @@ mod tests {
             probe(&["runtime connections/x64656d6f2d7061706572/token allowed"])
         );
         assert_eq!(
-            vault_drill_problems(&twice),
+            vault_drill_problems(&twice, VAULT_DRILL_POLICIES),
             [
                 "want `runtime connections/x64656d6f2d7061706572/token denied`, got \
                  `runtime connections/x64656d6f2d7061706572/token denied` and \
@@ -5157,17 +5382,17 @@ mod tests {
                 .collect::<Vec<_>>(),
         );
         assert_eq!(
-            vault_drill_problems(&missing),
+            vault_drill_problems(&missing, VAULT_DRILL_POLICIES),
             ["want `model-gateway platform/model-provider-key allowed`, got `no answer`"]
         );
         let unscanned = held.replace("checked 10 mandate policies", "checked 0 mandate policies");
         assert_eq!(
-            vault_drill_problems(&unscanned),
+            vault_drill_problems(&unscanned, VAULT_DRILL_POLICIES),
             ["want `checked 10 mandate policies`, got `checked 0 mandate policies`"]
         );
         let scanned_twice = format!("{held}{}", probe(&["checked 10 mandate policies"]));
         assert_eq!(
-            vault_drill_problems(&scanned_twice),
+            vault_drill_problems(&scanned_twice, VAULT_DRILL_POLICIES),
             [
                 "want `checked 10 mandate policies`, got `checked 10 mandate policies` and \
                  `checked 10 mandate policies`"
@@ -5175,14 +5400,17 @@ mod tests {
         );
         let no_scan = probe(&expected[..expected.len() - 1]);
         assert_eq!(
-            vault_drill_problems(&no_scan),
+            vault_drill_problems(&no_scan, VAULT_DRILL_POLICIES),
             ["want `checked 10 mandate policies`, got `no scan`"]
         );
         let errored = held.replace(
             "executor-demo-paper connections/x64656d6f2d7061706572/token allowed",
             "executor-demo-paper connections/x64656d6f2d7061706572/token error",
         );
-        assert_eq!(vault_drill_problems(&errored).len(), 1);
+        assert_eq!(
+            vault_drill_problems(&errored, VAULT_DRILL_POLICIES).len(),
+            1
+        );
         let plain = vault_drill_script(false);
         let seeded = vault_drill_script(true);
         assert!(!plain.contains("policy write"), "{plain}");
@@ -5207,6 +5435,244 @@ mod tests {
                 "{script}"
             );
         }
+    }
+
+    /// Once `cell up` provisions for the role provisioner, the drill must read its three policies
+    /// too: thirteen, and ten is a scan that missed some.
+    #[test]
+    fn the_vault_drill_counts_the_provisioned_policies() {
+        assert_eq!(vault_drill_policies(false), 10);
+        assert_eq!(vault_drill_policies(true), 13);
+        let scan = |n: usize| format!("[pod/vault-drill-1-x/probe] checked {n} mandate policies\n");
+        let only_scan = |logs: &str, policies: usize| -> Vec<String> {
+            vault_drill_problems(logs, policies)
+                .into_iter()
+                .filter(|p| p.contains("mandate policies"))
+                .collect()
+        };
+        assert_eq!(
+            only_scan(&scan(13), vault_drill_policies(true)),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            only_scan(&scan(10), vault_drill_policies(true)),
+            ["want `checked 13 mandate policies`, got `checked 10 mandate policies`"]
+        );
+    }
+
+    /// The vault drill's scan, run by `sh` against a fake `bao` that serves policies from files:
+    /// the role provisioner's policy as `mandate-vault` writes it passes, and a wildcard anywhere
+    /// else in it, the same role path in another policy, or a `*` in place of its `+`, is found.
+    #[test]
+    fn the_vault_drill_scan_exempts_only_the_provisioners_role_paths() -> Result<()> {
+        let provisioner = "path \"auth/kubernetes-executor/role/+\" {\n  \
+             capabilities = [\"create\", \"update\"]\n  \
+             required_parameters = [\"bound_service_account_names\"]\n  \
+             allowed_parameters = {\n    \
+             \"bound_service_account_namespaces\" = [\"ws-ws1\"]\n    \
+             \"token_policies\" = [\"mandate-kubernetes-executor\"]\n  \
+             }\n}\n\
+             path \"auth/kubernetes-exchange/role/+\" {\n  \
+             capabilities = [\"create\", \"update\", \"delete\"]\n  \
+             allowed_parameters = {\n    \
+             \"token_policies\" = [\"mandate-kubernetes-exchange\"]\n  \
+             }\n}\n";
+        let plain =
+            "path \"mandate/data/platform/model-provider-key\" {\n  capabilities = [\"read\"]\n}\n";
+        let scan = |policies: &[(&str, &str)]| -> Result<String> {
+            let dir = std::env::temp_dir().join(format!(
+                "xtask-vault-scan-{}-{}",
+                std::process::id(),
+                policies.len() + policies.iter().map(|(_, b)| b.len()).sum::<usize>()
+            ));
+            let _ = fs::remove_dir_all(&dir);
+            fs::create_dir_all(dir.join("bin"))?;
+            fs::create_dir_all(dir.join("policies"))?;
+            let names: Vec<&str> = policies.iter().map(|(name, _)| *name).collect();
+            for (name, body) in policies {
+                fs::write(dir.join("policies").join(name), body)?;
+            }
+            let bao = dir.join("bin/bao");
+            fs::write(
+                &bao,
+                format!(
+                    "#!/bin/sh\n\
+                     case \"$1 $2\" in\n\
+                       'policy list') printf '%s\\n' {names} ;;\n\
+                       'policy read') cat \"{dir}/policies/$3\" ;;\n\
+                       *) exit 9 ;;\n\
+                     esac\n",
+                    names = names.join(" "),
+                    dir = dir.display(),
+                ),
+            )?;
+            fs::set_permissions(&bao, fs::Permissions::from_mode(0o755))?;
+            let out = Command::new("sh")
+                .arg("-c")
+                .arg(format!("set -eu\nop=fake\n{}", vault_drill_scan()))
+                .env(
+                    "PATH",
+                    format!("{}:{}", dir.join("bin").display(), env::var("PATH")?),
+                )
+                .output()?;
+            fs::remove_dir_all(&dir)?;
+            ensure!(out.status.success(), "the scan failed: {out:?}");
+            Ok(String::from_utf8(out.stdout)?)
+        };
+        assert_eq!(
+            scan(&[
+                ("default", "path \"*\" {}\n"),
+                ("mandate-runtime", plain),
+                (PROVISIONER_POLICY, provisioner),
+            ])?,
+            "checked 2 mandate policies\n",
+            "the provisioner's role paths alone are exempt, and a policy not `mandate-*` is not read"
+        );
+        let elsewhere = format!(
+            "{provisioner}path \"mandate/data/connections/+/token\" {{\n  capabilities = [\"read\"]\n}}\n"
+        );
+        assert_eq!(
+            scan(&[(PROVISIONER_POLICY, &elsewhere)])?,
+            "wildcard in mandate-provisioner\nchecked 1 mandate policies\n"
+        );
+        let starred =
+            provisioner.replace("kubernetes-exchange/role/+", "kubernetes-exchange/role/*");
+        assert_eq!(
+            scan(&[(PROVISIONER_POLICY, &starred)])?,
+            "wildcard in mandate-provisioner\nchecked 1 mandate policies\n"
+        );
+        assert_eq!(
+            scan(&[("mandate-runtime", provisioner)])?,
+            "wildcard in mandate-runtime\nchecked 1 mandate policies\n",
+            "the role paths are exempt in the provisioner's policy alone"
+        );
+        let indented = provisioner.replace(
+            "path \"auth/kubernetes-executor",
+            "  path \"auth/kubernetes-executor",
+        );
+        assert_eq!(
+            scan(&[(PROVISIONER_POLICY, &indented)])?,
+            "wildcard in mandate-provisioner\nchecked 1 mandate policies\n",
+            "only whole lines, exactly as written, are dropped"
+        );
+        Ok(())
+    }
+
+    /// The role provisioner's image (DEC-2350): its package is built with the cell's others and is
+    /// one the cell jobs follow, its Dockerfile copies exactly that binary, and its key is the
+    /// chart's process and image name.
+    #[test]
+    fn the_cell_builds_the_role_provisioners_image() -> Result<()> {
+        assert!(BUILT_PACKAGES.contains(&"mandate-provisionerd"));
+        assert!(IMAGE_PACKAGES.contains(&"mandate-provisionerd"));
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let dockerfile = fs::read_to_string(root.join(ROLE_PROVISIONER_DOCKERFILE))?;
+        assert!(
+            dockerfile.contains("COPY mandate-provisionerd /mandate-provisionerd"),
+            "{dockerfile}"
+        );
+        let process = processes_in(&root)?
+            .into_iter()
+            .find(|p| p["name"] == ROLE_PROVISIONER_PROCESS)
+            .context("processes.json has no role provisioner")?;
+        assert_eq!(process["image"], ROLE_PROVISIONER_PROCESS);
+        assert_eq!(process["built"], true);
+        Ok(())
+    }
+
+    /// The vault's Kubernetes auth host is the `kubernetes` Service's IPv4 address and port, and
+    /// anything else `kubectl` prints is refused.
+    #[test]
+    fn the_kubernetes_host_is_an_ipv4_address_and_a_port() -> Result<()> {
+        assert_eq!(
+            kubernetes_host_from("10.43.0.1:443\n")?,
+            "https://10.43.0.1:443"
+        );
+        for bad in [
+            "",
+            "10.43.0.1",
+            "10.43.0.1:",
+            ":443",
+            "fd00::1:443",
+            "kubernetes:443",
+            "10.43.0.1:70000",
+        ] {
+            assert!(kubernetes_host_from(bad).is_err(), "{bad} was accepted");
+        }
+        Ok(())
+    }
+
+    /// The node's provisioning script takes the root token on standard input alone, which only the
+    /// CLI reads; prints the Secrets into `kubectl apply` and nowhere else; stops the forward and
+    /// removes the CA and the copied CLI on every exit; and, run by `sh` against a CLI and a
+    /// `kubectl` that fail, fails.
+    #[test]
+    fn the_cell_provisions_the_vault_with_its_token_on_stdin() -> Result<()> {
+        let script = provision_script();
+        assert!(script.starts_with("set -eu\n"), "{script}");
+        assert!(
+            script.contains(&format!(
+                "{NODE_CLI} vault provision --address \"https://127.0.0.1:$port\""
+            )) && script.contains(
+                "--operator-token-stdin --secrets-namespace ws-ws1 --kubernetes-host \"$1\""
+            ) && script.contains("| kubectl apply --namespace ws-ws1 -f - >/dev/null"),
+            "{script}"
+        );
+        assert!(!script.contains("--operator-token-file") && !script.contains("BAO_TOKEN"));
+        assert_eq!(
+            script.matches("</dev/null").count(),
+            2,
+            "kubectl reads no stdin: {script}"
+        );
+        assert!(
+            script.contains(&format!(
+                "trap '[ -z \"$pf\" ] || kill \"$pf\"; rm -rf \"$dir\" {NODE_CLI}' EXIT"
+            )),
+            "{script}"
+        );
+        assert!(
+            script.find("trap ") < script.find("port-forward"),
+            "{script}"
+        );
+        let dir = std::env::temp_dir().join(format!("xtask-provision-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir)?;
+        let kubectl = dir.join("kubectl");
+        fs::write(
+            &kubectl,
+            "#!/bin/sh\n\
+             case \"$1\" in\n\
+               port-forward) echo 'Forwarding from 127.0.0.1:41234 -> 8200'; exec sleep 5 ;;\n\
+               apply) cat >/dev/null; exit 1 ;;\n\
+               *) echo ca ;;\n\
+             esac\n",
+        )?;
+        fs::set_permissions(&kubectl, fs::Permissions::from_mode(0o755))?;
+        let local = script
+            .replace(
+                "/var/lib/rancher/k3s/provision.XXXXXX",
+                &format!("{}/p.XXXXXX", dir.display()),
+            )
+            .replace(NODE_CLI, "false");
+        let out = Command::new("sh")
+            .arg("-c")
+            .arg(&local)
+            .arg("provision")
+            .arg("https://10.43.0.1:443")
+            .env("PATH", format!("{}:{}", dir.display(), env::var("PATH")?))
+            .stdin(Stdio::null())
+            .output()?;
+        let left: Vec<_> = fs::read_dir(&dir)?
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name())
+            .collect();
+        fs::remove_dir_all(&dir)?;
+        assert!(
+            !out.status.success(),
+            "a failed CLI fails the script: {out:?}"
+        );
+        assert_eq!(left, ["kubectl"], "the CA's directory is removed");
+        Ok(())
     }
 
     /// The cell judges the vault's status as the client judges `sys/seal-status`: uninitialized,

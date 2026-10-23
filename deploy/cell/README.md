@@ -18,6 +18,7 @@ runner that proves it (E21-37), with no cloud account, no broker credential and 
 | `values/` | One values file per cluster: `k3d.yaml` (this cell), `k3s.yaml` (cell #1), `managed.yaml` (a managed cluster). Only values differ ; cell #1's own settings on top of `k3s.yaml`, and its bring-up, are in [`../hosted/`](../hosted/README.md) |
 | `images/mandate.Dockerfile` | The interim `mandate` image the cell builds from the change; lane R2 (E21-35) replaces it |
 | `images/deploy-manager.Dockerfile` | The deployment manager's image (`mandate-deployd`, DEC-1172), built beside it the same way |
+| `images/role-provisioner.Dockerfile` | The role provisioner's image (`mandate-provisionerd`, DEC-2350), built beside it the same way |
 | `../tests/test_cell.py` | The chart's and the Compose file's invariants, each shown failing on a seeded bug |
 | `../tests/test_artifacts.py` | The shared artifact store: each process mounts it as it may, or not at all, each shown failing on a seeded bug |
 | `../tests/test_vault.py` | The vault chart's invariants, each shown failing on a seeded bug |
@@ -263,7 +264,7 @@ that one workspace.
 | `admission` | The hosted clusters' kill-switch admission policies (`deploy/gitops/base/kill-switch-admission.yaml`), applied as they are with a signature webhook that is down and fails closed: the founder's kill-switch Job is admitted and its pod made; an unlabelled pod, a person's or a service account's `control` pod, a service account's control Job, the control label a service account gives its suspended Job, a service account's change to a person's control Job, a labelled Deployment's pod, a CronJob's control Job (another API group's included), the label added to a pod later, and a changed image or an ephemeral container in the kill switch's pod are each refused; a second workspace's namespace is covered by its label; and a finished kill-switch Job is removed by foreground deletion ([DEC-2045](../../docs/project/decisions/DEC-2045.md), [DEC-2046](../../docs/project/decisions/DEC-2046.md)) | The Job policy firing on update only for a newly control label: the check must name `admitted a service account's change to a person's control Job` |
 | `egress` | From a pod of every process type, each live trading host (`agent.robinhood.com`, `api.robinhood.com`, `api.alpaca.markets`) fails at the network layer, and the journal is reachable exactly from the rendered processes whose egress names Postgres (OPS-5) | Every network policy deleted |
 | `standby-down` | With the synchronous standby fenced, an append neither commits nor becomes visible on the primary, and its Job ends on its deadline; once the standby is back and streams synchronously, a new append commits and every stream written verifies by journal spec §11 (OPS-2, E21-41) | The cluster's durability set to `preferred`, so the primary commits alone: `committed with the standby fenced` |
-| `vault` | `mandate vault provision` sets the cell's vault up (DEC-2022), then from a pod labelled as the executor each AppRole logs in and reads: a runtime nothing, an executor exactly its own connection's token and not `drill-other`'s, the model gateway its key; and no `mandate-*` policy holds `*` or `+`. It runs in `cell-kill-switch`, after the kill switch's drill | The runtime's policy rewritten to read every connection's token through `+`: the check must name `wildcard in mandate-runtime` |
+| `vault` | `mandate vault provision` sets the cell's vault up (DEC-2022), then from a pod labelled as the executor each AppRole logs in and reads: a runtime nothing, an executor exactly its own connection's token and not `drill-other`'s, the model gateway its key; and no `mandate-*` policy holds `*` or `+`, but for the role provisioner's two role paths ("The vault" below). It runs in `cell-kill-switch`, after the kill switch's drill | The runtime's policy rewritten to read every connection's token through `+`: the check must name `wildcard in mandate-runtime` |
 | `archive` | A closed WAL segment is reported archived by Postgres, a base backup completes, and Barman's own tools, reading the store with the archive's key, list the backup and fetch the segment back (E21-41) | The archive pointed at another bucket of the same store, which Postgres cannot tell: `not in the archive` |
 | `executor` | An agent deployed on a recorded paper connection, and the deployment manager starting that account's executor until its pod runs and its process answers `livez` (E21-30, [DEC-2035](../../docs/project/decisions/DEC-2035.md)). Not `readyz`: the executor is ready only after a scheduler tick, and the cell builds no scheduler yet, so none is ever journaled there. Three one-off Jobs: the executor's connect check on its in-process fixture broker, which prints the passing `ConnectionChecked`; the workspace opened and founded and the record's code shown; then the record committed and the demo's mandate registered, created, confirmed and deployed, so `AgentDeployed` is version 2 (journal spec §9.24 rule 201). No credential, no broker host | The connect check skipped, so the connection is never recorded and the agent deploys at version 1: `no executor pod` |
 
@@ -310,6 +311,17 @@ In `deploy/tests/test_vault.py`:
 `cargo xtask cell up` installs it, initializes it once with one unseal key, kept with the root
 token in `target/cell/vault-init.json` (mode 0600; this cell holds fake secrets only), unseals it,
 and refuses a vault on any storage but raft. `cell down` discards both.
+
+Where it builds the role provisioner's image (DEC-2350), `cell up` then provisions the vault as
+staging's apply does (DEC-2630), before the workspace chart: it copies its static `mandate` CLI into
+the k3s node, which runs `mandate vault provision --secrets-namespace ws-ws1 --kubernetes-host`
+through a port-forward on the node's loopback, the root token on its standard input, into `kubectl
+apply`. That issues every AppRole Secret, `vault-approle-provisioner` among them, and sets
+Kubernetes auth up at the `kubernetes` Service's address. A cell where that Secret is already there
+is left as it is, so a second `cell up` rotates no credential. The provisioner's policy adds a `+`,
+on the role path under each Kubernetes-auth mount whose parameters it pins, and the `vault` drill
+drops exactly those two lines of that one policy before it looks for wildcards; it then reads
+thirteen `mandate-*` policies, not ten.
 
 A production cell is initialized and unsealed by the founder, by hand (DEC-977 item 5):
 
