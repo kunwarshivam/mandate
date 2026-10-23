@@ -2,13 +2,14 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use mandate_accounting::InstrumentId;
+use mandate_accounting::{InstrumentId, Side};
 use mandate_domain::CapabilityProfile;
 use mandate_num::{Price, Qty, Rounding, SignedQty, Usd};
 use mandate_time::Date;
 
 use crate::error::ExecutorError;
 use crate::ids::{ClientOrderId, IntentId};
+use crate::kill::sub_ledger;
 use crate::shape::transitional_alpaca;
 use crate::types::{
     AccountRef, AccountScope, AccountState, ActivityCursor, AgentId, BracketLegs, EventId, FillId,
@@ -264,6 +265,10 @@ pub(crate) struct OrderDetail {
     /// latest report carried: a bracket entry's filled quantity before its fills are ingested
     /// (§5.4's "the filled quantity", DEC-346 item 3).
     pub(crate) reported_filled: Option<Qty>,
+    /// Every `broker_order_id` the order's version-2 `OrderStateChanged` records carried (journal
+    /// spec v0.80 §9.16, DEC-2353): one id attributes a fill that names only it; two, or none,
+    /// attribute nothing.
+    pub(crate) broker_ids: BTreeSet<String>,
     /// What of `reported_filled` beyond the applied `filled_qty` an unattributed sell fill applied
     /// after this order was submitted has already taken off the position (DEC-421 item 5).
     pub(crate) netted: Option<Qty>,
@@ -663,6 +668,52 @@ impl ExecutorState {
         self.switches
             .values()
             .any(|switch| switch.copied_from.as_ref() == Some(source))
+    }
+
+    /// Whether a switch of `agent` this stream journaled copied `source` (DEC-2343 item 4): one
+    /// command applied to several agents is applied to each once.
+    pub fn applied_for(&self, agent: &AgentId, source: &EventId) -> bool {
+        self.switches
+            .values()
+            .any(|switch| &switch.agent == agent && switch.copied_from.as_ref() == Some(source))
+    }
+
+    /// Whether `agent` may hold lots in any instrument the account holds (DEC-2347 item 3.6): its
+    /// sub-ledger, the quantity its kill switch would sell (trading-domain spec §5.5), is above
+    /// zero there, or one of its buys there, in any state but `Rejected` or `Abandoned`, has other
+    /// than its quantity applied to it, as when the broker's fill named no order the fold could
+    /// attribute it to: filled, or partly filled and then canceled or expired. The second reading
+    /// keeps an agent's shares from passing for the owner's; an unfilled buy canceled with the
+    /// account holding the instrument only holds the exit longer, which is safe.
+    pub fn holds_lots(&self, agent: &AgentId) -> Result<bool, ExecutorError> {
+        for (instrument, position) in &self.positions {
+            if sub_ledger(self, agent, instrument)? > Qty::ZERO {
+                return Ok(true);
+            }
+            let unattributed = self.orders.values().any(|order| {
+                order.agent.as_ref() == Some(agent)
+                    && &order.instrument == instrument
+                    && order.side == Side::Buy
+                    && !matches!(order.state, OrderState::Rejected | OrderState::Abandoned)
+                    && order.filled_qty != order.qty
+            });
+            if unattributed && *position > SignedQty::ZERO {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    /// This state with what the fold kept of each order's broker order ids forgotten, every other
+    /// field as folded (journal spec v0.80 §9.16, DEC-2353): what a test compares to show the
+    /// member is read for fill attribution alone.
+    #[doc(hidden)]
+    pub fn without_broker_ids(&self) -> Self {
+        let mut state = self.clone();
+        for detail in state.details.values_mut() {
+            detail.broker_ids.clear();
+        }
+        state
     }
 
     pub fn started(&self) -> bool {
