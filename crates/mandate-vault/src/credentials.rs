@@ -79,7 +79,7 @@ pub fn write_credentials(
 /// `dir`, `dir` itself when it exists, and each output name in it, by the same rules. An absent
 /// `dir` passes and is not made. A refusal here leaves no secret id issued and unwritten.
 pub fn check_credential_dir(dir: &Path, connections: &[ConnectionId]) -> Result<(), SourceError> {
-    check_for(dir, &secret_id_identities(connections)).map(|_| ())
+    check_for(dir, &secret_id_identities(connections, false)).map(|_| ())
 }
 
 /// Checks `dir` for `identities`' files by [`write_credentials`]'s rules and answers whether `dir`

@@ -152,7 +152,8 @@ pub struct ProvisionArgs {
 }
 
 /// The Kubernetes auth `--kubernetes-host` asks for: the API server at `host`, with no CA, so the
-/// vault reads the one its own pod projects (DEC-2062 item 3). No host is no Kubernetes auth,
+/// vault reads the one its own pod projects (DEC-2062 item 3), and `secrets_namespace`, the
+/// workspace's, as the namespace the role provisioner's roles bind (DEC-2350 item 1). No host is no Kubernetes auth,
 /// except with `--secrets-namespace`, the cluster's path, where a missing one is
 /// [`SourceError::Config`], as is a host that is not `https://`, an IPv4 address and a port
 /// ([`mandate_vault::kubernetes::api_server_address`]); both are refused before the vault is
@@ -168,6 +169,7 @@ pub fn kubernetes_auth(
             let auth = KubernetesAuth {
                 host: host.to_owned(),
                 ca_pem: None,
+                namespace: secrets_namespace.map(str::to_owned),
             };
             kubernetes_mount_requests(&Mounts::default(), &auth)?;
             Ok(Some(auth))

@@ -77,6 +77,8 @@
 /crates/mandate-passkey/    @kunwarshivam
 /crates/mandate-ports/      @kunwarshivam
 /crates/mandate-process/    @kunwarshivam
+/crates/mandate-provisioner/ @kunwarshivam
+/crates/mandate-provisionerd/ @kunwarshivam
 /crates/mandate-push-relay/ @kunwarshivam
 /crates/mandate-refcases/   @kunwarshivam
 /crates/mandate-release/    @kunwarshivam
