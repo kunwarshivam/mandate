@@ -788,7 +788,7 @@ fn each_connections_made_roles_are_its_own() {
 }
 
 /// Roles made for a request that had already closed, since the provisioner writes the vault before
-/// it journals, are owed their removal at once, citing that close (journal spec v0.78 rule 263,
+/// it journals, are owed their removal at once, citing that close (journal spec v0.81 rule 263,
 /// DEC-2350 item 7); a closer of an earlier request is never cited, so a second request's roles
 /// made after the first one's close owe nothing until their own.
 #[test]
