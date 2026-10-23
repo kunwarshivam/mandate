@@ -39,8 +39,8 @@ commands:
   check                 run every per-PR job locally
   ci <job>              run one CI job: fast | full | nightly, or one part: lint | test | pending |
                         spec-guard | portable | refcases | reference | schemas | supply-chain |
-                        postgres | openbao | objectstore | stub-release | api-release |
-                        mutants |
+                        postgres | openbao | objectstore | stub-release | exchange-release |
+                        provisionerd-release | api-release | mutants |
                         schema-mutants | cell | cell-seeded | cell-upgrade | cell-demo |
                         cell-journal | cell-failover |
                         cell-kill-switch | cell-executor | cell-vault | sweep; or
@@ -163,6 +163,7 @@ const FULL_JOB: &[&str] = &[
     "tofu",
     "stub-release",
     "exchange-release",
+    "provisionerd-release",
     "api-release",
 ];
 const PR_JOBS: &[&str] = &[
@@ -180,6 +181,7 @@ const PR_JOBS: &[&str] = &[
     "objectstore",
     "stub-release",
     "exchange-release",
+    "provisionerd-release",
     "api-release",
     "mutants",
     "schema-mutants",
@@ -526,6 +528,7 @@ fn ci(job: &str) -> Result<()> {
         "tofu" => tofu_checks(),
         "stub-release" => stub_release(),
         "exchange-release" => exchange_release(),
+        "provisionerd-release" => provisionerd_release(),
         "api-release" => api_release(),
         "mutants" => mutants(Path::new("."), base_ref()?.as_deref()),
         "mutants-costs" => mutant_costs::ci(),
@@ -914,6 +917,67 @@ fn exchange_release() -> Result<()> {
         })?;
         release_exchange_refused(&output)
             .with_context(|| format!("tier {tier}, token URL {url:?}"))?;
+    }
+    Ok(())
+}
+
+/// The role provisioner's process's crate and binary (E21-33, DEC-2350).
+const PROVISIONERD: &str = "mandate-provisionerd";
+
+/// All the release role provisioner may write, to standard error, when it is asked for its
+/// fixture.
+const FIXTURE_NOT_BUILT: &str = "role_provisioner_start_failed: fixture_not_built\n";
+
+/// A build without debug assertions holds no fixture vault, so it never makes or removes a role
+/// against a vault that keeps nothing. Builds the provisioner with `--release` once, only when the
+/// diff selects its crate (DEC-1190), runs it with `--fixture` and every other flag a start needs,
+/// and requires [`release_provisionerd_refused`]. It first refuses an environment that turns
+/// debug assertions back on in the release profile (DEC-2322).
+fn provisionerd_release() -> Result<()> {
+    if !selection()?.crates.contains(PROVISIONERD) {
+        eprintln!("    provisionerd-release: {PROVISIONERD} is not affected (DEC-1190)");
+        return Ok(());
+    }
+    release_profile_untouched(|name| env::var(name).ok())?;
+    let socket = env::temp_dir().join(format!("provisionerd-release-{}.sock", std::process::id()));
+    let socket = socket
+        .to_str()
+        .context("the probe socket's path is not UTF-8")?;
+    let output = released(
+        PROVISIONERD,
+        &[
+            "run",
+            "--probe",
+            socket,
+            "--workspace",
+            "ws_1",
+            "--namespace",
+            "ws-1",
+            "--fixture",
+        ],
+        &[],
+    )?
+    .with_context(|| {
+        format!(
+            "the release build of {PROVISIONERD} kept running instead of refusing its fixture: \
+             it holds a fixture vault"
+        )
+    })?;
+    release_provisionerd_refused(&output)
+}
+
+/// Whether a release provisioner's run is the fixture's refusal: exit 2, [`FIXTURE_NOT_BUILT`]
+/// alone on standard error, and nothing on standard output.
+fn release_provisionerd_refused(output: &std::process::Output) -> Result<()> {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if output.status.code() != Some(2) || stderr != FIXTURE_NOT_BUILT || !output.stdout.is_empty() {
+        bail!(
+            "the release build of {PROVISIONERD} must exit 2 writing only \
+             {FIXTURE_NOT_BUILT:?} to standard error; it exited {} with stdout {:?} and stderr \
+             {stderr:?}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout)
+        );
     }
     Ok(())
 }
@@ -11766,11 +11830,11 @@ mod tests {
         mutated_crates, names_a_stub, output_in, pending_nextest, pending_problems, pending_tests,
         per_shard_value, plain_comment_lines, preflight_args, proptest_seeds_in, registry_problems,
         registry_rows, rehearsal_runs, release_api_refused, release_exchange_refused,
-        release_profile_untouched, release_stub_refused, repo_root, schema_mutants, shard_packages,
-        shellcheck_scripts, simulator_harnesses, simulator_oracles, spec_guard_problems,
-        spec_guard_problems_for_pr, status_flip_problems, test_binary, test_order_config,
-        test_outcomes, unique_temp_path, unjudged_mutants, used_by, verdicts, workspace_closure,
-        workspace_packages,
+        release_profile_untouched, release_provisionerd_refused, release_stub_refused, repo_root,
+        schema_mutants, shard_packages, shellcheck_scripts, simulator_harnesses, simulator_oracles,
+        spec_guard_problems, spec_guard_problems_for_pr, status_flip_problems, test_binary,
+        test_order_config, test_outcomes, unique_temp_path, unjudged_mutants, used_by, verdicts,
+        workspace_closure, workspace_packages,
     };
     use super::{
         BINARY_COUPLINGS, CrateGraph, MATRIX_LIMIT, RUNNER_CRATE, SWEEP_ROTATION,
@@ -12901,6 +12965,44 @@ mod tests {
             );
         }
         assert!(FULL_JOB.contains(&"stub-release") && PR_JOBS.contains(&"stub-release"));
+    }
+
+    /// `provisionerd-release` accepts only exit 2 with the fixture's refusal alone on standard
+    /// error, and runs in `full` and in `check`.
+    #[test]
+    fn the_release_provisioner_check_accepts_only_the_lone_refusal() {
+        let run = |code: i32, stdout: &str, stderr: &str| std::process::Output {
+            status: ExitStatus::from_raw(code << 8),
+            stdout: stdout.as_bytes().to_vec(),
+            stderr: stderr.as_bytes().to_vec(),
+        };
+        let refusal = "role_provisioner_start_failed: fixture_not_built\n";
+        assert!(release_provisionerd_refused(&run(2, "", refusal)).is_ok());
+        for (code, stdout, stderr) in [
+            (0, "", refusal),
+            (1, "", refusal),
+            (2, "ready\n", refusal),
+            (
+                2,
+                "",
+                "role_provisioner_start_failed: fixture_not_built\ndrained\n",
+            ),
+            (
+                2,
+                "",
+                "role_provisioner_start_failed: vault_ca_unreadable\n",
+            ),
+            (2, "", "role_provisioner_start_failed: fixture_not_built"),
+            (2, "", ""),
+        ] {
+            assert!(
+                release_provisionerd_refused(&run(code, stdout, stderr)).is_err(),
+                "{code} {stdout:?} {stderr:?}"
+            );
+        }
+        assert!(
+            FULL_JOB.contains(&"provisionerd-release") && PR_JOBS.contains(&"provisionerd-release")
+        );
     }
 
     /// DEC-2633 item 2: `exchange-release` accepts only exit 2 with
@@ -16739,7 +16841,7 @@ mod tests {
                 "exchange-release",
             ],
         ),
-        ("full-checks-3", &["api-release"]),
+        ("full-checks-3", &["api-release", "provisionerd-release"]),
     ];
 
     /// DEC-2334: CI's full jobs together run exactly what `cargo xtask ci full` runs, each part
