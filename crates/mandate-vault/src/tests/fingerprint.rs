@@ -188,6 +188,7 @@ fn the_managers_policy_reads_each_fingerprint_and_changes_the_registry() {
         let got = blocks_under(&hcl, &FINGERPRINT_PREFIXES);
         let want: Vec<(String, String)> = if identity == Identity::ConnectionManager {
             [
+                ("mandate/data/personal/fingerprints/+/+", "read"),
                 ("mandate/data/personal/claims", "read"),
                 ("mandate/data/personal/claims", "create,update"),
                 ("mandate/data/fingerprints/rotating", "read"),
