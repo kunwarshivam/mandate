@@ -1144,19 +1144,20 @@ REQUIRED_REFS["EvaluationRunRecorded"] = ("rule_set",)
 # the control stream. No member is free text: IDs, enumerations, and integers only.
 DM_PROCESSES = ("runtime", "executor")
 # v0.70 (DEC-1175): an OAuth connect's token exchange is started once, stopped only when its request
-# closes, and never looped.
+# closes, and never looped. v0.74 (DEC-2335): the connect's executor is started on the exchange's
+# success (`exchanged`) and stopped when its connection closes (`connection_closed`), rule 257.
 DM_STARTED_PROCESSES = (*DM_PROCESSES, "token_exchange")
 SCHEMAS[("ctl", "ProcessStartIssued")] = rec(
     ("process", one_of(*DM_STARTED_PROCESSES)),
     ("subject", IDENT_T),
     ("generation", INT),
-    ("cause", one_of("deployed", "restart", "kill_switch", "requested")),
+    ("cause", one_of("deployed", "restart", "kill_switch", "requested", "exchanged")),
 )
 SCHEMAS[("ctl", "ProcessStopIssued")] = rec(
     ("process", one_of(*DM_STARTED_PROCESSES)),
     ("subject", IDENT_T),
     ("generation", INT),
-    ("cause", one_of("agent_stopped", "request_closed")),
+    ("cause", one_of("agent_stopped", "request_closed", "connection_closed")),
 )
 SCHEMAS[("ctl", "ProcessCrashLooped")] = rec(
     ("process", one_of(*DM_PROCESSES)),
@@ -1166,6 +1167,19 @@ SCHEMAS[("ctl", "ProcessCrashLooped")] = rec(
     ("window_seconds", INT),
 )
 DM_RECORDS = ("ProcessStartIssued", "ProcessStopIssued", "ProcessCrashLooped")
+# §9.33 v0.77 (DEC-2350): the role provisioner's records of one OAuth connect's Kubernetes-auth roles,
+# on the control stream. IDs and enumerations only.
+SCHEMAS[("ctl", "ConnectionRolesMade")] = rec(("connection_id", IDENT_T))
+SCHEMAS[("ctl", "ConnectionRolesRefused")] = rec(
+    ("connection_id", IDENT_T),
+    ("reason", one_of("vault_unavailable", "role_refused")),
+)
+SCHEMAS[("ctl", "ConnectionRolesRemoved")] = rec(
+    ("connection_id", IDENT_T),
+    ("role", one_of("token_exchange")),
+    ("occasion", one_of("request_closed", "revoked")),
+)
+CR_RECORDS = ("ConnectionRolesMade", "ConnectionRolesRefused", "ConnectionRolesRemoved")
 
 # §9.5 (DEC-446, DEC-447): the account stream's executor records. The three records §9.5 closes at
 # `schema_version` 2 carry both versions here; the companion and `ProtectionChanged` close at 1.
@@ -1243,6 +1257,17 @@ PROTECTION_CHANGED = rec(
     ("acknowledged", opt(BOOL)),
     ("risk_clock", RISK_CLOCK),
 )
+# §9.5 (DEC-2312): `ProtectionChanged` version 2 adds the unprotected fraction of a fractional equity
+# position, disclosed beside version 1's members, with `risk_clock` last; version 1 stays registered.
+PROTECTION_CHANGED_V2 = rec(
+    *PROTECTION_CHANGED.fields[:-1],
+    ("unprotected_fraction", opt(DEC)),
+    ("risk_clock", RISK_CLOCK),
+)
+# The actions that may disclose a fraction: the start of a fractional entry's interval, the
+# protection placed for its whole shares, and the end, which carries the final size of a position
+# built from several fills (rule 44, DEC-2312 item 3, DEC-2315).
+FRACTION_ACTIONS = ("unprotected_start", "placed", "unprotected_end")
 ESTABLISHED_V2 = rec(
     *SCHEMAS[("ctl", "ConnectionEstablished")].fields,
     ("account_ref", ULID),
@@ -1256,8 +1281,9 @@ VERSIONED_VERSIONS: dict[tuple[str, str], tuple[int, ...]] = {
     ("acct", "GateDecided"): (1, 2),
     ("acct", "OrderSubmitted"): (1, 2),
     ("acct", "OrderRequestRecorded"): (1,),
-    ("acct", "ProtectionChanged"): (1,),
+    ("acct", "ProtectionChanged"): (1, 2),
     ("acct", "OwnerConfirmationReceived"): (1,),
+    ("acct", "AccountCloseRequested"): (1,),
     ("ctl", "ConnectionEstablished"): (1, 2),
     ("acct", "ConnectionEstablished"): (2,),
     ("ctl", "MandateConfirmed"): (1, 2),
@@ -1302,6 +1328,7 @@ VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
     ("acct", "OrderSubmitted", 2): rec(*SUBMITTED_V1.fields, ("risk_clock", RISK_CLOCK)),
     ("acct", "OrderRequestRecorded", 1): COMPANION,
     ("acct", "ProtectionChanged", 1): PROTECTION_CHANGED,
+    ("acct", "ProtectionChanged", 2): PROTECTION_CHANGED_V2,
     ("acct", "OwnerConfirmationReceived", 1): rec(
         ("intent_id", ULID),
         ("instrument_id", STR),
@@ -1311,6 +1338,15 @@ VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
         ("floor", DEC),
         ("expires_at", INT),
         ("copied_from", ULID),
+        ("risk_clock", RISK_CLOCK),
+    ),
+    # v0.75 §9.5 (DEC-2337): one instrument's close-position under an account kill switch,
+    # journaled before it is sent.
+    ("acct", "AccountCloseRequested", 1): rec(
+        ("instrument_id", STR),
+        ("qty", DEC),
+        ("kill_switch_event", ULID),
+        ("attempt", INT),
         ("risk_clock", RISK_CLOCK),
     ),
     ("ctl", "ConnectionEstablished", 2): ESTABLISHED_V2,
@@ -1832,6 +1868,22 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
 
         wrong = next((m for m in prices if not positive(m)), None)
         rule("247", wrong is None, "schema", f"payload.{wrong}" if wrong else "")
+    if event_type == "AccountCloseRequested":
+        qty = normalize_decimal(p["qty"])
+        if qty is None:
+            positive = True
+        elif "boundary.rule_258_zero" in skip:
+            positive = Decimal(qty) >= 0
+        else:
+            positive = Decimal(qty) > 0
+        first = 0 if "boundary.rule_258_attempt" in skip else 1
+        clauses = [("258.qty", positive, "payload.qty"), ("258.attempt", p["attempt"] >= first, "payload.attempt")]
+        if "order.rule_258_attempt_first" in skip:
+            clauses.reverse()
+        wrong = next(((n, at) for n, ok, at in clauses if not ok and f"rule.{n}" not in skip), None)
+        if wrong is not None:
+            rule("258", False, "schema", wrong[1])
+        rule("259", draft["causation_id"] == p["kill_switch_event"], "schema", "causation_id")
     if event_type == "StepUpConfirmed":
         rule("242.kind", p["action_kind"] == "approve", "schema", "payload.action_kind")
         rule("242.paper", draft["environment"] == "paper", "schema", "environment")
@@ -2031,6 +2083,14 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
             rule("44.uncovered", False, "schema", "payload.uncovered")
         if p["acknowledged"] is not None and action != "unprotected_end":
             rule("44.acknowledged", False, "schema", "payload.acknowledged")
+        fraction = p.get("unprotected_fraction")
+        if fraction is not None:
+            disclosing = action in FRACTION_ACTIONS or f"widen.44.{action}" in skip
+            if "tighten.44.fraction_placed" in skip:
+                disclosing = action == "unprotected_start"
+            rule("44.fraction", disclosing, "schema", "payload.unprotected_fraction")
+            if disclosing:
+                rule("44.fraction_range", 0 < Decimal(fraction) < 1, "schema", "payload.unprotected_fraction")
     out += request_violations(event_type, draft, skip)
     out += answer_violations(event_type, draft, skip)
     out += acknowledgment_violations(event_type, draft, skip)
@@ -2042,6 +2102,7 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
     out += control_plane_violations(event_type, draft, skip)
     out += backtest_violations(event_type, draft, skip)
     out += deployment_manager_violations(event_type, draft, skip)
+    out += connection_role_violations(event_type, draft, skip)
     return out
 
 
@@ -2823,7 +2884,7 @@ def deployment_manager_violations(event_type: str, draft: dict, skip: frozenset[
     rule("165", draft["actor"]["kind"] == "system", "actor.kind")
     rule("166", p["generation"] >= least, "payload.generation")
     if event_type == "ProcessStartIssued":
-        first = p["cause"] in ("deployed", "requested")
+        first = p["cause"] in ("deployed", "requested", "exchanged")
         rule("167", first == (p["generation"] == 1), "payload.cause")
     if event_type == "ProcessCrashLooped":
         rule("168.restarts", p["restarts"] >= 1, "payload.restarts")
@@ -2833,6 +2894,26 @@ def deployment_manager_violations(event_type: str, draft: dict, skip: frozenset[
         rule("256", (p["cause"] == "requested") == exchange, "payload.cause")
     if event_type == "ProcessStopIssued":
         rule("256.stop", (p["cause"] == "request_closed") == exchange, "payload.cause")
+    executor = p["process"] == "executor"
+    if event_type == "ProcessStartIssued":
+        rule("257", p["cause"] != "exchanged" or executor, "payload.cause")
+    if event_type == "ProcessStopIssued":
+        rule("257.stop", p["cause"] != "connection_closed" or executor, "payload.cause")
+    return out
+
+
+def connection_role_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
+    """§9.33's rule 261, on a well-typed payload: a system actor, and a cause."""
+    if event_type not in CR_RECORDS:
+        return []
+    out: list[Violation] = []
+
+    def rule(name: str, holds: bool, path: str) -> None:
+        if not holds and f"rule.{name}" not in skip:
+            out.append(Violation(f"rule.{name}", "schema", path))
+
+    rule("261.system", draft["actor"]["kind"] == "system", "actor.kind")
+    rule("261.cause", draft["causation_id"] is not None, "causation_id")
     return out
 
 

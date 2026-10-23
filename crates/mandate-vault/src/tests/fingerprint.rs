@@ -3,10 +3,11 @@
 //! connection manager reads each fingerprint entry, reads and changes the registry, and reads the
 //! rotation marker; no other identity reaches any of them.
 
-use mandate_connections::record::{AccountRef, ConnectionId};
+use mandate_connections::record::{AccountPiiRef, AccountRef, ConnectionId};
+use secrecy::ExposeSecret;
 
 use crate::SourceError;
-use crate::fingerprint::{AccountFingerprint, FINGERPRINT_KEY};
+use crate::fingerprint::{AccountFingerprint, FINGERPRINT_KEY, decode_entry, encode_entry};
 use crate::kubernetes::kubernetes_policy;
 use crate::policy::{Access, Identity, Mounts, SecretPath, allows, kv_path, openbao_policy};
 
@@ -236,4 +237,36 @@ fn the_executor_creates_its_fingerprint_and_only_hashes() {
         blocks_under(&exchange, &FINGERPRINT_PREFIXES).is_empty(),
         "{exchange}"
     );
+}
+
+const PII: &str = "pii_01J8Z2PQ000000000000000001";
+
+/// The fingerprint entry holds the fingerprint and the reference alone, in one canonical form, and
+/// its reader takes that form and nothing else.
+#[test]
+fn the_entry_holds_the_fingerprint_and_reference_alone() {
+    let fingerprint = AccountFingerprint::new(HASH).unwrap();
+    let pii_ref = AccountPiiRef::new(PII).unwrap();
+    let entry = encode_entry(&fingerprint, &pii_ref).unwrap();
+    let canonical = format!(r#"{{"fingerprint":"{HASH}","format":1,"pii_ref":"{PII}"}}"#);
+    assert_eq!(entry.expose_secret(), canonical.as_bytes());
+    assert_eq!(
+        decode_entry(entry.expose_secret()),
+        Ok((fingerprint, pii_ref))
+    );
+    for malformed in [
+        String::new(),
+        format!(r#"{{"fingerprint":"{HASH}","format":2,"pii_ref":"{PII}"}}"#),
+        format!(r#"{{"fingerprint":"{HASH}","format":1}}"#),
+        format!(r#"{{"fingerprint":"{HASH}","format":1,"pii_ref":"{PII}","account":"x"}}"#),
+        format!(r#"{{"fingerprint":"vault:v1:abc","format":1,"pii_ref":"{PII}"}}"#),
+        format!(r#"{{"fingerprint":"{HASH}","format":1,"pii_ref":""}}"#),
+        format!(r#"{{"format":1,"fingerprint":"{HASH}","pii_ref":"{PII}"}}"#),
+    ] {
+        assert_eq!(
+            decode_entry(malformed.as_bytes()),
+            Err(SourceError::Malformed),
+            "{malformed}"
+        );
+    }
 }

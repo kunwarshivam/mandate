@@ -9048,6 +9048,547 @@ protection_shapes:
       value: null
     expect:
       outcome: Valid
+protection_fraction:
+  spec: docs/specs/journal.md v0.72 §9.5 rule 44 (DEC-2312, DEC-2315)
+  drafts:
+    placed_v1:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8ZQA6A000000000000000E7
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+      event_type: ProtectionChanged
+      schema_version: 1
+      event_time: '2026-09-21T14:00:30.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+        action: placed
+        orders:
+        - md-01J8ZT90A000000000000000P1-p1
+        awaiting: []
+        qty: '10'
+        stop: '139'
+        take_profit: '159'
+        intent_id: null
+        bracket: null
+        entry: null
+        agent_id: null
+        replacing: null
+        created_on: '2026-09-21'
+        sent: null
+        uncovered: null
+        acknowledged: null
+        risk_clock: '2026-09-21T14:00:30.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    placed:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8ZQA6A000000000000000E7
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+      event_type: ProtectionChanged
+      schema_version: 2
+      event_time: '2026-09-21T14:00:30.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+        action: placed
+        orders:
+        - md-01J8ZT90A000000000000000P1-p1
+        awaiting: []
+        qty: '10'
+        stop: '139'
+        take_profit: '159'
+        intent_id: null
+        bracket: null
+        entry: null
+        agent_id: null
+        replacing: null
+        created_on: '2026-09-21'
+        sent: null
+        uncovered: null
+        acknowledged: null
+        unprotected_fraction: null
+        risk_clock: '2026-09-21T14:00:30.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    start:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8ZQA7A000000000000000E8
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A2
+      event_type: ProtectionChanged
+      schema_version: 2
+      event_time: '2026-09-21T14:00:35.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+        action: unprotected_start
+        orders:
+        - md-01J8ZT90A000000000000000P1-p1
+        awaiting: []
+        qty: null
+        stop: '139'
+        take_profit: '159'
+        intent_id: 01J8ZT90A000000000000000P1
+        bracket: null
+        entry: md-01J8ZT90A000000000000000P1
+        agent_id: agent_a
+        replacing: true
+        created_on: null
+        sent: null
+        uncovered: null
+        acknowledged: null
+        unprotected_fraction: null
+        risk_clock: '2026-09-21T14:00:35.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+  invalid_drafts:
+  - name: fraction_on_cancelled
+    clause: 'rule 44: only a start, a placement and an end disclose a fraction'
+    base_draft: placed
+    changes:
+    - path: payload.action
+      value: cancelled
+    - path: payload.stop
+      value: null
+    - path: payload.take_profit
+      value: null
+    - path: payload.created_on
+      value: null
+    - path: payload.unprotected_fraction
+      value: '0.4'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.unprotected_fraction
+  - name: fraction_on_intended
+    clause: 'rule 44: intended discloses no fraction'
+    base_draft: start
+    changes:
+    - path: payload.stop
+      value: null
+    - path: payload.take_profit
+      value: null
+    - path: payload.intent_id
+      value: null
+    - path: payload.entry
+      value: null
+    - path: payload.agent_id
+      value: null
+    - path: payload.orders
+      value: []
+    - path: payload.replacing
+      value: null
+    - path: payload.action
+      value: intended
+    - path: payload.intent_id
+      value: 01J8ZT90A000000000000000P1
+    - path: payload.stop
+      value: '139'
+    - path: payload.unprotected_fraction
+      value: '0.4'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.unprotected_fraction
+  - name: fraction_on_watchdog
+    clause: 'rule 44: watchdog discloses no fraction'
+    base_draft: start
+    changes:
+    - path: payload.stop
+      value: null
+    - path: payload.take_profit
+      value: null
+    - path: payload.intent_id
+      value: null
+    - path: payload.entry
+      value: null
+    - path: payload.agent_id
+      value: null
+    - path: payload.orders
+      value: []
+    - path: payload.replacing
+      value: null
+    - path: payload.action
+      value: watchdog
+    - path: payload.unprotected_fraction
+      value: '0.4'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.unprotected_fraction
+  - name: fraction_on_exit_unpriced
+    clause: 'rule 44: exit_unpriced discloses no fraction'
+    base_draft: start
+    changes:
+    - path: payload.stop
+      value: null
+    - path: payload.take_profit
+      value: null
+    - path: payload.intent_id
+      value: null
+    - path: payload.entry
+      value: null
+    - path: payload.agent_id
+      value: null
+    - path: payload.orders
+      value: []
+    - path: payload.replacing
+      value: null
+    - path: payload.action
+      value: exit_unpriced
+    - path: payload.unprotected_fraction
+      value: '0.4'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.unprotected_fraction
+  - name: fraction_on_ladder_floor
+    clause: 'rule 44: ladder_floor discloses no fraction'
+    base_draft: start
+    changes:
+    - path: payload.stop
+      value: null
+    - path: payload.take_profit
+      value: null
+    - path: payload.intent_id
+      value: null
+    - path: payload.entry
+      value: null
+    - path: payload.agent_id
+      value: null
+    - path: payload.orders
+      value: []
+    - path: payload.replacing
+      value: null
+    - path: payload.action
+      value: ladder_floor
+    - path: payload.unprotected_fraction
+      value: '0.4'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.unprotected_fraction
+  - name: fraction_on_expiry_unreplaceable
+    clause: 'rule 44: expiry_unreplaceable discloses no fraction'
+    base_draft: start
+    changes:
+    - path: payload.stop
+      value: null
+    - path: payload.take_profit
+      value: null
+    - path: payload.intent_id
+      value: null
+    - path: payload.entry
+      value: null
+    - path: payload.agent_id
+      value: null
+    - path: payload.orders
+      value: []
+    - path: payload.replacing
+      value: null
+    - path: payload.action
+      value: expiry_unreplaceable
+    - path: payload.unprotected_fraction
+      value: '0.4'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.unprotected_fraction
+  - name: fraction_on_rung_short
+    clause: 'rule 44: rung_short discloses no fraction'
+    base_draft: start
+    changes:
+    - path: payload.stop
+      value: null
+    - path: payload.take_profit
+      value: null
+    - path: payload.intent_id
+      value: null
+    - path: payload.entry
+      value: null
+    - path: payload.agent_id
+      value: null
+    - path: payload.orders
+      value: []
+    - path: payload.replacing
+      value: null
+    - path: payload.action
+      value: rung_short
+    - path: payload.intent_id
+      value: 01J8ZT90A000000000000000P1
+    - path: payload.sent
+      value: '2'
+    - path: payload.unprotected_fraction
+      value: '0.4'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.unprotected_fraction
+  - name: fraction_on_interval_limit
+    clause: 'rule 44: interval_limit discloses no fraction'
+    base_draft: start
+    changes:
+    - path: payload.stop
+      value: null
+    - path: payload.take_profit
+      value: null
+    - path: payload.intent_id
+      value: null
+    - path: payload.entry
+      value: null
+    - path: payload.agent_id
+      value: null
+    - path: payload.orders
+      value: []
+    - path: payload.replacing
+      value: null
+    - path: payload.action
+      value: interval_limit
+    - path: payload.unprotected_fraction
+      value: '0.4'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.unprotected_fraction
+  - name: fraction_on_a_passive_start
+    clause: 'rule 44: a passive start discloses no fraction'
+    base_draft: start
+    changes:
+    - path: payload.action
+      value: passive_start
+    - path: payload.unprotected_fraction
+      value: '0.4'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.unprotected_fraction
+  - name: fraction_zero
+    clause: 'rule 44: a disclosed fraction is above zero'
+    base_draft: placed
+    changes:
+    - path: payload.unprotected_fraction
+      value: '0'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.unprotected_fraction
+  - name: fraction_negative
+    clause: 'rule 44: a disclosed fraction is above zero'
+    base_draft: placed
+    changes:
+    - path: payload.unprotected_fraction
+      value: '-0.4'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.unprotected_fraction
+  - name: fraction_one
+    clause: 'rule 44: a disclosed fraction is below one share'
+    base_draft: placed
+    changes:
+    - path: payload.unprotected_fraction
+      value: '1'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.unprotected_fraction
+  - name: fraction_above_one
+    clause: 'rule 44: a disclosed fraction is below one share'
+    base_draft: start
+    changes:
+    - path: payload.stop
+      value: null
+    - path: payload.take_profit
+      value: null
+    - path: payload.intent_id
+      value: null
+    - path: payload.entry
+      value: null
+    - path: payload.agent_id
+      value: null
+    - path: payload.orders
+      value: []
+    - path: payload.replacing
+      value: null
+    - path: payload.bracket
+      value: md-01J8ZT90A000000000000000P1
+    - path: payload.unprotected_fraction
+      value: '1.4'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.unprotected_fraction
+  - name: version_1_carries_no_fraction
+    clause: '§8: version 1 is never edited'
+    base_draft: placed_v1
+    changes:
+    - path: payload.unprotected_fraction
+      value: '0.4'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.unprotected_fraction
+  - name: fraction_a_json_number
+    clause: '§9.1 decimal: a JSON number is not a decimal'
+    base_draft: placed
+    changes:
+    - path: payload.unprotected_fraction
+      value: 1
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.unprotected_fraction
+  - name: fraction_not_a_number
+    clause: §9.1 decimal
+    base_draft: placed
+    changes:
+    - path: payload.unprotected_fraction
+      value: abc
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.unprotected_fraction
+  - name: one_share_in_exponent_form
+    clause: 'rule 44 on the normalized decimal: 1e0 is one share'
+    base_draft: placed
+    changes:
+    - path: payload.unprotected_fraction
+      value: 1e0
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.unprotected_fraction
+  valid_drafts:
+  - name: fraction_on_first_fill_start
+    clause: 'rule 44: a fractional entry''s first fill discloses its fraction'
+    base_draft: start
+    changes:
+    - path: payload.stop
+      value: null
+    - path: payload.take_profit
+      value: null
+    - path: payload.intent_id
+      value: null
+    - path: payload.entry
+      value: null
+    - path: payload.agent_id
+      value: null
+    - path: payload.orders
+      value: []
+    - path: payload.replacing
+      value: null
+    - path: payload.bracket
+      value: md-01J8ZT90A000000000000000P1
+    - path: payload.unprotected_fraction
+      value: '0.4'
+    expect:
+      outcome: Valid
+  - name: fraction_on_placed
+    clause: 'rule 44: the whole shares'' protection discloses the fraction it leaves'
+    base_draft: placed
+    changes:
+    - path: payload.unprotected_fraction
+      value: '0.4'
+    expect:
+      outcome: Valid
+  - name: fraction_smallest
+    clause: 'rule 44: the smallest fraction a fractionable share has'
+    base_draft: placed
+    changes:
+    - path: payload.unprotected_fraction
+      value: '0.000000001'
+    expect:
+      outcome: Valid
+  - name: fraction_largest
+    clause: 'rule 44: the largest fraction below one share'
+    base_draft: placed
+    changes:
+    - path: payload.unprotected_fraction
+      value: '0.999999999'
+    expect:
+      outcome: Valid
+  - name: no_fraction_on_a_whole_position
+    clause: 'rule 44: a whole-share position discloses nothing'
+    base_draft: start
+    changes:
+    - path: payload.stop
+      value: null
+    - path: payload.take_profit
+      value: null
+    - path: payload.intent_id
+      value: null
+    - path: payload.entry
+      value: null
+    - path: payload.agent_id
+      value: null
+    - path: payload.orders
+      value: []
+    - path: payload.replacing
+      value: null
+    - path: payload.bracket
+      value: md-01J8ZT90A000000000000000P1
+    expect:
+      outcome: Valid
+  - name: fraction_in_exponent_form
+    clause: '§4.6: an exponent form is normalized on the way in, 4e-1 is 0.4'
+    base_draft: placed
+    changes:
+    - path: payload.unprotected_fraction
+      value: 4e-1
+    expect:
+      outcome: Valid
+  - name: fraction_on_the_end
+    clause: 'rule 44: the end discloses the final fraction of a position built from several fills (DEC-2315)'
+    base_draft: start
+    changes:
+    - path: payload.stop
+      value: null
+    - path: payload.take_profit
+      value: null
+    - path: payload.intent_id
+      value: null
+    - path: payload.entry
+      value: null
+    - path: payload.agent_id
+      value: null
+    - path: payload.action
+      value: unprotected_end
+    - path: payload.orders
+      value: []
+    - path: payload.replacing
+      value: null
+    - path: payload.bracket
+      value: md-01J8ZT90A000000000000000P1
+    - path: payload.unprotected_fraction
+      value: '0.4'
+    expect:
+      outcome: Valid
 approval_answers:
   spec: docs/specs/journal.md v0.17 §9.7 (DEC-533)
   drafts:
@@ -15213,6 +15754,42 @@ deployment_manager:
       outcome: Invalid
       reason: schema
       path: payload.cause
+  - name: ProcessStartIssued.executor_exchanged_twice
+    clause: 'rule 167: a connect''s executor is exchanged at generation 1 only'
+    base_draft: process_start_issued
+    changes:
+    - path: payload.process
+      value: executor
+    - path: payload.subject
+      value: 01J8Z2ACCT00000000000000A1
+    - path: payload.generation
+      value: 2
+    - path: payload.cause
+      value: exchanged
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.cause
+  - name: ProcessStartIssued.runtime_exchanged
+    clause: 'rule 257: only an executor is started on an exchange''s success'
+    base_draft: process_start_issued
+    changes:
+    - path: payload.cause
+      value: exchanged
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.cause
+  - name: ProcessStopIssued.runtime_stopped_as_connection_closed
+    clause: 'rule 257: only an executor stops as its connection closed'
+    base_draft: process_stop_issued
+    changes:
+    - path: payload.cause
+      value: connection_closed
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.cause
   - name: ProcessCrashLooped.exchange_looped
     clause: '§9.21 types: a token exchange never crash-loops'
     base_draft: process_crash_looped
@@ -15320,6 +15897,32 @@ deployment_manager:
       value: conn_01J8Z2CONN000000000000C1
     - path: payload.cause
       value: requested
+    expect:
+      outcome: Valid
+  - name: ProcessStartIssued.executor_exchanged
+    clause: 'rule 257: a connect''s executor, started on its exchange''s success'
+    base_draft: process_start_issued
+    changes:
+    - path: payload.process
+      value: executor
+    - path: payload.subject
+      value: 01J8Z2ACCT00000000000000A1
+    - path: payload.cause
+      value: exchanged
+    expect:
+      outcome: Valid
+  - name: ProcessStopIssued.executor_connection_closed
+    clause: 'rule 257: a connect''s executor stopped as its connection closed'
+    base_draft: process_stop_issued
+    changes:
+    - path: payload.process
+      value: executor
+    - path: payload.subject
+      value: 01J8Z2ACCT00000000000000A1
+    - path: payload.generation
+      value: 1
+    - path: payload.cause
+      value: connection_closed
     expect:
       outcome: Valid
   - name: ProcessStopIssued.token_exchange_closed
@@ -76001,3 +76604,2386 @@ step_up_assertions:
       pii_refs: []
     expect:
       outcome: Valid
+account_closes:
+  spec: docs/specs/journal.md v0.75 §9.5 rules 258 to 260 (DEC-2337)
+  drafts:
+    close:
+      envelope_version: 1
+      environment: paper
+      event_id: 01JAD2K0A000000000000000E1
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountCloseRequested
+      schema_version: 1
+      event_time: '2026-10-22T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: 01JAD2K0S000000000000000K1
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        instrument_id: AAPL
+        qty: '10'
+        kill_switch_event: 01JAD2K0S000000000000000K1
+        attempt: 1
+        risk_clock: '2026-10-22T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+  invalid_drafts:
+  - name: zero_qty
+    clause: 'rule 258: `qty` is positive'
+    base_draft: close
+    changes:
+    - path: payload.qty
+      value: '0'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.qty
+  - name: negative_qty
+    clause: 'rule 258: `qty` is positive'
+    base_draft: close
+    changes:
+    - path: payload.qty
+      value: '-10'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.qty
+  - name: negative_zero_qty
+    clause: 'rule 258: `-0` normalizes to 0 (§4.6)'
+    base_draft: close
+    changes:
+    - path: payload.qty
+      value: '-0'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.qty
+  - name: zero_qty_with_an_exponent
+    clause: 'rule 258: `0e5` normalizes to 0 (§4.6)'
+    base_draft: close
+    changes:
+    - path: payload.qty
+      value: 0e5
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.qty
+  - name: zero_qty_written_otherwise
+    clause: 'rule 258: `qty` compared as a decimal'
+    base_draft: close
+    changes:
+    - path: payload.qty
+      value: '0.000'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.qty
+  - name: zero_attempt
+    clause: 'rule 258: `attempt` is at least 1'
+    base_draft: close
+    changes:
+    - path: payload.attempt
+      value: 0
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.attempt
+  - name: zero_qty_and_attempt
+    clause: 'rule 258: reported at the first that fails, `qty` before `attempt`'
+    base_draft: close
+    changes:
+    - path: payload.qty
+      value: '0'
+    - path: payload.attempt
+      value: 0
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.qty
+  - name: another_cause
+    clause: 'rule 259: `causation_id` is the switch'
+    base_draft: close
+    changes:
+    - path: causation_id
+      value: 01JAD2K0S000000000000000K2
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: causation_id
+  - name: no_cause
+    clause: 'rule 259: `causation_id` is the switch'
+    base_draft: close
+    changes:
+    - path: causation_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: causation_id
+  - name: null_qty
+    clause: '§9.5: `qty` is a decimal, never null'
+    base_draft: close
+    changes:
+    - path: payload.qty
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.qty
+  - name: qty_as_number
+    clause: '§9.5: `qty` is a decimal string'
+    base_draft: close
+    changes:
+    - path: payload.qty
+      value: 10
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.qty
+  - name: qty_beyond_28_places
+    clause: '§4.6: at most 28 fractional digits'
+    base_draft: close
+    changes:
+    - path: payload.qty
+      value: '0.00000000000000000000000000001'
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.qty
+  - name: no_qty
+    clause: '§9.5: every member present'
+    base_draft: close
+    changes:
+    - path: payload.qty
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.qty
+  - name: no_instrument
+    clause: '§9.5: every member present'
+    base_draft: close
+    changes:
+    - path: payload.instrument_id
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.instrument_id
+  - name: null_instrument
+    clause: '§9.5: `instrument_id` is text, never null'
+    base_draft: close
+    changes:
+    - path: payload.instrument_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.instrument_id
+  - name: empty_instrument
+    clause: '§9.5: `instrument_id` is non-empty text'
+    base_draft: close
+    changes:
+    - path: payload.instrument_id
+      value: ''
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.instrument_id
+  - name: switch_not_ulid
+    clause: '§9.5: `kill_switch_event` is a ulid'
+    base_draft: close
+    changes:
+    - path: payload.kill_switch_event
+      value: switch-1
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.kill_switch_event
+  - name: no_switch
+    clause: '§9.5: every member present'
+    base_draft: close
+    changes:
+    - path: payload.kill_switch_event
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.kill_switch_event
+  - name: attempt_as_text
+    clause: '§9.5: `attempt` is an integer'
+    base_draft: close
+    changes:
+    - path: payload.attempt
+      value: '1'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.attempt
+  - name: no_attempt
+    clause: '§9.5: every member present'
+    base_draft: close
+    changes:
+    - path: payload.attempt
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.attempt
+  - name: no_risk_clock
+    clause: '§9.5: every member present'
+    base_draft: close
+    changes:
+    - path: payload.risk_clock
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.risk_clock
+  - name: extra_client_order_id
+    clause: '§9.5: the schema is closed'
+    base_draft: close
+    changes:
+    - path: payload.client_order_id
+      value: md-k-1
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.client_order_id
+  - name: version_2
+    clause: '§9.5: registered at `schema_version` 1 only'
+    base_draft: close
+    changes:
+    - path: schema_version
+      value: 2
+    expect:
+      outcome: Invalid
+      reason: unknown_schema
+      path: payload
+  - name: on_the_control_stream
+    clause: '§9.5: an account-stream record'
+    base_draft: close
+    changes:
+    - path: stream_id
+      value: ctl:ws_01J8Z2
+    expect:
+      outcome: Invalid
+      reason: wrong_stream
+      path: event_type
+  valid_drafts:
+  - name: a_fraction_of_a_share
+    clause: 'rule 258: positive, however small'
+    base_draft: close
+    changes:
+    - path: payload.qty
+      value: '0.0001'
+    expect:
+      outcome: Valid
+  - name: twelve_places
+    clause: 'rule 258: positive at 12 places (§4.6 allows 28)'
+    base_draft: close
+    changes:
+    - path: payload.qty
+      value: '0.000000000001'
+    expect:
+      outcome: Valid
+  - name: trailing_zeros
+    clause: 'rule 258: compared as a decimal'
+    base_draft: close
+    changes:
+    - path: payload.qty
+      value: '10.500'
+    expect:
+      outcome: Valid
+  - name: an_exponent
+    clause: 'rule 258: `1e2` normalizes to 100 (§4.6)'
+    base_draft: close
+    changes:
+    - path: payload.qty
+      value: 1e2
+    expect:
+      outcome: Valid
+  - name: a_negative_exponent
+    clause: 'rule 258: `5E-1` normalizes to 0.5 (§4.6)'
+    base_draft: close
+    changes:
+    - path: payload.qty
+      value: 5E-1
+    expect:
+      outcome: Valid
+  - name: a_later_attempt
+    clause: 'rule 258: a re-request''s attempt'
+    base_draft: close
+    changes:
+    - path: payload.attempt
+      value: 3
+    expect:
+      outcome: Valid
+  - name: crypto
+    clause: 'rule 258: any instrument the switch named, as it names it'
+    base_draft: close
+    changes:
+    - path: payload.instrument_id
+      value: BTC/USD
+    - path: payload.qty
+      value: '0.25'
+    expect:
+      outcome: Valid
+  streams:
+  - name: each_instrument_once
+    clause: 'rule 260: one request per instrument per attempt'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAD2K0A00000000000000001
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountCloseRequested
+      schema_version: 1
+      event_time: '2026-10-22T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: 01JAD2K0S000000000000000K1
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        instrument_id: AAPL
+        qty: '10'
+        kill_switch_event: 01JAD2K0S000000000000000K1
+        attempt: 1
+        risk_clock: '2026-10-22T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAD2K0A00000000000000002
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountCloseRequested
+      schema_version: 1
+      event_time: '2026-10-22T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: 01JAD2K0S000000000000000K1
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        instrument_id: BTC/USD
+        qty: '10'
+        kill_switch_event: 01JAD2K0S000000000000000K1
+        attempt: 1
+        risk_clock: '2026-10-22T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Valid
+  - name: a_re_request
+    clause: 'rule 260: a re-request takes the next attempt'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAD2K0A00000000000000001
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountCloseRequested
+      schema_version: 1
+      event_time: '2026-10-22T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: 01JAD2K0S000000000000000K1
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        instrument_id: AAPL
+        qty: '10'
+        kill_switch_event: 01JAD2K0S000000000000000K1
+        attempt: 1
+        risk_clock: '2026-10-22T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAD2K0A00000000000000002
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountCloseRequested
+      schema_version: 1
+      event_time: '2026-10-22T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: 01JAD2K0S000000000000000K1
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        instrument_id: AAPL
+        qty: '10'
+        kill_switch_event: 01JAD2K0S000000000000000K1
+        attempt: 2
+        risk_clock: '2026-10-22T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Valid
+  - name: under_a_later_switch
+    clause: 'rule 260: a later switch closes the instrument again from attempt 1'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAD2K0A00000000000000001
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountCloseRequested
+      schema_version: 1
+      event_time: '2026-10-22T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: 01JAD2K0S000000000000000K1
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        instrument_id: AAPL
+        qty: '10'
+        kill_switch_event: 01JAD2K0S000000000000000K1
+        attempt: 1
+        risk_clock: '2026-10-22T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAD2K0A00000000000000002
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountCloseRequested
+      schema_version: 1
+      event_time: '2026-10-22T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: 01JAD2K0S000000000000000K2
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        instrument_id: AAPL
+        qty: '10'
+        kill_switch_event: 01JAD2K0S000000000000000K2
+        attempt: 1
+        risk_clock: '2026-10-22T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Valid
+  - name: duplicate
+    clause: 'rule 260: the same switch, instrument and attempt twice'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAD2K0A00000000000000001
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountCloseRequested
+      schema_version: 1
+      event_time: '2026-10-22T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: 01JAD2K0S000000000000000K1
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        instrument_id: AAPL
+        qty: '10'
+        kill_switch_event: 01JAD2K0S000000000000000K1
+        attempt: 1
+        risk_clock: '2026-10-22T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAD2K0A00000000000000002
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountCloseRequested
+      schema_version: 1
+      event_time: '2026-10-22T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: 01JAD2K0S000000000000000K1
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        instrument_id: AAPL
+        qty: '10'
+        kill_switch_event: 01JAD2K0S000000000000000K1
+        attempt: 1
+        risk_clock: '2026-10-22T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      index: 1
+      reason: schema
+      path: payload.attempt
+  - name: duplicate_after_another
+    clause: 'rule 260: earlier records of the stream count, not only the last'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAD2K0A00000000000000001
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountCloseRequested
+      schema_version: 1
+      event_time: '2026-10-22T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: 01JAD2K0S000000000000000K1
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        instrument_id: AAPL
+        qty: '10'
+        kill_switch_event: 01JAD2K0S000000000000000K1
+        attempt: 1
+        risk_clock: '2026-10-22T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAD2K0A00000000000000002
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountCloseRequested
+      schema_version: 1
+      event_time: '2026-10-22T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: 01JAD2K0S000000000000000K1
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        instrument_id: BTC/USD
+        qty: '10'
+        kill_switch_event: 01JAD2K0S000000000000000K1
+        attempt: 1
+        risk_clock: '2026-10-22T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAD2K0A00000000000000003
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountCloseRequested
+      schema_version: 1
+      event_time: '2026-10-22T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: 01JAD2K0S000000000000000K1
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        instrument_id: AAPL
+        qty: '10'
+        kill_switch_event: 01JAD2K0S000000000000000K1
+        attempt: 2
+        risk_clock: '2026-10-22T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01JAD2K0A00000000000000004
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountCloseRequested
+      schema_version: 1
+      event_time: '2026-10-22T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: 01JAD2K0S000000000000000K1
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        instrument_id: AAPL
+        qty: '10'
+        kill_switch_event: 01JAD2K0S000000000000000K1
+        attempt: 1
+        risk_clock: '2026-10-22T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      index: 3
+      reason: schema
+      path: payload.attempt
+connection_roles:
+  spec: docs/specs/journal.md v0.77 §9.33 (DEC-2350)
+  drafts:
+    connection_roles_made:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CR000000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRolesMade
+      schema_version: 1
+      event_time: '2026-10-22T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01JAB1R0A000000000000000Q1
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+      artifact_refs: []
+      pii_refs: []
+    connection_roles_refused:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CR010000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRolesRefused
+      schema_version: 1
+      event_time: '2026-10-22T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01JAB1R0A000000000000000Q1
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+        reason: vault_unavailable
+      artifact_refs: []
+      pii_refs: []
+    connection_roles_removed:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CR020000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRolesRemoved
+      schema_version: 1
+      event_time: '2026-10-22T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z4CR0A000000000000000C
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+        role: token_exchange
+        occasion: request_closed
+      artifact_refs: []
+      pii_refs: []
+  invalid_drafts:
+  - name: ConnectionRolesMade.connection_id.kind
+    clause: §9.33 types
+    base_draft: connection_roles_made
+    changes:
+    - path: payload.connection_id
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.connection_id
+  - name: ConnectionRolesMade.connection_id.form
+    clause: §9.33 types
+    base_draft: connection_roles_made
+    changes:
+    - path: payload.connection_id
+      value: not an id
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.connection_id
+  - name: ConnectionRolesMade.connection_id.null
+    clause: §9.33 types
+    base_draft: connection_roles_made
+    changes:
+    - path: payload.connection_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.connection_id
+  - name: ConnectionRolesMade.missing
+    clause: §9.33 closed
+    base_draft: connection_roles_made
+    changes:
+    - path: payload.connection_id
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.connection_id
+  - name: ConnectionRolesMade.extra
+    clause: §9.33 closed
+    base_draft: connection_roles_made
+    changes:
+    - path: payload.role_name
+      value: x
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.role_name
+  - name: ConnectionRolesRefused.connection_id.kind
+    clause: §9.33 types
+    base_draft: connection_roles_refused
+    changes:
+    - path: payload.connection_id
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.connection_id
+  - name: ConnectionRolesRefused.connection_id.form
+    clause: §9.33 types
+    base_draft: connection_roles_refused
+    changes:
+    - path: payload.connection_id
+      value: not an id
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.connection_id
+  - name: ConnectionRolesRefused.connection_id.null
+    clause: §9.33 types
+    base_draft: connection_roles_refused
+    changes:
+    - path: payload.connection_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.connection_id
+  - name: ConnectionRolesRefused.reason.kind
+    clause: §9.33 types
+    base_draft: connection_roles_refused
+    changes:
+    - path: payload.reason
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reason
+  - name: ConnectionRolesRefused.reason.form
+    clause: §9.33 types
+    base_draft: connection_roles_refused
+    changes:
+    - path: payload.reason
+      value: not_listed
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.reason
+  - name: ConnectionRolesRefused.reason.null
+    clause: §9.33 types
+    base_draft: connection_roles_refused
+    changes:
+    - path: payload.reason
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reason
+  - name: ConnectionRolesRefused.missing
+    clause: §9.33 closed
+    base_draft: connection_roles_refused
+    changes:
+    - path: payload.connection_id
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.connection_id
+  - name: ConnectionRolesRefused.extra
+    clause: §9.33 closed
+    base_draft: connection_roles_refused
+    changes:
+    - path: payload.role_name
+      value: x
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.role_name
+  - name: ConnectionRolesRemoved.connection_id.kind
+    clause: §9.33 types
+    base_draft: connection_roles_removed
+    changes:
+    - path: payload.connection_id
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.connection_id
+  - name: ConnectionRolesRemoved.connection_id.form
+    clause: §9.33 types
+    base_draft: connection_roles_removed
+    changes:
+    - path: payload.connection_id
+      value: not an id
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.connection_id
+  - name: ConnectionRolesRemoved.connection_id.null
+    clause: §9.33 types
+    base_draft: connection_roles_removed
+    changes:
+    - path: payload.connection_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.connection_id
+  - name: ConnectionRolesRemoved.role.kind
+    clause: §9.33 types
+    base_draft: connection_roles_removed
+    changes:
+    - path: payload.role
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.role
+  - name: ConnectionRolesRemoved.role.form
+    clause: §9.33 types
+    base_draft: connection_roles_removed
+    changes:
+    - path: payload.role
+      value: not_listed
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.role
+  - name: ConnectionRolesRemoved.role.null
+    clause: §9.33 types
+    base_draft: connection_roles_removed
+    changes:
+    - path: payload.role
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.role
+  - name: ConnectionRolesRemoved.occasion.kind
+    clause: §9.33 types
+    base_draft: connection_roles_removed
+    changes:
+    - path: payload.occasion
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.occasion
+  - name: ConnectionRolesRemoved.occasion.form
+    clause: §9.33 types
+    base_draft: connection_roles_removed
+    changes:
+    - path: payload.occasion
+      value: not_listed
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.occasion
+  - name: ConnectionRolesRemoved.occasion.null
+    clause: §9.33 types
+    base_draft: connection_roles_removed
+    changes:
+    - path: payload.occasion
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.occasion
+  - name: ConnectionRolesRemoved.missing
+    clause: §9.33 closed
+    base_draft: connection_roles_removed
+    changes:
+    - path: payload.connection_id
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.connection_id
+  - name: ConnectionRolesRemoved.extra
+    clause: §9.33 closed
+    base_draft: connection_roles_removed
+    changes:
+    - path: payload.role_name
+      value: x
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.role_name
+  - name: ConnectionRolesMade.by_a_user
+    clause: 'rule 261: the provisioner writes it as a system actor'
+    base_draft: connection_roles_made
+    changes:
+    - path: actor
+      value:
+        kind: user
+        id: user_owner_01
+        version: '1'
+        build: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: ConnectionRolesMade.uncaused
+    clause: 'rule 261: it names its cause'
+    base_draft: connection_roles_made
+    changes:
+    - path: causation_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: causation_id
+  - name: ConnectionRolesMade.on_an_agent_stream
+    clause: '§9 row: a control-stream record'
+    base_draft: connection_roles_made
+    changes:
+    - path: stream_id
+      value: agent:ws_01J8Z2:agent_a
+    expect:
+      outcome: Invalid
+      reason: wrong_stream
+      path: event_type
+  - name: ConnectionRolesMade.at_version_2
+    clause: '§9.33: closed at schema version 1 only'
+    base_draft: connection_roles_made
+    changes:
+    - path: schema_version
+      value: 2
+    expect:
+      outcome: Invalid
+      reason: unknown_schema
+      path: payload
+  - name: ConnectionRolesRefused.by_a_user
+    clause: 'rule 261: the provisioner writes it as a system actor'
+    base_draft: connection_roles_refused
+    changes:
+    - path: actor
+      value:
+        kind: user
+        id: user_owner_01
+        version: '1'
+        build: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: ConnectionRolesRefused.uncaused
+    clause: 'rule 261: it names its cause'
+    base_draft: connection_roles_refused
+    changes:
+    - path: causation_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: causation_id
+  - name: ConnectionRolesRefused.on_an_agent_stream
+    clause: '§9 row: a control-stream record'
+    base_draft: connection_roles_refused
+    changes:
+    - path: stream_id
+      value: agent:ws_01J8Z2:agent_a
+    expect:
+      outcome: Invalid
+      reason: wrong_stream
+      path: event_type
+  - name: ConnectionRolesRefused.at_version_2
+    clause: '§9.33: closed at schema version 1 only'
+    base_draft: connection_roles_refused
+    changes:
+    - path: schema_version
+      value: 2
+    expect:
+      outcome: Invalid
+      reason: unknown_schema
+      path: payload
+  - name: ConnectionRolesRemoved.by_a_user
+    clause: 'rule 261: the provisioner writes it as a system actor'
+    base_draft: connection_roles_removed
+    changes:
+    - path: actor
+      value:
+        kind: user
+        id: user_owner_01
+        version: '1'
+        build: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: actor.kind
+  - name: ConnectionRolesRemoved.uncaused
+    clause: 'rule 261: it names its cause'
+    base_draft: connection_roles_removed
+    changes:
+    - path: causation_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: causation_id
+  - name: ConnectionRolesRemoved.on_an_agent_stream
+    clause: '§9 row: a control-stream record'
+    base_draft: connection_roles_removed
+    changes:
+    - path: stream_id
+      value: agent:ws_01J8Z2:agent_a
+    expect:
+      outcome: Invalid
+      reason: wrong_stream
+      path: event_type
+  - name: ConnectionRolesRemoved.at_version_2
+    clause: '§9.33: closed at schema version 1 only'
+    base_draft: connection_roles_removed
+    changes:
+    - path: schema_version
+      value: 2
+    expect:
+      outcome: Invalid
+      reason: unknown_schema
+      path: payload
+  - name: ConnectionRolesRemoved.of_the_executor
+    clause: '§9.33: the executor''s role is never removed'
+    base_draft: connection_roles_removed
+    changes:
+    - path: payload.role
+      value: executor
+    - path: payload.occasion
+      value: revoked
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.role
+  valid_drafts:
+  - name: ConnectionRolesRefused.refused_by_the_vault
+    clause: '§9.33: a role the vault refused'
+    base_draft: connection_roles_refused
+    changes:
+    - path: payload.reason
+      value: role_refused
+    expect:
+      outcome: Valid
+  - name: ConnectionRolesRemoved.exchange_on_revoke
+    clause: '§9.33: the exchange''s role, on a revocation'
+    base_draft: connection_roles_removed
+    changes:
+    - path: payload.occasion
+      value: revoked
+    expect:
+      outcome: Valid
+  - name: ConnectionRolesMade.in_live
+    clause: '§9.33: either environment'
+    base_draft: connection_roles_made
+    changes:
+    - path: environment
+      value: live
+    expect:
+      outcome: Valid
+  streams:
+  - name: made
+    clause: 'rule 262: after its OAuth request'
+    records:
+    - &id162
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS000000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRequested
+      schema_version: 2
+      event_time: '2026-10-19T15:30:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+        account_ref: 01J8Z2ACCT00000000000000A1
+        broker: alpaca
+        environment: paper
+        user: user_owner_01
+        step_up:
+          assertion_id: assert_owner_09
+          authenticated_at: '2026-09-22T12:59:50.000000000Z'
+          method: cli_confirm
+        credential: oauth
+        breadth:
+          other_environment: may_reach
+          disclosure:
+            document: alpaca_oauth_token_breadth
+            version: '1'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS010000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRolesMade
+      schema_version: 1
+      event_time: '2026-10-22T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z4CS000000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Valid
+  - name: refused
+    clause: 'rule 262: a refusal after its OAuth request'
+    records:
+    - *id162
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS010000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRolesRefused
+      schema_version: 1
+      event_time: '2026-10-22T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z4CS000000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+        reason: vault_unavailable
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Valid
+  - name: made_without_a_request
+    clause: 'rule 262: names a request'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS000000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRolesMade
+      schema_version: 1
+      event_time: '2026-10-22T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z4CS000000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      rule: rule 262
+      index: 0
+  - name: made_for_an_api_key_connect
+    clause: 'rule 262: an OAuth request alone'
+    records:
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS000000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRequested
+      schema_version: 2
+      event_time: '2026-10-19T15:30:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+        account_ref: 01J8Z2ACCT00000000000000A1
+        broker: alpaca
+        environment: paper
+        user: user_owner_01
+        step_up:
+          assertion_id: assert_owner_09
+          authenticated_at: '2026-09-22T12:59:50.000000000Z'
+          method: cli_confirm
+        credential: api_key
+        breadth: null
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS010000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRolesMade
+      schema_version: 1
+      event_time: '2026-10-22T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z4CS000000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      rule: rule 262
+      index: 1
+  - name: made_for_another_connection
+    clause: 'rule 262: of the same connection'
+    records:
+    - *id162
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS010000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRolesMade
+      schema_version: 1
+      event_time: '2026-10-22T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z4CS000000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper_2
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      rule: rule 262
+      index: 1
+  - name: made_twice
+    clause: 'rule 262: at most one per request'
+    records:
+    - *id162
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS010000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRolesMade
+      schema_version: 1
+      event_time: '2026-10-22T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z4CS000000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS020000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRolesMade
+      schema_version: 1
+      event_time: '2026-10-22T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z4CS000000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      rule: rule 262
+      index: 2
+  - name: made_then_refused
+    clause: 'rule 262: at most one of either per request'
+    records:
+    - *id162
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS010000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRolesMade
+      schema_version: 1
+      event_time: '2026-10-22T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z4CS000000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS020000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRolesRefused
+      schema_version: 1
+      event_time: '2026-10-22T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z4CS000000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+        reason: vault_unavailable
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      rule: rule 262
+      index: 2
+  - name: two_requests
+    clause: 'rule 262: one per request, each its own'
+    records:
+    - *id162
+    - &id166
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS010000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRequested
+      schema_version: 2
+      event_time: '2026-10-19T15:30:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper_2
+        account_ref: 01J8Z2ACCT00000000000000B7
+        broker: alpaca
+        environment: paper
+        user: user_owner_01
+        step_up:
+          assertion_id: assert_owner_09
+          authenticated_at: '2026-09-22T12:59:50.000000000Z'
+          method: cli_confirm
+        credential: oauth
+        breadth:
+          other_environment: may_reach
+          disclosure:
+            document: alpaca_oauth_token_breadth
+            version: '1'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS020000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRolesMade
+      schema_version: 1
+      event_time: '2026-10-22T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z4CS000000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS030000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRolesMade
+      schema_version: 1
+      event_time: '2026-10-22T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z4CS010000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper_2
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Valid
+  - name: removed_on_close
+    clause: 'rule 263: the exchange''s role once the request closed'
+    records:
+    - *id162
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS010000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRolesMade
+      schema_version: 1
+      event_time: '2026-10-22T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z4CS000000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+      artifact_refs: []
+      pii_refs: []
+    - &id163
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS020000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRefused
+      schema_version: 1
+      event_time: '2026-09-22T13:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+        broker: alpaca
+        environment: paper
+        occasion: connect
+        check: scope
+        reason: fund_movement
+        existing_connection_id: null
+        user: user_owner_01
+        step_up:
+          assertion_id: assert_owner_09
+          authenticated_at: '2026-09-22T12:59:50.000000000Z'
+          method: cli_confirm
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS030000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRolesRemoved
+      schema_version: 1
+      event_time: '2026-10-22T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z4CS020000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+        role: token_exchange
+        occasion: request_closed
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Valid
+  - name: removed_never_made
+    clause: 'rule 263: after its roles were made'
+    records:
+    - *id162
+    - *id163
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS030000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRolesRemoved
+      schema_version: 1
+      event_time: '2026-10-22T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z4CS020000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+        role: token_exchange
+        occasion: request_closed
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      rule: rule 263
+      index: 2
+  - name: removed_twice
+    clause: 'rule 263: at most once after its roles were made'
+    records:
+    - *id162
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS010000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRolesMade
+      schema_version: 1
+      event_time: '2026-10-22T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z4CS000000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+      artifact_refs: []
+      pii_refs: []
+    - *id163
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS030000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRolesRemoved
+      schema_version: 1
+      event_time: '2026-10-22T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z4CS020000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+        role: token_exchange
+        occasion: request_closed
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS040000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRolesRemoved
+      schema_version: 1
+      event_time: '2026-10-22T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z4CS020000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+        role: token_exchange
+        occasion: request_closed
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      rule: rule 263
+      index: 4
+  - name: removed_on_close_while_open
+    clause: 'rule 263: a closed request''s'
+    records:
+    - *id162
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS010000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRolesMade
+      schema_version: 1
+      event_time: '2026-10-22T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z4CS000000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS020000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRolesRemoved
+      schema_version: 1
+      event_time: '2026-10-22T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z4CS020000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+        role: token_exchange
+        occasion: request_closed
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      rule: rule 263
+      index: 2
+  - name: removed_on_revoke_before_it
+    clause: 'rule 263: a revoked connection''s'
+    records:
+    - *id162
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS010000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRolesMade
+      schema_version: 1
+      event_time: '2026-10-22T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z4CS000000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS020000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRolesRemoved
+      schema_version: 1
+      event_time: '2026-10-22T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z4CS030000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+        role: token_exchange
+        occasion: revoked
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      rule: rule 263
+      index: 2
+  - name: revoked_exchange_at_once
+    clause: 'rule 263: the exchange''s role at once on a revocation, its executor still running'
+    records:
+    - *id162
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS010000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRolesMade
+      schema_version: 1
+      event_time: '2026-10-22T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z4CS000000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS020000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ProcessStartIssued
+      schema_version: 1
+      event_time: '2026-10-22T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        process: executor
+        subject: 01J8Z2ACCT00000000000000A1
+        generation: 1
+        cause: deployed
+      artifact_refs: []
+      pii_refs: []
+    - &id164
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS030000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRevoked
+      schema_version: 1
+      event_time: '2026-09-22T13:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z4C4A000000000000000C4
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS040000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRolesRemoved
+      schema_version: 1
+      event_time: '2026-10-22T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z4CS030000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+        role: token_exchange
+        occasion: revoked
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Valid
+  - name: removed_by_an_earlier_requests_refusal
+    clause: 'rule 263: names the closer of the request its roles were made for'
+    records:
+    - *id162
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS010000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRolesMade
+      schema_version: 1
+      event_time: '2026-10-22T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z4CS000000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+      artifact_refs: []
+      pii_refs: []
+    - *id163
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS030000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRolesRemoved
+      schema_version: 1
+      event_time: '2026-10-22T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z4CS020000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+        role: token_exchange
+        occasion: request_closed
+      artifact_refs: []
+      pii_refs: []
+    - &id165
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS090000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRequested
+      schema_version: 2
+      event_time: '2026-10-19T15:30:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+        account_ref: 01J8Z2ACCT00000000000000A1
+        broker: alpaca
+        environment: paper
+        user: user_owner_01
+        step_up:
+          assertion_id: assert_owner_09
+          authenticated_at: '2026-09-22T12:59:50.000000000Z'
+          method: cli_confirm
+        credential: oauth
+        breadth:
+          other_environment: may_reach
+          disclosure:
+            document: alpaca_oauth_token_breadth
+            version: '1'
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS050000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRolesMade
+      schema_version: 1
+      event_time: '2026-10-22T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z4CS090000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS060000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRolesRemoved
+      schema_version: 1
+      event_time: '2026-10-22T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z4CS020000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+        role: token_exchange
+        occasion: request_closed
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      rule: rule 263
+      index: 6
+  - name: removed_by_a_revocation_before_its_roles
+    clause: 'rule 263: names the closer of the request its roles were made for'
+    records:
+    - *id162
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS010000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRolesMade
+      schema_version: 1
+      event_time: '2026-10-22T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z4CS000000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+      artifact_refs: []
+      pii_refs: []
+    - *id164
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS040000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRolesRemoved
+      schema_version: 1
+      event_time: '2026-10-22T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z4CS030000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+        role: token_exchange
+        occasion: revoked
+      artifact_refs: []
+      pii_refs: []
+    - *id165
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS050000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRolesMade
+      schema_version: 1
+      event_time: '2026-10-22T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z4CS090000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS060000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRolesRemoved
+      schema_version: 1
+      event_time: '2026-10-22T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z4CS030000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+        role: token_exchange
+        occasion: revoked
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      rule: rule 263
+      index: 6
+  - name: removed_by_another_connections_refusal
+    clause: 'rule 263: names its own connection''s closer'
+    records:
+    - *id162
+    - *id166
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS020000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRolesMade
+      schema_version: 1
+      event_time: '2026-10-22T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z4CS000000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS030000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRefused
+      schema_version: 1
+      event_time: '2026-09-22T13:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper_2
+        broker: alpaca
+        environment: paper
+        occasion: connect
+        check: scope
+        reason: fund_movement
+        existing_connection_id: null
+        user: user_owner_01
+        step_up:
+          assertion_id: assert_owner_09
+          authenticated_at: '2026-09-22T12:59:50.000000000Z'
+          method: cli_confirm
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS040000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRolesRemoved
+      schema_version: 1
+      event_time: '2026-10-22T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z4CS030000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper_2
+        role: token_exchange
+        occasion: request_closed
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      rule: rule 263
+      index: 4
+  - name: removed_after_a_second_request_closed
+    clause: 'rule 263: once per made roles, the second request''s own'
+    records:
+    - *id162
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS010000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRolesMade
+      schema_version: 1
+      event_time: '2026-10-22T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z4CS000000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+      artifact_refs: []
+      pii_refs: []
+    - *id163
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS030000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRolesRemoved
+      schema_version: 1
+      event_time: '2026-10-22T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z4CS020000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+        role: token_exchange
+        occasion: request_closed
+      artifact_refs: []
+      pii_refs: []
+    - *id165
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS050000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRolesMade
+      schema_version: 1
+      event_time: '2026-10-22T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z4CS090000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS070000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRefused
+      schema_version: 1
+      event_time: '2026-09-22T13:00:00.000000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+        broker: alpaca
+        environment: paper
+        occasion: connect
+        check: scope
+        reason: fund_movement
+        existing_connection_id: null
+        user: user_owner_01
+        step_up:
+          assertion_id: assert_owner_09
+          authenticated_at: '2026-09-22T12:59:50.000000000Z'
+          method: cli_confirm
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS080000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRolesRemoved
+      schema_version: 1
+      event_time: '2026-10-22T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z4CS070000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+        role: token_exchange
+        occasion: request_closed
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Valid
+  - name: removed_twice_on_revoke
+    clause: 'rule 263: at most once after its roles were made'
+    records:
+    - *id162
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS010000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRolesMade
+      schema_version: 1
+      event_time: '2026-10-22T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z4CS000000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+      artifact_refs: []
+      pii_refs: []
+    - *id164
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS040000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRolesRemoved
+      schema_version: 1
+      event_time: '2026-10-22T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z4CS030000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+        role: token_exchange
+        occasion: revoked
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS050000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRolesRemoved
+      schema_version: 1
+      event_time: '2026-10-22T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z4CS030000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+        role: token_exchange
+        occasion: revoked
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Invalid
+      rule: rule 263
+      index: 4

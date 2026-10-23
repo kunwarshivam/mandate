@@ -2,8 +2,10 @@
 //! marked `#[ignore = "pending <story>"]` fails at that story's stub until the story's code lands.
 
 mod form;
+mod process;
 mod response;
 mod run;
+mod vault;
 
 #[cfg(debug_assertions)]
 mod cell;

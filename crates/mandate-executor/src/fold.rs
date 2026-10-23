@@ -17,13 +17,14 @@ use crate::payload::{
 };
 use crate::protection::climbs;
 use crate::state::{
-    Adoption, Confirmed, ExecutorState, ExitSequence, IntentOutcome, IntentRecord, Ladder,
-    LoneLadder, ObservedAccount, OrderDetail, PendingRequest, PriorBase, Replacement, Switch,
+    AccountSwitch, Adoption, Confirmed, EVERY_AGENT, ExecutorState, ExitSequence, IntentOutcome,
+    IntentRecord, Ladder, LoneLadder, ObservedAccount, OrderDetail, PendingRequest, PriorBase,
+    Replacement, Switch,
 };
 use crate::types::{
-    AccountState, ActivityCursor, AgentId, BracketLegs, EventId, FillId, FoldedEvent, IntentBody,
-    Mode, OcoLegs, Order, OrderState, OrderType, Protection, ProtectionPrices, Purpose, RiskClock,
-    Seq, SubmitOrder, TimeInForce, UnprotectedInterval,
+    AccountRef, AccountState, ActivityCursor, AgentId, BracketLegs, EventId, FillId, FoldedEvent,
+    IntentBody, Mode, OcoLegs, Order, OrderState, OrderType, Protection, ProtectionPrices, Purpose,
+    RiskClock, Seq, SubmitOrder, TimeInForce, UnprotectedInterval,
 };
 
 /// The copied cross-stream facts of journal spec §2 this crate interprets. Each carries a
@@ -132,6 +133,7 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
             Ok(())
         }
         "OwnerAcknowledged" => owner_acknowledged(state, payload),
+        "PositionReleased" => position_released(state, payload),
         "ReconciliationRun" => {
             state.reconciled_through = Some(event.seq);
             if let Some(cursor) = optional_text(payload, "checkpoint") {
@@ -141,7 +143,8 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
         }
         "OrderAbandoned" => order_abandoned(state, payload),
         "AgentModeApplied" => agent_mode_applied(state, payload),
-        "KillSwitchActivated" => kill_switch_activated(state, event),
+        "KillSwitchActivated" => kill_switch_activated(state, event, at),
+        "AccountCloseRequested" => account_close_requested(state, event),
         "OwnerConfirmationReceived" => owner_confirmation_received(state, payload),
         "ClockAdvanced" | "MarkUpdated" | "ConductBreachDetected" => Ok(()),
         "TradingDayStarted" => {
@@ -258,13 +261,14 @@ fn owner_elsewhere(kind: &str) -> Option<&'static str> {
         | "ConductBreachDetected"
         | "KillSwitchActivated"
         | "OwnerConfirmationReceived"
-        | "ConnectionChecked" => None,
+        | "AccountCloseRequested"
+        | "ConnectionChecked"
+        | "PositionReleased" => None,
         "RelatedAccountsCoordination" => Some("E7-5"),
         "MandateVersionApplied"
         | "RiskLimitTriggered"
         | "RiskLimitLifted"
         | "HighWaterMarkReset"
-        | "PositionReleased"
         | "InstrumentRestrictionChanged"
         | "GoalCompleted" => Some("E6-4"),
         "UniverseChanged" => Some("E17-3"),
@@ -324,6 +328,19 @@ fn risk_clock(state: &ExecutorState, event: &FoldedEvent) -> Result<RiskClock, E
 /// The instrument a payload names, either spelling the account stream has written: the closed
 /// form's `instrument_id` (§9.5) beside the legacy `instrument` the golden journal carries
 /// (DEC-446 item 7: the fold's legacy reads stay).
+/// An agent's position, or part of it, became the owner's (journal spec §9.27, mandate spec §3.1,
+/// DEC-2354): the quantity leaves the agent's lots, so its kill switch never sells it.
+fn position_released(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
+    let agent = AgentId(required_text(payload, "agent_id")?.to_owned());
+    let released = qty(payload, "qty")?;
+    let total = state
+        .released
+        .entry((agent, instrument(payload)?))
+        .or_insert(Qty::ZERO);
+    *total = total.checked_add(released)?;
+    Ok(())
+}
+
 fn instrument(payload: &Value) -> Result<InstrumentId, ExecutorError> {
     let name = optional_text(payload, "instrument_id")
         .or_else(|| optional_text(payload, "instrument"))
@@ -425,9 +442,11 @@ fn owner_confirmation_received(
 fn kill_switch_activated(
     state: &mut ExecutorState,
     event: &FoldedEvent,
+    at: RiskClock,
 ) -> Result<(), ExecutorError> {
     let payload = &event.payload;
-    if optional_text(payload, "scope") != Some("agent") {
+    let scope = optional_text(payload, "scope");
+    if !matches!(scope, Some("agent" | "account")) {
         return Err(ExecutorError::Unimplemented { story: "E7-4" });
     }
     let named = |field: &str| -> Result<Vec<InstrumentId>, ExecutorError> {
@@ -445,6 +464,19 @@ fn kill_switch_activated(
     };
     let mut instruments = named("closes")?;
     instruments.extend(named("deferred")?);
+    if scope == Some("account") {
+        state.closing_all.extend(instruments);
+        state.account_switch = Some(AccountSwitch {
+            event: event.event_id.clone(),
+            seq: event.seq,
+            reference: AccountRef(required_text(payload, "subject")?.to_owned()),
+            at,
+            requests: BTreeMap::new(),
+        });
+        state.switch_read = None;
+        state.cancel_all_answered = false;
+        return Ok(());
+    }
     let cancels = match payload.get("cancels") {
         Some(Value::Array(items)) => items
             .iter()
@@ -872,6 +904,9 @@ fn order_state_changed(
             client_order_id: id.as_str().to_owned(),
         })?;
     let detail = state.details.entry(id.clone()).or_default();
+    if let Some(broker) = optional_text(payload, "broker_order_id") {
+        detail.broker_ids.insert(broker.to_owned());
+    }
     if let Some(reported) = optional_qty(payload, "filled_qty")? {
         detail.reported_filled = detail.reported_filled.max(Some(reported));
     }
@@ -1096,6 +1131,27 @@ fn net_unattributed(
     Ok(())
 }
 
+/// One close-position request of the account switch (journal spec §9.5, DEC-2337): the latest
+/// attempt of its instrument and where it was journaled, so a replay never sends it again and a
+/// re-request waits for a read taken after it. A request naming another switch changes nothing.
+fn account_close_requested(
+    state: &mut ExecutorState,
+    event: &FoldedEvent,
+) -> Result<(), ExecutorError> {
+    let payload = &event.payload;
+    let instrument = instrument(payload)?;
+    let attempt = optional_int(payload, "attempt").ok_or_else(|| refused("attempt"))?;
+    let named = required_text(payload, "kill_switch_event")?;
+    if let Some(switch) = state
+        .account_switch
+        .as_mut()
+        .filter(|switch| switch.event.0 == named)
+    {
+        switch.requests.insert(instrument, (attempt, event.seq));
+    }
+    Ok(())
+}
+
 /// One restriction on one agent (or on every agent, as `*`). A mode is the strictest of an
 /// agent's active restrictions, and `normal` lifts the restriction it names (mandate spec §5.9).
 /// Lifting the `kill_switch` restriction also lifts whatever closes the agent's kill switches had
@@ -1112,6 +1168,11 @@ fn agent_mode_applied(state: &mut ExecutorState, payload: &Value) -> Result<(), 
             if switch.agent == agent && restriction == "kill_switch" {
                 switch.pending.clear();
             }
+        }
+        if agent.0 == EVERY_AGENT && restriction == "kill_switch" {
+            state.closing_all.clear();
+            state.account_switch = None;
+            state.switch_read = None;
         }
         state.restrictions.remove(&(agent.clone(), restriction));
     } else {

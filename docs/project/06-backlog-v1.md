@@ -1785,6 +1785,15 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   retried until it succeeds or the entry is absent; and tests show a code written between the
   callback's open-request check and its vault write, and a token an exchange wrote after the
   close, both gone once the close is journaled.
+- **E10-22 (Must, M8, with or after lane D1's K1; before the founder's staging connect; SC)** As
+  the owner, I want the real token-exchange pod proven against the cell's fixture provider and the
+  cell's vault, so that the first exchange on staging is not the first time the pod, its vault
+  login and its token write run together ([DEC-2330](decisions/DEC-2330.md) item 5). *Accepted
+  when:* a cell drill starts the exchange pod the deployment manager starts, with its pinned
+  `run --vault-address <address> --vault-dir <dir>`, its projected ServiceAccount token and the
+  cell vault's CA, against `oauth-fixture` with a code entry the API wrote; the pod exits 0, the
+  code is taken, and the connection's token entry, format 1, is in the vault; the drill runs in the
+  cell jobs, plain and seeded; and the founder's staging connect waits on it.
 
 ### E11 Web app: dashboard and controls
 
@@ -3042,6 +3051,21 @@ enables `live` (ES-23, OPS-5).
     pass while its request has time left, making and deleting its account each time; a retry
     bound or backoff is left. Open until R1 lands: DEC-2332 items 4 to 6 (the environment pin, the
     vault CA, the exchange's launch).
+  - **The role provisioner** ([DEC-2350](decisions/DEC-2350.md), DEC-2630 item 7; journal spec v0.77
+    §9.33). Nothing makes a connection's Kubernetes-auth roles today, so every exchange's and every
+    managed executor's login is refused. Spec first (this row's first PR), then: the vault side with
+    lane V2 (the provisioner identity and AppRole, `delete` on the token exchange's mount alone in `provisioner_policy`, making and
+    removing a connection's roles); the journal crate's three records (the `connection_roles`
+    vectors, pending until then); the `provisioner` process; its chart, with vault-only egress to
+    lane GO's pattern; and the manager's wait for `ConnectionRolesMade` before an exchange starts.
+    *Accepted when:* a property test over requests, closes, revocations, executor starts and stops,
+    crashes and vault refusals shows every record the provisioner journals keeps rules 262 and 263,
+    against an oracle rebuilt from the stream, with no executor's role ever removed, a revocation
+    right after a kill switch among them; and the manager starts no exchange before its
+    `ConnectionRolesMade`. Left: a sweep of the executor's roles the provisioner never removes, one
+    per connection whose request closed without an establishment or that was revoked, once no
+    executor of its account runs; the manager does not journal a held generation's own exit
+    (DEC-2344), so the sweep needs a signal it does not have yet.
 - **E21-34 (Proposed, M8; SC; lane O4)** As an owner, I want the kill switch reachable in the cell
   with nothing running but Postgres, the executor and the broker, so that rule 13 holds when the
   web app, the API and the cell's tooling are down (design §3.6, OPS-4). *Accepted when:*
@@ -4232,6 +4256,55 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   after `max_unprotected_s` ended its sell; register the executor's own intent ids (`w-<record>`, `k-<switch>-<n>`)
   in journal spec §9.5's `IntentReceived`; and, with the account scope, add `KillSwitchActivated` to
   `properties::every_catalogue_event_is_interpreted_or_named`'s `INTERPRETED`.
+- **E7-4 (journal), from [DEC-2337](decisions/DEC-2337.md) item 5:** close the account stream's
+  `KillSwitchActivated` in journal spec §9.5, then add a stream rule that an `AccountCloseRequested`'s
+  `kill_switch_event` names an earlier account-scope `KillSwitchActivated` of the stream whose
+  `closes` or `deferred` lists its `instrument_id`. Until then, the executor's fold guarantees it.
+- **E7-4 (executor process), from [DEC-2343](decisions/DEC-2343.md) Alternatives option (1), for
+  the founder:** whether the executor reads every connection- and workspace-scope kill switch from
+  the control stream itself, independent of the runtime (`AGENTS.md` rule 13), at the cost of the
+  owner's confirmed bid on those switches. Until the founder decides, it reads one only for an agent
+  whose connection is revoked at or after it.
+- **E7-4 (executor process), from the review of [DEC-2343](decisions/DEC-2343.md), a follow-on
+  tightening:** an opening an agent proposed while deployed on another account is handed here once
+  the agent is deployed back on this account, unless the core abandons it as too old. Hold any
+  proposal older than the agent's latest deployment on this account; the agent stream's rows have
+  no order against the control stream's, so how to tell "older" (event time, or a deployment
+  marker the runtime writes on the agent stream) is the follow-on's to decide.
+- **E7-4 (deployment manager and executor), from [DEC-2343](decisions/DEC-2343.md) Not covered
+  here:** lane D1's [DEC-2344](decisions/DEC-2344.md) starts the executor for a kill switch that
+  covers only stopped agents, and the executor exits 0 once no agent it follows is desired and every
+  covering switch it read is applied, with nothing in flight and no `Unknown` order in scope. The
+  executor's half, a tighter exit, is [DEC-2347](decisions/DEC-2347.md)'s.
+- **E7-4 (executor process), from [DEC-2347](decisions/DEC-2347.md) item 6, with DEC-2333's slice
+  A2b:** the exit's `owes_nothing` reads agent-scoped work only; once the account-scope switch
+  lands, an account switch still closing (`closing_all`) keeps the executor running too, with a
+  test.
+- **E7-4 (kill switch sizing), from [DEC-2347](decisions/DEC-2347.md) item 9, rule 13:** a buy
+  the broker reports filled whose fill named no order (Alpaca's fill activity names only the
+  broker's order id, so the reconciliation applies it unattributed) leaves nothing in `kill.rs`'s
+  `sub_ledger`, so the agent's kill switch sells none of those shares. Attribute such a fill to the
+  order through the broker's order id (DEC-955 item 3), with a test that the switch then sells the
+  agent's whole position.
+- **E6-4 (executor fold), from [DEC-2347](decisions/DEC-2347.md) item 8:** when the executor's fold
+  interprets `PositionReleased`, the released quantity leaves the agent's sub-ledger (`kill.rs`'s
+  `sub_ledger`, read by the kill switch and by `ExecutorState::holds_lots`), so the switch sells
+  none of the owner's shares and the exit's item 3.6 no longer waits on them. Tests: released lots
+  let the executor exit `completed`; unreleased lots still hold it. The first two are
+  `mandate-executord/tests/released.rs`, pending E6-4 (a release alone, and a connection's kill
+  switch after it). Until this lands, an account stream holding a `PositionReleased` cannot be
+  folded by its executor, so a kill switch on that account cannot be applied by the executor
+  (`AGENTS.md` rule 13), and the only signal is the manager's `kill_switch_unapplied`
+  ([DEC-2344](decisions/DEC-2344.md) item 1): rank this staging-relevant if a release can happen on
+  staging. Done by [DEC-2354](decisions/DEC-2354.md)'s pair, for `PositionReleased`; §9.27's other records stay E6-4's.
+- **E6-4 (executor kill switch), from the review of [DEC-2354](decisions/DEC-2354.md):** a release
+  written after an agent's kill switch has sized its flatten sells does not shrink them, so the
+  switch can still offer the released shares. Re-size an agent flatten sell not yet sent against
+  the sub-ledger at send time, or cancel the part a later release takes.
+- **E7-4 A1c (stream K), from [DEC-2333](decisions/DEC-2333.md) item 3:** at §5.4's bound, re-place
+  protection in an instrument the account kill switch closes for the held quantity less every sell
+  not confirmed cancelled, placing nothing where that leaves none, with its own DEC-77 pair. Until
+  then the bound journals `interval_limit` and alerts, and places nothing there.
 - **E7-4 slices 5 and 6's tests correction (stream K), from #286 round 1 (minor 2):**
   `properties::no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding` counts a cancel as
   outstanding until the order is terminal, abandoned or its protection cancelled, so it would fail on
