@@ -3871,6 +3871,7 @@ def render(
     research_section: dict,
     account_section: dict,
     shape_section: dict,
+    fraction_section: dict,
     approval_section: dict,
     timeout_section: dict,
     requests_section: dict,
@@ -3917,6 +3918,7 @@ def render(
             "research": research_section,
             "account_stream": account_section,
             "protection_shapes": shape_section,
+            "protection_fraction": fraction_section,
             "approval_answers": approval_section,
             "approval_timeouts": timeout_section,
             "approval_requests": requests_section,
@@ -3994,6 +3996,7 @@ def main(argv: list[str] | None = None) -> int:
     research_section = research.build_section()
     account_section = account.build_section(v3["genesis_prev_hash"])
     shape_section = account.build_shape_section()
+    fraction_section = account.build_fraction_section()
     approval_section = approval.build_section()
     timeout_section = timeouts.build_section()
     requests_section = requests.build_section()
@@ -4045,6 +4048,8 @@ def main(argv: list[str] | None = None) -> int:
     problems += account.run_mutants(account_section)
     problems += account.check_shape_section(shape_section)
     problems += account.run_shape_mutants(shape_section)
+    problems += account.check_fraction_section(fraction_section)
+    problems += account.run_fraction_mutants(fraction_section)
     problems += approval.check_section(approval_section)
     problems += approval.run_mutants(approval_section)
     problems += timeouts.check_section(timeout_section)
@@ -4128,6 +4133,7 @@ def main(argv: list[str] | None = None) -> int:
         research_section,
         account_section,
         shape_section,
+        fraction_section,
         approval_section,
         timeout_section,
         requests_section,
@@ -4179,6 +4185,7 @@ def main(argv: list[str] | None = None) -> int:
         or research.check_section(reread["research"])
         or account.check_section(reread["account_stream"])
         or account.check_shape_section(reread["protection_shapes"])
+        or account.check_fraction_section(reread["protection_fraction"])
         or approval.check_section(reread["approval_answers"])
         or timeouts.check_section(reread["approval_timeouts"])
         or canceled.check_section(reread["approval_cancellations"])
@@ -4253,6 +4260,9 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(shape_section['invalid_drafts'])} invalid and {len(shape_section['valid_drafts'])} valid protection-shape drafts; "
         f"{len(account.SHAPE_VALIDATOR_MUTANTS)} validator, {len(account.SHAPE_TIGHTEN_MUTANTS)} tightening, and "
         f"{len(account.SHAPE_VECTOR_MUTANTS)} vector mutants caught; "
+        f"{len(fraction_section['invalid_drafts'])} invalid and {len(fraction_section['valid_drafts'])} valid "
+        f"protection-fraction drafts; {len(account.FRACTION_VALIDATOR_MUTANTS)} validator, "
+        f"{len(account.FRACTION_TIGHTEN_MUTANTS)} tightening, and {len(account.FRACTION_VECTOR_MUTANTS)} vector mutants caught; "
         f"{len(approval_section['drafts'])} approval-answer drafts, {len(approval_section['invalid_drafts'])} invalid and "
         f"{len(approval_section['valid_drafts'])} valid; {len(approval.VALIDATOR_MUTANTS)} validator and "
         f"{len(approval.vector_mutants(approval_section))} vector mutants caught; "
