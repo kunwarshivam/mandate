@@ -20,6 +20,8 @@ pub enum ConnectError {
     RedirectUriInvalid,
     #[error("the vault's token entry is not in its format")]
     TokenEntryInvalid,
+    #[error("the vault's code entry is not in its format")]
+    CodeEntryInvalid,
     #[error("the personal-data vault's account entry is not in its format")]
     AccountEntryInvalid,
     #[error("the request may not leave the process")]
@@ -72,6 +74,7 @@ impl ConnectError {
             Self::StateReused => "state_reused",
             Self::RedirectUriInvalid => "redirect_uri_invalid",
             Self::TokenEntryInvalid => "token_entry_invalid",
+            Self::CodeEntryInvalid => "code_entry_invalid",
             Self::AccountEntryInvalid => "account_entry_invalid",
             Self::RequestRefused => "request_refused",
             Self::ScopeMismatch => "scope_mismatch",
