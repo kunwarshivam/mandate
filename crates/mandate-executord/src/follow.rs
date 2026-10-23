@@ -77,6 +77,10 @@ pub struct Following {
     /// Whether the account's connection is closed (DEC-2347 item 3.2): a connect or a connection
     /// was journaled for it, no connect is open, and none of its connections is live.
     closed: bool,
+    /// Whether a connection record on the control stream did not read (DEC-2357): every agent with a
+    /// version-2 deployment is followed, with its openings held, every kill-switch command covering
+    /// it is applied directly, and the executor is never released, while exits go on.
+    unsure: bool,
 }
 
 /// An `OwnerCommandIssued` `kill_switch` the executor may read itself (DEC-2343 item 3): its
@@ -96,9 +100,13 @@ struct KillCommand {
 /// Reads [`Following`] from the control stream. `control` must hold the stream's rows in `seq`
 /// order: which deployments a kill-switch command covers is the deployments read before it.
 ///
+/// A connection record that does not read is ambiguity, never a stop (DEC-2357, `AGENTS.md` rules 3
+/// and 13): it is set aside, every followed agent's openings are held, and the executor is never
+/// released, while its exits and kill switches go on.
+///
 /// # Errors
-/// [`Unreadable`] for a deployment, connection, or kill-switch command record whose members do not
-/// read: an agent the account may owe a kill switch is never dropped for it (DEC-85).
+/// [`Unreadable`] for a deployment or kill-switch command record whose members do not read: an
+/// agent the account may owe a kill switch is never dropped for it (DEC-85).
 pub fn agents_of(
     control: &[StoredEvent],
     scope: &AccountScope,
@@ -113,6 +121,7 @@ pub fn agents_of(
     let mut requested: Option<String> = None;
     let mut connects: Vec<Option<String>> = Vec::new();
     let mut exchanged = false;
+    let mut unsure = false;
     for row in control
         .iter()
         .filter(|row| row.environment == environment.as_str())
@@ -130,96 +139,111 @@ pub fn agents_of(
         ) {
             continue;
         }
-        let event = folded(row)?;
-        let text = |member: &str| {
-            event
-                .payload
-                .get(member)
-                .and_then(Value::as_str)
-                .map(str::to_owned)
-                .ok_or(Unreadable)
+        let connection_record = matches!(
+            row.event_type.as_str(),
+            "ConnectionEstablished"
+                | "ConnectionRevoked"
+                | "ConnectionRequested"
+                | "ConnectionRefused"
+                | "ProcessStartIssued"
+        );
+        let mut read = || -> Result<(), Unreadable> {
+            let event = folded(row)?;
+            let text = |member: &str| {
+                event
+                    .payload
+                    .get(member)
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+                    .ok_or(Unreadable)
+            };
+            match (row.event_type.as_str(), row.schema_version) {
+                ("ConnectionEstablished", 2) => {
+                    let mine = text("account_ref")? == scope.account.0
+                        && text("environment")? == environment.as_str();
+                    let connection = text("connection_id")?;
+                    if mine {
+                        ours.insert(connection.clone());
+                    }
+                    live.insert(connection, mine);
+                }
+                ("ConnectionEstablished", _) => {
+                    live.insert(text("connection_id")?, false);
+                }
+                ("ConnectionRequested", _) => {
+                    if text("account_ref")? == scope.account.0 {
+                        requested = Some(text("connection_id")?);
+                    }
+                }
+                ("ProcessStartIssued", _) => {
+                    if text("process")? == "executor"
+                        && text("subject")? == scope.account.0
+                        && text("cause")? == "exchanged"
+                    {
+                        exchanged = true;
+                        connects.push(requested.clone());
+                    }
+                }
+                ("ConnectionRefused", _) => {
+                    if text("occasion")? == "connect" {
+                        let connection = Some(text("connection_id")?);
+                        connects.retain(|open| open != &connection);
+                    }
+                }
+                ("ConnectionRevoked", _) => {
+                    let connection = text("connection_id")?;
+                    connects.retain(|open| open.as_ref() != Some(&connection));
+                    revocations
+                        .entry(connection.clone())
+                        .or_default()
+                        .push(row.seq);
+                    live.insert(connection, false);
+                }
+                ("AgentDeployed", 2) => {
+                    deployed.entry(text("agent_id")?).or_default().push((
+                        row.seq,
+                        text("connection_id")?,
+                        text("mandate_version")?,
+                    ));
+                }
+                ("OwnerCommandIssued", _) => {
+                    if text("command")? != "kill_switch" {
+                        return Ok(());
+                    }
+                    let (connection, agent) = match text("scope")?.as_str() {
+                        "connection" => (Some(text("subject")?), None),
+                        "workspace" if text("subject")? == scope.workspace.0 => (None, None),
+                        "agent" => (None, Some(AgentId(text("subject")?))),
+                        _ => return Ok(()),
+                    };
+                    let before = deployed
+                        .iter()
+                        .flat_map(|(agent, deployments)| {
+                            deployments
+                                .iter()
+                                .map(move |(_, connection, _)| (agent.clone(), connection.clone()))
+                        })
+                        .collect();
+                    commands.push(KillCommand {
+                        id: event.event_id.clone(),
+                        seq: row.seq,
+                        connection,
+                        before,
+                        agent,
+                    });
+                }
+                ("AgentStopped", _) => {
+                    stopped.insert(AgentId(text("agent_id")?));
+                }
+                _ => {
+                    text("agent_id")?;
+                }
+            }
+            Ok(())
         };
-        match (row.event_type.as_str(), row.schema_version) {
-            ("ConnectionEstablished", 2) => {
-                let mine = text("account_ref")? == scope.account.0
-                    && text("environment")? == environment.as_str();
-                let connection = text("connection_id")?;
-                if mine {
-                    ours.insert(connection.clone());
-                }
-                live.insert(connection, mine);
-            }
-            ("ConnectionEstablished", _) => {
-                live.insert(text("connection_id")?, false);
-            }
-            ("ConnectionRequested", _) => {
-                if text("account_ref")? == scope.account.0 {
-                    requested = Some(text("connection_id")?);
-                }
-            }
-            ("ProcessStartIssued", _) => {
-                if text("process")? == "executor"
-                    && text("subject")? == scope.account.0
-                    && text("cause")? == "exchanged"
-                {
-                    exchanged = true;
-                    connects.push(requested.clone());
-                }
-            }
-            ("ConnectionRefused", _) => {
-                if text("occasion")? == "connect" {
-                    let connection = Some(text("connection_id")?);
-                    connects.retain(|open| open != &connection);
-                }
-            }
-            ("ConnectionRevoked", _) => {
-                let connection = text("connection_id")?;
-                connects.retain(|open| open.as_ref() != Some(&connection));
-                revocations
-                    .entry(connection.clone())
-                    .or_default()
-                    .push(row.seq);
-                live.insert(connection, false);
-            }
-            ("AgentDeployed", 2) => {
-                deployed.entry(text("agent_id")?).or_default().push((
-                    row.seq,
-                    text("connection_id")?,
-                    text("mandate_version")?,
-                ));
-            }
-            ("OwnerCommandIssued", _) => {
-                if text("command")? != "kill_switch" {
-                    continue;
-                }
-                let (connection, agent) = match text("scope")?.as_str() {
-                    "connection" => (Some(text("subject")?), None),
-                    "workspace" if text("subject")? == scope.workspace.0 => (None, None),
-                    "agent" => (None, Some(AgentId(text("subject")?))),
-                    _ => continue,
-                };
-                let before = deployed
-                    .iter()
-                    .flat_map(|(agent, deployments)| {
-                        deployments
-                            .iter()
-                            .map(move |(_, connection, _)| (agent.clone(), connection.clone()))
-                    })
-                    .collect();
-                commands.push(KillCommand {
-                    id: event.event_id.clone(),
-                    seq: row.seq,
-                    connection,
-                    before,
-                    agent,
-                });
-            }
-            ("AgentStopped", _) => {
-                stopped.insert(AgentId(text("agent_id")?));
-            }
-            _ => {
-                text("agent_id")?;
-            }
+        match read() {
+            Err(Unreadable) if connection_record => unsure = true,
+            other => other?,
         }
     }
     let mut following = Following {
@@ -236,6 +260,7 @@ pub fn agents_of(
             .collect(),
         commands,
         ours: ours.clone(),
+        unsure,
         ..Following::default()
     };
     for (agent, deployments) in deployed {
@@ -245,7 +270,7 @@ pub fn agents_of(
         let Some((_, _, version)) = deployments
             .iter()
             .rev()
-            .find(|(_, connection, _)| ours.contains(connection))
+            .find(|(_, connection, _)| unsure || ours.contains(connection))
         else {
             continue;
         };
@@ -253,7 +278,7 @@ pub fn agents_of(
         following
             .agents
             .insert(agent.clone(), MandateVersion(version.clone()));
-        if !latest_live {
+        if !latest_live || unsure {
             following.held.insert(agent);
         }
     }
@@ -270,6 +295,7 @@ impl Following {
     /// journaled, waits for the manager to stop it.
     pub fn released(&self) -> bool {
         !self.connecting
+            && !self.unsure
             && if self.agents.is_empty() {
                 self.closed
             } else {
@@ -283,7 +309,9 @@ impl Following {
     /// those connections is revoked at or after the command, or the agent has an `AgentStopped`, so
     /// no runtime will copy it; and each agent-scope command naming the agent when it has an
     /// `AgentStopped`. Every other covered agent waits for the runtime's copy, which carries the
-    /// owner's confirmation.
+    /// owner's confirmation. While the reading is unsure, a connection record having not read, a
+    /// command covering the agent on any connection is applied as if revoked at or after it
+    /// (DEC-2357 item 3).
     pub fn commands_for(&self, agent: &AgentId) -> Vec<EventId> {
         let stopped = self.stopped.contains(agent);
         self.commands
@@ -292,12 +320,13 @@ impl Following {
                 Some(named) => named == agent && stopped,
                 None => command.before.iter().any(|(deployed, connection)| {
                     deployed == &agent.0
-                        && self.ours.contains(connection)
+                        && (self.unsure || self.ours.contains(connection))
                         && command
                             .connection
                             .as_ref()
                             .is_none_or(|named| named == connection)
                         && (stopped
+                            || self.unsure
                             || self
                                 .revocations
                                 .get(connection)
