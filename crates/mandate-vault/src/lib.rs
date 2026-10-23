@@ -41,6 +41,7 @@ pub mod lease;
 pub mod local;
 pub mod mounted;
 pub mod openbao;
+pub mod personal;
 pub mod policy;
 pub mod provisioner;
 mod registry;

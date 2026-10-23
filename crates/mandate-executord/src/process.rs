@@ -354,6 +354,29 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         alerts
     }
 
+    /// Journals `copy`'s establishment copy on the account stream at `now`, under this process's
+    /// writer epoch, as [`crate::establish::copy_draft`] writes it with the next event id, and
+    /// folds it (DEC-2341 item 2).
+    ///
+    /// # Errors
+    /// `copy_refused` when the draft cannot be made or the journal does not commit it.
+    pub fn copy_establishment(
+        &mut self,
+        now: UtcNanos,
+        copy: &crate::establish::ToCopy,
+    ) -> Result<(), &'static str> {
+        let head = self.account_head();
+        let id = self
+            .wiring
+            .ids
+            .event_id(WriterEpoch(self.epoch), Seq(head), 0);
+        let draft = crate::establish::copy_draft(copy, id, now)?;
+        match self.journal(now, &[draft]) {
+            Ran::Committed => Ok(()),
+            _ => Err("copy_refused"),
+        }
+    }
+
     /// Whether the account owes nothing more (DEC-2347): the process is ready, no reconciliation
     /// is due, every order the account stream holds is terminal, `Unknown` included, and no agent
     /// followed holds lots its kill switch or exits would still sell. A pass that reads a switch

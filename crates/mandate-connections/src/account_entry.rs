@@ -78,6 +78,13 @@ impl BrokerAccountId {
             Err(ConnectError::AccountEntryInvalid)
         }
     }
+
+    /// The id itself, for the vault's keyed hash alone (DEC-2345 item 2): still a
+    /// [`SecretString`], so it prints nothing.
+    #[must_use]
+    pub fn secret(&self) -> &SecretString {
+        &self.0
+    }
 }
 
 /// One decoded entry: the reference the executor minted, and the id it stands for.
@@ -87,7 +94,8 @@ pub struct AccountEntry {
     pub account_id: BrokerAccountId,
 }
 
-/// The entry for `account_id` under `pii_ref`.
+/// The entry for `account_id` under `pii_ref`, built at its exact length, so the conversion to a
+/// [`SecretString`] never reallocates and no spare copy of the id is freed unwiped.
 ///
 /// # Errors
 /// [`ConnectError::AccountEntryInvalid`] for a reference outside the entry's form.
@@ -100,9 +108,9 @@ pub fn encode(
     if !in_form(id) || !is_pii_ref(pii_ref) {
         return Err(ConnectError::AccountEntryInvalid);
     }
-    Ok(SecretString::from(format!(
-        "{BEFORE}{id}{BETWEEN}{pii_ref}{AFTER}"
-    )))
+    Ok(SecretString::from(
+        [BEFORE, id, BETWEEN, pii_ref, AFTER].concat(),
+    ))
 }
 
 /// The reference and id of an entry's bytes.
