@@ -8,10 +8,10 @@ use mandate_canon::{Object, parse};
 use mandate_domain::{CapabilityProfile, ProfileError};
 use mandate_executor::{
     AccountScope, ActivityCursor, AgentId, BindingGateSource, BrokerOutcome, BrokerRequest,
-    BrokerSnapshot, BrokerUpdate, Command, ConnectorError, Effect, EventDraft, ExecutorConfig,
-    ExecutorError, ExecutorState, IdGen, Input, InstrumentSnapshot, IntentBody, IntentHandoff,
-    IntentId, KillScope, MandateVersion, MandateView, Ports, ProtectionPrices, ReconcileReason,
-    RiskClock, Seq, WriterEpoch, fold, handle,
+    BrokerSnapshot, BrokerUpdate, Command, ConnectorError, Effect, EventDraft, EventId,
+    ExecutorConfig, ExecutorError, ExecutorState, IdGen, Initiator, Input, InstrumentSnapshot,
+    IntentBody, IntentHandoff, IntentId, KillScope, MandateVersion, MandateView, Ports,
+    ProtectionPrices, ReconcileReason, RiskClock, Seq, WriterEpoch, fold, handle,
 };
 use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId};
 use mandate_num::{Fraction, Price};
@@ -174,11 +174,16 @@ pub struct ExecutorProcess<S, B> {
 }
 
 /// What one pass reads from the agents' streams: the kill switches this stream has not applied,
-/// the proposals the core does not hold yet, each with its agent, and whether a row did not read.
+/// the proposals the core does not hold yet, each with its agent, whether a row did not read, and
+/// whether nothing the journal shows still wants the executor ([`Following::released`]).
 struct Followed {
     switches: Vec<(AgentId, Switch)>,
     proposals: Vec<(AgentId, Proposal)>,
     unreadable: bool,
+    released: bool,
+    /// Whether every followed agent's stream parsed and read: one that did not may hold a switch,
+    /// so it holds the exit (DEC-2347 item 3.3).
+    all_read: bool,
 }
 
 impl<S: Store, B: Broker> ExecutorProcess<S, B> {
@@ -312,10 +317,13 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             switches,
             proposals: proposed,
             unreadable,
+            released,
+            all_read,
         }) = self.switches(now, &mut alerts)
         else {
             return alerts;
         };
+        let nothing_read = switches.is_empty() && proposed.is_empty();
         for (agent, switch) in switches {
             if !self.apply(now, agent, switch, &mut alerts) {
                 return alerts;
@@ -340,7 +348,46 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                 return alerts;
             }
         }
+        if nothing_read && all_read && released && self.owes_nothing() {
+            self.lifecycle.observe(now, Lifecycled::Completed);
+        }
         alerts
+    }
+
+    /// Whether the account owes nothing more (DEC-2347): the process is ready, no reconciliation
+    /// is due, every order the account stream holds is terminal, `Unknown` included, and no agent
+    /// followed holds lots its kill switch or exits would still sell. A pass that reads a switch
+    /// or a proposal, or reaches here with anything in doubt or unsent, never asks: it returned
+    /// earlier, or reads again on the next pass.
+    fn owes_nothing(&mut self) -> bool {
+        self.ready()
+            && !self.reconcile
+            && self
+                .state
+                .orders()
+                .values()
+                .all(|order| order.state.is_terminal())
+            && self
+                .deployed
+                .keys()
+                .all(|agent| self.state.holds_lots(agent) == Ok(false))
+            && self.broker_quiet()
+    }
+
+    /// Whether the broker, read now, lists no order on the account that may still work, ours or
+    /// one the fold never held (an order the platform did not place is external activity, never
+    /// one of the fold's orders): every status it reports is final. A read that fails, or a status
+    /// it does not name, keeps the executor running (DEC-2347 item 3.5).
+    fn broker_quiet(&mut self) -> bool {
+        match self.read(&BrokerRequest::ListOpenOrders) {
+            Ok(BrokerOutcome::OpenOrders(orders)) => orders.iter().all(|order| {
+                matches!(
+                    order.status.as_str(),
+                    "filled" | "canceled" | "expired" | "rejected" | "replaced"
+                )
+            }),
+            _ => false,
+        }
     }
 
     /// Drains at `now`: no new input; an input in doubt is handed once more, then the process exits
@@ -432,20 +479,23 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
     fn switches(&mut self, now: UtcNanos, alerts: &mut Vec<Alert>) -> Option<Followed> {
         let control = self.control.clone()?;
         let rows = self.follow(&control, alerts)?;
-        let Ok(agents) = agents_of(&rows, self.state.scope(), self.environment) else {
+        let Ok(following) = agents_of(&rows, self.state.scope(), self.environment) else {
             self.lifecycle.observe(now, Lifecycled::Failed);
             return None;
         };
-        self.deployed.clone_from(&agents);
+        self.deployed.clone_from(&following.agents);
         let workspace = self.state.scope().workspace.0.clone();
         let mut pending = Vec::new();
         let mut proposed = Vec::new();
         let mut unreadable = false;
-        for agent in agents.into_keys() {
+        let mut all_read = true;
+        for agent in following.agents.keys().cloned() {
             let Some(stream) = StreamId::parse(&format!("agent:{workspace}:{}", agent.0)) else {
+                all_read = false;
                 continue;
             };
             let Some(rows) = self.follow(&stream, alerts) else {
+                all_read = false;
                 continue;
             };
             let read: Result<Vec<_>, _> = rows
@@ -458,9 +508,11 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                 unreadable = true;
                 continue;
             };
+            let openings_held = following.held.contains(&agent);
             proposed.extend(
                 asked
                     .into_iter()
+                    .filter(|proposal| !(openings_held && proposal.purpose.adds_risk()))
                     .filter(|proposal| {
                         self.state
                             .intent(&IntentId(proposal.intent.clone()))
@@ -468,9 +520,38 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                     })
                     .map(|proposal| (agent.clone(), proposal)),
             );
+            let applied = |source: &EventId| self.state.applied_for(&agent, source);
+            let copied: Vec<&EventId> = held
+                .iter()
+                .filter(|switch| self.state.applied_copy(&switch.switch))
+                .filter_map(|switch| switch.cause.as_ref())
+                .collect();
+            let direct: Vec<Switch> = following
+                .commands_for(&agent)
+                .into_iter()
+                .filter(|command| !applied(command) && !copied.contains(&command))
+                .map(|command| Switch {
+                    switch: command,
+                    cause: None,
+                    initiator: Initiator::Owner,
+                    confirmation: None,
+                })
+                .collect();
+            let read: Vec<EventId> = direct.iter().map(|switch| switch.switch.clone()).collect();
+            let copies: Vec<Switch> = held
+                .into_iter()
+                .filter(|switch| !self.state.applied_copy(&switch.switch))
+                .filter(|switch| {
+                    switch
+                        .cause
+                        .as_ref()
+                        .is_none_or(|cause| !applied(cause) && !read.contains(cause))
+                })
+                .collect();
             pending.extend(
-                held.into_iter()
-                    .filter(|switch| !self.state.applied_copy(&switch.switch))
+                direct
+                    .into_iter()
+                    .chain(copies)
                     .map(|switch| (agent.clone(), switch)),
             );
         }
@@ -478,6 +559,8 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             switches: pending,
             proposals: proposed,
             unreadable,
+            released: following.released(),
+            all_read,
         })
     }
 

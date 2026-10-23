@@ -1270,6 +1270,7 @@ VERSIONED_VERSIONS: dict[tuple[str, str], tuple[int, ...]] = {
     ("acct", "OrderRequestRecorded"): (1,),
     ("acct", "ProtectionChanged"): (1, 2),
     ("acct", "OwnerConfirmationReceived"): (1,),
+    ("acct", "AccountCloseRequested"): (1,),
     ("ctl", "ConnectionEstablished"): (1, 2),
     ("acct", "ConnectionEstablished"): (2,),
     ("ctl", "MandateConfirmed"): (1, 2),
@@ -1324,6 +1325,15 @@ VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
         ("floor", DEC),
         ("expires_at", INT),
         ("copied_from", ULID),
+        ("risk_clock", RISK_CLOCK),
+    ),
+    # v0.75 §9.5 (DEC-2337): one instrument's close-position under an account kill switch,
+    # journaled before it is sent.
+    ("acct", "AccountCloseRequested", 1): rec(
+        ("instrument_id", STR),
+        ("qty", DEC),
+        ("kill_switch_event", ULID),
+        ("attempt", INT),
         ("risk_clock", RISK_CLOCK),
     ),
     ("ctl", "ConnectionEstablished", 2): ESTABLISHED_V2,
@@ -1845,6 +1855,22 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
 
         wrong = next((m for m in prices if not positive(m)), None)
         rule("247", wrong is None, "schema", f"payload.{wrong}" if wrong else "")
+    if event_type == "AccountCloseRequested":
+        qty = normalize_decimal(p["qty"])
+        if qty is None:
+            positive = True
+        elif "boundary.rule_258_zero" in skip:
+            positive = Decimal(qty) >= 0
+        else:
+            positive = Decimal(qty) > 0
+        first = 0 if "boundary.rule_258_attempt" in skip else 1
+        clauses = [("258.qty", positive, "payload.qty"), ("258.attempt", p["attempt"] >= first, "payload.attempt")]
+        if "order.rule_258_attempt_first" in skip:
+            clauses.reverse()
+        wrong = next(((n, at) for n, ok, at in clauses if not ok and f"rule.{n}" not in skip), None)
+        if wrong is not None:
+            rule("258", False, "schema", wrong[1])
+        rule("259", draft["causation_id"] == p["kill_switch_event"], "schema", "causation_id")
     if event_type == "StepUpConfirmed":
         rule("242.kind", p["action_kind"] == "approve", "schema", "payload.action_kind")
         rule("242.paper", draft["environment"] == "paper", "schema", "environment")

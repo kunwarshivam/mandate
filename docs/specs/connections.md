@@ -142,8 +142,9 @@ connection that is not revoked, as a `suspended` connection needs, is not a reco
 
 ### 3.1 The fingerprint key
 
-The key is a per-deployment key held in the vault. It never leaves the vault: the connection
-manager asks the vault to compute the keyed hash and receives only the result. It is never stored
+The key is a per-deployment key held in the vault. It never leaves the vault: the connection's
+executor, which holds the account id at connect, asks the vault to compute the keyed hash and
+stores only the result, and the connection manager reads only that result (DEC-2345). It is never stored
 beside the connection record, so a copy of the records cannot be reversed by trying every account
 number. On rotation, every fingerprint is recomputed under the new key from the account ids in the
 personal-data vault; until that finishes, every new connect is refused, so uniqueness is never
@@ -311,8 +312,9 @@ DEC-690 item 4; DEC-441 item 21). A live Alpaca OAuth connection needs a new dec
    account could not be read), never the id or the token (CN-10). The API then acts on it as the
    connection manager (journal §9.8):
    - It reads the results from the journal.
-   - It asks the vault to compute the account fingerprint from that reference, receiving only the
-     result (§3.1), and writes the fingerprint to the pending connection record.
+   - It reads the account fingerprint the executor had the vault compute beside that reference,
+     receiving only the hash and the reference, and uses it only if the reference is the one
+     journaled (§3.1, DEC-2345); it writes the fingerprint to the pending connection record.
    - It completes check 3 by comparing that fingerprint with the account the connection names
      in its record. The connection manager alone refuses `account_mismatch`; the executor never
      reports it.
