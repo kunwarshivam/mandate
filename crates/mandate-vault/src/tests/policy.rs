@@ -156,10 +156,7 @@ fn names_and_paths_are_pinned() {
     );
     let hcl = openbao_policy(&Identity::ConnectionManager, &[c("c1")], &other);
     assert!(
-        hcl.contains(&format!(
-            "path \"kv9/metadata/{}\"",
-            kv_path(&SecretPath::Token(c("c1")))
-        )),
+        hcl.contains("path \"kv9/metadata/connections/+/token\""),
         "{hcl}"
     );
     assert!(
@@ -183,8 +180,30 @@ fn blocks(hcl: &str) -> Vec<(String, String)> {
     out
 }
 
+/// Whether `path` is one of the fingerprint's, which `tests/fingerprint.rs` checks block by block
+/// (DEC-2345).
+fn fingerprint(path: &str) -> bool {
+    [
+        "mandate/data/personal/fingerprints/",
+        "mandate/data/personal/claims",
+        "mandate/data/fingerprints/",
+    ]
+    .iter()
+    .any(|prefix| path.starts_with(prefix))
+}
+
+/// Whether DEC-2349's one-segment `+` grants `access` on `path` to the Api or the connection
+/// manager in place of a spelled-out block: a write or a delete of a connection's code or token.
+fn by_prefix(access: Access, path: &SecretPath) -> bool {
+    matches!(access, Access::Write | Access::Delete)
+        && matches!(path, SecretPath::Code(_) | SecretPath::Token(_))
+}
+
+/// Every policy is the table with no wildcard, but the Api's and the connection manager's
+/// one-segment `+` on their connection write and delete paths (DEC-2349), which `policy_prefix`
+/// pins: only those paths go unchecked here, every read and every other path is checked as before.
 #[test]
-fn each_policy_is_the_table_with_no_wildcard() {
+fn each_policy_is_the_table_with_no_wildcard_beyond_dec_2349s() {
     let connections = [c("c1"), c("c2")];
     let platform_paths: Vec<String> = PlatformSecret::ALL
         .iter()
@@ -192,19 +211,26 @@ fn each_policy_is_the_table_with_no_wildcard() {
         .collect();
     for identity in identities() {
         let hcl = openbao_policy(&identity, &connections, &Mounts::default());
+        let prefixed = matches!(identity, Identity::Api | Identity::ConnectionManager);
         assert!(
-            !hcl.contains('*') && !hcl.contains('+'),
+            !hcl.contains('*') && (prefixed || !hcl.contains('+')),
             "{identity:?}: {hcl}"
         );
-        let got = blocks(&hcl);
+        let got: Vec<(String, String)> = blocks(&hcl)
+            .into_iter()
+            .filter(|(p, _)| !p.contains('+'))
+            .collect();
         let data_blocks = got
             .iter()
-            .filter(|(p, _)| p.starts_with("mandate/") && !platform_paths.contains(p))
+            .filter(|(p, _)| {
+                p.starts_with("mandate/") && !platform_paths.contains(p) && !fingerprint(p)
+            })
             .count();
         let allowed = [Access::Read, Access::Write, Access::Delete]
             .iter()
             .flat_map(|a| paths().into_iter().map(move |p| (*a, p)))
             .filter(|(a, p)| allows(&identity, *a, p))
+            .filter(|(a, p)| !(prefixed && by_prefix(*a, p)))
             .count();
         assert_eq!(
             data_blocks, allowed,
@@ -221,9 +247,10 @@ fn each_policy_is_the_table_with_no_wildcard() {
             0
         };
         assert_eq!(auth_blocks, want_auth, "{identity:?}: {hcl}");
+        let fingerprint_blocks = got.iter().filter(|(p, _)| fingerprint(p)).count();
         assert_eq!(
             got.len(),
-            data_blocks + auth_blocks + platform_blocks,
+            data_blocks + auth_blocks + platform_blocks + fingerprint_blocks,
             "{identity:?}: {hcl}"
         );
         for access in [Access::Read, Access::Write, Access::Delete] {
@@ -235,6 +262,9 @@ fn each_policy_is_the_table_with_no_wildcard() {
                     Access::Take => ("data", "update"),
                     Access::Create => ("data", "create"),
                 };
+                if prefixed && by_prefix(access, &path) && allows(&identity, access, &path) {
+                    continue;
+                }
                 let want = format!("mandate/{prefix}/{}", kv_path(&path));
                 let present = got.iter().any(|(p, c)| p == &want && c == caps);
                 assert_eq!(
@@ -358,9 +388,9 @@ fn only_the_executors_create_reaches_the_personal_data_vault() {
         Identity::TokenExchange(c("c1")),
         Identity::Executor(c("c1")),
     ] {
-        let hcl = crate::policy::openbao_policy(&identity, &connections, &Mounts::default())
-            .unwrap_or_default();
-        assert!(!hcl.contains("personal/"), "{identity:?}: {hcl}");
+        let hcl =
+            crate::policy::openbao_policy(&identity, &connections, &Mounts::default()).unwrap();
+        assert!(!hcl.contains("personal/accounts/"), "{identity:?}: {hcl}");
     }
     let accessor = "auth_kubernetes_1a2b";
     let exchange = kubernetes_policy(
@@ -369,12 +399,12 @@ fn only_the_executors_create_reaches_the_personal_data_vault() {
         accessor,
     )
     .unwrap();
-    assert!(!exchange.contains("personal/"), "{exchange}");
+    assert!(!exchange.contains("personal/accounts/"), "{exchange}");
     let executor =
         kubernetes_policy(&Identity::Executor(c("c1")), &Mounts::default(), accessor).unwrap();
     let personal: Vec<&str> = executor
         .split("path ")
-        .filter(|block| block.contains("personal/"))
+        .filter(|block| block.contains("personal/accounts/"))
         .collect();
     assert_eq!(personal.len(), 1, "{executor}");
     assert!(

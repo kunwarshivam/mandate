@@ -18,7 +18,10 @@
 //! the manager's own journaled records, and from what the orchestrator reports ([`orchestrator`])
 //! decides one step per process at a time: start, stop, or record a crash loop. [`Deployer`]
 //! journals each step on the control stream (journal spec §9.21) and calls the orchestrator only
-//! once the record is committed. It never stops a process for a kill switch or for readiness,
+//! once the record is committed. An executor no agent wants any more is started once for each
+//! kill switch that covers it and that it has not answered, is never stopped while such a switch
+//! waits, and ends by its own exit (DEC-2344 items 1 and 3); a crash loop before it ends raises
+//! `kill_switch_unapplied`. It never stops a process for a kill switch or for readiness,
 //! starts a process that is down at once when a kill switch covers it, never runs two instances of
 //! one stream's writer, and never writes a mandate, an envelope, a deployment or a command.
 //! It holds no broker credential and sends no order.
@@ -31,8 +34,11 @@ pub mod manager;
 pub mod orchestrator;
 pub mod record;
 
-pub use control::{Cause, Fact, Process, Scope, Slot};
+pub use control::{Cause, Fact, Process, Scope, Slot, StopCause};
 pub use driver::{ControlJournal, Deployer, Halt, Identity};
 pub use manager::{Decision, Manager, backoff};
-pub use orchestrator::{Alerts, Effect, Instance, OperatorAlert, Orchestrator, Phase, Unavailable};
+pub use orchestrator::{
+    Alerts, Effect, Instance, KILL_SWITCH_UNAPPLIED, Launch, OperatorAlert, Orchestrator, Phase,
+    Unavailable,
+};
 pub use record::Record;

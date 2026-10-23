@@ -192,6 +192,12 @@ fn each_kinds_policy_reaches_exactly_the_paths_its_connection_is_stored_at() {
                         "path \"mandate/data/personal/accounts/{}/+\" {{\n  capabilities = [\"create\"]\n}}\n",
                         connection_segment(&connection).unwrap_or_default()
                     ),
+                    format!(
+                        "path \"mandate/data/personal/fingerprints/{}/+\" {{\n  capabilities = [\"create\"]\n}}\n",
+                        connection_segment(&connection).unwrap_or_default()
+                    ),
+                    "path \"transit/hmac/account-fingerprint\" {\n  capabilities = [\"update\"]\n}\n"
+                        .to_owned(),
                 ]
                 .concat(),
             ),
@@ -277,23 +283,36 @@ fn each_kinds_policy_is_named_under_the_kv_mount() {
     );
 }
 
-/// The executor reads its own token, and creates its own connection's account entry in the
-/// personal-data vault, which it can neither read nor write over (DEC-2339).
+/// The executor reads its own token, and creates its own connection's account entry and its
+/// fingerprint entry in the personal-data vault, which it can neither read nor write over
+/// (DEC-2339), and asks transit for the fingerprint key's HMAC alone (DEC-2345).
 #[test]
 fn the_executors_policy_reads_its_own_token_alone() {
     assert_eq!(
         kubernetes_policy(&Identity::Executor(c("any")), &Mounts::default(), ACCESSOR),
         Ok(format!(
             "path \"mandate/data/connections/x{TEMPLATE}/token\" {{\n  capabilities = [\"read\"]\n}}\n\
-             path \"mandate/data/personal/accounts/x{TEMPLATE}/+\" {{\n  capabilities = [\"create\"]\n}}\n"
+             path \"mandate/data/personal/accounts/x{TEMPLATE}/+\" {{
+  capabilities = [\"create\"]
+}}
+\
+             path \"mandate/data/personal/fingerprints/x{TEMPLATE}/+\" {{
+  capabilities = [\"create\"]
+}}
+\
+             path \"transit/hmac/account-fingerprint\" {{
+  capabilities = [\"update\"]
+}}
+"
         ))
     );
 }
 
-/// DEC-2339 item 1's one deliberate exception to spelling every path out: the executor's create of
-/// its account entries ends in `+`, one segment below its own connection's templated segment, and
-/// creates only, so a request again on the connection to another account stream (DEC-699) has its
-/// own entry. No other path of a templated policy holds `+` or `*`.
+/// DEC-2339 item 1's deliberate exception to spelling every path out, and DEC-2345's beside it: the
+/// executor's creates of its account entries and its fingerprint entries end in `+`, one segment
+/// below its own connection's templated segment, and create only, so a request again on the
+/// connection to another account stream (DEC-699) has entries of its own. No other path of a
+/// templated policy holds `+` or `*`.
 #[test]
 fn the_executors_one_wildcard_is_below_its_own_account_entries() {
     let wildcards = |policy: &str| -> Vec<(String, String)> {
@@ -312,10 +331,16 @@ fn the_executors_one_wildcard_is_below_its_own_account_entries() {
         kubernetes_policy(&Identity::Executor(c("any")), &Mounts::default(), ACCESSOR).unwrap();
     assert_eq!(
         wildcards(&executor),
-        [(
-            format!("mandate/data/personal/accounts/x{TEMPLATE}/+"),
-            "create".to_owned()
-        )]
+        [
+            (
+                format!("mandate/data/personal/accounts/x{TEMPLATE}/+"),
+                "create".to_owned()
+            ),
+            (
+                format!("mandate/data/personal/fingerprints/x{TEMPLATE}/+"),
+                "create".to_owned()
+            ),
+        ]
     );
     let exchange = kubernetes_policy(
         &Identity::TokenExchange(c("any")),
@@ -580,6 +605,7 @@ fn the_provisioners_plus_reaches_only_the_two_role_paths() {
         auth: "approle-x".to_owned(),
         kubernetes_executor: "k-exec".to_owned(),
         kubernetes_exchange: "k-exch".to_owned(),
+        transit: "transit-x".to_owned(),
     };
     let written = provisioner_policy(&mounts, NAMESPACE);
     assert!(written.is_ok(), "{written:?}");

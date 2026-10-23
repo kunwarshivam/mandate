@@ -1,14 +1,15 @@
 {{- /*
 The deployment manager (journal spec §9.21, infrastructure design §3.4, DEC-1170, DEC-1172): one
 replica per workspace, the one pod that holds an API token. Its ServiceAccount's one Role, in this
-namespace only, creates, reads, lists and deletes pods, and the ServiceAccount a connection's token
-exchange runs as (DEC-1177, bounded by its own policy below): no Secret, no
+namespace only, creates, reads, lists and deletes pods, and the ServiceAccounts a connection's token
+exchange and executor run as (DEC-1177, DEC-2336, bounded by their own policy below): no Secret, no
 exec, no other resource or verb, and no cluster scope. Creating a pod is itself powerful (a pod can mount any Secret in the
 namespace, name any account, claim any egress label, or run privileged), so the admission policy
 below bounds every pod the manager makes to one shaped like its own process's template, read from
 the pod's `mandate.dev/process` label (DEC-1177): no service-account token, and no account but
-`default`, or for a token exchange an `x`-and-hex one (DEC-2060) that its environment names once,
-beside its connection, for the exchange to check against each other; no host namespace, host path,
+`default`, or for a token exchange an `x`-and-hex one and for an executor a hex one (DEC-2060,
+DEC-2336) that its environment names once, beside its subject, for the process to check against its
+connection; no host namespace, host path,
 host alias or node name; no root user and no added capability; every container unprivileged,
 without privilege escalation; only that process's
 images, exactly its containers' commands and arguments; only memory, that process's Secrets, its
@@ -20,8 +21,8 @@ process that reaches the live token host, runs its own image and launch only. Ea
 environment is exactly its template's, names and values, and the manager's own names once each,
 and a process that reaches the vault mounts the vault's CA alone (DEC-2332 items 4 and 5).
 Residual: what it does not check (resources, affinity, other labels, the values of the manager's
-own names, and whether a token exchange's `x` account is its own connection's hex, which CEL cannot compute and
-the exchange checks itself), so a pod inside the bound can still do what that process's image and
+own names, and whether a token exchange's or an executor's account is its own connection's hex, which CEL
+cannot compute and the process checks itself; the executor's check is lane V2's, DEC-2336's risks), so a pod inside the bound can still do what that process's image and
 role can. Every runtime and executor it starts is a bare pod from the templates
 below, which are exactly the pods the chart would build for those processes (their security
 context, egress gate, credentials, colocation, and the labels their network policies select), so
@@ -160,7 +161,8 @@ object.spec.containers.all(c, {{ . }}) && (!has(object.spec.initContainers) || o
 {{- $entries = append $entries (printf "%s=%s" .name (.value | default "")) }}
 {{- end }}
 {{- $_ := set $fixed .name $entries }}
-{{- $_ := set $named .name (ternary (list "MANDATE_WORKSPACE" "MANDATE_PROCESS" "MANDATE_SUBJECT" "MANDATE_GENERATION" "MANDATE_SUBJECT_ACCOUNT") (list "MANDATE_WORKSPACE" "MANDATE_PROCESS" "MANDATE_SUBJECT" "MANDATE_GENERATION") (eq $name "token-exchange")) }}
+{{- $own := dict "token-exchange" (list "MANDATE_SUBJECT_ACCOUNT") "executor" (list "MANDATE_SUBJECT_ACCOUNT" "MANDATE_WORKSPACE_NAMESPACE") }}
+{{- $_ := set $named .name (concat (list "MANDATE_WORKSPACE" "MANDATE_PROCESS" "MANDATE_SUBJECT" "MANDATE_GENERATION") (get $own $name | default list)) }}
 {{- end }}
 {{- $_ := set $env $name $fixed }}
 {{- $_ := set $added $name $named }}
@@ -245,12 +247,12 @@ spec:
     - expression: 'has(object.spec.automountServiceAccountToken) && object.spec.automountServiceAccountToken == false'
       reason: Forbidden
       message: a pod the deployment manager makes mounts no service-account token
-    - expression: 'variables.process == "token-exchange" ? (has(object.spec.serviceAccountName) && object.spec.serviceAccountName.matches(''^x([0-9a-f]{2}){1,64}$'') && (!has(object.spec.serviceAccount) || object.spec.serviceAccount == "" || object.spec.serviceAccount == object.spec.serviceAccountName)) : ((!has(object.spec.serviceAccountName) || object.spec.serviceAccountName == "" || object.spec.serviceAccountName == "default") && (!has(object.spec.serviceAccount) || object.spec.serviceAccount == "" || object.spec.serviceAccount == "default"))'
+    - expression: 'variables.process == "token-exchange" ? (has(object.spec.serviceAccountName) && object.spec.serviceAccountName.matches(''^x([0-9a-f]{2}){1,64}$'') && (!has(object.spec.serviceAccount) || object.spec.serviceAccount == "" || object.spec.serviceAccount == object.spec.serviceAccountName)) : variables.process == "executor" ? (has(object.spec.serviceAccountName) && object.spec.serviceAccountName.matches(''^([0-9a-f]{2}){1,64}$'') && (!has(object.spec.serviceAccount) || object.spec.serviceAccount == "" || object.spec.serviceAccount == object.spec.serviceAccountName)) : ((!has(object.spec.serviceAccountName) || object.spec.serviceAccountName == "" || object.spec.serviceAccountName == "default") && (!has(object.spec.serviceAccount) || object.spec.serviceAccount == "" || object.spec.serviceAccount == "default"))'
       reason: Forbidden
-      message: a pod the deployment manager makes names no service account but the default, or a token exchange its own
-    - expression: 'variables.process != "token-exchange" || object.spec.containers.all(c, has(c.env) && size(c.env.filter(e, e.name == "MANDATE_SUBJECT")) == 1 && size(c.env.filter(e, e.name == "MANDATE_SUBJECT_ACCOUNT")) == 1 && c.env.exists(e, e.name == "MANDATE_SUBJECT_ACCOUNT" && has(e.value) && e.value == object.spec.serviceAccountName))'
+      message: a pod the deployment manager makes names no service account but the default, or a token exchange or an executor its own
+    - expression: '!(variables.process in ["token-exchange", "executor"]) || object.spec.containers.all(c, has(c.env) && size(c.env.filter(e, e.name == "MANDATE_SUBJECT")) == 1 && size(c.env.filter(e, e.name == "MANDATE_SUBJECT_ACCOUNT")) == 1 && c.env.exists(e, e.name == "MANDATE_SUBJECT_ACCOUNT" && has(e.value) && e.value == object.spec.serviceAccountName))'
       reason: Forbidden
-      message: a token exchange's pod names its own account in its environment once, beside its connection, which the exchange checks against each other
+      message: a token exchange's or an executor's pod names its own account in its environment once, beside its subject, which the process checks against its connection
     - expression: 'has(object.spec.securityContext) && has(object.spec.securityContext.runAsNonRoot) && object.spec.securityContext.runAsNonRoot == true && (!has(object.spec.securityContext.runAsUser) || object.spec.securityContext.runAsUser != 0) && !has(object.spec.hostAliases) && !has(object.spec.nodeName) && {{ include "mandate.everyContainer" "has(c.securityContext) && (!has(c.securityContext.runAsUser) || c.securityContext.runAsUser != 0) && (!has(c.securityContext.runAsNonRoot) || c.securityContext.runAsNonRoot == true) && (!has(c.securityContext.capabilities) || !has(c.securityContext.capabilities.add))" }}'
       reason: Forbidden
       message: a pod the deployment manager makes runs as no root user, adds no capability, and names no node or host alias
@@ -291,11 +293,12 @@ spec:
 {{- /*
 The bound on the manager's `create` and `delete serviceaccounts` (DEC-1177). The manager makes one
 ServiceAccount for a connection's token exchange (`x` and the connection id's bytes in lowercase
-hex, the name DEC-2060's vault role admits) and deletes it when the request closes; an executor's
-account comes with the change that names it on the executor's pod. RBAC cannot shape a name, so
+hex, the name DEC-2060's vault role admits) and deletes it when the request closes, and one for a
+connection's executor (the bare hex) and deletes it when the executor stops (DEC-2336). RBAC cannot shape a name, so
 this policy refuses, on create, update and delete alike (a delete reads the account as it stands),
 any other name, the default account and the manager's own among them, a mounted token, a Secret
-or a pull secret, and labels that are not the manager's, this workspace's and the exchange's.
+or a pull secret, and labels that are not the manager's, this workspace's and the process its name
+form says.
 Which connection is open is the journal's, which CEL cannot read: the manager creates an account
 only from its record. It fails closed.
 */ -}}
@@ -327,15 +330,15 @@ spec:
     - name: account
       expression: 'request.operation == "DELETE" ? oldObject : object'
   validations:
-    - expression: 'variables.account.metadata.name.matches(''^x([0-9a-f]{2}){1,64}$'')'
+    - expression: 'variables.account.metadata.name.matches(''^x([0-9a-f]{2}){1,64}$'') || variables.account.metadata.name.matches(''^([0-9a-f]{2}){1,64}$'')'
       reason: Forbidden
-      message: an account the deployment manager makes or deletes is named for a connection's token exchange
+      message: an account the deployment manager makes or deletes is named for a connection's token exchange or executor
     - expression: 'has(variables.account.automountServiceAccountToken) && variables.account.automountServiceAccountToken == false && !has(variables.account.secrets) && !has(variables.account.imagePullSecrets)'
       reason: Forbidden
       message: an account the deployment manager makes or deletes mounts no token and holds no Secret
-    - expression: 'has(variables.account.metadata.labels) && "app.kubernetes.io/managed-by" in variables.account.metadata.labels && variables.account.metadata.labels["app.kubernetes.io/managed-by"] == "mandate-deploy-manager" && "mandate.dev/workspace" in variables.account.metadata.labels && variables.account.metadata.labels["mandate.dev/workspace"] == {{ .root.Values.workspace | toJson }} && "mandate.dev/process" in variables.account.metadata.labels && variables.account.metadata.labels["mandate.dev/process"] == "token-exchange"'
+    - expression: 'has(variables.account.metadata.labels) && "app.kubernetes.io/managed-by" in variables.account.metadata.labels && variables.account.metadata.labels["app.kubernetes.io/managed-by"] == "mandate-deploy-manager" && "mandate.dev/workspace" in variables.account.metadata.labels && variables.account.metadata.labels["mandate.dev/workspace"] == {{ .root.Values.workspace | toJson }} && "mandate.dev/process" in variables.account.metadata.labels && variables.account.metadata.labels["mandate.dev/process"] == (variables.account.metadata.name.startsWith("x") ? "token-exchange" : "executor")'
       reason: Forbidden
-      message: an account the deployment manager makes or deletes is a token exchange's, in this workspace
+      message: an account the deployment manager makes or deletes is a token exchange's or an executor's, as its name says, in this workspace
 {{- end -}}
 {{- define "mandate.deployManagerAccountsBinding" -}}
 apiVersion: admissionregistration.k8s.io/v1
