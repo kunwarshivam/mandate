@@ -76605,7 +76605,7 @@ step_up_assertions:
     expect:
       outcome: Valid
 connection_roles:
-  spec: docs/specs/journal.md v0.78 §9.33 (DEC-2350)
+  spec: docs/specs/journal.md v0.81 §9.33 (DEC-2350)
   drafts:
     connection_roles_made:
       envelope_version: 1
