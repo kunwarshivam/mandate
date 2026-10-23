@@ -186,14 +186,22 @@ fn each_kinds_policy_reaches_exactly_the_paths_its_connection_is_stored_at() {
         for (identity, wanted) in [
             (
                 Identity::Executor(connection.clone()),
-                block("data", &token, "\"read\""),
+                [
+                    block("data", &token, "\"read\""),
+                    format!(
+                        "path \"mandate/data/personal/accounts/{}/+\" {{\n  capabilities = [\"create\"]\n}}\n",
+                        connection_segment(&connection).unwrap_or_default()
+                    ),
+                ]
+                .concat(),
             ),
             (
                 Identity::TokenExchange(connection.clone()),
                 [
                     block("data", &SecretPath::ClientSecret, "\"read\""),
                     block("data", &code, "\"read\", \"update\""),
-                    block("metadata", &code, "\"delete\""),
+                    block("delete", &code, "\"update\""),
+                    block("destroy", &code, "\"update\""),
                     block("data", &token, "\"create\", \"update\""),
                 ]
                 .concat(),
@@ -269,18 +277,59 @@ fn each_kinds_policy_is_named_under_the_kv_mount() {
     );
 }
 
+/// The executor reads its own token, and creates its own connection's account entry in the
+/// personal-data vault, which it can neither read nor write over (DEC-2339).
 #[test]
 fn the_executors_policy_reads_its_own_token_alone() {
     assert_eq!(
         kubernetes_policy(&Identity::Executor(c("any")), &Mounts::default(), ACCESSOR),
         Ok(format!(
-            "path \"mandate/data/connections/x{TEMPLATE}/token\" {{\n  capabilities = [\"read\"]\n}}\n"
+            "path \"mandate/data/connections/x{TEMPLATE}/token\" {{\n  capabilities = [\"read\"]\n}}\n\
+             path \"mandate/data/personal/accounts/x{TEMPLATE}/+\" {{\n  capabilities = [\"create\"]\n}}\n"
         ))
     );
 }
 
-/// The exchange's code block reads and updates, the update being its take (DEC-2061), and never
-/// creates: `create` would let it write a code where none is.
+/// DEC-2339 item 1's one deliberate exception to spelling every path out: the executor's create of
+/// its account entries ends in `+`, one segment below its own connection's templated segment, and
+/// creates only, so a request again on the connection to another account stream (DEC-699) has its
+/// own entry. No other path of a templated policy holds `+` or `*`.
+#[test]
+fn the_executors_one_wildcard_is_below_its_own_account_entries() {
+    let wildcards = |policy: &str| -> Vec<(String, String)> {
+        policy
+            .split("path \"")
+            .skip(1)
+            .filter_map(|block| {
+                let (path, rest) = block.split_once('"')?;
+                let caps = rest.split_once('[')?.1.split_once(']')?.0;
+                (path.contains('+') || path.contains('*'))
+                    .then(|| (path.to_owned(), caps.replace([' ', '"'], "")))
+            })
+            .collect()
+    };
+    let executor =
+        kubernetes_policy(&Identity::Executor(c("any")), &Mounts::default(), ACCESSOR).unwrap();
+    assert_eq!(
+        wildcards(&executor),
+        [(
+            format!("mandate/data/personal/accounts/x{TEMPLATE}/+"),
+            "create".to_owned()
+        )]
+    );
+    let exchange = kubernetes_policy(
+        &Identity::TokenExchange(c("any")),
+        &Mounts::default(),
+        ACCESSOR,
+    )
+    .unwrap();
+    assert!(wildcards(&exchange).is_empty(), "{exchange}");
+}
+
+/// The exchange's code block reads and updates, the update being its take (DEC-2061); it destroys
+/// the version it took and soft-deletes its tombstone's version alone, by the `destroy` and
+/// `delete` endpoints (DEC-2321); and it never creates: `create` would let it write a code where
+/// none is.
 #[test]
 fn the_exchanges_policy_writes_its_token_and_reads_takes_and_deletes_its_code() {
     assert_eq!(
@@ -292,7 +341,8 @@ fn the_exchanges_policy_writes_its_token_and_reads_takes_and_deletes_its_code() 
         Ok(format!(
             "path \"mandate/data/platform/alpaca-oauth-client-secret\" {{\n  capabilities = [\"read\"]\n}}\n\
              path \"mandate/data/connections/{TEMPLATE}/code\" {{\n  capabilities = [\"read\", \"update\"]\n}}\n\
-             path \"mandate/metadata/connections/{TEMPLATE}/code\" {{\n  capabilities = [\"delete\"]\n}}\n\
+             path \"mandate/delete/connections/{TEMPLATE}/code\" {{\n  capabilities = [\"update\"]\n}}\n\
+             path \"mandate/destroy/connections/{TEMPLATE}/code\" {{\n  capabilities = [\"update\"]\n}}\n\
              path \"mandate/data/connections/{TEMPLATE}/token\" {{\n  capabilities = [\"create\", \"update\"]\n}}\n"
         ))
     );
@@ -721,5 +771,30 @@ fn a_mounts_accessor_is_read_from_the_vaults_list_and_must_be_plain() {
     assert_eq!(
         mount_accessor(None, "kubernetes-executor"),
         Err(SourceError::Malformed)
+    );
+}
+
+/// DEC-2321: the exchange reaches its code's metadata not at all, so it can neither read its
+/// versions, list a connection's entries, nor delete the metadata and so restart the version
+/// count; and it creates nothing but its own token.
+#[test]
+fn the_exchange_never_reaches_metadata_lists_or_creates_a_code() {
+    let policy = kubernetes_policy(
+        &Identity::TokenExchange(c("c1")),
+        &Mounts::default(),
+        ACCESSOR,
+    );
+    assert!(policy.is_ok(), "{policy:?}");
+    let policy = policy.unwrap_or_default();
+    assert!(!policy.contains("/metadata/"), "{policy}");
+    assert!(!policy.contains("\"list\""), "{policy}");
+    let creates: Vec<&str> = policy
+        .split("path \"")
+        .filter(|block| block.contains("\"create\""))
+        .collect();
+    assert_eq!(creates.len(), 1, "{policy}");
+    assert!(
+        creates[0].starts_with(&format!("mandate/data/connections/{TEMPLATE}/token\"")),
+        "{policy}"
     );
 }

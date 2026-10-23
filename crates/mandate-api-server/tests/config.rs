@@ -7,10 +7,13 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use mandate_api_server::config::{
-    MIN_SESSION_KEY_BYTES, SESSION_KEY_FILE, StartRefusal, check_bind, check_database_url,
-    check_environment, check_key_set_tier, read_session_key,
+    MIN_SESSION_KEY_BYTES, SESSION_KEY_FILE, StartRefusal, authorize_page, check_bind,
+    check_database_url, check_environment, check_key_set_tier, read_session_key,
 };
+use mandate_connections::start::AuthorizePage;
 use mandate_release::startup::Tier;
+use std::ffi::OsStr;
+use std::os::unix::ffi::OsStrExt;
 
 fn at(ip: IpAddr) -> SocketAddr {
     SocketAddr::new(ip, 8080)
@@ -405,4 +408,75 @@ fn no_tier_or_an_unknown_one_is_production_for_the_key_set() {
             "{setting:?}"
         );
     }
+}
+
+const CELL_PAGE: &str = "http://oauth-fixture:8091/alpaca/oauth/authorize";
+
+/// Unset, the page is Alpaca's in every tier (DEC-2633 item 3).
+#[test]
+fn without_an_authorize_url_the_page_is_alpaca_s() {
+    for tier in [Tier::Dev, Tier::Ci, Tier::Staging, Tier::Production] {
+        assert_eq!(
+            authorize_page(tier, None),
+            Ok(AuthorizePage::alpaca()),
+            "{tier:?}"
+        );
+    }
+}
+
+/// A dev or CI cell may name its fixture provider's page, kept as given.
+#[test]
+#[cfg(debug_assertions)]
+fn a_dev_or_ci_cell_names_its_fixture_page() {
+    for tier in [Tier::Dev, Tier::Ci] {
+        assert_eq!(
+            authorize_page(tier, Some(OsStr::new(CELL_PAGE))),
+            Ok(AuthorizePage::for_cell(CELL_PAGE).unwrap()),
+            "{tier:?}"
+        );
+    }
+}
+
+/// Outside dev and CI any set value refuses the start, Alpaca's own page and an empty one
+/// included: the variable being set at all is the refusal (DEC-2633 items 2 and 3).
+#[test]
+fn outside_dev_and_ci_any_authorize_url_refuses_the_start() {
+    for tier in [Tier::Staging, Tier::Production] {
+        for value in [CELL_PAGE, "", "https://app.alpaca.markets/oauth/authorize"] {
+            assert_eq!(
+                authorize_page(tier, Some(OsStr::new(value))),
+                Err(StartRefusal::AuthorizeUrl),
+                "{tier:?} {value:?}"
+            );
+        }
+    }
+}
+
+/// In dev and CI a page the cell check refuses, or one that is not UTF-8, refuses the start.
+#[test]
+#[cfg(debug_assertions)]
+fn a_page_the_cell_check_refuses_refuses_the_start_in_dev() {
+    for value in [
+        OsStr::new(""),
+        OsStr::new("https://app.alpaca.markets/oauth/authorize"),
+        OsStr::new("http://evil.example/a"),
+        OsStr::from_bytes(b"http://127.0.0.1/\xff"),
+    ] {
+        assert_eq!(
+            authorize_page(Tier::Dev, Some(value)),
+            Err(StartRefusal::AuthorizeUrl),
+            "{value:?}"
+        );
+    }
+}
+
+/// The refusal names the setting and nothing it read.
+#[test]
+fn the_authorize_url_refusal_names_the_setting_alone() {
+    let text = StartRefusal::AuthorizeUrl.to_string();
+    assert!(text.contains("MANDATE_ALPACA_AUTHORIZE_URL"), "{text}");
+    assert!(
+        !text.contains("oauth-fixture") && !text.contains("http"),
+        "{text}"
+    );
 }
