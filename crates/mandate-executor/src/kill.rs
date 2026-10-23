@@ -198,7 +198,10 @@ pub(crate) fn cancel_all_answered(batch: &mut Batch<'_, '_>) -> bool {
 }
 
 /// Notes the account switch's cancel-all answered, before the step (DEC-2333 items 2 and 3):
-/// accepted, lost, or a restart since the switch, which reads as lost.
+/// accepted, lost, or a restart since the switch, which reads as lost. It takes the next broker
+/// answer after the switch to be the cancel-all's, so it assumes the broker answers in the order
+/// it was asked: `mandate-executord` sends each request and waits for its answer before the next,
+/// the cancel-all included, which guarantees it.
 pub(crate) fn note_answer(state: &mut ExecutorState, input: &Input) {
     let answers = matches!(
         input,
@@ -235,12 +238,19 @@ pub(crate) fn note_read(state: &mut ExecutorState, input: &Input) {
         _ => return,
     };
     let mut sells: BTreeMap<InstrumentId, Vec<Option<ClientOrderId>>> = BTreeMap::new();
+    let mut foreign: BTreeMap<InstrumentId, Vec<Qty>> = BTreeMap::new();
     for order in orders.iter().filter(|order| order.side == Side::Sell) {
         let ours = order
             .client_order_id
             .as_deref()
             .and_then(|raw| ClientOrderId::parse(raw).ok())
             .filter(|id| state.orders.contains_key(id));
+        if ours.is_none() {
+            foreign
+                .entry(order.instrument.clone())
+                .or_default()
+                .push(order.qty.checked_sub(order.filled_qty).unwrap_or(Qty::ZERO));
+        }
         sells
             .entry(order.instrument.clone())
             .or_default()
@@ -249,6 +259,7 @@ pub(crate) fn note_read(state: &mut ExecutorState, input: &Input) {
     state.switch_read = Some(SwitchRead {
         taken_at,
         sells,
+        foreign,
         held,
     });
 }
@@ -256,7 +267,9 @@ pub(crate) fn note_read(state: &mut ExecutorState, input: &Input) {
 /// The open-orders read that confirms an account switch's cancel-all (DEC-2333 items 2 and 3),
 /// taken at the journal head `taken_at`: one taken before the switch confirms nothing. Any order
 /// of ours a later one shows still working is cancelled by its own id, once until confirmed, a buy
-/// as much as a sell. Answers whether an account switch was waiting for it.
+/// as much as a sell, but protection placed at §5.4's bound: that is cancelled only once the read
+/// shows no other sell working in its instrument, so it covers the position until the close can
+/// go (DEC-2356). Answers whether an account switch was waiting for it.
 pub(crate) fn open_orders_read(
     batch: &mut Batch<'_, '_>,
     orders: &[BrokerOrder],
@@ -268,10 +281,20 @@ pub(crate) fn open_orders_read(
     if taken_at < switch.seq {
         return Ok(true);
     }
+    let others = |order: &BrokerOrder| {
+        orders.iter().any(|other| {
+            other.side == Side::Sell
+                && other.instrument == order.instrument
+                && other.client_order_id != order.client_order_id
+        })
+    };
     let working: Vec<ClientOrderId> = orders
         .iter()
-        .filter_map(|order| ClientOrderId::parse(order.client_order_id.as_deref()?).ok())
-        .filter(|id| batch.view.orders.contains_key(id))
+        .filter_map(|order| {
+            let id = ClientOrderId::parse(order.client_order_id.as_deref()?).ok()?;
+            let held = switch.bound.contains(&id) && others(order);
+            (!held && batch.view.orders.contains_key(&id)).then_some(id)
+        })
         .collect();
     cancel_each(batch, working)?;
     Ok(true)

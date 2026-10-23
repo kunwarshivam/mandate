@@ -6690,7 +6690,6 @@ fn protective_sent(ran: &common::Ran) -> Vec<(String, String)> {
 /// one protective sell goes for the whole position, journaled first, and nothing else is sent: no
 /// close, no exit.
 #[test]
-#[ignore = "pending E7-4"]
 fn protection_is_placed_again_at_the_bound_for_the_held_quantity() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[BTC]);
@@ -6741,7 +6740,6 @@ fn protection_is_placed_again_at_the_bound_for_the_held_quantity() {
 /// DEC-2356 item 1: a sell the read shows working that is not ours counts as not confirmed
 /// cancelled, so the protection placed at the bound covers only what it leaves.
 #[test]
-#[ignore = "pending E7-4"]
 fn the_bound_protection_leaves_out_a_sell_the_read_shows_working() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[BTC]);
@@ -6769,7 +6767,6 @@ fn the_bound_protection_leaves_out_a_sell_the_read_shows_working() {
 /// protection resting, since the close cannot go yet; a read showing it alone cancels it by its
 /// id, and the close goes only once that cancel is confirmed, never beside it.
 #[test]
-#[ignore = "pending E7-4"]
 fn the_bound_protection_is_cancelled_only_when_the_close_can_go() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[BTC]);
@@ -6848,7 +6845,6 @@ fn the_bound_protection_is_cancelled_only_when_the_close_can_go() {
 /// DEC-2356 item 3, replayed: the protection the bound placed is folded from its `placed` record,
 /// so a restarted executor still keeps it while another sell blocks the close.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_restart_keeps_the_bound_protection_while_the_close_is_blocked() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[BTC]);

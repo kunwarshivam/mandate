@@ -1,7 +1,0 @@
-file = "crates/mandate-executor/tests/hand.rs"
-test = "the_bound_protection_leaves_out_a_sell_the_read_shows_working"
-reason = """
-E7-4 A1c (DEC-2333 item 3, DEC-2356): the executor places nothing at §5.4's bound in an instrument
-the account kill switch closes, so this test reaches no stub and fails on that behaviour until
-A1c's implementation deletes this file with its `#[ignore]` line.
-"""
