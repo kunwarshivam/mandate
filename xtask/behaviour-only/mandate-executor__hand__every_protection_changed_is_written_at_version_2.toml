@@ -1,0 +1,8 @@
+file = "crates/mandate-executor/tests/hand.rs"
+test = "every_protection_changed_is_written_at_version_2"
+reason = """
+E7-4's fractional slice (DEC-2312 item 3): the executor still writes `ProtectionChanged` at
+version 1, with no `unprotected_fraction` member, which is a behaviour, not a stub's report. It
+still runs and fails, and the slice that writes version 2 deletes this file with its `#[ignore]`
+line.
+"""
