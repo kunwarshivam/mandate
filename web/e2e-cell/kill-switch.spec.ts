@@ -15,6 +15,15 @@ const WORKSPACE = process.env.OWLHEAD_WORKSPACE_ID ?? "";
 const AGENT = process.env.OWLHEAD_CELL_AGENT ?? "";
 
 const write = (body: Record<string, string>) => writeFileSync(RESULT, JSON.stringify(body));
+/**
+ * Writes `error` for the scenario, then fails the test, so Playwright's `retain-on-failure` keeps
+ * the trace of what the page did; a gesture that returned after writing passed, and its trace was
+ * dropped, which left a failed run with nothing to read but the log.
+ */
+const refuse = (error: string): never => {
+  write({ error });
+  throw new Error(error);
+};
 
 /**
  * One `GET` the page must make, and its answer, so a failure names what the API said rather than
@@ -43,14 +52,14 @@ test("the kill switch from web/, recorded through the API", async ({ page }) => 
   await page.goto("/agents");
   const listed = (await (await agents).json()) as { agents?: Array<{ agent_id: string; mode: string }> };
   const named = AGENT ? listed.agents?.find((a) => a.agent_id === AGENT) : undefined;
-  if (AGENT && !named) return write({ error: `agent ${AGENT} is not in the API's workspace` });
-  if (named?.mode === "stopped") return write({ error: `agent ${AGENT} is already stopped; web/'s kill switch screen offers nothing to confirm for a stopped agent` });
+  if (AGENT && !named) return refuse(`agent ${AGENT} is not in the API's workspace`);
+  if (named?.mode === "stopped") return refuse(`agent ${AGENT} is already stopped; web/'s kill switch screen offers nothing to confirm for a stopped agent`);
   const agent = named ?? listed.agents?.find((a) => a.mode !== "stopped");
-  if (!agent) return write({ error: "no agent in the API's workspace to kill" });
+  if (!agent) return refuse("no agent in the API's workspace to kill");
   const detailPath = `/v1/workspaces/${WORKSPACE}/agents/${agent.agent_id}`;
   const detail = await detailAnswer(page, detailPath, `/agents/${agent.agent_id}`);
-  if (!detail) return write({ error: `web/ made no GET ${detailPath} within ${GET_TIMEOUT_MS} ms` });
-  if (detail.status < 200 || detail.status >= 300) return write({ error: `the API answered ${detail.status} for ${detailPath}: ${detail.body}` });
+  if (!detail) return refuse(`web/ made no GET ${detailPath} within ${GET_TIMEOUT_MS} ms`);
+  if (detail.status < 200 || detail.status >= 300) return refuse(`the API answered ${detail.status} for ${detailPath}: ${detail.body}`);
   await expect(page.getByRole("main")).not.toBeEmpty();
   await page.getByRole("button", { name: "Stop", exact: true }).first().click();
   const sheet = page.getByRole("dialog", { name: /^Stop/ });

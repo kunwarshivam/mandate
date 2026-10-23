@@ -215,6 +215,10 @@ start without them (AGENTS.md rule 3).
   value: {{ . | quote }}
 {{- end }}
 {{- end }}
+{{- if and (eq .p.name "token-exchange") (include "mandate.oauthFixtureOn" .root) }}
+- name: MANDATE_TOKEN_URL
+  value: http://oauth-fixture:8091/alpaca/oauth/token
+{{- end }}
 {{- if include "mandate.artifactsAccess" . }}
 - name: {{ ternary "MANDATE_API_ARTIFACTS" "MANDATE_ARTIFACTS" (eq .p.name "api") }}
   value: {{ include "mandate.artifactsPath" . | quote }}
@@ -546,6 +550,17 @@ its port from values, since a policy cannot select it by pod label.
   ports:
     - {protocol: TCP, port: {{ $v.egress.kubeApiPort }}}
 {{- end }}
+{{- else if and (eq . "token-host") (include "mandate.oauthFixtureOn" $root) }}
+{{- if index $v.egress "token-host" }}
+{{- fail "egress.token-host names CIDRs, but with oauthFixture.enabled a dev or ci cell's token exchange reaches the fixture pod alone (DEC-1176 item 4)" }}
+{{- end }}
+- to:
+    - podSelector:
+        matchLabels:
+          mandate.dev/workspace: {{ $v.workspace | quote }}
+          mandate.dev/process: oauth-fixture
+  ports:
+    - {protocol: TCP, port: 8091}
 {{- else if eq . "model-gateway" }}
 - to:
     - podSelector:
@@ -614,6 +629,19 @@ spec:
               mandate.dev/egress-{{ .p.name }}: "true"
       ports:
         - {protocol: TCP, port: {{ .port }}}
+{{- end -}}
+
+{{- /* "true" when the fixture OAuth provider renders (DEC-1176 item 2): `oauthFixture.enabled`,
+which fails the render in any tier but dev or ci, whether or not `images.stub-issuer` is named,
+and needs that image in dev and ci. Called with the chart's root. */ -}}
+{{- define "mandate.oauthFixtureOn" -}}
+{{- if .Values.oauthFixture.enabled -}}
+{{- if not (has .Values.deploymentTier (list "dev" "ci")) -}}
+{{- fail (printf "oauthFixture.enabled runs only in a dev or ci cell, and deploymentTier is %q (DEC-1176)" .Values.deploymentTier) -}}
+{{- end -}}
+{{- $_ := required "images.stub-issuer is required once oauthFixture.enabled is set (DEC-1176)" (index .Values.images "stub-issuer") -}}
+true
+{{- end -}}
 {{- end -}}
 
 {{/* A `mandate.local/` image only where the values allow it: the local cell's alone. */}}
