@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use mandate_accounting::InstrumentId;
+use mandate_accounting::{InstrumentId, Side};
 use mandate_domain::CapabilityProfile;
 use mandate_num::{Price, Qty, Rounding, SignedQty, Usd};
 use mandate_time::Date;
@@ -132,6 +132,9 @@ pub struct ExecutorState {
     /// Each agent-scoped kill switch as its `KillSwitchActivated` journaled it, by that record's
     /// id, with the closes it has not yet raised as flatten intents (§5.5, DEC-485).
     pub(crate) switches: BTreeMap<EventId, Switch>,
+    /// What each agent released to the owner in each instrument, from its `PositionReleased`
+    /// records (journal spec §9.27, mandate spec §3.1, DEC-2354): shares no longer its lots.
+    pub(crate) released: BTreeMap<(AgentId, InstrumentId), Qty>,
     /// The instruments an account-scoped kill switch closes through the broker's close-position,
     /// from its `KillSwitchActivated`: their protection is never placed again beside that close,
     /// which would sell the same shares twice (§5.4, §5.5). They all leave once the account's
@@ -264,6 +267,10 @@ pub(crate) struct OrderDetail {
     /// latest report carried: a bracket entry's filled quantity before its fills are ingested
     /// (§5.4's "the filled quantity", DEC-346 item 3).
     pub(crate) reported_filled: Option<Qty>,
+    /// Every `broker_order_id` the order's version-2 `OrderStateChanged` records carried (journal
+    /// spec v0.80 §9.16, DEC-2353): one id attributes a fill that names only it; two, or none,
+    /// attribute nothing.
+    pub(crate) broker_ids: BTreeSet<String>,
     /// What of `reported_filled` beyond the applied `filled_qty` an unattributed sell fill applied
     /// after this order was submitted has already taken off the position (DEC-421 item 5).
     pub(crate) netted: Option<Qty>,
@@ -407,6 +414,7 @@ impl ExecutorState {
             uncompensated: BTreeMap::new(),
             pending_requests: BTreeMap::new(),
             switches: BTreeMap::new(),
+            released: BTreeMap::new(),
             closing_all: BTreeSet::new(),
             account_switch: None,
             switch_read: None,
@@ -663,6 +671,63 @@ impl ExecutorState {
         self.switches
             .values()
             .any(|switch| switch.copied_from.as_ref() == Some(source))
+    }
+
+    /// Whether a switch of `agent` this stream journaled copied `source` (DEC-2343 item 4): one
+    /// command applied to several agents is applied to each once.
+    pub fn applied_for(&self, agent: &AgentId, source: &EventId) -> bool {
+        self.switches
+            .values()
+            .any(|switch| &switch.agent == agent && switch.copied_from.as_ref() == Some(source))
+    }
+
+    /// Whether `agent` may hold lots in any instrument the account holds (DEC-2347 item 3.6,
+    /// DEC-2354): an upper bound on its lots there is above zero. The bound is its buys, net of its
+    /// sells and of what it released to the owner, capped at the position, where a buy in any
+    /// state but `Rejected` or `Abandoned` with other than its quantity applied to it counts at its
+    /// whole quantity: its fill may have named no order the fold could attribute it to. The bound
+    /// only ever holds the exit longer; the kill switch sells the sub-ledger, never the bound.
+    pub fn holds_lots(&self, agent: &AgentId) -> Result<bool, ExecutorError> {
+        for (instrument, position) in &self.positions {
+            let mut bound = SignedQty::ZERO;
+            for order in self.orders.values().filter(|order| {
+                order.agent.as_ref() == Some(agent) && &order.instrument == instrument
+            }) {
+                let applied = SignedQty::from(order.filled_qty);
+                bound = bound.checked_add(match order.side {
+                    Side::Buy
+                        if !matches!(order.state, OrderState::Rejected | OrderState::Abandoned)
+                            && order.filled_qty != order.qty =>
+                    {
+                        SignedQty::from(order.qty)
+                    }
+                    Side::Buy => applied,
+                    Side::Sell => applied.negated(),
+                })?;
+            }
+            let released = self
+                .released
+                .get(&(agent.clone(), instrument.clone()))
+                .copied()
+                .unwrap_or(Qty::ZERO);
+            bound = bound.checked_add(SignedQty::from(released).negated())?;
+            if bound.min(*position) > SignedQty::ZERO {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    /// This state with what the fold kept of each order's broker order ids forgotten, every other
+    /// field as folded (journal spec v0.80 §9.16, DEC-2353): what a test compares to show the
+    /// member is read for fill attribution alone.
+    #[doc(hidden)]
+    pub fn without_broker_ids(&self) -> Self {
+        let mut state = self.clone();
+        for detail in state.details.values_mut() {
+            detail.broker_ids.clear();
+        }
+        state
     }
 
     pub fn started(&self) -> bool {

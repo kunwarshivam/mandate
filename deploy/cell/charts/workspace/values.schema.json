@@ -21,7 +21,8 @@
     "artifacts",
     "founding",
     "executor",
-    "alpacaOAuth"
+    "alpacaOAuth",
+    "oauthFixture"
   ],
   "properties": {
     "workspace": {
@@ -59,7 +60,8 @@
         "model-gateway",
         "exporter",
         "data",
-        "deploy-manager"
+        "deploy-manager",
+        "role-provisioner"
       ],
       "properties": {
         "postgres": {
@@ -108,6 +110,10 @@
           "pattern": "^$|^[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[0-9a-f]{64}$|^mandate\\.local/[a-z0-9-]+:[0-9a-f]{7,40}$"
         },
         "deploy-manager": {
+          "type": "string",
+          "pattern": "^$|^[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[0-9a-f]{64}$|^mandate\\.local/[a-z0-9-]+:[0-9a-f]{7,40}$"
+        },
+        "role-provisioner": {
           "type": "string",
           "pattern": "^$|^[a-z0-9./_-]+(:[A-Za-z0-9._-]+)?@sha256:[0-9a-f]{64}$|^mandate\\.local/[a-z0-9-]+:[0-9a-f]{7,40}$"
         }
@@ -441,7 +447,7 @@
         "subjectLinks",
         "ingressPeers",
         "vaultBinding",
-        "connectionManagerBinding"
+        "connectFinish"
       ],
       "properties": {
         "org": {
@@ -492,9 +498,9 @@
           "type": "boolean",
           "description": "The API's vault binding (DEC-2338): its AppRole and the vault's CA as owner-only files, and egress to the vault on 8200."
         },
-        "connectionManagerBinding": {
+        "connectFinish": {
           "type": "boolean",
-          "description": "The connection manager's AppRole beside the API's, copied owner-only as the API's is (DEC-2348); it needs vaultBinding."
+          "description": "The connect finish's Deployment, from the API's image, holding the connection manager's AppRole alone as owner-only files, with egress to the journal and the vault on 8200 (DEC-2348 item 3)."
         }
       }
     },
@@ -562,6 +568,19 @@
           "description": "MANDATE_ALPACA_REDIRECT_URI: the callback on this deployment's API host (DEC-2623 item 2)"
         }
       }
+    },
+    "oauthFixture": {
+      "description": "The fixture OAuth provider's own pod (DEC-1176): dev and ci cells only, and the token exchange's token URL pointed at it. Any other tier refuses it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      }
     }
   },
   "allOf": [
@@ -584,6 +603,38 @@
         "properties": {
           "deploymentTier": {
             "const": "staging"
+          }
+        },
+        "required": [
+          "deploymentTier"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "oauthFixture": {
+            "properties": {
+              "enabled": {
+                "const": true
+              }
+            },
+            "required": [
+              "enabled"
+            ]
+          }
+        },
+        "required": [
+          "oauthFixture"
+        ]
+      },
+      "then": {
+        "properties": {
+          "deploymentTier": {
+            "enum": [
+              "dev",
+              "ci"
+            ]
           }
         },
         "required": [

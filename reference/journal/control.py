@@ -225,6 +225,7 @@ REQUIRED_REFS = {
     "ApprovalRevalidated": ("mandate_version",),
     "AgentDeployed": ("mandate_version",),
     "AgentStopped": ("mandate_version",),
+    "RetirementHeld": ("mandate_version",),
     "MandateVersionApplied": ("mandate_version",),
     "UniverseChanged": ("mandate_version",),
     **{event_type: ("mandate_version",) for event_type in (
@@ -1180,6 +1181,15 @@ SCHEMAS[("ctl", "ConnectionRolesRemoved")] = rec(
     ("occasion", one_of("request_closed", "revoked")),
 )
 CR_RECORDS = ("ConnectionRolesMade", "ConnectionRolesRefused", "ConnectionRolesRemoved")
+# §9.34 v0.79 (DEC-2352): the runtime's record that a retirement has waited another 24 hours of risk
+# clock for what the agent still holds (DEC-2344 item 2). No order, position, or quantity.
+SCHEMAS[("agent", "RetirementHeld")] = rec(
+    ("held_since", RISK_CLOCK),
+    ("period", INT),
+    ("waiting_on", list_of(one_of("position", "working_order"))),
+    ("risk_clock", RISK_CLOCK),
+)
+HELD_PERIOD_S = 86_400
 
 # §9.5 (DEC-446, DEC-447): the account stream's executor records. The three records §9.5 closes at
 # `schema_version` 2 carry both versions here; the companion and `ProtectionChanged` close at 1.
@@ -1283,6 +1293,7 @@ VERSIONED_VERSIONS: dict[tuple[str, str], tuple[int, ...]] = {
     ("acct", "OrderRequestRecorded"): (1,),
     ("acct", "ProtectionChanged"): (1, 2),
     ("acct", "OwnerConfirmationReceived"): (1,),
+    ("acct", "AccountCloseRequested"): (1,),
     ("ctl", "ConnectionEstablished"): (1, 2),
     ("acct", "ConnectionEstablished"): (2,),
     ("ctl", "MandateConfirmed"): (1, 2),
@@ -1337,6 +1348,15 @@ VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
         ("floor", DEC),
         ("expires_at", INT),
         ("copied_from", ULID),
+        ("risk_clock", RISK_CLOCK),
+    ),
+    # v0.75 §9.5 (DEC-2337): one instrument's close-position under an account kill switch,
+    # journaled before it is sent.
+    ("acct", "AccountCloseRequested", 1): rec(
+        ("instrument_id", STR),
+        ("qty", DEC),
+        ("kill_switch_event", ULID),
+        ("attempt", INT),
         ("risk_clock", RISK_CLOCK),
     ),
     ("ctl", "ConnectionEstablished", 2): ESTABLISHED_V2,
@@ -1858,6 +1878,22 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
 
         wrong = next((m for m in prices if not positive(m)), None)
         rule("247", wrong is None, "schema", f"payload.{wrong}" if wrong else "")
+    if event_type == "AccountCloseRequested":
+        qty = normalize_decimal(p["qty"])
+        if qty is None:
+            positive = True
+        elif "boundary.rule_258_zero" in skip:
+            positive = Decimal(qty) >= 0
+        else:
+            positive = Decimal(qty) > 0
+        first = 0 if "boundary.rule_258_attempt" in skip else 1
+        clauses = [("258.qty", positive, "payload.qty"), ("258.attempt", p["attempt"] >= first, "payload.attempt")]
+        if "order.rule_258_attempt_first" in skip:
+            clauses.reverse()
+        wrong = next(((n, at) for n, ok, at in clauses if not ok and f"rule.{n}" not in skip), None)
+        if wrong is not None:
+            rule("258", False, "schema", wrong[1])
+        rule("259", draft["causation_id"] == p["kill_switch_event"], "schema", "causation_id")
     if event_type == "StepUpConfirmed":
         rule("242.kind", p["action_kind"] == "approve", "schema", "payload.action_kind")
         rule("242.paper", draft["environment"] == "paper", "schema", "environment")
@@ -2077,6 +2113,7 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
     out += backtest_violations(event_type, draft, skip)
     out += deployment_manager_violations(event_type, draft, skip)
     out += connection_role_violations(event_type, draft, skip)
+    out += retirement_held_violations(event_type, draft, skip)
     return out
 
 
@@ -2888,6 +2925,33 @@ def connection_role_violations(event_type: str, draft: dict, skip: frozenset[str
 
     rule("261.system", draft["actor"]["kind"] == "system", "actor.kind")
     rule("261.cause", draft["causation_id"] is not None, "causation_id")
+    return out
+
+
+def retirement_held_violations(event_type: str, draft: dict, skip: frozenset[str]) -> list[Violation]:
+    """§9.34's rule 265, on a well-typed payload: the runtime's own record, caused by what began
+    the retirement; a period from 1, no sooner than 24 hours after it began (the 24 hours between
+    records are rule 266's); and
+    what it waits on, once each and in order."""
+    if event_type != "RetirementHeld":
+        return []
+    p = draft["payload"]
+    out: list[Violation] = []
+
+    def rule(name: str, holds: bool, path: str) -> None:
+        if not holds and f"rule.{name}" not in skip:
+            out.append(Violation(f"rule.{name}", "schema", path))
+
+    rule("265.agent", draft["actor"]["kind"] == "agent", "actor.kind")
+    rule("265.cause", draft["causation_id"] is not None, "causation_id")
+    period, since, now, waiting = p["period"], p["held_since"], p["risk_clock"], p["waiting_on"]
+    if isinstance(period, int):
+        rule("265.period", period >= 1, "payload.period")
+        if isinstance(since, str) and isinstance(now, str) and is_timestamp(since) and is_timestamp(now) and (period >= 1 or "rule.265.period" in skip):
+            due = epoch_seconds(since) + HELD_PERIOD_S
+            rule("265.due", epoch_seconds(now) >= due, "payload.risk_clock")
+    if isinstance(waiting, list):
+        rule("265.waiting", bool(waiting) and ascending(waiting), "payload.waiting_on")
     return out
 
 

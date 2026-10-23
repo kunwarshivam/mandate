@@ -172,6 +172,17 @@ pub fn fixture_random(
     accepting: bool,
     random: Box<dyn Random>,
 ) -> Fixture {
+    fixture_port(environment, offered, accepting, random, None)
+}
+
+/// [`fixture`] whose callback writes through `vault` when given, rather than [`Codes`].
+pub fn fixture_port(
+    environment: &str,
+    offered: bool,
+    accepting: bool,
+    random: Box<dyn Random>,
+    vault: Option<Arc<dyn CodeVault>>,
+) -> Fixture {
     let mut n = DIRS.lock().expect("unpoisoned");
     *n += 1;
     let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
@@ -211,7 +222,7 @@ pub fn fixture_random(
                 client: client(),
             },
             random,
-            Arc::clone(&codes) as Arc<dyn CodeVault>,
+            vault.unwrap_or_else(|| Arc::clone(&codes) as Arc<dyn CodeVault>),
         ))
     });
     let app = App {

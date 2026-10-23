@@ -21,6 +21,9 @@
     "journal-role-mandate-api": {
       "file": "./secrets/journal-role-mandate-api.pgpass"
     },
+    "journal-role-mandate-connect-finish": {
+      "file": "./secrets/journal-role-mandate-connect-finish.pgpass"
+    },
     "journal-role-mandate-control": {
       "file": "./secrets/journal-role-mandate-control.pgpass"
     },
@@ -38,6 +41,9 @@
     },
     "journal-role-mandate-migrator": {
       "file": "./secrets/journal-role-mandate-migrator.pgpass"
+    },
+    "journal-role-mandate-role-provisioner": {
+      "file": "./secrets/journal-role-mandate-role-provisioner.pgpass"
     },
     "journal-role-mandate-runtime": {
       "file": "./secrets/journal-role-mandate-runtime.pgpass"
@@ -329,6 +335,8 @@
         "journal-role-mandate-verify",
         "journal-role-mandate-api",
         "journal-role-mandate-deploy-manager",
+        "journal-role-mandate-role-provisioner",
+        "journal-role-mandate-connect-finish",
         "journal-role-mandate-runtime",
         "journal-role-mandate-scheduler",
         "journal-role-mandate-gateway",
