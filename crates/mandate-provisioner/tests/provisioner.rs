@@ -792,7 +792,6 @@ fn each_connections_made_roles_are_its_own() {
 /// DEC-2350 item 7); a closer of an earlier request is never cited, so a second request's roles
 /// made after the first one's close owe nothing until their own.
 #[test]
-#[ignore = "pending E21-33"]
 fn roles_made_after_their_request_closed_are_owed_their_removal() {
     let oauth = r#"{"connection_id":"c1","credential":"oauth"}"#;
     let made = |seq: u64, request: &str| {
@@ -855,7 +854,6 @@ fn roles_made_after_their_request_closed_are_owed_their_removal() {
 /// A pass over roles recorded after their request closed removes the token exchange's role once,
 /// journals the removal the verifier's fold accepts, and owes nothing after.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending E21-33"]
 async fn a_pass_removes_the_exchanges_role_of_roles_made_after_the_close() {
     let stream = Stream::opened();
     let records = world("removed_after_roles_made_once_closed");

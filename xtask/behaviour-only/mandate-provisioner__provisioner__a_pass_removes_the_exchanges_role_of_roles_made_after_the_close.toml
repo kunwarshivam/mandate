@@ -1,7 +1,0 @@
-file = "crates/mandate-provisioner/tests/provisioner.rs"
-test = "a_pass_removes_the_exchanges_role_of_roles_made_after_the_close"
-reason = """
-The fold has no seam to stub: its plan still forgets a closer journaled before the roles' record, so the pass removes nothing (journal spec v0.78
-rule 263, DEC-2350 item 7). The pair's implementation reads the closer after the latest roles'
-request and deletes this row.
-"""

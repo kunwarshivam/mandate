@@ -1,7 +1,0 @@
-file = "crates/mandate-provisioner/tests/provisioner.rs"
-test = "roles_made_after_their_request_closed_are_owed_their_removal"
-reason = """
-The fold has no seam to stub: its plan still forgets a closer journaled before the roles' record, so it owes no removal for roles made after their request closed (journal spec v0.78
-rule 263, DEC-2350 item 7). The pair's implementation reads the closer after the latest roles'
-request and deletes this row.
-"""

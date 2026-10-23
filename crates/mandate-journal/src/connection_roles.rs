@@ -153,8 +153,11 @@ struct Fold {
     made: BTreeSet<String>,
     /// The connections whose exchange role was removed since their latest roles were made.
     removed: BTreeSet<String>,
-    /// Each connection's closers since its latest roles were made, by `event_id`.
+    /// Each request's connection's closers journaled after it, by `event_id`.
     closers: BTreeMap<String, BTreeMap<String, Closer>>,
+    /// The request each connection's latest roles were made for: its removal cites a closer
+    /// journaled after that request, before those roles' record or after it (v0.78 rule 263).
+    made_for: BTreeMap<String, String>,
 }
 
 impl Fold {
@@ -188,19 +191,20 @@ impl Fold {
                 let request = self.requests.get(&cause);
                 let oauth = request.is_some_and(|(_, oauth)| *oauth);
                 let own = request.is_some_and(|(of, _)| *of == connection);
-                if !oauth || !own || !self.answered.insert(cause) {
+                if !oauth || !own || !self.answered.insert(cause.clone()) {
                     return Err(ConnectionRolesRule::Answered);
                 }
                 if row.event_type == MADE {
                     self.removed.remove(&connection);
-                    self.closers.insert(connection.clone(), BTreeMap::new());
+                    self.made_for.insert(connection.clone(), cause);
                     self.made.insert(connection);
                 }
             }
             REMOVED => {
                 let closer = self
-                    .closers
+                    .made_for
                     .get(&connection)
+                    .and_then(|request| self.closers.get(request))
                     .and_then(|closers| closers.get(&cause))
                     .copied();
                 let named = match member("occasion").as_str() {
@@ -219,11 +223,15 @@ impl Fold {
         Ok(())
     }
 
-    /// Records `row` as a closer of `connection`'s roles, `how`.
+    /// Records `row` as a closer, `how`, of every request of `connection` journaled before it.
     fn close(&mut self, connection: String, row: &StoredEvent, how: Closer) {
-        self.closers
-            .entry(connection)
-            .or_default()
-            .insert(row.event_id.clone(), how);
+        for (request, (of, _)) in &self.requests {
+            if *of == connection {
+                self.closers
+                    .entry(request.clone())
+                    .or_default()
+                    .insert(row.event_id.clone(), how);
+            }
+        }
     }
 }
