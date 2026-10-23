@@ -35,7 +35,7 @@ use crate::kubernetes::{
 };
 use crate::lease::{LEASE_SECS, Lease, lease_times};
 use crate::policy::{
-    Identity, Mounts, SecretPath, kv_path, openbao_policy, policy_name, role_name,
+    Access, Identity, Mounts, SecretPath, kv_path, openbao_policy, policy_name, require, role_name,
 };
 use crate::provisioner::{RoleProvisioner, RoleRefusal};
 use crate::source::{GRANT_SECS, Grant, SecretSource};
@@ -134,34 +134,73 @@ impl Http {
         parsed(bytes)
     }
 
-    /// A Kubernetes login to `/v1/<path>` for `role`: as [`Http::call`], except that a refusal's
-    /// body is read, for [`kubernetes_login_refusal`], and then wiped like any other.
+    /// A Kubernetes login to `/v1/<path>` for `role`, its refusal judged by
+    /// [`kubernetes_login_refusal`].
     async fn login(
         &self,
         path: &str,
         body: &Value,
         role: &str,
     ) -> Result<Option<Value>, SourceError> {
-        let response = self
+        self.post_judged(path, None, body, |status, answer| {
+            kubernetes_login_refusal(status, answer, role)
+        })
+        .await
+    }
+
+    /// A `POST` to `/v1/<path>`: as [`Http::call`], except that a refusal's body is read, for
+    /// `judge`, and then wiped like any other.
+    async fn post_judged(
+        &self,
+        path: &str,
+        token: Option<&SecretString>,
+        body: &Value,
+        judge: impl FnOnce(u16, &[u8]) -> Result<(), SourceError>,
+    ) -> Result<Option<Value>, SourceError> {
+        let mut request = self
             .client
             .post(format!("{}/v1/{path}", self.address))
             .header("Content-Type", "application/json")
-            .body(body.to_string())
-            .send()
-            .await
-            .map_err(|_| SourceError::Unavailable)?;
+            .body(body.to_string());
+        if let Some(token) = token {
+            request = request.header("X-Vault-Token", token.expose_secret());
+        }
+        let response = request.send().await.map_err(|_| SourceError::Unavailable)?;
         let status = response.status();
         let mut bytes = response
             .bytes()
             .await
             .map_err(|_| SourceError::Unavailable)?
             .to_vec();
-        if let Err(refused) = kubernetes_login_refusal(status.as_u16(), &bytes, role) {
+        if let Err(refused) = judge(status.as_u16(), &bytes) {
             bytes.zeroize();
             return Err(refused);
         }
         parsed(bytes)
     }
+}
+
+/// The marker a take overwrites a code with (DEC-2061 item 4), never a code.
+const TOMBSTONE: &str = "taken";
+
+/// Whether the vault's answer to a KV read is a tombstone a take left.
+fn tombstoned(answer: Option<&Value>) -> bool {
+    answer.and_then(|a| a.pointer(&format!("/data/data/{TOMBSTONE}"))) == Some(&Value::Bool(true))
+}
+
+/// The refusal a check-and-set overwrite's answer means, its status and its body: [`refusal`]'s,
+/// except that a 400 whose one error is that the version moved on is [`SourceError::Missing`],
+/// since another taker got the code first. No part of the body reaches the error.
+pub(crate) fn cas_refusal(status: u16, body: &[u8]) -> Result<(), SourceError> {
+    let moved = json!(["check-and-set parameter did not match the current version"]);
+    let lost = status == 400
+        && serde_json::from_slice::<Value>(body)
+            .ok()
+            .is_some_and(|answer| answer.get("errors") == Some(&moved));
+    if lost {
+        return Err(SourceError::Missing);
+    }
+    refusal(StatusCode::from_u16(status).map_err(|_| SourceError::Unavailable)?)
 }
 
 /// The JSON in `bytes`, or `None` when there are none; the bytes are wiped either way.
@@ -207,6 +246,71 @@ pub fn kubernetes_login_refusal(status: u16, body: &[u8], role: &str) -> Result<
         return Err(SourceError::RoleMissing);
     }
     refusal(StatusCode::from_u16(status).map_err(|_| SourceError::Unavailable)?)
+}
+
+/// What a read of the code a take is about to overwrite says: no code, or a tombstone a take left,
+/// is `None`; otherwise the code's version and its bytes, held as a secret from the moment they are
+/// decoded, so a lost race or an error wipes them. A read with no version or no value, or whose
+/// value is not base64, is [`SourceError::Malformed`]; any other refusal is the read's own.
+pub(crate) fn taken_read(
+    read: Result<Option<Value>, SourceError>,
+) -> Result<Option<(u64, SecretSlice<u8>)>, SourceError> {
+    let read = match read {
+        Ok(read) => read,
+        Err(SourceError::Missing) => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    if tombstoned(read.as_ref()) {
+        return Ok(None);
+    }
+    let version = read
+        .as_ref()
+        .and_then(|r| r.pointer("/data/metadata/version"))
+        .and_then(Value::as_u64)
+        .ok_or(SourceError::Malformed)?;
+    let code = exact_decode(text(read.as_ref(), "/data/data/value")?)?;
+    Ok(Some((version, code)))
+}
+
+/// The bytes `encoded`, padded standard base64, decodes to, in a buffer of exactly their size, so
+/// boxing them as a secret never copies them and leaves the first copy unwiped; a buffer partly
+/// written by a decode that fails is wiped. The size is three bytes a four-character group less
+/// one a pad, which is exact for every input the decode accepts: it refuses a length that is not
+/// a whole number of groups, misplaced padding, and output that does not fit. Anything but padded
+/// standard base64 is [`SourceError::Malformed`].
+fn exact_decode(encoded: &str) -> Result<SecretSlice<u8>, SourceError> {
+    let padding = encoded
+        .bytes()
+        .rev()
+        .take_while(|byte| *byte == b'=')
+        .count();
+    let size = encoded
+        .len()
+        .checked_div(4)
+        .and_then(|quads| quads.checked_mul(3))
+        .and_then(|whole| whole.checked_sub(padding))
+        .ok_or(SourceError::Malformed)?;
+    let mut bytes = vec![0u8; size];
+    match STANDARD.decode_slice(encoded, &mut bytes) {
+        Ok(_) => Ok(SecretSlice::from(bytes.into_boxed_slice())),
+        Err(_) => {
+            bytes.zeroize();
+            Err(SourceError::Malformed)
+        }
+    }
+}
+
+/// What the read again after a refused overwrite means: the code gone is a race another taker
+/// won, `None`; a code still there is one this taker may not take, [`SourceError::Denied`]; a read
+/// that fails is that failure.
+pub(crate) fn lost_or_denied_verdict(
+    reread: Result<Option<Value>, SourceError>,
+) -> Result<Option<SecretSlice<u8>>, SourceError> {
+    match reread {
+        Err(SourceError::Missing) => Ok(None),
+        Ok(_) => Err(SourceError::Denied),
+        Err(e) => Err(e),
+    }
 }
 
 /// The string at `pointer` in `value`.
@@ -267,6 +371,26 @@ pub struct OpenBaoSource {
     mounts: Mounts,
     token: SecretString,
     token_expires_at: Mutex<UtcNanos>,
+}
+
+impl OpenBaoSource {
+    /// A session over `token`, which the test's operator made with the policy it gives: the one
+    /// way to hold the Kubernetes-auth exchange's policy without a cluster to check a login.
+    #[cfg(test)]
+    pub(crate) fn from_token(
+        config: &OpenBaoConfig,
+        identity: Identity,
+        token: SecretString,
+        expires_at: UtcNanos,
+    ) -> Result<Self, SourceError> {
+        Ok(Self {
+            identity,
+            http: Http::new(config)?,
+            mounts: config.mounts.clone(),
+            token,
+            token_expires_at: Mutex::new(expires_at),
+        })
+    }
 }
 
 impl fmt::Debug for OpenBaoSource {
@@ -505,11 +629,22 @@ impl OpenBaoSource {
             Err(SourceError::Missing) => return Ok(None),
             Err(e) => return Err(e),
         };
+        if tombstoned(value.as_ref()) {
+            return Ok(None);
+        }
         let encoded = text(value.as_ref(), "/data/data/value")?;
         STANDARD
             .decode(encoded)
             .map(|bytes| Some(SecretSlice::from(bytes)))
             .map_err(|_| SourceError::Malformed)
+    }
+
+    /// What a refused overwrite of the code at `data` means. The taker may only update, never
+    /// create, so once another taker has deleted the code the overwrite is refused before its
+    /// version is checked: that is a lost race, and `None`, but only if the code is gone when read
+    /// again. A code still there means the taker may not take it: [`SourceError::Denied`].
+    async fn lost_or_denied(&self, data: &str) -> Result<Option<SecretSlice<u8>>, SourceError> {
+        lost_or_denied_verdict(self.call(Method::GET, data, None).await)
     }
 
     fn role_path(&self, connection: &ConnectionId) -> String {
@@ -578,6 +713,72 @@ impl RoleProvisioner for OpenBaoSource {
 impl SecretSource for OpenBaoSource {
     fn identity(&self) -> &Identity {
         &self.identity
+    }
+
+    /// A check-and-set write at version 0, which the vault takes only where no version is there,
+    /// after the client-side check of [`Access::Create`].
+    async fn create(&self, path: &SecretPath, secret: &SecretSlice<u8>) -> Result<(), SourceError> {
+        require(&self.identity, Access::Create, path)?;
+        let mut encoded = STANDARD.encode(secret.expose_secret());
+        let body = json!({ "options": { "cas": 0 }, "data": { "value": encoded } });
+        encoded.zeroize();
+        let created = self
+            .http
+            .post_judged(
+                &self.data_path(path)?,
+                Some(&self.token),
+                &body,
+                cas_refusal,
+            )
+            .await;
+        match created {
+            Ok(_) => Ok(()),
+            Err(SourceError::Missing) => Err(SourceError::Denied),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Reads the code with its version, overwrites that version alone with a tombstone, destroys
+    /// the version read and deletes the tombstone's version alone, keeping the metadata so the
+    /// version count never restarts and a code stored since is never hidden (DEC-2321): a taker
+    /// whose overwrite loses, or that reads a tombstone or no code, gets `None`.
+    async fn take_code(
+        &self,
+        connection: &ConnectionId,
+    ) -> Result<Option<SecretSlice<u8>>, SourceError> {
+        let path = SecretPath::Code(connection.clone());
+        require(&self.identity, Access::Take, &path)?;
+        let data = self.data_path(&path)?;
+        let Some((version, code)) = taken_read(self.call(Method::GET, &data, None).await)? else {
+            return Ok(None);
+        };
+        let tombstone = version.checked_add(1).ok_or(SourceError::Malformed)?;
+        let body = json!({ "options": { "cas": version }, "data": { TOMBSTONE: true } });
+        let overwrite = self
+            .http
+            .post_judged(&data, Some(&self.token), &body, cas_refusal)
+            .await;
+        match overwrite {
+            Ok(_) => {}
+            Err(SourceError::Missing) => return Ok(None),
+            Err(SourceError::Denied) => return self.lost_or_denied(&data).await,
+            Err(e) => return Err(e),
+        }
+        for (endpoint, versions) in [("destroy", version), ("delete", tombstone)] {
+            let named = format!("{}/{endpoint}/{}", self.mounts.kv, kv_path(&path)?);
+            match self
+                .call(
+                    Method::POST,
+                    &named,
+                    Some(&json!({ "versions": [versions] })),
+                )
+                .await
+            {
+                Ok(_) | Err(SourceError::Missing) => {}
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(Some(code))
     }
 
     async fn put(&self, path: &SecretPath, secret: &SecretSlice<u8>) -> Result<(), SourceError> {

@@ -12,8 +12,19 @@ tests (deploy/tests/test_cell.py) and the drills (`cargo xtask cell drill`) read
 {{ toJson $doc }}
 {{- end -}}
 
+{{- /* The processes of processes.json; with `api.vaultBinding` the API's egress also names the
+vault, so its pod carries the label the vault's policy admits on 8200 and an egress rule to it
+alone (DEC-2338). */ -}}
 {{- define "mandate.processes" -}}
-{{- (fromJson (.Files.Get "processes.json")).processes | toJson -}}
+{{- $all := (fromJson (.Files.Get "processes.json")).processes -}}
+{{- $out := list -}}
+{{- range $all -}}
+{{- if and (eq .name "api") $.Values.api.vaultBinding -}}
+{{- $_ := set . "egress" (concat (list (first .egress) "vault") (rest .egress)) -}}
+{{- end -}}
+{{- $out = append $out . -}}
+{{- end -}}
+{{- $out | toJson -}}
 {{- end -}}
 
 {{/* A process renders only when its image is named (processes.json "about"). */}}
@@ -231,6 +242,11 @@ start without them (AGENTS.md rule 3).
   mountPath: /run/mandate/vault-token
   readOnly: true
 {{- end }}
+{{- if include "mandate.vaultCa" . }}
+- name: vault-ca
+  mountPath: /run/mandate/vault
+  readOnly: true
+{{- end }}
 {{- end -}}
 
 {{/*
@@ -408,6 +424,15 @@ spec:
                   fieldRef:
                     fieldPath: metadata.namespace
     {{- end }}
+    {{- if include "mandate.vaultCa" . }}
+    - name: vault-ca
+      configMap:
+        name: vault-ca
+        defaultMode: 292
+        items:
+          - key: ca.crt
+            path: ca.crt
+    {{- end }}
     {{- with .volumes }}
     {{- . | nindent 4 }}
     {{- end }}
@@ -429,6 +454,7 @@ process for no deployment.
 {{- if contains "{connection}" $w }}{{ $w = replace "{connection}" (required "runtime.connection is required once images.runtime is named" $v.runtime.connection) $w }}{{ end -}}
 {{- if contains "{owner}" $w }}{{ $w = replace "{owner}" (required "runtime.owner is required once images.runtime is named" $v.runtime.owner) $w }}{{ end -}}
 {{- if contains "{probe}" $w }}{{ $w = replace "{probe}" $.probe $w }}{{ end -}}
+{{- if contains "{vault}" $w }}{{ $w = replace "{vault}" (include "mandate.vaultAddress" $.root) $w }}{{ end -}}
 {{- $out = append $out $w -}}
 {{- end -}}
 {{- $out | toJson -}}
@@ -599,6 +625,19 @@ spec:
 {{- /* The executor's broker flags (DEC-2306 item 1), as JSON: none for the fixture broker, and for
 `alpaca-paper` the paper host's, the vault's address, and the directory the vault's CA is mounted
 in. */ -}}
+{{- /* Whether process `p` trusts the vault: the vault chart's CA certificate alone, the
+ConfigMap `vault-ca`, read-only at /run/mandate/vault (DEC-2332 item 5): a `vault_ca` process's,
+the executor's only when its broker reaches the vault. */ -}}
+{{- define "mandate.vaultCa" -}}
+{{- if and .p.vault_ca (or (ne .p.name "executor") (eq .root.Values.executor.broker "alpaca-paper")) -}}true{{- end -}}
+{{- end -}}
+
+{{- /* The vault's address: the executor's `vaultAddress` where it is set, else this namespace's
+vault Service, which the vault chart's certificate names. */ -}}
+{{- define "mandate.vaultAddress" -}}
+{{- .Values.executor.vaultAddress | default (printf "https://vault.%s.svc:8200" .Release.Namespace) -}}
+{{- end -}}
+
 {{- define "mandate.executorBroker" -}}
 {{- $e := .Values.executor -}}
 {{- if eq $e.broker "alpaca-paper" -}}
