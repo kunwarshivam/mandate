@@ -3531,6 +3531,14 @@ enables `live` (ES-23, OPS-5).
   - **Wipe the provider key when dropped.** `ProviderKey` holds a plain `String` (DEC-2326 item 5).
     Hold it in a type that zeroizes on drop, adding `secrecy` to `mandate-gateway`'s allowed
     dependencies.
+- **E21-63 (Proposed, M8; lane A1)** As an owner, I want the web app's status strip to show the
+  deployment's health, so that I see when market data, the broker, the deployment or the relay is
+  stale or down (workspace API spec §4.7, `GET /health`, the status strip G1). The API server routes
+  no `GET /v1/workspaces/{ws}/health` yet and answers it with its one 401 (API-1), so web/ does not
+  read it, and the strip shows each component as not reported; web/ reads routed paths only.
+  *Accepted when:* `read-models/health.schema.json` defines the body; the API server serves it from
+  the journal's observations, each component with its state and freshness; and web/'s `loadApi`
+  reads it again, with a test that a served health shows on the strip.
 
 ## Won't (v1)
 
