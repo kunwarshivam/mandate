@@ -789,8 +789,10 @@ forbidden_internal = ["mandate-daemon", "mandate-agentd", "mandate-shell", "mand
 # The token-exchange process (E10-13 slice 5b, DEC-821 item 2, DEC-2629): the one process with
 # the platform's client secret and the live token endpoint. It sits above mandate-connections, whose
 # exchange rules it runs, and no crate may depend on it, so no other process can send the request.
+# Raised from layer 7 by DEC-2330 item 1 to sit above mandate-vault, through which it logs in as
+# its connection's exchange, reads the client secret, takes the code and writes the token.
 [crates.mandate-token-exchange]
-layer = 7
+layer = 9
 safety_critical = true
 pure = false
 allowed_external = ["reqwest", "rustls", "secrecy", "tokio"]
