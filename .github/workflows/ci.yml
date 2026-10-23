@@ -507,7 +507,8 @@ jobs:
 
   # DEC-2334, DEC-2338 item 5. The API server's release-profile build and its release `config`
   # tests, about five minutes on its own, which neither job above has room for under ten minutes
-  # (DEC-464). It starts exactly when `full-checks` does.
+  # (DEC-464), and the role provisioner's release build, which refuses its fixture (DEC-2350),
+  # under two more. It starts exactly when `full-checks` does.
   full-checks-3:
     needs: select
     if: needs.select.outputs.full_checks == 'true'
@@ -524,6 +525,7 @@ jobs:
         run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: cargo xtask ci api-release
+      - run: cargo xtask ci provisionerd-release
 
   # E21-36, E21-37 (DEC-993): the local cell on the runner. `cargo xtask ci cell` lints and renders
   # both charts, runs the chart's invariant tests, brings up a k3d cluster, installs the chart from

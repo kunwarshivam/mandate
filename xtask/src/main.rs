@@ -16823,7 +16823,7 @@ mod tests {
                 "exchange-release",
             ],
         ),
-        ("full-checks-3", &["api-release"]),
+        ("full-checks-3", &["api-release", "provisionerd-release"]),
     ];
 
     /// DEC-2334: CI's full jobs together run exactly what `cargo xtask ci full` runs, each part
