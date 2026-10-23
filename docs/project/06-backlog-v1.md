@@ -4308,6 +4308,14 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   with the data host's credential from the vault, and hand each as `Input::Market` with its sanity
   verdict; a recorded fake for the tests. A design note on claim #137 first. Once it lands, the
   founder may revert DEC-2358 to DEC-160 (12)'s hold.
+- **E7-4 (executor process), from the review of [DEC-2357](decisions/DEC-2357.md):** while a
+  connection record does not read, `agents_of` follows every agent with a version-2 deployment,
+  those deployed only on another account's connection included: journal noise, no risk. Skip an
+  agent whose every deployment names a connection a readable establishment shows is another
+  account's.
+- **E7-4 (executor), from the review of [DEC-2358](decisions/DEC-2358.md):** pin a discretionary
+  exit with a limit of its own whose price vanishes mid-sequence: it falls back to its limit, and
+  the sequence goes on, rather than ending and re-protecting as an exit with no limit does.
 - **E7-4 A1c (stream K), from [DEC-2333](decisions/DEC-2333.md) item 3:** at §5.4's bound, re-place
   protection in an instrument the account kill switch closes for the held quantity less every sell
   not confirmed cancelled, placing nothing where that leaves none, with its own DEC-77 pair. Until

@@ -14992,10 +14992,8 @@ mod ladder_tests {
     proptest! {
         /// DEC-160 (12): `exit_price` answers every purpose, for any observations, step, floor and
         /// limit, and never with a refusal. Its oracle is its own: a sequence's exit prices when
-        /// some sane bid or sane trade is within five minutes (DEC-260 (5)); otherwise every exit
-        /// but a discretionary one falls back to its limit, raised to the floor. A discretionary
-        /// exit with nothing to price from is DEC-2358's, pinned by
-        /// `a_discretionary_exit_with_its_own_limit_falls_back_to_it`.
+        /// some sane bid or sane trade is within five minutes (DEC-260 (5)); otherwise every exit,
+        /// a discretionary one included (DEC-2358), falls back to its limit, raised to the floor.
         #[test]
         fn exit_price_never_refuses_any_purpose(
             purpose in purposes(),
@@ -15048,7 +15046,6 @@ mod ladder_tests {
                     matches!(priced, ExitPrice::Laddered(price) if floor.is_none_or(|floor| price >= floor)),
                     "{:?}", priced
                 ),
-                (true, false, Purpose::DiscretionaryExit) => {}
                 (true, false, _) => prop_assert_eq!(priced, ExitPrice::Fallback(raised)),
             }
         }
