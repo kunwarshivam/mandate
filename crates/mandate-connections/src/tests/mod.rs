@@ -3,6 +3,7 @@
 //! story's `Unimplemented` stub until the story's code lands; every other test runs.
 
 mod checks;
+mod code_entry;
 mod errors;
 mod exchange;
 mod grant;
