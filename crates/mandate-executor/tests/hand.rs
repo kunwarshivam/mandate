@@ -6051,6 +6051,55 @@ fn a_release_is_read_again_on_replay() {
     assert_eq!(replayed.holds_lots(&agent(common::AGENT)), Ok(false));
 }
 
+/// DEC-2354 item 3, the bound's terms: a buy the broker rejected bought nothing, so it gives its
+/// agent no lots in a position another agent holds, though it never filled its whole quantity.
+#[test]
+fn a_rejected_buy_gives_its_agent_no_lots() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = protected_position(&ports);
+    shell.run(Input::Market(quote(AAPL, "155", "155.1", 20)), &ports);
+    let id = shell
+        .run(
+            handoff(
+                OTHER_INTENT,
+                OTHER_AGENT,
+                protected_opening(AAPL, "10", "150", "140", Some("170")),
+            ),
+            &ports,
+        )
+        .submissions()
+        .first()
+        .map(|o| o.client_order_id.as_str().to_owned())
+        .expect("the other agent's buy is sent");
+    shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+            "b-other",
+            Some(&id),
+            AAPL,
+            Side::Buy,
+            "10",
+            "0",
+            "rejected",
+        ))),
+        &ports,
+    );
+    assert!(
+        shell
+            .state
+            .orders()
+            .values()
+            .any(|order| order.agent == Some(agent(OTHER_AGENT))
+                && order.state == OrderState::Rejected),
+        "the other agent's buy is rejected"
+    );
+    assert_eq!(shell.state.holds_lots(&agent(OTHER_AGENT)), Ok(false));
+    assert_eq!(shell.state.holds_lots(&agent(common::AGENT)), Ok(true));
+}
+
 /// DEC-2354 item 3 (the coordinator's guard): a buy that filled 5 of 10 with its fill naming no
 /// order, then released, leaves the switch nothing to sell: it sells the attributed lots alone,
 /// never the bound `holds_lots` reads, which still counts the buy whole and so keeps the exit.
