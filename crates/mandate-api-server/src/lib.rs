@@ -39,10 +39,17 @@
 //!   single-use `state` the callback redeems (DEC-2623).
 //! - [`backtests`]: the backtest and evaluation reads' folds (DEC-1001, DEC-1002, DEC-1143).
 //! - [`journal_reads`]: the journal's audit reads, a stream's events page (§4.8.1, E12-6).
+//! - [`finish`]: the connect's finish, from the open request and the executor's check to
+//!   `plan_finish`'s answer (DEC-2342), [`finish_records`], the records it appends, and
+//!   [`finish_pass`], the pass that appends them and tears closed connects down, run by its own
+//!   process from [`finish_binding`] (DEC-2348).
 //! - [`connections`]: the connections read's fold, references only (DEC-2620).
 //! - [`reduction`]: route 2's challenge route, its store and request keys, and the address and
 //!   device its limits count against (DEC-2117, DEC-2119).
 //! - [`me`]: the caller's own session, outside every workspace path (§4.10, DEC-2113).
+//! - [`connect_binding`]: whether the start binds a connect, from its four settings (DEC-2338).
+//! - [`vault_codes`]: the callback's vault port, which writes a code as the API's vault identity
+//!   and nothing else (DEC-2338).
 //!
 //! It never places, cancels, or sizes an order, and never calls a broker or a runtime (§1.4):
 //! `xtask/layers.toml` keeps it from every crate that could.
@@ -54,8 +61,13 @@ pub mod commands;
 pub mod config;
 pub mod confirm;
 pub mod connect;
+pub mod connect_binding;
 pub mod connections;
 pub mod documents;
+pub mod finish;
+pub mod finish_binding;
+pub mod finish_pass;
+pub mod finish_records;
 pub mod http;
 pub mod journal;
 pub mod journal_reads;
@@ -75,6 +87,9 @@ pub mod status;
 pub mod stepup;
 pub mod subject;
 pub mod token;
+pub mod vault_codes;
+pub mod vault_fingerprints;
+pub mod vault_teardown;
 pub mod version_routes;
 pub mod versions;
 pub mod writes;

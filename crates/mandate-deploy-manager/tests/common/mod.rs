@@ -8,13 +8,12 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::rc::Rc;
-use std::time::Duration;
 
 use mandate_canon::{Digest, parse};
 use mandate_deploy_manager::fake::Fake;
 use mandate_deploy_manager::{
-    Alerts, ControlJournal, Deployer, Identity, Instance, OperatorAlert, Orchestrator, Slot,
-    Unavailable,
+    Alerts, ControlJournal, Deployer, Identity, Instance, Launch, OperatorAlert, Orchestrator,
+    Slot, Unavailable,
 };
 use mandate_journal::{AppendOutcome, MemoryJournal, StoredEvent, StreamId};
 use mandate_time::UtcNanos;
@@ -224,24 +223,24 @@ impl Orchestrator for Checked {
         &mut self,
         slot: &Slot,
         generation: u64,
-        lifetime: Option<Duration>,
+        launch: &Launch,
     ) -> Result<(), Unavailable> {
         if self.fake.unavailable || self.fake.refuse_effects {
-            return self.fake.start(slot, generation, lifetime).await;
+            return self.fake.start(slot, generation, launch).await;
         }
         self.check_start(slot, generation);
         match self.seed {
             Seed::None => {}
             Seed::DropStarts => return Ok(()),
-            Seed::SecondInstance => self.fake.start(slot, generation + 1000, lifetime).await?,
+            Seed::SecondInstance => self.fake.start(slot, generation + 1000, launch).await?,
             Seed::Unwanted => {
                 self.fake
-                    .start(&Slot::runtime("agent_nobody"), 1, None)
+                    .start(&Slot::runtime("agent_nobody"), 1, &Launch::default())
                     .await?
             }
             Seed::Repeated => {
-                self.fake.start(slot, generation, lifetime).await?;
-                self.fake.start(slot, generation, lifetime).await?;
+                self.fake.start(slot, generation, launch).await?;
+                self.fake.start(slot, generation, launch).await?;
             }
             Seed::Unjournaled => {
                 self.check_start(slot, generation + 1);
@@ -263,15 +262,20 @@ impl Orchestrator for Checked {
                     .collect();
                 for other in looped {
                     if self.fake.live(&other) == 0 {
-                        self.fake.start(&other, 1000, None).await?;
+                        self.fake.start(&other, 1000, &Launch::default()).await?;
                     }
                 }
             }
         }
-        self.fake.start(slot, generation, lifetime).await
+        self.fake.start(slot, generation, launch).await
     }
 
-    async fn stop(&mut self, slot: &Slot, generation: u64) -> Result<(), Unavailable> {
+    async fn stop(
+        &mut self,
+        slot: &Slot,
+        generation: u64,
+        connection: Option<&str>,
+    ) -> Result<(), Unavailable> {
         if !self.fake.unavailable
             && !self.fake.refuse_effects
             && !self.journal.holds("ProcessStopIssued", slot, generation)
@@ -279,7 +283,7 @@ impl Orchestrator for Checked {
             self.violations
                 .push(format!("stop of {slot:?} g{generation} before its record"));
         }
-        self.fake.stop(slot, generation).await
+        self.fake.stop(slot, generation, connection).await
     }
 }
 

@@ -7,9 +7,10 @@ use std::time::Duration;
 use mandate_process::{CRASH_LOOP_WINDOW, crash_loop};
 use mandate_time::UtcNanos;
 
-use crate::control::{Cause, Fact, Process, Scope, Slot};
+use crate::control::{Cause, Fact, Process, Scope, Slot, StopCause};
 use crate::orchestrator::{
-    CRASH_LOOP, DEPLOYMENT_UNCONNECTED, DEPLOYMENT_UNREAD, Effect, Instance,
+    CRASH_LOOP, DEPLOYMENT_UNCONNECTED, DEPLOYMENT_UNREAD, Effect, Instance, KILL_SWITCH_UNAPPLIED,
+    Phase,
 };
 use crate::record::Record;
 
@@ -38,16 +39,23 @@ pub enum Decision {
     Retry(Effect),
 }
 
-/// A connection's OAuth request: its token exchange's deadline, and whether a record closed it.
+/// A connection's OAuth request: its token exchange's deadline, whether a record closed it, its
+/// account, whether its executor's `exchanged` start is journaled, and whether a refusal or a
+/// revocation ended the connection since (DEC-2335).
 #[derive(Debug, Clone)]
 struct Request {
     deadline: UtcNanos,
     closed: bool,
+    account: String,
+    exchanged: bool,
+    ended: bool,
 }
 
+/// A deployed agent: its account, the connection its deployment names, and whether it stopped.
 #[derive(Debug, Clone)]
 struct Agent {
     account: String,
+    connection: String,
     stopped: bool,
 }
 
@@ -69,6 +77,26 @@ struct SlotState {
     awaiting_launch: bool,
     /// This manager raised the crash-loop alert for the slot.
     alerted: bool,
+    /// For an executor: the last record that took a reason to want it away was its connection's
+    /// refusal or revocation, not an agent's stop, so its stop's cause is `connection_closed`.
+    connection_closed: bool,
+    /// The current generation was started for a kill switch while the slot was not desired, or
+    /// restarts one that was (DEC-2344 item 1): only an executor's can be, since only an executor is
+    /// started when not desired. The manager never stops it: it ends by its own exit, and only a
+    /// crash is restarted. Such a start begins a new run: the last run's restarts, crash loop, and
+    /// alert are behind it, so a later switch after an unapplied loop is tried, and reported, again.
+    /// Only a later start for a deployment, a request, or an exchange, its successful end, or a
+    /// stop of its generation (which the manager journals only for a generation it does not hold, so
+    /// a replay agrees) clears it: a deployment and
+    /// retirement while it runs leave it held, so the retirement never stops it (DEC-2344 item 3).
+    /// Its crash loop leaves a switch unapplied only if no agent wants it at the loop.
+    held: bool,
+    /// For an executor: its crash loop was journaled while `held`, so a switch is unapplied and its
+    /// alert is [`KILL_SWITCH_UNAPPLIED`].
+    unapplied: bool,
+    /// For an executor: the connection each generation's start named, read when its start is
+    /// folded, so the stop of that generation names the account its start made (DEC-2336 item 6).
+    launched_as: BTreeMap<u64, String>,
     down_since: Option<UtcNanos>,
 }
 
@@ -97,6 +125,8 @@ pub struct Manager {
     requests: BTreeMap<String, Request>,
     /// Every connection a record closed a request of, so a request read after one starts nothing.
     closed: BTreeSet<String>,
+    /// Every connection refused or revoked, so a request read after one wants no executor.
+    ended: BTreeSet<String>,
 }
 
 impl Manager {
@@ -127,23 +157,33 @@ impl Manager {
             Fact::Revoked { connection } => {
                 self.established.remove(connection);
                 self.close(connection);
+                self.end(connection);
             }
             Fact::Requested {
                 connection,
+                account,
                 deadline,
             } => {
                 let closed = self.closed.contains(connection);
+                let ended = self.ended.contains(connection);
                 self.requests
                     .entry(connection.clone())
                     .or_insert_with(|| Request {
                         deadline: *deadline,
                         closed,
+                        account: account.clone(),
+                        exchanged: false,
+                        ended,
                     });
                 self.slots
                     .entry(Slot::token_exchange(connection))
                     .or_default();
             }
             Fact::RequestClosed { connection } => self.close(connection),
+            Fact::Refused { connection } => {
+                self.close(connection);
+                self.end(connection);
+            }
             Fact::DeployedUnread { agent } => {
                 if !self.agents.contains_key(agent) && !self.stopped.contains(agent) {
                     self.unread.entry(agent.clone()).or_insert(false);
@@ -174,6 +214,7 @@ impl Manager {
                         agent.clone(),
                         Agent {
                             account,
+                            connection: connection.clone(),
                             stopped: false,
                         },
                     );
@@ -183,12 +224,16 @@ impl Manager {
                 self.stopped.insert(agent.clone());
                 self.unread.remove(agent);
                 self.unconnected.remove(agent);
-                let account = self.agents.get_mut(agent).map(|known| {
+                let account = self.agents.get_mut(agent).and_then(|known| {
+                    let was_running = !known.stopped;
                     known.stopped = true;
-                    known.account.clone()
+                    was_running.then(|| known.account.clone())
                 });
                 if let Some(account) = account {
                     let executor = Slot::executor(&account);
+                    if let Some(state) = self.slots.get_mut(&executor) {
+                        state.connection_closed = false;
+                    }
                     if !self.desired(&executor) {
                         self.resume(&executor);
                     }
@@ -215,7 +260,24 @@ impl Manager {
                 cause,
                 at,
             } => {
+                if *cause == Cause::Exchanged {
+                    for request in self.requests.values_mut() {
+                        if request.account == slot.subject {
+                            request.exchanged = true;
+                        }
+                    }
+                }
+                let held = slot.process == Process::Executor && !self.agent_wanted(slot);
+                let launched_as = (slot.process == Process::Executor)
+                    .then(|| {
+                        self.wanted_connection(&slot.subject)
+                            .or_else(|| self.last_connection(slot))
+                    })
+                    .flatten();
                 let state = self.slots.entry(slot.clone()).or_default();
+                if let Some(connection) = launched_as {
+                    state.launched_as.entry(*generation).or_insert(connection);
+                }
                 if *generation > state.generation {
                     state.generation = *generation;
                     let answered = std::mem::take(&mut state.kill_switches);
@@ -223,20 +285,36 @@ impl Manager {
                     state.awaiting_launch = false;
                     state.down_since = None;
                     match cause {
-                        Cause::Deployed | Cause::Requested => state.restarts.clear(),
+                        Cause::Deployed | Cause::Requested | Cause::Exchanged => {
+                            state.restarts.clear();
+                            state.held = false;
+                        }
                         Cause::Restart => state.restarts.push(*at),
-                        Cause::KillSwitch => {}
+                        Cause::KillSwitch => {
+                            state.held |= held;
+                            if held {
+                                state.restarts.clear();
+                                state.looped = false;
+                                state.alerted = false;
+                                state.unapplied = false;
+                            }
+                        }
                     }
                 }
             }
             Fact::StopIssued { slot, generation } => {
-                self.slots
-                    .entry(slot.clone())
-                    .or_default()
-                    .stopping
-                    .insert(*generation);
+                let state = self.slots.entry(slot.clone()).or_default();
+                state.stopping.insert(*generation);
+                if *generation == state.generation {
+                    state.held = false;
+                }
             }
-            Fact::CrashLooped { slot } => self.slots.entry(slot.clone()).or_default().looped = true,
+            Fact::CrashLooped { slot } => {
+                let wanted = self.agent_wanted(slot);
+                let state = self.slots.entry(slot.clone()).or_default();
+                state.looped = true;
+                state.unapplied = state.held && !wanted;
+            }
         }
     }
 
@@ -246,6 +324,33 @@ impl Manager {
         if let Some(request) = self.requests.get_mut(connection) {
             request.closed = true;
         }
+    }
+
+    /// Ends `connection`'s connect: its executor is no longer wanted for it, and if that executor
+    /// was started for it, its stop's cause is `connection_closed` (DEC-2335).
+    fn end(&mut self, connection: &str) {
+        self.ended.insert(connection.to_owned());
+        let Some(request) = self.requests.get_mut(connection) else {
+            return;
+        };
+        request.ended = true;
+        if request.exchanged
+            && let Some(state) = self.slots.get_mut(&Slot::executor(&request.account))
+        {
+            state.connection_closed = true;
+        }
+    }
+
+    /// The `exchanged` start of the executor of `connection`'s account, once its token exchange
+    /// succeeded: only while its request is open, and only if that executor never ran, since rule
+    /// 167 holds `exchanged` to generation 1.
+    fn exchanged(&self, connection: &str) -> Option<Decision> {
+        let request = self.requests.get(connection)?;
+        let executor = Slot::executor(&request.account);
+        if request.closed || request.exchanged || self.slots.contains_key(&executor) {
+            return None;
+        }
+        Some(start(&executor, 1, Cause::Exchanged, None))
     }
 
     /// What a token exchange's request has left at `now`, which its pod is given to end by; `None`
@@ -260,6 +365,35 @@ impl Manager {
         }
     }
 
+    /// The connection `generation` of `slot` acts for, which an executor runs as the account of
+    /// (DEC-2060 item 9, DEC-2336 item 6): the one read when its start was folded, so its start
+    /// and its stop name the same account. `None` for a runtime and a token exchange, whose
+    /// subjects say what they need, and for an executor generation this manager never read a
+    /// start of, which is then not started.
+    pub fn connection(&self, slot: &Slot, generation: u64) -> Option<String> {
+        if slot.process != Process::Executor {
+            return None;
+        }
+        self.slots.get(slot)?.launched_as.get(&generation).cloned()
+    }
+
+    /// The connection an executor of `account` would start for now: the one a running agent's
+    /// deployment names, else an open connect's whose exchange started it, else none. A revoked
+    /// connection a deployment does not name is never chosen.
+    fn wanted_connection(&self, account: &str) -> Option<String> {
+        let deployed = self
+            .agents
+            .values()
+            .find(|agent| !agent.stopped && agent.account == account)
+            .map(|agent| &agent.connection);
+        let connecting = self
+            .requests
+            .iter()
+            .find(|(_, r)| r.exchanged && !r.ended && r.account == account)
+            .map(|(connection, _)| connection);
+        deployed.or(connecting).cloned()
+    }
+
     /// Ends an executor's crash-loop pause once no agent wants it: every agent of its account is
     /// stopped (DEC-1170 item 3).
     fn resume(&mut self, executor: &Slot) {
@@ -267,6 +401,7 @@ impl Manager {
             state.looped = false;
             state.alerted = false;
             state.restarts.clear();
+            state.unapplied = false;
         }
     }
 
@@ -305,15 +440,49 @@ impl Manager {
                 .agents
                 .get(&slot.subject)
                 .is_some_and(|agent| !agent.stopped),
-            Process::Executor => self
-                .agents
-                .values()
-                .any(|agent| !agent.stopped && agent.account == slot.subject),
+            Process::Executor => {
+                self.agents
+                    .values()
+                    .any(|agent| !agent.stopped && agent.account == slot.subject)
+                    || self.requests.values().any(|request| {
+                        request.exchanged && !request.ended && request.account == slot.subject
+                    })
+            }
             Process::TokenExchange => self
                 .requests
                 .get(&slot.subject)
                 .is_some_and(|request| !request.closed),
         }
+    }
+
+    /// Whether an agent deployed on `slot`'s account and not stopped wants it, a connect's request
+    /// aside: what holds a kill switch's run and classifies its loop (DEC-2344 item 1, DEC-2351). A
+    /// deployment on a connection revoked since still counts until its `AgentStopped`, as journal
+    /// spec rule 264 reads it.
+    fn agent_wanted(&self, slot: &Slot) -> bool {
+        slot.process == Process::Executor
+            && self
+                .agents
+                .values()
+                .any(|agent| !agent.stopped && agent.account == slot.subject)
+    }
+
+    /// Whether `slot` is to run: [`Self::desired`], or an executor no agent wants whose current
+    /// generation a kill switch started (DEC-2344 item 1), so a start journaled for it is carried
+    /// out.
+    pub fn wanted(&self, slot: &Slot) -> bool {
+        self.desired(slot) || self.slots.get(slot).is_some_and(|state| state.held)
+    }
+
+    /// The connection the latest generation of `slot` this manager read a start of ran as: what a
+    /// kill switch's start of an executor no agent wants runs as, since neither a deployment nor a
+    /// connect names one any more.
+    fn last_connection(&self, slot: &Slot) -> Option<String> {
+        self.slots
+            .get(slot)?
+            .launched_as
+            .last_key_value()
+            .map(|(_, connection)| connection.clone())
     }
 
     /// Whether a kill switch of `scope` covers `slot`. None covers a token exchange: it holds no
@@ -329,6 +498,10 @@ impl Manager {
             }
             (Scope::Connection(connection), Process::Executor) => {
                 connected(connection) == Some(slot.subject.as_str())
+                    || self
+                        .requests
+                        .get(connection)
+                        .is_some_and(|request| request.account == slot.subject)
             }
             (Scope::Connection(connection), Process::Runtime) => {
                 account_of(&slot.subject).is_some_and(|a| connected(connection) == Some(a))
@@ -357,15 +530,39 @@ impl Manager {
             *reported = true;
             decisions.push(Decision::Retry(Effect::Alert(DEPLOYMENT_UNCONNECTED)));
         }
+        let unalerted: Vec<Slot> = self
+            .slots
+            .iter()
+            .filter(|(_, state)| state.looped && state.unapplied && !state.alerted)
+            .map(|(slot, _)| slot.clone())
+            .filter(|slot| !self.desired(slot))
+            .collect();
+        for slot in unalerted {
+            if let Some(state) = self.slots.get_mut(&slot) {
+                state.alerted = true;
+                decisions.push(Decision::Retry(Effect::Alert(KILL_SWITCH_UNAPPLIED)));
+            }
+        }
+        let succeeded: Vec<String> = observed
+            .iter()
+            .filter(|i| i.phase == Phase::Succeeded && i.slot.process == Process::TokenExchange)
+            .map(|i| i.slot.subject.clone())
+            .collect();
+        for start in succeeded.iter().filter_map(|c| self.exchanged(c)) {
+            if !decisions.contains(&start) {
+                decisions.push(start);
+            }
+        }
         let slots: Vec<Slot> = self.slots.keys().cloned().collect();
         decisions.extend(slots.into_iter().filter_map(|slot| {
             let desired = self.desired(&slot);
+            let unwanted_by_agents = !self.agent_wanted(&slot);
             let lifetime = self.lifetime(&slot, now);
             let state = self.slots.get_mut(&slot)?;
             let instances: Vec<&Instance> = observed.iter().filter(|i| i.slot == slot).collect();
             match lifetime {
                 Some(lifetime) => exchange_step(&slot, state, desired, lifetime, &instances),
-                None => step(&slot, state, desired, &instances, now),
+                None => step(&slot, state, desired, unwanted_by_agents, &instances, now),
             }
         }));
         decisions
@@ -376,12 +573,24 @@ fn step(
     slot: &Slot,
     state: &mut SlotState,
     desired: bool,
+    unwanted_by_agents: bool,
     instances: &[&Instance],
     now: UtcNanos,
 ) -> Option<Decision> {
     let live = instances.iter().find(|i| i.phase.live());
+    let executor = slot.process == Process::Executor;
+    if !desired && live.is_none() && executor {
+        return held_step(slot, state, instances, now);
+    }
     if !desired {
+        if executor && (state.held || !state.kill_switches.is_empty()) {
+            return None;
+        }
         let generation = live?.generation;
+        let cause = match slot.process {
+            Process::Executor if state.connection_closed => StopCause::ConnectionClosed,
+            _ => StopCause::AgentStopped,
+        };
         return Some(if state.stopping.contains(&generation) {
             Decision::Retry(Effect::Stop {
                 slot: slot.clone(),
@@ -391,6 +600,7 @@ fn step(
             Decision::Journal(Record::Stop {
                 slot: slot.clone(),
                 generation,
+                cause,
             })
         });
     }
@@ -423,8 +633,69 @@ fn step(
             return None;
         }
         state.alerted = true;
-        return Some(Decision::Retry(Effect::Alert(CRASH_LOOP)));
+        let alert = if state.unapplied {
+            KILL_SWITCH_UNAPPLIED
+        } else {
+            CRASH_LOOP
+        };
+        return Some(Decision::Retry(Effect::Alert(alert)));
     }
+    if crash_loop(state.restarts.iter().copied(), now) {
+        state.alerted = true;
+        let restarts = within_window(&state.restarts, now);
+        let alert = if state.held && unwanted_by_agents {
+            KILL_SWITCH_UNAPPLIED
+        } else {
+            CRASH_LOOP
+        };
+        return Some(Decision::Journal(Record::CrashLooped {
+            slot: slot.clone(),
+            generation: state.generation,
+            restarts: u64::try_from(restarts).unwrap_or(u64::MAX),
+            alert,
+        }));
+    }
+    let wait = backoff(within_window(&state.restarts, now));
+    (elapsed(down_since, now) >= wait).then(|| start(slot, next, Cause::Restart, None))
+}
+
+/// The step of an executor no agent wants and with no live instance (DEC-2344 item 1): one start,
+/// cause `kill_switch`, for each covering switch it has not answered; and for a generation a switch
+/// started, nothing once it ends with success, and after a crash the usual back-off restart, until
+/// its crash loop, which leaves the switch unapplied. Nothing else starts it.
+fn held_step(
+    slot: &Slot,
+    state: &mut SlotState,
+    instances: &[&Instance],
+    now: UtcNanos,
+) -> Option<Decision> {
+    let current: Vec<&&Instance> = instances
+        .iter()
+        .filter(|i| i.generation == state.generation)
+        .collect();
+    if state.held && current.is_empty() && state.awaiting_launch {
+        return Some(Decision::Retry(Effect::Start {
+            slot: slot.clone(),
+            generation: state.generation,
+        }));
+    }
+    let next = state.generation.checked_add(1)?;
+    if let Some(kill_switch) = state.kill_switches.iter().next() {
+        return Some(start(
+            slot,
+            next,
+            Cause::KillSwitch,
+            Some(kill_switch.clone()),
+        ));
+    }
+    if !state.held || state.looped {
+        return None;
+    }
+    if current.iter().any(|i| i.phase == Phase::Succeeded) {
+        state.held = false;
+        return None;
+    }
+    let down_since = *state.down_since.get_or_insert(now);
     if crash_loop(state.restarts.iter().copied(), now) {
         state.alerted = true;
         let restarts = within_window(&state.restarts, now);
@@ -432,6 +703,7 @@ fn step(
             slot: slot.clone(),
             generation: state.generation,
             restarts: u64::try_from(restarts).unwrap_or(u64::MAX),
+            alert: KILL_SWITCH_UNAPPLIED,
         }));
     }
     let wait = backoff(within_window(&state.restarts, now));
@@ -470,6 +742,7 @@ fn exchange_step(
             Decision::Journal(Record::Stop {
                 slot: slot.clone(),
                 generation,
+                cause: StopCause::RequestClosed,
             })
         });
     }

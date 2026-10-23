@@ -184,7 +184,8 @@ pub enum Drill {
     /// `mandate vault provision` sets the cell's vault up, then each AppRole logs in from a pod
     /// labelled as the executor and reads only what DEC-977 item 2's table gives it: a runtime
     /// nothing, an executor exactly its own connection's token, the model gateway its key; and
-    /// no policy of the cell's holds a wildcard (E21-32, DEC-2022 item 3).
+    /// no policy of the cell's holds a wildcard but DEC-2349's prefix grants, each in its own policy
+    /// (E21-32, DEC-2022 item 3).
     Vault,
 }
 
@@ -1822,20 +1823,65 @@ const VAULT_DRILL_READS: [(&str, &str, bool); 13] = [
 /// has proved nothing about wildcards.
 const VAULT_DRILL_POLICIES: usize = 10;
 
+/// The only stanzas holding a wildcard that the vault drill admits, each in the one policy it may
+/// appear in: DEC-2349's one-segment `+` for a connection the web made after the vault was
+/// provisioned, on the API's write of a connect's code and its and the connection manager's deletes,
+/// and the connection manager's read of each request's account fingerprint, a pseudonymous hash and
+/// no credential (DEC-2345); and the role provisioner's role under each Kubernetes-auth mount, the
+/// `+` naming the role, with every parameter but the ServiceAccount's name pinned (DEC-2350 item
+/// 1). Each is as the scan prints it, whitespace squeezed and the closing
+/// brace dropped, so another path, another capability, a `*`, the same stanza in another policy, or
+/// a wildcard outside a stanza is still reported.
+const VAULT_DRILL_PREFIX_GRANTS: [(&str, &str); 8] = [
+    (
+        "mandate-api",
+        "path \"mandate/data/connections/+/code\" { capabilities = [\"create\", \"update\"]",
+    ),
+    (
+        "mandate-api",
+        "path \"mandate/metadata/connections/+/code\" { capabilities = [\"delete\"]",
+    ),
+    (
+        "mandate-api",
+        "path \"mandate/metadata/connections/+/token\" { capabilities = [\"delete\"]",
+    ),
+    (
+        "mandate-connection-manager",
+        "path \"mandate/metadata/connections/+/code\" { capabilities = [\"delete\"]",
+    ),
+    (
+        "mandate-connection-manager",
+        "path \"mandate/metadata/connections/+/token\" { capabilities = [\"delete\"]",
+    ),
+    (
+        "mandate-connection-manager",
+        "path \"mandate/data/personal/fingerprints/+/+\" { capabilities = [\"read\"]",
+    ),
+    (PROVISIONER_POLICY, PROVISIONER_EXECUTOR_ROLES),
+    (PROVISIONER_POLICY, PROVISIONER_EXCHANGE_ROLES),
+];
+
+/// The role provisioner's policy (DEC-2350), as `mandate vault provision --secrets-namespace`
+/// writes it once `cell up` provisions for the provisioner ([`provision_vault`]).
+const PROVISIONER_POLICY: &str = "mandate-provisioner";
+/// Its stanza on the executors' Kubernetes-auth roles, as the scan prints it: create and update, a
+/// lease's TTL, the executor's maximum, bound to the workspace's namespace.
+const PROVISIONER_EXECUTOR_ROLES: &str = "path \"auth/kubernetes-executor/role/+\" { capabilities = [\"create\", \"update\"] required_parameters = [\"alias_name_source\", \"audience\", \"bound_service_account_names\", \"bound_service_account_namespaces\", \"token_max_ttl\", \"token_no_default_policy\", \"token_policies\", \"token_ttl\"] allowed_parameters = { \"alias_name_source\" = [\"serviceaccount_uid\"] \"audience\" = [\"mandate-vault\"] \"bound_service_account_names\" = [] \"bound_service_account_namespaces\" = [\"ws-ws1\"] \"token_max_ttl\" = [\"2592000\"] \"token_no_default_policy\" = [\"false\"] \"token_policies\" = [\"mandate-kubernetes-executor\"] \"token_ttl\" = [\"86400\"]";
+/// Its stanza on the token exchanges' roles: as the executors', with delete, and a grant's TTL.
+const PROVISIONER_EXCHANGE_ROLES: &str = "path \"auth/kubernetes-exchange/role/+\" { capabilities = [\"create\", \"update\", \"delete\"] required_parameters = [\"alias_name_source\", \"audience\", \"bound_service_account_names\", \"bound_service_account_namespaces\", \"token_max_ttl\", \"token_no_default_policy\", \"token_policies\", \"token_ttl\"] allowed_parameters = { \"alias_name_source\" = [\"serviceaccount_uid\"] \"audience\" = [\"mandate-vault\"] \"bound_service_account_names\" = [] \"bound_service_account_namespaces\" = [\"ws-ws1\"] \"token_max_ttl\" = [\"600\"] \"token_no_default_policy\" = [\"false\"] \"token_policies\" = [\"mandate-kubernetes-exchange\"] \"token_ttl\" = [\"600\"]";
+
+/// Whether a scan line `wildcard in <policy>: <stanza>` names one of [`VAULT_DRILL_PREFIX_GRANTS`]
+/// in its own policy.
+fn admitted_wildcard(line: &str) -> bool {
+    line.strip_prefix("wildcard in ")
+        .and_then(|rest| rest.split_once(": "))
+        .is_some_and(|(policy, stanza)| VAULT_DRILL_PREFIX_GRANTS.contains(&(policy, stanza)))
+}
+
 /// The `mandate-*` policies `cell up`'s own provisioning adds once the role provisioner runs
 /// ([`provision_vault`]): the provisioner's, and the two Kubernetes-auth kinds', the executor's and
 /// the token exchange's (DEC-2350 item 1, DEC-2062).
 const PROVISIONED_POLICIES: usize = 3;
-
-/// The one policy allowed a wildcard, and exactly where: the role provisioner's, on the path of a
-/// role under each Kubernetes-auth mount, the `+` that names the role, whose parameters the policy
-/// pins (DEC-2350 item 1). The drill drops exactly these lines of that policy alone before it looks
-/// for `*` or `+`, so a wildcard anywhere else in it, or in any other policy, is still found.
-const PROVISIONER_POLICY: &str = "mandate-provisioner";
-const PROVISIONER_ROLE_PATHS: [&str; 2] = [
-    "path \"auth/kubernetes-executor/role/+\" {",
-    "path \"auth/kubernetes-exchange/role/+\" {",
-];
 
 /// How many `mandate-*` policies the vault drill must read: [`VAULT_DRILL_POLICIES`], and
 /// [`PROVISIONED_POLICIES`] more where `cell up` provisioned for the role provisioner.
@@ -1848,14 +1894,15 @@ fn vault_drill_policies(provisioned: bool) -> usize {
 const VAULT_DRILL_PROBE: &str = "probe";
 
 /// What a vault drill's check lines must say: exactly one `<role> <path> allowed` or `denied`
-/// line for each of [`VAULT_DRILL_READS`], as the table has it, no `wildcard in` line, and exactly
-/// one `checked <n> mandate policies` line with `policies` ([`vault_drill_policies`]). A missing
-/// line, a second line for the same read, and a scan of fewer policies are problems too.
+/// line for each of [`VAULT_DRILL_READS`], as the table has it, no `wildcard in` line but those of
+/// [`VAULT_DRILL_PREFIX_GRANTS`], and exactly one `checked <n> mandate policies` line with
+/// `policies` ([`vault_drill_policies`]). A missing line, a second line for the same read, and a
+/// scan of fewer policies are problems too.
 fn vault_drill_problems(logs: &str, policies: usize) -> Vec<String> {
     let said = scenario::lines_of(logs, VAULT_DRILL_PROBE);
     let mut problems: Vec<String> = said
         .iter()
-        .filter(|l| l.starts_with("wildcard in "))
+        .filter(|l| l.starts_with("wildcard in ") && !admitted_wildcard(l))
         .map(|l| l.to_string())
         .collect();
     for (role, path, allowed) in VAULT_DRILL_READS {
@@ -1898,7 +1945,9 @@ fn vault_drill_problems(logs: &str, policies: usize) -> Vec<String> {
 
 /// The drill's script, run by the vault's own image: it puts a fake value at each path tried,
 /// as the operator, then logs in as each role from the files `mandate vault provision` wrote and
-/// prints one line per read, and one per policy of the cell's that holds `*` or `+`. Seeded, it
+/// prints one line per read, and one per stanza of a policy of the cell's that holds `*` or `+`,
+/// whitespace squeezed and its closing brace dropped, for [`vault_drill_problems`] to judge against
+/// [`VAULT_DRILL_PREFIX_GRANTS`]. Seeded, it
 /// first rewrites the runtime's policy to read every connection's token through `+`, and puts the
 /// policy it read back when the script exits, printing what the restore says so a failed one is
 /// seen. Each read first looks its token up, so a token the vault does not honour is an `error`,
@@ -1947,27 +1996,21 @@ fn vault_drill_script(seeded: bool) -> String {
     )
 }
 
-/// The vault drill's policy scan, run with the operator's token in `$op`: one `wildcard in <name>`
-/// line for each `mandate-*` policy holding `*` or `+`, the role provisioner's role paths
-/// ([`PROVISIONER_ROLE_PATHS`]) dropped from its own policy alone first, then `checked <n> mandate
-/// policies`. A failed read ends the script, under its `set -eu`.
+/// The vault drill's policy scan, run with the operator's token in `$op`: each `mandate-*`
+/// policy's text, whitespace squeezed and split at each `}`, and one `wildcard in <name>: <stanza>`
+/// line for each piece holding `*` or `+`, then `checked <n> mandate policies`. A failed read ends
+/// the script, under its `set -eu`.
 fn vault_drill_scan() -> String {
-    format!(
-        "n=0\n\
-         for p in $(BAO_TOKEN=\"$op\" bao policy list); do\n\
-           case \"$p\" in mandate-*)\n\
-             body=$(BAO_TOKEN=\"$op\" bao policy read \"$p\")\n\
-             if [ \"$p\" = {PROVISIONER_POLICY} ]; then\n\
-               body=$(printf '%s\\n' \"$body\" | grep -vxF -e '{exempt_executor}' -e '{exempt_exchange}' || true)\n\
-             fi\n\
-             n=$((n + 1))\n\
-             case \"$body\" in *'*'*|*'+'*) echo \"wildcard in $p\";; esac;;\n\
-           esac\n\
-         done\n\
-         echo \"checked $n mandate policies\"\n",
-        exempt_executor = PROVISIONER_ROLE_PATHS[0],
-        exempt_exchange = PROVISIONER_ROLE_PATHS[1],
-    )
+    "n=0\n\
+     for p in $(BAO_TOKEN=\"$op\" bao policy list); do\n\
+       case \"$p\" in mandate-*)\n\
+         body=$(BAO_TOKEN=\"$op\" bao policy read \"$p\")\n\
+         n=$((n + 1))\n\
+         printf '%s\\n' \"$body\" | tr '\\t\\n' '  ' | tr -s ' ' | awk -v p=\"$p\" 'BEGIN { RS = \"}\" } /[*+]/ { gsub(/^ +| +$/, \"\"); print \"wildcard in \" p \": \" $0 }';;\n\
+       esac\n\
+     done\n\
+     echo \"checked $n mandate policies\"\n"
+        .to_owned()
 }
 
 /// The vault drill (E21-32, DEC-2022 item 3). A Job labelled as the executor, so its egress
@@ -5319,7 +5362,8 @@ mod tests {
     }
 
     /// The vault drill passes only these answers, written out here rather than built from
-    /// [`VAULT_DRILL_READS`]: one line per read, every read as written, no wildcard, and a scan of
+    /// [`VAULT_DRILL_READS`]: one line per read, every read as written, no wildcard but DEC-2349's
+    /// prefix grants, each in its own policy, and a scan of
     /// every `mandate-*` policy. A second line for a read, a missing or failed scan, an error, or a
     /// line from another container fails it; the seeded symptom is the runtime policy's wildcard.
     #[test]
@@ -5351,6 +5395,39 @@ mod tests {
             vault_drill_problems(&held, VAULT_DRILL_POLICIES),
             Vec::<String>::new()
         );
+        let granted = [
+            r#"wildcard in mandate-api: path "mandate/data/connections/+/code" { capabilities = ["create", "update"]"#,
+            r#"wildcard in mandate-api: path "mandate/metadata/connections/+/code" { capabilities = ["delete"]"#,
+            r#"wildcard in mandate-api: path "mandate/metadata/connections/+/token" { capabilities = ["delete"]"#,
+            r#"wildcard in mandate-connection-manager: path "mandate/metadata/connections/+/code" { capabilities = ["delete"]"#,
+            r#"wildcard in mandate-connection-manager: path "mandate/metadata/connections/+/token" { capabilities = ["delete"]"#,
+            r#"wildcard in mandate-connection-manager: path "mandate/data/personal/fingerprints/+/+" { capabilities = ["read"]"#,
+        ];
+        let prefixed = format!("{held}{}", probe(&granted));
+        assert_eq!(
+            vault_drill_problems(&prefixed, VAULT_DRILL_POLICIES),
+            Vec::<String>::new(),
+            "DEC-2349's prefix grants, each in its own policy, are admitted"
+        );
+        for wider in [
+            r#"wildcard in mandate-api: path "mandate/data/connections/+/token" { capabilities = ["read"]"#,
+            r#"wildcard in mandate-api: path "mandate/data/connections/+/code" { capabilities = ["create", "update", "read"]"#,
+            r#"wildcard in mandate-api: path "mandate/data/connections/*" { capabilities = ["create", "update"]"#,
+            r#"wildcard in mandate-api: path "mandate/data/personal/fingerprints/+/+" { capabilities = ["read"]"#,
+            r#"wildcard in mandate-connection-manager: path "mandate/data/personal/+" { capabilities = ["read"]"#,
+            r#"wildcard in mandate-runtime: path "mandate/metadata/connections/+/token" { capabilities = ["delete"]"#,
+            r#"wildcard in mandate-api: # any + path "mandate/metadata/connections/+/code" { capabilities = ["delete"]"#,
+            "wildcard in mandate-api",
+        ] {
+            assert_eq!(
+                vault_drill_problems(
+                    &format!("{prefixed}{}", probe(&[wider])),
+                    VAULT_DRILL_POLICIES
+                ),
+                [wider],
+                "a wildcard wider than DEC-2349's, or in another policy, is still caught"
+            );
+        }
         let unprefixed = held.replace("[pod/vault-drill-1-x/probe] ", "");
         assert_eq!(
             vault_drill_problems(&unprefixed, VAULT_DRILL_POLICIES).len(),
@@ -5471,26 +5548,51 @@ mod tests {
         );
     }
 
-    /// The vault drill's scan, run by `sh` against a fake `bao` that serves policies from files:
-    /// the role provisioner's policy as `mandate-vault` writes it passes, and a wildcard anywhere
-    /// else in it, the same role path in another policy, or a `*` in place of its `+`, is found.
+    /// The vault drill's scan, run by `sh` against a fake `bao` that serves policies from files,
+    /// and judged as the drill judges it: the role provisioner's policy, written out as
+    /// `mandate-vault` writes it (its `the_provisioners_policy_requires_every_parameter_and_pins_all_but_the_name`),
+    /// prints exactly its two role stanzas, each admitted (DEC-2350 item 1); a wildcard anywhere
+    /// else in it, a `*` for its `+`, a parameter changed, or the same stanzas in another policy, is
+    /// reported.
     #[test]
-    fn the_vault_drill_scan_exempts_only_the_provisioners_role_paths() -> Result<()> {
-        let provisioner = "path \"auth/kubernetes-executor/role/+\" {\n  \
-             capabilities = [\"create\", \"update\"]\n  \
-             required_parameters = [\"bound_service_account_names\"]\n  \
-             allowed_parameters = {\n    \
-             \"bound_service_account_namespaces\" = [\"ws-ws1\"]\n    \
-             \"token_policies\" = [\"mandate-kubernetes-executor\"]\n  \
-             }\n}\n\
-             path \"auth/kubernetes-exchange/role/+\" {\n  \
-             capabilities = [\"create\", \"update\", \"delete\"]\n  \
-             allowed_parameters = {\n    \
-             \"token_policies\" = [\"mandate-kubernetes-exchange\"]\n  \
-             }\n}\n";
+    fn the_vault_drill_admits_only_the_provisioners_role_stanzas() -> Result<()> {
+        let block = |mount: &str, caps: &str, policy: &str, ttl: &str, max: &str| {
+            format!(
+                "path \"auth/{mount}/role/+\" {{\n  \
+                 capabilities = [{caps}]\n  \
+                 required_parameters = [\"alias_name_source\", \"audience\", \"bound_service_account_names\", \"bound_service_account_namespaces\", \"token_max_ttl\", \"token_no_default_policy\", \"token_policies\", \"token_ttl\"]\n  \
+                 allowed_parameters = {{\n    \
+                 \"alias_name_source\" = [\"serviceaccount_uid\"]\n    \
+                 \"audience\" = [\"mandate-vault\"]\n    \
+                 \"bound_service_account_names\" = []\n    \
+                 \"bound_service_account_namespaces\" = [\"ws-ws1\"]\n    \
+                 \"token_max_ttl\" = [\"{max}\"]\n    \
+                 \"token_no_default_policy\" = [\"false\"]\n    \
+                 \"token_policies\" = [\"{policy}\"]\n    \
+                 \"token_ttl\" = [\"{ttl}\"]\n  \
+                 }}\n}}\n"
+            )
+        };
+        let provisioner = format!(
+            "{}{}",
+            block(
+                "kubernetes-executor",
+                "\"create\", \"update\"",
+                "mandate-kubernetes-executor",
+                "86400",
+                "2592000"
+            ),
+            block(
+                "kubernetes-exchange",
+                "\"create\", \"update\", \"delete\"",
+                "mandate-kubernetes-exchange",
+                "600",
+                "600"
+            )
+        );
         let plain =
             "path \"mandate/data/platform/model-provider-key\" {\n  capabilities = [\"read\"]\n}\n";
-        let scan = |policies: &[(&str, &str)]| -> Result<String> {
+        let scan = |policies: &[(&str, &str)]| -> Result<Vec<String>> {
             let dir = std::env::temp_dir().join(format!(
                 "xtask-vault-scan-{}-{}",
                 std::process::id(),
@@ -5528,50 +5630,73 @@ mod tests {
                 .output()?;
             fs::remove_dir_all(&dir)?;
             ensure!(out.status.success(), "the scan failed: {out:?}");
-            Ok(String::from_utf8(out.stdout)?)
+            Ok(String::from_utf8(out.stdout)?
+                .lines()
+                .map(str::to_owned)
+                .collect())
         };
+        let reported = |lines: &[String]| -> Vec<String> {
+            lines
+                .iter()
+                .filter(|l| l.starts_with("wildcard in ") && !admitted_wildcard(l))
+                .cloned()
+                .collect()
+        };
+        let held = scan(&[
+            ("default", "path \"*\" {}\n"),
+            ("mandate-runtime", plain),
+            (PROVISIONER_POLICY, &provisioner),
+        ])?;
         assert_eq!(
-            scan(&[
-                ("default", "path \"*\" {}\n"),
-                ("mandate-runtime", plain),
-                (PROVISIONER_POLICY, provisioner),
-            ])?,
-            "checked 2 mandate policies\n",
-            "the provisioner's role paths alone are exempt, and a policy not `mandate-*` is not read"
+            held,
+            [
+                format!("wildcard in {PROVISIONER_POLICY}: {PROVISIONER_EXECUTOR_ROLES}"),
+                format!("wildcard in {PROVISIONER_POLICY}: {PROVISIONER_EXCHANGE_ROLES}"),
+                "checked 2 mandate policies".to_owned(),
+            ],
+            "the scan prints the provisioner's two stanzas as the grants name them, and reads no \
+             policy but `mandate-*`"
         );
+        assert_eq!(reported(&held), Vec::<String>::new());
         let elsewhere = format!(
             "{provisioner}path \"mandate/data/connections/+/token\" {{\n  capabilities = [\"read\"]\n}}\n"
         );
-        assert_eq!(
-            scan(&[(PROVISIONER_POLICY, &elsewhere)])?,
-            "wildcard in mandate-provisioner\nchecked 1 mandate policies\n"
-        );
-        let starred =
-            provisioner.replace("kubernetes-exchange/role/+", "kubernetes-exchange/role/*");
-        assert_eq!(
-            scan(&[(PROVISIONER_POLICY, &starred)])?,
-            "wildcard in mandate-provisioner\nchecked 1 mandate policies\n"
-        );
-        assert_eq!(
-            scan(&[("mandate-runtime", provisioner)])?,
-            "wildcard in mandate-runtime\nchecked 1 mandate policies\n",
-            "the role paths are exempt in the provisioner's policy alone"
-        );
-        let body_plus = provisioner.replace("[\"ws-ws1\"]", "[\"ws-+\"]");
-        assert_eq!(
-            scan(&[(PROVISIONER_POLICY, &body_plus)])?,
-            "wildcard in mandate-provisioner\nchecked 1 mandate policies\n",
-            "a `+` inside an exempt block's body is still found"
-        );
-        let indented = provisioner.replace(
-            "path \"auth/kubernetes-executor",
-            "  path \"auth/kubernetes-executor",
-        );
-        assert_eq!(
-            scan(&[(PROVISIONER_POLICY, &indented)])?,
-            "wildcard in mandate-provisioner\nchecked 1 mandate policies\n",
-            "only whole lines, exactly as written, are dropped"
-        );
+        for (name, body, why) in [
+            (PROVISIONER_POLICY, elsewhere, "a wildcard elsewhere in it"),
+            (
+                PROVISIONER_POLICY,
+                provisioner.replace("kubernetes-exchange/role/+", "kubernetes-exchange/role/*"),
+                "a `*` for its `+`",
+            ),
+            (
+                PROVISIONER_POLICY,
+                provisioner.replace("[\"ws-ws1\"]", "[\"ws-+\"]"),
+                "a `+` inside a stanza's body",
+            ),
+            (
+                PROVISIONER_POLICY,
+                provisioner.replace("[\"600\"]", "[\"86400\"]"),
+                "a parameter widened",
+            ),
+            (
+                PROVISIONER_POLICY,
+                provisioner.replace(
+                    "\"create\", \"update\"]",
+                    "\"create\", \"update\", \"delete\"]",
+                ),
+                "a capability added",
+            ),
+            (
+                "mandate-runtime",
+                provisioner.clone(),
+                "the same stanzas in another policy",
+            ),
+        ] {
+            assert!(
+                !reported(&scan(&[(name, &body)])?).is_empty(),
+                "{why} is reported"
+            );
+        }
         Ok(())
     }
 

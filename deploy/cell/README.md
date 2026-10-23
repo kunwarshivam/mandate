@@ -320,10 +320,10 @@ apply`. That issues every AppRole Secret, `vault-approle-provisioner` among them
 Kubernetes auth up at the `kubernetes` Service's address. A vault that `cell up` has just initialized
 is always provisioned, so no Secret left from an earlier vault keeps a stale secret id; otherwise
 a cell where that Secret is already there is left as it is, so a second `cell up` rotates no
-credential. The provisioner's policy adds a `+`,
-on the role path under each Kubernetes-auth mount whose parameters it pins, and the `vault` drill
-drops exactly those two lines of that one policy before it looks for wildcards; it then reads
-thirteen `mandate-*` policies, not ten.
+credential. The provisioner's policy adds a `+`, on the role path under each Kubernetes-auth
+mount, whose parameters it pins. The `vault` drill admits exactly those two stanzas, every
+parameter as written, in that one policy, beside DEC-2349's grants; it then reads thirteen
+`mandate-*` policies, not ten.
 
 A production cell is initialized and unsealed by the founder, by hand (DEC-977 item 5):
 

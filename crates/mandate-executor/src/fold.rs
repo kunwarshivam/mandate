@@ -133,6 +133,7 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
             Ok(())
         }
         "OwnerAcknowledged" => owner_acknowledged(state, payload),
+        "PositionReleased" => position_released(state, payload),
         "ReconciliationRun" => {
             state.reconciled_through = Some(event.seq);
             if let Some(cursor) = optional_text(payload, "checkpoint") {
@@ -261,13 +262,13 @@ fn owner_elsewhere(kind: &str) -> Option<&'static str> {
         | "KillSwitchActivated"
         | "OwnerConfirmationReceived"
         | "AccountCloseRequested"
-        | "ConnectionChecked" => None,
+        | "ConnectionChecked"
+        | "PositionReleased" => None,
         "RelatedAccountsCoordination" => Some("E7-5"),
         "MandateVersionApplied"
         | "RiskLimitTriggered"
         | "RiskLimitLifted"
         | "HighWaterMarkReset"
-        | "PositionReleased"
         | "InstrumentRestrictionChanged"
         | "GoalCompleted" => Some("E6-4"),
         "UniverseChanged" => Some("E17-3"),
@@ -327,6 +328,19 @@ fn risk_clock(state: &ExecutorState, event: &FoldedEvent) -> Result<RiskClock, E
 /// The instrument a payload names, either spelling the account stream has written: the closed
 /// form's `instrument_id` (§9.5) beside the legacy `instrument` the golden journal carries
 /// (DEC-446 item 7: the fold's legacy reads stay).
+/// An agent's position, or part of it, became the owner's (journal spec §9.27, mandate spec §3.1,
+/// DEC-2354): the quantity leaves the agent's lots, so its kill switch never sells it.
+fn position_released(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
+    let agent = AgentId(required_text(payload, "agent_id")?.to_owned());
+    let released = qty(payload, "qty")?;
+    let total = state
+        .released
+        .entry((agent, instrument(payload)?))
+        .or_insert(Qty::ZERO);
+    *total = total.checked_add(released)?;
+    Ok(())
+}
+
 fn instrument(payload: &Value) -> Result<InstrumentId, ExecutorError> {
     let name = optional_text(payload, "instrument_id")
         .or_else(|| optional_text(payload, "instrument"))
@@ -890,6 +904,9 @@ fn order_state_changed(
             client_order_id: id.as_str().to_owned(),
         })?;
     let detail = state.details.entry(id.clone()).or_default();
+    if let Some(broker) = optional_text(payload, "broker_order_id") {
+        detail.broker_ids.insert(broker.to_owned());
+    }
     if let Some(reported) = optional_qty(payload, "filled_qty")? {
         detail.reported_filled = detail.reported_filled.max(Some(reported));
     }
