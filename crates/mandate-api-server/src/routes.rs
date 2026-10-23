@@ -138,6 +138,76 @@ pub(crate) async fn authorized(
     permission: Permission,
     unreadable: Unreadable,
 ) -> Result<Reader, Refused> {
+    let (authorized, control) =
+        authorize_row(app, admitted, now, workspace, permission, unreadable).await?;
+    match authorized {
+        Ok(Authorized::Workspace { tenant, .. }) => Ok(Reader {
+            workspace: workspace_text(tenant.workspace())?,
+            tenant,
+            control,
+            now,
+        }),
+        other => Err(refused_by(other)),
+    }
+}
+
+/// What an `own` row's route reads once `authorize` grants it: the workspace the membership is
+/// used through, its control stream, and the instant (DEC-832 item 7).
+pub(crate) struct OwnReader {
+    pub(crate) workspace: WorkspaceId,
+    pub(crate) workspace_text: String,
+    pub(crate) control: Vec<StoredEvent>,
+    pub(crate) now: UtcNanos,
+}
+
+/// Authorizes `admitted` for an `own` row's `permission` through its membership of `workspace`
+/// and reads that workspace's control stream; `authorize` answers such a row for the principal,
+/// not with a tenant context.
+pub(crate) async fn own_authorized(
+    app: &App,
+    admitted: &Authenticated,
+    now: UtcNanos,
+    workspace: &str,
+    permission: Permission,
+    unreadable: Unreadable,
+) -> Result<OwnReader, Refused> {
+    let (authorized, control) =
+        authorize_row(app, admitted, now, workspace, permission, unreadable).await?;
+    match authorized {
+        Ok(Authorized::Principal { .. }) => {
+            let workspace =
+                WorkspaceId::from_ulid_text(workspace).map_err(|_| Refused::NotFound)?;
+            Ok(OwnReader {
+                workspace_text: workspace_text(workspace)?,
+                workspace,
+                control,
+                now,
+            })
+        }
+        other => Err(refused_by(other)),
+    }
+}
+
+/// The refusal for an answer a route does not serve.
+fn refused_by(authorized: Result<Authorized, Refusal>) -> Refused {
+    match authorized {
+        Ok(_) | Err(Refusal::NoMembership) => Refused::NotFound,
+        Err(Refusal::MembershipUnavailable) => Refused::MembershipUnavailable,
+        Err(Refusal::ReductionOnly) => Refused::ReductionOnly,
+        Err(_) => Refused::Forbidden,
+    }
+}
+
+/// `authorize`'s answer for `admitted` and `permission` at `workspace`'s scope, and the control
+/// stream it read.
+async fn authorize_row(
+    app: &App,
+    admitted: &Authenticated,
+    now: UtcNanos,
+    workspace: &str,
+    permission: Permission,
+    unreadable: Unreadable,
+) -> Result<(Result<Authorized, Refusal>, Vec<StoredEvent>), Refused> {
     let workspace = WorkspaceId::from_ulid_text(workspace).map_err(|_| Refused::NotFound)?;
     let hosted = app.hosted;
     let (records, control) = if workspace == hosted.workspace {
@@ -173,18 +243,7 @@ pub(crate) async fn authorized(
         permission,
         now,
     );
-    match authorized {
-        Ok(Authorized::Workspace { tenant, .. }) => Ok(Reader {
-            workspace: workspace_text(tenant.workspace())?,
-            tenant,
-            control,
-            now,
-        }),
-        Ok(_) | Err(Refusal::NoMembership) => Err(Refused::NotFound),
-        Err(Refusal::MembershipUnavailable) => Err(Refused::MembershipUnavailable),
-        Err(Refusal::ReductionOnly) => Err(Refused::ReductionOnly),
-        Err(_) => Err(Refused::Forbidden),
-    }
+    Ok((authorized, control))
 }
 
 pub(crate) fn workspace_text(workspace: WorkspaceId) -> Result<String, Refused> {

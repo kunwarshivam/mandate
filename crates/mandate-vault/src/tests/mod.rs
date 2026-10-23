@@ -15,3 +15,4 @@ mod openbao_server;
 mod platform;
 mod policy;
 mod provisioner;
+mod take;

@@ -11,7 +11,7 @@ use mandate_api::problem::ProblemCode;
 use mandate_api_server::session::COOKIE_NAME;
 use mandate_canon::to_canonical;
 use mandate_connections::record::ConnectionId;
-use mandate_connections::start::{Binding, Environment, PkceVerifier};
+use mandate_connections::start::{AuthorizePage, Authorizer, Binding, Environment, PkceVerifier};
 use secrecy::SecretString;
 
 use common::{Reply, WORKSPACE, send};
@@ -338,7 +338,10 @@ fn a_binding_for_a_workspace_not_hosted_writes_nothing() {
         .lock()
         .unwrap()
         .begin(
-            &client(),
+            &Authorizer {
+                page: AuthorizePage::alpaca(),
+                client: client(),
+            },
             binding,
             "foreign-state",
             PkceVerifier(SecretString::from("v".repeat(43))),
