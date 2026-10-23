@@ -951,6 +951,14 @@ fn without_a_stop_the_passes_go_on() {
     assert!(deletes.of().len() >= 2);
 }
 
+/// A current-thread runtime with its timers, as the finish process builds.
+fn timed() -> tokio::runtime::Runtime {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+}
+
 /// A teardown whose every delete runs twelve seconds on a blocking thread, as a vault that accepts
 /// the connection and never answers holds `VaultTeardown`'s.
 struct Hung;
@@ -983,7 +991,7 @@ fn a_hung_vault_call_does_not_hold_the_stop_past_the_drain() {
     let clock = ManualClock::at(OPENED + CONNECT_DEADLINE_SECS);
     let (sent, ended) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let ran = run_until_stopped(finisher, clock, Duration::from_secs(3600), || {
+        let ran = run_until_stopped(timed(), finisher, clock, Duration::from_secs(3600), || {
             Ok(async { tokio::time::sleep(Duration::from_millis(100)).await })
         });
         let _ = sent.send(ran.is_ok());
@@ -1002,7 +1010,7 @@ fn a_stop_that_cannot_be_made_is_an_error() {
     let (journal, deletes, finisher) = finisher(Unbacked);
     request(&journal, A, 2, "oauth");
     let clock = ManualClock::at(OPENED + CONNECT_DEADLINE_SECS);
-    let ran = run_until_stopped(finisher, clock, Duration::from_millis(1), || {
+    let ran = run_until_stopped(timed(), finisher, clock, Duration::from_millis(1), || {
         Err::<std::future::Ready<()>, _>(io::Error::other("no handler"))
     });
     assert!(ran.is_err());
