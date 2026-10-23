@@ -124,6 +124,14 @@ fn every_id_in_the_form_round_trips() {
         .unwrap();
 }
 
+/// The id the vault hashes is the id's own text, still behind a secret wrapper (DEC-2345 item 2).
+#[test]
+fn the_secret_is_the_ids_own_text() {
+    let id = BrokerAccountId::new(ID).unwrap();
+    assert_eq!(id.secret().expose_secret(), ID);
+    assert!(!format!("{:?}", id.secret()).contains(ID));
+}
+
 /// Two ids are equal exactly when their text is.
 #[test]
 fn two_ids_are_equal_only_when_their_text_is() {

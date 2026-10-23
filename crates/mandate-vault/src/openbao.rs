@@ -22,6 +22,7 @@ use std::time::Duration;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
+use mandate_connections::account_entry::BrokerAccountId;
 use mandate_connections::record::{AccountPiiRef, AccountRef, ConnectionId};
 use mandate_time::UtcNanos;
 use reqwest::{Certificate, Method, StatusCode, redirect};
@@ -402,6 +403,21 @@ pub fn fingerprint_key_verdict(answer: Option<&Value>) -> Result<(), SourceError
     }
 }
 
+/// Whether provisioning must create the fingerprint key, from its `GET <transit>/keys/<key>`:
+/// only a 404 is a key that is not there, `true`; a key that is there must pass
+/// [`fingerprint_key_verdict`], `false`. Any other refusal fails provisioning, so a transient
+/// error never lets an existing key go unverified (review F1, round 2).
+///
+/// # Errors
+/// The GET's own refusal, other than [`SourceError::Missing`], and [`fingerprint_key_verdict`]'s.
+pub fn key_needs_creating(found: &Result<Option<Value>, SourceError>) -> Result<bool, SourceError> {
+    match found {
+        Ok(key) => fingerprint_key_verdict(key.as_ref()).map(|()| false),
+        Err(SourceError::Missing) => Ok(true),
+        Err(e) => Err(e.clone()),
+    }
+}
+
 /// A logged-in session as one identity.
 pub struct OpenBaoSource {
     identity: Identity,
@@ -705,32 +721,6 @@ impl OpenBaoSource {
         }
     }
 
-    /// The fingerprint of the broker account id `account` under the deployment's key, by transit's
-    /// HMAC
-    /// (`<transit>/hmac/account-fingerprint`): asked by a connection's executor alone, at its
-    /// connect (DEC-2345 item 2). The key never leaves the vault, and the id is sent only to it.
-    ///
-    /// # Errors
-    /// [`SourceError::Denied`] for any identity but an executor, the vault's refusals, and
-    /// [`SourceError::Malformed`] for an answer that is not a fingerprint.
-    pub async fn hmac_account(
-        &self,
-        account: &SecretString,
-    ) -> Result<AccountFingerprint, SourceError> {
-        if !matches!(self.identity, Identity::Executor(_)) {
-            return Err(SourceError::Denied);
-        }
-        let mut input = STANDARD.encode(account.expose_secret());
-        let mut body = json!({ "input": input });
-        input.zeroize();
-        let path = format!("{}/hmac/{FINGERPRINT_KEY}", self.mounts.transit);
-        let answer = self.call(Method::POST, &path, Some(&body)).await;
-        if let Some(Value::String(sent)) = body.get_mut("input") {
-            sent.zeroize();
-        }
-        AccountFingerprint::new(text(answer?.as_ref(), "/data/hmac")?)
-    }
-
     /// Whether the marker that the fingerprint key rotates is there.
     async fn rotating(&self) -> Result<bool, FingerprintError> {
         require(&self.identity, Access::Read, &SecretPath::Rotating).map_err(unavailable)?;
@@ -908,6 +898,31 @@ fn unavailable(_: SourceError) -> FingerprintError {
 impl SecretSource for OpenBaoSource {
     fn identity(&self) -> &Identity {
         &self.identity
+    }
+
+    /// The fingerprint of the broker account id `account` under the deployment's key, by transit's
+    /// HMAC (`<transit>/hmac/account-fingerprint`): asked by a connection's executor alone, at its
+    /// connect (DEC-2345 item 2). The key never leaves the vault, and the id is sent only to it.
+    ///
+    /// # Errors
+    /// [`SourceError::Denied`] for any identity but an executor, the vault's refusals, and
+    /// [`SourceError::Malformed`] for an answer that is not a fingerprint.
+    async fn hmac_account(
+        &self,
+        account: &BrokerAccountId,
+    ) -> Result<AccountFingerprint, SourceError> {
+        if !matches!(self.identity, Identity::Executor(_)) {
+            return Err(SourceError::Denied);
+        }
+        let mut input = STANDARD.encode(account.secret().expose_secret());
+        let mut body = json!({ "input": input });
+        input.zeroize();
+        let path = format!("{}/hmac/{FINGERPRINT_KEY}", self.mounts.transit);
+        let answer = self.call(Method::POST, &path, Some(&body)).await;
+        if let Some(Value::String(sent)) = body.get_mut("input") {
+            sent.zeroize();
+        }
+        AccountFingerprint::new(text(answer?.as_ref(), "/data/hmac")?)
     }
 
     /// A check-and-set write at version 0, which the vault takes only where no version is there,
@@ -1226,30 +1241,28 @@ async fn provision_fingerprints(
     mounts: &Mounts,
 ) -> Result<(), SourceError> {
     let transit = format!("sys/mounts/{}", mounts.transit);
-    match http.call(Method::GET, &transit, token, None).await {
-        Ok(mount) => transit_mount_verdict(mount.as_ref())?,
-        Err(_) => {
-            http.call(
-                Method::POST,
-                &transit,
-                token,
-                Some(&json!({ "type": "transit" })),
-            )
-            .await?;
-        }
+    if http.call(Method::GET, &transit, token, None).await.is_err() {
+        http.call(
+            Method::POST,
+            &transit,
+            token,
+            Some(&json!({ "type": "transit" })),
+        )
+        .await?;
     }
+    let mount = http.call(Method::GET, &transit, token, None).await?;
+    transit_mount_verdict(mount.as_ref())?;
     let key = format!("{}/keys/{FINGERPRINT_KEY}", mounts.transit);
-    match http.call(Method::GET, &key, token, None).await {
-        Ok(found) => fingerprint_key_verdict(found.as_ref())?,
-        Err(_) => {
-            http.call(
-                Method::POST,
-                &key,
-                token,
-                Some(&json!({ "exportable": false })),
-            )
-            .await?;
-        }
+    if key_needs_creating(&http.call(Method::GET, &key, token, None).await)? {
+        http.call(
+            Method::POST,
+            &key,
+            token,
+            Some(&json!({ "exportable": false })),
+        )
+        .await?;
+        let made = http.call(Method::GET, &key, token, None).await?;
+        fingerprint_key_verdict(made.as_ref())?;
     }
     let claims = format!("{}/metadata/{}", mounts.kv, kv_path(&SecretPath::Claims)?);
     http.call(
