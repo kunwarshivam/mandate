@@ -236,7 +236,7 @@ pub(crate) fn exit_price(
 /// on a fresh, sane latest quote (§4.4: no presumed halt) that shows a bid, so a market order never
 /// goes into a book with no buyer. With no bid the exit is laddered from the last sane bid or
 /// trade, or held with nothing to price from (DEC-2037 items 4 and 5).
-fn market_allowed(batch: &Batch<'_, '_>, instrument: &InstrumentId) -> bool {
+pub(crate) fn market_allowed(batch: &Batch<'_, '_>, instrument: &InstrumentId) -> bool {
     venue(batch.ports, instrument, batch.at()) == Venue::Regular
         && current_quote(batch, instrument).is_some_and(|quote| quote.bid.is_some())
 }
@@ -1129,7 +1129,7 @@ const CLOSED_MEMBERS: [(&str, &[&str]); 14] = [
 
 /// Journals one `ProtectionChanged` for `instrument` in §9.5's closed form (DEC-446 item 4,
 /// DEC-859): every member present, `orders` and `awaiting` as lists, the owner as `agent_id`.
-fn changed(
+pub(crate) fn changed(
     batch: &mut Batch<'_, '_>,
     instrument: &InstrumentId,
     action: &str,
@@ -1401,6 +1401,9 @@ fn bracket(
         changed(batch, &instrument, "unprotected_start", named.clone())?;
     }
     if order.state.is_terminal() {
+        if batch.view.closing_all.contains(&instrument) {
+            return Ok(());
+        }
         let unapplied = filled.checked_sub(order.filled_qty)?;
         let committed = covered(&batch.view, &instrument)?
             .checked_add(still_selling(&batch.view, &instrument)?)?;
@@ -1544,7 +1547,7 @@ fn stop_after(
     let filled = order
         .filled_qty
         .max(detail.reported_filled.unwrap_or(Qty::ZERO));
-    if filled == Qty::ZERO {
+    if filled == Qty::ZERO || batch.view.closing_all.contains(&order.instrument) {
         return Ok(());
     }
     let named = vec![("bracket", text(entry.as_str()))];
@@ -1688,6 +1691,7 @@ pub(crate) fn new_day(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         .filter(|(instrument, protection)| {
             !protection.resting.is_empty()
                 && !batch.view.exiting.contains_key(*instrument)
+                && !batch.view.closing_all.contains(*instrument)
                 && !batch.view.replacing.contains_key(*instrument)
                 && protection.resting.iter().any(|id| {
                     batch
@@ -1786,6 +1790,10 @@ fn unprotectable(
 /// at once ([`re_place`]), its interval started first, for what the protection and the exits
 /// still working leave uncovered. The prices are the resting protection's, or else the ended
 /// protective order's own.
+/// Nor is protection in an instrument an account kill switch closes through the broker's
+/// close-position: a stop beside that close would sell the same shares twice (§5.5, rule 12).
+/// Its loss starts the instrument's interval instead, naming no order, so §5.4's bound journals
+/// and alerts it (DEC-2333 item 3).
 /// Protection the broker refuses, or cancels before acknowledging it, is not re-placed here: its
 /// interval stays open and bounded (DEC-348 item 2), so neither loops, nor restarts the bound.
 /// With no prices anywhere to place from, the shortfall is journaled and the owner alerted
@@ -1836,6 +1844,12 @@ fn re_cover(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         .filter_map(|instrument| InstrumentId::new(instrument).ok())
         .collect();
     for instrument in instruments {
+        if batch.view.closing_all.contains(&instrument) {
+            if !interval_open(&batch.view, &instrument) {
+                changed(batch, &instrument, "unprotected_start", Vec::new())?;
+            }
+            continue;
+        }
         if batch.view.exiting.contains_key(&instrument)
             || batch.view.replacing.contains_key(&instrument)
             || stepping_alone(&batch.view, &instrument, &ended)
@@ -2233,7 +2247,7 @@ fn covered(view: &ExecutorState, instrument: &InstrumentId) -> Result<Qty, Execu
         .map_err(ExecutorError::from)
 }
 
-fn interval_open(view: &ExecutorState, instrument: &InstrumentId) -> bool {
+pub(crate) fn interval_open(view: &ExecutorState, instrument: &InstrumentId) -> bool {
     view.unprotected
         .iter()
         .any(|interval| &interval.instrument == instrument && interval.ended_at.is_none())
@@ -2309,6 +2323,9 @@ fn re_place(
     instrument: &InstrumentId,
     sequence: &Replacement,
 ) -> Result<(), ExecutorError> {
+    if batch.view.closing_all.contains(instrument) {
+        return Ok(());
+    }
     let committed =
         covered(&batch.view, instrument)?.checked_add(working_exits(&batch.view, instrument)?)?;
     let qty = long(&batch.view, instrument)?
@@ -2553,7 +2570,8 @@ pub(crate) fn bound(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         }
         let alerted = changed(batch, &instrument, "interval_limit", Vec::new())?;
         batch.notify(alerted.clone(), "unprotected_interval_limit");
-        let Some(entry) = entry.filter(|_| !exiting) else {
+        let closing = batch.view.closing_all.contains(&instrument);
+        let Some(entry) = entry.filter(|_| !exiting && !closing) else {
             continue;
         };
         let plain = batch
