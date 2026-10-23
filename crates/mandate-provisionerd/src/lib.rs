@@ -18,7 +18,7 @@
 use std::path::Path;
 
 use mandate_process::Input;
-use mandate_provisioner::driver::Halt;
+use mandate_provisioner::driver::{DEADLINE, Halt};
 use mandate_time::UtcNanos;
 use mandate_vault::SourceError;
 use mandate_vault::lease::LEASE_SECS;
@@ -50,6 +50,11 @@ pub const EXPIRY_MARGIN_SECS: i64 = 300;
 const _RENEWED_BEFORE_THE_END: () = assert!(
     RELOGIN_SECS < LEASE_SECS - EXPIRY_MARGIN_SECS,
     "a session is renewed well before it stops being usable"
+);
+
+const _NO_STEP_OUTLIVES_THE_MARGIN: () = assert!(
+    DEADLINE.as_secs() < EXPIRY_MARGIN_SECS.unsigned_abs(),
+    "a step the session was asked about ends before its token does"
 );
 
 /// What one pass reports to the lifecycle. A pass that could not read or write the journal, or

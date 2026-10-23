@@ -473,6 +473,26 @@ async fn a_removal_the_vault_keeps_refusing_alerts_once() {
     assert_eq!(verify_connection_roles(&stream.rows()), Ok(()));
 }
 
+/// The alert is once per step, not once per process: a second, distinct step refused after the
+/// first raises its own.
+#[tokio::test(flavor = "current_thread")]
+async fn a_second_distinct_refused_step_still_alerts() {
+    let stream = Stream::opened();
+    for record in world("two_requests") {
+        stream.push(&record);
+    }
+    let vault = Vault {
+        refusal: Some(RoleRefusal::RoleRefused),
+        ..Vault::default()
+    };
+    let mut provisioner = provisioner(&stream, vault);
+    assert_eq!(provisioner.tick(at(1)).await, Ok(()));
+    assert_eq!(stream.of("ConnectionRolesRefused").len(), 2);
+    assert_eq!(provisioner.alerts().0, [ROLES_REFUSED, ROLES_REFUSED]);
+    assert_eq!(provisioner.tick(at(2)).await, Ok(()));
+    assert_eq!(provisioner.alerts().0, [ROLES_REFUSED, ROLES_REFUSED]);
+}
+
 /// A journal that answers `Committed` and never shows the record leaves the step owed on every
 /// read; the pass ends once it has done the steps first owed and [`APPEND_TRIES`] more, with the
 /// journal named, rather than calling the vault for ever.
