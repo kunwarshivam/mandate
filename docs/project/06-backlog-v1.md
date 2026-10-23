@@ -4236,6 +4236,10 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   `KillSwitchActivated` in journal spec §9.5, then add a stream rule that an `AccountCloseRequested`'s
   `kill_switch_event` names an earlier account-scope `KillSwitchActivated` of the stream whose
   `closes` or `deferred` lists its `instrument_id`. Until then, the executor's fold guarantees it.
+- **E7-4 A1c (stream K), from [DEC-2333](decisions/DEC-2333.md) item 3:** at §5.4's bound, re-place
+  protection in an instrument the account kill switch closes for the held quantity less every sell
+  not confirmed cancelled, placing nothing where that leaves none, with its own DEC-77 pair. Until
+  then the bound journals `interval_limit` and alerts, and places nothing there.
 - **E7-4 slices 5 and 6's tests correction (stream K), from #286 round 1 (minor 2):**
   `properties::no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding` counts a cancel as
   outstanding until the order is terminal, abandoned or its protection cancelled, so it would fail on

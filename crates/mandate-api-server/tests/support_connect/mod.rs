@@ -24,7 +24,8 @@ use mandate_authn::{Algorithm, IssuerConfig};
 use mandate_canon::{Digest, Value, parse, to_canonical};
 use mandate_connections::ConnectError;
 use mandate_connections::start::{
-    Binding, ClientId, Environment, OAuthClient, PkceVerifier, RedirectUri,
+    AuthorizePage, Authorizer, Binding, ClientId, Environment, OAuthClient, PkceVerifier,
+    RedirectUri,
 };
 use mandate_connections::vault::AuthorizationCode;
 use mandate_identity::{MembershipEvent, MembershipRecord, PrincipalId, Role, StepUpActionKind};
@@ -205,7 +206,10 @@ pub fn fixture_random(
     let codes = Arc::new(Codes::default());
     let connect = offered.then(|| {
         Arc::new(Connect::new(
-            client(),
+            Authorizer {
+                page: AuthorizePage::alpaca(),
+                client: client(),
+            },
             random,
             Arc::clone(&codes) as Arc<dyn CodeVault>,
         ))
