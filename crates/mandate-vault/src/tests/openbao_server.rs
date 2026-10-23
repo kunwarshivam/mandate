@@ -23,6 +23,9 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use super::conformance::{self, Harness, at, c};
 use crate::SourceError;
+use crate::fingerprint::{
+    AccountFingerprint, Claim, FINGERPRINT_KEY, FingerprintError, ManagerFingerprints, encode_entry,
+};
 use crate::kubernetes::{
     KubernetesAuth, kubernetes_mount_requests, kubernetes_policy, kubernetes_policy_name,
     mount_accessor, service_account_name,
@@ -30,9 +33,10 @@ use crate::kubernetes::{
 use crate::openbao::{
     OpenBaoConfig, OpenBaoSource, RoleCredentials, provision, provision_kubernetes_auth,
 };
-use crate::policy::{Identity, Mounts, SecretPath, kv_path, role_name};
+use crate::openbao::{fingerprint_key_verdict, transit_mount_verdict};
+use crate::policy::{Identity, Mounts, SecretPath, kv_path, openbao_policy, role_name};
 use crate::source::{Grant, SecretSource};
-use mandate_connections::record::{AccountRef, ConnectionId};
+use mandate_connections::record::{AccountPiiRef, AccountRef, ConnectionId};
 use mandate_time::UtcNanos;
 use reqwest::{Certificate, Method};
 use secrecy::{ExposeSecret, SecretString};
@@ -1022,4 +1026,469 @@ async fn an_executor_creates_its_own_account_entry_once_and_no_identity_reads_it
         assert_eq!(manager.delete(&revoked).await, Ok(()));
     }
     assert!(stored().await.is_some());
+}
+
+/// DEC-2345 items 1, 2 and 4: provisioning creates the fingerprint key on the transit mount, never
+/// exportable nor deletable, and has the registry entry take only check-and-set writes; a
+/// connection's executor, and no other identity, hashes an account id under that key, the same id
+/// to the same fingerprint for every connection and another id to another. A vault nobody answers
+/// for is an outage, checked first.
+#[tokio::test(flavor = "current_thread")]
+async fn only_an_executor_hashes_an_account_under_the_vaults_key() {
+    let ca = include_bytes!("fixtures/isrg-root-x1.pem").to_vec();
+    let id = |text: &str| SecretString::from(text.to_owned());
+    let unreachable = OpenBaoSource::from_token(
+        &nowhere(ca),
+        Identity::Executor(c("c1")),
+        SecretString::from("unused".to_owned()),
+        at(1_000_600),
+    )
+    .unwrap();
+    assert_eq!(
+        unreachable.hmac_account(&id("acct-1")).await,
+        Err(SourceError::Unavailable)
+    );
+    let Some(bao) = Bao::new().await else {
+        return;
+    };
+    let mounts = &bao.config.mounts;
+    let key = bao
+        .operator(
+            Method::GET,
+            &format!("{}/keys/{FINGERPRINT_KEY}", mounts.transit),
+            None,
+        )
+        .await;
+    assert_eq!(
+        key.pointer("/data/exportable"),
+        Some(&json!(false)),
+        "{key}"
+    );
+    assert_eq!(
+        key.pointer("/data/deletion_allowed"),
+        Some(&json!(false)),
+        "{key}"
+    );
+    let claims = bao
+        .operator(
+            Method::GET,
+            &format!("{}/metadata/personal/claims", mounts.kv),
+            None,
+        )
+        .await;
+    assert_eq!(
+        claims.pointer("/data/cas_required"),
+        Some(&json!(true)),
+        "{claims}"
+    );
+    let now = at(1_000_000);
+    let (one, two) = (
+        executor_of(&bao, "c1", now).await,
+        executor_of(&bao, "c2", now).await,
+    );
+    let first = one.hmac_account(&id("acct-1")).await.unwrap();
+    assert_eq!(one.hmac_account(&id("acct-1")).await, Ok(first.clone()));
+    assert_eq!(two.hmac_account(&id("acct-1")).await, Ok(first.clone()));
+    assert_ne!(one.hmac_account(&id("acct-2")).await, Ok(first));
+    for identity in [Identity::ConnectionManager, Identity::Api] {
+        let other = bao.source(identity.clone(), now).await;
+        assert_eq!(
+            other.hmac_account(&id("acct-1")).await,
+            Err(SourceError::Denied),
+            "{identity:?}"
+        );
+    }
+}
+
+/// DEC-2345 item 1 on a real vault: provisioning keeps a fingerprint key already there only when
+/// it is never exportable and never deletable, on a mount that is transit. A key made exportable
+/// or deletable before provisioning, or a transit path that holds another engine, fails it as
+/// `Config`. The pure verdicts are checked first, so a run with no server still fails until they
+/// hold.
+#[tokio::test(flavor = "current_thread")]
+async fn provisioning_fails_on_a_fingerprint_key_that_can_leave_the_vault() {
+    let kept = json!({ "data": {
+        "exportable": false, "deletion_allowed": false, "allow_plaintext_backup": false,
+    } });
+    assert_eq!(fingerprint_key_verdict(Some(&kept)), Ok(()));
+    let mount = json!({ "data": { "type": "transit" } });
+    assert_eq!(transit_mount_verdict(Some(&mount)), Ok(()));
+    let Some((address, ca_pem, operator)) = server() else {
+        return;
+    };
+    let setups: [(&str, Vec<(String, Value)>); 3] = [
+        (
+            "an exportable key",
+            vec![
+                (
+                    "sys/mounts/{transit}".to_owned(),
+                    json!({ "type": "transit" }),
+                ),
+                (
+                    format!("{{transit}}/keys/{FINGERPRINT_KEY}"),
+                    json!({ "exportable": true }),
+                ),
+            ],
+        ),
+        (
+            "a deletable key",
+            vec![
+                (
+                    "sys/mounts/{transit}".to_owned(),
+                    json!({ "type": "transit" }),
+                ),
+                (
+                    format!("{{transit}}/keys/{FINGERPRINT_KEY}"),
+                    json!({ "exportable": false }),
+                ),
+                (
+                    format!("{{transit}}/keys/{FINGERPRINT_KEY}/config"),
+                    json!({ "deletion_allowed": true }),
+                ),
+            ],
+        ),
+        (
+            "another engine",
+            vec![(
+                "sys/mounts/{transit}".to_owned(),
+                json!({ "type": "kv", "options": { "version": "2" } }),
+            )],
+        ),
+    ];
+    for (case, steps) in setups {
+        let n = NEXT.fetch_add(1, Ordering::Relaxed);
+        let suffix = format!("{}-{n}", std::process::id());
+        let config = OpenBaoConfig {
+            address: address.clone(),
+            ca_pem: ca_pem.clone(),
+            mounts: Mounts {
+                kv: format!("kv-{suffix}"),
+                auth: format!("approle-{suffix}"),
+                kubernetes_executor: format!("kubernetes-executor-{suffix}"),
+                kubernetes_exchange: format!("kubernetes-exchange-{suffix}"),
+                transit: format!("transit-{suffix}"),
+            },
+        };
+        for (path, body) in steps {
+            let path = path.replace("{transit}", &config.mounts.transit);
+            operator_call(
+                &address,
+                &ca_pem,
+                &operator,
+                Method::POST,
+                &path,
+                Some(body),
+            )
+            .await;
+        }
+        assert_eq!(
+            provision(&config, &operator, &[c("c1")], None)
+                .await
+                .map(drop),
+            Err(SourceError::Config),
+            "{case}"
+        );
+    }
+}
+
+/// A session as `connection`'s executor, logged in by its Kubernetes token.
+async fn executor_of(bao: &Bao, connection: &str, now: UtcNanos) -> OpenBaoSource {
+    let identity = Identity::Executor(c(connection));
+    OpenBaoSource::from_token(
+        &bao.config,
+        identity.clone(),
+        bao.kubernetes_token(&identity).await,
+        at(now.secs() + 600),
+    )
+    .unwrap()
+}
+
+/// A session as the connection manager whose policy is its generated one and DEC-2349's read of
+/// every fingerprint entry, `personal/fingerprints/+/+`, which that decision's provisioning renders.
+async fn fingerprint_manager(bao: &Bao, now: UtcNanos) -> OpenBaoSource {
+    let mounts = &bao.config.mounts;
+    let hcl = format!(
+        "{}path \"{}/data/personal/fingerprints/+/+\" {{\n  capabilities = [\"read\"]\n}}\n",
+        openbao_policy(&Identity::ConnectionManager, &[c("c1"), c("c2")], mounts).unwrap(),
+        mounts.kv
+    );
+    let name = format!("{}-fingerprint-manager", mounts.kv);
+    bao.operator(
+        Method::PUT,
+        &format!("sys/policies/acl/{name}"),
+        Some(json!({"policy": hcl})),
+    )
+    .await;
+    let made = bao
+        .operator(
+            Method::POST,
+            "auth/token/create",
+            Some(json!({"policies": [name], "no_default_policy": true, "ttl": "600s"})),
+        )
+        .await;
+    OpenBaoSource::from_token(
+        &bao.config,
+        Identity::ConnectionManager,
+        SecretString::from(made["auth"]["client_token"].as_str().unwrap().to_owned()),
+        at(now.secs() + 600),
+    )
+    .unwrap()
+}
+
+fn request(n: u8) -> AccountRef {
+    AccountRef::new(&format!("01J8Z2ACCT000000000000000{n}")).unwrap()
+}
+
+/// `connection`'s executor writes its request's fingerprint entry, as at its connect.
+async fn fingerprinted(bao: &Bao, connection: &str, n: u8, now: UtcNanos) -> AccountFingerprint {
+    let executor = executor_of(bao, connection, now).await;
+    let fingerprint = executor
+        .hmac_account(&SecretString::from("acct-1".to_owned()))
+        .await
+        .unwrap();
+    let pii_ref = AccountPiiRef::new(&format!("pii_01J8Z2PQ00000000000000000{n}")).unwrap();
+    executor
+        .create(
+            &SecretPath::Fingerprint(c(connection), request(n)),
+            &encode_entry(&fingerprint, &pii_ref).unwrap(),
+        )
+        .await
+        .unwrap();
+    fingerprint
+}
+
+/// DEC-2345 items 3 to 6 on a real vault: the manager reads a request's fingerprint and its
+/// reference, and nothing for a request with no entry; a claim is the connection's once, again
+/// for it, and `HeldBy` it for another; a release by a connection that does not hold it deletes
+/// nothing, and the holder's frees it for the next; while the key rotates, the manager reads and
+/// claims nothing. A vault nobody answers for is an outage, checked first.
+#[tokio::test(flavor = "current_thread")]
+async fn the_manager_claims_each_fingerprint_for_one_connection() {
+    let ca = include_bytes!("fixtures/isrg-root-x1.pem").to_vec();
+    let unreachable = OpenBaoSource::from_token(
+        &nowhere(ca),
+        Identity::ConnectionManager,
+        SecretString::from("unused".to_owned()),
+        at(1_000_600),
+    )
+    .unwrap();
+    assert_eq!(
+        unreachable.fingerprint(&c("c1"), &request(1)).await,
+        Err(FingerprintError::Unavailable)
+    );
+    let Some(bao) = Bao::new().await else {
+        return;
+    };
+    let now = at(1_000_000);
+    let held = fingerprinted(&bao, "c1", 1, now).await;
+    assert_eq!(fingerprinted(&bao, "c2", 2, now).await, held);
+    let manager = fingerprint_manager(&bao, now).await;
+    let (fingerprint, pii_ref) = manager.fingerprint(&c("c1"), &request(1)).await.unwrap();
+    assert_eq!(fingerprint, held);
+    assert_eq!(pii_ref.as_str(), "pii_01J8Z2PQ000000000000000001");
+    assert_eq!(
+        manager.fingerprint(&c("c1"), &request(3)).await,
+        Err(FingerprintError::Missing)
+    );
+    assert_eq!(manager.claim(&c("c1"), &held).await, Ok(Claim::Claimed));
+    assert_eq!(manager.claim(&c("c1"), &held).await, Ok(Claim::Claimed));
+    assert_eq!(
+        manager.claim(&c("c2"), &held).await,
+        Ok(Claim::HeldBy(c("c1")))
+    );
+    assert_eq!(manager.release(&c("c2"), &request(2)).await, Ok(()));
+    assert_eq!(
+        manager.claim(&c("c2"), &held).await,
+        Ok(Claim::HeldBy(c("c1")))
+    );
+    assert_eq!(manager.release(&c("c1"), &request(1)).await, Ok(()));
+    assert_eq!(manager.release(&c("c1"), &request(1)).await, Ok(()));
+    assert_eq!(manager.claim(&c("c2"), &held).await, Ok(Claim::Claimed));
+    let api = bao.source(Identity::Api, now).await;
+    assert_eq!(
+        api.claim(&c("c1"), &held).await,
+        Err(FingerprintError::Unavailable)
+    );
+    bao.operator(
+        Method::POST,
+        &format!("{}/data/fingerprints/rotating", bao.config.mounts.kv),
+        Some(json!({"data": {"value": "cm90YXRpbmc="}})),
+    )
+    .await;
+    assert_eq!(
+        manager.fingerprint(&c("c2"), &request(2)).await,
+        Err(FingerprintError::Rotating)
+    );
+    assert_eq!(
+        manager.claim(&c("c1"), &held).await,
+        Err(FingerprintError::Rotating)
+    );
+}
+
+/// Review F-b: a release whose fingerprint entry is there but does not read answers
+/// `Unavailable`, and the claim is kept, so a release never reports success while the account
+/// stays claimed by a connection that can no longer give it back. A vault nobody answers for is an
+/// outage, checked first.
+#[tokio::test(flavor = "current_thread")]
+async fn a_release_over_an_unreadable_entry_fails_closed() {
+    let ca = include_bytes!("fixtures/isrg-root-x1.pem").to_vec();
+    let unreachable = OpenBaoSource::from_token(
+        &nowhere(ca),
+        Identity::ConnectionManager,
+        SecretString::from("unused".to_owned()),
+        at(1_000_600),
+    )
+    .unwrap();
+    assert_eq!(
+        unreachable.release(&c("c1"), &request(1)).await,
+        Err(FingerprintError::Unavailable)
+    );
+    let Some(bao) = Bao::new().await else {
+        return;
+    };
+    let now = at(1_000_000);
+    let held = fingerprinted(&bao, "c1", 1, now).await;
+    let manager = fingerprint_manager(&bao, now).await;
+    assert_eq!(manager.claim(&c("c1"), &held).await, Ok(Claim::Claimed));
+    let entry = kv_path(&SecretPath::Fingerprint(c("c1"), request(1))).unwrap();
+    bao.operator(
+        Method::POST,
+        &format!("{}/data/{entry}", bao.config.mounts.kv),
+        Some(json!({"data": {"value": "bm90IGFuIGVudHJ5"}})),
+    )
+    .await;
+    assert_eq!(
+        manager.release(&c("c1"), &request(1)).await,
+        Err(FingerprintError::Unavailable)
+    );
+    assert_eq!(
+        manager.claim(&c("c2"), &held).await,
+        Ok(Claim::HeldBy(c("c1")))
+    );
+}
+
+/// The manager's three operations through [`ManagerFingerprints`], as the connect's callers drive
+/// them: the fingerprint read, a claim, a release that frees it for the next connection. A vault
+/// nobody answers for is an outage, checked first.
+#[tokio::test(flavor = "current_thread")]
+async fn the_managers_operations_run_through_its_trait() {
+    async fn connect<M: ManagerFingerprints>(
+        manager: &M,
+        connection: &ConnectionId,
+        account: &AccountRef,
+    ) -> Result<Claim, FingerprintError> {
+        let (fingerprint, _) = manager.fingerprint(connection, account).await?;
+        manager.claim(connection, &fingerprint).await
+    }
+    let ca = include_bytes!("fixtures/isrg-root-x1.pem").to_vec();
+    let unreachable = OpenBaoSource::from_token(
+        &nowhere(ca),
+        Identity::ConnectionManager,
+        SecretString::from("unused".to_owned()),
+        at(1_000_600),
+    )
+    .unwrap();
+    assert_eq!(
+        connect(&unreachable, &c("c1"), &request(1)).await,
+        Err(FingerprintError::Unavailable)
+    );
+    assert_eq!(
+        ManagerFingerprints::release(&unreachable, &c("c1"), &request(1)).await,
+        Err(FingerprintError::Unavailable)
+    );
+    let Some(bao) = Bao::new().await else {
+        return;
+    };
+    let now = at(1_000_000);
+    fingerprinted(&bao, "c1", 1, now).await;
+    fingerprinted(&bao, "c2", 2, now).await;
+    let manager = fingerprint_manager(&bao, now).await;
+    assert_eq!(
+        connect(&manager, &c("c1"), &request(1)).await,
+        Ok(Claim::Claimed)
+    );
+    assert_eq!(
+        connect(&manager, &c("c2"), &request(2)).await,
+        Ok(Claim::HeldBy(c("c1")))
+    );
+    assert_eq!(
+        ManagerFingerprints::release(&manager, &c("c1"), &request(1)).await,
+        Ok(())
+    );
+    assert_eq!(
+        connect(&manager, &c("c2"), &request(2)).await,
+        Ok(Claim::Claimed)
+    );
+}
+
+/// Deleting a connection's code or token where there is none changes nothing and answers `Ok`, so
+/// a revoke that runs again, or one of a connection that never stored a token, never fails.
+#[tokio::test(flavor = "current_thread")]
+async fn deleting_an_absent_entry_answers_ok() {
+    let Some(bao) = Bao::new().await else {
+        return;
+    };
+    let now = at(1_000_000);
+    let manager = bao.source(Identity::ConnectionManager, now).await;
+    for path in [SecretPath::Code(c("c2")), SecretPath::Token(c("c2"))] {
+        assert_eq!(manager.delete(&path).await, Ok(()), "{path:?}");
+        assert_eq!(manager.delete(&path).await, Ok(()), "{path:?}");
+    }
+}
+
+/// DEC-2345 item 4: of two concurrent claims of one fingerprint, exactly one wins, and the other
+/// answers `HeldBy` the winner, never both `Claimed`.
+#[tokio::test(flavor = "current_thread")]
+async fn of_two_concurrent_claims_exactly_one_wins() {
+    let ca = include_bytes!("fixtures/isrg-root-x1.pem").to_vec();
+    let unreachable = OpenBaoSource::from_token(
+        &nowhere(ca),
+        Identity::ConnectionManager,
+        SecretString::from("unused".to_owned()),
+        at(1_000_600),
+    )
+    .unwrap();
+    let probe =
+        AccountFingerprint::new("vault:v1:q83vEjRWeJCrze8SNFZ4kKvN7xI0VniQq83vEjRWeJA=").unwrap();
+    assert_eq!(
+        unreachable.claim(&c("c1"), &probe).await,
+        Err(FingerprintError::Unavailable)
+    );
+    let Some(bao) = Bao::new().await else {
+        return;
+    };
+    let now = at(1_000_000);
+    let held = fingerprinted(&bao, "c1", 1, now).await;
+    let (one, two) = (
+        fingerprint_manager(&bao, now).await,
+        fingerprint_manager(&bao, now).await,
+    );
+    for _ in 0..4 {
+        let (c1, c2) = (c("c1"), c("c2"));
+        let (first, second) = tokio::join!(one.claim(&c1, &held), two.claim(&c2, &held));
+        let answers = [first.unwrap(), second.unwrap()];
+        let won: Vec<_> = answers.iter().filter(|a| **a == Claim::Claimed).collect();
+        assert_eq!(won.len(), 1, "{answers:?}");
+        let winner = if answers[0] == Claim::Claimed {
+            c("c1")
+        } else {
+            c("c2")
+        };
+        assert!(
+            answers.contains(&Claim::HeldBy(winner.clone())),
+            "{answers:?}"
+        );
+        bao.operator(
+            Method::DELETE,
+            &format!("{}/metadata/personal/claims", bao.config.mounts.kv),
+            None,
+        )
+        .await;
+        bao.operator(
+            Method::POST,
+            &format!("{}/metadata/personal/claims", bao.config.mounts.kv),
+            Some(json!({"cas_required": true})),
+        )
+        .await;
+    }
 }

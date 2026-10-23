@@ -42,6 +42,7 @@ pub mod local;
 pub mod mounted;
 pub mod openbao;
 pub mod policy;
+mod registry;
 pub mod source;
 
 pub use error::SourceError;

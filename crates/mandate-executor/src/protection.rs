@@ -236,7 +236,7 @@ pub(crate) fn exit_price(
 /// on a fresh, sane latest quote (§4.4: no presumed halt) that shows a bid, so a market order never
 /// goes into a book with no buyer. With no bid the exit is laddered from the last sane bid or
 /// trade, or held with nothing to price from (DEC-2037 items 4 and 5).
-fn market_allowed(batch: &Batch<'_, '_>, instrument: &InstrumentId) -> bool {
+pub(crate) fn market_allowed(batch: &Batch<'_, '_>, instrument: &InstrumentId) -> bool {
     venue(batch.ports, instrument, batch.at()) == Venue::Regular
         && current_quote(batch, instrument).is_some_and(|quote| quote.bid.is_some())
 }
@@ -1093,7 +1093,7 @@ pub(crate) fn ask_cancel(
 
 /// §9.5's members after `instrument_id` and `action`, each with the actions rules 41 to 44 let
 /// it be non-null or non-empty on.
-const CLOSED_MEMBERS: [(&str, &[&str]); 14] = [
+const CLOSED_MEMBERS: [(&str, &[&str]); 15] = [
     (
         "orders",
         &["placed", "cancelled", "passive_start", "unprotected_start"],
@@ -1125,16 +1125,33 @@ const CLOSED_MEMBERS: [(&str, &[&str]); 14] = [
     ("sent", &["rung_short"]),
     ("uncovered", &["interval_limit", "unprotected_end"]),
     ("acknowledged", &["unprotected_end"]),
+    (
+        "unprotected_fraction",
+        &["unprotected_start", "placed", "unprotected_end"],
+    ),
 ];
 
-/// Journals one `ProtectionChanged` for `instrument` in §9.5's closed form (DEC-446 item 4,
-/// DEC-859): every member present, `orders` and `awaiting` as lists, the owner as `agent_id`.
-fn changed(
+/// Journals one `ProtectionChanged` for `instrument` in §9.5's closed form at version 2 (DEC-446
+/// item 4, DEC-859, DEC-2312): every member present, `orders` and `awaiting` as lists, the owner as
+/// `agent_id`. A start or a placement discloses the fraction of a share the position holds beyond
+/// its whole shares ([`unprotected_fraction`]), from the folded position unless the caller names
+/// what it protects.
+pub(crate) fn changed(
     batch: &mut Batch<'_, '_>,
     instrument: &InstrumentId,
     action: &str,
-    pairs: Vec<(&'static str, Value)>,
+    mut pairs: Vec<(&'static str, Value)>,
 ) -> Result<EventId, ExecutorError> {
+    if !pairs
+        .iter()
+        .any(|(name, _)| *name == "unprotected_fraction")
+    {
+        let held = long(&batch.view, instrument)?;
+        pairs.push((
+            "unprotected_fraction",
+            unprotected_fraction(batch.ports, instrument, held)?,
+        ));
+    }
     let mut closed = vec![
         ("instrument_id", text(instrument.as_str())),
         ("action", text(action)),
@@ -1401,6 +1418,9 @@ fn bracket(
         changed(batch, &instrument, "unprotected_start", named.clone())?;
     }
     if order.state.is_terminal() {
+        if batch.view.closing_all.contains(&instrument) {
+            return Ok(());
+        }
         let unapplied = filled.checked_sub(order.filled_qty)?;
         let committed = covered(&batch.view, &instrument)?
             .checked_add(still_selling(&batch.view, &instrument)?)?;
@@ -1514,19 +1534,24 @@ fn past_bound(view: &ExecutorState, instrument: &InstrumentId, entry: &ClientOrd
     })
 }
 
-/// One plain entry: crypto (§5.4, DEC-36), or an equity on a profile with no OCO or bracket
-/// (§5.4, DEC-529 item 7, DEC-966). The unprotected interval starts, journaled once and naming
-/// the entry, at its first fill. Once the entry is terminal — filled completely, or ended partly filled, its remainder cancelled at
-/// `bracket_partial_fill_timeout_s` (or `max_unprotected_s`, if shorter) or once its venue is no
-/// longer the regular session, exactly as [`bracket`] cancels one — one protective order is
-/// journaled and then sent for its filled quantity, capped at what the position leaves after every
-/// live protective order and every exit still selling (rule 12): the strongest form the profile
-/// offers for it ([`protective_shape`]), one GTC stop-limit at the intent's stop and
-/// stop × (1 − `stop_limit_offset`). A crypto entry's stop waits until every fill the broker
-/// reported is applied, and covers what the buy leaves held once its fee posts
-/// ([`held_after_fees`]; DEC-349 items 1 and 2), so it never outlasts the position (RC-07,
-/// RC-20). Its take-profit is never a resting order: beside a stop
-/// for the same shares it would sell them twice (DEC-966 item 3). The interval ends once the broker
+/// One plain entry: crypto (§5.4, DEC-36), an equity on a profile with no OCO or bracket (§5.4,
+/// DEC-529 item 7, DEC-966), or a fractional equity entry, which is never a bracket (§5.2,
+/// DEC-2312). The unprotected interval starts, journaled once and naming the entry, at its first
+/// fill, and discloses the fraction of a share the position then holds beyond its whole shares,
+/// counting the fills the broker reported. Once the entry is terminal — filled completely, or ended
+/// partly filled, its remainder cancelled at `bracket_partial_fill_timeout_s` (or
+/// `max_unprotected_s`, if shorter) or once its venue is no longer the regular session, exactly as
+/// [`bracket`] cancels one — one protective order is journaled and then sent for the whole shares
+/// of its filled quantity, capped at what the position leaves after every live protective order and
+/// every exit still selling (rule 12; DEC-2312 item 2): the strongest form the profile offers for it
+/// ([`protective_shape`]). Where the profile offers an OCO for an equity, that is one OCO at the
+/// intent's prices, whose legs cancel each other; otherwise one GTC stop-limit at the intent's stop
+/// and stop × (1 − `stop_limit_offset`), and its take-profit is never a resting order: beside a stop
+/// for the same shares it would sell them twice (DEC-966 item 3). Crypto is always the one
+/// stop-limit, never an OCO. A crypto entry's stop waits until every fill the broker reported is
+/// applied, and covers what the buy leaves held once each fill's fee posts ([`held_after_fees`];
+/// DEC-349 items 1 and 2), so it never outlasts the position (RC-07). The placement discloses the
+/// fraction as the start does. The interval ends once the broker
 /// acknowledges the stop ([`acknowledged`]); with no form to place, the shortfall is journaled and
 /// alerted ([`unprotectable`]) and the interval stays open, so [`bound`] exits the position. An
 /// entry that ends only after its interval reached the bound places no stop: what it filled is
@@ -1544,11 +1569,17 @@ fn stop_after(
     let filled = order
         .filled_qty
         .max(detail.reported_filled.unwrap_or(Qty::ZERO));
-    if filled == Qty::ZERO {
+    if filled == Qty::ZERO || batch.view.closing_all.contains(&order.instrument) {
         return Ok(());
     }
-    let named = vec![("bracket", text(entry.as_str()))];
     let instrument = order.instrument.clone();
+    let unapplied = filled.checked_sub(order.filled_qty)?;
+    let held = long(&batch.view, &instrument)?.checked_add(unapplied)?;
+    let fraction = (
+        "unprotected_fraction",
+        unprotected_fraction(batch.ports, &instrument, held)?,
+    );
+    let named = vec![("bracket", text(entry.as_str())), fraction.clone()];
     if detail.bracket_since.is_none() {
         changed(batch, &instrument, "unprotected_start", named.clone())?;
     }
@@ -1577,7 +1608,6 @@ fn stop_after(
         let record = changed(batch, &instrument, "unprotected_end", ended)?;
         return flatten_unprotected(batch, &instrument, entry, &record);
     }
-    let unapplied = filled.checked_sub(order.filled_qty)?;
     if unapplied > Qty::ZERO
         && batch.ports.instruments.asset_class(&instrument) == Some(AssetClass::Crypto)
     {
@@ -1585,11 +1615,12 @@ fn stop_after(
     }
     let committed =
         covered(&batch.view, &instrument)?.checked_add(still_selling(&batch.view, &instrument)?)?;
-    let room = long(&batch.view, &instrument)?
-        .checked_add(unapplied)?
-        .checked_sub(committed)
-        .unwrap_or(Qty::ZERO);
-    let qty = held_after_fees(batch.ports, &instrument, filled, &detail.fill_qtys)?.min(room);
+    let room = held.checked_sub(committed).unwrap_or(Qty::ZERO);
+    let qty = whole_shares(
+        batch.ports,
+        &instrument,
+        held_after_fees(batch.ports, &instrument, filled, &detail.fill_qtys)?.min(room),
+    )?;
     if qty == Qty::ZERO {
         changed(batch, &instrument, "unprotected_end", named)?;
         return Ok(());
@@ -1598,14 +1629,17 @@ fn stop_after(
         .agent
         .clone()
         .unwrap_or_else(|| AgentId(EVERY_AGENT.to_owned()));
-    let stop = ProtectionPrices {
-        stop: prices.stop,
-        take_profit: None,
-    };
     let offset = batch.ports.mandates.crypto_stop_limit_offset(&agent);
     let class = protected_class(batch, &instrument);
+    let shaped = match class {
+        AssetClass::Crypto => ProtectionPrices {
+            stop: prices.stop,
+            take_profit: None,
+        },
+        _ => prices,
+    };
     let shape = match batch.view.profile.as_ref() {
-        Some(profile) => protective_shape(profile, class, UNREAD_CLOCK, qty, stop, offset)?,
+        Some(profile) => protective_shape(profile, class, UNREAD_CLOCK, qty, shaped, offset)?,
         None => None,
     };
     let Some(shape) = shape else {
@@ -1629,7 +1663,11 @@ fn stop_after(
         extended_hours: false,
         purpose: Purpose::Protective,
     };
-    place(batch, &request, None, &agent, stop)?;
+    let stop = ProtectionPrices {
+        stop: prices.stop,
+        take_profit: request.oco.as_ref().map(|legs| legs.take_profit),
+    };
+    place_disclosing(batch, &request, (None, &agent), stop, vec![fraction])?;
     let mut ended = named;
     ended.push(awaiting(&[&request.client_order_id]));
     changed(batch, &instrument, "unprotected_end", ended)?;
@@ -1688,6 +1726,7 @@ pub(crate) fn new_day(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         .filter(|(instrument, protection)| {
             !protection.resting.is_empty()
                 && !batch.view.exiting.contains_key(*instrument)
+                && !batch.view.closing_all.contains(*instrument)
                 && !batch.view.replacing.contains_key(*instrument)
                 && protection.resting.iter().any(|id| {
                     batch
@@ -1719,6 +1758,12 @@ pub(crate) fn new_day(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
             .get(first)
             .and_then(|order| order.agent.clone())
             .unwrap_or_else(|| AgentId(EVERY_AGENT.to_owned()));
+        if !replaceable(batch, &instrument, protection.prices, &agent)? {
+            let pairs = vec![("orders", text(joined(&protection.resting)))];
+            let alerted = changed(batch, &instrument, "expiry_unreplaceable", pairs)?;
+            batch.notify(alerted, "protection_expiring");
+            continue;
+        }
         let mut pairs = vec![
             ("replacing", Value::Bool(true)),
             ("orders", text(joined(&protection.resting))),
@@ -1741,6 +1786,41 @@ pub(crate) fn new_day(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         }
     }
     Ok(())
+}
+
+/// Whether the protection resting in `instrument` could be placed again at `prices` once it is
+/// cancelled: the profile offers a form for the whole shares [`re_place`] would cover, or nothing
+/// is left to cover. An OCO the executor cannot re-place is never the one it cancels: the position
+/// keeps it, and the shortfall is journaled and alerted instead (DEC-2312 item 2).
+///
+/// It sizes as [`re_place`] will: the long position less the working exits and less what other
+/// protection covers. Here that other protection is none. Every non-terminal protective order is
+/// in `protection.resting`, since each placer journals `placed` in its own batch and an order
+/// leaves only on a terminal state or a confirmed `cancelled`, and [`new_day`] cancels all of
+/// them. So `re_place`'s `covered` is zero once those cancels are confirmed, and subtracting the
+/// resting orders here would count the very protection being replaced (DEC-2355).
+fn replaceable(
+    batch: &Batch<'_, '_>,
+    instrument: &InstrumentId,
+    prices: Option<ProtectionPrices>,
+    agent: &AgentId,
+) -> Result<bool, ExecutorError> {
+    let qty = whole_shares(
+        batch.ports,
+        instrument,
+        long(&batch.view, instrument)?
+            .checked_sub(working_exits(&batch.view, instrument)?)
+            .unwrap_or(Qty::ZERO),
+    )?;
+    if qty == Qty::ZERO {
+        return Ok(true);
+    }
+    let (Some(prices), Some(profile)) = (prices, batch.view.profile.as_ref()) else {
+        return Ok(false);
+    };
+    let offset = batch.ports.mandates.crypto_stop_limit_offset(agent);
+    let class = protected_class(batch, instrument);
+    Ok(protective_shape(profile, class, UNREAD_CLOCK, qty, prices, offset)?.is_some())
 }
 
 /// Whether every order that ended in `instrument` this step is a rung of one of its lone ladders
@@ -1786,6 +1866,10 @@ fn unprotectable(
 /// at once ([`re_place`]), its interval started first, for what the protection and the exits
 /// still working leave uncovered. The prices are the resting protection's, or else the ended
 /// protective order's own.
+/// Nor is protection in an instrument an account kill switch closes through the broker's
+/// close-position: a stop beside that close would sell the same shares twice (§5.5, rule 12).
+/// Its loss starts the instrument's interval instead, naming no order, so §5.4's bound journals
+/// and alerts it (DEC-2333 item 3).
 /// Protection the broker refuses, or cancels before acknowledging it, is not re-placed here: its
 /// interval stays open and bounded (DEC-348 item 2), so neither loops, nor restarts the bound.
 /// With no prices anywhere to place from, the shortfall is journaled and the owner alerted
@@ -1836,6 +1920,12 @@ fn re_cover(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         .filter_map(|instrument| InstrumentId::new(instrument).ok())
         .collect();
     for instrument in instruments {
+        if batch.view.closing_all.contains(&instrument) {
+            if !interval_open(&batch.view, &instrument) {
+                changed(batch, &instrument, "unprotected_start", Vec::new())?;
+            }
+            continue;
+        }
         if batch.view.exiting.contains_key(&instrument)
             || batch.view.replacing.contains_key(&instrument)
             || stepping_alone(&batch.view, &instrument, &ended)
@@ -2218,6 +2308,36 @@ fn long(view: &ExecutorState, instrument: &InstrumentId) -> Result<Qty, Executor
     Ok(folded.checked_sub(unapplied).unwrap_or(Qty::ZERO))
 }
 
+/// The whole-share part of `qty` in an equity, and in an instrument the snapshot does not classify
+/// (DEC-841 item 1): §5.2 allows no fractional quantity in an OCO or a bracket, so §5.4 protects
+/// only the whole shares (DEC-2312 item 2). A crypto quantity is protected whole (DEC-36).
+pub(crate) fn whole_shares(
+    ports: &Ports<'_>,
+    instrument: &InstrumentId,
+    qty: Qty,
+) -> Result<Qty, ExecutorError> {
+    if ports.instruments.asset_class(instrument) == Some(AssetClass::Crypto) {
+        return Ok(qty);
+    }
+    Ok(qty.portion(Fraction::ONE, ShareIncrement::Whole)?)
+}
+
+/// The fraction of a share `held` holds beyond its whole shares, which protection cannot cover and
+/// a start or a placement discloses as `unprotected_fraction` (§5.4, journal spec v0.72 rule 44,
+/// DEC-2312 item 3); null when `held` is whole shares, or crypto.
+fn unprotected_fraction(
+    ports: &Ports<'_>,
+    instrument: &InstrumentId,
+    held: Qty,
+) -> Result<Value, ExecutorError> {
+    let fraction = held.checked_sub(whole_shares(ports, instrument, held)?)?;
+    Ok(if fraction == Qty::ZERO {
+        Value::Null
+    } else {
+        text(fraction.to_string())
+    })
+}
+
 /// The unfilled quantity every live protective order in `instrument` covers.
 fn covered(view: &ExecutorState, instrument: &InstrumentId) -> Result<Qty, ExecutorError> {
     view.orders
@@ -2233,7 +2353,7 @@ fn covered(view: &ExecutorState, instrument: &InstrumentId) -> Result<Qty, Execu
         .map_err(ExecutorError::from)
 }
 
-fn interval_open(view: &ExecutorState, instrument: &InstrumentId) -> bool {
+pub(crate) fn interval_open(view: &ExecutorState, instrument: &InstrumentId) -> bool {
     view.unprotected
         .iter()
         .any(|interval| &interval.instrument == instrument && interval.ended_at.is_none())
@@ -2309,11 +2429,18 @@ fn re_place(
     instrument: &InstrumentId,
     sequence: &Replacement,
 ) -> Result<(), ExecutorError> {
+    if batch.view.closing_all.contains(instrument) {
+        return Ok(());
+    }
     let committed =
         covered(&batch.view, instrument)?.checked_add(working_exits(&batch.view, instrument)?)?;
-    let qty = long(&batch.view, instrument)?
-        .checked_sub(committed)
-        .unwrap_or(Qty::ZERO);
+    let qty = whole_shares(
+        batch.ports,
+        instrument,
+        long(&batch.view, instrument)?
+            .checked_sub(committed)
+            .unwrap_or(Qty::ZERO),
+    )?;
     if qty == Qty::ZERO {
         changed(batch, instrument, "unprotected_end", Vec::new())?;
         return Ok(());
@@ -2404,9 +2531,23 @@ fn place(
     agent: &AgentId,
     prices: ProtectionPrices,
 ) -> Result<(), ExecutorError> {
+    place_disclosing(batch, request, (intent, agent), prices, Vec::new())
+}
+
+/// [`place`], with the `placed` record also carrying `disclosed`: the fraction a plain entry's
+/// protection leaves, counted with the fills the broker reported and the fold has not yet applied
+/// ([`stop_after`], DEC-2312 item 3).
+fn place_disclosing(
+    batch: &mut Batch<'_, '_>,
+    request: &SubmitOrder,
+    (intent, agent): (Option<&IntentId>, &AgentId),
+    prices: ProtectionPrices,
+    disclosed: Vec<(&'static str, Value)>,
+) -> Result<(), ExecutorError> {
     journal_submission(batch, request, intent, agent, 1)?;
     let mut placed = recorded_placement(&request.client_order_id, request.qty, prices);
     placed.extend(created(&batch.view));
+    placed.extend(disclosed);
     changed(batch, &request.instrument, "placed", placed).map(|_| ())
 }
 
@@ -2553,7 +2694,8 @@ pub(crate) fn bound(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         }
         let alerted = changed(batch, &instrument, "interval_limit", Vec::new())?;
         batch.notify(alerted.clone(), "unprotected_interval_limit");
-        let Some(entry) = entry.filter(|_| !exiting) else {
+        let closing = batch.view.closing_all.contains(&instrument);
+        let Some(entry) = entry.filter(|_| !exiting && !closing) else {
             continue;
         };
         let plain = batch

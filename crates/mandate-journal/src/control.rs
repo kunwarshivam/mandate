@@ -25,7 +25,10 @@
 //! `ProtectionChanged` closed whole. The version-1 schemas of the three stay registered (§8): a
 //! stream that holds version-1 records keeps replaying and appending them. Journal spec v0.65
 //! adds rule 245 on `IntentReceived` at either version (DEC-2037), and v0.67 the owner's
-//! confirmation `OwnerConfirmationReceived` with rule 247 and the batch rule 248 (DEC-2040).
+//! confirmation `OwnerConfirmationReceived` with rule 247 and the batch rule 248 (DEC-2040), and
+//! v0.72 `ProtectionChanged` version 2, which discloses a fractional position's unprotected
+//! fraction under rule 44 (DEC-2312), and v0.75 the account kill switch's `AccountCloseRequested`
+//! with rules 258 and 259 and the stream rule 260 (DEC-2337).
 
 use mandate_canon::Value;
 use mandate_domain::ThesisRefusal;
@@ -62,11 +65,12 @@ const RISK_STATE: [&str; 2] = ["MandateVersionApplied", "UniverseChanged"];
 const THESIS: [&str; 2] = ["ThesisProposed", "ThesisRevised"];
 
 /// The account stream's closed executor records (DEC-446, DEC-447, DEC-459, DEC-460).
-/// `OrderRequestRecorded` and `ProtectionChanged` close at version 1; `IntentReceived`,
+/// `OrderRequestRecorded` closes at version 1, and `ProtectionChanged` at version 1 and 2
+/// (DEC-2312); `IntentReceived`,
 /// `GateDecided`, and `OrderSubmitted` close at version 2 and stay at version 1, and so does
 /// `OrderStateChanged` (journal spec §9.16, DEC-869). `OwnerConfirmationReceived` closes at
-/// version 1 (DEC-2040).
-const EXECUTOR: [&str; 10] = [
+/// version 1 (DEC-2040), and so does `AccountCloseRequested` (DEC-2337).
+const EXECUTOR: [&str; 11] = [
     "IntentReceived",
     "GateDecided",
     "OrderSubmitted",
@@ -74,6 +78,7 @@ const EXECUTOR: [&str; 10] = [
     "OrderStateChanged",
     "ProtectionChanged",
     CONFIRMATION,
+    CLOSE,
     "BrokerPositionObserved",
     "AgentModeApplied",
     "CompensatingEvent",
@@ -84,6 +89,10 @@ const ACCOUNT_STATE: &str = "AccountStateObserved";
 /// The owner's confirmed bid journaled beside an owner exit's `IntentReceived` (§9.5, DEC-2040):
 /// rule 247 on its own members and the batch rule 248 on the intent before it.
 const CONFIRMATION: &str = "OwnerConfirmationReceived";
+
+/// One request of one instrument's close-position under an account kill switch, journaled before
+/// it is sent (§9.5, DEC-2337): rules 258 and 259 on its own members, rule 260 on the stream.
+const CLOSE: &str = "AccountCloseRequested";
 
 /// The companion's (§9.5): an `OrderSubmitted` at `schema_version` 2 must be immediately preceded
 /// in its `append` batch by exactly one `OrderRequestRecorded`, which its `causation_id` names.
@@ -366,6 +375,7 @@ pub(crate) fn payload(
         COMPANION => companion_rules(p)?,
         "IntentReceived" => intent_received_rules(p)?,
         CONFIRMATION => confirmation_rules(p)?,
+        CLOSE => close_rules(p, causation_id)?,
         "ProtectionChanged" => protection_changed_rules(p)?,
         SNAPSHOT => {
             let compared = !p.is_null("model_cash");
@@ -511,6 +521,54 @@ fn confirmation_rules(p: Payload<'_>) -> Result<(), Invalid> {
     )
 }
 
+/// Rules 258 and 259 (DEC-2337 item 2): the quantity is positive, then the attempt is at least 1,
+/// then the request is caused by the switch it names.
+fn close_rules(p: Payload<'_>, causation_id: Option<&Value>) -> Result<(), Invalid> {
+    ensure(
+        crate::scheduler::positive(p.text("qty")),
+        InvalidReason::Schema,
+        "payload.qty",
+    )?;
+    ensure(
+        p.0.get("attempt")
+            .and_then(Value::as_int)
+            .is_some_and(|attempt| attempt >= 1),
+        InvalidReason::Schema,
+        "payload.attempt",
+    )?;
+    ensure(
+        causation_id.and_then(Value::as_str) == Some(p.text("kill_switch_event")),
+        InvalidReason::Schema,
+        "causation_id",
+    )
+}
+
+/// Rule 260 (DEC-2337 item 2), a stream rule: an `AccountCloseRequested` names a switch,
+/// instrument, and attempt no earlier one of its stream names together, so a duplicate request is
+/// refused and its second send never happens.
+pub(crate) fn stream_rule(before: &[&Draft], draft: &Draft) -> Result<(), Invalid> {
+    if draft.event_type() != CLOSE {
+        return Ok(());
+    }
+    let request = |d: &Draft| {
+        let payload = d.fields().get("payload").cloned().unwrap_or(Value::Null);
+        let p = Payload(&payload);
+        (
+            p.text("kill_switch_event").to_owned(),
+            p.text("instrument_id").to_owned(),
+            payload.get("attempt").and_then(Value::as_int),
+        )
+    };
+    let mine = request(draft);
+    ensure(
+        !before
+            .iter()
+            .any(|d| d.event_type() == CLOSE && request(d) == mine),
+        InvalidReason::Schema,
+        "payload.attempt",
+    )
+}
+
 /// §9.5's rules 39 and 40 on a well-typed `OrderRequestRecorded` (DEC-446 item 2), the first
 /// offending member in the order the spec reports: 39's pairs at `order_class` then
 /// `take_profit`, 40 at `at_floor`.
@@ -551,7 +609,9 @@ const PROTECTION_ACTIONS: &[&str] = &[
 /// §9.5's rules 41 to 44 on a well-typed `ProtectionChanged`, each clause in the order §9.5 gives
 /// it and reported at the member it names (DEC-446 item 6): 41's two lists, 42's quantity, 43's
 /// prices, then 44's remaining members from `intent_id` to `acknowledged`, each at its own member
-/// in the table's order.
+/// in the table's order, and last version 2's `unprotected_fraction`: only on `unprotected_start`,
+/// `placed` and `unprotected_end`, and strictly between 0 and 1 (journal spec v0.72, DEC-2312,
+/// DEC-2315). A version-1 record has no such member, which reads as null.
 fn protection_changed_rules(p: Payload<'_>) -> Result<(), Invalid> {
     let schema = InvalidReason::Schema;
     let action = p.text("action");
@@ -625,7 +685,21 @@ fn protection_changed_rules(p: Payload<'_>) -> Result<(), Invalid> {
             &format!("payload.{member}"),
         )?;
     }
+    if has("unprotected_fraction") {
+        let fraction = p.text("unprotected_fraction");
+        ensure(
+            named(&["unprotected_start", "placed", "unprotected_end"]) && below_one_share(fraction),
+            schema,
+            "payload.unprotected_fraction",
+        )?;
+    }
     Ok(())
+}
+
+/// Whether a normalized §4.6 decimal lies strictly between 0 and 1: positive, with an integer part
+/// of zero, which a normalized decimal writes as `0.` and nothing else.
+fn below_one_share(decimal: &str) -> bool {
+    crate::scheduler::positive(decimal) && decimal.starts_with("0.")
 }
 
 /// A normalized payload, read member by member; a `null` or absent member reads as empty.
@@ -811,7 +885,9 @@ fn schema(event_type: &str, schema_version: u64) -> Option<&'static Ty> {
         ("OrderStateChanged", 1) => Some(&ORDER_STATE_CHANGED),
         ("OrderStateChanged", 2) => Some(&ORDER_STATE_CHANGED_V2),
         ("ProtectionChanged", 1) => Some(&PROTECTION_CHANGED),
+        ("ProtectionChanged", 2) => Some(&PROTECTION_CHANGED_V2),
         (CONFIRMATION, 1) => Some(&OWNER_CONFIRMATION_RECEIVED),
+        (CLOSE, 1) => Some(&ACCOUNT_CLOSE_REQUESTED),
         ("BrokerPositionObserved", 1) => Some(&BROKER_POSITION_OBSERVED),
         ("AgentModeApplied", 1) => Some(&AGENT_MODE_APPLIED),
         ("CompensatingEvent", 1) => Some(&COMPENSATING_EVENT),
@@ -1151,6 +1227,15 @@ static OWNER_CONFIRMATION_RECEIVED: Ty = Ty::Record(&[
     ("risk_clock", Ty::RiskClock),
 ]);
 
+/// §9.5's `AccountCloseRequested` (DEC-2337 item 1).
+static ACCOUNT_CLOSE_REQUESTED: Ty = Ty::Record(&[
+    ("instrument_id", Ty::Str),
+    ("qty", Ty::Decimal),
+    ("kill_switch_event", Ty::Ulid),
+    ("attempt", Ty::Int),
+    ("risk_clock", Ty::RiskClock),
+]);
+
 /// §9.5's companion at `schema_version` 1: the executor-only members the fold rebuilds the exact
 /// request and the order's owner from (DEC-446 item 2). Every member is present (§4.2); rules 39
 /// and 40 say which are null.
@@ -1290,6 +1375,30 @@ static PROTECTION_CHANGED: Ty = Ty::Record(&[
     ("sent", Ty::Nullable(&Ty::Decimal)),
     ("uncovered", Ty::Nullable(&Ty::Bool)),
     ("acknowledged", Ty::Nullable(&Ty::Bool)),
+    ("risk_clock", Ty::RiskClock),
+]);
+
+/// §9.5's `ProtectionChanged` at `schema_version` 2 (journal spec v0.72, DEC-2312): version 1's
+/// members with `unprotected_fraction`, the fraction of a share a fractional equity position holds
+/// beyond the whole shares its protection covers, before `risk_clock`. Version 1 stays registered.
+static PROTECTION_CHANGED_V2: Ty = Ty::Record(&[
+    ("instrument_id", Ty::Str),
+    ("action", Ty::OneOf(PROTECTION_ACTIONS)),
+    ("orders", Ty::List(&Ty::Str)),
+    ("awaiting", Ty::List(&Ty::Str)),
+    ("qty", Ty::Nullable(&Ty::Decimal)),
+    ("stop", Ty::Nullable(&Ty::Decimal)),
+    ("take_profit", Ty::Nullable(&Ty::Decimal)),
+    ("intent_id", Ty::Nullable(&Ty::Ulid)),
+    ("bracket", Ty::Nullable(&Ty::Str)),
+    ("entry", Ty::Nullable(&Ty::Str)),
+    ("agent_id", Ty::Nullable(&Ty::Ident)),
+    ("replacing", Ty::Nullable(&Ty::Bool)),
+    ("created_on", Ty::Nullable(&Ty::Date)),
+    ("sent", Ty::Nullable(&Ty::Decimal)),
+    ("uncovered", Ty::Nullable(&Ty::Bool)),
+    ("acknowledged", Ty::Nullable(&Ty::Bool)),
+    ("unprotected_fraction", Ty::Nullable(&Ty::Decimal)),
     ("risk_clock", Ty::RiskClock),
 ]);
 
