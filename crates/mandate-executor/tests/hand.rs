@@ -6051,53 +6051,73 @@ fn a_release_is_read_again_on_replay() {
     assert_eq!(replayed.holds_lots(&agent(common::AGENT)), Ok(false));
 }
 
-/// DEC-2354 item 3, the bound's terms: a buy the broker rejected bought nothing, so it gives its
-/// agent no lots in a position another agent holds, though it never filled its whole quantity.
+/// DEC-2354 item 3, the bound's terms: a buy the broker rejected, or one the executor abandoned,
+/// bought nothing, so it gives its agent no lots in a position another agent holds, though it
+/// never filled its whole quantity.
 #[test]
-fn a_rejected_buy_gives_its_agent_no_lots() {
+fn a_rejected_or_abandoned_buy_gives_its_agent_no_lots() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
     let instruments = FixedInstruments;
     let config = config();
     let ports = ports(&ids, &mandates, &instruments, &config);
-    let mut shell = protected_position(&ports);
-    shell.run(Input::Market(quote(AAPL, "155", "155.1", 20)), &ports);
-    let id = shell
-        .run(
-            handoff(
-                OTHER_INTENT,
-                OTHER_AGENT,
-                protected_opening(AAPL, "10", "150", "140", Some("170")),
-            ),
-            &ports,
-        )
-        .submissions()
-        .first()
-        .map(|o| o.client_order_id.as_str().to_owned())
-        .expect("the other agent's buy is sent");
-    shell.run(
-        Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
-            "b-other",
-            Some(&id),
-            AAPL,
-            Side::Buy,
-            "10",
-            "0",
-            "rejected",
-        ))),
-        &ports,
-    );
-    assert!(
-        shell
-            .state
-            .orders()
-            .values()
-            .any(|order| order.agent == Some(agent(OTHER_AGENT))
-                && order.state == OrderState::Rejected),
-        "the other agent's buy is rejected"
-    );
-    assert_eq!(shell.state.holds_lots(&agent(OTHER_AGENT)), Ok(false));
-    assert_eq!(shell.state.holds_lots(&agent(common::AGENT)), Ok(true));
+    for ending in [OrderState::Rejected, OrderState::Abandoned] {
+        let mut shell = protected_position(&ports);
+        shell.run(Input::Market(quote(AAPL, "155", "155.1", 20)), &ports);
+        let id = shell
+            .run(
+                handoff(
+                    OTHER_INTENT,
+                    OTHER_AGENT,
+                    protected_opening(AAPL, "10", "150", "140", Some("170")),
+                ),
+                &ports,
+            )
+            .submissions()
+            .first()
+            .map(|o| o.client_order_id.as_str().to_owned())
+            .expect("the other agent's buy is sent");
+        if ending == OrderState::Rejected {
+            shell.run(
+                Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+                    "b-other",
+                    Some(&id),
+                    AAPL,
+                    Side::Buy,
+                    "10",
+                    "0",
+                    "rejected",
+                ))),
+                &ports,
+            );
+        } else {
+            let absent = || {
+                Input::Broker(Ok(BrokerOutcome::Absent {
+                    client_order_id: id.clone(),
+                }))
+            };
+            shell.run(Input::Broker(Err(BrokerUnknown::Timeout)), &ports);
+            shell.run(absent(), &ports);
+            shell.run(Input::Tick(clock(60)), &ports);
+            shell.run(absent(), &ports);
+            shell.run(Input::Tick(clock(200)), &ports);
+            shell.run(absent(), &ports);
+        }
+        assert!(
+            shell
+                .state
+                .orders()
+                .values()
+                .any(|order| order.agent == Some(agent(OTHER_AGENT)) && order.state == ending),
+            "the other agent's buy ends {ending:?}"
+        );
+        assert_eq!(
+            shell.state.holds_lots(&agent(OTHER_AGENT)),
+            Ok(false),
+            "{ending:?}"
+        );
+        assert_eq!(shell.state.holds_lots(&agent(common::AGENT)), Ok(true));
+    }
 }
 
 /// DEC-2354 item 3 (the coordinator's guard): a buy that filled 5 of 10 with its fill naming no
