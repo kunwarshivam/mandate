@@ -80955,7 +80955,7 @@ account_closes:
       reason: schema
       path: payload.attempt
 connection_roles:
-  spec: docs/specs/journal.md v0.77 §9.33 (DEC-2350)
+  spec: docs/specs/journal.md v0.81 §9.33 (DEC-2350)
   drafts:
     connection_roles_made:
       envelope_version: 1
@@ -82610,6 +82610,104 @@ connection_roles:
         connection_id: conn_alpaca_paper
         role: token_exchange
         occasion: request_closed
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Valid
+  - name: removed_after_roles_made_once_closed
+    clause: 'rule 263: the exchange''s role of roles made after their request closed'
+    records:
+    - *id169
+    - *id170
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS020000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRolesMade
+      schema_version: 1
+      event_time: '2026-10-22T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z4CS000000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS030000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRolesRemoved
+      schema_version: 1
+      event_time: '2026-10-22T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z4CS020000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+        role: token_exchange
+        occasion: request_closed
+      artifact_refs: []
+      pii_refs: []
+    expect:
+      outcome: Valid
+  - name: removed_after_roles_made_once_revoked
+    clause: 'rule 263: the exchange''s role of roles made after their connection was revoked'
+    records:
+    - *id169
+    - *id171
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS020000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRolesMade
+      schema_version: 1
+      event_time: '2026-10-22T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z4CS000000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+      artifact_refs: []
+      pii_refs: []
+    - envelope_version: 1
+      environment: paper
+      event_id: 01J8Z4CS030000000000000000
+      stream_id: ctl:ws_01J8Z2
+      event_type: ConnectionRolesRemoved
+      schema_version: 1
+      event_time: '2026-10-22T16:00:00.000000000Z'
+      clock_source: local
+      causation_id: 01J8Z4CS030000000000000000
+      correlation_id: null
+      actor:
+        kind: system
+        id: control_services
+        version: 0.1.0
+        build: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      config_refs: {}
+      payload:
+        connection_id: conn_alpaca_paper
+        role: token_exchange
+        occasion: revoked
       artifact_refs: []
       pii_refs: []
     expect:
