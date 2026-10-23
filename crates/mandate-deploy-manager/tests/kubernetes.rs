@@ -17,7 +17,7 @@ use common::block_on;
 use mandate_canon::Digest;
 use mandate_connections::record::ConnectionId;
 use mandate_deploy_manager::kubernetes::{InCluster, Kubernetes, MAX_BODY, SetupError};
-use mandate_deploy_manager::{Instance, Orchestrator, Phase, Process, Slot, Unavailable};
+use mandate_deploy_manager::{Instance, Launch, Orchestrator, Phase, Process, Slot, Unavailable};
 use mandate_vault::kubernetes::service_account_name;
 use mandate_vault::policy::Identity;
 use serde_json::{Value, json};
@@ -103,6 +103,14 @@ fn exchange_template() -> Value {
     })
 }
 
+/// A start's [`Launch`] with `lifetime` and no connection.
+fn launch(lifetime: Option<Duration>) -> Launch {
+    Launch {
+        lifetime,
+        connection: None,
+    }
+}
+
 fn client() -> reqwest::Client {
     let _ = rustls::crypto::ring::default_provider().install_default();
     reqwest::Client::builder().no_proxy().build().unwrap()
@@ -153,7 +161,6 @@ fn a_pod_list_reads_as_instances_and_a_pod_being_deleted_may_still_run() {
         pod("runtime", "agent_b", "1", "Running", false, false),
         pod("executor", "ACCT_1", "2", "Pending", false, false),
         pod("executor", "acct_2", "1", "Failed", false, false),
-        pod("executor", "acct_3", "1", "Succeeded", false, false),
         pod("runtime", "agent_c", "4", "Running", true, true),
         pod("runtime", "agent_d", "1", "Unknown", false, false),
         pod("executor", "acct_4", "1", "Pending", false, true),
@@ -166,7 +173,6 @@ fn a_pod_list_reads_as_instances_and_a_pod_being_deleted_may_still_run() {
         (Slot::runtime("agent_b"), 1, Phase::Running { ready: false }),
         (Slot::executor("ACCT_1"), 2, Phase::Pending),
         (Slot::executor("acct_2"), 1, Phase::Exited),
-        (Slot::executor("acct_3"), 1, Phase::Exited),
         (Slot::runtime("agent_c"), 4, Phase::Unknown),
         (Slot::runtime("agent_d"), 1, Phase::Unknown),
         (Slot::executor("acct_4"), 1, Phase::Unknown),
@@ -234,13 +240,13 @@ fn a_start_creates_a_bare_pod_the_orchestrator_never_restarts() {
     ]);
     let mut k = adapter(api);
     let slot = Slot::runtime("Agent_A");
-    assert_eq!(block_on(k.start(&slot, 7, None)), Ok(()));
+    assert_eq!(block_on(k.start(&slot, 7, &launch(None))), Ok(()));
     assert_eq!(
-        block_on(k.start(&slot, 7, None)),
+        block_on(k.start(&slot, 7, &launch(None))),
         Ok(()),
         "already created is done"
     );
-    assert_eq!(block_on(k.start(&slot, 7, None)), Err(Unavailable));
+    assert_eq!(block_on(k.start(&slot, 7, &launch(None))), Err(Unavailable));
     let seen = seen.lock().unwrap();
     assert_eq!(
         (seen[0].method.as_str(), seen[0].path.as_str()),
@@ -323,10 +329,12 @@ fn a_container_without_an_environment_gets_one() {
         "cell".to_owned(),
         "t".to_owned(),
         "ws_01J8Z2".to_owned(),
-        BTreeMap::from([(Process::Executor, bare)]),
+        BTreeMap::from([(Process::Runtime, bare)]),
     )
     .unwrap();
-    let pod = k.manifest(&Slot::executor("acct_1"), 1, None).unwrap();
+    let pod = k
+        .manifest(&Slot::runtime("agent_a"), 1, &launch(None))
+        .unwrap();
     assert_eq!(
         pod["spec"]["containers"][0]["env"]
             .as_array()
@@ -338,10 +346,10 @@ fn a_container_without_an_environment_gets_one() {
         pod["metadata"]["name"]
             .as_str()
             .unwrap()
-            .starts_with("mandate-ex-")
+            .starts_with("mandate-rt-")
     );
     assert_eq!(
-        k.manifest(&Slot::runtime("agent_a"), 1, None),
+        k.manifest(&Slot::executor("acct_1"), 1, &launch(None)),
         None,
         "no template, no pod"
     );
@@ -373,9 +381,9 @@ fn a_stop_deletes_the_generations_pod_and_a_pod_already_gone_is_stopped() {
     ]);
     let mut k = adapter(api);
     let slot = Slot::executor("acct_1");
-    assert_eq!(block_on(k.stop(&slot, 2)), Ok(()));
-    assert_eq!(block_on(k.stop(&slot, 2)), Ok(()));
-    assert_eq!(block_on(k.stop(&slot, 2)), Err(Unavailable));
+    assert_eq!(block_on(k.stop(&slot, 2, None)), Ok(()));
+    assert_eq!(block_on(k.stop(&slot, 2, None)), Ok(()));
+    assert_eq!(block_on(k.stop(&slot, 2, None)), Err(Unavailable));
     let seen = seen.lock().unwrap();
     assert_eq!(seen[0].method, "DELETE");
     assert_eq!(
@@ -482,12 +490,12 @@ fn the_exchanges_account_is_the_one_the_vaults_role_is_named_for() {
     let k = adapter("http://127.0.0.1:1".to_owned());
     let connection = ConnectionId::new(CONNECTION).unwrap();
     assert_eq!(
-        k.account_name(&exchange()),
+        k.account_name(&exchange(), None),
         Some(service_account_name(&Identity::TokenExchange(connection)).unwrap())
     );
-    assert_eq!(k.account_name(&exchange()), Some(exchange_account()));
+    assert_eq!(k.account_name(&exchange(), None), Some(exchange_account()));
     assert_eq!(
-        k.account_name(&Slot::runtime("agent_a")),
+        k.account_name(&Slot::runtime("agent_a"), None),
         None,
         "a runtime runs as the namespace's default account"
     );
@@ -498,7 +506,10 @@ fn an_exchanges_start_creates_its_account_then_its_pod_ended_by_its_deadline() {
     let (api, seen) = server(vec![(201, "{}".to_owned()), (201, "{}".to_owned())]);
     let mut k = adapter(api);
     let lifetime = Duration::from_millis(599_900);
-    assert_eq!(block_on(k.start(&exchange(), 1, Some(lifetime))), Ok(()));
+    assert_eq!(
+        block_on(k.start(&exchange(), 1, &launch(Some(lifetime)))),
+        Ok(())
+    );
     let seen = seen.lock().unwrap();
     assert_eq!(seen.len(), 2);
     assert_eq!(
@@ -570,7 +581,7 @@ fn an_exchanges_start_creates_its_account_then_its_pod_ended_by_its_deadline() {
 
 /// The account [`Kubernetes::account`] makes for [`exchange`], as the API server answers a read of it.
 fn made_account(k: &Kubernetes) -> Value {
-    k.account(&exchange()).unwrap()
+    k.account(&exchange(), None).unwrap()
 }
 
 #[test]
@@ -583,7 +594,7 @@ fn an_existing_account_is_used_only_if_it_is_the_one_the_manager_makes() {
         (201, "{}".to_owned()),
     ]);
     let mut k = adapter(api);
-    assert_eq!(block_on(k.start(&exchange(), 1, lifetime)), Ok(()));
+    assert_eq!(block_on(k.start(&exchange(), 1, &launch(lifetime))), Ok(()));
     let asked: Vec<(String, String)> = seen
         .lock()
         .unwrap()
@@ -616,7 +627,7 @@ fn an_existing_account_is_used_only_if_it_is_the_one_the_manager_makes() {
         (201, "{}".to_owned()),
     ]);
     assert_eq!(
-        block_on(adapter(api).start(&exchange(), 1, lifetime)),
+        block_on(adapter(api).start(&exchange(), 1, &launch(lifetime))),
         Ok(()),
         "an empty list of Secrets holds none"
     );
@@ -659,7 +670,7 @@ fn an_existing_account_is_used_only_if_it_is_the_one_the_manager_makes() {
             (201, "{}".to_owned()),
         ]);
         assert_eq!(
-            block_on(adapter(api).start(&exchange(), 1, lifetime)),
+            block_on(adapter(api).start(&exchange(), 1, &launch(lifetime))),
             Err(Unavailable),
             "{name}"
         );
@@ -672,7 +683,7 @@ fn an_existing_account_is_used_only_if_it_is_the_one_the_manager_makes() {
             (201, "{}".to_owned()),
         ]);
         assert_eq!(
-            block_on(adapter(api).start(&exchange(), 1, lifetime)),
+            block_on(adapter(api).start(&exchange(), 1, &launch(lifetime))),
             Err(Unavailable),
             "{unread:?}"
         );
@@ -689,7 +700,7 @@ fn a_pod_the_api_server_refused_takes_its_new_account_with_it() {
         (200, "{}".to_owned()),
     ]);
     assert_eq!(
-        block_on(adapter(api).start(&exchange(), 1, lifetime)),
+        block_on(adapter(api).start(&exchange(), 1, &launch(lifetime))),
         Err(Unavailable)
     );
     let asked: Vec<String> = seen
@@ -717,7 +728,7 @@ fn a_pod_the_api_server_refused_takes_its_new_account_with_it() {
             (200, "{}".to_owned()),
         ]);
         assert_eq!(
-            block_on(adapter(api).start(&exchange(), 1, lifetime)),
+            block_on(adapter(api).start(&exchange(), 1, &launch(lifetime))),
             Err(Unavailable)
         );
         assert_eq!(
@@ -728,7 +739,7 @@ fn a_pod_the_api_server_refused_takes_its_new_account_with_it() {
     }
     let (api, seen) = server(vec![(500, "{}".to_owned())]);
     assert_eq!(
-        block_on(adapter(api).start(&exchange(), 1, lifetime)),
+        block_on(adapter(api).start(&exchange(), 1, &launch(lifetime))),
         Err(Unavailable)
     );
     assert_eq!(
@@ -744,7 +755,7 @@ fn a_pod_the_api_server_refused_takes_its_new_account_with_it() {
         (200, "{}".to_owned()),
     ]);
     assert_eq!(
-        block_on(adapter(api).start(&exchange(), 1, lifetime)),
+        block_on(adapter(api).start(&exchange(), 1, &launch(lifetime))),
         Err(Unavailable)
     );
     assert_eq!(
@@ -757,24 +768,31 @@ fn a_pod_the_api_server_refused_takes_its_new_account_with_it() {
 #[test]
 fn only_an_exchange_takes_a_lifetime_and_it_always_takes_one_of_a_second_or_more() {
     let k = adapter("http://127.0.0.1:1".to_owned());
-    assert_eq!(k.manifest(&exchange(), 1, None), None);
+    assert_eq!(k.manifest(&exchange(), 1, &launch(None)), None);
     assert_eq!(
-        k.manifest(&exchange(), 1, Some(Duration::from_millis(999))),
+        k.manifest(&exchange(), 1, &launch(Some(Duration::from_millis(999)))),
         None,
         "a deadline already reached starts nothing"
     );
     assert!(
-        k.manifest(&exchange(), 1, Some(Duration::from_secs(1)))
+        k.manifest(&exchange(), 1, &launch(Some(Duration::from_secs(1))))
             .is_some()
     );
     assert_eq!(
-        k.manifest(&Slot::runtime("agent_a"), 1, Some(Duration::from_secs(60))),
+        k.manifest(
+            &Slot::runtime("agent_a"),
+            1,
+            &launch(Some(Duration::from_secs(60)))
+        ),
         None,
         "a standing process is never given a deadline"
     );
     let (api, seen) = server(Vec::new());
     let mut k = adapter(api);
-    assert_eq!(block_on(k.start(&exchange(), 1, None)), Err(Unavailable));
+    assert_eq!(
+        block_on(k.start(&exchange(), 1, &launch(None))),
+        Err(Unavailable)
+    );
     assert!(seen.lock().unwrap().is_empty(), "nothing is created for it");
 }
 
@@ -788,13 +806,13 @@ fn an_exchanges_stop_deletes_its_account_then_its_pod_and_a_failure_keeps_the_po
         (500, "{}".to_owned()),
     ]);
     let mut k = adapter(api);
-    assert_eq!(block_on(k.stop(&exchange(), 1)), Ok(()));
+    assert_eq!(block_on(k.stop(&exchange(), 1, None)), Ok(()));
     assert_eq!(
-        block_on(k.stop(&exchange(), 1)),
+        block_on(k.stop(&exchange(), 1, None)),
         Ok(()),
         "both already gone"
     );
-    assert_eq!(block_on(k.stop(&exchange(), 1)), Err(Unavailable));
+    assert_eq!(block_on(k.stop(&exchange(), 1, None)), Err(Unavailable));
     let seen = seen.lock().unwrap();
     let asked: Vec<(&str, String)> = seen
         .iter()
@@ -858,4 +876,185 @@ fn each_process_reads_back_from_its_journal_code_and_from_its_chart_label() {
     );
     assert_eq!(Process::parse("token-exchange"), None);
     assert_eq!(Process::from_label("token_exchange"), None);
+}
+
+const ACCOUNT_REF: &str = "01J8Z2ACCT00000000000000K2";
+
+fn executor() -> Slot {
+    Slot::executor(ACCOUNT_REF)
+}
+
+/// An executor's start for [`CONNECTION`].
+fn connected() -> Launch {
+    Launch {
+        lifetime: None,
+        connection: Some(CONNECTION.to_owned()),
+    }
+}
+
+/// The account DEC-2060 names for the executor of [`CONNECTION`]: its bytes in hex.
+fn executor_account() -> String {
+    CONNECTION.bytes().map(|b| format!("{b:02x}")).collect()
+}
+
+fn env_of(pod: &Value) -> BTreeMap<String, String> {
+    pod["spec"]["containers"][0]["env"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| {
+            (
+                e["name"].as_str().unwrap().to_owned(),
+                e["value"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn an_executors_account_is_the_one_the_vaults_role_is_named_for() {
+    let k = adapter("http://127.0.0.1:1".to_owned());
+    let connection = ConnectionId::new(CONNECTION).unwrap();
+    assert_eq!(
+        k.account_name(&executor(), Some(CONNECTION)),
+        Some(service_account_name(&Identity::Executor(connection)).unwrap())
+    );
+    assert_eq!(
+        k.account_name(&executor(), Some(CONNECTION)),
+        Some(executor_account())
+    );
+    assert_eq!(k.account_name(&executor(), None), None);
+    assert_eq!(
+        k.account_name(&exchange(), Some("conn_other")),
+        Some(exchange_account()),
+        "an exchange's account is its subject's, whatever it is given"
+    );
+    assert_eq!(
+        k.account_name(&Slot::runtime("agent_a"), Some(CONNECTION)),
+        None
+    );
+}
+
+#[test]
+fn an_executors_start_creates_its_connections_account_then_its_pod_running_as_it() {
+    let (api, seen) = server(vec![
+        (201, "{}".to_owned()),
+        (201, "{}".to_owned()),
+        (201, "{}".to_owned()),
+    ]);
+    let mut k = adapter(api);
+    assert_eq!(block_on(k.start(&executor(), 2, &connected())), Ok(()));
+    let seen = seen.lock().unwrap();
+    assert_eq!(seen.len(), 2, "one account, one pod");
+    assert_eq!(
+        (seen[0].method.as_str(), seen[0].path.as_str()),
+        ("POST", "/api/v1/namespaces/cell/serviceaccounts")
+    );
+    let account: Value = serde_json::from_str(&seen[0].body).unwrap();
+    assert_eq!(account, k.account(&executor(), Some(CONNECTION)).unwrap());
+    assert_eq!(account["metadata"]["name"], executor_account().as_str());
+    assert_eq!(
+        account["metadata"]["labels"]["mandate.dev/process"],
+        "executor"
+    );
+    assert_eq!(account["automountServiceAccountToken"], false);
+    let pod: Value = serde_json::from_str(&seen[1].body).unwrap();
+    assert_eq!(
+        pod["spec"]["serviceAccountName"],
+        executor_account().as_str()
+    );
+    assert!(
+        pod["spec"].get("activeDeadlineSeconds").is_none(),
+        "a standing process has no deadline"
+    );
+    let env = env_of(&pod);
+    assert_eq!(env["MANDATE_SUBJECT"], ACCOUNT_REF);
+    assert_eq!(env["MANDATE_SUBJECT_ACCOUNT"], executor_account());
+    assert_eq!(
+        env["MANDATE_WORKSPACE_NAMESPACE"], "cell",
+        "the namespace its vault token is bound to, which it checks"
+    );
+    assert_eq!(env.len(), 7, "the template's one, and the manager's six");
+    let runtime = k
+        .manifest(&Slot::runtime("agent_a"), 1, &launch(None))
+        .unwrap();
+    assert!(runtime["spec"].get("serviceAccountName").is_none());
+    assert!(!env_of(&runtime).contains_key("MANDATE_WORKSPACE_NAMESPACE"));
+    assert!(!env_of(&runtime).contains_key("MANDATE_SUBJECT_ACCOUNT"));
+}
+
+#[test]
+fn an_executor_without_its_connection_starts_nothing() {
+    let k = adapter("http://127.0.0.1:1".to_owned());
+    assert!(k.manifest(&executor(), 1, &connected()).is_some());
+    assert_eq!(k.manifest(&executor(), 1, &launch(None)), None);
+    let (api, seen) = server(vec![(201, "{}".to_owned())]);
+    let mut k = adapter(api);
+    assert_eq!(
+        block_on(k.start(&executor(), 1, &launch(None))),
+        Err(Unavailable)
+    );
+    assert!(
+        seen.lock().unwrap().is_empty(),
+        "no account, no pod asked for"
+    );
+}
+
+#[test]
+fn an_executors_stop_deletes_its_account_then_its_pod() {
+    let (api, seen) = server(vec![
+        (200, "{}".to_owned()),
+        (200, "{}".to_owned()),
+        (500, "{}".to_owned()),
+        (200, "{}".to_owned()),
+    ]);
+    let mut k = adapter(api);
+    assert_eq!(block_on(k.stop(&executor(), 3, Some(CONNECTION))), Ok(()));
+    assert_eq!(
+        block_on(k.stop(&executor(), 3, Some(CONNECTION))),
+        Err(Unavailable)
+    );
+    let asked: Vec<String> = seen
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|s| format!("{} {}", s.method, s.path))
+        .collect();
+    let account = format!(
+        "DELETE /api/v1/namespaces/cell/serviceaccounts/{}",
+        executor_account()
+    );
+    let pod = format!(
+        "DELETE /api/v1/namespaces/cell/pods/{}",
+        k.pod_name(&executor(), 3)
+    );
+    assert_eq!(
+        asked,
+        [account.clone(), pod, account],
+        "an account it could not delete leaves the pod listed, so the stop is asked again"
+    );
+}
+
+#[test]
+fn a_succeeded_pod_reads_as_succeeded_and_a_failed_one_as_exited() {
+    let list = json!({"items": [
+        pod("token-exchange", CONNECTION, "1", "Succeeded", false, false),
+        pod("token-exchange", "conn_failed", "1", "Failed", false, false),
+        pod("executor", ACCOUNT_REF, "1", "Succeeded", false, true),
+    ]});
+    let (api, _) = server(vec![(200, list.to_string())]);
+    let phases: Vec<(Slot, Phase)> = block_on(adapter(api).observe())
+        .unwrap()
+        .into_iter()
+        .map(|i| (i.slot, i.phase))
+        .collect();
+    assert_eq!(
+        phases,
+        [
+            (exchange(), Phase::Succeeded),
+            (Slot::token_exchange("conn_failed"), Phase::Exited),
+            (executor(), Phase::Succeeded),
+        ],
+        "an exit's status holds whether or not its pod is being deleted"
+    );
 }
