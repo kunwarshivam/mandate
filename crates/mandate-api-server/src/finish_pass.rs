@@ -5,7 +5,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
-use std::io::Write;
+use std::io::{self, Write};
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::Poll;
@@ -113,6 +113,32 @@ pub async fn passes_until<F, T, A>(
             return;
         }
     }
+}
+
+/// [`passes_until`] on a runtime of its own, the stop made by `stop` inside it, then that runtime
+/// shut down without waiting (DEC-2348 item 3): a vault call a drained pass abandoned runs on a
+/// blocking thread its runtime would otherwise wait for, so this returns within [`DRAIN`] of the
+/// stop whatever the vault does.
+///
+/// # Errors
+/// The runtime's failure to start, or `stop`'s.
+#[expect(
+    clippy::todo,
+    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+)]
+pub fn run_until_stopped<F, T, A, S>(
+    _finisher: Finisher<F, T, A>,
+    _clock: Arc<dyn Clock>,
+    _every: Duration,
+    _stop: impl FnOnce() -> io::Result<S>,
+) -> io::Result<()>
+where
+    F: Fingerprints,
+    T: Teardown,
+    A: Alerts,
+    S: Future<Output = ()> + Send,
+{
+    todo!()
 }
 
 /// The pass over one workspace's connects, and what it remembers between passes.
