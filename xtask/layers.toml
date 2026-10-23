@@ -65,8 +65,6 @@
 #      "adapters depend on the core, never the reverse"): it implements the `BrokerConnector` that
 #      `mandate-executor` declares, so it must sit strictly above it rather than beside it
 #   8  mandate-version-backtest (E4-4, DEC-1000), above mandate-backtest and mandate-executor
-#   7  also mandate-api-server, the workspace API server (E21-31, DEC-978): above the journal's
-#      Postgres store and the API's contract, and kept from the runtime, executor and connectors
 #   8  mandate-shell, the process shell (E7-7, DEC-138; the shell's dependency on backtest is
 #      deleted with the tracer's signal path, DEC-475 item 6): the lowest layer that sees the
 #      order path (`mandate-runtime`, `mandate-executor`, `mandate-alpaca`) and no model at all; and
@@ -90,6 +88,10 @@
 #      to sit above mandate-journal-pg, whose notice stream it alone appends to; its
 #      forbidden_internal list names every crate that writes an agent, account, or control stream
 #      (NT-3 at rung 1, DEC-701 item 3), and nothing may depend on it (NT-9)
+#   9  also mandate-api-server, the workspace API server (E21-31, DEC-978): above the journal's
+#      Postgres store and the API's contract, raised from layer 7 by DEC-2338 item 1 to sit above
+#      mandate-vault, through which it writes the callback's code; kept from the runtime, executor
+#      and connectors
 #   10 mandate-rh-sim, the simulated Robinhood broker (E7-25, DEC-124): above every product crate,
 #      so none can take it as a normal dependency and it stays out of every production graph,
 #      while the Robinhood connector's tests (C1) reach it as a dev-dependency
@@ -789,8 +791,10 @@ forbidden_internal = ["mandate-daemon", "mandate-agentd", "mandate-shell", "mand
 # The token-exchange process (E10-13 slice 5b, DEC-821 item 2, DEC-2629): the one process with
 # the platform's client secret and the live token endpoint. It sits above mandate-connections, whose
 # exchange rules it runs, and no crate may depend on it, so no other process can send the request.
+# Raised from layer 7 by DEC-2330 item 1 to sit above mandate-vault, through which it logs in as
+# its connection's exchange, reads the client secret, takes the code and writes the token.
 [crates.mandate-token-exchange]
-layer = 7
+layer = 9
 safety_critical = true
 pure = false
 allowed_external = ["reqwest", "rustls", "secrecy", "tokio"]
@@ -828,9 +832,10 @@ forbidden_internal = [
 # and their tools. It records owner input on the control stream and serves reads from the journal;
 # it never places, cancels, or sizes an order and never calls a broker or a runtime (workspace API
 # spec §1.4, `AGENTS.md` rule 12), so it may never reach the runtime, the executor, a connector,
-# the shell, the paper adapter, or the founder's CLI.
+# the shell, the paper adapter, or the founder's CLI. It links mandate-vault only to write the
+# callback's code as the vault's `api` identity, which may read no token (DEC-2338).
 [crates.mandate-api-server]
-layer = 7
+layer = 9
 safety_critical = true
 pure = false
 allowed_external = ["axum", "base64", "reqwest", "ring", "rustix", "rustls", "secrecy", "tokio"]

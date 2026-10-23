@@ -4043,7 +4043,6 @@ fn protection_is_re_placed_at_the_buffer_day() {
 /// not cancelled, and the shortfall is journaled and the owner alerted, as for protection with no
 /// recorded prices (`expiry_unreplaceable`, `protection_expiring`; DEC-367 item 4).
 #[test]
-#[ignore = "pending E7-4"]
 fn an_oco_that_cannot_be_re_placed_is_kept_at_its_buffer_day() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -4654,7 +4653,6 @@ fn a_crypto_position_never_takes_an_oco_even_where_the_profile_lists_one() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn a_fractional_position_protects_the_whole_shares_and_discloses_the_fraction() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[FRAC]);
@@ -4800,7 +4798,6 @@ fn fractional_position(ports: &mandate_executor::Ports<'_>, held: &str) -> Shell
 /// protective prices it carries, on a profile that offers brackets, and only that form (DEC-2312
 /// item 1). A whole-share entry in the same instrument still goes as its bracket.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_fractional_entry_goes_as_a_plain_day_limit_whatever_its_prices() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[FRAC]);
@@ -4895,7 +4892,6 @@ fn a_fractional_entry_goes_as_a_plain_day_limit_whatever_its_prices() {
 /// denies it as `add_blocked_by_protective_order`, as it denies any plain equity add: the
 /// conservative reading (DEC-2312 item 1). Nothing is sent and the resting OCO is not touched.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_fractional_add_where_protection_rests_is_denied_as_a_plain_add() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[FRAC]);
@@ -4942,7 +4938,6 @@ fn a_fractional_add_where_protection_rests_is_denied_as_a_plain_add() {
 /// protective order is sent, the interval it started ends, and both the start and the end
 /// disclose the whole position as the fraction left unprotected (DEC-2312 items 2 and 3, DEC-2315).
 #[test]
-#[ignore = "pending E7-4"]
 fn a_position_under_one_share_places_nothing_and_discloses_its_fraction() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[FRAC]);
@@ -5015,7 +5010,6 @@ fn a_position_under_one_share_places_nothing_and_discloses_its_fraction() {
 /// nears its GTC expiry is cancelled, confirmed, and re-placed for ten, never 10.4, and the
 /// placement discloses the 0.4 it leaves unprotected (DEC-2312 items 2 and 3).
 #[test]
-#[ignore = "pending E7-4"]
 fn a_re_placement_before_expiry_covers_only_the_whole_shares() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[FRAC]);
@@ -5111,7 +5105,6 @@ fn unprotectable_profile() -> mandate_domain::CapabilityProfile {
 /// `unprotected_end` and `expiry_unreplaceable`: a whole-share entry, a fractional position's
 /// re-placement before expiry, and an entry on a profile with nothing to protect it with.
 #[test]
-#[ignore = "pending E7-4"]
 fn every_protection_changed_is_written_at_version_2() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL, FRAC]);
@@ -5272,7 +5265,6 @@ fn a_crypto_entry_is_never_held_to_the_fractional_equity_rule() {
 /// position is protected again, its interval ending with the 0.4 it leaves (§5.4; DEC-2312 item 2,
 /// DEC-2315). An OCO the executor cannot re-place is never the one it cancels.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_fractional_hold_keeps_its_whole_shares_covered_through_the_buffer_day() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[FRAC]);
@@ -5612,6 +5604,544 @@ fn an_agent_kill_switch_cancels_only_that_agents_orders() {
     assert!(
         !ran.requests.iter().any(common::is_account_wide),
         "and never the account-wide endpoints"
+    );
+}
+
+/// DEC-2347 item 3.5: the agent whose own buy filled holds lots, the quantity its kill switch would
+/// sell, and another agent, with none of its own, holds none in the same position.
+#[test]
+fn only_the_agent_whose_buy_filled_holds_lots() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let shell = protected_position(&ports);
+    assert_eq!(shell.state.holds_lots(&agent(common::AGENT)), Ok(true));
+    assert_eq!(shell.state.holds_lots(&agent(OTHER_AGENT)), Ok(false));
+}
+
+/// A reconciliation whose broker reports one fill of 10 AAPL at 150 naming only the broker's order
+/// id `broker`, as Alpaca's `FILL` activity does, lists no open order (a filled order is not open),
+/// and holds `held` AAPL.
+fn fill_by_broker_id(
+    shell: &mut Shell,
+    ports: &mandate_executor::Ports<'_>,
+    broker: &str,
+    held: &str,
+) -> common::Ran {
+    let mut taken = snapshot(shell.head().0, ReconcileReason::Startup);
+    let mut fill = broker_fill("f-1", None, "10", "150");
+    fill.broker_order_id = Some(broker.to_owned());
+    taken.fills = vec![fill];
+    taken.positions = vec![broker_position(AAPL, held)];
+    shell.run(Input::BrokerSnapshot(taken), ports)
+}
+
+/// The agent's switch after a quote, and the quantities of the sells it sends.
+fn switch_sells(shell: &mut Shell, ports: &mandate_executor::Ports<'_>) -> Vec<String> {
+    shell.run(Input::Market(quote(AAPL, "155", "155.1", 20)), ports);
+    let ran = shell.run(
+        Input::Command(Command::KillSwitch {
+            scope: KillScope::Agent(agent(common::AGENT)),
+            initiator: Initiator::Owner,
+            confirmation: Some(owner_confirmation()),
+            cause: None,
+        }),
+        ports,
+    );
+    ran.submissions()
+        .into_iter()
+        .filter(|order| order.side == Side::Sell)
+        .map(|order| order.qty.to_string())
+        .collect()
+}
+
+/// DEC-2353 item 2: a fill naming only the broker's order id the order's acknowledgment journaled
+/// is that order's, so its quantity is applied to it and the agent holds the lots.
+#[test]
+fn a_fill_naming_only_the_broker_id_is_its_orders() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = reconciling(&ports);
+    let id = accepted_order(&mut shell, &ports, INTENT);
+    let ran = fill_by_broker_id(&mut shell, &ports, "b-1", "10");
+    let applied = ran.draft("FillApplied").expect("the fill is applied");
+    assert_eq!(
+        applied.payload.get("client_order_id"),
+        Some(&text(&id)),
+        "{:?}",
+        ran.draft_types()
+    );
+    assert!(!ran.draft_types().contains(&"ExternalActivityIngested"));
+    let order = shell.state.orders().values().next().expect("the order");
+    assert_eq!(order.filled_qty, qty("10"));
+    assert_eq!(shell.state.holds_lots(&agent(common::AGENT)), Ok(true));
+}
+
+/// DEC-2353, rule 13: once the broker-id fill is the agent's, its kill switch sells exactly it.
+#[test]
+fn the_agents_switch_sells_the_lots_a_broker_id_fill_bought() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = reconciling(&ports);
+    accepted_order(&mut shell, &ports, INTENT);
+    fill_by_broker_id(&mut shell, &ports, "b-1", "10");
+    assert_eq!(switch_sells(&mut shell, &ports), ["10"]);
+}
+
+/// DEC-2353, the review of #2270: a buy that filled 5 of its 10 and then ended canceled or expired,
+/// its fill naming only the broker's order id, is the agent's, so its switch sells exactly the 5.
+#[test]
+fn the_agents_switch_sells_what_an_ended_buys_broker_id_fill_bought() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    for status in ["canceled", "expired"] {
+        let mut shell = reconciling(&ports);
+        let id = accepted_order(&mut shell, &ports, INTENT);
+        let mut taken = snapshot(shell.head().0, ReconcileReason::Startup);
+        taken.open_orders = vec![broker_order(
+            "b-1",
+            Some(&id),
+            AAPL,
+            Side::Buy,
+            "10",
+            "5",
+            status,
+        )];
+        let mut fill = broker_fill("f-1", None, "5", "150");
+        fill.broker_order_id = Some("b-1".to_owned());
+        taken.fills = vec![fill];
+        taken.positions = vec![broker_position(AAPL, "5")];
+        shell.run(Input::BrokerSnapshot(taken), &ports);
+        assert!(
+            shell
+                .state
+                .orders()
+                .values()
+                .all(|order| order.state.is_terminal() && order.state != OrderState::Filled),
+            "{status}: the order ended"
+        );
+        assert_eq!(switch_sells(&mut shell, &ports), ["5"], "{status}");
+    }
+}
+
+/// DEC-2353 item 3 (the review of #2299): a fill naming only the broker's order id is no order's
+/// when that order's records carry two ids, and it is not taken past the order's own checks: more
+/// than the order has left, the other side, or another instrument. Each stays external activity,
+/// every agent goes `exits_only`, and nothing is applied to the order; the account holds what the
+/// fill bought, so no position difference is in play.
+#[test]
+fn a_broker_id_fill_failing_its_orders_checks_stays_external() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    for case in ["two ids", "overfill", "side", "instrument"] {
+        let mut shell = reconciling(&ports);
+        let id = accepted_order(&mut shell, &ports, INTENT);
+        let mut fill = broker_fill("f-1", None, "10", "150");
+        fill.broker_order_id = Some("b-1".to_owned());
+        let mut held = (AAPL, "10");
+        match case {
+            "two ids" => {
+                shell.run(
+                    Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+                        "b-2",
+                        Some(&id),
+                        AAPL,
+                        Side::Buy,
+                        "10",
+                        "0",
+                        "accepted",
+                    ))),
+                    &ports,
+                );
+            }
+            "overfill" => {
+                fill.qty = qty("11");
+                held = (AAPL, "11");
+            }
+            "side" => {
+                fill.side = Side::Sell;
+                held = (AAPL, "-10");
+            }
+            _ => {
+                fill.instrument = instrument(FixedInstruments::THIN_EQUITY);
+                held = (FixedInstruments::THIN_EQUITY, "10");
+            }
+        }
+        let mut taken = snapshot(shell.head().0, ReconcileReason::Startup);
+        taken.fills = vec![fill];
+        taken.positions = vec![broker_position(held.0, held.1)];
+        let ran = shell.run(Input::BrokerSnapshot(taken), &ports);
+        assert!(
+            ran.draft_types().contains(&"ExternalActivityIngested"),
+            "{case}: {:?}",
+            ran.draft_types()
+        );
+        assert_eq!(
+            ran.draft("FillApplied")
+                .and_then(|applied| applied.payload.get("client_order_id")),
+            None,
+            "{case}"
+        );
+        assert!(
+            shell
+                .state
+                .orders()
+                .values()
+                .all(|order| order.filled_qty == qty("0")),
+            "{case}"
+        );
+        assert_eq!(
+            shell.state.effective_mode(&agent(common::AGENT)),
+            Mode::ExitsOnly,
+            "{case}"
+        );
+    }
+}
+
+/// DEC-2353 invariant 4: the broker id is folded from the journaled acknowledgment, so after a
+/// restart the fill is still the order's.
+#[test]
+fn a_broker_id_fill_is_the_orders_after_a_restart() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = reconciling(&ports);
+    let id = accepted_order(&mut shell, &ports, INTENT);
+    let (mut restarted, _) = shell.restart(&ports);
+    let ran = fill_by_broker_id(&mut restarted, &ports, "b-1", "10");
+    let applied = ran.draft("FillApplied").expect("the fill is applied");
+    assert_eq!(applied.payload.get("client_order_id"), Some(&text(&id)));
+}
+
+/// DEC-2353 item 3, invariant 3: a fill whose broker id no order's records carry, or two orders'
+/// records carry, is no agent's. It is external activity, every agent goes `exits_only`, and the
+/// agent's switch sells none of it.
+#[test]
+fn a_fill_whose_broker_id_names_no_one_order_stays_external() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    for two_orders in [false, true] {
+        let mut shell = reconciling(&ports);
+        accepted_order(&mut shell, &ports, INTENT);
+        let broker = if two_orders {
+            accepted_order(&mut shell, &ports, OTHER_INTENT);
+            "b-1"
+        } else {
+            "b-unknown"
+        };
+        let ran = fill_by_broker_id(&mut shell, &ports, broker, "10");
+        assert!(
+            ran.draft_types().contains(&"ExternalActivityIngested"),
+            "two orders: {two_orders}, {:?}",
+            ran.draft_types()
+        );
+        assert_eq!(
+            ran.draft("FillApplied")
+                .and_then(|applied| applied.payload.get("client_order_id")),
+            None,
+            "two orders: {two_orders}"
+        );
+        assert_eq!(
+            shell.state.effective_mode(&agent(common::AGENT)),
+            Mode::ExitsOnly,
+            "two orders: {two_orders}"
+        );
+        assert!(
+            switch_sells(&mut shell, &ports).is_empty(),
+            "two orders: {two_orders}"
+        );
+    }
+}
+
+/// The agent's buy of 10 the broker reports in `status` with `filled` of it filled, after a
+/// reconciliation, with its fill naming no order.
+fn ended_without_its_fill(
+    status: &str,
+    filled: &str,
+    fills: Vec<mandate_executor::BrokerFill>,
+    held: &str,
+) -> Shell {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = reconciling(&ports);
+    let id = accepted_order(&mut shell, &ports, INTENT);
+    let mut taken = snapshot(shell.head().0, ReconcileReason::Startup);
+    taken.open_orders = vec![broker_order(
+        "b-1",
+        Some(&id),
+        AAPL,
+        Side::Buy,
+        "10",
+        filled,
+        status,
+    )];
+    taken.fills = fills;
+    taken.positions = vec![broker_position(AAPL, held)];
+    shell.run(Input::BrokerSnapshot(taken), &ports);
+    shell
+}
+
+/// DEC-2347 item 3.6 (lane D1's finding): a buy the broker reports filled whose fill named no
+/// order leaves no lots in the sub-ledger, but the shares the account holds are the agent's, so it
+/// still holds lots; once the account holds none of the instrument, it holds none.
+#[test]
+fn a_filled_buy_whose_fill_named_no_order_still_holds_lots() {
+    let bought = broker_fill("f-1", None, "10", "150");
+    let mut sold = broker_fill("f-2", None, "10", "151");
+    sold.side = Side::Sell;
+    let holding = ended_without_its_fill("filled", "10", vec![bought.clone()], "10");
+    assert!(
+        holding
+            .state
+            .orders()
+            .values()
+            .all(|order| order.filled_qty == qty("0")),
+        "the fill is applied to no order"
+    );
+    assert_eq!(holding.state.holds_lots(&agent(common::AGENT)), Ok(true));
+    assert_eq!(holding.state.holds_lots(&agent(OTHER_AGENT)), Ok(false));
+    let flat = ended_without_its_fill("filled", "10", vec![bought, sold], "0");
+    assert_eq!(flat.state.holds_lots(&agent(common::AGENT)), Ok(false));
+}
+
+/// DEC-2347 item 3.6 (the review of #2270): a buy that filled 5 of its 10 and then ended canceled
+/// or expired, its fill naming no order, still holds the 5 the account holds.
+#[test]
+fn a_partly_filled_buy_that_ended_with_its_fill_named_no_order_still_holds_lots() {
+    for status in ["canceled", "expired"] {
+        let fill = broker_fill("f-1", None, "5", "150");
+        let ended = ended_without_its_fill(status, "5", vec![fill], "5");
+        assert!(
+            ended.state.orders().values().all(|order| {
+                order.state.is_terminal()
+                    && order.state != OrderState::Filled
+                    && order.filled_qty == qty("0")
+            }),
+            "{status}: the order ended unfilled in the fold"
+        );
+        assert_eq!(
+            ended.state.holds_lots(&agent(common::AGENT)),
+            Ok(true),
+            "{status}"
+        );
+    }
+}
+
+/// The owner's release of `qty` AAPL from `who`'s position (journal spec §9.27, mandate spec §3.1),
+/// folded at the account stream's next position.
+fn release(shell: &mut Shell, who: &str, qty: &str) {
+    let released = event(
+        ACCOUNT_STREAM,
+        shell.head().0 + 1,
+        "PositionReleased",
+        with_clock(
+            &[
+                ("agent_id", text(who)),
+                ("instrument", text(AAPL)),
+                ("qty", text(qty)),
+                ("cause", text("owner_release")),
+            ],
+            25,
+        ),
+    );
+    shell.fold_one(&released).expect("the release folds");
+}
+
+/// The agent's switch over its protected position: the sells it sends once its OCO's cancel is
+/// accepted.
+fn protected_switch_sells(shell: &mut Shell, ports: &mandate_executor::Ports<'_>) -> Vec<String> {
+    shell.run(Input::Market(quote(AAPL, "155", "155.1", 30)), ports);
+    shell.run(
+        Input::Command(Command::KillSwitch {
+            scope: KillScope::Agent(agent(common::AGENT)),
+            initiator: Initiator::Owner,
+            confirmation: Some(owner_confirmation()),
+            cause: None,
+        }),
+        ports,
+    );
+    let after = shell.run(
+        Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+            client_order_id: "md-oco-1".to_owned(),
+        })),
+        ports,
+    );
+    after
+        .submissions()
+        .into_iter()
+        .filter(|order| order.side == Side::Sell)
+        .map(|order| order.qty.to_string())
+        .collect()
+}
+
+/// DEC-2354 item 2: a release of part of the agent's 10 leaves its switch only the remainder,
+/// and a release of all of it leaves the switch nothing to sell and the agent no lots.
+#[test]
+fn a_release_leaves_the_switch_only_what_the_agent_still_holds() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut partly = protected_position(&ports);
+    release(&mut partly, common::AGENT, "4");
+    assert_eq!(protected_switch_sells(&mut partly, &ports), ["6"]);
+    let mut wholly = protected_position(&ports);
+    release(&mut wholly, common::AGENT, "10");
+    assert_eq!(wholly.state.holds_lots(&agent(common::AGENT)), Ok(false));
+    assert!(protected_switch_sells(&mut wholly, &ports).is_empty());
+}
+
+/// DEC-2354 item 2: another agent's release takes nothing off this agent's lots.
+#[test]
+fn another_agents_release_leaves_this_agents_lots() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = protected_position(&ports);
+    release(&mut shell, OTHER_AGENT, "10");
+    assert_eq!(shell.state.holds_lots(&agent(common::AGENT)), Ok(true));
+    assert_eq!(protected_switch_sells(&mut shell, &ports), ["10"]);
+}
+
+/// DEC-2354 item 1: the release is folded from the journal, so a replay reads the agent's lots as
+/// released too.
+#[test]
+fn a_release_is_read_again_on_replay() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = protected_position(&ports);
+    release(&mut shell, common::AGENT, "10");
+    let replayed = shell.replay().expect("the stream replays");
+    assert_eq!(replayed.holds_lots(&agent(common::AGENT)), Ok(false));
+}
+
+/// DEC-2354 item 3, the bound's terms: a buy the broker rejected, or one the executor abandoned,
+/// bought nothing, so it gives its agent no lots in a position another agent holds, though it
+/// never filled its whole quantity.
+#[test]
+fn a_rejected_or_abandoned_buy_gives_its_agent_no_lots() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    for ending in [OrderState::Rejected, OrderState::Abandoned] {
+        let mut shell = protected_position(&ports);
+        shell.run(Input::Market(quote(AAPL, "155", "155.1", 20)), &ports);
+        let id = shell
+            .run(
+                handoff(
+                    OTHER_INTENT,
+                    OTHER_AGENT,
+                    protected_opening(AAPL, "10", "150", "140", Some("170")),
+                ),
+                &ports,
+            )
+            .submissions()
+            .first()
+            .map(|o| o.client_order_id.as_str().to_owned())
+            .expect("the other agent's buy is sent");
+        if ending == OrderState::Rejected {
+            shell.run(
+                Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+                    "b-other",
+                    Some(&id),
+                    AAPL,
+                    Side::Buy,
+                    "10",
+                    "0",
+                    "rejected",
+                ))),
+                &ports,
+            );
+        } else {
+            let absent = || {
+                Input::Broker(Ok(BrokerOutcome::Absent {
+                    client_order_id: id.clone(),
+                }))
+            };
+            shell.run(Input::Broker(Err(BrokerUnknown::Timeout)), &ports);
+            shell.run(absent(), &ports);
+            shell.run(Input::Tick(clock(60)), &ports);
+            shell.run(absent(), &ports);
+            shell.run(Input::Tick(clock(200)), &ports);
+            shell.run(absent(), &ports);
+        }
+        assert!(
+            shell
+                .state
+                .orders()
+                .values()
+                .any(|order| order.agent == Some(agent(OTHER_AGENT)) && order.state == ending),
+            "the other agent's buy ends {ending:?}"
+        );
+        assert_eq!(
+            shell.state.holds_lots(&agent(OTHER_AGENT)),
+            Ok(false),
+            "{ending:?}"
+        );
+        assert_eq!(shell.state.holds_lots(&agent(common::AGENT)), Ok(true));
+    }
+}
+
+/// DEC-2354 item 3 (the coordinator's guard): a buy that filled 5 of 10 with its fill naming no
+/// order, then released, leaves the switch nothing to sell: it sells the attributed lots alone,
+/// never the bound `holds_lots` reads, which still counts the buy whole and so keeps the exit.
+#[test]
+fn a_released_unattributed_partial_fill_leaves_the_switch_nothing() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let fill = broker_fill("f-1", None, "5", "150");
+    let mut shell = ended_without_its_fill("canceled", "5", vec![fill], "5");
+    release(&mut shell, common::AGENT, "5");
+    assert_eq!(shell.state.holds_lots(&agent(common::AGENT)), Ok(true));
+    let switched = shell.run(
+        Input::Command(Command::KillSwitch {
+            scope: KillScope::Agent(agent(common::AGENT)),
+            initiator: Initiator::Owner,
+            confirmation: Some(owner_confirmation()),
+            cause: None,
+        }),
+        &ports,
+    );
+    assert!(
+        switched
+            .submissions()
+            .into_iter()
+            .all(|order| order.side != Side::Sell),
+        "{:?}",
+        switched.draft_types()
     );
 }
 
@@ -9383,5 +9913,43 @@ fn a_restart_in_a_parked_night_alerts_nothing_more() {
         at_the_open(&mut restarted, &ports),
         vec![(format!("{rung}-l1"), true)],
         "the exit still goes at the open"
+    );
+}
+
+/// One command applied as the switch of two agents counts as applied for each of them, and for no
+/// other agent or record (DEC-2343 item 4, `ExecutorState::applied_for`): the executor process
+/// dedupes a command against the runtime's copy per agent.
+#[test]
+fn a_switch_copied_from_one_record_is_applied_for_its_own_agents_only() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = started();
+    shell.fold_one(&stream_opened()).expect("folds");
+    let mut shell = shell.restart_ready(&ports);
+    let command = EventId("01JCMD000000000000000000AA".to_owned());
+    for named in [common::AGENT, OTHER_AGENT] {
+        shell.run(
+            Input::Command(Command::KillSwitch {
+                scope: KillScope::Agent(agent(named)),
+                initiator: Initiator::RiskLimit,
+                confirmation: None,
+                cause: Some(command.clone()),
+            }),
+            &ports,
+        );
+    }
+    let other = EventId("01JCMD000000000000000000AB".to_owned());
+    assert_eq!(
+        (
+            shell.state.applied_for(&agent(common::AGENT), &command),
+            shell.state.applied_for(&agent(OTHER_AGENT), &command),
+            shell.state.applied_for(&agent("agent-c"), &command),
+            shell.state.applied_for(&agent(common::AGENT), &other),
+        ),
+        (true, true, false, false),
+        "each named agent once, no other agent or record"
     );
 }
