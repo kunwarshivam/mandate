@@ -8,6 +8,7 @@ use std::future::Future;
 use std::io::Write;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
+use std::task::Poll;
 use std::time::Duration;
 
 use mandate_canon::{Value, parse};
@@ -68,42 +69,50 @@ impl<W: Write + Send> Alerts for LineAlerts<W> {
 
 /// Runs a pass at the clock's time every `every`, for as long as the process runs; a clock that
 /// cannot be read skips that pass, and a pass that cannot read the journal waits for the next.
-pub async fn passes<F, T, A>(
-    mut finisher: Finisher<F, T, A>,
-    clock: Arc<dyn Clock>,
-    every: Duration,
-) where
+pub async fn passes<F, T, A>(finisher: Finisher<F, T, A>, clock: Arc<dyn Clock>, every: Duration)
+where
     F: Fingerprints,
     T: Teardown,
     A: Alerts,
 {
-    loop {
-        if let Some(now) = clock.now() {
-            let _waits_for_the_next_pass = finisher.pass(now).await;
-        }
-        tokio::time::sleep(every).await;
-    }
+    passes_until(finisher, clock, every, std::future::pending()).await;
 }
 
 /// [`passes`] until `stop` resolves (DEC-2348 item 3): the wait between passes ends at once, and a
 /// pass in flight gets [`DRAIN`] to end. One still running then is abandoned, which is safe, since
 /// every pass reads the control stream again, appends at the head it read, and deletes and releases
 /// idempotently: the next start's pass does what it left.
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
 pub async fn passes_until<F, T, A>(
-    _finisher: Finisher<F, T, A>,
-    _clock: Arc<dyn Clock>,
-    _every: Duration,
-    _stop: impl Future<Output = ()> + Send,
+    mut finisher: Finisher<F, T, A>,
+    clock: Arc<dyn Clock>,
+    every: Duration,
+    stop: impl Future<Output = ()> + Send,
 ) where
     F: Fingerprints,
     T: Teardown,
     A: Alerts,
 {
-    todo!()
+    let mut stop = std::pin::pin!(stop);
+    loop {
+        if let Some(now) = clock.now() {
+            let mut pass = std::pin::pin!(finisher.pass(now));
+            let stopped = std::future::poll_fn(|cx| {
+                if pass.as_mut().poll(cx).is_ready() {
+                    Poll::Ready(false)
+                } else {
+                    stop.as_mut().poll(cx).map(|()| true)
+                }
+            })
+            .await;
+            if stopped {
+                let _abandoned_past_the_drain = tokio::time::timeout(DRAIN, pass).await;
+                return;
+            }
+        }
+        if tokio::time::timeout(every, stop.as_mut()).await.is_ok() {
+            return;
+        }
+    }
 }
 
 /// The pass over one workspace's connects, and what it remembers between passes.

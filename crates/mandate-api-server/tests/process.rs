@@ -563,7 +563,6 @@ fn finish_vault_dir(role: &str) -> String {
 /// vault nobody answers for, gets the drain bound, and the process exits 0 with nothing more on
 /// stdout.
 #[test]
-#[ignore = "pending E10-13"]
 fn the_finish_mode_exits_0_on_sigterm() {
     let dir = finish_vault_dir("connection-manager");
     let mut child = Running(

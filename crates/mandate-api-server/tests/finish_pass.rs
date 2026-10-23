@@ -897,7 +897,6 @@ fn run_until<F: Fingerprints>(
 /// DEC-2348 item 3: a stop given before the first pass still lets that pass run to its end, and
 /// then ends the passes.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_stop_already_given_ends_the_passes_after_the_pass_in_flight() {
     let (journal, deletes, finisher) = finisher(Unbacked);
     request(&journal, A, 2, "oauth");
@@ -918,7 +917,6 @@ fn a_stop_already_given_ends_the_passes_after_the_pass_in_flight() {
 
 /// A stop during the wait between passes ends the wait at once, and no other pass runs.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_stop_during_the_wait_ends_it_without_another_pass() {
     let (journal, deletes, finisher) = finisher(Unbacked);
     request(&journal, A, 2, "oauth");
@@ -936,7 +934,6 @@ fn a_stop_during_the_wait_ends_it_without_another_pass() {
 
 /// Without a stop the passes go on: a stop that never comes never ends them.
 #[test]
-#[ignore = "pending E10-13"]
 fn without_a_stop_the_passes_go_on() {
     let (journal, deletes, finisher) = finisher(Unbacked);
     request(&journal, A, 2, "oauth");
