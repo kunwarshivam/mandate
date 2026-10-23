@@ -41,7 +41,8 @@ commands:
                         spec-guard | portable | refcases | reference | schemas | supply-chain |
                         postgres | openbao | objectstore | stub-release | api-release |
                         mutants |
-                        schema-mutants | cell | cell-demo | cell-journal | cell-failover |
+                        schema-mutants | cell | cell-upgrade | cell-demo | cell-journal |
+                        cell-failover |
                         cell-kill-switch | cell-executor | cell-vault | sweep; or
                         one part of test: test-nextest | test-doc | test-rh-sim | test-python.
                         Tests, pending tests,
@@ -183,6 +184,7 @@ const PR_JOBS: &[&str] = &[
     "mutants",
     "schema-mutants",
     "cell",
+    "cell-upgrade",
     "cell-journal",
     "cell-failover",
     "cell-kill-switch",
@@ -462,6 +464,7 @@ fn ci(job: &str) -> Result<()> {
         "portable" => portable(),
         "select" => ci_select(),
         "cell" => cell::ci(),
+        "cell-upgrade" => cell::ci_upgrade(),
         "cell-demo" => cell::scenario::ci(),
         "cell-journal" => cell::ci_drills(job, &cell::JOURNAL_DRILLS),
         "cell-failover" => cell::ci_drills(job, &cell::FAILOVER_DRILLS),
@@ -17132,7 +17135,7 @@ mod tests {
     }
 
     /// The jobs `select` scopes, each with the output that starts it (DEC-1190 item 2).
-    const SELECT_GATES: [(&str, &str); 17] = [
+    const SELECT_GATES: [(&str, &str); 18] = [
         ("fast-test", "tests"),
         ("fast-pending", "tests"),
         ("fast-python", "python"),
@@ -17143,6 +17146,7 @@ mod tests {
         ("full-checks-3", "full_checks"),
         ("schema-mutants", "schema_mutants"),
         ("cell", "cell"),
+        ("cell-upgrade", "cell"),
         ("cell-demo", "cell"),
         ("cell-demo-web", "cell_web"),
         ("cell-journal", "cell"),
@@ -19388,11 +19392,11 @@ mod tests {
             .collect();
         assert_eq!(
             checkouts.len(),
-            23,
+            24,
             "one checkout in each source-reading job: `select` (DEC-1190), `fast-lint`, \
              `fast-test`, `fast-pending`, `fast-python`, `fast-portable`, `fast-rh-sim-live`, \
              `full-checks`, `full-checks-2`, `full-checks-3` (DEC-2334), the mutation plan, the mutants matrix, `mutants-costs` (DEC-2607), \
-             `schema-mutants`, `cell`, `cell-demo` (DEC-2002), `cell-demo-web` (DEC-2609), \
+             `schema-mutants`, `cell`, `cell-upgrade` (DEC-464), `cell-demo` (DEC-2002), `cell-demo-web` (DEC-2609), \
              `cell-journal`, `cell-failover`, `cell-kill-switch` (DEC-2602), `cell-executor` \
              (DEC-2615), `cell-vault` (DEC-2616), and `hosted-k3d` \
              (E21-51)"
