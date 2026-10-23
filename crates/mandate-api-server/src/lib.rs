@@ -28,6 +28,8 @@
 //!   until E9-4 binds it; [`objects`] is the content-addressed store those routes add records to.
 //! - [`challenges`]: the step-up challenge route and the store of the challenges it issues, each
 //!   issued under the context `authorize` returned for its action's row (DEC-2103).
+//! - [`passkeys`]: one's own passkeys, the registration challenge and the list (§3.6, DEC-2124),
+//!   each read from one fold of the member's passkeys on the control stream.
 //! - [`confirm`]: the code the web app shows for a challenge, and the port that verifies a paper
 //!   grant's `cli_confirm` evidence against the owner's `StepUpConfirmed` (DEC-2104).
 //! - [`writes`] also records resume, Stop, and an owner exit as the CLI records them, with step-up
@@ -75,6 +77,7 @@ pub mod me;
 pub mod members;
 pub mod objects;
 pub mod opening;
+pub mod passkeys;
 pub mod reads;
 pub mod reduction;
 pub mod routes;
