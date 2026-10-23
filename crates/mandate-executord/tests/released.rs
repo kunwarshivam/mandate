@@ -21,21 +21,31 @@ fn text(value: &str) -> Value {
 }
 
 /// The agent's opening of 10 AAPL at 150, filled and journaled by an earlier executor process,
-/// the owner's release of all 10 (mandate spec §3.1), journaled as that process would, then the
-/// agent retired, and, if `switched`, a kill switch of its connection.
+/// which holds the bracket's stop leg as its protection, the owner's release of all 10 (mandate
+/// spec §3.1) with that leg cancelled, journaled as that process would, then the agent retired,
+/// and, if `switched`, a kill switch of its connection.
 fn released(switched: bool) -> Result<(support::Journal, Paper), Error> {
     let journal = deployed()?;
     journal.seed(ACCOUNT_STREAM, OPENED)?;
     let broker = Paper::new(&journal);
     broker.resting(OPENING, "AAPL", "10", "150")?;
     broker.fill(OPENING, "150")?;
-    broker.resting("md-protect", "AAPL", "10", "147")?;
     let mut earlier = start_allowing(&journal, &broker)?;
     earlier.step(at(NOON)?);
     if !earlier.ready() {
         return Err("the earlier executor never read the fill".into());
     }
     drop(earlier);
+    let leg = journal
+        .payloads("ProtectionChanged")
+        .iter()
+        .filter(|payload| payload.get("action").and_then(Value::as_str) == Some("placed"))
+        .find_map(|payload| match payload.get("orders") {
+            Some(Value::Array(orders)) => orders.first().and_then(Value::as_str).map(str::to_owned),
+            _ => None,
+        })
+        .ok_or("the earlier executor never placed the bracket's stop leg")?;
+    broker.resting(&leg, "AAPL", "10", "147")?;
     {
         journal.write(
             ACCOUNT_STREAM,
@@ -45,7 +55,7 @@ fn released(switched: bool) -> Result<(support::Journal, Paper), Error> {
             Some("01JRELEASE0000000000000000"),
             object(vec![
                 ("agent_id", text(AGENT)),
-                ("canceled_order_ids", Value::Array(Vec::new())),
+                ("canceled_order_ids", Value::Array(vec![text(&leg)])),
                 ("cause", text("owner_release")),
                 ("instrument", text("AAPL")),
                 ("qty", text("10")),
@@ -66,7 +76,7 @@ fn released(switched: bool) -> Result<(support::Journal, Paper), Error> {
             ])?,
         )?;
     }
-    broker.canceled("md-protect")?;
+    broker.canceled(&leg)?;
     stopped(&journal, "c3", AGENT)?;
     if switched {
         kill_command(&journal, COMMAND, "connection", CONNECTION)?;
