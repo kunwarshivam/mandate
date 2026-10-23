@@ -14,6 +14,7 @@ use std::net::SocketAddrV4;
 use serde_json::{Value, json};
 
 use crate::SourceError;
+use crate::fingerprint::FINGERPRINT_KEY;
 use crate::kube::is_label;
 use crate::lease::LEASE_SECS;
 use crate::openbao::EXECUTOR_TOKEN_MAX_SECS;
@@ -152,9 +153,13 @@ pub fn kubernetes_policy_name(identity: &Identity, mounts: &Mounts) -> Result<St
 /// The templated policy, in HCL, of `identity`'s kind, keyed by the ServiceAccount name in the
 /// login's alias metadata on the auth mount whose accessor is `accessor`, an `x` before an
 /// executor's, so both kinds reach [`crate::policy::connection_segment`]. An executor reads its
-/// connection's token; a token exchange writes it, reads and deletes its code, and reads the
-/// platform's client secret. Anything else, or an accessor that is not one plain path segment (a
-/// quote, a brace or a newline would end the template or the policy), is [`SourceError::Config`].
+/// connection's token, creates its account entries and its fingerprint entries in the personal-data
+/// vault, one per request below its own connection (DEC-2339, DEC-2345), and asks transit for the
+/// fingerprint key's HMAC alone; a token
+/// exchange writes the token, reads, overwrites, destroys and deletes its code but never its
+/// code's metadata (DEC-2321), and reads the platform's client secret. Anything else, or an
+/// accessor that is not one plain path segment (a quote, a brace or a newline would end the
+/// template or the policy), is [`SourceError::Config`].
 pub fn kubernetes_policy(
     identity: &Identity,
     mounts: &Mounts,
@@ -171,11 +176,28 @@ pub fn kubernetes_policy(
         )
     };
     match identity {
-        Identity::Executor(_) => Ok(block(
-            "data",
-            &format!("connections/{SEGMENT_PREFIX}{own}/token"),
-            "\"read\"",
-        )),
+        Identity::Executor(_) => Ok([
+            block(
+                "data",
+                &format!("connections/{SEGMENT_PREFIX}{own}/token"),
+                "\"read\"",
+            ),
+            block(
+                "data",
+                &format!("personal/accounts/{SEGMENT_PREFIX}{own}/+"),
+                "\"create\"",
+            ),
+            block(
+                "data",
+                &format!("personal/fingerprints/{SEGMENT_PREFIX}{own}/+"),
+                "\"create\"",
+            ),
+            format!(
+                "path \"{}/hmac/{FINGERPRINT_KEY}\" {{\n  capabilities = [\"update\"]\n}}\n",
+                mounts.transit
+            ),
+        ]
+        .concat()),
         Identity::TokenExchange(_) => Ok([
             block("data", &kv_path(&SecretPath::ClientSecret)?, "\"read\""),
             block(
@@ -183,7 +205,8 @@ pub fn kubernetes_policy(
                 &format!("connections/{own}/code"),
                 "\"read\", \"update\"",
             ),
-            block("metadata", &format!("connections/{own}/code"), "\"delete\""),
+            block("delete", &format!("connections/{own}/code"), "\"update\""),
+            block("destroy", &format!("connections/{own}/code"), "\"update\""),
             block(
                 "data",
                 &format!("connections/{own}/token"),

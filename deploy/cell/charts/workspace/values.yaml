@@ -72,6 +72,16 @@ api:
   # alone, route 2's limits read the client's address from X-Forwarded-For (DEC-2117 item 4). With
   # the tunnel on, cloudflared runs beside the API in its pod and reaches it on loopback.
   ingressPeers: []
+  # The API's vault binding (DEC-2338): its AppRole, the Secret `vault-approle-api` the vault's
+  # provisioning makes, and the vault's CA, copied owner-only into its vault directory, with egress
+  # to the vault on 8200 alone. Off until that Secret exists: staging provisions it, production runs
+  # no vault, and the local cell turns it on once `cargo xtask cell up` provisions it.
+  vaultBinding: false
+  # The connection manager's AppRole beside the API's (DEC-2348): the API finishes an OAuth connect
+  # as the connection manager, so with `vaultBinding` on, the Secret
+  # `vault-approle-connection-manager` rides the same owner-only copy. Off until that Secret exists;
+  # staging only, as `vaultBinding` is.
+  connectionManagerBinding: false
 
 # The workspace's shared artifact store (mandate documents, backtest reports), mounted at
 # /var/lib/mandate/artifacts. Which process may write it is fixed by the chart, never a value.
