@@ -656,3 +656,59 @@ vault Service, which the vault chart's certificate names. */ -}}
 {{- end -}}
 {{- end -}}
 
+
+{{- /*
+A process's AppRole and the vault's CA as owner-only files (DEC-2338, DEC-2630 item 6), for the
+process whose vault role is `role`: the Secret the vault's provisioning makes for it,
+`vault-approle-<role>` (`role-id`, `secret-id`), and the ConfigMap `vault-ca`, projected read-only
+into one source directory, mounted 0440 for the pod's fsGroup, and copied by an init container into
+a memory-backed directory, `/run/mandate/vault`, as `<role>.role-id`, `<role>.secret-id` and
+`ca.crt` at 0600 with nothing else in it, since `mandate_vault`'s reader refuses a file any group or
+other can read. Each role named in `extras` rides the same projection and copy, its Secret
+`vault-approle-<extra>` as `<extra>.role-id` and `<extra>.secret-id`. The process mounts that directory read-only and reads them there as files, never
+from its environment; it never mounts the Secret itself.
+*/ -}}
+{{- define "mandate.vaultCopy" -}}
+{{- $sources := printf "/run/secrets/vault-%s" .role -}}
+- name: vault-credentials
+  image: {{ .root.Values.images.postgres | quote }}
+  imagePullPolicy: IfNotPresent
+  {{- $files := list (printf "%s/%s.role-id" $sources .role) (printf "%s/%s.secret-id" $sources .role) }}
+  {{- range (.extras | default list) }}
+  {{- $files = concat $files (list (printf "%s/%s.role-id" $sources .) (printf "%s/%s.secret-id" $sources .)) }}
+  {{- end }}
+  {{- $files = append $files (printf "%s/ca.crt" $sources) }}
+  command: ["install", "-m", "0600", {{ range $files }}{{ . | quote }}, {{ end }}"/run/mandate/vault/"]
+  securityContext:
+    {{- include "mandate.containerSecurity" . | nindent 4 }}
+  resources:
+    limits: {cpu: "50m", memory: "32Mi"}
+    requests: {cpu: "50m", memory: "32Mi"}
+  volumeMounts:
+    - {name: vault, mountPath: /run/mandate/vault}
+    - {name: vault-sources, mountPath: {{ $sources }}, readOnly: true}
+{{- end -}}
+{{- define "mandate.vaultVolumes" -}}
+- name: vault
+  emptyDir: {medium: Memory, sizeLimit: 1Mi}
+- name: vault-sources
+  projected:
+    defaultMode: 288
+    sources:
+      - secret:
+          name: {{ printf "vault-approle-%s" .role }}
+          items:
+            - {key: role-id, path: {{ printf "%s.role-id" .role }}}
+            - {key: secret-id, path: {{ printf "%s.secret-id" .role }}}
+      {{- range (.extras | default list) }}
+      - secret:
+          name: {{ printf "vault-approle-%s" . }}
+          items:
+            - {key: role-id, path: {{ printf "%s.role-id" . }}}
+            - {key: secret-id, path: {{ printf "%s.secret-id" . }}}
+      {{- end }}
+      - configMap:
+          name: vault-ca
+          items:
+            - {key: ca.crt, path: ca.crt}
+{{- end -}}

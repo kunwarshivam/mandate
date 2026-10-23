@@ -64,6 +64,8 @@ import risk_limits
 import risk_state
 import segment_rows
 import timeouts
+import retirements
+import unapplied
 import verification
 import workspace
 import yaml
@@ -3876,6 +3878,8 @@ def render(
     fraction_section: dict,
     approval_section: dict,
     timeout_section: dict,
+    retirement_section: dict,
+    unapplied_section: dict,
     requests_section: dict,
     cancel_section: dict,
     control_plane_section: dict,
@@ -3925,6 +3929,8 @@ def render(
             "protection_fraction": fraction_section,
             "approval_answers": approval_section,
             "approval_timeouts": timeout_section,
+            "retirements": retirement_section,
+            "kill_switch_unapplied": unapplied_section,
             "approval_requests": requests_section,
             "approval_cancellations": cancel_section,
             "control_plane": control_plane_section,
@@ -4005,6 +4011,8 @@ def main(argv: list[str] | None = None) -> int:
     fraction_section = account.build_fraction_section()
     approval_section = approval.build_section()
     timeout_section = timeouts.build_section()
+    retirement_section = retirements.build_section()
+    unapplied_section = unapplied.build_section()
     requests_section = requests.build_section()
     cancel_section = canceled.build_section()
     control_plane_section = control_plane.build_section()
@@ -4062,6 +4070,10 @@ def main(argv: list[str] | None = None) -> int:
     problems += approval.run_mutants(approval_section)
     problems += timeouts.check_section(timeout_section)
     problems += timeouts.run_mutants(timeout_section)
+    problems += retirements.check_section(retirement_section)
+    problems += retirements.run_mutants(retirement_section)
+    problems += unapplied.check_section(unapplied_section)
+    problems += unapplied.run_mutants(unapplied_section)
     problems += requests.check_section(requests_section)
     problems += requests.run_mutants(requests_section)
     problems += canceled.check_section(cancel_section)
@@ -4148,6 +4160,8 @@ def main(argv: list[str] | None = None) -> int:
         fraction_section,
         approval_section,
         timeout_section,
+        retirement_section,
+        unapplied_section,
         requests_section,
         cancel_section,
         control_plane_section,
@@ -4202,6 +4216,8 @@ def main(argv: list[str] | None = None) -> int:
         or account.check_fraction_section(reread["protection_fraction"])
         or approval.check_section(reread["approval_answers"])
         or timeouts.check_section(reread["approval_timeouts"])
+        or retirements.check_section(reread["retirements"])
+        or unapplied.check_section(reread["kill_switch_unapplied"])
         or canceled.check_section(reread["approval_cancellations"])
         or control_plane.check_section(reread["control_plane"])
         or deployment_manager.check_section(reread["deployment_manager"])
@@ -4285,6 +4301,12 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(timeout_section['invalid_drafts'])} invalid and {len(timeout_section['valid_drafts'])} valid "
         f"approval-timeout drafts, {len(timeouts.VALIDATOR_MUTANTS)} validator and "
         f"{len(timeouts.vector_mutants(timeout_section))} vector mutants caught; "
+        f"{len(retirement_section['invalid_drafts'])} invalid and {len(retirement_section['valid_drafts'])} valid "
+        f"retirement-held drafts and {len(retirement_section['streams'])} rule-266 streams, "
+        f"{len(retirements.VALIDATOR_MUTANTS)} validator, {len(retirements.STREAM_MUTANTS)} stream and "
+        f"{len(retirements.vector_mutants(retirement_section))} vector mutants caught; "
+        f"{len(unapplied_section['streams'])} rule-264 streams, {len(unapplied.STREAM_MUTANTS)} stream and "
+        f"{len(unapplied.vector_mutants(unapplied_section))} vector mutants caught; "
         f"{len(requests_section['invalid_drafts'])} invalid and {len(requests_section['valid_drafts'])} valid "
         f"approval-request drafts, {len(requests.VALIDATOR_MUTANTS)} validator and "
         f"{len(requests.vector_mutants(requests_section))} vector mutants caught; "

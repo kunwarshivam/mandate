@@ -19,6 +19,7 @@ set_password mandate_executor journal-role-mandate-executor
 set_password mandate_verify journal-role-mandate-verify
 set_password mandate_api journal-role-mandate-api
 set_password mandate_deploy_manager journal-role-mandate-deploy-manager
+set_password mandate_role_provisioner journal-role-mandate-role-provisioner
 set_password mandate_runtime journal-role-mandate-runtime
 set_password mandate_scheduler journal-role-mandate-scheduler
 set_password mandate_gateway journal-role-mandate-gateway

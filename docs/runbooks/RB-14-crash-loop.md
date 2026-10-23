@@ -37,8 +37,8 @@ it as a kill switch not yet applied.
 
 What holds while it is down:
 
-- The manager starts the process again only for a kill switch whose scope covers it, once per
-  kill switch, so a kill switch still reaches it (journal spec §9.21, "Which fact is the pause").
+- The manager starts the process again only for a kill switch whose scope covers it, once for the
+  covering switches not yet answered, so a kill switch still reaches it (journal spec §9.21, "Which fact is the pause").
 - A restart of the manager does not bring it back.
 - An executor stays down while any agent of its account is still deployed.
 

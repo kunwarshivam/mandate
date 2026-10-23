@@ -60,6 +60,7 @@ SECTION_3_1 = {
     "exporter": {("postgres", "TCP", 5432), ("object-storage", "TCP", 443), ("timestamping", "TCP", 443)},
     "data": {("market-data", "TCP", 443)},
     "deploy-manager": {("postgres", "TCP", 5432), ("kube-api", "TCP", 6443)},
+    "role-provisioner": {("postgres", "TCP", 5432), ("vault", "TCP", 8200)},
 }
 # The API server's endpoint the tests give the deployment manager (DEC-1172), as `cargo xtask cell
 # up` gives it the cell's own; the manager is the one process that may reach it.
@@ -891,6 +892,7 @@ def api_vault(docs: list[dict], on: bool, manager: bool = False) -> list[str]:
         (w["kind"], w["metadata"]["name"], name)
         for w in workloads(docs)
         for name in APPROLE_NAME.findall(json.dumps(w))
+        if (w["metadata"]["name"], name) != (PROVISIONER, "vault-approle-provisioner")
     )
     named = ["vault-approle-api"] + (["vault-approle-connection-manager"] if manager else [])
     if holders != ([("Deployment", "api", name) for name in sorted(named)] if on else []):
@@ -1151,6 +1153,198 @@ def vault_rule(policy: dict) -> dict:
 def api_env(rendered: list[dict]) -> dict[str, str]:
     """The api container's environment, name to value."""
     return {e["name"]: e.get("value", "") for e in first_container(owner_workload(rendered)).get("env", [])}
+
+
+PROVISIONER = "role-provisioner"
+PROVISIONER_VAULT_SOURCES = {
+    "defaultMode": 288,
+    "sources": [
+        {
+            "secret": {
+                "name": "vault-approle-provisioner",
+                "items": [
+                    {"key": "role-id", "path": "provisioner.role-id"},
+                    {"key": "secret-id", "path": "provisioner.secret-id"},
+                ],
+            }
+        },
+        {"configMap": {"name": "vault-ca", "items": [{"key": "ca.crt", "path": "ca.crt"}]}},
+    ],
+}
+PROVISIONER_VAULT_COPY = [
+    "install",
+    "-m",
+    "0600",
+    "/run/secrets/vault-provisioner/provisioner.role-id",
+    "/run/secrets/vault-provisioner/provisioner.secret-id",
+    "/run/secrets/vault-provisioner/ca.crt",
+    f"{API_VAULT_DIR}/",
+]
+PROVISIONER_ENV = {"MANDATE_JOURNAL_DSN", "PGPASSFILE", "HOME", "MANDATE_DEPLOYMENT_TIER"}
+# Every volume of the provisioner's pod, by name and kind: its scratch space, its journal role's
+# pgpass copy and Secret and the journal's CA, and its vault copy and sources. Anything else, a
+# projected service-account token or another ConfigMap among them, is a credential it must not get.
+PROVISIONER_VOLUMES = {
+    "tmp": "emptyDir",
+    "work": "emptyDir",
+    "pg": "emptyDir",
+    "journal-role": "secret",
+    "journal-ca": "secret",
+    "vault": "emptyDir",
+    "vault-sources": "projected",
+}
+
+
+def provisioner_contained(docs: list[dict], workspace: str) -> list[str]:
+    """The role provisioner's pod (DEC-2350, DEC-2630 item 7) holds its own AppRole and the vault's
+    CA alone, as #2227's owner-only copy makes them, and no Kubernetes credential: no service-account
+    token, no account of its own, no Role or binding; it reads the control stream of the hosted
+    workspace `workspace` as its own journal role, and binds roles in its own namespace; and its
+    egress is the journal and its workspace's vault on 8200, nothing else."""
+    problems = []
+    found = [w for w in workloads(docs) if w["metadata"]["name"] == PROVISIONER]
+    if [w["kind"] for w in found] != ["Deployment"]:
+        return [f"the role provisioner renders as {[w['kind'] for w in found]}"]
+    w = found[0]
+    spec = pod_spec(w)
+    labels = w["spec"]["template"]["metadata"]["labels"]
+    if spec.get("automountServiceAccountToken") is not False or spec.get("serviceAccountName", "default") != "default" or spec.get("serviceAccount", "default") != "default":
+        problems.append("the role provisioner's pod holds a service-account token or an account of its own")
+    if any(d["kind"] in ("ServiceAccount", "Role", "RoleBinding") and PROVISIONER in json.dumps(d) for d in docs):
+        problems.append("a ServiceAccount, Role or binding names the role provisioner")
+    main = next((c for c in spec["containers"] if c["name"] == PROVISIONER), None)
+    if main is None or len(spec["containers"]) != 1:
+        return problems + [f"the role provisioner's containers are {[c['name'] for c in spec['containers']]}"]
+    namespace = api_vault_address(labels).split(".")[1]
+    args = [
+        "run",
+        "--workspace",
+        workspace,
+        "--namespace",
+        namespace,
+        "--probe",
+        "/tmp/process.sock",
+        "--vault-address",
+        api_vault_address(labels),
+        "--vault-dir",
+        API_VAULT_DIR,
+    ]
+    if main.get("args") != args or main.get("command"):
+        problems.append(f"the role provisioner starts as {main.get('command')} {main.get('args')}")
+    env = {e["name"]: e for e in main.get("env", [])}
+    if set(env) != PROVISIONER_ENV or any("valueFrom" in e for e in env.values()) or main.get("envFrom"):
+        problems.append(f"the role provisioner's environment is {sorted(env)}")
+    if not env.get("MANDATE_JOURNAL_DSN", {}).get("value", "").startswith("postgres://mandate_role_provisioner@"):
+        problems.append("the role provisioner reaches the journal as another role")
+    volumes = {v["name"]: v for v in spec.get("volumes", [])}
+    kinds = {n: sorted(k for k in v if k != "name") for n, v in volumes.items()}
+    if kinds != {n: [k] for n, k in PROVISIONER_VOLUMES.items()} or len(volumes) != len(spec.get("volumes", [])):
+        problems.append(f"the role provisioner's pod has the volumes {kinds}")
+    sources = [k for v in volumes.values() if "projected" in v for x in v["projected"]["sources"] for k in x]
+    if sorted(sources) != ["configMap", "secret"]:
+        problems.append(f"the role provisioner's projected sources are {sources}")
+    secrets = sorted(
+        [v["secret"]["secretName"] for v in volumes.values() if "secret" in v]
+        + [x["secret"]["name"] for v in volumes.values() if "projected" in v for x in v["projected"]["sources"] if "secret" in x]
+    )
+    if secrets != sorted(["journal-ca", "journal-role-mandate-role-provisioner", "vault-approle-provisioner"]):
+        problems.append(f"the role provisioner's pod mounts the Secrets {secrets}")
+    if volumes.get("vault-sources", {}).get("projected") != PROVISIONER_VAULT_SOURCES:
+        problems.append(f"the role provisioner's vault sources are {volumes.get('vault-sources')}")
+    if volumes.get("vault", {}).get("emptyDir", {}).get("medium") != "Memory":
+        problems.append(f"the role provisioner's vault directory is {volumes.get('vault')}")
+    copies = [c for c in spec.get("initContainers", []) if c["name"] == "vault-credentials"]
+    if [c.get("command") for c in copies] != [PROVISIONER_VAULT_COPY]:
+        problems.append(f"the role provisioner's credentials are copied by {[c.get('command') for c in copies]}")
+    holders = sorted(
+        (m["name"], c["name"], m.get("mountPath"), m.get("readOnly", False))
+        for c in spec.get("containers", []) + spec.get("initContainers", [])
+        for m in c.get("volumeMounts", [])
+        if m["name"] in ("vault", "vault-sources")
+    )
+    wanted = [
+        ("vault", PROVISIONER, API_VAULT_DIR, True),
+        ("vault", "vault-credentials", API_VAULT_DIR, False),
+        ("vault-sources", "vault-credentials", "/run/secrets/vault-provisioner", True),
+    ]
+    if holders != wanted:
+        problems.append(f"the role provisioner's vault volumes are mounted by {holders}")
+    egress = sorted(k for k, v in labels.items() if k.startswith("mandate.dev/egress-") and v == "true")
+    if egress != ["mandate.dev/egress-postgres", "mandate.dev/egress-vault"]:
+        problems.append(f"the role provisioner's pod carries the egress labels {egress}")
+    rules = policies(docs)[f"egress-{PROVISIONER}"]["spec"]["egress"]
+    if any("to" not in r or "ports" not in r for r in rules):
+        problems.append(f"a role provisioner egress rule names no peer or no port: {rules}")
+    reaching = [r for r in rules if '"vault"' in json.dumps(r) or any(p.get("port") == 8200 for p in r.get("ports", []))]
+    if reaching != [api_vault_rule(labels)]:
+        problems.append(f"the role provisioner's egress to the vault is {reaching}")
+    if len(rules) != 3:
+        problems.append(f"the role provisioner has {len(rules)} egress rules, not DNS, the journal and the vault")
+    holders = [
+        (d["kind"], d["metadata"]["name"])
+        for d in workloads(docs)
+        for _ in range(json.dumps(d).count('"vault-approle-provisioner"'))
+    ]
+    if holders != [("Deployment", PROVISIONER)]:
+        problems.append(f"the role provisioner's AppRole is named by {holders}")
+    return problems
+
+
+def test_the_role_provisioner_holds_its_approle_alone_and_no_kubernetes_credential():
+    docs = render_all()
+    workspace = next(
+        d for d in docs if d["kind"] == "Deployment" and d["metadata"]["name"] == MANAGER
+    )["spec"]["template"]["spec"]["containers"][0]["args"][2]
+    assert provisioner_contained(docs, workspace) == []
+    for check in (hardened, gated, secrets_as_files, default_deny, egress_exact):
+        assert check(docs) == [], check.__name__
+    main = lambda w: next(c for c in pod_spec(w)["containers"] if c["name"] == PROVISIONER)
+    copy_of = lambda w: next(c for c in pod_spec(w)["initContainers"] if c["name"] == "vault-credentials")
+    volume = lambda w, n: next(v for v in pod_spec(w)["volumes"] if v["name"] == n)
+    seeds = [
+        ("Deployment", lambda w: pod_spec(w).update(automountServiceAccountToken=True)),
+        ("Deployment", lambda w: pod_spec(w).update(serviceAccountName=MANAGER)),
+        ("Deployment", lambda w: volume(w, "vault-sources")["projected"].update(defaultMode=292)),
+        ("Deployment", lambda w: volume(w, "vault-sources")["projected"]["sources"][0]["secret"].update(name="vault-approle-api")),
+        ("Deployment", lambda w: volume(w, "vault-sources")["projected"]["sources"].append({"secret": {"name": "vault-approle-executor-6331"}})),
+        ("Deployment", lambda w: pod_spec(w)["volumes"].append({"name": "leak", "secret": {"secretName": "vault-approle-connection-manager"}})),
+        ("Deployment", lambda w: pod_spec(w)["volumes"].append({"name": "kube", "projected": {"sources": [{"serviceAccountToken": {"path": "token", "expirationSeconds": 600}}]}})),
+        ("Deployment", lambda w: volume(w, "vault-sources")["projected"]["sources"].append({"serviceAccountToken": {"path": "token"}})),
+        ("Deployment", lambda w: pod_spec(w)["volumes"].append({"name": "extra", "configMap": {"name": "deploy-manager-templates"}})),
+        ("Deployment", lambda w: pod_spec(w)["volumes"].append({"name": "host", "hostPath": {"path": "/var/run"}})),
+        ("Deployment", lambda w: pod_spec(w)["volumes"].append({"name": "down", "downwardAPI": {"items": [{"path": "ns", "fieldRef": {"fieldPath": "metadata.namespace"}}]}})),
+        ("Deployment", lambda w: volume(w, "work").update(configMap={"name": "vault-ca"})),
+        ("Deployment", lambda w: volume(w, "vault").update(emptyDir={})),
+        ("Deployment", lambda w: copy_of(w)["command"].__setitem__(2, "0640")),
+        ("Deployment", lambda w: main(w)["volumeMounts"].append({"name": "vault-sources", "mountPath": "/run/secrets/vault-provisioner", "readOnly": True})),
+        ("Deployment", lambda w: next(m for m in main(w)["volumeMounts"] if m["name"] == "vault").update(readOnly=False)),
+        ("Deployment", lambda w: main(w)["env"].append({"name": "MANDATE_VAULT_SECRET_ID", "value": "x"})),
+        ("Deployment", lambda w: main(w)["env"].append({"name": "X", "valueFrom": {"secretKeyRef": {"name": "vault-approle-provisioner", "key": "secret-id"}}})),
+        ("Deployment", lambda w: main(w)["args"].__setitem__(4, "kube-system")),
+        ("Deployment", lambda w: main(w)["args"].__setitem__(2, "ws9")),
+        ("Deployment", lambda w: main(w)["args"].__setitem__(8, "https://vault.example.com:8200")),
+        ("Deployment", lambda w: main(w)["args"].append("--fixture")),
+        ("Deployment", lambda w: main(w)["env"][0].update(value="postgres://mandate_deploy_manager@journal-rw:5432/mandate")),
+        ("Deployment", lambda w: w["spec"]["template"]["metadata"]["labels"].update({"mandate.dev/egress-kube-api": "true"})),
+        ("Deployment", lambda w: w["spec"]["template"]["metadata"]["labels"].pop("mandate.dev/egress-vault")),
+        ("NetworkPolicy", lambda p: vault_rule(p)["ports"].append({"protocol": "TCP", "port": 8201})),
+        ("NetworkPolicy", lambda p: vault_rule(p)["to"][0].update(namespaceSelector={})),
+        ("NetworkPolicy", lambda p: p["spec"]["egress"].append({"to": [{"ipBlock": {"cidr": "0.0.0.0/0"}}], "ports": [{"protocol": "TCP", "port": 443}]})),
+        ("NetworkPolicy", lambda p: p["spec"]["egress"].append({"to": [{"podSelector": {}}]})),
+    ]
+    for kind, seed in seeds:
+        name = PROVISIONER if kind == "Deployment" else f"egress-{PROVISIONER}"
+        assert provisioner_contained(mutate(docs, name, kind, seed), workspace), seed
+    leaks = [
+        ("Deployment", "api", lambda w: pod_spec(w).setdefault("volumes", []).append({"name": "leak", "secret": {"secretName": "vault-approle-provisioner"}})),
+        ("Deployment", MANAGER, lambda w: containers(w)[0].setdefault("envFrom", []).append({"secretRef": {"name": "vault-approle-provisioner"}})),
+        ("Pod", "executor", lambda w: pod_spec(w).setdefault("volumes", []).append({"name": "leak", "secret": {"secretName": "vault-approle-provisioner"}})),
+    ]
+    for kind, name, seed in leaks:
+        assert provisioner_contained(mutate(docs, name, kind, seed), workspace), (kind, name)
+    granted = copy.deepcopy(docs)
+    granted.append({"kind": "RoleBinding", "metadata": {"name": "x"}, "subjects": [{"kind": "ServiceAccount", "name": PROVISIONER}]})
+    assert provisioner_contained(granted, workspace), "a binding that names the provisioner is caught"
 
 
 def test_ingress_peers_are_exact_addresses_set_only_when_named():
