@@ -78,7 +78,6 @@ fn bind(vars: &BTreeMap<&'static str, OsString>) -> Result<BoundFinish, Vec<&'st
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn every_setting_valid_binds_the_finish_as_the_connection_manager() {
     let dir = vault_dir(Some(0o600));
     let bound = bind(&all(&dir)).expect("a bound finish");
@@ -92,13 +91,11 @@ fn every_setting_valid_binds_the_finish_as_the_connection_manager() {
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn none_set_names_all_four_in_order() {
     assert_eq!(bind(&BTreeMap::new()).err(), Some(FINISH_SETTINGS.to_vec()));
 }
 
 #[test]
-#[ignore = "pending E10-13"]
 fn a_missing_or_invalid_setting_is_named_alone() {
     let dir = vault_dir(Some(0o600));
     let invalid: [(&str, OsString); 14] = [
@@ -149,7 +146,6 @@ fn the_off_line_names_the_settings_and_nothing_they_hold() {
 /// A vault directory holding the API's pair, or the connection manager's role id alone, or its pair
 /// readable by others, binds nothing: the finish never logs in as another identity.
 #[test]
-#[ignore = "pending E10-13"]
 fn without_the_connection_managers_own_pair_the_finish_binds_nothing() {
     let api_only = bare_dir(Some(0o600));
     write_pair(&api_only, "api", 0o600);

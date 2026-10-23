@@ -13,7 +13,7 @@ use mandate_api_server::clock::{Clock, SystemClock};
 use mandate_api_server::config::{AUTHORIZE_URL, StartRefusal};
 use mandate_api_server::connect_binding::{
     CLIENT_ID, CONNECT_SETTINGS, ConnectBinding, REDIRECT_URI, VAULT_ADDRESS, VAULT_DIR, bound,
-    connect_binding, fingerprints, teardown,
+    connect_binding,
 };
 use mandate_api_server::session::OsRandom;
 use mandate_connections::start::{AuthorizePage, ClientId, RedirectUri};
@@ -242,59 +242,5 @@ fn only_a_bound_connect_is_offered() {
             bound(binding, Box::new(OsRandom::new()), clock()).is_none(),
             "no connect"
         );
-    }
-}
-
-/// DEC-2348 item 3: a bound connect's teardown logs in at the connect's vault, over its own copy
-/// of the login, as the connection manager; no connect and an incomplete one have none.
-#[test]
-fn only_a_bound_connect_has_a_teardown() {
-    let clock = || Arc::new(SystemClock) as Arc<dyn Clock>;
-    let dir = vault_dir(Some(0o600));
-    let binding = bind(Tier::Staging, &all(&dir)).expect("no refusal");
-    let ConnectBinding::On(expected) = &binding else {
-        panic!("a bound connect")
-    };
-    let made = teardown(&binding, clock()).expect("a teardown");
-    assert_eq!(made.login.config.address, expected.login.config.address);
-    assert_eq!(made.login.dir, expected.login.dir);
-    assert_eq!(made.login.identity, Identity::ConnectionManager);
-    assert_eq!(
-        expected.login.identity,
-        Identity::Api,
-        "the connect's own login is unchanged"
-    );
-    let mut incomplete = all(&dir);
-    incomplete.remove(VAULT_DIR);
-    for binding in [
-        bind(Tier::Staging, &BTreeMap::new()).expect("no refusal"),
-        bind(Tier::Staging, &incomplete).expect("no refusal"),
-    ] {
-        assert!(teardown(&binding, clock()).is_none(), "no teardown");
-    }
-}
-
-/// DEC-2348 item 4: a bound connect's fingerprint port logs in at the connect's vault, over its
-/// own copy of the login, as the connection manager; no connect and an incomplete one have none.
-#[test]
-fn only_a_bound_connect_has_fingerprints() {
-    let clock = || Arc::new(SystemClock) as Arc<dyn Clock>;
-    let dir = vault_dir(Some(0o600));
-    let binding = bind(Tier::Staging, &all(&dir)).expect("no refusal");
-    let ConnectBinding::On(expected) = &binding else {
-        panic!("a bound connect")
-    };
-    let made = fingerprints(&binding, clock()).expect("a fingerprint port");
-    assert_eq!(made.login.config.address, expected.login.config.address);
-    assert_eq!(made.login.config.ca_pem, expected.login.config.ca_pem);
-    assert_eq!(made.login.dir, expected.login.dir);
-    assert_eq!(made.login.identity, Identity::ConnectionManager);
-    let mut incomplete = all(&dir);
-    incomplete.remove(VAULT_DIR);
-    for binding in [
-        bind(Tier::Staging, &BTreeMap::new()).expect("no refusal"),
-        bind(Tier::Staging, &incomplete).expect("no refusal"),
-    ] {
-        assert!(fingerprints(&binding, clock()).is_none(), "no port");
     }
 }

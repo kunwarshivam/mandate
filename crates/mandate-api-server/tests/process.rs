@@ -472,7 +472,6 @@ fn the_finish_mode_refuses_a_secret_in_the_environment_and_never_prints_it() {
 
 /// Without its vault settings the finish does not start, and names them alone.
 #[test]
-#[ignore = "pending E10-13"]
 fn the_finish_mode_without_its_vault_settings_names_them() {
     let (code, text) = refused(command(&["finish"], &[]));
     assert_eq!(code, Some(2), "{text}");
@@ -486,7 +485,6 @@ fn the_finish_mode_without_its_vault_settings_names_them() {
 /// With its settings the finish starts, says only `finishing`, and runs until it is stopped; the
 /// vault is not reached before its first pass needs it.
 #[test]
-#[ignore = "pending E10-13"]
 fn the_finish_mode_with_its_settings_runs_until_stopped() {
     let dir = finish_vault_dir("connection-manager");
     let mut child = Running(
@@ -527,7 +525,6 @@ fn the_finish_mode_with_its_settings_runs_until_stopped() {
 /// A vault directory with the CA and the API's pair, but not the connection manager's, refuses
 /// the finish: it never falls back to another identity (DEC-2348 item 3).
 #[test]
-#[ignore = "pending E10-13"]
 fn the_finish_mode_without_the_connection_managers_pair_is_refused() {
     let dir = finish_vault_dir("api");
     let (code, text) = refused(command(

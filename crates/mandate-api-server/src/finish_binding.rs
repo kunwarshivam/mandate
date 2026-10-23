@@ -5,7 +5,15 @@
 //! and names them, never their values.
 
 use std::ffi::OsString;
+use std::path::PathBuf;
 
+use mandate_identity::WorkspaceId;
+use mandate_vault::mounted::read_mounted_credentials;
+use mandate_vault::openbao::OpenBaoConfig;
+use mandate_vault::policy::{Identity, Mounts};
+
+use crate::config::check_database_url;
+use crate::connect_binding::{address_in_form, ca_pem};
 use crate::vault_codes::OpenBaoLogin;
 
 /// The journal's connection string, the same one the API reads.
@@ -44,14 +52,54 @@ pub struct BoundFinish {
 ///
 /// # Errors
 /// The settings of [`FINISH_SETTINGS`] that are missing or invalid, in its order.
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
 pub fn finish_binding(
-    _var: impl Fn(&str) -> Option<OsString>,
+    var: impl Fn(&str) -> Option<OsString>,
 ) -> Result<BoundFinish, Vec<&'static str>> {
-    todo!()
+    let text = |name: &str| var(name).and_then(|value| value.into_string().ok());
+    let database_url =
+        text(DATABASE_URL).filter(|url| !url.is_empty() && check_database_url(url).is_ok());
+    let workspace = text(WORKSPACE)
+        .and_then(|id| WorkspaceId::from_ulid_text(&id).ok())
+        .and_then(|id| id.to_ulid_text().ok());
+    let address = text(FINISH_VAULT_ADDRESS).filter(|address| address_in_form(address));
+    let dir = text(FINISH_VAULT_DIR)
+        .map(PathBuf::from)
+        .filter(|dir| dir.is_absolute());
+    let ca_pem = dir
+        .as_deref()
+        .filter(|dir| read_mounted_credentials(dir, &Identity::ConnectionManager).is_ok())
+        .and_then(ca_pem);
+    match (database_url, workspace, address, dir, ca_pem) {
+        (Some(database_url), Some(workspace), Some(address), Some(dir), Some(ca_pem)) => {
+            Ok(BoundFinish {
+                database_url,
+                workspace,
+                login: OpenBaoLogin {
+                    config: OpenBaoConfig {
+                        address,
+                        ca_pem,
+                        mounts: Mounts::default(),
+                    },
+                    dir,
+                    identity: Identity::ConnectionManager,
+                },
+            })
+        }
+        (database_url, workspace, address, dir, ca_pem) => {
+            let valid = [
+                database_url.is_some(),
+                workspace.is_some(),
+                address.is_some(),
+                dir.is_some() && ca_pem.is_some(),
+            ];
+            Err(FINISH_SETTINGS
+                .into_iter()
+                .zip(valid)
+                .filter(|(_, valid)| !valid)
+                .map(|(name, _)| name)
+                .collect())
+        }
+    }
 }
 
 /// The one line the finish writes when it does not start, naming settings only.
