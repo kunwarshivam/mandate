@@ -957,7 +957,7 @@ pub fn up() -> Result<()> {
         "jsonpath={.metadata.annotations.mandate\\.dev/failure-domain}",
     ])?;
     eprintln!("    journal: failure domains: {}", domain.trim());
-    let fresh = vault()?;
+    let fresh = vault(provisioner.is_some())?;
     if provisioner.is_some() {
         provision_vault(fresh)?;
     }
@@ -1456,15 +1456,13 @@ fn in_vault_pod(command: &[&str], stdin: &[u8]) -> Result<(bool, String)> {
     Ok((out.status.success(), text))
 }
 
-/// The workspace vault (E21-32, DEC-2019): installed without `--wait`, since it is ready only once
-/// unsealed, then initialized once with one unseal key, kept with the root token under
-/// `target/cell` (mode 0600, set again on a file that was already there; the cell holds fake
-/// secrets only), and unsealed with it, the key
-/// passed on stdin and never as an argument. A hosted cell is initialized and unsealed by hand
-/// (deploy/cell/README.md, "The vault"). Answers whether this run initialized it, so a vault made
-/// afresh is provisioned afresh ([`provision_vault`]).
-fn vault() -> Result<bool> {
-    helm(&[
+/// The `helm` arguments that install the cell's vault. With `kube_api`, Kubernetes auth is on as in
+/// staging (DEC-2060, DEC-2062): the vault's pod projects its ServiceAccount's token and the
+/// cluster's CA, the account may review tokens (`system:auth-delegator`), and its egress is the
+/// API server alone, read at install. OpenBao refuses a Kubernetes auth config with no CA to read,
+/// so `mandate vault provision --kubernetes-host` needs it.
+fn vault_install_args(kube_api: bool) -> Vec<&'static str> {
+    let mut args = vec![
         "upgrade",
         "--install",
         "vault",
@@ -1474,7 +1472,23 @@ fn vault() -> Result<bool> {
         "--create-namespace",
         "--timeout",
         "5m",
-    ])?;
+    ];
+    if kube_api {
+        args.extend(["--set", "kubeApi.enabled=true"]);
+    }
+    args
+}
+
+/// The workspace vault (E21-32, DEC-2019): installed without `--wait`, since it is ready only once
+/// unsealed, then initialized once with one unseal key, kept with the root token under
+/// `target/cell` (mode 0600, set again on a file that was already there; the cell holds fake
+/// secrets only), and unsealed with it, the key
+/// passed on stdin and never as an argument. A hosted cell is initialized and unsealed by hand
+/// (deploy/cell/README.md, "The vault"). Answers whether this run initialized it, so a vault made
+/// afresh is provisioned afresh ([`provision_vault`]). With `kube_api`, the vault runs as staging's
+/// does ([`vault_install_args`]), so the Kubernetes auth [`provision_vault`] sets up can be.
+fn vault(kube_api: bool) -> Result<bool> {
+    helm(&vault_install_args(kube_api))?;
     let mut answer = None;
     for _ in 0..POLLS {
         if let Ok((_, status)) = bao(&["status", "-format=json"], b"")
@@ -5720,6 +5734,18 @@ mod tests {
         assert_eq!(process["image"], ROLE_PROVISIONER_PROCESS);
         assert_eq!(process["built"], true);
         Ok(())
+    }
+
+    /// The cell's vault turns Kubernetes auth on exactly when the role provisioner runs, as
+    /// staging's values do; what the chart then renders (the projected token and CA, the reviewer
+    /// binding, egress to the API server alone) is `deploy/tests/test_vault.py`'s.
+    #[test]
+    fn the_vault_runs_kubernetes_auth_for_the_provisioner() {
+        let off = vault_install_args(false);
+        assert!(!off.iter().any(|a| a.starts_with("kubeApi")), "{off:?}");
+        let on = vault_install_args(true);
+        assert_eq!(on[..off.len()], off[..]);
+        assert_eq!(on[off.len()..], ["--set", "kubeApi.enabled=true"]);
     }
 
     /// A vault this run initialized is provisioned even where the Secret is left from the vault
