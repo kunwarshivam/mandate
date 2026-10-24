@@ -16395,7 +16395,7 @@ mod tests {
     /// is CI's own `schema-mutants` job, guarded like the others against drafts, capped at ten
     /// minutes (DEC-464), and needed by the required `full` verdict, which fails on any result of
     /// it but success while every other job passed: the matrix's result, a success only when every
-    /// one of its six shards succeeded. Each shard runs the sweep only after all three checkers
+    /// one of its ten shards succeeded. Each shard runs the sweep only after all three checkers
     /// pass on the unmutated tree: a checker failing there fails the job and runs no mutant.
     #[test]
     fn the_workspace_api_schema_jobs_gate_full() -> Result<()> {
@@ -16463,7 +16463,7 @@ mod tests {
             "if: needs.select.outputs.schema_mutants == 'true'",
             "timeout-minutes: 10",
             "fail-fast: false",
-            "shard: [\"0/6\", \"1/6\", \"2/6\", \"3/6\", \"4/6\", \"5/6\"]",
+            "shard: [\"0/10\", \"1/10\", \"2/10\", \"3/10\", \"4/10\", \"5/10\", \"6/10\", \"7/10\", \"8/10\", \"9/10\"]",
             shard_env.as_str(),
             "run: cargo xtask ci schema-mutants",
         ] {
