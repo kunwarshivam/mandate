@@ -223,7 +223,6 @@ fn an_account_switch_whose_close_filled_lets_the_executor_exit() -> Result<(), E
 /// DEC-2364: a close-position whose answer is lost, the close then expired unfilled, leaves the
 /// switch's 10 shares held, so the executor keeps running, ready or not, pass after pass.
 #[test]
-#[ignore = "pending E7-4"]
 fn an_account_switch_whose_close_answer_is_lost_keeps_the_executor_running() -> Result<(), Error> {
     let (journal, broker) = released("10", false)?;
     account_switched(&journal, &["AAPL"])?;
