@@ -1863,6 +1863,21 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   the right) and never the code; reading a lost check-and-set's `Denied` as a won take fails it,
   and `cargo mutants` finds no missed mutant in `take_code` and `lost_or_denied`.
 
+- **E10-25 (Must, M8, before the founder's staging connect; SC)** As the founder, I want every image
+  that holds `mandate-token-exchange` to carry a CA bundle, so that the exchange's token client can
+  be built and a connect does not end `endpoint_failed` before it sends anything
+  ([DEC-2063](decisions/DEC-2063.md) item 8: on an empty base reqwest's platform verifier finds no
+  roots and the client build fails). *Accepted when:* any image that holds
+  `mandate-token-exchange` (cell or release) carries a CA bundle, and a release check fails the
+  build when the image has no roots, for example by starting the binary in the built image far
+  enough to build its live client.
+
+- **E10-26 (Should, M8; SC)** As an engineer, I want the token exchange's HTTP client to ignore any
+  ambient proxy, as the vault client does (`no_proxy()`), so that the one live token request never
+  goes through a proxy an environment variable names. *Accepted when:* the client is built with
+  `no_proxy()` and a test shows a request built with a proxy variable set still reaches the
+  endpoint directly.
+
 ### E11 Web app: dashboard and controls
 
 - **E11-1 (Must)** As an operator, I want a dashboard of agents, state, positions, P&L, open
