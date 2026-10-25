@@ -480,9 +480,32 @@ fn a_counter_not_above_the_last_is_missing() {
     let mut eleven = asserted_at_twelve.ask();
     eleven.assertion = Some(asserted_at_twelve.signed(11).wire(CREDENTIAL));
     refused(&asserted_at_twelve, &eleven, ProblemCode::StepUpMissing);
+    let mut twelve = asserted_at_twelve.ask();
+    twelve.assertion = Some(asserted_at_twelve.signed(12).wire(CREDENTIAL));
+    refused(&asserted_at_twelve, &twelve, ProblemCode::StepUpMissing);
     let mut thirteen = asserted_at_twelve.ask();
     thirteen.assertion = Some(asserted_at_twelve.signed(13).wire(CREDENTIAL));
     counts(&asserted_at_twelve, &thirteen);
+}
+
+#[test]
+#[ignore = "pending E9-4"]
+fn a_counter_the_authenticator_does_not_keep_counts_while_both_are_zero() {
+    let enrolled_at_zero = world();
+    let mut zero = enrolled_at_zero.ask();
+    zero.assertion = Some(enrolled_at_zero.signed(0).wire(CREDENTIAL));
+    counts(&enrolled_at_zero, &zero);
+
+    let mut asserted_at_zero = world();
+    assert_by(
+        &mut asserted_at_zero.rows,
+        OWNER,
+        T0 - 50,
+        asserted(UNKNOWN_CHALLENGE, CREDENTIAL, 0),
+    );
+    let mut again = asserted_at_zero.ask();
+    again.assertion = Some(asserted_at_zero.signed(0).wire(CREDENTIAL));
+    counts(&asserted_at_zero, &again);
 }
 
 #[test]
