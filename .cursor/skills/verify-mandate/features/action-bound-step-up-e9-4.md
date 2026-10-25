@@ -39,9 +39,9 @@
   read as `null`, one violation beside `cli_confirm` or `null` evidence, and each member's pattern
   at its bounds). The passkey verifier: `crates/mandate-api-server/tests/passkey_stepup.rs`
   (pending E9-4: each challenge refusal, its evidence and its order; the credential's
-  refusals, cool-off, removal, version 1, its backup-eligible flag, the counter, and a fold that
-  cannot answer; and the record a counted step-up returns, the challenge it takes, and the stored
-  assertion's re-verification), with the software
+  refusals, cool-off, removal, version 1, its backup-eligible flag, the counter, a holder broken by
+  rule 251 or 254, and a stream the fold cannot read; and the record a counted step-up returns, the
+  challenge it takes, and the stored assertion's re-verification), with the software
   authenticator in `tests/support_passkey/mod.rs`.
 - **Run:** `cargo nextest run -p mandate-passkey`, `cargo test -p mandate-passkey --doc`,
   `cargo nextest run -p mandate-api-server --test stepup_http --test passkeys_http`, and
