@@ -535,6 +535,11 @@ impl ExecutorState {
                     .keys()
                     .map(|(instrument, _)| instrument.clone()),
             )
+            .chain(
+                self.switches
+                    .values()
+                    .flat_map(|switch| switch.pending.iter().cloned()),
+            )
             .chain(held)
             .collect())
     }

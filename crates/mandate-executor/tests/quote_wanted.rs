@@ -232,7 +232,6 @@ fn an_exit_on_its_own_ladder_wants_its_instruments_quote() {
 /// stop and no confirmed floor, raises no flatten yet, and its instrument is wanted, so the quote
 /// that names the flatten's limit is read (`AGENTS.md` rule 13).
 #[test]
-#[ignore = "pending E21-30"]
 fn a_kill_switch_close_waiting_on_a_price_wants_its_instrument() {
     let (ids, mandates, instruments, config) = (
         TestIds,
