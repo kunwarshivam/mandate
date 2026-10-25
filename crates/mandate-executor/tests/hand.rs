@@ -7079,6 +7079,110 @@ fn a_restart_keeps_the_bound_protection_while_the_close_is_blocked() {
     );
 }
 
+/// DEC-2356 item 1: a sell of ours still working counts as not confirmed cancelled. An agent
+/// switch's flatten rung in flight on the BTC position when the account switch goes, its stop's
+/// cancel confirmed, covers the whole position at the bound, so nothing is placed there beside it.
+#[test]
+fn a_flatten_rung_in_flight_at_the_bound_covers_the_position() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (mut shell, stop) = crypto_stop_account(&ports);
+    shell.run(Input::Market(quote(BTC, "60000", "60010", 20)), &ports);
+    shell.run(
+        Input::Command(Command::KillSwitch {
+            scope: KillScope::Agent(agent(common::AGENT)),
+            initiator: Initiator::RiskLimit,
+            confirmation: None,
+            cause: None,
+        }),
+        &ports,
+    );
+    let stopped = stop("canceled");
+    let sent = shell.run(Input::BrokerUpdate(BrokerUpdate::Order(stopped)), &ports);
+    assert!(
+        sent.submissions()
+            .iter()
+            .any(|o| o.side == Side::Sell && o.purpose != Purpose::Protective),
+        "the agent switch's flatten sends its first rung: {:?}",
+        sent.submissions()
+    );
+    shell.run(account_switch(Initiator::Owner), &ports);
+
+    let bound = shell.run(Input::Tick(clock(20 + 3_600)), &ports);
+
+    assert!(
+        protective_sent(&bound).is_empty(),
+        "the rung still covers the position: {:?}",
+        protective_sent(&bound)
+    );
+}
+
+/// DEC-2356 item 3: the protection placed at the bound takes its prices from its own instrument's
+/// protection, never from another's, though that other's protective order is the later one.
+#[test]
+#[ignore = "pending E7-4"]
+fn the_bound_protection_takes_its_own_instruments_prices() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC, FRAC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (mut shell, stop) = crypto_stop_account(&ports);
+    let btc_stop = Some(common::price("54000"));
+    shell.run(Input::Market(quote(FRAC, "20", "20.1", 20)), &ports);
+    let entry = shell
+        .run(
+            handoff(
+                OTHER_INTENT,
+                common::AGENT,
+                protected_opening(FRAC, "10.4", "20", "18", Some("24")),
+            ),
+            &ports,
+        )
+        .submissions()
+        .first()
+        .map(|o| o.client_order_id.as_str().to_owned())
+        .expect("the FRAC entry is sent");
+    let filled = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+            "b-frac",
+            Some(&entry),
+            FRAC,
+            Side::Buy,
+            "10.4",
+            "10.4",
+            "filled",
+        ))),
+        &ports,
+    );
+    assert!(
+        !protective_sent(&filled).is_empty(),
+        "FRAC's own protection is placed"
+    );
+    shell.run(account_switch(Initiator::Owner), &ports);
+    shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(stop("canceled"))),
+        &ports,
+    );
+
+    let bound = shell.run(Input::Tick(clock(20 + 3_600)), &ports);
+
+    let placed: Vec<_> = bound
+        .submissions()
+        .into_iter()
+        .filter(|o| o.purpose == Purpose::Protective)
+        .map(|o| (o.instrument.as_str().to_owned(), o.stop_price))
+        .collect();
+    assert_eq!(
+        placed,
+        vec![(BTC.to_owned(), btc_stop)],
+        "BTC's protection at BTC's own stop"
+    );
+}
+
 /// DEC-2333 item 5: once BTC's close-position has gone out, nothing is placed there, at the bound
 /// or anywhere else, even with the stop's cancel confirmed and the interval it opens at its bound.
 #[test]
