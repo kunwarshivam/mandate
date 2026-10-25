@@ -1838,7 +1838,21 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   `run --vault-address <address> --vault-dir <dir>`, its projected ServiceAccount token and the
   cell vault's CA, against `oauth-fixture` with a code entry the API wrote; the pod exits 0, the
   code is taken, and the connection's token entry, format 1, is in the vault; the drill runs in the
-  cell jobs, plain and seeded; and the founder's staging connect waits on it.
+  cell jobs, plain and seeded; and the founder's staging connect waits on it. *The drill*
+  ([DEC-2063](decisions/DEC-2063.md)): `cargo xtask cell drill exchange` and the CI job
+  `cell-exchange` run the whole paper connect (stub sign-in, the `connection` challenge,
+  `mandate step-up confirm-connect` in a Job, the start, the fixture's authorize page, the callback)
+  and hold on the exchange pod's success, the taken code and the token entry; the seeded run skips
+  the CLI confirmation and must see the start refused `step_up_missing`. It is also the CLI and
+  API's contract test for DEC-2125.
+- **E10-23 (Should, M8, after E10-22; SC)** As the owner, I want the cell to establish a connection
+  end to end, so that the executor's connect check after an exchange is proven before staging
+  ([DEC-2063](decisions/DEC-2063.md) item 6). *Accepted when:* the cell's executor reads the
+  account from the `oauth-fixture` pod (`GET /v2/account`) through an account reader swapped in at
+  `Start.account`, built only with debug assertions and refused outside the dev and ci tiers, with
+  a test that a release build cannot select it, never through a paper-host override; the fixture
+  answers that route and the executor's dev and ci egress reaches it (lane D1); and a cell drill
+  holds on `ConnectionChecked` and the connection's establishment, plain and seeded.
 
 ### E11 Web app: dashboard and controls
 
@@ -4367,9 +4381,9 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   interprets `PositionReleased`, the released quantity leaves the agent's sub-ledger (`kill.rs`'s
   `sub_ledger`, read by the kill switch and by `ExecutorState::holds_lots`), so the switch sells
   none of the owner's shares and the exit's item 3.6 no longer waits on them. Tests: released lots
-  let the executor exit `completed`; unreleased lots still hold it. The first two are
-  `mandate-executord/tests/released.rs`, pending E6-4 (a release alone, and a connection's kill
-  switch after it). Until this lands, an account stream holding a `PositionReleased` cannot be
+  let the executor exit `completed`; unreleased lots still hold it. All three are in
+  `mandate-executord/tests/released.rs` (a release alone, a connection's kill switch after it, and
+  a release of part of the position). Until this lands, an account stream holding a `PositionReleased` cannot be
   folded by its executor, so a kill switch on that account cannot be applied by the executor
   (`AGENTS.md` rule 13), and the only signal is the manager's `kill_switch_unapplied`
   ([DEC-2344](decisions/DEC-2344.md) item 1): rank this staging-relevant if a release can happen on

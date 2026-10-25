@@ -1029,3 +1029,22 @@ fn a_bar_on_a_session_its_asset_class_never_trades_is_refused_by_index() {
         "the message claims the rule in both directions, not only the continuous-for-equity one"
     );
 }
+
+/// A latency is its milliseconds in nanoseconds, read back exactly; one too long for nanoseconds to
+/// hold is refused as an overflow rather than wrapped.
+#[test]
+fn a_latency_reads_back_its_milliseconds_in_nanoseconds() {
+    assert_eq!(Nanos::ZERO.nanos(), 0);
+    assert_eq!(Nanos::from_millis(0).unwrap().nanos(), 0);
+    assert_eq!(Nanos::from_millis(1).unwrap().nanos(), 1_000_000);
+    assert_eq!(Nanos::from_millis(60_000).unwrap().nanos(), 60_000_000_000);
+    let longest = u64::MAX / 1_000_000;
+    assert_eq!(
+        Nanos::from_millis(longest).unwrap().nanos(),
+        longest * 1_000_000
+    );
+    assert!(matches!(
+        Nanos::from_millis(longest + 1),
+        Err(SimError::Num(_))
+    ));
+}

@@ -150,6 +150,7 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
         "TradingDayStarted" => {
             let date = Date::parse(required_text(payload, "date")?)?;
             state.trading_day = Some(state.trading_day.map_or(date, |current| current.max(date)));
+            state.day_started = Some(event.event_id.clone());
             Ok(())
         }
         "FillApplied" | "LateFillApplied" => fill_applied(state, payload, event.seq),
@@ -165,7 +166,7 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
             state.consecutive_403s = 0;
             Ok(())
         }
-        "ProtectionChanged" => protection_changed(state, payload, at),
+        "ProtectionChanged" => protection_changed(state, payload, at, event.causation_id.as_ref()),
         "AccountStateObserved" => account_observed(state, payload, event.seq),
         "AccountSnapshotRecorded" => {
             account_observed(state, payload, event.seq)?;
@@ -972,6 +973,7 @@ fn leaves_protection(
     id: &ClientOrderId,
     qty: Qty,
 ) {
+    state.alerted.remove(instrument);
     let Some(protection) = state.protection.get_mut(instrument) else {
         return;
     };
@@ -1315,6 +1317,7 @@ fn protection_changed(
     state: &mut ExecutorState,
     payload: &Value,
     at: RiskClock,
+    cause: Option<&EventId>,
 ) -> Result<(), ExecutorError> {
     let instrument = instrument(payload)?;
     let action = required_text(payload, "action")?;
@@ -1338,6 +1341,7 @@ fn protection_changed(
                 let entry = ClientOrderId::parse(entry)?;
                 state.details.entry(entry).or_default().bracket_placed = true;
             }
+            state.alerted.remove(&instrument);
             let orders = protective_orders(payload)?;
             let covered = qty(payload, "qty")?;
             let prices = prices_of(payload)?;
@@ -1374,6 +1378,7 @@ fn protection_changed(
             protection.covered_qty = protection.covered_qty.checked_add(covered)?;
         }
         "cancelled" => {
+            state.alerted.remove(&instrument);
             let orders = protective_orders(payload)?;
             let uncovered = optional_qty(payload, "qty")?;
             if let Some(protection) = state.protection.get_mut(&instrument) {
@@ -1474,7 +1479,11 @@ fn protection_changed(
         "watchdog" => {
             state.watchdogged.insert(instrument.clone(), at);
         }
-        "exit_unpriced" | "ladder_floor" | "expiry_unreplaceable" => {}
+        "expiry_unreplaceable" if cause.is_some() && cause == state.day_started.as_ref() => {
+            state.alerted.insert(instrument.clone());
+        }
+        "expiry_unreplaceable" => {}
+        "exit_unpriced" | "ladder_floor" => {}
         "rung_short" if optional_qty(payload, "sent")? == Some(Qty::ZERO) => {
             let intent = required_text(payload, "intent_id")?;
             if let Some(sequence) = state
