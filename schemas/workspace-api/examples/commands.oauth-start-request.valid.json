@@ -1,12 +1,9 @@
 [
   {
-    "label": "a null step_up and no assertion, which the route refuses",
+    "label": "a null step_up, which the route refuses",
     "set": {
       "/step_up": null
-    },
-    "remove": [
-      "/step_up_assertion"
-    ]
+    }
   },
   {
     "label": "live, which the route refuses as live_unavailable",
@@ -24,10 +21,7 @@
     "label": "cli_confirm step-up with no assertion (DEC-2125)",
     "set": {
       "/step_up/method": "cli_confirm"
-    },
-    "remove": [
-      "/step_up_assertion"
-    ]
+    }
   },
   {
     "label": "cli_confirm step-up with a null assertion",
@@ -37,9 +31,20 @@
     }
   },
   {
-    "label": "passkey step-up without its assertion, which the route refuses step_up_missing",
-    "remove": [
-      "/step_up_assertion"
-    ]
+    "label": "passkey step-up with its assertion (DEC-2126)",
+    "set": {
+      "/step_up_assertion": {
+        "passkey_id": "AQIDBAUGBwgJCgsMDQ4PEA",
+        "authenticator_data": "SZYN5YgOjGh0NBcPZHZgW4_krrmihjLHmVzzuoMdl2MFAAAAAQ",
+        "client_data_json": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0In0",
+        "signature": "MEUCIQDTGOGdiLsJjYpkEnJUg4uk6vbsPMqJYxnHNqVfqH4qPAIgZl1lQ3GqQ2bjdMEpm14p9Lqwd2pHAH8dOrQYp6_L9Q4"
+      }
+    }
+  },
+  {
+    "label": "passkey step-up with a null assertion, which the route refuses step_up_missing",
+    "set": {
+      "/step_up_assertion": null
+    }
   }
 ]
