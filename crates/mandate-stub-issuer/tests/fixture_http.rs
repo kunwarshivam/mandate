@@ -14,7 +14,7 @@ use std::time::Duration;
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use common::{Reply, send};
-use mandate_stub_issuer::alpaca::{AUTHORIZE_PATH, Alpaca, Settings, TOKEN_PATH};
+use mandate_stub_issuer::alpaca::{ACCOUNT_PATH, AUTHORIZE_PATH, Alpaca, Settings, TOKEN_PATH};
 use mandate_stub_issuer::serve::serve_fixture;
 use ring::digest::{SHA256, digest};
 use ring::rand::SystemRandom;
@@ -96,6 +96,31 @@ fn authorize_path() -> String {
 
 fn get(addr: SocketAddr, host: &str, path: &str) -> Reply {
     send(addr, host, "GET", path, &[], b"")
+}
+
+/// A token redeemed from a fresh code at the public host.
+fn redeemed_token(addr: SocketAddr) -> String {
+    let location = get(addr, HOST, &authorize_path())
+        .header("location")
+        .expect("a Location")
+        .to_owned();
+    let code = location
+        .split('&')
+        .find_map(|pair| pair.split_once("code=").map(|(_, code)| code.to_owned()))
+        .expect("a code");
+    let body = joined(&[
+        ("grant_type", "authorization_code"),
+        ("code", &code),
+        ("client_id", "client-1"),
+        ("client_secret", SECRET),
+        ("redirect_uri", REDIRECT),
+        ("code_verifier", VERIFIER),
+    ]);
+    let reply = send(addr, HOST, "POST", TOKEN_PATH, &[FORM], body.as_bytes());
+    reply.json()["access_token"]
+        .as_str()
+        .expect("a token")
+        .to_owned()
 }
 
 #[test]
@@ -183,4 +208,90 @@ fn no_issuer_runs_so_its_routes_and_every_other_path_are_not_found() {
             "{method} {path}"
         );
     }
+}
+
+/// DEC-1178 item 1: a token the fixture issued reads its account at `/alpaca/v2/account`, as
+/// JSON; no bearer or another one is 401 with an empty body; a query or a body is 400; any other
+/// method is not found, and the account is answered at the public host alone.
+#[test]
+#[ignore = "pending E10-23"]
+fn an_issued_tokens_account_is_read_at_the_public_host_and_nothing_else_is() {
+    let addr = serve();
+    let token = redeemed_token(addr);
+    let bearer = format!("Bearer {token}");
+    let read = |path: &str, headers: &[(&str, &str)], body: &[u8]| {
+        send(addr, HOST, "GET", path, headers, body)
+    };
+    let answered = read(ACCOUNT_PATH, &[("Authorization", &bearer)], b"");
+    assert_eq!(
+        answered.status,
+        200,
+        "{:?}",
+        String::from_utf8_lossy(&answered.body)
+    );
+    assert_eq!(answered.header("content-type"), Some("application/json"));
+    let id = answered.json()["id"].as_str().expect("an id").to_owned();
+    assert_eq!(id.len(), 36, "{id}");
+    assert_eq!(answered.json().as_object().map(|o| o.len()), Some(1));
+    assert!(!answered.has_cors());
+    for (headers, why) in [
+        (vec![], "no bearer"),
+        (
+            vec![("Authorization", "Bearer someone-elses")],
+            "another bearer",
+        ),
+        (vec![("Authorization", "Basic x")], "another scheme"),
+    ] {
+        let refused = read(ACCOUNT_PATH, &headers, b"");
+        assert_eq!(
+            refused.status,
+            401,
+            "{why}: {:?}",
+            String::from_utf8_lossy(&refused.body)
+        );
+        assert!(refused.body.is_empty(), "{why}");
+    }
+    let queried = read(
+        &format!("{ACCOUNT_PATH}?x=1"),
+        &[("Authorization", &bearer)],
+        b"",
+    );
+    assert_eq!(queried.status, 400, "a query");
+    let bodied = read(ACCOUNT_PATH, &[("Authorization", &bearer)], b"{}");
+    assert_eq!(bodied.status, 400, "a body");
+    let posted = send(
+        addr,
+        HOST,
+        "POST",
+        ACCOUNT_PATH,
+        &[("Authorization", &bearer)],
+        b"",
+    );
+    assert_eq!(posted.status, 404, "another method");
+    let elsewhere = send(
+        addr,
+        "127.0.0.1:8091",
+        "GET",
+        ACCOUNT_PATH,
+        &[("Authorization", &bearer)],
+        b"",
+    );
+    assert_eq!(elsewhere.status, 421, "another Host");
+    let again = read(ACCOUNT_PATH, &[("Authorization", &bearer)], b"");
+    assert_eq!(
+        again.json()["id"].as_str(),
+        Some(id.as_str()),
+        "the same token, the same account"
+    );
+    let other = redeemed_token(addr);
+    let theirs = read(
+        ACCOUNT_PATH,
+        &[("Authorization", &format!("Bearer {other}"))],
+        b"",
+    );
+    assert_ne!(
+        theirs.json()["id"].as_str(),
+        Some(id.as_str()),
+        "another token, another account"
+    );
 }

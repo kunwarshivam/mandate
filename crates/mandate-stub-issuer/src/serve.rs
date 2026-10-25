@@ -16,7 +16,7 @@ use axum::http::{Method, StatusCode, Version};
 use axum::response::{IntoResponse as _, Response};
 use tokio::net::TcpListener;
 
-use crate::alpaca::{AUTHORIZE_PATH, Alpaca, Refusal, TOKEN_PATH};
+use crate::alpaca::{ACCOUNT_PATH, AUTHORIZE_PATH, Alpaca, Refusal, TOKEN_PATH};
 use crate::issuer::{IssueError, Issuer, TOKEN_TTL_S};
 
 /// The largest `POST /token` body accepted, in bytes.
@@ -145,6 +145,9 @@ async fn answer(State(served): State<Arc<Served>>, request: Request) -> Response
         (&Method::POST, TOKEN_PATH, _) if served.alpaca.is_some() => {
             exchange(served.alpaca.as_deref(), request).await
         }
+        (&Method::GET, ACCOUNT_PATH, _) if served.alpaca.is_some() => {
+            account(served.alpaca.as_deref(), request).await
+        }
         _ => StatusCode::NOT_FOUND.into_response(),
     }
 }
@@ -184,6 +187,12 @@ async fn exchange(alpaca: Option<&Alpaca>, request: Request) -> Response {
         Ok(json) => ([(CONTENT_TYPE, JSON), (CACHE_CONTROL, "no-store")], json).into_response(),
         Err(refusal) => refused(refusal),
     }
+}
+
+/// `GET /alpaca/v2/account` (DEC-1178 item 1): the stub, before E10-23 lands, answers 501.
+async fn account(alpaca: Option<&Alpaca>, request: Request) -> Response {
+    let _unread_by_the_stub = (alpaca, request);
+    (StatusCode::NOT_IMPLEMENTED, "Unimplemented").into_response()
 }
 
 /// A refusal as RFC 6749 §5.2 writes it, never stored by a cache.

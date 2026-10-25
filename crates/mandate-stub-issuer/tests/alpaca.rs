@@ -9,8 +9,8 @@ use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use mandate_stub_issuer::alpaca::{
-    Alpaca, CODE_TTL_S, MAX_CODES, Random, Refusal, SecretFileError, Settings, read_secret,
-    settings,
+    AccountRefusal, Alpaca, CODE_TTL_S, MAX_CODES, MAX_TOKENS, Random, Refusal, SecretFileError,
+    Settings, account_id, read_secret, settings,
 };
 use mandate_stub_issuer::start::Refused;
 use proptest::prelude::{any, prop};
@@ -565,4 +565,104 @@ fn a_redirect_uri_outside_dec_2623s_shape_is_refused_at_start() {
         let settings = settings(Some("client-1"), Some(file), Some(uri));
         assert!(matches!(settings, Err(Refused::Alpaca)), "{uri}");
     }
+}
+
+/// The account id of `token` as DEC-1178 item 1 states it, computed here on its own: SHA-256's
+/// first 16 bytes, the version nibble set to 4 and the variant bits to `10`, in lowercase
+/// hexadecimal grouped 8-4-4-4-12.
+fn expected_id(token: &str) -> String {
+    let sum = digest(&SHA256, token.as_bytes());
+    let mut bytes: Vec<u8> = sum.as_ref().iter().take(16).copied().collect();
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+    format!(
+        "{}-{}-{}-{}-{}",
+        &hex[0..8],
+        &hex[8..12],
+        &hex[12..16],
+        &hex[16..20],
+        &hex[20..32]
+    )
+}
+
+/// A token issued by `provider` for a fresh code at `now`.
+fn issued_token(provider: &Alpaca, now: i64) -> Result<String, Refusal> {
+    let code = code(provider, now);
+    let body = provider.token(&joined(&token_params(&code)), now)?;
+    let answer: serde_json::Value = serde_json::from_str(&body).expect("JSON");
+    Ok(answer["access_token"].as_str().expect("a token").to_owned())
+}
+
+/// The id is the token's SHA-256 as a version 4 UUID: two vectors computed outside the crate, and
+/// for other tokens the test's own derivation; distinct tokens read distinct accounts.
+#[test]
+#[ignore = "pending E10-23"]
+fn an_account_id_is_the_tokens_sha256_as_a_version_4_uuid() {
+    assert_eq!(
+        account_id("token-a"),
+        Ok("a70bf50e-531c-41a8-9756-1f2f5d5b6645".to_owned())
+    );
+    assert_eq!(
+        account_id("token-b"),
+        Ok("49e2bb7e-ab54-4f09-b409-ffafd3fa8a8a".to_owned())
+    );
+    let mut seen = std::collections::BTreeSet::new();
+    for token in ["", "x", "AAAA", "a-much-longer-token-0123456789_-"] {
+        let id = account_id(token).expect("an id");
+        assert_eq!(id, expected_id(token), "{token:?}");
+        assert_eq!(id.as_bytes()[14], b'4', "{id}: version 4");
+        assert!(b"89ab".contains(&id.as_bytes()[19]), "{id}: variant 1");
+        assert!(seen.insert(id), "{token:?} shares an account");
+    }
+}
+
+/// A token the provider issued reads its own account, `{"id": ...}` and nothing else; every other
+/// header, or none, reads nothing, as does another provider's token.
+#[test]
+#[ignore = "pending E10-23"]
+fn an_issued_token_reads_its_account_and_nothing_else_does() {
+    let provider = provider();
+    let token = issued_token(&provider, T0).expect("a token");
+    let body = provider
+        .account(Some(format!("Bearer {token}").as_bytes()))
+        .expect("an account");
+    let answer: serde_json::Value = serde_json::from_str(&body).expect("JSON");
+    assert_eq!(answer, serde_json::json!({ "id": expected_id(&token) }));
+    let foreign = issued_token(&self::provider(), T0).expect("another provider's token");
+    for refused in [
+        None,
+        Some(String::new()),
+        Some("Bearer".to_owned()),
+        Some("Bearer ".to_owned()),
+        Some(format!("bearer {token}")),
+        Some(format!("Basic {token}")),
+        Some(format!("Bearer  {token}")),
+        Some(format!("Bearer {token} ")),
+        Some(format!("Bearer {token}x")),
+        Some(format!("Bearer {foreign}x")),
+        Some("Bearer token-a".to_owned()),
+    ] {
+        assert_eq!(
+            provider.account(refused.as_deref().map(str::as_bytes)),
+            Err(AccountRefusal::Unauthorized),
+            "{refused:?}"
+        );
+    }
+}
+
+/// The provider holds at most [`MAX_TOKENS`] tokens: the next redemption is unavailable, and every
+/// token held still reads its account.
+#[test]
+#[ignore = "pending E10-23"]
+fn the_token_store_holds_at_most_its_bound() {
+    let provider = provider();
+    let first = issued_token(&provider, T0).expect("a token");
+    let read = |token: &str| provider.account(Some(format!("Bearer {token}").as_bytes()));
+    read(&first).expect("a held token reads its account");
+    for _ in 1..MAX_TOKENS {
+        issued_token(&provider, T0).expect("a token");
+    }
+    assert_eq!(issued_token(&provider, T0), Err(Refusal::Unavailable));
+    read(&first).expect("the first token is still held");
 }
