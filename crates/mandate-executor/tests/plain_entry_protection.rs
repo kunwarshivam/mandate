@@ -652,6 +652,9 @@ enum Step {
     StopsAccepted,
     /// The broker rejects every protective order it has not answered.
     StopsRejected,
+    /// The broker confirms the cancel of every stop it accepted that the executor asked to
+    /// cancel, so the wait that cancel held ends here.
+    StopCancelConfirmed,
     /// Another protected opening of 4, once the working entry has ended (at most three in all).
     Add,
     /// The clock moves on this many seconds.
@@ -665,6 +668,7 @@ fn step() -> impl Strategy<Value = Step> {
         Just(Step::CancelConfirmed),
         Just(Step::StopsAccepted),
         Just(Step::StopsRejected),
+        Just(Step::StopCancelConfirmed),
         Just(Step::Add),
         (1u8..=40).prop_map(Step::Wait),
     ]
@@ -766,9 +770,10 @@ impl Book {
     }
 
     /// Whether the executor has asked the broker to cancel an order the broker has not answered:
-    /// an opening still working, a stop never acknowledged, or a stop the broker accepted, whose
-    /// cancel no step of the property ever confirms. An exit waits on that cancel (§5.3 rule 5,
-    /// §5.4's marketable sequence), which is the broker's hold `AGENTS.md` rule 13 allows.
+    /// an opening still working, a stop never acknowledged, or a stop the broker accepted whose
+    /// cancel no `StopCancelConfirmed` step has confirmed yet. An exit waits on that cancel (§5.3
+    /// rule 5, §5.4's marketable sequence), which is the broker's hold `AGENTS.md` rule 13 allows;
+    /// once the broker confirms it, the wait ends and the bound holds the executor to it.
     fn waiting_on_broker(&self) -> bool {
         let working = self
             .openings
@@ -807,7 +812,7 @@ proptest! {
     })]
 
     /// Over any sequence of up to three openings, their fills, part fills, ends and cancels, stop
-    /// acceptances and rejects, and waits:
+    /// acceptances, rejects and confirmed cancels, and waits:
     /// - the protective and exit sells the executor sent never exceed the position the test
     ///   itself summed (rule 12, §5.3 rule 4);
     /// - once an opening's shares have been held past `max_unprotected_s` + one wait, they are
@@ -956,6 +961,25 @@ fn holds(steps: Vec<Step>) -> Result<(), TestCaseError> {
                     if accepted {
                         book.resting.push((stop, shares));
                     }
+                }
+                Ran::default()
+            }
+            Step::StopCancelConfirmed => {
+                let (asked, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut book.resting)
+                    .into_iter()
+                    .partition(|(stop, _)| book.cancels.contains(stop));
+                book.resting = kept;
+                if asked.is_empty() {
+                    continue;
+                }
+                for (stop, _) in asked {
+                    let confirmed = shell.run(
+                        Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+                            client_order_id: stop,
+                        })),
+                        &ports,
+                    );
+                    book.sent(&confirmed);
                 }
                 Ran::default()
             }
