@@ -28,7 +28,7 @@ use mandate_api_server::confirm::CliConfirm;
 use mandate_api_server::methods::{Methods, Passkey};
 use mandate_api_server::stepup::{Action, Asserted, Judged, StepUp, Unverified};
 use mandate_api_server::subject::{LinkRefusal, NamesPrincipal};
-use mandate_canon::Digest;
+use mandate_canon::{Digest, encode_ulid};
 use mandate_identity::MembershipState::Active;
 use mandate_identity::SessionKind::Full;
 use mandate_identity::{
@@ -66,6 +66,7 @@ fn context(who: PrincipalId, kind: StepUpActionKind, place: WorkspaceId) -> Tena
     let roles = [
         (Role::WorkspaceAdmin, at(ISSUED - 86_400)),
         (Role::Operator, at(ISSUED - 86_400)),
+        (Role::Approver, at(ISSUED - 86_400)),
     ];
     let scope = |w: WorkspaceId| Scope::Workspace { org, workspace: w };
     let places = [workspace(WORKSPACE), workspace(NEIGHBOUR)];
@@ -88,12 +89,12 @@ fn context(who: PrincipalId, kind: StepUpActionKind, place: WorkspaceId) -> Tena
     }
 }
 
-/// Subject links that name nobody: no `cli_confirm` evidence counts here.
-struct Unlinked;
+/// Subject links that name the owner alone, so the owner's `cli_confirm` can count.
+struct OwnerLinked;
 
-impl NamesPrincipal for Unlinked {
-    fn names(&self, _principal: PrincipalId) -> Result<bool, LinkRefusal> {
-        Ok(false)
+impl NamesPrincipal for OwnerLinked {
+    fn names(&self, principal: PrincipalId) -> Result<bool, LinkRefusal> {
+        Ok(principal == OWNER)
     }
 }
 
@@ -151,7 +152,7 @@ fn world_with(signer: Signer) -> World {
         },
         cli_confirm: CliConfirm {
             challenges: Arc::clone(&challenges),
-            links: Arc::new(Unlinked),
+            links: Arc::new(OwnerLinked),
         },
     };
     World {
@@ -389,17 +390,86 @@ fn the_first_failing_check_answers_in_consume_s_order() {
     );
 }
 
+/// The test's own Crockford base-32 of the first 40 bits of `bytes` (DEC-2104 item 1).
+fn crockford40(bytes: &[u8]) -> String {
+    const CROCKFORD: &[u8; 32] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+    let bits = bytes
+        .iter()
+        .take(5)
+        .fold(0u64, |acc, byte| (acc << 8) | u64::from(*byte));
+    (0..8)
+        .rev()
+        .map(|i| char::from(CROCKFORD[usize::try_from((bits >> (i * 5)) & 31).expect("5 bits")]))
+        .collect()
+}
+
+/// The owner's `StepUpConfirmed` of the held challenge on the host (journal spec §9.29), 20 s
+/// after it was issued, with the code the web app shows for it.
+fn confirm_on_the_host(w: &mut World) {
+    let challenge = w.record.webauthn_challenge().expect("a canonical record");
+    w.rows.hosted(
+        "StepUpConfirmed",
+        ISSUED + 20,
+        json!({
+            "challenge": CHALLENGE, "action_kind": "connection",
+            "action_digest": format!("sha256:{}", w.action.digest.to_hex()),
+            "principal": encode_ulid(OWNER.0), "code": crockford40(&unb64(&challenge.base64url())),
+            "confirmed_at": ISSUED + 20,
+        }),
+    );
+}
+
 #[test]
 #[ignore = "pending E9-4"]
 fn passkey_evidence_without_an_assertion_is_missing_and_cli_confirm_with_one_is_too() {
-    let w = world();
+    let mut w = world();
     let mut bare = w.ask();
     bare.assertion = None;
     refused(&w, &bare, ProblemCode::StepUpMissing);
 
+    confirm_on_the_host(&mut w);
     let mut confirmed_and_signed = w.ask();
     confirmed_and_signed.evidence = evidence(CHALLENGE, StepUpMethod::CliConfirm);
     refused(&w, &confirmed_and_signed, ProblemCode::StepUpMissing);
+    let mut confirmed = confirmed_and_signed;
+    confirmed.assertion = None;
+    assert_eq!(
+        w.judge(&confirmed),
+        Ok(None),
+        "the same confirmation counts without the assertion, which alone refused it"
+    );
+}
+
+#[test]
+#[ignore = "pending E9-4"]
+fn a_challenge_issued_for_another_kind_with_the_same_digest_is_mismatch() {
+    let w = world();
+    let approval = stepup::Action {
+        kind: StepUpActionKind::Approve,
+        digest: w.action.digest,
+    };
+    let record = w
+        .challenges
+        .issue(
+            &context(OWNER, approval.kind, workspace(WORKSPACE)),
+            approval,
+            AssertionId(UNKNOWN_CHALLENGE.to_owned()),
+            at(ISSUED),
+        )
+        .expect("the owner obtains an approval's challenge");
+    let challenge = record.webauthn_challenge().expect("a canonical record");
+    let mut ask = w.ask();
+    ask.evidence = evidence(UNKNOWN_CHALLENGE, StepUpMethod::Passkey);
+    ask.assertion = Some(
+        w.signer
+            .assert(&unb64(&challenge.base64url()), 9)
+            .wire(CREDENTIAL),
+    );
+    assert_eq!(
+        w.judge(&ask),
+        Err(Unverified::Code(ProblemCode::StepUpMismatch))
+    );
+    assert!(w.challenges.held(UNKNOWN_CHALLENGE).is_some());
 }
 
 #[test]
