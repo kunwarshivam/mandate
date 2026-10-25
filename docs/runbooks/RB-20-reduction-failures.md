@@ -1,4 +1,4 @@
-# RB-19: route 2's failed-assertion limit reached
+# RB-20: route 2's failed-assertion limit reached
 
 The alert this answers comes from the workspace API server ([infrastructure design
 §8.2](../design/infrastructure.md)). It is an opaque operator alert: the code
