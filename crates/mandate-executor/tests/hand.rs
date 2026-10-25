@@ -7119,7 +7119,6 @@ fn a_flatten_rung_in_flight_at_the_bound_covers_the_position() {
 /// DEC-2356 item 3: the protection placed at the bound takes its prices from its own instrument's
 /// protection, never from another's, though that other's protective order is the later one.
 #[test]
-#[ignore = "pending E7-4"]
 fn the_bound_protection_takes_its_own_instruments_prices() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[BTC, FRAC]);

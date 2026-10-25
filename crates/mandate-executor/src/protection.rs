@@ -2694,7 +2694,7 @@ pub(crate) fn bound(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         let alerted = changed(batch, &instrument, "interval_limit", Vec::new())?;
         batch.notify(alerted.clone(), "unprotected_interval_limit");
         let closing = batch.view.closing_all.contains(&instrument);
-        if closing && !exiting {
+        if closing {
             protect_at_bound(batch, &instrument)?;
         }
         let Some(entry) = entry.filter(|_| !exiting && !closing) else {
@@ -2733,7 +2733,10 @@ pub(crate) fn bound(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
 /// confirms nothing, and every sell the last read showed that the fold does not hold. Where that
 /// leaves nothing, or the sum cannot be taken, nothing is placed. Its prices are the resting
 /// protection's, or else the latest protective order's own; with none, nothing is placed, and the
-/// bound's alert has gone. Once the close is requested nothing is placed (item 5).
+/// bound's alert has gone. Once the close is requested nothing is placed (item 5). An exit
+/// sequence there does not stop it: the bound ends those exits, nothing else re-places protection
+/// beside the close, and the exits still working count as not confirmed cancelled (DEC-2356
+/// item 6).
 fn protect_at_bound(
     batch: &mut Batch<'_, '_>,
     instrument: &InstrumentId,
