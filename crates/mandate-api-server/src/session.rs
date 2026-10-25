@@ -484,8 +484,9 @@ impl Sessions {
     }
 
     /// `member`'s standing for route 2: the last sign-in this store opened a full session for
-    /// at, and no deprovision, which has no source yet ([DEC-2319] items 1 and 2, Proposed). A
-    /// reduction-only session is not a sign-in, and a refused open records nothing.
+    /// at, and no deprovision, which has no source yet: [DEC-2319] item 2's interim, until the
+    /// journaled signal the founder chose lands (backlog E9-13). A reduction-only session is not a
+    /// sign-in, and a refused open records nothing.
     ///
     /// [DEC-2319]: ../../../docs/project/decisions/DEC-2319.md
     pub fn standing(&self, member: PrincipalId) -> SubjectStanding {
