@@ -218,6 +218,9 @@ pub(crate) struct Switch {
     /// The orders the switch cancelled, which no refusal of that cancel returns to working while
     /// the broker still reports them working (DEC-2302).
     pub(crate) cancels: BTreeSet<ClientOrderId>,
+    /// The instruments whose close was journaled `exit_unpriced` for want of a limit, from that
+    /// record naming this switch as its cause: alerted once, not again (DEC-2361).
+    pub(crate) unpriced: BTreeSet<InstrumentId>,
 }
 
 /// The bid and floor an owner confirmed for an owner's exit (§5.5, DEC-2040): the ladder prices

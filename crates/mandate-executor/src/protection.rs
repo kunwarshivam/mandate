@@ -1139,7 +1139,18 @@ pub(crate) fn changed(
     batch: &mut Batch<'_, '_>,
     instrument: &InstrumentId,
     action: &str,
+    pairs: Vec<(&'static str, Value)>,
+) -> Result<EventId, ExecutorError> {
+    changed_by(batch, instrument, action, pairs, None)
+}
+
+/// [`changed`], naming `cause` as the record's `causation_id`.
+pub(crate) fn changed_by(
+    batch: &mut Batch<'_, '_>,
+    instrument: &InstrumentId,
+    action: &str,
     mut pairs: Vec<(&'static str, Value)>,
+    cause: Option<EventId>,
 ) -> Result<EventId, ExecutorError> {
     if !pairs
         .iter()
@@ -1175,7 +1186,7 @@ pub(crate) fn changed(
         };
         closed.push((member, value));
     }
-    batch.journal("ProtectionChanged", None, closed)
+    batch.journal("ProtectionChanged", cause, closed)
 }
 
 /// A protective order's confirmed cancel (§5.4), recorded. Releasing the waiting exits is

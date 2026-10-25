@@ -6219,7 +6219,6 @@ fn unpriced_alerts(ran: &common::Ran) -> (usize, usize) {
 /// no quote, floor or protective stop to name a limit from, is journaled `exit_unpriced` and
 /// alerted once, never silent, and later steps do not repeat it.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_switch_close_with_nothing_to_price_from_is_alerted_once() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);

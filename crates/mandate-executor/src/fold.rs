@@ -165,7 +165,10 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
             state.consecutive_403s = 0;
             Ok(())
         }
-        "ProtectionChanged" => protection_changed(state, payload, at),
+        "ProtectionChanged" => {
+            unpriced_close(state, event)?;
+            protection_changed(state, payload, at)
+        }
         "AccountStateObserved" => account_observed(state, payload, event.seq),
         "AccountSnapshotRecorded" => {
             account_observed(state, payload, event.seq)?;
@@ -438,6 +441,23 @@ fn owner_confirmation_received(
     Ok(())
 }
 
+/// DEC-2361 item 2: an `exit_unpriced` naming an agent switch as its cause is that switch's close
+/// alerted for want of a limit, noted on the switch so it is alerted once.
+fn unpriced_close(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), ExecutorError> {
+    if required_text(&event.payload, "action")? != "exit_unpriced" {
+        return Ok(());
+    }
+    let Some(switch) = event
+        .causation_id
+        .as_ref()
+        .and_then(|cause| state.switches.get_mut(cause))
+    else {
+        return Ok(());
+    };
+    switch.unpriced.insert(instrument(&event.payload)?);
+    Ok(())
+}
+
 /// One agent-scoped `KillSwitchActivated` (§5.5, DEC-485 item 3): the agent, the purpose its
 /// sells carry, the owner's confirmed floor if any, and the closes it named, now or deferred,
 /// every one pending until its flatten's `IntentReceived` folds. Any other scope, the account and
@@ -497,6 +517,7 @@ fn kill_switch_activated(
         bid: optional_price(payload, "bid")?,
         pending: instruments.iter().cloned().collect(),
         instruments,
+        unpriced: BTreeSet::new(),
     };
     state.switches.insert(event.event_id.clone(), switch);
     Ok(())
