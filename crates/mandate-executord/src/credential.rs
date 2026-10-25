@@ -46,6 +46,7 @@ use mandate_vault::policy::{Identity, Mounts};
 use mandate_vault::source::SecretSource;
 use secrecy::{ExposeSecret, SecretString};
 
+use crate::Wiring;
 use crate::alpaca::AlpacaBroker;
 use crate::lease::{Held, Leased, runtime};
 use crate::quotes::{QuoteBounds, QuoteFeed};
@@ -410,6 +411,27 @@ pub fn paper_quote_bounds() -> Result<QuoteBounds, &'static str> {
         max_age: Duration::from_secs(10),
         max_spread: Fraction::parse("0.02").map_err(|_| "quote_bounds_invalid")?,
     })
+}
+
+#[allow(
+    non_upper_case_globals,
+    reason = "the pending gate recognises a stub by the name `Unimplemented` (DEC-137)"
+)]
+pub const Unimplemented: &str = "unimplemented";
+
+/// The paper serve path's wiring (DEC-2359 item 2): the fixture's, with the quote feed over
+/// `broker`'s own transport and credential, judged by [`paper_quote_bounds`] on `clock`.
+///
+/// # Errors
+/// The fixture wiring's refusal, `quote_bounds_invalid` when the bounds do not read, and
+/// `runtime_unavailable` when the feed's runtime cannot be built.
+pub fn paper_wiring<T, P>(broker: &AlpacaBroker<T>, clock: P) -> Result<Wiring, &'static str>
+where
+    T: TradingTransport + DataTransport + Clone + 'static,
+    P: Pause + 'static,
+{
+    let _ = (broker, clock);
+    Err(Unimplemented)
 }
 
 /// The latest-quote read of Alpaca's market-data host, over the connection's transport.

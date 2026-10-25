@@ -1,0 +1,7 @@
+file = "crates/mandate-executord/tests/quote_feed.rs"
+test = "a_waiting_exits_quote_is_read_once_per_step"
+reason = """
+The process reads no quote while its `read_quotes` stub hands nothing, so the test fails on the
+count of reads the feed saw, not at a stub's report. E21-30's implementation PR deletes the row
+with the stub.
+"""
