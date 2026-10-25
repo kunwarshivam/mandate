@@ -6224,6 +6224,78 @@ fn a_release_in_another_instrument_leaves_this_ones_protection_whole() {
     assert_eq!(buffer_day_after(&[released_of("MSFT", "4")]), qty("10"));
 }
 
+/// A filled order of `agent`'s in `instrument`, `side` `qty` at 150, named `id`: its submission
+/// and its fill, unplaced.
+fn filled_order(
+    id: &str,
+    agent: &str,
+    instrument: &str,
+    side: &str,
+    qty: &str,
+) -> [mandate_executor::FoldedEvent; 2] {
+    [
+        event(
+            ACCOUNT_STREAM,
+            0,
+            "OrderSubmitted",
+            with_clock(
+                &[
+                    ("client_order_id", text(id)),
+                    ("agent", text(agent)),
+                    ("instrument", text(instrument)),
+                    ("side", text(side)),
+                    ("qty", text(qty)),
+                    ("limit", text("150")),
+                ],
+                26,
+            ),
+        ),
+        event(
+            ACCOUNT_STREAM,
+            0,
+            "FillApplied",
+            with_clock(
+                &[
+                    ("fill_id", text(&format!("f-{id}"))),
+                    ("client_order_id", text(id)),
+                    ("instrument", text(instrument)),
+                    ("side", text(side)),
+                    ("qty_gross", text(qty)),
+                    ("price", text("150")),
+                ],
+                26,
+            ),
+        ),
+    ]
+}
+
+/// DEC-2362 item 1 counts the instrument's own lots only: the agent's 5 shares of another symbol
+/// leave the AAPL release of 4 what it is, so the agent's 6 AAPL are covered.
+#[test]
+#[ignore = "pending E6-4"]
+fn another_instruments_lots_leave_this_ones_release_as_it_is() {
+    let mut before = vec![released_of(AAPL, "4")];
+    before.extend(filled_order("md-msft-1", common::AGENT, "MSFT", "buy", "5"));
+    assert_eq!(buffer_day_after(&before), qty("6"));
+}
+
+/// DEC-2362 item 1 floors each agent's kept lots at zero: another agent that sold 3 it never
+/// bought adds nothing to the agents' shares, so the owner, holding 1 of the 4 released, keeps
+/// that 1 out of the agent's protection, which covers the agent's 6.
+#[test]
+#[ignore = "pending E6-4"]
+fn an_agent_that_sold_more_than_it_holds_adds_nothing_to_the_agents_shares() {
+    let mut before = vec![released_of(AAPL, "4")];
+    before.extend(filled_order(
+        "md-other-sell",
+        OTHER_AGENT,
+        AAPL,
+        "sell",
+        "3",
+    ));
+    assert_eq!(buffer_day_after(&before), qty("6"));
+}
+
 /// The protected 10 with the owner's release of `released` of them folded and an agent's risk exit
 /// of 2 that filled, so the executor placed its own protection again, which the broker accepts
 /// and then reports expired: the re-placement step and the expiry step.
