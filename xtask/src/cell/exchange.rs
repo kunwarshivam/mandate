@@ -185,6 +185,21 @@ pub fn newest_exchange(pods: &str, connection: &str) -> Option<(String, String)>
     ))
 }
 
+/// How a failed exchange pod's container ended, from `kubectl get pod -o json`: its exit code and
+/// reason and when it started and finished, which tells a connect that timed out from an answer
+/// refused at once. Never its termination message, which may hold its log.
+pub fn termination(pod: &str) -> Option<String> {
+    let pod: Value = serde_json::from_str(pod).ok()?;
+    let ended = &pod["status"]["containerStatuses"][0]["state"]["terminated"];
+    Some(format!(
+        "exit {} ({}) started {} finished {}",
+        ended["exitCode"].as_i64()?,
+        ended["reason"].as_str().unwrap_or("no reason"),
+        ended["startedAt"].as_str().unwrap_or("unknown"),
+        ended["finishedAt"].as_str().unwrap_or("unknown"),
+    ))
+}
+
 /// What a report may say of a failed exchange's logs, the exchange pod's and the fixture's: only
 /// their lines of lowercase words, `[a-z_]+` separated by single spaces, which is all either writes
 /// for a refusal (`mandate-token-exchange`'s `main`, the fixture's `token_refused <error> <cause>`),
@@ -365,7 +380,11 @@ pub fn drill(seeded: bool) -> Result<Verdict> {
         Some((_, phase)) if phase == "Succeeded" => {}
         Some((pod, phase)) => {
             let log = kubectl(&["logs", "--namespace", NAMESPACE, &pod]).unwrap_or_default();
-            let fixture = kubectl(&[
+            let ran = kubectl(&["get", "pod", "--namespace", NAMESPACE, &pod, "-o", "json"])
+                .ok()
+                .and_then(|json| termination(&json))
+                .unwrap_or_else(|| "no termination recorded".to_owned());
+            let fixture = match kubectl(&[
                 "logs",
                 "--namespace",
                 NAMESPACE,
@@ -373,13 +392,18 @@ pub fn drill(seeded: bool) -> Result<Verdict> {
                 "mandate.dev/process=oauth-fixture",
                 "--tail",
                 "50",
-            ])
-            .unwrap_or_default();
+            ]) {
+                Ok(log) => format!(
+                    "codes {:?} of {} lines",
+                    codes_only(&log),
+                    log.lines().count()
+                ),
+                Err(error) => format!("log unreadable: {error:#}"),
+            };
             return Ok(Verdict::Broken(format!(
-                "the exchange pod {pod} for {connection} did not succeed: {phase}, codes {:?}; \
-                 the fixture's codes {:?}",
-                codes_only(&log),
-                codes_only(&fixture)
+                "the exchange pod {pod} for {connection} did not succeed: {phase}, codes {:?}, \
+                 {ran}; the fixture's {fixture}",
+                codes_only(&log)
             )));
         }
         None => {
@@ -609,6 +633,24 @@ mod tests {
                 "token_refused invalid_grant redirect_uri"
             ]
         );
+    }
+
+    #[test]
+    fn a_failed_pod_s_termination_names_its_exit_and_times_alone() {
+        let pod = json!({"status": {"containerStatuses": [{"state": {"terminated": {
+            "exitCode": 1,
+            "reason": "Error",
+            "message": "endpoint_failed",
+            "startedAt": "2026-10-25T22:01:40Z",
+            "finishedAt": "2026-10-25T22:01:46Z",
+        }}}]}});
+        assert_eq!(
+            termination(&pod.to_string()).as_deref(),
+            Some("exit 1 (Error) started 2026-10-25T22:01:40Z finished 2026-10-25T22:01:46Z")
+        );
+        let running = json!({"status": {"containerStatuses": [{"state": {"running": {}}}]}});
+        assert_eq!(termination(&running.to_string()), None);
+        assert_eq!(termination("not json"), None);
     }
 
     #[test]
