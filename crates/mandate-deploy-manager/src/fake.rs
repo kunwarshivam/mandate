@@ -4,6 +4,8 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
+use mandate_time::UtcNanos;
+
 use crate::control::Slot;
 use crate::orchestrator::{Instance, Launch, Orchestrator, Phase, Unavailable};
 
@@ -14,6 +16,7 @@ pub enum Call {
         slot: Slot,
         generation: u64,
         lifetime: Option<Duration>,
+        expires_at: Option<UtcNanos>,
         connection: Option<String>,
     },
     Stop {
@@ -148,6 +151,7 @@ impl Orchestrator for Fake {
             slot: slot.clone(),
             generation,
             lifetime: launch.lifetime,
+            expires_at: launch.expires_at,
             connection: launch.connection.clone(),
         });
         self.instances

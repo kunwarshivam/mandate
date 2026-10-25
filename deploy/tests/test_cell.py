@@ -2018,7 +2018,8 @@ PROCESS_VARIABLE = (
     ' ? object.metadata.labels["mandate.dev/process"] : ""'
 )
 # The names the manager's adapter adds to each of a pod's containers, its init containers aside
-# (crates/mandate-deploy-manager kubernetes.rs); a token exchange's also names its account.
+# (crates/mandate-deploy-manager kubernetes.rs); a token exchange's also names its account and its
+# request's expiry (DEC-2363).
 MANAGER_ENV = ["MANDATE_WORKSPACE", "MANDATE_PROCESS", "MANDATE_SUBJECT", "MANDATE_GENERATION"]
 # The connection a test's token exchange is for, and the account DEC-2060 names for it: `x` and the
 # id's bytes in lowercase hex.
@@ -2027,7 +2028,12 @@ CONNECTION_ACCOUNT = "x" + CONNECTION.encode().hex()
 # The account an executor for the same connection runs as: the bare hex (DEC-2060, DEC-2336), and
 # the names its environment adds beside a token exchange's.
 EXECUTOR_ACCOUNT = CONNECTION.encode().hex()
-OWN_ENV = {EXCHANGE: ["MANDATE_SUBJECT_ACCOUNT"], "executor": ["MANDATE_SUBJECT_ACCOUNT", "MANDATE_WORKSPACE_NAMESPACE"]}
+OWN_ENV = {
+    EXCHANGE: ["MANDATE_SUBJECT_ACCOUNT", "MANDATE_REQUEST_EXPIRES_AT"],
+    "executor": ["MANDATE_SUBJECT_ACCOUNT", "MANDATE_WORKSPACE_NAMESPACE"],
+}
+# The request expiry a test's token exchange is given (DEC-2363), in the journal's form of a time.
+REQUEST_EXPIRES_AT = "2026-10-17T15:10:10.000000000Z"
 # The evaluator the tests run the rendered policies' CEL on: cel-python, pinned in python/pyproject
 # (DEC-1177), so a loosened expression is caught by what it admits, not by how it reads.
 CEL = celpy.Environment()
@@ -2216,6 +2222,8 @@ def as_started(pod: dict) -> dict:
             c["env"].append({"name": "MANDATE_SUBJECT_ACCOUNT", "value": own})
         if name == "executor":
             c["env"].append({"name": "MANDATE_WORKSPACE_NAMESPACE", "value": "ws-ws1"})
+        if exchange:
+            c["env"].append({"name": "MANDATE_REQUEST_EXPIRES_AT", "value": REQUEST_EXPIRES_AT})
     return pod
 
 
@@ -2270,6 +2278,14 @@ def attacks(pod: dict) -> list[tuple[str, dict]]:
         changed(
             "a second connection in its environment",
             lambda b: first(b)["env"].append({"name": "MANDATE_SUBJECT", "value": "conn_other"}),
+        ),
+        changed(
+            "no request expiry in its environment",
+            lambda b: first(b)["env"].remove(env(b, "MANDATE_REQUEST_EXPIRES_AT")),
+        ),
+        changed(
+            "a second request expiry in its environment",
+            lambda b: first(b)["env"].append({"name": "MANDATE_REQUEST_EXPIRES_AT", "value": REQUEST_EXPIRES_AT}),
         ),
         changed("no namespace file", lambda b: projected(b)["sources"].pop(1)),
         changed("an optional vault CA", lambda b: vault_ca(b).update(optional=True)),
@@ -2381,6 +2397,18 @@ def attacks(pod: dict) -> list[tuple[str, dict]]:
             else executor_only()
             if process_name == "executor"
             else others_only()
+        ),
+        *(
+            []
+            if process_name == EXCHANGE
+            else [
+                changed(
+                    "a request expiry on a process that is not an exchange",
+                    lambda b: first(b)["env"].append(
+                        {"name": "MANDATE_REQUEST_EXPIRES_AT", "value": REQUEST_EXPIRES_AT}
+                    ),
+                )
+            ]
         ),
         changed("an altered command", lambda b: first(b).update(command=["/bin/sh", "-c", "id"])),
         changed("altered arguments", lambda b: first(b).update(args=[*first(b).get("args", []), "--extra"])),
