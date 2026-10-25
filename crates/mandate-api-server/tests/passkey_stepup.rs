@@ -37,7 +37,7 @@ use mandate_identity::{
 };
 use mandate_identity_testkit::{StaticLookup, membership, session};
 use mandate_journal::StoredEvent;
-use mandate_passkey::stepup::{self, ChallengeRecord, permission_for};
+use mandate_passkey::stepup::{self, ChallengeRecord, permission_for, reverify};
 use serde_json::json;
 use support_passkey::{
     CREDENTIAL, OTHER_CREDENTIAL, Signed, Signer, asserted, backup_eligible, enrol, enrol_at,
@@ -244,6 +244,84 @@ fn refused(w: &World, ask: &Ask, code: ProblemCode) {
     assert!(w.held(), "a refused step-up leaves the challenge held");
 }
 
+/// What a counted step-up returns, read member by member.
+fn members(asserted: &Asserted) -> (String, String, u32, Vec<u8>) {
+    (
+        asserted.challenge().to_owned(),
+        asserted.credential().to_owned(),
+        asserted.sign_count(),
+        asserted.assertion().to_vec(),
+    )
+}
+
+#[test]
+#[ignore = "pending E9-4"]
+fn a_valid_assertion_counts_once_returns_its_record_and_drops_the_challenge() {
+    for signer in [Signer::es256(), Signer::ed25519()] {
+        let w = world_with(signer);
+        let signed = w.signed(9);
+        let mut ask = w.ask();
+        ask.assertion = Some(signed.wire(CREDENTIAL));
+        let counted = w.judge(&ask).map(|a| a.as_ref().map(members));
+        let expected = (
+            CHALLENGE.to_owned(),
+            CREDENTIAL.to_owned(),
+            9,
+            signed.canonical(CREDENTIAL),
+        );
+        assert_eq!(counted, Ok(Some(expected)), "{}", w.signer.alg());
+        assert!(!w.held(), "the challenge is taken once it counts");
+        assert_eq!(
+            w.judge(&ask),
+            Err(Unverified::Code(ProblemCode::StepUpMissing)),
+            "a challenge never verifies twice"
+        );
+    }
+}
+
+#[test]
+#[ignore = "pending E9-4"]
+fn a_second_assertion_on_one_challenge_is_missing() {
+    let w = world();
+    assert!(matches!(w.judge(&w.ask()), Ok(Some(_))));
+    let mut again = w.ask();
+    again.assertion = Some(w.signed(10).wire(CREDENTIAL));
+    assert_eq!(
+        w.judge(&again),
+        Err(Unverified::Code(ProblemCode::StepUpMissing))
+    );
+}
+
+#[test]
+#[ignore = "pending E9-4"]
+fn the_stored_assertion_re_verifies_against_the_credential() {
+    let w = world();
+    let counted = w.judge(&w.ask()).map(|a| a.map(|a| a.assertion().to_vec()));
+    let Ok(Some(stored)) = counted else {
+        panic!("the step-up counts: {counted:?}");
+    };
+    let object: serde_json::Value = serde_json::from_slice(&stored).expect("a JSON object");
+    let text = |name: &str| unb64(object[name].as_str().expect("a text member"));
+    let id = text("passkey_id");
+    let (authenticator_data, client_data_json, signature) = (
+        text("authenticator_data"),
+        text("client_data_json"),
+        text("signature"),
+    );
+    let assertion = mandate_passkey::Assertion {
+        credential_id: &id,
+        authenticator_data: &authenticator_data,
+        client_data_json: &client_data_json,
+        signature: &signature,
+    };
+    let credential = w.signer.credential(CREDENTIAL);
+    assert_eq!(
+        reverify(&support_passkey::rp(), &w.record, &credential, &assertion)
+            .map(|verified| verified.sign_count),
+        Ok(9)
+    );
+}
+
 #[test]
 #[ignore = "pending E9-4"]
 fn an_unknown_challenge_is_missing() {
@@ -420,6 +498,19 @@ fn a_credential_not_the_principal_s_held_and_past_cool_off_is_missing() {
 
 #[test]
 #[ignore = "pending E9-4"]
+fn a_credential_past_cool_off_at_its_end_counts() {
+    let mut w = world();
+    w.rows = Rows::opened();
+    enrol(
+        &mut w.rows,
+        T0 - 900,
+        enrolled(OWNER, CREDENTIAL, &w.signer, 0, Some(ISSUED + 30)),
+    );
+    assert!(matches!(w.judge(&w.ask()), Ok(Some(_))));
+}
+
+#[test]
+#[ignore = "pending E9-4"]
 fn a_counter_not_above_the_last_is_missing() {
     let mut enrolled_at_nine = world();
     enrolled_at_nine.rows = Rows::opened();
@@ -559,4 +650,28 @@ fn a_backup_eligible_flag_other_than_the_registration_s_is_missing() {
         .assert_backup_eligible(&unb64(&challenge.base64url()), 9);
     ask.assertion = Some(signed.wire(CREDENTIAL));
     refused(&not_eligible, &ask, ProblemCode::StepUpMissing);
+}
+
+#[test]
+#[ignore = "pending E9-4"]
+fn a_backup_eligible_flag_the_registration_recorded_counts() {
+    let mut w = world();
+    w.rows = Rows::opened();
+    let payload = backup_eligible(enrolled(OWNER, CREDENTIAL, &w.signer, 0, None));
+    enrol(&mut w.rows, T0 - 900, payload);
+    let challenge = w.record.webauthn_challenge().expect("a canonical record");
+    let mut ask = w.ask();
+    let signed = w
+        .signer
+        .assert_backup_eligible(&unb64(&challenge.base64url()), 9);
+    ask.assertion = Some(signed.wire(CREDENTIAL));
+    assert_eq!(
+        w.judge(&ask).map(|a| a.as_ref().map(members)),
+        Ok(Some((
+            CHALLENGE.to_owned(),
+            CREDENTIAL.to_owned(),
+            9,
+            signed.canonical(CREDENTIAL)
+        )))
+    );
 }
