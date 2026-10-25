@@ -174,15 +174,20 @@ enum Answered {
 
 /// The line for `answered`: `fixture_answered` and its word.
 fn answered_line(answered: Answered) -> &'static str {
-    let _ = answered;
-    "not yet implemented\n"
+    match answered {
+        Answered::Misdirected => "fixture_answered misdirected\n",
+        Answered::HttpVersion => "fixture_answered http_version\n",
+        Answered::NotFound => "fixture_answered not_found\n",
+    }
 }
 
 impl Served {
     /// Writes `answered`'s line when the provider runs alone, the fixture mode; the sign-in
     /// issuer writes none (DEC-2366).
     fn note(&self, answered: Answered) {
-        write_line(answered_line(answered));
+        if self.issuer.is_none() {
+            write_line(answered_line(answered));
+        }
     }
 }
 
@@ -229,7 +234,7 @@ async fn exchange(alpaca: Option<&Alpaca>, request: Request) -> Response {
 }
 
 /// The line for an issued token (DEC-2366): the word alone, never the token.
-const ISSUED_LINE: &str = "not yet implemented\n";
+const ISSUED_LINE: &str = "token_issued\n";
 
 /// The line for a token request that is not a form (DEC-1179 item 2).
 const MEDIA_TYPE_LINE: &str = "token_refused unsupported_media_type\n";

@@ -488,7 +488,6 @@ fn joined(params: &[(&str, &str)]) -> String {
 /// `token_issued` for an issued token: lowercase words alone, so nothing the request carried and
 /// no token reaches its log. The sign-in issuer names no answer.
 #[test]
-#[ignore = "pending E10-23"]
 fn the_fixture_names_each_unrouted_answer_and_each_issued_token_in_words_alone() {
     let (owner, _) = secret_files();
     let (mut child, _stdout, addr, _) = fixture(&owner);
