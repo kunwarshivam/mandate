@@ -6369,6 +6369,182 @@ fn a_released_unattributed_partial_fill_leaves_the_switch_nothing() {
     );
 }
 
+/// The agent's owner switch over its protected position, its flatten raised and waiting on the
+/// OCO's cancel, then the owner's release of `released` of the 10 shares before that cancel is
+/// confirmed: what the confirmation sends.
+fn released_while_the_flatten_waits(released: &str) -> common::Ran {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = protected_position(&ports);
+    shell.run(Input::Market(quote(AAPL, "155", "155.1", 20)), &ports);
+    shell.run(
+        Input::Command(Command::KillSwitch {
+            scope: KillScope::Agent(agent(common::AGENT)),
+            initiator: Initiator::Owner,
+            confirmation: Some(owner_confirmation()),
+            cause: None,
+        }),
+        &ports,
+    );
+    release(&mut shell, common::AGENT, released);
+    shell.run(
+        Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+            client_order_id: "md-oco-1".to_owned(),
+        })),
+        &ports,
+    )
+}
+
+/// DEC-2360 item 1, rule 13: a release written after the switch sized its flatten, before that
+/// flatten was sent, shrinks it to the sub-ledger at send time, so the owner's 4 shares are never
+/// offered, and the shorter send is journaled `rung_short`.
+#[test]
+fn a_release_while_the_flatten_waits_shrinks_its_sell() {
+    let sent = released_while_the_flatten_waits("4");
+    let sold: Vec<String> = sent
+        .submissions()
+        .into_iter()
+        .filter(|order| order.side == Side::Sell)
+        .map(|order| order.qty.to_string())
+        .collect();
+    assert_eq!(sold, ["6"], "{:?}", sent.draft_types());
+    let short: Vec<&str> = sent
+        .drafts
+        .iter()
+        .filter(|draft| {
+            draft.event_type == "ProtectionChanged"
+                && draft
+                    .payload
+                    .get("action")
+                    .and_then(mandate_canon::Value::as_str)
+                    == Some("rung_short")
+        })
+        .filter_map(|draft| {
+            draft
+                .payload
+                .get("sent")
+                .and_then(mandate_canon::Value::as_str)
+        })
+        .collect();
+    assert_eq!(
+        short,
+        ["6"],
+        "the shorter send is journaled (DEC-2360 item 1): {:?}",
+        sent.draft_types()
+    );
+}
+
+/// DEC-2360 item 2: a release of the whole position before the flatten was sent leaves it nothing
+/// to sell, so it is abandoned, never sent, and the owner alerted (`exit_released`). The
+/// protection the ended sequence re-places is DEC-2360 item 4's, not this test's.
+#[test]
+fn a_release_of_everything_while_the_flatten_waits_abandons_it() {
+    let sent = released_while_the_flatten_waits("10");
+    assert!(
+        sent.submissions()
+            .into_iter()
+            .filter(|order| order.purpose != Purpose::Protective)
+            .all(|order| order.side != Side::Sell),
+        "{:?}",
+        sent.draft_types()
+    );
+    let reasons: Vec<&str> = sent
+        .drafts
+        .iter()
+        .filter(|draft| draft.event_type == "OrderAbandoned")
+        .filter_map(|draft| {
+            draft
+                .payload
+                .get("reason")
+                .and_then(mandate_canon::Value::as_str)
+        })
+        .collect();
+    assert_eq!(reasons, ["released_to_owner"], "{:?}", sent.draft_types());
+    assert!(
+        sent.notifications.contains(&"exit_released"),
+        "the owner is told the switch has nothing left to sell there: {:?}",
+        sent.notifications
+    );
+}
+
+/// DEC-2360 item 1 on the ladder (§5.6 step 2): a release between rungs shrinks the next rung to
+/// the sub-ledger, so the flatten's 10 becomes 6 once the owner takes 4.
+#[test]
+fn a_release_between_rungs_shrinks_the_next_rung() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = protected_position(&ports);
+    shell.run(Input::Market(quote(AAPL, "155", "155.1", 20)), &ports);
+    shell.run(
+        Input::Command(Command::KillSwitch {
+            scope: KillScope::Agent(agent(common::AGENT)),
+            initiator: Initiator::RiskLimit,
+            confirmation: None,
+            cause: None,
+        }),
+        &ports,
+    );
+    let sent = shell.run(
+        Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+            client_order_id: "md-oco-1".to_owned(),
+        })),
+        &ports,
+    );
+    let first = sent
+        .submissions()
+        .first()
+        .copied()
+        .cloned()
+        .expect("the flatten's first rung");
+    assert_eq!(first.qty, qty("10"));
+    release(&mut shell, common::AGENT, "4");
+    let (_, confirmed) = step_rung(&mut shell, &ports, 16, first.client_order_id.as_str());
+    let next = confirmed
+        .submissions()
+        .first()
+        .copied()
+        .cloned()
+        .expect("the step's confirmation submits the next rung");
+    assert_eq!(next.qty, qty("6"), "{:?}", confirmed.draft_types());
+}
+
+/// DEC-2360 invariant 4, rule 13: the cap reaches a switch's own flatten only. After the agent
+/// released 4 of its 10, a risk exit of 10 that is not a switch's still sends all 10, unshrunk.
+#[test]
+fn a_release_leaves_an_exit_other_than_a_switch_flatten_whole() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = protected_position(&ports);
+    shell.run(Input::Market(quote(AAPL, "155", "155.1", 20)), &ports);
+    release(&mut shell, common::AGENT, "4");
+    shell.run(
+        handoff(INTENT, common::AGENT, risk_exit(AAPL, "10", "155")),
+        &ports,
+    );
+    let sent = shell.run(
+        Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+            client_order_id: "md-oco-1".to_owned(),
+        })),
+        &ports,
+    );
+    let sold: Vec<String> = sent
+        .submissions()
+        .into_iter()
+        .filter(|order| order.side == Side::Sell)
+        .map(|order| order.qty.to_string())
+        .collect();
+    assert_eq!(sold, ["10"], "{:?}", sent.draft_types());
+}
+
 /// The agent's position of 10 whose OCO was cancelled before any switch, so no protective stop
 /// is left, with no quote ever seen; then its risk-limit switch, with no floor, and a tick: the
 /// shell and what the switch's step and the tick journaled and alerted.

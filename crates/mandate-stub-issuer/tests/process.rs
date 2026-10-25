@@ -7,6 +7,10 @@ use std::io::{BufRead, BufReader, Read};
 use std::process::{Command, Output, Stdio};
 use std::time::Duration;
 
+use base64::Engine as _;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use ring::digest::{SHA256, digest};
+
 const BIN: &str = env!("CARGO_BIN_EXE_mandate-stub-issuer");
 
 fn stub(tier: Option<&str>, bind: &str) -> Command {
@@ -453,6 +457,157 @@ fn the_fixture_writes_each_token_refusal_as_its_code_and_cause_alone() {
         "client-1",
         "127.0.0.1:8080",
         verifier,
+    ] {
+        assert!(!stderr.contains(value), "{value:?} in {stderr:?}");
+    }
+}
+
+/// RFC 3986 percent-encoding of everything but the unreserved characters.
+fn encode(value: &str) -> String {
+    value
+        .bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                char::from(b).to_string()
+            }
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
+}
+
+fn joined(params: &[(&str, &str)]) -> String {
+    params
+        .iter()
+        .map(|(name, value)| format!("{name}={}", encode(value)))
+        .collect::<Vec<_>>()
+        .join("&")
+}
+
+/// DEC-2366: beside its token refusals, the fixture writes `fixture_answered misdirected`,
+/// `fixture_answered http_version` and `fixture_answered not_found` for those answers, and
+/// `token_issued` for an issued token: lowercase words alone, so nothing the request carried and
+/// no token reaches its log. The sign-in issuer names no answer.
+#[test]
+fn the_fixture_names_each_unrouted_answer_and_each_issued_token_in_words_alone() {
+    let (owner, _) = secret_files();
+    let (mut child, _stdout, addr, _) = fixture(&owner);
+    let host = format!("oauth-fixture:{}", addr.port());
+    let elsewhere = common::send(addr, &addr.to_string(), "GET", "/jwks.json", &[], b"");
+    assert_eq!(elsewhere.status, 421);
+    let old = common::raw(
+        addr,
+        format!("GET /jwks.json HTTP/1.0\r\nHost: {host}\r\n\r\n").as_bytes(),
+    );
+    assert_eq!(old.status, 505);
+    assert_eq!(
+        common::send(addr, &host, "GET", "/jwks.json", &[], b"").status,
+        404
+    );
+    let verifier = "verifier-canary-0123456789-abcdefghijklmnopqrstu";
+    let challenge = URL_SAFE_NO_PAD.encode(digest(&SHA256, verifier.as_bytes()));
+    let query = joined(&[
+        ("response_type", "code"),
+        ("client_id", "client-1"),
+        ("redirect_uri", REDIRECT),
+        ("state", "state-canary-31"),
+        ("code_challenge", &challenge),
+        ("code_challenge_method", "S256"),
+        ("scope", "trading data"),
+        ("env", "paper"),
+    ]);
+    let authorized = common::send(
+        addr,
+        &host,
+        "GET",
+        &format!("/alpaca/oauth/authorize?{query}"),
+        &[],
+        b"",
+    );
+    let code = authorized
+        .header("location")
+        .and_then(|l| {
+            l.split('&')
+                .find_map(|p| p.split_once("code=").map(|(_, c)| c.to_owned()))
+        })
+        .expect("a code");
+    let body = joined(&[
+        ("grant_type", "authorization_code"),
+        ("code", &code),
+        ("client_id", "client-1"),
+        ("client_secret", "secret-canary-9f2a"),
+        ("redirect_uri", REDIRECT),
+        ("code_verifier", verifier),
+    ]);
+    let issued = common::send(
+        addr,
+        &host,
+        "POST",
+        "/alpaca/oauth/token",
+        &[("Content-Type", "application/x-www-form-urlencoded")],
+        body.as_bytes(),
+    );
+    assert_eq!(issued.status, 200);
+    let token = issued.json()["access_token"]
+        .as_str()
+        .expect("a token")
+        .to_owned();
+    let _ = Command::new("kill")
+        .args(["-TERM", &child.0.id().to_string()])
+        .status();
+    let status = child.0.wait().expect("an exit");
+    assert!(status.success(), "{status:?}");
+    let mut stderr = String::new();
+    child
+        .0
+        .stderr
+        .take()
+        .expect("stderr")
+        .read_to_string(&mut stderr)
+        .expect("stderr");
+    assert_eq!(
+        stderr,
+        "fixture_answered misdirected\n\
+         fixture_answered http_version\n\
+         fixture_answered not_found\n\
+         token_issued\n"
+    );
+    assert!(
+        stderr
+            .lines()
+            .all(|line| line.split(' ').all(|word| !word.is_empty()
+                && word.bytes().all(|b| b.is_ascii_lowercase() || b == b'_'))),
+        "lowercase words alone: {stderr:?}"
+    );
+    let (mut issuer, _stdout, at) = started(&[], "authenticated");
+    assert_eq!(
+        common::send(at, "elsewhere:1", "GET", "/jwks.json", &[], b"").status,
+        421
+    );
+    assert_eq!(
+        common::send(at, &at.to_string(), "GET", "/nope", &[], b"").status,
+        404
+    );
+    let _ = Command::new("kill")
+        .args(["-TERM", &issuer.0.id().to_string()])
+        .status();
+    issuer.0.wait().expect("an exit");
+    let mut quiet = String::new();
+    issuer
+        .0
+        .stderr
+        .take()
+        .expect("stderr")
+        .read_to_string(&mut quiet)
+        .expect("stderr");
+    assert_eq!(quiet, "", "the sign-in issuer names no answer");
+    for value in [
+        code.as_str(),
+        token.as_str(),
+        "secret-canary-9f2a",
+        "state-canary-31",
+        "client-1",
+        verifier,
+        host.as_str(),
     ] {
         assert!(!stderr.contains(value), "{value:?} in {stderr:?}");
     }

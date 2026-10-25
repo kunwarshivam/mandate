@@ -3645,6 +3645,20 @@ fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
         "  \"authenticator_data\": \"{}\",",
         concat!("TZYN5YgOjGh0NBcPZHZgW4_krrmihjLHmVzz", "uoMdl2MFAAAABw")
     );
+    let start_decoder = "crates/mandate-api/tests/step_up_assertion.rs";
+    let start_authenticator = format!(
+        "            authenticator_data: \"{}\".to_owned(),",
+        concat!("SZYN5YgOjGh0NBcPZHZgW4_krrmihjLHmVzz", "uoMdl2MFAAAACQ")
+    );
+    let not_start_authenticator = format!(
+        "            authenticator_data: \"{}\".to_owned(),",
+        concat!("TZYN5YgOjGh0NBcPZHZgW4_krrmihjLHmVzz", "uoMdl2MFAAAACQ")
+    );
+    let start_example = "schemas/workspace-api/examples/commands.oauth-start-request.valid.json";
+    let start_example_data = format!(
+        "  \"authenticator_data\": \"{}\",",
+        concat!("SZYN5YgOjGh0NBcPZHZgW4_krrmihjLHmVzz", "uoMdl2MFAAAAAQ")
+    );
     let journal_yaml = "docs/specs/reference-cases/journal.yaml";
     let credential_line = format!("        credential: {}", "AAECAwQFBgcICQoLDA0ODw");
     let not_credential_line = format!("        credential: {}", "ZZECAwQFBgcICQoLDA0ODw");
@@ -3742,6 +3756,19 @@ fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
         (
             passkey_authenticator.to_owned(),
             not_authenticator_data,
+            generic,
+        ),
+        (start_decoder.to_owned(), start_authenticator.clone(), None),
+        (
+            "stray-step-up-assertion.rs".to_owned(),
+            start_authenticator,
+            generic,
+        ),
+        (start_decoder.to_owned(), not_start_authenticator, generic),
+        (start_example.to_owned(), start_example_data.clone(), None),
+        (
+            "stray-oauth-start-request.json".to_owned(),
+            start_example_data,
             generic,
         ),
         (journal_yaml.to_owned(), credential_line.clone(), None),
