@@ -6690,6 +6690,315 @@ fn a_switch_close_alerted_unpriced_sells_once_a_quote_arrives() {
     assert_eq!(sold, ["10"], "{:?}", quoted.draft_types());
 }
 
+/// The buffer day's replacement of the protected 10 after `before` folds onto it: the quantity
+/// re-placed once the expiring OCO's cancel is confirmed.
+fn buffer_day_after(before: &[mandate_executor::FoldedEvent]) -> mandate_num::Qty {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = protected_position(&ports);
+    for event in before {
+        let mut event = event.clone();
+        event.seq = mandate_executor::Seq(shell.head().0.saturating_add(1));
+        shell.fold_one(&event).expect("folds");
+    }
+    let day = copied(
+        ACCOUNT_STREAM,
+        shell.head().0.saturating_add(1),
+        "TradingDayStarted",
+        with_clock(&[("date", text("2026-12-14"))], 7_000_000),
+        &EventId(format!("{CLOCK_STREAM}-9")),
+    );
+    shell.fold_one(&day).expect("the trading day folds");
+    shell.run(Input::Journal(day), &ports);
+    let confirmed = shell.run(
+        Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+            client_order_id: "md-oco-1".to_owned(),
+        })),
+        &ports,
+    );
+    re_placed(&confirmed, None)
+}
+
+/// The owner's release of `qty` of `instrument` from the agent (journal spec §9.27), unplaced.
+fn released_of(instrument: &str, qty: &str) -> mandate_executor::FoldedEvent {
+    event(
+        ACCOUNT_STREAM,
+        0,
+        "PositionReleased",
+        with_clock(
+            &[
+                ("agent_id", text(common::AGENT)),
+                ("instrument", text(instrument)),
+                ("qty", text(qty)),
+                ("cause", text("owner_release")),
+            ],
+            25,
+        ),
+    )
+}
+
+/// DEC-2362 invariant 3: once the owner has sold the 4 shares they took, nothing of theirs is left
+/// in the position, so the agent's 6 stay wholly protected.
+#[test]
+fn released_shares_the_owner_sold_leave_the_agents_protection_whole() {
+    let sold = event(
+        ACCOUNT_STREAM,
+        0,
+        "FillApplied",
+        with_clock(
+            &[
+                ("fill_id", text("f-owner")),
+                ("instrument", text(AAPL)),
+                ("side", text("sell")),
+                ("qty_gross", text("4")),
+                ("price", text("150")),
+            ],
+            26,
+        ),
+    );
+    assert_eq!(buffer_day_after(&[released_of(AAPL, "4"), sold]), qty("6"));
+}
+
+/// DEC-2362 item 1 reads the instrument's own releases only: a release in another instrument
+/// leaves this one's protection whole.
+#[test]
+fn a_release_in_another_instrument_leaves_this_ones_protection_whole() {
+    assert_eq!(buffer_day_after(&[released_of("MSFT", "4")]), qty("10"));
+}
+
+/// A filled order of `agent`'s in `instrument`, `side` `qty` at 150, named `id`: its submission
+/// and its fill, unplaced.
+fn filled_order(
+    id: &str,
+    agent: &str,
+    instrument: &str,
+    side: &str,
+    qty: &str,
+) -> [mandate_executor::FoldedEvent; 2] {
+    [
+        event(
+            ACCOUNT_STREAM,
+            0,
+            "OrderSubmitted",
+            with_clock(
+                &[
+                    ("client_order_id", text(id)),
+                    ("agent", text(agent)),
+                    ("instrument", text(instrument)),
+                    ("side", text(side)),
+                    ("qty", text(qty)),
+                    ("limit", text("150")),
+                ],
+                26,
+            ),
+        ),
+        event(
+            ACCOUNT_STREAM,
+            0,
+            "FillApplied",
+            with_clock(
+                &[
+                    ("fill_id", text(&format!("f-{id}"))),
+                    ("client_order_id", text(id)),
+                    ("instrument", text(instrument)),
+                    ("side", text(side)),
+                    ("qty_gross", text(qty)),
+                    ("price", text("150")),
+                ],
+                26,
+            ),
+        ),
+    ]
+}
+
+/// DEC-2362 item 1 counts the instrument's own lots only: the agent's 5 shares of another symbol
+/// leave the AAPL release of 4 what it is, so the agent's 6 AAPL are covered.
+#[test]
+fn another_instruments_lots_leave_this_ones_release_as_it_is() {
+    let mut before = vec![released_of(AAPL, "4")];
+    before.extend(filled_order("md-msft-1", common::AGENT, "MSFT", "buy", "5"));
+    assert_eq!(buffer_day_after(&before), qty("6"));
+}
+
+/// DEC-2362 item 1 floors each agent's kept lots at zero: another agent that sold 3 it never
+/// bought adds nothing to the agents' shares, so the owner, holding 1 of the 4 released, keeps
+/// that 1 out of the agent's protection, which covers the agent's 6.
+#[test]
+fn an_agent_that_sold_more_than_it_holds_adds_nothing_to_the_agents_shares() {
+    let mut before = vec![released_of(AAPL, "4")];
+    before.extend(filled_order(
+        "md-other-sell",
+        OTHER_AGENT,
+        AAPL,
+        "sell",
+        "3",
+    ));
+    assert_eq!(buffer_day_after(&before), qty("6"));
+}
+
+/// The protected 10 with the owner's release of `released` of them folded and an agent's risk exit
+/// of 2 that filled, so the executor placed its own protection again, which the broker accepts
+/// and then reports expired: the re-placement step and the expiry step.
+fn released_then_lost(released: &str) -> (common::Ran, common::Ran) {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = protected_position(&ports);
+    release(&mut shell, common::AGENT, released);
+    shell.run(
+        handoff(INTENT, common::AGENT, risk_exit(AAPL, "2", "155")),
+        &ports,
+    );
+    shell.run(
+        Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+            client_order_id: "md-oco-1".to_owned(),
+        })),
+        &ports,
+    );
+    let exit = format!("md-{INTENT}");
+    let ended = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+            "b-exit",
+            Some(&exit),
+            AAPL,
+            Side::Sell,
+            "2",
+            "2",
+            "filled",
+        ))),
+        &ports,
+    );
+    let Some(placed) = ended
+        .submissions()
+        .into_iter()
+        .find(|order| order.purpose == Purpose::Protective)
+        .cloned()
+    else {
+        return (ended, common::Ran::default());
+    };
+    let report = |status| {
+        Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+            "b-placed",
+            Some(placed.client_order_id.as_str()),
+            AAPL,
+            Side::Sell,
+            &placed.qty.to_string(),
+            "0",
+            status,
+        )))
+    };
+    shell.run(report("accepted"), &ports);
+    let lost = shell.run(report("expired"), &ports);
+    (ended, lost)
+}
+
+/// DEC-2362 item 1 at `re_cover`: with the owner holding 4 released shares and the agent's exit of
+/// 2 filled, the agent's re-placed protection, lost at the broker, is placed again for the
+/// agent's 4, never for the owner's released shares.
+#[test]
+fn a_re_cover_after_a_release_protects_only_the_agents_shares() {
+    let (_, lost) = released_then_lost("4");
+    assert_eq!(re_placed(&lost, None), qty("4"), "{:?}", lost.draft_types());
+}
+
+/// DEC-2362 item 1: after the owner took 8 of the 10 and the agent's exit sold its other 2, nothing
+/// of the agent's is left to protect, so no protection is placed on the owner's shares, at the
+/// exit's end or at a later loss.
+#[test]
+fn a_release_of_all_the_agent_keeps_places_no_protection() {
+    let (ended, lost) = released_then_lost("8");
+    for ran in [&ended, &lost] {
+        assert!(
+            ran.submissions()
+                .into_iter()
+                .all(|order| order.purpose != Purpose::Protective),
+            "{:?}",
+            ran.draft_types()
+        );
+    }
+}
+
+/// DEC-2362 item 1 at the end of an exit sequence: with the owner holding 4 released shares, the
+/// agent's risk exit of 2 leaves it 4, and that is what the re-placement covers.
+#[test]
+fn an_exits_re_placement_after_a_release_protects_only_the_agents_shares() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = protected_position(&ports);
+    release(&mut shell, common::AGENT, "4");
+    shell.run(
+        handoff(INTENT, common::AGENT, risk_exit(AAPL, "2", "155")),
+        &ports,
+    );
+    shell.run(
+        Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+            client_order_id: "md-oco-1".to_owned(),
+        })),
+        &ports,
+    );
+    let exit = format!("md-{INTENT}");
+    let ended = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+            "b-exit",
+            Some(&exit),
+            AAPL,
+            Side::Sell,
+            "2",
+            "2",
+            "filled",
+        ))),
+        &ports,
+    );
+    assert_eq!(
+        re_placed(&ended, None),
+        qty("4"),
+        "{:?}",
+        ended.draft_types()
+    );
+}
+
+/// DEC-2362 item 1 at `new_day`: the buffer day's replacement of the protected 10, after the owner
+/// took 4, covers the agent's 6.
+#[test]
+fn a_buffer_day_re_placement_after_a_release_protects_only_the_agents_shares() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = protected_position(&ports);
+    release(&mut shell, common::AGENT, "4");
+    let day = copied(
+        ACCOUNT_STREAM,
+        shell.head().0.saturating_add(1),
+        "TradingDayStarted",
+        with_clock(&[("date", text("2026-12-14"))], 7_000_000),
+        &EventId(format!("{CLOCK_STREAM}-9")),
+    );
+    shell.fold_one(&day).expect("the trading day folds");
+    shell.run(Input::Journal(day), &ports);
+    let confirmed = shell.run(
+        Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+            client_order_id: "md-oco-1".to_owned(),
+        })),
+        &ports,
+    );
+    assert_eq!(
+        re_placed(&confirmed, None),
+        qty("6"),
+        "{:?}",
+        confirmed.draft_types()
+    );
+}
+
 #[test]
 fn an_agent_kill_switch_sells_exactly_the_sub_ledger_quantity() {
     let ids = TestIds;

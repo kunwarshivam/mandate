@@ -4406,11 +4406,10 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   [DEC-2360](decisions/DEC-2360.md) takes the first: each send, the first and every rung, is capped
   at the sub-ledger; its tests are in `hand.rs`, pending E6-4.
 - **E6-4 (protection sizing after a release), from [DEC-2360](decisions/DEC-2360.md) item 4:**
-  protection the executor places or re-places (§5.4's sequence end, `re_cover`, `new_day`) is sized
-  at the long position, so after a release it covers the owner's released shares with the agent's
-  protective order, which a stop would sell. Size it at the agents' own lots, the owner's released
-  shares left out, with a DEC-77 pair (`a_release_of_everything_while_the_flatten_waits_abandons_it`
-  shows an OCO of 10 placed after a release of all 10).
+  protection the executor places again (the sequence end's `re_place`, `re_cover`, `new_day`) is
+  sized at the long position, so after a release it covers the owner's released shares with the
+  agent's protective order. [DEC-2362](decisions/DEC-2362.md) sizes it at the long position less
+  the released shares the owner still holds; its tests are in `hand.rs`, pending E6-4.
 - **E7-4 (executor kill switch), from [DEC-2361](decisions/DEC-2361.md):** a switch's close that
   no limit can be named for (no quote, no protective stop, no floor) is skipped silently by
   `flatten_closes`. Journal it `exit_unpriced` and alert once per switch and instrument; the
