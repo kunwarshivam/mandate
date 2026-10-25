@@ -358,7 +358,7 @@ fn switched_without_protection(quotes: Recorded) -> Result<(Journal, Vec<SubmitO
 /// sends nothing and journals the wait `exit_unpriced`; once the feed reads the instrument's quote,
 /// the close is raised at it and sells the agent's ten.
 #[test]
-fn a_kill_switchs_unpriced_close_goes_once_its_quote_is_read() -> Result<(), Error> {
+fn an_unpriced_kill_switch_close_goes_once_its_quote_is_read() -> Result<(), Error> {
     let (journal, unquoted) = switched_without_protection(Recorded::default())?;
     assert_eq!(
         journal.applications(),
