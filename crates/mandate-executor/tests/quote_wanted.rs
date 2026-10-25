@@ -1,8 +1,9 @@
 //! E21-30, DEC-2359: the instruments whose exit waits on a price, which the process's quote feed
 //! reads. Each case builds its state from journaled records and handed inputs, and states the set
 //! it expects from what it built, never from the accessor's own rule: a held exit and an exit in
-//! §5.4's sequence are wanted; a position with only resting protection is not, nor a held opening,
-//! nor an account with nothing waiting.
+//! §5.4's sequence or on its own ladder are wanted, and so is each leg of a held flatten; a
+//! position with only resting protection is not, nor a held opening, nor an account with nothing
+//! waiting.
 
 mod common;
 
@@ -12,11 +13,12 @@ use common::{
     ACCOUNT_STREAM, AGENT, FixedInstruments, FixedMandate, Ran, Shell, TestIds, config, event,
     handoff, instrument, qty, quote, stream_opened, text, with_clock,
 };
-use mandate_accounting::{InstrumentId, Side};
+use mandate_accounting::{AssetClass, InstrumentId, Side};
 use mandate_canon::Value;
-use mandate_executor::{Input, IntentBody, Ports, Purpose};
+use mandate_executor::{FlattenLeg, FlattenPlan, Input, IntentBody, Ports, Purpose};
 
 const AAPL: &str = FixedInstruments::LIQUID_EQUITY;
+const CPHC: &str = FixedInstruments::THIN_EQUITY;
 const INTENT: &str = "01JABCDEFGHJKMNPQRSTVWXYZ0";
 const BID: &str = "150";
 
@@ -33,17 +35,15 @@ fn market_exit(purpose: Purpose) -> IntentBody {
     }
 }
 
-/// Ten `AAPL` bought by `AGENT` and filled, with nothing resting, folded at `at`.
-fn held(ports: &Ports<'_>, at: i64) -> Shell {
-    let mut shell = Shell::new(1);
-    let order = || text("md-held-1");
+/// Ten `name` bought by `AGENT` under `order` and filled, folded onto `shell` at `at`.
+fn buy(shell: &mut Shell, name: &str, order: &str, at: i64) {
     let events = [
         (
             "OrderSubmitted",
             vec![
-                ("client_order_id", order()),
+                ("client_order_id", text(order)),
                 ("agent", text(AGENT)),
-                ("instrument", text(AAPL)),
+                ("instrument", text(name)),
                 ("side", text("buy")),
                 ("qty", text("10")),
                 ("limit", text(BID)),
@@ -52,9 +52,9 @@ fn held(ports: &Ports<'_>, at: i64) -> Shell {
         (
             "FillApplied",
             vec![
-                ("fill_id", text("f-0")),
-                ("client_order_id", order()),
-                ("instrument", text(AAPL)),
+                ("fill_id", text(&format!("f-{order}"))),
+                ("client_order_id", text(order)),
+                ("instrument", text(name)),
                 ("side", text("buy")),
                 ("qty_gross", text("10")),
                 ("price", text(BID)),
@@ -62,11 +62,11 @@ fn held(ports: &Ports<'_>, at: i64) -> Shell {
         ),
         (
             "OrderStateChanged",
-            vec![("client_order_id", order()), ("state", text("filled"))],
+            vec![("client_order_id", text(order)), ("state", text("filled"))],
         ),
     ];
-    shell.fold_one(&stream_opened()).expect("the stream opens");
-    for (seq, (event_type, pairs)) in (2_u64..).zip(events) {
+    for (event_type, pairs) in events {
+        let seq = shell.head().0.saturating_add(1);
         shell
             .fold_one(&event(
                 ACCOUNT_STREAM,
@@ -76,6 +76,13 @@ fn held(ports: &Ports<'_>, at: i64) -> Shell {
             ))
             .expect("the position folds");
     }
+}
+
+/// Ten `AAPL` bought by `AGENT` and filled, with nothing resting, folded at `at`.
+fn held(ports: &Ports<'_>, at: i64) -> Shell {
+    let mut shell = Shell::new(1);
+    shell.fold_one(&stream_opened()).expect("the stream opens");
+    buy(&mut shell, AAPL, "md-held-1", at);
     shell.restart_ready(ports)
 }
 
@@ -194,6 +201,72 @@ fn an_exit_in_its_sequence_wants_its_instruments_quote() {
         "the case builds a sequence that cancels the protection first"
     );
     assert_eq!(wanted(&shell), only(AAPL));
+}
+
+/// §5.6: an exit at the market beside no protection is priced by its own ladder from the quote,
+/// and while the ladder runs its instrument is wanted, so each step prices from a fresh quote.
+#[test]
+#[ignore = "pending E21-30"]
+fn an_exit_on_its_own_ladder_wants_its_instruments_quote() {
+    let (ids, mandates, instruments, config) = (
+        TestIds,
+        FixedMandate::covering(&[AAPL]),
+        FixedInstruments,
+        config(),
+    );
+    let ports = common::ports(&ids, &mandates, &instruments, &config);
+    let mut shell = held(&ports, 10);
+    shell.run(Input::Market(quote(AAPL, BID, "150.2", 20)), &ports);
+    let sent = shell.run(
+        handoff(INTENT, AGENT, market_exit(Purpose::RiskExit)),
+        &ports,
+    );
+    assert_eq!(
+        sent.submissions().len(),
+        1,
+        "the case builds an unprotected exit sent on its ladder"
+    );
+    assert_eq!(wanted(&shell), only(AAPL));
+}
+
+/// A flatten waiting on prices wants every leg's instrument, not only its first: here ten
+/// `AAPL` and ten `CPHC` with nothing to price either from.
+#[test]
+#[ignore = "pending E7-4"]
+fn a_held_flatten_wants_each_legs_instrument() {
+    let (ids, mandates, instruments, config) = (
+        TestIds,
+        FixedMandate::covering(&[AAPL, CPHC]),
+        FixedInstruments,
+        config(),
+    );
+    let ports = common::ports(&ids, &mandates, &instruments, &config);
+    let mut shell = Shell::new(1);
+    shell.fold_one(&stream_opened()).expect("the stream opens");
+    buy(&mut shell, AAPL, "md-held-1", 10);
+    buy(&mut shell, CPHC, "md-held-2", 10);
+    let mut shell = shell.restart_ready(&ports);
+    let leg = |name: &str| FlattenLeg {
+        instrument: instrument(name),
+        asset_class: AssetClass::UsEquity,
+        qty: qty("10"),
+        deferred_to_regular_session: false,
+    };
+    let plan = FlattenPlan {
+        cancel_client_order_ids: Vec::new(),
+        sells: vec![leg(AAPL), leg(CPHC)],
+        purpose: Purpose::Flatten,
+        confirmation: None,
+    };
+    let held = shell.run(handoff(INTENT, AGENT, IntentBody::Flatten(plan)), &ports);
+    assert!(
+        held.submissions().is_empty(),
+        "the case builds a flatten with nothing to price from"
+    );
+    assert_eq!(
+        wanted(&shell),
+        BTreeSet::from([instrument(AAPL), instrument(CPHC)])
+    );
 }
 
 /// A held opening waits on no exit price, so it wants no quote, whatever held it.
