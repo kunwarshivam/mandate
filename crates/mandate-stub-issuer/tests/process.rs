@@ -338,10 +338,17 @@ fn the_fixture_mode_needs_the_providers_flags_and_a_public_host_and_a_public_hos
     refused(&output(staging), "stub_issuer_tier");
 }
 
-#[test]
-fn the_fixture_mode_announces_its_public_host_and_serves_only_the_provider() {
-    let (owner, _) = secret_files();
-    let (mut child, mut stdout, addr, line) = (0..PORT_ATTEMPTS)
+/// Starts the fixture provider on a free port with the owner-only secret file `owner`, and reads
+/// its announce line.
+fn fixture(
+    owner: &str,
+) -> (
+    Running,
+    BufReader<std::process::ChildStdout>,
+    std::net::SocketAddr,
+    String,
+) {
+    (0..PORT_ATTEMPTS)
         .find_map(|_| {
             let free = std::net::TcpListener::bind("127.0.0.1:0").expect("a port");
             let addr = free.local_addr().expect("its address");
@@ -349,7 +356,7 @@ fn the_fixture_mode_announces_its_public_host_and_serves_only_the_provider() {
             let host = format!("oauth-fixture:{}", addr.port());
             let mut child = Running(
                 stub(Some("ci"), &addr.to_string())
-                    .args(fixture_flags(&owner))
+                    .args(fixture_flags(owner))
                     .args(["--public-host", &host])
                     .stdout(Stdio::piped())
                     .stderr(Stdio::piped())
@@ -361,7 +368,13 @@ fn the_fixture_mode_announces_its_public_host_and_serves_only_the_provider() {
             stdout.read_line(&mut line).expect("a line");
             (!line.is_empty()).then_some((child, stdout, addr, line))
         })
-        .expect("a free port within the attempts");
+        .expect("a free port within the attempts")
+}
+
+#[test]
+fn the_fixture_mode_announces_its_public_host_and_serves_only_the_provider() {
+    let (owner, _) = secret_files();
+    let (mut child, mut stdout, addr, line) = fixture(&owner);
     let host = format!("oauth-fixture:{}", addr.port());
     assert_eq!(line, format!("alpaca_fixture http://{host}\n"));
     for (path, status) in [("/alpaca/oauth/authorize", 400), ("/jwks.json", 404)] {
@@ -378,4 +391,69 @@ fn the_fixture_mode_announces_its_public_host_and_serves_only_the_provider() {
     let mut rest = String::new();
     stdout.read_to_string(&mut rest).expect("the rest");
     assert!(rest.is_empty(), "nothing after the announce line: {rest:?}");
+}
+
+/// DEC-1179: the fixture writes each token refusal to standard error as `token_refused`, the
+/// answer's `error` and the refusing check's word, a refused media type or size as
+/// `token_refused unsupported_media_type` or `token_refused payload_too_large`, and nothing the
+/// request carried.
+#[test]
+fn the_fixture_writes_each_token_refusal_as_its_code_and_cause_alone() {
+    let (owner, _) = secret_files();
+    let (mut child, _stdout, addr, _) = fixture(&owner);
+    let host = format!("oauth-fixture:{}", addr.port());
+    let verifier = "verifier-canary-0123456789-abcdefghijklmnopqrstu";
+    let form = |secret: &str| {
+        format!(
+            "grant_type=authorization_code&code=code-canary-77&client_id=client-1\
+             &client_secret={secret}&redirect_uri={}&code_verifier={verifier}",
+            REDIRECT.replace(':', "%3A").replace('/', "%2F")
+        )
+    };
+    let post = |media: &str, body: &str| {
+        common::send(
+            addr,
+            &host,
+            "POST",
+            "/alpaca/oauth/token",
+            &[("Content-Type", media)],
+            body.as_bytes(),
+        )
+    };
+    let media = "application/x-www-form-urlencoded";
+    assert_eq!(post(media, &form("secret-canary-9f2a")).status, 400);
+    assert_eq!(post(media, &form("wrong-secret-canary")).status, 400);
+    assert_eq!(post("text/plain", &form("secret-canary-9f2a")).status, 415);
+    let oversized = format!("{}&pad={}", form("secret-canary-9f2a"), "p".repeat(5000));
+    assert_eq!(post(media, &oversized).status, 413);
+    let _ = Command::new("kill")
+        .args(["-TERM", &child.0.id().to_string()])
+        .status();
+    let status = child.0.wait().expect("an exit");
+    assert!(status.success(), "{status:?}");
+    let mut stderr = String::new();
+    child
+        .0
+        .stderr
+        .take()
+        .expect("stderr")
+        .read_to_string(&mut stderr)
+        .expect("stderr");
+    assert_eq!(
+        stderr,
+        "token_refused invalid_grant code_unknown\n\
+         token_refused invalid_client client\n\
+         token_refused unsupported_media_type\n\
+         token_refused payload_too_large\n"
+    );
+    for value in [
+        "code-canary-77",
+        "secret-canary-9f2a",
+        "wrong-secret-canary",
+        "client-1",
+        "127.0.0.1:8080",
+        verifier,
+    ] {
+        assert!(!stderr.contains(value), "{value:?} in {stderr:?}");
+    }
 }
