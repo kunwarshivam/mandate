@@ -11,7 +11,7 @@
 use std::ffi::{OsStr, OsString};
 
 use mandate_connections::record::ConnectionId;
-use mandate_connections::start::{ClientId, OAuthClient, RedirectUri};
+use mandate_connections::start::{ClientId, OAuthClient, RedirectUri, STATE_LIFETIME_SECS};
 use mandate_time::UtcNanos;
 
 #[cfg(debug_assertions)]
@@ -160,12 +160,21 @@ pub fn settings(var: impl Fn(&str) -> Option<OsString>) -> Result<Settings, Star
 /// [`StartRefused::RequestDeadlineMissing`], [`StartRefused::RequestDeadlineMalformed`] (a value
 /// that is not UTF-8 included), or [`StartRefused::RequestExpired`] for a deadline at or before
 /// `now`.
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
-pub fn request_deadline(_value: Option<&OsStr>, _now: UtcNanos) -> Result<UtcNanos, StartRefused> {
-    todo!()
+pub fn request_deadline(value: Option<&OsStr>, now: UtcNanos) -> Result<UtcNanos, StartRefused> {
+    let text = value.ok_or(StartRefused::RequestDeadlineMissing)?;
+    let deadline = text
+        .to_str()
+        .and_then(|text| UtcNanos::parse(text).ok())
+        .ok_or(StartRefused::RequestDeadlineMalformed)?;
+    if deadline <= now {
+        return Err(StartRefused::RequestExpired);
+    }
+    let one_lifetime = now
+        .secs()
+        .checked_add(STATE_LIFETIME_SECS)
+        .and_then(|secs| UtcNanos::from_parts(secs, now.nanos()).ok())
+        .unwrap_or(deadline);
+    Ok(deadline.min(one_lifetime))
 }
 
 /// The ServiceAccount name of `connection`'s pod: `x` and its bytes in lowercase hex (DEC-2060).

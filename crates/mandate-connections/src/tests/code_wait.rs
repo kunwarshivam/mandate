@@ -173,7 +173,6 @@ fn schedule(deadline: i64) -> Vec<i64> {
 /// A code the callback writes 5 s after the exchange started is taken at the next take, 7 s in,
 /// after pauses of 1, 2 and 4 s, and exchanged once.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_code_that_arrives_after_the_start_is_exchanged_once() {
     let mut clock = Clock::new();
     let mut vault = Arriving::new(&clock, Some(START + 5));
@@ -187,7 +186,6 @@ fn a_code_that_arrives_after_the_start_is_exchanged_once() {
 /// A code that never arrives ends `code_missing` at the deadline: takes at 0, 1, 3, 7, 15 and 30 s,
 /// the last pause cut to the 10 s left, and nothing sent.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_code_that_never_arrives_ends_code_missing_at_the_deadline() {
     let mut clock = Clock::new();
     let mut vault = Arriving::new(&clock, None);
@@ -205,7 +203,6 @@ fn a_code_that_never_arrives_ends_code_missing_at_the_deadline() {
 /// A deadline already reached takes nothing and pauses never: a pod whose clock runs ahead of the
 /// request's deadline ends at once, even with a code waiting.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_deadline_already_reached_takes_nothing() {
     for deadline in [START, START - 1] {
         let mut clock = Clock::new();
@@ -224,7 +221,6 @@ fn a_deadline_already_reached_takes_nothing() {
 /// Two exchanges racing for one code (DEC-2363 item 4): the first takes it and exchanges it, the
 /// second never finds it and ends `code_missing` at its deadline; one live request in all.
 #[test]
-#[ignore = "pending E10-13"]
 fn two_racing_exchanges_take_the_code_once() {
     let mut clock = Clock::new();
     let mut first = Arriving::new(&clock, Some(START + 3));
@@ -242,7 +238,6 @@ fn two_racing_exchanges_take_the_code_once() {
 /// instants until it finds the code, succeeds exactly when the code arrived by a scheduled take,
 /// never pauses past the deadline or longer than [`MAX_PAUSE`], and sends at most one request.
 #[test]
-#[ignore = "pending E10-13"]
 fn the_wait_follows_its_schedule_for_every_arrival_and_deadline() {
     let mut runner = TestRunner::default();
     let cases = (0i64..=1_200, proptest::option::of(0i64..=1_200));

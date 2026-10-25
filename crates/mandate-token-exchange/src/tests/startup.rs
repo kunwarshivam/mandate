@@ -430,7 +430,6 @@ fn rendered(secs: i64) -> OsString {
 /// DEC-2363 item 2: the request's deadline is read exactly as the manager renders it, and a pod
 /// restarted later in the same request reads the same deadline, never a fresh lifetime.
 #[test]
-#[ignore = "pending E10-13"]
 fn the_request_s_deadline_is_read_as_rendered_and_a_restart_gets_no_more() {
     let deadline = POD_START + 420;
     let value = rendered(deadline);
@@ -448,7 +447,6 @@ fn the_request_s_deadline_is_read_as_rendered_and_a_restart_gets_no_more() {
 /// DEC-2363 item 2: no deadline, one in any other form, and one already reached each refuse the
 /// start, the last also for a pod whose clock runs ahead of the request's.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_missing_malformed_or_reached_deadline_refuses_the_start() {
     let now = instant(POD_START);
     assert_eq!(
@@ -487,7 +485,6 @@ fn a_missing_malformed_or_reached_deadline_refuses_the_start() {
 /// DEC-2363 item 3: a deadline further than one lifetime ahead, from a pod clock behind or a bad
 /// value, waits one lifetime from the pod's start and no longer.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_deadline_far_ahead_waits_one_lifetime_at_most() {
     let now = instant(POD_START);
     assert_eq!(
