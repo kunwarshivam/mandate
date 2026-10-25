@@ -311,9 +311,11 @@ fn the_fixture_run_reads_no_quote() -> Result<(), Error> {
 
 /// Lane LV's case (DEC-2361), with `quotes` as the feed: the agent's ten AAPL bought and filled
 /// by an earlier executor, the bracket's stop leg cancelled at the broker, the agent stopped, and
-/// then a kill switch of its connection, with three passes after it. The broker's sell orders are
-/// returned with the journal.
-fn switched_without_protection(quotes: Recorded) -> Result<(Journal, Vec<SubmitOrder>), Error> {
+/// then a kill switch of its connection, with three passes after it. The broker's sell orders and
+/// the passes' alert keys are returned with the journal.
+fn switched_without_protection(
+    quotes: Recorded,
+) -> Result<(Journal, Vec<SubmitOrder>, Vec<String>), Error> {
     let journal = deployed()?;
     journal.seed(ACCOUNT_STREAM, OPENED)?;
     let broker = Paper::new(&journal);
@@ -338,8 +340,14 @@ fn switched_without_protection(quotes: Recorded) -> Result<(Journal, Vec<SubmitO
     let mut wiring = support::wiring()?;
     wiring.quotes = Box::new(quotes);
     let mut process = start_wired(&journal, &broker, wiring)?;
+    let mut alerted = Vec::new();
     for _ in 0..3 {
-        process.step(at(NOON)?);
+        alerted.extend(
+            process
+                .step(at(NOON)?)
+                .into_iter()
+                .map(|alert| alert.key.to_owned()),
+        );
     }
     let sells = broker
         .seen()
@@ -349,15 +357,15 @@ fn switched_without_protection(quotes: Recorded) -> Result<(Journal, Vec<SubmitO
             _ => None,
         })
         .collect();
-    Ok((journal, sells))
+    Ok((journal, sells, alerted))
 }
 
 /// `AGENTS.md` rule 13, DEC-2361: a kill switch whose close has no stop, no floor and no quote
-/// sends nothing and journals the wait `exit_unpriced`; once the feed reads the instrument's quote,
-/// the close is raised at it and sells the agent's ten.
+/// sends nothing, journals the wait `exit_unpriced` and alerts it once; once the feed reads the
+/// instrument's quote, the close is raised at it and sells the agent's ten.
 #[test]
 fn an_unpriced_kill_switch_close_goes_once_its_quote_is_read() -> Result<(), Error> {
-    let (journal, unquoted) = switched_without_protection(Recorded::default())?;
+    let (journal, unquoted, alerted) = switched_without_protection(Recorded::default())?;
     assert_eq!(
         journal.applications(),
         [(AGENT.to_owned(), SWITCH.to_owned())],
@@ -369,11 +377,16 @@ fn an_unpriced_kill_switch_close_goes_once_its_quote_is_read() -> Result<(), Err
         .iter()
         .any(|payload| payload.get("action").and_then(Value::as_str) == Some("exit_unpriced"));
     assert!(unpriced, "the wait is journaled");
+    assert_eq!(
+        alerted.iter().filter(|key| *key == "exit_unpriced").count(),
+        1,
+        "{alerted:?}"
+    );
     let quotes = Recorded {
         quote: Some(observed("150", "150.2", at(NOON)?.secs())?),
         asked: Rc::default(),
     };
-    let (_, quoted) = switched_without_protection(quotes)?;
+    let (_, quoted, _) = switched_without_protection(quotes)?;
     assert!(
         matches!(quoted.as_slice(), [sell] if sell.qty == Qty::parse("10")?),
         "{quoted:?}"
