@@ -41,6 +41,10 @@ pub enum Identity {
     ModelGateway,
     /// The process that sends the platform's email: reads the email credential (DEC-2020).
     EmailSender,
+    /// The role provisioner: makes each OAuth connect's two Kubernetes-auth roles and removes the
+    /// token exchange's, by [`crate::kubernetes::provisioner_policy`] alone, and reads no secret
+    /// (DEC-2630 item 7, DEC-2350 items 1 and 5).
+    Provisioner,
 }
 
 /// One secret the vault holds.
@@ -58,6 +62,15 @@ pub enum SecretPath {
     AccountId(ConnectionId, AccountRef),
     /// A secret of the platform's own that one process type reads (DEC-2020).
     Platform(PlatformSecret),
+    /// The account fingerprint of one connect of a connection, to one account stream, and the
+    /// reference it was computed beside, in the personal-data vault, written once by its executor
+    /// beside the account entry (DEC-2345).
+    Fingerprint(ConnectionId, AccountRef),
+    /// The fingerprint registry: which connection holds each fingerprint, the connection
+    /// manager's alone, changed by check-and-set (DEC-2345).
+    Claims,
+    /// The marker that the fingerprint key is rotating (connections spec §3.1).
+    Rotating,
 }
 
 /// A secret of the platform's own, held for one process type, never an environment variable or a
@@ -120,7 +133,13 @@ pub fn allows(identity: &Identity, access: Access, path: &SecretPath) -> bool {
             SecretPath::Code(_) | SecretPath::Token(_),
         )
         | (Identity::TokenExchange(_), Access::Read, SecretPath::ClientSecret)
-        | (Identity::SecretImport, Access::Write, SecretPath::ClientSecret) => true,
+        | (Identity::SecretImport, Access::Write, SecretPath::ClientSecret)
+        | (
+            Identity::ConnectionManager,
+            Access::Read,
+            SecretPath::Fingerprint(..) | SecretPath::Claims | SecretPath::Rotating,
+        )
+        | (Identity::ConnectionManager, Access::Write, SecretPath::Claims) => true,
         (
             Identity::TokenExchange(own),
             Access::Read | Access::Delete | Access::Take,
@@ -128,7 +147,11 @@ pub fn allows(identity: &Identity, access: Access, path: &SecretPath) -> bool {
         )
         | (Identity::TokenExchange(own), Access::Write, SecretPath::Token(c))
         | (Identity::Executor(own), Access::Read, SecretPath::Token(c))
-        | (Identity::Executor(own), Access::Create, SecretPath::AccountId(c, _)) => own == c,
+        | (
+            Identity::Executor(own),
+            Access::Create,
+            SecretPath::AccountId(c, _) | SecretPath::Fingerprint(c, _),
+        ) => own == c,
         (identity, Access::Read, SecretPath::Platform(secret)) => {
             holders(*secret).is_ok_and(|h| h.reads == *identity)
         }
@@ -149,16 +172,20 @@ pub struct Mounts {
     pub kubernetes_executor: String,
     /// The Kubernetes auth mount a connection's token exchange logs in on (DEC-2060).
     pub kubernetes_exchange: String,
+    /// The transit mount that holds the fingerprint key (DEC-2345).
+    pub transit: String,
 }
 
 impl Default for Mounts {
-    /// `mandate`, `approle`, `kubernetes-executor` and `kubernetes-exchange`, the cell's.
+    /// `mandate`, `approle`, `kubernetes-executor`, `kubernetes-exchange` and `transit`, the
+    /// cell's.
     fn default() -> Self {
         Self {
             kv: "mandate".to_owned(),
             auth: "approle".to_owned(),
             kubernetes_executor: "kubernetes-executor".to_owned(),
             kubernetes_exchange: "kubernetes-exchange".to_owned(),
+            transit: "transit".to_owned(),
         }
     }
 }
@@ -179,6 +206,7 @@ pub fn role_name(identity: &Identity) -> String {
         Identity::SecretImport => "secret-import".to_owned(),
         Identity::ModelGateway => "model-gateway".to_owned(),
         Identity::EmailSender => "email-sender".to_owned(),
+        Identity::Provisioner => "provisioner".to_owned(),
     }
 }
 
@@ -222,24 +250,86 @@ pub fn kv_path(path: &SecretPath) -> Result<String, SourceError> {
         SecretPath::Platform(PlatformSecret::EmailCredential) => {
             "platform/email-credential".to_owned()
         }
+        SecretPath::Fingerprint(c, account) => format!(
+            "personal/fingerprints/{}/{}",
+            connection_segment(c)?,
+            account.as_str()
+        ),
+        SecretPath::Claims => "personal/claims".to_owned(),
+        SecretPath::Rotating => "fingerprints/rotating".to_owned(),
     })
 }
 
 /// The OpenBao policy of `identity`, given every connection the cell holds, in HCL. Each path is
-/// written out for each connection; none holds `*` or `+`. A runtime's policy grants nothing: it
-/// is a comment alone, since OpenBao refuses an empty policy.
+/// written out for each connection, except the Api's and the connection manager's: a connect from
+/// the web makes a connection after the vault is provisioned, so their `code` and `token` write and
+/// delete paths take a one-segment `+` for the connection (DEC-2349). The connection manager also
+/// reads each request's account fingerprint, a pseudonymous hash and no credential, through
+/// `personal/fingerprints/+/+` (DEC-2349, DEC-2345). No `+` is ever on a read of a credential, no
+/// other identity holds one, and no policy holds `*`. A runtime's policy grants nothing: it is
+/// a comment alone, since OpenBao refuses an empty policy.
 pub fn openbao_policy(
     identity: &Identity,
     connections: &[ConnectionId],
     mounts: &Mounts,
 ) -> Result<String, SourceError> {
+    let any_connection = matches!(identity, Identity::Api | Identity::ConnectionManager);
     let mut paths: Vec<SecretPath> = vec![SecretPath::ClientSecret];
     paths.extend(PlatformSecret::ALL.map(SecretPath::Platform));
-    for connection in connections {
-        paths.push(SecretPath::Code(connection.clone()));
-        paths.push(SecretPath::Token(connection.clone()));
+    if !any_connection {
+        for connection in connections {
+            paths.push(SecretPath::Code(connection.clone()));
+            paths.push(SecretPath::Token(connection.clone()));
+        }
     }
+    paths.extend([SecretPath::Claims, SecretPath::Rotating]);
     let mut hcl = String::new();
+    if any_connection {
+        let probe = ConnectionId::new("0").map_err(|_| SourceError::Config)?;
+        for (access, prefix, path, leaf, capabilities) in [
+            (
+                Access::Write,
+                "data",
+                SecretPath::Code(probe.clone()),
+                "code",
+                "\"create\", \"update\"",
+            ),
+            (
+                Access::Delete,
+                "metadata",
+                SecretPath::Code(probe.clone()),
+                "code",
+                "\"delete\"",
+            ),
+            (
+                Access::Delete,
+                "metadata",
+                SecretPath::Token(probe.clone()),
+                "token",
+                "\"delete\"",
+            ),
+        ] {
+            if allows(identity, access, &path) {
+                hcl.push_str(&format!(
+                    "path \"{}/{prefix}/connections/+/{leaf}\" {{\n  capabilities = [{capabilities}]\n}}\n",
+                    mounts.kv
+                ));
+            }
+        }
+    }
+    let probe_account =
+        AccountRef::new("00000000000000000000000000").map_err(|_| SourceError::Config)?;
+    let probe_connection = ConnectionId::new("0").map_err(|_| SourceError::Config)?;
+    if allows(
+        identity,
+        Access::Read,
+        &SecretPath::Fingerprint(probe_connection, probe_account),
+    ) {
+        hcl.push_str(&format!(
+            "path \"{}/data/personal/fingerprints/+/+\" {{\n  capabilities = [\"read\"]\n}}\n",
+            mounts.kv
+        ));
+    }
     for path in &paths {
         for (access, prefix, capabilities) in [
             (Access::Read, "data", "\"read\""),

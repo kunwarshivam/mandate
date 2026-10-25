@@ -27,6 +27,7 @@ mod backtest_records;
 mod catalogue;
 mod confirmations;
 mod connection_fold;
+mod connection_roles;
 mod connections;
 mod control;
 mod control_plane;
@@ -85,8 +86,8 @@ pub fn stream_event_types(stream: StreamType) -> impl Iterator<Item = &'static s
 }
 
 /// The event types the stream rules read: §9.19's rules 153 and 158, the invalidation's rule 187,
-/// and the run records' rules 173 to 183.
-pub const STREAM_RULE_TYPES: [&str; 11] = [
+/// the run records' rules 173 to 183, and §9.5's rule 260.
+pub const STREAM_RULE_TYPES: [&str; 12] = [
     "ModelInvocationRecorded",
     "MeterReserved",
     "MeterSettled",
@@ -98,11 +99,12 @@ pub const STREAM_RULE_TYPES: [&str; 11] = [
     "ToolResultRecorded",
     "RunSummaryRecorded",
     "RunEnded",
+    "AccountCloseRequested",
 ];
 
 /// Whether a draft of `batch` is judged by a stream rule (journal spec §9.19 rules 153 and 158,
-/// the invalidation's rule 187, the run records' rules 173 to 183), so `append` reads the stream's
-/// earlier records of [`STREAM_RULE_TYPES`] to judge it.
+/// the invalidation's rule 187, the run records' rules 173 to 183, §9.5's rule 260), so `append`
+/// reads the stream's earlier records of [`STREAM_RULE_TYPES`] to judge it.
 pub fn reads_stream(batch: &[Draft]) -> bool {
     batch.iter().any(|draft| {
         matches!(
@@ -119,7 +121,7 @@ pub fn reads_stream(batch: &[Draft]) -> bool {
             ) | (
                 "MeterReserved" | "MeterSettled",
                 StreamType::Meter | StreamType::DeploymentMeter
-            )
+            ) | ("AccountCloseRequested", StreamType::Account)
         )
     })
 }
@@ -141,6 +143,8 @@ pub fn reads_stream(batch: &[Draft]) -> bool {
 ///   names its run's answered research turn and a tool on its menu, in reply order, a result names
 ///   its call once and fits its class, a summary and an end are canonical, and no turn record
 ///   follows its run's end unless the run was cancelled and the record judges nothing.
+/// - 260: an account stream's `AccountCloseRequested` names a switch, instrument, and attempt no
+///   earlier one names together.
 pub fn check_stream(earlier: &[Draft], batch: &[Draft]) -> Result<(), (usize, Invalid)> {
     for (i, draft) in batch.iter().enumerate() {
         let before: Vec<&Draft> = earlier
@@ -151,6 +155,7 @@ pub fn check_stream(earlier: &[Draft], batch: &[Draft]) -> Result<(), (usize, In
         gateway::stream_rule(&before, draft).map_err(|error| (i, error))?;
         invalidation::stream_rule(&before, draft).map_err(|error| (i, error))?;
         runs::stream_rule(&before, draft).map_err(|error| (i, error))?;
+        control::stream_rule(&before, draft).map_err(|error| (i, error))?;
     }
     Ok(())
 }
@@ -184,6 +189,7 @@ pub use connection_fold::{
     verify_connection_causes_from_genesis, verify_connection_lifecycle,
     verify_connection_lifecycle_from,
 };
+pub use connection_roles::{ConnectionRolesError, ConnectionRolesRule, verify_connection_roles};
 pub use control_verify::{
     ControlStreamCheck, ControlStreamFailure, ControlVerifyError, verify_anchor_self,
     verify_break_glass_causes,

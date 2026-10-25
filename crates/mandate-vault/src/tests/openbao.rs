@@ -7,11 +7,13 @@ use mandate_connections::record::ConnectionId;
 use mandate_time::UtcNanos;
 use serde_json::{Value, json};
 
+use crate::openbao::provisioned_policy;
 use crate::openbao::{
     OpenBaoConfig, OpenBaoSource, cas_refusal, kubernetes_login_path, kubernetes_login_refusal,
     kubernetes_login_verdict, kubernetes_namespace_verdict, lost_or_denied_verdict, provision,
     provisioned_identities, refusal, role_settings, seal_verdict, secret_id_identities, taken_read,
 };
+use crate::openbao::{fingerprint_key_verdict, key_needs_creating, transit_mount_verdict};
 use crate::policy::{Identity, Mounts};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
@@ -132,7 +134,7 @@ fn each_role_lives_as_long_as_its_process_type_may() {
 fn provisioning_covers_every_process_type_and_each_connections_two_roles() {
     let c = |id: &str| ConnectionId::new(id).unwrap();
     assert_eq!(
-        provisioned_identities(&[c("c1"), c("c2")]),
+        provisioned_identities(&[c("c1"), c("c2")], false),
         vec![
             Identity::Api,
             Identity::ConnectionManager,
@@ -146,7 +148,38 @@ fn provisioning_covers_every_process_type_and_each_connections_two_roles() {
             Identity::TokenExchange(c("c2")),
         ]
     );
-    assert_eq!(provisioned_identities(&[]).len(), 6);
+    assert_eq!(provisioned_identities(&[], false).len(), 6);
+}
+
+/// Given the workspace's namespace, provisioning also makes the role provisioner's AppRole, after
+/// the process types' and before the connections', and issues it a secret id (DEC-2350 item 1).
+#[test]
+fn the_role_provisioner_is_provisioned_only_with_the_workspaces_namespace() {
+    let c = |id: &str| ConnectionId::new(id).unwrap();
+    let with = provisioned_identities(&[c("c1")], true);
+    assert_eq!(with.len(), 9);
+    assert_eq!(with[6], Identity::Provisioner);
+    assert_eq!(
+        with[7..],
+        [
+            Identity::Executor(c("c1")),
+            Identity::TokenExchange(c("c1"))
+        ]
+    );
+    assert_eq!(
+        secret_id_identities(&[c("c1")], true),
+        vec![
+            Identity::Api,
+            Identity::ConnectionManager,
+            Identity::Runtime,
+            Identity::SecretImport,
+            Identity::ModelGateway,
+            Identity::EmailSender,
+            Identity::Provisioner,
+            Identity::Executor(c("c1")),
+        ]
+    );
+    assert!(!provisioned_identities(&[c("c1")], false).contains(&Identity::Provisioner));
 }
 
 /// A secret id is issued, and its files written, for each process type and each connection's
@@ -155,7 +188,7 @@ fn provisioning_covers_every_process_type_and_each_connections_two_roles() {
 fn a_secret_id_is_issued_to_every_identity_but_the_token_exchanges() {
     let c = |id: &str| ConnectionId::new(id).unwrap();
     assert_eq!(
-        secret_id_identities(&[c("c1"), c("c2")]),
+        secret_id_identities(&[c("c1"), c("c2")], false),
         vec![
             Identity::Api,
             Identity::ConnectionManager,
@@ -167,7 +200,7 @@ fn a_secret_id_is_issued_to_every_identity_but_the_token_exchanges() {
             Identity::Executor(c("c2")),
         ]
     );
-    assert_eq!(secret_id_identities(&[]).len(), 6);
+    assert_eq!(secret_id_identities(&[], false).len(), 6);
 }
 
 /// Provisioning a vault nobody answers for is an outage, never an empty success that would leave
@@ -215,6 +248,7 @@ async fn only_a_connections_processes_log_in_with_kubernetes_auth() {
         Identity::SecretImport,
         Identity::ModelGateway,
         Identity::EmailSender,
+        Identity::Provisioner,
     ] {
         let login = OpenBaoSource::login_kubernetes(
             &unreachable(),
@@ -421,6 +455,50 @@ fn a_kubernetes_login_is_accepted_only_in_the_workspaces_namespace() {
     );
 }
 
+/// The policy `provision` writes for the role provisioner's role is exactly
+/// `provisioner_policy` for the workspace's namespace, and every other identity's is its
+/// `openbao_policy`, with no server needed to tell them apart (DEC-2350 item 1).
+#[test]
+fn provisioning_writes_the_provisioners_own_policy_for_its_role() {
+    let c = |id: &str| ConnectionId::new(id).unwrap();
+    let connections = [c("c1")];
+    let mounts = Mounts::default();
+    assert_eq!(
+        provisioned_policy(
+            &Identity::Provisioner,
+            &connections,
+            &mounts,
+            Some("ws-ws1")
+        ),
+        crate::kubernetes::provisioner_policy(&mounts, "ws-ws1")
+    );
+    assert_ne!(
+        provisioned_policy(
+            &Identity::Provisioner,
+            &connections,
+            &mounts,
+            Some("ws-ws1")
+        ),
+        crate::policy::openbao_policy(&Identity::Provisioner, &connections, &mounts)
+    );
+    for identity in [
+        Identity::Api,
+        Identity::ConnectionManager,
+        Identity::Executor(c("c1")),
+        Identity::TokenExchange(c("c1")),
+    ] {
+        assert_eq!(
+            provisioned_policy(&identity, &connections, &mounts, Some("ws-ws1")),
+            crate::policy::openbao_policy(&identity, &connections, &mounts),
+            "{identity:?}"
+        );
+    }
+    assert_eq!(
+        provisioned_policy(&Identity::Provisioner, &connections, &mounts, None),
+        crate::policy::openbao_policy(&Identity::Provisioner, &connections, &mounts)
+    );
+}
+
 /// A check-and-set overwrite that finds the version moved on lost to another taker, which is no
 /// code; every other answer keeps `refusal`'s meaning.
 #[test]
@@ -549,4 +627,97 @@ fn a_refused_overwrite_read_again_is_a_lost_race_only_when_the_code_is_gone() {
         Err(SourceError::Unavailable)
     );
     assert_eq!(verdict(Err(SourceError::Sealed)), Err(SourceError::Sealed));
+}
+
+/// The fingerprint key's mount must be a transit mount, by its own answer; any other engine, or
+/// an answer that does not say, fails provisioning (DEC-2345 item 1).
+#[test]
+fn the_fingerprint_keys_mount_must_be_transit() {
+    assert_eq!(
+        transit_mount_verdict(Some(
+            &json!({ "type": "transit", "data": { "type": "transit" } })
+        )),
+        Ok(())
+    );
+    for answer in [
+        Some(json!({ "data": { "type": "kv" } })),
+        Some(json!({ "type": "transit", "data": {} })),
+        Some(json!({ "data": { "type": ["transit"] } })),
+        Some(json!({})),
+        None,
+    ] {
+        assert_eq!(
+            transit_mount_verdict(answer.as_ref()),
+            Err(SourceError::Config),
+            "{answer:?}"
+        );
+    }
+}
+
+/// A fingerprint key already there passes only when it is never exportable, never deletable and
+/// has no plaintext backup, each said as `false`; a key that is any of them, or an answer that
+/// does not say, fails provisioning (DEC-2345 item 1).
+#[test]
+fn an_existing_fingerprint_key_must_never_leave_the_vault() {
+    let key = |exportable: Value, deletion: Value, backup: Value| {
+        json!({ "data": {
+            "exportable": exportable,
+            "deletion_allowed": deletion,
+            "allow_plaintext_backup": backup,
+            "type": "aes256-gcm96",
+        } })
+    };
+    let no = || json!(false);
+    assert_eq!(
+        fingerprint_key_verdict(Some(&key(no(), no(), no()))),
+        Ok(())
+    );
+    for answer in [
+        Some(key(json!(true), no(), no())),
+        Some(key(no(), json!(true), no())),
+        Some(key(no(), no(), json!(true))),
+        Some(key(Value::Null, no(), no())),
+        Some(key(no(), json!("false"), no())),
+        Some(json!({ "data": { "exportable": false, "deletion_allowed": false } })),
+        Some(json!({})),
+        None,
+    ] {
+        assert_eq!(
+            fingerprint_key_verdict(answer.as_ref()),
+            Err(SourceError::Config),
+            "{answer:?}"
+        );
+    }
+}
+
+/// Provisioning creates the fingerprint key only when its GET answers 404; a key there is kept
+/// only when it passes the verdict, and any other refusal of the GET fails provisioning, so a
+/// transient error never lets an exportable key through unverified (review F1, round 2).
+#[test]
+fn only_a_missing_fingerprint_key_is_created_and_any_other_error_fails() {
+    let kept = json!({ "data": {
+        "exportable": false, "deletion_allowed": false, "allow_plaintext_backup": false,
+    } });
+    let exportable = json!({ "data": {
+        "exportable": true, "deletion_allowed": false, "allow_plaintext_backup": false,
+    } });
+    assert_eq!(key_needs_creating(&Ok(Some(kept))), Ok(false));
+    assert_eq!(
+        key_needs_creating(&Ok(Some(exportable))),
+        Err(SourceError::Config)
+    );
+    assert_eq!(key_needs_creating(&Ok(None)), Err(SourceError::Config));
+    assert_eq!(key_needs_creating(&Err(SourceError::Missing)), Ok(true));
+    for refusal in [
+        SourceError::Unavailable,
+        SourceError::Denied,
+        SourceError::Sealed,
+        SourceError::Malformed,
+    ] {
+        assert_eq!(
+            key_needs_creating(&Err(refusal.clone())),
+            Err(refusal.clone()),
+            "{refusal:?}"
+        );
+    }
 }

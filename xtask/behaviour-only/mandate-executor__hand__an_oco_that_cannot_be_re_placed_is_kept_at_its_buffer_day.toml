@@ -1,8 +1,0 @@
-file = "crates/mandate-executor/tests/hand.rs"
-test = "an_oco_that_cannot_be_re_placed_is_kept_at_its_buffer_day"
-reason = """
-E7-4's fractional slice (DEC-2312 item 2): at the buffer day the executor cancels resting
-protection whenever it has recorded prices, whether or not the profile offers a form to place it
-again, which is a behaviour, not a stub's report. It still runs and fails, and the slice that
-implements it deletes this file with its `#[ignore]` line.
-"""

@@ -18,7 +18,7 @@ use crate::kill::{confirmed_bid, is_flatten};
 use crate::payload::{int, text};
 use crate::protection::{
     ExitPrice, alone, awaits_cancel, begin_exit, crypto_add, exit_limit, fallback, passive_exit,
-    reference_price, reprotect_unpriced, rests,
+    reference_price, reprotect_unpriced, rests, whole_shares,
 };
 use crate::session::{closed_hold, extended_hours};
 use crate::shape::offers_bracket;
@@ -173,6 +173,7 @@ fn intended_fields(
         ("sent", Value::Null),
         ("uncovered", Value::Null),
         ("acknowledged", Value::Null),
+        ("unprotected_fraction", Value::Null),
     ])
 }
 
@@ -281,7 +282,11 @@ fn decide(
             side: *side,
             qty: *qty,
             purpose: *purpose,
-            protection: *protection,
+            protection: if fractional(batch, instrument, *qty)? {
+                None
+            } else {
+                *protection
+            },
             limit: limit.or_else(|| reference_price(batch, intent, instrument, *purpose)),
             market: limit.is_none(),
             tif: order_tif(batch, instrument),
@@ -441,7 +446,11 @@ fn submit(
     {
         return Ok(());
     }
-    let bracket = bracket_of(batch, &instrument, purpose, protection)?;
+    let bracket = if fractional(batch, &instrument, qty)? {
+        None
+    } else {
+        bracket_of(batch, &instrument, purpose, protection)?
+    };
     let lone = !batch.view.exiting.contains_key(&instrument)
         && !rests(&batch.view, &instrument)
         && alone(
@@ -498,6 +507,18 @@ fn submit(
     journal_rung(batch, &request, Some(intent), &agent, 1, first)?;
     batch.broker(BrokerRequest::Submit(request));
     Ok(())
+}
+
+/// Whether `qty` of `instrument` is a fractional equity quantity: §5.2 and §5.3 rule 7 allow it
+/// only as a plain DAY order, never in a bracket, so it is sent plain and the gate sees it plain,
+/// whatever protective prices it carries; its protection follows its fill and covers the whole
+/// shares ([`crate::protection::settle`], DEC-2312 items 1 and 2).
+fn fractional(
+    batch: &Batch<'_, '_>,
+    instrument: &InstrumentId,
+    qty: Qty,
+) -> Result<bool, ExecutorError> {
+    Ok(whole_shares(batch.ports, instrument, qty)? != qty)
 }
 
 /// §5.4's tranche model: an equity entry that carries its protective prices goes as one GTC

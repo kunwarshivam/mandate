@@ -1578,6 +1578,17 @@ fn the_credential_records_are_catalogued_and_closed_on_the_control_stream() {
     closed_on_the_control_stream(&["CredentialEnrolled", "CredentialRemoved"]);
 }
 
+/// Journal spec v0.77 §9.33 (DEC-2350): the role provisioner's three records are on the control
+/// stream alone, with no configuration, closed there at schema version 1.
+#[test]
+fn the_connection_role_records_are_catalogued_and_closed_on_the_control_stream() {
+    closed_on_the_control_stream(&[
+        "ConnectionRolesMade",
+        "ConnectionRolesRefused",
+        "ConnectionRolesRemoved",
+    ]);
+}
+
 /// `VerificationRun` version 2 (journal spec v0.36 §9.13, DEC-788, DEC-789) is closed on the
 /// control stream as version 1 is: an unlisted member is refused `schema`, never `unknown_schema`.
 #[test]

@@ -192,13 +192,12 @@ pub(crate) fn parse_digest_ref(s: &str) -> Option<Digest> {
     s.strip_prefix("sha256:").and_then(Digest::from_hex)
 }
 
-/// The payload schema for `(event_type, schema_version)`, if one is registered.
+/// The payload schema for `(event_type, schema_version)`, if one is registered. `IntentReceived`,
+/// `GateDecided` and `OrderSubmitted` are account-stream records that `control::governs` takes, so
+/// `control::schema` serves their versions, the v1 schemas below among them, and none is here.
 pub(crate) fn payload_schema(event_type: &str, schema_version: u64) -> Option<&'static Ty> {
     match (event_type, schema_version) {
         ("StreamOpened", 1) => Some(&STREAM_OPENED_V1),
-        ("IntentReceived", 1) => Some(&INTENT_RECEIVED_V1),
-        ("GateDecided", 1) => Some(&GATE_DECIDED_V1),
-        ("OrderSubmitted", 1) => Some(&ORDER_SUBMITTED_V1),
         ("FillApplied", 1) => Some(&FILL_APPLIED_V1),
         ("MarkUpdated", 1) => Some(&MARK_UPDATED_V1),
         ("ReconciliationRun", 1) => Some(&RECONCILIATION_RUN_V1),
