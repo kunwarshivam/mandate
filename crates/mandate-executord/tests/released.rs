@@ -133,9 +133,9 @@ fn unreleased_lots_still_hold_the_retired_executor() -> Result<(), Error> {
 }
 
 /// The account stream's account-scope kill switch after the release, as the process that applied
-/// it journals it (DEC-2333): every agent of the account stopped, then the switch closing AAPL,
-/// the owner's 10 shares.
-fn account_switched(journal: &support::Journal) -> Result<(), Error> {
+/// it journals it (DEC-2333): every agent of the account stopped, then the switch closing
+/// `closes`.
+fn account_switched(journal: &support::Journal, closes: &[&str]) -> Result<(), Error> {
     let clock = "2026-09-21T15:00:00.000000000Z";
     journal.write(
         ACCOUNT_STREAM,
@@ -161,7 +161,10 @@ fn account_switched(journal: &support::Journal) -> Result<(), Error> {
             ("bid", Value::Null),
             ("bid_size", Value::Null),
             ("cancels", Value::Array(Vec::new())),
-            ("closes", Value::Array(vec![text("AAPL")])),
+            (
+                "closes",
+                Value::Array(closes.iter().map(|instrument| text(instrument)).collect()),
+            ),
             ("copied_from", Value::Null),
             ("deferred", Value::Array(Vec::new())),
             ("floor", Value::Null),
@@ -182,7 +185,7 @@ fn account_switched(journal: &support::Journal) -> Result<(), Error> {
 #[ignore = "pending E7-4"]
 fn an_account_switch_still_closing_keeps_the_executor_running() -> Result<(), Error> {
     let (journal, broker) = released("10", false)?;
-    account_switched(&journal)?;
+    account_switched(&journal, &["AAPL"])?;
     broker.accept_account_wide(false);
     let mut process = start(&journal, &broker)?;
     process.step(at(NOON)?);
@@ -208,8 +211,72 @@ fn an_account_switch_still_closing_keeps_the_executor_running() -> Result<(), Er
 #[test]
 fn an_account_switch_whose_close_filled_lets_the_executor_exit() -> Result<(), Error> {
     let (journal, broker) = released("10", false)?;
-    account_switched(&journal)?;
+    account_switched(&journal, &["AAPL"])?;
     broker.accept_account_wide(true);
+    let mut process = start(&journal, &broker)?;
+    for _ in 0..2 {
+        process.step(at(NOON)?);
+    }
+    assert_eq!(process.lifecycle().state(), COMPLETED);
+    Ok(())
+}
+
+/// DEC-2364: a close-position whose answer is lost, the close then expired unfilled, leaves the
+/// switch's 10 shares held, so the executor keeps running, ready or not, pass after pass.
+#[test]
+#[ignore = "pending E7-4"]
+fn an_account_switch_whose_close_answer_is_lost_keeps_the_executor_running() -> Result<(), Error> {
+    let (journal, broker) = released("10", false)?;
+    account_switched(&journal, &["AAPL"])?;
+    broker.accept_account_wide(false);
+    broker.lose_close_answers();
+    let mut process = start(&journal, &broker)?;
+    process.step(at(NOON)?);
+    assert!(
+        broker
+            .seen()
+            .iter()
+            .any(|seen| matches!(seen.request, BrokerRequest::ClosePosition(..))),
+        "the switch asked its close"
+    );
+    broker.expire_closes();
+    for _ in 0..3 {
+        process.step(at(NOON)?);
+        assert!(!matches!(process.lifecycle().state(), State::Exited(_)));
+    }
+    Ok(())
+}
+
+/// DEC-2364: a switch whose close is not yet sent, its cancel-all refused unsent so the read that
+/// would confirm it never comes, keeps the executor running with the 10 shares held.
+#[test]
+#[ignore = "pending E7-4"]
+fn an_account_switch_whose_close_is_not_yet_sent_keeps_the_executor_running() -> Result<(), Error> {
+    let (journal, broker) = released("10", false)?;
+    account_switched(&journal, &["AAPL"])?;
+    let mut process = start(&journal, &broker)?;
+    for _ in 0..3 {
+        process.step(at(NOON)?);
+        assert!(!matches!(process.lifecycle().state(), State::Exited(_)));
+    }
+    assert!(
+        !broker
+            .seen()
+            .iter()
+            .any(|seen| matches!(seen.request, BrokerRequest::ClosePosition(..))),
+        "no close was sent"
+    );
+    Ok(())
+}
+
+/// DEC-2364 item 1: only an instrument the switch closes holds the exit. A switch that closes
+/// nothing, journaled while the owner's 10 shares sat outside it, owes nothing, and the executor
+/// exits with them still held.
+#[test]
+fn an_instrument_the_account_switch_does_not_close_never_holds_the_exit() -> Result<(), Error> {
+    let (journal, broker) = released("10", false)?;
+    account_switched(&journal, &[])?;
+    broker.accept_account_wide(false);
     let mut process = start(&journal, &broker)?;
     for _ in 0..2 {
         process.step(at(NOON)?);
