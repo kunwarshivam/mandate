@@ -223,6 +223,10 @@ start without them (AGENTS.md rule 3).
 - name: MANDATE_ALPACA_AUTHORIZE_URL
   value: http://oauth-fixture:8091/alpaca/oauth/authorize
 {{- end }}
+{{- if and (eq .p.name "executor") (include "mandate.oauthFixtureOn" .root) }}
+- name: MANDATE_ALPACA_ACCOUNT_URL
+  value: http://oauth-fixture:8091/alpaca/v2/account
+{{- end }}
 {{- if include "mandate.artifactsAccess" . }}
 - name: {{ ternary "MANDATE_API_ARTIFACTS" "MANDATE_ARTIFACTS" (eq .p.name "api") }}
   value: {{ include "mandate.artifactsPath" . | quote }}
@@ -511,7 +515,9 @@ process for no deployment.
 The egress allowed to process `p`: DNS when it has any target, each in-cluster target by pod
 label and port, and each external target's CIDRs from values (an empty list allows nothing). The
 API server (`kube-api`, the deployment manager's alone) is an external-style target: its CIDRs and
-its port from values, since a policy cannot select it by pod label.
+its port from values, since a policy cannot select it by pod label. In a dev or ci cell running the
+fixture provider, the executor also reaches the fixture's pod on 8091 for its account read
+(DEC-1178 item 4), and nothing else beside its own targets.
 */}}
 {{- define "mandate.egressRules" -}}
 {{- $root := .root -}}
@@ -589,6 +595,15 @@ its port from values, since a policy cannot select it by pod label.
     {{- end }}
 {{- end }}
 {{- end }}
+{{- end }}
+{{- if and (eq .p.name "executor") (include "mandate.oauthFixtureOn" $root) }}
+- to:
+    - podSelector:
+        matchLabels:
+          mandate.dev/workspace: {{ $v.workspace | quote }}
+          mandate.dev/process: oauth-fixture
+  ports:
+    - {protocol: TCP, port: 8091}
 {{- end }}
 {{- end -}}
 

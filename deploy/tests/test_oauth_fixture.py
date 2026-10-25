@@ -15,6 +15,7 @@ import copy
 import json
 
 from test_cell import (
+    ALPACA_PAPER,
     ALPACA_SET,
     ALPACA_SET_VALUES,
     CELL,
@@ -47,6 +48,7 @@ ON = (
 )
 TOKEN_URL = "http://oauth-fixture:8091/alpaca/oauth/token"
 AUTHORIZE_URL = "http://oauth-fixture:8091/alpaca/oauth/authorize"
+ACCOUNT_URL = "http://oauth-fixture:8091/alpaca/v2/account"
 SECRET_FILE = "/run/oauth-fixture/client-secret"
 MOUNTED_SECRET = "/run/secrets/oauth-fixture-client/client-secret"
 ARGS = [
@@ -64,6 +66,7 @@ ARGS = [
 ]
 FIXTURE = {"mandate.dev/workspace": "ws1", "mandate.dev/process": "oauth-fixture"}
 EXCHANGE = {"mandate.dev/workspace": "ws1", "mandate.dev/process": "token-exchange"}
+EXECUTOR = {"mandate.dev/workspace": "ws1", "mandate.dev/process": "executor"}
 PORT = [{"protocol": "TCP", "port": 8091}]
 OBJECTS = {
     ("Deployment", "oauth-fixture"),
@@ -105,6 +108,33 @@ def authorize_urls(docs: list[dict]) -> list[tuple[str, str]]:
     ]
 
 
+def named_env(docs: list[dict], name: str) -> list[tuple[str, str]]:
+    """Each container that names `name`, as its process and the value."""
+    return [
+        (w["metadata"]["labels"]["mandate.dev/process"], e.get("value", ""))
+        for w in workloads(docs)
+        for c in containers(w)
+        for e in c.get("env", [])
+        if e["name"] == name
+    ]
+
+
+def executor_reach(docs: list[dict]) -> list[dict]:
+    """The executor's egress rules that name a pod or a CIDR beside the journal, the vault and DNS
+    (DEC-1178 item 4)."""
+    rules = policies(docs).get("egress-executor", {}).get("spec", {}).get("egress", [])
+    known = [
+        {"mandate.dev/workspace": "ws1", "mandate.dev/process": "vault"},
+    ]
+    return [
+        r
+        for r in rules
+        if not any("namespaceSelector" in t for t in r["to"])
+        and not any(t.get("podSelector", {}).get("matchLabels") in known for t in r["to"])
+        and not any("cnpg.io/cluster" in t.get("podSelector", {}).get("matchLabels", {}) for t in r["to"])
+    ]
+
+
 def oauth_fixture(docs: list[dict], on: bool) -> list[str]:
     """What the chart renders for the fixture, on or off (DEC-1176 items 1 to 6)."""
     problems = []
@@ -117,6 +147,12 @@ def oauth_fixture(docs: list[dict], on: bool) -> list[str]:
         problems.append(f"the exchange's token URLs are {token_urls(docs)}")
     if authorize_urls(docs) != ([("api", AUTHORIZE_URL)] if on else []):
         problems.append(f"the authorize pages are {authorize_urls(docs)}")
+    accounts = named_env(docs, "MANDATE_ALPACA_ACCOUNT_URL")
+    if accounts != ([("executor", ACCOUNT_URL)] if on else []):
+        problems.append(f"the account URLs are {accounts}")
+    to_fixture_only = [{"to": [{"podSelector": {"matchLabels": FIXTURE}}], "ports": PORT}]
+    if executor_reach(docs) != (to_fixture_only if on else []):
+        problems.append(f"the executor reaches {executor_reach(docs)}")
     exchange = policies(docs).get("egress-token-exchange", {}).get("spec", {}).get("egress", [])
     to_fixture = [
         r for r in exchange if any(t.get("podSelector", {}).get("matchLabels") == FIXTURE for t in r["to"])
@@ -173,7 +209,15 @@ def oauth_fixture(docs: list[dict], on: bool) -> list[str]:
     if policy != {
         "podSelector": {"matchLabels": FIXTURE},
         "policyTypes": ["Ingress", "Egress"],
-        "ingress": [{"from": [{"podSelector": {"matchLabels": EXCHANGE}}], "ports": PORT}],
+        "ingress": [
+            {
+                "from": [
+                    {"podSelector": {"matchLabels": EXCHANGE}},
+                    {"podSelector": {"matchLabels": EXECUTOR}},
+                ],
+                "ports": PORT,
+            }
+        ],
         "egress": [],
     }:
         problems.append(f"the fixture's policy is {policy}")
@@ -342,9 +386,11 @@ def test_each_seeded_bug_is_caught():
         docs,
         "token-exchange",
         "Pod",
-        lambda w: pod_spec(w)["containers"][0]
-        .setdefault("env", [])
-        .append({"name": "MANDATE_ALPACA_AUTHORIZE_URL", "value": AUTHORIZE_URL}),
+        lambda w: (
+            pod_spec(w)["containers"][0]
+            .setdefault("env", [])
+            .append({"name": "MANDATE_ALPACA_AUTHORIZE_URL", "value": AUTHORIZE_URL})
+        ),
     )
     assert oauth_fixture(elsewhere, on=True), "an authorize page on another process is caught"
     made = {
@@ -354,9 +400,13 @@ def test_each_seeded_bug_is_caught():
         "type": "Opaque",
         "data": {"client-secret": "eA=="},
     }
-    assert oauth_fixture([*docs, made], on=True), "the client Secret made by the chart is caught (DEC-822 item 4)"
+    assert oauth_fixture([*docs, made], on=True), (
+        "the client Secret made by the chart is caught (DEC-822 item 4)"
+    )
     off = render_all()
-    stray = copy.deepcopy(next(d for d in docs if d["kind"] == "Service" and d["metadata"]["name"] == "oauth-fixture"))
+    stray = copy.deepcopy(
+        next(d for d in docs if d["kind"] == "Service" and d["metadata"]["name"] == "oauth-fixture")
+    )
     assert oauth_fixture([*off, stray], on=False), "an object of a fixture that is off is caught"
     on_with_url_off = mutate(
         off,
@@ -378,6 +428,84 @@ def test_each_seeded_bug_is_caught():
         ),
     )
     assert oauth_fixture(page_with_fixture_off, on=False), "a page with the fixture off is caught"
+
+    def executor_env(w):
+        return pod_spec(w)["containers"][0].setdefault("env", [])
+
+    def account(w):
+        return next(e for e in executor_env(w) if e["name"] == "MANDATE_ALPACA_ACCOUNT_URL")
+
+    for change in (
+        lambda w: account(w).update(value="https://paper-api.alpaca.markets/v2/account"),
+        lambda w: account(w).update(value=TOKEN_URL),
+        lambda w: account(w).update(value=ACCOUNT_URL + "?x=1"),
+        lambda w: executor_env(w).remove(account(w)),
+        lambda w: executor_env(w).append({"name": "MANDATE_ALPACA_ACCOUNT_URL", "value": ACCOUNT_URL}),
+    ):
+        assert oauth_fixture(mutate(docs, "executor", "Pod", change), on=True), "missed an account URL bug"
+    on_exchange = mutate(
+        docs,
+        "token-exchange",
+        "Pod",
+        lambda w: (
+            pod_spec(w)["containers"][0]
+            .setdefault("env", [])
+            .append({"name": "MANDATE_ALPACA_ACCOUNT_URL", "value": ACCOUNT_URL})
+        ),
+    )
+    assert oauth_fixture(on_exchange, on=True), "an account URL on another process is caught"
+    off_with_account = mutate(
+        off,
+        "executor",
+        "Pod",
+        lambda w: (
+            pod_spec(w)["containers"][0]
+            .setdefault("env", [])
+            .append({"name": "MANDATE_ALPACA_ACCOUNT_URL", "value": ACCOUNT_URL})
+        ),
+    )
+    assert oauth_fixture(off_with_account, on=False), "an account URL with the fixture off is caught"
+
+    def fixture_rule(p):
+        return next(r for r in p["spec"]["egress"] if r.get("ports") == PORT)
+
+    for change in (
+        lambda p: fixture_rule(p).update(ports=[{"protocol": "TCP", "port": 8090}]),
+        lambda p: fixture_rule(p)["to"].append({"ipBlock": {"cidr": "0.0.0.0/0"}}),
+        lambda p: p["spec"]["egress"].remove(fixture_rule(p)),
+        lambda p: p["spec"]["egress"].append({"to": [{"ipBlock": {"cidr": "35.221.23.121/32"}}]}),
+    ):
+        assert oauth_fixture(mutate(docs, "egress-executor", "NetworkPolicy", change), on=True), (
+            "missed an executor egress bug"
+        )
+    stray = mutate(
+        off,
+        "egress-executor",
+        "NetworkPolicy",
+        lambda p: p["spec"]["egress"].append(
+            {"to": [{"podSelector": {"matchLabels": FIXTURE}}], "ports": PORT}
+        ),
+    )
+    assert oauth_fixture(stray, on=False), "executor egress to a fixture that is off is caught"
+    no_executor = mutate(
+        docs,
+        "oauth-fixture",
+        "NetworkPolicy",
+        lambda p: p["spec"]["ingress"][0]["from"].pop(),
+    )
+    assert oauth_fixture(no_executor, on=True), "a fixture that refuses the executor is caught"
+
+
+def test_staging_and_production_name_no_account_url_and_their_executor_reaches_no_fixture():
+    """DEC-1178 item 4: in staging, on Alpaca's paper host, and in production, the executor carries no
+    account URL and its egress names nothing beside the journal, the vault and DNS; staging's one
+    external host for it, `paper-api.alpaca.markets`, is its Cilium policy's (`test_gitops`)."""
+    for name, docs in (
+        ("staging", render_all(*ALPACA_PAPER)),
+        ("production", render_all("--set", "deploymentTier=production")),
+    ):
+        assert named_env(docs, "MANDATE_ALPACA_ACCOUNT_URL") == [], name
+        assert executor_reach(docs) == [], name
 
 
 def test_a_token_url_is_admitted_by_its_one_fixture_value_alone():

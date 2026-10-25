@@ -2,7 +2,8 @@
 The fixture OAuth provider of a dev or ci cell (DEC-1176): the stub issuer's image, run as the
 Alpaca provider alone (`--alpaca-only`, DEC-1176 item 8) on its own pod, so no sign-in issuer is
 served to the namespace. A ClusterIP Service `oauth-fixture` fronts it on 8091; its policy admits
-only this workspace's token-exchange pods on 8091 and allows it no egress at all, not even DNS. The
+only this workspace's token-exchange pods and, for the connect check's account read (DEC-1178), its
+executor pods, on 8091, and allows it no egress at all, not even DNS. The
 browser reaches it as it reaches the API, through `kubectl port-forward`, with `oauth-fixture`
 resolved to loopback, so its `Host` header is the one the fixture answers. The stub compares that
 header alone, never an absolute-form request target's authority.
@@ -114,6 +115,10 @@ spec:
             matchLabels:
               mandate.dev/workspace: {{ .root.Values.workspace | quote }}
               mandate.dev/process: token-exchange
+        - podSelector:
+            matchLabels:
+              mandate.dev/workspace: {{ .root.Values.workspace | quote }}
+              mandate.dev/process: executor
       ports:
         - {protocol: TCP, port: 8091}
   egress: []
