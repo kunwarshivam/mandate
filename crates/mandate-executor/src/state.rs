@@ -132,6 +132,11 @@ pub struct ExecutorState {
     /// Each agent-scoped kill switch as its `KillSwitchActivated` journaled it, by that record's
     /// id, with the closes it has not yet raised as flatten intents (§5.5, DEC-485).
     pub(crate) switches: BTreeMap<EventId, Switch>,
+    /// The instruments whose kept protection was journaled `expiry_unreplaceable` and alerted
+    /// since their resting protection last changed (DEC-2355): it is alerted once for its resting
+    /// set, and again only once a placement, a confirmed cancel or an order's end changes the set.
+    /// The record names no order (journal spec §9.5, rule 41), so the fold keeps the instrument.
+    pub(crate) alerted: BTreeSet<InstrumentId>,
     /// What each agent released to the owner in each instrument, from its `PositionReleased`
     /// records (journal spec §9.27, mandate spec §3.1, DEC-2354): shares no longer its lots.
     pub(crate) released: BTreeMap<(AgentId, InstrumentId), Qty>,
@@ -414,6 +419,7 @@ impl ExecutorState {
             uncompensated: BTreeMap::new(),
             pending_requests: BTreeMap::new(),
             switches: BTreeMap::new(),
+            alerted: BTreeSet::new(),
             released: BTreeMap::new(),
             closing_all: BTreeSet::new(),
             account_switch: None,

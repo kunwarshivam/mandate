@@ -4147,7 +4147,6 @@ fn alerts_the_kept_oco(ran: &common::Ran) -> bool {
 /// once for its resting set. The next trading day, with the same orders resting, journals and
 /// alerts nothing, and neither does a restarted executor, since the fold keeps what was alerted.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_kept_oco_is_alerted_once_for_its_resting_set() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
