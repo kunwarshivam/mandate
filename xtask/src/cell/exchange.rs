@@ -359,9 +359,21 @@ pub fn drill(seeded: bool) -> Result<Verdict> {
         Some((_, phase)) if phase == "Succeeded" => {}
         Some((pod, phase)) => {
             let log = kubectl(&["logs", "--namespace", NAMESPACE, &pod]).unwrap_or_default();
+            let fixture = kubectl(&[
+                "logs",
+                "--namespace",
+                NAMESPACE,
+                "--selector",
+                "mandate.dev/process=oauth-fixture",
+                "--tail",
+                "50",
+            ])
+            .unwrap_or_default();
             return Ok(Verdict::Broken(format!(
-                "the exchange pod {pod} for {connection} did not succeed: {phase}, codes {:?}",
-                codes_only(&log)
+                "the exchange pod {pod} for {connection} did not succeed: {phase}, codes {:?}; \
+                 the fixture's codes {:?}",
+                codes_only(&log),
+                codes_only(&fixture)
             )));
         }
         None => {
