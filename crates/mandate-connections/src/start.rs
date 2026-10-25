@@ -18,6 +18,80 @@ pub const CALLBACK_PATH: &str = "/v1/oauth/alpaca/callback";
 const PRODUCTION_REDIRECT_URI: &str = "https://api.owlhead.ai/v1/oauth/alpaca/callback";
 /// Alpaca's authorization page.
 pub const AUTHORIZE_URL: &str = "https://app.alpaca.markets/oauth/authorize";
+/// The one authority beside loopback a cell's authorization page may name, over plain `http`
+/// only: the cell's `oauth-fixture` pod (DEC-1176), its scheme, host and port pinned (DEC-2633
+/// items 1 and 3).
+#[cfg(debug_assertions)]
+const FIXTURE_POD: &str = "oauth-fixture:8091";
+
+/// Where the browser is sent to grant the connect: Alpaca's page, or, only in a build with debug
+/// assertions, a dev or CI cell's fixture provider (DEC-2633 item 3). Only [`AuthorizePage::alpaca`]
+/// and [`AuthorizePage::for_cell`] make one, so no other text can become the page:
+///
+/// ```compile_fail,E0423
+/// let forged = mandate_connections::start::AuthorizePage("https://evil.example/".to_owned());
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthorizePage(String);
+
+impl AuthorizePage {
+    /// Alpaca's own page, [`AUTHORIZE_URL`].
+    pub fn alpaca() -> Self {
+        Self(AUTHORIZE_URL.to_owned())
+    }
+
+    /// A dev or CI cell's page, kept exactly as given: `http://` or `https://` on a loopback host
+    /// with an optional port from 1 to 65535, or `http://` on exactly [`FIXTURE_POD`], and a
+    /// non-empty path of unreserved characters and `/`, nothing else, so no user information,
+    /// query or fragment, and never an Alpaca host. The tier is the caller's to check first.
+    #[cfg(debug_assertions)]
+    pub fn for_cell(text: &str) -> Option<Self> {
+        cell_page_admitted(text).then(|| Self(text.to_owned()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// What the start sends the browser with: the page and the platform's OAuth client.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Authorizer {
+    pub page: AuthorizePage,
+    pub client: OAuthClient,
+}
+
+/// [`AuthorizePage::for_cell`]'s check.
+#[cfg(debug_assertions)]
+fn cell_page_admitted(text: &str) -> bool {
+    let (plain, rest) = match (text.strip_prefix("http://"), text.strip_prefix("https://")) {
+        (Some(rest), _) => (true, rest),
+        (None, Some(rest)) => (false, rest),
+        (None, None) => return false,
+    };
+    let Some((authority, path)) = rest.split_once('/') else {
+        return false;
+    };
+    let path_ok = !path.is_empty()
+        && path
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~' | b'/'));
+    let fixture_pod = plain && authority == FIXTURE_POD;
+    let loopback = split_authority(authority).is_some_and(|(host, port)| {
+        let host_ok = match host {
+            Host::Bracketed(inner) => inner == "::1",
+            Host::Named(name) => LOOPBACK_HOSTS.contains(&name),
+        };
+        let port_ok = port.is_none_or(|port| {
+            !port.starts_with('0')
+                && port.bytes().all(|b| b.is_ascii_digit())
+                && port.parse::<u16>().is_ok_and(|n| n != 0)
+        });
+        host_ok && port_ok
+    });
+    (loopback || fixture_pod) && path_ok
+}
+
 /// The scopes requested, space-separated as Alpaca expects (connections spec §5.3).
 pub const REQUESTED_SCOPES: &str = "trading data";
 /// How long a `state` may be redeemed after it is issued (Proposed default, §5.2 step 1).
@@ -185,14 +259,15 @@ pub struct PendingStates {
 }
 
 impl PendingStates {
-    /// Issues `state` for `binding` and returns the authorization URL: `response_type=code`,
+    /// Issues `state` for `binding` and returns the authorization URL on `authorizer`'s page:
+    /// `response_type=code`,
     /// the client's id and redirect URI, the `state`, the PKCE challenge (`S256`),
     /// [`REQUESTED_SCOPES`], and `env` set to the binding's environment. Only a paper binding
     /// is accepted (DEC-821 item 3; DEC-441 item 21). A `state` already issued and not yet
     /// redeemed is refused, and the binding and verifier issued with it are kept unchanged.
     pub fn begin(
         &mut self,
-        client: &OAuthClient,
+        authorizer: &Authorizer,
         binding: Binding,
         state: &str,
         verifier: PkceVerifier,
@@ -202,6 +277,7 @@ impl PendingStates {
         if binding.environment != Environment::Paper {
             return Err(ConnectError::EnvironmentRefused);
         }
+        let client = &authorizer.client;
         if self.issued.contains_key(state) {
             return Err(ConnectError::StateReused);
         }
@@ -228,7 +304,8 @@ impl PendingStates {
             },
         );
         Ok(AuthorizeRedirect(format!(
-            "{AUTHORIZE_URL}?{}",
+            "{}?{}",
+            authorizer.page.as_str(),
             query.join("&")
         )))
     }

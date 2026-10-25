@@ -106,6 +106,8 @@ pub enum Cause {
     KillSwitch,
     /// A token exchange's one start, for its connection's OAuth request (rule 256).
     Requested,
+    /// A connect's executor's first start, on its token exchange's success (rule 257).
+    Exchanged,
 }
 
 impl Cause {
@@ -115,6 +117,7 @@ impl Cause {
             Self::Restart => "restart",
             Self::KillSwitch => "kill_switch",
             Self::Requested => "requested",
+            Self::Exchanged => "exchanged",
         }
     }
 
@@ -124,7 +127,30 @@ impl Cause {
             "restart" => Some(Self::Restart),
             "kill_switch" => Some(Self::KillSwitch),
             "requested" => Some(Self::Requested),
+            "exchanged" => Some(Self::Exchanged),
             _ => None,
+        }
+    }
+}
+
+/// Why a stop was journaled (journal spec §9.21).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StopCause {
+    /// An agent's runtime, or the executor of an account whose last deployed agent stopped.
+    AgentStopped,
+    /// A token exchange whose request closed (rule 256).
+    RequestClosed,
+    /// A connect's executor whose connection was refused or revoked, with no deployed agent
+    /// (rule 257).
+    ConnectionClosed,
+}
+
+impl StopCause {
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::AgentStopped => "agent_stopped",
+            Self::RequestClosed => "request_closed",
+            Self::ConnectionClosed => "connection_closed",
         }
     }
 }
@@ -148,16 +174,31 @@ pub enum Fact {
     Revoked {
         connection: String,
     },
-    /// A version-2 `ConnectionRequested` with `credential` `oauth` (§9.8): its connection's token
-    /// exchange runs until `deadline`, the request's `recorded_at` plus 600 seconds (DEC-2627).
+    /// A version-2 `ConnectionRequested` with `credential` `oauth` (§9.8), whose event id is
+    /// `request`: its connection's token exchange runs, once its roles are made, until `deadline`,
+    /// the request's `recorded_at` plus 600 seconds (DEC-2627), and its success starts `account`'s
+    /// executor (DEC-2335).
     Requested {
         connection: String,
+        account: String,
         deadline: UtcNanos,
+        request: String,
     },
-    /// A record that closes a connection's request other than a version-2 establishment, which is
-    /// read as `Connected` and closes it too: a version-1 `ConnectionEstablished`, or a
-    /// `ConnectionRefused` with occasion `connect` (rule 131).
+    /// The role provisioner's `ConnectionRolesMade` (§9.33): `connection`'s Kubernetes-auth roles
+    /// are made for the request whose event id is `request`, its cause, so that request's token
+    /// exchange can log in and may start (§9.21, DEC-2350).
+    RolesMade {
+        connection: String,
+        request: String,
+    },
+    /// A version-1 `ConnectionEstablished`, which closes the connection's request (rule 131) and
+    /// names no account.
     RequestClosed {
+        connection: String,
+    },
+    /// A `ConnectionRefused` with occasion `connect`: it closes the connection's request (rule 131)
+    /// and ends the connect, so its executor (DEC-2335).
+    Refused {
         connection: String,
     },
     /// A version-2 `AgentDeployed`, which names its connection (§9.24).
@@ -226,10 +267,16 @@ pub fn fact(row: &StoredEvent) -> Option<Fact> {
             let deadline = recorded.secs().checked_add(REQUEST_SECONDS)?;
             Some(Fact::Requested {
                 connection: text("connection_id")?.to_owned(),
+                account: text("account_ref")?.to_owned(),
                 deadline: UtcNanos::from_parts(deadline, recorded.nanos()).ok()?,
+                request: row.event_id.clone(),
             })
         }
-        "ConnectionRefused" if text("occasion") == Some("connect") => Some(Fact::RequestClosed {
+        "ConnectionRolesMade" => Some(Fact::RolesMade {
+            connection: text("connection_id")?.to_owned(),
+            request: body.get("causation_id")?.as_str()?.to_owned(),
+        }),
+        "ConnectionRefused" if text("occasion") == Some("connect") => Some(Fact::Refused {
             connection: text("connection_id")?.to_owned(),
         }),
         "ConnectionRevoked" => Some(Fact::Revoked {

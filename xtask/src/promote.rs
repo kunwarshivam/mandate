@@ -19,12 +19,13 @@ use crate::gitops::Environment;
 /// The published binaries the workspace chart runs, each with the chart's `images` key it fills.
 /// A binary not named here (`mandate-agentd`, `mandate-rh-sim`) is not a chart process yet, and
 /// the simulator never is. A lane that publishes a process's binary adds its row here.
-const CHART_IMAGE_FOR_BINARY: [(&str, &str); 5] = [
+const CHART_IMAGE_FOR_BINARY: [(&str, &str); 6] = [
     ("mandate", "mandate"),
     ("mandate-api-server", "api"),
     ("mandate-deployd", "deploy-manager"),
     ("mandate-daemon", "runtime"),
     ("mandate-executord", "executor"),
+    ("mandate-provisionerd", "role-provisioner"),
 ];
 
 /// The charts `release.yml` publishes (`HOSTED_CHARTS`), by the name `CHARTS` lists. An overlay
@@ -296,14 +297,16 @@ mod tests {
              ghcr.io/kunwarshivam/mandate/mandate-api-server@{}  mandate-api-server\n\
              ghcr.io/kunwarshivam/mandate/mandate-deployd@{}  mandate-deployd\n\
              ghcr.io/kunwarshivam/mandate/mandate-daemon@{}  mandate-daemon\n\
-             ghcr.io/kunwarshivam/mandate/mandate-executord@{}  mandate-executord\n",
+             ghcr.io/kunwarshivam/mandate/mandate-executord@{}  mandate-executord\n\
+             ghcr.io/kunwarshivam/mandate/mandate-provisionerd@{}  mandate-provisionerd\n",
             digest('a'),
             digest('b'),
             digest('c'),
             digest('d'),
             digest('e'),
             digest('f'),
-            digest('9')
+            digest('9'),
+            digest('8')
         )
     }
 
@@ -398,6 +401,13 @@ mod tests {
                     format!("ghcr.io/kunwarshivam/mandate/mandate@{}", digest('a'))
                 ),
                 (
+                    "role-provisioner".to_owned(),
+                    format!(
+                        "ghcr.io/kunwarshivam/mandate/mandate-provisionerd@{}",
+                        digest('8')
+                    )
+                ),
+                (
                     "runtime".to_owned(),
                     format!(
                         "ghcr.io/kunwarshivam/mandate/mandate-daemon@{}",
@@ -419,6 +429,7 @@ mod tests {
             "mandate-deployd",
             "mandate-daemon",
             "mandate-executord",
+            "mandate-provisionerd",
         ] {
             let without: String = published()
                 .lines()
@@ -450,6 +461,7 @@ mod tests {
             ("mandate-deployd", "deploy-manager"),
             ("mandate-daemon", "runtime"),
             ("mandate-executord", "executor"),
+            ("mandate-provisionerd", "role-provisioner"),
         ] {
             assert!(
                 CHART_IMAGE_FOR_BINARY.contains(&row),

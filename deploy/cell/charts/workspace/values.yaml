@@ -40,6 +40,10 @@ images:
   # The deployment manager (DEC-1172): the one pod with an API token, which starts the runtimes and
   # executors. Once named, those two render as its pod templates, never as Deployments.
   deploy-manager: ""
+  # The role provisioner (DEC-2350): makes each OAuth connect's Kubernetes-auth roles with its own
+  # AppRole, the Secret `vault-approle-provisioner` the vault's provisioning makes. It needs
+  # `api.workspace`, whose control stream it reads, like the deployment manager.
+  role-provisioner: ""
 
 # The Alpaca OAuth app the founder registers for paper (DEC-2636): its client id and this
 # deployment's redirect URI, both public. Each is rendered, when set, into the API and the token
@@ -51,6 +55,13 @@ alpacaOAuth:
   # MANDATE_ALPACA_REDIRECT_URI: https on this deployment's API host, or loopback http in a cell,
   # with the callback's path.
   redirectUri: ""
+
+# The fixture OAuth provider of a dev or ci cell (DEC-1176): its own `oauth-fixture` pod, the stub
+# issuer's image run as the Alpaca provider alone, which only the token exchange reaches, and the
+# exchange's token URL pointed at it. It needs images.stub-issuer and both alpacaOAuth values. Any
+# tier but dev or ci refuses it, in the schema and in the chart.
+oauthFixture:
+  enabled: false
 
 # The workspace API server's settings (workspace API spec §3.11 item 2), each required once
 # images.api is named. None is a secret: the session signing key is made in the pod's memory at
@@ -72,6 +83,15 @@ api:
   # alone, route 2's limits read the client's address from X-Forwarded-For (DEC-2117 item 4). With
   # the tunnel on, cloudflared runs beside the API in its pod and reaches it on loopback.
   ingressPeers: []
+  # The API's vault binding (DEC-2338): its AppRole, the Secret `vault-approle-api` the vault's
+  # provisioning makes, and the vault's CA, copied owner-only into its vault directory, with egress
+  # to the vault on 8200 alone. Off until that Secret exists: staging provisions it, production runs
+  # no vault, and the local cell turns it on once `cargo xtask cell up` provisions it.
+  vaultBinding: false
+  # The connect finish (DEC-2348 item 3): its own Deployment, from the API's image, holding the
+  # connection manager's AppRole alone, the Secret `vault-approle-connection-manager`; the API pod
+  # never holds it. Off until that Secret exists; staging only, as `vaultBinding` is.
+  connectFinish: false
 
 # The workspace's shared artifact store (mandate documents, backtest reports), mounted at
 # /var/lib/mandate/artifacts. Which process may write it is fixed by the chart, never a value.
