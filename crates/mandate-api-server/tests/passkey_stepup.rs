@@ -667,11 +667,14 @@ fn a_tampered_assertion_is_missing() {
 
 #[test]
 fn passkey_evidence_without_an_assertion_is_missing_and_cli_confirm_with_one_is_too() {
-    let mut w = world();
+    let w = world();
     let mut bare = w.ask();
     bare.assertion = None;
     refused(&w, &bare, ProblemCode::StepUpMissing);
 
+    let mut w = holding(2, |signer| {
+        enrolled(OWNER, CREDENTIAL, signer, 0, Some(ISSUED + 3_600))
+    });
     confirm_on_the_host(&mut w);
     let mut confirmed_and_signed = w.ask();
     confirmed_and_signed.evidence = evidence(CHALLENGE, StepUpMethod::CliConfirm);
