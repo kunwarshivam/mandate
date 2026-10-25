@@ -44,6 +44,8 @@ use serde_json::{Map, json};
 use crate::{Case, Json, at, ensure, expect_eq, list_at, str_at, u64_at};
 
 mod gate;
+#[cfg(test)]
+mod tests;
 
 const SUITE: &str = "trading_domain";
 /// The broker profile of a backtest case (spec §6.4): no broker, only bars.
@@ -1615,7 +1617,7 @@ mod backtest {
 
     /// The session, its first instant, and the trading day of an instant. Crypto trades continuously,
     /// in a day that ends at 00:00 UTC (spec §2.2, §4.3).
-    fn label(
+    pub(super) fn label(
         start: UtcNanos,
         class: AssetClass,
         calendar: &TradingCalendar,
