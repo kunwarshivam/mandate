@@ -127,8 +127,18 @@ fn a_quote_is_handed_only_when_sane() -> Result<(), Error> {
     let noon = now.secs();
     let before = "2026-09-21T14:59:58Z";
     for (bid, ask) in [("150", "150.2"), ("150", "150"), ("150", "151.5")] {
-        let read = feed(answer(bid, ask, before), now)?.read(&aapl()?, now);
-        assert_eq!(read, Ok(observed(bid, ask, noon - 2)?), "{bid} × {ask}");
+        let quotes = feed(answer(bid, ask, before), now)?;
+        let observation = observed(bid, ask, noon - 2)?;
+        assert_eq!(
+            quotes.read(&aapl()?, now),
+            Ok(observation.clone()),
+            "{bid} × {ask}"
+        );
+        assert_eq!(
+            quotes.observe(&aapl()?, now),
+            Some(observation),
+            "{bid} × {ask}"
+        );
     }
     for (bid, ask) in [("150", "151.6"), ("150.2", "150")] {
         let quotes = feed(answer(bid, ask, before), now)?;
