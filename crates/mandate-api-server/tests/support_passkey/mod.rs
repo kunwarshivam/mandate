@@ -279,6 +279,15 @@ pub fn removed(member: PrincipalId, credential: &str) -> Json {
     })
 }
 
+/// Appends a `StepUpAsserted` of `payload` to `rows`, at `secs`, written by `member`, the actor its
+/// credential's holder is read from (journal spec §9.32).
+pub fn assert_by(rows: &mut Rows, member: PrincipalId, secs: i64, payload: Json) {
+    rows.edited("StepUpAsserted", secs, |envelope| {
+        envelope["payload"] = payload;
+        envelope["actor"] = json!({"kind": "user", "id": encode_ulid(member.0)});
+    });
+}
+
 /// A `StepUpAsserted` payload (journal spec §9.32) for `credential` at `sign_count`.
 pub fn asserted(challenge: &str, credential: &str, sign_count: u32) -> Json {
     json!({
