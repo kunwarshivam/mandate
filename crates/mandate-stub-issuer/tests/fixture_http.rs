@@ -211,8 +211,9 @@ fn no_issuer_runs_so_its_routes_and_every_other_path_are_not_found() {
 }
 
 /// DEC-1178 item 1: a token the fixture issued reads its account at `/alpaca/v2/account`, as
-/// JSON; no bearer or another one is 401 with an empty body; a query or a body is 400; any other
-/// method is not found, and the account is answered at the public host alone.
+/// JSON that no cache keeps; no bearer, another one, or two Authorization headers is 401 with an
+/// empty body; a query or a body is 400; any other method is not found, and the account is
+/// answered at the public host alone.
 #[test]
 #[ignore = "pending E10-23"]
 fn an_issued_tokens_account_is_read_at_the_public_host_and_nothing_else_is() {
@@ -230,6 +231,7 @@ fn an_issued_tokens_account_is_read_at_the_public_host_and_nothing_else_is() {
         String::from_utf8_lossy(&answered.body)
     );
     assert_eq!(answered.header("content-type"), Some("application/json"));
+    assert_eq!(answered.header("cache-control"), Some("no-store"));
     let id = answered.json()["id"].as_str().expect("an id").to_owned();
     assert_eq!(id.len(), 36, "{id}");
     assert_eq!(answered.json().as_object().map(|o| o.len()), Some(1));
@@ -241,6 +243,27 @@ fn an_issued_tokens_account_is_read_at_the_public_host_and_nothing_else_is() {
             "another bearer",
         ),
         (vec![("Authorization", "Basic x")], "another scheme"),
+        (
+            vec![
+                ("Authorization", bearer.as_str()),
+                ("Authorization", "Bearer x"),
+            ],
+            "its bearer, then another",
+        ),
+        (
+            vec![
+                ("Authorization", "Bearer x"),
+                ("Authorization", bearer.as_str()),
+            ],
+            "another bearer, then its",
+        ),
+        (
+            vec![
+                ("Authorization", bearer.as_str()),
+                ("Authorization", bearer.as_str()),
+            ],
+            "its bearer twice",
+        ),
     ] {
         let refused = read(ACCOUNT_PATH, &headers, b"");
         assert_eq!(
