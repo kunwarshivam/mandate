@@ -154,6 +154,7 @@ impl<J: ControlJournal, O: Orchestrator, A: Alerts> Deployer<J, O, A> {
             Effect::Start { slot, generation } => {
                 let launch = Launch {
                     lifetime: self.manager.lifetime(&slot, now),
+                    expires_at: self.manager.expires_at(&slot),
                     connection: self.manager.connection(&slot, generation),
                 };
                 if self

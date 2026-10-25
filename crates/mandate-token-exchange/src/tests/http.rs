@@ -21,6 +21,7 @@ use axum::response::{IntoResponse, Response};
 use secrecy::{ExposeSecret, SecretString};
 
 use super::vault;
+use super::{Waitless, deadline};
 use crate::cell::parse;
 use crate::http::{HttpTokenEndpoint, Target};
 use crate::response::MAX_BODY;
@@ -464,7 +465,15 @@ fn the_exchange_runs_through_the_vault_adapter_and_the_http_adapter() {
     let script = vault::Script::waiting();
     let adapter = vault::adapter(&script);
     let mut endpoint = HttpTokenEndpoint::for_cell(parse(Some("ci"), &url).unwrap()).unwrap();
-    let grant = run(&settings, &mut &adapter, &mut &adapter, &mut endpoint).unwrap();
+    let grant = run(
+        &settings,
+        &mut &adapter,
+        &mut &adapter,
+        &mut endpoint,
+        &mut Waitless,
+        deadline(),
+    )
+    .unwrap();
     assert_eq!(grant.connection_id, vault::CONNECTION);
     let hits = hits.lock().unwrap().clone();
     assert_eq!(hits.len(), 1, "one request");
