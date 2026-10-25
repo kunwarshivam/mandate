@@ -4418,6 +4418,9 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
 - **E7-4 (executor), from the review of [DEC-2358](decisions/DEC-2358.md):** pin a discretionary
   exit with a limit of its own whose price vanishes mid-sequence: it falls back to its limit, and
   the sequence goes on, rather than ending and re-protecting as an exit with no limit does.
+  Done: `hand.rs`'s `a_discretionary_exits_rung_falls_back_to_its_own_limit_when_its_price_vanishes`
+  (a `max_unprotected_s` above the five-minute staleness is what lets the price vanish inside the
+  sequence; a lone exit with a limit of its own is never laddered, so it has no rung to price).
 - **E7-4 (executor), from the review of [DEC-2356](decisions/DEC-2356.md) item 8:** `closes_due`
   holds the close only for a `Submitting` sell of ours a read does not list. A sell whose
   submission answer is lost becomes `Unknown`, and a later read that omits it releases the close

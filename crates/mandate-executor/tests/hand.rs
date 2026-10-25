@@ -5679,6 +5679,76 @@ fn step_rung(
     (ticked, confirmed)
 }
 
+/// DEC-2358 (its review's pin): a discretionary exit with a limit of its own, laddered from a
+/// fresh quote inside its sequence, whose price vanishes mid-sequence (the quote is more than five
+/// minutes old at its next rung, which a `max_unprotected_s` above five minutes allows) goes on at
+/// its own limit, journaled and alerted `exit_unpriced`, and the sequence goes on: nothing is
+/// re-placed, as it would be for an exit with no limit that ends.
+#[test]
+fn a_discretionary_exits_rung_falls_back_to_its_own_limit_when_its_price_vanishes() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let mut config = config();
+    config.max_unprotected_s = 900;
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = protected_position(&ports);
+    shell.run(Input::Market(quote(AAPL, "155", "155.1", 20)), &ports);
+    shell.run(
+        handoff(INTENT, common::AGENT, discretionary_exit(AAPL, "10", "150")),
+        &ports,
+    );
+    let sent = shell.run(
+        Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+            client_order_id: "md-oco-1".to_owned(),
+        })),
+        &ports,
+    );
+    let first = sent
+        .submissions()
+        .first()
+        .copied()
+        .cloned()
+        .expect("the exit's first rung goes once the OCO's cancel is confirmed");
+    assert_ne!(
+        first.limit_price,
+        Some(price("150")),
+        "the first rung is laddered from the fresh quote"
+    );
+
+    let (_, confirmed) = step_rung(&mut shell, &ports, 20 + 400, first.client_order_id.as_str());
+
+    let next = confirmed
+        .submissions()
+        .first()
+        .copied()
+        .cloned()
+        .expect("the next rung goes, at the exit's own limit");
+    assert_eq!(
+        (next.limit_price, next.qty, next.purpose),
+        (Some(price("150")), qty("10"), Purpose::DiscretionaryExit),
+        "{:?}",
+        confirmed.draft_types()
+    );
+    assert!(
+        confirmed.notifications.contains(&"exit_unpriced"),
+        "{:?}",
+        confirmed.notifications
+    );
+    assert!(
+        !confirmed
+            .drafts
+            .iter()
+            .any(|d| d.event_type == "ProtectionChanged"
+                && d.payload
+                    .get("action")
+                    .and_then(mandate_canon::Value::as_str)
+                    == Some("placed")),
+        "the sequence goes on, so nothing is re-placed: {:?}",
+        confirmed.draft_types()
+    );
+}
+
 #[test]
 fn the_ladder_steps_only_after_the_interval() {
     let ids = TestIds;
