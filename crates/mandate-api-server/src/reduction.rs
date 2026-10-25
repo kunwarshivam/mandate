@@ -223,9 +223,8 @@ impl Reduction {
         }
     }
 
-    /// Raises the operator alert `reduction_failures_over_limit` once: its opaque code on standard
-    /// error, naming no address, device, member, or passkey (rule 6), and one more in
-    /// [`Reduction::alerts_raised`].
+    /// Raises the operator alert `reduction_failures_over_limit` once: [`alert_line`] on standard
+    /// error, and one more in [`Reduction::alerts_raised`].
     #[expect(
         clippy::todo,
         reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
@@ -429,6 +428,21 @@ pub async fn challenge(
         headers.insert(SET_COOKIE, cookie);
     }
     response
+}
+
+/// The runbook `reduction_failures_over_limit` names (infrastructure design §8.2).
+pub const FAILURES_RUNBOOK: &str = "docs/runbooks/RB-20-reduction-failures.md";
+
+/// The one line [`Reduction::alerted`] writes, `operator_alert <code> <runbook>` as the connect
+/// finish writes its own: the opaque code and the runbook's path, and nothing a request carried,
+/// so no address, device, member, passkey, or challenge (rule 6). It takes no argument, so it
+/// cannot name one.
+#[expect(
+    clippy::todo,
+    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+)]
+pub fn alert_line() -> String {
+    todo!()
 }
 
 /// `POST /v1/reduction-sessions` (§4.10 route 2): 403 `forbidden` without the browser marks;
