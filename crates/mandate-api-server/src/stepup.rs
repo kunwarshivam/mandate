@@ -45,6 +45,27 @@ pub struct Asserted {
 }
 
 impl Asserted {
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the passkey verifier builds one once E9-4 S4.2 lands; a unit test reads it now"
+        )
+    )]
+    pub(crate) fn new(
+        challenge: String,
+        credential: String,
+        sign_count: u32,
+        assertion: Vec<u8>,
+    ) -> Self {
+        Self {
+            challenge,
+            credential,
+            sign_count,
+            assertion,
+        }
+    }
+
     /// The challenge's ULID text, the authorized event's `step_up.assertion_id`.
     pub fn challenge(&self) -> &str {
         &self.challenge
@@ -137,5 +158,28 @@ pub fn journaled(evidence: Option<&StepUpEvidence>) -> Option<Value> {
     match evidence {
         Some(evidence) => parse(&encode(evidence).ok()?).ok(),
         None => Some(Value::Null),
+    }
+}
+
+#[cfg(test)]
+mod asserted {
+    //! A `StepUpAsserted` draft answers each member exactly as it was built: values none of the
+    //! getters' defaults or stand-ins could give.
+
+    use super::Asserted;
+
+    #[test]
+    fn each_getter_answers_what_the_draft_was_built_with() {
+        let assertion = vec![0x7b, 0x22, 0x61, 0x22, 0x7d];
+        let asserted = Asserted::new(
+            "01J9ZQ4B7Y8K3M5N6P7Q8R9S0T".to_owned(),
+            "AAECAwQFBgcICQoLDA0ODw".to_owned(),
+            9,
+            assertion.clone(),
+        );
+        assert_eq!(asserted.challenge(), "01J9ZQ4B7Y8K3M5N6P7Q8R9S0T");
+        assert_eq!(asserted.credential(), "AAECAwQFBgcICQoLDA0ODw");
+        assert_eq!(asserted.sign_count(), 9);
+        assert_eq!(asserted.assertion(), assertion.as_slice());
     }
 }

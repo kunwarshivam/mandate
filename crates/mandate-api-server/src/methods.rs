@@ -19,9 +19,6 @@ use crate::challenges::Challenges;
 use crate::confirm::CliConfirm;
 use crate::stepup::{Action, Asserted, Judged, StepUp, Unverified};
 
-/// The story the passkey binding's stubs report until it lands.
-const STORY: &str = "E9-4";
-
 /// DEC-2108 item 8's passkey verifier.
 pub struct Passkey {
     /// The challenges the server holds, from which a verified assertion's is taken.
@@ -51,7 +48,7 @@ impl StepUp for Passkey {
         _action: &Action,
         _judged: &Judged<'_>,
     ) -> Result<Option<Asserted>, Unverified> {
-        Err(Unverified::Unimplemented { story: STORY })
+        Err(Unverified::Unimplemented { story: "E9-4" })
     }
 }
 
@@ -81,6 +78,6 @@ impl StepUp for Methods {
         _action: &Action,
         _judged: &Judged<'_>,
     ) -> Result<Option<Asserted>, Unverified> {
-        Err(Unverified::Unimplemented { story: STORY })
+        Err(Unverified::Unimplemented { story: "E9-4" })
     }
 }
