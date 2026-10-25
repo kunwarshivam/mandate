@@ -6464,6 +6464,28 @@ fn a_switch_close_with_nothing_to_price_from_is_alerted_once() {
         "{:?}",
         switched.draft_types()
     );
+    let switch = switched
+        .draft("KillSwitchActivated")
+        .map(|draft| draft.event_id.clone())
+        .expect("the switch is journaled");
+    let causes: Vec<Option<EventId>> = switched
+        .drafts
+        .iter()
+        .filter(|draft| {
+            draft.event_type == "ProtectionChanged"
+                && draft
+                    .payload
+                    .get("action")
+                    .and_then(mandate_canon::Value::as_str)
+                    == Some("exit_unpriced")
+        })
+        .map(|draft| draft.causation_id.clone())
+        .collect();
+    assert_eq!(
+        causes,
+        [Some(switch)],
+        "the record names the switch it alerts for, which is what folds it once (DEC-2361 item 2)"
+    );
     assert_eq!(
         unpriced_alerts(&ticked),
         (0, 0),
