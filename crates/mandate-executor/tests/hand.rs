@@ -6214,8 +6214,8 @@ fn a_release_while_the_flatten_waits_shrinks_its_sell() {
 }
 
 /// DEC-2360 item 2: a release of the whole position before the flatten was sent leaves it nothing
-/// to sell, so it is abandoned, never sent, and the owner alerted (`exit_released`). The protection the ended sequence re-places is
-/// DEC-2360 item 4's, not this test's.
+/// to sell, so it is abandoned, never sent, and the owner alerted (`exit_released`). The
+/// protection the ended sequence re-places is DEC-2360 item 4's, not this test's.
 #[test]
 fn a_release_of_everything_while_the_flatten_waits_abandons_it() {
     let sent = released_while_the_flatten_waits("10");
@@ -6288,6 +6288,37 @@ fn a_release_between_rungs_shrinks_the_next_rung() {
         .cloned()
         .expect("the step's confirmation submits the next rung");
     assert_eq!(next.qty, qty("6"), "{:?}", confirmed.draft_types());
+}
+
+/// DEC-2360 invariant 4, rule 13: the cap reaches a switch's own flatten only. After the agent
+/// released 4 of its 10, a risk exit of 10 that is not a switch's still sends all 10, unshrunk.
+#[test]
+fn a_release_leaves_an_exit_that_is_not_a_switchs_flatten_whole() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = protected_position(&ports);
+    shell.run(Input::Market(quote(AAPL, "155", "155.1", 20)), &ports);
+    release(&mut shell, common::AGENT, "4");
+    shell.run(
+        handoff(INTENT, common::AGENT, risk_exit(AAPL, "10", "155")),
+        &ports,
+    );
+    let sent = shell.run(
+        Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+            client_order_id: "md-oco-1".to_owned(),
+        })),
+        &ports,
+    );
+    let sold: Vec<String> = sent
+        .submissions()
+        .into_iter()
+        .filter(|order| order.side == Side::Sell)
+        .map(|order| order.qty.to_string())
+        .collect();
+    assert_eq!(sold, ["10"], "{:?}", sent.draft_types());
 }
 
 #[test]
