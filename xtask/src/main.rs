@@ -17071,7 +17071,7 @@ mod tests {
             "fail-fast: false",
             partition_env.as_str(),
             "shared-key: fast-test",
-            "save-if: ${{ matrix.shard == '1/4' }}",
+            "save-if: ${{ matrix.shard == '1/6' }}",
         ] {
             assert!(test.contains(&line), "`fast-test` has `{line}`");
         }
