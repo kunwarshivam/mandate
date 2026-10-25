@@ -432,12 +432,14 @@ The ceremony belongs to the [identity spec](identity.md) (E9-4). The API's part:
   the API's check is a convenience, except that it never forwards evidence bound to another action.
 - Until E9-4 ships, the CLI's only method is `cli_confirm`, paper only (mandate spec §6.1). The API
   refuses every `live` step-up with `live_unavailable`. For a call made in the web app the API
-  verifies `passkey`, and `cli_confirm` only for a paper `approve` grant, confirmed in the CLI by
-  the same principal against a challenge this server issued for that action, within its 300 s and
-  once (DEC-2103 item 7, decided by the founder, DEC-2605 row 5); any other `cli_confirm` is
-  `step_up_method`. The web app shows the challenge's code, the first 40 bits of its
-  `webauthn_challenge` as 8 Crockford base-32 characters; the owner confirms it on the host with
-  `mandate step-up confirm`, which appends `StepUpConfirmed` ([journal spec
+  verifies `passkey`, and `cli_confirm` only for a paper `approve` grant or, until passkey step-up
+  confirms a connect, a paper OAuth connect's start (DEC-2125, decided by the founder), confirmed
+  in the CLI by the same principal against a challenge this server issued for that action, within
+  its 300 s and once (DEC-2103 item 7, decided by the founder, DEC-2605 row 5); any other
+  `cli_confirm` is `step_up_method`. The web app shows the challenge's code, the first 40 bits of
+  its `webauthn_challenge` as 8 Crockford base-32 characters; the owner confirms it on the host with
+  `mandate step-up confirm` (a connect: `mandate step-up confirm-connect`), which appends
+  `StepUpConfirmed` ([journal spec
   §9.29](journal.md#929-the-clis-step-up-confirmation-dec-2104)); and the API verifies the grant's
   evidence against that record in [DEC-2104](../project/decisions/DEC-2104.md) item 6's order.
 
