@@ -44,8 +44,8 @@
   challenge it takes, and the stored assertion's re-verification), with the software
   authenticator in `tests/support_passkey/mod.rs`. The connect start under passkey step-up over
   HTTP: `tests/connect_passkey_http.rs` (the batch of `ConnectionRequested` then
-  `StepUpAsserted` and the stored raw assertion, nothing appended on a refusal or on a stream that
-  breaks rule 254, and a `cli_confirm` start in the interim; and the two `invalid` wire cases).
+  `StepUpAsserted` and the stored raw assertion, nothing appended on a refusal, on a stream that
+  breaks rule 254, an unreadable one, or a store that refuses the assertion, a replay answered alike, and a `cli_confirm` start in the interim; and the two `invalid` wire cases).
 - **Run:** `cargo nextest run -p mandate-passkey`, `cargo test -p mandate-passkey --doc`,
   `cargo nextest run -p mandate-api-server --test stepup_http --test passkeys_http`,
   `cargo nextest run -p mandate-api --test step_up_assertion`, and

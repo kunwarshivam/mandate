@@ -24,17 +24,17 @@ use mandate_api::problem::{Problem, ProblemCode, Violation};
 use mandate_api::wire::decode;
 use mandate_api_server::confirm::CliConfirm;
 use mandate_api_server::methods::{Methods, Passkey};
-use mandate_api_server::objects::Objects;
+use mandate_api_server::objects::{ObjectStore, Objects};
 use mandate_api_server::session::COOKIE_NAME;
 use mandate_api_server::stepup::{Action, Asserted, Judged, StepUp, Unverified};
 use mandate_api_server::subject::{LinkRefusal, NamesPrincipal};
 use mandate_canon::{Digest, Value, parse, to_canonical};
 use mandate_identity::PrincipalId;
-use mandate_journal::{ArtifactRef, StoredEvent, get_artifact};
+use mandate_journal::{ArtifactError, ArtifactRef, ArtifactSource, StoredEvent, get_artifact};
 use serde_json::json;
 use support_connect::{
-    ALICE, APP, Fixture, KEY, StepUpBinding, T0, appended, base, code, ctl, derived, digest,
-    fixture_binding, json, principal, signed_in, start, text, unissued,
+    ALICE, APP, Fixture, KEY, MemObjects, StepUpBinding, T0, appended, base, code, ctl, derived,
+    digest, fixture_binding, json, principal, signed_in, start, text, unissued,
 };
 use support_passkey::{CREDENTIAL, Signed, Signer, assert_by, asserted, enrol, enrolled, unb64url};
 
@@ -93,13 +93,19 @@ struct World {
 }
 
 fn world() -> World {
+    world_storing(|store| store)
+}
+
+/// [`world`] whose object store is `store` made of the in-memory one holding Alice's key.
+fn world_storing(store: impl FnOnce(Arc<MemObjects>) -> Arc<dyn ObjectStore>) -> World {
     let signer = Signer::es256();
-    let mut store = BTreeMap::new();
+    let mut held = BTreeMap::new();
     let key = signer.cose_key();
-    store.insert(Digest::of(&key), key);
-    let objects = Arc::new(Objects::new(store));
+    held.insert(Digest::of(&key), key);
+    let objects = store(Arc::new(Objects::new(held)));
     let answers = Arc::new(Mutex::new(Vec::new()));
-    let (keys, kept) = (Arc::clone(&objects), Arc::clone(&answers));
+    let keys: Arc<dyn ArtifactSource + Send + Sync> = objects.clone();
+    let kept = Arc::clone(&answers);
     let f = fixture_binding(StepUpBinding {
         bind: Box::new(move |challenges| {
             Arc::new(Recorded {
@@ -138,6 +144,21 @@ fn world() -> World {
         answers,
         cookie,
         seeded,
+    }
+}
+
+/// An object store that reads as `0` does and refuses every write.
+struct Refusing(Arc<MemObjects>);
+
+impl ArtifactSource for Refusing {
+    fn read_artifact(&self, reference: &ArtifactRef) -> Result<Vec<u8>, ArtifactError> {
+        self.0.read_artifact(reference)
+    }
+}
+
+impl ObjectStore for Refusing {
+    fn put(&self, _bytes: &[u8]) -> Result<ArtifactRef, ArtifactError> {
+        Err(ArtifactError::Unavailable)
     }
 }
 
@@ -364,6 +385,92 @@ fn a_start_on_a_stream_that_breaks_rule_254_is_step_up_missing_and_appends_nothi
         assert!(w.appended().is_empty(), "{records:?}: nothing is appended");
         assert!(w.held(&issued), "{records:?}");
     }
+}
+
+#[test]
+fn a_replayed_passkey_start_answers_as_the_first_though_its_challenge_is_gone() {
+    let w = world();
+    let issued = w.challenge();
+    w.f.clock.set(T0 + 5);
+    let signed = w.signer.assert(&issued.bytes, 9);
+    let body = w.body(&issued, "passkey", Some(signed.json(CREDENTIAL)));
+    let first = w.start(&body);
+    assert_eq!(
+        first.status,
+        201,
+        "{} after the port answered {:?}",
+        String::from_utf8_lossy(&first.body),
+        w.answers()
+    );
+    let committed = w.appended();
+    assert!(!w.held(&issued));
+    let again = w.start(&body);
+    assert_eq!(
+        again.status,
+        201,
+        "{}",
+        String::from_utf8_lossy(&again.body)
+    );
+    assert_eq!(json(&again), json(&first), "the same answer");
+    assert_eq!(w.appended(), committed, "nothing more is appended");
+}
+
+#[test]
+fn a_store_that_refuses_the_raw_assertion_appends_nothing() {
+    let w = world_storing(|store| Arc::new(Refusing(store)));
+    let issued = w.challenge();
+    let signed = w.signer.assert(&issued.bytes, 9);
+    let reply = w.start(&w.body(&issued, "passkey", Some(signed.json(CREDENTIAL))));
+    assert_eq!(
+        code(&reply),
+        (503, ProblemCode::JournalUnavailable),
+        "the port answered {:?}",
+        w.answers()
+    );
+    assert!(w.appended().is_empty(), "nothing is appended");
+    assert!(
+        !w.held(&issued),
+        "DEC-2108 item 8: the challenge was taken at verification, so the owner signs again"
+    );
+    unissued(&w.f, &reply.body);
+}
+
+#[test]
+fn a_credential_stream_the_fold_cannot_read_is_journal_unavailable() {
+    let w = world();
+    let mut rows = Rows {
+        rows: w.f.journal.rows_of(&ctl()),
+    };
+    rows.hosted(
+        "CredentialEnrolled",
+        T0 - 500,
+        json!({"member": ALICE, "credential": CREDENTIAL, "alg": "rs256"}),
+    );
+    w.f.journal
+        .streams
+        .lock()
+        .expect("unpoisoned")
+        .insert(ctl(), rows.rows);
+    let issued = w.challenge();
+    let signed = w.signer.assert(&issued.bytes, 9);
+    let reply = w.start(&w.body(&issued, "passkey", Some(signed.json(CREDENTIAL))));
+    assert_eq!(
+        code(&reply),
+        (503, ProblemCode::JournalUnavailable),
+        "the port answered {:?}",
+        w.answers()
+    );
+    assert!(w.held(&issued), "nothing is taken");
+    let after_seeded: Vec<String> = w
+        .appended()
+        .iter()
+        .skip(1)
+        .map(|row| row.event_type.clone())
+        .collect();
+    assert!(
+        after_seeded.is_empty(),
+        "nothing is appended: {after_seeded:?}"
+    );
 }
 
 #[test]
