@@ -3507,6 +3507,9 @@ enables `live` (ES-23, OPS-5).
   select` (DEC-1190); and the founder's one bootstrap, from an address the cluster's API firewall
   admits, installs Flux and creates the workload secrets (the tunnel token and the archive key)
   from lane IAC's outputs, never committed and never by an agent, until E21-32's vault holds them.
+  Follow-up (DEC-2371 item 4): the public CA bundle every public-TLS process trusts comes from the
+  pinned postgres image, whose one digest is bumped by hand in three values files; automate that
+  bump (a scheduled check that opens the pull request) so the bundle never goes stale.
 
 - **E21-59 (Proposed, M8, after E21-54's step 3; lane I2; DEC-2214)** As the founder, I want the
   runtime process's research source to fold an agent's theses, lineages, working universe and

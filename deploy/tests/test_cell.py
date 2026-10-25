@@ -1581,7 +1581,7 @@ def test_the_founding_grant_is_a_hook_of_the_control_process():
 
 
 # The public CA bundle a process trusts for the hosts it reaches over public TLS (RS's finding 1,
-# DEC-2063 item 8): copied from the pinned postgres image by an init container of its pod, since
+# DEC-2371): copied from the pinned postgres image by an init container of its pod, since
 # every process image is a bare binary with no roots. The API trusts it for the identity provider's
 # key set; the token exchange for Alpaca's token host, which without it fails every connect
 # `endpoint_failed`; the executor for the broker; and so on for each public destination below.

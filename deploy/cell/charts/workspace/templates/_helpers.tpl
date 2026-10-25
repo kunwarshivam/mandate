@@ -703,7 +703,7 @@ true
 {{- /* The executor's broker flags (DEC-2306 item 1), as JSON: none for the fixture broker, and for
 `alpaca-paper` the paper host's, the vault's address, and the directory the vault's CA is mounted
 in. */ -}}
-{{- /* Whether process `p` needs the public CA bundle (DEC-2063 item 8): its egress names a host
+{{- /* Whether process `p` needs the public CA bundle (DEC-2371): its egress names a host
 reached over public TLS, an identity provider, a broker, market data, the OAuth token host, a model
 provider, object storage or a timestamping service. Its image is a bare binary with no roots, so
 its HTTP client could not even be built. The API gets its own bundle in its own pod (`api.yaml`).
