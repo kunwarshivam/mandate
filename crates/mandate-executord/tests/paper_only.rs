@@ -126,3 +126,21 @@ fn only_the_process_sits_above_the_vault() -> Result<(), Error> {
     }
     Ok(())
 }
+
+/// DEC-2359 item 9: the binary implements neither broker trait, so it cannot wrap a broker into
+/// one the scripted serve path takes and serve the paper broker with a wiring that reads no quote.
+#[test]
+fn the_binary_implements_no_broker() -> Result<(), Error> {
+    let main = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/main.rs"))?;
+    let implementations: Vec<&str> = main
+        .lines()
+        .map(str::trim_start)
+        .filter(|line| line.starts_with("impl") && line.contains("Broker"))
+        .collect();
+    assert_eq!(implementations, Vec::<&str>::new());
+    assert!(
+        !main.contains("ScriptedBroker"),
+        "src/main.rs names ScriptedBroker"
+    );
+    Ok(())
+}

@@ -8,7 +8,10 @@ use std::cell::{Cell, RefCell};
 use std::time::Duration;
 
 use mandate_canon::Value;
-use mandate_executord::serve::{Edge, STARTUP, Waited, serve, starting, wait};
+use mandate_executord::alpaca::AlpacaBroker;
+use mandate_executord::paper::FixturePaper;
+use mandate_executord::run;
+use mandate_executord::serve::{Edge, STARTUP, Waited, serve, serve_run, starting, wait};
 use mandate_journal::Environment;
 use mandate_process::probe::{Probe, Status, answer};
 use mandate_process::{Exit, Snapshot, State};
@@ -430,5 +433,28 @@ fn a_start_is_live_only_within_its_bound() -> Result<(), Error> {
     assert!(answer(Probe::Live, snapshot, after(STARTUP.as_secs())?).ok);
     assert!(!answer(Probe::Live, snapshot, after(STARTUP.as_secs() + 1)?).ok);
     assert!(!answer(Probe::Ready, snapshot, start).ok);
+    Ok(())
+}
+
+/// DEC-2359 item 9: the binary's serve path runs a paired run as the scripted one runs: the
+/// fixture's, on a journal that has not yet started, drains at SIGTERM and publishes the drain.
+#[test]
+fn a_fixture_run_serves_until_drained() -> Result<(), Error> {
+    let journal = deployed()?;
+    let run = run::fixture(AlpacaBroker::new(FixturePaper::new(at(NOON)?))?)?;
+    let status = starting_status();
+    let (exit, said) = with_edge(2, None, &|_| Ok(()), |edge, seen| {
+        let exit = serve_run(
+            journal.clone(),
+            run,
+            &process_config(Environment::Paper),
+            &status,
+            edge,
+        );
+        (exit, seen.said.borrow().clone())
+    })?;
+    assert_eq!(exit, Ok(0));
+    assert!(said.iter().any(|line| line == "drained"), "{said:?}");
+    assert_eq!(status.snapshot().state(), State::Exited(Exit::Drained));
     Ok(())
 }

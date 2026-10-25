@@ -8,7 +8,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Duration;
 
-use mandate_accounting::InstrumentId;
+use mandate_accounting::{InstrumentId, Side};
 use mandate_alpaca::{
     BarsRequest, DataTransport, HttpRequest, Pause, QuoteRequest, Response, TradingTransport,
     TransportError,
@@ -17,15 +17,19 @@ use mandate_canon::Value;
 use mandate_executor::{BrokerRequest, MarketObservation, OrderType, RiskClock, SubmitOrder};
 use mandate_executord::alpaca::AlpacaBroker;
 use mandate_executord::credential::paper_wiring;
+use mandate_executord::paper::FixturePaper;
 use mandate_executord::quotes::QuoteFeed;
-use mandate_executord::{ExecutorProcess, fixture};
+use mandate_executord::{ExecutorProcess, fixture, run};
 use mandate_num::{Price, Qty};
 use mandate_time::UtcNanos;
 use support::{
-    AAPL, ACCOUNT_STREAM, AGENT, Allowing, Error, Journal, NOON, OPENED, OPENING, Paper,
-    TwoPercentStop, agent_stream, at, deployed, object, propose_market_exit, start_wired, wired,
+    AAPL, ACCOUNT_STREAM, AGENT, Allowing, CONNECTION, Error, Journal, NOON, OPENED, OPENING,
+    Paper, TwoPercentStop, agent_stream, at, deployed, kill_command, object, propose_market_exit,
+    start_allowing, start_wired, stopped, wired,
 };
 
+/// The owner's kill switch of the connection.
+const SWITCH: &str = "01JCMD000000000000000000AB";
 const MSFT: &str = "MSFT";
 /// The agent's opening in MSFT, which waits on no exit price.
 const OPENING_MSFT: &str = "01JINTENT0000000000000000M";
@@ -270,5 +274,122 @@ fn the_paper_serve_path_reads_quotes_over_its_broker() -> Result<(), Error> {
         )
     );
     assert!(fixture::wiring()?.quotes.observe(&aapl, now).is_err());
+    Ok(())
+}
+
+/// DEC-2359 item 9: the paper run's wiring reads quotes over its broker's own transport.
+#[test]
+fn the_paper_run_reads_quotes_over_its_broker() -> Result<(), Error> {
+    let now = at(NOON)?;
+    let run = run::paper(AlpacaBroker::new(Quoting(now.to_string()))?, Fixed(now))?;
+    let read = run
+        .wiring()
+        .quotes
+        .observe(&InstrumentId::new(AAPL)?, now)?;
+    assert_eq!(
+        (read.bid, read.ask, read.sane),
+        (
+            Some(Price::parse("150")?),
+            Some(Price::parse("150.2")?),
+            true
+        )
+    );
+    Ok(())
+}
+
+/// DEC-2359 item 9: the fixture run's wiring reads no quote.
+#[test]
+fn the_fixture_run_reads_no_quote() -> Result<(), Error> {
+    let now = at(NOON)?;
+    let run = run::fixture(AlpacaBroker::new(FixturePaper::new(now))?)?;
+    assert_eq!(
+        run.wiring().quotes.observe(&InstrumentId::new(AAPL)?, now),
+        Err("no_quotes")
+    );
+    Ok(())
+}
+
+/// Lane LV's case (DEC-2361), with `quotes` as the feed: the agent's ten AAPL bought and filled
+/// by an earlier executor, the bracket's stop leg cancelled at the broker, the agent stopped, and
+/// then a kill switch of its connection, with three passes after it. The broker's sell orders and
+/// the passes' alert keys are returned with the journal.
+fn switched_without_protection(
+    quotes: Recorded,
+) -> Result<(Journal, Vec<SubmitOrder>, Vec<String>), Error> {
+    let journal = deployed()?;
+    journal.seed(ACCOUNT_STREAM, OPENED)?;
+    let broker = Paper::new(&journal);
+    broker.resting(OPENING, AAPL, "10", "150")?;
+    broker.fill(OPENING, "150")?;
+    let mut earlier = start_allowing(&journal, &broker)?;
+    earlier.step(at(NOON)?);
+    drop(earlier);
+    let leg = journal
+        .payloads("ProtectionChanged")
+        .iter()
+        .filter(|payload| payload.get("action").and_then(Value::as_str) == Some("placed"))
+        .find_map(|payload| match payload.get("orders") {
+            Some(Value::Array(orders)) => orders.first().and_then(Value::as_str).map(str::to_owned),
+            _ => None,
+        })
+        .ok_or("the earlier executor never placed the bracket's stop leg")?;
+    broker.resting(&leg, AAPL, "10", "147")?;
+    broker.canceled(&leg)?;
+    stopped(&journal, "c3", AGENT)?;
+    kill_command(&journal, SWITCH, "connection", CONNECTION)?;
+    let mut wiring = support::wiring()?;
+    wiring.quotes = Box::new(quotes);
+    let mut process = start_wired(&journal, &broker, wiring)?;
+    let mut alerted = Vec::new();
+    for _ in 0..3 {
+        alerted.extend(
+            process
+                .step(at(NOON)?)
+                .into_iter()
+                .map(|alert| alert.key.to_owned()),
+        );
+    }
+    let sells = broker
+        .seen()
+        .into_iter()
+        .filter_map(|seen| match seen.request {
+            BrokerRequest::Submit(order) if order.side == Side::Sell => Some(order),
+            _ => None,
+        })
+        .collect();
+    Ok((journal, sells, alerted))
+}
+
+/// `AGENTS.md` rule 13, DEC-2361: a kill switch whose close has no stop, no floor and no quote
+/// sends nothing, journals the wait `exit_unpriced` and alerts it once; once the feed reads the
+/// instrument's quote, the close is raised at it and sells the agent's ten.
+#[test]
+fn an_unpriced_kill_switch_close_goes_once_its_quote_is_read() -> Result<(), Error> {
+    let (journal, unquoted, alerted) = switched_without_protection(Recorded::default())?;
+    assert_eq!(
+        journal.applications(),
+        [(AGENT.to_owned(), SWITCH.to_owned())],
+        "the case builds an applied switch"
+    );
+    assert!(unquoted.is_empty(), "{unquoted:?}");
+    let unpriced = journal
+        .payloads("ProtectionChanged")
+        .iter()
+        .any(|payload| payload.get("action").and_then(Value::as_str) == Some("exit_unpriced"));
+    assert!(unpriced, "the wait is journaled");
+    assert_eq!(
+        alerted.iter().filter(|key| *key == "exit_unpriced").count(),
+        1,
+        "{alerted:?}"
+    );
+    let quotes = Recorded {
+        quote: Some(observed("150", "150.2", at(NOON)?.secs())?),
+        asked: Rc::default(),
+    };
+    let (_, quoted, _) = switched_without_protection(quotes)?;
+    assert!(
+        matches!(quoted.as_slice(), [sell] if sell.qty == Qty::parse("10")?),
+        "{quoted:?}"
+    );
     Ok(())
 }
