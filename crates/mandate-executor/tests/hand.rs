@@ -6145,6 +6145,170 @@ fn a_released_unattributed_partial_fill_leaves_the_switch_nothing() {
     );
 }
 
+/// The protected 10 with the owner's release of `released` of them folded and an agent's risk exit
+/// of 2 that filled, so the executor placed its own protection again, which the broker accepts
+/// and then reports expired: the re-placement step and the expiry step.
+fn released_then_lost(released: &str) -> (common::Ran, common::Ran) {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = protected_position(&ports);
+    release(&mut shell, common::AGENT, released);
+    shell.run(
+        handoff(INTENT, common::AGENT, risk_exit(AAPL, "2", "155")),
+        &ports,
+    );
+    shell.run(
+        Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+            client_order_id: "md-oco-1".to_owned(),
+        })),
+        &ports,
+    );
+    let exit = format!("md-{INTENT}");
+    let ended = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+            "b-exit",
+            Some(&exit),
+            AAPL,
+            Side::Sell,
+            "2",
+            "2",
+            "filled",
+        ))),
+        &ports,
+    );
+    let Some(placed) = ended
+        .submissions()
+        .into_iter()
+        .find(|order| order.purpose == Purpose::Protective)
+        .cloned()
+    else {
+        return (ended, common::Ran::default());
+    };
+    let report = |status| {
+        Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+            "b-placed",
+            Some(placed.client_order_id.as_str()),
+            AAPL,
+            Side::Sell,
+            &placed.qty.to_string(),
+            "0",
+            status,
+        )))
+    };
+    shell.run(report("accepted"), &ports);
+    let lost = shell.run(report("expired"), &ports);
+    (ended, lost)
+}
+
+/// DEC-2362 item 1 at `re_cover`: with the owner holding 4 released shares and the agent's exit of
+/// 2 filled, the agent's re-placed protection, lost at the broker, is placed again for the
+/// agent's 4, never for the owner's released shares.
+#[test]
+#[ignore = "pending E6-4"]
+fn a_re_cover_after_a_release_protects_only_the_agents_shares() {
+    let (_, lost) = released_then_lost("4");
+    assert_eq!(re_placed(&lost, None), qty("4"), "{:?}", lost.draft_types());
+}
+
+/// DEC-2362 item 1: after the owner took 8 of the 10 and the agent's exit sold its other 2, nothing
+/// of the agent's is left to protect, so no protection is placed on the owner's shares, at the
+/// exit's end or at a later loss.
+#[test]
+#[ignore = "pending E6-4"]
+fn a_release_of_all_the_agent_keeps_places_no_protection() {
+    let (ended, lost) = released_then_lost("8");
+    for ran in [&ended, &lost] {
+        assert!(
+            ran.submissions()
+                .into_iter()
+                .all(|order| order.purpose != Purpose::Protective),
+            "{:?}",
+            ran.draft_types()
+        );
+    }
+}
+
+/// DEC-2362 item 1 at the end of an exit sequence: with the owner holding 4 released shares, the
+/// agent's risk exit of 2 leaves it 4, and that is what the re-placement covers.
+#[test]
+#[ignore = "pending E6-4"]
+fn an_exits_re_placement_after_a_release_protects_only_the_agents_shares() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = protected_position(&ports);
+    release(&mut shell, common::AGENT, "4");
+    shell.run(
+        handoff(INTENT, common::AGENT, risk_exit(AAPL, "2", "155")),
+        &ports,
+    );
+    shell.run(
+        Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+            client_order_id: "md-oco-1".to_owned(),
+        })),
+        &ports,
+    );
+    let exit = format!("md-{INTENT}");
+    let ended = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+            "b-exit",
+            Some(&exit),
+            AAPL,
+            Side::Sell,
+            "2",
+            "2",
+            "filled",
+        ))),
+        &ports,
+    );
+    assert_eq!(
+        re_placed(&ended, None),
+        qty("4"),
+        "{:?}",
+        ended.draft_types()
+    );
+}
+
+/// DEC-2362 item 1 at `new_day`: the buffer day's replacement of the protected 10, after the owner
+/// took 4, covers the agent's 6.
+#[test]
+#[ignore = "pending E6-4"]
+fn a_buffer_day_re_placement_after_a_release_protects_only_the_agents_shares() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = protected_position(&ports);
+    release(&mut shell, common::AGENT, "4");
+    let day = copied(
+        ACCOUNT_STREAM,
+        shell.head().0.saturating_add(1),
+        "TradingDayStarted",
+        with_clock(&[("date", text("2026-12-14"))], 7_000_000),
+        &EventId(format!("{CLOCK_STREAM}-9")),
+    );
+    shell.fold_one(&day).expect("the trading day folds");
+    shell.run(Input::Journal(day), &ports);
+    let confirmed = shell.run(
+        Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+            client_order_id: "md-oco-1".to_owned(),
+        })),
+        &ports,
+    );
+    assert_eq!(
+        re_placed(&confirmed, None),
+        qty("6"),
+        "{:?}",
+        confirmed.draft_types()
+    );
+}
+
 #[test]
 fn an_agent_kill_switch_sells_exactly_the_sub_ledger_quantity() {
     let ids = TestIds;

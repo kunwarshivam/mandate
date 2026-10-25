@@ -4378,6 +4378,11 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   written after an agent's kill switch has sized its flatten sells does not shrink them, so the
   switch can still offer the released shares. Re-size an agent flatten sell not yet sent against
   the sub-ledger at send time, or cancel the part a later release takes.
+- **E6-4 (protection sizing after a release), from [DEC-2360](decisions/DEC-2360.md) item 4:**
+  protection the executor places again (the sequence end's `re_place`, `re_cover`, `new_day`) is
+  sized at the long position, so after a release it covers the owner's released shares with the
+  agent's protective order. [DEC-2362](decisions/DEC-2362.md) sizes it at the long position less
+  the released shares the owner still holds; its tests are in `hand.rs`, pending E6-4.
 - **E21-30 (executor process), from [DEC-2358](decisions/DEC-2358.md):** `mandate-executord` hands
   the core no quote, so §5.6's ladder never prices an exit there and every exit beside resting
   protection goes at its own limit or is held for want of a price. Add a quote feed: poll
