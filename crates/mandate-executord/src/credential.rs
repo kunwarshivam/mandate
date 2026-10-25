@@ -20,6 +20,7 @@
 //! Alpaca's market-data host over the same transport and credential (DEC-2359 items 2 and 5).
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use mandate_accounting::InstrumentId;
 use mandate_alpaca::{
@@ -33,7 +34,7 @@ use mandate_connections::token_entry::decode;
 use mandate_connections::vault::AccessToken;
 use mandate_executor::{AccountScope, MarketObservation, RiskClock};
 use mandate_journal::StreamId;
-use mandate_num::Adverse;
+use mandate_num::{Adverse, Fraction};
 use mandate_store::Store;
 use mandate_time::UtcNanos;
 use mandate_vault::SourceError;
@@ -396,6 +397,30 @@ impl<V: SecretSource> RunLease<V> {
     pub fn give_back(self) -> Result<(), &'static str> {
         self.leased.revoke()
     }
+}
+
+/// The paper equity profile's quote age bound (trading-domain spec §4.2, DEC-2359 item 4): the
+/// reviewed rule set's IEX quote age.
+pub const PAPER_QUOTE_MAX_AGE: Duration = Duration::from_secs(10);
+
+/// The paper equity profile's spread bound, as a fraction of the bid (DEC-2359 item 4): the
+/// collar's width for an instrument outside the liquid tier.
+pub const PAPER_QUOTE_MAX_SPREAD: &str = "0.02";
+
+/// The quote feed over `broker`'s own transport and credential (DEC-2359 item 2), judged by
+/// [`PAPER_QUOTE_MAX_AGE`] and [`PAPER_QUOTE_MAX_SPREAD`].
+///
+/// # Errors
+/// `quote_bounds_invalid` when the spread bound does not read, and `runtime_unavailable` when the
+/// feed's runtime cannot be built.
+pub fn paper_quotes(
+    broker: &AlpacaBroker<AlpacaPaperHttp>,
+) -> Result<AlpacaQuotes<AlpacaPaperHttp, TokioPause>, &'static str> {
+    let bounds = QuoteBounds {
+        max_age: PAPER_QUOTE_MAX_AGE,
+        max_spread: Fraction::parse(PAPER_QUOTE_MAX_SPREAD).map_err(|_| "quote_bounds_invalid")?,
+    };
+    AlpacaQuotes::new(DataClient::new(broker.transport(), TokioPause), bounds)
 }
 
 /// The latest-quote read of Alpaca's market-data host, over the connection's transport.

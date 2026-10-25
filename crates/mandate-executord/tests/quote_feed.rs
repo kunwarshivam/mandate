@@ -95,7 +95,6 @@ fn exit_sells(broker: &Paper) -> Vec<SubmitOrder> {
 /// and sends no sell. With a fresh, sane quote read for it, the ladder prices it: one limit sell
 /// below the bid. The feed is asked about AAPL only once its exit waits, and about nothing else.
 #[test]
-#[ignore = "pending E21-30"]
 fn a_held_exit_beside_its_protection_is_priced_once_its_quote_is_read() -> Result<(), Error> {
     let (journal, unquoted) = exit_beside_its_protection(Recorded::default())?;
     let held = journal

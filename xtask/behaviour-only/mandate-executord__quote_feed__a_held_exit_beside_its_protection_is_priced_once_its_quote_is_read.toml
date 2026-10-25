@@ -1,7 +1,0 @@
-file = "crates/mandate-executord/tests/quote_feed.rs"
-test = "a_held_exit_beside_its_protection_is_priced_once_its_quote_is_read"
-reason = """
-The process reads no quote while its `read_quotes` is a stub that hands nothing, so the held exit
-is never priced and the test fails on the sells the broker saw, not at a stub's report. E21-30's
-implementation PR deletes the row with the stub.
-"""

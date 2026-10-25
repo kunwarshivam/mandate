@@ -430,7 +430,17 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
     /// on a price and is due a read (DEC-2359), so the tick's ladder step prices from it. A quote
     /// the feed cannot give hands nothing. `false` when a handoff stopped the pass.
     fn read_quotes(&mut self, now: UtcNanos, alerts: &mut Vec<Alert>) -> bool {
-        let _ = (now, alerts, &self.polled, &self.wiring.quotes);
+        let Ok(wanted) = self.state.quote_wanted() else {
+            return true;
+        };
+        for instrument in self.polled.due(&wanted, now) {
+            let Some(observation) = self.wiring.quotes.observe(&instrument, now) else {
+                continue;
+            };
+            if !self.hand(now, now, Input::Market(observation), alerts, 0) {
+                return false;
+            }
+        }
         true
     }
 
