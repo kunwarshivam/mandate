@@ -19,9 +19,9 @@ use sha2::{Digest, Sha256};
 
 use super::{
     API_LOCAL_PORT, API_PROCESS, CELL_REQUIRED_ENV, DEMO_OWNER, DEPLOY_MANAGER_PROCESS, NAMESPACE,
-    NODE, WORKSPACE_CHART, api_image_tag, api_port_forward, helm, http, kubectl, open_session,
-    processes, render, render_with, reply_body, run_id, run_job, session_cookie, signed_in,
-    stub_image_tag, stub_token, template_args, tools_missing, up, web,
+    NODE, WORKSPACE_CHART, api_diagnosis, api_image_tag, api_port_forward, helm, http, kubectl,
+    open_session, processes, render, render_with, reply_body, run_id, run_job, session_cookie,
+    signed_in, stub_image_tag, stub_token, template_args, tools_missing, up, web,
 };
 use crate::output;
 
@@ -1513,7 +1513,7 @@ fn api_unaskable() -> Result<Option<String>> {
 /// through it (`api_port_forward` would reuse a forward that still answers its 401).
 pub(super) fn point_api(workspace: &str) -> Result<()> {
     let hosted = format!("api.workspace={workspace}");
-    helm(&[
+    let upgraded = helm(&[
         "upgrade",
         "workspace",
         WORKSPACE_CHART,
@@ -1526,7 +1526,11 @@ pub(super) fn point_api(workspace: &str) -> Result<()> {
         "--wait-for-jobs",
         "--timeout",
         "3m",
-    ])?;
+    ]);
+    if upgraded.is_err() {
+        api_diagnosis();
+    }
+    upgraded?;
     for process in [API_PROCESS, DEPLOY_MANAGER_PROCESS] {
         let deployment = format!("deployment/{process}");
         let present = kubectl(&[
