@@ -451,7 +451,7 @@ fn a_counter_not_above_the_last_is_missing() {
 
 #[test]
 #[ignore = "pending E9-4"]
-fn a_credential_fold_that_cannot_answer_is_journal_unavailable() {
+fn a_credential_stream_the_fold_cannot_read_is_journal_unavailable() {
     let mut w = world();
     w.rows.hosted(
         "CredentialEnrolled",
@@ -459,6 +459,49 @@ fn a_credential_fold_that_cannot_answer_is_journal_unavailable() {
         json!({"member": encode_ulid(OTHER.0), "credential": OTHER_CREDENTIAL, "alg": "rs256"}),
     );
     refused(&w, &w.ask(), ProblemCode::JournalUnavailable);
+}
+
+/// The owner's credential enrolled at counter 5, then `asserted` written by the owner.
+fn broken_by(asserted_records: &[(&str, u32)]) -> World {
+    let mut w = world();
+    w.rows = Rows::opened();
+    enrol(
+        &mut w.rows,
+        T0 - 900,
+        enrolled(OWNER, CREDENTIAL, &w.signer, 5, None),
+    );
+    for (seq, (challenge, counter)) in asserted_records.iter().enumerate() {
+        let secs = T0 - 100 + i64::try_from(seq).expect("small");
+        assert_by(
+            &mut w.rows,
+            OWNER,
+            secs,
+            asserted(challenge, CREDENTIAL, *counter),
+        );
+    }
+    w
+}
+
+#[test]
+#[ignore = "pending E9-4"]
+fn a_holder_whose_assertions_break_rule_254_has_no_passkey_that_counts() {
+    let below_the_last = broken_by(&[(UNKNOWN_CHALLENGE, 3)]);
+    refused(
+        &below_the_last,
+        &below_the_last.ask(),
+        ProblemCode::StepUpMissing,
+    );
+    let one_challenge_twice = broken_by(&[(UNKNOWN_CHALLENGE, 6), (UNKNOWN_CHALLENGE, 7)]);
+    refused(
+        &one_challenge_twice,
+        &one_challenge_twice.ask(),
+        ProblemCode::StepUpMissing,
+    );
+    let kept = broken_by(&[(UNKNOWN_CHALLENGE, 6)]);
+    assert!(
+        matches!(kept.judge(&kept.ask()), Ok(Some(_))),
+        "a stream that keeps rule 254 still counts"
+    );
 }
 
 #[test]
