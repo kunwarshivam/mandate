@@ -452,7 +452,7 @@ fn a_counter_not_above_the_last_is_missing() {
     refused(&asserted_at_twelve, &eleven, ProblemCode::StepUpMissing);
     let mut thirteen = asserted_at_twelve.ask();
     thirteen.assertion = Some(asserted_at_twelve.signed(13).wire(CREDENTIAL));
-    assert!(matches!(asserted_at_twelve.judge(&thirteen), Ok(Some(_))));
+    counts(&asserted_at_twelve, &thirteen);
 }
 
 #[test]
@@ -504,10 +504,7 @@ fn a_holder_whose_assertions_break_rule_254_has_no_passkey_that_counts() {
         ProblemCode::StepUpMissing,
     );
     let kept = broken_by(&[(UNKNOWN_CHALLENGE, 6)]);
-    assert!(
-        matches!(kept.judge(&kept.ask()), Ok(Some(_))),
-        "a stream that keeps rule 254 still counts"
-    );
+    counts(&kept, &kept.ask());
 }
 
 #[test]
