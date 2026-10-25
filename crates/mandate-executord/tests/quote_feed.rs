@@ -54,8 +54,9 @@ impl QuoteFeed for Recorded {
 
 /// The agent's ten AAPL, bought by the recorded opening and filled, its protection resting at the
 /// broker, and then the agent's risk exit at the market, whose sequence (§5.4) cancels the
-/// protection first and the broker confirms, with `quotes` as the process's feed.
-fn exit_beside_its_protection(quotes: Recorded) -> Result<(Journal, Paper), Error> {
+/// protection first and the broker confirms, with `quotes` as the process's feed. With them, the
+/// count of exit sells the broker has seen after each of the four passes after the proposal.
+fn exit_beside_its_protection(quotes: Recorded) -> Result<(Journal, Paper, Vec<usize>), Error> {
     let journal = deployed()?;
     journal.seed(ACCOUNT_STREAM, OPENED)?;
     let broker = Paper::new(&journal);
@@ -67,15 +68,17 @@ fn exit_beside_its_protection(quotes: Recorded) -> Result<(Journal, Paper), Erro
     let mut process = start_wired(&journal, &broker, wiring)?;
     process.step(at(NOON)?);
     propose_market_exit(&journal, AGENT, EXIT, "risk_exit", "decision")?;
+    let mut sold = Vec::new();
     for _ in 0..4 {
         process.step(at(NOON)?);
+        sold.push(exit_sells(&broker).len());
         for seen in broker.seen() {
             if let BrokerRequest::Cancel { client_order_id } = seen.request {
                 broker.canceled(client_order_id.as_str())?;
             }
         }
     }
-    Ok((journal, broker))
+    Ok((journal, broker, sold))
 }
 
 fn exit_sells(broker: &Paper) -> Vec<SubmitOrder> {
@@ -91,12 +94,13 @@ fn exit_sells(broker: &Paper) -> Vec<SubmitOrder> {
         .collect()
 }
 
-/// DEC-2037 item 5, §5.6: with no feed, the exit beside the bracket has nothing to price from
-/// and sends no sell. With a fresh, sane quote read for it, the ladder prices it: one limit sell
-/// below the bid. The feed is asked about AAPL only once its exit waits, and about nothing else.
+/// DEC-2037 item 5, §5.6: with no feed, the exit beside its protection has nothing to price from
+/// and sends no sell. With a fresh, sane quote read for it, the ladder prices it in the pass that
+/// reads it, whose tick follows the read: one limit sell below the bid. The feed is asked about
+/// AAPL only once its exit waits, and about nothing else.
 #[test]
 fn a_held_exit_beside_its_protection_is_priced_once_its_quote_is_read() -> Result<(), Error> {
-    let (journal, unquoted) = exit_beside_its_protection(Recorded::default())?;
+    let (journal, unquoted, _) = exit_beside_its_protection(Recorded::default())?;
     let held = journal
         .payloads("GateDecided")
         .last()
@@ -115,7 +119,13 @@ fn a_held_exit_beside_its_protection_is_priced_once_its_quote_is_read() -> Resul
         asked: Rc::default(),
     };
     let asked = Rc::clone(&quotes.asked);
-    let (_, quoted) = exit_beside_its_protection(quotes)?;
+    let (_, quoted, sold) = exit_beside_its_protection(quotes)?;
+    assert_eq!(
+        sold.iter().position(|sells| *sells > 0),
+        Some(1),
+        "the pass that first reads the quote, the one after the protection's cancel is confirmed, \
+         prices the exit: {sold:?}"
+    );
     let sells = exit_sells(&quoted);
     let bid = Price::parse("150")?;
     assert!(
