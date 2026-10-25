@@ -44,11 +44,16 @@ struct Recorded {
 }
 
 impl QuoteFeed for Recorded {
-    fn observe(&self, instrument: &InstrumentId, _now: UtcNanos) -> Option<MarketObservation> {
+    fn observe(
+        &self,
+        instrument: &InstrumentId,
+        _now: UtcNanos,
+    ) -> Result<MarketObservation, &'static str> {
         self.asked.borrow_mut().push(instrument.clone());
         self.quote
             .clone()
             .filter(|quote| &quote.instrument == instrument)
+            .ok_or("no_quote")
     }
 }
 
