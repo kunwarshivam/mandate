@@ -1832,11 +1832,7 @@ def test_the_executor_runs_on_alpaca_paper_where_staging_names_it():
         "executor": ["run", "--probe", "/tmp/process.sock", *PAPER_ARGS],
         "runtime": ["run", "--probe", "/tmp/process.sock", "--research", RESEARCH],
     }, args
-    unmanaged = render_all(*ALPACA_PAPER, "--set", f"images.{MANAGER}=")
-    executor = next(
-        w for w in workloads(unmanaged) if w["kind"] == "Deployment" and w["metadata"]["name"] == "executor"
-    )
-    assert first_container(executor)["args"] == ["run", "--probe", "/tmp/process.sock", *PAPER_ARGS]
+    assert helm(CHART, *paper_without_manager()).returncode != 0, "a paper executor needs the manager (DEC-2064)"
 
 
 VAULT_CA = {
@@ -1875,8 +1871,7 @@ def test_the_vault_ca_alone_is_mounted_read_only_where_the_vault_is_reached():
     paper = render_all(*ALPACA_PAPER, "--set", f"executor.vaultAddress={VAULT}")
     assert vault_ca_mounts(paper, {EXCHANGE, "executor"}) == []
     assert deploy_manager_admission(paper) == [], "the executor's CA is admitted where it is mounted"
-    unmanaged = render_all(*ALPACA_PAPER, "--set", f"images.{MANAGER}=")
-    assert vault_ca_mounts(unmanaged, {"executor"}) == []
+    assert vault_ca_mounts(render_all("--set", f"images.{MANAGER}="), set()) == [], "a fixture Deployment trusts no vault"
     keyed = mutate(
         docs, EXCHANGE, "Pod", lambda w: pod_spec(w)["volumes"][-1]["configMap"]["items"].append({"key": "tls.key", "path": "k"})
     )
@@ -1903,11 +1898,12 @@ def vault_token_mounts(docs: list[dict]) -> dict[str, str]:
 def test_only_pods_the_manager_starts_as_their_connections_account_mount_a_vault_token():
     """DEC-2336: a vault token is mounted only by a pod the deployment manager starts, which runs as
     its connection's own account; the executor's only where its broker reaches the vault. The
-    chart's Deployment executor runs as `default`, which no vault role names, and mounts none."""
+    chart's Deployment executor, the fixture broker's alone (DEC-2064), runs as `default`, which no
+    vault role names, and mounts none."""
     assert vault_token_mounts(render_all()) == {EXCHANGE: "Pod"}
     paper = render_all(*ALPACA_PAPER, "--set", f"executor.vaultAddress={VAULT}")
     assert vault_token_mounts(paper) == {EXCHANGE: "Pod", "executor": "Pod"}
-    unmanaged = render_all(*ALPACA_PAPER, "--set", f"images.{MANAGER}=")
+    unmanaged = render_all("--set", f"images.{MANAGER}=")
     assert vault_token_mounts(unmanaged) == {}, "the Deployment executor mounts no vault token"
     assert pod_spec(next(w for w in workloads(unmanaged) if w["metadata"]["name"] == "executor")).get(
         "serviceAccountName", "default"
@@ -1921,6 +1917,85 @@ def test_only_pods_the_manager_starts_as_their_connections_account_mount_a_vault
         ),
     )
     assert vault_token_mounts(seeded) == {"executor": "Deployment"}, "a Deployment's vault token is caught"
+
+
+def paper_without_manager() -> list[str]:
+    """Staging's paper broker with every image but the deployment manager's."""
+    return ["-f", str(CELL / "values" / "k3d.yaml"), *every_image(), *ALPACA_PAPER, "--set", f"images.{MANAGER}="]
+
+
+def executor_kinds(chart: Path, *extra: str) -> dict[str, str] | None:
+    """Where the executor renders with `extra`, by kind (`Deployment`, or `Pod` for the manager's
+    template) and its account, or `None` when the chart refuses to render."""
+    done = helm(chart, "-f", str(CELL / "values" / "k3d.yaml"), *every_image(), *extra)
+    if done.returncode != 0:
+        return None
+    docs = documents(done.stdout)
+    found = {
+        w["kind"]: pod_spec(w).get("serviceAccountName", "default")
+        for w in workloads(docs)
+        if w["kind"] == "Deployment" and w["metadata"]["name"] == "executor"
+    }
+    found.update({"Pod": "manager's"} if any(p["metadata"]["name"] == "executor" for p in managed_pods(docs)) else {})
+    return found
+
+
+def a_paper_executor_runs_only_as_the_managers_pod(chart: Path) -> list[str]:
+    """DEC-2064: an executor whose broker reaches the vault (`alpaca-paper`) renders only as the
+    deployment manager's pod template, which the manager starts as its connection's own account
+    (DEC-2336); without the manager the chart refuses to render, so no paper executor ever runs as
+    `default` or under another connection's account. The fixture broker's executor stays a
+    Deployment on `default`, with no connection and no credential."""
+    problems = []
+    paper = executor_kinds(chart, *ALPACA_PAPER)
+    if paper != {"Pod": "manager's"}:
+        problems.append(f"the paper executor with the manager renders as {paper}")
+    unmanaged = executor_kinds(chart, *ALPACA_PAPER, "--set", f"images.{MANAGER}=")
+    if unmanaged is not None:
+        problems.append(f"the paper executor without the manager renders as {unmanaged}")
+    else:
+        refused = helm(chart, *paper_without_manager()).stderr
+        if "DEC-2064" not in refused:
+            problems.append(f"the refusal does not name its decision: {refused.strip()[-200:]}")
+    fixture = executor_kinds(chart, "--set", f"images.{MANAGER}=")
+    if fixture != {"Deployment": "default"}:
+        problems.append(f"the fixture executor without the manager renders as {fixture}")
+    return problems
+
+
+def test_a_paper_executor_runs_only_as_the_managers_pod():
+    assert a_paper_executor_runs_only_as_the_managers_pod(CHART) == []
+
+
+def test_each_seeded_paper_executor_bug_is_caught(tmp_path):
+    """Each bug seeded into a copy of the chart is caught, so the check above is not vacuous."""
+    helpers = Path("templates") / "_helpers.tpl"
+    services = Path("templates") / "services.yaml"
+    bugs = {
+        "no refusal": (services, "{{- fail", "{{- /* fail */ -}}{{- $_ := list"),
+        "the paper broker on default": (
+            services,
+            '{{- if eq .root.Values.executor.broker "alpaca-paper" }}',
+            '{{- if eq .root.Values.executor.broker "none" }}',
+        ),
+        "the fixture refused too": (
+            services,
+            '{{- if eq .root.Values.executor.broker "alpaca-paper" }}',
+            "{{- if true }}",
+        ),
+        "another account on the Deployment": (
+            helpers,
+            "  automountServiceAccountToken: false\n",
+            "  serviceAccountName: \"0123456789abcdef\"\n  automountServiceAccountToken: false\n",
+        ),
+    }
+    for why, (path, old, new) in bugs.items():
+        copy = tmp_path / why.replace(" ", "-")
+        shutil.copytree(CHART, copy)
+        text = (copy / path).read_text()
+        assert old in text, f"{why}: {old!r} is not in {path}"
+        (copy / path).write_text(text.replace(old, new, 1))
+        assert a_paper_executor_runs_only_as_the_managers_pod(copy), f"{why} is not caught"
 
 
 def test_the_paper_broker_needs_staging_and_its_vault():
