@@ -3,6 +3,7 @@
 //! `Host`, with no CORS header on any answer.
 
 use std::future::{Future, IntoFuture as _};
+use std::io::Write as _;
 use std::pin::pin;
 use std::sync::Arc;
 use std::task::Poll;
@@ -16,7 +17,9 @@ use axum::http::{Method, StatusCode, Version};
 use axum::response::{IntoResponse as _, Response};
 use tokio::net::TcpListener;
 
-use crate::alpaca::{ACCOUNT_PATH, AUTHORIZE_PATH, AccountRefusal, Alpaca, Refusal, TOKEN_PATH};
+use crate::alpaca::{
+    ACCOUNT_PATH, AUTHORIZE_PATH, AccountRefusal, Alpaca, Cause, Refusal, TOKEN_PATH, refusal_line,
+};
 use crate::issuer::{IssueError, Issuer, TOKEN_TTL_S};
 
 /// The largest `POST /token` body accepted, in bytes.
@@ -172,21 +175,40 @@ async fn exchange(alpaca: Option<&Alpaca>, request: Request) -> Response {
         .and_then(|media| media.to_str().ok())
         .is_some_and(|media| essence_is(media, FORM));
     if !form {
+        write_line(MEDIA_TYPE_LINE);
         return StatusCode::UNSUPPORTED_MEDIA_TYPE.into_response();
     }
     let Ok(body) = to_bytes(request.into_body(), MAX_BODY_BYTES).await else {
+        write_line(BODY_SIZE_LINE);
         return StatusCode::PAYLOAD_TOO_LARGE.into_response();
     };
     let (Some(alpaca), Some(now)) = (alpaca, now_s()) else {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     };
     let Ok(body) = std::str::from_utf8(&body) else {
-        return refused(Refusal::InvalidRequest);
+        return token_refused(Refusal::InvalidRequest, Cause::Form);
     };
-    match alpaca.token(body, now) {
+    match alpaca.exchange(body, now) {
         Ok(json) => ([(CONTENT_TYPE, JSON), (CACHE_CONTROL, "no-store")], json).into_response(),
-        Err(refusal) => refused(refusal),
+        Err((refusal, cause)) => token_refused(refusal, cause),
     }
+}
+
+/// The line for a token request that is not a form (DEC-1179 item 2).
+const MEDIA_TYPE_LINE: &str = "token_refused unsupported_media_type\n";
+
+/// The line for a token request over [`MAX_BODY_BYTES`] (DEC-1179 item 2).
+const BODY_SIZE_LINE: &str = "token_refused payload_too_large\n";
+
+/// A token refusal, its line written to standard error first (DEC-1179).
+fn token_refused(refusal: Refusal, cause: Cause) -> Response {
+    write_line(&refusal_line(refusal, cause));
+    refused(refusal)
+}
+
+/// Writes `line` to standard error; a closed standard error loses the line, never the answer.
+fn write_line(line: &str) {
+    let _ = std::io::stderr().lock().write_all(line.as_bytes());
 }
 
 /// `GET /alpaca/v2/account` (DEC-1178 item 1): 400 for a query or a body, the account of the one

@@ -95,6 +95,50 @@ impl Refusal {
     }
 }
 
+/// Which check refused a token request, for the stub's standard error (DEC-1179): a fixed word,
+/// never a value the request carried.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Cause {
+    /// Not exactly DEC-2625 item 4's form, or not UTF-8.
+    Form,
+    /// A grant type other than `authorization_code`.
+    GrantType,
+    /// Another client id or client secret.
+    Client,
+    /// A code the store does not hold.
+    CodeUnknown,
+    /// A held code past its expiry.
+    CodeExpired,
+    /// Another redirect URI than the code's.
+    RedirectUri,
+    /// A verifier that is not the code's challenge.
+    CodeVerifier,
+    /// The token store is full, or the random source failed.
+    StoreFull,
+}
+
+impl Cause {
+    /// The cause's word in the stub's standard error.
+    pub fn word(self) -> &'static str {
+        match self {
+            Self::Form => "form",
+            Self::GrantType => "grant_type",
+            Self::Client => "client",
+            Self::CodeUnknown => "code_unknown",
+            Self::CodeExpired => "code_expired",
+            Self::RedirectUri => "redirect_uri",
+            Self::CodeVerifier => "code_verifier",
+            Self::StoreFull => "store_full",
+        }
+    }
+}
+
+/// The line the stub writes to standard error for `refusal` by `cause`: `token_refused`, the
+/// answer's `error`, and the cause's word (DEC-1179).
+pub fn refusal_line(refusal: Refusal, cause: Cause) -> String {
+    format!("token_refused {} {}\n", refusal.code(), cause.word())
+}
+
 /// Why the account endpoint answers no account (DEC-1178 item 1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AccountRefusal {
@@ -245,12 +289,20 @@ impl Alpaca {
     /// # Errors
     /// DEC-2625 item 4's refusals.
     pub fn token(&self, body: &str, now: i64) -> Result<String, Refusal> {
+        self.exchange(body, now).map_err(|(refusal, _)| refusal)
+    }
+
+    /// [`Alpaca::token`], with the [`Cause`] of a refusal (DEC-1179).
+    ///
+    /// # Errors
+    /// [`Alpaca::token`]'s refusals.
+    pub fn exchange(&self, body: &str, now: i64) -> Result<String, (Refusal, Cause)> {
         let params = parse(body)
             .and_then(|params| exactly(&params, &TOKEN_PARAMS))
-            .ok_or(Refusal::InvalidRequest)?;
+            .ok_or((Refusal::InvalidRequest, Cause::Form))?;
         let value = |name: &str| params.get(name).map(String::as_str).unwrap_or_default();
         if value("grant_type") != "authorization_code" {
-            return Err(Refusal::InvalidRequest);
+            return Err((Refusal::InvalidRequest, Cause::GrantType));
         }
         let issued = self
             .codes
@@ -263,20 +315,28 @@ impl Alpaca {
                 &self.settings.client_secret,
             );
         if !client {
-            return Err(Refusal::InvalidClient);
+            return Err((Refusal::InvalidClient, Cause::Client));
         }
-        let issued = issued.ok_or(Refusal::InvalidGrant)?;
-        let redeemable = now < expiry(issued.issued_at)
-            && value("redirect_uri") == issued.redirect_uri
-            && s256(value("code_verifier")) == issued.challenge;
-        if !redeemable {
-            return Err(Refusal::InvalidGrant);
+        let issued = issued.ok_or((Refusal::InvalidGrant, Cause::CodeUnknown))?;
+        let refused = if now >= expiry(issued.issued_at) {
+            Some(Cause::CodeExpired)
+        } else if value("redirect_uri") != issued.redirect_uri {
+            Some(Cause::RedirectUri)
+        } else if s256(value("code_verifier")) != issued.challenge {
+            Some(Cause::CodeVerifier)
+        } else {
+            None
+        };
+        if let Some(cause) = refused {
+            return Err((Refusal::InvalidGrant, cause));
         }
         let mut tokens = self.tokens.lock().unwrap_or_else(PoisonError::into_inner);
         if tokens.len() >= MAX_TOKENS {
-            return Err(Refusal::Unavailable);
+            return Err((Refusal::Unavailable, Cause::StoreFull));
         }
-        let token = self.fresh().ok_or(Refusal::Unavailable)?;
+        let token = self
+            .fresh()
+            .ok_or((Refusal::Unavailable, Cause::StoreFull))?;
         tokens.insert(token.clone());
         Ok(serde_json::json!({
             "access_token": token,
