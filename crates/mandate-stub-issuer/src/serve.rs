@@ -12,12 +12,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use axum::Router;
 use axum::body::to_bytes;
 use axum::extract::{Request, State};
-use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE, HOST, LOCATION};
+use axum::http::header::{AUTHORIZATION, CACHE_CONTROL, CONTENT_TYPE, HOST, LOCATION};
 use axum::http::{Method, StatusCode, Version};
 use axum::response::{IntoResponse as _, Response};
 use tokio::net::TcpListener;
 
-use crate::alpaca::{AUTHORIZE_PATH, Alpaca, Cause, Refusal, TOKEN_PATH, refusal_line};
+use crate::alpaca::{
+    ACCOUNT_PATH, AUTHORIZE_PATH, AccountRefusal, Alpaca, Cause, Refusal, TOKEN_PATH, refusal_line,
+};
 use crate::issuer::{IssueError, Issuer, TOKEN_TTL_S};
 
 /// The largest `POST /token` body accepted, in bytes.
@@ -146,6 +148,9 @@ async fn answer(State(served): State<Arc<Served>>, request: Request) -> Response
         (&Method::POST, TOKEN_PATH, _) if served.alpaca.is_some() => {
             exchange(served.alpaca.as_deref(), request).await
         }
+        (&Method::GET, ACCOUNT_PATH, _) if served.alpaca.is_some() => {
+            account(served.alpaca.as_deref(), request).await
+        }
         _ => StatusCode::NOT_FOUND.into_response(),
     }
 }
@@ -204,6 +209,32 @@ fn token_refused(refusal: Refusal, cause: Cause) -> Response {
 /// Writes `line` to standard error; a closed standard error loses the line, never the answer.
 fn write_line(line: &str) {
     let _ = std::io::stderr().lock().write_all(line.as_bytes());
+}
+
+/// `GET /alpaca/v2/account` (DEC-1178 item 1): 400 for a query or a body, the account of the one
+/// `Authorization` header's held token, never stored by a cache, or 401 with an empty body.
+async fn account(alpaca: Option<&Alpaca>, request: Request) -> Response {
+    if request.uri().query().is_some() {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    let mut headers = request.headers().get_all(AUTHORIZATION).iter();
+    let authorization = match (headers.next(), headers.next()) {
+        (Some(one), None) => Some(one.as_bytes().to_vec()),
+        _ => None,
+    };
+    let Ok(body) = to_bytes(request.into_body(), MAX_BODY_BYTES).await else {
+        return StatusCode::BAD_REQUEST.into_response();
+    };
+    if !body.is_empty() {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    let Some(alpaca) = alpaca else {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    };
+    match alpaca.account(authorization.as_deref()) {
+        Ok(json) => ([(CONTENT_TYPE, JSON), (CACHE_CONTROL, "no-store")], json).into_response(),
+        Err(AccountRefusal::Unauthorized) => StatusCode::UNAUTHORIZED.into_response(),
+    }
 }
 
 /// A refusal as RFC 6749 §5.2 writes it, never stored by a cache.

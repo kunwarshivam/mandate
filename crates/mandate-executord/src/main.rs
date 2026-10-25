@@ -45,13 +45,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use mandate_alpaca::TokioPause;
 use mandate_connections::record::ConnectionId;
 use mandate_executor::{AccountRef, AccountScope, WorkspaceId};
 use mandate_executord::alpaca::AlpacaBroker;
 use mandate_executord::connect::connect_check;
 use mandate_executord::credential::{
     RunLease, SUBJECT_ACCOUNT_ENV, VaultMount, WORKSPACE_NAMESPACE_ENV, own_checked_connection,
-    paper_account, paper_broker, paper_settings, paper_transport, subject_account,
+    paper_account, paper_broker, paper_settings, paper_transport, paper_wiring, subject_account,
     subject_connection, vault_config, vault_login, workspace_namespace,
 };
 use mandate_executord::oauth_check::{Start, exchanged_start};
@@ -211,11 +212,11 @@ fn serve<S: Store>(
     };
     let status = Status::new(serve::starting(host_now()));
     probe::serve(socket, status.clone(), host_now).map_err(|_| "probe_socket_unavailable")?;
-    let wiring = fixture::wiring()?;
     let terminated = || terminate.load(Ordering::SeqCst);
     let mut say = |line: &str| eprintln!("{line}");
     let Some(mount) = paper else {
         let broker = AlpacaBroker::new(FixturePaper::new(host_now()))?;
+        let wiring = fixture::wiring()?;
         let edge = Edge {
             now: &host_now,
             tick: &mut |_| None,
@@ -236,6 +237,7 @@ fn serve<S: Store>(
     exchanged_start(&mut store, &fixture::Ids, &config.scope, start, host_now())?;
     own_checked_connection(&store, &config.scope, &connection)?;
     let (broker, mut lease) = paper_broker(vault, &connection, host_now())?;
+    let wiring = paper_wiring(&broker, TokioPause)?;
     let mut tick = |now| lease.pass(now);
     let mut edge = Edge {
         now: &host_now,
