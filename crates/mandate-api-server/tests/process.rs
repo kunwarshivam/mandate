@@ -449,3 +449,142 @@ fn a_malformed_or_non_unicode_ingress_peers_setting_refuses_the_start() {
         );
     }
 }
+
+/// DEC-2348 item 3: `finish` takes nothing after it.
+#[test]
+fn the_finish_mode_takes_no_arguments() {
+    let (code, text) = refused(command(&["finish", "--bind", "127.0.0.1:0"], &[]));
+    assert_eq!(code, Some(2), "{text}");
+    assert!(
+        text.contains("refused: a required setting is absent or malformed: arguments"),
+        "{text}"
+    );
+}
+
+#[test]
+fn the_finish_mode_refuses_a_secret_in_the_environment_and_never_prints_it() {
+    let canary = "canary-7e20-never-printed";
+    let (code, text) = refused(command(&["finish"], &[("VAULT_TOKEN", canary)]));
+    assert_eq!(code, Some(2), "{text}");
+    assert!(text.contains("VAULT_TOKEN"), "{text}");
+    assert!(!text.contains(canary), "{text}");
+}
+
+/// Without its vault settings the finish does not start, and names them alone.
+#[test]
+fn the_finish_mode_without_its_vault_settings_names_them() {
+    let (code, text) = refused(command(&["finish"], &[]));
+    assert_eq!(code, Some(2), "{text}");
+    assert_eq!(
+        text,
+        "refused: finish off: MANDATE_FINISH_VAULT_ADDRESS MANDATE_FINISH_VAULT_DIR missing or \
+         invalid\n"
+    );
+}
+
+/// With its settings the finish starts, says only `finishing`, and runs until it is stopped; the
+/// vault is not reached before its first pass needs it.
+#[test]
+fn the_finish_mode_with_its_settings_runs_until_stopped() {
+    let dir = finish_vault_dir("connection-manager");
+    let mut child = Running(
+        command(
+            &["finish"],
+            &[
+                ("MANDATE_FINISH_VAULT_ADDRESS", "https://127.0.0.1:9"),
+                ("MANDATE_FINISH_VAULT_DIR", &dir),
+            ],
+        )
+        .spawn()
+        .expect("the binary starts"),
+    );
+    let stdout = child.0.stdout.take().expect("its stdout");
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut line = String::new();
+        let _ = BufReader::new(stdout).read_line(&mut line);
+        let _ = tx.send(line);
+    });
+    let line = rx.recv_timeout(Duration::from_secs(10)).unwrap_or_default();
+    if line != "finishing\n" {
+        let _ = wait(&mut child.0, Duration::from_secs(10));
+        let mut stderr = String::new();
+        if let Some(mut out) = child.0.stderr.take() {
+            out.read_to_string(&mut stderr).expect("its stderr");
+        }
+        panic!("first line {line:?}; stderr: {stderr}");
+    }
+    std::thread::sleep(Duration::from_millis(200));
+    assert_eq!(
+        child.0.try_wait().expect("its status"),
+        None,
+        "still running"
+    );
+}
+
+/// A vault directory with the CA and the API's pair, but not the connection manager's, refuses
+/// the finish: it never falls back to another identity (DEC-2348 item 3).
+#[test]
+fn the_finish_mode_without_the_connection_managers_pair_is_refused() {
+    let dir = finish_vault_dir("api");
+    let (code, text) = refused(command(
+        &["finish"],
+        &[
+            ("MANDATE_FINISH_VAULT_ADDRESS", "https://127.0.0.1:9"),
+            ("MANDATE_FINISH_VAULT_DIR", &dir),
+        ],
+    ));
+    assert_eq!(code, Some(2), "{text}");
+    assert_eq!(
+        text,
+        "refused: finish off: MANDATE_FINISH_VAULT_DIR missing or invalid\n"
+    );
+}
+
+/// A fresh directory holding the CA and `role`'s credential pair, each at 0600.
+fn finish_vault_dir(role: &str) -> String {
+    let dir = credentials();
+    for (name, value) in [
+        (
+            "ca.crt".to_owned(),
+            "-----BEGIN CERTIFICATE-----\nca\n-----END CERTIFICATE-----\n",
+        ),
+        (format!("{role}.role-id"), "role-canary\n"),
+        (format!("{role}.secret-id"), "secret-canary\n"),
+    ] {
+        let file = dir.join(name);
+        fs::write(&file, value).expect("a file");
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o600)).expect("its mode");
+    }
+    dir.to_str().expect("a UTF-8 path").to_owned()
+}
+
+/// SIGTERM drains the finish (DEC-2348 item 3): the pass in flight, here held by a journal and a
+/// vault nobody answers for, gets the drain bound, and the process exits 0 with nothing more on
+/// stdout.
+#[test]
+fn the_finish_mode_exits_0_on_sigterm() {
+    let dir = finish_vault_dir("connection-manager");
+    let mut child = Running(
+        command(
+            &["finish"],
+            &[
+                ("MANDATE_FINISH_VAULT_ADDRESS", "https://127.0.0.1:9"),
+                ("MANDATE_FINISH_VAULT_DIR", &dir),
+            ],
+        )
+        .spawn()
+        .expect("the binary starts"),
+    );
+    let mut stdout = BufReader::new(child.0.stdout.take().expect("its stdout"));
+    let mut line = String::new();
+    stdout.read_line(&mut line).expect("its first line");
+    assert_eq!(line, "finishing\n");
+    terminate(&child.0);
+    let code = wait(&mut child.0, Duration::from_secs(15));
+    let mut rest = String::new();
+    stdout
+        .read_to_string(&mut rest)
+        .expect("the rest of stdout");
+    assert_eq!((code, rest.as_str()), (Some(0), ""));
+}

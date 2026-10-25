@@ -70,8 +70,13 @@ const EXIT_BID: (&str, &str, &str) = ("501.25", "100", "500");
 const EXIT_CONTROL_HEAD: u64 = 9;
 /// A second agent, on its own envelope ([`WEB_MANDATE_FILE`]), deployed for `web/`'s kill switch:
 /// the CLI stops [`AGENT`] inside the Job, and `web/` offers nothing to stop on a stopped agent, so
-/// the browser presses this one's (lane W2's D10).
-pub const WEB_AGENT: &str = "demo-web";
+/// the browser presses this one's (lane W2's D10). Its id is `agt_` and a ULID, the only agent id
+/// web/'s routes open (`web/src/lib/ids.ts`'s `AGENT_ID`); any other id is a 404 there.
+pub const WEB_AGENT: &str = "agt_01KDEM00000000000000000WEB";
+/// [`WEB_AGENT`]'s envelope's `name`: a mandate name is lowercase letters, digits and hyphens
+/// (`mandate.schema.json`), so it cannot be the agent's id, and nothing requires that it is.
+#[cfg(test)]
+const WEB_ENVELOPE: &str = "demo-web";
 /// The demo's research agent, deployed alone in [`research_workspace_of`] the run's workspace, so
 /// its research is the only agent on its control stream (DEC-2214 item 1, DEC-2247 item 2).
 pub const RESEARCH_AGENT: &str = "demo-research";
@@ -1852,7 +1857,7 @@ mod tests {
             pinned[0]["asset_id"],
             parsed(INSTRUMENT_FILE)["instrument_id"]
         );
-        assert_eq!(web["name"], WEB_AGENT);
+        assert_eq!(web["name"], WEB_ENVELOPE);
         assert_eq!(web["connection_id"], demo["connection_id"]);
         for m in [&mut demo, &mut web] {
             m["name"] = Value::Null;

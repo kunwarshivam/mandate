@@ -113,9 +113,10 @@ still asks for a seal key when none exists (`openssl rand -hex 32`, not shown as
 stop it there with Ctrl-C, run `stty echo`), and keeps one that does.
 
 If you ever provision by hand rather than through the apply (DEC-2630), pipe `mandate vault
-provision --operator-token-stdin --secrets-namespace ws-ws1` straight into `kubectl apply -f -`:
-its output holds every process's secret id, and redirected to a file it leaves them there at your
-umask. It refuses a terminal on either end.
+provision --operator-token-stdin --secrets-namespace ws-ws1 --kubernetes-host https://<IP>:<port>`,
+the `kubernetes` Service's ClusterIP and port in `default`, which it requires there, straight into
+`kubectl apply -f -`: its output holds every process's secret id, and redirected to a file it
+leaves them there at your umask. It refuses a terminal on either end.
 
 ## Staging's founder
 

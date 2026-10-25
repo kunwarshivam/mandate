@@ -70,7 +70,8 @@ fn nothing_is_sent_while_the_journal_is_down() -> Result<(), Error> {
 }
 
 /// Once appends succeed, the owed exit is the first order the broker sees, journaled first, and
-/// nothing goes ahead of it.
+/// nothing goes ahead of it but the cancels of the agent's own protective orders its exit sequence
+/// asks for first (§5.4).
 #[test]
 fn the_owed_exit_is_the_first_order_once_appends_succeed() -> Result<(), Error> {
     let (journal, broker, mut process) = owed_exit()?;
@@ -81,13 +82,27 @@ fn the_owed_exit_is_the_first_order_once_appends_succeed() -> Result<(), Error> 
     }
     journal.clear_faults();
     process.step(at("2026-09-21T15:04:00Z")?);
-    let first = broker
-        .seen()
-        .into_iter()
-        .nth(before)
-        .ok_or("nothing was sent once appends succeeded")?;
+    let sent: Vec<_> = broker.seen().into_iter().skip(before).collect();
+    let at_exit = sent
+        .iter()
+        .position(|seen| matches!(seen.request, BrokerRequest::Submit(_)))
+        .ok_or("no order was sent once appends succeeded")?;
+    for ahead in &sent[..at_exit] {
+        let BrokerRequest::Cancel { client_order_id } = &ahead.request else {
+            return Err(format!("only cancels go ahead of the exit: {ahead:?}").into());
+        };
+        let protective = process.state().order(client_order_id).is_some_and(|order| {
+            order.purpose == Purpose::Protective
+                && order.agent.as_ref().map(|agent| agent.0.as_str()) == Some(AGENT)
+        });
+        assert!(
+            protective,
+            "only the agent's protective orders are cancelled ahead of it: {ahead:?}"
+        );
+    }
+    let first = &sent[at_exit];
     let BrokerRequest::Submit(order) = &first.request else {
-        return Err(format!("the first request is not the exit: {first:?}").into());
+        return Err(format!("the first order is not the exit: {first:?}").into());
     };
     assert_eq!(order.client_order_id.as_str(), format!("md-{EXIT}"));
     assert_eq!(order.purpose, Purpose::RiskExit);

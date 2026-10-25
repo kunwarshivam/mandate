@@ -1,17 +1,17 @@
 # Per-PR checks (ADR-0001 ES-12, DEC-75, DEC-76, DEC-464). The required checks remain `fast` and
 # `full`, and both are quick aggregates. `fast` is over `fast-lint` (lint and the spec guard), the
-# three `fast-test` shards of the nextest run, `fast-pending` (pending tests, doctests and the
+# four `fast-test` shards of the nextest run, `fast-pending` (pending tests, doctests and the
 # rh-sim build's tests) and `fast-python` (pytest), which together run exactly `cargo xtask ci
 # fast` (DEC-871), and `fast-rh-sim-live`, the runner's tests in the `live,rh-sim` build, which no
 # `cargo xtask` group runs (DEC-964). `full` is
-# over the non-mutation full checks, the mutation plan, every deterministic mutation shard the plan
+# over the non-mutation full checks (`full-checks`, `full-checks-2` and `full-checks-3`, DEC-2334), the mutation plan, every deterministic mutation shard the plan
 # sized to the diff (DEC-538), and the workspace API schemas' mutation sweep (DEC-688). Run
 # `cargo xtask check` locally for the same complete set, unsharded. main itself is covered by the
 # nightly workflow, which dispatches this workflow on main every night (DEC-1190).
 # DEC-1190 scopes the jobs to the diff: `select` runs `cargo xtask ci select`, which takes the
 # changed paths, the crates owning them or naming them in their sources, and every crate built on
 # those, and says which jobs the diff needs. `fast-test`, `fast-pending`, `fast-python`,
-# `fast-portable`, `fast-rh-sim-live`, `full-checks`, `schema-mutants` and the seven cell jobs
+# `fast-portable`, `fast-rh-sim-live`, `full-checks`, `full-checks-2`, `full-checks-3`, `schema-mutants` and the nine cell jobs
 # (DEC-2609: a crate the cell's images hold or are built on, or `deploy/` and the cell's Python
 # pins) start only when it says so, and inside them xtask runs only the selected crates' tests. `fast-lint`, the mutation plan
 # and its shards run on every ready pull request as before. A build input, CI, xtask, any
@@ -179,8 +179,8 @@ jobs:
       - run: cargo xtask ci spec-guard
         if: steps.change.outputs.docs_only != 'true'
 
-  # DEC-871. The workspace's nextest run, in nextest's counted partitions: each shard builds every
-  # test binary and runs its third of the tests, and together they run every test once. The shards
+  # DEC-871, DEC-2325. The workspace's nextest run, in nextest's counted partitions: each shard builds every
+  # test binary and runs its quarter of the tests, and together they run every test once. The shards
   # and `fast-pending` build the same test profile, so they share one cache, which only the first
   # shard saves.
   fast-test:
@@ -194,7 +194,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: ["1/3", "2/3", "3/3"]
+        shard: ["1/4", "2/4", "3/4", "4/4"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -224,7 +224,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: fast-test
-          save-if: ${{ matrix.shard == '1/3' }}
+          save-if: ${{ matrix.shard == '1/4' }}
       - run: cargo xtask ci test-nextest
         env:
           MANDATE_TEST_PARTITION: ${{ matrix.shard }}
@@ -426,7 +426,6 @@ jobs:
       MANDATE_S3_ACCESS_KEY_ID: mandate-test
       MANDATE_S3_SECRET_ACCESS_KEY: mandate-test-only
       MANDATE_S3_REQUIRED: "1"
-      MANDATE_TOFU_REQUIRED: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -447,7 +446,40 @@ jobs:
           enable-cache: true
       - uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
         with:
-          tool: cargo-deny@0.20.2,cargo-nextest@0.9.146
+          tool: cargo-nextest@0.9.146
+      - name: Install the pinned Rust toolchain (rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - run: cargo xtask ci refcases
+      - run: cargo xtask ci postgres
+      - run: cargo xtask ci openbao
+      - run: cargo xtask ci objectstore
+
+  # DEC-2334. The rest of `cargo xtask ci full`, which needs none of `full-checks`' services: the
+  # OpenTofu checks and two of the release-profile builds. A full selection ran past ten minutes in
+  # one job (DEC-464), so `full-checks`, this job and `full-checks-3` split `full`'s parts, each
+  # once, and `full` needs all three. It starts exactly when `full-checks` does.
+  full-checks-2:
+    needs: select
+    if: needs.select.outputs.full_checks == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      MANDATE_TOFU_REQUIRED: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.19"
+          enable-cache: true
+      - uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
+        with:
+          tool: cargo-deny@0.20.2
       - name: Install gitleaks (checksum-verified)
         run: |
           curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o gitleaks.tgz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
@@ -466,15 +498,42 @@ jobs:
       - name: Install the pinned Rust toolchain (rust-toolchain.toml)
         run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - run: cargo xtask ci full
+      - run: cargo xtask ci reference
+      - run: cargo xtask ci schemas
+      - run: cargo xtask ci supply-chain
+      - run: cargo xtask ci tofu
+      - run: cargo xtask ci stub-release
+      - run: cargo xtask ci exchange-release
+
+  # DEC-2334, DEC-2338 item 5. The API server's release-profile build and its release `config`
+  # tests, about five minutes on its own, which neither job above has room for under ten minutes
+  # (DEC-464), and the role provisioner's release build, which refuses its fixture (DEC-2350),
+  # under two more. It starts exactly when `full-checks` does.
+  full-checks-3:
+    needs: select
+    if: needs.select.outputs.full_checks == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install the pinned Rust toolchain (rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - run: cargo xtask ci api-release
+      - run: cargo xtask ci provisionerd-release
 
   # E21-36, E21-37 (DEC-993): the local cell on the runner. `cargo xtask ci cell` lints and renders
   # both charts, runs the chart's invariant tests, brings up a k3d cluster, installs the chart from
-  # the image this change built, runs its drills, runs each again with its bug planted, which
-  # each must catch (the journal's drills run in `cell-journal` and `cell-failover`, and the kill
-  # switch's in `cell-kill-switch` and the executor's and the vault's in `cell-executor` and `cell-vault`, below), and ends with `cell demo --no-web`, an upgrade of every release in place. Not yet in `full` (DEC-993 item 10); the chart's invariants are in
-  # `fast-python`. It and the six cell jobs below start only when `select` says the diff reaches
-  # the cell (DEC-2609); main's nightly run has no diff base and runs all seven.
+  # the image this change built, runs its drills (each again with its bug planted, which each
+  # must catch, is `cell-seeded`'s; the journal's drills run in `cell-journal` and `cell-failover`, and the kill
+  # switch's in `cell-kill-switch` and the executor's and the vault's in `cell-executor` and `cell-vault`, below); `cell demo --no-web`, an upgrade of every release in place, is `cell-upgrade`'s (DEC-464). Not yet in `full` (DEC-993 item 10); the chart's invariants are in
+  # `fast-python`. It and the eight cell jobs below start only when `select` says the diff reaches
+  # the cell (DEC-2609); main's nightly run has no diff base and runs all nine.
   cell:
     needs: select
     if: needs.select.outputs.cell == 'true'
@@ -854,6 +913,90 @@ jobs:
           cache-on-failure: true
       - run: cargo xtask ci cell-vault
 
+  # DEC-464: `cell`'s drills again, each with its bug planted, which each must catch, on its own
+  # cell, so `cell` stays within its ten minutes. Not required, as `cell` is not. It restores
+  # `cell`'s cache and saves none of its own.
+  cell-seeded:
+    needs: select
+    if: needs.select.outputs.cell == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      MANDATE_CELL_REQUIRED: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.19"
+          enable-cache: true
+      - name: Install k3d, helm and kubeconform (checksum-verified)
+        run: |
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o k3d "https://github.com/k3d-io/k3d/releases/download/v${K3D_VERSION}/k3d-linux-amd64"
+          echo "${K3D_SHA256}  k3d" | sha256sum --check
+          sudo install k3d /usr/local/bin/ && rm k3d
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o helm.tgz "https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz"
+          echo "${HELM_SHA256}  helm.tgz" | sha256sum --check
+          tar xzf helm.tgz linux-amd64 && cat linux-amd64/helm > helm
+          sudo install helm /usr/local/bin/ && rm -r helm helm.tgz linux-amd64
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o kubeconform.tgz "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          echo "${KUBECONFORM_SHA256}  kubeconform.tgz" | sha256sum --check
+          tar xzf kubeconform.tgz kubeconform && sudo install kubeconform /usr/local/bin/ && rm kubeconform kubeconform.tgz
+      - name: Install the pinned Rust toolchain (rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: cell
+          save-if: false
+          cache-on-failure: true
+      - run: cargo xtask ci cell-seeded
+
+  # DEC-464: `cell demo --no-web` on its own cell, whose `up` upgrades every release in place, and
+  # the demo's workspace, readiness and sign-in, so `cell` stays within its ten minutes. Not
+  # required, as `cell` is not. It restores `cell`'s cache and saves none of its own.
+  cell-upgrade:
+    needs: select
+    if: needs.select.outputs.cell == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      MANDATE_CELL_REQUIRED: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.19"
+          enable-cache: true
+      - name: Install k3d, helm and kubeconform (checksum-verified)
+        run: |
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o k3d "https://github.com/k3d-io/k3d/releases/download/v${K3D_VERSION}/k3d-linux-amd64"
+          echo "${K3D_SHA256}  k3d" | sha256sum --check
+          sudo install k3d /usr/local/bin/ && rm k3d
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o helm.tgz "https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz"
+          echo "${HELM_SHA256}  helm.tgz" | sha256sum --check
+          tar xzf helm.tgz linux-amd64 && cat linux-amd64/helm > helm
+          sudo install helm /usr/local/bin/ && rm -r helm helm.tgz linux-amd64
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o kubeconform.tgz "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          echo "${KUBECONFORM_SHA256}  kubeconform.tgz" | sha256sum --check
+          tar xzf kubeconform.tgz kubeconform && sudo install kubeconform /usr/local/bin/ && rm kubeconform kubeconform.tgz
+      - name: Install the pinned Rust toolchain (rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: cell
+          save-if: false
+          cache-on-failure: true
+      - run: cargo xtask ci cell-upgrade
+
   # E21-51, DEC-2001 item 11. Cell #1's `cluster` step, the same code the founder runs against the
   # droplets, against a two-node k3d cluster: the namespace and its secrets, the pull secret on the
   # default service account, the CloudNativePG operator, journal-db and the workspace chart with
@@ -1046,11 +1189,11 @@ jobs:
           path: target/mutant-costs/mutant-costs.json
           retention-days: 14
 
-  # DEC-688. The workspace API schemas' mutation sweep (`schemas/workspace-api/mutate_schemas.py`)
-  # takes about seven minutes unsharded, so it runs here beside `full-checks`, which stays under ten
-  # minutes (DEC-464), as three fixed shards of about two and a half to three minutes each; `full`
-  # needs every one. Each shard runs the three checkers on the unmutated tree first; they alone
-  # also run inside `full-checks`.
+  # DEC-688, DEC-1004, DEC-2637. The workspace API schemas' mutation sweep
+  # (`schemas/workspace-api/mutate_schemas.py`) runs here beside `full-checks`, which stays under ten
+  # minutes (DEC-464), as ten fixed shards of about 137 mutants, about six minutes each on the
+  # slowest runner; `full` needs every one. Each shard runs the three checkers on the unmutated tree
+  # first; they alone also run inside `full-checks`.
   schema-mutants:
     name: schema-mutants (${{ matrix.shard }})
     needs: select
@@ -1062,7 +1205,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: ["0/6", "1/6", "2/6", "3/6", "4/6", "5/6"]
+        shard: ["0/10", "1/10", "2/10", "3/10", "4/10", "5/10", "6/10", "7/10", "8/10", "9/10"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -1085,14 +1228,15 @@ jobs:
     permissions: {}
     # As `fast`: it runs on a cancelled pull request run, and a cancelled run elsewhere skips it.
     if: ${{ ((github.event_name == 'pull_request' && always()) || !cancelled()) && !github.event.pull_request.draft }}
-    needs: [select, full-checks, mutants-plan, mutants, schema-mutants]
+    needs: [select, full-checks, full-checks-2, full-checks-3, mutants-plan, mutants, schema-mutants]
     # DEC-538. A plan of zero mutants launches no shard, so `mutants` is skipped, and that skip
     # passes only beside a plan that succeeded and reported zero. A failed or cancelled plan, a
     # count that is not a number, a skipped matrix beside a plan that counted mutants, and a matrix
     # that ran beside a plan of zero all fail. xtask's tests run this script over that table.
     # `schema-mutants` must succeed, which a matrix does only when every shard succeeded (DEC-688).
-    # DEC-1190: `full-checks` and `schema-mutants` must have run and succeeded where `select`
-    # selected them and been skipped where it did not, beside a `select` that succeeded.
+    # DEC-1190: `full-checks`, `full-checks-2`, `full-checks-3` (DEC-2334) and `schema-mutants` must have run and
+    # succeeded where `select` selected them and been skipped where it did not, beside a `select`
+    # that succeeded.
     steps:
       - name: Require the selection, every full check it named, the mutation plan, every shard it sized, and schema-mutants where named
         env:
@@ -1101,6 +1245,8 @@ jobs:
           FULL_CHECKS_SELECTED: ${{ needs.select.outputs.full_checks }}
           SCHEMA_MUTANTS_SELECTED: ${{ needs.select.outputs.schema_mutants }}
           FULL_CHECKS_RESULT: ${{ needs.full-checks.result }}
+          FULL_CHECKS_2_RESULT: ${{ needs.full-checks-2.result }}
+          FULL_CHECKS_3_RESULT: ${{ needs.full-checks-3.result }}
           PLAN_RESULT: ${{ needs.mutants-plan.result }}
           PLANNED_MUTANTS: ${{ needs.mutants-plan.outputs.mutants }}
           MUTANTS_RESULT: ${{ needs.mutants.result }}
@@ -1109,6 +1255,8 @@ jobs:
           printf 'Affected-set selection (DEC-1190): %s\n' "$REASONS" | tee -a "$GITHUB_STEP_SUMMARY"
           test "$SELECT_RESULT" = success
           test "$FULL_CHECKS_SELECTED:$FULL_CHECKS_RESULT" = true:success || test "$FULL_CHECKS_SELECTED:$FULL_CHECKS_RESULT" = false:skipped
+          test "$FULL_CHECKS_SELECTED:$FULL_CHECKS_2_RESULT" = true:success || test "$FULL_CHECKS_SELECTED:$FULL_CHECKS_2_RESULT" = false:skipped
+          test "$FULL_CHECKS_SELECTED:$FULL_CHECKS_3_RESULT" = true:success || test "$FULL_CHECKS_SELECTED:$FULL_CHECKS_3_RESULT" = false:skipped
           test "$SCHEMA_MUTANTS_SELECTED:$SCHEMA_MUTANTS_RESULT" = true:success || test "$SCHEMA_MUTANTS_SELECTED:$SCHEMA_MUTANTS_RESULT" = false:skipped
           test "$PLAN_RESULT" = success
           case "$PLANNED_MUTANTS" in
