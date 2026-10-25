@@ -488,7 +488,12 @@ impl Sessions {
     /// journaled signal the founder chose lands (backlog E9-13). A reduction-only session is not a
     /// sign-in, and a refused open records nothing.
     ///
+    /// The standing has one owner, [`Standings`]: the store holds the process's only instance and
+    /// is its only writer, recording each full sign-in as it opens, and this reads it through, as
+    /// route 2's judge does. Nothing else keeps a sign-in.
+    ///
     /// [DEC-2319]: ../../../docs/project/decisions/DEC-2319.md
+    /// [`Standings`]: crate::standing::Standings
     pub fn standing(&self, member: PrincipalId) -> SubjectStanding {
         self.standings.standing(member)
     }
