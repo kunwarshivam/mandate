@@ -1,0 +1,7 @@
+file = "crates/mandate-executor/tests/hand.rs"
+test = "a_kept_oco_is_alerted_once_for_its_resting_set"
+reason = """
+DEC-2355 (accepted by the founder, 2026-10-25): `new_day` journals and alerts kept protection on
+every trading day it is due, as DEC-367 item 4 (a') had it, so this test reaches no stub and fails
+on that behaviour until DEC-2355's implementation deletes this file with its `#[ignore]` line.
+"""

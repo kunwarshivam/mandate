@@ -4094,6 +4094,109 @@ fn an_oco_that_cannot_be_re_placed_is_kept_at_its_buffer_day() {
     );
 }
 
+/// The kept OCO of `an_oco_that_cannot_be_re_placed_is_kept_at_its_buffer_day` at its buffer
+/// day, 2026-12-14, journaled and alerted there.
+fn kept_at_the_buffer_day(ports: &mandate_executor::Ports<'_>) -> Shell {
+    let mut shell = started();
+    shell.fold_one(&stream_opened()).expect("folds");
+    for event in protected_position_events(2) {
+        shell
+            .fold_one(&event)
+            .expect("the protected position folds");
+    }
+    shell.profile = Some(unprotectable_profile());
+    let mut shell = shell.restart_ready(ports);
+    trading_day(&mut shell, ports, "2026-12-14", 9);
+    shell
+}
+
+/// Copies a `TradingDayStarted` for `date` onto the account stream and runs it.
+fn trading_day(
+    shell: &mut Shell,
+    ports: &mandate_executor::Ports<'_>,
+    date: &str,
+    ordinal: u32,
+) -> common::Ran {
+    let day = copied(
+        ACCOUNT_STREAM,
+        shell.head().0.saturating_add(1),
+        "TradingDayStarted",
+        with_clock(
+            &[("date", text(date))],
+            7_000_000 + i64::from(ordinal) * 86_400,
+        ),
+        &EventId(format!("{CLOCK_STREAM}-{ordinal}")),
+    );
+    shell.fold_one(&day).expect("the trading day folds");
+    shell.run(Input::Journal(day), ports)
+}
+
+/// Whether `ran` journals `expiry_unreplaceable` or alerts `protection_expiring`.
+fn alerts_the_kept_oco(ran: &common::Ran) -> bool {
+    ran.notifications.contains(&"protection_expiring")
+        || ran.drafts.iter().any(|d| {
+            d.event_type == "ProtectionChanged"
+                && d.payload
+                    .get("action")
+                    .and_then(mandate_canon::Value::as_str)
+                    == Some("expiry_unreplaceable")
+        })
+}
+
+/// DEC-2355 item 2 (accepted by the founder, 2026-10-25): a kept OCO is journaled and alerted
+/// once for its resting set. The next trading day, with the same orders resting, journals and
+/// alerts nothing, and neither does a restarted executor, since the fold keeps what was alerted.
+#[test]
+#[ignore = "pending E7-4"]
+fn a_kept_oco_is_alerted_once_for_its_resting_set() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = kept_at_the_buffer_day(&ports);
+
+    let next = trading_day(&mut shell, &ports, "2026-12-15", 10);
+    assert!(!alerts_the_kept_oco(&next), "{:?}", next.draft_types());
+
+    let (mut restarted, _) = shell.restart(&ports);
+    let after = trading_day(&mut restarted, &ports, "2026-12-16", 11);
+    assert!(!alerts_the_kept_oco(&after), "{:?}", after.draft_types());
+}
+
+/// DEC-2355 item 2: a change to what rests alerts again. A second tranche placed beside the kept
+/// OCO, itself due, makes a new resting set, which the next trading day journals and alerts.
+#[test]
+fn a_changed_resting_set_is_alerted_again() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = kept_at_the_buffer_day(&ports);
+    let tranche = event(
+        ACCOUNT_STREAM,
+        shell.head().0.saturating_add(1),
+        "ProtectionChanged",
+        with_clock(
+            &[
+                ("instrument", text(AAPL)),
+                ("action", text("placed")),
+                ("orders", text("md-oco-2")),
+                ("qty", text("5")),
+                ("take_profit", text("170")),
+                ("stop", text("140")),
+                ("created_on", text("2026-09-22")),
+            ],
+            7_000_000 + 9 * 86_400 + 100,
+        ),
+    );
+    shell.fold_one(&tranche).expect("the second tranche folds");
+
+    let next = trading_day(&mut shell, &ports, "2026-12-15", 10);
+    assert!(alerts_the_kept_oco(&next), "{:?}", next.draft_types());
+}
+
 #[test]
 fn protection_is_not_re_placed_early() {
     let ids = TestIds;
