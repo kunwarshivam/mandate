@@ -4437,6 +4437,13 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
 - **E7-4 (executor), from the review of [DEC-2358](decisions/DEC-2358.md):** pin a discretionary
   exit with a limit of its own whose price vanishes mid-sequence: it falls back to its limit, and
   the sequence goes on, rather than ending and re-protecting as an exit with no limit does.
+- **E7-4 (tests), from the review of #2395 (option (b)):** `plain_entry_protection`'s property
+  accepts the bound's exit as an outcome, so an executor that stopped placing a fill's own stop
+  and left it to the bound passes it (S5 and S6 in the review). Assert that every ended opening
+  with fills has its own stop sent before its bound, unless an exit sequence, a reject or the
+  bound itself intervenes, with a model exact enough to keep it from false failures. The hand
+  tests `a_fill_beside_an_unanswered_stop_being_cancelled_gets_its_own_stop` and
+  `a_fill_beside_an_accepted_stop_being_cancelled_gets_its_own_stop` pin the two cases meanwhile.
 - **E7-4 (executor), from the review of [DEC-2356](decisions/DEC-2356.md) item 8:** `closes_due`
   holds the close only for a `Submitting` sell of ours a read does not list. A sell whose
   submission answer is lost becomes `Unknown`, and a later read that omits it releases the close
