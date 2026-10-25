@@ -1,6 +1,6 @@
 //! What route 2's judge reads besides the assertion (§4.10 route 2 item 2, E9-1 S2b-2): the
 //! control stream's passkey records (journal spec §9.31), read as the membership parser reads its
-//! rows, and DEC-2319 item 2's interim standing, Proposed: the last sign-in this process saw, and
+//! rows, and DEC-2319 item 2's interim standing, until E9-13: the last sign-in this process saw, and
 //! no membership record naming the member since.
 
 mod common;

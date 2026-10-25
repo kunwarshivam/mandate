@@ -6,8 +6,8 @@ use std::collections::BTreeSet;
 use std::fmt::Debug;
 
 use mandate_api::envelope::{
-    Actor, ApiVersion, Record, StepUpAction, StepUpActionKind, StepUpEvidence, StepUpMethod,
-    StepUpStatus, Watermark,
+    Actor, ApiVersion, Record, StepUpAction, StepUpActionKind, StepUpAssertion, StepUpEvidence,
+    StepUpMethod, StepUpStatus, Watermark,
 };
 use mandate_api::problem::{Problem, Violation};
 use mandate_api::requests::{
@@ -144,6 +144,25 @@ fn members<T: DeserializeOwned + Debug>(objects: &[&Value], tag: Option<(&str, &
     assert_eq!(serde_names::<T>(probe), schema, "{objects:?}");
 }
 
+/// [`members`] for a shape that names `ahead` before its schema does ([DEC-2126] item 5: the type
+/// takes an optional member in the tests change, and the schema follows in its own, which carries
+/// no code under ES-22). The shape must name each one whether or not the schema names it yet, and
+/// every other member exactly as its schema does. The implementation change empties the list once
+/// the schema names the member, so the struct's members are checked exactly again.
+///
+/// [DEC-2126]: ../../../docs/project/decisions/DEC-2126.md
+fn members_ahead<T: DeserializeOwned + Debug>(objects: &[&Value], ahead: &[&str]) {
+    let named = |o: &&Value| o["properties"].as_object().cloned();
+    let names = objects.iter().filter_map(named).flatten();
+    let mut schema: BTreeSet<String> = names.map(|(name, _)| name).collect();
+    schema.extend(ahead.iter().map(|member| (*member).to_owned()));
+    assert_eq!(
+        serde_names::<T>(json!({"no_such_member": 1})),
+        schema,
+        "{objects:?}"
+    );
+}
+
 #[test]
 fn every_struct_names_exactly_its_schemas_members() {
     let defs = &file!("workspace-api/envelope.schema.json")["$defs"];
@@ -151,6 +170,7 @@ fn every_struct_names_exactly_its_schemas_members() {
     members::<Watermark>(&[watermark], None);
     members::<Record>(&[&defs["Record"]], None);
     members::<StepUpEvidence>(&[&defs["StepUpEvidence"]], None);
+    members::<StepUpAssertion>(&[&defs["StepUpAssertion"]], None);
     members::<StepUpAction>(&[&defs["StepUpAction"]], None);
     members::<Actor>(&[&defs["Actor"]["oneOf"][0]], Some(("kind", "user")));
     members::<Actor>(&[&defs["Actor"]["oneOf"][1]], Some(("kind", "client")));
@@ -186,7 +206,7 @@ fn every_struct_names_exactly_its_schemas_members() {
     members::<OwnerExitRequest>(&[&schema!("owner-exit-request")], None);
     members::<RevokeRequest>(&[&schema!("revoke-request")], None);
     let start = schema!("oauth-start-request");
-    members::<OauthStartRequest>(&[&start], None);
+    members_ahead::<OauthStartRequest>(&[&start], &["step_up_assertion"]);
     members::<Disclosure>(&[&start["properties"]["disclosure"]], None);
     members::<StepUpChallengeRequest>(&[&schema!("step-up-challenge-request")], None);
     let preview = schema!("delegation-preview");

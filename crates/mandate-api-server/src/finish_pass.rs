@@ -229,7 +229,10 @@ impl<F: Fingerprints, T: Teardown, A: Alerts> Finisher<F, T, A> {
                 let Ok(epoch) = self.journal.take_ownership(&stream).await else {
                     continue;
                 };
-                let appended = self.journal.append(&stream, head, epoch, now, &draft).await;
+                let appended = self
+                    .journal
+                    .append(&stream, head, epoch, now, &[&draft])
+                    .await;
                 if let Ok(AppendOutcome::Committed(rows)) = &appended
                     && let Some(last) = rows.last()
                 {

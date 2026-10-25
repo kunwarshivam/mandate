@@ -14,11 +14,11 @@ use crate::gate::{
     PartialGateDecision, Proposal, SESSION_CLOSED, SESSION_UNKNOWN, UNPRICED, binding_checks,
 };
 use crate::ids::{ClientOrderId, IntentId};
-use crate::kill::{confirmed_bid, is_flatten};
+use crate::kill::{confirmed_bid, flatten_room, is_flatten};
 use crate::payload::{int, text};
 use crate::protection::{
-    ExitPrice, alone, awaits_cancel, begin_exit, crypto_add, exit_limit, fallback, passive_exit,
-    reference_price, reprotect_unpriced, rests, whole_shares,
+    ExitPrice, alone, awaits_cancel, begin_exit, changed, crypto_add, exit_limit, fallback,
+    passive_exit, reference_price, reprotect_unpriced, rests, whole_shares,
 };
 use crate::session::{closed_hold, extended_hours};
 use crate::shape::offers_bracket;
@@ -446,6 +446,21 @@ fn submit(
     {
         return Ok(());
     }
+    let room = flatten_room(&batch.view, intent, qty)?;
+    if room == Qty::ZERO {
+        let abandoned = abandon_record(batch, intent, "released_to_owner")?;
+        batch.notify(abandoned, "exit_released");
+        return Ok(());
+    }
+    if room < qty {
+        let pairs = vec![
+            ("intent_id", text(intent.0.0.clone())),
+            ("qty", text(qty.checked_sub(room)?.to_string())),
+            ("sent", text(room.to_string())),
+        ];
+        changed(batch, &instrument, "rung_short", pairs)?;
+    }
+    let qty = room;
     let bracket = if fractional(batch, &instrument, qty)? {
         None
     } else {
@@ -750,6 +765,15 @@ pub(crate) fn abandon(
     intent: &IntentId,
     reason: &str,
 ) -> Result<(), ExecutorError> {
+    abandon_record(batch, intent, reason).map(|_| ())
+}
+
+/// [`abandon`], answering the `OrderAbandoned` record's id.
+fn abandon_record(
+    batch: &mut Batch<'_, '_>,
+    intent: &IntentId,
+    reason: &str,
+) -> Result<EventId, ExecutorError> {
     batch.journal(
         "OrderAbandoned",
         None,
@@ -761,8 +785,7 @@ pub(crate) fn abandon(
             ("intent_id", text(intent.0.0.clone())),
             ("reason", text(reason)),
         ],
-    )?;
-    Ok(())
+    )
 }
 
 /// `Unknown → Intent` after a confirmed absence: the gate re-runs and the order is resubmitted

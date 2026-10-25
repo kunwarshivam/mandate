@@ -1,14 +1,16 @@
 //! The exchange itself, after the start checks (connections spec §5.2 step 4; DEC-821 item 2;
-//! DEC-2628; DEC-2626 item 3): the client secret is read first, so a vault that cannot give it
-//! takes no code, and then `mandate_connections::exchange::exchange_code` takes the code, sends the
-//! one request, and stores the token.
+//! DEC-2628; DEC-2626 item 3; DEC-2363): the client secret is read first, so a vault that cannot
+//! give it takes no code, and then `mandate_connections::exchange::exchange_waiting_code` waits
+//! for the code until the request's deadline, takes it, sends the one request, and stores the
+//! token.
 
 use mandate_connections::ConnectError;
 use mandate_connections::exchange::{
-    ClientSecret, ExchangedGrant, PendingConnect, TokenEndpoint, exchange_code,
+    ClientSecret, CodeWait, ExchangedGrant, PendingConnect, TokenEndpoint, exchange_waiting_code,
 };
 use mandate_connections::start::Environment;
 use mandate_connections::vault::{Vault, VaultKey};
+use mandate_time::UtcNanos;
 
 use crate::startup::Settings;
 
@@ -28,15 +30,18 @@ pub fn vault_key(settings: &Settings) -> VaultKey {
 }
 
 /// Runs the one exchange for `settings`' connection, always on paper (DEC-821 item 1): the client
-/// secret from `secrets`, then the take, the request to `endpoint` and the token write in `vault`.
+/// secret from `secrets`, then the wait for the code until `deadline` on `wait` (DEC-2363), the
+/// take, the request to `endpoint` and the token write in `vault`.
 ///
 /// # Errors
-/// The client secret's refusal, before anything is taken; then `exchange_code`'s.
+/// The client secret's refusal, before anything is taken; then `exchange_waiting_code`'s.
 pub fn run(
     settings: &Settings,
     secrets: &mut impl ClientSecretSource,
     vault: &mut impl Vault,
     endpoint: &mut impl TokenEndpoint,
+    wait: &mut impl CodeWait,
+    deadline: UtcNanos,
 ) -> Result<ExchangedGrant, ConnectError> {
     let client_secret = secrets.client_secret()?;
     let pending = PendingConnect {
@@ -44,5 +49,13 @@ pub fn run(
         environment: Environment::Paper,
         vault_key: vault_key(settings),
     };
-    exchange_code(&pending, &settings.client, &client_secret, vault, endpoint)
+    exchange_waiting_code(
+        &pending,
+        &settings.client,
+        &client_secret,
+        vault,
+        endpoint,
+        wait,
+        deadline,
+    )
 }
