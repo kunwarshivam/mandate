@@ -121,8 +121,8 @@
       "colocate": false,
       "egress": ["postgres", "vault"],
       "resources": {
-        "requests": {"cpu": "50m", "memory": "32Mi"},
-        "limits": {"cpu": "100m", "memory": "64Mi"}
+        "requests": {"cpu": "50m", "memory": "64Mi"},
+        "limits": {"cpu": "100m", "memory": "128Mi"}
       }
     },
     {
