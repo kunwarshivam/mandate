@@ -394,10 +394,10 @@ fn the_fixture_mode_announces_its_public_host_and_serves_only_the_provider() {
 }
 
 /// DEC-2127: the fixture writes each token refusal to standard error as `token_refused`, the
-/// answer's `error` and the refusing check's word, a refused media type as `token_refused
-/// unsupported_media_type`, and nothing the request carried.
+/// answer's `error` and the refusing check's word, a refused media type or size as
+/// `token_refused unsupported_media_type` or `token_refused payload_too_large`, and nothing the
+/// request carried.
 #[test]
-#[ignore = "pending E10-23"]
 fn the_fixture_writes_each_token_refusal_as_its_code_and_cause_alone() {
     let (owner, _) = secret_files();
     let (mut child, _stdout, addr, _) = fixture(&owner);
@@ -424,6 +424,8 @@ fn the_fixture_writes_each_token_refusal_as_its_code_and_cause_alone() {
     assert_eq!(post(media, &form("secret-canary-9f2a")).status, 400);
     assert_eq!(post(media, &form("wrong-secret-canary")).status, 400);
     assert_eq!(post("text/plain", &form("secret-canary-9f2a")).status, 415);
+    let oversized = format!("{}&pad={}", form("secret-canary-9f2a"), "p".repeat(5000));
+    assert_eq!(post(media, &oversized).status, 413);
     let _ = Command::new("kill")
         .args(["-TERM", &child.0.id().to_string()])
         .status();
@@ -441,7 +443,8 @@ fn the_fixture_writes_each_token_refusal_as_its_code_and_cause_alone() {
         stderr,
         "token_refused invalid_grant code_unknown\n\
          token_refused invalid_client client\n\
-         token_refused unsupported_media_type\n"
+         token_refused unsupported_media_type\n\
+         token_refused payload_too_large\n"
     );
     for value in [
         "code-canary-77",

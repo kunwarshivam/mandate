@@ -105,15 +105,28 @@ pub enum Cause {
     CodeVerifier,
     /// The token store is full, or the random source failed.
     StoreFull,
-    /// The stub before its implementation (E10-23).
-    Unimplemented,
+}
+
+impl Cause {
+    /// The cause's word in the stub's standard error.
+    pub fn word(self) -> &'static str {
+        match self {
+            Self::Form => "form",
+            Self::GrantType => "grant_type",
+            Self::Client => "client",
+            Self::CodeUnknown => "code_unknown",
+            Self::CodeExpired => "code_expired",
+            Self::RedirectUri => "redirect_uri",
+            Self::CodeVerifier => "code_verifier",
+            Self::StoreFull => "store_full",
+        }
+    }
 }
 
 /// The line the stub writes to standard error for `refusal` by `cause`: `token_refused`, the
 /// answer's `error`, and the cause's word (DEC-2127).
 pub fn refusal_line(refusal: Refusal, cause: Cause) -> String {
-    let _ = (refusal, cause);
-    "not yet implemented\n".to_owned()
+    format!("token_refused {} {}\n", refusal.code(), cause.word())
 }
 
 /// Why the client secret file is refused.
@@ -232,12 +245,20 @@ impl Alpaca {
     /// # Errors
     /// DEC-2625 item 4's refusals.
     pub fn token(&self, body: &str, now: i64) -> Result<String, Refusal> {
+        self.exchange(body, now).map_err(|(refusal, _)| refusal)
+    }
+
+    /// [`Alpaca::token`], with the [`Cause`] of a refusal (DEC-2127).
+    ///
+    /// # Errors
+    /// [`Alpaca::token`]'s refusals.
+    pub fn exchange(&self, body: &str, now: i64) -> Result<String, (Refusal, Cause)> {
         let params = parse(body)
             .and_then(|params| exactly(&params, &TOKEN_PARAMS))
-            .ok_or(Refusal::InvalidRequest)?;
+            .ok_or((Refusal::InvalidRequest, Cause::Form))?;
         let value = |name: &str| params.get(name).map(String::as_str).unwrap_or_default();
         if value("grant_type") != "authorization_code" {
-            return Err(Refusal::InvalidRequest);
+            return Err((Refusal::InvalidRequest, Cause::GrantType));
         }
         let issued = self
             .codes
@@ -250,31 +271,30 @@ impl Alpaca {
                 &self.settings.client_secret,
             );
         if !client {
-            return Err(Refusal::InvalidClient);
+            return Err((Refusal::InvalidClient, Cause::Client));
         }
-        let issued = issued.ok_or(Refusal::InvalidGrant)?;
-        let redeemable = now < expiry(issued.issued_at)
-            && value("redirect_uri") == issued.redirect_uri
-            && s256(value("code_verifier")) == issued.challenge;
-        if !redeemable {
-            return Err(Refusal::InvalidGrant);
+        let issued = issued.ok_or((Refusal::InvalidGrant, Cause::CodeUnknown))?;
+        let refused = if now >= expiry(issued.issued_at) {
+            Some(Cause::CodeExpired)
+        } else if value("redirect_uri") != issued.redirect_uri {
+            Some(Cause::RedirectUri)
+        } else if s256(value("code_verifier")) != issued.challenge {
+            Some(Cause::CodeVerifier)
+        } else {
+            None
+        };
+        if let Some(cause) = refused {
+            return Err((Refusal::InvalidGrant, cause));
         }
-        let token = self.fresh().ok_or(Refusal::Unavailable)?;
+        let token = self
+            .fresh()
+            .ok_or((Refusal::Unavailable, Cause::StoreFull))?;
         Ok(serde_json::json!({
             "access_token": token,
             "scope": SCOPE,
             "token_type": "bearer",
         })
         .to_string())
-    }
-
-    /// [`Alpaca::token`], with the [`Cause`] of a refusal (DEC-2127).
-    ///
-    /// # Errors
-    /// [`Alpaca::token`]'s refusals.
-    pub fn exchange(&self, body: &str, now: i64) -> Result<String, (Refusal, Cause)> {
-        self.token(body, now)
-            .map_err(|refusal| (refusal, Cause::Unimplemented))
     }
 
     /// How many codes are held.

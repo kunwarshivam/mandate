@@ -170,9 +170,11 @@ async fn exchange(alpaca: Option<&Alpaca>, request: Request) -> Response {
         .and_then(|media| media.to_str().ok())
         .is_some_and(|media| essence_is(media, FORM));
     if !form {
+        write_line(MEDIA_TYPE_LINE);
         return StatusCode::UNSUPPORTED_MEDIA_TYPE.into_response();
     }
     let Ok(body) = to_bytes(request.into_body(), MAX_BODY_BYTES).await else {
+        write_line(BODY_SIZE_LINE);
         return StatusCode::PAYLOAD_TOO_LARGE.into_response();
     };
     let (Some(alpaca), Some(now)) = (alpaca, now_s()) else {
@@ -187,12 +189,21 @@ async fn exchange(alpaca: Option<&Alpaca>, request: Request) -> Response {
     }
 }
 
+/// The line for a token request that is not a form (DEC-2127 item 2).
+const MEDIA_TYPE_LINE: &str = "token_refused unsupported_media_type\n";
+
+/// The line for a token request over [`MAX_BODY_BYTES`] (DEC-2127 item 2).
+const BODY_SIZE_LINE: &str = "token_refused payload_too_large\n";
+
 /// A token refusal, its line written to standard error first (DEC-2127).
 fn token_refused(refusal: Refusal, cause: Cause) -> Response {
-    let _ = std::io::stderr()
-        .lock()
-        .write_all(refusal_line(refusal, cause).as_bytes());
+    write_line(&refusal_line(refusal, cause));
     refused(refusal)
+}
+
+/// Writes `line` to standard error; a closed standard error loses the line, never the answer.
+fn write_line(line: &str) {
+    let _ = std::io::stderr().lock().write_all(line.as_bytes());
 }
 
 /// A refusal as RFC 6749 §5.2 writes it, never stored by a cache.
