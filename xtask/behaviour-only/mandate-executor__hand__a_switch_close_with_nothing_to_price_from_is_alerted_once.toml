@@ -1,0 +1,8 @@
+file = "crates/mandate-executor/tests/hand.rs"
+test = "a_switch_close_with_nothing_to_price_from_is_alerted_once"
+reason = """
+DEC-2361 (backlog: "E7-4 (executor kill switch), from DEC-2361"): `kill.rs`'s `flatten_closes`
+skips a switch's close it can name no limit for, journaling and alerting nothing. It reaches no
+stub and fails on that silence until DEC-2361's implementation deletes this file with its
+`#[ignore]` line.
+"""

@@ -6145,6 +6145,130 @@ fn a_released_unattributed_partial_fill_leaves_the_switch_nothing() {
     );
 }
 
+/// The agent's position of 10 whose OCO was cancelled before any switch, so no protective stop
+/// is left, with no quote ever seen; then its risk-limit switch, with no floor, and a tick: the
+/// shell and what the switch's step and the tick journaled and alerted.
+fn unpriced_switch(ports: &mandate_executor::Ports<'_>) -> (Shell, common::Ran, common::Ran) {
+    let mut shell = protected_position(ports);
+    for gone in [
+        event(
+            ACCOUNT_STREAM,
+            shell.head().0.saturating_add(1),
+            "ProtectionChanged",
+            with_clock(
+                &[
+                    ("instrument", text(AAPL)),
+                    ("action", text("cancelled")),
+                    ("orders", text("md-oco-1")),
+                    ("qty", text("10")),
+                ],
+                20,
+            ),
+        ),
+        event(
+            ACCOUNT_STREAM,
+            shell.head().0.saturating_add(2),
+            "OrderStateChanged",
+            with_clock(
+                &[
+                    ("client_order_id", text("md-oco-1")),
+                    ("state", text("canceled")),
+                ],
+                20,
+            ),
+        ),
+    ] {
+        shell.fold_one(&gone).expect("the OCO's cancel folds");
+    }
+    let switched = shell.run(
+        Input::Command(Command::KillSwitch {
+            scope: KillScope::Agent(agent(common::AGENT)),
+            initiator: Initiator::RiskLimit,
+            confirmation: None,
+            cause: None,
+        }),
+        ports,
+    );
+    let ticked = shell.run(Input::Tick(clock(40)), ports);
+    (shell, switched, ticked)
+}
+
+/// How many `exit_unpriced` records `ran` journaled and alerts it sent.
+fn unpriced_alerts(ran: &common::Ran) -> (usize, usize) {
+    let records = ran
+        .drafts
+        .iter()
+        .filter(|draft| {
+            draft.event_type == "ProtectionChanged"
+                && draft
+                    .payload
+                    .get("action")
+                    .and_then(mandate_canon::Value::as_str)
+                    == Some("exit_unpriced")
+        })
+        .count();
+    let alerts = ran
+        .notifications
+        .iter()
+        .filter(|key| **key == "exit_unpriced")
+        .count();
+    (records, alerts)
+}
+
+/// DEC-2361 item 1, rule 13: a switch's close that nothing but a missing price holds back, with
+/// no quote, floor or protective stop to name a limit from, is journaled `exit_unpriced` and
+/// alerted once, never silent, and later steps do not repeat it.
+#[test]
+#[ignore = "pending E7-4"]
+fn a_switch_close_with_nothing_to_price_from_is_alerted_once() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (_, switched, ticked) = unpriced_switch(&ports);
+    assert!(
+        switched
+            .submissions()
+            .into_iter()
+            .all(|order| order.side != Side::Sell),
+        "nothing to name a limit from, so no sell goes: {:?}",
+        switched.draft_types()
+    );
+    assert_eq!(
+        unpriced_alerts(&switched),
+        (1, 1),
+        "{:?}",
+        switched.draft_types()
+    );
+    assert_eq!(
+        unpriced_alerts(&ticked),
+        (0, 0),
+        "{:?}",
+        ticked.draft_types()
+    );
+}
+
+/// DEC-2361 item 2: the alert holds nothing back. Once a quote arrives the switch's close is
+/// raised and sells the agent's whole sub-ledger.
+#[test]
+fn a_switch_close_alerted_unpriced_sells_once_a_quote_arrives() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (mut shell, _, _) = unpriced_switch(&ports);
+    let quoted = shell.run(Input::Market(quote(AAPL, "155", "155.1", 41)), &ports);
+    let sold: Vec<String> = quoted
+        .submissions()
+        .into_iter()
+        .filter(|order| order.side == Side::Sell)
+        .map(|order| order.qty.to_string())
+        .collect();
+    assert_eq!(sold, ["10"], "{:?}", quoted.draft_types());
+}
+
 #[test]
 fn an_agent_kill_switch_sells_exactly_the_sub_ledger_quantity() {
     let ids = TestIds;
