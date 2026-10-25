@@ -176,6 +176,7 @@ pub fn check_batch(drafts: &[Draft]) -> Result<(), (usize, Invalid)> {
     control::check_batch(drafts)?;
     workspace::check_batch(drafts)?;
     notices::check_batch(drafts)?;
+    credentials::check_batch(drafts)?;
     invalidation::check_batch(drafts)
 }
 pub use artifact::{
