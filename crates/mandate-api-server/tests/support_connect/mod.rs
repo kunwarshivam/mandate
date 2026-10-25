@@ -151,7 +151,7 @@ pub struct Fixture {
     /// The challenges the server holds.
     pub challenges: Arc<Challenges>,
     /// The object store, when the fixture binds one.
-    pub objects: Option<Arc<MemObjects>>,
+    pub objects: Option<Arc<dyn ObjectStore>>,
 }
 
 static DIRS: Mutex<u32> = Mutex::new(0);
@@ -199,7 +199,7 @@ pub type MemObjects = Objects<BTreeMap<Digest, Vec<u8>>>;
 /// fixture's challenge store, and the object store the server reads and adds to.
 pub struct StepUpBinding {
     pub bind: Box<dyn FnOnce(Arc<Challenges>) -> Arc<dyn StepUp>>,
-    pub objects: Arc<MemObjects>,
+    pub objects: Arc<dyn ObjectStore>,
 }
 
 /// A paper workspace offering a connect, whose step-up port and object store are `binding`'s.
@@ -288,7 +288,7 @@ fn fixture_bound(
         artifacts: objects
             .clone()
             .map(|store| store as Arc<dyn mandate_journal::ArtifactSource + Send + Sync>),
-        objects: objects.clone().map(|store| store as Arc<dyn ObjectStore>),
+        objects: objects.clone(),
         step_up,
         challenges: Arc::clone(&challenges),
         connect: connect.clone(),

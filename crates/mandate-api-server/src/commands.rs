@@ -427,7 +427,7 @@ pub async fn settle_at(
 ) -> Settled {
     let mut ambiguous = false;
     for _ in 0..ATTEMPTS {
-        match attempt(journal, stream, draft, now, pinned).await {
+        match attempt(journal, stream, &[draft], now, pinned).await {
             Some(AppendOutcome::Committed(rows) | AppendOutcome::AlreadyCommitted(rows)) => {
                 match rows.into_iter().find(|row| row.event_id == event_id) {
                     Some(row) => return Settled::Stored(Box::new(row)),
@@ -454,7 +454,7 @@ pub async fn settle_at(
 async fn attempt(
     journal: &dyn Journal,
     stream: &str,
-    draft: &[u8],
+    drafts: &[&[u8]],
     now: UtcNanos,
     pinned: Option<u64>,
 ) -> Option<AppendOutcome> {
@@ -463,5 +463,5 @@ async fn attempt(
         Some(head) => head,
         None => journal.head(stream).await.ok()?,
     };
-    journal.append(stream, head, epoch, now, draft).await.ok()
+    journal.append(stream, head, epoch, now, drafts).await.ok()
 }
