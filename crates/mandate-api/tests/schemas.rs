@@ -145,21 +145,17 @@ fn members<T: DeserializeOwned + Debug>(objects: &[&Value], tag: Option<(&str, &
 }
 
 /// [`members`] for a shape that names `ahead` before its schema does ([DEC-2126] item 5: the type
-/// takes an optional member in the tests change, and the schema follows in its own). Each one
-/// must be absent from the schema, so the schema change that adds it fails here until it is
-/// taken off the list, and the shape then names exactly its schema's members again.
+/// takes an optional member in the tests change, and the schema follows in its own, which carries
+/// no code under ES-22). The shape must name each one whether or not the schema names it yet, and
+/// every other member exactly as its schema does. The implementation change empties the list once
+/// the schema names the member, so the struct's members are checked exactly again.
 ///
 /// [DEC-2126]: ../../../docs/project/decisions/DEC-2126.md
 fn members_ahead<T: DeserializeOwned + Debug>(objects: &[&Value], ahead: &[&str]) {
     let named = |o: &&Value| o["properties"].as_object().cloned();
     let names = objects.iter().filter_map(named).flatten();
     let mut schema: BTreeSet<String> = names.map(|(name, _)| name).collect();
-    for member in ahead {
-        assert!(
-            schema.insert((*member).to_owned()),
-            "{member} is in the schema now: take it off the list"
-        );
-    }
+    schema.extend(ahead.iter().map(|member| (*member).to_owned()));
     assert_eq!(
         serde_names::<T>(json!({"no_such_member": 1})),
         schema,
