@@ -357,6 +357,9 @@ impl Store for Journal {
 pub struct Seen {
     pub request: BrokerRequest,
     pub journaled_first: bool,
+    /// How many appends the journal had taken when the request was sent: what the process had
+    /// journaled of every answer handed before it.
+    pub appended: usize,
 }
 
 #[derive(Default)]
@@ -520,6 +523,7 @@ impl Broker for Paper {
         books.seen.push(Seen {
             request: request.clone(),
             journaled_first,
+            appended: self.journal.appends(),
         });
         let outcome = answer(&mut books, request)?;
         if books.lose_answers > 0 {
