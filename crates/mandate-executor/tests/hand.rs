@@ -6176,7 +6176,7 @@ fn released_while_the_flatten_waits(released: &str) -> common::Ran {
 
 /// DEC-2360 item 1, rule 13: a release written after the switch sized its flatten, before that
 /// flatten was sent, shrinks it to the sub-ledger at send time, so the owner's 4 shares are never
-/// offered.
+/// offered, and the shorter send is journaled `rung_short`.
 #[test]
 fn a_release_while_the_flatten_waits_shrinks_its_sell() {
     let sent = released_while_the_flatten_waits("4");
@@ -6187,10 +6187,34 @@ fn a_release_while_the_flatten_waits_shrinks_its_sell() {
         .map(|order| order.qty.to_string())
         .collect();
     assert_eq!(sold, ["6"], "{:?}", sent.draft_types());
+    let short: Vec<&str> = sent
+        .drafts
+        .iter()
+        .filter(|draft| {
+            draft.event_type == "ProtectionChanged"
+                && draft
+                    .payload
+                    .get("action")
+                    .and_then(mandate_canon::Value::as_str)
+                    == Some("rung_short")
+        })
+        .filter_map(|draft| {
+            draft
+                .payload
+                .get("sent")
+                .and_then(mandate_canon::Value::as_str)
+        })
+        .collect();
+    assert_eq!(
+        short,
+        ["6"],
+        "the shorter send is journaled (DEC-2360 item 1): {:?}",
+        sent.draft_types()
+    );
 }
 
 /// DEC-2360 item 2: a release of the whole position before the flatten was sent leaves it nothing
-/// to sell, so it is abandoned, never sent. The protection the ended sequence re-places is
+/// to sell, so it is abandoned, never sent, and the owner alerted (`exit_released`). The protection the ended sequence re-places is
 /// DEC-2360 item 4's, not this test's.
 #[test]
 fn a_release_of_everything_while_the_flatten_waits_abandons_it() {
@@ -6215,6 +6239,11 @@ fn a_release_of_everything_while_the_flatten_waits_abandons_it() {
         })
         .collect();
     assert_eq!(reasons, ["released_to_owner"], "{:?}", sent.draft_types());
+    assert!(
+        sent.notifications.contains(&"exit_released"),
+        "the owner is told the switch has nothing left to sell there: {:?}",
+        sent.notifications
+    );
 }
 
 /// DEC-2360 item 1 on the ladder (§5.6 step 2): a release between rungs shrinks the next rung to
