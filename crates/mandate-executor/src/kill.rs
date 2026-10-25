@@ -641,6 +641,23 @@ fn switch_of<'s>(view: &'s ExecutorState, intent: &IntentId) -> Option<&'s Switc
     closes_with(switch, ordinal, &record.agent, instrument).then_some(switch)
 }
 
+/// DEC-2360 item 1: what a send of `intent` may sell at most, `qty` for any exit but a switch's
+/// own flatten, and for one at most the agent's sub-ledger in its instrument now, so a release
+/// written since the flatten was sized is taken off every send, the first and each rung.
+pub(crate) fn flatten_room(
+    view: &ExecutorState,
+    intent: &IntentId,
+    qty: Qty,
+) -> Result<Qty, ExecutorError> {
+    let Some(switch) = switch_of(view, intent) else {
+        return Ok(qty);
+    };
+    let Some(IntentBody::Order { instrument, .. }) = view.bodies.get(intent) else {
+        return Ok(qty);
+    };
+    Ok(qty.min(sub_ledger(view, &switch.agent, instrument)?))
+}
+
 /// The floor an exit's ladder never prices below (§5.5, §5.6): the owner's confirmed floor for an
 /// owner's exit received with one, or for a flatten raised by a confirmed switch, the higher where
 /// both are; nothing for any other exit (DEC-2040 item 3).

@@ -6178,7 +6178,6 @@ fn released_while_the_flatten_waits(released: &str) -> common::Ran {
 /// flatten was sent, shrinks it to the sub-ledger at send time, so the owner's 4 shares are never
 /// offered.
 #[test]
-#[ignore = "pending E6-4"]
 fn a_release_while_the_flatten_waits_shrinks_its_sell() {
     let sent = released_while_the_flatten_waits("4");
     let sold: Vec<String> = sent
@@ -6194,7 +6193,6 @@ fn a_release_while_the_flatten_waits_shrinks_its_sell() {
 /// to sell, so it is abandoned, never sent. The protection the ended sequence re-places is
 /// DEC-2360 item 4's, not this test's.
 #[test]
-#[ignore = "pending E6-4"]
 fn a_release_of_everything_while_the_flatten_waits_abandons_it() {
     let sent = released_while_the_flatten_waits("10");
     assert!(
@@ -6222,7 +6220,6 @@ fn a_release_of_everything_while_the_flatten_waits_abandons_it() {
 /// DEC-2360 item 1 on the ladder (§5.6 step 2): a release between rungs shrinks the next rung to
 /// the sub-ledger, so the flatten's 10 becomes 6 once the owner takes 4.
 #[test]
-#[ignore = "pending E6-4"]
 fn a_release_between_rungs_shrinks_the_next_rung() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
