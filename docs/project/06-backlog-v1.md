@@ -4392,13 +4392,24 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   written after an agent's kill switch has sized its flatten sells does not shrink them, so the
   switch can still offer the released shares. Re-size an agent flatten sell not yet sent against
   the sub-ledger at send time, or cancel the part a later release takes.
+- **E7-4 (executor kill switch), from [DEC-2361](decisions/DEC-2361.md):** a switch's close that
+  no limit can be named for (no quote, no protective stop, no floor) is skipped silently by
+  `flatten_closes`. Journal it `exit_unpriced` and alert once per switch and instrument; the
+  tests are in `hand.rs`, pending E7-4.
 - **E21-30 (executor process), from [DEC-2358](decisions/DEC-2358.md):** `mandate-executord` hands
   the core no quote, so §5.6's ladder never prices an exit there and every exit beside resting
   protection goes at its own limit or is held for want of a price. Add a quote feed: poll
   `mandate-alpaca`'s `DataClient::latest_quote` for each instrument with a held or sequenced exit,
   with the data host's credential from the vault, and hand each as `Input::Market` with its sanity
   verdict; a recorded fake for the tests. A design note on claim #137 first. Once it lands, the
-  founder may revert DEC-2358 to DEC-160 (12)'s hold.
+  founder may revert DEC-2358 to DEC-160 (12)'s hold. Taken by [DEC-2359](decisions/DEC-2359.md)'s
+  pair (claim #2354): a REST poll behind a `QuoteFeed` port, with the connection's own credential,
+  handing only sane, fresh quotes, until E21-44's pushed channel replaces it.
+- **E7-4 (executor, lane LV), from [DEC-2359](decisions/DEC-2359.md) item 7:** the quote feed reads
+  no instrument whose only exit is protection resting at the broker, so a resting stop or
+  take-profit is never repriced or re-protected from a quote. Decide whether one should be (a gap or
+  a stale stop), and if so add the instrument to `ExecutorState::quote_wanted` with its own DEC-77
+  pair.
 - **E7-4 (executor process), from the review of [DEC-2357](decisions/DEC-2357.md):** while a
   connection record does not read, `agents_of` follows every agent with a version-2 deployment,
   those deployed only on another account's connection included: journal noise, no risk. Skip an
@@ -4407,6 +4418,11 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
 - **E7-4 (executor), from the review of [DEC-2358](decisions/DEC-2358.md):** pin a discretionary
   exit with a limit of its own whose price vanishes mid-sequence: it falls back to its limit, and
   the sequence goes on, rather than ending and re-protecting as an exit with no limit does.
+- **E7-4 (executor), from the review of [DEC-2356](decisions/DEC-2356.md) item 8:** `closes_due`
+  holds the close only for a `Submitting` sell of ours a read does not list. A sell whose
+  submission answer is lost becomes `Unknown`, and a later read that omits it releases the close
+  beside it. Hold the close on any sell of ours journaled after the read's `taken_at`, whatever its
+  state, with its own DEC-77 pair.
 - **E7-4 A1c (stream K), from [DEC-2333](decisions/DEC-2333.md) item 3:** at §5.4's bound, re-place
   protection in an instrument the account kill switch closes for the held quantity less every sell
   not confirmed cancelled, placing nothing where that leaves none, with its own DEC-77 pair. Until

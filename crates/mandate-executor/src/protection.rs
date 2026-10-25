@@ -1145,7 +1145,7 @@ pub(crate) fn changed(
 }
 
 /// [`changed`], naming `cause` as the record's `causation_id`.
-fn changed_by(
+pub(crate) fn changed_by(
     batch: &mut Batch<'_, '_>,
     instrument: &InstrumentId,
     action: &str,
