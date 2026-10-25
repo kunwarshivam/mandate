@@ -73200,7 +73200,7 @@ acknowledgments:
       not_independent: 111
       request_invalid: 48
 step_up_confirmations:
-  spec: docs/specs/journal.md v0.62 §9.29 (DEC-2104)
+  spec: docs/specs/journal.md v0.82 §9.29 (DEC-2104, DEC-2125)
   drafts:
     step_up_confirmed:
       envelope_version: 1
@@ -73440,11 +73440,41 @@ step_up_confirmations:
       reason: schema
       path: payload.method
   - name: another_kind
-    clause: 'rule 242: the one kind is `approve`'
+    clause: 'rule 242: the kinds are `approve` and `connection`'
     base_draft: step_up_confirmed
     changes:
     - path: payload.action_kind
       value: confirm_version
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.action_kind
+  - name: connect
+    clause: 'rule 242: `connection`, not the action''s own word'
+    base_draft: step_up_confirmed
+    changes:
+    - path: payload.action_kind
+      value: connect
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.action_kind
+  - name: connection_capitalized
+    clause: 'rule 242: the kind is lower case'
+    base_draft: step_up_confirmed
+    changes:
+    - path: payload.action_kind
+      value: Connection
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.action_kind
+  - name: connection_padded
+    clause: 'rule 242: the kind exactly'
+    base_draft: step_up_confirmed
+    changes:
+    - path: payload.action_kind
+      value: 'connection '
     expect:
       outcome: Invalid
       reason: schema
@@ -73564,6 +73594,52 @@ step_up_confirmations:
     changes:
     - path: payload.code
       value: '01234567'
+    expect:
+      outcome: Valid
+  connection_drafts:
+  - name: connection
+    clause: 'rule 242: `connection` is the second kind'
+    base_draft: step_up_confirmed
+    changes:
+    - path: payload.action_kind
+      value: connection
+    - path: payload.action_digest
+      value: sha256:5555555555555555555555555555555555555555555555555555555555555555
+    - path: artifact_refs
+      value:
+      - sha256:5555555555555555555555555555555555555555555555555555555555555555
+    expect:
+      outcome: Valid
+  - name: connection_by_another_principal
+    clause: 'rule 242: a principal confirms its own connect'
+    base_draft: step_up_confirmed
+    changes:
+    - path: payload.action_kind
+      value: connection
+    - path: payload.action_digest
+      value: sha256:5555555555555555555555555555555555555555555555555555555555555555
+    - path: artifact_refs
+      value:
+      - sha256:5555555555555555555555555555555555555555555555555555555555555555
+    - path: payload.principal
+      value: 01JAA2N0A000000000000000P2
+    - path: actor.id
+      value: 01JAA2N0A000000000000000P2
+    expect:
+      outcome: Valid
+  - name: connection_within_its_second
+    clause: 'rule 242: `confirmed_at` is `event_time`''s whole second'
+    base_draft: step_up_confirmed
+    changes:
+    - path: payload.action_kind
+      value: connection
+    - path: payload.action_digest
+      value: sha256:5555555555555555555555555555555555555555555555555555555555555555
+    - path: artifact_refs
+      value:
+      - sha256:5555555555555555555555555555555555555555555555555555555555555555
+    - path: event_time
+      value: '2026-10-18T22:30:05.500000000Z'
     expect:
       outcome: Valid
   streams:
