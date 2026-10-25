@@ -4392,6 +4392,10 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   written after an agent's kill switch has sized its flatten sells does not shrink them, so the
   switch can still offer the released shares. Re-size an agent flatten sell not yet sent against
   the sub-ledger at send time, or cancel the part a later release takes.
+- **E7-4 (executor kill switch), from [DEC-2361](decisions/DEC-2361.md):** a switch's close that
+  no limit can be named for (no quote, no protective stop, no floor) is skipped silently by
+  `flatten_closes`. Journal it `exit_unpriced` and alert once per switch and instrument; the
+  tests are in `hand.rs`, pending E7-4.
 - **E21-30 (executor process), from [DEC-2358](decisions/DEC-2358.md):** `mandate-executord` hands
   the core no quote, so §5.6's ladder never prices an exit there and every exit beside resting
   protection goes at its own limit or is held for want of a price. Add a quote feed: poll
