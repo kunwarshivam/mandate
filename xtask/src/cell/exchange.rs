@@ -365,10 +365,15 @@ pub fn drill(seeded: bool, late: bool) -> Result<Verdict> {
     if late {
         match newest_in(connection, "Running")? {
             Some((_, phase)) if phase == "Running" => sleep(LATE_BY),
-            seen => {
+            Some((pod, phase)) => {
                 return Ok(Verdict::Broken(format!(
-                    "the manager's exchange pod for {connection} never ran before the callback: {:?}",
-                    seen.map(|(_, phase)| phase)
+                    "the exchange pod {pod} for {connection} ended before the callback: {}",
+                    ended(&pod, &phase)
+                )));
+            }
+            None => {
+                return Ok(Verdict::Broken(format!(
+                    "the manager started no exchange pod for {connection} before the callback"
                 )));
             }
         }
@@ -395,31 +400,9 @@ pub fn drill(seeded: bool, late: bool) -> Result<Verdict> {
     match newest_in(connection, "Succeeded")? {
         Some((_, phase)) if phase == "Succeeded" => {}
         Some((pod, phase)) => {
-            let log = kubectl(&["logs", "--namespace", NAMESPACE, &pod]).unwrap_or_default();
-            let ran = kubectl(&["get", "pod", "--namespace", NAMESPACE, &pod, "-o", "json"])
-                .ok()
-                .and_then(|json| termination(&json))
-                .unwrap_or_else(|| "no termination recorded".to_owned());
-            let fixture = match kubectl(&[
-                "logs",
-                "--namespace",
-                NAMESPACE,
-                "--selector",
-                "mandate.dev/process=oauth-fixture",
-                "--tail",
-                "50",
-            ]) {
-                Ok(log) => format!(
-                    "codes {:?} of {} lines",
-                    codes_only(&log),
-                    log.lines().count()
-                ),
-                Err(error) => format!("log unreadable: {error:#}"),
-            };
             return Ok(Verdict::Broken(format!(
-                "the exchange pod {pod} for {connection} did not succeed: {phase}, codes {:?}, \
-                 {ran}; the fixture's {fixture}",
-                codes_only(&log)
+                "the exchange pod {pod} for {connection} did not succeed: {}",
+                ended(&pod, &phase)
             )));
         }
         None => {
@@ -451,6 +434,36 @@ pub fn drill(seeded: bool, late: bool) -> Result<Verdict> {
         "    the manager's exchange for {connection} succeeded on {when}: code taken, token entry format 1"
     );
     Ok(Verdict::Held)
+}
+
+/// What a failure report says of the exchange pod `pod` in `phase`: its codes, how its container
+/// ended, and the fixture's codes, each through [`codes_only`] or [`termination`] alone.
+fn ended(pod: &str, phase: &str) -> String {
+    let log = kubectl(&["logs", "--namespace", NAMESPACE, pod]).unwrap_or_default();
+    let ran = kubectl(&["get", "pod", "--namespace", NAMESPACE, pod, "-o", "json"])
+        .ok()
+        .and_then(|json| termination(&json))
+        .unwrap_or_else(|| "no termination recorded".to_owned());
+    let fixture = match kubectl(&[
+        "logs",
+        "--namespace",
+        NAMESPACE,
+        "--selector",
+        "mandate.dev/process=oauth-fixture",
+        "--tail",
+        "50",
+    ]) {
+        Ok(log) => format!(
+            "codes {:?} of {} lines",
+            codes_only(&log),
+            log.lines().count()
+        ),
+        Err(error) => format!("log unreadable: {error:#}"),
+    };
+    format!(
+        "{phase}, codes {:?}, {ran}; the fixture's {fixture}",
+        codes_only(&log)
+    )
 }
 
 /// The `Idempotency-Key` of the run `id`'s `step`: one per call, as the API requires on each
