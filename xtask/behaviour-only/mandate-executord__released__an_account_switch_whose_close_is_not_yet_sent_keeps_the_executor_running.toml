@@ -1,8 +1,0 @@
-file = "crates/mandate-executord/tests/released.rs"
-test = "an_account_switch_whose_close_is_not_yet_sent_keeps_the_executor_running"
-reason = """
-`mandate-executord`'s exit reads agent-scoped work only, so a switch whose cancel-all is refused
-unsent, its close never sent, lets the executor exit `completed` with the switch's shares held: the
-test fails on that behaviour, not at a stub. DEC-2364's implementation keeps an account switch whose
-instruments are still held owing, and deletes this row.
-"""

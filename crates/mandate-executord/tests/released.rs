@@ -246,24 +246,23 @@ fn an_account_switch_whose_close_answer_is_lost_keeps_the_executor_running() -> 
     Ok(())
 }
 
-/// DEC-2364: a switch whose close is not yet sent, its cancel-all refused unsent so the read that
-/// would confirm it never comes, keeps the executor running with the 10 shares held.
+/// DEC-2364: a switch whose close the broker refuses unsent leaves the 10 shares held. The
+/// startup read is the switch's confirming read (DEC-2333 items 2 and 3), so the close is
+/// requested at once; the refusal fails the cycle, a failed exit the manager restarts, never
+/// `completed`.
 #[test]
-#[ignore = "pending E7-4"]
-fn an_account_switch_whose_close_is_not_yet_sent_keeps_the_executor_running() -> Result<(), Error> {
+fn an_account_switch_whose_close_is_refused_unsent_never_exits_completed() -> Result<(), Error> {
     let (journal, broker) = released("10", false)?;
     account_switched(&journal, &["AAPL"])?;
     let mut process = start(&journal, &broker)?;
     for _ in 0..3 {
         process.step(at(NOON)?);
-        assert!(!matches!(process.lifecycle().state(), State::Exited(_)));
+        assert_ne!(process.lifecycle().state(), COMPLETED);
     }
-    assert!(
-        !broker
-            .seen()
-            .iter()
-            .any(|seen| matches!(seen.request, BrokerRequest::ClosePosition(..))),
-        "no close was sent"
+    assert_eq!(
+        journal.payloads("AccountCloseRequested").len(),
+        1,
+        "the close was requested once"
     );
     Ok(())
 }
