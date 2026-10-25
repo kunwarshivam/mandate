@@ -865,6 +865,21 @@ fn fixture_values(stub: Option<&str>, exchange: Option<&str>) -> Vec<String> {
     ]
 }
 
+/// The API's vault binding and the connect finish (DEC-2338, DEC-2348 item 3): both on only
+/// where the cell runs the API and the role provisioner, since only then does `cell up` provision
+/// the vault, issuing `vault-approle-api` and `vault-approle-connection-manager` before the
+/// workspace installs; else none, so neither pod names a Secret that does not exist.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "image_sets takes it in E21-33's implementation PR, which this tests PR precedes"
+    )
+)]
+fn vault_binding_values(_api: Option<&str>, _provisioner: Option<&str>) -> Result<Vec<String>> {
+    bail!("E21-33 has not been implemented yet")
+}
+
 /// The `images.*` settings for the images this cell runs, so `up` and every render agree.
 fn image_sets() -> Result<Vec<String>> {
     let mut sets = vec![
@@ -5585,6 +5600,25 @@ mod tests {
                 "alpacaOAuth.redirectUri=http://127.0.0.1:8080/v1/oauth/alpaca/callback",
             ]
         );
+    }
+
+    /// The API's vault binding and the connect finish come on together, and only where the cell
+    /// runs both the API and the role provisioner, whose presence is what provisions the vault and
+    /// issues the two AppRole Secrets they mount.
+    #[test]
+    #[ignore = "pending E21-33"]
+    fn the_api_vault_binding_and_connect_finish_are_on_only_with_the_api_and_the_provisioner()
+    -> Result<()> {
+        let api = Some("mandate.local/api:a");
+        let provisioner = Some("mandate.local/role-provisioner:a");
+        assert!(vault_binding_values(None, None)?.is_empty());
+        assert!(vault_binding_values(api, None)?.is_empty());
+        assert!(vault_binding_values(None, provisioner)?.is_empty());
+        assert_eq!(
+            vault_binding_values(api, provisioner)?,
+            ["api.vaultBinding=true", "api.connectFinish=true"]
+        );
+        Ok(())
     }
 
     /// A Secret the cell already holds is kept, unread and unchanged; none is made, from a value
