@@ -4394,9 +4394,9 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   interprets `PositionReleased`, the released quantity leaves the agent's sub-ledger (`kill.rs`'s
   `sub_ledger`, read by the kill switch and by `ExecutorState::holds_lots`), so the switch sells
   none of the owner's shares and the exit's item 3.6 no longer waits on them. Tests: released lots
-  let the executor exit `completed`; unreleased lots still hold it. The first two are
-  `mandate-executord/tests/released.rs`, pending E6-4 (a release alone, and a connection's kill
-  switch after it). Until this lands, an account stream holding a `PositionReleased` cannot be
+  let the executor exit `completed`; unreleased lots still hold it. All three are in
+  `mandate-executord/tests/released.rs` (a release alone, a connection's kill switch after it, and
+  a release of part of the position). Until this lands, an account stream holding a `PositionReleased` cannot be
   folded by its executor, so a kill switch on that account cannot be applied by the executor
   (`AGENTS.md` rule 13), and the only signal is the manager's `kill_switch_unapplied`
   ([DEC-2344](decisions/DEC-2344.md) item 1): rank this staging-relevant if a release can happen on
