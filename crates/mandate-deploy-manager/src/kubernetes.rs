@@ -212,13 +212,17 @@ impl Kubernetes {
     /// connection, as `MANDATE_SUBJECT_ACCOUNT`, which admission and the exchange check against
     /// each other (DEC-1177 item 6), and ends by its `lifetime`, in whole seconds
     /// rounded down, so it never outlives its request; it needs one of at least a second, and a
-    /// standing process is never given one.
+    /// standing process is never given one. It also names its request's expiry as
+    /// `MANDATE_REQUEST_EXPIRES_AT`, in the journal's form of a time, which it waits for its code
+    /// until (DEC-2363); it needs one, and a standing process is never given one.
     pub fn manifest(&self, slot: &Slot, generation: u64, launch: &Launch) -> Option<Value> {
-        let deadline = match (slot.process, launch.lifetime) {
-            (Process::TokenExchange, Some(lifetime)) if lifetime.as_secs() >= 1 => {
-                Some(lifetime.as_secs())
+        let (deadline, expires_at) = match (slot.process, launch.lifetime, launch.expires_at) {
+            (Process::TokenExchange, Some(lifetime), Some(expires_at))
+                if lifetime.as_secs() >= 1 =>
+            {
+                (Some(lifetime.as_secs()), Some(expires_at))
             }
-            (Process::Runtime | Process::Executor, None) => None,
+            (Process::Runtime | Process::Executor, None, None) => (None, None),
             _ => return None,
         };
         let mut pod = self.templates.get(&slot.process)?.clone();
@@ -253,6 +257,7 @@ impl Kubernetes {
             ("MANDATE_GENERATION", generation.to_string()),
         ];
         env.extend(account.map(|account| ("MANDATE_SUBJECT_ACCOUNT", account)));
+        env.extend(expires_at.map(|at| ("MANDATE_REQUEST_EXPIRES_AT", at.to_string())));
         if slot.process == Process::Executor {
             env.push(("MANDATE_WORKSPACE_NAMESPACE", self.namespace.clone()));
         }

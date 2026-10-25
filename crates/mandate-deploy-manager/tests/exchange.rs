@@ -12,6 +12,7 @@ use common::{
     restart, revoked, roles_made,
 };
 use mandate_canon::Value;
+use mandate_deploy_manager::control::fact;
 use mandate_deploy_manager::fake::Call;
 use mandate_deploy_manager::{Process, Slot};
 use mandate_time::UtcNanos;
@@ -157,10 +158,10 @@ fn an_oauth_request_starts_one_exchange_journaled_first_and_ended_by_its_deadlin
 }
 
 /// DEC-2363: the exchange's start names its request's expiry, the stored row's `recorded_at` plus
-/// 600 seconds, never a time read from the manager's clock, so a start asked again after a refusal
-/// and a restart names the same instant, and only its lifetime is shorter.
+/// 600 seconds, never a time read from the manager's clock, so a start asked again after the
+/// orchestrator refused it names the same instant, and only its lifetime is shorter. A restarted
+/// manager never asks for it again (rule 256), and folds the same expiry from the same row.
 #[test]
-#[ignore = "pending E10-23"]
 fn every_start_of_an_exchange_names_its_requests_expiry_whatever_the_clock_reads() {
     let (journal, mut m) = requested_at(10);
     tick(&mut m, 12);
@@ -173,20 +174,18 @@ fn every_start_of_an_exchange_names_its_requests_expiry_whatever_the_clock_reads
     });
     runner
         .run(
-            &(0_i64..100_000, 0_i64..599, 0_i64..599, any::<bool>()),
-            |(committed, first, second, refused)| {
+            &(0_i64..100_000, 0_i64..598, 1_i64..600, any::<bool>()),
+            |(committed, first, gap, refused)| {
                 let (journal, mut m) = requested_at(committed);
-                let (first, later) = (first.min(second), first.max(second));
+                let later = (first + gap).min(599);
                 m.orchestrator().fake.refuse_effects = refused;
                 tick(&mut m, committed + first);
                 if refused {
                     m.orchestrator().fake.refuse_effects = false;
-                    m = restart(m);
                     tick(&mut m, committed + later);
                 }
                 let ran = if refused { later } else { first };
-                let expected = recorded_expiry(&journal);
-                prop_assert_eq!(expiries(&mut m), vec![(1, Some(expected))]);
+                prop_assert_eq!(expiries(&mut m), vec![(1, Some(recorded_expiry(&journal)))]);
                 prop_assert_eq!(
                     starts(&mut m),
                     vec![(1, Some(Duration::from_secs((600 - ran).unsigned_abs())))]
@@ -195,6 +194,40 @@ fn every_start_of_an_exchange_names_its_requests_expiry_whatever_the_clock_reads
             },
         )
         .unwrap();
+}
+
+/// DEC-2363: a manager that folds the same rows again, as after its restart, holds the same expiry,
+/// and its request's `event_time` is not where it comes from; no other process has one.
+#[test]
+fn a_refolded_manager_holds_the_same_expiry_and_no_other_process_has_one() {
+    let (journal, _) = requested_at(10);
+    let folded = || {
+        let mut folding = mandate_deploy_manager::Manager::new();
+        for row in journal.rows() {
+            if let Some(fact) = fact(&row) {
+                folding.fold(&fact);
+            }
+        }
+        folding
+    };
+    let (first, again) = (folded(), folded());
+    assert_eq!(
+        first.expires_at(&exchange()),
+        Some(recorded_expiry(&journal))
+    );
+    assert_eq!(again.expires_at(&exchange()), first.expires_at(&exchange()));
+    assert_ne!(
+        first.expires_at(&exchange()),
+        Some(at(600)),
+        "the row's event_time, 2026-10-17T15:00:00Z, plus 600 seconds"
+    );
+    for slot in [Slot::runtime("agent_a"), Slot::executor(ACCOUNT)] {
+        assert_eq!(first.expires_at(&slot), None, "{slot:?}");
+    }
+    assert_eq!(
+        first.expires_at(&Slot::token_exchange("conn_unrequested")),
+        None
+    );
 }
 
 #[test]

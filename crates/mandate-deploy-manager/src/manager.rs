@@ -384,8 +384,13 @@ impl Manager {
     /// The instant a token exchange's request expires, its folded deadline, which every start of
     /// it is given whatever the clock reads (DEC-2363); `None` for every other process.
     pub fn expires_at(&self, slot: &Slot) -> Option<UtcNanos> {
-        let _ = slot;
-        None
+        match slot.process {
+            Process::TokenExchange => self
+                .requests
+                .get(&slot.subject)
+                .map(|request| request.deadline),
+            Process::Runtime | Process::Executor => None,
+        }
     }
 
     /// The connection `generation` of `slot` acts for, which an executor runs as the account of

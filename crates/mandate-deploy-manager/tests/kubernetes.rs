@@ -807,7 +807,6 @@ fn only_an_exchange_takes_a_lifetime_and_it_always_takes_one_of_a_second_or_more
 /// waits for its code until then and no longer; an exchange without one starts nothing, and no
 /// other process is given one.
 #[test]
-#[ignore = "pending E10-23"]
 fn an_exchanges_pod_names_its_requests_expiry_and_no_other_process_is_given_one() {
     let k = adapter("http://127.0.0.1:1".to_owned());
     let started = launch(Some(Duration::from_secs(598)));
