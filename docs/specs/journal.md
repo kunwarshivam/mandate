@@ -6049,6 +6049,12 @@ alone, and to its action by `action_digest` and `action_kind`, which must be the
 the API holds, match its kind, digest, and principal, fall within its 300 s, and carry its code.
 A confirmation for a challenge the API no longer holds, or never issued, verifies nothing.
 
+**A connect started under `cli_confirm`.** Its `ConnectionRequested` version 2 (§9.8) carries
+`step_up.method` `cli_confirm`, and no `StepUpAsserted` follows it: §9.32's record is the assertion
+behind a passkey step-up, and the API appends one only with an event committed under passkey. The
+connect's confirmation is the `StepUpConfirmed` of kind `connection` that names its challenge, so an
+auditor reading §9.32 finds that start complete, not short of an assertion.
+
 **No `JournaledFact`.** It feeds no `ValidationContext`. **Vectors**: `reference/journal`'s
 `step_up_confirmations` section holds a base draft, an invalid draft for every member type and
 for each clause of rule 242, valid drafts for the members no rule reads, its `connection_drafts`
