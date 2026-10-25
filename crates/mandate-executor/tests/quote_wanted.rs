@@ -130,7 +130,6 @@ fn only(name: &str) -> BTreeSet<InstrumentId> {
 
 /// A position with nothing waiting to exit, protected or not, wants no quote.
 #[test]
-#[ignore = "pending E21-30"]
 fn a_position_with_no_exit_waiting_wants_no_quote() {
     let (ids, mandates, instruments, config) = (
         TestIds,
@@ -146,7 +145,6 @@ fn a_position_with_no_exit_waiting_wants_no_quote() {
 /// DEC-2037 item 5: an exit at the market with nothing to price from is held `exit_unpriced`, and
 /// its instrument is wanted for every exit purpose, so the quote that would release it is read.
 #[test]
-#[ignore = "pending E21-30"]
 fn a_held_exit_wants_its_instruments_quote() {
     let (ids, mandates, instruments, config) = (
         TestIds,
@@ -174,7 +172,6 @@ fn a_held_exit_wants_its_instruments_quote() {
 /// §5.4: an exit beside resting protection starts the exit sequence, which cancels the protection
 /// first; while the sequence runs its instrument is wanted, so its exit is priced by the ladder.
 #[test]
-#[ignore = "pending E21-30"]
 fn an_exit_in_its_sequence_wants_its_instruments_quote() {
     let (ids, mandates, instruments, config) = (
         TestIds,
@@ -199,7 +196,6 @@ fn an_exit_in_its_sequence_wants_its_instruments_quote() {
 /// Reading the wanted instruments changes nothing: the state folds the same afterwards, and a
 /// second read answers the same.
 #[test]
-#[ignore = "pending E21-30"]
 fn reading_the_wanted_instruments_changes_nothing() {
     let (ids, mandates, instruments, config) = (
         TestIds,

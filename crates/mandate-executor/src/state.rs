@@ -508,7 +508,34 @@ impl ExecutorState {
     /// from. An instrument with only resting protection is not among them, and neither is a held
     /// opening: neither waits on an exit price.
     pub fn quote_wanted(&self) -> Result<BTreeSet<InstrumentId>, ExecutorError> {
-        Err(ExecutorError::Unimplemented { story: "E21-30" })
+        let held = self
+            .held
+            .iter()
+            .filter_map(|intent| self.bodies.get(intent))
+            .flat_map(|body| match body {
+                IntentBody::Order {
+                    instrument,
+                    purpose,
+                    ..
+                } if !purpose.adds_risk() => vec![instrument.clone()],
+                IntentBody::Order { .. } => Vec::new(),
+                IntentBody::Flatten(plan) => plan
+                    .sells
+                    .iter()
+                    .map(|leg| leg.instrument.clone())
+                    .collect(),
+            });
+        Ok(self
+            .exiting
+            .keys()
+            .cloned()
+            .chain(
+                self.ladders
+                    .keys()
+                    .map(|(instrument, _)| instrument.clone()),
+            )
+            .chain(held)
+            .collect())
     }
 
     /// Σ protective sell quantity for one instrument, which §5.4 requires never to exceed the
