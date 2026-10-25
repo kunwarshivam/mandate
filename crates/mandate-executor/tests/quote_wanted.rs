@@ -1,7 +1,8 @@
 //! E21-30, DEC-2359: the instruments whose exit waits on a price, which the process's quote feed
 //! reads. Each case builds its state from journaled records and handed inputs, and states the set
 //! it expects from what it built, never from the accessor's own rule: a held exit and an exit in
-//! §5.4's sequence or on its own ladder are wanted, and so is each leg of a held flatten; a
+//! §5.4's sequence or on its own ladder are wanted, and so is a kill switch's close waiting on a
+//! price and each leg of a held flatten; a
 //! position with only resting protection is not, nor a held opening, nor an account with nothing
 //! waiting.
 
@@ -15,7 +16,9 @@ use common::{
 };
 use mandate_accounting::{AssetClass, InstrumentId, Side};
 use mandate_canon::Value;
-use mandate_executor::{FlattenLeg, FlattenPlan, Input, IntentBody, Ports, Purpose};
+use mandate_executor::{
+    Command, FlattenLeg, FlattenPlan, Initiator, Input, IntentBody, KillScope, Ports, Purpose,
+};
 
 const AAPL: &str = FixedInstruments::LIQUID_EQUITY;
 const CPHC: &str = FixedInstruments::THIN_EQUITY;
@@ -221,6 +224,36 @@ fn an_exit_on_its_own_ladder_wants_its_instruments_quote() {
         sent.submissions().len(),
         1,
         "the case builds an unprotected exit sent on its ladder"
+    );
+    assert_eq!(wanted(&shell), only(AAPL));
+}
+
+/// §5.5: an agent's kill switch whose close has nothing to price from, no quote, no protection's
+/// stop and no confirmed floor, raises no flatten yet, and its instrument is wanted, so the quote
+/// that names the flatten's limit is read (`AGENTS.md` rule 13).
+#[test]
+#[ignore = "pending E21-30"]
+fn a_kill_switch_close_waiting_on_a_price_wants_its_instrument() {
+    let (ids, mandates, instruments, config) = (
+        TestIds,
+        FixedMandate::covering(&[AAPL]),
+        FixedInstruments,
+        config(),
+    );
+    let ports = common::ports(&ids, &mandates, &instruments, &config);
+    let mut shell = held(&ports, 10);
+    let switched = shell.run(
+        Input::Command(Command::KillSwitch {
+            scope: KillScope::Agent(common::agent(AGENT)),
+            initiator: Initiator::RiskLimit,
+            confirmation: None,
+            cause: None,
+        }),
+        &ports,
+    );
+    assert!(
+        switched.draft("KillSwitchActivated").is_some() && switched.submissions().is_empty(),
+        "the case builds an applied switch whose close has nothing to price from"
     );
     assert_eq!(wanted(&shell), only(AAPL));
 }
