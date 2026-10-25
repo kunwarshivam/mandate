@@ -26,7 +26,7 @@ use crate::ports::Ports;
 use crate::session::{
     Venue, closed_hold, extended_hours, same_session, stops_trigger_since, venue,
 };
-use crate::shape::protective_shape;
+use crate::shape::{ProtectiveShape, protective_shape};
 use crate::state::{
     EVERY_AGENT, ExecutorState, ExitSequence, IntentOutcome, Ladder, LoneLadder, Replacement,
 };
@@ -1958,18 +1958,7 @@ fn re_cover(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
                     .get(&order.client_order_id)?
                     .request
                     .as_ref()?;
-                let prices = match (&request.oco, request.stop_price) {
-                    (Some(legs), _) => ProtectionPrices {
-                        stop: legs.stop,
-                        take_profit: Some(legs.take_profit),
-                    },
-                    (None, Some(stop)) => ProtectionPrices {
-                        stop,
-                        take_profit: None,
-                    },
-                    (None, None) => return None,
-                };
-                Some((order, prices))
+                Some((order, request_prices(request)?))
             });
         let Some((from, prices)) = resting.or(lost) else {
             if !alerted.contains(&instrument) {
@@ -2455,6 +2444,17 @@ fn re_place(
     let Some(shape) = protective_shape(profile, class, UNREAD_CLOCK, qty, prices, offset)? else {
         return uncovered(batch, instrument);
     };
+    send_protection(batch, instrument, sequence, (prices, qty, shape))
+}
+
+/// Journals and sends one protective order for `qty` of `instrument` in `shape`, at `prices`, and
+/// ends the interval awaiting its acknowledgment ([`re_place`], [`protect_at_bound`]).
+fn send_protection(
+    batch: &mut Batch<'_, '_>,
+    instrument: &InstrumentId,
+    sequence: &Replacement,
+    (prices, qty, shape): (ProtectionPrices, Qty, ProtectiveShape),
+) -> Result<(), ExecutorError> {
     let request = SubmitOrder {
         client_order_id: ClientOrderId::for_protection(&sequence.entry, &batch.id_after(2))?,
         instrument: instrument.clone(),
@@ -2694,6 +2694,9 @@ pub(crate) fn bound(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         let alerted = changed(batch, &instrument, "interval_limit", Vec::new())?;
         batch.notify(alerted.clone(), "unprotected_interval_limit");
         let closing = batch.view.closing_all.contains(&instrument);
+        if closing {
+            protect_at_bound(batch, &instrument)?;
+        }
         let Some(entry) = entry.filter(|_| !exiting && !closing) else {
             continue;
         };
@@ -2721,6 +2724,135 @@ pub(crate) fn bound(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         }
     }
     Ok(())
+}
+
+/// §5.4's bound in an instrument the account kill switch closes, whose close-position has not
+/// gone out (DEC-2333 item 3, DEC-2356): protection is placed again for the held quantity less
+/// every sell not confirmed cancelled. That is every sell of ours not yet terminal, the protection
+/// that rested before the switch and every `Unknown` order included, since a lost cancel-all
+/// confirms nothing, and every sell the last read showed that the fold does not hold. Where that
+/// leaves nothing, or the sum cannot be taken, nothing is placed. Its prices are the resting
+/// protection's, or else the latest protective order's own; with none, nothing is placed, and the
+/// bound's alert has gone. Once the close is requested nothing is placed (item 5). An exit
+/// sequence there does not stop it: the bound ends those exits, nothing else re-places protection
+/// beside the close, and the exits still working count as not confirmed cancelled (DEC-2356
+/// item 6).
+fn protect_at_bound(
+    batch: &mut Batch<'_, '_>,
+    instrument: &InstrumentId,
+) -> Result<(), ExecutorError> {
+    let Some(switch) = batch.view.account_switch.as_ref() else {
+        return Ok(());
+    };
+    if switch.requests.contains_key(instrument) {
+        return Ok(());
+    }
+    let Some(committed) = unconfirmed_sells(&batch.view, instrument) else {
+        return Ok(());
+    };
+    let qty = whole_shares(
+        batch.ports,
+        instrument,
+        long(&batch.view, instrument)?
+            .checked_sub(committed)
+            .unwrap_or(Qty::ZERO),
+    )?;
+    if qty == Qty::ZERO {
+        return Ok(());
+    }
+    let (Some(sequence), Some(profile)) = (
+        bound_sequence(&batch.view, instrument),
+        batch.view.profile.as_ref(),
+    ) else {
+        return Ok(());
+    };
+    let Some(prices) = sequence.prices else {
+        return Ok(());
+    };
+    let class = protected_class(batch, instrument);
+    let offset = batch
+        .ports
+        .mandates
+        .crypto_stop_limit_offset(&sequence.agent);
+    let Some(shape) = protective_shape(profile, class, UNREAD_CLOCK, qty, prices, offset)? else {
+        return Ok(());
+    };
+    send_protection(batch, instrument, &sequence, (prices, qty, shape))
+}
+
+/// What every sell not confirmed cancelled in `instrument` may still sell (DEC-2356): each sell of
+/// ours sent and not terminal, and each sell the account switch's last read showed that is not
+/// ours. `None` when the sum overflows, which reads as covering everything.
+fn unconfirmed_sells(view: &ExecutorState, instrument: &InstrumentId) -> Option<Qty> {
+    let ours = view
+        .orders
+        .values()
+        .filter(|order| {
+            &order.instrument == instrument
+                && order.side == Side::Sell
+                && !order.state.is_terminal()
+                && order.state != OrderState::Intent
+        })
+        .map(|order| order.qty.checked_sub(order.filled_qty).unwrap_or(Qty::ZERO));
+    let foreign = view
+        .switch_read
+        .as_ref()
+        .and_then(|read| read.foreign.get(instrument))
+        .into_iter()
+        .flatten()
+        .copied();
+    ours.chain(foreign)
+        .try_fold(Qty::ZERO, |sum, left| sum.checked_add(left).ok())
+}
+
+/// The prices a protective order's own request placed it at: an OCO's stop and take-profit, or a
+/// stop's alone. None for a request that names neither.
+fn request_prices(request: &SubmitOrder) -> Option<ProtectionPrices> {
+    match (&request.oco, request.stop_price) {
+        (Some(legs), _) => Some(ProtectionPrices {
+            stop: legs.stop,
+            take_profit: Some(legs.take_profit),
+        }),
+        (None, Some(stop)) => Some(ProtectionPrices {
+            stop,
+            take_profit: None,
+        }),
+        (None, None) => None,
+    }
+}
+
+/// The entry, agent and prices protection placed at the bound takes (DEC-2356): the resting
+/// protection's, or else those of the protective order in `instrument` whose request recorded
+/// prices, the last by id.
+fn bound_sequence(view: &ExecutorState, instrument: &InstrumentId) -> Option<Replacement> {
+    let resting = view.protection.get(instrument).and_then(|protection| {
+        protection
+            .resting
+            .first()
+            .and_then(|first| view.orders.get(first))
+            .zip(protection.prices)
+    });
+    let recorded = view
+        .orders
+        .values()
+        .rev()
+        .filter(|order| &order.instrument == instrument && order.purpose == Purpose::Protective)
+        .find_map(|order| {
+            let request = view.details.get(&order.client_order_id)?.request.as_ref()?;
+            Some((order, request_prices(request)?))
+        });
+    let (from, prices) = resting.or(recorded)?;
+    Some(Replacement {
+        entry: from
+            .client_order_id
+            .protected_entry()
+            .unwrap_or_else(|| from.client_order_id.clone()),
+        agent: from
+            .agent
+            .clone()
+            .unwrap_or_else(|| AgentId(EVERY_AGENT.to_owned())),
+        prices: Some(prices),
+    })
 }
 
 /// §5.4's bound on a profile with no OCO or bracket: "if it is not resting by then, the executor
