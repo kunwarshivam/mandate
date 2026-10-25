@@ -279,7 +279,6 @@ fn the_paper_serve_path_reads_quotes_over_its_broker() -> Result<(), Error> {
 
 /// DEC-2359 item 9: the paper run's wiring reads quotes over its broker's own transport.
 #[test]
-#[ignore = "pending E21-30"]
 fn the_paper_run_reads_quotes_over_its_broker() -> Result<(), Error> {
     let now = at(NOON)?;
     let run = run::paper(AlpacaBroker::new(Quoting(now.to_string()))?, Fixed(now))?;
@@ -300,7 +299,6 @@ fn the_paper_run_reads_quotes_over_its_broker() -> Result<(), Error> {
 
 /// DEC-2359 item 9: the fixture run's wiring reads no quote.
 #[test]
-#[ignore = "pending E21-30"]
 fn the_fixture_run_reads_no_quote() -> Result<(), Error> {
     let now = at(NOON)?;
     let run = run::fixture(AlpacaBroker::new(FixturePaper::new(now))?)?;

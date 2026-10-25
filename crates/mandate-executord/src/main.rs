@@ -52,13 +52,13 @@ use mandate_executord::alpaca::AlpacaBroker;
 use mandate_executord::connect::connect_check;
 use mandate_executord::credential::{
     RunLease, SUBJECT_ACCOUNT_ENV, VaultMount, WORKSPACE_NAMESPACE_ENV, own_checked_connection,
-    paper_account, paper_broker, paper_settings, paper_transport, paper_wiring, subject_account,
+    paper_account, paper_broker, paper_settings, paper_transport, subject_account,
     subject_connection, vault_config, vault_login, workspace_namespace,
 };
 use mandate_executord::oauth_check::{Start, exchanged_start};
 use mandate_executord::paper::FixturePaper;
 use mandate_executord::serve::{self, Edge, Waited, wait};
-use mandate_executord::{Broker, Config, fixture, launch};
+use mandate_executord::{Broker, Config, fixture, launch, run};
 use mandate_journal::Environment;
 use mandate_process::probe::{self, Probe, Status};
 use mandate_store::{MemoryStore, PgStore, Store};
@@ -215,8 +215,7 @@ fn serve<S: Store>(
     let terminated = || terminate.load(Ordering::SeqCst);
     let mut say = |line: &str| eprintln!("{line}");
     let Some(mount) = paper else {
-        let broker = AlpacaBroker::new(FixturePaper::new(host_now()))?;
-        let wiring = fixture::wiring()?;
+        let run = run::fixture(AlpacaBroker::new(FixturePaper::new(host_now()))?)?;
         let edge = Edge {
             now: &host_now,
             tick: &mut |_| None,
@@ -224,7 +223,7 @@ fn serve<S: Store>(
             say: &mut say,
             interval: PASS,
         };
-        return serve::serve(store, broker, wiring, &config, &status, edge);
+        return serve::serve_run(store, run, &config, &status, edge);
     };
     let connection = subject_connection(std::env::var(SUBJECT_ACCOUNT_ENV).ok())?;
     let vault = logged_in(mount, &connection)?;
@@ -237,7 +236,7 @@ fn serve<S: Store>(
     exchanged_start(&mut store, &fixture::Ids, &config.scope, start, host_now())?;
     own_checked_connection(&store, &config.scope, &connection)?;
     let (broker, mut lease) = paper_broker(vault, &connection, host_now())?;
-    let wiring = paper_wiring(&broker, TokioPause)?;
+    let run = run::paper(broker, TokioPause)?;
     let mut tick = |now| lease.pass(now);
     let mut edge = Edge {
         now: &host_now,
@@ -247,7 +246,7 @@ fn serve<S: Store>(
         interval: PASS,
     };
     let served = match wait(&store, &config, &status, &mut edge) {
-        Ok(Waited::Ready) => serve::serve(store, broker, wiring, &config, &status, edge),
+        Ok(Waited::Ready) => serve::serve_run(store, run, &config, &status, edge),
         Ok(Waited::Stopped) => Ok(0),
         Ok(Waited::Closed) => {
             (edge.say)("connection_closed");

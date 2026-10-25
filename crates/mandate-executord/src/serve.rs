@@ -16,7 +16,7 @@ use mandate_time::UtcNanos;
 
 use crate::establish::{Establishment, GateReport, OpeningGate, pass, read_establishment};
 use crate::follow::agents_of;
-use crate::run::{Run, Unimplemented};
+use crate::run::Run;
 use crate::{Broker, Config, ExecutorProcess, Wiring};
 
 /// What the run is handed from the binary's edge.
@@ -131,11 +131,11 @@ pub fn serve_run<S: Store, B: Broker>(
     status: &Status,
     edge: Edge<'_>,
 ) -> Result<u8, &'static str> {
-    let _ = (store, run, config, status, edge);
-    Err(Unimplemented)
+    let (broker, wiring) = run.into_parts();
+    serve_with(store, broker, wiring, config, status, edge)
 }
 
-/// Runs the process over `store` and `broker` with `wiring` behind rule 68's gate: the gate
+/// Runs the process over `store` and a scripted `broker` with `wiring` behind rule 68's gate: the gate
 /// guards `wiring`'s binding-gate source, and after each step a pass writes the establishment's
 /// copy when it is due and opens the gate once the stream holds it. Each gate code is said once
 /// per change, and the lifecycle is published on `status` each pass. A lease that stops the run,
@@ -143,7 +143,19 @@ pub fn serve_run<S: Store, B: Broker>(
 ///
 /// # Errors
 /// `drain_unfinished`, or the lease's code, when a drain does not end the lifecycle.
-pub fn serve<S: Store, B: Broker>(
+pub fn serve<S: Store, B: ScriptedBroker>(
+    store: S,
+    broker: B,
+    wiring: Wiring,
+    config: &Config,
+    status: &Status,
+    edge: Edge<'_>,
+) -> Result<u8, &'static str> {
+    serve_with(store, broker, wiring, config, status, edge)
+}
+
+/// The run [`serve`] and [`serve_run`] share.
+fn serve_with<S: Store, B: Broker>(
     store: S,
     broker: B,
     mut wiring: Wiring,

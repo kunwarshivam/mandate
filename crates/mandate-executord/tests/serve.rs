@@ -439,7 +439,6 @@ fn a_start_is_live_only_within_its_bound() -> Result<(), Error> {
 /// DEC-2359 item 9: the binary's serve path runs a paired run as the scripted one runs: the
 /// fixture's, on a journal that has not yet started, drains at SIGTERM and publishes the drain.
 #[test]
-#[ignore = "pending E21-30"]
 fn a_fixture_run_serves_until_drained() -> Result<(), Error> {
     let journal = deployed()?;
     let run = run::fixture(AlpacaBroker::new(FixturePaper::new(at(NOON)?))?)?;

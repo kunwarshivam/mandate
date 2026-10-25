@@ -8,13 +8,9 @@ use mandate_alpaca::{DataTransport, Pause, TradingTransport};
 
 use crate::Wiring;
 use crate::alpaca::AlpacaBroker;
+use crate::credential::paper_wiring;
+use crate::fixture;
 use crate::paper::FixturePaper;
-
-#[allow(
-    non_upper_case_globals,
-    reason = "the pending gate recognises a stub by the name `Unimplemented` (DEC-137)"
-)]
-pub const Unimplemented: &str = "unimplemented";
 
 /// A broker paired with its wiring, which only [`fixture`] and [`paper`] make.
 pub struct Run<B> {
@@ -41,8 +37,10 @@ impl<B> Run<B> {
 pub fn fixture(
     broker: AlpacaBroker<FixturePaper>,
 ) -> Result<Run<AlpacaBroker<FixturePaper>>, &'static str> {
-    let _ = broker;
-    Err(Unimplemented)
+    Ok(Run {
+        broker,
+        wiring: fixture::wiring()?,
+    })
 }
 
 /// A broker whose transport reads market data, with the paper wiring: its quote feed reads over
@@ -55,6 +53,6 @@ where
     T: TradingTransport + DataTransport + Clone + 'static,
     P: Pause + 'static,
 {
-    let _ = (broker, clock);
-    Err(Unimplemented)
+    let wiring = paper_wiring(&broker, clock)?;
+    Ok(Run { broker, wiring })
 }
