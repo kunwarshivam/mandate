@@ -40,8 +40,8 @@ use mandate_journal::StoredEvent;
 use mandate_passkey::stepup::{self, ChallengeRecord, permission_for};
 use serde_json::json;
 use support_passkey::{
-    CREDENTIAL, OTHER_CREDENTIAL, Signed, Signer, asserted, backup_eligible, enrol, enrol_at,
-    enrolled, removed, version_1,
+    CREDENTIAL, OTHER_CREDENTIAL, Signed, Signer, assert_by, asserted, backup_eligible, enrol,
+    enrol_at, enrolled, removed, version_1,
 };
 
 const OWNER: PrincipalId = PrincipalId(0x31);
@@ -435,8 +435,9 @@ fn a_counter_not_above_the_last_is_missing() {
     );
 
     let mut asserted_at_twelve = world();
-    asserted_at_twelve.rows.hosted(
-        "StepUpAsserted",
+    assert_by(
+        &mut asserted_at_twelve.rows,
+        OWNER,
         T0 - 50,
         asserted(UNKNOWN_CHALLENGE, CREDENTIAL, 12),
     );
