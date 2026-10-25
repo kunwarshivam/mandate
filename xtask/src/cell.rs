@@ -1128,7 +1128,7 @@ pub fn hosted() -> Result<()> {
 /// container last ended (its reason, `OOMKilled` among them, and exit code), their containers'
 /// last logs, current and from the run before a restart, and the namespace's recent events, so a
 /// server that refused to start or was killed names it in the run's own output.
-fn api_diagnosis() {
+pub(super) fn api_diagnosis() {
     let selector = format!(
         "mandate.dev/workspace={WORKSPACE},mandate.dev/process in ({API_PROCESS},{CONNECT_FINISH_PROCESS})"
     );
