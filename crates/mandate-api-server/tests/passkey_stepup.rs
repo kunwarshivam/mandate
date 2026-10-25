@@ -28,7 +28,7 @@ use mandate_api_server::confirm::CliConfirm;
 use mandate_api_server::methods::{Methods, Passkey};
 use mandate_api_server::stepup::{Action, Asserted, Judged, StepUp, Unverified};
 use mandate_api_server::subject::{LinkRefusal, NamesPrincipal};
-use mandate_canon::Digest;
+use mandate_canon::{Digest, encode_ulid};
 use mandate_identity::MembershipState::Active;
 use mandate_identity::SessionKind::Full;
 use mandate_identity::{
@@ -39,7 +39,10 @@ use mandate_identity_testkit::{StaticLookup, membership, session};
 use mandate_journal::StoredEvent;
 use mandate_passkey::stepup::{self, ChallengeRecord, permission_for};
 use serde_json::json;
-use support_passkey::{CREDENTIAL, Signed, Signer, enrol, enrolled};
+use support_passkey::{
+    CREDENTIAL, OTHER_CREDENTIAL, Signed, Signer, asserted, backup_eligible, enrol, enrol_at,
+    enrolled, removed, version_1,
+};
 
 const OWNER: PrincipalId = PrincipalId(0x31);
 const OTHER: PrincipalId = PrincipalId(0x32);
@@ -385,6 +388,111 @@ fn the_first_failing_check_answers_in_consume_s_order() {
 
 #[test]
 #[ignore = "pending E9-4"]
+fn a_credential_not_the_principal_s_held_and_past_cool_off_is_missing() {
+    let unknown = world();
+    let mut ask = unknown.ask();
+    ask.assertion = Some(unknown.signed(9).wire(OTHER_CREDENTIAL));
+    refused(&unknown, &ask, ProblemCode::StepUpMissing);
+
+    let mut cooling = world();
+    cooling.rows = Rows::opened();
+    enrol(
+        &mut cooling.rows,
+        T0 - 900,
+        enrolled(OWNER, CREDENTIAL, &cooling.signer, 0, Some(ISSUED + 31)),
+    );
+    refused(&cooling, &cooling.ask(), ProblemCode::StepUpMissing);
+
+    let mut gone = world();
+    gone.rows
+        .hosted("CredentialRemoved", T0 - 100, removed(OWNER, CREDENTIAL));
+    refused(&gone, &gone.ask(), ProblemCode::StepUpMissing);
+
+    let mut theirs = world();
+    theirs.rows = Rows::opened();
+    enrol(
+        &mut theirs.rows,
+        T0 - 900,
+        enrolled(OTHER, CREDENTIAL, &theirs.signer, 0, None),
+    );
+    refused(&theirs, &theirs.ask(), ProblemCode::StepUpMissing);
+}
+
+#[test]
+#[ignore = "pending E9-4"]
+fn a_counter_not_above_the_last_is_missing() {
+    let mut enrolled_at_nine = world();
+    enrolled_at_nine.rows = Rows::opened();
+    enrol(
+        &mut enrolled_at_nine.rows,
+        T0 - 900,
+        enrolled(OWNER, CREDENTIAL, &enrolled_at_nine.signer, 9, None),
+    );
+    refused(
+        &enrolled_at_nine,
+        &enrolled_at_nine.ask(),
+        ProblemCode::StepUpMissing,
+    );
+
+    let mut asserted_at_twelve = world();
+    asserted_at_twelve.rows.hosted(
+        "StepUpAsserted",
+        T0 - 50,
+        asserted(UNKNOWN_CHALLENGE, CREDENTIAL, 12),
+    );
+    let mut eleven = asserted_at_twelve.ask();
+    eleven.assertion = Some(asserted_at_twelve.signed(11).wire(CREDENTIAL));
+    refused(&asserted_at_twelve, &eleven, ProblemCode::StepUpMissing);
+    let mut thirteen = asserted_at_twelve.ask();
+    thirteen.assertion = Some(asserted_at_twelve.signed(13).wire(CREDENTIAL));
+    assert!(matches!(asserted_at_twelve.judge(&thirteen), Ok(Some(_))));
+}
+
+#[test]
+#[ignore = "pending E9-4"]
+fn a_credential_fold_that_cannot_answer_is_journal_unavailable() {
+    let mut w = world();
+    w.rows.hosted(
+        "CredentialEnrolled",
+        T0 - 500,
+        json!({"member": encode_ulid(OTHER.0), "credential": OTHER_CREDENTIAL, "alg": "rs256"}),
+    );
+    refused(&w, &w.ask(), ProblemCode::JournalUnavailable);
+}
+
+#[test]
+#[ignore = "pending E9-4"]
+fn a_member_whose_records_break_rule_251_has_no_passkey_that_counts() {
+    let mut w = world();
+    enrol(
+        &mut w.rows,
+        T0 - 500,
+        enrolled(OWNER, CREDENTIAL, &w.signer, 0, None),
+    );
+    refused(&w, &w.ask(), ProblemCode::StepUpMissing);
+}
+
+#[test]
+#[ignore = "pending E9-4"]
+fn a_tampered_assertion_is_missing() {
+    let w = world();
+    let signed = w.signed(9);
+    let mut flipped = signed.clone();
+    let last = flipped.signature.len() - 1;
+    flipped.signature[last] ^= 1;
+    let mut ask = w.ask();
+    ask.assertion = Some(flipped.wire(CREDENTIAL));
+    refused(&w, &ask, ProblemCode::StepUpMissing);
+
+    let mut unverified = signed;
+    unverified.authenticator_data[32] = 0x01;
+    let mut ask = w.ask();
+    ask.assertion = Some(unverified.wire(CREDENTIAL));
+    refused(&w, &ask, ProblemCode::StepUpMissing);
+}
+
+#[test]
+#[ignore = "pending E9-4"]
 fn passkey_evidence_without_an_assertion_is_missing_and_cli_confirm_with_one_is_too() {
     let w = world();
     let mut bare = w.ask();
@@ -419,4 +527,36 @@ fn passkey_evidence_alone_is_missing_at_verify() {
         Err(ProblemCode::StepUpMissing)
     );
     assert!(w.held());
+}
+
+#[test]
+#[ignore = "pending E9-4"]
+fn a_credential_enrolled_at_version_1_never_counts() {
+    let mut w = world();
+    w.rows = Rows::opened();
+    let payload = version_1(enrolled(OWNER, CREDENTIAL, &w.signer, 0, None));
+    enrol_at(&mut w.rows, 1, T0 - 900, payload);
+    refused(&w, &w.ask(), ProblemCode::StepUpMissing);
+}
+
+#[test]
+#[ignore = "pending E9-4"]
+fn a_backup_eligible_flag_other_than_the_registration_s_is_missing() {
+    let mut eligible = world();
+    eligible.rows = Rows::opened();
+    let payload = backup_eligible(enrolled(OWNER, CREDENTIAL, &eligible.signer, 0, None));
+    enrol(&mut eligible.rows, T0 - 900, payload);
+    refused(&eligible, &eligible.ask(), ProblemCode::StepUpMissing);
+
+    let not_eligible = world();
+    let challenge = not_eligible
+        .record
+        .webauthn_challenge()
+        .expect("a canonical record");
+    let mut ask = not_eligible.ask();
+    let signed = not_eligible
+        .signer
+        .assert_backup_eligible(&unb64(&challenge.base64url()), 9);
+    ask.assertion = Some(signed.wire(CREDENTIAL));
+    refused(&not_eligible, &ask, ProblemCode::StepUpMissing);
 }
