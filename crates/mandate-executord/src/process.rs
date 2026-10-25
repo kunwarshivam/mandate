@@ -343,7 +343,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             self.lifecycle.observe(now, Lifecycled::Failed);
             return alerts;
         }
-        if !self.read_quotes(now, &mut alerts) {
+        if !self.read_quotes(now, &mut alerts).unwrap_or(true) {
             return alerts;
         }
         if let Some(tick) = tick
@@ -428,20 +428,26 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
 
     /// Hands the core, before the pass's tick, the latest quote of each instrument whose exit waits
     /// on a price and is due a read (DEC-2359), so the tick's ladder step prices from it. A quote
-    /// the feed cannot give hands nothing. `false` when a handoff stopped the pass.
-    fn read_quotes(&mut self, now: UtcNanos, alerts: &mut Vec<Alert>) -> bool {
-        let Ok(wanted) = self.state.quote_wanted() else {
-            return true;
-        };
+    /// the feed cannot give hands nothing. `Ok(false)` when a handoff stopped the pass.
+    ///
+    /// # Errors
+    /// The core's refusal to name the instruments it wants; the pass then reads no quote and goes
+    /// on, as it would with the feed down (`AGENTS.md` rule 3).
+    fn read_quotes(
+        &mut self,
+        now: UtcNanos,
+        alerts: &mut Vec<Alert>,
+    ) -> Result<bool, ExecutorError> {
+        let wanted = self.state.quote_wanted()?;
         for instrument in self.polled.due(&wanted, now) {
             let Some(observation) = self.wiring.quotes.observe(&instrument, now) else {
                 continue;
             };
             if !self.hand(now, now, Input::Market(observation), alerts, 0) {
-                return false;
+                return Ok(false);
             }
         }
-        true
+        Ok(true)
     }
 
     /// Drains at `now`: no new input; an input in doubt is handed once more, then the process exits
