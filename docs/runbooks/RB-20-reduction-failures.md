@@ -1,8 +1,9 @@
 # RB-20: route 2's failed-assertion limit reached
 
 The alert this answers comes from the workspace API server ([infrastructure design
-§8.2](../design/infrastructure.md)). It is an opaque operator alert: the code
-`reduction_failures_over_limit` on the server's standard error, and this runbook, and nothing else.
+§8.2](../design/infrastructure.md)). It is an opaque operator alert, one line on the server's
+standard error, `operator_alert reduction_failures_over_limit docs/runbooks/RB-20-reduction-failures.md`:
+the code and this runbook, and nothing else.
 It names no address, device, member, passkey, or workspace content (`AGENTS.md` rule 6), so the
 alert alone tells you that someone failed many times, never who.
 
@@ -30,8 +31,9 @@ alert alone tells you that someone failed many times, never who.
     DEC-2119 item 8 accepts; it tells nothing about any member.
 - An address is the TCP peer, or, behind the ingress, the `X-Forwarded-For` entry the server trusts
   (`MANDATE_API_INGRESS_PEERS`); a native IPv6 address counts as its /64. A device is the
-  `__Host-mandate_device` cookie. A client without a device cookie shares one device budget with
-  every other such client.
+  `__Host-mandate_device` cookie. A client without a device cookie, or with a malformed one,
+  shares one device budget with every other such client ([DEC-2127](../project/decisions/DEC-2127.md)).
+  It only counts, so that client is never refused for it.
 
 ## What to check
 

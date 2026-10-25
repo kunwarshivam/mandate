@@ -22,7 +22,7 @@ use mandate_passkey::{Assertion, Challenge, PublicKey, RelyingParty};
 use mandate_time::UtcNanos;
 
 use crate::members::{ControlLookup, Hosted};
-use crate::standing::{Standings, interim_refuses};
+use crate::standing::interim_refuses;
 
 /// The principal the membership and standing lookups run for when the passkey is unknown, so
 /// they cost the same: the greatest ULID, which no principal is minted as.
@@ -48,10 +48,12 @@ pub struct Reads<'a> {
     pub credentials: Option<&'a [CredentialRecord]>,
     /// Its membership records, or `None` when they could not be read.
     pub memberships: Option<&'a [MembershipRecord]>,
-    /// The sign-ins this process has seen ([DEC-2319] item 2).
+    /// A member's route 2 standing ([DEC-2319] item 2), asked once for every request, of the
+    /// passkey's member or of [`DECOY_MEMBER`] when the passkey is unknown. The route answers it
+    /// from `Sessions::standing`, so the session store stays the standing's one owner.
     ///
     /// [DEC-2319]: ../../../docs/project/decisions/DEC-2319.md
-    pub standings: &'a Standings,
+    pub standing: &'a dyn Fn(PrincipalId) -> SubjectStanding,
     /// The store the passkeys' public keys are artifacts in; `None` when the deployment names
     /// none, and then no key resolves.
     pub keys: Option<&'a (dyn ArtifactSource + Send + Sync)>,
@@ -92,7 +94,7 @@ pub fn judge(
     let records = reads.memberships.map(<[MembershipRecord]>::to_vec);
     let lookup = ControlLookup::new(reads.hosted, records.ok_or(LookupFailed), now);
     let reaches = lookup.reaches(member) == Ok(true);
-    let standing = reads.standings.standing(member);
+    let standing = (reads.standing)(member);
     let refused = interim_refuses(standing, reads.memberships.unwrap_or_default(), member);
     (key.is_some() && verified && reaches && !refused).then_some(Opened { member, standing })
 }
