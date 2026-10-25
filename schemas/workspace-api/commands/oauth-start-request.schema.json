@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://mandate.dev/schemas/workspace-api/v1/commands/oauth-start-request.schema.json",
-  "description": "POST /connections/oauth/start (\u00a74.5, DEC-2623 item 1). broker is alpaca, the only OAuth connect served; environment live is refused live_unavailable by the route (DEC-883). disclosure names the token-breadth disclosure the owner confirmed, which the connect's step-up digest binds (DEC-2621 item 4). A null step_up is refused by the route and commits nothing.",
+  "description": "POST /connections/oauth/start (\u00a74.5, DEC-2623 item 1). broker is alpaca, the only OAuth connect served; environment live is refused live_unavailable by the route (DEC-883). disclosure names the token-breadth disclosure the owner confirmed, which the connect's step-up digest binds (DEC-2621 item 4). A null step_up is refused by the route and commits nothing. step_up_assertion is DEC-2108 item 7's object beside passkey step-up, optional so a cli_confirm start (DEC-2125) still decodes; set only beside a step_up whose method is passkey (DEC-2126 item 1).",
   "type": "object",
   "required": [
     "broker",
@@ -48,6 +48,41 @@
           "type": "null"
         }
       ]
+    },
+    "step_up_assertion": {
+      "oneOf": [
+        {
+          "$ref": "../envelope.schema.json#/$defs/StepUpAssertion"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "if": {
+    "properties": {
+      "step_up_assertion": {
+        "type": "object"
+      }
+    },
+    "required": [
+      "step_up_assertion"
+    ]
+  },
+  "then": {
+    "properties": {
+      "step_up": {
+        "type": "object",
+        "properties": {
+          "method": {
+            "const": "passkey"
+          }
+        },
+        "required": [
+          "method"
+        ]
+      }
     }
   }
 }
