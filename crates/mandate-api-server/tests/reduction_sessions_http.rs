@@ -242,13 +242,25 @@ fn a_verified_assertion_opens_a_reduction_only_session_for_fifteen_minutes() {
         assert_eq!(reply.header("cache-control"), Some("no-store"));
         assert_eq!(device_set(&reply), Vec::<String>::new(), "no device cookie");
         let set = session_set(&reply).expect("the session cookie");
-        assert!(
-            set.contains("Max-Age=900")
-                && set.contains("Secure")
-                && set.contains("HttpOnly")
-                && set.contains("SameSite=Strict")
-                && set.contains("Path=/"),
-            "{set}"
+        assert_eq!(
+            reply.all("set-cookie").len(),
+            1,
+            "one Set-Cookie, the session's"
+        );
+        let (pair, attributes) = set.split_once("; ").expect("attributes after the value");
+        let (name, value) = pair.split_once('=').expect("name=value");
+        assert_eq!(name, COOKIE_NAME);
+        assert!(!value.is_empty(), "{set}");
+        assert_eq!(
+            attributes.split("; ").collect::<Vec<_>>(),
+            [
+                "Path=/",
+                "Max-Age=900",
+                "Secure",
+                "HttpOnly",
+                "SameSite=Strict"
+            ],
+            "the whole attribute list, in order, and nothing else (no Domain, no Expires): {set}"
         );
         let answer = json(&reply);
         assert_eq!(text(&answer, "kind"), "reduction_only");
