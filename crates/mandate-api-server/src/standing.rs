@@ -1,5 +1,7 @@
 //! Route 2's standing (§4.10 route 2 item 2; identity spec §6.4 route 2), as the interim of
-//! [DEC-2319] item 2 reads it, which is Proposed and waits for the founder.
+//! [DEC-2319] item 2 reads it, in force until the journaled deprovision signal the founder chose
+//! lands (backlog E9-13). The session store holds the process's only [`Standings`] and is its only
+//! writer.
 //!
 //! The server sees no deprovision signal yet ([DEC-2319] item 1), so it keeps, in memory, only
 //! each member's last successful sign-in on this process. Route 2 is refused to a member with no

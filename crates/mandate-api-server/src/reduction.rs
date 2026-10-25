@@ -181,6 +181,11 @@ pub fn challenge_id(issued_at: UtcNanos, bytes: &[u8; 32]) -> String {
     encode_ulid(u128::from_be_bytes(raw.try_into().unwrap_or_default()))
 }
 
+/// The bytes a presentation that named no challenge settles with: the gate holds no challenge of
+/// all zeros, which a 32-byte draw from the operating system's generator is never expected to give,
+/// so it counts a failure and consumes nothing.
+const NO_CHALLENGE: [u8; 32] = [0; 32];
+
 /// A challenge the store issued.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Issued {
@@ -278,6 +283,38 @@ impl Reduction {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .contains_key(challenge_id)
+    }
+
+    /// Takes the challenge `challenge_id` out of memory on its first presentation, whatever
+    /// follows, so it is presented at most once (§4.10 route 2 item 1): the challenge, or `None`
+    /// when it is unknown, already taken, or expired at `now`.
+    pub fn take(&self, challenge_id: &str, now: UtcNanos) -> Option<Issued> {
+        let issued = self
+            .outstanding
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(challenge_id)?;
+        (now < issued.expires_at).then_some(issued)
+    }
+
+    /// Settles a presentation from `client` at `now` with the gate: the challenge `taken` is
+    /// consumed there too, and a presentation that `opened` nothing counts one failure against
+    /// `client`'s address and device, a request that named no challenge included. Returns whether
+    /// this failure is the one that brought the address or device to its failure limit, when the
+    /// operator alert `reduction_failures_over_limit` is raised, once (§4.10 route 2 item 3). No
+    /// answer depends on it.
+    pub fn settle(
+        &self,
+        client: &ClientKey,
+        taken: Option<&Issued>,
+        opened: bool,
+        now: UtcNanos,
+    ) -> bool {
+        let mut gate = self.gate.lock().unwrap_or_else(PoisonError::into_inner);
+        let before = gate.failure_limit_reached(client, now);
+        let bytes = taken.map_or(NO_CHALLENGE, |issued| issued.bytes);
+        let _answer = gate.present(client, &bytes, now, |_| opened.then_some(()));
+        !before && gate.failure_limit_reached(client, now)
     }
 
     /// Fresh device cookie bytes, unpadded base64url.
