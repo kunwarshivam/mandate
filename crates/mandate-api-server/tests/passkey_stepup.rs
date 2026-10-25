@@ -24,7 +24,7 @@ use mandate_api::envelope::{StepUpAssertion, StepUpEvidence, StepUpMethod};
 use mandate_api::problem::ProblemCode;
 use mandate_api::wire::{EventId, Timestamp};
 use mandate_api_server::challenges::Challenges;
-use mandate_api_server::confirm::CliConfirm;
+use mandate_api_server::confirm::{CliConfirm, Unanswered, passkey_held};
 use mandate_api_server::methods::{CoolOffWaiver, Methods, Passkey};
 use mandate_api_server::stepup::{Action, Asserted, CoolOffWaived, Judged, StepUp, Unverified};
 use mandate_api_server::subject::{LinkRefusal, NamesPrincipal};
@@ -929,4 +929,132 @@ fn only_a_cooling_passkey_under_the_waiver_is_waived() {
         panic!("the step-up counts, not {answer:?}");
     };
     assert_eq!(asserted.waived(), None);
+
+/// DEC-2126 item 6: what [`passkey_held`] answers for the owner over `w`'s rows at `secs`.
+fn held_at(w: &World, secs: i64) -> Result<bool, Unanswered> {
+    passkey_held(workspace(WORKSPACE), OWNER, &w.rows.rows, at(secs))
+}
+
+/// The world with the owner's only passkey enrolled by `payload` at `version`.
+fn holding(version: u64, payload: impl FnOnce(&Signer) -> serde_json::Value) -> World {
+    let mut w = world();
+    w.rows = Rows::opened();
+    let payload = payload(&w.signer);
+    enrol_at(&mut w.rows, version, T0 - 900, payload);
+    w
+}
+
+#[test]
+#[ignore = "pending E9-4"]
+fn a_passkey_past_its_cool_off_is_held_and_one_cooling_off_is_not() {
+    let w = world();
+    assert_eq!(held_at(&w, ISSUED), Ok(true), "cool-off ended at T0 - 800");
+    let ends = ISSUED + 30;
+    let cooling = holding(2, |signer| {
+        enrolled(OWNER, CREDENTIAL, signer, 0, Some(ends))
+    });
+    assert_eq!(
+        held_at(&cooling, ends - 1),
+        Ok(false),
+        "a second before it ends"
+    );
+    assert_eq!(held_at(&cooling, ends), Ok(true), "the instant it ends");
+    let none = holding(2, |signer| enrolled(OWNER, CREDENTIAL, signer, 0, None));
+    assert_eq!(held_at(&none, ISSUED), Ok(true), "no cool-off at all");
+}
+
+#[test]
+#[ignore = "pending E9-4"]
+fn a_removed_passkey_another_member_s_or_none_is_not_held() {
+    let mut gone = world();
+    gone.rows
+        .hosted("CredentialRemoved", T0 - 100, removed(OWNER, CREDENTIAL));
+    assert_eq!(held_at(&gone, ISSUED), Ok(false));
+    let theirs = holding(2, |signer| enrolled(OTHER, CREDENTIAL, signer, 0, None));
+    assert_eq!(held_at(&theirs, ISSUED), Ok(false));
+    let mut none = world();
+    none.rows = Rows::opened();
+    assert_eq!(held_at(&none, ISSUED), Ok(false));
+}
+
+#[test]
+#[ignore = "pending E9-4"]
+fn a_version_1_passkey_the_routes_list_is_held() {
+    let w = holding(1, |signer| {
+        version_1(enrolled(OWNER, CREDENTIAL, signer, 0, None))
+    });
+    assert_eq!(
+        held_at(&w, ISSUED),
+        Ok(true),
+        "the routes list it, so the interim ends though only a version 2 passkey can step up"
+    );
+}
+
+#[test]
+#[ignore = "pending E9-4"]
+fn a_broken_or_unreadable_stream_answers_nothing() {
+    let mut broken = world();
+    enrol(
+        &mut broken.rows,
+        T0 - 500,
+        enrolled(OWNER, CREDENTIAL, &broken.signer, 0, None),
+    );
+    assert_eq!(held_at(&broken, ISSUED), Err(Unanswered::Journal));
+    let mut unreadable = world();
+    unreadable.rows.hosted(
+        "CredentialEnrolled",
+        T0 - 500,
+        json!({"member": encode_ulid(OTHER.0), "credential": OTHER_CREDENTIAL, "alg": "rs256"}),
+    );
+    assert_eq!(held_at(&unreadable, ISSUED), Err(Unanswered::Journal));
+}
+
+/// The owner's `cli_confirm` connect over the held challenge, confirmed on the host.
+fn confirmed_connect(w: &mut World) -> Ask {
+    confirm_on_the_host(w);
+    let mut ask = w.ask();
+    ask.evidence = evidence(CHALLENGE, StepUpMethod::CliConfirm);
+    ask.assertion = None;
+    ask
+}
+
+#[test]
+#[ignore = "pending E9-4"]
+fn a_member_holding_a_passkey_past_its_cool_off_can_no_longer_cli_confirm_a_connect() {
+    let mut w = world();
+    let ask = confirmed_connect(&mut w);
+    assert_eq!(
+        w.judge(&ask),
+        Err(Unverified::Code(ProblemCode::StepUpMethod)),
+        "DEC-2126 item 6; the owner's passkeys answer {:?}",
+        held_at(&w, ask.now)
+    );
+    assert!(w.held(), "a refusal takes nothing");
+}
+
+#[test]
+#[ignore = "pending E9-4"]
+fn a_cli_confirm_connect_over_a_stream_the_fold_cannot_read_is_journal_unavailable() {
+    let mut w = world();
+    w.rows.hosted(
+        "CredentialEnrolled",
+        T0 - 500,
+        json!({"member": encode_ulid(OTHER.0), "credential": OTHER_CREDENTIAL, "alg": "rs256"}),
+    );
+    let ask = confirmed_connect(&mut w);
+    assert_eq!(
+        w.judge(&ask),
+        Err(Unverified::Code(ProblemCode::JournalUnavailable)),
+        "the owner's passkeys answer {:?}",
+        held_at(&w, ask.now)
+    );
+}
+
+#[test]
+fn a_member_whose_passkey_is_still_cooling_off_keeps_cli_confirm_for_a_connect() {
+    let mut w = holding(2, |signer| {
+        enrolled(OWNER, CREDENTIAL, signer, 0, Some(ISSUED + 3_600))
+    });
+    let ask = confirmed_connect(&mut w);
+    assert_eq!(w.judge(&ask), Ok(None), "DEC-2125's interim holds for them");
 }

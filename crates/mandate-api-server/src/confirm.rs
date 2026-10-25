@@ -14,7 +14,8 @@ use std::sync::Arc;
 use mandate_api::envelope::{StepUpEvidence, StepUpMethod};
 use mandate_api::problem::ProblemCode;
 use mandate_canon::{Digest, Value, parse};
-use mandate_identity::StepUpActionKind;
+use mandate_identity::{PrincipalId, StepUpActionKind, WorkspaceId};
+use mandate_journal::StoredEvent;
 use mandate_time::UtcNanos;
 
 use crate::challenges::Challenges;
@@ -163,6 +164,32 @@ impl StepUp for CliConfirm {
         }
         Ok(())
     }
+}
+
+/// Why [`passkey_held`] gives no answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Unanswered {
+    /// The stream's credential records cannot be read, or the member's records break rule 251 or
+    /// 254, so the passkey routes would list nothing: `journal_unavailable`.
+    Journal,
+    /// The check is a stub until its story implements it (DEC-77).
+    Unimplemented { story: &'static str },
+}
+
+/// Whether `principal` holds a passkey past its cool-off at `now` on `workspace`'s control stream
+/// as the request read it ([DEC-2126](../../../docs/project/decisions/DEC-2126.md) item 6): one
+/// the passkey routes list, from the same fold, whose cool-off has ended or that has none. Such a
+/// member's `cli_confirm` for a connect has ended, and a paper connect needs their passkey.
+///
+/// # Errors
+/// [`Unanswered`].
+pub fn passkey_held(
+    _workspace: WorkspaceId,
+    _principal: PrincipalId,
+    _control: &[StoredEvent],
+    _now: UtcNanos,
+) -> Result<bool, Unanswered> {
+    Err(Unanswered::Unimplemented { story: "E9-4" })
 }
 
 /// `value`'s text member `name`.

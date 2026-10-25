@@ -18,11 +18,11 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use common::control::{Rows, envelope, stored};
-use common::{WORKSPACE, send};
+use common::{WORKSPACE, hosted, send};
 use mandate_api::envelope::{StepUpAssertion, StepUpEvidence};
 use mandate_api::problem::{Problem, ProblemCode, Violation};
 use mandate_api::wire::decode;
-use mandate_api_server::confirm::CliConfirm;
+use mandate_api_server::confirm::{CliConfirm, passkey_held};
 use mandate_api_server::methods::{CoolOffWaiver, Methods, Passkey};
 use mandate_api_server::objects::{ObjectStore, Objects};
 use mandate_api_server::session::COOKIE_NAME;
@@ -36,8 +36,8 @@ use mandate_journal::{
 use mandate_time::UtcNanos;
 use serde_json::json;
 use support_connect::{
-    ALICE, APP, Fixture, KEY, MemObjects, StepUpBinding, T0, appended, base, code, ctl, derived,
-    digest, fixture_binding, json, principal, signed_in, start, text, unissued,
+    ALICE, APP, Fixture, KEY, MemObjects, StepUpBinding, T0, appended, at, base, code, ctl,
+    derived, digest, fixture_binding, json, principal, signed_in, start, text, unissued,
 };
 use support_passkey::{CREDENTIAL, Signed, Signer, assert_by, asserted, enrol, enrolled, unb64url};
 
@@ -573,10 +573,23 @@ fn crockford40(bytes: &[u8]) -> String {
         .collect()
 }
 
-#[test]
-fn a_cli_confirm_start_still_commits_the_request_alone_while_the_interim_lasts() {
-    let w = world();
-    let issued = w.challenge();
+/// Re-enrols Alice's passkey with its cool-off ending at `ends`, before any challenge is asked.
+fn cooling_until(w: &World, ends: i64) {
+    let mut rows = Rows::opened();
+    enrol(
+        &mut rows,
+        T0 - 900,
+        enrolled(principal(ALICE), CREDENTIAL, &w.signer, 0, Some(ends)),
+    );
+    w.f.journal
+        .streams
+        .lock()
+        .expect("unpoisoned")
+        .insert(ctl(), rows.rows);
+}
+
+/// Alice's confirmation of `issued` on the host, as the CLI appends it (journal spec §9.29).
+fn confirmed_on_the_host(w: &World, issued: &Issued) {
     let mut rows = w.f.journal.rows_of(&ctl());
     let seq = u64::try_from(rows.len()).expect("small") + 1;
     let payload = json!({
@@ -591,6 +604,14 @@ fn a_cli_confirm_start_still_commits_the_request_alone_while_the_interim_lasts()
         .lock()
         .expect("unpoisoned")
         .insert(ctl(), rows);
+}
+
+#[test]
+fn a_cli_confirm_start_still_commits_the_request_alone_while_the_interim_lasts() {
+    let w = world();
+    cooling_until(&w, T0 + 86_400);
+    let issued = w.challenge();
+    confirmed_on_the_host(&w, &issued);
     w.f.clock.set(T0 + 5);
     let reply = w.start(&w.body(&issued, "cli_confirm", None));
     assert_eq!(
@@ -693,4 +714,34 @@ fn without_the_waiver_a_fresh_passkeys_start_is_step_up_missing() {
     );
     assert!(w.appended().is_empty());
     assert!(w.held(&issued), "the challenge is kept");
+
+#[test]
+#[ignore = "pending E9-4"]
+fn a_cli_confirm_start_by_a_member_holding_a_passkey_past_its_cool_off_is_step_up_method() {
+    let w = world();
+    let issued = w.challenge();
+    confirmed_on_the_host(&w, &issued);
+    w.f.clock.set(T0 + 5);
+    let reply = w.start(&w.body(&issued, "cli_confirm", None));
+    let held = passkey_held(
+        hosted().workspace,
+        principal(ALICE),
+        &w.f.journal.rows_of(&ctl()),
+        at(T0 + 5),
+    );
+    assert_eq!(
+        reply.status,
+        401,
+        "DEC-2126 item 6; Alice's passkeys answer {held:?}, the port {:?}",
+        w.answers()
+    );
+    assert_eq!(code(&reply), (401, ProblemCode::StepUpMethod));
+    let after_confirmation: Vec<String> = w
+        .appended()
+        .iter()
+        .skip(1)
+        .map(|row| row.event_type.clone())
+        .collect();
+    assert!(after_confirmation.is_empty(), "nothing is appended");
+    assert!(w.held(&issued), "a refusal takes nothing");
 }
