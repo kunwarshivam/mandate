@@ -745,6 +745,17 @@ impl ExecutorState {
             .any(|switch| &switch.agent == agent && switch.copied_from.as_ref() == Some(source))
     }
 
+    /// Whether an account switch still has an instrument to close (DEC-2364): one its `closes` or
+    /// `deferred` name that the account's position reads above zero. A switch whose every
+    /// instrument reads flat, or one the owner lifted, owes nothing.
+    pub fn account_closing(&self) -> bool {
+        self.closing_all.iter().any(|instrument| {
+            self.positions
+                .get(instrument)
+                .is_some_and(|held| *held > SignedQty::ZERO)
+        })
+    }
+
     /// Whether `agent` may hold lots in any instrument the account holds (DEC-2347 item 3.6,
     /// DEC-2354): an upper bound on its lots there is above zero. The bound is its buys, net of its
     /// sells and of what it released to the owner, capped at the position, where a buy in any

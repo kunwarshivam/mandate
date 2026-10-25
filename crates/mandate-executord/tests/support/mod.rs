@@ -374,6 +374,12 @@ struct Books {
     lose_answers: usize,
     /// Whether the account reads as blocked from trading (trading spec §7.3).
     blocked: bool,
+    /// How a cancel-all or a close-position is answered: refused unsent while `None`, accepted
+    /// while `Some`. A close is an order of the broker's own, working while `Some(false)` and
+    /// filled whole at 150 on arrival while `Some(true)`.
+    account_wide: Option<bool>,
+    /// Whether every close-position's answer is lost after the close takes effect.
+    lose_closes: bool,
     sequence: u64,
 }
 
@@ -500,6 +506,27 @@ impl Paper {
     pub fn lose_next_answers(&self, n: usize) {
         self.books.borrow_mut().lose_answers = n;
     }
+
+    /// Every cancel-all and close-position is accepted from now on. Each close is an order of the
+    /// broker's own that names no client order id, for the whole position: if `closes_fill`, it
+    /// sells it at once, else it works until [`Paper::expire_closes`].
+    pub fn accept_account_wide(&self, closes_fill: bool) {
+        self.books.borrow_mut().account_wide = Some(closes_fill);
+    }
+
+    /// Every close-position from now on takes effect and its answer is lost.
+    pub fn lose_close_answers(&self) {
+        self.books.borrow_mut().lose_closes = true;
+    }
+
+    /// The broker expires every close still working, unfilled: the position stays held.
+    pub fn expire_closes(&self) {
+        for order in self.books.borrow_mut().orders.values_mut() {
+            if order.client_order_id.is_none() && order.status == "new" {
+                order.status = "expired".to_owned();
+            }
+        }
+    }
 }
 
 impl ScriptedBroker for Paper {}
@@ -529,6 +556,9 @@ impl Broker for Paper {
             appended: self.journal.appends(),
         });
         let outcome = answer(&mut books, request)?;
+        if books.lose_closes && matches!(request, BrokerRequest::ClosePosition(..)) {
+            return Err(ConnectorError::Unknown(BrokerUnknown::Timeout));
+        }
         if books.lose_answers > 0 {
             books.lose_answers = books.lose_answers.saturating_sub(1);
             return Err(ConnectorError::Unknown(BrokerUnknown::Timeout));
@@ -591,8 +621,69 @@ fn answer(books: &mut Books, request: &BrokerRequest) -> Result<BrokerOutcome, C
                 cursor: ActivityCursor(books.fills.len().to_string()),
             }
         }
+        BrokerRequest::CancelAll(_) if books.account_wide.is_some() => {
+            BrokerOutcome::AccountWideAccepted
+        }
+        BrokerRequest::ClosePosition(_, instrument) if books.account_wide.is_some() => {
+            let fills = books.account_wide == Some(true);
+            close(books, instrument, fills).map_err(|_| not_sent)?;
+            BrokerOutcome::AccountWideAccepted
+        }
         _ => return Err(not_sent),
     })
+}
+
+/// The broker's close of `instrument`: a sell of the whole position as an order of its own with no
+/// client order id, working, or, if `fills`, filled at 150, its fill in the account's activities
+/// and the position gone.
+fn close(books: &mut Books, instrument: &InstrumentId, fills: bool) -> Result<(), Error> {
+    let held = books
+        .positions
+        .iter()
+        .filter(|position| &position.instrument == instrument)
+        .try_fold(SignedQty::ZERO, |sum, position| {
+            sum.checked_add(position.qty)
+        })?;
+    let qty = held.abs();
+    books.sequence = books.sequence.saturating_add(1);
+    let broker_order_id = format!("b{}", books.sequence);
+    let price = Price::parse("150")?;
+    books.orders.insert(
+        broker_order_id.clone(),
+        BrokerOrder {
+            broker_order_id: broker_order_id.clone(),
+            client_order_id: None,
+            instrument: instrument.clone(),
+            side: Side::Sell,
+            qty,
+            filled_qty: if fills { qty } else { Qty::ZERO },
+            limit_price: None,
+            stop_price: None,
+            status: if fills { "filled" } else { "new" }.to_owned(),
+            reject_code: None,
+            replaced_by_broker_order_id: None,
+            legs: Vec::new(),
+            created_on: None,
+        },
+    );
+    if !fills {
+        return Ok(());
+    }
+    books.fills.push(BrokerFill {
+        fill_id: FillId(format!("f-{broker_order_id}")),
+        client_order_id: None,
+        broker_order_id: Some(broker_order_id),
+        instrument: instrument.clone(),
+        side: Side::Sell,
+        qty,
+        price,
+        fees: Usd::parse("0")?,
+        trade_date: mandate_time::Date::parse("2026-09-21")?,
+    });
+    books
+        .positions
+        .retain(|position| &position.instrument != instrument);
+    Ok(())
 }
 
 fn account() -> Result<BrokerAccount, Error> {

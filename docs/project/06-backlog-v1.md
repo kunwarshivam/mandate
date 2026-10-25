@@ -3036,7 +3036,8 @@ enables `live` (ES-23, OPS-5).
   process runs anywhere beyond the dev and CI cell: E7-4's flatten-intent body and its account and
   workspace kill-switch scopes, so a kill switch reaches the executor from the control stream
   without the runtime (design §3.6, `AGENTS.md` rule 13). Until then it reaches the executor only
-  through the runtime's copy.
+  through the runtime's copy. The account scope waits on the close-position re-ask row from
+  [DEC-2364](decisions/DEC-2364.md).
 - **E21-31 (Proposed, M8; SC; lane A1)** As a workspace member, I want the workspace API served by
   its own process in the cell, so that the web app and the CLI reach my deployment the same way
   (design §3.1, §9; the API server, "A2" in `deploy/README.md`). *Accepted when:* a new crate
@@ -4381,7 +4382,16 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
 - **E7-4 (executor process), from [DEC-2347](decisions/DEC-2347.md) item 6, with DEC-2333's slice
   A2b:** the exit's `owes_nothing` reads agent-scoped work only; once the account-scope switch
   lands, an account switch still closing (`closing_all`) keeps the executor running too, with a
-  test.
+  test. Taken by [DEC-2364](decisions/DEC-2364.md)'s pair: an instrument the switch closes that the
+  fold still reads held keeps it running.
+- **E7-4 (executor, account kill switch), from [DEC-2364](decisions/DEC-2364.md) Not covered
+  here:** a close-position the broker accepts and then drops at once (rejected, or expired before
+  the next read) is asked again on the read that confirms its own answer, whose answer asks another
+  read, within one pass, until the chain bound fails the cycle. Ask a close again only on the
+  in-doubt hold's reads (DEC-2337 item 3), with a test over the fake broker's dropped close.
+  Latent: only the core's account-scope switch sends a close-position, and no process hands the
+  core that scope today. **Blocks** handing the account scope to `mandate-executord` or the shell
+  (E21-30's *Left*, DEC-2003 item 6): neither ships without the other (the coordinator's ruling).
 - **E7-4 (kill switch sizing), from [DEC-2347](decisions/DEC-2347.md) item 9, rule 13:** a buy
   the broker reports filled whose fill named no order (Alpaca's fill activity names only the
   broker's order id, so the reconciliation applies it unattributed) leaves nothing in `kill.rs`'s
