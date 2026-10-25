@@ -18,7 +18,7 @@ mod common;
 
 use common::{
     FixedInstruments, FixedMandate, Ran, Shell, TestIds, broker_fill, broker_order, clock, config,
-    handoff, ports, price, protected_opening, qty, quote, stream_opened,
+    handoff, ports, price, protected_opening, qty, quote, risk_exit, stream_opened,
 };
 use mandate_accounting::Side;
 use mandate_canon::Value;
@@ -528,6 +528,109 @@ fn a_second_entry_never_ends_the_interval_of_the_first() {
             if client_order_id == &second_stop.client_order_id)),
         "the resting stop is cancelled before the exit sells: {:?}",
         bound.requests
+    );
+}
+
+/// A first entry of 5 filled, its stop then answered `first` (or left unanswered with `None`),
+/// an agent's risk exit of 1 that cancels that stop, then a second entry of 5 that fills and ends
+/// while the stop's cancel is unanswered: the second entry's id and what its fill and its end
+/// sent.
+fn a_second_fill_beside_a_stop_being_cancelled(first: Option<&str>) -> (String, [Ran; 2]) {
+    let (ids, mandates, instruments, config) = (
+        TestIds,
+        FixedMandate::covering(&[AAPL]),
+        FixedInstruments,
+        config(),
+    );
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = ready(&ports);
+    shell.run(Input::Market(quote(AAPL, "151", "151.1", 0)), &ports);
+    let entry_id = entry(&mut shell, &ports, "5", None)
+        .client_order_id
+        .as_str()
+        .to_owned();
+    let filled = fill(&mut shell, &ports, "f-1", &entry_id, "5");
+    let [first_stop] = stops(&filled).try_into().expect("the first entry's stop");
+    if let Some(status) = first {
+        report(
+            &mut shell,
+            &ports,
+            broker_order(
+                "s-1",
+                Some(first_stop.client_order_id.as_str()),
+                AAPL,
+                Side::Sell,
+                "5",
+                "0",
+                status,
+            ),
+        );
+    }
+    let exiting = shell.run(
+        handoff(
+            "01JABCDEFGHJKMNPQRSTVWXYZ8",
+            common::AGENT,
+            risk_exit(AAPL, "1", "150"),
+        ),
+        &ports,
+    );
+    assert!(
+        exiting
+            .requests
+            .iter()
+            .any(|r| matches!(r, BrokerRequest::Cancel { client_order_id }
+            if client_order_id == &first_stop.client_order_id)),
+        "the exit asks the first stop's cancel: {:?}",
+        exiting.requests
+    );
+    let second = shell
+        .run(
+            handoff(
+                "01JABCDEFGHJKMNPQRSTVWXYZ1",
+                common::AGENT,
+                protected_opening(AAPL, "5", "150", "140", None),
+            ),
+            &ports,
+        )
+        .submissions()
+        .first()
+        .map(|order| order.client_order_id.as_str().to_owned())
+        .expect("the second entry is sent");
+    let filled = fill(&mut shell, &ports, "f-2", &second, "5");
+    let ended = report(&mut shell, &ports, entry_state(&second, "5", "5", "filled"));
+    (second, [filled, ended])
+}
+
+/// Whether any of `ran` sent a stop named for `entry` (§2.3's `{entry}-p…`).
+fn stops_for(ran: &[Ran], entry: &str) -> bool {
+    let named = format!("{entry}-p");
+    ran.iter()
+        .flat_map(stops)
+        .any(|stop| stop.client_order_id.as_str().starts_with(&named))
+}
+
+/// The independent review of #2395, S5: a fill gets its own stop even while another protective
+/// order's cancel, asked before the broker acknowledged it, is unanswered. Holding the stop back
+/// there would leave the fill to the bound's exit (DEC-966 items 2 and 4).
+#[test]
+fn a_fill_beside_an_unanswered_stop_being_cancelled_gets_its_own_stop() {
+    let (second, ran) = a_second_fill_beside_a_stop_being_cancelled(None);
+    assert!(
+        stops_for(&ran, &second),
+        "{:?}",
+        ran.map(|ran| ran.requests)
+    );
+}
+
+/// The independent review of #2395, S6: the same with the stop being cancelled one the broker
+/// accepted.
+#[test]
+fn a_fill_beside_an_accepted_stop_being_cancelled_gets_its_own_stop() {
+    let (second, ran) = a_second_fill_beside_a_stop_being_cancelled(Some("accepted"));
+    assert!(
+        stops_for(&ran, &second),
+        "{:?}",
+        ran.map(|ran| ran.requests)
     );
 }
 
