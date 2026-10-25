@@ -280,12 +280,8 @@ pub fn drill(seeded: bool) -> Result<Verdict> {
     let base = format!("/v1/workspaces/{workspace}");
     let digest = connect_digest(&workspace);
     let asked = json!({"action": {"kind": "connection", "digest": digest}});
-    let (status, reply) = api(
-        &cookie,
-        "POST",
-        &format!("{base}/step-up/challenges"),
-        &asked,
-    )?;
+    let challenges = format!("{base}/step-up/challenges");
+    let (status, reply) = api(&cookie, &key(&id, "challenge"), &challenges, &asked)?;
     let challenge: Value = serde_json::from_str(reply_body(&reply)).unwrap_or_default();
     let (Some(challenge_id), Some(issued_at), Some(code)) = (
         challenge["challenge_id"].as_str(),
@@ -315,12 +311,8 @@ pub fn drill(seeded: bool) -> Result<Verdict> {
         "disclosure": {"document": document, "version": version},
         "step_up": {"assertion_id": challenge_id, "authenticated_at": issued_at, "method": "cli_confirm"},
     });
-    let (status, reply) = api(
-        &cookie,
-        "POST",
-        &format!("{base}/connections/oauth/start"),
-        &start,
-    )?;
+    let starts = format!("{base}/connections/oauth/start");
+    let (status, reply) = api(&cookie, &key(&id, "start"), &starts, &start)?;
     let started: Value = serde_json::from_str(reply_body(&reply)).unwrap_or_default();
     let (Some(connection), Some(path)) = (
         started["connection_id"].as_str(),
@@ -377,14 +369,22 @@ pub fn drill(seeded: bool) -> Result<Verdict> {
     Ok(Verdict::Held)
 }
 
-/// One request to the API through its forward, as the signed-in owner from the app origin.
-fn api(cookie: &str, method: &str, path: &str, body: &Value) -> Result<(u16, String)> {
+/// The `Idempotency-Key` of the run `id`'s `step`: one per call, as the API requires on each
+/// command (workspace API spec API-4).
+pub fn key(id: &str, step: &str) -> String {
+    format!("exchange-{id}-{step}")
+}
+
+/// One `POST` to the API through its forward, as the signed-in owner from the app origin, under
+/// the idempotency key `key`.
+fn api(cookie: &str, key: &str, path: &str, body: &Value) -> Result<(u16, String)> {
     super::http(
         API_LOCAL_PORT,
-        method,
+        "POST",
         path,
         &[
             ("Cookie", cookie),
+            ("Idempotency-Key", key),
             ("Content-Type", "application/json"),
             ("Origin", super::DEMO_APP_ORIGIN),
             ("X-Mandate-Request", "1"),
@@ -585,6 +585,17 @@ mod tests {
         ] {
             assert_eq!(fixture_path(other), None, "{other}");
         }
+    }
+
+    /// Each call's key is its own and is the API's shape: one segment of 16 to 64 characters.
+    #[test]
+    fn each_call_has_a_key_of_the_api_s_shape() {
+        for step in ["challenge", "start"] {
+            let key = key("1234567890", step);
+            assert!((16..=64).contains(&key.len()), "{key}");
+            assert!(key.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'));
+        }
+        assert_ne!(key("1", "challenge"), key("1", "start"));
     }
 
     /// A failure report names the problem's code and never the reply's body.
