@@ -1123,12 +1123,15 @@ pub fn hosted() -> Result<()> {
     )
 }
 
-/// What the API's pod says when the workspace release does not become ready: its pods, its
-/// containers' last logs, current and from the run before a restart, and the namespace's recent
-/// events, so a server that refused to start
-/// names its refusal in the run's own output.
+/// What the API's pods say when the workspace release does not become ready: the API's and the
+/// connect finish's (DEC-2348 item 3), which runs from the API's image. Their pods, how each
+/// container last ended (its reason, `OOMKilled` among them, and exit code), their containers'
+/// last logs, current and from the run before a restart, and the namespace's recent events, so a
+/// server that refused to start or was killed names it in the run's own output.
 fn api_diagnosis() {
-    let selector = format!("mandate.dev/workspace={WORKSPACE},mandate.dev/process={API_PROCESS}");
+    let selector = format!(
+        "mandate.dev/workspace={WORKSPACE},mandate.dev/process in ({API_PROCESS},{CONNECT_FINISH_PROCESS})"
+    );
     let logs = |previous: &'static str| {
         [
             "logs",
@@ -1153,6 +1156,16 @@ fn api_diagnosis() {
         "-o",
         "wide",
     ];
+    let ended = [
+        "get",
+        "pods",
+        "--namespace",
+        NAMESPACE,
+        "--selector",
+        selector.as_str(),
+        "-o",
+        "jsonpath={range .items[*]}{.metadata.name}{range .status.containerStatuses[*]} {.name}: {.lastState.terminated.reason} {.lastState.terminated.exitCode} restarts {.restartCount}{end}{\"\\n\"}{end}",
+    ];
     let current = logs("--previous=false");
     let previous = logs("--previous=true");
     let events = [
@@ -1163,7 +1176,7 @@ fn api_diagnosis() {
         "--sort-by",
         ".lastTimestamp",
     ];
-    let shown: [&[&str]; 4] = [&pods, &current, &previous, &events];
+    let shown: [&[&str]; 5] = [&pods, &ended, &current, &previous, &events];
     for args in shown {
         match kubectl(args) {
             Ok(text) => eprintln!("    api diagnosis `kubectl {}`:\n{text}", args.join(" ")),
@@ -4993,6 +5006,8 @@ const WEB_URL: &str = "http://127.0.0.1:4317";
 /// The process-list name lane A1 gives the workspace API server; `api_is_a_planned_name` checks
 /// that, once listed, it is a service.
 const API_PROCESS: &str = "api";
+/// The connect finish's process (DEC-2348 item 3), from the API's image.
+const CONNECT_FINISH_PROCESS: &str = "connect-finish";
 
 /// Which model gateway the demo's research loop calls through (DEC-1120 item 5): the recorded fake,
 /// since no cell holds a vaulted OpenRouter key (E21-32) or a hosted transport yet. The selection
