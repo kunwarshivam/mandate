@@ -1,8 +1,8 @@
 //! E21-30, DEC-2359: the instruments whose exit waits on a price, which the process's quote feed
 //! reads. Each case builds its state from journaled records and handed inputs, and states the set
 //! it expects from what it built, never from the accessor's own rule: a held exit and an exit in
-//! §5.4's sequence are wanted, a position with only resting protection is not, and neither is an
-//! account with nothing waiting.
+//! §5.4's sequence are wanted; a position with only resting protection is not, nor a held opening,
+//! nor an account with nothing waiting.
 
 mod common;
 
@@ -191,6 +191,53 @@ fn an_exit_in_its_sequence_wants_its_instruments_quote() {
         "the case builds a sequence that cancels the protection first"
     );
     assert_eq!(wanted(&shell), only(AAPL));
+}
+
+/// A held opening waits on no exit price, so it wants no quote, whatever held it.
+#[test]
+#[ignore = "pending E21-30"]
+fn a_held_opening_wants_no_quote() {
+    let (ids, mandates, instruments, config) = (
+        TestIds,
+        FixedMandate::covering(&[AAPL]),
+        FixedInstruments,
+        config(),
+    );
+    let ports = common::ports(&ids, &mandates, &instruments, &config);
+    let mut shell = held(&ports, 10);
+    let received = event(
+        ACCOUNT_STREAM,
+        shell.head().0.saturating_add(1),
+        "IntentReceived",
+        with_clock(
+            &[
+                ("intent_id", text(INTENT)),
+                ("agent", text(AGENT)),
+                ("instrument", text(AAPL)),
+                ("side", text("buy")),
+                ("qty", text("5")),
+                ("limit_price", text(BID)),
+                ("purpose", text("open")),
+            ],
+            12,
+        ),
+    );
+    shell.fold_one(&received).expect("the opening folds");
+    let decided = event(
+        ACCOUNT_STREAM,
+        shell.head().0.saturating_add(1),
+        "GateDecided",
+        with_clock(
+            &[
+                ("intent_id", text(INTENT)),
+                ("verdict", text("hold")),
+                ("reason_code", text("unknown_order_in_flight")),
+            ],
+            12,
+        ),
+    );
+    shell.fold_one(&decided).expect("the opening's hold folds");
+    assert_eq!(wanted(&shell), BTreeSet::new());
 }
 
 /// Reading the wanted instruments changes nothing: the state folds the same afterwards, and a
