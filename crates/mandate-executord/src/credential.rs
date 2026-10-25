@@ -46,7 +46,9 @@ use mandate_vault::policy::{Identity, Mounts};
 use mandate_vault::source::SecretSource;
 use secrecy::{ExposeSecret, SecretString};
 
+use crate::Wiring;
 use crate::alpaca::AlpacaBroker;
+use crate::fixture;
 use crate::lease::{Held, Leased, runtime};
 use crate::quotes::{QuoteBounds, QuoteFeed};
 
@@ -412,19 +414,23 @@ pub fn paper_quote_bounds() -> Result<QuoteBounds, &'static str> {
     })
 }
 
-/// The quote feed over `broker`'s own transport and credential (DEC-2359 item 2), judged by
-/// [`paper_quote_bounds`].
+/// The paper serve path's wiring (DEC-2359 item 2): the fixture's, with the quote feed over
+/// `broker`'s own transport and credential, judged by [`paper_quote_bounds`] on `clock`.
 ///
 /// # Errors
-/// `quote_bounds_invalid` when the bounds do not read, and `runtime_unavailable` when the feed's
-/// runtime cannot be built.
-pub fn paper_quotes(
-    broker: &AlpacaBroker<AlpacaPaperHttp>,
-) -> Result<AlpacaQuotes<AlpacaPaperHttp, TokioPause>, &'static str> {
-    AlpacaQuotes::new(
-        DataClient::new(broker.transport(), TokioPause),
+/// The fixture wiring's refusal, `quote_bounds_invalid` when the bounds do not read, and
+/// `runtime_unavailable` when the feed's runtime cannot be built.
+pub fn paper_wiring<T, P>(broker: &AlpacaBroker<T>, clock: P) -> Result<Wiring, &'static str>
+where
+    T: TradingTransport + DataTransport + Clone + 'static,
+    P: Pause + 'static,
+{
+    let mut wiring = fixture::wiring()?;
+    wiring.quotes = Box::new(AlpacaQuotes::new(
+        DataClient::new(broker.transport(), clock),
         paper_quote_bounds()?,
-    )
+    )?);
+    Ok(wiring)
 }
 
 /// The latest-quote read of Alpaca's market-data host, over the connection's transport.
