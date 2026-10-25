@@ -978,3 +978,68 @@ fn every_kind_but_approve_and_connection_is_still_refused() {
         );
     }
 }
+
+/// Kinds never cross, either way (DEC-2125 item 1): an approval's challenge presented for a
+/// connect, and a connect's challenge confirmed as `approve`, are each a mismatch; and a connect's
+/// confirmation is bound to its own digest and principal, as an approval's is.
+#[test]
+fn a_connect_is_bound_to_its_kind_digest_and_principal() {
+    let w = world(&[OWNER]);
+    let connection = Confirmation {
+        kind: "connection",
+        ..Confirmation::of(&w.record)
+    };
+    let as_connect = Ask {
+        action: stepup::Action {
+            kind: StepUpActionKind::Connection,
+            digest: w.action.digest,
+        },
+        ..w.ask()
+    };
+    assert_eq!(
+        w.judge(
+            &as_connect,
+            &[connection.row(1, "01JAA2P4A000000000000000C1")]
+        ),
+        Err(ProblemCode::StepUpMismatch),
+        "an approval's challenge presented for a connect"
+    );
+    let honest = Confirmation::of(&w.record);
+    assert_eq!(
+        w.judge(&as_connect, &[honest.row(1, "01JAA2P4A000000000000000C1")]),
+        Err(ProblemCode::StepUpMismatch),
+        "an approval's challenge, confirmed as the approval it is, presented for a connect"
+    );
+    let w = connect_world();
+    let as_approve = Confirmation::of(&w.record);
+    assert_eq!(
+        w.grant(&[as_approve.row(1, "01JAA2P4A000000000000000C1")]),
+        Err(ProblemCode::StepUpMismatch),
+        "a connect's challenge confirmed as approve"
+    );
+    let w = connect_world();
+    let mut digest = Confirmation {
+        kind: "connection",
+        ..Confirmation::of(&w.record)
+    };
+    digest.digest = Digest::of(b"another workspace's connect");
+    assert_eq!(
+        w.grant(&[digest.row(1, "01JAA2P4A000000000000000C1")]),
+        Err(ProblemCode::StepUpMismatch),
+        "another digest"
+    );
+    let mut w = connect_world();
+    w.port.links = Arc::new(Linked(vec![OWNER, OTHER]));
+    let mut principal = Confirmation {
+        kind: "connection",
+        ..Confirmation::of(&w.record)
+    };
+    principal.principal = OTHER;
+    assert_eq!(
+        w.grant(&[principal.row(1, "01JAA2P4A000000000000000C1")]),
+        Err(ProblemCode::StepUpMismatch),
+        "another principal"
+    );
+    let w = connect_world();
+    assert_eq!(w.grant(&connect_confirmed(&w)), Ok(()), "the paired commit");
+}

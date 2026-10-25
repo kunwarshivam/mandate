@@ -946,7 +946,9 @@ which appends `StepUpConfirmed` to the control stream ([journal spec
 services verify the grant's `cli_confirm` evidence against the challenge they hold and that one
 record, in DEC-2104 item 6's order, with the principal checked against the subject link. Step 5
 holds with `method: cli_confirm` and no raw assertion, since none exists, and step 6 is unchanged.
-It is paper only and `approve` only (§7.3).
+It is paper only, and for an `approve` grant or, until E9-4 S4's passkey step-up confirms a connect
+(DEC-2126), a paper OAuth connect's start alone, confirmed with `mandate step-up confirm-connect`
+([DEC-2125](../project/decisions/DEC-2125.md); §7.3).
 
 The runtime and executor still judge evidence at the effective time as mandate §6.1 says (window,
 reuse in the control stream, method per environment). Steps 4 and 5 are the authentication the

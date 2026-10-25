@@ -219,6 +219,10 @@ start without them (AGENTS.md rule 3).
 - name: MANDATE_TOKEN_URL
   value: http://oauth-fixture:8091/alpaca/oauth/token
 {{- end }}
+{{- if and (eq .p.name "api") (include "mandate.oauthFixtureOn" .root) }}
+- name: MANDATE_ALPACA_AUTHORIZE_URL
+  value: http://oauth-fixture:8091/alpaca/oauth/authorize
+{{- end }}
 {{- if include "mandate.artifactsAccess" . }}
 - name: {{ ternary "MANDATE_API_ARTIFACTS" "MANDATE_ARTIFACTS" (eq .p.name "api") }}
   value: {{ include "mandate.artifactsPath" . | quote }}
