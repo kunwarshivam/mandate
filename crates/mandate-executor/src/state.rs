@@ -502,6 +502,15 @@ impl ExecutorState {
         Ok(self.protection.get(instrument))
     }
 
+    /// The instruments whose exit waits on a price (E21-30, DEC-2359): one in §5.4's exit sequence,
+    /// one with a lone exit ladder, and one with a held exit or flatten, whatever held it. These
+    /// are the instruments the process's quote feed reads, so §5.6's ladder has a quote to price
+    /// from. An instrument with only resting protection is not among them, and neither is a held
+    /// opening: neither waits on an exit price.
+    pub fn quote_wanted(&self) -> Result<BTreeSet<InstrumentId>, ExecutorError> {
+        Err(ExecutorError::Unimplemented { story: "E21-30" })
+    }
+
     /// Σ protective sell quantity for one instrument, which §5.4 requires never to exceed the
     /// position.
     pub fn protective_sell_qty(&self, instrument: &InstrumentId) -> Result<Qty, ExecutorError> {
