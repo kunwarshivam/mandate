@@ -1,6 +1,9 @@
 //! The control stream's `CredentialEnrolled` and `CredentialRemoved`, journal spec v0.70 §9.31
 //! (DEC-2108 items 4, 5 and 8), closed at schema version 1 with the consistency rules that read
 //! them: 249 and 250, each refusing at its member, in rule order. Every rule only refuses a draft.
+//! v0.71 (DEC-2122) closes `CredentialEnrolled` at version 2 too, with `backup_eligible`, which
+//! rule 249 reads as at version 1, and §9.32's `StepUpAsserted` at version 1, with rule 252 at
+//! append and batch rule 253 in [`check_batch`]. Stream rule 254 is the writer's, as 251 is.
 //!
 //! §9.31's stream rule, 251, is the writer's: the API checks it against its own fold before it
 //! appends, and the verifier's fold fails closed on it, so `append` neither sees the stream nor
@@ -14,13 +17,14 @@ use mandate_canon::Value;
 use mandate_time::UtcNanos;
 
 use crate::schema::Ty;
-use crate::{Invalid, InvalidReason, StreamType};
+use crate::{Draft, Invalid, InvalidReason, StreamType};
 
 const ENROLLED: &str = "CredentialEnrolled";
 const REMOVED: &str = "CredentialRemoved";
+const ASSERTED: &str = "StepUpAsserted";
 
-/// The control-stream event types §9.31 adds to [`crate::control::governs`].
-pub(crate) const CONTROL: [&str; 2] = [ENROLLED, REMOVED];
+/// The control-stream event types §9.31 and §9.32 add to [`crate::control::governs`].
+pub(crate) const CONTROL: [&str; 3] = [ENROLLED, REMOVED, ASSERTED];
 
 /// A cool-off's length when one is owed (identity spec §10.1).
 const DAY_SECS: i64 = 86_400;
@@ -45,7 +49,9 @@ pub(crate) fn schema(
 ) -> Option<&'static Ty> {
     match (event_type, schema_version, stream) {
         (ENROLLED, 1, StreamType::Control) => Some(&CREDENTIAL_ENROLLED),
+        (ENROLLED, 2, StreamType::Control) => Some(&CREDENTIAL_ENROLLED_V2),
         (REMOVED, 1, StreamType::Control) => Some(&CREDENTIAL_REMOVED),
+        (ASSERTED, 1, StreamType::Control) => Some(&STEP_UP_ASSERTED),
         _ => None,
     }
 }
@@ -72,25 +78,108 @@ static CREDENTIAL_ENROLLED: Ty = Ty::Record(&[
     ("step_up", Ty::Nullable(&STEP_UP_RECORD)),
 ]);
 
+/// Version 2 (v0.71): version 1's members, with the registration's backup-eligible flag after
+/// `sign_count`.
+static CREDENTIAL_ENROLLED_V2: Ty = Ty::Record(&[
+    ("member", Ty::Ulid),
+    ("kind", Ty::Str),
+    ("credential", Ty::Text(credential_id)),
+    ("public_key", Ty::DigestRef),
+    ("alg", Ty::OneOf(&["es256", "eddsa"])),
+    ("sign_count", Ty::Int),
+    ("backup_eligible", Ty::Bool),
+    ("cool_off_ends", Ty::Nullable(&Ty::Timestamp)),
+    ("step_up", Ty::Nullable(&STEP_UP_RECORD)),
+]);
+
+/// §9.32's `StepUpAsserted`: the challenge answered, the credential, the counter the assertion
+/// carried, and the raw assertion as an artifact.
+static STEP_UP_ASSERTED: Ty = Ty::Record(&[
+    ("challenge", Ty::Ulid),
+    ("credential", Ty::Text(credential_id)),
+    ("sign_count", Ty::Int),
+    ("assertion", Ty::DigestRef),
+]);
+
 static CREDENTIAL_REMOVED: Ty = Ty::Record(&[
     ("member", Ty::Ulid),
     ("credential", Ty::Text(credential_id)),
     ("step_up", Ty::Record(STEP_UP)),
 ]);
 
-/// Rules 249 and 250 on a credential record its schema has normalized, the first that fails
-/// reported. `actor` and `event_time` are the envelope's.
+/// Rules 249, 250 and 252 on a record its schema has normalized, the first that fails reported.
+/// `actor`, `event_time` and `causation_id` are the envelope's.
 pub(crate) fn rules(
     event_type: &str,
     payload: &Value,
     actor: Option<&Value>,
     event_time: Option<&Value>,
+    causation_id: Option<&Value>,
 ) -> Result<(), Invalid> {
     match event_type {
         ENROLLED => rules_249(payload, actor, event_time),
         REMOVED => rules_250(payload, actor),
+        ASSERTED => rules_252(payload, actor, causation_id),
         _ => Ok(()),
     }
+}
+
+/// Rule 252: the counter fits 32 bits, the record names the event it authorized as its cause, and
+/// its actor is a user.
+fn rules_252(
+    payload: &Value,
+    actor: Option<&Value>,
+    causation_id: Option<&Value>,
+) -> Result<(), Invalid> {
+    ensure(counts_in_32_bits(payload), "payload.sign_count")?;
+    ensure(
+        causation_id.is_some_and(|c| *c != Value::Null),
+        "causation_id",
+    )?;
+    ensure(
+        actor.and_then(|a| a.get("kind")).and_then(Value::as_str) == Some("user"),
+        "actor.kind",
+    )
+}
+
+/// Batch rule 253 (§9.32): each `StepUpAsserted` follows, immediately, the event its cause names
+/// (else its `event_type`), by the same actor (`actor.id`), whose step-up is a passkey's
+/// (`payload.step_up`) over the challenge the assertion answered (`payload.challenge`). Each draft
+/// has already passed `Draft::parse`, so rule 252 has held.
+pub(crate) fn check_batch(drafts: &[Draft]) -> Result<(), (usize, Invalid)> {
+    fn at<'a>(draft: &'a Draft, path: &[&str]) -> Option<&'a Value> {
+        let (first, rest) = path.split_first()?;
+        rest.iter()
+            .try_fold(draft.fields().get(*first)?, |node, name| node.get(name))
+    }
+    for (i, draft) in drafts.iter().enumerate() {
+        if draft.event_type() != ASSERTED {
+            continue;
+        }
+        let refuse = |path: &str| Err((i, Invalid::new(InvalidReason::Schema, path)));
+        let cause = at(draft, &["causation_id"]).and_then(Value::as_str);
+        let before = i
+            .checked_sub(1)
+            .and_then(|j| drafts.get(j))
+            .filter(|b| Some(b.event_id()) == cause);
+        let Some(before) = before else {
+            return refuse("event_type");
+        };
+        let actor = |d| at(d, &["actor", "id"]).and_then(Value::as_str);
+        if actor(before) != actor(draft) {
+            return refuse("actor.id");
+        }
+        let method = at(before, &["payload", "step_up", "method"]).and_then(Value::as_str);
+        if method != Some("passkey") {
+            return refuse("payload.step_up");
+        }
+        let assertion_id =
+            at(before, &["payload", "step_up", "assertion_id"]).and_then(Value::as_str);
+        if assertion_id != at(draft, &["payload", "challenge"]).and_then(Value::as_str) {
+            return refuse("payload.challenge");
+        }
+    }
+    Ok(())
 }
 
 /// Rule 249: `kind` is `passkey`, the actor is the member themselves, a step-up's method is
