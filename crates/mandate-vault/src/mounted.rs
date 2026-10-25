@@ -1,7 +1,9 @@
 //! AppRole credentials and the vault's CA read from a mounted Kubernetes Secret (DEC-2630): the
 //! kubelet writes each key as a link, `<name> -> ..data/<name>`, with `..data` a link to the
 //! current timestamped directory, so a read follows links, but only to a file inside the mount.
-//! The file it reaches must be a plain file with no group or other permission bit.
+//! The file it reaches must be a plain file with no group or other permission bit, but for the
+//! public files of [`read_mounted_ca`] and the projected token, which refuse only a group or other
+//! write bit.
 
 use std::fs::{self, File};
 use std::io::Read;
@@ -14,6 +16,7 @@ use secrecy::{ExposeSecret, SecretString};
 
 use crate::SourceError;
 use crate::credentials::{ROLE_ID_SUFFIX, SECRET_ID_SUFFIX};
+use crate::kube::is_label;
 use crate::policy::{Identity, role_name};
 
 /// The permission bits of group and others, none of which a mounted file may carry.
@@ -102,6 +105,20 @@ fn read_bounded(
     }
 }
 
+/// The one file [`read_mounted_ca`] reads: the vault's CA certificate, which is public.
+pub const CA_FILE: &str = "ca.crt";
+
+/// Reads the vault's CA certificate, `dir/ca.crt`, whole, by [`read_mounted`]'s rules but its
+/// mode (DEC-2340): a CA is public, and what matters is that no one but its owner can change it,
+/// so only a group or other write bit is refused, as for [`read_service_account_token`]. A
+/// ConfigMap mounted at 0444, or at 0440 under an `fsGroup`, is read. No other file is read this
+/// way: a role id, a secret id or a key keeps [`read_mounted`]'s owner-only rule. Anything else is
+/// [`SourceError::CredentialFile`].
+pub fn read_mounted_ca(dir: &Path) -> Result<String, SourceError> {
+    read_bounded(dir, CA_FILE, &|_| {}, WRITABLE_BY_OTHERS, MOUNTED_MAX)
+        .map(|ca| ca.expose_secret().to_owned())
+}
+
 /// Where a connection's executor or token exchange finds its projected ServiceAccount token, the
 /// file `token` in it (DEC-2060): projected for the audience [`crate::kubernetes::AUDIENCE`],
 /// lasting 600 seconds, and rotated by the kubelet, so it is read again at each login.
@@ -122,6 +139,30 @@ pub fn read_service_account_token(dir: &Path) -> Result<SecretString, SourceErro
     )?;
     one_line(&token)
 }
+
+/// Reads the pod's own namespace, `dir/namespace`, which the projected volume holds beside the
+/// token from the downward API (`metadata.namespace`), so no pod names its namespace in its
+/// arguments: by [`read_service_account_token`]'s rules, at most 64 bytes, and a Kubernetes label.
+/// Anything else is [`SourceError::CredentialFile`].
+pub fn read_service_account_namespace(dir: &Path) -> Result<String, SourceError> {
+    let namespace = read_bounded(
+        dir,
+        "namespace",
+        &|_| {},
+        WRITABLE_BY_OTHERS,
+        SERVICE_ACCOUNT_NAMESPACE_MAX,
+    )?;
+    let line = one_line(&namespace)?;
+    let text = line.expose_secret();
+    if is_label(text) {
+        Ok(text.to_owned())
+    } else {
+        Err(SourceError::CredentialFile)
+    }
+}
+
+/// The most bytes the projected namespace may hold: a 63-byte label and its newline.
+const SERVICE_ACCOUNT_NAMESPACE_MAX: u64 = 64;
 
 /// The most bytes a projected ServiceAccount token may hold; a real one is about a kilobyte.
 pub const SERVICE_ACCOUNT_TOKEN_MAX: u64 = 16384;
