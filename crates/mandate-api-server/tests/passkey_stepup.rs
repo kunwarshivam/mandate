@@ -238,6 +238,15 @@ fn unb64(text: &str) -> Vec<u8> {
     support_passkey::unb64url(text)
 }
 
+/// `ask` counts: the port returns a record to append, and shows what it answered otherwise.
+fn counts(w: &World, ask: &Ask) {
+    let answer = w.judge(ask);
+    assert!(
+        matches!(answer, Ok(Some(_))),
+        "the step-up counts, not {answer:?}"
+    );
+}
+
 /// `code`, and the challenge still held: a refusal takes nothing.
 fn refused(w: &World, ask: &Ask, code: ProblemCode) {
     assert_eq!(w.judge(ask), Err(Unverified::Code(code)));
@@ -342,10 +351,7 @@ fn a_challenge_outside_its_window_is_stale() {
     }
     let mut last = w.ask();
     last.now = ISSUED + LIFE - 1;
-    assert!(
-        matches!(w.judge(&last), Ok(Some(_))),
-        "the last second counts"
-    );
+    counts(&w, &last);
 }
 
 /// An earlier event on the stream whose step-up names `challenge`.
@@ -537,7 +543,7 @@ fn a_counter_not_above_the_last_is_missing() {
     refused(&asserted_at_twelve, &eleven, ProblemCode::StepUpMissing);
     let mut thirteen = asserted_at_twelve.ask();
     thirteen.assertion = Some(asserted_at_twelve.signed(13).wire(CREDENTIAL));
-    assert!(matches!(asserted_at_twelve.judge(&thirteen), Ok(Some(_))));
+    counts(&asserted_at_twelve, &thirteen);
 }
 
 #[test]
@@ -589,10 +595,7 @@ fn a_holder_whose_assertions_break_rule_254_has_no_passkey_that_counts() {
         ProblemCode::StepUpMissing,
     );
     let kept = broken_by(&[(UNKNOWN_CHALLENGE, 6)]);
-    assert!(
-        matches!(kept.judge(&kept.ask()), Ok(Some(_))),
-        "a stream that keeps rule 254 still counts"
-    );
+    counts(&kept, &kept.ask());
 }
 
 #[test]
