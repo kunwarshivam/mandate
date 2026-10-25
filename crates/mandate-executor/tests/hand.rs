@@ -6191,7 +6191,8 @@ fn a_release_while_the_flatten_waits_shrinks_its_sell() {
 }
 
 /// DEC-2360 item 2: a release of the whole position before the flatten was sent leaves it nothing
-/// to sell, so it is abandoned, never sent.
+/// to sell, so it is abandoned, never sent. The protection the ended sequence re-places is
+/// DEC-2360 item 4's, not this test's.
 #[test]
 #[ignore = "pending E6-4"]
 fn a_release_of_everything_while_the_flatten_waits_abandons_it() {
@@ -6199,6 +6200,7 @@ fn a_release_of_everything_while_the_flatten_waits_abandons_it() {
     assert!(
         sent.submissions()
             .into_iter()
+            .filter(|order| order.purpose != Purpose::Protective)
             .all(|order| order.side != Side::Sell),
         "{:?}",
         sent.draft_types()

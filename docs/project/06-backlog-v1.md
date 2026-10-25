@@ -4407,6 +4407,12 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   the sub-ledger at send time, or cancel the part a later release takes.
   [DEC-2360](decisions/DEC-2360.md) takes the first: each send, the first and every rung, is capped
   at the sub-ledger; its tests are in `hand.rs`, pending E6-4.
+- **E6-4 (protection sizing after a release), from [DEC-2360](decisions/DEC-2360.md) item 4:**
+  protection the executor places or re-places (§5.4's sequence end, `re_cover`, `new_day`) is sized
+  at the long position, so after a release it covers the owner's released shares with the agent's
+  protective order, which a stop would sell. Size it at the agents' own lots, the owner's released
+  shares left out, with a DEC-77 pair (`a_release_of_everything_while_the_flatten_waits_abandons_it`
+  shows an OCO of 10 placed after a release of all 10).
 - **E21-30 (executor process), from [DEC-2358](decisions/DEC-2358.md):** `mandate-executord` hands
   the core no quote, so §5.6's ladder never prices an exit there and every exit beside resting
   protection goes at its own limit or is held for want of a price. Add a quote feed: poll
