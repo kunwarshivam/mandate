@@ -100,5 +100,35 @@
     "remove": [
       "/disclosure/document"
     ]
+  },
+  {
+    "label": "an assertion with a null step_up",
+    "set": {
+      "/step_up": null
+    }
+  },
+  {
+    "label": "an assertion beside cli_confirm",
+    "set": {
+      "/step_up/method": "cli_confirm"
+    }
+  },
+  {
+    "label": "an assertion without its signature",
+    "remove": [
+      "/step_up_assertion/signature"
+    ]
+  },
+  {
+    "label": "an assertion with an extra member",
+    "set": {
+      "/step_up_assertion/user_handle": "AQ"
+    }
+  },
+  {
+    "label": "an assertion that is a string",
+    "set": {
+      "/step_up_assertion": "x"
+    }
   }
 ]

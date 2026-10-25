@@ -1,9 +1,12 @@
 [
   {
-    "label": "a null step_up, which the route refuses",
+    "label": "a null step_up and no assertion, which the route refuses",
     "set": {
       "/step_up": null
-    }
+    },
+    "remove": [
+      "/step_up_assertion"
+    ]
   },
   {
     "label": "live, which the route refuses as live_unavailable",
@@ -16,5 +19,27 @@
     "set": {
       "/disclosure/version": "12"
     }
+  },
+  {
+    "label": "cli_confirm step-up with no assertion (DEC-2125)",
+    "set": {
+      "/step_up/method": "cli_confirm"
+    },
+    "remove": [
+      "/step_up_assertion"
+    ]
+  },
+  {
+    "label": "cli_confirm step-up with a null assertion",
+    "set": {
+      "/step_up/method": "cli_confirm",
+      "/step_up_assertion": null
+    }
+  },
+  {
+    "label": "passkey step-up without its assertion, which the route refuses step_up_missing",
+    "remove": [
+      "/step_up_assertion"
+    ]
   }
 ]
