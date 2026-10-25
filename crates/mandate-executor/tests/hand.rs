@@ -6272,7 +6272,6 @@ fn filled_order(
 /// DEC-2362 item 1 counts the instrument's own lots only: the agent's 5 shares of another symbol
 /// leave the AAPL release of 4 what it is, so the agent's 6 AAPL are covered.
 #[test]
-#[ignore = "pending E6-4"]
 fn another_instruments_lots_leave_this_ones_release_as_it_is() {
     let mut before = vec![released_of(AAPL, "4")];
     before.extend(filled_order("md-msft-1", common::AGENT, "MSFT", "buy", "5"));
@@ -6283,7 +6282,6 @@ fn another_instruments_lots_leave_this_ones_release_as_it_is() {
 /// bought adds nothing to the agents' shares, so the owner, holding 1 of the 4 released, keeps
 /// that 1 out of the agent's protection, which covers the agent's 6.
 #[test]
-#[ignore = "pending E6-4"]
 fn an_agent_that_sold_more_than_it_holds_adds_nothing_to_the_agents_shares() {
     let mut before = vec![released_of(AAPL, "4")];
     before.extend(filled_order(
