@@ -86,15 +86,21 @@ pub fn now() -> Option<UtcNanos> {
     UtcNanos::from_parts(secs, since.subsec_nanos()).ok()
 }
 
-/// The wait's clock and sleep, the host's (DEC-2363 item 3). A clock that cannot be read reads as
-/// the deadline reached, so the wait ends `code_missing` rather than runs on.
+/// The wait's reading of the host clock (DEC-2363 item 3): the clock's `read` while it can be read,
+/// and `deadline` when it cannot, so an unreadable clock reads as the deadline reached and the wait
+/// ends `code_missing` rather than runs on.
+pub fn read_or(deadline: UtcNanos, read: Option<UtcNanos>) -> UtcNanos {
+    read.unwrap_or(deadline)
+}
+
+/// The wait's clock and sleep, the host's (DEC-2363 item 3), the clock read through [`read_or`].
 pub struct HostWait {
     pub deadline: UtcNanos,
 }
 
 impl CodeWait for HostWait {
     fn now(&mut self) -> UtcNanos {
-        now().unwrap_or(self.deadline)
+        read_or(self.deadline, now())
     }
 
     fn pause(&mut self, pause: Duration) {

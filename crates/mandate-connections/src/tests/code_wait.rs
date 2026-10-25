@@ -132,9 +132,13 @@ impl Vault for Arriving {
 }
 
 fn pending() -> PendingConnect {
+    pending_in(Environment::Paper)
+}
+
+fn pending_in(environment: Environment) -> PendingConnect {
     PendingConnect {
         connection_id: "conn-1".to_owned(),
-        environment: Environment::Paper,
+        environment,
         vault_key: key(),
     }
 }
@@ -232,6 +236,32 @@ fn two_racing_exchanges_take_the_code_once() {
         Some(ConnectError::CodeMissing)
     );
     assert_eq!(provider.calls.len(), 1, "the code is sent once");
+}
+
+/// A connect for any environment but paper is refused before the wait (DEC-2363 item 3 keeps
+/// `exchange_code`'s refusal): no take, no pause, nothing sent, even with the code waiting.
+#[test]
+fn a_live_connect_is_refused_before_any_take() {
+    let mut clock = Clock::new();
+    let mut vault = Arriving::new(&clock, Some(START));
+    let mut provider = FixtureProvider::granting("bearer", "trading data");
+    let secret = ClientSecret(SecretString::from(SECRET));
+    assert_eq!(
+        exchange_waiting_code(
+            &pending_in(Environment::Live),
+            &client(),
+            &secret,
+            &mut vault,
+            &mut provider,
+            &mut clock,
+            at(START + 600),
+        )
+        .err(),
+        Some(ConnectError::EnvironmentRefused)
+    );
+    assert_eq!(vault.takes.get(), 0);
+    assert!(clock.pauses().is_empty());
+    assert!(provider.calls.is_empty());
 }
 
 /// For any arrival and any deadline within two lifetimes: the run takes exactly at the scheduled

@@ -14,7 +14,7 @@ use mandate_vault::SourceError;
 
 use super::deadline;
 use crate::process::{
-    ARGUMENTS_REFUSED, Failed, HostWait, VAULT_REFUSED, VaultArgs, exchange, log_in, now,
+    ARGUMENTS_REFUSED, Failed, HostWait, VAULT_REFUSED, VaultArgs, exchange, log_in, now, read_or,
     vault_args,
 };
 use crate::startup::{Endpoint, Settings};
@@ -202,12 +202,29 @@ fn the_host_s_pause_sleeps() {
     );
 }
 
-/// The host's clock reads the wall clock while it can (DEC-2363 item 3).
+/// The host's clock reads the wall clock while it can (DEC-2363 item 3): against a deadline long
+/// past, its reading is no earlier than the wall clock read just before, never the deadline.
 #[test]
 fn the_host_s_clock_reads_the_wall_clock() {
+    let before = now().expect("a time");
+    let long_past = UtcNanos::from_parts(1, 0).unwrap();
     let read = HostWait {
-        deadline: deadline(),
+        deadline: long_past,
     }
     .now();
-    assert!(read > deadline(), "today is after the fixture's deadline");
+    assert!(read >= before, "{read:?} before {before:?}");
+}
+
+/// An unreadable clock reads as the deadline (DEC-2363 item 3), so the wait ends rather than runs
+/// on; a readable one reads as itself, before the deadline or after it.
+#[test]
+fn an_unreadable_clock_reads_as_the_deadline() {
+    let deadline = UtcNanos::from_parts(1_790_000_600, 0).unwrap();
+    assert_eq!(read_or(deadline, None), deadline);
+    for read in [
+        UtcNanos::from_parts(1_790_000_000, 0).unwrap(),
+        UtcNanos::from_parts(1_790_001_200, 7).unwrap(),
+    ] {
+        assert_eq!(read_or(deadline, Some(read)), read);
+    }
 }
