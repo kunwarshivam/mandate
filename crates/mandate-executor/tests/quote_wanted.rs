@@ -195,7 +195,6 @@ fn an_exit_in_its_sequence_wants_its_instruments_quote() {
 
 /// A held opening waits on no exit price, so it wants no quote, whatever held it.
 #[test]
-#[ignore = "pending E21-30"]
 fn a_held_opening_wants_no_quote() {
     let (ids, mandates, instruments, config) = (
         TestIds,
