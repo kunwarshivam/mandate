@@ -897,7 +897,6 @@ fn connect_confirmed(w: &World) -> Vec<StoredEvent> {
 
 /// DEC-2125 item 1: a connect confirmed with the code shown verifies, once.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_confirmed_connect_verifies_once() {
     let w = connect_world();
     let control = connect_confirmed(&w);
@@ -912,7 +911,6 @@ fn a_confirmed_connect_verifies_once() {
 /// A connect's confirmation with another code, a challenge an earlier event already carries, or
 /// presented once its life is over, is refused as an approval's is.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_connect_with_a_wrong_replayed_or_expired_code_is_refused() {
     let w = connect_world();
     let mut wrong = Confirmation {
