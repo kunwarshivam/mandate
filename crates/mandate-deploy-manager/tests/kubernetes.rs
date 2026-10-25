@@ -18,6 +18,7 @@ use mandate_canon::Digest;
 use mandate_connections::record::ConnectionId;
 use mandate_deploy_manager::kubernetes::{InCluster, Kubernetes, MAX_BODY, SetupError};
 use mandate_deploy_manager::{Instance, Launch, Orchestrator, Phase, Process, Slot, Unavailable};
+use mandate_time::UtcNanos;
 use mandate_vault::kubernetes::service_account_name;
 use mandate_vault::policy::Identity;
 use serde_json::{Value, json};
@@ -103,10 +104,16 @@ fn exchange_template() -> Value {
     })
 }
 
-/// A start's [`Launch`] with `lifetime` and no connection.
+/// The request expiry [`launch`] gives a start with a lifetime: 2026-10-17T15:10:10Z and 5 ns.
+fn expiry() -> UtcNanos {
+    UtcNanos::from_parts(1_792_249_810, 5).unwrap()
+}
+
+/// A start's [`Launch`] with `lifetime`, [`expiry`] beside a lifetime, and no connection.
 fn launch(lifetime: Option<Duration>) -> Launch {
     Launch {
         lifetime,
+        expires_at: lifetime.and(Some(expiry())),
         connection: None,
     }
 }
@@ -796,6 +803,51 @@ fn only_an_exchange_takes_a_lifetime_and_it_always_takes_one_of_a_second_or_more
     assert!(seen.lock().unwrap().is_empty(), "nothing is created for it");
 }
 
+/// DEC-2363: an exchange's pod names its request's expiry, in the journal's form of a time, so it
+/// waits for its code until then and no longer; an exchange without one starts nothing, and no
+/// other process is given one.
+#[test]
+fn an_exchanges_pod_names_its_requests_expiry_and_no_other_process_is_given_one() {
+    let k = adapter("http://127.0.0.1:1".to_owned());
+    let started = launch(Some(Duration::from_secs(598)));
+    let pod = k.manifest(&exchange(), 1, &started).expect("its pod");
+    assert_eq!(
+        env_of(&pod)
+            .get("MANDATE_REQUEST_EXPIRES_AT")
+            .map(String::as_str),
+        Some("2026-10-17T15:10:10.000000005Z")
+    );
+    assert_eq!(
+        k.manifest(
+            &exchange(),
+            1,
+            &Launch {
+                expires_at: None,
+                ..started.clone()
+            }
+        ),
+        None,
+        "an exchange never starts without its request's expiry"
+    );
+    let runtime = Slot::runtime("agent_a");
+    for (slot, start) in [(&runtime, launch(None)), (&executor(), connected())] {
+        let pod = k.manifest(slot, 1, &start).expect("its pod");
+        assert!(
+            !env_of(&pod).contains_key("MANDATE_REQUEST_EXPIRES_AT"),
+            "{slot:?}"
+        );
+        let given = Launch {
+            expires_at: Some(expiry()),
+            ..start
+        };
+        assert_eq!(
+            k.manifest(slot, 1, &given),
+            None,
+            "a standing process is never given an expiry: {slot:?}"
+        );
+    }
+}
+
 #[test]
 fn an_exchanges_stop_deletes_its_account_then_its_pod_and_a_failure_keeps_the_pod() {
     let (api, seen) = server(vec![
@@ -888,6 +940,7 @@ fn executor() -> Slot {
 fn connected() -> Launch {
     Launch {
         lifetime: None,
+        expires_at: None,
         connection: Some(CONNECTION.to_owned()),
     }
 }

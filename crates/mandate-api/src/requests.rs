@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::envelope::{Record, StepUpAction, StepUpEvidence};
+use crate::envelope::{Record, StepUpAction, StepUpAssertion, StepUpEvidence, StepUpMethod};
 use crate::responses::Classification;
 use crate::wire::{Asset, Check, Decimal, EventId, Id, Ref, Rules, Timestamp, is_pointer};
 
@@ -289,12 +289,17 @@ pub struct Disclosure {
 
 /// `POST /connections/oauth/start` (§4.5, DEC-2623 item 1). A `null` step-up is decoded, and the
 /// route refuses it with nothing appended; `environment` `live` is decoded, and the route refuses
-/// it as `live_unavailable` (DEC-883).
+/// it as `live_unavailable` (DEC-883). `step_up_assertion` is optional, an absent one read as
+/// `null`, and is carried only beside `passkey` evidence ([DEC-2126] item 1).
+///
+/// [DEC-2126]: ../../../docs/project/decisions/DEC-2126.md
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(remote = "Self", deny_unknown_fields)]
 pub struct OauthStartRequest {
     #[serde(deserialize_with = "Option::deserialize")]
     pub step_up: Option<StepUpEvidence>,
+    #[serde(default)]
+    pub step_up_assertion: Option<StepUpAssertion>,
     pub broker: OauthBroker,
     pub environment: Environment,
     pub disclosure: Disclosure,
@@ -353,6 +358,18 @@ impl Rules for OauthStartRequest {
             && version.bytes().all(|b| b.is_ascii_digit())
             && !version.starts_with('0');
         check.rule(holds, &format!("{at}/disclosure/version"), "pattern");
+        if let Some(assertion) = &self.step_up_assertion {
+            let rests_on_a_passkey = self
+                .step_up
+                .as_ref()
+                .is_some_and(|evidence| evidence.method == StepUpMethod::Passkey);
+            check.rule(
+                rests_on_a_passkey,
+                &format!("{at}/step_up_assertion"),
+                "condition",
+            );
+            assertion.rules(&format!("{at}/step_up_assertion"), check);
+        }
     }
 }
 

@@ -5,6 +5,7 @@
 mod account_entry;
 mod checks;
 mod code_entry;
+mod code_wait;
 mod errors;
 mod exchange;
 mod grant;

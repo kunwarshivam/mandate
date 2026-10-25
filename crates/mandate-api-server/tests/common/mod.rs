@@ -4,6 +4,7 @@
 #![allow(dead_code, reason = "each test file uses part of the shared helpers")]
 
 pub mod control;
+pub mod passkey;
 
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
@@ -440,9 +441,10 @@ impl mandate_api_server::journal::Journal for MemJournal {
         expected_head: u64,
         writer_epoch: u64,
         recorded_at: mandate_time::UtcNanos,
-        draft: &'a [u8],
+        drafts: &'a [&'a [u8]],
     ) -> mandate_api_server::journal::Answer<'a, mandate_journal::AppendOutcome> {
         use mandate_journal::AppendOutcome;
+        let draft = drafts.first().copied().expect("a draft");
         self.appends.lock().expect("unpoisoned").push((
             stream.to_owned(),
             expected_head,
@@ -496,7 +498,7 @@ impl mandate_api_server::journal::Journal for MemJournal {
                 self.store(stream, recorded_at, draft);
                 Ok(AppendOutcome::Ambiguous)
             }
-            None => Ok(self.protocol(stream, expected_head, writer_epoch, recorded_at, draft)),
+            None => Ok(self.protocol(stream, expected_head, writer_epoch, recorded_at, drafts)),
         };
         Box::pin(async move { outcome })
     }
@@ -528,9 +530,10 @@ impl MemJournal {
         expected_head: u64,
         writer_epoch: u64,
         recorded_at: mandate_time::UtcNanos,
-        draft: &[u8],
+        drafts: &[&[u8]],
     ) -> mandate_journal::AppendOutcome {
         use mandate_journal::AppendOutcome;
+        let draft = drafts.first().copied().expect("a draft");
         let value = mandate_canon::parse(draft).expect("a JSON draft");
         let id = value
             .get("event_id")
@@ -565,6 +568,11 @@ impl MemJournal {
                 actual_hash: mandate_canon::Digest::ZERO,
             };
         }
-        AppendOutcome::Committed(vec![self.store(stream, recorded_at, draft)])
+        AppendOutcome::Committed(
+            drafts
+                .iter()
+                .map(|draft| self.store(stream, recorded_at, draft))
+                .collect(),
+        )
     }
 }
