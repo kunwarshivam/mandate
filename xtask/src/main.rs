@@ -9107,9 +9107,7 @@ fn gate_run(
     let unmutated = UnmutatedSource::read(root, &diff.touched)?;
     let before = launched_after(root, started);
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
-    let stop = (per_shard > 1)
-        .then(|| Duration::from_millis(mutant_costs::STOP_AFTER_MS).saturating_sub(before));
-    record_unfinished(root, shard, in_shard.clone(), per_shard);
+    let stop = launch_stop(root, shard, in_shard.clone(), per_shard, before);
     let status = match stop {
         Some(left) => mutants_job_within(root, &args, left),
         None => mutants_job_cargo(root, &args),
@@ -9178,6 +9176,21 @@ fn launched_after(root: &Path, started: SystemTime) -> Duration {
         .ok()
         .and_then(|launched| launched.duration_since(started).ok())
         .unwrap_or_default()
+}
+
+/// How long a shard of `per_shard` mutants may run from now, `before` having gone since the gate
+/// started, with its provisional record written first (DEC-2607 item 5, DEC-2367 item 2): `None`
+/// for a shard of one, which runs to its end and writes none.
+fn launch_stop(
+    root: &Path,
+    shard: Option<MutantShard>,
+    packages: Vec<String>,
+    per_shard: usize,
+    before: Duration,
+) -> Option<Duration> {
+    record_unfinished(root, shard, packages, per_shard);
+    (per_shard > 1)
+        .then(|| Duration::from_millis(mutant_costs::STOP_AFTER_MS).saturating_sub(before))
 }
 
 /// Writes the record a shard of more than one mutant leaves if GitHub stops its job before
@@ -13331,12 +13344,30 @@ mod tests {
         }
         fs::create_dir_all(&dir)?;
         let shard = crate::MutantShard { index: 0, total: 2 };
-        crate::record_unfinished(&dir, Some(shard), vec!["mandate-executor".to_owned()], 1);
+        let one = crate::launch_stop(
+            &dir,
+            Some(shard),
+            vec!["mandate-executor".to_owned()],
+            1,
+            Duration::from_secs(30),
+        );
+        assert_eq!(one, None, "a shard of one runs to its end");
         assert!(
             !dir.join(crate::mutant_costs::COST_FILE).exists(),
             "a shard of one leaves none"
         );
-        crate::record_unfinished(&dir, Some(shard), vec!["mandate-executor".to_owned()], 5);
+        let five = crate::launch_stop(
+            &dir,
+            Some(shard),
+            vec!["mandate-executor".to_owned()],
+            5,
+            Duration::from_secs(30),
+        );
+        assert_eq!(
+            five,
+            Some(Duration::from_secs(450)),
+            "480 s from the gate's start"
+        );
         let left: crate::mutant_costs::ShardCost = serde_json::from_str(&fs::read_to_string(
             dir.join(crate::mutant_costs::COST_FILE),
         )?)?;
