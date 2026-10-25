@@ -10,7 +10,7 @@ use std::path::Path;
 use mandate_canon::{Int, Key, Object, Value, decode_ulid, parse};
 use mandate_identity::PrincipalId;
 use mandate_passkey::credentials::{
-    CredentialError, CredentialFold, CredentialRecord, Enrolment, PasskeyAlg, Removal,
+    Assertion, CredentialError, CredentialFold, CredentialRecord, Enrolment, PasskeyAlg, Removal,
     credential_record,
 };
 use mandate_time::UtcNanos;
@@ -62,7 +62,7 @@ fn credential_of(record: &CredentialRecord) -> (&str, PrincipalId) {
     match record {
         CredentialRecord::Enrolled(e) => (&e.credential, e.member),
         CredentialRecord::Removed(r) => (&r.credential, r.member),
-        CredentialRecord::Asserted { seq } => panic!("no credential record at seq {seq}"),
+        CredentialRecord::Asserted(a) => panic!("no credential record at seq {}", a.seq),
     }
 }
 
@@ -108,7 +108,7 @@ fn a_valid_stream_holds_each_members_unremoved_passkeys_in_enrolment_order() {
             match record {
                 CredentialRecord::Enrolled(_) => kept.push((member, credential.to_owned())),
                 CredentialRecord::Removed(_) => kept.retain(|(_, c)| c != credential),
-                CredentialRecord::Asserted { .. } => {}
+                CredentialRecord::Asserted(_) => {}
             }
         }
         let fold = CredentialFold::new(all.iter().cloned());
@@ -289,7 +289,7 @@ fn credential_record_refuses_a_record_that_does_not_map_at_its_path() {
         (path, Value::Object(body))
     };
     for (path, envelope) in [
-        changed("schema_version", Some(Value::Int(Int::new(2).unwrap()))),
+        changed("schema_version", Some(Value::Int(Int::new(3).unwrap()))),
         changed("payload.member", Some(Value::Str("not a ulid".to_owned()))),
         changed("payload.credential", None),
         changed("payload.public_key", Some(Value::Null)),
@@ -422,7 +422,7 @@ fn credential_record_maps_every_valid_vector_draft() {
         let enrolled = match &record {
             CredentialRecord::Enrolled(e) => Some((e.alg, e.sign_count)),
             CredentialRecord::Removed(_) => None,
-            CredentialRecord::Asserted { seq } => panic!("a valid draft is no assertion: {seq}"),
+            CredentialRecord::Asserted(a) => panic!("a valid draft is no assertion: {}", a.seq),
         };
         match text(case, "name") {
             "eddsa" => assert_eq!(enrolled.map(|e| e.0), Some(PasskeyAlg::EdDsa)),
@@ -433,36 +433,27 @@ fn credential_record_maps_every_valid_vector_draft() {
     }
 }
 
-/// A `StepUpAsserted` (journal spec §9.32) carries a credential's later counter, which the fold
-/// does not read yet. It maps to an unread record: step-up's view fails closed on it, so the
-/// enrolment's counter is never taken for the last, while route 2's view, which reads no counter,
-/// still holds the credential, and `admits` does not judge it.
+/// Route 2's view reads no counter: a `StepUpAsserted` changes nothing `held` answers, and
+/// `admits` reads an assertion only for rule 254 (`credential_fold_v2.rs` pins step-up's view).
 #[test]
-fn a_step_up_asserted_fails_step_up_closed_and_leaves_route_two_holding() {
+fn route_two_holds_through_a_step_up_assertion() {
     let section = section();
     let enrolled = section
         .get("drafts")
         .and_then(|d| d.get("first_enrolled"))
         .unwrap();
-    let mut asserted = enrolled.as_object().cloned().unwrap();
-    asserted.insert(
-        Key::new("event_type").unwrap(),
-        Value::Str("StepUpAsserted".to_owned()),
-    );
-    assert_eq!(
-        credential_record(2, &Value::Object(asserted)),
-        Ok(Some(CredentialRecord::Asserted { seq: 2 }))
-    );
     let enrolment = credential_record(1, enrolled).unwrap().unwrap();
     let (credential, member) = credential_of(&enrolment);
     let (credential, member) = (credential.to_owned(), member);
-    let fold = CredentialFold::new([enrolment, CredentialRecord::Asserted { seq: 2 }]);
-    assert_eq!(
-        fold.passkeys(member),
-        Err(CredentialError::AssertionUnread { seq: 2 })
-    );
+    let asserted = CredentialRecord::Asserted(Assertion {
+        seq: 2,
+        member,
+        credential: credential.clone(),
+        challenge: "01JAA3P0A000000000000000H1".to_owned(),
+        sign_count: 7,
+    });
+    let fold = CredentialFold::new([enrolment, asserted]);
     assert_eq!(fold.held(&credential).map(|e| e.member), Some(member));
-    assert_eq!(fold.admits(&CredentialRecord::Asserted { seq: 3 }), Ok(()));
 }
 
 /// One random step: member, credential, and whether it enrols or removes.
@@ -482,6 +473,7 @@ fn record(seq: u64, (member, credential, enrols): (u8, u8, bool)) -> CredentialR
             alg: PasskeyAlg::EdDsa,
             sign_count: 0,
             cool_off_ends: None,
+            backup_eligible: Some(false),
         })
     } else {
         CredentialRecord::Removed(Removal {
