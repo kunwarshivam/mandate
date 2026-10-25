@@ -1610,6 +1610,15 @@ story buys a service, and none uses a real identity-provider account in tests (s
   renamed the second; confirm no other use remains); (6) the Status row matches DEC-437 after round 2.
   ID-13's founding-grant exception and ID-10's note on item 15 were taken in round 2 because the
   blocker fixes touched those lines.
+- **E9-13 (Must, M8, under E9-1; SC)** As an admin, I want a member disabled at the identity
+  provider to lose route 2 at once and across a restart, so that route 2's deprovision check rests
+  on a journaled signal rather than an in-memory record ([DEC-2319](decisions/DEC-2319.md) item 3,
+  option (b), the founder's on 2026-10-25). *Accepted when:* the server learns of a deprovision from
+  a back-channel logout or from a refresh's `invalid_grant`, and journals `SessionRevoked` with
+  reason `deprovisioned` on the control stream, registered (journal spec, tests first) and folded;
+  route 2 refuses a member whose latest fold holds that revocation, after a restart too; DEC-2319
+  item 2's in-memory interim is removed only once this lands; and nothing in the event or its logs
+  carries a token or the provider's subject beyond its opaque id.
 
 ### E10 Mandate authoring
 
