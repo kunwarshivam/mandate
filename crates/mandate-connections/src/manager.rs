@@ -236,28 +236,11 @@ pub const DISCLOSURE_VERSION: &str = "1";
 ///
 /// # Errors
 /// [`ConnectError::InvalidRecord`] when a member cannot be keyed.
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
 pub fn oauth_connect_object(
-    _workspace_id: &str,
-    _document: &str,
-    _version: &str,
-) -> Result<Vec<u8>, ConnectError> {
-    todo!()
-}
-
-/// An OAuth connect's step-up digest (kind `connection`, DEC-2621 item 4, amending DEC-693 items
-/// 1 and 2): SHA-256 of the canonical `{action: "connect", broker: "alpaca", disclosure:
-/// {document, version}, environment: "paper", workspace_id}`, so the step-up proves which
-/// version of the token-breadth disclosure the owner confirmed. Alpaca OAuth connects paper only
-/// (DEC-821 item 7), so neither the broker nor the environment is a parameter.
-pub fn oauth_connect_digest(
     workspace_id: &str,
     document: &str,
     version: &str,
-) -> Result<Digest, ConnectError> {
+) -> Result<Vec<u8>, ConnectError> {
     let invalid = |_| ConnectError::InvalidRecord {
         member: "connect digest",
     };
@@ -284,7 +267,20 @@ pub fn oauth_connect_digest(
         .map(|(name, value)| Key::new(name).map(|key| (key, value)))
         .collect::<Result<Object, _>>()
         .map_err(invalid)?;
-    Ok(Digest::of(&to_canonical(&Value::Object(object))))
+    Ok(to_canonical(&Value::Object(object)))
+}
+
+/// An OAuth connect's step-up digest (kind `connection`, DEC-2621 item 4, amending DEC-693 items
+/// 1 and 2): SHA-256 of the canonical `{action: "connect", broker: "alpaca", disclosure:
+/// {document, version}, environment: "paper", workspace_id}`, so the step-up proves which
+/// version of the token-breadth disclosure the owner confirmed. Alpaca OAuth connects paper only
+/// (DEC-821 item 7), so neither the broker nor the environment is a parameter.
+pub fn oauth_connect_digest(
+    workspace_id: &str,
+    document: &str,
+    version: &str,
+) -> Result<Digest, ConnectError> {
+    oauth_connect_object(workspace_id, document, version).map(|object| Digest::of(&object))
 }
 
 /// Plans a connect's start: exactly `[Requested]` with the request's members, or the first

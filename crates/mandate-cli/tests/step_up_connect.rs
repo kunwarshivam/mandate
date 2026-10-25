@@ -58,7 +58,6 @@ fn confirm(
 /// DEC-2125 item 3: exactly one `StepUpConfirmed` of kind `connection` naming the connect's
 /// digest, which the journal accepts under rule 242, and the object that digest names, stored.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_connect_confirmation_appends_one_record_and_stores_its_object() {
     let mut fx = Fixture::new();
     let mut store = BTreeMap::new();
@@ -104,7 +103,6 @@ fn a_connect_confirmation_appends_one_record_and_stores_its_object() {
 /// DEC-2106 item 3, for a connect: a re-run with the same flags finds its own record and appends
 /// nothing more.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_re_run_finds_its_own_confirmation() {
     let mut fx = Fixture::new();
     let mut store = BTreeMap::new();
@@ -117,7 +115,6 @@ fn a_re_run_finds_its_own_confirmation() {
 
 /// Rule 243: a challenge already confirmed with another code is refused, and nothing is appended.
 #[test]
-#[ignore = "pending E10-13"]
 fn a_challenge_confirmed_otherwise_is_refused() {
     let mut fx = Fixture::new();
     let mut store = BTreeMap::new();
@@ -132,7 +129,6 @@ fn a_challenge_confirmed_otherwise_is_refused() {
 /// A workspace whose control stream is `live` is refused before anything is stored or appended:
 /// a connect is confirmed in paper only (DEC-2125 item 3, rule 242).
 #[test]
-#[ignore = "pending E10-13"]
 fn a_live_workspace_is_refused_and_nothing_is_stored() {
     let mut fx = Fixture::new();
     fx.append_in("live", CONTROL, "StreamOpened", None, object(&[]));
@@ -148,7 +144,6 @@ fn a_live_workspace_is_refused_and_nothing_is_stored() {
 /// The flags, first failing check first, before any journal: a workspace, a principal and a
 /// challenge in their forms, and a code as the web app shows it.
 #[test]
-#[ignore = "pending E10-13"]
 fn the_flags_are_checked_in_order_before_any_journal() {
     let base = confirming("ABCD-EFGH");
     assert!(check_connect(&base).is_ok());

@@ -548,7 +548,6 @@ fn a_finish_closes_its_request_once_or_plans_no_effect() {
 /// by hand here, whose digest is the one the start route binds; and the disclosure is the founder's
 /// version 1 (DEC-2622).
 #[test]
-#[ignore = "pending E10-13"]
 fn the_stored_connect_object_is_the_digest_s_preimage() {
     let canonical = br#"{"action":"connect","broker":"alpaca","disclosure":{"document":"alpaca_oauth_token_breadth","version":"1"},"environment":"paper","workspace_id":"ws_01"}"#;
     assert_eq!(

@@ -1,7 +1,0 @@
-file = "crates/mandate-journal/tests/step_up_confirmations.rs"
-test = "every_connection_confirmation_draft_parses"
-reason = """
-Journal spec v0.82 (DEC-2125) admits `action_kind` `connection` in rule 242, and the vectors hold
-its drafts before the validator does: `mandate-journal` refuses each at `payload.action_kind`, a
-behaviour with no stub. The validator's change, DEC-2125's journal and CLI pair, deletes this row.
-"""

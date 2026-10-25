@@ -18,7 +18,8 @@ use std::io::Write;
 
 use clap::{Args, Subcommand};
 use mandate_artifacts_fs::FsArtifactStore;
-use mandate_canon::{Value, is_ulid};
+use mandate_canon::{Digest, Value, is_ulid};
+use mandate_connections::manager::{DISCLOSURE_DOCUMENT, DISCLOSURE_VERSION, oauth_connect_object};
 use mandate_journal::{ArtifactStore, Environment, StreamId};
 
 use crate::approvals::{self, Shown};
@@ -240,12 +241,20 @@ pub fn check(confirming: &Confirming<'_>) -> Result<Checked, ControlError> {
 /// # Errors
 /// [`ControlError::Refused`] with `owner_workspace_invalid`, `principal_invalid`,
 /// `challenge_invalid`, or `code_invalid`, in that order.
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
-pub fn check_connect(_confirming: &ConnectConfirming<'_>) -> Result<CheckedConnect, ControlError> {
-    todo!()
+pub fn check_connect(confirming: &ConnectConfirming<'_>) -> Result<CheckedConnect, ControlError> {
+    let checked = check(&Confirming {
+        workspace: confirming.workspace,
+        principal: confirming.principal,
+        agent: "",
+        approval: "",
+        challenge: confirming.challenge,
+        code: confirming.code,
+    })?;
+    Ok(CheckedConnect {
+        owner: checked.owner,
+        challenge: checked.challenge,
+        code: checked.code,
+    })
 }
 
 /// The connect's action object for `checked`'s workspace at the current disclosure version, stored
@@ -256,17 +265,81 @@ pub fn check_connect(_confirming: &ConnectConfirming<'_>) -> Result<CheckedConne
 /// [`ControlError::Refused`] with `workspace_environment` for a workspace that is not paper, or
 /// `challenge_confirmed` for a challenge already confirmed otherwise, having appended nothing;
 /// [`ControlError::Journal`] when the journal or the store cannot be read or written.
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
 pub fn confirm_connect(
-    _journal: &mut dyn ControlJournal,
-    _store: &mut dyn ArtifactStore,
-    _checked: &CheckedConnect,
-    _now: Now,
+    journal: &mut dyn ControlJournal,
+    store: &mut dyn ArtifactStore,
+    checked: &CheckedConnect,
+    now: Now,
 ) -> Result<ConnectConfirmed, ControlError> {
-    todo!()
+    let stream = control_stream(&checked.owner)?;
+    let object = oauth_connect_object(
+        &checked.owner.workspace,
+        DISCLOSURE_DOCUMENT,
+        DISCLOSURE_VERSION,
+    )
+    .map_err(|e| ControlError::Journal(format!("the connect's action object: {e}")))?;
+    let action_digest = format!("sha256:{}", Digest::of(&object));
+    let ours = Ours {
+        challenge: &checked.challenge,
+        action_digest: &action_digest,
+        principal: &checked.owner.user,
+        code: &checked.code,
+    };
+    for _ in 0..ATTEMPTS {
+        let head = journal.head(&stream)?.seq;
+        same_environment(journal, &stream, &checked.owner)?;
+        if let Some(submitted) = earlier(journal, &stream, &ours)? {
+            return Ok(ConnectConfirmed {
+                action_digest,
+                submitted,
+                earlier: true,
+            });
+        }
+        store
+            .put_artifact(&object)
+            .map_err(|e| ControlError::Journal(format!("the artifact store: {}", e.code())))?;
+        let key = vec![
+            ("action_digest", text(&action_digest)),
+            ("action_kind", text("connection")),
+            ("challenge", text(&checked.challenge)),
+            ("code", text(&checked.code)),
+            ("confirmed_at", seconds(now.at.secs())?),
+            ("principal", text(&checked.owner.user)),
+        ];
+        let owner = &checked.owner;
+        let decided = match decide(
+            journal,
+            owner,
+            EVENT_TYPE,
+            key,
+            Confirmation::Fixed(false),
+            Repeat::AlwaysCommits,
+        )? {
+            Decision::Fresh(decided) => decided,
+            Decision::Committed(submitted) => {
+                return Ok(ConnectConfirmed {
+                    action_digest,
+                    submitted,
+                    earlier: true,
+                });
+            }
+        };
+        let shape = Shape {
+            schema_version: 1,
+            artifact_refs: vec![action_digest.clone()],
+            config_refs: Vec::new(),
+        };
+        if let Some(submitted) = commit_choice_at(journal, owner, decided, shape, now, head)? {
+            return Ok(ConnectConfirmed {
+                action_digest,
+                submitted,
+                earlier: false,
+            });
+        }
+    }
+    Err(ControlError::Journal(format!(
+        "the control stream moved on each of {ATTEMPTS} reads; nothing was appended"
+    )))
 }
 
 /// Runs [`confirm_connect`] and prints `confirmed <challenge> as event <id> at seq <n> for
@@ -337,7 +410,13 @@ pub fn confirm(
         if now.secs >= shown.deadline_s {
             return Err(refused("late"));
         }
-        if let Some(submitted) = earlier(journal, &stream, checked, &shown)? {
+        let ours = Ours {
+            challenge: &checked.challenge,
+            action_digest: &shown.content_hash,
+            principal: &checked.owner.user,
+            code: &checked.code,
+        };
+        if let Some(submitted) = earlier(journal, &stream, &ours)? {
             return Ok(Confirmed {
                 shown,
                 submitted,
@@ -389,13 +468,21 @@ pub fn confirm(
     )))
 }
 
-/// Rule 243 and DEC-2106 item 3: the confirmation of `checked`'s challenge already on `stream`, if
-/// it is this command's, or `challenge_confirmed` for any other.
+/// The members a confirmation of this command's carries, so a re-run can tell its own record from
+/// another's.
+struct Ours<'a> {
+    challenge: &'a str,
+    action_digest: &'a str,
+    principal: &'a str,
+    code: &'a str,
+}
+
+/// Rule 243 and DEC-2106 item 3: the confirmation of `ours`' challenge already on `stream`, if it
+/// is this command's, or `challenge_confirmed` for any other.
 fn earlier(
     journal: &dyn ControlJournal,
     stream: &StreamId,
-    checked: &Checked,
-    shown: &Shown,
+    ours: &Ours<'_>,
 ) -> Result<Option<Submitted>, ControlError> {
     for row in journal.rows(stream)? {
         if row.event_type != EVENT_TYPE {
@@ -408,13 +495,13 @@ fn earlier(
                 .and_then(|p| p.get(name))
                 .and_then(Value::as_str)
         };
-        if member("challenge") != Some(checked.challenge.as_str()) {
+        if member("challenge") != Some(ours.challenge) {
             continue;
         }
-        let ours = member("action_digest") == Some(shown.content_hash.as_str())
-            && member("principal") == Some(checked.owner.user.as_str())
-            && member("code") == Some(checked.code.as_str());
-        if !ours {
+        let same = member("action_digest") == Some(ours.action_digest)
+            && member("principal") == Some(ours.principal)
+            && member("code") == Some(ours.code);
+        if !same {
             return Err(refused("challenge_confirmed"));
         }
         return Ok(Some(Submitted {
