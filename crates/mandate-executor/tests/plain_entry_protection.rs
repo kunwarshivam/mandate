@@ -766,9 +766,9 @@ impl Book {
     }
 
     /// Whether the executor has asked the broker to cancel an order the broker has not answered:
-    /// an opening still working, or a stop never acknowledged. An exit waits on that cancel
-    /// (§5.3 rule 5, §5.4's marketable sequence), which is the broker's hold `AGENTS.md` rule 13
-    /// allows.
+    /// an opening still working, a stop never acknowledged, or a stop the broker accepted, whose
+    /// cancel no step of the property ever confirms. An exit waits on that cancel (§5.3 rule 5,
+    /// §5.4's marketable sequence), which is the broker's hold `AGENTS.md` rule 13 allows.
     fn waiting_on_broker(&self) -> bool {
         let working = self
             .openings
@@ -776,8 +776,10 @@ impl Book {
             .filter(|opening| !opening.done)
             .map(|opening| opening.id.as_str());
         let unanswered = self.unanswered.iter().map(|(stop, _)| stop.as_str());
+        let resting = self.resting.iter().map(|(stop, _)| stop.as_str());
         working
             .chain(unanswered)
+            .chain(resting)
             .any(|id| self.cancels.iter().any(|asked| asked == id))
     }
 
@@ -822,6 +824,29 @@ proptest! {
     ) {
         holds(steps)?;
     }
+}
+
+/// A case a random seed drew in CI (#2370's mutants baseline): the bound's exit for the first
+/// opening cancels the second opening's stop of 3 in the step the broker then accepts it, so the
+/// exit waits on that cancel, which no step confirms, while the bound passes for the second
+/// opening's 4 shares. That wait is the broker's hold (rule 13), not an unprotected position.
+#[test]
+fn an_accepted_stop_whose_cancel_is_unanswered_is_the_brokers_hold() {
+    let steps = vec![
+        Step::EntryFill(1),
+        Step::Wait(25),
+        Step::EntryEnds,
+        Step::Wait(35),
+        Step::Add,
+        Step::EntryFill(2),
+        Step::Wait(21),
+        Step::EntryFill(1),
+        Step::EntryFill(1),
+        Step::StopsAccepted,
+        Step::Wait(40),
+        Step::Wait(1),
+    ];
+    assert!(holds(steps).is_ok());
 }
 
 /// The property's run over `steps` (see the property's doc).

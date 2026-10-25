@@ -21,6 +21,7 @@ use mandate_store::envelope::{Envelope, Fields, draft_bytes, object, text};
 use mandate_time::UtcNanos;
 
 use crate::follow::{Proposal, Switch, agents_of, bounded, folded, proposals, switches};
+use crate::quotes::{QuoteFeed, QuotePoll};
 
 /// The version the envelope's actor carries.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -62,6 +63,8 @@ pub struct Wiring {
     pub fees: mandate_accounting::Config,
     pub gate: Box<dyn BindingGateSource>,
     pub protections: Box<dyn Protections>,
+    /// The latest quote of each instrument whose exit waits on a price (E21-30, DEC-2359).
+    pub quotes: Box<dyn QuoteFeed>,
 }
 
 impl Wiring {
@@ -170,6 +173,9 @@ pub struct ExecutorProcess<S, B> {
     /// mandate port answers with (DEC-2034 item 1).
     deployed: BTreeMap<AgentId, MandateVersion>,
     max_chain: usize,
+    /// When each instrument whose exit waits on a price was last read, so each is read at most
+    /// once per `exit_step_s` (DEC-2359).
+    polled: QuotePoll,
     written_at: UtcNanos,
 }
 
@@ -194,6 +200,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
     pub fn start(store: S, broker: B, wiring: Wiring, config: &Config, now: UtcNanos) -> Self {
         let scope = &config.scope;
         let workspace = scope.workspace.0.as_str();
+        let wiring_step = wiring.config.exit_step_s;
         let stream = |id: String| StreamId::parse(&id);
         let mut this = Self {
             store,
@@ -215,6 +222,9 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             deployed: BTreeMap::new(),
             max_chain: config.max_chain,
             written_at: now,
+            polled: QuotePoll::new(Duration::from_secs(
+                u64::try_from(wiring_step).unwrap_or_default(),
+            )),
         };
         if config.environment != Environment::Paper {
             this.lifecycle.observe(now, Lifecycled::Failed);
@@ -333,6 +343,9 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             self.lifecycle.observe(now, Lifecycled::Failed);
             return alerts;
         }
+        if !self.read_quotes(now, &mut alerts).unwrap_or(true) {
+            return alerts;
+        }
         if let Some(tick) = tick
             && !self.hand(now, now, Input::Tick(tick), &mut alerts, 0)
         {
@@ -411,6 +424,33 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             }),
             _ => false,
         }
+    }
+
+    /// Hands the core, before the pass's tick, the latest quote of each instrument whose exit waits
+    /// on a price and is due a read (DEC-2359), so the tick's ladder step prices from it. A quote
+    /// the feed cannot give hands nothing. `Ok(false)` when a handoff stopped the pass.
+    ///
+    /// # Errors
+    /// The core's refusal to name the instruments it wants; the pass then reads no quote and goes
+    /// on, as it would with the feed down (`AGENTS.md` rule 3).
+    fn read_quotes(
+        &mut self,
+        now: UtcNanos,
+        alerts: &mut Vec<Alert>,
+    ) -> Result<bool, ExecutorError> {
+        let wanted = self.state.quote_wanted()?;
+        let Ok(due) = self.polled.due(&wanted, now) else {
+            return Ok(true);
+        };
+        for instrument in due {
+            let Ok(observation) = self.wiring.quotes.observe(&instrument, now) else {
+                continue;
+            };
+            if !self.hand(now, now, Input::Market(observation), alerts, 0) {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 
     /// Drains at `now`: no new input; an input in doubt is handed once more, then the process exits

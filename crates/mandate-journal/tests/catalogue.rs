@@ -1671,7 +1671,8 @@ fn the_acknowledgment_records_are_closed_on_the_control_and_account_streams() {
 }
 
 /// Each of `event_types` is refused `schema` at an unlisted member on the control stream and
-/// `wrong_stream` on every other, and, but for `VerificationRun`, has no schema at version 2.
+/// `wrong_stream` on every other, and, but for `VerificationRun` and `CredentialEnrolled` (version
+/// 2 since journal spec v0.71, DEC-2122), has no schema at version 2.
 fn closed_on_the_control_stream(event_types: &[&str]) {
     for event_type in event_types {
         for kind in [ACCT, AGENT, CTL, CLOCK] {
@@ -1685,7 +1686,7 @@ fn closed_on_the_control_stream(event_types: &[&str]) {
                 "{event_type} in {kind}"
             );
         }
-        if *event_type == VERIFICATION {
+        if *event_type == VERIFICATION || *event_type == "CredentialEnrolled" {
             continue;
         }
         let version_2 = edit(&draft(event_type, CTL, &[]), "schema_version", Some("2"));

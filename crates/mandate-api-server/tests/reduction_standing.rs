@@ -15,12 +15,14 @@ use mandate_api_server::standing::{Standings, interim_refuses};
 use mandate_authn::SubjectStanding;
 use mandate_canon::encode_ulid;
 use mandate_identity::{InvitationId, MembershipEvent, PrincipalId, Role};
-use mandate_passkey::credentials::{CredentialRecord, Enrolment, PasskeyAlg, Removal};
+use mandate_passkey::credentials::{Assertion, CredentialRecord, Enrolment, PasskeyAlg, Removal};
 use serde_json::{Value as Json, json};
 
 const ALICE: PrincipalId = PrincipalId(7);
 const BOB: PrincipalId = PrincipalId(8);
 const CREDENTIAL: &str = "AAECAwQFBgcICQoLDA0ODw";
+const CHALLENGE: &str = "01JAA3P0A000000000000000H1";
+const ASSERTION: &str = "sha256:6666666666666666666666666666666666666666666666666666666666666666";
 const KEY: &str = "sha256:5555555555555555555555555555555555555555555555555555555555555555";
 
 fn enrolled(member: PrincipalId, credential: &str) -> Json {
@@ -47,6 +49,7 @@ fn enrolment(seq: u64, member: PrincipalId, credential: &str) -> CredentialRecor
         alg: PasskeyAlg::Es256,
         sign_count: 3,
         cool_off_ends: None,
+        backup_eligible: None,
     })
 }
 
@@ -66,13 +69,27 @@ fn the_hosted_streams_passkey_records_are_read_in_order_and_every_other_row_pass
         T0 - 80,
         enrolled(BOB, "EBESExQVFhcYGRobHB0eHw"),
     );
-    rows.hosted("StepUpAsserted", T0 - 70, json!({}));
+    rows.edited("StepUpAsserted", T0 - 70, |e| {
+        e["causation_id"] = json!(encode_ulid(1));
+        e["actor"] =
+            json!({"kind": "user", "id": encode_ulid(ALICE.0), "version": "1", "build": null});
+        e["payload"] = json!({
+            "challenge": CHALLENGE, "credential": CREDENTIAL, "sign_count": 4,
+            "assertion": ASSERTION,
+        });
+    });
     rows.hosted("CredentialRemoved", T0 - 60, removed(ALICE, CREDENTIAL));
     assert_eq!(
         parsed(&rows),
         Ok(vec![
             enrolment(2, ALICE, CREDENTIAL),
-            CredentialRecord::Asserted { seq: 5 },
+            CredentialRecord::Asserted(Assertion {
+                seq: 5,
+                member: ALICE,
+                credential: CREDENTIAL.to_owned(),
+                challenge: CHALLENGE.to_owned(),
+                sign_count: 4,
+            }),
             CredentialRecord::Removed(Removal {
                 seq: 6,
                 member: ALICE,
