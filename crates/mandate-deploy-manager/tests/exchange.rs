@@ -51,6 +51,36 @@ fn starts(m: &mut Manager) -> Vec<(u64, Option<Duration>)> {
         .collect()
 }
 
+/// The exchange's starts, as (generation, its request's expiry).
+fn expiries(m: &mut Manager) -> Vec<(u64, Option<UtcNanos>)> {
+    m.orchestrator()
+        .fake
+        .calls()
+        .iter()
+        .filter_map(|c| match c {
+            Call::Start {
+                slot,
+                generation,
+                expires_at,
+                ..
+            } if *slot == exchange() => Some((*generation, *expires_at)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The expiry the stored `ConnectionRequested` row gives its request, read from the row rather than
+/// from the manager: its `recorded_at` plus 600 seconds (DEC-2627 item 1, DEC-2363).
+fn recorded_expiry(journal: &Journal) -> UtcNanos {
+    let row = journal
+        .rows()
+        .into_iter()
+        .find(|r| r.event_type == "ConnectionRequested")
+        .unwrap();
+    let recorded = UtcNanos::parse(&row.recorded_at).unwrap();
+    UtcNanos::from_parts(recorded.secs() + 600, recorded.nanos()).unwrap()
+}
+
 fn stops(m: &mut Manager) -> Vec<u64> {
     m.orchestrator()
         .fake
@@ -124,6 +154,47 @@ fn an_oauth_request_starts_one_exchange_journaled_first_and_ended_by_its_deadlin
         "the deadline ends it on its own; the manager never stops an open request's exchange"
     );
     clean(&mut m);
+}
+
+/// DEC-2363: the exchange's start names its request's expiry, the stored row's `recorded_at` plus
+/// 600 seconds, never a time read from the manager's clock, so a start asked again after a refusal
+/// and a restart names the same instant, and only its lifetime is shorter.
+#[test]
+#[ignore = "pending E10-23"]
+fn every_start_of_an_exchange_names_its_requests_expiry_whatever_the_clock_reads() {
+    let (journal, mut m) = requested_at(10);
+    tick(&mut m, 12);
+    assert_eq!(expiries(&mut m), [(1, Some(recorded_expiry(&journal)))]);
+    assert_eq!(recorded_expiry(&journal), at(610));
+    let mut runner = TestRunner::new(ProptestConfig {
+        cases: 64,
+        failure_persistence: None,
+        ..ProptestConfig::default()
+    });
+    runner
+        .run(
+            &(0_i64..100_000, 0_i64..599, 0_i64..599, any::<bool>()),
+            |(committed, first, second, refused)| {
+                let (journal, mut m) = requested_at(committed);
+                let (first, later) = (first.min(second), first.max(second));
+                m.orchestrator().fake.refuse_effects = refused;
+                tick(&mut m, committed + first);
+                if refused {
+                    m.orchestrator().fake.refuse_effects = false;
+                    m = restart(m);
+                    tick(&mut m, committed + later);
+                }
+                let ran = if refused { later } else { first };
+                let expected = recorded_expiry(&journal);
+                prop_assert_eq!(expiries(&mut m), vec![(1, Some(expected))]);
+                prop_assert_eq!(
+                    starts(&mut m),
+                    vec![(1, Some(Duration::from_secs((600 - ran).unsigned_abs())))]
+                );
+                Ok(())
+            },
+        )
+        .unwrap();
 }
 
 #[test]
