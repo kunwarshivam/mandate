@@ -222,5 +222,8 @@ fn main() -> anyhow::Result<()> {
             let out = &mut io::stdout().lock();
             step_up::run_confirm(&checked, &mut journal, now()?, out).map(drop)
         }
+        Command::StepUp(StepUpCommand::ConfirmConnect(args)) => {
+            step_up::run_connect_command(&args, now()?, &mut io::stdout().lock()).map(drop)
+        }
     }
 }

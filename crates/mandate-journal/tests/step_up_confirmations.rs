@@ -109,7 +109,6 @@ fn the_base_and_every_valid_confirmation_draft_parse() {
 /// record; before the validator admits the kind it refuses each at `payload.action_kind`, the
 /// answer this test fails on.
 #[test]
-#[ignore = "pending E10-13"]
 fn every_connection_confirmation_draft_parses() {
     let section = section();
     let mut failed = Vec::new();

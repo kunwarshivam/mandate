@@ -90,7 +90,8 @@ api:
   vaultBinding: false
   # The connect finish (DEC-2348 item 3): its own Deployment, from the API's image, holding the
   # connection manager's AppRole alone, the Secret `vault-approle-connection-manager`; the API pod
-  # never holds it. Off until that Secret exists; staging only, as `vaultBinding` is.
+  # never holds it. Off until that Secret exists: staging provisions it, and the local cell turns it
+  # on with `vaultBinding`, once `cargo xtask cell up` provisions both.
   connectFinish: false
 
 # The workspace's shared artifact store (mandate documents, backtest reports), mounted at
