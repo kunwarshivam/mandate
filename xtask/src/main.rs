@@ -9109,6 +9109,7 @@ fn gate_run(
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     let stop = (per_shard > 1)
         .then(|| Duration::from_millis(mutant_costs::STOP_AFTER_MS).saturating_sub(before));
+    record_unfinished(root, shard, in_shard.clone(), per_shard);
     let status = match stop {
         Some(left) => mutants_job_within(root, &args, left),
         None => mutants_job_cargo(root, &args),
@@ -9177,6 +9178,28 @@ fn launched_after(root: &Path, started: SystemTime) -> Duration {
         .ok()
         .and_then(|launched| launched.duration_since(started).ok())
         .unwrap_or_default()
+}
+
+/// Writes the record a shard of more than one mutant leaves if GitHub stops its job before
+/// [`record_shard_cost`] replaces it (DEC-2367 item 2). As with that record, one that cannot be
+/// written is said and the gate's verdict stands alone.
+fn record_unfinished(
+    root: &Path,
+    shard: Option<MutantShard>,
+    packages: Vec<String>,
+    per_shard: usize,
+) {
+    let Some(cost) = mutant_costs::provisional(
+        mutant_costs::run_id(),
+        shard.map_or_else(|| "all".to_owned(), |s| s.argument()),
+        packages,
+        per_shard,
+    ) else {
+        return;
+    };
+    if let Err(err) = mutant_costs::write_record(root, &cost) {
+        eprintln!("    mutants: no provisional cost record for this shard ({err:#})");
+    }
 }
 
 /// Writes this shard's [`mutant_costs::ShardCost`] (DEC-2607 item 1). The record only informs
@@ -13296,6 +13319,51 @@ mod tests {
             "a mutated package is listed even if the tested set omits it, so its live tests are \
              still counted (DEC-139)"
         );
+    }
+
+    /// DEC-2367 item 2: a shard of more than one mutant writes its provisional record before
+    /// cargo-mutants starts, so a job GitHub stops still leaves one; a shard of one writes none.
+    #[test]
+    fn a_shard_of_more_than_one_leaves_a_record_before_cargo_mutants_starts() -> Result<()> {
+        let dir = env::temp_dir().join(format!("mandate-xtask-unfinished-{}", std::process::id()));
+        if dir.exists() {
+            fs::remove_dir_all(&dir)?;
+        }
+        fs::create_dir_all(&dir)?;
+        let shard = crate::MutantShard { index: 0, total: 2 };
+        crate::record_unfinished(&dir, Some(shard), vec!["mandate-executor".to_owned()], 1);
+        assert!(
+            !dir.join(crate::mutant_costs::COST_FILE).exists(),
+            "a shard of one leaves none"
+        );
+        crate::record_unfinished(&dir, Some(shard), vec!["mandate-executor".to_owned()], 5);
+        let left: crate::mutant_costs::ShardCost = serde_json::from_str(&fs::read_to_string(
+            dir.join(crate::mutant_costs::COST_FILE),
+        )?)?;
+        assert_eq!(
+            (left.shard.as_str(), left.outcome.as_str(), left.overran),
+            ("0/2", crate::mutant_costs::UNFINISHED, true)
+        );
+        assert_eq!(left.packages, ["mandate-executor"]);
+        crate::record_shard_cost(
+            &dir,
+            Some(shard),
+            vec!["mandate-executor".to_owned()],
+            Duration::from_secs(1),
+            Some(0),
+            std::time::UNIX_EPOCH,
+            false,
+        );
+        let finished: crate::mutant_costs::ShardCost = serde_json::from_str(&fs::read_to_string(
+            dir.join(crate::mutant_costs::COST_FILE),
+        )?)?;
+        assert_eq!(
+            (finished.outcome.as_str(), finished.overran),
+            ("caught", false),
+            "a shard that finishes replaces its provisional record"
+        );
+        fs::remove_dir_all(&dir)?;
+        Ok(())
     }
 
     /// DEC-850: an in-place run that ends with a mutant still in the tree has it written back and
