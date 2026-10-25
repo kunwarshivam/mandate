@@ -78,10 +78,7 @@
           "method": {
             "const": "passkey"
           }
-        },
-        "required": [
-          "method"
-        ]
+        }
       }
     }
   }
