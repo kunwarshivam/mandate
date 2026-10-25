@@ -1838,7 +1838,21 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   `run --vault-address <address> --vault-dir <dir>`, its projected ServiceAccount token and the
   cell vault's CA, against `oauth-fixture` with a code entry the API wrote; the pod exits 0, the
   code is taken, and the connection's token entry, format 1, is in the vault; the drill runs in the
-  cell jobs, plain and seeded; and the founder's staging connect waits on it.
+  cell jobs, plain and seeded; and the founder's staging connect waits on it. *The drill*
+  ([DEC-2063](decisions/DEC-2063.md)): `cargo xtask cell drill exchange` and the CI job
+  `cell-exchange` run the whole paper connect (stub sign-in, the `connection` challenge,
+  `mandate step-up confirm-connect` in a Job, the start, the fixture's authorize page, the callback)
+  and hold on the exchange pod's success, the taken code and the token entry; the seeded run skips
+  the CLI confirmation and must see the start refused `step_up_missing`. It is also the CLI and
+  API's contract test for DEC-2125.
+- **E10-23 (Should, M8, after E10-22; SC)** As the owner, I want the cell to establish a connection
+  end to end, so that the executor's connect check after an exchange is proven before staging
+  ([DEC-2063](decisions/DEC-2063.md) item 6). *Accepted when:* the cell's executor reads the
+  account from the `oauth-fixture` pod (`GET /v2/account`) through an account reader swapped in at
+  `Start.account`, built only with debug assertions and refused outside the dev and ci tiers, with
+  a test that a release build cannot select it, never through a paper-host override; the fixture
+  answers that route and the executor's dev and ci egress reaches it (lane D1); and a cell drill
+  holds on `ConnectionChecked` and the connection's establishment, plain and seeded.
 
 ### E11 Web app: dashboard and controls
 
