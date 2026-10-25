@@ -179,7 +179,6 @@ fn account_switched(journal: &support::Journal) -> Result<(), Error> {
 /// executor keeps running, ready, pass after pass. No agent holds lots, no order works and the
 /// broker lists none working, so only the switch's close holds it.
 #[test]
-#[ignore = "pending E7-4"]
 fn an_account_switch_still_closing_keeps_the_executor_running() -> Result<(), Error> {
     let (journal, broker) = released("10", false)?;
     account_switched(&journal)?;
