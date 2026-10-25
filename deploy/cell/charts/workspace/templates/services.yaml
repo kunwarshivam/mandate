@@ -2,7 +2,10 @@
 is its own template, api.yaml, the deployment manager's deploy-manager.yaml, the role
 provisioner's role-provisioner.yaml, and the connect finish's connect-finish.yaml. A process the
 manager starts (the runtime and the executor, `started_by`) has no Deployment once the manager
-renders: only the manager starts it, from its pod template (DEC-1170). */ -}}
+renders: only the manager starts it, from its pod template (DEC-1170). Without the manager the
+executor is a Deployment on `default`, the fixture broker's alone: a paper executor, which reaches
+the vault for its connection's lease, needs the manager, and the render fails without it
+(DEC-2064). */ -}}
 {{- define "mandate.service" -}}
 {{- $ctx := . -}}
 apiVersion: apps/v1
@@ -24,6 +27,9 @@ spec:
     {{- $_ := set $launch "args" (include "mandate.fill" (dict "root" $ctx.root "words" . "probe" "") | fromJsonArray) }}
     {{- end }}
     {{- if eq .p.name "executor" }}
+    {{- if eq .root.Values.executor.broker "alpaca-paper" }}
+    {{- fail "executor.broker=alpaca-paper needs images.deploy-manager: a paper executor runs only as the pod the manager starts as its connection's own account, never as this Deployment's default (DEC-2064)" }}
+    {{- end }}
     {{- $_ := set $launch "args" (concat ($launch.args | default list) (include "mandate.executorBroker" .root | fromJsonArray)) }}
     {{- end }}
     {{- with .p.probe }}
