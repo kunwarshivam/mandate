@@ -304,8 +304,9 @@ pub(crate) fn open_orders_read(
 
 /// The account switch's close-position, one instrument at a time (§5.5, DEC-2333 item 2,
 /// DEC-2337): for each instrument it closes that is still held, once the latest read noted after
-/// its cancel-all was answered, taken at or after the switch, shows no sell working there but ours whose cancel is since confirmed. The first
-/// request is attempt 1. A later one goes only on a reconciliation taken at or after the last
+/// its cancel-all was answered, taken at or after the switch, shows no sell working there but ours
+/// whose cancel is since confirmed, and misses none of ours a read may not yet show (DEC-2356 item
+/// 8). The first request is attempt 1. A later one goes only on a reconciliation taken at or after the last
 /// request that shows the instrument still held, so a crash or a lost answer never strands it and
 /// nothing is ever sent twice blind. Each request is journaled before it is sent. An instrument
 /// whose close is requested and that is no longer held ends its open interval (DEC-2337 item 4).
@@ -326,13 +327,14 @@ pub(crate) fn closes_due(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError>
             .get(&instrument)
             .copied()
             .unwrap_or(SignedQty::ZERO);
-        let clear = read.sells.get(&instrument).is_none_or(|sells| {
+        let listed = read.sells.get(&instrument);
+        let clear = listed.is_none_or(|sells| {
             sells.iter().all(|sell| {
                 sell.as_ref()
                     .and_then(|id| batch.view.orders.get(id))
                     .is_some_and(|order| order.state.is_terminal())
             })
-        });
+        }) && !unlisted_sell(&batch.view, &instrument, listed);
         if held <= SignedQty::ZERO {
             if switch.requests.contains_key(&instrument) && interval_open(&batch.view, &instrument)
             {
@@ -373,6 +375,23 @@ pub(crate) fn closes_due(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError>
         ));
     }
     Ok(())
+}
+
+/// Whether a sell of ours in `instrument` that a read may not yet show, one sent that the broker
+/// has not acknowledged (`Submitting`), is missing from the read's `listed` sells: the close waits
+/// for it as for a listed one (DEC-2356 item 8). An `Unknown` order is not one: an order a read
+/// omits is what reads as `Unknown`, so the read itself is the confirmation that it is gone.
+fn unlisted_sell(
+    view: &ExecutorState,
+    instrument: &InstrumentId,
+    listed: Option<&Vec<Option<ClientOrderId>>>,
+) -> bool {
+    view.orders.values().any(|order| {
+        &order.instrument == instrument
+            && order.side == Side::Sell
+            && order.state == OrderState::Submitting
+            && !listed.is_some_and(|sells| sells.contains(&Some(order.client_order_id.clone())))
+    })
 }
 
 /// The in-doubt hold reads again every `unknown_absent_window_s` from the switch (DEC-2333 item

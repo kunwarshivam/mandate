@@ -21,10 +21,10 @@ fn text(value: &str) -> Value {
 }
 
 /// The agent's opening of 10 AAPL at 150, filled and journaled by an earlier executor process,
-/// which holds the bracket's stop leg as its protection, the owner's release of all 10 (mandate
-/// spec §3.1) with that leg cancelled, journaled as that process would, then the agent retired,
-/// and, if `switched`, a kill switch of its connection.
-fn released(switched: bool) -> Result<(support::Journal, Paper), Error> {
+/// which holds the bracket's stop leg as its protection, the owner's release of `qty` of them
+/// (mandate spec §3.1) with that leg cancelled, journaled as that process would, then the agent
+/// retired, and, if `switched`, a kill switch of its connection.
+fn released(qty: &str, switched: bool) -> Result<(support::Journal, Paper), Error> {
     let journal = deployed()?;
     journal.seed(ACCOUNT_STREAM, OPENED)?;
     let broker = Paper::new(&journal);
@@ -58,7 +58,7 @@ fn released(switched: bool) -> Result<(support::Journal, Paper), Error> {
                 ("canceled_order_ids", Value::Array(vec![text(&leg)])),
                 ("cause", text("owner_release")),
                 ("instrument", text("AAPL")),
-                ("qty", text("10")),
+                ("qty", text(qty)),
                 ("risk_clock", text("2026-09-21T15:00:00.000000000Z")),
                 (
                     "step_up",
@@ -88,7 +88,7 @@ fn released(switched: bool) -> Result<(support::Journal, Paper), Error> {
 /// retired account's executor exits.
 #[test]
 fn a_released_position_lets_the_retired_executor_exit() -> Result<(), Error> {
-    let (journal, broker) = released(false)?;
+    let (journal, broker) = released("10", false)?;
     let mut process = start(&journal, &broker)?;
     for _ in 0..2 {
         process.step(at(NOON)?);
@@ -103,7 +103,7 @@ fn a_released_position_lets_the_retired_executor_exit() -> Result<(), Error> {
 #[test]
 fn a_released_position_lets_the_kill_switch_start_exit_once_the_switch_is_applied()
 -> Result<(), Error> {
-    let (journal, broker) = released(true)?;
+    let (journal, broker) = released("10", true)?;
     let mut process = start(&journal, &broker)?;
     process.step(at(NOON)?);
     assert_eq!(
@@ -113,5 +113,20 @@ fn a_released_position_lets_the_kill_switch_start_exit_once_the_switch_is_applie
     );
     process.step(at(NOON)?);
     assert_eq!(process.lifecycle().state(), COMPLETED);
+    Ok(())
+}
+
+/// DEC-2347 items 3.6 and 8: a release of 4 of the 10 shares leaves 6 the agent's lots, so the
+/// retired account's executor keeps running, ready, pass after pass, rather than exit. Its switch
+/// would sell those 6 and never the owner's 4 (`mandate-executor`'s
+/// `a_release_leaves_the_switch_only_what_the_agent_still_holds`).
+#[test]
+fn unreleased_lots_still_hold_the_retired_executor() -> Result<(), Error> {
+    let (journal, broker) = released("4", false)?;
+    let mut process = start(&journal, &broker)?;
+    for _ in 0..3 {
+        process.step(at(NOON)?);
+        assert_eq!(process.lifecycle().state(), State::Ready);
+    }
     Ok(())
 }

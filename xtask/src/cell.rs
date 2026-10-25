@@ -865,20 +865,40 @@ fn fixture_values(stub: Option<&str>, exchange: Option<&str>) -> Vec<String> {
     ]
 }
 
+/// The API's vault binding and the connect finish (DEC-2338, DEC-2348 item 3): both on only
+/// where the cell runs the API and the role provisioner, since only then does `cell up` provision
+/// the vault, issuing `vault-approle-api` and `vault-approle-connection-manager` before the
+/// workspace installs; else none, so neither pod names a Secret that does not exist.
+fn vault_binding_values(api: Option<&str>, provisioner: Option<&str>) -> Result<Vec<String>> {
+    if api.is_none() || provisioner.is_none() {
+        return Ok(Vec::new());
+    }
+    Ok(vec![
+        "api.vaultBinding=true".to_owned(),
+        "api.connectFinish=true".to_owned(),
+    ])
+}
+
 /// The `images.*` settings for the images this cell runs, so `up` and every render agree.
 fn image_sets() -> Result<Vec<String>> {
+    let api = api_image_tag()?;
+    let provisioner = role_provisioner_image_tag()?;
     let mut sets = vec![
         format!("images.mandate={}", image_tag()?),
-        format!("images.api={}", api_image_tag()?.unwrap_or_default()),
+        format!("images.api={}", api.clone().unwrap_or_default()),
         format!(
             "images.{DEPLOY_MANAGER_PROCESS}={}",
             deploy_manager_image_tag()?.unwrap_or_default()
         ),
         format!(
             "images.{ROLE_PROVISIONER_PROCESS}={}",
-            role_provisioner_image_tag()?.unwrap_or_default()
+            provisioner.clone().unwrap_or_default()
         ),
     ];
+    sets.extend(vault_binding_values(
+        api.as_deref(),
+        provisioner.as_deref(),
+    )?);
     let stub = stub_image_tag()?;
     let exchange = exchange_image()?;
     sets.extend(signin_values(stub.as_deref()));
@@ -1103,12 +1123,15 @@ pub fn hosted() -> Result<()> {
     )
 }
 
-/// What the API's pod says when the workspace release does not become ready: its pods, its
-/// containers' last logs, current and from the run before a restart, and the namespace's recent
-/// events, so a server that refused to start
-/// names its refusal in the run's own output.
-fn api_diagnosis() {
-    let selector = format!("mandate.dev/workspace={WORKSPACE},mandate.dev/process={API_PROCESS}");
+/// What the API's pods say when the workspace release does not become ready: the API's and the
+/// connect finish's (DEC-2348 item 3), which runs from the API's image. Their pods, how each
+/// container last ended (its reason, `OOMKilled` among them, and exit code), their containers'
+/// last logs, current and from the run before a restart, and the namespace's recent events, so a
+/// server that refused to start or was killed names it in the run's own output.
+pub(super) fn api_diagnosis() {
+    let selector = format!(
+        "mandate.dev/workspace={WORKSPACE},mandate.dev/process in ({API_PROCESS},{CONNECT_FINISH_PROCESS})"
+    );
     let logs = |previous: &'static str| {
         [
             "logs",
@@ -1133,6 +1156,16 @@ fn api_diagnosis() {
         "-o",
         "wide",
     ];
+    let ended = [
+        "get",
+        "pods",
+        "--namespace",
+        NAMESPACE,
+        "--selector",
+        selector.as_str(),
+        "-o",
+        "jsonpath={range .items[*]}{.metadata.name}{range .status.containerStatuses[*]} {.name}: {.lastState.terminated.reason} {.lastState.terminated.exitCode} restarts {.restartCount}{end}{\"\\n\"}{end}",
+    ];
     let current = logs("--previous=false");
     let previous = logs("--previous=true");
     let events = [
@@ -1143,7 +1176,7 @@ fn api_diagnosis() {
         "--sort-by",
         ".lastTimestamp",
     ];
-    let shown: [&[&str]; 4] = [&pods, &current, &previous, &events];
+    let shown: [&[&str]; 5] = [&pods, &ended, &current, &previous, &events];
     for args in shown {
         match kubectl(args) {
             Ok(text) => eprintln!("    api diagnosis `kubectl {}`:\n{text}", args.join(" ")),
@@ -4973,6 +5006,8 @@ const WEB_URL: &str = "http://127.0.0.1:4317";
 /// The process-list name lane A1 gives the workspace API server; `api_is_a_planned_name` checks
 /// that, once listed, it is a service.
 const API_PROCESS: &str = "api";
+/// The connect finish's process (DEC-2348 item 3), from the API's image.
+const CONNECT_FINISH_PROCESS: &str = "connect-finish";
 
 /// Which model gateway the demo's research loop calls through (DEC-1120 item 5): the recorded fake,
 /// since no cell holds a vaulted OpenRouter key (E21-32) or a hosted transport yet. The selection
@@ -5585,6 +5620,24 @@ mod tests {
                 "alpacaOAuth.redirectUri=http://127.0.0.1:8080/v1/oauth/alpaca/callback",
             ]
         );
+    }
+
+    /// The API's vault binding and the connect finish come on together, and only where the cell
+    /// runs both the API and the role provisioner, whose presence is what provisions the vault and
+    /// issues the two AppRole Secrets they mount.
+    #[test]
+    fn the_api_vault_binding_and_connect_finish_are_on_only_with_the_api_and_the_provisioner()
+    -> Result<()> {
+        let api = Some("mandate.local/api:a");
+        let provisioner = Some("mandate.local/role-provisioner:a");
+        assert!(vault_binding_values(None, None)?.is_empty());
+        assert!(vault_binding_values(api, None)?.is_empty());
+        assert!(vault_binding_values(None, provisioner)?.is_empty());
+        assert_eq!(
+            vault_binding_values(api, provisioner)?,
+            ["api.vaultBinding=true", "api.connectFinish=true"]
+        );
+        Ok(())
     }
 
     /// A Secret the cell already holds is kept, unread and unchanged; none is made, from a value
