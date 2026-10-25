@@ -393,7 +393,7 @@ fn the_fixture_mode_announces_its_public_host_and_serves_only_the_provider() {
     assert!(rest.is_empty(), "nothing after the announce line: {rest:?}");
 }
 
-/// DEC-2127: the fixture writes each token refusal to standard error as `token_refused`, the
+/// DEC-1179: the fixture writes each token refusal to standard error as `token_refused`, the
 /// answer's `error` and the refusing check's word, a refused media type or size as
 /// `token_refused unsupported_media_type` or `token_refused payload_too_large`, and nothing the
 /// request carried.

@@ -341,7 +341,7 @@ fn values(form: &str) -> Vec<String> {
         .collect()
 }
 
-/// DEC-2127: each token refusal names the check that refused it, and its line is `token_refused`,
+/// DEC-1179: each token refusal names the check that refused it, and its line is `token_refused`,
 /// the answer's `error` and that check's word, with nothing the request carried.
 #[test]
 fn each_token_refusal_names_its_cause_and_its_line_carries_no_request_value() {

@@ -85,7 +85,7 @@ impl Refusal {
     }
 }
 
-/// Which check refused a token request, for the stub's standard error (DEC-2127): a fixed word,
+/// Which check refused a token request, for the stub's standard error (DEC-1179): a fixed word,
 /// never a value the request carried.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Cause {
@@ -124,7 +124,7 @@ impl Cause {
 }
 
 /// The line the stub writes to standard error for `refusal` by `cause`: `token_refused`, the
-/// answer's `error`, and the cause's word (DEC-2127).
+/// answer's `error`, and the cause's word (DEC-1179).
 pub fn refusal_line(refusal: Refusal, cause: Cause) -> String {
     format!("token_refused {} {}\n", refusal.code(), cause.word())
 }
@@ -248,7 +248,7 @@ impl Alpaca {
         self.exchange(body, now).map_err(|(refusal, _)| refusal)
     }
 
-    /// [`Alpaca::token`], with the [`Cause`] of a refusal (DEC-2127).
+    /// [`Alpaca::token`], with the [`Cause`] of a refusal (DEC-1179).
     ///
     /// # Errors
     /// [`Alpaca::token`]'s refusals.

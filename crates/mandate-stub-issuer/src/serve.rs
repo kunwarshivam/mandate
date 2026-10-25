@@ -189,13 +189,13 @@ async fn exchange(alpaca: Option<&Alpaca>, request: Request) -> Response {
     }
 }
 
-/// The line for a token request that is not a form (DEC-2127 item 2).
+/// The line for a token request that is not a form (DEC-1179 item 2).
 const MEDIA_TYPE_LINE: &str = "token_refused unsupported_media_type\n";
 
-/// The line for a token request over [`MAX_BODY_BYTES`] (DEC-2127 item 2).
+/// The line for a token request over [`MAX_BODY_BYTES`] (DEC-1179 item 2).
 const BODY_SIZE_LINE: &str = "token_refused payload_too_large\n";
 
-/// A token refusal, its line written to standard error first (DEC-2127).
+/// A token refusal, its line written to standard error first (DEC-1179).
 fn token_refused(refusal: Refusal, cause: Cause) -> Response {
     write_line(&refusal_line(refusal, cause));
     refused(refusal)
