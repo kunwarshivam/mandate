@@ -399,28 +399,32 @@ impl<V: SecretSource> RunLease<V> {
     }
 }
 
-/// The paper equity profile's quote age bound (trading-domain spec §4.2, DEC-2359 item 4): the
-/// reviewed rule set's IEX quote age.
-pub const PAPER_QUOTE_MAX_AGE: Duration = Duration::from_secs(10);
-
-/// The paper equity profile's spread bound, as a fraction of the bid (DEC-2359 item 4): the
-/// collar's width for an instrument outside the liquid tier.
-pub const PAPER_QUOTE_MAX_SPREAD: &str = "0.02";
-
-/// The quote feed over `broker`'s own transport and credential (DEC-2359 item 2), judged by
-/// [`PAPER_QUOTE_MAX_AGE`] and [`PAPER_QUOTE_MAX_SPREAD`].
+/// The paper equity profile's quote bounds (trading-domain spec §4.2, DEC-2359 item 4): a quote
+/// at most the reviewed rule set's IEX age old, ten seconds, and a spread of at most 2 % of the
+/// bid, the collar's width for an instrument outside the liquid tier.
 ///
 /// # Errors
-/// `quote_bounds_invalid` when the spread bound does not read, and `runtime_unavailable` when the
-/// feed's runtime cannot be built.
+/// `quote_bounds_invalid` when the spread bound does not read.
+pub fn paper_quote_bounds() -> Result<QuoteBounds, &'static str> {
+    Ok(QuoteBounds {
+        max_age: Duration::from_secs(10),
+        max_spread: Fraction::parse("0.02").map_err(|_| "quote_bounds_invalid")?,
+    })
+}
+
+/// The quote feed over `broker`'s own transport and credential (DEC-2359 item 2), judged by
+/// [`paper_quote_bounds`].
+///
+/// # Errors
+/// `quote_bounds_invalid` when the bounds do not read, and `runtime_unavailable` when the feed's
+/// runtime cannot be built.
 pub fn paper_quotes(
     broker: &AlpacaBroker<AlpacaPaperHttp>,
 ) -> Result<AlpacaQuotes<AlpacaPaperHttp, TokioPause>, &'static str> {
-    let bounds = QuoteBounds {
-        max_age: PAPER_QUOTE_MAX_AGE,
-        max_spread: Fraction::parse(PAPER_QUOTE_MAX_SPREAD).map_err(|_| "quote_bounds_invalid")?,
-    };
-    AlpacaQuotes::new(DataClient::new(broker.transport(), TokioPause), bounds)
+    AlpacaQuotes::new(
+        DataClient::new(broker.transport(), TokioPause),
+        paper_quote_bounds()?,
+    )
 }
 
 /// The latest-quote read of Alpaca's market-data host, over the connection's transport.
