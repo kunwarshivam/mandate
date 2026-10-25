@@ -448,7 +448,9 @@ fn submit(
     }
     let room = flatten_room(&batch.view, intent, qty)?;
     if room == Qty::ZERO {
-        return abandon(batch, intent, "released_to_owner");
+        let abandoned = abandon_record(batch, intent, "released_to_owner")?;
+        batch.notify(abandoned, "exit_released");
+        return Ok(());
     }
     if room < qty {
         let pairs = vec![
@@ -763,6 +765,15 @@ pub(crate) fn abandon(
     intent: &IntentId,
     reason: &str,
 ) -> Result<(), ExecutorError> {
+    abandon_record(batch, intent, reason).map(|_| ())
+}
+
+/// [`abandon`], answering the `OrderAbandoned` record's id.
+fn abandon_record(
+    batch: &mut Batch<'_, '_>,
+    intent: &IntentId,
+    reason: &str,
+) -> Result<EventId, ExecutorError> {
     batch.journal(
         "OrderAbandoned",
         None,
@@ -774,8 +785,7 @@ pub(crate) fn abandon(
             ("intent_id", text(intent.0.0.clone())),
             ("reason", text(reason)),
         ],
-    )?;
-    Ok(())
+    )
 }
 
 /// `Unknown → Intent` after a confirmed absence: the gate re-runs and the order is resubmitted
