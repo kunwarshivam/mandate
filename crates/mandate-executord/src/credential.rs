@@ -20,6 +20,7 @@
 //! Alpaca's market-data host over the same transport and credential (DEC-2359 items 2 and 5).
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use mandate_accounting::InstrumentId;
 use mandate_alpaca::{
@@ -33,7 +34,7 @@ use mandate_connections::token_entry::decode;
 use mandate_connections::vault::AccessToken;
 use mandate_executor::{AccountScope, MarketObservation, RiskClock};
 use mandate_journal::StreamId;
-use mandate_num::Adverse;
+use mandate_num::{Adverse, Fraction};
 use mandate_store::Store;
 use mandate_time::UtcNanos;
 use mandate_vault::SourceError;
@@ -396,6 +397,19 @@ impl<V: SecretSource> RunLease<V> {
     pub fn give_back(self) -> Result<(), &'static str> {
         self.leased.revoke()
     }
+}
+
+/// The paper equity profile's quote bounds (trading-domain spec §4.2, DEC-2359 item 4): a quote
+/// at most the reviewed rule set's IEX age old, ten seconds, and a spread of at most 2 % of the
+/// bid, the collar's width for an instrument outside the liquid tier.
+///
+/// # Errors
+/// `quote_bounds_invalid` when the spread bound does not read.
+pub fn paper_quote_bounds() -> Result<QuoteBounds, &'static str> {
+    Ok(QuoteBounds {
+        max_age: Duration::from_secs(10),
+        max_spread: Fraction::parse("0.02").map_err(|_| "quote_bounds_invalid")?,
+    })
 }
 
 /// The latest-quote read of Alpaca's market-data host, over the connection's transport.

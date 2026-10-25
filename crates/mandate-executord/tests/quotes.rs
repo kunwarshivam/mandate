@@ -12,6 +12,7 @@ use mandate_alpaca::{
     BarsRequest, DataClient, DataTransport, Pause, QuoteRequest, Response, TransportError,
 };
 use mandate_executor::{MarketObservation, RiskClock};
+use mandate_executord::credential::paper_quote_bounds;
 use mandate_executord::quotes::{AlpacaQuotes, QuoteBounds, QuoteFeed, QuotePoll};
 use mandate_num::{Fraction, Price, Qty};
 use mandate_time::UtcNanos;
@@ -202,5 +203,36 @@ fn a_quote_that_cannot_be_read_hands_nothing() -> Result<(), Error> {
         assert_eq!(read, Err("quote_unread"), "{case}");
         assert_eq!(quotes.observe(&aapl()?, now), None, "{case}");
     }
+    Ok(())
+}
+
+/// DEC-2359 item 4: the paper profile's bounds take a quote exactly ten seconds old and refuse one
+/// a nanosecond older, and take a spread of exactly 2 % of the bid and refuse a cent wider.
+#[test]
+fn the_paper_bounds_are_ten_seconds_and_two_percent() -> Result<(), Error> {
+    let now = at(NOON)?;
+    let noon = now.secs();
+    let paper = |response| -> Result<AlpacaQuotes<Scripted, Fixed>, Error> {
+        Ok(AlpacaQuotes::new(
+            DataClient::new(Scripted(response), Fixed(now)),
+            paper_quote_bounds()?,
+        )?)
+    };
+    let ten = "2026-09-21T14:59:50Z";
+    assert_eq!(
+        paper(answer("150", "153", ten))?.read(&aapl()?, now),
+        Ok(observed("150", "153", noon - 10)?),
+        "ten seconds old and 2 % wide"
+    );
+    assert_eq!(
+        paper(answer("150", "150.2", "2026-09-21T14:59:49.999999999Z"))?.read(&aapl()?, now),
+        Err("quote_unread"),
+        "a nanosecond past ten seconds"
+    );
+    assert_eq!(
+        paper(answer("150", "153.01", ten))?.read(&aapl()?, now),
+        Err("quote_insane"),
+        "a cent past 2 %"
+    );
     Ok(())
 }
