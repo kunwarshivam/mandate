@@ -1627,6 +1627,9 @@ def ca_bundle(docs: list[dict]) -> list[str]:
             if not mount or mount.get("readOnly") is not True:
                 problems.append(f"{name} does not mount the CA bundle read-only: {mount}")
                 continue
+            volume = next((v for v in spec.get("volumes", []) if v.get("name") == mount["name"]), {})
+            if volume.get("emptyDir") != {"sizeLimit": "1Mi"}:
+                problems.append(f"{name}'s CA bundle is not a 1Mi emptyDir: {volume}")
             copiers = [
                 i
                 for i in spec.get("initContainers", [])
@@ -1664,6 +1667,10 @@ def test_each_public_tls_process_gets_the_ca_bundle_and_no_other():
                     for i in pod_spec(w).get("initContainers", [])
                     if SYSTEM_BUNDLE not in " ".join(i.get("command", []))
                 ]
+            ),
+            lambda w: next(v for v in pod_spec(w)["volumes"] if v["name"] == "ca-bundle").update(emptyDir={}),
+            lambda w: next(v for v in pod_spec(w)["volumes"] if v["name"] == "ca-bundle").update(
+                emptyDir={"sizeLimit": "1Gi"}
             ),
         ):
             assert ca_bundle(mutate(docs, name, kind, seed)), (name, seed)
