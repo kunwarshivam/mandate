@@ -6145,6 +6145,85 @@ fn a_released_unattributed_partial_fill_leaves_the_switch_nothing() {
     );
 }
 
+/// The buffer day's replacement of the protected 10 after `before` folds onto it: the quantity
+/// re-placed once the expiring OCO's cancel is confirmed.
+fn buffer_day_after(before: &[mandate_executor::FoldedEvent]) -> mandate_num::Qty {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = protected_position(&ports);
+    for event in before {
+        let mut event = event.clone();
+        event.seq = mandate_executor::Seq(shell.head().0.saturating_add(1));
+        shell.fold_one(&event).expect("folds");
+    }
+    let day = copied(
+        ACCOUNT_STREAM,
+        shell.head().0.saturating_add(1),
+        "TradingDayStarted",
+        with_clock(&[("date", text("2026-12-14"))], 7_000_000),
+        &EventId(format!("{CLOCK_STREAM}-9")),
+    );
+    shell.fold_one(&day).expect("the trading day folds");
+    shell.run(Input::Journal(day), &ports);
+    let confirmed = shell.run(
+        Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+            client_order_id: "md-oco-1".to_owned(),
+        })),
+        &ports,
+    );
+    re_placed(&confirmed, None)
+}
+
+/// The owner's release of `qty` of `instrument` from the agent (journal spec §9.27), unplaced.
+fn released_of(instrument: &str, qty: &str) -> mandate_executor::FoldedEvent {
+    event(
+        ACCOUNT_STREAM,
+        0,
+        "PositionReleased",
+        with_clock(
+            &[
+                ("agent_id", text(common::AGENT)),
+                ("instrument", text(instrument)),
+                ("qty", text(qty)),
+                ("cause", text("owner_release")),
+            ],
+            25,
+        ),
+    )
+}
+
+/// DEC-2362 invariant 3: once the owner has sold the 4 shares they took, nothing of theirs is left
+/// in the position, so the agent's 6 stay wholly protected.
+#[test]
+fn released_shares_the_owner_sold_leave_the_agents_protection_whole() {
+    let sold = event(
+        ACCOUNT_STREAM,
+        0,
+        "FillApplied",
+        with_clock(
+            &[
+                ("fill_id", text("f-owner")),
+                ("instrument", text(AAPL)),
+                ("side", text("sell")),
+                ("qty_gross", text("4")),
+                ("price", text("150")),
+            ],
+            26,
+        ),
+    );
+    assert_eq!(buffer_day_after(&[released_of(AAPL, "4"), sold]), qty("6"));
+}
+
+/// DEC-2362 item 1 reads the instrument's own releases only: a release in another instrument
+/// leaves this one's protection whole.
+#[test]
+fn a_release_in_another_instrument_leaves_this_ones_protection_whole() {
+    assert_eq!(buffer_day_after(&[released_of("MSFT", "4")]), qty("10"));
+}
+
 /// The protected 10 with the owner's release of `released` of them folded and an agent's risk exit
 /// of 2 that filled, so the executor placed its own protection again, which the broker accepts
 /// and then reports expired: the re-placement step and the expiry step.
