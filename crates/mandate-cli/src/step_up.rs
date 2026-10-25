@@ -20,6 +20,7 @@ use clap::{Args, Subcommand};
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Digest, Value, is_ulid};
 use mandate_connections::manager::{DISCLOSURE_DOCUMENT, DISCLOSURE_VERSION, oauth_connect_object};
+use mandate_identity::StepUpActionKind;
 use mandate_journal::{ArtifactStore, Environment, StreamId};
 
 use crate::approvals::{self, Shown};
@@ -262,8 +263,9 @@ pub fn check_connect(confirming: &ConnectConfirming<'_>) -> Result<CheckedConnec
 /// or the one a run that committed appended (DEC-2125 item 3, DEC-2106 item 3).
 ///
 /// # Errors
-/// [`ControlError::Refused`] with `workspace_environment` for a workspace that is not paper, or
-/// `challenge_confirmed` for a challenge already confirmed otherwise, having appended nothing;
+/// [`ControlError::Refused`] with `workspace_environment` for a workspace that is not paper,
+/// `workspace_not_open` for one whose control stream was never opened, or `challenge_confirmed`
+/// for a challenge already confirmed otherwise, having stored and appended nothing;
 /// [`ControlError::Journal`] when the journal or the store cannot be read or written.
 pub fn confirm_connect(
     journal: &mut dyn ControlJournal,
@@ -288,6 +290,7 @@ pub fn confirm_connect(
     for _ in 0..ATTEMPTS {
         let head = journal.head(&stream)?.seq;
         same_environment(journal, &stream, &checked.owner)?;
+        opened(journal, &stream)?;
         if let Some(submitted) = earlier(journal, &stream, &ours)? {
             return Ok(ConnectConfirmed {
                 action_digest,
@@ -300,7 +303,7 @@ pub fn confirm_connect(
             .map_err(|e| ControlError::Journal(format!("the artifact store: {}", e.code())))?;
         let key = vec![
             ("action_digest", text(&action_digest)),
-            ("action_kind", text("connection")),
+            ("action_kind", text(StepUpActionKind::Connection.code())),
             ("challenge", text(&checked.challenge)),
             ("code", text(&checked.code)),
             ("confirmed_at", seconds(now.at.secs())?),
@@ -425,7 +428,7 @@ pub fn confirm(
         }
         let key = vec![
             ("action_digest", text(&shown.content_hash)),
-            ("action_kind", text("approve")),
+            ("action_kind", text(StepUpActionKind::Approve.code())),
             ("challenge", text(&checked.challenge)),
             ("code", text(&checked.code)),
             ("confirmed_at", seconds(now.at.secs())?),
@@ -466,6 +469,16 @@ pub fn confirm(
     Err(ControlError::Journal(format!(
         "the control stream moved on each of {ATTEMPTS} reads; nothing was appended"
     )))
+}
+
+/// A workspace whose control stream holds no `StreamOpened` first is `workspace_not_open`, as
+/// `mandate workspace found` reads it: the journal refuses any other first record, so the connect's
+/// object is never stored for an append that cannot commit.
+fn opened(journal: &dyn ControlJournal, stream: &StreamId) -> Result<(), ControlError> {
+    match journal.rows(stream)?.first() {
+        Some(first) if first.event_type == "StreamOpened" => Ok(()),
+        _ => Err(refused("workspace_not_open")),
+    }
 }
 
 /// The members a confirmation of this command's carries, so a re-run can tell its own record from

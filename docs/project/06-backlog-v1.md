@@ -1838,7 +1838,21 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   `run --vault-address <address> --vault-dir <dir>`, its projected ServiceAccount token and the
   cell vault's CA, against `oauth-fixture` with a code entry the API wrote; the pod exits 0, the
   code is taken, and the connection's token entry, format 1, is in the vault; the drill runs in the
-  cell jobs, plain and seeded; and the founder's staging connect waits on it.
+  cell jobs, plain and seeded; and the founder's staging connect waits on it. *The drill*
+  ([DEC-2063](decisions/DEC-2063.md)): `cargo xtask cell drill exchange` and the CI job
+  `cell-exchange` run the whole paper connect (stub sign-in, the `connection` challenge,
+  `mandate step-up confirm-connect` in a Job, the start, the fixture's authorize page, the callback)
+  and hold on the exchange pod's success, the taken code and the token entry; the seeded run skips
+  the CLI confirmation and must see the start refused `step_up_missing`. It is also the CLI and
+  API's contract test for DEC-2125.
+- **E10-23 (Should, M8, after E10-22; SC)** As the owner, I want the cell to establish a connection
+  end to end, so that the executor's connect check after an exchange is proven before staging
+  ([DEC-2063](decisions/DEC-2063.md) item 6). *Accepted when:* the cell's executor reads the
+  account from the `oauth-fixture` pod (`GET /v2/account`) through an account reader swapped in at
+  `Start.account`, built only with debug assertions and refused outside the dev and ci tiers, with
+  a test that a release build cannot select it, never through a paper-host override; the fixture
+  answers that route and the executor's dev and ci egress reaches it (lane D1); and a cell drill
+  holds on `ConnectionChecked` and the connection's establishment, plain and seeded.
 
 ### E11 Web app: dashboard and controls
 
@@ -4383,13 +4397,24 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   sized at the long position, so after a release it covers the owner's released shares with the
   agent's protective order. [DEC-2362](decisions/DEC-2362.md) sizes it at the long position less
   the released shares the owner still holds; its tests are in `hand.rs`, pending E6-4.
+- **E7-4 (executor kill switch), from [DEC-2361](decisions/DEC-2361.md):** a switch's close that
+  no limit can be named for (no quote, no protective stop, no floor) is skipped silently by
+  `flatten_closes`. Journal it `exit_unpriced` and alert once per switch and instrument; the
+  tests are in `hand.rs`, pending E7-4.
 - **E21-30 (executor process), from [DEC-2358](decisions/DEC-2358.md):** `mandate-executord` hands
   the core no quote, so §5.6's ladder never prices an exit there and every exit beside resting
   protection goes at its own limit or is held for want of a price. Add a quote feed: poll
   `mandate-alpaca`'s `DataClient::latest_quote` for each instrument with a held or sequenced exit,
   with the data host's credential from the vault, and hand each as `Input::Market` with its sanity
   verdict; a recorded fake for the tests. A design note on claim #137 first. Once it lands, the
-  founder may revert DEC-2358 to DEC-160 (12)'s hold.
+  founder may revert DEC-2358 to DEC-160 (12)'s hold. Taken by [DEC-2359](decisions/DEC-2359.md)'s
+  pair (claim #2354): a REST poll behind a `QuoteFeed` port, with the connection's own credential,
+  handing only sane, fresh quotes, until E21-44's pushed channel replaces it.
+- **E7-4 (executor, lane LV), from [DEC-2359](decisions/DEC-2359.md) item 7:** the quote feed reads
+  no instrument whose only exit is protection resting at the broker, so a resting stop or
+  take-profit is never repriced or re-protected from a quote. Decide whether one should be (a gap or
+  a stale stop), and if so add the instrument to `ExecutorState::quote_wanted` with its own DEC-77
+  pair.
 - **E7-4 (executor process), from the review of [DEC-2357](decisions/DEC-2357.md):** while a
   connection record does not read, `agents_of` follows every agent with a version-2 deployment,
   those deployed only on another account's connection included: journal noise, no risk. Skip an
@@ -4398,6 +4423,11 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
 - **E7-4 (executor), from the review of [DEC-2358](decisions/DEC-2358.md):** pin a discretionary
   exit with a limit of its own whose price vanishes mid-sequence: it falls back to its limit, and
   the sequence goes on, rather than ending and re-protecting as an exit with no limit does.
+- **E7-4 (executor), from the review of [DEC-2356](decisions/DEC-2356.md) item 8:** `closes_due`
+  holds the close only for a `Submitting` sell of ours a read does not list. A sell whose
+  submission answer is lost becomes `Unknown`, and a later read that omits it releases the close
+  beside it. Hold the close on any sell of ours journaled after the read's `taken_at`, whatever its
+  state, with its own DEC-77 pair.
 - **E7-4 A1c (stream K), from [DEC-2333](decisions/DEC-2333.md) item 3:** at §5.4's bound, re-place
   protection in an instrument the account kill switch closes for the held quantity less every sell
   not confirmed cancelled, placing nothing where that leaves none, with its own DEC-77 pair. Until

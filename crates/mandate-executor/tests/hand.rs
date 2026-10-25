@@ -4094,6 +4094,230 @@ fn an_oco_that_cannot_be_re_placed_is_kept_at_its_buffer_day() {
     );
 }
 
+/// The kept OCO of `an_oco_that_cannot_be_re_placed_is_kept_at_its_buffer_day` at its buffer
+/// day, 2026-12-14, journaled and alerted there.
+fn kept_at_the_buffer_day(ports: &mandate_executor::Ports<'_>) -> Shell {
+    let mut shell = started();
+    shell.fold_one(&stream_opened()).expect("folds");
+    for event in protected_position_events(2) {
+        shell
+            .fold_one(&event)
+            .expect("the protected position folds");
+    }
+    shell.profile = Some(unprotectable_profile());
+    let mut shell = shell.restart_ready(ports);
+    trading_day(&mut shell, ports, "2026-12-14", 9);
+    shell
+}
+
+/// Copies a `TradingDayStarted` for `date` onto the account stream and runs it.
+fn trading_day(
+    shell: &mut Shell,
+    ports: &mandate_executor::Ports<'_>,
+    date: &str,
+    ordinal: u32,
+) -> common::Ran {
+    let day = copied(
+        ACCOUNT_STREAM,
+        shell.head().0.saturating_add(1),
+        "TradingDayStarted",
+        with_clock(
+            &[("date", text(date))],
+            7_000_000 + i64::from(ordinal) * 86_400,
+        ),
+        &EventId(format!("{CLOCK_STREAM}-{ordinal}")),
+    );
+    shell.fold_one(&day).expect("the trading day folds");
+    shell.run(Input::Journal(day), ports)
+}
+
+/// Whether `ran` journals `expiry_unreplaceable` or alerts `protection_expiring`.
+fn alerts_the_kept_oco(ran: &common::Ran) -> bool {
+    ran.notifications.contains(&"protection_expiring")
+        || ran.drafts.iter().any(|d| {
+            d.event_type == "ProtectionChanged"
+                && d.payload
+                    .get("action")
+                    .and_then(mandate_canon::Value::as_str)
+                    == Some("expiry_unreplaceable")
+        })
+}
+
+/// DEC-2355 item 2 (accepted by the founder, 2026-10-25): a kept OCO is journaled and alerted
+/// once for its resting set. The next trading day, with the same orders resting, journals and
+/// alerts nothing, and neither does a restarted executor, since the fold keeps what was alerted.
+#[test]
+fn a_kept_oco_is_alerted_once_for_its_resting_set() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = kept_at_the_buffer_day(&ports);
+
+    let next = trading_day(&mut shell, &ports, "2026-12-15", 10);
+    assert!(!alerts_the_kept_oco(&next), "{:?}", next.draft_types());
+
+    let (mut restarted, _) = shell.restart(&ports);
+    let after = trading_day(&mut restarted, &ports, "2026-12-16", 11);
+    assert!(!alerts_the_kept_oco(&after), "{:?}", after.draft_types());
+}
+
+/// DEC-2355 item 2: a change to what rests alerts again. A second tranche placed beside the kept
+/// OCO, itself due, makes a new resting set, which the next trading day journals and alerts.
+#[test]
+fn a_changed_resting_set_is_alerted_again() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = kept_at_the_buffer_day(&ports);
+    let tranche = event(
+        ACCOUNT_STREAM,
+        shell.head().0.saturating_add(1),
+        "ProtectionChanged",
+        with_clock(
+            &[
+                ("instrument", text(AAPL)),
+                ("action", text("placed")),
+                ("orders", text("md-oco-2")),
+                ("qty", text("5")),
+                ("take_profit", text("170")),
+                ("stop", text("140")),
+                ("created_on", text("2026-09-22")),
+            ],
+            7_000_000 + 9 * 86_400 + 100,
+        ),
+    );
+    shell.fold_one(&tranche).expect("the second tranche folds");
+
+    let next = trading_day(&mut shell, &ports, "2026-12-15", 10);
+    assert!(alerts_the_kept_oco(&next), "{:?}", next.draft_types());
+}
+
+/// The kept OCO of [`kept_at_the_buffer_day`] with a second tranche, `md-oco-2`, placed beside
+/// it, the new resting set alerted on the next trading day, 2026-12-15.
+fn two_tranches_alerted(ports: &mandate_executor::Ports<'_>) -> Shell {
+    let mut shell = kept_at_the_buffer_day(ports);
+    let tranche = event(
+        ACCOUNT_STREAM,
+        shell.head().0.saturating_add(1),
+        "ProtectionChanged",
+        with_clock(
+            &[
+                ("instrument", text(AAPL)),
+                ("action", text("placed")),
+                ("orders", text("md-oco-2")),
+                ("qty", text("5")),
+                ("take_profit", text("170")),
+                ("stop", text("140")),
+                ("created_on", text("2026-09-22")),
+            ],
+            7_000_000 + 9 * 86_400 + 100,
+        ),
+    );
+    shell.fold_one(&tranche).expect("the second tranche folds");
+    let next = trading_day(&mut shell, ports, "2026-12-15", 10);
+    assert!(alerts_the_kept_oco(&next), "{:?}", next.draft_types());
+    shell
+}
+
+/// DEC-2355 item 1: a confirmed cancel of one of the kept orders changes the resting set, so the
+/// kept OCO left resting is alerted again on the next trading day.
+#[test]
+fn a_cancel_of_a_kept_order_alerts_the_rest_again() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = two_tranches_alerted(&ports);
+    let cancelled = event(
+        ACCOUNT_STREAM,
+        shell.head().0.saturating_add(1),
+        "ProtectionChanged",
+        with_clock(
+            &[
+                ("instrument", text(AAPL)),
+                ("action", text("cancelled")),
+                ("orders", text("md-oco-2")),
+                ("qty", text("5")),
+            ],
+            7_000_000 + 10 * 86_400 + 100,
+        ),
+    );
+    shell.fold_one(&cancelled).expect("the cancel folds");
+
+    let next = trading_day(&mut shell, &ports, "2026-12-16", 11);
+    assert!(alerts_the_kept_oco(&next), "{:?}", next.draft_types());
+}
+
+/// DEC-2355 item 1: a kept order the broker reports ended, here expired, leaves the resting set,
+/// so the kept OCO left resting is alerted again on the next trading day.
+#[test]
+fn a_kept_order_ended_at_the_broker_alerts_the_rest_again() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = two_tranches_alerted(&ports);
+    let expired = event(
+        ACCOUNT_STREAM,
+        shell.head().0.saturating_add(1),
+        "OrderStateChanged",
+        with_clock(
+            &[
+                ("client_order_id", text("md-oco-2")),
+                ("state", text("expired")),
+            ],
+            7_000_000 + 10 * 86_400 + 100,
+        ),
+    );
+    shell.fold_one(&expired).expect("the expiry folds");
+
+    let next = trading_day(&mut shell, &ports, "2026-12-16", 11);
+    assert!(alerts_the_kept_oco(&next), "{:?}", next.draft_types());
+}
+
+/// DEC-2355 item 1 (the independent review's probe): `re_cover`'s and `re_place`'s shortfall
+/// record, `expiry_unreplaceable` naming no order, written before the buffer day, is not the
+/// due-day alert, so the kept OCO is still journaled and alerted at its buffer day.
+#[test]
+fn a_shortfall_record_before_the_buffer_day_leaves_the_due_day_alert() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = started();
+    shell.fold_one(&stream_opened()).expect("folds");
+    for event in protected_position_events(2) {
+        shell
+            .fold_one(&event)
+            .expect("the protected position folds");
+    }
+    shell.profile = Some(unprotectable_profile());
+    let mut shell = shell.restart_ready(&ports);
+    let shortfall = event(
+        ACCOUNT_STREAM,
+        shell.head().0.saturating_add(1),
+        "ProtectionChanged",
+        with_clock(
+            &[
+                ("instrument", text(AAPL)),
+                ("action", text("expiry_unreplaceable")),
+            ],
+            7_000_000,
+        ),
+    );
+    shell.fold_one(&shortfall).expect("the shortfall folds");
+
+    let due = trading_day(&mut shell, &ports, "2026-12-14", 9);
+    assert!(alerts_the_kept_oco(&due), "{:?}", due.draft_types());
+}
+
 #[test]
 fn protection_is_not_re_placed_early() {
     let ids = TestIds;
@@ -6143,6 +6367,151 @@ fn a_released_unattributed_partial_fill_leaves_the_switch_nothing() {
         "{:?}",
         switched.draft_types()
     );
+}
+
+/// The agent's position of 10 whose OCO was cancelled before any switch, so no protective stop
+/// is left, with no quote ever seen; then its risk-limit switch, with no floor, and a tick: the
+/// shell and what the switch's step and the tick journaled and alerted.
+fn unpriced_switch(ports: &mandate_executor::Ports<'_>) -> (Shell, common::Ran, common::Ran) {
+    let mut shell = protected_position(ports);
+    for gone in [
+        event(
+            ACCOUNT_STREAM,
+            shell.head().0.saturating_add(1),
+            "ProtectionChanged",
+            with_clock(
+                &[
+                    ("instrument", text(AAPL)),
+                    ("action", text("cancelled")),
+                    ("orders", text("md-oco-1")),
+                    ("qty", text("10")),
+                ],
+                20,
+            ),
+        ),
+        event(
+            ACCOUNT_STREAM,
+            shell.head().0.saturating_add(2),
+            "OrderStateChanged",
+            with_clock(
+                &[
+                    ("client_order_id", text("md-oco-1")),
+                    ("state", text("canceled")),
+                ],
+                20,
+            ),
+        ),
+    ] {
+        shell.fold_one(&gone).expect("the OCO's cancel folds");
+    }
+    let switched = shell.run(
+        Input::Command(Command::KillSwitch {
+            scope: KillScope::Agent(agent(common::AGENT)),
+            initiator: Initiator::RiskLimit,
+            confirmation: None,
+            cause: None,
+        }),
+        ports,
+    );
+    let ticked = shell.run(Input::Tick(clock(40)), ports);
+    (shell, switched, ticked)
+}
+
+/// How many `exit_unpriced` records `ran` journaled and alerts it sent.
+fn unpriced_alerts(ran: &common::Ran) -> (usize, usize) {
+    let records = ran
+        .drafts
+        .iter()
+        .filter(|draft| {
+            draft.event_type == "ProtectionChanged"
+                && draft
+                    .payload
+                    .get("action")
+                    .and_then(mandate_canon::Value::as_str)
+                    == Some("exit_unpriced")
+        })
+        .count();
+    let alerts = ran
+        .notifications
+        .iter()
+        .filter(|key| **key == "exit_unpriced")
+        .count();
+    (records, alerts)
+}
+
+/// DEC-2361 item 1, rule 13: a switch's close that nothing but a missing price holds back, with
+/// no quote, floor or protective stop to name a limit from, is journaled `exit_unpriced` and
+/// alerted once, never silent, and later steps do not repeat it.
+#[test]
+fn a_switch_close_with_nothing_to_price_from_is_alerted_once() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (_, switched, ticked) = unpriced_switch(&ports);
+    assert!(
+        switched
+            .submissions()
+            .into_iter()
+            .all(|order| order.side != Side::Sell),
+        "nothing to name a limit from, so no sell goes: {:?}",
+        switched.draft_types()
+    );
+    assert_eq!(
+        unpriced_alerts(&switched),
+        (1, 1),
+        "{:?}",
+        switched.draft_types()
+    );
+    let switch = switched
+        .draft("KillSwitchActivated")
+        .map(|draft| draft.event_id.clone())
+        .expect("the switch is journaled");
+    let causes: Vec<Option<EventId>> = switched
+        .drafts
+        .iter()
+        .filter(|draft| {
+            draft.event_type == "ProtectionChanged"
+                && draft
+                    .payload
+                    .get("action")
+                    .and_then(mandate_canon::Value::as_str)
+                    == Some("exit_unpriced")
+        })
+        .map(|draft| draft.causation_id.clone())
+        .collect();
+    assert_eq!(
+        causes,
+        [Some(switch)],
+        "the record names the switch it alerts for, which is what folds it once (DEC-2361 item 2)"
+    );
+    assert_eq!(
+        unpriced_alerts(&ticked),
+        (0, 0),
+        "{:?}",
+        ticked.draft_types()
+    );
+}
+
+/// DEC-2361 item 2: the alert holds nothing back. Once a quote arrives the switch's close is
+/// raised and sells the agent's whole sub-ledger.
+#[test]
+fn a_switch_close_alerted_unpriced_sells_once_a_quote_arrives() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (mut shell, _, _) = unpriced_switch(&ports);
+    let quoted = shell.run(Input::Market(quote(AAPL, "155", "155.1", 41)), &ports);
+    let sold: Vec<String> = quoted
+        .submissions()
+        .into_iter()
+        .filter(|order| order.side == Side::Sell)
+        .map(|order| order.qty.to_string())
+        .collect();
+    assert_eq!(sold, ["10"], "{:?}", quoted.draft_types());
 }
 
 /// The buffer day's replacement of the protected 10 after `before` folds onto it: the quantity
