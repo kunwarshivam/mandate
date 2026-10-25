@@ -102,17 +102,17 @@ fn a_wanted_instrument_is_read_at_once_then_once_per_step() -> Result<(), Error>
     let both = BTreeSet::from([aapl()?, msft.clone()]);
     let mut poll = QuotePoll::new(Duration::from_secs(5));
     let t = 1_790_000_000;
-    assert_eq!(poll.due(&both, secs(t)?), vec![aapl()?, msft.clone()]);
-    assert_eq!(poll.due(&both, secs(t + 4)?), Vec::<InstrumentId>::new());
-    assert_eq!(poll.due(&both, secs(t + 5)?), vec![aapl()?, msft.clone()]);
+    assert_eq!(poll.due(&both, secs(t)?)?, vec![aapl()?, msft.clone()]);
+    assert_eq!(poll.due(&both, secs(t + 4)?)?, Vec::<InstrumentId>::new());
+    assert_eq!(poll.due(&both, secs(t + 5)?)?, vec![aapl()?, msft.clone()]);
     let only_aapl = BTreeSet::from([aapl()?]);
     assert_eq!(
-        poll.due(&only_aapl, secs(t + 6)?),
+        poll.due(&only_aapl, secs(t + 6)?)?,
         Vec::<InstrumentId>::new()
     );
-    assert_eq!(poll.due(&both, secs(t + 7)?), vec![msft]);
+    assert_eq!(poll.due(&both, secs(t + 7)?)?, vec![msft]);
     assert_eq!(
-        poll.due(&BTreeSet::new(), secs(t + 20)?),
+        poll.due(&BTreeSet::new(), secs(t + 20)?)?,
         Vec::<InstrumentId>::new()
     );
     Ok(())
@@ -127,31 +127,16 @@ fn a_quote_is_handed_only_when_sane() -> Result<(), Error> {
     let noon = now.secs();
     let before = "2026-09-21T14:59:58Z";
     for (bid, ask) in [("150", "150.2"), ("150", "150"), ("150", "151.5")] {
-        let quotes = feed(answer(bid, ask, before), now)?;
-        let observation = observed(bid, ask, noon - 2)?;
-        assert_eq!(
-            quotes.read(&aapl()?, now),
-            Ok(observation.clone()),
-            "{bid} × {ask}"
-        );
-        assert_eq!(
-            quotes.observe(&aapl()?, now),
-            Some(observation),
-            "{bid} × {ask}"
-        );
+        let read = feed(answer(bid, ask, before), now)?.observe(&aapl()?, now);
+        assert_eq!(read, Ok(observed(bid, ask, noon - 2)?), "{bid} × {ask}");
     }
     for (bid, ask) in [("150", "151.6"), ("150.2", "150")] {
-        let quotes = feed(answer(bid, ask, before), now)?;
-        assert_eq!(
-            quotes.read(&aapl()?, now),
-            Err("quote_insane"),
-            "{bid} × {ask}"
-        );
-        assert_eq!(quotes.observe(&aapl()?, now), None, "{bid} × {ask}");
+        let read = feed(answer(bid, ask, before), now)?.observe(&aapl()?, now);
+        assert_eq!(read, Err("quote_insane"), "{bid} × {ask}");
     }
     let ahead = "2026-09-21T15:00:00.200Z";
     assert_eq!(
-        feed(answer("150", "150.2", ahead), now)?.read(&aapl()?, now),
+        feed(answer("150", "150.2", ahead), now)?.observe(&aapl()?, now),
         Ok(observed("150", "150.2", noon)?),
         "a quote stamped ahead of the clock is observed at the clock's now"
     );
@@ -197,10 +182,8 @@ fn a_quote_that_cannot_be_read_hands_nothing() -> Result<(), Error> {
         ("one-sided", answer("0", "150.2", "2026-09-21T14:59:58Z")),
         ("garbage", not_quote("not json")),
     ] {
-        let quotes = feed(response, now)?;
-        let read = quotes.read(&aapl()?, now);
+        let read = feed(response, now)?.observe(&aapl()?, now);
         assert_eq!(read, Err("quote_unread"), "{case}");
-        assert_eq!(quotes.observe(&aapl()?, now), None, "{case}");
     }
     Ok(())
 }

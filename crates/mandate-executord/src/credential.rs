@@ -421,7 +421,9 @@ impl<D: DataTransport, P: Pause> AlpacaQuotes<D, P> {
             runtime,
         })
     }
+}
 
+impl<D: DataTransport, P: Pause> QuoteFeed for AlpacaQuotes<D, P> {
     /// The instrument's latest quote at `now`: its bid, ask and sizes as the host answered them,
     /// observed at the earlier of its own stamp and `now`, so a quote stamped ahead of the clock
     /// never reads younger than it is.
@@ -431,7 +433,7 @@ impl<D: DataTransport, P: Pause> AlpacaQuotes<D, P> {
     /// than [`QuoteBounds::max_age`]; `quote_insane` for one that is not sane as trading spec §8.2
     /// says, `0 < bid ≤ ask` and the ask no higher than `bid × (1 + max_spread)` rounded down.
     /// Neither code names the instrument or a price.
-    pub fn read(
+    fn observe(
         &self,
         instrument: &InstrumentId,
         now: UtcNanos,
@@ -458,11 +460,5 @@ impl<D: DataTransport, P: Pause> AlpacaQuotes<D, P> {
             sane: true,
             observed_at: RiskClock::from_secs(quote.at.min(now).secs()),
         })
-    }
-}
-
-impl<D: DataTransport, P: Pause> QuoteFeed for AlpacaQuotes<D, P> {
-    fn observe(&self, instrument: &InstrumentId, now: UtcNanos) -> Option<MarketObservation> {
-        self.read(instrument, now).ok()
     }
 }
