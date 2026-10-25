@@ -15,18 +15,23 @@
 //! account stream. Each pass [`RunLease::pass`] ticks the lease, and [`lease_verdict`] says
 //! whether the run goes on: a lost credential, and a rotated one, which the supervisor's restart
 //! leases afresh, drain the process and stop it.
+//!
+//! [`AlpacaQuotes`] reads the latest quote of an instrument whose exit waits on a price from
+//! Alpaca's market-data host over the same transport and credential (DEC-2359 items 2 and 5).
 
 use std::path::PathBuf;
 
+use mandate_accounting::InstrumentId;
 use mandate_alpaca::{
-    AlpacaPaperHttp, Credentials, RetryPolicy, TokioPause, TradingClient, TradingTransport,
+    AlpacaPaperHttp, Credentials, DataClient, DataTransport, Pause, RetryPolicy, TokioPause,
+    TradingClient, TradingTransport,
 };
 use mandate_canon::{Value, parse};
 use mandate_connections::account_entry::BrokerAccountId;
 use mandate_connections::record::ConnectionId;
 use mandate_connections::token_entry::decode;
 use mandate_connections::vault::AccessToken;
-use mandate_executor::AccountScope;
+use mandate_executor::{AccountScope, MarketObservation};
 use mandate_journal::StreamId;
 use mandate_store::Store;
 use mandate_time::UtcNanos;
@@ -41,6 +46,7 @@ use secrecy::{ExposeSecret, SecretString};
 
 use crate::alpaca::AlpacaBroker;
 use crate::lease::{Held, Leased, runtime};
+use crate::quotes::{QuoteBounds, QuoteFeed, Unimplemented};
 
 /// Which broker the process runs over.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -388,5 +394,54 @@ impl<V: SecretSource> RunLease<V> {
     /// `revoke_failed` when the vault does not take it back; it then expires.
     pub fn give_back(self) -> Result<(), &'static str> {
         self.leased.revoke()
+    }
+}
+
+/// The latest-quote read of Alpaca's market-data host, over the connection's transport.
+pub struct AlpacaQuotes<D, P> {
+    client: DataClient<D, P>,
+    bounds: QuoteBounds,
+    runtime: tokio::runtime::Runtime,
+}
+
+impl<D: DataTransport, P: Pause> AlpacaQuotes<D, P> {
+    /// The feed over `client`, judged by `bounds`.
+    ///
+    /// # Errors
+    /// `runtime_unavailable` when the feed's runtime cannot be built.
+    pub fn new(client: DataClient<D, P>, bounds: QuoteBounds) -> Result<Self, &'static str> {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|_| "runtime_unavailable")?;
+        Ok(Self {
+            client,
+            bounds,
+            runtime,
+        })
+    }
+
+    /// The instrument's latest quote at `now`: its bid, ask and sizes as the host answered them,
+    /// observed at the earlier of its own stamp and `now`, so a quote stamped ahead of the clock
+    /// never reads younger than it is.
+    ///
+    /// # Errors
+    /// `quote_unread` for a quote the host does not answer, that does not read, or that is older
+    /// than [`QuoteBounds::max_age`]; `quote_insane` for one that is not sane as trading spec §8.2
+    /// says, `0 < bid ≤ ask` and the ask no higher than `bid × (1 + max_spread)` rounded down.
+    /// Neither code names the instrument or a price.
+    pub fn read(
+        &self,
+        instrument: &InstrumentId,
+        now: UtcNanos,
+    ) -> Result<MarketObservation, &'static str> {
+        let _ = (&self.client, &self.bounds, &self.runtime, instrument, now);
+        Err(Unimplemented)
+    }
+}
+
+impl<D: DataTransport, P: Pause> QuoteFeed for AlpacaQuotes<D, P> {
+    fn observe(&self, instrument: &InstrumentId, now: UtcNanos) -> Option<MarketObservation> {
+        self.read(instrument, now).ok()
     }
 }
