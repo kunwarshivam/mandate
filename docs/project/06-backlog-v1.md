@@ -3141,8 +3141,10 @@ enables `live` (ES-23, OPS-5).
   - Lane V2, a dependency of K2b (DEC-2336 risks): `mandate-executord` refuses to start unless
     `MANDATE_SUBJECT_ACCOUNT` is the lowercase hex of its connection id's bytes, beside #2196's
     namespace check, as DEC-1177 item 6 has the token exchange do.
-  - After K2b: the chart's Deployment executor moves from `default` to its connection's `<hex>`
-    account, once the manager owns every executor.
+  - Done ([DEC-2365](decisions/DEC-2365.md)): a paper executor, the one that reaches the vault,
+    runs only as the pod the manager starts as its connection's `<hex>` account, and the chart
+    refuses to render it without the manager. The fixture broker's Deployment executor stays on
+    `default`, with no connection and no credential.
   - **The role provisioner** ([DEC-2350](decisions/DEC-2350.md), DEC-2630 item 7; journal spec v0.77
     §9.33). Nothing makes a connection's Kubernetes-auth roles today, so every exchange's and every
     managed executor's login is refused. Spec first (this row's first PR), then: the vault side with
