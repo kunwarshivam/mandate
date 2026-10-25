@@ -230,7 +230,6 @@ fn member<'v>(row: &'v Value, name: &str) -> Option<&'v Value> {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_passkey_start_commits_the_request_then_its_assertion_and_stores_the_raw_assertion() {
     let w = world();
     let issued = w.challenge();
@@ -295,7 +294,6 @@ fn a_passkey_start_commits_the_request_then_its_assertion_and_stores_the_raw_ass
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_refused_passkey_start_appends_and_stores_nothing_and_keeps_the_challenge() {
     let w = world();
     let issued = w.challenge();
@@ -346,7 +344,6 @@ fn asserted_before(w: &mut World, records: &[(&str, u32)]) {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_start_on_a_stream_that_breaks_rule_254_is_step_up_missing_and_appends_nothing() {
     let earlier = "01J9ZQ4B7Y8K3M5N6P7Q8R9S0V";
     for records in [
@@ -370,7 +367,6 @@ fn a_start_on_a_stream_that_breaks_rule_254_is_step_up_missing_and_appends_nothi
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn passkey_evidence_without_an_assertion_is_step_up_missing() {
     let w = world();
     let issued = w.challenge();
@@ -440,7 +436,6 @@ fn crockford40(bytes: &[u8]) -> String {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_cli_confirm_start_still_commits_the_request_alone_while_the_interim_lasts() {
     let w = world();
     let issued = w.challenge();

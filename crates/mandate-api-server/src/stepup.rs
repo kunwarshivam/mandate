@@ -45,6 +45,20 @@ pub struct Asserted {
 }
 
 impl Asserted {
+    pub(crate) fn new(
+        challenge: String,
+        credential: String,
+        sign_count: u32,
+        assertion: Vec<u8>,
+    ) -> Self {
+        Self {
+            challenge,
+            credential,
+            sign_count,
+            assertion,
+        }
+    }
+
     /// The challenge's ULID text, the authorized event's `step_up.assertion_id`.
     pub fn challenge(&self) -> &str {
         &self.challenge
@@ -71,8 +85,6 @@ pub enum Unverified {
     /// The §3.5 code of the first check that failed, or `journal_unavailable` for a read that
     /// could not answer.
     Code(ProblemCode),
-    /// The passkey binding is a stub until its story implements it (DEC-77).
-    Unimplemented { story: &'static str },
 }
 
 /// Judges evidence a call carries for one action.

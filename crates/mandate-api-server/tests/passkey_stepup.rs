@@ -264,7 +264,6 @@ fn members(asserted: &Asserted) -> (String, String, u32, Vec<u8>) {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_valid_assertion_counts_once_returns_its_record_and_drops_the_challenge() {
     for signer in [Signer::es256(), Signer::ed25519()] {
         let w = world_with(signer);
@@ -289,7 +288,6 @@ fn a_valid_assertion_counts_once_returns_its_record_and_drops_the_challenge() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_second_assertion_on_one_challenge_is_missing() {
     let w = world();
     counts(&w, &w.ask());
@@ -302,7 +300,6 @@ fn a_second_assertion_on_one_challenge_is_missing() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn the_stored_assertion_re_verifies_against_the_credential() {
     let w = world();
     let counted = w.judge(&w.ask()).map(|a| a.map(|a| a.assertion().to_vec()));
@@ -332,7 +329,6 @@ fn the_stored_assertion_re_verifies_against_the_credential() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn an_unknown_challenge_is_missing() {
     let w = world();
     let mut ask = w.ask();
@@ -341,7 +337,6 @@ fn an_unknown_challenge_is_missing() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_challenge_outside_its_window_is_stale() {
     let w = world();
     for now in [ISSUED - 1, ISSUED + LIFE, ISSUED + LIFE + 1] {
@@ -367,7 +362,6 @@ fn spent(rows: &mut Rows, challenge: &str) {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn evidence_authenticated_at_another_instant_than_the_challenge_s_is_stale() {
     let w = world();
     for secs in [ISSUED - 1, ISSUED + 1, ISSUED + 30] {
@@ -379,7 +373,6 @@ fn evidence_authenticated_at_another_instant_than_the_challenge_s_is_stale() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_challenge_an_event_already_spent_is_reused() {
     let mut w = world();
     spent(&mut w.rows, CHALLENGE);
@@ -387,7 +380,6 @@ fn a_challenge_an_event_already_spent_is_reused() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn cli_confirm_evidence_for_a_kind_it_does_not_serve_is_the_method_refusal() {
     let w = world();
     let mut ask = w.ask();
@@ -398,7 +390,6 @@ fn cli_confirm_evidence_for_a_kind_it_does_not_serve_is_the_method_refusal() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_challenge_bound_to_another_principal_workspace_or_digest_is_mismatch() {
     let w = world();
     let mut other_principal = w.ask();
@@ -427,7 +418,6 @@ fn a_challenge_bound_to_another_principal_workspace_or_digest_is_mismatch() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn the_first_failing_check_answers_in_consume_s_order() {
     let w = world();
     let mut unknown_and_stale = w.ask();
@@ -471,7 +461,6 @@ fn the_first_failing_check_answers_in_consume_s_order() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_credential_not_the_principal_s_held_and_past_cool_off_is_missing() {
     let unknown = world();
     let mut ask = unknown.ask();
@@ -503,7 +492,6 @@ fn a_credential_not_the_principal_s_held_and_past_cool_off_is_missing() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_credential_past_cool_off_at_its_end_counts() {
     let mut w = world();
     w.rows = Rows::opened();
@@ -516,7 +504,6 @@ fn a_credential_past_cool_off_at_its_end_counts() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_counter_not_above_the_last_is_missing() {
     let mut enrolled_at_nine = world();
     enrolled_at_nine.rows = Rows::opened();
@@ -547,7 +534,6 @@ fn a_counter_not_above_the_last_is_missing() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_credential_stream_the_fold_cannot_read_is_journal_unavailable() {
     let mut w = world();
     w.rows.hosted(
@@ -580,7 +566,6 @@ fn broken_by(asserted_records: &[(&str, u32)]) -> World {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_holder_whose_assertions_break_rule_254_has_no_passkey_that_counts() {
     let below_the_last = broken_by(&[(UNKNOWN_CHALLENGE, 3)]);
     refused(
@@ -599,7 +584,6 @@ fn a_holder_whose_assertions_break_rule_254_has_no_passkey_that_counts() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_member_whose_records_break_rule_251_has_no_passkey_that_counts() {
     let mut w = world();
     enrol(
@@ -611,7 +595,6 @@ fn a_member_whose_records_break_rule_251_has_no_passkey_that_counts() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_tampered_assertion_is_missing() {
     let w = world();
     let signed = w.signed(9);
@@ -630,7 +613,6 @@ fn a_tampered_assertion_is_missing() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn passkey_evidence_without_an_assertion_is_missing_and_cli_confirm_with_one_is_too() {
     let w = world();
     let mut bare = w.ask();
@@ -668,7 +650,6 @@ fn passkey_evidence_alone_is_missing_at_verify() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_credential_enrolled_at_version_1_never_counts() {
     let mut w = world();
     w.rows = Rows::opened();
@@ -678,7 +659,6 @@ fn a_credential_enrolled_at_version_1_never_counts() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_backup_eligible_flag_other_than_the_registration_s_is_missing() {
     let mut eligible = world();
     eligible.rows = Rows::opened();
@@ -700,7 +680,6 @@ fn a_backup_eligible_flag_other_than_the_registration_s_is_missing() {
 }
 
 #[test]
-#[ignore = "pending E9-4"]
 fn a_backup_eligible_flag_the_registration_recorded_counts() {
     let mut w = world();
     w.rows = Rows::opened();
