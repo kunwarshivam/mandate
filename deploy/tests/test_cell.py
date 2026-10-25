@@ -48,7 +48,12 @@ SECTION_3_1 = {
     "journal-verify": {("postgres", "TCP", 5432)},
     "connect-check": {("postgres", "TCP", 5432)},
     "runtime": {("postgres", "TCP", 5432), ("model-gateway", "TCP", 8080), ("artifact-store", "TCP", 443)},
-    "executor": {("postgres", "TCP", 5432), ("vault", "TCP", 8200), ("broker", "TCP", 443)},
+    "executor": {
+        ("postgres", "TCP", 5432),
+        ("vault", "TCP", 8200),
+        ("broker", "TCP", 443),
+        ("market-data", "TCP", 443),
+    },
     "token-exchange": {("vault", "TCP", 8200), ("token-host", "TCP", 443)},
     "scheduler": {("postgres", "TCP", 5432), ("time", "UDP", 123)},
     "model-gateway": {
