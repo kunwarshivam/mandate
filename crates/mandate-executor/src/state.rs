@@ -180,16 +180,23 @@ pub(crate) struct AccountSwitch {
     pub(crate) reference: AccountRef,
     pub(crate) at: RiskClock,
     pub(crate) requests: BTreeMap<InstrumentId, (u64, Seq)>,
+    /// The protective orders placed at §5.4's bound in an instrument the switch closes, from their
+    /// `placed` records while it holds (DEC-2333 item 3, DEC-2356): cancelled by id only on a read
+    /// that shows no other sell working in their instrument, so the close waits on their confirmed
+    /// cancel and never goes beside them.
+    pub(crate) bound: BTreeSet<ClientOrderId>,
 }
 
 /// One broker read noted after the account switch's cancel-all was answered (DEC-2333 item 2,
 /// DEC-2337 item 3): the head it was taken at, which [`crate::kill::closes_due`] holds to the
 /// switch's, the sells it showed working in each instrument, by our id or `None` for
-/// one that is not ours, and, for a reconciliation, the positions it showed.
+/// one that is not ours, what those not ours may still sell in each instrument (DEC-2356), and,
+/// for a reconciliation, the positions it showed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SwitchRead {
     pub(crate) taken_at: Seq,
     pub(crate) sells: BTreeMap<InstrumentId, Vec<Option<ClientOrderId>>>,
+    pub(crate) foreign: BTreeMap<InstrumentId, Vec<Qty>>,
     pub(crate) held: Option<BTreeMap<InstrumentId, SignedQty>>,
 }
 

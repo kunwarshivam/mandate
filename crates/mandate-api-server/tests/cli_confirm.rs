@@ -837,3 +837,144 @@ fn the_deployment_names_principals_from_the_fixed_path_only() {
         assert_eq!(Fixed.names(principal), names_at(fixed, principal));
     }
 }
+
+/// Every step-up kind but `approve` and `connection`, written out here from the identity spec's
+/// list rather than read from `StepUpActionKind::ALL`, so a kind added or admitted without a
+/// decision fails (DEC-2125 item 1).
+const REFUSED_KINDS: [StepUpActionKind; 16] = [
+    StepUpActionKind::ConfirmVersion,
+    StepUpActionKind::Deploy,
+    StepUpActionKind::Resume,
+    StepUpActionKind::Stop,
+    StepUpActionKind::Acknowledge,
+    StepUpActionKind::OwnerExit,
+    StepUpActionKind::KillSwitchPrivilege,
+    StepUpActionKind::Disclosure,
+    StepUpActionKind::PolicyLoosen,
+    StepUpActionKind::MemberInvite,
+    StepUpActionKind::RoleGrant,
+    StepUpActionKind::ClientConnect,
+    StepUpActionKind::CredentialEnrol,
+    StepUpActionKind::NotificationAddress,
+    StepUpActionKind::BreakGlassApprove,
+    StepUpActionKind::LiftHold,
+];
+
+/// A world whose one challenge is the owner's for a connect: the start route's digest, here any
+/// digest the challenge binds, issued in `HOME` at `ISSUED`.
+fn connect_world() -> World {
+    let challenges = Arc::new(Challenges::default());
+    let action = stepup::Action {
+        kind: StepUpActionKind::Connection,
+        digest: Digest::of(b"the connect's workspace and disclosure"),
+    };
+    let record = challenges
+        .issue(
+            &context(OWNER, StepUpActionKind::Connection, HOME),
+            action,
+            AssertionId(CHALLENGE.to_owned()),
+            at(ISSUED),
+        )
+        .expect("the owner obtains a connect's challenge");
+    World {
+        port: CliConfirm {
+            challenges,
+            links: Arc::new(Linked(vec![OWNER])),
+        },
+        record,
+        action,
+    }
+}
+
+/// The owner's confirmation of a connect's challenge, kind `connection`, as one control row.
+fn connect_confirmed(w: &World) -> Vec<StoredEvent> {
+    let confirmation = Confirmation {
+        kind: "connection",
+        ..Confirmation::of(&w.record)
+    };
+    vec![confirmation.row(1, "01JAA2P4A000000000000000C1")]
+}
+
+/// DEC-2125 item 1: a connect confirmed with the code shown verifies, once.
+#[test]
+fn a_confirmed_connect_verifies_once() {
+    let w = connect_world();
+    let control = connect_confirmed(&w);
+    assert_eq!(w.grant(&control), Ok(()));
+    assert_eq!(
+        w.grant(&control),
+        Err(ProblemCode::StepUpMissing),
+        "the challenge is dropped once a connect verifies with it"
+    );
+}
+
+/// A connect's confirmation with another code, a challenge an earlier event already carries, or
+/// presented once its life is over, is refused as an approval's is.
+#[test]
+fn a_connect_with_a_wrong_replayed_or_expired_code_is_refused() {
+    let w = connect_world();
+    let mut wrong = Confirmation {
+        kind: "connection",
+        ..Confirmation::of(&w.record)
+    };
+    wrong.code = swapped(&wrong.code);
+    assert_eq!(
+        w.grant(&[wrong.row(1, "01JAA2P4A000000000000000C1")]),
+        Err(ProblemCode::StepUpMissing),
+        "another code"
+    );
+    let w = connect_world();
+    let mut replayed = connect_confirmed(&w);
+    replayed.insert(0, used(1, CHALLENGE));
+    replayed[1].seq = 2;
+    assert_eq!(
+        w.grant(&replayed),
+        Err(ProblemCode::StepUpReused),
+        "replayed"
+    );
+    let w = connect_world();
+    let expired = Ask {
+        now: ISSUED + LIFE,
+        ..w.ask()
+    };
+    assert_eq!(
+        w.judge(&expired, &connect_confirmed(&w)),
+        Err(ProblemCode::StepUpStale),
+        "expired"
+    );
+}
+
+/// Every kind but `approve` and `connection` is still `step_up_method`, whatever its confirmation
+/// says; the list is the test's own, and with the two admitted it is every kind there is.
+#[test]
+fn every_kind_but_approve_and_connection_is_still_refused() {
+    let mut listed: Vec<StepUpActionKind> = REFUSED_KINDS.to_vec();
+    listed.extend([StepUpActionKind::Approve, StepUpActionKind::Connection]);
+    let mut all = StepUpActionKind::ALL.to_vec();
+    listed.sort_by_key(|k| k.code());
+    all.sort_by_key(|k| k.code());
+    assert_eq!(
+        listed, all,
+        "the refused list and the two admitted are every kind"
+    );
+    let tenant = context(OWNER, StepUpActionKind::Connection, HOME);
+    for kind in REFUSED_KINDS {
+        let w = connect_world();
+        let control = connect_confirmed(&w);
+        let judged = Judged {
+            tenant: &tenant,
+            control: &control,
+            now: at(ISSUED + 30),
+        };
+        let action = Action {
+            kind,
+            digest: w.action.digest,
+        };
+        assert_eq!(
+            w.port
+                .verify(&evidence(CHALLENGE, ISSUED), &action, &judged),
+            Err(ProblemCode::StepUpMethod),
+            "{kind:?}"
+        );
+    }
+}

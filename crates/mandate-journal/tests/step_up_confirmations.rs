@@ -70,12 +70,17 @@ fn the_confirmation_section_holds_every_part() {
     let section = section();
     assert_eq!(
         text(&section, "spec"),
-        "docs/specs/journal.md v0.62 §9.29 (DEC-2104)"
+        "docs/specs/journal.md v0.82 §9.29 (DEC-2104, DEC-2125)"
     );
     let drafts = section.get("drafts").and_then(Value::as_object).unwrap();
     let names: Vec<&str> = drafts.keys().map(|k| k.as_str()).collect();
     assert_eq!(names, ["step_up_confirmed"], "one base draft");
-    for (part, at_least) in [("invalid_drafts", 28), ("valid_drafts", 5), ("streams", 4)] {
+    for (part, at_least) in [
+        ("invalid_drafts", 31),
+        ("valid_drafts", 5),
+        ("connection_drafts", 3),
+        ("streams", 4),
+    ] {
         let n = list(&section, part).len();
         assert!(n >= at_least, "{n} {part}; never fewer than {at_least}");
     }
@@ -95,6 +100,23 @@ fn the_base_and_every_valid_confirmation_draft_parse() {
     for case in list(&section, "valid_drafts") {
         if let Err(e) = Draft::parse(&draft(&section, case)) {
             failed.push(format!("valid {}: {e:?}", text(case, "name")));
+        }
+    }
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
+}
+
+/// v0.82 (DEC-2125): a confirmation of a paper OAuth connect, kind `connection`, parses as the
+/// record; before the validator admits the kind it refuses each at `payload.action_kind`, the
+/// answer this test fails on.
+#[test]
+#[ignore = "pending E10-13"]
+fn every_connection_confirmation_draft_parses() {
+    let section = section();
+    let mut failed = Vec::new();
+    for case in list(&section, "connection_drafts") {
+        match Draft::parse(&draft(&section, case)) {
+            Ok(d) if d.event_type() == EVENT_TYPE => {}
+            got => failed.push(format!("{}: {:?}", text(case, "name"), got.err())),
         }
     }
     assert!(failed.is_empty(), "{}", failed.join("\n"));
