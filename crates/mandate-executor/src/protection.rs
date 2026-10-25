@@ -2298,9 +2298,7 @@ fn protectable(view: &ExecutorState, instrument: &InstrumentId) -> Result<Qty, E
     for (agent, own) in &lots {
         let gave = released.get(agent).copied().unwrap_or(Qty::ZERO);
         let kept = own.checked_add(SignedQty::from(gave).negated())?;
-        if kept > SignedQty::ZERO {
-            agents = agents.checked_add(kept.abs())?;
-        }
+        agents = agents.checked_add(kept.max(SignedQty::ZERO).abs())?;
     }
     let total = released
         .values()
