@@ -379,7 +379,7 @@ pub fn drill(seeded: bool) -> Result<Verdict> {
 }
 
 /// Runs `all` as one gestures Job of the `control` process, run `{id}{suffix}`.
-fn gestures(
+pub(super) fn gestures(
     id: &str,
     suffix: &str,
     all: &[Gesture],

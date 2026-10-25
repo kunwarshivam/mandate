@@ -11,7 +11,7 @@
 # DEC-1190 scopes the jobs to the diff: `select` runs `cargo xtask ci select`, which takes the
 # changed paths, the crates owning them or naming them in their sources, and every crate built on
 # those, and says which jobs the diff needs. `fast-test`, `fast-pending`, `fast-python`,
-# `fast-portable`, `fast-rh-sim-live`, `full-checks`, `full-checks-2`, `full-checks-3`, `schema-mutants` and the nine cell jobs
+# `fast-portable`, `fast-rh-sim-live`, `full-checks`, `full-checks-2`, `full-checks-3`, `schema-mutants` and the ten cell jobs
 # (DEC-2609: a crate the cell's images hold or are built on, or `deploy/` and the cell's Python
 # pins) start only when it says so, and inside them xtask runs only the selected crates' tests. `fast-lint`, the mutation plan
 # and its shards run on every ready pull request as before. A build input, CI, xtask, any
@@ -531,9 +531,9 @@ jobs:
   # both charts, runs the chart's invariant tests, brings up a k3d cluster, installs the chart from
   # the image this change built, runs its drills (each again with its bug planted, which each
   # must catch, is `cell-seeded`'s; the journal's drills run in `cell-journal` and `cell-failover`, and the kill
-  # switch's in `cell-kill-switch` and the executor's and the vault's in `cell-executor` and `cell-vault`, below); `cell demo --no-web`, an upgrade of every release in place, is `cell-upgrade`'s (DEC-464). Not yet in `full` (DEC-993 item 10); the chart's invariants are in
-  # `fast-python`. It and the eight cell jobs below start only when `select` says the diff reaches
-  # the cell (DEC-2609); main's nightly run has no diff base and runs all nine.
+  # switch's in `cell-kill-switch` and the executor's, the vault's and the token exchange's in `cell-executor`, `cell-vault` and `cell-exchange`, below); `cell demo --no-web`, an upgrade of every release in place, is `cell-upgrade`'s (DEC-464). Not yet in `full` (DEC-993 item 10); the chart's invariants are in
+  # `fast-python`. It and the nine cell jobs below start only when `select` says the diff reaches
+  # the cell (DEC-2609); main's nightly run has no diff base and runs all ten.
   cell:
     needs: select
     if: needs.select.outputs.cell == 'true'
@@ -912,6 +912,48 @@ jobs:
           save-if: false
           cache-on-failure: true
       - run: cargo xtask ci cell-vault
+
+  # E10-22 (DEC-2063): the token-exchange drill, plain and seeded, on its own cell, so each cell
+  # job stays within its ten minutes (DEC-464). Not required, as `cell` is not. It restores
+  # `cell`'s cache and saves none of its own.
+  cell-exchange:
+    needs: select
+    if: needs.select.outputs.cell == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      MANDATE_CELL_REQUIRED: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.19"
+          enable-cache: true
+      - name: Install k3d, helm and kubeconform (checksum-verified)
+        run: |
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o k3d "https://github.com/k3d-io/k3d/releases/download/v${K3D_VERSION}/k3d-linux-amd64"
+          echo "${K3D_SHA256}  k3d" | sha256sum --check
+          sudo install k3d /usr/local/bin/ && rm k3d
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o helm.tgz "https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz"
+          echo "${HELM_SHA256}  helm.tgz" | sha256sum --check
+          tar xzf helm.tgz linux-amd64 && cat linux-amd64/helm > helm
+          sudo install helm /usr/local/bin/ && rm -r helm helm.tgz linux-amd64
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o kubeconform.tgz "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          echo "${KUBECONFORM_SHA256}  kubeconform.tgz" | sha256sum --check
+          tar xzf kubeconform.tgz kubeconform && sudo install kubeconform /usr/local/bin/ && rm kubeconform kubeconform.tgz
+      - name: Install the pinned Rust toolchain (rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: cell
+          save-if: false
+          cache-on-failure: true
+      - run: cargo xtask ci cell-exchange
 
   # DEC-464: `cell`'s drills again, each with its bug planted, which each must catch, on its own
   # cell, so `cell` stays within its ten minutes. Not required, as `cell` is not. It restores

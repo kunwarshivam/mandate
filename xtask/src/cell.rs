@@ -26,6 +26,7 @@ use crate::admission_drill;
 use crate::{output, sh};
 use web::web_run;
 
+pub mod exchange;
 pub mod executor;
 pub mod scenario;
 pub mod web;
@@ -190,6 +191,10 @@ pub enum Drill {
     /// no policy of the cell's holds a wildcard but DEC-2349's prefix grants, each in its own policy
     /// (E21-32, DEC-2022 item 3).
     Vault,
+    /// The real token-exchange pod the deployment manager starts redeems a code the cell's
+    /// `oauth-fixture` issued, after a connect the CLI confirmed and the API started, against the
+    /// cell's vault (E10-22, DEC-2063); see [`exchange`].
+    Exchange,
 }
 
 pub const DRILLS: [Drill; 4] = [Drill::Boot, Drill::Journal, Drill::Egress, Drill::Compose];
@@ -215,6 +220,10 @@ pub const EXECUTOR_DRILLS: [Drill; 1] = [Drill::Executor];
 /// own, so each cell job stays within its ten minutes (DEC-464, DEC-2616).
 pub const VAULT_DRILLS: [Drill; 1] = [Drill::Vault];
 
+/// The token-exchange drill (E10-22, DEC-2063), which `cargo xtask ci cell-exchange` runs on a cell
+/// of its own, so each cell job stays within its ten minutes (DEC-464).
+pub const EXCHANGE_DRILLS: [Drill; 1] = [Drill::Exchange];
+
 impl Drill {
     pub fn name(self) -> &'static str {
         match self {
@@ -229,6 +238,7 @@ impl Drill {
             Self::Archive => "archive",
             Self::Executor => "executor",
             Self::Vault => "vault",
+            Self::Exchange => "exchange",
         }
     }
 
@@ -240,6 +250,7 @@ impl Drill {
             .chain(KILL_SWITCH_DRILLS)
             .chain(EXECUTOR_DRILLS)
             .chain(VAULT_DRILLS)
+            .chain(EXCHANGE_DRILLS)
             .find(|d| d.name() == name)
             .with_context(|| format!("no drill named `{name}`"))
     }
@@ -275,6 +286,9 @@ impl Drill {
             Self::Vault => {
                 "the runtime's policy rewritten to read every connection's token through a wildcard"
             }
+            Self::Exchange => {
+                "the connect's step-up never confirmed in the CLI, so the API must refuse its start"
+            }
         }
     }
 }
@@ -295,6 +309,7 @@ impl Drill {
             Self::Archive => "is not in the archive",
             Self::Executor => "no executor pod",
             Self::Vault => "wildcard in mandate-runtime",
+            Self::Exchange => "step_up_missing",
         }
     }
 }
@@ -2537,6 +2552,7 @@ pub fn drill(drills: &[Drill], seeded: bool) -> Result<()> {
             Drill::Archive => archive(seeded),
             Drill::Executor => executor::drill(seeded),
             Drill::Vault => vault_drill(seeded),
+            Drill::Exchange => exchange::drill(seeded),
         };
         if seeded && matches!(d, Drill::Boot | Drill::Journal | Drill::Egress) {
             restore()?;
