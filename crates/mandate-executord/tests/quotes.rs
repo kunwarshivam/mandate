@@ -203,17 +203,17 @@ fn the_paper_bounds_are_ten_seconds_and_two_percent() -> Result<(), Error> {
     };
     let ten = "2026-09-21T14:59:50Z";
     assert_eq!(
-        paper(answer("150", "153", ten))?.read(&aapl()?, now),
+        paper(answer("150", "153", ten))?.observe(&aapl()?, now),
         Ok(observed("150", "153", noon - 10)?),
         "ten seconds old and 2 % wide"
     );
     assert_eq!(
-        paper(answer("150", "150.2", "2026-09-21T14:59:49.999999999Z"))?.read(&aapl()?, now),
+        paper(answer("150", "150.2", "2026-09-21T14:59:49.999999999Z"))?.observe(&aapl()?, now),
         Err("quote_unread"),
         "a nanosecond past ten seconds"
     );
     assert_eq!(
-        paper(answer("150", "153.01", ten))?.read(&aapl()?, now),
+        paper(answer("150", "153.01", ten))?.observe(&aapl()?, now),
         Err("quote_insane"),
         "a cent past 2 %"
     );
