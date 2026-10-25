@@ -16,6 +16,7 @@ use mandate_time::UtcNanos;
 
 use crate::establish::{Establishment, GateReport, OpeningGate, pass, read_establishment};
 use crate::follow::agents_of;
+use crate::run::{Run, Unimplemented};
 use crate::{Broker, Config, ExecutorProcess, Wiring};
 
 /// What the run is handed from the binary's edge.
@@ -111,6 +112,27 @@ fn closed<S: Store>(store: &S, config: &Config) -> Result<Waited, &'static str> 
     } else {
         Err("connection_closed")
     }
+}
+
+/// A broker a test scripts, which [`serve`] runs with any wiring (DEC-2359 item 9). The library
+/// implements it for none of its own brokers, and the orphan rule keeps the binary from
+/// implementing it for one, so the binary serves only a [`Run`] through [`serve_run`].
+pub trait ScriptedBroker: Broker {}
+
+/// Runs `run`'s broker with the wiring paired with it, as [`serve`] runs a scripted one: the
+/// binary's only way to serve.
+///
+/// # Errors
+/// As [`serve`]'s.
+pub fn serve_run<S: Store, B: Broker>(
+    store: S,
+    run: Run<B>,
+    config: &Config,
+    status: &Status,
+    edge: Edge<'_>,
+) -> Result<u8, &'static str> {
+    let _ = (store, run, config, status, edge);
+    Err(Unimplemented)
 }
 
 /// Runs the process over `store` and `broker` with `wiring` behind rule 68's gate: the gate

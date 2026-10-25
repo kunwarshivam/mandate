@@ -24,6 +24,7 @@ use mandate_executor::{
     Purpose, Seq, WorkspaceId, WriterEpoch, equity_bracket_prices,
 };
 use mandate_executord::quotes::NoQuotes;
+use mandate_executord::serve::ScriptedBroker;
 use mandate_executord::{Broker, Config, ExecutorProcess, Protections, Unplanned, Wiring};
 use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId};
 use mandate_num::{Fraction, Price, Qty, Ratio, ShareIncrement, SignedQty, Usd};
@@ -497,6 +498,8 @@ impl Paper {
         self.books.borrow_mut().lose_answers = n;
     }
 }
+
+impl ScriptedBroker for Paper {}
 
 impl Broker for Paper {
     fn profile(&self) -> Result<CapabilityProfile, ProfileError> {
