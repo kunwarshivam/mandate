@@ -503,6 +503,36 @@ fn ten_bad_presentations_from_one_device_raise_the_alert_once() {
 
 #[test]
 #[ignore = "pending E9-1"]
+fn an_opening_counts_no_failure() {
+    let signer = Signer::es256();
+    let f = fixture(&signer, true);
+    let forged_presentation = |f: &Fixture| {
+        let (id, bytes) = challenge(f);
+        let mut forged = signer.assert(&bytes);
+        forged.2[12] ^= 1;
+        present(f, &[], &request(&id, CREDENTIAL, &forged)).status
+    };
+    for _ in 0..9 {
+        assert_eq!(forged_presentation(&f), 401);
+    }
+    let (id, bytes) = challenge(&f);
+    let opened = present(&f, &[], &request(&id, CREDENTIAL, &signer.assert(&bytes)));
+    assert_eq!(opened.status, 201);
+    assert_eq!(
+        f.reduction.alerts_raised(),
+        0,
+        "nine failures and an opening: the opening is no tenth failure"
+    );
+    assert_eq!(forged_presentation(&f), 401);
+    assert_eq!(
+        f.reduction.alerts_raised(),
+        1,
+        "the next failure is the device's tenth, and raises the alert"
+    );
+}
+
+#[test]
+#[ignore = "pending E9-1"]
 fn behind_a_listed_ingress_each_forwarded_address_counts_apart() {
     let signer = Signer::es256();
     let f = fixture_behind(
