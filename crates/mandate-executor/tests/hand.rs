@@ -7178,6 +7178,88 @@ fn the_bound_protection_takes_its_own_instruments_prices() {
     );
 }
 
+/// DEC-2356 item 8 (the review of #2327): a read that omits the bound's protection, sent and not
+/// yet acknowledged, lets no close go beside it, though it lists no other sell.
+#[test]
+#[ignore = "pending E7-4"]
+fn a_read_that_omits_the_unacknowledged_bound_protection_closes_nothing() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (mut shell, bound, _) = at_the_bound(&ports, Some("0.2"));
+    assert!(
+        !protective_sent(&bound).is_empty(),
+        "the bound places protection"
+    );
+
+    let read = shell.run(
+        Input::Broker(Ok(BrokerOutcome::OpenOrders(Vec::new()))),
+        &ports,
+    );
+
+    assert!(
+        !read
+            .requests
+            .iter()
+            .any(|r| matches!(r, BrokerRequest::ClosePosition(..))),
+        "no close beside the protection the read could not show: {:?}",
+        read.requests
+    );
+}
+
+/// DEC-2356 items 2 and 6: beside an exit sequence that sells only part of the position, the bound
+/// places protection for what the exit still working leaves, `whole(long − sum)`.
+#[test]
+fn the_bound_protects_what_an_exit_of_part_of_the_position_leaves() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let (mut shell, stop) = crypto_stop_account(&ports);
+    let held = shell
+        .state
+        .positions()
+        .get(&instrument(BTC))
+        .map(ToString::to_string)
+        .expect("BTC is held");
+    shell.run(Input::Market(quote(BTC, "60000", "60010", 20)), &ports);
+    shell.run(
+        handoff(OTHER_INTENT, common::AGENT, risk_exit(BTC, "0.2", "60000")),
+        &ports,
+    );
+    let sent = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(stop("canceled"))),
+        &ports,
+    );
+    assert!(
+        sent.submissions()
+            .iter()
+            .any(|o| o.side == Side::Sell && o.qty == qty("0.2")),
+        "the exit of 0.2 is sent once the stop's cancel is confirmed: {:?}",
+        sent.submissions()
+    );
+    shell.run(account_switch(Initiator::Owner), &ports);
+
+    let bound = shell.run(Input::Tick(clock(20 + 3_600)), &ports);
+
+    let left = qty(&held)
+        .checked_sub(qty("0.2"))
+        .expect("the position holds more than the exit")
+        .to_string();
+    let placed = protective_sent(&bound);
+    assert_eq!(
+        placed
+            .iter()
+            .map(|(_, qty)| qty.as_str())
+            .collect::<Vec<_>>(),
+        vec![left.as_str()],
+        "protection for what the exit leaves: {placed:?}"
+    );
+}
+
 /// DEC-2333 item 5: once BTC's close-position has gone out, nothing is placed there, at the bound
 /// or anywhere else, even with the stop's cancel confirmed and the interval it opens at its bound.
 #[test]
