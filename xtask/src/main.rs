@@ -223,6 +223,14 @@ const MUTANT_SHARD_ENV: &str = "MANDATE_MUTANT_SHARD";
 /// The `K/N` shard CI's `schema-mutants` matrix passes to `cargo xtask ci schema-mutants`, through
 /// the environment because the live-feature check refuses cargo words the shell expands (DEC-688).
 const SCHEMA_SHARD_ENV: &str = "MANDATE_SCHEMA_SHARD";
+/// The `K/N` shard, counted from 0, the nightly's `reference-fuzz` matrix passes to `cargo xtask
+/// ci nightly-fuzz`, through the environment as [`SCHEMA_SHARD_ENV`] is (DEC-2638).
+const FUZZ_SHARD_ENV: &str = "MANDATE_FUZZ_SHARD";
+/// The mandate reference's fuzz seeds the nightly runs (DEC-1190 item 5): `1..=` this.
+const NIGHTLY_FUZZ_SEEDS: u32 = 10;
+/// The `K/N` shard, counted from 0, the nightly's `reference-mutants` matrix passes to `cargo
+/// xtask ci nightly-mutants`, which hands it to `reference/mandate/mutants.py --shard` (DEC-2638).
+const REFERENCE_SHARD_ENV: &str = "MANDATE_REFERENCE_SHARD";
 /// The `K/N` partition, counted from 1, CI's `fast-test` matrix passes to `cargo xtask ci
 /// test-nextest`, through the environment for the same reason as [`SCHEMA_SHARD_ENV`] (DEC-871).
 /// `cargo xtask ci test` ignores it and runs every test.
@@ -546,12 +554,22 @@ fn ci(job: &str) -> Result<()> {
             Ok(())
         }
         "nightly" => {
-            for seed in 1..=10 {
-                reference(&["mandate/fuzz.py", &seed.to_string()])?;
-            }
+            nightly_fuzz(None)?;
             reference(&["mandate/mutants.py"])?;
-            sh("gitleaks", &["git", "--no-banner", "--redact"])
+            nightly_gitleaks()
         }
+        "nightly-fuzz" => {
+            let shard = env::var(FUZZ_SHARD_ENV)
+                .with_context(|| format!("{FUZZ_SHARD_ENV} names the fuzz shard, K/N"))?;
+            nightly_fuzz(Some(&shard))
+        }
+        "nightly-mutants" => {
+            let shard = env::var(REFERENCE_SHARD_ENV).with_context(|| {
+                format!("{REFERENCE_SHARD_ENV} names the reference's mutant shard, K/N")
+            })?;
+            reference(&["mandate/mutants.py", "--shard", &shard])
+        }
+        "nightly-gitleaks" => nightly_gitleaks(),
         other => bail!("unknown CI job: {other}"),
     }
 }
@@ -5993,6 +6011,8 @@ const READ_ENV_NAMES: &[&str] = &[
     "TF_VAR_access_allowed_emails",
     "TF_VAR_cloudflare_api_token",
     "MANDATE_SCHEMA_SHARD",
+    "MANDATE_FUZZ_SHARD",
+    "MANDATE_REFERENCE_SHARD",
     "MANDATE_SWEEP_CLOCK",
     "MANDATE_TEST_PARTITION",
     "MERGE_APPROVERS",
@@ -9334,10 +9354,11 @@ fn gate_diff_whole(root: &Path) -> Result<Option<GateDiff>> {
 }
 
 /// The mutants a shard of the whole-crate sweep tests at most, so a shard stays within ten
-/// minutes (DEC-1190 item 5): DEC-473 found fourteen or fifteen `mandate-executor` mutants a shard
-/// reaching the cap and eight fitting. Slice sharding over `ceil(n / 8)` shards gives each shard
-/// `ceil(n / ceil(n / 8))` mutants, never more than this.
-const SWEEP_SHARD_MUTANTS: usize = 8;
+/// minutes (DEC-1190 item 5, DEC-2638): DEC-473 found eight `mandate-executor` mutants fitting,
+/// but at a4986bbe the slowest eight-mutant shard took 9m58s and 25 ran past the cap, so five,
+/// near seven minutes at that rate. Slice sharding over `ceil(n / 5)` shards gives each shard
+/// `ceil(n / ceil(n / 5))` mutants, never more than this.
+const SWEEP_SHARD_MUTANTS: usize = 5;
 
 /// The fewest days one whole-crate sweep is spread over (DEC-1190 item 5): shard `k` runs on the
 /// days whose index is `k` modulo the rotation, so every mutant is tested once a week, and a
@@ -10604,6 +10625,40 @@ fn pending() -> Result<()> {
     )
 }
 
+/// The fuzz seeds of shard `shard`, `K/N` counted from 0, or every seed without one: seed `s` is
+/// shard `(s - 1) % N`'s, so the `N` shards hold every seed of `1..=`[`NIGHTLY_FUZZ_SEEDS`] once
+/// between them (DEC-2638). A shard that is not `K/N` with `K < N` is refused.
+fn fuzz_seeds(shard: Option<&str>) -> Result<Vec<u32>> {
+    let all = 1..=NIGHTLY_FUZZ_SEEDS;
+    let Some(shard) = shard else {
+        return Ok(all.collect());
+    };
+    let parsed = shard.split_once('/').and_then(|(k, n)| {
+        let plain = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+        if !plain(k) || !plain(n) {
+            return None;
+        }
+        Some((k.parse::<u32>().ok()?, n.parse::<u32>().ok()?))
+    });
+    match parsed {
+        Some((k, n)) if k < n => Ok(all.filter(|seed| (seed - 1) % n == k).collect()),
+        _ => bail!("{FUZZ_SHARD_ENV} must be K/N with K < N, counted from 0; got {shard:?}"),
+    }
+}
+
+/// The mandate reference's fuzz over [`fuzz_seeds`] of `shard`.
+fn nightly_fuzz(shard: Option<&str>) -> Result<()> {
+    for seed in fuzz_seeds(shard)? {
+        reference(&["mandate/fuzz.py", &seed.to_string()])?;
+    }
+    Ok(())
+}
+
+/// Gitleaks over the whole history, the nightly's secret scan.
+fn nightly_gitleaks() -> Result<()> {
+    sh("gitleaks", &["git", "--no-banner", "--redact"])
+}
+
 /// Where a `cargo` child that builds puts what it builds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum BuildDir {
@@ -11838,7 +11893,7 @@ mod tests {
     };
     use super::{
         BINARY_COUPLINGS, CrateGraph, MATRIX_LIMIT, RUNNER_CRATE, SWEEP_ROTATION,
-        SWEEP_SHARD_MUTANTS, SweepPlan, Token, crate_graph, infra_commands,
+        SWEEP_SHARD_MUTANTS, SweepPlan, Token, crate_graph, fuzz_seeds, infra_commands,
         infra_workflow_problems, is_docs_path, literal_paths, nextest_args, normalized_join,
         references_path, select, selection_in, source_references, tokens, withhold_web_demo,
     };
@@ -17012,7 +17067,7 @@ mod tests {
             "fail-fast: false",
             partition_env.as_str(),
             "shared-key: fast-test",
-            "save-if: ${{ matrix.shard == '1/4' }}",
+            "save-if: ${{ matrix.shard == '1/6' }}",
         ] {
             assert!(test.contains(&line), "`fast-test` has `{line}`");
         }
@@ -19300,7 +19355,7 @@ mod tests {
     /// after, and a night's outputs are the matrix GitHub reads.
     #[test]
     fn the_sweep_rotation_runs_every_shard_once_a_week() -> Result<()> {
-        for mutants in [0usize, 1, 7, 8, 9, 99, 12_538, 14_336, 14_337, 40_000] {
+        for mutants in [0usize, 1, 4, 5, 6, 99, 12_538, 8_960, 8_961, 40_000] {
             let total = SweepPlan::shards_for(mutants);
             if mutants > 0 {
                 assert!(
@@ -19344,17 +19399,43 @@ mod tests {
         );
         assert_eq!(SWEEP_ROTATION, 7);
         assert_eq!(
-            SweepPlan::for_night(25, 7)?.tonight,
+            SweepPlan::for_night(15, 7)?.tonight,
             vec![0],
             "night 7 is night 0 again"
         );
-        assert_eq!(SweepPlan::for_night(25, 9)?.tonight, vec![2]);
+        assert_eq!(SweepPlan::for_night(15, 9)?.tonight, vec![2]);
         assert!(
-            SweepPlan::for_night(25, 4)?.tonight.is_empty(),
-            "four shards leave night 4 idle"
+            SweepPlan::for_night(15, 4)?.tonight.is_empty(),
+            "three shards leave night 4 idle"
         );
         let plan = SweepPlan::for_night(30, 1)?;
-        assert_eq!(plan.outputs(), "mutants=30\nshards=[1]\ntotal=4\n");
+        assert_eq!(plan.outputs(), "mutants=30\nshards=[1]\ntotal=6\n");
+        Ok(())
+    }
+
+    /// DEC-2638: the nightly's fuzz shards hold every seed of `1..=10` exactly once between them,
+    /// shard `K` the seeds `s` with `(s - 1) % N == K`; no shard runs them all; and a shard that is
+    /// not `K/N` with `K < N` is refused rather than run as some other shard.
+    #[test]
+    fn the_fuzz_shards_hold_every_seed_once() -> Result<()> {
+        assert_eq!(fuzz_seeds(None)?, (1..=10).collect::<Vec<u32>>());
+        assert_eq!(fuzz_seeds(Some("0/4"))?, [1, 5, 9]);
+        assert_eq!(fuzz_seeds(Some("1/4"))?, [2, 6, 10]);
+        assert_eq!(fuzz_seeds(Some("2/4"))?, [3, 7]);
+        assert_eq!(fuzz_seeds(Some("3/4"))?, [4, 8]);
+        for n in 1..=12u32 {
+            let mut all = Vec::new();
+            for k in 0..n {
+                all.extend(fuzz_seeds(Some(&format!("{k}/{n}")))?);
+            }
+            all.sort_unstable();
+            assert_eq!(all, (1..=10).collect::<Vec<u32>>(), "{n} shards");
+        }
+        for bad in [
+            "4/4", "5/4", "1", "/4", "1/", "a/4", "1/b", "-1/4", "0/0", "",
+        ] {
+            assert!(fuzz_seeds(Some(bad)).is_err(), "{bad:?} is refused");
+        }
         Ok(())
     }
 

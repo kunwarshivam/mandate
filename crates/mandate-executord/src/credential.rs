@@ -15,19 +15,26 @@
 //! account stream. Each pass [`RunLease::pass`] ticks the lease, and [`lease_verdict`] says
 //! whether the run goes on: a lost credential, and a rotated one, which the supervisor's restart
 //! leases afresh, drain the process and stop it.
+//!
+//! [`AlpacaQuotes`] reads the latest quote of an instrument whose exit waits on a price from
+//! Alpaca's market-data host over the same transport and credential (DEC-2359 items 2 and 5).
 
 use std::path::PathBuf;
+use std::time::Duration;
 
+use mandate_accounting::InstrumentId;
 use mandate_alpaca::{
-    AlpacaPaperHttp, Credentials, RetryPolicy, TokioPause, TradingClient, TradingTransport,
+    AlpacaPaperHttp, Credentials, DataClient, DataTransport, Pause, RetryPolicy, TokioPause,
+    TradingClient, TradingTransport,
 };
 use mandate_canon::{Value, parse};
 use mandate_connections::account_entry::BrokerAccountId;
 use mandate_connections::record::ConnectionId;
 use mandate_connections::token_entry::decode;
 use mandate_connections::vault::AccessToken;
-use mandate_executor::AccountScope;
+use mandate_executor::{AccountScope, MarketObservation, RiskClock};
 use mandate_journal::StreamId;
+use mandate_num::{Adverse, Fraction};
 use mandate_store::Store;
 use mandate_time::UtcNanos;
 use mandate_vault::SourceError;
@@ -39,8 +46,11 @@ use mandate_vault::policy::{Identity, Mounts};
 use mandate_vault::source::SecretSource;
 use secrecy::{ExposeSecret, SecretString};
 
+use crate::Wiring;
 use crate::alpaca::AlpacaBroker;
+use crate::fixture;
 use crate::lease::{Held, Leased, runtime};
+use crate::quotes::{QuoteBounds, QuoteFeed};
 
 /// Which broker the process runs over.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -388,5 +398,102 @@ impl<V: SecretSource> RunLease<V> {
     /// `revoke_failed` when the vault does not take it back; it then expires.
     pub fn give_back(self) -> Result<(), &'static str> {
         self.leased.revoke()
+    }
+}
+
+/// The paper equity profile's quote bounds (trading-domain spec §4.2, DEC-2359 item 4): a quote
+/// at most the reviewed rule set's IEX age old, ten seconds, and a spread of at most 2 % of the
+/// bid, the collar's width for an instrument outside the liquid tier.
+///
+/// # Errors
+/// `quote_bounds_invalid` when the spread bound does not read.
+pub fn paper_quote_bounds() -> Result<QuoteBounds, &'static str> {
+    Ok(QuoteBounds {
+        max_age: Duration::from_secs(10),
+        max_spread: Fraction::parse("0.02").map_err(|_| "quote_bounds_invalid")?,
+    })
+}
+
+/// The paper serve path's wiring (DEC-2359 item 2): the fixture's, with the quote feed over
+/// `broker`'s own transport and credential, judged by [`paper_quote_bounds`] on `clock`.
+///
+/// # Errors
+/// The fixture wiring's refusal, `quote_bounds_invalid` when the bounds do not read, and
+/// `runtime_unavailable` when the feed's runtime cannot be built.
+pub fn paper_wiring<T, P>(broker: &AlpacaBroker<T>, clock: P) -> Result<Wiring, &'static str>
+where
+    T: TradingTransport + DataTransport + Clone + 'static,
+    P: Pause + 'static,
+{
+    let mut wiring = fixture::wiring()?;
+    wiring.quotes = Box::new(AlpacaQuotes::new(
+        DataClient::new(broker.transport(), clock),
+        paper_quote_bounds()?,
+    )?);
+    Ok(wiring)
+}
+
+/// The latest-quote read of Alpaca's market-data host, over the connection's transport.
+pub struct AlpacaQuotes<D, P> {
+    client: DataClient<D, P>,
+    bounds: QuoteBounds,
+    runtime: tokio::runtime::Runtime,
+}
+
+impl<D: DataTransport, P: Pause> AlpacaQuotes<D, P> {
+    /// The feed over `client`, judged by `bounds`.
+    ///
+    /// # Errors
+    /// `runtime_unavailable` when the feed's runtime cannot be built.
+    pub fn new(client: DataClient<D, P>, bounds: QuoteBounds) -> Result<Self, &'static str> {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|_| "runtime_unavailable")?;
+        Ok(Self {
+            client,
+            bounds,
+            runtime,
+        })
+    }
+}
+
+impl<D: DataTransport, P: Pause> QuoteFeed for AlpacaQuotes<D, P> {
+    /// The instrument's latest quote at `now`: its bid, ask and sizes as the host answered them,
+    /// observed at the earlier of its own stamp and `now`, so a quote stamped ahead of the clock
+    /// never reads younger than it is.
+    ///
+    /// # Errors
+    /// `quote_unread` for a quote the host does not answer, that does not read, or that is older
+    /// than [`QuoteBounds::max_age`]; `quote_insane` for one that is not sane as trading spec §8.2
+    /// says, `0 < bid ≤ ask` and the ask no higher than `bid × (1 + max_spread)` rounded down.
+    /// Neither code names the instrument or a price.
+    fn observe(
+        &self,
+        instrument: &InstrumentId,
+        now: UtcNanos,
+    ) -> Result<MarketObservation, &'static str> {
+        let quote = self
+            .runtime
+            .block_on(self.client.latest_quote(instrument, self.bounds.max_age))
+            .map_err(|_| "quote_unread")?;
+        let sane = quote.bid <= quote.ask
+            && quote
+                .bid
+                .collar_bound(self.bounds.max_spread, Adverse::Up)
+                .is_ok_and(|widest| quote.ask <= widest);
+        if !sane {
+            return Err("quote_insane");
+        }
+        Ok(MarketObservation {
+            instrument: instrument.clone(),
+            bid: Some(quote.bid),
+            bid_size: Some(quote.bid_size),
+            ask: Some(quote.ask),
+            last_trade: None,
+            mark: None,
+            sane: true,
+            observed_at: RiskClock::from_secs(quote.at.min(now).secs()),
+        })
     }
 }

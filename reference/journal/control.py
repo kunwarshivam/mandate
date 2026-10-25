@@ -1895,7 +1895,9 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
             rule("258", False, "schema", wrong[1])
         rule("259", draft["causation_id"] == p["kill_switch_event"], "schema", "causation_id")
     if event_type == "StepUpConfirmed":
-        rule("242.kind", p["action_kind"] == "approve", "schema", "payload.action_kind")
+        # A seeded bug: the kinds before v0.82 (DEC-2125), `approve` alone.
+        kinds = ("approve",) if "rule.242.approve_only" in skip else ("approve", "connection")
+        rule("242.kind", p["action_kind"] in kinds, "schema", "payload.action_kind")
         rule("242.paper", draft["environment"] == "paper", "schema", "environment")
         rule("242.time", p["confirmed_at"] == epoch_seconds(draft["event_time"]), "schema", "payload.confirmed_at")
         if rule_holds("242.user", draft["actor"]["kind"] == "user", skip):

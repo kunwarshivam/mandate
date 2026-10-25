@@ -1,10 +1,13 @@
 //! The fixture Alpaca OAuth provider for dev and CI cells
 //! ([DEC-2625](../../../docs/project/decisions/DEC-2625.md)): `GET /alpaca/oauth/authorize` and
 //! `POST /alpaca/oauth/token`, answering as connections spec §5.2 and §5.5 say Alpaca's do, for one
-//! configured client and redirect URI. Codes live in memory only, at most [`MAX_CODES`]; tokens are
-//! not kept. Nothing here reads a clock or logs: the router passes the time in.
+//! configured client and redirect URI. Codes live in memory only, at most [`MAX_CODES`]. In a dev or
+//! ci cell's executor's connect check, `GET /alpaca/v2/account` answers the account of a token this
+//! provider issued ([DEC-1178](../../../docs/project/decisions/DEC-1178.md)), whose id is derived
+//! from the token alone; the tokens are kept in memory, at most [`MAX_TOKENS`]. Nothing here reads a
+//! clock or logs: the router passes the time in.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::Path;
 use std::sync::{Mutex, PoisonError};
@@ -22,6 +25,13 @@ pub const AUTHORIZE_PATH: &str = "/alpaca/oauth/authorize";
 
 /// The token endpoint's path.
 pub const TOKEN_PATH: &str = "/alpaca/oauth/token";
+
+/// The account endpoint's path (DEC-1178 item 1): under `/alpaca/`, so it is never Alpaca's own
+/// `/v2/account`.
+pub const ACCOUNT_PATH: &str = "/alpaca/v2/account";
+
+/// The most tokens held at once (DEC-1178 item 2).
+pub const MAX_TOKENS: usize = 4096;
 
 /// The one scope request accepted and granted, as `start::REQUESTED_SCOPES` sends it.
 pub const SCOPE: &str = "trading data";
@@ -85,6 +95,38 @@ impl Refusal {
     }
 }
 
+/// Why the account endpoint answers no account (DEC-1178 item 1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccountRefusal {
+    /// No `Authorization: Bearer <token>` naming a token this provider issued and holds: 401.
+    Unauthorized,
+}
+
+/// The account id the fixture answers for `token` (DEC-1178 item 1): the first 16 bytes of its
+/// SHA-256 as a version 4, variant 1 UUID, in lowercase hexadecimal, so each token, and so each
+/// connect, has its own account, and a token always reads the same one.
+///
+/// # Errors
+/// None today; the `Result` keeps the endpoint's one refusal type.
+pub fn account_id(token: &str) -> Result<String, AccountRefusal> {
+    let sum = digest(&SHA256, token.as_bytes());
+    let mut bytes = [0_u8; 16];
+    for (byte, from) in bytes.iter_mut().zip(sum.as_ref()) {
+        *byte = *from;
+    }
+    bytes[6] = (bytes[6] & 0x0f).wrapping_add(0x40);
+    bytes[8] = (bytes[8] & 0x3f).wrapping_add(0x80);
+    let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+    Ok(format!(
+        "{}-{}-{}-{}-{}",
+        &hex[0..8],
+        &hex[8..12],
+        &hex[12..16],
+        &hex[16..20],
+        &hex[20..32]
+    ))
+}
+
 /// Why the client secret file is refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SecretFileError {
@@ -128,11 +170,12 @@ struct Issued {
     issued_at: i64,
 }
 
-/// The provider: its client and the codes it issued.
+/// The provider: its client, the codes it issued, and the tokens it issued (DEC-1178 item 2).
 pub struct Alpaca {
     settings: Settings,
     random: Box<dyn Random>,
     codes: Mutex<BTreeMap<String, Issued>>,
+    tokens: Mutex<BTreeSet<String>>,
 }
 
 impl Alpaca {
@@ -141,6 +184,7 @@ impl Alpaca {
             settings,
             random,
             codes: Mutex::new(BTreeMap::new()),
+            tokens: Mutex::new(BTreeSet::new()),
         }
     }
 
@@ -228,13 +272,40 @@ impl Alpaca {
         if !redeemable {
             return Err(Refusal::InvalidGrant);
         }
+        let mut tokens = self.tokens.lock().unwrap_or_else(PoisonError::into_inner);
+        if tokens.len() >= MAX_TOKENS {
+            return Err(Refusal::Unavailable);
+        }
         let token = self.fresh().ok_or(Refusal::Unavailable)?;
+        tokens.insert(token.clone());
         Ok(serde_json::json!({
             "access_token": token,
             "scope": SCOPE,
             "token_type": "bearer",
         })
         .to_string())
+    }
+
+    /// The JSON body to answer `GET /alpaca/v2/account` with for the request's `Authorization`
+    /// header, `authorization`: `{"id": ...}`, [`account_id`] of the token it names.
+    ///
+    /// # Errors
+    /// [`AccountRefusal::Unauthorized`] for a header that is not exactly `Bearer <token>` with a
+    /// token this provider issued and holds.
+    pub fn account(&self, authorization: Option<&[u8]>) -> Result<String, AccountRefusal> {
+        let token = authorization
+            .and_then(|header| header.strip_prefix(b"Bearer "))
+            .and_then(|token| std::str::from_utf8(token).ok())
+            .ok_or(AccountRefusal::Unauthorized)?;
+        let held = self
+            .tokens
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .contains(token);
+        if !held {
+            return Err(AccountRefusal::Unauthorized);
+        }
+        Ok(serde_json::json!({ "id": account_id(token)? }).to_string())
     }
 
     /// How many codes are held.
