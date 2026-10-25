@@ -5,6 +5,7 @@
 mod common;
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Mutex;
 
 use common::control::{Rows, T0, activation, change, member};
 use common::passkey::{Signer, enrolled, removed, rp};
@@ -28,6 +29,8 @@ struct World {
     rows: Rows,
     keys: Option<BTreeMap<Digest, Vec<u8>>>,
     standings: Standings,
+    /// The members the judge asked a standing for, in order.
+    asked: Mutex<Vec<PrincipalId>>,
     unreadable_credentials: bool,
     unreadable_memberships: bool,
 }
@@ -53,6 +56,7 @@ impl World {
             rows,
             keys: Some(BTreeMap::from([(Digest::of(&key), key)])),
             standings,
+            asked: Mutex::new(Vec::new()),
             unreadable_credentials: false,
             unreadable_memberships: false,
         }
@@ -61,11 +65,15 @@ impl World {
     fn judge(&self, passkey_id: &str, assertion: &(Vec<u8>, Vec<u8>, Vec<u8>)) -> Option<Opened> {
         let credentials = credential_records(hosted().workspace, &self.rows.rows).unwrap();
         let memberships = membership_records(hosted().workspace, &self.rows.rows).unwrap();
+        let standing = |member| {
+            self.asked.lock().expect("unpoisoned").push(member);
+            self.standings.standing(member)
+        };
         let reads = Reads {
             hosted: hosted(),
             credentials: (!self.unreadable_credentials).then_some(credentials.as_slice()),
             memberships: (!self.unreadable_memberships).then_some(memberships.as_slice()),
-            standings: &self.standings,
+            standing: &standing,
             keys: self
                 .keys
                 .as_ref()
@@ -330,4 +338,23 @@ fn a_membership_reaches_the_workspace_while_active_or_cooling_off() {
     assert_eq!(lookup.reaches(PrincipalId(11)), Ok(false), "never a member");
     let failed = ControlLookup::new(hosted(), Err(LookupFailed), at(T0));
     assert_eq!(failed.reaches(ALICE), Err(LookupFailed));
+}
+
+#[test]
+fn the_judge_asks_one_standing_for_every_request_the_decoys_for_an_unknown_passkey() {
+    let signer = Signer::es256();
+    let world = World::new(&signer);
+    assert_eq!(
+        world.judge(CREDENTIAL, &signer.assert(&CHALLENGE)),
+        opened_for_alice()
+    );
+    assert_eq!(world.judge(STRANGER, &signer.assert(&CHALLENGE)), None);
+    let mut forged = signer.assert(&CHALLENGE);
+    forged.2[12] ^= 1;
+    assert_eq!(world.judge(CREDENTIAL, &forged), None);
+    assert_eq!(
+        *world.asked.lock().expect("unpoisoned"),
+        [ALICE, DECOY_MEMBER, ALICE],
+        "once per request, whatever it names or whether it verifies"
+    );
 }

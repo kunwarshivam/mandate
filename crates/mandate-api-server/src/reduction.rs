@@ -228,12 +228,11 @@ impl Reduction {
         }
     }
 
-    /// Raises the operator alert `reduction_failures_over_limit` once: its opaque code on standard
-    /// error, naming no address, device, member, or passkey (rule 6), and one more in
-    /// [`Reduction::alerts_raised`].
+    /// Raises the operator alert `reduction_failures_over_limit` once: [`alert_line`] on standard
+    /// error, and one more in [`Reduction::alerts_raised`].
     pub fn alerted(&self) {
         self.alerts.fetch_add(1, Ordering::Relaxed);
-        eprintln!("alert: {FAILURES_OVER_LIMIT}");
+        eprintln!("{}", alert_line());
     }
 
     /// How many `reduction_failures_over_limit` alerts this process has raised, for the tests and
@@ -428,6 +427,17 @@ pub async fn challenge(
     response
 }
 
+/// The runbook `reduction_failures_over_limit` names (infrastructure design §8.2).
+pub const FAILURES_RUNBOOK: &str = "docs/runbooks/RB-20-reduction-failures.md";
+
+/// The one line [`Reduction::alerted`] writes, `operator_alert <code> <runbook>` as the connect
+/// finish writes its own: the opaque code and the runbook's path, and nothing a request carried,
+/// so no address, device, member, passkey, or challenge (rule 6). It takes no argument, so it
+/// cannot name one.
+pub fn alert_line() -> String {
+    format!("operator_alert {FAILURES_OVER_LIMIT} {FAILURES_RUNBOOK}")
+}
+
 /// `POST /v1/reduction-sessions` (§4.10 route 2): 403 `forbidden` without the browser marks;
 /// otherwise the named challenge is taken out first, the assertion judged
 /// ([`crate::opening::judge`]), the presentation settled with the gate, and on an opening `201`
@@ -576,11 +586,12 @@ async fn judged(app: &App, request: &Request, taken: &Issued, now: UtcNanos) -> 
         .as_deref()
         .and_then(|rows| credential_records(app.hosted.workspace, rows).ok());
     let memberships = rows.as_deref().and_then(|rows| (app.members)(rows).ok());
+    let standing = |member| app.sessions.standing(member);
     let reads = Reads {
         hosted: app.hosted,
         credentials: credentials.as_deref(),
         memberships: memberships.as_deref(),
-        standings: app.sessions.standings(),
+        standing: &standing,
         keys: app.artifacts.as_deref(),
     };
     let presented = Presented {
