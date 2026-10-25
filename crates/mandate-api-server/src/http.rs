@@ -26,6 +26,7 @@ use crate::lifecycle::{Drain, Lifecycle};
 use crate::me;
 use crate::members::{Hosted, ParseMembers};
 use crate::objects::ObjectStore;
+use crate::passkeys;
 use crate::reduction::{self, Reduction};
 use crate::routes;
 use crate::session::{Answer, COOKIE_MAX_AGE_S, COOKIE_NAME, Sessions};
@@ -221,6 +222,14 @@ pub fn api(app: App, drain: Arc<Drain>) -> Router {
         .route(
             "/v1/workspaces/{workspace}/step-up/challenges",
             post(challenges::challenge).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/passkeys/registration-challenges",
+            post(passkeys::registration_challenge).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/passkeys",
+            get(passkeys::list).fallback(otherwise.clone()),
         )
         .route(
             "/v1/workspaces/{workspace}/connections",

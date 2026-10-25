@@ -245,6 +245,19 @@ impl Reduction {
         todo!()
     }
 
+    /// The same store over a gate with limits of its own, so a test can loosen the gate and see the
+    /// store's own guard refuse alone (its defence in depth over the gate's equal limits).
+    #[cfg(test)]
+    fn with_gate(random: Box<dyn Random>, gate: ReductionLimits) -> Self {
+        Self {
+            gate: Mutex::new(ReductionGate::new(gate)),
+            outstanding: Mutex::new(BTreeMap::new()),
+            ingress: Vec::new(),
+            random,
+            alerts: AtomicU64::new(0),
+        }
+    }
+
     /// The ingress peers the store reads forwarded addresses from.
     pub fn ingress(&self) -> &[IpAddr] {
         &self.ingress
@@ -437,4 +450,104 @@ pub async fn open(
 ) -> Response {
     let _ = (app, peer, headers, body);
     todo!()
+}
+
+#[cfg(test)]
+mod store_guard {
+    //! The store's own guard in `Reduction::issue`, with the gate loosened far past it: the gate
+    //! enforces the same two limits over the same challenges, so only a gate that allows more shows
+    //! the store refusing on its own, on each side of its condition.
+
+    use std::num::NonZeroU32;
+    use std::sync::Mutex;
+
+    use mandate_authn::{ClientKey, ReductionLimits};
+    use mandate_time::UtcNanos;
+
+    use super::{CHALLENGES_IN_ALL, RESERVE_FROM, Reduction};
+    use crate::session::{Random, Unauthenticated};
+
+    type Outcome = Result<(), &'static str>;
+
+    /// Distinct 32-byte draws for as long as a test needs.
+    #[derive(Default)]
+    struct Counting(Mutex<u64>);
+
+    impl Random for Counting {
+        fn fill(&self, out: &mut [u8]) -> Result<(), Unauthenticated> {
+            let mut n = self.0.lock().map_err(|_| Unauthenticated)?;
+            *n = n.wrapping_add(1);
+            out.iter_mut().for_each(|b| *b = 0x3c);
+            out.iter_mut()
+                .zip(n.to_be_bytes())
+                .for_each(|(b, counted)| *b = counted);
+            Ok(())
+        }
+    }
+
+    /// A store over a gate that allows far more than the store does.
+    fn store() -> Result<Reduction, &'static str> {
+        let wide = NonZeroU32::new(1_000_000).ok_or("a non-zero limit")?;
+        let gate = ReductionLimits {
+            challenges_per_address: wide,
+            challenges_per_device: wide,
+            failures_per_address: wide,
+            failures_per_device: wide,
+            max_outstanding: wide,
+            reserve: wide,
+            max_failure_keys: wide,
+        };
+        Ok(Reduction::with_gate(Box::new(Counting::default()), gate))
+    }
+
+    fn client(address: &str) -> ClientKey {
+        ClientKey {
+            address: address.to_owned(),
+            device: format!("device-{address}"),
+        }
+    }
+
+    fn now() -> Result<UtcNanos, &'static str> {
+        UtcNanos::from_parts(1_791_000_000, 0).map_err(|_| "an instant")
+    }
+
+    /// Issues one challenge to each of `count` distinct addresses, `a0` onwards.
+    fn fill(store: &Reduction, count: usize) -> Outcome {
+        for n in 0..count {
+            store
+                .issue(&client(&format!("a{n}")), now()?)
+                .map_err(|_| "each address below the limits is issued one")?;
+        }
+        Ok(())
+    }
+
+    /// With every address holding one, the 4,097th outstanding is refused by the store alone, even
+    /// for an address that holds none.
+    #[test]
+    fn the_store_refuses_past_all_its_challenges_for_an_address_holding_none() -> Outcome {
+        let store = store()?;
+        fill(&store, CHALLENGES_IN_ALL)?;
+        assert!(
+            store.issue(&client("fresh"), now()?).is_err(),
+            "the store holds no more than its challenges in all"
+        );
+        Ok(())
+    }
+
+    /// Past the reserve, an address that holds one is refused by the store alone, while one that
+    /// holds none is still issued.
+    #[test]
+    fn past_the_reserve_the_store_refuses_only_an_address_that_holds_one() -> Outcome {
+        let store = store()?;
+        fill(&store, RESERVE_FROM)?;
+        assert!(
+            store.issue(&client("a0"), now()?).is_err(),
+            "an address holding one gets no more past the reserve"
+        );
+        assert!(
+            store.issue(&client("fresh"), now()?).is_ok(),
+            "an address holding none still gets one from the reserve"
+        );
+        Ok(())
+    }
 }

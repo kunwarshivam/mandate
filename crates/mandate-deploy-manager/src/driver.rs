@@ -8,7 +8,7 @@ use mandate_time::UtcNanos;
 
 use crate::control::fact;
 use crate::manager::{Decision, Manager};
-use crate::orchestrator::{Alerts, Effect, Orchestrator, Unavailable};
+use crate::orchestrator::{Alerts, Effect, Launch, Orchestrator, Unavailable};
 
 pub use crate::record::Identity;
 
@@ -121,14 +121,14 @@ impl<J: ControlJournal, O: Orchestrator, A: Alerts> Deployer<J, O, A> {
                     if let Effect::Start { slot, generation } = record.effect() {
                         self.manager.issued(&slot, generation);
                         self.refresh().await?;
-                        if !self.manager.desired(&slot) {
+                        if !self.manager.wanted(&slot) {
                             continue;
                         }
                     }
                     record.effect()
                 }
             };
-            self.perform(effect).await;
+            self.perform(effect, now).await;
         }
         Ok(())
     }
@@ -149,13 +149,16 @@ impl<J: ControlJournal, O: Orchestrator, A: Alerts> Deployer<J, O, A> {
         Ok(())
     }
 
-    async fn perform(&mut self, effect: Effect) {
+    async fn perform(&mut self, effect: Effect, now: UtcNanos) {
         match effect {
             Effect::Start { slot, generation } => {
-                let no_request_starts_an_exchange_yet = None;
+                let launch = Launch {
+                    lifetime: self.manager.lifetime(&slot, now),
+                    connection: self.manager.connection(&slot, generation),
+                };
                 if self
                     .orchestrator
-                    .start(&slot, generation, no_request_starts_an_exchange_yet)
+                    .start(&slot, generation, &launch)
                     .await
                     .is_ok()
                 {
@@ -163,7 +166,15 @@ impl<J: ControlJournal, O: Orchestrator, A: Alerts> Deployer<J, O, A> {
                 }
             }
             Effect::Stop { slot, generation } => {
-                let _retried_next_pass = self.orchestrator.stop(&slot, generation).await;
+                let connection = self.manager.connection(&slot, generation);
+                if self
+                    .orchestrator
+                    .stop(&slot, generation, connection.as_deref())
+                    .await
+                    .is_ok()
+                {
+                    self.manager.stopped(&slot, generation);
+                }
             }
             Effect::Alert(alert) => self.alerts.raise(alert),
         }

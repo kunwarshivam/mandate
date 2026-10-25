@@ -6,6 +6,11 @@
 //! the process's identity. A token exchange also runs as its connection's own ServiceAccount, which
 //! the adapter makes just before the pod and deletes just before deleting it, and ends by its request's
 //! deadline (DEC-1175 item 4, DEC-1177 items 4, 6 and 11).
+//!
+//! A finished pod stays listed with its phase until the manager deletes it, as the orchestrator
+//! port requires of [`Phase::Succeeded`]: a bare pod has no `ttlSecondsAfterFinished` (a Job's), the
+//! chart makes no Job for a managed process, and the cluster's terminated-pod garbage collection
+//! starts only past its threshold (12500 pods by default), far beyond what one workspace leaves.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -16,7 +21,7 @@ use reqwest::{Client, Method, StatusCode};
 use serde_json::{Map, Value, json};
 
 use crate::control::{Process, Slot};
-use crate::orchestrator::{Instance, Orchestrator, Phase, Unavailable};
+use crate::orchestrator::{Instance, Launch, Orchestrator, Phase, Unavailable};
 
 const MANAGED_BY: &str = "app.kubernetes.io/managed-by";
 const MANAGER: &str = "mandate-deploy-manager";
@@ -164,26 +169,21 @@ impl Kubernetes {
 
     /// The ServiceAccount `slot` runs as, when it is not the namespace's default: a token
     /// exchange's is `x` and its connection id's bytes in lowercase hex, the name its vault role
-    /// and the admission policies are written for (DEC-2060).
-    pub fn account_name(&self, slot: &Slot) -> Option<String> {
+    /// and the admission policies are written for (DEC-2060). An executor's `connection` is the
+    /// one it acts for.
+    pub fn account_name(&self, slot: &Slot, connection: Option<&str>) -> Option<String> {
         match slot.process {
-            Process::TokenExchange => {
-                let hex: String = slot
-                    .subject
-                    .bytes()
-                    .map(|byte| format!("{byte:02x}"))
-                    .collect();
-                Some(format!("x{hex}"))
-            }
-            Process::Runtime | Process::Executor => None,
+            Process::TokenExchange => Some(format!("x{}", lower_hex(&slot.subject))),
+            Process::Executor => connection.map(lower_hex),
+            Process::Runtime => None,
         }
     }
 
     /// The account [`Kubernetes::account_name`] names for `slot`: no token mounted, no Secret, and
     /// the manager's, the chart's workspace and the process's labels, which the chart's accounts
     /// policy requires.
-    pub fn account(&self, slot: &Slot) -> Option<Value> {
-        let name = self.account_name(slot)?;
+    pub fn account(&self, slot: &Slot, connection: Option<&str>) -> Option<Value> {
+        let name = self.account_name(slot, connection)?;
         let workspace = self
             .templates
             .get(&slot.process)?
@@ -213,13 +213,8 @@ impl Kubernetes {
     /// each other (DEC-1177 item 6), and ends by its `lifetime`, in whole seconds
     /// rounded down, so it never outlives its request; it needs one of at least a second, and a
     /// standing process is never given one.
-    pub fn manifest(
-        &self,
-        slot: &Slot,
-        generation: u64,
-        lifetime: Option<Duration>,
-    ) -> Option<Value> {
-        let deadline = match (slot.process, lifetime) {
+    pub fn manifest(&self, slot: &Slot, generation: u64, launch: &Launch) -> Option<Value> {
+        let deadline = match (slot.process, launch.lifetime) {
             (Process::TokenExchange, Some(lifetime)) if lifetime.as_secs() >= 1 => {
                 Some(lifetime.as_secs())
             }
@@ -244,7 +239,11 @@ impl Kubernetes {
         if let Some(seconds) = deadline {
             spec.insert("activeDeadlineSeconds".to_owned(), json!(seconds));
         }
-        if let Some(account) = self.account_name(slot) {
+        let account = self.account_name(slot, launch.connection.as_deref());
+        if slot.process == Process::Executor && account.is_none() {
+            return None;
+        }
+        if let Some(account) = &account {
             spec.insert("serviceAccountName".to_owned(), json!(account));
         }
         let mut env = vec![
@@ -253,10 +252,10 @@ impl Kubernetes {
             ("MANDATE_SUBJECT", slot.subject.clone()),
             ("MANDATE_GENERATION", generation.to_string()),
         ];
-        env.extend(
-            self.account_name(slot)
-                .map(|account| ("MANDATE_SUBJECT_ACCOUNT", account)),
-        );
+        env.extend(account.map(|account| ("MANDATE_SUBJECT_ACCOUNT", account)));
+        if slot.process == Process::Executor {
+            env.push(("MANDATE_WORKSPACE_NAMESPACE", self.namespace.clone()));
+        }
         for container in spec.get_mut("containers")?.as_array_mut()? {
             let vars = container
                 .as_object_mut()?
@@ -281,11 +280,31 @@ impl Kubernetes {
         )
     }
 
-    /// Creates `body` at `url`; one that already exists is made.
-    async fn create(&self, url: String, body: &Value) -> Result<(), Unavailable> {
-        let (status, _) = self.send(Method::POST, url, Some(body)).await?;
-        if status.is_success() || status == StatusCode::CONFLICT {
-            Ok(())
+    /// Makes `slot`'s account, `true`, or finds the one already made, `false`; an account of that
+    /// name the manager would not have made (another manager's, a mounted token, a Secret) is
+    /// refused, so no pod runs as it (DEC-2332 item 1).
+    async fn make_account(
+        &self,
+        slot: &Slot,
+        connection: Option<&str>,
+    ) -> Result<bool, Unavailable> {
+        let made = self.account(slot, connection).ok_or(Unavailable)?;
+        let (status, _) = self
+            .send(Method::POST, self.accounts(), Some(&made))
+            .await?;
+        if status.is_success() {
+            return Ok(true);
+        }
+        let name = self.account_name(slot, connection).ok_or(Unavailable)?;
+        if status != StatusCode::CONFLICT {
+            return Err(Unavailable);
+        }
+        let (status, body) = self
+            .send(Method::GET, format!("{}/{name}", self.accounts()), None)
+            .await?;
+        let found: Value = serde_json::from_slice(&body).map_err(|_| Unavailable)?;
+        if status == StatusCode::OK && same_account(&found, &made) {
+            Ok(false)
         } else {
             Err(Unavailable)
         }
@@ -356,28 +375,71 @@ impl Orchestrator for Kubernetes {
         &mut self,
         slot: &Slot,
         generation: u64,
-        lifetime: Option<Duration>,
+        launch: &Launch,
     ) -> Result<(), Unavailable> {
-        let pod = self
-            .manifest(slot, generation, lifetime)
-            .ok_or(Unavailable)?;
-        if self.account_name(slot).is_some() {
-            let account = self.account(slot).ok_or(Unavailable)?;
-            self.create(self.accounts(), &account).await?;
+        let pod = self.manifest(slot, generation, launch).ok_or(Unavailable)?;
+        let connection = launch.connection.as_deref();
+        let account = self.account_name(slot, connection);
+        let made = match account {
+            Some(_) => self.make_account(slot, connection).await?,
+            None => false,
+        };
+        let (status, _) = self.send(Method::POST, self.pods(), Some(&pod)).await?;
+        if status.is_success() || status == StatusCode::CONFLICT {
+            return Ok(());
         }
-        self.create(self.pods(), &pod).await
+        if let Some(account) = account
+            && made
+            && refused(status)
+        {
+            let _swept_again_when_the_request_closes =
+                self.delete(format!("{}/{account}", self.accounts())).await;
+        }
+        Err(Unavailable)
     }
 
     /// Deletes the account first, then the pod: a stop that fails leaves the pod listed, so the
     /// manager asks again, and no account outlives the pod it was made for.
-    async fn stop(&mut self, slot: &Slot, generation: u64) -> Result<(), Unavailable> {
-        if let Some(account) = self.account_name(slot) {
+    async fn stop(
+        &mut self,
+        slot: &Slot,
+        generation: u64,
+        connection: Option<&str>,
+    ) -> Result<(), Unavailable> {
+        if let Some(account) = self.account_name(slot, connection) {
             self.delete(format!("{}/{account}", self.accounts()))
                 .await?;
         }
         let pod = format!("{}/{}", self.pods(), self.pod_name(slot, generation));
         self.delete(pod).await
     }
+}
+
+/// Whether the API server refused a create outright: a client error other than a conflict or a
+/// rate limit, so nothing was made. A server error or a lost answer may have made it.
+fn refused(status: StatusCode) -> bool {
+    status.is_client_error()
+        && status != StatusCode::CONFLICT
+        && status != StatusCode::TOO_MANY_REQUESTS
+}
+
+/// Whether `found` is the account the manager makes, `made`: its labels, no mounted token, and
+/// no Secret or pull secret.
+fn same_account(found: &Value, made: &Value) -> bool {
+    let label =
+        |account: &Value, name: &str| account.get("metadata")?.get("labels")?.get(name).cloned();
+    let labelled = [MANAGED_BY, CHART_WORKSPACE, PROCESS]
+        .iter()
+        .all(|name| label(found, name).is_some() && label(found, name) == label(made, name));
+    let empty = |member: &str| {
+        found
+            .get(member)
+            .is_none_or(|v| v.as_array().is_some_and(Vec::is_empty))
+    };
+    labelled
+        && found.get("automountServiceAccountToken") == Some(&Value::Bool(false))
+        && empty("secrets")
+        && empty("imagePullSecrets")
 }
 
 /// One listed pod as an instance. A pod of this manager that cannot be read makes the whole list
@@ -410,7 +472,8 @@ fn instance(pod: &Value) -> Result<Instance, Unavailable> {
         .get("deletionTimestamp")
         .is_some_and(|d| !d.is_null());
     let phase = match status.and_then(|s| s.get("phase")).and_then(Value::as_str) {
-        Some("Succeeded" | "Failed") => Phase::Exited,
+        Some("Succeeded") => Phase::Succeeded,
+        Some("Failed") => Phase::Exited,
         Some("Pending") if !deleting => Phase::Pending,
         Some("Running") if !deleting => Phase::Running { ready },
         _ => Phase::Unknown,
@@ -435,6 +498,11 @@ fn member<'a>(
         .entry(name.to_owned())
         .or_insert_with(|| Value::Object(Map::new()))
         .as_object_mut()
+}
+
+/// `text`'s bytes in lowercase hex, two digits each.
+fn lower_hex(text: &str) -> String {
+    text.bytes().map(|byte| format!("{byte:02x}")).collect()
 }
 
 /// The first 16 hex digits of the SHA-256 of `text`: a label-safe, DNS-safe key.

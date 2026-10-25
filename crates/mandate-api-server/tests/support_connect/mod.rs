@@ -24,7 +24,8 @@ use mandate_authn::{Algorithm, IssuerConfig};
 use mandate_canon::{Digest, Value, parse, to_canonical};
 use mandate_connections::ConnectError;
 use mandate_connections::start::{
-    Binding, ClientId, Environment, OAuthClient, PkceVerifier, RedirectUri,
+    AuthorizePage, Authorizer, Binding, ClientId, Environment, OAuthClient, PkceVerifier,
+    RedirectUri,
 };
 use mandate_connections::vault::AuthorizationCode;
 use mandate_identity::{MembershipEvent, MembershipRecord, PrincipalId, Role, StepUpActionKind};
@@ -171,6 +172,17 @@ pub fn fixture_random(
     accepting: bool,
     random: Box<dyn Random>,
 ) -> Fixture {
+    fixture_port(environment, offered, accepting, random, None)
+}
+
+/// [`fixture`] whose callback writes through `vault` when given, rather than [`Codes`].
+pub fn fixture_port(
+    environment: &str,
+    offered: bool,
+    accepting: bool,
+    random: Box<dyn Random>,
+    vault: Option<Arc<dyn CodeVault>>,
+) -> Fixture {
     let mut n = DIRS.lock().expect("unpoisoned");
     *n += 1;
     let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
@@ -205,9 +217,12 @@ pub fn fixture_random(
     let codes = Arc::new(Codes::default());
     let connect = offered.then(|| {
         Arc::new(Connect::new(
-            client(),
+            Authorizer {
+                page: AuthorizePage::alpaca(),
+                client: client(),
+            },
             random,
-            Arc::clone(&codes) as Arc<dyn CodeVault>,
+            vault.unwrap_or_else(|| Arc::clone(&codes) as Arc<dyn CodeVault>),
         ))
     });
     let app = App {

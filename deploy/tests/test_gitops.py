@@ -12,6 +12,7 @@ takes the seeded bugs.
 """
 
 import copy
+import json
 import os
 import re
 import shutil
@@ -20,6 +21,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from test_cell import api_vault, approle_copied, connect_finish
 
 ROOT = Path(__file__).resolve().parents[2]
 GITOPS = ROOT / "deploy" / "gitops"
@@ -393,6 +395,12 @@ def values_policy(values: dict[str, dict], environment: str) -> list[str]:
         problems.append(f"workspace: deploymentTier {tier} in {environment}")
     if workspace.get("localImages"):
         problems.append("workspace: local images allowed")
+    if (workspace.get("api") or {}).get("vaultBinding") and environment != "staging":
+        problems.append(f"workspace: the API's vault binding is on in {environment}, where only staging runs a vault (DEC-2338)")
+    if (workspace.get("api") or {}).get("connectFinish") and environment != "staging":
+        problems.append(f"workspace: the connect finish runs in {environment}, where only staging runs a vault (DEC-2348)")
+    if (workspace.get("oauthFixture") or {}).get("enabled"):
+        problems.append("workspace: the cell's fixture OAuth provider is on (DEC-1176)")
     for image, reference in (workspace.get("images") or {}).items():
         if image == "stub-issuer" and reference:
             problems.append("workspace: the stub issuer is named")
@@ -449,11 +457,15 @@ def containers(doc: dict):
 
 
 def rendered_policy(rendered: list[dict], environment: str) -> list[str]:
-    """What the charts render: every image by digest, and no process told a stub tier, another
-    environment's tier, or `live`."""
+    """What the charts render: every image by digest, no process told a stub tier, another
+    environment's tier, or `live`, and nothing of a dev or ci cell's fixture OAuth provider: no
+    `oauth-fixture` object, and no token URL that repoints the exchange (DEC-1176 items 2 and 5)."""
     problems = []
     for doc in rendered:
         where = f"{doc.get('kind')} {doc.get('metadata', {}).get('name')}"
+        text = json.dumps(doc)
+        if "oauth-fixture" in text or "MANDATE_TOKEN_URL" in text:
+            problems.append(f"{where}: the cell's fixture OAuth provider or a token URL (DEC-1176)")
         for container in containers(doc):
             image = container.get("image", "")
             if not PINNED.search(image):
@@ -1309,6 +1321,7 @@ VALUE_BUGS = [
     ("workspace", {"environment": "live"}),
     ("workspace", {"api": {"issuer": "live"}}),
     ("workspace", {"localImages": True}),
+    ("workspace", {"oauthFixture": {"enabled": True}}),
     ("policy-controller", {"webhook": {"failurePolicy": "Ignore"}}),
     ("policy-controller", {"webhook": {"configData": {"no-match-policy": "deny"}}}),
     ("policy-controller", {"webhook": {"image": {"version": "v0.13.1"}}}),
@@ -1336,6 +1349,26 @@ def test_each_values_seeded_bug_is_caught(overlay, release, change):
     assert values_policy(bad, environment), f"values_policy missed {release} {change}"
 
 
+def test_the_api_is_bound_to_the_vault_in_staging_alone(overlay):
+    """DEC-2338: staging's API carries the vault binding, its AppRole copied owner-only and its
+    egress to the vault on 8200; production, which runs no vault, carries none of it."""
+    environment, _, values, rendered, directory = overlay
+    bound = bool((values["workspace"].get("api") or {}).get("vaultBinding"))
+    finish = bool((values["workspace"].get("api") or {}).get("connectFinish"))
+    if directory == GITOPS / "clusters" / "staging":
+        assert bound, "staging's API is bound to its vault"
+        assert finish, "and runs the connect finish as the connection manager (DEC-2348)"
+    assert api_vault(rendered, on=bound) == []
+    workspace = (values["workspace"].get("api") or {}).get("workspace", "")
+    assert connect_finish(rendered, on=finish, workspace=workspace) == []
+    assert approle_copied(rendered) == []
+    if environment != "staging":
+        for setting in ("vaultBinding", "connectFinish"):
+            bad = copy.deepcopy(values)
+            bad["workspace"] = merge(bad["workspace"], {"api": {setting: True}})
+            assert values_policy(bad, environment), f"{setting} where no vault runs is caught"
+
+
 def test_another_environments_tier_is_caught(overlay):
     environment, _, values, _, _ = overlay
     other = next(e for e in ENVIRONMENTS if e != environment)
@@ -1356,6 +1389,14 @@ def test_rendered_seeded_bugs_are_caught(overlay):
     live = copy.deepcopy(deployment)
     containers(live)[0].setdefault("env", []).append({"name": "MANDATE_ENVIRONMENT", "value": "live"})
     assert rendered_policy([live], environment)
+    fixture = copy.deepcopy(deployment)
+    fixture["metadata"]["name"] = "oauth-fixture"
+    assert rendered_policy([fixture], environment)
+    repointed = copy.deepcopy(deployment)
+    containers(repointed)[0].setdefault("env", []).append(
+        {"name": "MANDATE_TOKEN_URL", "value": "http://oauth-fixture:8091/alpaca/oauth/token"}
+    )
+    assert rendered_policy([repointed], environment)
     cluster = copy.deepcopy(next(d for d in rendered if d["kind"] == "Cluster"))
     cluster["spec"]["imageName"] = "ghcr.io/cloudnative-pg/postgresql:18"
     assert rendered_policy([cluster], environment)
