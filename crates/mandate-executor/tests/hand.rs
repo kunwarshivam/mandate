@@ -6296,7 +6296,7 @@ fn a_release_between_rungs_shrinks_the_next_rung() {
 /// DEC-2360 invariant 4, rule 13: the cap reaches a switch's own flatten only. After the agent
 /// released 4 of its 10, a risk exit of 10 that is not a switch's still sends all 10, unshrunk.
 #[test]
-fn a_release_leaves_an_exit_that_is_not_a_switchs_flatten_whole() {
+fn a_release_leaves_an_exit_other_than_a_switch_flatten_whole() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
     let instruments = FixedInstruments;
