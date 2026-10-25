@@ -4370,7 +4370,13 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
 - **E7-4 (executor process), from [DEC-2347](decisions/DEC-2347.md) item 6, with DEC-2333's slice
   A2b:** the exit's `owes_nothing` reads agent-scoped work only; once the account-scope switch
   lands, an account switch still closing (`closing_all`) keeps the executor running too, with a
-  test.
+  test. Taken by [DEC-2364](decisions/DEC-2364.md)'s pair: an instrument the switch closes that the
+  fold still reads held keeps it running.
+- **E7-4 (executor, account kill switch), from [DEC-2364](decisions/DEC-2364.md) Not covered
+  here:** a close-position the broker accepts and then drops at once (rejected, or expired before
+  the next read) is asked again on the read that confirms its own answer, whose answer asks another
+  read, within one pass, until the chain bound fails the cycle. Ask a close again only on the
+  in-doubt hold's reads (DEC-2337 item 3), with a test over the fake broker's dropped close.
 - **E7-4 (kill switch sizing), from [DEC-2347](decisions/DEC-2347.md) item 9, rule 13:** a buy
   the broker reports filled whose fill named no order (Alpaca's fill activity names only the
   broker's order id, so the reconciliation applies it unattributed) leaves nothing in `kill.rs`'s

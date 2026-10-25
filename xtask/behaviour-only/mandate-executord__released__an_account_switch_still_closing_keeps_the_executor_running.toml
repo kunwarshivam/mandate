@@ -1,0 +1,8 @@
+file = "crates/mandate-executord/tests/released.rs"
+test = "an_account_switch_still_closing_keeps_the_executor_running"
+reason = """
+`mandate-executord`'s exit reads agent-scoped work only, so once the broker expires the account
+switch's close the executor exits `completed` with the owner's shares still held: the test fails on
+that behaviour, not at a stub. DEC-2364's implementation keeps an account switch whose instruments
+are still held owing, and deletes this row.
+"""
