@@ -4,7 +4,9 @@ With `oauthFixture.enabled` in a dev or ci tier, and only there, the chart rende
 Deployment, its Service and its policy, and mounts the client Secret `cargo xtask cell up` makes,
 since the chart makes none (DEC-822 item 4); the stub issuer's image runs as the
 Alpaca provider alone, answering one public host; it reaches nothing, and only this workspace's
-token exchange reaches it, whose token URL and `token-host` egress name it and nothing else. Any other
+token exchange reaches it, whose token URL and `token-host` egress name it and nothing else. The API
+alone names its authorize page, which the connect start hands the browser and the API never dials
+(DEC-2633 item 3). Any other
 tier refuses the setting, in the schema and in the chart, whether or not the stub's image is named.
 What is expected is written out here, not read from the chart, so a chart that drifts fails.
 """
@@ -20,6 +22,7 @@ from test_cell import (
     KUBE_API,
     STUB,
     TEMPLATES,
+    containers,
     default_deny,
     every_image,
     gated,
@@ -30,6 +33,7 @@ from test_cell import (
     policies,
     render_all,
     secrets_as_files,
+    workloads,
 )
 
 ON = (
@@ -42,6 +46,7 @@ ON = (
     "oauthFixture.enabled=true",
 )
 TOKEN_URL = "http://oauth-fixture:8091/alpaca/oauth/token"
+AUTHORIZE_URL = "http://oauth-fixture:8091/alpaca/oauth/authorize"
 SECRET_FILE = "/run/oauth-fixture/client-secret"
 MOUNTED_SECRET = "/run/secrets/oauth-fixture-client/client-secret"
 ARGS = [
@@ -88,6 +93,18 @@ def token_urls(docs: list[dict]) -> list[str]:
     ]
 
 
+def authorize_urls(docs: list[dict]) -> list[tuple[str, str]]:
+    """Each container that names `MANDATE_ALPACA_AUTHORIZE_URL`, as its process and the value: the
+    page the API's connect start sends the browser to (DEC-2633 item 3)."""
+    return [
+        (w["metadata"]["labels"]["mandate.dev/process"], e.get("value", ""))
+        for w in workloads(docs)
+        for c in containers(w)
+        for e in c.get("env", [])
+        if e["name"] == "MANDATE_ALPACA_AUTHORIZE_URL"
+    ]
+
+
 def oauth_fixture(docs: list[dict], on: bool) -> list[str]:
     """What the chart renders for the fixture, on or off (DEC-1176 items 1 to 6)."""
     problems = []
@@ -98,6 +115,8 @@ def oauth_fixture(docs: list[dict], on: bool) -> list[str]:
         problems.append(f"the fixture's objects are {sorted(found)}")
     if token_urls(docs) != ([TOKEN_URL] if on else []):
         problems.append(f"the exchange's token URLs are {token_urls(docs)}")
+    if authorize_urls(docs) != ([("api", AUTHORIZE_URL)] if on else []):
+        problems.append(f"the authorize pages are {authorize_urls(docs)}")
     exchange = policies(docs).get("egress-token-exchange", {}).get("spec", {}).get("egress", [])
     to_fixture = [
         r for r in exchange if any(t.get("podSelector", {}).get("matchLabels") == FIXTURE for t in r["to"])
@@ -303,6 +322,30 @@ def test_each_seeded_bug_is_caught():
         ),
     ):
         assert oauth_fixture(mutate(docs, "token-exchange", "Pod", change), on=True), "missed a token URL bug"
+
+    def api_env(w):
+        return w["spec"]["template"]["spec"]["containers"][0]["env"]
+
+    def page(w):
+        return next(e for e in api_env(w) if e["name"] == "MANDATE_ALPACA_AUTHORIZE_URL")
+
+    for change in (
+        lambda w: page(w).update(value="https://app.alpaca.markets/oauth/authorize"),
+        lambda w: page(w).update(value="http://oauth-fixture:8091/alpaca/oauth/token"),
+        lambda w: page(w).update(value=AUTHORIZE_URL + "?x=1"),
+        lambda w: api_env(w).remove(page(w)),
+        lambda w: api_env(w).append({"name": "MANDATE_ALPACA_AUTHORIZE_URL", "value": AUTHORIZE_URL}),
+    ):
+        assert oauth_fixture(mutate(docs, "api", "Deployment", change), on=True), "missed an authorize page bug"
+    elsewhere = mutate(
+        docs,
+        "token-exchange",
+        "Pod",
+        lambda w: pod_spec(w)["containers"][0]
+        .setdefault("env", [])
+        .append({"name": "MANDATE_ALPACA_AUTHORIZE_URL", "value": AUTHORIZE_URL}),
+    )
+    assert oauth_fixture(elsewhere, on=True), "an authorize page on another process is caught"
     made = {
         "apiVersion": "v1",
         "kind": "Secret",
@@ -325,6 +368,15 @@ def test_each_seeded_bug_is_caught():
         ),
     )
     assert oauth_fixture(on_with_url_off, on=False), "a token URL with the fixture off is caught"
+    page_with_fixture_off = mutate(
+        off,
+        "api",
+        "Deployment",
+        lambda w: w["spec"]["template"]["spec"]["containers"][0]["env"].append(
+            {"name": "MANDATE_ALPACA_AUTHORIZE_URL", "value": AUTHORIZE_URL}
+        ),
+    )
+    assert oauth_fixture(page_with_fixture_off, on=False), "an authorize page with the fixture off is caught"
 
 
 def test_a_token_url_is_admitted_by_its_one_fixture_value_alone():
