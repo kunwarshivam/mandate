@@ -374,6 +374,8 @@ struct Books {
     /// while `Some`. A close is an order of the broker's own, working while `Some(false)` and
     /// filled whole at 150 on arrival while `Some(true)`.
     account_wide: Option<bool>,
+    /// Whether every close-position's answer is lost after the close takes effect.
+    lose_closes: bool,
     sequence: u64,
 }
 
@@ -508,6 +510,11 @@ impl Paper {
         self.books.borrow_mut().account_wide = Some(closes_fill);
     }
 
+    /// Every close-position from now on takes effect and its answer is lost.
+    pub fn lose_close_answers(&self) {
+        self.books.borrow_mut().lose_closes = true;
+    }
+
     /// The broker expires every close still working, unfilled: the position stays held.
     pub fn expire_closes(&self) {
         for order in self.books.borrow_mut().orders.values_mut() {
@@ -542,6 +549,9 @@ impl Broker for Paper {
             journaled_first,
         });
         let outcome = answer(&mut books, request)?;
+        if books.lose_closes && matches!(request, BrokerRequest::ClosePosition(..)) {
+            return Err(ConnectorError::Unknown(BrokerUnknown::Timeout));
+        }
         if books.lose_answers > 0 {
             books.lose_answers = books.lose_answers.saturating_sub(1);
             return Err(ConnectorError::Unknown(BrokerUnknown::Timeout));
