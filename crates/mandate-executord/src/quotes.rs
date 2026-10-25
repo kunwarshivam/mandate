@@ -25,10 +25,18 @@ use mandate_time::UtcNanos;
 
 pub use crate::credential::AlpacaQuotes;
 
-/// Reads one instrument's latest quote as the core observes it, or nothing.
+/// Reads one instrument's latest quote as the core observes it.
 pub trait QuoteFeed {
-    /// The instrument's latest sane quote at `now`, or `None` when there is no such quote to hand.
-    fn observe(&self, instrument: &InstrumentId, now: UtcNanos) -> Option<MarketObservation>;
+    /// The instrument's latest sane, fresh quote at `now`.
+    ///
+    /// # Errors
+    /// A code naming neither the instrument nor a price when there is no such quote to hand; the
+    /// process then hands nothing.
+    fn observe(
+        &self,
+        instrument: &InstrumentId,
+        now: UtcNanos,
+    ) -> Result<MarketObservation, &'static str>;
 }
 
 /// A feed with no quotes: the fixture broker's, and any wiring that reads none.
@@ -36,8 +44,12 @@ pub trait QuoteFeed {
 pub struct NoQuotes;
 
 impl QuoteFeed for NoQuotes {
-    fn observe(&self, _instrument: &InstrumentId, _now: UtcNanos) -> Option<MarketObservation> {
-        None
+    fn observe(
+        &self,
+        _instrument: &InstrumentId,
+        _now: UtcNanos,
+    ) -> Result<MarketObservation, &'static str> {
+        Err("no_quotes")
     }
 }
 
@@ -68,7 +80,14 @@ impl QuotePoll {
     /// The wanted instruments due a read at `now`, which it records as read: one never read, or
     /// last read `every` or more before `now`. An instrument no longer wanted is forgotten, so it
     /// is read at once when it is wanted again.
-    pub fn due(&mut self, wanted: &BTreeSet<InstrumentId>, now: UtcNanos) -> Vec<InstrumentId> {
+    ///
+    /// # Errors
+    /// Never: the result keeps the form its stub had (DEC-137).
+    pub fn due(
+        &mut self,
+        wanted: &BTreeSet<InstrumentId>,
+        now: UtcNanos,
+    ) -> Result<Vec<InstrumentId>, &'static str> {
         self.read_at
             .retain(|instrument, _| wanted.contains(instrument));
         let every = i64::try_from(self.every.as_secs()).unwrap_or(i64::MAX);
@@ -84,6 +103,6 @@ impl QuotePoll {
         for instrument in &due {
             self.read_at.insert(instrument.clone(), now);
         }
-        due
+        Ok(due)
     }
 }
