@@ -1,7 +1,0 @@
-file = "crates/mandate-executor/tests/hand.rs"
-test = "a_release_of_all_the_agent_keeps_places_no_protection"
-reason = """
-DEC-2362 (backlog: "E6-4 (protection sizing after a release)"): protection the executor places is
-sized at the long position, the owner's released shares included. It reaches no stub and fails on
-that size until DEC-2362's implementation deletes this file with its `#[ignore]` line.
-"""

@@ -6207,7 +6207,6 @@ fn released_then_lost(released: &str) -> (common::Ran, common::Ran) {
 /// 2 filled, the agent's re-placed protection, lost at the broker, is placed again for the
 /// agent's 4, never for the owner's released shares.
 #[test]
-#[ignore = "pending E6-4"]
 fn a_re_cover_after_a_release_protects_only_the_agents_shares() {
     let (_, lost) = released_then_lost("4");
     assert_eq!(re_placed(&lost, None), qty("4"), "{:?}", lost.draft_types());
@@ -6217,7 +6216,6 @@ fn a_re_cover_after_a_release_protects_only_the_agents_shares() {
 /// of the agent's is left to protect, so no protection is placed on the owner's shares, at the
 /// exit's end or at a later loss.
 #[test]
-#[ignore = "pending E6-4"]
 fn a_release_of_all_the_agent_keeps_places_no_protection() {
     let (ended, lost) = released_then_lost("8");
     for ran in [&ended, &lost] {
@@ -6234,7 +6232,6 @@ fn a_release_of_all_the_agent_keeps_places_no_protection() {
 /// DEC-2362 item 1 at the end of an exit sequence: with the owner holding 4 released shares, the
 /// agent's risk exit of 2 leaves it 4, and that is what the re-placement covers.
 #[test]
-#[ignore = "pending E6-4"]
 fn an_exits_re_placement_after_a_release_protects_only_the_agents_shares() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -6277,7 +6274,6 @@ fn an_exits_re_placement_after_a_release_protects_only_the_agents_shares() {
 /// DEC-2362 item 1 at `new_day`: the buffer day's replacement of the protected 10, after the owner
 /// took 4, covers the agent's 6.
 #[test]
-#[ignore = "pending E6-4"]
 fn a_buffer_day_re_placement_after_a_release_protects_only_the_agents_shares() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
