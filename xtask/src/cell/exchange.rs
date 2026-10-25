@@ -162,12 +162,12 @@ pub fn code_state(read: &str) -> &'static str {
     }
 }
 
-/// The phase of the token-exchange pod the manager started for `connection`, from `kubectl get
-/// pods -o json` over the manager's token-exchange pods: the newest generation's, matched by its
-/// `mandate.dev/subject` annotation; `None` while there is none.
-pub fn exchange_phase(pods: &str, connection: &str) -> Option<String> {
+/// The newest token-exchange pod the manager started for `connection`, from `kubectl get pods -o
+/// json` over the manager's token-exchange pods: its name and phase, the newest generation's,
+/// matched by its `mandate.dev/subject` annotation; `None` while there is none.
+pub fn newest_exchange(pods: &str, connection: &str) -> Option<(String, String)> {
     let pods: Value = serde_json::from_str(pods).ok()?;
-    pods["items"]
+    let pod = pods["items"]
         .as_array()?
         .iter()
         .filter(|pod| {
@@ -178,8 +178,21 @@ pub fn exchange_phase(pods: &str, connection: &str) -> Option<String> {
                 .as_str()
                 .and_then(|g| g.parse::<u64>().ok())
                 .unwrap_or_default()
-        })
-        .and_then(|pod| pod["status"]["phase"].as_str().map(str::to_owned))
+        })?;
+    Some((
+        pod["metadata"]["name"].as_str()?.to_owned(),
+        pod["status"]["phase"].as_str()?.to_owned(),
+    ))
+}
+
+/// What a report may say of a failed exchange pod's log: only its lines that are a refusal code,
+/// `[a-z_]+`, which is all the exchange writes (`mandate-token-exchange`'s `main`), so no other
+/// line can carry a code or token into CI's log.
+pub fn codes_only(log: &str) -> Vec<&str> {
+    log.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && l.bytes().all(|b| b.is_ascii_lowercase() || b == b'_'))
+        .collect()
 }
 
 /// The code and state the fixture's authorize page hands back in its redirect to `redirect_uri`:
@@ -342,12 +355,20 @@ pub fn drill(seeded: bool) -> Result<Verdict> {
             "the callback answered {status}, not 303"
         )));
     }
-    let phase = exchanged(connection)?;
-    if phase.as_deref() != Some("Succeeded") {
-        return Ok(Verdict::Broken(format!(
-            "the exchange pod for {connection} did not succeed: {}",
-            phase.as_deref().unwrap_or("the manager started none")
-        )));
+    match exchanged(connection)? {
+        Some((_, phase)) if phase == "Succeeded" => {}
+        Some((pod, phase)) => {
+            let log = kubectl(&["logs", "--namespace", NAMESPACE, &pod]).unwrap_or_default();
+            return Ok(Verdict::Broken(format!(
+                "the exchange pod {pod} for {connection} did not succeed: {phase}, codes {:?}",
+                codes_only(&log)
+            )));
+        }
+        None => {
+            return Ok(Verdict::Broken(format!(
+                "the manager started no exchange pod for {connection}"
+            )));
+        }
     }
     let root = root_token()?;
     let seg = segment(connection);
@@ -436,9 +457,9 @@ fn fixture_get(path: &str) -> Result<String> {
     Ok(reply)
 }
 
-/// `Succeeded` once the manager's newest exchange pod for `connection` has succeeded, or the last
-/// phase seen after [`POLLS`] polls: a generation that failed may be followed by a newer one.
-fn exchanged(connection: &str) -> Result<Option<String>> {
+/// The manager's newest exchange pod for `connection` once it has succeeded, or the last one seen
+/// after [`POLLS`] polls: a generation that failed may be followed by a newer one.
+fn exchanged(connection: &str) -> Result<Option<(String, String)>> {
     let selector = format!("{MANAGED_BY},mandate.dev/process=token-exchange");
     let mut phase = None;
     for _ in 0..POLLS {
@@ -452,8 +473,8 @@ fn exchanged(connection: &str) -> Result<Option<String>> {
             "-o",
             "json",
         ])?;
-        phase = exchange_phase(&pods, connection);
-        if phase.as_deref() == Some("Succeeded") {
+        phase = newest_exchange(&pods, connection);
+        if phase.as_ref().is_some_and(|(_, p)| p == "Succeeded") {
             return Ok(phase);
         }
         sleep(Duration::from_secs(2));
@@ -540,16 +561,28 @@ mod tests {
     }
 
     #[test]
-    fn the_newest_generation_s_phase_for_the_connection_is_read() {
+    fn the_newest_generation_s_pod_for_the_connection_is_read() {
         let pods = serde_json::json!({"items": [
-            {"metadata": {"annotations": {"mandate.dev/subject": "c1"}, "labels": {"mandate.dev/generation": "1"}}, "status": {"phase": "Failed"}},
-            {"metadata": {"annotations": {"mandate.dev/subject": "c1"}, "labels": {"mandate.dev/generation": "2"}}, "status": {"phase": "Succeeded"}},
-            {"metadata": {"annotations": {"mandate.dev/subject": "c2"}, "labels": {"mandate.dev/generation": "3"}}, "status": {"phase": "Running"}},
+            {"metadata": {"name": "x1", "annotations": {"mandate.dev/subject": "c1"}, "labels": {"mandate.dev/generation": "1"}}, "status": {"phase": "Failed"}},
+            {"metadata": {"name": "x2", "annotations": {"mandate.dev/subject": "c1"}, "labels": {"mandate.dev/generation": "2"}}, "status": {"phase": "Succeeded"}},
+            {"metadata": {"name": "x3", "annotations": {"mandate.dev/subject": "c2"}, "labels": {"mandate.dev/generation": "3"}}, "status": {"phase": "Running"}},
         ]})
         .to_string();
-        assert_eq!(exchange_phase(&pods, "c1").as_deref(), Some("Succeeded"));
-        assert_eq!(exchange_phase(&pods, "c3"), None);
-        assert_eq!(exchange_phase("not json", "c1"), None);
+        assert_eq!(
+            newest_exchange(&pods, "c1"),
+            Some(("x2".to_owned(), "Succeeded".to_owned()))
+        );
+        assert_eq!(newest_exchange(&pods, "c3"), None);
+        assert_eq!(newest_exchange("not json", "c1"), None);
+    }
+
+    /// A failed pod's report keeps its refusal codes and drops any other line.
+    #[test]
+    fn only_refusal_codes_leave_a_failed_exchange_s_log() {
+        assert_eq!(
+            codes_only("vault_refused\naccess_token=abc\n\nToken: XyZ\n token_exchange_failed \n"),
+            vec!["vault_refused", "token_exchange_failed"]
+        );
     }
 
     #[test]
