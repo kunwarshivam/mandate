@@ -439,8 +439,11 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         alerts: &mut Vec<Alert>,
     ) -> Result<bool, ExecutorError> {
         let wanted = self.state.quote_wanted()?;
-        for instrument in self.polled.due(&wanted, now) {
-            let Some(observation) = self.wiring.quotes.observe(&instrument, now) else {
+        let Ok(due) = self.polled.due(&wanted, now) else {
+            return Ok(true);
+        };
+        for instrument in due {
+            let Ok(observation) = self.wiring.quotes.observe(&instrument, now) else {
                 continue;
             };
             if !self.hand(now, now, Input::Market(observation), alerts, 0) {
