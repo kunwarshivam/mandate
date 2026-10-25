@@ -336,7 +336,8 @@ def test_each_seeded_bug_is_caught():
         lambda w: api_env(w).remove(page(w)),
         lambda w: api_env(w).append({"name": "MANDATE_ALPACA_AUTHORIZE_URL", "value": AUTHORIZE_URL}),
     ):
-        assert oauth_fixture(mutate(docs, "api", "Deployment", change), on=True), "missed an authorize page bug"
+        changed = mutate(docs, "api", "Deployment", change)
+        assert oauth_fixture(changed, on=True), "missed an authorize page bug"
     elsewhere = mutate(
         docs,
         "token-exchange",
@@ -376,7 +377,7 @@ def test_each_seeded_bug_is_caught():
             {"name": "MANDATE_ALPACA_AUTHORIZE_URL", "value": AUTHORIZE_URL}
         ),
     )
-    assert oauth_fixture(page_with_fixture_off, on=False), "an authorize page with the fixture off is caught"
+    assert oauth_fixture(page_with_fixture_off, on=False), "a page with the fixture off is caught"
 
 
 def test_a_token_url_is_admitted_by_its_one_fixture_value_alone():
