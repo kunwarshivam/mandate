@@ -1,0 +1,8 @@
+file = "crates/mandate-executor/tests/hand.rs"
+test = "a_release_between_rungs_shrinks_the_next_rung"
+reason = """
+DEC-2360 (backlog: "E6-4 (executor kill switch), from the review of DEC-2354"): a switch's flatten
+is sized when it is raised, and its first send and each ladder rung send that size, so a release
+written since is not taken off it. It reaches no stub and fails on that size until DEC-2360's
+implementation deletes this file with its `#[ignore]` line.
+"""
