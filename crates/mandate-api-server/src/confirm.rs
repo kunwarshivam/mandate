@@ -177,9 +177,11 @@ pub enum Unanswered {
 }
 
 /// Whether `principal` holds a passkey past its cool-off at `now` on `workspace`'s control stream
-/// as the request read it ([DEC-2126](../../../docs/project/decisions/DEC-2126.md) item 6): one
-/// the passkey routes list, from the same fold, whose cool-off has ended or that has none. Such a
-/// member's `cli_confirm` for a connect has ended, and a paper connect needs their passkey.
+/// as the request read it ([DEC-2126](../../../docs/project/decisions/DEC-2126.md) item 6),
+/// judged as the step-up verifier counts one: from the same fold, a `CredentialEnrolled` version 2
+/// passkey whose cool-off has ended or that has none. A version 1 enrolment never counts (DEC-2122
+/// item 3), so it holds nothing here. Such a member's `cli_confirm` for a connect has ended, and a
+/// paper connect needs their passkey.
 ///
 /// # Errors
 /// [`Unanswered`].

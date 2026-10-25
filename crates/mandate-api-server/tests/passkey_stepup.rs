@@ -982,14 +982,36 @@ fn a_removed_passkey_another_member_s_or_none_is_not_held() {
 
 #[test]
 #[ignore = "pending E9-4"]
-fn a_version_1_passkey_the_routes_list_is_held() {
+fn a_version_1_passkey_is_not_held_beside_a_version_2_one_that_is() {
     let w = holding(1, |signer| {
         version_1(enrolled(OWNER, CREDENTIAL, signer, 0, None))
     });
     assert_eq!(
         held_at(&w, ISSUED),
-        Ok(true),
-        "the routes list it, so the interim ends though only a version 2 passkey can step up"
+        Ok(false),
+        "the verifier never counts a version 1 enrolment, so it ends no interim"
+    );
+    let mut both = holding(1, |signer| {
+        version_1(enrolled(OWNER, OTHER_CREDENTIAL, signer, 0, None))
+    });
+    enrol(
+        &mut both.rows,
+        T0 - 800,
+        enrolled(OWNER, CREDENTIAL, &both.signer, 0, None),
+    );
+    assert_eq!(held_at(&both, ISSUED), Ok(true), "the version 2 one counts");
+}
+
+#[test]
+fn a_member_whose_only_passkey_is_version_1_keeps_cli_confirm_for_a_connect() {
+    let mut w = holding(1, |signer| {
+        version_1(enrolled(OWNER, CREDENTIAL, signer, 0, None))
+    });
+    let ask = confirmed_connect(&mut w);
+    assert_eq!(
+        w.judge(&ask),
+        Ok(None),
+        "DEC-2126 item 6: no passkey the verifier counts, so DEC-2125's interim holds for them"
     );
 }
 
