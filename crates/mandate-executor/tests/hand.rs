@@ -7181,7 +7181,6 @@ fn the_bound_protection_takes_its_own_instruments_prices() {
 /// DEC-2356 item 8 (the review of #2327): a read that omits the bound's protection, sent and not
 /// yet acknowledged, lets no close go beside it, though it lists no other sell.
 #[test]
-#[ignore = "pending E7-4"]
 fn a_read_that_omits_the_unacknowledged_bound_protection_closes_nothing() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[BTC]);

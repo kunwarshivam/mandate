@@ -1,8 +1,0 @@
-file = "crates/mandate-executor/tests/hand.rs"
-test = "a_read_that_omits_the_unacknowledged_bound_protection_closes_nothing"
-reason = """
-DEC-2356 item 8: `closes_due` releases a close on a read that lists no sell in the instrument,
-though a sell of ours the broker has not yet acknowledged may be missing from it, so this test
-reaches no stub and fails on that behaviour until the implementation deletes this file with its
-`#[ignore]` line.
-"""
