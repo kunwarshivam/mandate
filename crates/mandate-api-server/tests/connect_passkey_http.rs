@@ -2,8 +2,8 @@
 //! and 8, journal spec §9.32 rules 253 and 254): the challenge from the challenge route, signed by
 //! a software authenticator, verified by the server's real binding, and committed as
 //! `ConnectionRequested` then `StepUpAsserted` in one batch, with the raw assertion stored; a
-//! refused start appends and stores nothing; and a `cli_confirm` start still works while
-//! DEC-2125's interim lasts.
+//! refused start, or one on a stream that breaks rule 254, appends and stores nothing; and a
+//! `cli_confirm` start still works while DEC-2125's interim lasts.
 //!
 //! The binding is wrapped in a recorder, so a failure shows what the port answered. Every expected
 //! record is written here by hand from the request the test sent.
@@ -36,7 +36,7 @@ use support_connect::{
     ALICE, APP, Fixture, KEY, StepUpBinding, T0, appended, base, code, ctl, derived, digest,
     fixture_binding, json, principal, signed_in, start, text, unissued,
 };
-use support_passkey::{CREDENTIAL, Signed, Signer, enrol, enrolled, unb64url};
+use support_passkey::{CREDENTIAL, Signed, Signer, assert_by, asserted, enrol, enrolled, unb64url};
 
 const CHALLENGE_KEY: &str = "k1Z-9_challeng01";
 const CROCKFORD: &[u8; 32] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
@@ -321,6 +321,52 @@ fn a_refused_passkey_start_appends_and_stores_nothing_and_keeps_the_challenge() 
     );
     assert!(w.held(&issued), "a refused start keeps the challenge");
     unissued(&w.f, &reply.body);
+}
+
+/// Appends Alice's `StepUpAsserted` records `(challenge, counter)` for her passkey to the stream.
+fn asserted_before(w: &mut World, records: &[(&str, u32)]) {
+    let mut rows = Rows {
+        rows: w.f.journal.rows_of(&ctl()),
+    };
+    for (n, (challenge, counter)) in records.iter().enumerate() {
+        let secs = T0 - 100 + i64::try_from(n).expect("small");
+        assert_by(
+            &mut rows,
+            principal(ALICE),
+            secs,
+            asserted(challenge, CREDENTIAL, *counter),
+        );
+    }
+    w.seeded = rows.rows.len();
+    w.f.journal
+        .streams
+        .lock()
+        .expect("unpoisoned")
+        .insert(ctl(), rows.rows);
+}
+
+#[test]
+#[ignore = "pending E9-4"]
+fn a_start_on_a_stream_that_breaks_rule_254_is_step_up_missing_and_appends_nothing() {
+    let earlier = "01J9ZQ4B7Y8K3M5N6P7Q8R9S0V";
+    for records in [
+        vec![(earlier, 3), ("01J9ZQ4B7Y8K3M5N6P7Q8R9S0W", 2)],
+        vec![(earlier, 1), (earlier, 2)],
+    ] {
+        let mut w = world();
+        asserted_before(&mut w, &records);
+        let issued = w.challenge();
+        let signed = w.signer.assert(&issued.bytes, 9);
+        let reply = w.start(&w.body(&issued, "passkey", Some(signed.json(CREDENTIAL))));
+        assert_eq!(
+            code(&reply),
+            (401, ProblemCode::StepUpMissing),
+            "{records:?}: the port answered {:?}",
+            w.answers()
+        );
+        assert!(w.appended().is_empty(), "{records:?}: nothing is appended");
+        assert!(w.held(&issued), "{records:?}");
+    }
 }
 
 #[test]
