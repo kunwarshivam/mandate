@@ -911,7 +911,7 @@ def test_rendered_objects_match_the_kubernetes_schemas(overlay, tmp_path):
 FQDN_EGRESS = {
     "api": {"wyyxngmblqqokcvraflx.supabase.co"},
     "control": {"wyyxngmblqqokcvraflx.supabase.co"},
-    "executor": {"paper-api.alpaca.markets"},
+    "executor": {"paper-api.alpaca.markets", "data.alpaca.markets"},
     "data": {"data.alpaca.markets", "stream.data.alpaca.markets"},
     "model-gateway": {"openrouter.ai"},
     "token-exchange": {"api.alpaca.markets"},
@@ -996,6 +996,22 @@ def test_fqdn_egress(overlay):
     assert fqdn_egress(docs, FQDN_EGRESS if environment == "staging" and overlay[4] != FIXTURE else {}) == []
 
 
+def test_the_executor_reaches_paper_trading_and_market_data_only(tmp_path):
+    """DEC-2359 item 5: staging's executor reaches Alpaca's paper trading host and its market-data
+    host, by exact name on 443, and never the live host, whose name is the token exchange's alone."""
+    docs = build("staging", GITOPS / "clusters" / "staging", tmp_path)
+    executor = [
+        d
+        for d in docs
+        if d["kind"] == "CiliumNetworkPolicy"
+        and d["spec"]["endpointSelector"]["matchLabels"].get("mandate.dev/process") == "executor"
+    ]
+    assert len(executor) == 1
+    names = {f.get("matchName") for r in executor[0]["spec"]["egress"] for f in r.get("toFQDNs", [])}
+    assert names == {"paper-api.alpaca.markets", "data.alpaca.markets"}
+    assert not LIVE_HOST.search(str(executor[0]))
+
+
 def test_each_fqdn_egress_bug_is_caught(tmp_path):
     docs = build("staging", GITOPS / "clusters" / "staging", tmp_path)
     assert fqdn_egress(docs, FQDN_EGRESS) == []
@@ -1024,6 +1040,9 @@ def test_each_fqdn_egress_bug_is_caught(tmp_path):
         lambda: host_rule("data")["toFQDNs"].append({"matchPattern": "*.alpaca.markets"}),
         lambda: host_rule("model-gateway")["toFQDNs"].append({"matchName": "paper-api.alpaca.markets"}),
         lambda: host_rule("executor")["toPorts"][0]["ports"].append({"port": "80", "protocol": "TCP"}),
+        lambda: host_rule("executor")["toFQDNs"].append({"matchName": "stream.data.alpaca.markets"}),
+        lambda: host_rule("executor")["toFQDNs"].append({"matchPattern": "*.alpaca.markets"}),
+        lambda: host_rule("executor")["toFQDNs"].remove({"matchName": "data.alpaca.markets"}),
         lambda: policy("api")["spec"]["egress"].append({"toCIDR": ["0.0.0.0/0"]}),
         lambda: policy("api")["spec"]["endpointSelector"]["matchLabels"].update({"mandate.dev/process": "runtime"}),
         lambda: policy("control")["spec"]["endpointSelector"]["matchLabels"].pop("mandate.dev/workspace"),

@@ -110,7 +110,7 @@ fn a_pod_on_another_connection_s_account_refuses_the_start() {
 }
 
 /// The settings a start that passes its checks has.
-const SETTINGS: [(&str, &str); 7] = [
+const SETTINGS: [(&str, &str); 8] = [
     ("MANDATE_SUBJECT", CONNECTION),
     ("MANDATE_DEPLOYMENT_TIER", "dev"),
     ("MANDATE_PROCESS", "token_exchange"),
@@ -123,6 +123,10 @@ const SETTINGS: [(&str, &str); 7] = [
     (
         "MANDATE_TOKEN_URL",
         "http://127.0.0.1:8091/alpaca/oauth/token",
+    ),
+    (
+        "MANDATE_REQUEST_EXPIRES_AT",
+        "9999-12-31T23:59:59.000000000Z",
     ),
 ];
 
@@ -137,6 +141,41 @@ fn run_with(args: &[&str]) -> Output {
         .args(args)
         .output()
         .expect("the binary runs")
+}
+
+/// Runs the binary as [`run_with`] does, with the request's deadline `deadline`, or none.
+fn run_with_deadline(deadline: Option<&str>, args: &[&str]) -> Output {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_mandate-token-exchange"));
+    command.env_clear().envs(SETTINGS).args(args);
+    match deadline {
+        Some(deadline) => command.env("MANDATE_REQUEST_EXPIRES_AT", deadline),
+        None => command.env_remove("MANDATE_REQUEST_EXPIRES_AT"),
+    };
+    command.output().expect("the binary runs")
+}
+
+/// DEC-2363 item 2: a start with no usable request deadline is refused, exit 2 and the code alone,
+/// before the vault is dialled.
+#[test]
+fn a_start_without_a_usable_deadline_is_refused_before_the_vault() {
+    let dir = vault_dir("deadline", true);
+    let args = [
+        "run",
+        "--vault-address",
+        NO_VAULT,
+        "--vault-dir",
+        dir.to_str().expect("UTF-8"),
+    ];
+    for (deadline, code) in [
+        (None, "request_deadline_missing"),
+        (Some("2030-01-01T00:00:00Z"), "request_deadline_malformed"),
+        (Some("2020-01-01T00:00:00.000000000Z"), "request_expired"),
+    ] {
+        let output = run_with_deadline(deadline, &args);
+        assert_eq!(output.status.code(), Some(2), "{deadline:?} {output:?}");
+        assert_eq!(String::from_utf8_lossy(&output.stderr), format!("{code}\n"));
+        assert!(output.stdout.is_empty(), "{output:?}");
+    }
 }
 
 /// A fresh directory, holding `ca.crt` when `with_ca`.

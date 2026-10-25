@@ -1854,6 +1854,15 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   answers that route and the executor's dev and ci egress reaches it (lane D1); and a cell drill
   holds on `ConnectionChecked` and the connection's establishment, plain and seeded.
 
+- **E10-24 (Should, M8, before the founder's staging connect; SC)** As an engineer, I want a test
+  that forces the OpenBao code take to lose its check-and-set, so that the take-once of
+  [DEC-2628](decisions/DEC-2628.md) item 2 is pinned on the backend staging runs, not only on the
+  local vault ([DEC-2363](decisions/DEC-2363.md) item 4). *Accepted when:* a test in
+  `mandate-vault`'s OpenBao suite reads the code, has another writer overwrite it before the
+  tombstone's `cas` write, and asserts the take answers `None` (or `Denied` when the session lacks
+  the right) and never the code; reading a lost check-and-set's `Denied` as a won take fails it,
+  and `cargo mutants` finds no missed mutant in `take_code` and `lost_or_denied`.
+
 ### E11 Web app: dashboard and controls
 
 - **E11-1 (Must)** As an operator, I want a dashboard of agents, state, positions, P&L, open
@@ -4392,13 +4401,24 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   written after an agent's kill switch has sized its flatten sells does not shrink them, so the
   switch can still offer the released shares. Re-size an agent flatten sell not yet sent against
   the sub-ledger at send time, or cancel the part a later release takes.
+- **E7-4 (executor kill switch), from [DEC-2361](decisions/DEC-2361.md):** a switch's close that
+  no limit can be named for (no quote, no protective stop, no floor) is skipped silently by
+  `flatten_closes`. Journal it `exit_unpriced` and alert once per switch and instrument; the
+  tests are in `hand.rs`, pending E7-4.
 - **E21-30 (executor process), from [DEC-2358](decisions/DEC-2358.md):** `mandate-executord` hands
   the core no quote, so §5.6's ladder never prices an exit there and every exit beside resting
   protection goes at its own limit or is held for want of a price. Add a quote feed: poll
   `mandate-alpaca`'s `DataClient::latest_quote` for each instrument with a held or sequenced exit,
   with the data host's credential from the vault, and hand each as `Input::Market` with its sanity
   verdict; a recorded fake for the tests. A design note on claim #137 first. Once it lands, the
-  founder may revert DEC-2358 to DEC-160 (12)'s hold.
+  founder may revert DEC-2358 to DEC-160 (12)'s hold. Taken by [DEC-2359](decisions/DEC-2359.md)'s
+  pair (claim #2354): a REST poll behind a `QuoteFeed` port, with the connection's own credential,
+  handing only sane, fresh quotes, until E21-44's pushed channel replaces it.
+- **E7-4 (executor, lane LV), from [DEC-2359](decisions/DEC-2359.md) item 7:** the quote feed reads
+  no instrument whose only exit is protection resting at the broker, so a resting stop or
+  take-profit is never repriced or re-protected from a quote. Decide whether one should be (a gap or
+  a stale stop), and if so add the instrument to `ExecutorState::quote_wanted` with its own DEC-77
+  pair.
 - **E7-4 (executor process), from the review of [DEC-2357](decisions/DEC-2357.md):** while a
   connection record does not read, `agents_of` follows every agent with a version-2 deployment,
   those deployed only on another account's connection included: journal noise, no risk. Skip an
@@ -4407,6 +4427,24 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
 - **E7-4 (executor), from the review of [DEC-2358](decisions/DEC-2358.md):** pin a discretionary
   exit with a limit of its own whose price vanishes mid-sequence: it falls back to its limit, and
   the sequence goes on, rather than ending and re-protecting as an exit with no limit does.
+- **E7-4 (executor), from the review of [DEC-2356](decisions/DEC-2356.md) item 8:** `closes_due`
+  holds the close only for a `Submitting` sell of ours a read does not list. A sell whose
+  submission answer is lost becomes `Unknown`, and a later read that omits it releases the close
+  beside it. Hold the close on any sell of ours journaled after the read's `taken_at`, whatever its
+  state, with its own DEC-77 pair. **Unreachable under `mandate-executord`'s ordering** (the
+  coordinator's ruling, 2026-10-25): the process hands each answer before it sends the next
+  request and gathers a reconciliation's reads only once everything else queued was answered, so a
+  read beside a submission is taken after it was sent, and a read that omits an `Unknown` sell of
+  ours was requested after that sell went out. `mandate-executord/tests/ordering.rs`
+  (`each_answer_is_handed_before_the_next_request_is_sent`,
+  `a_reconciliation_is_read_only_once_every_other_request_is_answered`) pins that ordering. Reopen
+  this row if a shell sends broker requests before handing earlier answers.
+- **E7-4 (executor), broker eventual consistency, from the same analysis:** a broker may accept an
+  order and not list it yet in an open-orders read taken just after. A read that omits a sell of
+  ours the broker accepted a moment before can release `closes_due`'s close beside it, and no
+  `taken_at` rule covers it, since the read was requested after the sell went out. Measure the
+  paper and live brokers' listing lag, then decide whether `closes_due` waits a settle interval
+  after the newest sell of ours in the instrument, or reads twice.
 - **E7-4 A1c (stream K), from [DEC-2333](decisions/DEC-2333.md) item 3:** at §5.4's bound, re-place
   protection in an instrument the account kill switch closes for the held quantity less every sell
   not confirmed cancelled, placing nothing where that leaves none, with its own DEC-77 pair. Until

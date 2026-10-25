@@ -228,6 +228,9 @@ pub(crate) struct Switch {
     /// The orders the switch cancelled, which no refusal of that cancel returns to working while
     /// the broker still reports them working (DEC-2302).
     pub(crate) cancels: BTreeSet<ClientOrderId>,
+    /// The instruments whose close was journaled `exit_unpriced` for want of a limit, from that
+    /// record naming this switch as its cause: alerted once, not again (DEC-2361).
+    pub(crate) unpriced: BTreeSet<InstrumentId>,
 }
 
 /// The bid and floor an owner confirmed for an owner's exit (§5.5, DEC-2040): the ladder prices
@@ -519,6 +522,48 @@ impl ExecutorState {
         instrument: &InstrumentId,
     ) -> Result<Option<&Protection>, ExecutorError> {
         Ok(self.protection.get(instrument))
+    }
+
+    /// The instruments whose exit waits on a price (E21-30, DEC-2359): one in §5.4's exit sequence,
+    /// one with a lone exit ladder, one a kill switch has yet to raise its close in (§5.5, which
+    /// names that close's limit from a sane quote when no stop or floor does), and one with a held
+    /// exit or flatten, whatever held it. These are the instruments the process's quote feed
+    /// reads, so §5.6's ladder has a quote to price from. An instrument with only resting
+    /// protection is not among them, and neither is a held opening: neither waits on an exit price.
+    pub fn quote_wanted(&self) -> Result<BTreeSet<InstrumentId>, ExecutorError> {
+        let held = self
+            .held
+            .iter()
+            .filter_map(|intent| self.bodies.get(intent))
+            .flat_map(|body| match body {
+                IntentBody::Order {
+                    instrument,
+                    purpose,
+                    ..
+                } if !purpose.adds_risk() => vec![instrument.clone()],
+                IntentBody::Order { .. } => Vec::new(),
+                IntentBody::Flatten(plan) => plan
+                    .sells
+                    .iter()
+                    .map(|leg| leg.instrument.clone())
+                    .collect(),
+            });
+        Ok(self
+            .exiting
+            .keys()
+            .cloned()
+            .chain(
+                self.ladders
+                    .keys()
+                    .map(|(instrument, _)| instrument.clone()),
+            )
+            .chain(
+                self.switches
+                    .values()
+                    .flat_map(|switch| switch.pending.iter().cloned()),
+            )
+            .chain(held)
+            .collect())
     }
 
     /// Σ protective sell quantity for one instrument, which §5.4 requires never to exceed the

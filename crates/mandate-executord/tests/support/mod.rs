@@ -23,6 +23,7 @@ use mandate_executor::{
     ExitTier, FillId, IdGen, InstrumentSnapshot, MandateVersion, MandateView, ProtectionPrices,
     Purpose, Seq, WorkspaceId, WriterEpoch, equity_bracket_prices,
 };
+use mandate_executord::quotes::NoQuotes;
 use mandate_executord::{Broker, Config, ExecutorProcess, Protections, Unplanned, Wiring};
 use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId};
 use mandate_num::{Fraction, Price, Qty, Ratio, ShareIncrement, SignedQty, Usd};
@@ -356,6 +357,9 @@ impl Store for Journal {
 pub struct Seen {
     pub request: BrokerRequest,
     pub journaled_first: bool,
+    /// How many appends the journal had taken when the request was sent: what the process had
+    /// journaled of every answer handed before it.
+    pub appended: usize,
 }
 
 #[derive(Default)]
@@ -519,6 +523,7 @@ impl Broker for Paper {
         books.seen.push(Seen {
             request: request.clone(),
             journaled_first,
+            appended: self.journal.appends(),
         });
         let outcome = answer(&mut books, request)?;
         if books.lose_answers > 0 {
@@ -706,6 +711,7 @@ pub fn wired(
         fees: fees()?,
         gate,
         protections,
+        quotes: Box::new(NoQuotes),
     })
 }
 
