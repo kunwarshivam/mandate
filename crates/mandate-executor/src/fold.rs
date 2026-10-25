@@ -475,6 +475,7 @@ fn kill_switch_activated(
             reference: AccountRef(required_text(payload, "subject")?.to_owned()),
             at,
             requests: BTreeMap::new(),
+            bound: BTreeSet::new(),
         });
         state.switch_read = None;
         state.cancel_all_answered = false;
@@ -1344,6 +1345,11 @@ fn protection_changed(
             let prices = prices_of(payload)?;
             let created = created_on(payload)?;
             legs(state, &instrument, &orders, covered, created);
+            if state.closing_all.contains(&instrument)
+                && let Some(switch) = state.account_switch.as_mut()
+            {
+                switch.bound.extend(orders.iter().cloned());
+            }
             for id in &orders {
                 if let Some(order) = state.orders.get_mut(id) {
                     order.created_on = order.created_on.or(created);

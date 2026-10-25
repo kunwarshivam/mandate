@@ -1610,6 +1610,15 @@ story buys a service, and none uses a real identity-provider account in tests (s
   renamed the second; confirm no other use remains); (6) the Status row matches DEC-437 after round 2.
   ID-13's founding-grant exception and ID-10's note on item 15 were taken in round 2 because the
   blocker fixes touched those lines.
+- **E9-13 (Must, M8, under E9-1; SC)** As an admin, I want a member disabled at the identity
+  provider to lose route 2 at once and across a restart, so that route 2's deprovision check rests
+  on a journaled signal rather than an in-memory record ([DEC-2319](decisions/DEC-2319.md) item 3,
+  option (b), the founder's on 2026-10-25). *Accepted when:* the server learns of a deprovision from
+  a back-channel logout or from a refresh's `invalid_grant`, and journals `SessionRevoked` with
+  reason `deprovisioned` on the control stream, registered (journal spec, tests first) and folded;
+  route 2 refuses a member whose latest fold holds that revocation, after a restart too; DEC-2319
+  item 2's in-memory interim is removed only once this lands; and nothing in the event or its logs
+  carries a token or the provider's subject beyond its opaque id.
 
 ### E10 Mandate authoring
 
@@ -1738,7 +1747,9 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   true` commits the connection-scope kill switch and then `ConnectionRevoked` in one batch, never
   waits on positions, commits the kill switch even without step-up or with the control stream
   frozen, destroys the credential after the kill switch's requests are sent, and tells the owner
-  which positions remain at the broker (spec §5.6, DEC-436 item 20).
+  which positions remain at the broker (spec §5.6, DEC-436 item 20). *Owed at E9-4 S4* (DEC-2126):
+  the interim `cli_confirm` step-up for the connect start ([DEC-2125](decisions/DEC-2125.md)) ends,
+  with a test that `cli_confirm` then refuses `connection`, `step_up_method`.
 - **E10-14 (Must, M8, before E10-6; SC)** As an owner, I want my connected agent's token limited to
   `read`, `request`, `propose`, `dry_run`, and `hold`, so that it is owner input and never the owner
   (spec §3.8, DEC-141). *Accepted when:* every other route refuses a client token; `requested_by` is
@@ -3124,35 +3135,6 @@ enables `live` (ES-23, OPS-5).
     per connection whose request closed without an establishment or that was revoked, once no
     executor of its account runs; the manager does not journal a held generation's own exit
     (DEC-2344), so the sweep needs a signal it does not have yet.
-  - **The role provisioner** ([DEC-2350](decisions/DEC-2350.md), DEC-2630 item 7; journal spec v0.77
-    §9.33). Nothing makes a connection's Kubernetes-auth roles today, so every exchange's and every
-    managed executor's login is refused. Spec first (this row's first PR), then: the vault side with
-    lane V2 (the provisioner identity and AppRole, `delete` on the token exchange's mount alone in `provisioner_policy`, making and
-    removing a connection's roles); the journal crate's three records (the `connection_roles`
-    vectors, pending until then); the `provisioner` process; its chart, with vault-only egress to
-    lane GO's pattern; and the manager's wait for `ConnectionRolesMade` before an exchange starts.
-    *Accepted when:* a property test over requests, closes, revocations, executor starts and stops,
-    crashes and vault refusals shows every record the provisioner journals keeps rules 262 and 263,
-    against an oracle rebuilt from the stream, with no executor's role ever removed, a revocation
-    right after a kill switch among them; and the manager starts no exchange before its
-    `ConnectionRolesMade`. Left: a sweep of the executor's roles the provisioner never removes, one
-    per connection whose request closed without an establishment or that was revoked, once no
-    executor of its account runs; the manager does not journal a held generation's own exit
-    (DEC-2344), so the sweep needs a signal it does not have yet.
-  - From DEC-2336 item 2 (K2a): a reconnect that reuses its `account_ref` (connections spec
-    CN-12) starts no executor for its connect, since that account's executor already used
-    generation 1 and rule 167 holds `exchanged` to it, so the connect fails by its deadline until a
-    reconnect start is specified (a new cause, or `exchanged` at the next generation). This reaches
-    the staging reconnect path.
-  - K2b, after K2a: the executor's `<hex>` account, its vault-token volume and vault CA,
-    `MANDATE_WORKSPACE_NAMESPACE` among the manager's names, the pod-policy pin of the executor's
-    account, and the Kubernetes adapter reporting a pod's `Succeeded` as its own phase; until then
-    the adapter reports it `Exited`, so no connect's executor starts in the cell.
-  - Lane V2, a dependency of K2b (DEC-2336 risks): `mandate-executord` refuses to start unless
-    `MANDATE_SUBJECT_ACCOUNT` is the lowercase hex of its connection id's bytes, beside #2196's
-    namespace check, as DEC-1177 item 6 has the token exchange do.
-  - After K2b: the chart's Deployment executor moves from `default` to its connection's `<hex>`
-    account, once the manager owns every executor.
 - **E21-34 (Proposed, M8; SC; lane O4)** As an owner, I want the kill switch reachable in the cell
   with nothing running but Postgres, the executor and the broker, so that rule 13 holds when the
   web app, the API and the cell's tooling are down (design §3.6, OPS-4). *Accepted when:*
