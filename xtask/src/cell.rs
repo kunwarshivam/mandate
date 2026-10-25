@@ -869,31 +869,36 @@ fn fixture_values(stub: Option<&str>, exchange: Option<&str>) -> Vec<String> {
 /// where the cell runs the API and the role provisioner, since only then does `cell up` provision
 /// the vault, issuing `vault-approle-api` and `vault-approle-connection-manager` before the
 /// workspace installs; else none, so neither pod names a Secret that does not exist.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "image_sets takes it in E21-33's implementation PR, which this tests PR precedes"
-    )
-)]
-fn vault_binding_values(_api: Option<&str>, _provisioner: Option<&str>) -> Result<Vec<String>> {
-    bail!("E21-33 has not been implemented yet")
+fn vault_binding_values(api: Option<&str>, provisioner: Option<&str>) -> Result<Vec<String>> {
+    if api.is_none() || provisioner.is_none() {
+        return Ok(Vec::new());
+    }
+    Ok(vec![
+        "api.vaultBinding=true".to_owned(),
+        "api.connectFinish=true".to_owned(),
+    ])
 }
 
 /// The `images.*` settings for the images this cell runs, so `up` and every render agree.
 fn image_sets() -> Result<Vec<String>> {
+    let api = api_image_tag()?;
+    let provisioner = role_provisioner_image_tag()?;
     let mut sets = vec![
         format!("images.mandate={}", image_tag()?),
-        format!("images.api={}", api_image_tag()?.unwrap_or_default()),
+        format!("images.api={}", api.clone().unwrap_or_default()),
         format!(
             "images.{DEPLOY_MANAGER_PROCESS}={}",
             deploy_manager_image_tag()?.unwrap_or_default()
         ),
         format!(
             "images.{ROLE_PROVISIONER_PROCESS}={}",
-            role_provisioner_image_tag()?.unwrap_or_default()
+            provisioner.clone().unwrap_or_default()
         ),
     ];
+    sets.extend(vault_binding_values(
+        api.as_deref(),
+        provisioner.as_deref(),
+    )?);
     let stub = stub_image_tag()?;
     let exchange = exchange_image()?;
     sets.extend(signin_values(stub.as_deref()));
@@ -5606,7 +5611,6 @@ mod tests {
     /// runs both the API and the role provisioner, whose presence is what provisions the vault and
     /// issues the two AppRole Secrets they mount.
     #[test]
-    #[ignore = "pending E21-33"]
     fn the_api_vault_binding_and_connect_finish_are_on_only_with_the_api_and_the_provisioner()
     -> Result<()> {
         let api = Some("mandate.local/api:a");
