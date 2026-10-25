@@ -150,6 +150,7 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
         "TradingDayStarted" => {
             let date = Date::parse(required_text(payload, "date")?)?;
             state.trading_day = Some(state.trading_day.map_or(date, |current| current.max(date)));
+            state.day_started = Some(event.event_id.clone());
             Ok(())
         }
         "FillApplied" | "LateFillApplied" => fill_applied(state, payload, event.seq),
@@ -165,7 +166,7 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
             state.consecutive_403s = 0;
             Ok(())
         }
-        "ProtectionChanged" => protection_changed(state, payload, at),
+        "ProtectionChanged" => protection_changed(state, payload, at, event.causation_id.as_ref()),
         "AccountStateObserved" => account_observed(state, payload, event.seq),
         "AccountSnapshotRecorded" => {
             account_observed(state, payload, event.seq)?;
@@ -1316,6 +1317,7 @@ fn protection_changed(
     state: &mut ExecutorState,
     payload: &Value,
     at: RiskClock,
+    cause: Option<&EventId>,
 ) -> Result<(), ExecutorError> {
     let instrument = instrument(payload)?;
     let action = required_text(payload, "action")?;
@@ -1477,9 +1479,10 @@ fn protection_changed(
         "watchdog" => {
             state.watchdogged.insert(instrument.clone(), at);
         }
-        "expiry_unreplaceable" => {
+        "expiry_unreplaceable" if cause.is_some() && cause == state.day_started.as_ref() => {
             state.alerted.insert(instrument.clone());
         }
+        "expiry_unreplaceable" => {}
         "exit_unpriced" | "ladder_floor" => {}
         "rung_short" if optional_qty(payload, "sent")? == Some(Qty::ZERO) => {
             let intent = required_text(payload, "intent_id")?;

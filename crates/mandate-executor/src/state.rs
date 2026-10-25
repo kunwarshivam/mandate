@@ -66,6 +66,10 @@ pub struct ExecutorState {
     /// The latest trading day a copied `TradingDayStarted` began: the creation date of the GTC
     /// protection placed from then on, and the day §5.4's re-placement buffer is counted from.
     pub(crate) trading_day: Option<Date>,
+    /// The latest copied `TradingDayStarted` record: the due-day `expiry_unreplaceable` names it as
+    /// its cause, which tells it apart from `re_cover`'s and `re_place`'s shortfall record of the
+    /// same action (DEC-2355 item 1).
+    pub(crate) day_started: Option<EventId>,
     /// Each exit laddered outside a sequence (§5.6: extended hours, the closing auction window, a
     /// presumed halt), by its instrument and its intent, folded from its rungs' `OrderSubmitted`:
     /// one for each exit, so a second exit laddered in the instrument never replaces the first
@@ -132,10 +136,11 @@ pub struct ExecutorState {
     /// Each agent-scoped kill switch as its `KillSwitchActivated` journaled it, by that record's
     /// id, with the closes it has not yet raised as flatten intents (§5.5, DEC-485).
     pub(crate) switches: BTreeMap<EventId, Switch>,
-    /// The instruments whose kept protection was journaled `expiry_unreplaceable` and alerted
-    /// since their resting protection last changed (DEC-2355): it is alerted once for its resting
-    /// set, and again only once a placement, a confirmed cancel or an order's end changes the set.
-    /// The record names no order (journal spec §9.5, rule 41), so the fold keeps the instrument.
+    /// The instruments whose kept protection was journaled `expiry_unreplaceable` at its due day,
+    /// caused by that day's `TradingDayStarted`, and alerted since their resting protection last
+    /// changed (DEC-2355): it is alerted once for its resting set, and again only once a placement,
+    /// a confirmed cancel or an order's end changes the set. The record names no order (journal
+    /// spec §9.5, rule 41), so the fold keeps the instrument.
     pub(crate) alerted: BTreeSet<InstrumentId>,
     /// What each agent released to the owner in each instrument, from its `PositionReleased`
     /// records (journal spec §9.27, mandate spec §3.1, DEC-2354): shares no longer its lots.
@@ -427,6 +432,7 @@ impl ExecutorState {
             pending_requests: BTreeMap::new(),
             switches: BTreeMap::new(),
             alerted: BTreeSet::new(),
+            day_started: None,
             released: BTreeMap::new(),
             closing_all: BTreeSet::new(),
             account_switch: None,
