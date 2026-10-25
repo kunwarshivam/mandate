@@ -47,6 +47,13 @@ fn refused(reason: &'static str) -> ControlError {
     ControlError::Refused { reason }
 }
 
+/// A fixture whose paper control stream is opened, as every workspace's is before anything else.
+fn opened() -> Fixture {
+    let mut fx = Fixture::new();
+    fx.append_in("paper", CONTROL, "StreamOpened", None, object(&[]));
+    fx
+}
+
 fn confirm(
     fx: &mut Fixture,
     store: &mut BTreeMap<Digest, Vec<u8>>,
@@ -59,17 +66,17 @@ fn confirm(
 /// digest, which the journal accepts under rule 242, and the object that digest names, stored.
 #[test]
 fn a_connect_confirmation_appends_one_record_and_stores_its_object() {
-    let mut fx = Fixture::new();
+    let mut fx = opened();
     let mut store = BTreeMap::new();
     let confirmed = confirm(&mut fx, &mut store, "abcd-efgh").unwrap();
     assert!(!confirmed.earlier);
     assert_eq!(confirmed.action_digest, digest());
     let rows = fx.rows(CONTROL);
-    assert_eq!(rows.len(), 1, "one record");
-    assert_eq!(rows[0].event_id, confirmed.submitted.event_id);
-    let parsed = Draft::parse(&rows[0].body).map(|d| d.event_type().to_owned());
+    assert_eq!(rows.len(), 2, "the opening and one record");
+    assert_eq!(rows[1].event_id, confirmed.submitted.event_id);
+    let parsed = Draft::parse(&rows[1].body).map(|d| d.event_type().to_owned());
     assert_eq!(parsed, Ok(EVENT_TYPE.to_owned()));
-    let event = body(&rows[0]);
+    let event = body(&rows[1]);
     for (path, want) in [
         ("environment", "paper"),
         ("stream_id", CONTROL),
@@ -104,26 +111,26 @@ fn a_connect_confirmation_appends_one_record_and_stores_its_object() {
 /// nothing more.
 #[test]
 fn a_re_run_finds_its_own_confirmation() {
-    let mut fx = Fixture::new();
+    let mut fx = opened();
     let mut store = BTreeMap::new();
     let first = confirm(&mut fx, &mut store, "ABCD-EFGH").unwrap();
     let again = confirm(&mut fx, &mut store, "abcdefgh").unwrap();
     assert!(again.earlier);
     assert_eq!(again.submitted, first.submitted);
-    assert_eq!(fx.rows(CONTROL).len(), 1);
+    assert_eq!(fx.rows(CONTROL).len(), 2);
 }
 
 /// Rule 243: a challenge already confirmed with another code is refused, and nothing is appended.
 #[test]
 fn a_challenge_confirmed_otherwise_is_refused() {
-    let mut fx = Fixture::new();
+    let mut fx = opened();
     let mut store = BTreeMap::new();
     confirm(&mut fx, &mut store, "ABCD-EFGH").unwrap();
     assert_eq!(
         confirm(&mut fx, &mut store, "ABCD-EFGJ").err(),
         Some(refused("challenge_confirmed"))
     );
-    assert_eq!(fx.rows(CONTROL).len(), 1, "nothing more");
+    assert_eq!(fx.rows(CONTROL).len(), 2, "nothing more");
 }
 
 /// A workspace whose control stream is `live` is refused before anything is stored or appended:
@@ -139,6 +146,35 @@ fn a_live_workspace_is_refused_and_nothing_is_stored() {
     );
     assert_eq!(fx.rows(CONTROL).len(), 1, "only the stream's opening");
     assert!(store.is_empty(), "nothing stored");
+}
+
+/// A workspace whose control stream was never opened, or opens with any other record, is refused before anything is stored: the
+/// journal would refuse the append (`not_stream_opened`), and an object stored for it would name a
+/// record that never commits. The in-memory journal here admits an unopened stream, so the refusal
+/// is the command's own.
+#[test]
+fn an_unopened_workspace_is_refused_and_nothing_is_stored() {
+    let mut fx = Fixture::new();
+    let mut store = BTreeMap::new();
+    assert_eq!(
+        confirm(&mut fx, &mut store, "ABCD-EFGH").err(),
+        Some(refused("workspace_not_open"))
+    );
+    assert!(fx.rows(CONTROL).is_empty(), "nothing appended");
+    assert!(store.is_empty(), "nothing stored");
+    let mut headless = Fixture::new();
+    headless.append_in("paper", CONTROL, "OwnerCommandIssued", None, object(&[]));
+    assert_eq!(
+        confirm(&mut headless, &mut store, "ABCD-EFGH").err(),
+        Some(refused("workspace_not_open")),
+        "a first record other than the opening"
+    );
+    assert_eq!(headless.rows(CONTROL).len(), 1, "nothing appended");
+    assert!(store.is_empty(), "nothing stored");
+    assert!(
+        confirm(&mut opened(), &mut store, "ABCD-EFGH").is_ok(),
+        "the paired commit"
+    );
 }
 
 /// The flags, first failing check first, before any journal: a workspace, a principal and a
