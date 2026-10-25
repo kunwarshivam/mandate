@@ -4398,7 +4398,14 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   `mandate-alpaca`'s `DataClient::latest_quote` for each instrument with a held or sequenced exit,
   with the data host's credential from the vault, and hand each as `Input::Market` with its sanity
   verdict; a recorded fake for the tests. A design note on claim #137 first. Once it lands, the
-  founder may revert DEC-2358 to DEC-160 (12)'s hold.
+  founder may revert DEC-2358 to DEC-160 (12)'s hold. Taken by [DEC-2359](decisions/DEC-2359.md)'s
+  pair (claim #2354): a REST poll behind a `QuoteFeed` port, with the connection's own credential,
+  handing only sane, fresh quotes, until E21-44's pushed channel replaces it.
+- **E7-4 (executor, lane LV), from [DEC-2359](decisions/DEC-2359.md) item 7:** the quote feed reads
+  no instrument whose only exit is protection resting at the broker, so a resting stop or
+  take-profit is never repriced or re-protected from a quote. Decide whether one should be (a gap or
+  a stale stop), and if so add the instrument to `ExecutorState::quote_wanted` with its own DEC-77
+  pair.
 - **E7-4 (executor process), from the review of [DEC-2357](decisions/DEC-2357.md):** while a
   connection record does not read, `agents_of` follows every agent with a version-2 deployment,
   those deployed only on another account's connection included: journal noise, no risk. Skip an

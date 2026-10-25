@@ -145,7 +145,7 @@
     },
     {
       "name": "executor",
-      "row": "Account executor, one per broker account: Postgres, the vault, and its one connection's broker hosts only",
+      "row": "Account executor, one per broker account: Postgres, the vault, its one connection's broker hosts only, and the market-data host until the data service pushes quotes (DEC-2359)",
       "kind": "service",
       "image": "executor",
       "built": true,
@@ -158,7 +158,7 @@
       "guaranteed": true,
       "colocate": true,
       "vault_ca": true,
-      "egress": ["postgres", "vault", "broker"],
+      "egress": ["postgres", "vault", "broker", "market-data"],
       "resources": {
         "limits": {"cpu": "250m", "memory": "256Mi"}
       }
