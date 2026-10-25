@@ -1747,7 +1747,9 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   true` commits the connection-scope kill switch and then `ConnectionRevoked` in one batch, never
   waits on positions, commits the kill switch even without step-up or with the control stream
   frozen, destroys the credential after the kill switch's requests are sent, and tells the owner
-  which positions remain at the broker (spec §5.6, DEC-436 item 20).
+  which positions remain at the broker (spec §5.6, DEC-436 item 20). *Owed at E9-4 S4* (DEC-2126):
+  the interim `cli_confirm` step-up for the connect start ([DEC-2125](decisions/DEC-2125.md)) ends,
+  with a test that `cli_confirm` then refuses `connection`, `step_up_method`.
 - **E10-14 (Must, M8, before E10-6; SC)** As an owner, I want my connected agent's token limited to
   `read`, `request`, `propose`, `dry_run`, and `hold`, so that it is owner input and never the owner
   (spec §3.8, DEC-141). *Accepted when:* every other route refuses a client token; `requested_by` is
