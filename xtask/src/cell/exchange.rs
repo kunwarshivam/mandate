@@ -36,6 +36,9 @@ const FIXTURE_AUTHORITY: &str = "oauth-fixture:8091";
 const FIXTURE_LOCAL_PORT: u16 = 8791;
 /// Polls, two seconds apart, for the manager's exchange pod to succeed.
 const POLLS: u32 = 90;
+/// How long a late owner authorizes after the exchange pod runs: past its first takes, which find
+/// no code, at 0, 1 and 3 s (DEC-2363 item 3), so the code is found only by a later one.
+const LATE_BY: Duration = Duration::from_secs(5);
 const MANAGED_BY: &str = "app.kubernetes.io/managed-by=mandate-deploy-manager";
 const CROCKFORD: &[u8; 32] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
@@ -282,8 +285,10 @@ const TOKEN_READ: &str = "read -r BAO_TOKEN && export BAO_TOKEN && \
      sed -nE 's/\"access_token\":\"[^\"]+\"/\"access_token\":\"present\"/p'";
 
 /// The drill. In seeded mode the connect's step-up is never confirmed in the CLI, so the start must
-/// refuse it, `step_up_missing`, and the drill reports that.
-pub fn drill(seeded: bool) -> Result<Verdict> {
+/// refuse it, `step_up_missing`, and the drill reports that. When `late`, the owner authorizes only
+/// once the manager's exchange pod is running and has found no code, as a real owner at Alpaca
+/// does, so the exchange must wait for the code until the request's deadline (DEC-2363 item 3).
+pub fn drill(seeded: bool, late: bool) -> Result<Verdict> {
     let id = run_id()?;
     let workspace = workspace_of(&id);
     point_api(&workspace)?;
@@ -342,6 +347,17 @@ pub fn drill(seeded: bool) -> Result<Verdict> {
             problem(&reply)
         )));
     };
+    if late {
+        match newest_in(connection, "Running")? {
+            Some((_, phase)) if phase == "Running" => sleep(LATE_BY),
+            seen => {
+                return Ok(Verdict::Broken(format!(
+                    "the manager's exchange pod for {connection} never ran before the callback: {:?}",
+                    seen.map(|(_, phase)| phase)
+                )));
+            }
+        }
+    }
     let mut forward = fixture_forward()?;
     let authorized = fixture_get(path);
     let _ = forward.kill();
@@ -361,7 +377,7 @@ pub fn drill(seeded: bool) -> Result<Verdict> {
             "the callback answered {status}, not 303"
         )));
     }
-    match exchanged(connection)? {
+    match newest_in(connection, "Succeeded")? {
         Some((_, phase)) if phase == "Succeeded" => {}
         Some((pod, phase)) => {
             let log = kubectl(&["logs", "--namespace", NAMESPACE, &pod]).unwrap_or_default();
@@ -402,8 +418,13 @@ pub fn drill(seeded: bool) -> Result<Verdict> {
     if !problems.is_empty() {
         return Ok(Verdict::Broken(problems.join("; ")));
     }
+    let when = if late {
+        "a callback after it started"
+    } else {
+        "a callback"
+    };
     eprintln!(
-        "    the manager's exchange for {connection} succeeded: code taken, token entry format 1"
+        "    the manager's exchange for {connection} succeeded on {when}: code taken, token entry format 1"
     );
     Ok(Verdict::Held)
 }
@@ -475,9 +496,9 @@ fn fixture_get(path: &str) -> Result<String> {
     Ok(reply)
 }
 
-/// The manager's newest exchange pod for `connection` once it has succeeded, or the last one seen
+/// The manager's newest exchange pod for `connection` once it is in `phase`, or the last one seen
 /// after [`POLLS`] polls: a generation that failed may be followed by a newer one.
-fn exchanged(connection: &str) -> Result<Option<(String, String)>> {
+fn newest_in(connection: &str, wanted: &str) -> Result<Option<(String, String)>> {
     let selector = format!("{MANAGED_BY},mandate.dev/process=token-exchange");
     let mut phase = None;
     for _ in 0..POLLS {
@@ -492,7 +513,7 @@ fn exchanged(connection: &str) -> Result<Option<(String, String)>> {
             "json",
         ])?;
         phase = newest_exchange(&pods, connection);
-        if phase.as_ref().is_some_and(|(_, p)| p == "Succeeded") {
+        if phase.as_ref().is_some_and(|(_, p)| p == wanted) {
             return Ok(phase);
         }
         sleep(Duration::from_secs(2));

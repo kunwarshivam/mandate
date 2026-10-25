@@ -195,6 +195,9 @@ pub enum Drill {
     /// `oauth-fixture` issued, after a connect the CLI confirmed and the API started, against the
     /// cell's vault (E10-22, DEC-2063); see [`exchange`].
     Exchange,
+    /// The same connect with the owner authorizing only once the manager's exchange pod runs, as
+    /// at Alpaca, so the exchange waits for its code until the request's deadline (DEC-2363).
+    ExchangeLate,
 }
 
 pub const DRILLS: [Drill; 4] = [Drill::Boot, Drill::Journal, Drill::Egress, Drill::Compose];
@@ -222,7 +225,7 @@ pub const VAULT_DRILLS: [Drill; 1] = [Drill::Vault];
 
 /// The token-exchange drill (E10-22, DEC-2063), which `cargo xtask ci cell-exchange` runs on a cell
 /// of its own, so each cell job stays within its ten minutes (DEC-464).
-pub const EXCHANGE_DRILLS: [Drill; 1] = [Drill::Exchange];
+pub const EXCHANGE_DRILLS: [Drill; 2] = [Drill::Exchange, Drill::ExchangeLate];
 
 impl Drill {
     pub fn name(self) -> &'static str {
@@ -239,6 +242,7 @@ impl Drill {
             Self::Executor => "executor",
             Self::Vault => "vault",
             Self::Exchange => "exchange",
+            Self::ExchangeLate => "exchange-late",
         }
     }
 
@@ -286,7 +290,7 @@ impl Drill {
             Self::Vault => {
                 "the runtime's policy rewritten to read every connection's token through a wildcard"
             }
-            Self::Exchange => {
+            Self::Exchange | Self::ExchangeLate => {
                 "the connect's step-up never confirmed in the CLI, so the API must refuse its start"
             }
         }
@@ -309,7 +313,7 @@ impl Drill {
             Self::Archive => "is not in the archive",
             Self::Executor => "no executor pod",
             Self::Vault => "wildcard in mandate-runtime",
-            Self::Exchange => "step_up_missing",
+            Self::Exchange | Self::ExchangeLate => "step_up_missing",
         }
     }
 }
@@ -2552,7 +2556,8 @@ pub fn drill(drills: &[Drill], seeded: bool) -> Result<()> {
             Drill::Archive => archive(seeded),
             Drill::Executor => executor::drill(seeded),
             Drill::Vault => vault_drill(seeded),
-            Drill::Exchange => exchange::drill(seeded),
+            Drill::Exchange => exchange::drill(seeded, false),
+            Drill::ExchangeLate => exchange::drill(seeded, true),
         };
         if seeded && matches!(d, Drill::Boot | Drill::Journal | Drill::Egress) {
             restore()?;
