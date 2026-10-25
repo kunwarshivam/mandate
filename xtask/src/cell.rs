@@ -104,7 +104,8 @@ const KEY_SET_TIER_CHECK: (&str, &str) = (
 /// Where a Linux host keeps its CA bundle, in the order `cell up` looks after `SSL_CERT_FILE`:
 /// Debian and Ubuntu, Fedora and RHEL, openSUSE, Alpine. The bundle is copied into the `api`
 /// image: on an empty base the server finds no roots, cannot build its key-set client, and refuses
-/// to start (`MANDATE_API_JWKS_URL`).
+/// to start (`MANDATE_API_JWKS_URL`). The `token-exchange` image carries it for the same reason:
+/// without roots its token client cannot be built (DEC-2063 item 8).
 const HOST_CA_BUNDLES: [&str; 4] = [
     "/etc/ssl/certs/ca-certificates.crt",
     "/etc/pki/tls/certs/ca-bundle.crt",
@@ -862,7 +863,12 @@ fn exchange_image() -> Result<Option<String>> {
     if deploy_manager_image_tag()?.is_none() {
         return Ok(None);
     }
-    local_tag("token-exchange", &[EXCHANGE_PACKAGE]).map(Some)
+    local_tag_with(
+        "token-exchange",
+        &[EXCHANGE_PACKAGE],
+        &[EXCHANGE_DOCKERFILE.to_owned()],
+    )
+    .map(Some)
 }
 
 /// The fixture OAuth app the cell's API, token exchange and fixture provider share (DEC-1176 item
@@ -971,7 +977,12 @@ pub fn up() -> Result<()> {
         build_image(stub, STUB_DOCKERFILE, "mandate-stub-issuer", &[])?;
     }
     if let Some(exchange) = &exchange {
-        build_image(exchange, EXCHANGE_DOCKERFILE, EXCHANGE_PACKAGE, &[])?;
+        build_image(
+            exchange,
+            EXCHANGE_DOCKERFILE,
+            EXCHANGE_PACKAGE,
+            &[(&host_ca_bundle()?, "ca-certificates.crt")],
+        )?;
     }
     if let Some(manager) = &manager {
         build_image(manager, DEPLOY_MANAGER_DOCKERFILE, "mandate-deployd", &[])?;
