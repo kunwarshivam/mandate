@@ -430,7 +430,9 @@ fn a_store_that_refuses_the_raw_assertion_appends_nothing() {
     assert!(w.appended().is_empty(), "nothing is appended");
     assert!(
         !w.held(&issued),
-        "DEC-2108 item 8: the challenge was taken at verification, so the owner signs again"
+        "DEC-2108 item 8: the challenge was taken at verification, so the owner signs again; \
+         the port answered {:?}",
+        w.answers()
     );
     unissued(&w.f, &reply.body);
 }
@@ -459,6 +461,11 @@ fn a_credential_stream_the_fold_cannot_read_is_journal_unavailable() {
         (503, ProblemCode::JournalUnavailable),
         "the port answered {:?}",
         w.answers()
+    );
+    assert_eq!(
+        w.answers(),
+        ["Err(Code(JournalUnavailable))"],
+        "the verifier's own answer, not a store's or the route's"
     );
     assert!(w.held(&issued), "nothing is taken");
     let after_seeded: Vec<String> = w
