@@ -7,9 +7,12 @@ use std::ffi::OsString;
 use std::os::unix::ffi::OsStringExt;
 
 use crate::cell::{Refused, parse};
-use crate::startup::{Endpoint, Settings, StartRefused, settings, subject_account};
+use crate::startup::{
+    Endpoint, Settings, StartRefused, request_deadline, settings, subject_account,
+};
 use mandate_connections::record::ConnectionId;
-use mandate_connections::start::{ClientId, OAuthClient, RedirectUri};
+use mandate_connections::start::{ClientId, OAuthClient, RedirectUri, STATE_LIFETIME_SECS};
+use mandate_time::UtcNanos;
 
 const CONNECTION: &str = "conn_01JB3K6F0C9R2V7N4M8Q1T5W50";
 const CELL_URL: &str = "http://127.0.0.1:8091/alpaca/oauth/token";
@@ -410,4 +413,103 @@ fn each_start_refusal_has_its_stable_code() {
         StartRefused::Cell(Refused::Url).code(),
         "token_exchange_cell_url"
     );
+}
+
+/// The pod's start in the deadline tests, a whole second.
+const POD_START: i64 = 1_790_000_000;
+
+fn instant(secs: i64) -> UtcNanos {
+    UtcNanos::from_parts(secs, 0).unwrap()
+}
+
+/// The deadline as the manager renders it: the journal's timestamp form.
+fn rendered(secs: i64) -> OsString {
+    OsString::from(instant(secs).to_string())
+}
+
+/// DEC-2363 item 2: the request's deadline is read exactly as the manager renders it, and a pod
+/// restarted later in the same request reads the same deadline, never a fresh lifetime.
+#[test]
+#[ignore = "pending E10-13"]
+fn the_request_s_deadline_is_read_as_rendered_and_a_restart_gets_no_more() {
+    let deadline = POD_START + 420;
+    let value = rendered(deadline);
+    assert_eq!(
+        request_deadline(Some(&value), instant(POD_START)),
+        Ok(instant(deadline))
+    );
+    assert_eq!(
+        request_deadline(Some(&value), instant(POD_START + 300)),
+        Ok(instant(deadline)),
+        "a restart 300 s later waits until the same deadline"
+    );
+}
+
+/// DEC-2363 item 2: no deadline, one in any other form, and one already reached each refuse the
+/// start, the last also for a pod whose clock runs ahead of the request's.
+#[test]
+#[ignore = "pending E10-13"]
+fn a_missing_malformed_or_reached_deadline_refuses_the_start() {
+    let now = instant(POD_START);
+    assert_eq!(
+        request_deadline(None, now),
+        Err(StartRefused::RequestDeadlineMissing)
+    );
+    for malformed in [
+        OsString::from(""),
+        OsString::from("2026-10-25T20:00:00Z"),
+        OsString::from("2026-10-25T20:00:00.000000000+00:00"),
+        OsString::from(" 2026-10-25T20:00:00.000000000Z"),
+        OsString::from("1790000600"),
+        not_utf8(),
+    ] {
+        assert_eq!(
+            request_deadline(Some(&malformed), now),
+            Err(StartRefused::RequestDeadlineMalformed),
+            "{malformed:?}"
+        );
+    }
+    for reached in [POD_START, POD_START - 1, POD_START - 600] {
+        assert_eq!(
+            request_deadline(Some(&rendered(reached)), now),
+            Err(StartRefused::RequestExpired),
+            "{reached}"
+        );
+    }
+    let ahead_of_the_request = instant(POD_START + 30);
+    assert_eq!(
+        request_deadline(Some(&rendered(POD_START + 20)), ahead_of_the_request),
+        Err(StartRefused::RequestExpired),
+        "a pod clock 30 s ahead of a deadline 20 s off"
+    );
+}
+
+/// DEC-2363 item 3: a deadline further than one lifetime ahead, from a pod clock behind or a bad
+/// value, waits one lifetime from the pod's start and no longer.
+#[test]
+#[ignore = "pending E10-13"]
+fn a_deadline_far_ahead_waits_one_lifetime_at_most() {
+    let now = instant(POD_START);
+    assert_eq!(
+        request_deadline(Some(&rendered(POD_START + 86_400)), now),
+        Ok(instant(POD_START + STATE_LIFETIME_SECS))
+    );
+    assert_eq!(
+        request_deadline(Some(&rendered(POD_START + STATE_LIFETIME_SECS)), now),
+        Ok(instant(POD_START + STATE_LIFETIME_SECS))
+    );
+}
+
+/// The deadline's refusals have codes of their own (DEC-2363 item 2).
+#[test]
+fn the_deadline_s_refusals_have_their_codes() {
+    assert_eq!(
+        StartRefused::RequestDeadlineMissing.code(),
+        "request_deadline_missing"
+    );
+    assert_eq!(
+        StartRefused::RequestDeadlineMalformed.code(),
+        "request_deadline_malformed"
+    );
+    assert_eq!(StartRefused::RequestExpired.code(), "request_expired");
 }
