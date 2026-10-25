@@ -18,8 +18,11 @@
 
 use std::path::PathBuf;
 
-use mandate_alpaca::{AlpacaPaperHttp, Credentials};
+use mandate_alpaca::{
+    AlpacaPaperHttp, Credentials, RetryPolicy, TokioPause, TradingClient, TradingTransport,
+};
 use mandate_canon::{Value, parse};
+use mandate_connections::account_entry::BrokerAccountId;
 use mandate_connections::record::ConnectionId;
 use mandate_connections::token_entry::decode;
 use mandate_connections::vault::AccessToken;
@@ -28,8 +31,9 @@ use mandate_journal::StreamId;
 use mandate_store::Store;
 use mandate_time::UtcNanos;
 use mandate_vault::SourceError;
+use mandate_vault::kubernetes::service_account_name;
 use mandate_vault::lease::{Lease, LeaseKeeper};
-use mandate_vault::mounted::read_mounted;
+use mandate_vault::mounted::read_mounted_ca;
 use mandate_vault::openbao::OpenBaoConfig;
 use mandate_vault::policy::{Identity, Mounts};
 use mandate_vault::source::SecretSource;
@@ -37,9 +41,6 @@ use secrecy::{ExposeSecret, SecretString};
 
 use crate::alpaca::AlpacaBroker;
 use crate::lease::{Held, Leased, runtime};
-
-/// The mounted file holding the vault's CA (DEC-2630).
-const VAULT_CA: &str = "ca.crt";
 
 /// Which broker the process runs over.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -104,6 +105,25 @@ pub fn checked_connection<S: Store>(
         .ok_or("connection_record_unreadable")
 }
 
+/// [`checked_connection`], when it is `own`, the connection the executor runs as: a run never
+/// leases a connection whose check another connection's executor wrote.
+///
+/// # Errors
+/// [`checked_connection`]'s codes, and `connection_mismatch` for a checked connection that is
+/// not `own`.
+pub fn own_checked_connection<S: Store>(
+    store: &S,
+    scope: &AccountScope,
+    own: &ConnectionId,
+) -> Result<ConnectionId, &'static str> {
+    let checked = checked_connection(store, scope)?;
+    if checked == *own {
+        Ok(checked)
+    } else {
+        Err("connection_mismatch")
+    }
+}
+
 /// The access token a leased secret holds: DEC-2624's token entry, decoded by its one reader.
 ///
 /// # Errors
@@ -133,6 +153,20 @@ pub fn paper_token(
 /// `transport_unavailable` when the HTTPS client cannot be built.
 pub fn paper_transport(token: AccessToken) -> Result<AlpacaPaperHttp, &'static str> {
     AlpacaPaperHttp::new(Credentials::bearer(token.0)).map_err(|_| "transport_unavailable")
+}
+
+/// The broker's own id of the account `transport` reaches, by `mandate-alpaca`'s one read of it
+/// (`GET /v2/account`'s `id`), for the exchanged executor's connect check (connections spec §5.2
+/// step 4, DEC-2339).
+///
+/// # Errors
+/// `account_unreadable` when the host does not answer it, or `runtime_unavailable`; neither
+/// names the id.
+pub fn paper_account<T: TradingTransport>(transport: T) -> Result<BrokerAccountId, &'static str> {
+    let client = TradingClient::new(transport, TokioPause, RetryPolicy::default());
+    runtime()?
+        .block_on(client.account_id())
+        .map_err(|_| "account_unreadable")
 }
 
 /// Where the vault is and where its CA is mounted: `--vault-address` and `--vault-dir`.
@@ -172,10 +206,10 @@ pub fn paper_settings(
 /// # Errors
 /// `vault_ca_unreadable` when the CA is not a mounted file the reader accepts.
 pub fn vault_config(mount: &VaultMount) -> Result<OpenBaoConfig, &'static str> {
-    let ca = read_mounted(&mount.dir, VAULT_CA).map_err(|_| "vault_ca_unreadable")?;
+    let ca = read_mounted_ca(&mount.dir).map_err(|_| "vault_ca_unreadable")?;
     Ok(OpenBaoConfig {
         address: mount.address.clone(),
-        ca_pem: ca.expose_secret().as_bytes().to_vec(),
+        ca_pem: ca.into_bytes(),
         mounts: Mounts::default(),
     })
 }
@@ -195,6 +229,86 @@ pub fn vault_login<V>(
 ) -> Result<V, &'static str> {
     let token = service_account_token().map_err(|_| "vault_credentials_unreadable")?;
     login(Identity::Executor(connection.clone()), token).map_err(|_| "vault_login_failed")
+}
+
+/// The variable the deployment manager sets to the ServiceAccount its pod runs as (DEC-2336).
+pub const SUBJECT_ACCOUNT_ENV: &str = "MANDATE_SUBJECT_ACCOUNT";
+
+/// Whether `configured`, the pod's [`SUBJECT_ACCOUNT_ENV`], is exactly the ServiceAccount
+/// `connection`'s executor runs as, its id's bytes in lowercase hex, as
+/// [`mandate_vault::kubernetes::service_account_name`] builds it (DEC-2060 item 2). Admission pins
+/// the name's form but cannot compute the hex, so the executor checks it before it logs in, as
+/// the token exchange does (DEC-1177 item 6, DEC-2336).
+///
+/// # Errors
+/// `executor_subject_account` when `configured` is absent, empty or any other name.
+pub fn subject_account(
+    configured: Option<String>,
+    connection: &ConnectionId,
+) -> Result<(), &'static str> {
+    let own = service_account_name(&Identity::Executor(connection.clone()))
+        .map_err(|_| "executor_subject_account")?;
+    if configured.as_deref() == Some(own.as_str()) {
+        Ok(())
+    } else {
+        Err("executor_subject_account")
+    }
+}
+
+/// The connection whose executor the pod runs as: `configured`, the pod's [`SUBJECT_ACCOUNT_ENV`],
+/// read back from its lowercase hex, and kept only when [`subject_account`] then holds for it, so
+/// an upper-case digit, an odd length or bytes that are no connection id are refused (DEC-2336,
+/// DEC-2339). A manager-started executor names no connection otherwise, so this is its own.
+///
+/// # Errors
+/// `executor_subject_account` for anything but one connection's own ServiceAccount name.
+pub fn subject_connection(configured: Option<String>) -> Result<ConnectionId, &'static str> {
+    let refused = "executor_subject_account";
+    let text = configured.ok_or(refused)?;
+    let bytes = text
+        .as_bytes()
+        .chunks(2)
+        .map(|pair| {
+            std::str::from_utf8(pair)
+                .ok()
+                .and_then(|digits| u8::from_str_radix(digits, 16).ok())
+        })
+        .collect::<Option<Vec<u8>>>()
+        .ok_or(refused)?;
+    let connection = String::from_utf8(bytes)
+        .ok()
+        .and_then(|id| ConnectionId::new(&id).ok())
+        .ok_or(refused)?;
+    subject_account(Some(text), &connection)?;
+    Ok(connection)
+}
+
+/// The variable the workspace chart sets to the namespace the deployment manager creates the
+/// executor's pod in (lane D1, K2).
+pub const WORKSPACE_NAMESPACE_ENV: &str = "MANDATE_WORKSPACE_NAMESPACE";
+
+/// The namespace the executor's Kubernetes login must be in: `configured`, the chart's
+/// [`WORKSPACE_NAMESPACE_ENV`], checked before `projected` reads the pod's own namespace from the
+/// downward API, and only when the two are the same. So the vault's answer is held to what the
+/// chart configured, never to what the pod alone says it is.
+///
+/// # Errors
+/// `workspace_namespace_missing` when `configured` is absent or empty, before `projected` is
+/// read; `vault_credentials_unreadable` when the pod's namespace cannot be read;
+/// `workspace_namespace_mismatch` when the two differ.
+pub fn workspace_namespace(
+    configured: Option<String>,
+    projected: impl FnOnce() -> Result<String, SourceError>,
+) -> Result<String, &'static str> {
+    let configured = configured
+        .filter(|name| !name.is_empty())
+        .ok_or("workspace_namespace_missing")?;
+    let projected = projected().map_err(|_| "vault_credentials_unreadable")?;
+    if configured == projected {
+        Ok(configured)
+    } else {
+        Err("workspace_namespace_mismatch")
+    }
 }
 
 /// How a renewed secret is read: as the access token.

@@ -79,7 +79,7 @@ pub enum Phase {
 }
 
 impl Phase {
-    const ALL: [Self; 8] = [
+    const ALL: [Self; 9] = [
         Self::Starting,
         Self::Ready,
         Self::Draining,
@@ -88,6 +88,7 @@ impl Phase {
         Self::Stopped(Stop::Refused),
         Self::Stopped(Stop::CycleFailed),
         Self::Stopped(Stop::DrainIncomplete),
+        Self::Stopped(Stop::Completed),
     ];
 
     /// The shared lifecycle's state for this phase, which the probes answer from (DEC-994 item 7).
@@ -110,6 +111,7 @@ impl Phase {
             Self::Stopped(Stop::Refused) => 5,
             Self::Stopped(Stop::CycleFailed) => 6,
             Self::Stopped(Stop::DrainIncomplete) => 7,
+            Self::Stopped(Stop::Completed) => 8,
         }
     }
 }

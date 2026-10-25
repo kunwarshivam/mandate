@@ -141,6 +141,7 @@ impl Draft {
                     pii_refs: fields.get("pii_refs"),
                     event_time: fields.get("event_time"),
                     environment: fields.get("environment"),
+                    event_id: fields.get("event_id"),
                 },
             )?
         } else {
