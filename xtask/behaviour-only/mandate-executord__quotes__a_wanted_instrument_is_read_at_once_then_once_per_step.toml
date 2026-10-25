@@ -1,7 +1,0 @@
-file = "crates/mandate-executord/tests/quotes.rs"
-test = "a_wanted_instrument_is_read_at_once_then_once_per_step"
-reason = """
-`QuotePoll::due` answers a list of instruments, not a result, so its stub answers an empty list
-and the test fails on that answer rather than at a stub's report. E21-30's implementation PR
-deletes the row with the stub.
-"""

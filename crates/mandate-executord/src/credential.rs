@@ -31,8 +31,9 @@ use mandate_connections::account_entry::BrokerAccountId;
 use mandate_connections::record::ConnectionId;
 use mandate_connections::token_entry::decode;
 use mandate_connections::vault::AccessToken;
-use mandate_executor::{AccountScope, MarketObservation};
+use mandate_executor::{AccountScope, MarketObservation, RiskClock};
 use mandate_journal::StreamId;
+use mandate_num::Adverse;
 use mandate_store::Store;
 use mandate_time::UtcNanos;
 use mandate_vault::SourceError;
@@ -46,7 +47,7 @@ use secrecy::{ExposeSecret, SecretString};
 
 use crate::alpaca::AlpacaBroker;
 use crate::lease::{Held, Leased, runtime};
-use crate::quotes::{QuoteBounds, QuoteFeed, Unimplemented};
+use crate::quotes::{QuoteBounds, QuoteFeed};
 
 /// Which broker the process runs over.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -435,8 +436,28 @@ impl<D: DataTransport, P: Pause> AlpacaQuotes<D, P> {
         instrument: &InstrumentId,
         now: UtcNanos,
     ) -> Result<MarketObservation, &'static str> {
-        let _ = (&self.client, &self.bounds, &self.runtime, instrument, now);
-        Err(Unimplemented)
+        let quote = self
+            .runtime
+            .block_on(self.client.latest_quote(instrument, self.bounds.max_age))
+            .map_err(|_| "quote_unread")?;
+        let sane = quote.bid <= quote.ask
+            && quote
+                .bid
+                .collar_bound(self.bounds.max_spread, Adverse::Up)
+                .is_ok_and(|widest| quote.ask <= widest);
+        if !sane {
+            return Err("quote_insane");
+        }
+        Ok(MarketObservation {
+            instrument: instrument.clone(),
+            bid: Some(quote.bid),
+            bid_size: Some(quote.bid_size),
+            ask: Some(quote.ask),
+            last_trade: None,
+            mark: None,
+            sane: true,
+            observed_at: RiskClock::from_secs(quote.at.min(now).secs()),
+        })
     }
 }
 

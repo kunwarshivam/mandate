@@ -97,7 +97,6 @@ fn observed(bid: &str, ask: &str, observed: i64) -> Result<MarketObservation, Er
 /// A wanted instrument is read at once, then not again until `every` has passed since its last
 /// read; one no longer wanted is forgotten, so it is read at once when it is wanted again.
 #[test]
-#[ignore = "pending E21-30"]
 fn a_wanted_instrument_is_read_at_once_then_once_per_step() -> Result<(), Error> {
     let msft = InstrumentId::new("MSFT")?;
     let both = BTreeSet::from([aapl()?, msft.clone()]);
@@ -123,7 +122,6 @@ fn a_wanted_instrument_is_read_at_once_then_once_per_step() -> Result<(), Error>
 /// sane, a locked one too, and is observed at its own stamp, or at the clock's now when stamped
 /// ahead. A wider or a crossed one hands nothing (DEC-2359), so the core prices nothing from it.
 #[test]
-#[ignore = "pending E21-30"]
 fn a_quote_is_handed_only_when_sane() -> Result<(), Error> {
     let now = at(NOON)?;
     let noon = now.secs();
@@ -154,7 +152,6 @@ fn a_quote_is_handed_only_when_sane() -> Result<(), Error> {
 /// refused or failed read, or a quote of another instrument hands nothing, and the refusal names
 /// neither the instrument nor a price.
 #[test]
-#[ignore = "pending E21-30"]
 fn a_quote_that_cannot_be_read_hands_nothing() -> Result<(), Error> {
     let now = at(NOON)?;
     let not_quote = |body: &str| {

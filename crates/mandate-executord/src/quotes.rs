@@ -25,12 +25,6 @@ use mandate_time::UtcNanos;
 
 pub use crate::credential::AlpacaQuotes;
 
-#[allow(
-    non_upper_case_globals,
-    reason = "the pending gate recognises a stub by the name `Unimplemented` (DEC-137)"
-)]
-pub const Unimplemented: &str = "unimplemented";
-
 /// Reads one instrument's latest quote as the core observes it, or nothing.
 pub trait QuoteFeed {
     /// The instrument's latest sane quote at `now`, or `None` when there is no such quote to hand.
@@ -75,7 +69,21 @@ impl QuotePoll {
     /// last read `every` or more before `now`. An instrument no longer wanted is forgotten, so it
     /// is read at once when it is wanted again.
     pub fn due(&mut self, wanted: &BTreeSet<InstrumentId>, now: UtcNanos) -> Vec<InstrumentId> {
-        let _ = (self.every, &mut self.read_at, wanted, now);
-        Vec::new()
+        self.read_at
+            .retain(|instrument, _| wanted.contains(instrument));
+        let every = i64::try_from(self.every.as_secs()).unwrap_or(i64::MAX);
+        let due: Vec<InstrumentId> = wanted
+            .iter()
+            .filter(|instrument| {
+                self.read_at
+                    .get(*instrument)
+                    .is_none_or(|last| now.secs().saturating_sub(last.secs()) >= every)
+            })
+            .cloned()
+            .collect();
+        for instrument in &due {
+            self.read_at.insert(instrument.clone(), now);
+        }
+        due
     }
 }
