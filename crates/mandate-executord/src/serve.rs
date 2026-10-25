@@ -116,7 +116,17 @@ fn closed<S: Store>(store: &S, config: &Config) -> Result<Waited, &'static str> 
 
 /// A broker a test scripts, which [`serve`] runs with any wiring (DEC-2359 item 9). The library
 /// implements it for none of its own brokers, and the orphan rule keeps the binary from
-/// implementing it for one, so the binary serves only a [`Run`] through [`serve_run`].
+/// implementing it for one of them, so the binary serves a library broker only as a [`Run`]
+/// through [`serve_run`]:
+///
+/// ```compile_fail,E0277
+/// fn scripted<B: mandate_executord::serve::ScriptedBroker>() {}
+/// scripted::<mandate_executord::alpaca::AlpacaBroker<mandate_executord::paper::FixturePaper>>();
+/// ```
+///
+/// This guards against an accidental swap, not intent: a type of the binary's own that wraps a
+/// broker and implements [`Broker`] and this trait could still be served with any wiring.
+/// `tests/paper_only.rs` refuses such an implementation in `src/main.rs`.
 pub trait ScriptedBroker: Broker {}
 
 /// Runs `run`'s broker with the wiring paired with it, as [`serve`] runs a scripted one: the
