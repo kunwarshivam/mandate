@@ -41,6 +41,7 @@ import canceled
 import confirmations
 import credentials
 import step_up_assertions
+import connection_roles
 import control_plane
 import deployed
 import deployment_manager
@@ -63,6 +64,8 @@ import risk_limits
 import risk_state
 import segment_rows
 import timeouts
+import retirements
+import unapplied
 import verification
 import workspace
 import yaml
@@ -3875,6 +3878,8 @@ def render(
     fraction_section: dict,
     approval_section: dict,
     timeout_section: dict,
+    retirement_section: dict,
+    unapplied_section: dict,
     requests_section: dict,
     cancel_section: dict,
     control_plane_section: dict,
@@ -3908,6 +3913,7 @@ def render(
     credential_enrolled_v2_section: dict,
     step_up_assertions_section: dict,
     account_closes_section: dict,
+    connection_roles_section: dict,
 ) -> str:
     head, _ = split_file(v3_text)
     body = yaml.dump(
@@ -3923,6 +3929,8 @@ def render(
             "protection_fraction": fraction_section,
             "approval_answers": approval_section,
             "approval_timeouts": timeout_section,
+            "retirements": retirement_section,
+            "kill_switch_unapplied": unapplied_section,
             "approval_requests": requests_section,
             "approval_cancellations": cancel_section,
             "control_plane": control_plane_section,
@@ -3956,6 +3964,7 @@ def render(
             "credential_enrolled_v2": credential_enrolled_v2_section,
             "step_up_assertions": step_up_assertions_section,
             "account_closes": account_closes_section,
+            "connection_roles": connection_roles_section,
         },
         Dumper=Dumper,
         sort_keys=False,
@@ -4002,6 +4011,8 @@ def main(argv: list[str] | None = None) -> int:
     fraction_section = account.build_fraction_section()
     approval_section = approval.build_section()
     timeout_section = timeouts.build_section()
+    retirement_section = retirements.build_section()
+    unapplied_section = unapplied.build_section()
     requests_section = requests.build_section()
     cancel_section = canceled.build_section()
     control_plane_section = control_plane.build_section()
@@ -4035,6 +4046,7 @@ def main(argv: list[str] | None = None) -> int:
     credential_enrolled_v2_section = credentials.build_v2_section()
     step_up_assertions_section = step_up_assertions.build_section()
     account_closes_section = account_closes.build_section()
+    connection_roles_section = connection_roles.build_section()
 
     problems = check_chain(section, v3)
     problems += run_mutants(section, v3)
@@ -4058,6 +4070,10 @@ def main(argv: list[str] | None = None) -> int:
     problems += approval.run_mutants(approval_section)
     problems += timeouts.check_section(timeout_section)
     problems += timeouts.run_mutants(timeout_section)
+    problems += retirements.check_section(retirement_section)
+    problems += retirements.run_mutants(retirement_section)
+    problems += unapplied.check_section(unapplied_section)
+    problems += unapplied.run_mutants(unapplied_section)
     problems += requests.check_section(requests_section)
     problems += requests.run_mutants(requests_section)
     problems += canceled.check_section(cancel_section)
@@ -4086,6 +4102,8 @@ def main(argv: list[str] | None = None) -> int:
     problems += credentials.run_v2_mutants(credential_enrolled_v2_section)
     problems += step_up_assertions.check_section(step_up_assertions_section)
     problems += step_up_assertions.run_mutants(step_up_assertions_section)
+    problems += connection_roles.check_section(connection_roles_section)
+    problems += connection_roles.run_mutants(connection_roles_section)
     problems += marks.check_section(marks_section)
     problems += marks.run_mutants(marks_section)
     problems += market_intents.check_section(market_intents_section)
@@ -4142,6 +4160,8 @@ def main(argv: list[str] | None = None) -> int:
         fraction_section,
         approval_section,
         timeout_section,
+        retirement_section,
+        unapplied_section,
         requests_section,
         cancel_section,
         control_plane_section,
@@ -4175,6 +4195,7 @@ def main(argv: list[str] | None = None) -> int:
         credential_enrolled_v2_section,
         step_up_assertions_section,
         account_closes_section,
+        connection_roles_section,
     )
     reread = yaml.safe_load(rendered)
     canonical_self_test()
@@ -4195,6 +4216,8 @@ def main(argv: list[str] | None = None) -> int:
         or account.check_fraction_section(reread["protection_fraction"])
         or approval.check_section(reread["approval_answers"])
         or timeouts.check_section(reread["approval_timeouts"])
+        or retirements.check_section(reread["retirements"])
+        or unapplied.check_section(reread["kill_switch_unapplied"])
         or canceled.check_section(reread["approval_cancellations"])
         or control_plane.check_section(reread["control_plane"])
         or deployment_manager.check_section(reread["deployment_manager"])
@@ -4224,6 +4247,7 @@ def main(argv: list[str] | None = None) -> int:
         or market_intents.check_section(reread["market_intents"])
         or owner_confirmations.check_section(reread["owner_confirmations"])
         or account_closes.check_section(reread["account_closes"])
+        or connection_roles.check_section(reread["connection_roles"])
         or connection_requested.check_section(reread["connection_requested"])
     ):
         print(
@@ -4277,6 +4301,12 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(timeout_section['invalid_drafts'])} invalid and {len(timeout_section['valid_drafts'])} valid "
         f"approval-timeout drafts, {len(timeouts.VALIDATOR_MUTANTS)} validator and "
         f"{len(timeouts.vector_mutants(timeout_section))} vector mutants caught; "
+        f"{len(retirement_section['invalid_drafts'])} invalid and {len(retirement_section['valid_drafts'])} valid "
+        f"retirement-held drafts and {len(retirement_section['streams'])} rule-266 streams, "
+        f"{len(retirements.VALIDATOR_MUTANTS)} validator, {len(retirements.STREAM_MUTANTS)} stream and "
+        f"{len(retirements.vector_mutants(retirement_section))} vector mutants caught; "
+        f"{len(unapplied_section['streams'])} rule-264 streams, {len(unapplied.STREAM_MUTANTS)} stream and "
+        f"{len(unapplied.vector_mutants(unapplied_section))} vector mutants caught; "
         f"{len(requests_section['invalid_drafts'])} invalid and {len(requests_section['valid_drafts'])} valid "
         f"approval-request drafts, {len(requests.VALIDATOR_MUTANTS)} validator and "
         f"{len(requests.vector_mutants(requests_section))} vector mutants caught; "
@@ -4316,6 +4346,10 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(step_up_assertions_section['batches'])} rule-253 batches, {len(step_up_assertions_section['streams'])} rule-254 streams, "
         f"{len(step_up_assertions.VALIDATOR_MUTANTS)} validator, {len(step_up_assertions.BATCH_MUTANTS)} batch, "
         f"{len(step_up_assertions.STREAM_MUTANTS)} stream and {len(step_up_assertions.vector_mutants(step_up_assertions_section))} vector mutants caught; "
+        f"{len(connection_roles_section['invalid_drafts'])} invalid and {len(connection_roles_section['valid_drafts'])} valid "
+        f"connection-role drafts and {len(connection_roles_section['streams'])} rule-262 and rule-263 streams, "
+        f"{len(connection_roles.VALIDATOR_MUTANTS)} validator, {len(connection_roles.STREAM_MUTANTS)} stream and "
+        f"{len(connection_roles.vector_mutants(connection_roles_section))} vector mutants caught; "
         f"{len(control_plane_section['invalid_drafts'])} invalid and {len(control_plane_section['valid_drafts'])} valid "
         f"control-plane drafts, {len(control_plane.VALIDATOR_MUTANTS)} validator and "
         f"{len(control_plane.vector_mutants(control_plane_section))} vector mutants caught; "

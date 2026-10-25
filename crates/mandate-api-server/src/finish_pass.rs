@@ -5,9 +5,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
-use std::io::Write;
+use std::io::{self, Write};
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
+use std::task::Poll;
 use std::time::Duration;
 
 use mandate_canon::{Value, parse};
@@ -25,6 +26,9 @@ use crate::journal::{Journal, JournalUnavailable};
 
 /// How long the pass waits between passes while a connect is bound (DEC-2342 item 10).
 pub const PASS_SECS: u64 = 5;
+
+/// How long a stopped finish lets the pass in flight run, well inside a pod's 30-second grace.
+pub const DRAIN: Duration = Duration::from_secs(5);
 
 /// A delete that did not reach the vault, or that the vault refused; the next pass retries it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,21 +69,79 @@ impl<W: Write + Send> Alerts for LineAlerts<W> {
 
 /// Runs a pass at the clock's time every `every`, for as long as the process runs; a clock that
 /// cannot be read skips that pass, and a pass that cannot read the journal waits for the next.
-pub async fn passes<F, T, A>(
+pub async fn passes<F, T, A>(finisher: Finisher<F, T, A>, clock: Arc<dyn Clock>, every: Duration)
+where
+    F: Fingerprints,
+    T: Teardown,
+    A: Alerts,
+{
+    passes_until(finisher, clock, every, std::future::pending()).await;
+}
+
+/// [`passes`] until `stop` resolves (DEC-2348 item 3): the wait between passes ends at once, and a
+/// pass in flight gets [`DRAIN`] to end. One still running then is abandoned, which is safe, since
+/// every pass reads the control stream again, appends at the head it read, and deletes and releases
+/// idempotently: the next start's pass does what it left.
+pub async fn passes_until<F, T, A>(
     mut finisher: Finisher<F, T, A>,
     clock: Arc<dyn Clock>,
     every: Duration,
+    stop: impl Future<Output = ()> + Send,
 ) where
     F: Fingerprints,
     T: Teardown,
     A: Alerts,
 {
+    let mut stop = std::pin::pin!(stop);
     loop {
         if let Some(now) = clock.now() {
-            let _waits_for_the_next_pass = finisher.pass(now).await;
+            let mut pass = std::pin::pin!(finisher.pass(now));
+            let stopped = std::future::poll_fn(|cx| {
+                if pass.as_mut().poll(cx).is_ready() {
+                    Poll::Ready(false)
+                } else {
+                    stop.as_mut().poll(cx).map(|()| true)
+                }
+            })
+            .await;
+            if stopped {
+                let _abandoned_past_the_drain = tokio::time::timeout(DRAIN, pass).await;
+                return;
+            }
         }
-        tokio::time::sleep(every).await;
+        if tokio::time::timeout(every, stop.as_mut()).await.is_ok() {
+            return;
+        }
     }
+}
+
+/// [`passes_until`] on `runtime`, the stop made by `stop` inside it, then `runtime` shut down
+/// without waiting (DEC-2348 item 3): a vault call a drained pass abandoned runs on a blocking
+/// thread the runtime would otherwise wait for, so this returns within [`DRAIN`] of the stop
+/// whatever the vault does.
+///
+/// # Errors
+/// `stop`'s failure to make the stop; no pass runs then.
+pub fn run_until_stopped<F, T, A, S>(
+    runtime: tokio::runtime::Runtime,
+    finisher: Finisher<F, T, A>,
+    clock: Arc<dyn Clock>,
+    every: Duration,
+    stop: impl FnOnce() -> io::Result<S>,
+) -> io::Result<()>
+where
+    F: Fingerprints,
+    T: Teardown,
+    A: Alerts,
+    S: Future<Output = ()> + Send,
+{
+    let ran = runtime.block_on(async {
+        let stop = stop()?;
+        passes_until(finisher, clock, every, stop).await;
+        io::Result::Ok(())
+    });
+    runtime.shutdown_background();
+    ran
 }
 
 /// The pass over one workspace's connects, and what it remembers between passes.

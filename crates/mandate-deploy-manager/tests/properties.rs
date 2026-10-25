@@ -33,9 +33,9 @@ use common::{
     Journal, Manager, Seed, accounts, at, block_on, connection_of, deployed, established_again,
     kill, manager, restart, revoked_again, stopped,
 };
-use mandate_deploy_manager::Slot;
 use mandate_deploy_manager::fake::Call;
 use mandate_deploy_manager::orchestrator::DEPLOYMENT_UNCONNECTED;
+use mandate_deploy_manager::{Process, Slot};
 use proptest::prelude::*;
 
 const AGENTS: [(&str, &str); 3] = [
@@ -272,7 +272,10 @@ fn run_seeded(ops: &[Op], seed: Seed) -> Result<(), TestCaseError> {
         for call in &calls[seen_calls..] {
             match call {
                 Call::Start { slot, .. } => {
-                    prop_assert!(oracle.wanted(slot), "{op:?}: started unwanted {slot:?}");
+                    prop_assert!(
+                        oracle.wanted(slot) || slot.process == Process::Executor,
+                        "{op:?}: started unwanted {slot:?}; an executor no agent wants is started only for a kill switch, which `retired.rs`'s property checks (DEC-2344 item 1)"
+                    );
                     let answered = oracle.unanswered.insert(slot.clone(), 0).unwrap_or(0);
                     prop_assert!(
                         !oracle.looped.contains(slot) || answered > 0,

@@ -215,6 +215,10 @@ start without them (AGENTS.md rule 3).
   value: {{ . | quote }}
 {{- end }}
 {{- end }}
+{{- if and (eq .p.name "token-exchange") (include "mandate.oauthFixtureOn" .root) }}
+- name: MANDATE_TOKEN_URL
+  value: http://oauth-fixture:8091/alpaca/oauth/token
+{{- end }}
 {{- if include "mandate.artifactsAccess" . }}
 - name: {{ ternary "MANDATE_API_ARTIFACTS" "MANDATE_ARTIFACTS" (eq .p.name "api") }}
   value: {{ include "mandate.artifactsPath" . | quote }}
@@ -237,7 +241,7 @@ start without them (AGENTS.md rule 3).
   mountPath: {{ include "mandate.artifactsPath" $ | quote }}
   readOnly: {{ ne . "rw" }}
 {{- end }}
-{{- if .p.vault_token }}
+{{- if include "mandate.vaultToken" . }}
 - name: vault-token
   mountPath: /run/mandate/vault-token
   readOnly: true
@@ -331,6 +335,9 @@ spec:
   {{- end }}
   enableServiceLinks: false
   restartPolicy: {{ .restartPolicy }}
+  {{- with .grace }}
+  terminationGracePeriodSeconds: {{ . }}
+  {{- end }}
   securityContext:
     runAsNonRoot: true
     runAsUser: 65532
@@ -409,7 +416,7 @@ spec:
         claimName: artifacts
         readOnly: {{ eq (include "mandate.artifactsAccess" .) "ro" }}
     {{- end }}
-    {{- if $p.vault_token }}
+    {{- if include "mandate.vaultToken" . }}
     - name: vault-token
       projected:
         defaultMode: 292
@@ -543,6 +550,17 @@ its port from values, since a policy cannot select it by pod label.
   ports:
     - {protocol: TCP, port: {{ $v.egress.kubeApiPort }}}
 {{- end }}
+{{- else if and (eq . "token-host") (include "mandate.oauthFixtureOn" $root) }}
+{{- if index $v.egress "token-host" }}
+{{- fail "egress.token-host names CIDRs, but with oauthFixture.enabled a dev or ci cell's token exchange reaches the fixture pod alone (DEC-1176 item 4)" }}
+{{- end }}
+- to:
+    - podSelector:
+        matchLabels:
+          mandate.dev/workspace: {{ $v.workspace | quote }}
+          mandate.dev/process: oauth-fixture
+  ports:
+    - {protocol: TCP, port: 8091}
 {{- else if eq . "model-gateway" }}
 - to:
     - podSelector:
@@ -613,6 +631,19 @@ spec:
         - {protocol: TCP, port: {{ .port }}}
 {{- end -}}
 
+{{- /* "true" when the fixture OAuth provider renders (DEC-1176 item 2): `oauthFixture.enabled`,
+which fails the render in any tier but dev or ci, whether or not `images.stub-issuer` is named,
+and needs that image in dev and ci. Called with the chart's root. */ -}}
+{{- define "mandate.oauthFixtureOn" -}}
+{{- if .Values.oauthFixture.enabled -}}
+{{- if not (has .Values.deploymentTier (list "dev" "ci")) -}}
+{{- fail (printf "oauthFixture.enabled runs only in a dev or ci cell, and deploymentTier is %q (DEC-1176)" .Values.deploymentTier) -}}
+{{- end -}}
+{{- $_ := required "images.stub-issuer is required once oauthFixture.enabled is set (DEC-1176)" (index .Values.images "stub-issuer") -}}
+true
+{{- end -}}
+{{- end -}}
+
 {{/* A `mandate.local/` image only where the values allow it: the local cell's alone. */}}
 {{- define "mandate.checkImages" -}}
 {{- range $key, $image := .Values.images -}}
@@ -632,6 +663,15 @@ the executor's only when its broker reaches the vault. */ -}}
 {{- if and .p.vault_ca (or (ne .p.name "executor") (eq .root.Values.executor.broker "alpaca-paper")) -}}true{{- end -}}
 {{- end -}}
 
+{{- /* Whether process `p` mounts a projected ServiceAccount token for the vault (DEC-2060): a
+`vault_token` process's, only as a pod the deployment manager starts, which runs as its
+connection's own account (DEC-2336), and the executor's only when its broker reaches the vault. A
+process the chart runs as a Deployment of its own runs as `default`, which no vault role names, and
+mounts none. */ -}}
+{{- define "mandate.vaultToken" -}}
+{{- if and .p.vault_token (include "mandate.startedElsewhere" .) (or (ne .p.name "executor") (eq .root.Values.executor.broker "alpaca-paper")) -}}true{{- end -}}
+{{- end -}}
+
 {{- /* The vault's address: the executor's `vaultAddress` where it is set, else this namespace's
 vault Service, which the vault chart's certificate names. */ -}}
 {{- define "mandate.vaultAddress" -}}
@@ -647,3 +687,46 @@ vault Service, which the vault chart's certificate names. */ -}}
 {{- end -}}
 {{- end -}}
 
+
+{{- /*
+A process's AppRole and the vault's CA as owner-only files (DEC-2338, DEC-2630 item 6), for the
+process whose vault role is `role`: the Secret the vault's provisioning makes for it,
+`vault-approle-<role>` (`role-id`, `secret-id`), and the ConfigMap `vault-ca`, projected read-only
+into one source directory, mounted 0440 for the pod's fsGroup, and copied by an init container into
+a memory-backed directory, `/run/mandate/vault`, as `<role>.role-id`, `<role>.secret-id` and
+`ca.crt` at 0600 with nothing else in it, since `mandate_vault`'s reader refuses a file any group or
+other can read. The process mounts that directory read-only and reads them there as files, never
+from its environment; it never mounts the Secret itself.
+*/ -}}
+{{- define "mandate.vaultCopy" -}}
+{{- $sources := printf "/run/secrets/vault-%s" .role -}}
+- name: vault-credentials
+  image: {{ .root.Values.images.postgres | quote }}
+  imagePullPolicy: IfNotPresent
+  command: ["install", "-m", "0600", {{ printf "%s/%s.role-id" $sources .role | quote }}, {{ printf "%s/%s.secret-id" $sources .role | quote }}, {{ printf "%s/ca.crt" $sources | quote }}, "/run/mandate/vault/"]
+  securityContext:
+    {{- include "mandate.containerSecurity" . | nindent 4 }}
+  resources:
+    limits: {cpu: "50m", memory: "32Mi"}
+    requests: {cpu: "50m", memory: "32Mi"}
+  volumeMounts:
+    - {name: vault, mountPath: /run/mandate/vault}
+    - {name: vault-sources, mountPath: {{ $sources }}, readOnly: true}
+{{- end -}}
+{{- define "mandate.vaultVolumes" -}}
+- name: vault
+  emptyDir: {medium: Memory, sizeLimit: 1Mi}
+- name: vault-sources
+  projected:
+    defaultMode: 288
+    sources:
+      - secret:
+          name: {{ printf "vault-approle-%s" .role }}
+          items:
+            - {key: role-id, path: {{ printf "%s.role-id" .role }}}
+            - {key: secret-id, path: {{ printf "%s.secret-id" .role }}}
+      - configMap:
+          name: vault-ca
+          items:
+            - {key: ca.crt, path: ca.crt}
+{{- end -}}

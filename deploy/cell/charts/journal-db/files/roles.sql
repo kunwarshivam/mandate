@@ -64,6 +64,24 @@ GRANT CONNECT ON DATABASE mandate TO mandate_deploy_manager;
 ALTER ROLE mandate_deploy_manager IN DATABASE mandate SET search_path = journal;
 DO $$
 BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'mandate_role_provisioner') THEN
+    CREATE ROLE mandate_role_provisioner LOGIN IN ROLE mandate_journal_app;
+  END IF;
+END
+$$;
+GRANT CONNECT ON DATABASE mandate TO mandate_role_provisioner;
+ALTER ROLE mandate_role_provisioner IN DATABASE mandate SET search_path = journal;
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'mandate_connect_finish') THEN
+    CREATE ROLE mandate_connect_finish LOGIN IN ROLE mandate_journal_app;
+  END IF;
+END
+$$;
+GRANT CONNECT ON DATABASE mandate TO mandate_connect_finish;
+ALTER ROLE mandate_connect_finish IN DATABASE mandate SET search_path = journal;
+DO $$
+BEGIN
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'mandate_runtime') THEN
     CREATE ROLE mandate_runtime LOGIN IN ROLE mandate_journal_app;
   END IF;

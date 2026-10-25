@@ -203,8 +203,9 @@ pub(crate) enum ExitPrice {
     /// Nothing to price from: the intent's own limit, never below an owner exit's floor,
     /// journaled with an owner alert.
     Fallback(Price),
-    /// Nothing to price from, for a discretionary exit or an exit with no limit of its own: held,
-    /// protection resting, until a price arrives (DEC-2037 item 5).
+    /// Nothing to price from, for an exit with no limit of its own: held, protection resting,
+    /// until a price arrives (DEC-2037 item 5). An exit with a limit of its own, a discretionary
+    /// one included, falls back to it instead (DEC-2358).
     Held,
     /// An exit with no limit, unsequenced, where §5.1 lets a market order go (DEC-2037 item 4).
     Market,
@@ -225,9 +226,7 @@ pub(crate) fn exit_price(
     };
     match (ladder_price(tier, observations, step, now, floor), limit) {
         (Ok(rung), _) => ExitPrice::Laddered(rung.limit),
-        (Err(_), Some(limit)) if purpose != Purpose::DiscretionaryExit => {
-            ExitPrice::Fallback(floor.map_or(limit, |floor| limit.max(floor)))
-        }
+        (Err(_), Some(limit)) => ExitPrice::Fallback(floor.map_or(limit, |floor| limit.max(floor))),
         (Err(_), _) => ExitPrice::Held,
     }
 }
@@ -1792,6 +1791,13 @@ pub(crate) fn new_day(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
 /// cancelled: the profile offers a form for the whole shares [`re_place`] would cover, or nothing
 /// is left to cover. An OCO the executor cannot re-place is never the one it cancels: the position
 /// keeps it, and the shortfall is journaled and alerted instead (DEC-2312 item 2).
+///
+/// It sizes as [`re_place`] will: the long position less the working exits and less what other
+/// protection covers. Here that other protection is none. Every non-terminal protective order is
+/// in `protection.resting`, since each placer journals `placed` in its own batch and an order
+/// leaves only on a terminal state or a confirmed `cancelled`, and [`new_day`] cancels all of
+/// them. So `re_place`'s `covered` is zero once those cancels are confirmed, and subtracting the
+/// resting orders here would count the very protection being replaced (DEC-2355).
 fn replaceable(
     batch: &Batch<'_, '_>,
     instrument: &InstrumentId,
@@ -3784,6 +3790,25 @@ mod sequence_tests {
         }))
     }
 
+    /// A sell of `qty` `AAPL` for `purpose` with no limit of its own: with nothing to price from it
+    /// is held, whatever its purpose (DEC-2037 item 5, DEC-2358).
+    fn market_sell(intent: &str, qty: &str, purpose: Purpose) -> Result<Input, ExecutorError> {
+        Ok(Input::Intent(IntentHandoff {
+            intent_id: IntentId(EventId(intent.to_owned())),
+            agent: AgentId("agent-a".to_owned()),
+            tif: Some(TimeInForce::Day),
+            body: IntentBody::Order {
+                instrument: aapl()?,
+                side: Side::Sell,
+                qty: Qty::parse(qty)?,
+                limit: None,
+                purpose,
+                protection: None,
+            },
+            confirmation: None,
+        }))
+    }
+
     /// A sane quote whose bid and mark are both `at`.
     fn quote(at: &str) -> Result<Input, ExecutorError> {
         let at = Price::parse(at)?;
@@ -4486,9 +4511,70 @@ mod sequence_tests {
         Ok(())
     }
 
-    /// DEC-160 (12): a discretionary exit with nothing to price from is held with its protection
-    /// resting, the hold journaled and alerted once; each tick re-evaluates it silently, and the
-    /// first tick after a priceable quote releases it into the sequence, laddered.
+    /// DEC-2358, narrowing DEC-160 (12): a discretionary exit with a limit of its own and nothing
+    /// to price from falls back to that limit, as a risk exit does, never held: the sequence
+    /// starts, the exit goes at its own limit, and the fallback is journaled and alerted. At the
+    /// next priceable quote the ladder steps it again from that quote, never from the fallback.
+    #[test]
+    fn a_discretionary_exit_with_its_own_limit_and_nothing_to_price_from_goes_at_it()
+    -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = tiered_ports(&config, &fees);
+        let mut executor = protected(&ports)?;
+        executor.run(unpriceable()?, &ports)?;
+        let started = executor.run(sell(EXIT, "5", "150", Purpose::DiscretionaryExit)?, &ports)?;
+        assert_eq!(
+            cancels(&started),
+            vec![OCO],
+            "the sequence starts, never held"
+        );
+        assert_eq!(
+            verdicts_with_reasons(&started),
+            vec![("allow".to_owned(), String::new())]
+        );
+        let sent = executor.run(cancel_accepted(OCO), &ports)?;
+        assert_eq!(
+            submissions(&sent)
+                .iter()
+                .map(|order| order.limit_price)
+                .collect::<Vec<_>>(),
+            vec![Some(Price::parse("150")?)],
+            "at its own limit"
+        );
+        assert!(
+            actions(&sent).contains(&"exit_unpriced"),
+            "the fallback is journaled"
+        );
+        assert_eq!(alerts(&sent), vec!["exit_unpriced"], "and alerted");
+        let rung = submissions(&sent)
+            .first()
+            .map(|order| order.client_order_id.as_str().to_owned())
+            .unwrap_or_default();
+        executor.run(quote("151")?, &ports)?;
+        let stepped = executor.run(Input::Tick(RiskClock::from_secs(10)), &ports)?;
+        assert_eq!(
+            cancels(&stepped),
+            vec![rung.as_str()],
+            "the ladder steps again"
+        );
+        let next = executor.run(cancel_accepted(&rung), &ports)?;
+        let limits: Vec<_> = submissions(&next)
+            .iter()
+            .map(|order| order.limit_price)
+            .collect();
+        assert_eq!(limits.len(), 1, "one next rung: {limits:?}");
+        assert_ne!(
+            limits.first().copied().flatten(),
+            Some(Price::parse("150")?),
+            "priced from the quote, not the fallback"
+        );
+        Ok(())
+    }
+
+    /// DEC-2037 item 5: a discretionary exit with no limit of its own and nothing to price from
+    /// is held with its protection resting, the hold journaled and alerted once; each tick
+    /// re-evaluates it silently, and the first tick after a priceable quote releases it into the
+    /// sequence, laddered. One with a limit of its own goes at it instead (DEC-2358).
     #[test]
     fn a_discretionary_exit_with_nothing_to_price_from_is_held_then_goes()
     -> Result<(), ExecutorError> {
@@ -4496,7 +4582,7 @@ mod sequence_tests {
         let ports = tiered_ports(&config, &fees);
         let mut executor = protected(&ports)?;
         executor.run(unpriceable()?, &ports)?;
-        let held = executor.run(sell(EXIT, "5", "150", Purpose::DiscretionaryExit)?, &ports)?;
+        let held = executor.run(market_sell(EXIT, "5", Purpose::DiscretionaryExit)?, &ports)?;
         assert!(cancels(&held).is_empty(), "protection stays resting");
         assert_eq!(
             verdicts_with_reasons(&held),
@@ -4913,7 +4999,7 @@ mod sequence_tests {
         let mut executor = protected(&ports)?;
         executor.run(bid_only("150", 0)?, &ports)?;
         executor.run(Input::Tick(RiskClock::from_secs(280)), &ports)?;
-        let started = executor.run(sell(EXIT, "5", "150", Purpose::DiscretionaryExit)?, &ports)?;
+        let started = executor.run(market_sell(EXIT, "5", Purpose::DiscretionaryExit)?, &ports)?;
         assert_eq!(
             cancels(&started),
             vec![OCO],
@@ -5289,7 +5375,7 @@ mod sequence_tests {
         let working = executor.run(cancel_accepted(OCO), &ports)?;
         assert_eq!(submissions(&working).len(), 1, "{:?}", drafted(&working));
         let held = executor.run(
-            sell(SECOND, "2", "150", Purpose::DiscretionaryExit)?,
+            market_sell(SECOND, "2", Purpose::DiscretionaryExit)?,
             &ports,
         )?;
         assert_eq!(verdicts(&held), vec!["hold"]);
@@ -9892,6 +9978,8 @@ mod sequence_tests {
     enum Move {
         Tick(i64),
         Quote(Option<u32>, Option<u32>, bool),
+        /// An exit of `EXIT_PURPOSES[.0]` for `.1` shares at a limit of `.2`, or with no limit of
+        /// its own for a `.2` of 0, which the random scripts never draw.
         Exit(usize, u32, u32),
         Ack,
         Fill(u32),
@@ -10897,10 +10985,12 @@ mod sequence_tests {
                             watchdog: false,
                         },
                     );
-                    Some(
+                    let exit = if limit == 0 {
+                        market_sell(&intent, &qty.to_string(), purpose)
+                    } else {
                         sell(&intent, &qty.to_string(), &limit.to_string(), purpose)
-                            .map_err(failed)?,
-                    )
+                    };
+                    Some(exit.map_err(failed)?)
                 }
                 Move::Ack => {
                     let first = desk.venue.iter_mut().find(|(_, held)| {
@@ -11544,12 +11634,19 @@ mod sequence_tests {
     }
 
     /// #524's claim 2, which already holds on `main`: an exit the gate holds counts nothing
-    /// toward the room later exits are allowed in. Seed 15's discretionary exit of 4 is held
-    /// `exit_unpriced`, and the two risk exits of 2 beside it are both allowed, 3 + 2 + 2 within 10.
+    /// toward the room later exits are allowed in. Seed 15's arrivals with its discretionary exit
+    /// of 4 given no limit of its own, so it is held `exit_unpriced` (DEC-2037 item 5; one with a
+    /// limit goes at it, DEC-2358), and the two risk exits of 2 beside it are both allowed,
+    /// 3 + 2 + 2 within 10.
     #[test]
     fn a_held_exit_counts_nothing_toward_the_gates_room() -> Result<(), String> {
-        let prefix = SEED_15.get(..6).ok_or("seed 15's arrivals")?;
-        let desk = rule_13_script_with(0, From::Protected, false, prefix)?;
+        let mut prefix = SEED_15.get(..6).ok_or("seed 15's arrivals")?.to_vec();
+        let discretionary = prefix
+            .iter_mut()
+            .find(|step| matches!(step, Move::Exit(2, 4, _)))
+            .ok_or("seed 15's discretionary exit")?;
+        *discretionary = Move::Exit(2, 4, 0);
+        let desk = rule_13_script_with(0, From::Protected, false, &prefix)?;
         let mut decided: Vec<(Purpose, u32, &str, &str)> = desk
             .exits
             .values()
@@ -13440,7 +13537,12 @@ mod sequence_tests {
                     Purpose::RiskExit
                 }
             };
-            let ran = executor.run(sell(EXIT, "10", "150", purpose)?, &ports)?;
+            let exit = if protects {
+                market_sell(EXIT, "10", purpose)?
+            } else {
+                sell(EXIT, "10", "150", purpose)?
+            };
+            let ran = executor.run(exit, &ports)?;
             assert_eq!(gate_reasons(&ran), vec![reason]);
             let long = executor.run(Input::Tick(RiskClock::from_secs(start + 121)), &ports)?;
             assert!(!drafted(&long).contains(&"OrderAbandoned"), "{reason}");
@@ -15019,8 +15121,8 @@ mod ladder_tests {
     proptest! {
         /// DEC-160 (12): `exit_price` answers every purpose, for any observations, step, floor and
         /// limit, and never with a refusal. Its oracle is its own: a sequence's exit prices when
-        /// some sane bid or sane trade is within five minutes (DEC-260 (5)); otherwise a discretionary
-        /// exit is held and every other exit falls back to its limit, raised to the floor.
+        /// some sane bid or sane trade is within five minutes (DEC-260 (5)); otherwise every exit,
+        /// a discretionary one included (DEC-2358), falls back to its limit, raised to the floor.
         #[test]
         fn exit_price_never_refuses_any_purpose(
             purpose in purposes(),
@@ -15073,10 +15175,28 @@ mod ladder_tests {
                     matches!(priced, ExitPrice::Laddered(price) if floor.is_none_or(|floor| price >= floor)),
                     "{:?}", priced
                 ),
-                (true, false, Purpose::DiscretionaryExit) => prop_assert_eq!(priced, ExitPrice::Held),
                 (true, false, _) => prop_assert_eq!(priced, ExitPrice::Fallback(raised)),
             }
         }
+    }
+
+    /// DEC-2358, narrowing DEC-160 (12): with nothing to price from, a discretionary exit with a
+    /// limit of its own falls back to it, as every other exit does, whatever its floor; one with no
+    /// limit of its own is still held (DEC-2037 item 5); an opening keeps its own limit.
+    #[test]
+    fn a_discretionary_exit_with_its_own_limit_falls_back_to_it() -> Result<(), ExecutorError> {
+        let stale = [seen(Some("150"), None, true, 0)?];
+        let now = RiskClock::from_secs(1_000);
+        let limit = Price::parse("150")?;
+        let tier = Some(liquid()?);
+        let priced = |purpose, limit| exit_price(tier, &stale, 0, now, None, purpose, limit);
+        assert_eq!(
+            priced(Purpose::DiscretionaryExit, Some(limit)),
+            ExitPrice::Fallback(limit)
+        );
+        assert_eq!(priced(Purpose::DiscretionaryExit, None), ExitPrice::Held);
+        assert_eq!(priced(Purpose::Open, Some(limit)), ExitPrice::Own(limit));
+        Ok(())
     }
 
     /// An owner exit's floor (§5.5): the rung never prices below it, and a rung above it keeps
