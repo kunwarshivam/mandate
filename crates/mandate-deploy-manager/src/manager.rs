@@ -381,6 +381,18 @@ impl Manager {
         }
     }
 
+    /// The instant a token exchange's request expires, its folded deadline, which every start of
+    /// it is given whatever the clock reads (DEC-2363); `None` for every other process.
+    pub fn expires_at(&self, slot: &Slot) -> Option<UtcNanos> {
+        match slot.process {
+            Process::TokenExchange => self
+                .requests
+                .get(&slot.subject)
+                .map(|request| request.deadline),
+            Process::Runtime | Process::Executor => None,
+        }
+    }
+
     /// The connection `generation` of `slot` acts for, which an executor runs as the account of
     /// (DEC-2060 item 9, DEC-2336 item 6): the one read when its start was folded, so its start
     /// and its stop name the same account. `None` for a runtime and a token exchange, whose

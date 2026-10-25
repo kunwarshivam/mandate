@@ -4,7 +4,8 @@
 //! exactly those arguments, logs in to the vault as its connection's exchange, and exchanges.
 //!
 //! Every outcome but success writes one code alone to standard error:
-//! - exit 2: a start refusal, the settings' or the arguments', before the vault or the network;
+//! - exit 2: a start refusal, the settings', the arguments' or the request's deadline's
+//!   (DEC-2363 item 2), before the vault or the network;
 //! - exit 4: the vault could not be logged in to;
 //! - exit 5: the exchange refused or failed, with the connect core's code.
 //!
@@ -15,7 +16,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use mandate_token_exchange::process::{ARGUMENTS_REFUSED, Failed, exchange, now, vault_args};
-use mandate_token_exchange::startup::settings;
+use mandate_token_exchange::startup::{REQUEST_EXPIRES_AT, request_deadline, settings};
 use mandate_vault::mounted::SERVICE_ACCOUNT_TOKEN_DIR;
 
 /// The exit code of every start refusal.
@@ -44,7 +45,12 @@ fn main() -> ExitCode {
     let Some(now) = now() else {
         return ended(Failed::Vault.code(), VAULT_FAILED);
     };
-    match exchange(&settings, &args, Path::new(SERVICE_ACCOUNT_TOKEN_DIR), now) {
+    let deadline = match request_deadline(std::env::var_os(REQUEST_EXPIRES_AT).as_deref(), now) {
+        Ok(deadline) => deadline,
+        Err(refused) => return ended(refused.code(), REFUSED),
+    };
+    let token_dir = Path::new(SERVICE_ACCOUNT_TOKEN_DIR);
+    match exchange(&settings, &args, token_dir, now, deadline) {
         Ok(_) => ExitCode::SUCCESS,
         Err(failed @ Failed::Vault) => ended(failed.code(), VAULT_FAILED),
         Err(failed @ Failed::Exchange(_)) => ended(failed.code(), EXCHANGE_FAILED),

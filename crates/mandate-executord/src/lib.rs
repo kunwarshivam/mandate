@@ -44,6 +44,8 @@ pub mod lease;
 pub mod oauth_check;
 pub mod paper;
 mod process;
+pub mod quotes;
+pub mod run;
 pub mod serve;
 
 pub use process::{

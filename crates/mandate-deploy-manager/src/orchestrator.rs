@@ -4,6 +4,8 @@
 use std::future::Future;
 use std::time::Duration;
 
+use mandate_time::UtcNanos;
+
 use crate::control::Slot;
 
 /// What the orchestrator reports of one instance.
@@ -44,12 +46,14 @@ pub struct Instance {
 }
 
 /// What a start needs beside its slot and generation: a token exchange's `lifetime`, which its
-/// request has left, and an executor's `connection`, whose own account it runs as (DEC-2060). A
-/// standing process has no lifetime; a runtime and a token exchange name no connection here, an
-/// exchange's being its subject.
+/// request has left, and its request's `expires_at`, the instant that lifetime runs to, which the
+/// exchange waits for its code until (DEC-2363); and an executor's `connection`, whose own account
+/// it runs as (DEC-2060). A standing process has neither a lifetime nor an expiry; a runtime and a
+/// token exchange name no connection here, an exchange's being its subject.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Launch {
     pub lifetime: Option<Duration>,
+    pub expires_at: Option<UtcNanos>,
     pub connection: Option<String>,
 }
 

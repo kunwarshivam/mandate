@@ -14,7 +14,9 @@ use crate::error::ExecutorError;
 use crate::ids::{ClientOrderId, FLATTEN, IntentId};
 use crate::intent::{order_tif, received};
 use crate::payload::{int, text};
-use crate::protection::{ask_cancel, changed, interval_open, lowest_sane, market_allowed};
+use crate::protection::{
+    ask_cancel, changed, changed_by, interval_open, lowest_sane, market_allowed,
+};
 use crate::session::{Venue, venue};
 use crate::state::{EVERY_AGENT, ExecutorState, IntentOutcome, Switch, SwitchRead};
 use crate::types::{
@@ -530,6 +532,8 @@ fn deferred(batch: &Batch<'_, '_>, instrument: &InstrumentId, purpose: Purpose) 
 /// and each close not yet raised is raised as the executor's own flatten intent,
 /// `k-<switch>-<n>` (DEC-485 item 2), once nothing the switch reaches is live in the instrument
 /// any more, the session admits the sell, the agent holds lots there, and a limit can be named.
+/// One that waits only for a limit is journaled `exit_unpriced` and alerted, once per switch and
+/// instrument (DEC-2361).
 /// Raised earlier, the gate would count the sells still pending their cancel and deny the flatten
 /// `sell_exceeds_available`.
 pub(crate) fn flatten_closes(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
@@ -567,12 +571,24 @@ pub(crate) fn flatten_closes(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorEr
                 (Some(own), floor) => Some(floor.map_or(own, |floor| own.max(floor))),
                 (None, floor) => floor,
             };
-            let (true, false, true, Some(limit)) = (
+            let (true, false, true) = (
                 switch.pending.contains(instrument),
                 working || deferred(batch, instrument, switch.purpose),
                 qty > Qty::ZERO,
-                limit,
             ) else {
+                continue;
+            };
+            let Some(limit) = limit else {
+                if !switch.unpriced.contains(instrument) {
+                    let alerted = changed_by(
+                        batch,
+                        instrument,
+                        "exit_unpriced",
+                        Vec::new(),
+                        Some(id.clone()),
+                    )?;
+                    batch.notify(alerted, "exit_unpriced");
+                }
                 continue;
             };
             let tif = Some(order_tif(batch, instrument));
@@ -658,6 +674,23 @@ fn switch_of<'s>(view: &'s ExecutorState, intent: &IntentId) -> Option<&'s Switc
         return None;
     };
     closes_with(switch, ordinal, &record.agent, instrument).then_some(switch)
+}
+
+/// DEC-2360 item 1: what a send of `intent` may sell at most, `qty` for any exit but a switch's
+/// own flatten, and for one at most the agent's sub-ledger in its instrument now, so a release
+/// written since the flatten was sized is taken off every send, the first and each rung.
+pub(crate) fn flatten_room(
+    view: &ExecutorState,
+    intent: &IntentId,
+    qty: Qty,
+) -> Result<Qty, ExecutorError> {
+    let Some(switch) = switch_of(view, intent) else {
+        return Ok(qty);
+    };
+    let Some(IntentBody::Order { instrument, .. }) = view.bodies.get(intent) else {
+        return Ok(qty);
+    };
+    Ok(qty.min(sub_ledger(view, &switch.agent, instrument)?))
 }
 
 /// The floor an exit's ladder never prices below (§5.5, §5.6): the owner's confirmed floor for an
