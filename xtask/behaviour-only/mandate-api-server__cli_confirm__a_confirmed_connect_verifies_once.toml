@@ -1,0 +1,7 @@
+file = "crates/mandate-api-server/tests/cli_confirm.rs"
+test = "a_confirmed_connect_verifies_once"
+reason = """
+`CliConfirm` refuses every kind but `approve` at its first check today, so a connect's step-up
+fails `step_up_method` before any check this test judges; there is no stub to stop at. DEC-2125
+item 1's change admits `connection` and deletes this row.
+"""
