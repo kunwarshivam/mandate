@@ -10,6 +10,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
+use mandate_connections::start::AuthorizePage;
 use mandate_release::startup::Tier;
 
 /// The session signing key's file name under `$CREDENTIALS_DIRECTORY` (`deploy/systemd`).
@@ -41,6 +42,9 @@ pub enum StartRefusal {
     SessionKeyExposed,
     /// A required setting is absent or malformed; carries only its name.
     Setting { name: &'static str },
+    /// [`AUTHORIZE_URL`] is set where it may not be, or names a page a cell may not use
+    /// (DEC-2633 item 3).
+    AuthorizeUrl,
     /// [`INTERNAL_PAPER_WORKSPACE`] is on, and the hosted control stream is not shown to be paper
     /// (DEC-1143 item 2).
     InternalWorkspaceNotPaper,
@@ -62,6 +66,10 @@ impl fmt::Display for StartRefusal {
             Self::Setting { name } => {
                 write!(f, "a required setting is absent or malformed: {name}")
             }
+            Self::AuthorizeUrl => write!(
+                f,
+                "{AUTHORIZE_URL} is set outside a dev or ci debug build, or names no cell page"
+            ),
             Self::InternalWorkspaceNotPaper => write!(
                 f,
                 "{INTERNAL_PAPER_WORKSPACE} is on, and the control stream is not shown to be paper"
@@ -128,6 +136,35 @@ where
         }
     }
     Ok(())
+}
+
+/// The setting a dev or CI cell names its fixture provider's authorization page in (DEC-2633
+/// item 3).
+pub const AUTHORIZE_URL: &str = "MANDATE_ALPACA_AUTHORIZE_URL";
+
+/// The authorization page the connect start sends the browser to: Alpaca's when [`AUTHORIZE_URL`]
+/// is unset. A build with debug assertions admits a set one only in the `dev` and `ci` tiers, and
+/// only a page [`AuthorizePage::for_cell`] admits; a build without them refuses any set value,
+/// whatever the tier, as the token exchange refuses its token URL (DEC-2322). A value that is not
+/// UTF-8 is still a value set.
+///
+/// # Errors
+/// [`StartRefusal::AuthorizeUrl`].
+pub fn authorize_page(tier: Tier, value: Option<&OsStr>) -> Result<AuthorizePage, StartRefusal> {
+    let Some(text) = value else {
+        return Ok(AuthorizePage::alpaca());
+    };
+    #[cfg(debug_assertions)]
+    let judged = matches!(tier, Tier::Dev | Tier::Ci)
+        .then(|| text.to_str().and_then(AuthorizePage::for_cell))
+        .flatten()
+        .ok_or(StartRefusal::AuthorizeUrl);
+    #[cfg(not(debug_assertions))]
+    let judged = {
+        let _unread_in_release = (tier, text);
+        Err(StartRefusal::AuthorizeUrl)
+    };
+    judged
 }
 
 /// Refuses a key set fetched over anything but `https` outside dev and CI (E21-53, DEC-2100 item

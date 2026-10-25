@@ -1,0 +1,51 @@
+{{- /*
+The connect finish (DEC-2348 item 3), with `api.connectFinish`: one replica per workspace, from the
+API's image as `mandate-api-server finish`, finishing each OAuth connect on the control stream
+`ctl:<api.workspace>` and tearing a closed one down in the vault. It listens on nothing. Its one
+vault credential is the connection manager's AppRole, the Secret `vault-approle-connection-manager`,
+with the vault's CA, as owner-only files in its vault directory (`mandate.vaultCopy`); no other pod
+names that Secret, the API's among them. It reaches the journal as its own role and the vault on
+8200, nothing else. SIGTERM lets the pass in flight end, at most five seconds, and the process
+exits 0 without waiting for a vault call it abandoned, inside the pod's grace, set to 30 seconds
+here so the bound the finish keeps is stated.
+*/ -}}
+{{- define "mandate.connectFinishEnv" -}}
+{{- $j := .root.Values.journal -}}
+- name: MANDATE_API_DATABASE_URL
+  value: {{ printf "postgres://%s@%s:%v/%s?sslmode=verify-full&sslrootcert=/run/secrets/journal-ca/ca.crt" .p.db_role $j.host $j.port $j.database | quote }}
+- name: MANDATE_API_WORKSPACE
+  value: {{ required "api.workspace, the hosted workspace whose connects the finish closes, is required with api.connectFinish" .root.Values.api.workspace | quote }}
+- name: MANDATE_FINISH_VAULT_ADDRESS
+  value: {{ include "mandate.vaultAddress" .root | quote }}
+- name: MANDATE_FINISH_VAULT_DIR
+  value: /run/mandate/vault
+{{- end -}}
+{{- define "mandate.connectFinish" -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .p.name | quote }}
+  labels:
+    {{- include "mandate.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "mandate.selector" . | nindent 6 }}
+  template:
+    {{- $mounts := "- {name: vault, mountPath: /run/mandate/vault, readOnly: true}" }}
+    {{- $container := include "mandate.container" (dict "root" .root "p" .p "name" .p.name "args" (list "finish") "mounts" $mounts) }}
+    {{- $container = replace "  env:\n" (printf "  env:\n%s\n" (include "mandate.connectFinishEnv" . | indent 4)) $container }}
+    {{- $init := include "mandate.vaultCopy" (dict "root" .root "role" "connection-manager") }}
+    {{- $volumes := include "mandate.vaultVolumes" (dict "root" .root "role" "connection-manager") }}
+    {{- include "mandate.pod" (dict "root" .root "p" .p "restartPolicy" "Always" "grace" 30 "containers" $container "initContainers" $init "volumes" $volumes) | nindent 4 }}
+{{- end -}}
+{{- $root := . }}
+{{- range (include "mandate.rendered" (dict "root" . "kind" "service") | fromJsonArray) }}
+{{- if and (eq .name "connect-finish") $root.Values.api.connectFinish }}
+---
+{{ include "mandate.emit" (include "mandate.connectFinish" (dict "root" $root "p" .)) }}
+{{- end }}
+{{- end }}

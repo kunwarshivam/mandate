@@ -79,6 +79,13 @@ const API_DOCKERFILE: &str = "deploy/cell/images/api.Dockerfile";
 const DEPLOY_MANAGER_DOCKERFILE: &str = "deploy/cell/images/deploy-manager.Dockerfile";
 /// The deployment manager's process name, which is also its image's key in the chart's values.
 const DEPLOY_MANAGER_PROCESS: &str = "deploy-manager";
+/// The role provisioner's image (DEC-2350), built beside `mandate` from the same static build.
+const ROLE_PROVISIONER_DOCKERFILE: &str = "deploy/cell/images/role-provisioner.Dockerfile";
+/// The role provisioner's process name, which is also its image's key in the chart's values.
+const ROLE_PROVISIONER_PROCESS: &str = "role-provisioner";
+/// The role provisioner's own AppRole Secret, which its pod mounts (`mandate.vaultCopy`) and
+/// `mandate vault provision --secrets-namespace` issues.
+const ROLE_PROVISIONER_SECRET: &str = "vault-approle-provisioner";
 /// The local stub token issuer's image (DEC-2100, DEC-1025), a sidecar in the API pod.
 const STUB_DOCKERFILE: &str = "deploy/cell/images/stub-issuer.Dockerfile";
 /// Lane SI's stub issuer crate (E21-52); the cell runs it only once it is in the workspace.
@@ -116,6 +123,9 @@ const DEMO_RESEARCH_FILES: [&str; 5] = [
     "instruments.json",
 ];
 const EXECUTOR_DOCKERFILE: &str = "deploy/cell/images/executor.Dockerfile";
+/// The token-exchange process's image (DEC-1175), which the deployment manager starts once per
+/// OAuth connect.
+const EXCHANGE_DOCKERFILE: &str = "deploy/cell/images/token-exchange.Dockerfile";
 /// Where the cell keeps what it derives: the kubeconfig, the downloaded operator chart, and the
 /// image build context. Under `target/`, so nothing derived is ever committed.
 const STATE: &str = "target/cell";
@@ -177,7 +187,8 @@ pub enum Drill {
     /// `mandate vault provision` sets the cell's vault up, then each AppRole logs in from a pod
     /// labelled as the executor and reads only what DEC-977 item 2's table gives it: a runtime
     /// nothing, an executor exactly its own connection's token, the model gateway its key; and
-    /// no policy of the cell's holds a wildcard (E21-32, DEC-2022 item 3).
+    /// no policy of the cell's holds a wildcard but DEC-2349's prefix grants, each in its own policy
+    /// (E21-32, DEC-2022 item 3).
     Vault,
 }
 
@@ -313,8 +324,9 @@ pub fn tools_missing() -> Option<String> {
     None
 }
 
-/// `cargo xtask ci cell`: the chart checks, then the cell itself, every drill, every drill again
-/// with its bug planted, and the demo without `web/`, which upgrades the releases in place. Skipped without docker, k3d and helm unless CI requires it.
+/// `cargo xtask ci cell`: the chart checks, then the cell itself and every drill; the drills with
+/// their bugs planted are `ci cell-seeded`'s, and the upgrade in place is `ci cell-upgrade`'s.
+/// Skipped without docker, k3d and helm unless CI requires it.
 pub fn ci() -> Result<()> {
     if let Some(reason) = tools_missing() {
         if env::var_os(CELL_REQUIRED_ENV).is_some() {
@@ -325,8 +337,36 @@ pub fn ci() -> Result<()> {
     }
     chart_checks()?;
     up()?;
-    drill(&DRILLS, false)?;
-    drill(&DRILLS, true)?;
+    drill(&DRILLS, false)
+}
+
+/// `cargo xtask ci cell-seeded`: the cell, then every drill of [`DRILLS`] again with its bug planted,
+/// which each must catch. It ran in `ci cell` until that job came within reach of its ten minutes
+/// (DEC-464). Skipped as `ci cell` is.
+pub fn ci_seeded() -> Result<()> {
+    if let Some(reason) = tools_missing() {
+        if env::var_os(CELL_REQUIRED_ENV).is_some() {
+            bail!("{CELL_REQUIRED_ENV} is set but {reason}");
+        }
+        eprintln!("    cell-seeded: {reason}; skipping (see deploy/cell/README.md)");
+        return Ok(());
+    }
+    up()?;
+    drill(&DRILLS, true)
+}
+
+/// `cargo xtask ci cell-upgrade`: the cell, then `cell demo --no-web`, whose own `up` upgrades every
+/// release in place, with the demo's workspace, readiness, port-forward and sign-in. It ran at the
+/// end of `ci cell` until that job outgrew its ten minutes (DEC-464). Skipped as `ci cell` is.
+pub fn ci_upgrade() -> Result<()> {
+    if let Some(reason) = tools_missing() {
+        if env::var_os(CELL_REQUIRED_ENV).is_some() {
+            bail!("{CELL_REQUIRED_ENV} is set but {reason}");
+        }
+        eprintln!("    cell-upgrade: {reason}; skipping (see deploy/cell/README.md)");
+        return Ok(());
+    }
+    up()?;
     demo(false)
 }
 
@@ -580,14 +620,20 @@ const RUNNER: &str = "mandate-backtest-runner";
 
 /// The packages [`build_binary`] always builds for the cell's images, the backtest runner among
 /// them.
-const BUILT_PACKAGES: [&str; 6] = [
+const BUILT_PACKAGES: [&str; 8] = [
     "mandate-cli",
     RUNNER,
     "mandate-api-server",
     "mandate-daemon",
     "mandate-deployd",
     "mandate-executord",
+    "mandate-provisionerd",
+    EXCHANGE_PACKAGE,
 ];
+
+/// The token exchange's package (DEC-1175), a dev-profile build like the rest, so its cell token
+/// URL compiles in (DEC-2633).
+const EXCHANGE_PACKAGE: &str = "mandate-token-exchange";
 
 /// The stub issuer's package, which [`build_binary`] adds once [`stub_ready`].
 const STUB_PACKAGE: &str = "mandate-stub-issuer";
@@ -595,13 +641,15 @@ const STUB_PACKAGE: &str = "mandate-stub-issuer";
 /// Every package whose binary the cell's images can hold: what [`build_binary`] builds. A change
 /// that reaches none of them, and no path under `deploy/`, cannot change what a cell job runs, so
 /// `cargo xtask ci select` starts the cell jobs only for one that does (DEC-2609).
-pub const IMAGE_PACKAGES: [&str; 7] = [
+pub const IMAGE_PACKAGES: [&str; 9] = [
     BUILT_PACKAGES[0],
     BUILT_PACKAGES[1],
     BUILT_PACKAGES[2],
     BUILT_PACKAGES[3],
     BUILT_PACKAGES[4],
     BUILT_PACKAGES[5],
+    BUILT_PACKAGES[6],
+    BUILT_PACKAGES[7],
     STUB_PACKAGE,
 ];
 
@@ -622,6 +670,16 @@ fn deploy_manager_image_tag() -> Result<Option<String>> {
         return Ok(None);
     }
     local_tag(DEPLOY_MANAGER_PROCESS, &["mandate-deployd"]).map(Some)
+}
+
+/// The cell's `role-provisioner` image (DEC-2350), this checkout's build of `mandate-provisionerd`:
+/// none when the cell pulls its `mandate` image, as for the deployment manager, so the chart leaves
+/// the provisioner out and no AppRole of its own is issued.
+fn role_provisioner_image_tag() -> Result<Option<String>> {
+    if let ImageSource::Pull(_) = host_image_source()? {
+        return Ok(None);
+    }
+    local_tag(ROLE_PROVISIONER_PROCESS, &["mandate-provisionerd"]).map(Some)
 }
 
 /// The workspace chart's settings, each a `--set-json` pair, that `cell up` installs it with and
@@ -779,6 +837,34 @@ fn executor_image() -> Result<Option<String>> {
     local_tag("executor", &["mandate-executord"]).map(Some)
 }
 
+/// The cell's `token-exchange` image, this checkout's build of `mandate-token-exchange`: none
+/// without the deployment manager, the one process that starts it, as for the manager itself.
+fn exchange_image() -> Result<Option<String>> {
+    if deploy_manager_image_tag()?.is_none() {
+        return Ok(None);
+    }
+    local_tag("token-exchange", &[EXCHANGE_PACKAGE]).map(Some)
+}
+
+/// The fixture OAuth app the cell's API, token exchange and fixture provider share (DEC-1176 item
+/// 6): a fixed fake client id, and the API's callback through the port-forward the browser uses.
+const FIXTURE_CLIENT_ID: &str = "cell-fixture-client";
+const FIXTURE_REDIRECT_URI: &str = "http://127.0.0.1:8080/v1/oauth/alpaca/callback";
+
+/// The fixture provider's settings (DEC-1176): on only when the cell runs both the stub issuer,
+/// whose image the fixture runs, and the token exchange, the one process that reaches it; else
+/// none, so the chart renders no fixture.
+fn fixture_values(stub: Option<&str>, exchange: Option<&str>) -> Vec<String> {
+    if stub.is_none() || exchange.is_none() {
+        return Vec::new();
+    }
+    vec![
+        "oauthFixture.enabled=true".to_owned(),
+        format!("alpacaOAuth.clientId={FIXTURE_CLIENT_ID}"),
+        format!("alpacaOAuth.redirectUri={FIXTURE_REDIRECT_URI}"),
+    ]
+}
+
 /// The `images.*` settings for the images this cell runs, so `up` and every render agree.
 fn image_sets() -> Result<Vec<String>> {
     let mut sets = vec![
@@ -788,8 +874,18 @@ fn image_sets() -> Result<Vec<String>> {
             "images.{DEPLOY_MANAGER_PROCESS}={}",
             deploy_manager_image_tag()?.unwrap_or_default()
         ),
+        format!(
+            "images.{ROLE_PROVISIONER_PROCESS}={}",
+            role_provisioner_image_tag()?.unwrap_or_default()
+        ),
     ];
-    sets.extend(signin_values(stub_image_tag()?.as_deref()));
+    let stub = stub_image_tag()?;
+    let exchange = exchange_image()?;
+    sets.extend(signin_values(stub.as_deref()));
+    if let Some(exchange) = &exchange {
+        sets.push(format!("images.token-exchange={exchange}"));
+    }
+    sets.extend(fixture_values(stub.as_deref(), exchange.as_deref()));
     if let Some(runtime) = runtime_image()? {
         sets.push(format!("images.runtime={runtime}"));
     }
@@ -799,10 +895,11 @@ fn image_sets() -> Result<Vec<String>> {
     Ok(sets)
 }
 
-/// `cargo xtask cell up`: build the `mandate`, `api`, `runtime`, `executor` and `deploy-manager`
-/// images from this checkout (never with the `live` feature), bring up the k3d cluster if it is not
-/// up, install the CloudNativePG operator, the journal's Postgres and the workspace chart, and wait
-/// until every pod is ready and the migration Job has finished.
+/// `cargo xtask cell up`: build the `mandate`, `api`, `runtime`, `executor`, `deploy-manager` and
+/// `role-provisioner` images from this checkout (never with the `live` feature), bring up the k3d
+/// cluster if it is not up, install the CloudNativePG operator, the journal's Postgres and the
+/// vault, issue the vault's AppRole Secrets once the provisioner runs ([`provision_vault`]), install
+/// the workspace chart, and wait until every pod is ready and the migration Job has finished.
 pub fn up() -> Result<()> {
     let source = host_image_source()?;
     if source == ImageSource::Build {
@@ -811,9 +908,11 @@ pub fn up() -> Result<()> {
     let image = image_tag()?;
     let api = api_image_tag()?;
     let manager = deploy_manager_image_tag()?;
+    let provisioner = role_provisioner_image_tag()?;
     let runtime = runtime_image()?;
     let executor = executor_image()?;
     let stub = stub_image_tag()?;
+    let exchange = exchange_image()?;
     if source == ImageSource::Build {
         let runner = static_binary(RUNNER);
         build_image(&image, IMAGE_DOCKERFILE, "mandate", &[(&runner, RUNNER)])?;
@@ -832,8 +931,19 @@ pub fn up() -> Result<()> {
     if let Some(stub) = &stub {
         build_image(stub, STUB_DOCKERFILE, "mandate-stub-issuer", &[])?;
     }
+    if let Some(exchange) = &exchange {
+        build_image(exchange, EXCHANGE_DOCKERFILE, EXCHANGE_PACKAGE, &[])?;
+    }
     if let Some(manager) = &manager {
         build_image(manager, DEPLOY_MANAGER_DOCKERFILE, "mandate-deployd", &[])?;
+    }
+    if let Some(provisioner) = &provisioner {
+        build_image(
+            provisioner,
+            ROLE_PROVISIONER_DOCKERFILE,
+            "mandate-provisionerd",
+            &[],
+        )?;
     }
     if let Some(api) = &api {
         build_image(
@@ -853,7 +963,9 @@ pub fn up() -> Result<()> {
         runtime.as_ref(),
         executor.as_ref(),
         stub.as_ref(),
+        exchange.as_ref(),
         manager.as_ref(),
+        provisioner.as_ref(),
     ]
     .into_iter()
     .flatten()
@@ -922,7 +1034,32 @@ pub fn up() -> Result<()> {
         "jsonpath={.metadata.annotations.mandate\\.dev/failure-domain}",
     ])?;
     eprintln!("    journal: failure domains: {}", domain.trim());
-    vault()?;
+    let fresh = vault(provisioner.is_some())?;
+    if provisioner.is_some() {
+        provision_vault(fresh)?;
+    }
+    fixture_client_secret(
+        || {
+            kubectl(&[
+                "get",
+                "secret",
+                FIXTURE_CLIENT_SECRET,
+                "--namespace",
+                NAMESPACE,
+                "--ignore-not-found",
+                "-o",
+                "name",
+            ])
+        },
+        || {
+            let mut bytes = [0u8; FIXTURE_CLIENT_SECRET_BYTES];
+            fs::File::open("/dev/urandom")
+                .and_then(|mut random| random.read_exact(&mut bytes))
+                .context("reading /dev/urandom")?;
+            Ok(hex_of(&bytes))
+        },
+        |secret| apply(&[secret]),
+    )?;
     if stub.is_some() {
         demo_links(&image)?;
     }
@@ -1418,14 +1555,13 @@ fn in_vault_pod(command: &[&str], stdin: &[u8]) -> Result<(bool, String)> {
     Ok((out.status.success(), text))
 }
 
-/// The workspace vault (E21-32, DEC-2019): installed without `--wait`, since it is ready only once
-/// unsealed, then initialized once with one unseal key, kept with the root token under
-/// `target/cell` (mode 0600, set again on a file that was already there; the cell holds fake
-/// secrets only), and unsealed with it, the key
-/// passed on stdin and never as an argument. A hosted cell is initialized and unsealed by hand
-/// (deploy/cell/README.md, "The vault").
-fn vault() -> Result<()> {
-    helm(&[
+/// The `helm` arguments that install the cell's vault. With `kube_api`, Kubernetes auth is on as in
+/// staging (DEC-2060, DEC-2062): the vault's pod projects its ServiceAccount's token and the
+/// cluster's CA, the account may review tokens (`system:auth-delegator`), and its egress is the
+/// API server alone, read at install. OpenBao refuses a Kubernetes auth config with no CA to read,
+/// so `mandate vault provision --kubernetes-host` needs it.
+fn vault_install_args(kube_api: bool) -> Vec<&'static str> {
+    let mut args = vec![
         "upgrade",
         "--install",
         "vault",
@@ -1435,7 +1571,23 @@ fn vault() -> Result<()> {
         "--create-namespace",
         "--timeout",
         "5m",
-    ])?;
+    ];
+    if kube_api {
+        args.extend(["--set", "kubeApi.enabled=true"]);
+    }
+    args
+}
+
+/// The workspace vault (E21-32, DEC-2019): installed without `--wait`, since it is ready only once
+/// unsealed, then initialized once with one unseal key, kept with the root token under
+/// `target/cell` (mode 0600, set again on a file that was already there; the cell holds fake
+/// secrets only), and unsealed with it, the key
+/// passed on stdin and never as an argument. A hosted cell is initialized and unsealed by hand
+/// (deploy/cell/README.md, "The vault"). Answers whether this run initialized it, so a vault made
+/// afresh is provisioned afresh ([`provision_vault`]). With `kube_api`, the vault runs as staging's
+/// does ([`vault_install_args`]), so the Kubernetes auth [`provision_vault`] sets up can be.
+fn vault(kube_api: bool) -> Result<bool> {
+    helm(&vault_install_args(kube_api))?;
     let mut answer = None;
     for _ in 0..POLLS {
         if let Ok((_, status)) = bao(&["status", "-format=json"], b"")
@@ -1448,6 +1600,7 @@ fn vault() -> Result<()> {
     }
     let mut seal = vault_state(&answer.context("the vault never answered `bao status`")?)?;
     let init = state()?.join(VAULT_INIT);
+    let mut fresh = false;
     if seal == VaultState::Uninitialized {
         let (ok, made) = bao(
             &[
@@ -1472,6 +1625,7 @@ fn vault() -> Result<()> {
         file.set_permissions(fs::Permissions::from_mode(0o600))?;
         file.write_all(made.as_bytes())?;
         seal = VaultState::Sealed;
+        fresh = true;
     }
     if seal == VaultState::Sealed {
         let kept = fs::read_to_string(&init).with_context(|| {
@@ -1505,11 +1659,12 @@ fn vault() -> Result<()> {
         "--timeout=120s",
     ])?;
     eprintln!("    vault: unsealed, on raft storage");
-    Ok(())
+    Ok(fresh)
 }
 
-/// The Secret the workspace chart makes in a dev or ci cell for the `oauth-fixture` pod, and its
-/// key, which holds the fake Alpaca OAuth client secret as plain text (DEC-1176 item 6).
+/// The Secret the local cell makes for the `oauth-fixture` pod, which the workspace chart only
+/// mounts, and its key, which holds the fake Alpaca OAuth client secret as plain text (DEC-1176
+/// item 6; the chart makes no Secret, DEC-822 item 4).
 const FIXTURE_CLIENT_SECRET: &str = "oauth-fixture-client";
 const FIXTURE_CLIENT_SECRET_KEY: &str = "client-secret";
 
@@ -1528,11 +1683,60 @@ fn client_secret_seed_stdin(root: &str, encoded: &str) -> String {
     format!("{root}\n{encoded}")
 }
 
+/// The length of the fixture client's fake secret, in random bytes, written as hex.
+const FIXTURE_CLIENT_SECRET_BYTES: usize = 32;
+
+/// Whether the cell keeps the fixture client's Secret it already holds: `found` is kubectl's
+/// `get secret -o name` answer, empty when there is none.
+fn keep_existing(found: &str) -> bool {
+    !found.trim().is_empty()
+}
+
+/// Makes [`FIXTURE_CLIENT_SECRET`] once, before the workspace release whose `oauth-fixture` pod
+/// mounts it, and keeps one already made, so the pod and the vault's seed agree across every
+/// `cell up` (DEC-1176 item 6): `found` reads what the cell holds, `value` draws a fake client's
+/// secret, random bytes in hex, which no real provider knows, and `create` applies the Secret,
+/// which kubectl reads from stdin, so the value reaches no argument. `Ok(true)` when it was made;
+/// any failure fails `cell up`.
+fn fixture_client_secret(
+    found: impl FnOnce() -> Result<String>,
+    value: impl FnOnce() -> Result<String>,
+    create: impl FnOnce(Value) -> Result<()>,
+) -> Result<bool> {
+    if keep_existing(&found()?) {
+        eprintln!("    oauth-fixture: its client secret is kept");
+        return Ok(false);
+    }
+    create(fixture_client_secret_object(&value()?))?;
+    eprintln!("    oauth-fixture: its client secret is made");
+    Ok(true)
+}
+
+/// The fixture client's Secret holding `value` at its one key.
+fn fixture_client_secret_object(value: &str) -> Value {
+    json!({
+        "apiVersion": "v1",
+        "kind": "Secret",
+        "metadata": {
+            "name": FIXTURE_CLIENT_SECRET,
+            "namespace": NAMESPACE,
+            "labels": {"app.kubernetes.io/name": "mandate-cell", "mandate.dev/process": "oauth-fixture"}
+        },
+        "type": "Opaque",
+        "stringData": {FIXTURE_CLIENT_SECRET_KEY: value}
+    })
+}
+
+/// `bytes` in lowercase hex, two digits each.
+fn hex_of(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
 /// Seeds a dev or ci cell's vault with the fake client secret the `oauth-fixture` pod checks, read
-/// from [`FIXTURE_CLIENT_SECRET`] once the workspace release, which makes it, is installed, so
-/// the token exchange redeems the fixture's codes (DEC-1176 item 6, DEC-2636). Only the local
-/// cell runs it, with its fake root token; the chart makes the Secret only in a dev or ci cell, so
-/// a release without it is told so and the vault is left as it is. The value is never decoded.
+/// from [`FIXTURE_CLIENT_SECRET`] once the workspace release is installed, so the token exchange
+/// redeems the fixture's codes (DEC-1176 item 6, DEC-2636). Only the local cell runs it, with its
+/// fake root token; a cell without the Secret is told so and the vault is left as it is. The value
+/// is never decoded.
 fn seed_client_secret() -> Result<()> {
     let jsonpath = format!("jsonpath={{.data.{FIXTURE_CLIENT_SECRET_KEY}}}");
     let encoded = kubectl(&[
@@ -1561,6 +1765,157 @@ fn seed_client_secret() -> Result<()> {
     )?;
     ensure!(seeded, "seeding the vault's client secret failed");
     eprintln!("    vault: the fixture's client secret is seeded");
+    Ok(())
+}
+
+/// Where [`provision_vault`] copies the host's static `mandate` CLI in the k3s node: under k3s's
+/// own data volume, which every node has.
+const NODE_CLI: &str = "/var/lib/rancher/k3s/mandate-provision";
+
+/// The script [`provision_vault`] runs in the k3s node, which holds `kubectl` and reaches the
+/// vault's pod by a port-forward on its own loopback, the listener the vault's certificate names:
+/// it reads the vault's CA, forwards a free port, and pipes `mandate vault provision
+/// --secrets-namespace` into `kubectl apply`, as staging's apply does (DEC-2630). The root token is
+/// the script's standard input, which only the CLI reads, so it is never an argument, a file or an
+/// environment variable; `kubectl`'s own calls read `/dev/null`. The Kubernetes auth host is `$1`.
+/// The forward is stopped, and the CA's directory and the copied CLI removed, however it ends. A
+/// CLI that fails prints nothing, so `kubectl apply`, given no object, fails the script too.
+fn provision_script() -> String {
+    format!(
+        "set -eu\n\
+         pf=\n\
+         dir=$(mktemp -d /var/lib/rancher/k3s/provision.XXXXXX)\n\
+         trap '[ -z \"$pf\" ] || kill \"$pf\"; rm -rf \"$dir\" {NODE_CLI}' EXIT\n\
+         kubectl get configmap vault-ca --namespace {NAMESPACE} -o 'jsonpath={{.data.ca\\.crt}}' \
+           </dev/null >\"$dir/ca.crt\"\n\
+         kubectl port-forward --namespace {NAMESPACE} pod/{VAULT_POD} :8200 \
+           </dev/null >\"$dir/forward\" 2>/dev/null &\n\
+         pf=$!\n\
+         port=\n\
+         for _ in $(seq 100); do\n\
+           port=$(sed -n 's/^Forwarding from 127.0.0.1:\\([0-9]*\\) .*/\\1/p' \"$dir/forward\")\n\
+           [ -z \"$port\" ] || break\n\
+           sleep 0.1\n\
+         done\n\
+         [ -n \"$port\" ]\n\
+         {NODE_CLI} vault provision --address \"https://127.0.0.1:$port\" --ca \"$dir/ca.crt\" \
+           --operator-token-stdin --secrets-namespace {NAMESPACE} --kubernetes-host \"$1\" \
+           | kubectl apply --namespace {NAMESPACE} -f - >/dev/null\n"
+    )
+}
+
+/// The cell's `kubernetes` Service as the vault's Kubernetes auth reaches it, `https://` its
+/// cluster address and its `https` port, as staging's apply reads it.
+fn kubernetes_host() -> Result<String> {
+    let found = kubectl(&[
+        "get",
+        "service",
+        "kubernetes",
+        "--namespace",
+        "default",
+        "-o",
+        "jsonpath={.spec.clusterIP}:{.spec.ports[?(@.name==\"https\")].port}",
+    ])?;
+    kubernetes_host_from(&found)
+}
+
+/// [`kubernetes_host`] from what `kubectl` printed: an IPv4 address and a port, or an error.
+fn kubernetes_host_from(found: &str) -> Result<String> {
+    let found = found.trim();
+    let (ip, port) = found
+        .split_once(':')
+        .with_context(|| format!("the kubernetes Service read as `{found}`"))?;
+    let ip: Ipv4Addr = ip
+        .parse()
+        .with_context(|| format!("the kubernetes Service's address `{ip}` is not IPv4"))?;
+    let port: u16 = port
+        .parse()
+        .with_context(|| format!("the kubernetes Service's port `{port}` is not a port"))?;
+    Ok(format!("https://{ip}:{port}"))
+}
+
+/// Whether `cell up` provisions the vault: always for a vault this run initialized (`fresh`), whose
+/// roles and secret ids are new, so a Secret left from the vault before would hold a stale secret
+/// id; otherwise only when [`ROLE_PROVISIONER_SECRET`] is missing (`held` false), so a second
+/// `cell up` rotates no credential in use.
+fn must_provision(fresh: bool, held: bool) -> bool {
+    fresh || !held
+}
+
+/// Issues the vault's AppRole Secrets in the workspace's namespace (DEC-2350, DEC-2630), the role
+/// provisioner's [`ROLE_PROVISIONER_SECRET`] among them, and sets Kubernetes auth up at
+/// [`kubernetes_host`], unless [`must_provision`] says the Secrets there are still the vault's.
+/// The host's static `mandate` CLI is copied into the k3s node and run there by
+/// [`provision_script`], with the cell's fake root token on its standard input.
+fn provision_vault(fresh: bool) -> Result<()> {
+    let held = kubectl(&[
+        "get",
+        "secret",
+        ROLE_PROVISIONER_SECRET,
+        "--namespace",
+        NAMESPACE,
+        "--ignore-not-found",
+        "-o",
+        "name",
+    ])?;
+    if !must_provision(fresh, !held.trim().is_empty()) {
+        eprintln!("    vault: {ROLE_PROVISIONER_SECRET} is there, so nothing is provisioned");
+        return Ok(());
+    }
+    let init = fs::read_to_string(state()?.join(VAULT_INIT)).context("reading the vault's init")?;
+    let init: Value = serde_json::from_str(&init).context("reading the vault's init")?;
+    let root = init["root_token"]
+        .as_str()
+        .context("the vault's init holds no root token")?;
+    let host = kubernetes_host()?;
+    sh(
+        "docker",
+        &[
+            "cp",
+            &static_binary("mandate"),
+            &format!("{NODE}:{NODE_CLI}"),
+        ],
+    )?;
+    let mut child = Command::new("docker")
+        .args([
+            "exec",
+            "-i",
+            NODE,
+            "sh",
+            "-c",
+            &provision_script(),
+            "provision",
+            &host,
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .spawn()
+        .context("starting the vault's provisioning")?;
+    child
+        .stdin
+        .take()
+        .context("the provisioning's stdin")?
+        .write_all(root.as_bytes())?;
+    let status = child.wait()?;
+    ensure!(
+        status.success(),
+        "provisioning the vault failed with {status}"
+    );
+    let issued = kubectl(&[
+        "get",
+        "secret",
+        ROLE_PROVISIONER_SECRET,
+        "--namespace",
+        NAMESPACE,
+        "--ignore-not-found",
+        "-o",
+        "name",
+    ])?;
+    ensure!(
+        !issued.trim().is_empty(),
+        "the vault's provisioning issued no {ROLE_PROVISIONER_SECRET}"
+    );
+    eprintln!("    vault: provisioned, its AppRole Secrets issued");
     Ok(())
 }
 
@@ -1631,19 +1986,144 @@ const VAULT_DRILL_READS: [(&str, &str, bool); 13] = [
 /// has proved nothing about wildcards.
 const VAULT_DRILL_POLICIES: usize = 10;
 
+/// The only stanzas holding a wildcard that the vault drill admits, each in the one policy it may
+/// appear in: DEC-2349's one-segment `+` for a connection the web made after the vault was
+/// provisioned, on the API's write of a connect's code and its and the connection manager's deletes,
+/// and the connection manager's read of each request's account fingerprint, a pseudonymous hash and
+/// no credential (DEC-2345); and the role provisioner's role under each Kubernetes-auth mount, the
+/// `+` naming the role, with every parameter but the ServiceAccount's name pinned (DEC-2350 item
+/// 1). Each is a whole stanza, its closing brace included, as the scan prints it
+/// ([`vault_drill_scan`]), whitespace squeezed, so another path, another capability anywhere in
+/// the stanza, a `*`, the same stanza in another policy, or
+/// a wildcard outside a stanza is still reported.
+const VAULT_DRILL_PREFIX_GRANTS: [(&str, &str); 10] = [
+    (
+        "mandate-api",
+        "path \"mandate/data/connections/+/code\" { capabilities = [\"create\", \"update\"] }",
+    ),
+    (
+        "mandate-api",
+        "path \"mandate/metadata/connections/+/code\" { capabilities = [\"delete\"] }",
+    ),
+    (
+        "mandate-api",
+        "path \"mandate/metadata/connections/+/token\" { capabilities = [\"delete\"] }",
+    ),
+    (
+        "mandate-connection-manager",
+        "path \"mandate/metadata/connections/+/code\" { capabilities = [\"delete\"] }",
+    ),
+    (
+        "mandate-connection-manager",
+        "path \"mandate/metadata/connections/+/token\" { capabilities = [\"delete\"] }",
+    ),
+    (
+        "mandate-connection-manager",
+        "path \"mandate/data/personal/fingerprints/+/+\" { capabilities = [\"read\"] }",
+    ),
+    (PROVISIONER_POLICY, PROVISIONER_EXECUTOR_ROLES),
+    (PROVISIONER_POLICY, PROVISIONER_EXCHANGE_ROLES),
+    (
+        KUBERNETES_EXECUTOR_POLICY,
+        "path \"mandate/data/personal/accounts/x{{identity.entity.aliases.<accessor>.metadata.service_account_name}}/+\" { capabilities = [\"create\"] }",
+    ),
+    (
+        KUBERNETES_EXECUTOR_POLICY,
+        "path \"mandate/data/personal/fingerprints/x{{identity.entity.aliases.<accessor>.metadata.service_account_name}}/+\" { capabilities = [\"create\"] }",
+    ),
+];
+
+/// The Kubernetes-auth executors' templated policy, which `cell up`'s provisioning writes once the
+/// role provisioner runs: its two one-segment `create` grants below the executor's own templated
+/// connection segment, its account entries (DEC-2339 item 2) and its fingerprint entries (DEC-2345
+/// item 3), are in [`VAULT_DRILL_PREFIX_GRANTS`] with the mount's accessor as `<accessor>`.
+const KUBERNETES_EXECUTOR_POLICY: &str = "mandate-kubernetes-executor";
+
+/// What a templated policy's alias reference holds in place of the Kubernetes mount's accessor,
+/// which OpenBao names `auth_kubernetes_<hex>` afresh for each vault ([`normalised_accessor`]).
+const ACCESSOR_PLACEHOLDER: &str = "<accessor>";
+
+/// The role provisioner's policy (DEC-2350), as `mandate vault provision --secrets-namespace`
+/// writes it once `cell up` provisions for the provisioner ([`provision_vault`]).
+const PROVISIONER_POLICY: &str = "mandate-provisioner";
+/// Its stanza on the executors' Kubernetes-auth roles, as the scan prints it: create and update, a
+/// lease's TTL, the executor's maximum, bound to the workspace's namespace.
+const PROVISIONER_EXECUTOR_ROLES: &str = "path \"auth/kubernetes-executor/role/+\" { capabilities = [\"create\", \"update\"] required_parameters = [\"alias_name_source\", \"audience\", \"bound_service_account_names\", \"bound_service_account_namespaces\", \"token_max_ttl\", \"token_no_default_policy\", \"token_policies\", \"token_ttl\"] allowed_parameters = { \"alias_name_source\" = [\"serviceaccount_uid\"] \"audience\" = [\"mandate-vault\"] \"bound_service_account_names\" = [] \"bound_service_account_namespaces\" = [\"ws-ws1\"] \"token_max_ttl\" = [\"2592000\"] \"token_no_default_policy\" = [\"false\"] \"token_policies\" = [\"mandate-kubernetes-executor\"] \"token_ttl\" = [\"86400\"] } }";
+/// Its stanza on the token exchanges' roles: as the executors', with delete, and a grant's TTL.
+const PROVISIONER_EXCHANGE_ROLES: &str = "path \"auth/kubernetes-exchange/role/+\" { capabilities = [\"create\", \"update\", \"delete\"] required_parameters = [\"alias_name_source\", \"audience\", \"bound_service_account_names\", \"bound_service_account_namespaces\", \"token_max_ttl\", \"token_no_default_policy\", \"token_policies\", \"token_ttl\"] allowed_parameters = { \"alias_name_source\" = [\"serviceaccount_uid\"] \"audience\" = [\"mandate-vault\"] \"bound_service_account_names\" = [] \"bound_service_account_namespaces\" = [\"ws-ws1\"] \"token_max_ttl\" = [\"600\"] \"token_no_default_policy\" = [\"false\"] \"token_policies\" = [\"mandate-kubernetes-exchange\"] \"token_ttl\" = [\"600\"] } }";
+
+/// Whether a scan line `wildcard in <policy>: <stanza>` names one of [`VAULT_DRILL_PREFIX_GRANTS`]
+/// in its own policy, the stanza's mount accessors made [`ACCESSOR_PLACEHOLDER`] first and nothing
+/// else changed. A stanza that already holds the placeholder is never admitted, so only a real
+/// accessor can stand for it.
+fn admitted_wildcard(line: &str) -> bool {
+    line.strip_prefix("wildcard in ")
+        .and_then(|rest| rest.split_once(": "))
+        .is_some_and(|(policy, stanza)| {
+            if stanza.contains(ACCESSOR_PLACEHOLDER) {
+                return false;
+            }
+            let stanza = normalised_accessor(stanza);
+            VAULT_DRILL_PREFIX_GRANTS.contains(&(policy, stanza.as_str()))
+        })
+}
+
+/// `stanza` with each `aliases.auth_kubernetes_<hex>.metadata`, the alias reference a templated
+/// policy keys its ServiceAccount by, `<hex>` one or more lowercase hexadecimal digits, made
+/// `aliases.<accessor>.metadata`. Nothing else is touched: another accessor's shape, another
+/// mount type, or the reference anywhere but between `aliases.` and `.metadata` stays as it is,
+/// so it matches no grant.
+fn normalised_accessor(stanza: &str) -> String {
+    const BEFORE: &str = "aliases.auth_kubernetes_";
+    const AFTER: &str = ".metadata";
+    let mut out = String::new();
+    let mut rest = stanza;
+    while let Some(at) = rest.find(BEFORE) {
+        let (head, tail) = rest.split_at(at);
+        out.push_str(head);
+        let after_prefix = &tail[BEFORE.len()..];
+        let hex = after_prefix
+            .bytes()
+            .take_while(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+            .count();
+        if hex > 0 && after_prefix[hex..].starts_with(AFTER) {
+            out.push_str("aliases.");
+            out.push_str(ACCESSOR_PLACEHOLDER);
+            rest = &after_prefix[hex..];
+        } else {
+            out.push_str(BEFORE);
+            rest = after_prefix;
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// The `mandate-*` policies `cell up`'s own provisioning adds once the role provisioner runs
+/// ([`provision_vault`]): the provisioner's, and the two Kubernetes-auth kinds', the executor's and
+/// the token exchange's (DEC-2350 item 1, DEC-2062).
+const PROVISIONED_POLICIES: usize = 3;
+
+/// How many `mandate-*` policies the vault drill must read: [`VAULT_DRILL_POLICIES`], and
+/// [`PROVISIONED_POLICIES`] more where `cell up` provisioned for the role provisioner.
+fn vault_drill_policies(provisioned: bool) -> usize {
+    VAULT_DRILL_POLICIES + if provisioned { PROVISIONED_POLICIES } else { 0 }
+}
+
 /// The container of the vault drill's Job that logs in and reads; only its lines are judged, as
 /// `kubectl logs --prefix` writes them (see [`scenario::lines_of`]).
 const VAULT_DRILL_PROBE: &str = "probe";
 
 /// What a vault drill's check lines must say: exactly one `<role> <path> allowed` or `denied`
-/// line for each of [`VAULT_DRILL_READS`], as the table has it, no `wildcard in` line, and exactly
-/// one `checked <n> mandate policies` line with [`VAULT_DRILL_POLICIES`]. A missing line, a second
-/// line for the same read, and a scan of fewer policies are problems too.
-fn vault_drill_problems(logs: &str) -> Vec<String> {
+/// line for each of [`VAULT_DRILL_READS`], as the table has it, no `wildcard in` line but those of
+/// [`VAULT_DRILL_PREFIX_GRANTS`], and exactly one `checked <n> mandate policies` line with
+/// `policies` ([`vault_drill_policies`]). A missing line, a second line for the same read, and a
+/// scan of fewer policies are problems too.
+fn vault_drill_problems(logs: &str, policies: usize) -> Vec<String> {
     let said = scenario::lines_of(logs, VAULT_DRILL_PROBE);
     let mut problems: Vec<String> = said
         .iter()
-        .filter(|l| l.starts_with("wildcard in "))
+        .filter(|l| l.starts_with("wildcard in ") && !admitted_wildcard(l))
         .map(|l| l.to_string())
         .collect();
     for (role, path, allowed) in VAULT_DRILL_READS {
@@ -1670,7 +2150,7 @@ fn vault_drill_problems(logs: &str) -> Vec<String> {
         .filter(|l| l.starts_with("checked "))
         .copied()
         .collect();
-    let want = format!("checked {VAULT_DRILL_POLICIES} mandate policies");
+    let want = format!("checked {policies} mandate policies");
     if scanned != [want.as_str()] {
         problems.push(format!(
             "want `{want}`, got `{}`",
@@ -1686,7 +2166,9 @@ fn vault_drill_problems(logs: &str) -> Vec<String> {
 
 /// The drill's script, run by the vault's own image: it puts a fake value at each path tried,
 /// as the operator, then logs in as each role from the files `mandate vault provision` wrote and
-/// prints one line per read, and one per policy of the cell's that holds `*` or `+`. Seeded, it
+/// prints one line per read, and one per stanza of a policy of the cell's that holds `*` or `+`,
+/// whole and whitespace squeezed ([`vault_drill_scan`]), for [`vault_drill_problems`] to judge against
+/// [`VAULT_DRILL_PREFIX_GRANTS`]. Seeded, it
 /// first rewrites the runtime's policy to read every connection's token through `+`, and puts the
 /// policy it read back when the script exits, printing what the restore says so a failed one is
 /// seen. Each read first looks its token up, so a token the vault does not honour is an `error`,
@@ -1730,17 +2212,29 @@ fn vault_drill_script(seeded: bool) -> String {
            elif echo \"$out\" | grep -q 'permission denied'; then echo \"$1 $2 denied\"\n\
            else echo \"$1 $2 error\"; fi\n\
          }}\n\
-         {reads}\
-         n=0\n\
-         for p in $(BAO_TOKEN=\"$op\" bao policy list); do\n\
-           case \"$p\" in mandate-*)\n\
-             body=$(BAO_TOKEN=\"$op\" bao policy read \"$p\")\n\
-             n=$((n + 1))\n\
-             case \"$body\" in *'*'*|*'+'*) echo \"wildcard in $p\";; esac;;\n\
-           esac\n\
-         done\n\
-         echo \"checked $n mandate policies\"\n"
+         {reads}{scan}",
+        scan = vault_drill_scan(),
     )
+}
+
+/// The vault drill's policy scan, run with the operator's token in `$op`: each `mandate-*`
+/// policy's text cut into whole stanzas, each ending at a line that is `}` alone, as every
+/// policy `mandate vault provision` writes ends its stanzas, so a nested block's brace ends none;
+/// whatever follows the last such line, or a policy with none, is one more piece, so text the cut
+/// misses is still judged. Each piece, whitespace squeezed, that holds `*` or `+` is one
+/// `wildcard in <name>: <stanza>` line; then `checked <n> mandate policies`. A failed read ends
+/// the script, under its `set -eu`.
+fn vault_drill_scan() -> String {
+    "n=0\n\
+     for p in $(BAO_TOKEN=\"$op\" bao policy list); do\n\
+       case \"$p\" in mandate-*)\n\
+         body=$(BAO_TOKEN=\"$op\" bao policy read \"$p\")\n\
+         n=$((n + 1))\n\
+         printf '%s\\n' \"$body\" | awk -v p=\"$p\" 'function judge(r) { gsub(/[ \\t]+/, \" \", r); sub(/^ /, \"\", r); sub(/ $/, \"\", r); if (r ~ /[*+]/) print \"wildcard in \" p \": \" r } { rec = rec \" \" $0 } /^}$/ { judge(rec); rec = \"\" } END { judge(rec) }';;\n\
+       esac\n\
+     done\n\
+     echo \"checked $n mandate policies\"\n"
+        .to_owned()
 }
 
 /// The vault drill (E21-32, DEC-2022 item 3). A Job labelled as the executor, so its egress
@@ -1855,7 +2349,10 @@ fn vault_drill(seeded: bool) -> Result<Verdict> {
             "the vault drill's Job failed:\n{logs}"
         )));
     }
-    let problems = vault_drill_problems(&logs);
+    let problems = vault_drill_problems(
+        &logs,
+        vault_drill_policies(role_provisioner_image_tag()?.is_some()),
+    );
     if problems.is_empty() {
         Ok(Verdict::Held)
     } else {
@@ -5069,27 +5566,122 @@ mod tests {
         assert_eq!(stdin, "fake-root\nZmFrZS1jbGllbnQtc2VjcmV0");
     }
 
-    /// The cell seeds the client secret only once the workspace release, which makes its Secret,
-    /// is installed.
+    /// The fixture renders only where the cell runs both the stub, whose image it runs, and the
+    /// exchange, the one process that reaches it; then it takes the cell's fake client and the
+    /// API's loopback callback, which the chart's schema admits.
     #[test]
-    fn the_client_secret_is_seeded_after_the_workspace_release() {
+    fn the_fixture_is_on_only_with_the_stub_and_the_exchange() {
+        assert!(fixture_values(None, None).is_empty());
+        assert!(fixture_values(Some("mandate.local/stub-issuer:a"), None).is_empty());
+        assert!(fixture_values(None, Some("mandate.local/token-exchange:a")).is_empty());
+        assert_eq!(
+            fixture_values(
+                Some("mandate.local/stub-issuer:a"),
+                Some("mandate.local/token-exchange:a")
+            ),
+            [
+                "oauthFixture.enabled=true",
+                "alpacaOAuth.clientId=cell-fixture-client",
+                "alpacaOAuth.redirectUri=http://127.0.0.1:8080/v1/oauth/alpaca/callback",
+            ]
+        );
+    }
+
+    /// A Secret the cell already holds is kept, unread and unchanged; none is made, from a value
+    /// drawn once; and a failure to read, draw or create fails the step, so `cell up` stops.
+    #[test]
+    fn the_fixture_client_secret_is_kept_or_made_once_and_its_failures_stop_cell_up() {
+        assert!(keep_existing("secret/oauth-fixture-client\n"));
+        assert!(!keep_existing(""));
+        assert!(!keep_existing("  \n"));
+        let kept = fixture_client_secret(
+            || Ok("secret/oauth-fixture-client\n".to_owned()),
+            || panic!("a kept Secret draws no value"),
+            |_| panic!("a kept Secret is not made again"),
+        );
+        assert!(matches!(kept, Ok(false)));
+        let mut made = Vec::new();
+        let created = fixture_client_secret(
+            || Ok(String::new()),
+            || Ok("ab01".to_owned()),
+            |secret| {
+                made.push(secret);
+                Ok(())
+            },
+        );
+        assert!(matches!(created, Ok(true)));
+        assert_eq!(made, [fixture_client_secret_object("ab01")]);
+        let unread = fixture_client_secret(
+            || bail!("kubectl failed"),
+            || Ok("ab01".to_owned()),
+            |_| panic!("nothing is made when the cell cannot be read"),
+        );
+        assert!(unread.is_err());
+        let undrawn = fixture_client_secret(
+            || Ok(String::new()),
+            || bail!("no randomness"),
+            |_| panic!("nothing is made without a value"),
+        );
+        assert!(undrawn.is_err());
+        let refused = fixture_client_secret(
+            || Ok(String::new()),
+            || Ok("ab01".to_owned()),
+            |_| bail!("kubectl apply failed"),
+        );
+        assert!(refused.is_err());
+    }
+
+    /// The fixture client's Secret holds its one key as written, in the cell's namespace, and its
+    /// value is hex.
+    #[test]
+    fn the_fixture_client_secret_is_one_key_in_the_cells_namespace() {
+        let made = fixture_client_secret_object("ab01");
+        assert_eq!(made["metadata"]["name"], "oauth-fixture-client");
+        assert_eq!(made["metadata"]["namespace"], NAMESPACE);
+        assert_eq!(made["type"], "Opaque");
+        assert_eq!(made["stringData"], json!({"client-secret": "ab01"}));
+        assert!(made.get("data").is_none());
+        assert_eq!(hex_of(&[0, 1, 0xab, 0xff]), "0001abff");
+        assert_eq!(FIXTURE_CLIENT_SECRET_BYTES, 32);
+    }
+
+    /// The cell makes the fixture's Secret before the workspace release that mounts it, and seeds
+    /// the vault from it only once that release is installed.
+    #[test]
+    fn the_client_secret_is_made_before_and_seeded_after_the_workspace_release() {
         let source = include_str!("cell.rs");
         let up = source
             .split("pub fn up() -> Result<()> {")
             .nth(1)
             .and_then(|rest| rest.split("\n}\n").next())
             .unwrap_or_default();
+        let made = up.find("    fixture_client_secret(").unwrap_or(usize::MAX);
+        let made_call = up
+            .get(made..)
+            .and_then(|rest| rest.split("\n    if stub.is_some()").next())
+            .unwrap_or_default();
+        assert!(
+            made_call.trim_end().ends_with(")?;"),
+            "a failure to make the Secret fails `cell up`: {made_call}"
+        );
+        let install = up.find("let installed = helm(&install);").unwrap_or(0);
         let installed = up.find("    installed?;").unwrap_or(usize::MAX);
         let seeded = up.find("    seed_client_secret()?;").unwrap_or(0);
+        assert!(
+            made < install,
+            "the Secret is made before the workspace install"
+        );
         assert!(
             installed < seeded,
             "the seed runs after the workspace install"
         );
         assert_eq!(up.matches("seed_client_secret()").count(), 1);
+        assert_eq!(up.matches("fixture_client_secret(").count(), 1);
     }
 
     /// The vault drill passes only these answers, written out here rather than built from
-    /// [`VAULT_DRILL_READS`]: one line per read, every read as written, no wildcard, and a scan of
+    /// [`VAULT_DRILL_READS`]: one line per read, every read as written, no wildcard but DEC-2349's
+    /// prefix grants, each in its own policy, and a scan of
     /// every `mandate-*` policy. A second line for a read, a missing or failed scan, an error, or a
     /// line from another container fails it; the seeded symptom is the runtime policy's wildcard.
     #[test]
@@ -5117,21 +5709,60 @@ mod tests {
                 .collect()
         };
         let held = probe(&expected);
-        assert_eq!(vault_drill_problems(&held), Vec::<String>::new());
+        assert_eq!(
+            vault_drill_problems(&held, VAULT_DRILL_POLICIES),
+            Vec::<String>::new()
+        );
+        let granted = [
+            r#"wildcard in mandate-api: path "mandate/data/connections/+/code" { capabilities = ["create", "update"] }"#,
+            r#"wildcard in mandate-api: path "mandate/metadata/connections/+/code" { capabilities = ["delete"] }"#,
+            r#"wildcard in mandate-api: path "mandate/metadata/connections/+/token" { capabilities = ["delete"] }"#,
+            r#"wildcard in mandate-connection-manager: path "mandate/metadata/connections/+/code" { capabilities = ["delete"] }"#,
+            r#"wildcard in mandate-connection-manager: path "mandate/metadata/connections/+/token" { capabilities = ["delete"] }"#,
+            r#"wildcard in mandate-connection-manager: path "mandate/data/personal/fingerprints/+/+" { capabilities = ["read"] }"#,
+        ];
+        let prefixed = format!("{held}{}", probe(&granted));
+        assert_eq!(
+            vault_drill_problems(&prefixed, VAULT_DRILL_POLICIES),
+            Vec::<String>::new(),
+            "DEC-2349's prefix grants, each in its own policy, are admitted"
+        );
+        for wider in [
+            r#"wildcard in mandate-api: path "mandate/data/connections/+/token" { capabilities = ["read"] }"#,
+            r#"wildcard in mandate-api: path "mandate/data/connections/+/code" { capabilities = ["create", "update", "read"] }"#,
+            r#"wildcard in mandate-api: path "mandate/data/connections/*" { capabilities = ["create", "update"] }"#,
+            r#"wildcard in mandate-api: path "mandate/data/personal/fingerprints/+/+" { capabilities = ["read"] }"#,
+            r#"wildcard in mandate-connection-manager: path "mandate/data/personal/+" { capabilities = ["read"] }"#,
+            r#"wildcard in mandate-runtime: path "mandate/metadata/connections/+/token" { capabilities = ["delete"] }"#,
+            r#"wildcard in mandate-api: # any + path "mandate/metadata/connections/+/code" { capabilities = ["delete"] }"#,
+            "wildcard in mandate-api",
+        ] {
+            assert_eq!(
+                vault_drill_problems(
+                    &format!("{prefixed}{}", probe(&[wider])),
+                    VAULT_DRILL_POLICIES
+                ),
+                [wider],
+                "a wildcard wider than DEC-2349's, or in another policy, is still caught"
+            );
+        }
         let unprefixed = held.replace("[pod/vault-drill-1-x/probe] ", "");
         assert_eq!(
-            vault_drill_problems(&unprefixed).len(),
+            vault_drill_problems(&unprefixed, VAULT_DRILL_POLICIES).len(),
             expected.len(),
             "only the probe's lines, as kubectl prefixes them, are judged"
         );
         let elsewhere = held.replace("/probe] ", "/provision] ");
-        assert_eq!(vault_drill_problems(&elsewhere).len(), expected.len());
+        assert_eq!(
+            vault_drill_problems(&elsewhere, VAULT_DRILL_POLICIES).len(),
+            expected.len()
+        );
         let leaked = held.replace(
             "runtime connections/x64656d6f2d7061706572/token denied",
             "runtime connections/x64656d6f2d7061706572/token allowed",
         );
         let wildcard = format!("{leaked}{}", probe(&["wildcard in mandate-runtime"]));
-        let found = vault_drill_problems(&wildcard).join("\n");
+        let found = vault_drill_problems(&wildcard, VAULT_DRILL_POLICIES).join("\n");
         assert!(found.contains(Drill::Vault.seeded_symptom()), "{found}");
         assert!(
             found.contains("want `runtime connections/x64656d6f2d7061706572/token denied`"),
@@ -5142,7 +5773,7 @@ mod tests {
             probe(&["runtime connections/x64656d6f2d7061706572/token allowed"])
         );
         assert_eq!(
-            vault_drill_problems(&twice),
+            vault_drill_problems(&twice, VAULT_DRILL_POLICIES),
             [
                 "want `runtime connections/x64656d6f2d7061706572/token denied`, got \
                  `runtime connections/x64656d6f2d7061706572/token denied` and \
@@ -5157,17 +5788,17 @@ mod tests {
                 .collect::<Vec<_>>(),
         );
         assert_eq!(
-            vault_drill_problems(&missing),
+            vault_drill_problems(&missing, VAULT_DRILL_POLICIES),
             ["want `model-gateway platform/model-provider-key allowed`, got `no answer`"]
         );
         let unscanned = held.replace("checked 10 mandate policies", "checked 0 mandate policies");
         assert_eq!(
-            vault_drill_problems(&unscanned),
+            vault_drill_problems(&unscanned, VAULT_DRILL_POLICIES),
             ["want `checked 10 mandate policies`, got `checked 0 mandate policies`"]
         );
         let scanned_twice = format!("{held}{}", probe(&["checked 10 mandate policies"]));
         assert_eq!(
-            vault_drill_problems(&scanned_twice),
+            vault_drill_problems(&scanned_twice, VAULT_DRILL_POLICIES),
             [
                 "want `checked 10 mandate policies`, got `checked 10 mandate policies` and \
                  `checked 10 mandate policies`"
@@ -5175,14 +5806,17 @@ mod tests {
         );
         let no_scan = probe(&expected[..expected.len() - 1]);
         assert_eq!(
-            vault_drill_problems(&no_scan),
+            vault_drill_problems(&no_scan, VAULT_DRILL_POLICIES),
             ["want `checked 10 mandate policies`, got `no scan`"]
         );
         let errored = held.replace(
             "executor-demo-paper connections/x64656d6f2d7061706572/token allowed",
             "executor-demo-paper connections/x64656d6f2d7061706572/token error",
         );
-        assert_eq!(vault_drill_problems(&errored).len(), 1);
+        assert_eq!(
+            vault_drill_problems(&errored, VAULT_DRILL_POLICIES).len(),
+            1
+        );
         let plain = vault_drill_script(false);
         let seeded = vault_drill_script(true);
         assert!(!plain.contains("policy write"), "{plain}");
@@ -5207,6 +5841,434 @@ mod tests {
                 "{script}"
             );
         }
+    }
+
+    /// Once `cell up` provisions for the role provisioner, the drill must read its three policies
+    /// too: thirteen, and ten is a scan that missed some.
+    #[test]
+    fn the_vault_drill_counts_the_provisioned_policies() {
+        assert_eq!(vault_drill_policies(false), 10);
+        assert_eq!(vault_drill_policies(true), 13);
+        let scan = |n: usize| format!("[pod/vault-drill-1-x/probe] checked {n} mandate policies\n");
+        let only_scan = |logs: &str, policies: usize| -> Vec<String> {
+            vault_drill_problems(logs, policies)
+                .into_iter()
+                .filter(|p| p.contains("mandate policies"))
+                .collect()
+        };
+        assert_eq!(
+            only_scan(&scan(13), vault_drill_policies(true)),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            only_scan(&scan(10), vault_drill_policies(true)),
+            ["want `checked 13 mandate policies`, got `checked 10 mandate policies`"]
+        );
+    }
+
+    /// The vault drill's scan, run by `sh` against a fake `bao` that serves policies from files,
+    /// and judged as the drill judges it: the role provisioner's policy, written out as
+    /// `mandate-vault` writes it (its `the_provisioners_policy_requires_every_parameter_and_pins_all_but_the_name`),
+    /// prints exactly its two role stanzas, each admitted (DEC-2350 item 1); a wildcard anywhere
+    /// else in it, a `*` for its `+`, a parameter changed, or the same stanzas in another policy, is
+    /// reported.
+    #[test]
+    fn the_vault_drill_admits_only_the_provisioners_role_stanzas() -> Result<()> {
+        let block = |mount: &str, caps: &str, policy: &str, ttl: &str, max: &str| {
+            format!(
+                "path \"auth/{mount}/role/+\" {{\n  \
+                 capabilities = [{caps}]\n  \
+                 required_parameters = [\"alias_name_source\", \"audience\", \"bound_service_account_names\", \"bound_service_account_namespaces\", \"token_max_ttl\", \"token_no_default_policy\", \"token_policies\", \"token_ttl\"]\n  \
+                 allowed_parameters = {{\n    \
+                 \"alias_name_source\" = [\"serviceaccount_uid\"]\n    \
+                 \"audience\" = [\"mandate-vault\"]\n    \
+                 \"bound_service_account_names\" = []\n    \
+                 \"bound_service_account_namespaces\" = [\"ws-ws1\"]\n    \
+                 \"token_max_ttl\" = [\"{max}\"]\n    \
+                 \"token_no_default_policy\" = [\"false\"]\n    \
+                 \"token_policies\" = [\"{policy}\"]\n    \
+                 \"token_ttl\" = [\"{ttl}\"]\n  \
+                 }}\n}}\n"
+            )
+        };
+        let provisioner = format!(
+            "{}{}",
+            block(
+                "kubernetes-executor",
+                "\"create\", \"update\"",
+                "mandate-kubernetes-executor",
+                "86400",
+                "2592000"
+            ),
+            block(
+                "kubernetes-exchange",
+                "\"create\", \"update\", \"delete\"",
+                "mandate-kubernetes-exchange",
+                "600",
+                "600"
+            )
+        );
+        let plain =
+            "path \"mandate/data/platform/model-provider-key\" {\n  capabilities = [\"read\"]\n}\n";
+        let scan = |policies: &[(&str, &str)]| -> Result<Vec<String>> {
+            let dir = std::env::temp_dir().join(format!(
+                "xtask-vault-scan-{}-{}",
+                std::process::id(),
+                policies.len() + policies.iter().map(|(_, b)| b.len()).sum::<usize>()
+            ));
+            let _ = fs::remove_dir_all(&dir);
+            fs::create_dir_all(dir.join("bin"))?;
+            fs::create_dir_all(dir.join("policies"))?;
+            let names: Vec<&str> = policies.iter().map(|(name, _)| *name).collect();
+            for (name, body) in policies {
+                fs::write(dir.join("policies").join(name), body)?;
+            }
+            let bao = dir.join("bin/bao");
+            fs::write(
+                &bao,
+                format!(
+                    "#!/bin/sh\n\
+                     case \"$1 $2\" in\n\
+                       'policy list') printf '%s\\n' {names} ;;\n\
+                       'policy read') cat \"{dir}/policies/$3\" ;;\n\
+                       *) exit 9 ;;\n\
+                     esac\n",
+                    names = names.join(" "),
+                    dir = dir.display(),
+                ),
+            )?;
+            fs::set_permissions(&bao, fs::Permissions::from_mode(0o755))?;
+            let out = Command::new("sh")
+                .arg("-c")
+                .arg(format!("set -eu\nop=fake\n{}", vault_drill_scan()))
+                .env(
+                    "PATH",
+                    format!("{}:{}", dir.join("bin").display(), env::var("PATH")?),
+                )
+                .output()?;
+            fs::remove_dir_all(&dir)?;
+            ensure!(out.status.success(), "the scan failed: {out:?}");
+            Ok(String::from_utf8(out.stdout)?
+                .lines()
+                .map(str::to_owned)
+                .collect())
+        };
+        let reported = |lines: &[String]| -> Vec<String> {
+            lines
+                .iter()
+                .filter(|l| l.starts_with("wildcard in ") && !admitted_wildcard(l))
+                .cloned()
+                .collect()
+        };
+        let held = scan(&[
+            ("default", "path \"*\" {}\n"),
+            ("mandate-runtime", plain),
+            (PROVISIONER_POLICY, &provisioner),
+        ])?;
+        assert_eq!(
+            held,
+            [
+                format!("wildcard in {PROVISIONER_POLICY}: {PROVISIONER_EXECUTOR_ROLES}"),
+                format!("wildcard in {PROVISIONER_POLICY}: {PROVISIONER_EXCHANGE_ROLES}"),
+                "checked 2 mandate policies".to_owned(),
+            ],
+            "the scan prints the provisioner's two stanzas as the grants name them, and reads no \
+             policy but `mandate-*`"
+        );
+        assert_eq!(reported(&held), Vec::<String>::new());
+        let api = "path \"mandate/data/connections/+/code\" {\n  capabilities = [\"create\", \"update\"]\n}\n\
+                   path \"mandate/metadata/connections/+/code\" {\n  capabilities = [\"delete\"]\n}\n\
+                   path \"mandate/metadata/connections/+/token\" {\n  capabilities = [\"delete\"]\n}\n";
+        let manager = "path \"mandate/metadata/connections/+/code\" {\n  capabilities = [\"delete\"]\n}\n\
+                       path \"mandate/metadata/connections/+/token\" {\n  capabilities = [\"delete\"]\n}\n\
+                       path \"mandate/data/personal/fingerprints/+/+\" {\n  capabilities = [\"read\"]\n}\n";
+        let granted = scan(&[
+            ("mandate-api", api),
+            ("mandate-connection-manager", manager),
+        ])?;
+        assert_eq!(granted.len(), 7, "six stanzas and the count: {granted:?}");
+        assert_eq!(
+            reported(&granted),
+            Vec::<String>::new(),
+            "DEC-2349's grants, as `mandate-vault` writes them, are still admitted whole"
+        );
+        let elsewhere = format!(
+            "{provisioner}path \"mandate/data/connections/+/token\" {{\n  capabilities = [\"read\"]\n}}\n"
+        );
+        for (name, body, why) in [
+            (PROVISIONER_POLICY, elsewhere, "a wildcard elsewhere in it"),
+            (
+                PROVISIONER_POLICY,
+                provisioner.replace("kubernetes-exchange/role/+", "kubernetes-exchange/role/*"),
+                "a `*` for its `+`",
+            ),
+            (
+                PROVISIONER_POLICY,
+                provisioner.replace("[\"ws-ws1\"]", "[\"ws-+\"]"),
+                "a `+` inside a stanza's body",
+            ),
+            (
+                PROVISIONER_POLICY,
+                provisioner.replace("[\"600\"]", "[\"86400\"]"),
+                "a parameter widened",
+            ),
+            (
+                PROVISIONER_POLICY,
+                provisioner.replace(
+                    "\"create\", \"update\"]",
+                    "\"create\", \"update\", \"delete\"]",
+                ),
+                "a capability added",
+            ),
+            (
+                "mandate-runtime",
+                provisioner.clone(),
+                "the same stanzas in another policy",
+            ),
+            (
+                PROVISIONER_POLICY,
+                provisioner.replacen(
+                    "\"token_ttl\" = [\"86400\"]\n  }\n",
+                    "\"token_ttl\" = [\"86400\"]\n  }\n  capabilities = [\"create\", \"update\", \"delete\", \"sudo\"]\n",
+                    1,
+                ),
+                "a key repeated after the nested block, which the vault merges",
+            ),
+            (
+                PROVISIONER_POLICY,
+                provisioner.replace("}\n}\n", "} }\n"),
+                "a stanza whose closing brace is not alone on its line",
+            ),
+        ] {
+            assert!(
+                !reported(&scan(&[(name, &body)])?).is_empty(),
+                "{why} is reported"
+            );
+        }
+        Ok(())
+    }
+
+    /// The role provisioner's image (DEC-2350): its package is built with the cell's others and is
+    /// one the cell jobs follow, its Dockerfile copies exactly that binary, and its key is the
+    /// chart's process and image name.
+    #[test]
+    fn the_cell_builds_the_role_provisioners_image() -> Result<()> {
+        assert!(BUILT_PACKAGES.contains(&"mandate-provisionerd"));
+        assert!(IMAGE_PACKAGES.contains(&"mandate-provisionerd"));
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let dockerfile = fs::read_to_string(root.join(ROLE_PROVISIONER_DOCKERFILE))?;
+        assert!(
+            dockerfile.contains("COPY mandate-provisionerd /mandate-provisionerd"),
+            "{dockerfile}"
+        );
+        let process = processes_in(&root)?
+            .into_iter()
+            .find(|p| p["name"] == ROLE_PROVISIONER_PROCESS)
+            .context("processes.json has no role provisioner")?;
+        assert_eq!(process["image"], ROLE_PROVISIONER_PROCESS);
+        assert_eq!(process["built"], true);
+        Ok(())
+    }
+
+    /// DEC-2339 item 2's and DEC-2345 item 3's two `create` grants of the Kubernetes-auth
+    /// executors' policy, as the cell's drill printed them on CI, are admitted for any accessor;
+    /// another capability, a path outside the executor's own `personal/accounts/x{{…}}/` or
+    /// `personal/fingerprints/x{{…}}/`, the stanzas in another policy, a change inside the template
+    /// but the accessor, or an accessor of another shape, is reported.
+    #[test]
+    fn the_vault_drill_admits_the_kubernetes_executors_personal_grants() {
+        let line = |accessor: &str, path: &str, capabilities: &str| {
+            format!(
+                "wildcard in mandate-kubernetes-executor: path \"mandate/data/personal/{path}/x{{{{identity.entity.aliases.{accessor}.metadata.service_account_name}}}}/+\" {{ capabilities = [{capabilities}] }}"
+            )
+        };
+        for accessor in [
+            "auth_kubernetes_050c14a4",
+            "auth_kubernetes_0123456789abcdef",
+        ] {
+            for path in ["accounts", "fingerprints"] {
+                let held = line(accessor, path, "\"create\"");
+                assert!(admitted_wildcard(&held), "{held}");
+            }
+        }
+        let held = line("auth_kubernetes_050c14a4", "accounts", "\"create\"");
+        for (bad, why) in [
+            (
+                line(
+                    "auth_kubernetes_050c14a4",
+                    "accounts",
+                    "\"create\", \"update\"",
+                ),
+                "another capability",
+            ),
+            (
+                line("auth_kubernetes_050c14a4", "accounts", "\"read\""),
+                "a read for its create",
+            ),
+            (
+                line("auth_kubernetes_050c14a4", "tokens", "\"create\""),
+                "a path outside its personal entries",
+            ),
+            (held.replace("/+\" {", "/*\" {"), "a `*` for its `+`"),
+            (held.replace("/+\" {", "/+/+\" {"), "a second segment"),
+            (
+                held.replace("mandate-kubernetes-executor", "mandate-kubernetes-exchange"),
+                "the stanza in another policy",
+            ),
+            (
+                held.replace("service_account_name", "service_account_namespace"),
+                "a change inside the template but the accessor",
+            ),
+            (
+                held.replace("{{identity.", "{{ identity."),
+                "the template spelled another way",
+            ),
+            (
+                held.replace("auth_kubernetes_050c14a4", "auth_kubernetes_050C14A4"),
+                "an accessor not in lowercase hex",
+            ),
+            (
+                held.replace("auth_kubernetes_050c14a4", "auth_approle_050c14a4"),
+                "another mount type's accessor",
+            ),
+            (
+                held.replace("auth_kubernetes_050c14a4", "auth_kubernetes_"),
+                "an accessor with no digits",
+            ),
+            (
+                held.replace("auth_kubernetes_050c14a4", ACCESSOR_PLACEHOLDER),
+                "the placeholder itself",
+            ),
+        ] {
+            assert!(!admitted_wildcard(&bad), "{why} is admitted: {bad}");
+        }
+        assert_eq!(
+            normalised_accessor(
+                "a aliases.auth_kubernetes_ab.metadata b aliases.auth_kubernetes_cd.metadata"
+            ),
+            "a aliases.<accessor>.metadata b aliases.<accessor>.metadata"
+        );
+        assert_eq!(
+            normalised_accessor("aliases.auth_kubernetes_ab.other"),
+            "aliases.auth_kubernetes_ab.other"
+        );
+    }
+
+    /// The cell's vault turns Kubernetes auth on exactly when the role provisioner runs, as
+    /// staging's values do; what the chart then renders (the projected token and CA, the reviewer
+    /// binding, egress to the API server alone) is `deploy/tests/test_vault.py`'s.
+    #[test]
+    fn the_vault_runs_kubernetes_auth_for_the_provisioner() {
+        let off = vault_install_args(false);
+        assert!(!off.iter().any(|a| a.starts_with("kubeApi")), "{off:?}");
+        let on = vault_install_args(true);
+        assert_eq!(on[..off.len()], off[..]);
+        assert_eq!(on[off.len()..], ["--set", "kubeApi.enabled=true"]);
+    }
+
+    /// A vault this run initialized is provisioned even where the Secret is left from the vault
+    /// before; an existing vault only where the Secret is missing.
+    #[test]
+    fn a_fresh_vault_is_always_provisioned() {
+        assert!(must_provision(true, true));
+        assert!(must_provision(true, false));
+        assert!(must_provision(false, false));
+        assert!(!must_provision(false, true));
+    }
+
+    /// The vault's Kubernetes auth host is the `kubernetes` Service's IPv4 address and port, and
+    /// anything else `kubectl` prints is refused.
+    #[test]
+    fn the_kubernetes_host_is_an_ipv4_address_and_a_port() -> Result<()> {
+        assert_eq!(
+            kubernetes_host_from("10.43.0.1:443\n")?,
+            "https://10.43.0.1:443"
+        );
+        for bad in [
+            "",
+            "10.43.0.1",
+            "10.43.0.1:",
+            ":443",
+            "fd00::1:443",
+            "kubernetes:443",
+            "10.43.0.1:70000",
+        ] {
+            assert!(kubernetes_host_from(bad).is_err(), "{bad} was accepted");
+        }
+        Ok(())
+    }
+
+    /// The node's provisioning script takes the root token on standard input alone, which only the
+    /// CLI reads; prints the Secrets into `kubectl apply` and nowhere else; stops the forward and
+    /// removes the CA and the copied CLI on every exit; and, run by `sh` against a CLI and a
+    /// `kubectl` that fail, fails.
+    #[test]
+    fn the_cell_provisions_the_vault_with_its_token_on_stdin() -> Result<()> {
+        let script = provision_script();
+        assert!(script.starts_with("set -eu\n"), "{script}");
+        assert!(
+            script.contains(&format!(
+                "{NODE_CLI} vault provision --address \"https://127.0.0.1:$port\""
+            )) && script.contains(
+                "--operator-token-stdin --secrets-namespace ws-ws1 --kubernetes-host \"$1\""
+            ) && script.contains("| kubectl apply --namespace ws-ws1 -f - >/dev/null"),
+            "{script}"
+        );
+        assert!(!script.contains("--operator-token-file") && !script.contains("BAO_TOKEN"));
+        assert_eq!(
+            script.matches("</dev/null").count(),
+            2,
+            "kubectl reads no stdin: {script}"
+        );
+        assert!(
+            script.contains(&format!(
+                "trap '[ -z \"$pf\" ] || kill \"$pf\"; rm -rf \"$dir\" {NODE_CLI}' EXIT"
+            )),
+            "{script}"
+        );
+        assert!(
+            script.find("trap ") < script.find("port-forward"),
+            "{script}"
+        );
+        let dir = std::env::temp_dir().join(format!("xtask-provision-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir)?;
+        let kubectl = dir.join("kubectl");
+        fs::write(
+            &kubectl,
+            "#!/bin/sh\n\
+             case \"$1\" in\n\
+               port-forward) echo 'Forwarding from 127.0.0.1:41234 -> 8200'; exec sleep 5 ;;\n\
+               apply) cat >/dev/null; exit 1 ;;\n\
+               *) echo ca ;;\n\
+             esac\n",
+        )?;
+        fs::set_permissions(&kubectl, fs::Permissions::from_mode(0o755))?;
+        let local = script
+            .replace(
+                "/var/lib/rancher/k3s/provision.XXXXXX",
+                &format!("{}/p.XXXXXX", dir.display()),
+            )
+            .replace(NODE_CLI, "false");
+        let out = Command::new("sh")
+            .arg("-c")
+            .arg(&local)
+            .arg("provision")
+            .arg("https://10.43.0.1:443")
+            .env("PATH", format!("{}:{}", dir.display(), env::var("PATH")?))
+            .stdin(Stdio::null())
+            .output()?;
+        let left: Vec<_> = fs::read_dir(&dir)?
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name())
+            .collect();
+        fs::remove_dir_all(&dir)?;
+        assert!(
+            !out.status.success(),
+            "a failed CLI fails the script: {out:?}"
+        );
+        assert_eq!(left, ["kubectl"], "the CA's directory is removed");
+        Ok(())
     }
 
     /// The cell judges the vault's status as the client judges `sys/seal-status`: uninitialized,
