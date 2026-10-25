@@ -185,13 +185,19 @@ pub fn newest_exchange(pods: &str, connection: &str) -> Option<(String, String)>
     ))
 }
 
-/// What a report may say of a failed exchange pod's log: only its lines that are a refusal code,
-/// `[a-z_]+`, which is all the exchange writes (`mandate-token-exchange`'s `main`), so no other
-/// line can carry a code or token into CI's log.
+/// What a report may say of a failed exchange's logs, the exchange pod's and the fixture's: only
+/// their lines of lowercase words, `[a-z_]+` separated by single spaces, which is all either writes
+/// for a refusal (`mandate-token-exchange`'s `main`, the fixture's `token_refused <error> <cause>`),
+/// so no other line can carry a code or token into CI's log.
 pub fn codes_only(log: &str) -> Vec<&str> {
     log.lines()
         .map(str::trim)
-        .filter(|l| !l.is_empty() && l.bytes().all(|b| b.is_ascii_lowercase() || b == b'_'))
+        .filter(|l| {
+            !l.is_empty()
+                && l.split(' ').all(|word| {
+                    !word.is_empty() && word.bytes().all(|b| b.is_ascii_lowercase() || b == b'_')
+                })
+        })
         .collect()
 }
 
@@ -592,8 +598,16 @@ mod tests {
     #[test]
     fn only_refusal_codes_leave_a_failed_exchange_s_log() {
         assert_eq!(
-            codes_only("vault_refused\naccess_token=abc\n\nToken: XyZ\n token_exchange_failed \n"),
-            vec!["vault_refused", "token_exchange_failed"]
+            codes_only(
+                "vault_refused\naccess_token=abc\n\nToken: XyZ\n token_exchange_failed \n\
+                 token_refused invalid_grant redirect_uri\ntoken_refused  double_space\n\
+                 token_refused code=abc\nrefused Abc\n"
+            ),
+            vec![
+                "vault_refused",
+                "token_exchange_failed",
+                "token_refused invalid_grant redirect_uri"
+            ]
         );
     }
 
