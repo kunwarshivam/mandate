@@ -1,6 +1,6 @@
 //! The protective sequences and the exit price ladder (E7-4, trading-domain spec §5.4 to §5.6).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_accounting::{AssetClass, InstrumentId};
 use mandate_domain::MarketSession;
@@ -18,7 +18,7 @@ use crate::ids::{ClientOrderId, IntentId, WATCHDOG};
 use crate::intent::{
     abandon, gate_and_submit, intent_of, journal_rung, journal_submission, order_tif, received,
 };
-use crate::kill::{confirmed_bid, flatten_closes, floor_of, is_flatten, mode_holds};
+use crate::kill::{confirmed_bid, flatten_closes, flatten_room, floor_of, is_flatten, mode_holds};
 use crate::listing::query_unknown;
 use crate::orders::{StateEvidence, legal, transition};
 use crate::payload::{int, text};
@@ -545,7 +545,8 @@ fn unsent(state: &ExecutorState, intent: &IntentId, ladder: Ladder) -> Result<Qt
 }
 
 /// DEC-410 item 4: what `intent`'s next rung sends, of the `left` its stepped rung left unsold:
-/// what its remainder counts now ([`remainders`]). A shorter rung is journaled `ProtectionChanged
+/// what its remainder counts now ([`remainders`]), and for a switch's flatten no more than the
+/// agent's sub-ledger now (DEC-2360 item 1). A shorter rung is journaled `ProtectionChanged
 /// rung_short`, with what it does not send and why; with nothing to send, that record ends the
 /// ladder, so it never sends later into a position bought afresh.
 fn sendable(
@@ -554,10 +555,11 @@ fn sendable(
     intent: &IntentId,
     left: Qty,
 ) -> Result<Qty, ExecutorError> {
-    let sends = remainders(&batch.view, instrument)?
+    let counts = remainders(&batch.view, instrument)?
         .into_iter()
         .find(|(owner, _)| owner == intent)
         .map_or(Qty::ZERO, |(_, counts)| counts);
+    let sends = flatten_room(&batch.view, intent, counts)?;
     if sends < left {
         let pairs = vec![
             ("intent_id", text(intent.0.0.clone())),
@@ -1831,7 +1833,7 @@ fn replaceable(
     let qty = whole_shares(
         batch.ports,
         instrument,
-        long(&batch.view, instrument)?
+        protectable(&batch.view, instrument)?
             .checked_sub(working_exits(&batch.view, instrument)?)
             .unwrap_or(Qty::ZERO),
     )?;
@@ -1957,7 +1959,7 @@ fn re_cover(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         }
         let committed = covered(&batch.view, &instrument)?
             .checked_add(working_exits(&batch.view, &instrument)?)?;
-        if committed >= long(&batch.view, &instrument)? {
+        if committed >= protectable(&batch.view, &instrument)? {
             continue;
         }
         let resting = batch
@@ -2287,6 +2289,62 @@ fn still_selling(view: &ExecutorState, instrument: &InstrumentId) -> Result<Qty,
         .map_err(ExecutorError::from)
 }
 
+/// What protection placed in `instrument` may cover (DEC-2362): the long position less the shares
+/// the owner released and still holds, `min(released, long − agents)`, where `agents` is each
+/// agent's filled buys net of what its sells sold ([`sold`]) and of what it released, floored at
+/// zero, summed.
+/// With nothing released it is the long position, so only the owner's released shares leave it.
+fn protectable(view: &ExecutorState, instrument: &InstrumentId) -> Result<Qty, ExecutorError> {
+    let held = long(view, instrument)?;
+    let released: BTreeMap<&AgentId, Qty> = view
+        .released
+        .iter()
+        .filter(|((_, of), _)| of == instrument)
+        .map(|((agent, _), qty)| (agent, *qty))
+        .collect();
+    if released.is_empty() {
+        return Ok(held);
+    }
+    let mut lots: BTreeMap<&AgentId, SignedQty> = BTreeMap::new();
+    for (id, order) in view
+        .orders
+        .iter()
+        .filter(|(_, order)| &order.instrument == instrument)
+    {
+        let Some(agent) = order.agent.as_ref() else {
+            continue;
+        };
+        let entry = lots.entry(agent).or_insert(SignedQty::ZERO);
+        *entry = entry.checked_add(match order.side {
+            Side::Buy => SignedQty::from(order.filled_qty),
+            Side::Sell => SignedQty::from(sold(view, id, order)).negated(),
+        })?;
+    }
+    let mut agents = Qty::ZERO;
+    for (agent, own) in &lots {
+        let gave = released.get(agent).copied().unwrap_or(Qty::ZERO);
+        let kept = own.checked_add(SignedQty::from(gave).negated())?;
+        agents = agents.checked_add(kept.max(SignedQty::ZERO).abs())?;
+    }
+    let total = released
+        .values()
+        .try_fold(Qty::ZERO, |sum, qty| sum.checked_add(*qty))?;
+    let owners = held.checked_sub(agents).unwrap_or(Qty::ZERO);
+    Ok(held.checked_sub(total.min(owners)).unwrap_or(Qty::ZERO))
+}
+
+/// What a sell of ours has sold as [`long`] reads it: its applied fills, or, once it ended, the
+/// larger fill the broker reported for it that no fill update has applied yet.
+fn sold(view: &ExecutorState, id: &ClientOrderId, order: &Order) -> Qty {
+    let reported = view
+        .details
+        .get(id)
+        .and_then(|detail| detail.reported_filled)
+        .filter(|_| order.state.is_terminal())
+        .unwrap_or(Qty::ZERO);
+    order.filled_qty.max(reported)
+}
+
 /// The long position in `instrument` as the broker holds it (DEC-421, #515): the folded position
 /// less every fill the broker reported on a sell that has ended, in any terminal state, that no
 /// fill update has applied and no unattributed sell fill has already taken off it (`netted`, the
@@ -2449,7 +2507,7 @@ fn re_place(
     let qty = whole_shares(
         batch.ports,
         instrument,
-        long(&batch.view, instrument)?
+        protectable(&batch.view, instrument)?
             .checked_sub(committed)
             .unwrap_or(Qty::ZERO),
     )?;

@@ -1854,6 +1854,15 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   answers that route and the executor's dev and ci egress reaches it (lane D1); and a cell drill
   holds on `ConnectionChecked` and the connection's establishment, plain and seeded.
 
+- **E10-24 (Should, M8, before the founder's staging connect; SC)** As an engineer, I want a test
+  that forces the OpenBao code take to lose its check-and-set, so that the take-once of
+  [DEC-2628](decisions/DEC-2628.md) item 2 is pinned on the backend staging runs, not only on the
+  local vault ([DEC-2363](decisions/DEC-2363.md) item 4). *Accepted when:* a test in
+  `mandate-vault`'s OpenBao suite reads the code, has another writer overwrite it before the
+  tombstone's `cas` write, and asserts the take answers `None` (or `Denied` when the session lacks
+  the right) and never the code; reading a lost check-and-set's `Denied` as a won take fails it,
+  and `cargo mutants` finds no missed mutant in `take_code` and `lost_or_denied`.
+
 ### E11 Web app: dashboard and controls
 
 - **E11-1 (Must)** As an operator, I want a dashboard of agents, state, positions, P&L, open
@@ -3132,8 +3141,10 @@ enables `live` (ES-23, OPS-5).
   - Lane V2, a dependency of K2b (DEC-2336 risks): `mandate-executord` refuses to start unless
     `MANDATE_SUBJECT_ACCOUNT` is the lowercase hex of its connection id's bytes, beside #2196's
     namespace check, as DEC-1177 item 6 has the token exchange do.
-  - After K2b: the chart's Deployment executor moves from `default` to its connection's `<hex>`
-    account, once the manager owns every executor.
+  - Done ([DEC-2365](decisions/DEC-2365.md)): a paper executor, the one that reaches the vault,
+    runs only as the pod the manager starts as its connection's `<hex>` account, and the chart
+    refuses to render it without the manager. The fixture broker's Deployment executor stays on
+    `default`, with no connection and no credential.
   - **The role provisioner** ([DEC-2350](decisions/DEC-2350.md), DEC-2630 item 7; journal spec v0.77
     §9.33). Nothing makes a connection's Kubernetes-auth roles today, so every exchange's and every
     managed executor's login is refused. Spec first (this row's first PR), then: the vault side with
@@ -4392,6 +4403,13 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   written after an agent's kill switch has sized its flatten sells does not shrink them, so the
   switch can still offer the released shares. Re-size an agent flatten sell not yet sent against
   the sub-ledger at send time, or cancel the part a later release takes.
+  [DEC-2360](decisions/DEC-2360.md) takes the first: each send, the first and every rung, is capped
+  at the sub-ledger; its tests are in `hand.rs`, pending E6-4.
+- **E6-4 (protection sizing after a release), from [DEC-2360](decisions/DEC-2360.md) item 4:**
+  protection the executor places again (the sequence end's `re_place`, `re_cover`, `new_day`) is
+  sized at the long position, so after a release it covers the owner's released shares with the
+  agent's protective order. [DEC-2362](decisions/DEC-2362.md) sizes it at the long position less
+  the released shares the owner still holds; its tests are in `hand.rs`, pending E6-4.
 - **E7-4 (executor kill switch), from [DEC-2361](decisions/DEC-2361.md):** a switch's close that
   no limit can be named for (no quote, no protective stop, no floor) is skipped silently by
   `flatten_closes`. Journal it `exit_unpriced` and alert once per switch and instrument; the
@@ -4418,11 +4436,34 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
 - **E7-4 (executor), from the review of [DEC-2358](decisions/DEC-2358.md):** pin a discretionary
   exit with a limit of its own whose price vanishes mid-sequence: it falls back to its limit, and
   the sequence goes on, rather than ending and re-protecting as an exit with no limit does.
+  Done: `hand.rs`'s `a_discretionary_exits_rung_falls_back_to_its_own_limit_when_its_price_vanishes`
+  (a `max_unprotected_s` above the five-minute staleness is what lets the price vanish inside the
+  sequence; a lone exit with a limit of its own is never laddered, so it has no rung to price).
+- **E7-4 (tests), from the review of #2395 (option (b)):** `plain_entry_protection`'s property
+  accepts the bound's exit as an outcome, so an executor that stopped placing a fill's own stop
+  and left it to the bound passes it (S5 and S6 in the review). Assert that every ended opening
+  with fills has its own stop sent before its bound, unless an exit sequence, a reject or the
+  bound itself intervenes, with a model exact enough to keep it from false failures. The hand
+  tests `a_fill_beside_an_unanswered_stop_being_cancelled_gets_its_own_stop` and
+  `a_fill_beside_an_accepted_stop_being_cancelled_gets_its_own_stop` pin the two cases meanwhile.
 - **E7-4 (executor), from the review of [DEC-2356](decisions/DEC-2356.md) item 8:** `closes_due`
   holds the close only for a `Submitting` sell of ours a read does not list. A sell whose
   submission answer is lost becomes `Unknown`, and a later read that omits it releases the close
   beside it. Hold the close on any sell of ours journaled after the read's `taken_at`, whatever its
-  state, with its own DEC-77 pair.
+  state, with its own DEC-77 pair. **Unreachable under `mandate-executord`'s ordering** (the
+  coordinator's ruling, 2026-10-25): the process hands each answer before it sends the next
+  request and gathers a reconciliation's reads only once everything else queued was answered, so a
+  read beside a submission is taken after it was sent, and a read that omits an `Unknown` sell of
+  ours was requested after that sell went out. `mandate-executord/tests/ordering.rs`
+  (`each_answer_is_handed_before_the_next_request_is_sent`,
+  `a_reconciliation_is_read_only_once_every_other_request_is_answered`) pins that ordering. Reopen
+  this row if a shell sends broker requests before handing earlier answers.
+- **E7-4 (executor), broker eventual consistency, from the same analysis:** a broker may accept an
+  order and not list it yet in an open-orders read taken just after. A read that omits a sell of
+  ours the broker accepted a moment before can release `closes_due`'s close beside it, and no
+  `taken_at` rule covers it, since the read was requested after the sell went out. Measure the
+  paper and live brokers' listing lag, then decide whether `closes_due` waits a settle interval
+  after the newest sell of ours in the instrument, or reads twice.
 - **E7-4 A1c (stream K), from [DEC-2333](decisions/DEC-2333.md) item 3:** at §5.4's bound, re-place
   protection in an instrument the account kill switch closes for the held quantity less every sell
   not confirmed cancelled, placing nothing where that leaves none, with its own DEC-77 pair. Until

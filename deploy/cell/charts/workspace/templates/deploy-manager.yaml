@@ -9,7 +9,7 @@ below bounds every pod the manager makes to one shaped like its own process's te
 the pod's `mandate.dev/process` label (DEC-1177): no service-account token, and no account but
 `default`, or for a token exchange an `x`-and-hex one and for an executor a hex one (DEC-2060,
 DEC-2336) that its environment names once, beside its subject, for the process to check against its
-connection; no host namespace, host path,
+connection, and for a token exchange its request's expiry once too (DEC-2363); no host namespace, host path,
 host alias or node name; no root user and no added capability; every container unprivileged,
 without privilege escalation; only that process's
 images, exactly its containers' commands and arguments; only memory, that process's Secrets, its
@@ -161,7 +161,7 @@ object.spec.containers.all(c, {{ . }}) && (!has(object.spec.initContainers) || o
 {{- $entries = append $entries (printf "%s=%s" .name (.value | default "")) }}
 {{- end }}
 {{- $_ := set $fixed .name $entries }}
-{{- $own := dict "token-exchange" (list "MANDATE_SUBJECT_ACCOUNT") "executor" (list "MANDATE_SUBJECT_ACCOUNT" "MANDATE_WORKSPACE_NAMESPACE") }}
+{{- $own := dict "token-exchange" (list "MANDATE_SUBJECT_ACCOUNT" "MANDATE_REQUEST_EXPIRES_AT") "executor" (list "MANDATE_SUBJECT_ACCOUNT" "MANDATE_WORKSPACE_NAMESPACE") }}
 {{- $_ := set $named .name (concat (list "MANDATE_WORKSPACE" "MANDATE_PROCESS" "MANDATE_SUBJECT" "MANDATE_GENERATION") (get $own $name | default list)) }}
 {{- end }}
 {{- $_ := set $env $name $fixed }}

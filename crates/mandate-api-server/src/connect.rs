@@ -42,7 +42,7 @@ use crate::routes::{
     self, Reader, Refused, Unreadable, authorized, enveloped, path_refused, string,
 };
 use crate::session::{Authenticated, Random};
-use crate::stepup::{Action, Judged, journaled};
+use crate::stepup::{Action, Judged, Unverified, journaled};
 use crate::versions::object;
 use crate::writes::{
     Gate, appended_at, derived_for, id_text, principal_text, repeated, strictly, unknown,
@@ -344,9 +344,22 @@ async fn started(
         control: &reader.control,
         now: gate.now,
     };
-    app.step_up
-        .verify(evidence, &action, &judged)
-        .map_err(|code| coded(StatusCode::UNAUTHORIZED, code))?;
+    let asserted = app
+        .step_up
+        .asserted(
+            evidence,
+            request.step_up_assertion.as_ref(),
+            &action,
+            &judged,
+        )
+        .map_err(|unverified| match unverified {
+            Unverified::Code(ProblemCode::JournalUnavailable)
+            | Unverified::Unimplemented { .. } => unavailable(),
+            Unverified::Code(code) => coded(StatusCode::UNAUTHORIZED, code),
+        })?;
+    if let Some(_refused_until_the_route_commits_its_batch) = asserted {
+        return Err(unavailable());
+    }
     planned(&reader, &ids, &request, evidence)?;
     let judged_head = reader.control.last().map(|row| row.seq);
     match appended_at(app, &reader, (&ids.event, &draft), gate.now, judged_head).await {

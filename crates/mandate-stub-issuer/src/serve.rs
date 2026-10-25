@@ -3,6 +3,7 @@
 //! `Host`, with no CORS header on any answer.
 
 use std::future::{Future, IntoFuture as _};
+use std::io::Write as _;
 use std::pin::pin;
 use std::sync::Arc;
 use std::task::Poll;
@@ -16,7 +17,9 @@ use axum::http::{Method, StatusCode, Version};
 use axum::response::{IntoResponse as _, Response};
 use tokio::net::TcpListener;
 
-use crate::alpaca::{ACCOUNT_PATH, AUTHORIZE_PATH, AccountRefusal, Alpaca, Refusal, TOKEN_PATH};
+use crate::alpaca::{
+    ACCOUNT_PATH, AUTHORIZE_PATH, AccountRefusal, Alpaca, Cause, Refusal, TOKEN_PATH, refusal_line,
+};
 use crate::issuer::{IssueError, Issuer, TOKEN_TTL_S};
 
 /// The largest `POST /token` body accepted, in bytes.
@@ -125,9 +128,11 @@ async fn answer(State(served): State<Arc<Served>>, request: Request) -> Response
         (Some(host), None) if host.as_bytes() == served.host.as_bytes()
     );
     if !ours {
+        served.note(Answered::Misdirected);
         return StatusCode::MISDIRECTED_REQUEST.into_response();
     }
     if request.version() != Version::HTTP_11 {
+        served.note(Answered::HttpVersion);
         return StatusCode::HTTP_VERSION_NOT_SUPPORTED.into_response();
     }
     match (
@@ -148,7 +153,41 @@ async fn answer(State(served): State<Arc<Served>>, request: Request) -> Response
         (&Method::GET, ACCOUNT_PATH, _) if served.alpaca.is_some() => {
             account(served.alpaca.as_deref(), request).await
         }
-        _ => StatusCode::NOT_FOUND.into_response(),
+        _ => {
+            served.note(Answered::NotFound);
+            StatusCode::NOT_FOUND.into_response()
+        }
+    }
+}
+
+/// An answer the fixture names on standard error beside its token refusals (DEC-2366), so a
+/// drill can tell a misdirected or unrouted request from a refused one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Answered {
+    /// 421: not exactly the one `Host`.
+    Misdirected,
+    /// 505: not HTTP/1.1.
+    HttpVersion,
+    /// 404: no route.
+    NotFound,
+}
+
+/// The line for `answered`: `fixture_answered` and its word.
+fn answered_line(answered: Answered) -> &'static str {
+    match answered {
+        Answered::Misdirected => "fixture_answered misdirected\n",
+        Answered::HttpVersion => "fixture_answered http_version\n",
+        Answered::NotFound => "fixture_answered not_found\n",
+    }
+}
+
+impl Served {
+    /// Writes `answered`'s line when the provider runs alone, the fixture mode; the sign-in
+    /// issuer writes none (DEC-2366).
+    fn note(&self, answered: Answered) {
+        if self.issuer.is_none() {
+            write_line(answered_line(answered));
+        }
     }
 }
 
@@ -172,21 +211,46 @@ async fn exchange(alpaca: Option<&Alpaca>, request: Request) -> Response {
         .and_then(|media| media.to_str().ok())
         .is_some_and(|media| essence_is(media, FORM));
     if !form {
+        write_line(MEDIA_TYPE_LINE);
         return StatusCode::UNSUPPORTED_MEDIA_TYPE.into_response();
     }
     let Ok(body) = to_bytes(request.into_body(), MAX_BODY_BYTES).await else {
+        write_line(BODY_SIZE_LINE);
         return StatusCode::PAYLOAD_TOO_LARGE.into_response();
     };
     let (Some(alpaca), Some(now)) = (alpaca, now_s()) else {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     };
     let Ok(body) = std::str::from_utf8(&body) else {
-        return refused(Refusal::InvalidRequest);
+        return token_refused(Refusal::InvalidRequest, Cause::Form);
     };
-    match alpaca.token(body, now) {
-        Ok(json) => ([(CONTENT_TYPE, JSON), (CACHE_CONTROL, "no-store")], json).into_response(),
-        Err(refusal) => refused(refusal),
+    match alpaca.exchange(body, now) {
+        Ok(json) => {
+            write_line(ISSUED_LINE);
+            ([(CONTENT_TYPE, JSON), (CACHE_CONTROL, "no-store")], json).into_response()
+        }
+        Err((refusal, cause)) => token_refused(refusal, cause),
     }
+}
+
+/// The line for an issued token (DEC-2366): the word alone, never the token.
+const ISSUED_LINE: &str = "token_issued\n";
+
+/// The line for a token request that is not a form (DEC-1179 item 2).
+const MEDIA_TYPE_LINE: &str = "token_refused unsupported_media_type\n";
+
+/// The line for a token request over [`MAX_BODY_BYTES`] (DEC-1179 item 2).
+const BODY_SIZE_LINE: &str = "token_refused payload_too_large\n";
+
+/// A token refusal, its line written to standard error first (DEC-1179).
+fn token_refused(refusal: Refusal, cause: Cause) -> Response {
+    write_line(&refusal_line(refusal, cause));
+    refused(refusal)
+}
+
+/// Writes `line` to standard error; a closed standard error loses the line, never the answer.
+fn write_line(line: &str) {
+    let _ = std::io::stderr().lock().write_all(line.as_bytes());
 }
 
 /// `GET /alpaca/v2/account` (DEC-1178 item 1): 400 for a query or a body, the account of the one
