@@ -520,8 +520,9 @@ fn fixture_get(path: &str) -> Result<String> {
     Ok(reply)
 }
 
-/// The manager's newest exchange pod for `connection` once it is in `phase`, or the last one seen
-/// after [`POLLS`] polls: a generation that failed may be followed by a newer one.
+/// The manager's newest exchange pod for `connection` once it is in `wanted`, or once it has
+/// `Failed`, which ends the wait since the manager starts a request's exchange once (journal spec
+/// rule 256), or the last one seen after [`POLLS`] polls.
 fn newest_in(connection: &str, wanted: &str) -> Result<Option<(String, String)>> {
     let selector = format!("{MANAGED_BY},mandate.dev/process=token-exchange");
     let mut phase = None;
@@ -537,7 +538,10 @@ fn newest_in(connection: &str, wanted: &str) -> Result<Option<(String, String)>>
             "json",
         ])?;
         phase = newest_exchange(&pods, connection);
-        if phase.as_ref().is_some_and(|(_, p)| p == wanted) {
+        if phase
+            .as_ref()
+            .is_some_and(|(_, p)| p == wanted || p == "Failed")
+        {
             return Ok(phase);
         }
         sleep(Duration::from_secs(2));
