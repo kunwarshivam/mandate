@@ -90,8 +90,9 @@ const TARGET_CC: &str = "gcc";
 /// runtime and the account executor a hosted cell runs, released the same way. The runtime's image
 /// holds no recorded research bundle, which only the local cell's interim image carries (DEC-2246).
 /// `mandate-provisionerd` is the role provisioner a hosted cell runs, released the same way
-/// (DEC-2350).
-pub(crate) const BINARIES: [(&str, &str); 8] = [
+/// (DEC-2350), and `mandate-token-exchange` the OAuth connect's token exchange (DEC-821, DEC-1175),
+/// whose release build refuses a token URL of its own (DEC-2633 item 2).
+pub(crate) const BINARIES: [(&str, &str); 9] = [
     ("mandate-cli", "mandate"),
     ("mandate-agentd", "mandate-agentd"),
     ("mandate-rh-sim", "mandate-rh-sim"),
@@ -100,6 +101,7 @@ pub(crate) const BINARIES: [(&str, &str); 8] = [
     ("mandate-daemon", "mandate-daemon"),
     ("mandate-executord", "mandate-executord"),
     ("mandate-provisionerd", "mandate-provisionerd"),
+    ("mandate-token-exchange", "mandate-token-exchange"),
 ];
 
 /// Where `release build` keeps its own target directory, apart from the workspace's, because its
@@ -1449,6 +1451,7 @@ mod tests {
                 ("mandate-daemon", "mandate-daemon"),
                 ("mandate-executord", "mandate-executord"),
                 ("mandate-provisionerd", "mandate-provisionerd"),
+                ("mandate-token-exchange", "mandate-token-exchange"),
             ]
             .as_slice()
         );
