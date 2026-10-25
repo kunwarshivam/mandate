@@ -128,9 +128,11 @@ async fn answer(State(served): State<Arc<Served>>, request: Request) -> Response
         (Some(host), None) if host.as_bytes() == served.host.as_bytes()
     );
     if !ours {
+        served.note(Answered::Misdirected);
         return StatusCode::MISDIRECTED_REQUEST.into_response();
     }
     if request.version() != Version::HTTP_11 {
+        served.note(Answered::HttpVersion);
         return StatusCode::HTTP_VERSION_NOT_SUPPORTED.into_response();
     }
     match (
@@ -151,7 +153,36 @@ async fn answer(State(served): State<Arc<Served>>, request: Request) -> Response
         (&Method::GET, ACCOUNT_PATH, _) if served.alpaca.is_some() => {
             account(served.alpaca.as_deref(), request).await
         }
-        _ => StatusCode::NOT_FOUND.into_response(),
+        _ => {
+            served.note(Answered::NotFound);
+            StatusCode::NOT_FOUND.into_response()
+        }
+    }
+}
+
+/// An answer the fixture names on standard error beside its token refusals (DEC-2366), so a
+/// drill can tell a misdirected or unrouted request from a refused one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Answered {
+    /// 421: not exactly the one `Host`.
+    Misdirected,
+    /// 505: not HTTP/1.1.
+    HttpVersion,
+    /// 404: no route.
+    NotFound,
+}
+
+/// The line for `answered`: `fixture_answered` and its word.
+fn answered_line(answered: Answered) -> &'static str {
+    let _ = answered;
+    "not yet implemented\n"
+}
+
+impl Served {
+    /// Writes `answered`'s line when the provider runs alone, the fixture mode; the sign-in
+    /// issuer writes none (DEC-2366).
+    fn note(&self, answered: Answered) {
+        write_line(answered_line(answered));
     }
 }
 
@@ -189,10 +220,16 @@ async fn exchange(alpaca: Option<&Alpaca>, request: Request) -> Response {
         return token_refused(Refusal::InvalidRequest, Cause::Form);
     };
     match alpaca.exchange(body, now) {
-        Ok(json) => ([(CONTENT_TYPE, JSON), (CACHE_CONTROL, "no-store")], json).into_response(),
+        Ok(json) => {
+            write_line(ISSUED_LINE);
+            ([(CONTENT_TYPE, JSON), (CACHE_CONTROL, "no-store")], json).into_response()
+        }
         Err((refusal, cause)) => token_refused(refusal, cause),
     }
 }
+
+/// The line for an issued token (DEC-2366): the word alone, never the token.
+const ISSUED_LINE: &str = "not yet implemented\n";
 
 /// The line for a token request that is not a form (DEC-1179 item 2).
 const MEDIA_TYPE_LINE: &str = "token_refused unsupported_media_type\n";
