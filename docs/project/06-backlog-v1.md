@@ -1854,6 +1854,15 @@ are the M8 owner-input API that E10-6 waits for (DEC-148). **SC** marks a safety
   answers that route and the executor's dev and ci egress reaches it (lane D1); and a cell drill
   holds on `ConnectionChecked` and the connection's establishment, plain and seeded.
 
+- **E10-24 (Should, M8, before the founder's staging connect; SC)** As an engineer, I want a test
+  that forces the OpenBao code take to lose its check-and-set, so that the take-once of
+  [DEC-2628](decisions/DEC-2628.md) item 2 is pinned on the backend staging runs, not only on the
+  local vault ([DEC-2363](decisions/DEC-2363.md) item 4). *Accepted when:* a test in
+  `mandate-vault`'s OpenBao suite reads the code, has another writer overwrite it before the
+  tombstone's `cas` write, and asserts the take answers `None` (or `Denied` when the session lacks
+  the right) and never the code; reading a lost check-and-set's `Denied` as a won take fails it,
+  and `cargo mutants` finds no missed mutant in `take_code` and `lost_or_denied`.
+
 ### E11 Web app: dashboard and controls
 
 - **E11-1 (Must)** As an operator, I want a dashboard of agents, state, positions, P&L, open
