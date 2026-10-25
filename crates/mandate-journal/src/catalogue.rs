@@ -35,7 +35,7 @@ const NONE: &[&str] = &[];
 
 /// Every event type [`lookup`] admits, in its order. The test below reads `lookup`'s source, so
 /// a type added there and not here fails the build's tests.
-pub(crate) const EVENT_TYPES: [&str; 130] = [
+pub(crate) const EVENT_TYPES: [&str; 134] = [
     "StreamOpened",
     "MeterReserved",
     "MeterSettled",
@@ -74,6 +74,7 @@ pub(crate) const EVENT_TYPES: [&str; 130] = [
     "MarkUpdated",
     "ProtectionChanged",
     "OwnerConfirmationReceived",
+    "AccountCloseRequested",
     "BrokerPositionObserved",
     "ReconciliationRun",
     "CompensatingEvent",
@@ -153,6 +154,9 @@ pub(crate) const EVENT_TYPES: [&str; 130] = [
     "ProcessCrashLooped",
     "CredentialEnrolled",
     "CredentialRemoved",
+    "ConnectionRolesMade",
+    "ConnectionRolesRefused",
+    "ConnectionRolesRemoved",
     "ConnectionEstablished",
     "ConnectionCredentialRotated",
     "ConnectionRefused",
@@ -219,6 +223,7 @@ pub(crate) fn lookup(event_type: &str) -> Option<Entry> {
         | "MarkUpdated"
         | "ProtectionChanged"
         | "OwnerConfirmationReceived"
+        | "AccountCloseRequested"
         | "BrokerPositionObserved"
         | "ReconciliationRun"
         | "CompensatingEvent"
@@ -291,7 +296,10 @@ pub(crate) fn lookup(event_type: &str) -> Option<Entry> {
         | "ProcessStopIssued"
         | "ProcessCrashLooped"
         | "CredentialEnrolled"
-        | "CredentialRemoved" => entry(CONTROL, NONE),
+        | "CredentialRemoved"
+        | "ConnectionRolesMade"
+        | "ConnectionRolesRefused"
+        | "ConnectionRolesRemoved" => entry(CONTROL, NONE),
 
         "ConnectionEstablished" | "ConnectionCredentialRotated" => entry(&[Control, Account], NONE),
         "ConnectionRefused" | "ConnectionRequested" => entry(CONTROL, NONE),

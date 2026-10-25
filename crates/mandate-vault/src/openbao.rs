@@ -22,6 +22,7 @@ use std::time::Duration;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
+use mandate_connections::account_entry::BrokerAccountId;
 use mandate_connections::record::{AccountPiiRef, AccountRef, ConnectionId};
 use mandate_time::UtcNanos;
 use reqwest::{Certificate, Method, StatusCode, redirect};
@@ -35,12 +36,13 @@ use crate::fingerprint::{
 };
 use crate::kubernetes::{
     KubernetesAuth, kubernetes_mount_requests, kubernetes_policy, kubernetes_policy_name,
-    mount_accessor, service_account_name,
+    mount_accessor, provisioner_policy, role_request, service_account_name,
 };
 use crate::lease::{LEASE_SECS, Lease, lease_times};
 use crate::policy::{
     Access, Identity, Mounts, SecretPath, kv_path, openbao_policy, policy_name, require, role_name,
 };
+use crate::provisioner::{RoleProvisioner, RoleRefusal};
 use crate::registry::{Registry, claim_in, release_in};
 use crate::source::{GRANT_SECS, Grant, SecretSource};
 
@@ -401,6 +403,21 @@ pub fn fingerprint_key_verdict(answer: Option<&Value>) -> Result<(), SourceError
     }
 }
 
+/// Whether provisioning must create the fingerprint key, from its `GET <transit>/keys/<key>`:
+/// only a 404 is a key that is not there, `true`; a key that is there must pass
+/// [`fingerprint_key_verdict`], `false`. Any other refusal fails provisioning, so a transient
+/// error never lets an existing key go unverified (review F1, round 2).
+///
+/// # Errors
+/// The GET's own refusal, other than [`SourceError::Missing`], and [`fingerprint_key_verdict`]'s.
+pub fn key_needs_creating(found: &Result<Option<Value>, SourceError>) -> Result<bool, SourceError> {
+    match found {
+        Ok(key) => fingerprint_key_verdict(key.as_ref()).map(|()| false),
+        Err(SourceError::Missing) => Ok(true),
+        Err(e) => Err(e.clone()),
+    }
+}
+
 /// A logged-in session as one identity.
 pub struct OpenBaoSource {
     identity: Identity,
@@ -454,7 +471,8 @@ pub fn kubernetes_login_path(
         | Identity::Runtime
         | Identity::SecretImport
         | Identity::ModelGateway
-        | Identity::EmailSender => return Err(SourceError::Config),
+        | Identity::EmailSender
+        | Identity::Provisioner => return Err(SourceError::Config),
     };
     Ok((
         format!("auth/{mount}/login"),
@@ -495,6 +513,23 @@ pub fn kubernetes_namespace_verdict(
 }
 
 impl OpenBaoSource {
+    /// A session as `identity` that never logged in, for unit tests of the checks that refuse
+    /// before the vault is reached: its token is empty, so any call that does reach a vault is
+    /// refused there.
+    #[cfg(test)]
+    pub(crate) fn unlogged(
+        config: &OpenBaoConfig,
+        identity: Identity,
+    ) -> Result<Self, SourceError> {
+        Ok(Self {
+            identity,
+            http: Http::new(config)?,
+            mounts: config.mounts.clone(),
+            token: SecretString::from(String::new()),
+            token_expires_at: Mutex::new(UtcNanos::EPOCH),
+        })
+    }
+
     /// Logs in as `identity` with its AppRole `role_id` and `secret_id` (read by the caller from
     /// mounted files, never the environment). The login is refused unless the role it reaches
     /// is `identity`'s own. The token exchange logs in with [`OpenBaoSource::login_with_grant`].
@@ -676,30 +711,14 @@ impl OpenBaoSource {
 }
 
 impl OpenBaoSource {
-    /// The fingerprint of the broker account id `account` under the deployment's key, by transit's
-    /// HMAC
-    /// (`<transit>/hmac/account-fingerprint`): asked by a connection's executor alone, at its
-    /// connect (DEC-2345 item 2). The key never leaves the vault, and the id is sent only to it.
-    ///
-    /// # Errors
-    /// [`SourceError::Denied`] for any identity but an executor, the vault's refusals, and
-    /// [`SourceError::Malformed`] for an answer that is not a fingerprint.
-    pub async fn hmac_account(
-        &self,
-        account: &SecretString,
-    ) -> Result<AccountFingerprint, SourceError> {
-        if !matches!(self.identity, Identity::Executor(_)) {
-            return Err(SourceError::Denied);
+    /// Refuses `role_refused`, before the vault is reached, a role operation from any session but
+    /// the provisioner's own (DEC-2350 item 5), whatever its policy would answer.
+    fn provisioner_only(&self) -> Result<(), RoleRefusal> {
+        if self.identity == Identity::Provisioner {
+            Ok(())
+        } else {
+            Err(RoleRefusal::RoleRefused)
         }
-        let mut input = STANDARD.encode(account.expose_secret());
-        let mut body = json!({ "input": input });
-        input.zeroize();
-        let path = format!("{}/hmac/{FINGERPRINT_KEY}", self.mounts.transit);
-        let answer = self.call(Method::POST, &path, Some(&body)).await;
-        if let Some(Value::String(sent)) = body.get_mut("input") {
-            sent.zeroize();
-        }
-        AccountFingerprint::new(text(answer?.as_ref(), "/data/hmac")?)
     }
 
     /// Whether the marker that the fingerprint key rotates is there.
@@ -829,6 +848,48 @@ impl Registry for OpenBaoSource {
     }
 }
 
+impl RoleProvisioner for OpenBaoSource {
+    async fn make_roles(
+        &self,
+        connection: &ConnectionId,
+        namespace: &str,
+    ) -> Result<(), RoleRefusal> {
+        self.provisioner_only()?;
+        for identity in [
+            Identity::Executor(connection.clone()),
+            Identity::TokenExchange(connection.clone()),
+        ] {
+            let (path, body) = role_request(&identity, &self.mounts, namespace)
+                .map_err(|e| RoleRefusal::of(&e))?;
+            self.call(Method::POST, &path, Some(&body))
+                .await
+                .map_err(|e| RoleRefusal::of(&e))?;
+        }
+        Ok(())
+    }
+
+    /// OpenBao answers a DELETE of a role that is not there 204, so an absent role is `Ok` from
+    /// the call itself. `Missing` (404) comes only when the auth mount is absent, and then no
+    /// role can exist under it either, so it is `Ok` too: nothing is left for the exchange.
+    async fn remove_exchange_role(
+        &self,
+        connection: &ConnectionId,
+        namespace: &str,
+    ) -> Result<(), RoleRefusal> {
+        self.provisioner_only()?;
+        let (path, _) = role_request(
+            &Identity::TokenExchange(connection.clone()),
+            &self.mounts,
+            namespace,
+        )
+        .map_err(|e| RoleRefusal::of(&e))?;
+        match self.call(Method::DELETE, &path, None).await {
+            Ok(_) | Err(SourceError::Missing) => Ok(()),
+            Err(e) => Err(RoleRefusal::of(&e)),
+        }
+    }
+}
+
 /// A vault refusal, as the fingerprint operations answer every one: unavailable.
 fn unavailable(_: SourceError) -> FingerprintError {
     FingerprintError::Unavailable
@@ -837,6 +898,31 @@ fn unavailable(_: SourceError) -> FingerprintError {
 impl SecretSource for OpenBaoSource {
     fn identity(&self) -> &Identity {
         &self.identity
+    }
+
+    /// The fingerprint of the broker account id `account` under the deployment's key, by transit's
+    /// HMAC (`<transit>/hmac/account-fingerprint`): asked by a connection's executor alone, at its
+    /// connect (DEC-2345 item 2). The key never leaves the vault, and the id is sent only to it.
+    ///
+    /// # Errors
+    /// [`SourceError::Denied`] for any identity but an executor, the vault's refusals, and
+    /// [`SourceError::Malformed`] for an answer that is not a fingerprint.
+    async fn hmac_account(
+        &self,
+        account: &BrokerAccountId,
+    ) -> Result<AccountFingerprint, SourceError> {
+        if !matches!(self.identity, Identity::Executor(_)) {
+            return Err(SourceError::Denied);
+        }
+        let mut input = STANDARD.encode(account.secret().expose_secret());
+        let mut body = json!({ "input": input });
+        input.zeroize();
+        let path = format!("{}/hmac/{FINGERPRINT_KEY}", self.mounts.transit);
+        let answer = self.call(Method::POST, &path, Some(&body)).await;
+        if let Some(Value::String(sent)) = body.get_mut("input") {
+            sent.zeroize();
+        }
+        AccountFingerprint::new(text(answer?.as_ref(), "/data/hmac")?)
     }
 
     /// A check-and-set write at version 0, which the vault takes only where no version is there,
@@ -1043,16 +1129,23 @@ pub(crate) fn role_settings(identity: &Identity) -> Value {
 /// The identities [`provision`] issues a secret id for, whose files
 /// [`crate::credentials::write_credentials`] writes: every provisioned identity but the token
 /// exchanges, whose secret ids are grants, in [`provisioned_identities`]' order.
-pub(crate) fn secret_id_identities(connections: &[ConnectionId]) -> Vec<Identity> {
-    provisioned_identities(connections)
+pub(crate) fn secret_id_identities(
+    connections: &[ConnectionId],
+    provisioner: bool,
+) -> Vec<Identity> {
+    provisioned_identities(connections, provisioner)
         .into_iter()
         .filter(|identity| !matches!(identity, Identity::TokenExchange(_)))
         .collect()
 }
 
-/// Every identity [`provision`] makes a policy and a role for: each process type's, then each
-/// connection's executor and token exchange, in that order.
-pub(crate) fn provisioned_identities(connections: &[ConnectionId]) -> Vec<Identity> {
+/// Every identity [`provision`] makes a policy and a role for: each process type's, the role
+/// provisioner's when `provisioner`, then each connection's executor and token exchange, in that
+/// order.
+pub(crate) fn provisioned_identities(
+    connections: &[ConnectionId],
+    provisioner: bool,
+) -> Vec<Identity> {
     let mut identities = vec![
         Identity::Api,
         Identity::ConnectionManager,
@@ -1061,6 +1154,9 @@ pub(crate) fn provisioned_identities(connections: &[ConnectionId]) -> Vec<Identi
         Identity::ModelGateway,
         Identity::EmailSender,
     ];
+    if provisioner {
+        identities.push(Identity::Provisioner);
+    }
     for connection in connections {
         identities.push(Identity::Executor(connection.clone()));
         identities.push(Identity::TokenExchange(connection.clone()));
@@ -1119,6 +1215,24 @@ pub async fn provision_kubernetes_auth(
     provision_kubernetes(&http, Some(operator_token), &config.mounts, auth).await
 }
 
+/// The policy [`provision`] writes for `identity`'s role: [`provisioner_policy`] for the role
+/// provisioner, given the workspace's `namespace`, and [`openbao_policy`] for every other identity
+/// (DEC-2350 item 1).
+///
+/// # Errors
+/// [`provisioner_policy`]'s or [`openbao_policy`]'s refusal.
+pub fn provisioned_policy(
+    identity: &Identity,
+    connections: &[ConnectionId],
+    mounts: &Mounts,
+    namespace: Option<&str>,
+) -> Result<String, SourceError> {
+    match (identity, namespace) {
+        (Identity::Provisioner, Some(namespace)) => provisioner_policy(mounts, namespace),
+        _ => openbao_policy(identity, connections, mounts),
+    }
+}
+
 /// The fingerprint key and registry (DEC-2345): the transit mount, its key, never exportable nor
 /// deletable, and the registry entry made to take only check-and-set writes.
 async fn provision_fingerprints(
@@ -1127,30 +1241,28 @@ async fn provision_fingerprints(
     mounts: &Mounts,
 ) -> Result<(), SourceError> {
     let transit = format!("sys/mounts/{}", mounts.transit);
-    match http.call(Method::GET, &transit, token, None).await {
-        Ok(mount) => transit_mount_verdict(mount.as_ref())?,
-        Err(_) => {
-            http.call(
-                Method::POST,
-                &transit,
-                token,
-                Some(&json!({ "type": "transit" })),
-            )
-            .await?;
-        }
+    if http.call(Method::GET, &transit, token, None).await.is_err() {
+        http.call(
+            Method::POST,
+            &transit,
+            token,
+            Some(&json!({ "type": "transit" })),
+        )
+        .await?;
     }
+    let mount = http.call(Method::GET, &transit, token, None).await?;
+    transit_mount_verdict(mount.as_ref())?;
     let key = format!("{}/keys/{FINGERPRINT_KEY}", mounts.transit);
-    match http.call(Method::GET, &key, token, None).await {
-        Ok(found) => fingerprint_key_verdict(found.as_ref())?,
-        Err(_) => {
-            http.call(
-                Method::POST,
-                &key,
-                token,
-                Some(&json!({ "exportable": false })),
-            )
-            .await?;
-        }
+    if key_needs_creating(&http.call(Method::GET, &key, token, None).await)? {
+        http.call(
+            Method::POST,
+            &key,
+            token,
+            Some(&json!({ "exportable": false })),
+        )
+        .await?;
+        let made = http.call(Method::GET, &key, token, None).await?;
+        fingerprint_key_verdict(made.as_ref())?;
     }
     let claims = format!("{}/metadata/{}", mounts.kv, kv_path(&SecretPath::Claims)?);
     http.call(
@@ -1166,8 +1278,10 @@ async fn provision_fingerprints(
 /// Sets a vault up for `connections`, with an operator's token: the KV v2 mount, the fingerprint
 /// key and registry ([`provision_fingerprints`]), the AppRole auth method, one policy and one role per identity, and a secret id for every identity but the
 /// token exchanges, whose secret ids are grants; and, given `kubernetes`, both Kubernetes auth
-/// mounts and their templated policies. Running it again rewrites the policies and roles, so
-/// adding a connection is running it with the longer list.
+/// mounts and their templated policies, and, given its namespace too, the role provisioner, whose
+/// policy is [`provisioner_policy`] for that namespace and nothing else (DEC-2350 item 1). Running
+/// it again rewrites the policies and roles, so adding a connection is running it with the longer
+/// list.
 pub async fn provision(
     config: &OpenBaoConfig,
     operator_token: &SecretString,
@@ -1217,10 +1331,11 @@ pub async fn provision(
     if let Some(auth) = kubernetes {
         provision_kubernetes(&http, token, mounts, auth).await?;
     }
+    let namespace = kubernetes.and_then(|auth| auth.namespace.as_deref());
     let mut credentials = Vec::new();
-    for identity in provisioned_identities(connections) {
+    for identity in provisioned_identities(connections, namespace.is_some()) {
         let policy = policy_name(&identity, mounts);
-        let hcl = openbao_policy(&identity, connections, mounts)?;
+        let hcl = provisioned_policy(&identity, connections, mounts, namespace)?;
         http.call(
             Method::PUT,
             &format!("sys/policies/acl/{policy}"),
@@ -1236,7 +1351,7 @@ pub async fn provision(
         http.call(Method::POST, &role, token, Some(&settings))
             .await?;
     }
-    for identity in secret_id_identities(connections) {
+    for identity in secret_id_identities(connections, namespace.is_some()) {
         let role = format!("auth/{}/role/{}", mounts.auth, role_name(&identity));
         let role_id = http
             .call(Method::GET, &format!("{role}/role-id"), token, None)

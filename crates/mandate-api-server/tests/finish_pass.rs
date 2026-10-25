@@ -15,7 +15,7 @@ use mandate_api_server::finish::{
 };
 use mandate_api_server::finish_pass::{
     Alerts, DeleteFailed, Deleted, Finisher, LineAlerts, TEARDOWN_RUNBOOK, TEARDOWN_STALLED,
-    Teardown, passes,
+    Teardown, passes, passes_until, run_until_stopped,
 };
 use mandate_api_server::journal::Journal;
 use mandate_canon::Digest;
@@ -869,4 +869,145 @@ fn a_release_that_keeps_failing_raises_one_alert_past_the_deadline() {
     assert_eq!(raised.take(), [STALLED]);
     pass(&mut finisher, OPENED + CONNECT_DEADLINE_SECS + 5);
     assert_eq!(raised.take(), [], "once per request");
+}
+
+/// Runs `passes_until` over `finisher` at `clock`, every `every`, until `stop`; whether it ended
+/// within a second.
+fn run_until<F: Fingerprints>(
+    finisher: Pass<F>,
+    clock: Arc<dyn Clock>,
+    every: Duration,
+    stop: impl std::future::Future<Output = ()> + Send,
+) -> bool {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .unwrap();
+    runtime
+        .block_on(async {
+            tokio::time::timeout(
+                Duration::from_secs(1),
+                passes_until(finisher, clock, every, stop),
+            )
+            .await
+        })
+        .is_ok()
+}
+
+/// DEC-2348 item 3: a stop given before the first pass still lets that pass run to its end, and
+/// then ends the passes.
+#[test]
+fn a_stop_already_given_ends_the_passes_after_the_pass_in_flight() {
+    let (journal, deletes, finisher) = finisher(Unbacked);
+    request(&journal, A, 2, "oauth");
+    let clock = ManualClock::at(OPENED + CONNECT_DEADLINE_SECS);
+    assert!(run_until(
+        finisher,
+        clock,
+        Duration::from_millis(1),
+        std::future::ready(())
+    ));
+    assert_eq!(last(&journal).0, "ConnectionRefused");
+    assert_eq!(
+        deletes.of(),
+        [A, A],
+        "one pass: the deletes before and after the refusal"
+    );
+}
+
+/// A stop during the wait between passes ends the wait at once, and no other pass runs.
+#[test]
+fn a_stop_during_the_wait_ends_it_without_another_pass() {
+    let (journal, deletes, finisher) = finisher(Unbacked);
+    request(&journal, A, 2, "oauth");
+    let rows = journal.rows_of(&ctl()).len();
+    let clock = ManualClock::at(OPENED + CONNECT_DEADLINE_SECS);
+    assert!(run_until(
+        finisher,
+        clock,
+        Duration::from_secs(3600),
+        async { tokio::time::sleep(Duration::from_millis(20)).await }
+    ));
+    assert_eq!(journal.rows_of(&ctl()).len(), rows + 1, "one refusal");
+    assert_eq!(deletes.of(), [A, A], "one pass");
+}
+
+/// Without a stop the passes go on: a stop that never comes never ends them.
+#[test]
+fn without_a_stop_the_passes_go_on() {
+    let (journal, deletes, finisher) = finisher(Unbacked);
+    request(&journal, A, 2, "oauth");
+    let clock = ManualClock::at(OPENED + CONNECT_DEADLINE_SECS);
+    assert!(!run_until(
+        finisher,
+        clock,
+        Duration::from_millis(1),
+        std::future::pending()
+    ));
+    assert_eq!(last(&journal).0, "ConnectionRefused");
+    assert!(deletes.of().len() >= 2);
+}
+
+/// A current-thread runtime with its timers, as the finish process builds.
+fn timed() -> tokio::runtime::Runtime {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+}
+
+/// A teardown whose every delete runs twelve seconds on a blocking thread, as a vault that accepts
+/// the connection and never answers holds `VaultTeardown`'s.
+struct Hung;
+
+impl Teardown for Hung {
+    fn delete<'a>(&'a self, _connection: &'a ConnectionId) -> Deleted<'a> {
+        Box::pin(async {
+            let _ =
+                tokio::task::spawn_blocking(|| std::thread::sleep(Duration::from_secs(12))).await;
+            Ok(())
+        })
+    }
+}
+
+/// DEC-2348 item 3: a stop ends the finish within the drain even while a vault call it abandoned
+/// still runs on a blocking thread, so the process exits inside its pod's grace.
+#[test]
+fn a_hung_vault_call_does_not_hold_the_stop_past_the_drain() {
+    let journal = Arc::new(MemJournal::default());
+    request(&journal, A, 2, "oauth");
+    let shared: Arc<dyn Journal> = Arc::clone(&journal) as Arc<dyn Journal>;
+    let finisher = Finisher::new(
+        shared,
+        Unbacked,
+        Hung,
+        Raised::default(),
+        WORKSPACE.to_owned(),
+    );
+    let clock = ManualClock::at(OPENED + CONNECT_DEADLINE_SECS);
+    let (sent, ended) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let ran = run_until_stopped(timed(), finisher, clock, Duration::from_secs(3600), || {
+            Ok(async { tokio::time::sleep(Duration::from_millis(100)).await })
+        });
+        let _ = sent.send(ran.is_ok());
+    });
+    assert_eq!(
+        ended.recv_timeout(Duration::from_secs(8)),
+        Ok(true),
+        "the stop must end the finish within the drain, not when the abandoned vault call returns"
+    );
+}
+
+/// A stop that cannot be made is the finish's error, and no pass runs.
+#[test]
+fn a_stop_that_cannot_be_made_is_an_error() {
+    let (journal, deletes, finisher) = finisher(Unbacked);
+    request(&journal, A, 2, "oauth");
+    let clock = ManualClock::at(OPENED + CONNECT_DEADLINE_SECS);
+    let ran = run_until_stopped(timed(), finisher, clock, Duration::from_millis(1), || {
+        Err::<std::future::Ready<()>, _>(io::Error::other("no handler"))
+    });
+    assert!(ran.is_err());
+    assert!(deletes.of().is_empty(), "no pass");
 }

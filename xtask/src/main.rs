@@ -39,9 +39,10 @@ commands:
   check                 run every per-PR job locally
   ci <job>              run one CI job: fast | full | nightly, or one part: lint | test | pending |
                         spec-guard | portable | refcases | reference | schemas | supply-chain |
-                        postgres | openbao | objectstore | stub-release | api-release |
-                        mutants |
-                        schema-mutants | cell | cell-demo | cell-journal | cell-failover |
+                        postgres | openbao | objectstore | stub-release | exchange-release |
+                        provisionerd-release | api-release | mutants |
+                        schema-mutants | cell | cell-seeded | cell-upgrade | cell-demo |
+                        cell-journal | cell-failover |
                         cell-kill-switch | cell-executor | cell-vault | sweep; or
                         one part of test: test-nextest | test-doc | test-rh-sim | test-python.
                         Tests, pending tests,
@@ -162,6 +163,7 @@ const FULL_JOB: &[&str] = &[
     "tofu",
     "stub-release",
     "exchange-release",
+    "provisionerd-release",
     "api-release",
 ];
 const PR_JOBS: &[&str] = &[
@@ -179,10 +181,13 @@ const PR_JOBS: &[&str] = &[
     "objectstore",
     "stub-release",
     "exchange-release",
+    "provisionerd-release",
     "api-release",
     "mutants",
     "schema-mutants",
     "cell",
+    "cell-seeded",
+    "cell-upgrade",
     "cell-journal",
     "cell-failover",
     "cell-kill-switch",
@@ -462,6 +467,8 @@ fn ci(job: &str) -> Result<()> {
         "portable" => portable(),
         "select" => ci_select(),
         "cell" => cell::ci(),
+        "cell-seeded" => cell::ci_seeded(),
+        "cell-upgrade" => cell::ci_upgrade(),
         "cell-demo" => cell::scenario::ci(),
         "cell-journal" => cell::ci_drills(job, &cell::JOURNAL_DRILLS),
         "cell-failover" => cell::ci_drills(job, &cell::FAILOVER_DRILLS),
@@ -521,6 +528,7 @@ fn ci(job: &str) -> Result<()> {
         "tofu" => tofu_checks(),
         "stub-release" => stub_release(),
         "exchange-release" => exchange_release(),
+        "provisionerd-release" => provisionerd_release(),
         "api-release" => api_release(),
         "mutants" => mutants(Path::new("."), base_ref()?.as_deref()),
         "mutants-costs" => mutant_costs::ci(),
@@ -909,6 +917,67 @@ fn exchange_release() -> Result<()> {
         })?;
         release_exchange_refused(&output)
             .with_context(|| format!("tier {tier}, token URL {url:?}"))?;
+    }
+    Ok(())
+}
+
+/// The role provisioner's process's crate and binary (E21-33, DEC-2350).
+const PROVISIONERD: &str = "mandate-provisionerd";
+
+/// All the release role provisioner may write, to standard error, when it is asked for its
+/// fixture.
+const FIXTURE_NOT_BUILT: &str = "role_provisioner_start_failed: fixture_not_built\n";
+
+/// A build without debug assertions holds no fixture vault, so it never makes or removes a role
+/// against a vault that keeps nothing. Builds the provisioner with `--release` once, only when the
+/// diff selects its crate (DEC-1190), runs it with `--fixture` and every other flag a start needs,
+/// and requires [`release_provisionerd_refused`]. It first refuses an environment that turns
+/// debug assertions back on in the release profile (DEC-2322).
+fn provisionerd_release() -> Result<()> {
+    if !selection()?.crates.contains(PROVISIONERD) {
+        eprintln!("    provisionerd-release: {PROVISIONERD} is not affected (DEC-1190)");
+        return Ok(());
+    }
+    release_profile_untouched(|name| env::var(name).ok())?;
+    let socket = env::temp_dir().join(format!("provisionerd-release-{}.sock", std::process::id()));
+    let socket = socket
+        .to_str()
+        .context("the probe socket's path is not UTF-8")?;
+    let output = released(
+        PROVISIONERD,
+        &[
+            "run",
+            "--probe",
+            socket,
+            "--workspace",
+            "ws_1",
+            "--namespace",
+            "ws-1",
+            "--fixture",
+        ],
+        &[],
+    )?
+    .with_context(|| {
+        format!(
+            "the release build of {PROVISIONERD} kept running instead of refusing its fixture: \
+             it holds a fixture vault"
+        )
+    })?;
+    release_provisionerd_refused(&output)
+}
+
+/// Whether a release provisioner's run is the fixture's refusal: exit 2, [`FIXTURE_NOT_BUILT`]
+/// alone on standard error, and nothing on standard output.
+fn release_provisionerd_refused(output: &std::process::Output) -> Result<()> {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if output.status.code() != Some(2) || stderr != FIXTURE_NOT_BUILT || !output.stdout.is_empty() {
+        bail!(
+            "the release build of {PROVISIONERD} must exit 2 writing only \
+             {FIXTURE_NOT_BUILT:?} to standard error; it exited {} with stdout {:?} and stderr \
+             {stderr:?}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout)
+        );
     }
     Ok(())
 }
@@ -3478,6 +3547,8 @@ struct Finding {
 /// "Amazon's documented SigV4 example key ID" exception: that exact value, in that file alone. The
 /// ULID rows prove the API server's process-test exception: a workspace or organization ULID is
 /// allowed in that test file alone, and any other value under the same setting there is reported.
+/// The image rows prove the placeholder API image tag's exception: that exact tag is allowed in the
+/// cell module and the OAuth fixture's chart test alone, and another tag there is reported.
 /// The build-output rows prove the `target/` exception: a key under the workspace root's `target/`
 /// is allowed, and the same key under a crate's own `target` or under `targets/` is reported.
 fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
@@ -3522,6 +3593,14 @@ fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
     let cell = "xtask/src/cell.rs";
     let image = format!("                \"mandate.local/api:{}\",", "0123456789ab");
     let not_image = format!("                \"mandate.local/api:{page}\",");
+    let fixture_test = "deploy/tests/test_oauth_fixture.py";
+    let fixture_image = format!(
+        "        lambda w: fixture_container(w).update(image=\"mandate.local/api:{}\"),",
+        "0123456789ab"
+    );
+    let not_fixture_image = format!(
+        "        lambda w: fixture_container(w).update(image=\"mandate.local/api:{page}\"),"
+    );
     let challenges = "schemas/workspace-api/examples/commands.step-up-challenge.json";
     let challenge = format!(
         "  \"webauthn_challenge\": \"{}\",",
@@ -3609,6 +3688,9 @@ fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
         (cell.to_owned(), image.clone(), None),
         ("stray-cell.rs".to_owned(), image, generic),
         (cell.to_owned(), not_image, generic),
+        (fixture_test.to_owned(), fixture_image.clone(), None),
+        ("stray-test.py".to_owned(), fixture_image, generic),
+        (fixture_test.to_owned(), not_fixture_image, generic),
         (challenges.to_owned(), challenge.clone(), None),
         ("stray-challenge.json".to_owned(), challenge, generic),
         (challenges.to_owned(), not_challenge, generic),
@@ -11748,11 +11830,11 @@ mod tests {
         mutated_crates, names_a_stub, output_in, pending_nextest, pending_problems, pending_tests,
         per_shard_value, plain_comment_lines, preflight_args, proptest_seeds_in, registry_problems,
         registry_rows, rehearsal_runs, release_api_refused, release_exchange_refused,
-        release_profile_untouched, release_stub_refused, repo_root, schema_mutants, shard_packages,
-        shellcheck_scripts, simulator_harnesses, simulator_oracles, spec_guard_problems,
-        spec_guard_problems_for_pr, status_flip_problems, test_binary, test_order_config,
-        test_outcomes, unique_temp_path, unjudged_mutants, used_by, verdicts, workspace_closure,
-        workspace_packages,
+        release_profile_untouched, release_provisionerd_refused, release_stub_refused, repo_root,
+        schema_mutants, shard_packages, shellcheck_scripts, simulator_harnesses, simulator_oracles,
+        spec_guard_problems, spec_guard_problems_for_pr, status_flip_problems, test_binary,
+        test_order_config, test_outcomes, unique_temp_path, unjudged_mutants, used_by, verdicts,
+        workspace_closure, workspace_packages,
     };
     use super::{
         BINARY_COUPLINGS, CrateGraph, MATRIX_LIMIT, RUNNER_CRATE, SWEEP_ROTATION,
@@ -12257,6 +12339,8 @@ mod tests {
                 "mandate-cp-site",
                 "mandate-deploy-manager",
                 "mandate-deployd",
+                "mandate-provisioner",
+                "mandate-provisionerd",
                 "mandate-dispatcher",
                 "mandate-gatewayd"
             ]
@@ -12881,6 +12965,44 @@ mod tests {
             );
         }
         assert!(FULL_JOB.contains(&"stub-release") && PR_JOBS.contains(&"stub-release"));
+    }
+
+    /// `provisionerd-release` accepts only exit 2 with the fixture's refusal alone on standard
+    /// error, and runs in `full` and in `check`.
+    #[test]
+    fn the_release_provisioner_check_accepts_only_the_lone_refusal() {
+        let run = |code: i32, stdout: &str, stderr: &str| std::process::Output {
+            status: ExitStatus::from_raw(code << 8),
+            stdout: stdout.as_bytes().to_vec(),
+            stderr: stderr.as_bytes().to_vec(),
+        };
+        let refusal = "role_provisioner_start_failed: fixture_not_built\n";
+        assert!(release_provisionerd_refused(&run(2, "", refusal)).is_ok());
+        for (code, stdout, stderr) in [
+            (0, "", refusal),
+            (1, "", refusal),
+            (2, "ready\n", refusal),
+            (
+                2,
+                "",
+                "role_provisioner_start_failed: fixture_not_built\ndrained\n",
+            ),
+            (
+                2,
+                "",
+                "role_provisioner_start_failed: vault_ca_unreadable\n",
+            ),
+            (2, "", "role_provisioner_start_failed: fixture_not_built"),
+            (2, "", ""),
+        ] {
+            assert!(
+                release_provisionerd_refused(&run(code, stdout, stderr)).is_err(),
+                "{code} {stdout:?} {stderr:?}"
+            );
+        }
+        assert!(
+            FULL_JOB.contains(&"provisionerd-release") && PR_JOBS.contains(&"provisionerd-release")
+        );
     }
 
     /// DEC-2633 item 2: `exchange-release` accepts only exit 2 with
@@ -16273,7 +16395,7 @@ mod tests {
     /// is CI's own `schema-mutants` job, guarded like the others against drafts, capped at ten
     /// minutes (DEC-464), and needed by the required `full` verdict, which fails on any result of
     /// it but success while every other job passed: the matrix's result, a success only when every
-    /// one of its six shards succeeded. Each shard runs the sweep only after all three checkers
+    /// one of its ten shards succeeded. Each shard runs the sweep only after all three checkers
     /// pass on the unmutated tree: a checker failing there fails the job and runs no mutant.
     #[test]
     fn the_workspace_api_schema_jobs_gate_full() -> Result<()> {
@@ -16341,7 +16463,7 @@ mod tests {
             "if: needs.select.outputs.schema_mutants == 'true'",
             "timeout-minutes: 10",
             "fail-fast: false",
-            "shard: [\"0/6\", \"1/6\", \"2/6\", \"3/6\", \"4/6\", \"5/6\"]",
+            "shard: [\"0/10\", \"1/10\", \"2/10\", \"3/10\", \"4/10\", \"5/10\", \"6/10\", \"7/10\", \"8/10\", \"9/10\"]",
             shard_env.as_str(),
             "run: cargo xtask ci schema-mutants",
         ] {
@@ -16719,7 +16841,7 @@ mod tests {
                 "exchange-release",
             ],
         ),
-        ("full-checks-3", &["api-release"]),
+        ("full-checks-3", &["api-release", "provisionerd-release"]),
     ];
 
     /// DEC-2334: CI's full jobs together run exactly what `cargo xtask ci full` runs, each part
@@ -17117,7 +17239,7 @@ mod tests {
     }
 
     /// The jobs `select` scopes, each with the output that starts it (DEC-1190 item 2).
-    const SELECT_GATES: [(&str, &str); 17] = [
+    const SELECT_GATES: [(&str, &str); 19] = [
         ("fast-test", "tests"),
         ("fast-pending", "tests"),
         ("fast-python", "python"),
@@ -17128,6 +17250,8 @@ mod tests {
         ("full-checks-3", "full_checks"),
         ("schema-mutants", "schema_mutants"),
         ("cell", "cell"),
+        ("cell-seeded", "cell"),
+        ("cell-upgrade", "cell"),
         ("cell-demo", "cell"),
         ("cell-demo-web", "cell_web"),
         ("cell-journal", "cell"),
@@ -19373,11 +19497,11 @@ mod tests {
             .collect();
         assert_eq!(
             checkouts.len(),
-            23,
+            25,
             "one checkout in each source-reading job: `select` (DEC-1190), `fast-lint`, \
              `fast-test`, `fast-pending`, `fast-python`, `fast-portable`, `fast-rh-sim-live`, \
              `full-checks`, `full-checks-2`, `full-checks-3` (DEC-2334), the mutation plan, the mutants matrix, `mutants-costs` (DEC-2607), \
-             `schema-mutants`, `cell`, `cell-demo` (DEC-2002), `cell-demo-web` (DEC-2609), \
+             `schema-mutants`, `cell`, `cell-seeded` and `cell-upgrade` (DEC-464), `cell-demo` (DEC-2002), `cell-demo-web` (DEC-2609), \
              `cell-journal`, `cell-failover`, `cell-kill-switch` (DEC-2602), `cell-executor` \
              (DEC-2615), `cell-vault` (DEC-2616), and `hosted-k3d` \
              (E21-51)"

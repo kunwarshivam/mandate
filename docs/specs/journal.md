@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | v0.80 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.19 registers a broker's capability profile as configuration, [DEC-531](../project/decisions/DEC-531.md) item 4 and [DEC-630](../project/decisions/DEC-630.md); v0.20 adds the connection records and `ConnectionEstablished`'s `account_ref`, [DEC-800](../project/decisions/DEC-800.md); v0.21 closes the records the workspace API commits for drafts, the compiler, confirmation, and owner requests, [DEC-670](../project/decisions/DEC-670.md); v0.22 adds the `client` actor and closes `ConnectionRevoked`'s reason and the client records, [DEC-671](../project/decisions/DEC-671.md); v0.23 closes the hold on new openings, [DEC-672](../project/decisions/DEC-672.md); v0.24 suspends a connection on a later `tools_missing`, [DEC-674](../project/decisions/DEC-674.md), and reads a later check with no pin as `contract_drift`, [DEC-676](../project/decisions/DEC-676.md) item 2; v0.25 catalogues the identity records and closes the membership records, [DEC-648](../project/decisions/DEC-648.md); v0.26 closes the records-access, export, and verification records, [DEC-780](../project/decisions/DEC-780.md); v0.27 closes the anchor and segment records, [DEC-783](../project/decisions/DEC-783.md); v0.28 closes the alert and notice records and the notice stream's `StreamOpened`, [DEC-720](../project/decisions/DEC-720.md); v0.29 completes §9.13's check codes and verifies an operator read's break-glass cause, [DEC-774](../project/decisions/DEC-774.md); v0.30 brings the connection vectors to §9.8's and §11's readings, [DEC-696](../project/decisions/DEC-696.md); v0.31 states the membership writer's order rule in §9.12, [DEC-659](../project/decisions/DEC-659.md); v0.32 journals the pending connection as `ConnectionRequested`, with stream rule 131, [DEC-694](../project/decisions/DEC-694.md) item 4 and [DEC-699](../project/decisions/DEC-699.md); v0.33 admits the `ProtectionChanged` records the executor's fold needs in rules 41 and 44, [DEC-859](../project/decisions/DEC-859.md); v0.34 journals the broker's order id on `OrderStateChanged` version 2, [DEC-869](../project/decisions/DEC-869.md); v0.35 verifies a connection range from its connection anchor and fails closed without one, [DEC-885](../project/decisions/DEC-885.md); v0.36 records a verification's trusted start, count, and unproven token check on `VerificationRun` version 2, with an `incomplete` result, [DEC-788](../project/decisions/DEC-788.md) and [DEC-789](../project/decisions/DEC-789.md); v0.37 refuses a `ConnectionRevoked` on an account stream under rule 68, [DEC-888](../project/decisions/DEC-888.md), and folds §11's anchors only from a verified prefix bound to the range's start, [DEC-892](../project/decisions/DEC-892.md); v0.38 scopes a connection anchor to one stream, [DEC-889](../project/decisions/DEC-889.md), and checks a range's hot rows against its segments' cold files as `segment_rows_mismatch`, [DEC-894](../project/decisions/DEC-894.md); v0.39 verifies an anchor start's timestamp token, [DEC-896](../project/decisions/DEC-896.md); v0.40 records the provider's verdict on a failed `NoticeAttempted`, [DEC-706](../project/decisions/DEC-706.md); v0.41 closes the runtime's `ApprovalTimedOut`, [DEC-944](../project/decisions/DEC-944.md); v0.42 binds the order builder's plan on `ApprovalRequested` version 2, with rule 136, [DEC-942](../project/decisions/DEC-942.md); v0.43 closes the runtime's `ApprovalCanceled`, [DEC-950](../project/decisions/DEC-950.md); v0.44 registers the control-plane records, [DEC-981](../project/decisions/DEC-981.md); v0.45 closes `BacktestRunRecorded` and adds `EvaluationRunRecorded`, [DEC-1001](../project/decisions/DEC-1001.md) and [DEC-1002](../project/decisions/DEC-1002.md); v0.46 closes the agent stream's `ModelInvocationRecorded` and adds the model gateway's meter stream, [DEC-998](../project/decisions/DEC-998.md); v0.47 closes the scheduler stream's records, [DEC-1010](../project/decisions/DEC-1010.md); v0.48 registers the deployment manager's records, [DEC-1170](../project/decisions/DEC-1170.md); v0.49 adds the agent stream's invalidation verdict, `ThesisInvalidated`, [DEC-2202](../project/decisions/DEC-2202.md); v0.50 closes the agentic research run's records, [DEC-2203](../project/decisions/DEC-2203.md); v0.51 closes the control stream's `NotificationAddressChanged` and adds `NoticeAttempted` version 3, which names the web-push address an attempt went to, [DEC-2505](../project/decisions/DEC-2505.md); v0.52 types `EvaluationRunRecorded`'s `theses_head` as record hashes, [DEC-1142](../project/decisions/DEC-1142.md); v0.53 adds the deployment meter stream, [DEC-2207](../project/decisions/DEC-2207.md); v0.54 names the deployment's connection on `AgentDeployed` version 2, with rules 200 and 201, [DEC-1171](../project/decisions/DEC-1171.md); v0.55 adds the desk's `OwnerQuestionSubmitted` and the `answer` tool's check codes, [DEC-2240](../project/decisions/DEC-2240.md); v0.56 deploys an agent id once and reads a stop as final whether or not its deployment was read, [DEC-1173](../project/decisions/DEC-1173.md); v0.57 closes the owner's acknowledgment and adds its request, [DEC-2509](../project/decisions/DEC-2509.md); v0.58 closes the account stream's risk-limit records, [DEC-2301](../project/decisions/DEC-2301.md); v0.59 names `copied_from` on the account stream's `KillSwitchActivated`, [DEC-2003](../project/decisions/DEC-2003.md) item 4; v0.60 names `cancels` on the account stream's `KillSwitchActivated` as the orders whose cancel never lapses, [DEC-2302](../project/decisions/DEC-2302.md) item 2; v0.61 says when §9.28's executor judges an acknowledgment's step-up and reads the control stream for reuse, and adds §9.28's vectors, [DEC-2509](../project/decisions/DEC-2509.md); v0.62 adds the control stream's `StepUpConfirmed`, [DEC-2104](../project/decisions/DEC-2104.md); v0.63 adds `MarkUpdated` version 2, with the risk mark's bid, sanity verdict, and session, [DEC-2305](../project/decisions/DEC-2305.md); v0.64 states that rule 200 holds at the writers by construction, [DEC-1171](../project/decisions/DEC-1171.md); v0.65 receives an exit proposed at the market as `type` `market` on `IntentReceived`, with stream rule 245, [DEC-2037](../project/decisions/DEC-2037.md); v0.66 lets a workspace service claim, on the owner's Stop, the stream of an agent whose runtime never ran, and retire it, with rule 246, [DEC-2039](../project/decisions/DEC-2039.md); v0.67 journals an owner exit's confirmed bid beside its intent as `OwnerConfirmationReceived`, with rules 247 and 248, [DEC-2040](../project/decisions/DEC-2040.md); v0.68 journals an Alpaca OAuth connect's token breadth and the disclosure the owner confirmed on `ConnectionRequested` version 2, with rule 255, [DEC-2621](../project/decisions/DEC-2621.md); v0.69 closes the passkey credential records, with rules 249 to 251, [DEC-2108](../project/decisions/DEC-2108.md); v0.70 lets the deployment manager start an OAuth connect's token exchange, and stop it when its request closes, with rule 256, [DEC-1175](../project/decisions/DEC-1175.md); v0.71 adds the passkey assertion record `StepUpAsserted`, with rules 252 to 254, and `CredentialEnrolled` version 2's `backup_eligible`, [DEC-2122](../project/decisions/DEC-2122.md); v0.72 adds `ProtectionChanged` version 2, which discloses the unprotected fraction of a fractional equity position, under rule 44, [DEC-2312](../project/decisions/DEC-2312.md); v0.74 lets the deployment manager start an OAuth connect's executor on its token exchange's success, and stop it when its connection closes, with rule 257, [DEC-2335](../project/decisions/DEC-2335.md); v0.75 journals each close-position request of an account kill switch as `AccountCloseRequested` before it is sent, with rules 258 to 260, [DEC-2337](../project/decisions/DEC-2337.md); v0.80 lets the executor's fold read `OrderStateChanged` version 2's `broker_order_id` to attribute a broker fill that names only the broker's order id, [DEC-2353](../project/decisions/DEC-2353.md)); changes need a decision-log entry (safety-critical) |
+| **Status** | v0.81 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 approval escalation v0, [DEC-173](../project/04-decision-log.md#decisions), amended by [DEC-181](../project/04-decision-log.md#decisions), whose `DecisionMade` members [DEC-252](../project/04-decision-log.md#decisions) closes in §9.1; v0.6 closes the agent stream's payload schemas, [DEC-177](../project/04-decision-log.md#decisions); v0.7 closes the control-stream schemas `ValidationContext` reads, `AccountSnapshotRecorded`, and `OwnerCommandRefused`, [DEC-261](../project/04-decision-log.md#decisions); v0.8 closes the account-stream risk-state records `MandateVersionApplied` and `UniverseChanged`, [DEC-403](../project/decisions/DEC-403.md); v0.9 closes the research agent's thesis records `ThesisProposed` and `ThesisRevised`, [DEC-413](../project/decisions/DEC-413.md); v0.10 types `UniverseChanged`'s instrument as an asset ID and states what §9.3's mapping refuses, [DEC-404](../project/decisions/DEC-404.md); v0.11 types the thesis records' `instrument_id` as an asset ID, [DEC-413](../project/decisions/DEC-413.md) item 7; v0.12 adds the notice stream, [DEC-438](../project/decisions/DEC-438.md) items 5 and 28; v0.13 closes the account-stream executor records of §9.5, [DEC-446](../project/decisions/DEC-446.md) and [DEC-447](../project/decisions/DEC-447.md); v0.14 closes `OrderStateChanged`, [DEC-459](../project/decisions/DEC-459.md); v0.15 closes the approval and reconciliation records in §9.6, [DEC-460](../project/decisions/DEC-460.md); v0.16 binds effective policy and model-registry snapshots to production decisions, [DEC-484](../project/decisions/DEC-484.md); v0.17 closes the owner's approval answer and the runtime's two records of it, [DEC-533](../project/decisions/DEC-533.md); v0.18 adds the policy overlay's `decided_by` label, [DEC-536](../project/decisions/DEC-536.md); v0.19 registers a broker's capability profile as configuration, [DEC-531](../project/decisions/DEC-531.md) item 4 and [DEC-630](../project/decisions/DEC-630.md); v0.20 adds the connection records and `ConnectionEstablished`'s `account_ref`, [DEC-800](../project/decisions/DEC-800.md); v0.21 closes the records the workspace API commits for drafts, the compiler, confirmation, and owner requests, [DEC-670](../project/decisions/DEC-670.md); v0.22 adds the `client` actor and closes `ConnectionRevoked`'s reason and the client records, [DEC-671](../project/decisions/DEC-671.md); v0.23 closes the hold on new openings, [DEC-672](../project/decisions/DEC-672.md); v0.24 suspends a connection on a later `tools_missing`, [DEC-674](../project/decisions/DEC-674.md), and reads a later check with no pin as `contract_drift`, [DEC-676](../project/decisions/DEC-676.md) item 2; v0.25 catalogues the identity records and closes the membership records, [DEC-648](../project/decisions/DEC-648.md); v0.26 closes the records-access, export, and verification records, [DEC-780](../project/decisions/DEC-780.md); v0.27 closes the anchor and segment records, [DEC-783](../project/decisions/DEC-783.md); v0.28 closes the alert and notice records and the notice stream's `StreamOpened`, [DEC-720](../project/decisions/DEC-720.md); v0.29 completes §9.13's check codes and verifies an operator read's break-glass cause, [DEC-774](../project/decisions/DEC-774.md); v0.30 brings the connection vectors to §9.8's and §11's readings, [DEC-696](../project/decisions/DEC-696.md); v0.31 states the membership writer's order rule in §9.12, [DEC-659](../project/decisions/DEC-659.md); v0.32 journals the pending connection as `ConnectionRequested`, with stream rule 131, [DEC-694](../project/decisions/DEC-694.md) item 4 and [DEC-699](../project/decisions/DEC-699.md); v0.33 admits the `ProtectionChanged` records the executor's fold needs in rules 41 and 44, [DEC-859](../project/decisions/DEC-859.md); v0.34 journals the broker's order id on `OrderStateChanged` version 2, [DEC-869](../project/decisions/DEC-869.md); v0.35 verifies a connection range from its connection anchor and fails closed without one, [DEC-885](../project/decisions/DEC-885.md); v0.36 records a verification's trusted start, count, and unproven token check on `VerificationRun` version 2, with an `incomplete` result, [DEC-788](../project/decisions/DEC-788.md) and [DEC-789](../project/decisions/DEC-789.md); v0.37 refuses a `ConnectionRevoked` on an account stream under rule 68, [DEC-888](../project/decisions/DEC-888.md), and folds §11's anchors only from a verified prefix bound to the range's start, [DEC-892](../project/decisions/DEC-892.md); v0.38 scopes a connection anchor to one stream, [DEC-889](../project/decisions/DEC-889.md), and checks a range's hot rows against its segments' cold files as `segment_rows_mismatch`, [DEC-894](../project/decisions/DEC-894.md); v0.39 verifies an anchor start's timestamp token, [DEC-896](../project/decisions/DEC-896.md); v0.40 records the provider's verdict on a failed `NoticeAttempted`, [DEC-706](../project/decisions/DEC-706.md); v0.41 closes the runtime's `ApprovalTimedOut`, [DEC-944](../project/decisions/DEC-944.md); v0.42 binds the order builder's plan on `ApprovalRequested` version 2, with rule 136, [DEC-942](../project/decisions/DEC-942.md); v0.43 closes the runtime's `ApprovalCanceled`, [DEC-950](../project/decisions/DEC-950.md); v0.44 registers the control-plane records, [DEC-981](../project/decisions/DEC-981.md); v0.45 closes `BacktestRunRecorded` and adds `EvaluationRunRecorded`, [DEC-1001](../project/decisions/DEC-1001.md) and [DEC-1002](../project/decisions/DEC-1002.md); v0.46 closes the agent stream's `ModelInvocationRecorded` and adds the model gateway's meter stream, [DEC-998](../project/decisions/DEC-998.md); v0.47 closes the scheduler stream's records, [DEC-1010](../project/decisions/DEC-1010.md); v0.48 registers the deployment manager's records, [DEC-1170](../project/decisions/DEC-1170.md); v0.49 adds the agent stream's invalidation verdict, `ThesisInvalidated`, [DEC-2202](../project/decisions/DEC-2202.md); v0.50 closes the agentic research run's records, [DEC-2203](../project/decisions/DEC-2203.md); v0.51 closes the control stream's `NotificationAddressChanged` and adds `NoticeAttempted` version 3, which names the web-push address an attempt went to, [DEC-2505](../project/decisions/DEC-2505.md); v0.52 types `EvaluationRunRecorded`'s `theses_head` as record hashes, [DEC-1142](../project/decisions/DEC-1142.md); v0.53 adds the deployment meter stream, [DEC-2207](../project/decisions/DEC-2207.md); v0.54 names the deployment's connection on `AgentDeployed` version 2, with rules 200 and 201, [DEC-1171](../project/decisions/DEC-1171.md); v0.55 adds the desk's `OwnerQuestionSubmitted` and the `answer` tool's check codes, [DEC-2240](../project/decisions/DEC-2240.md); v0.56 deploys an agent id once and reads a stop as final whether or not its deployment was read, [DEC-1173](../project/decisions/DEC-1173.md); v0.57 closes the owner's acknowledgment and adds its request, [DEC-2509](../project/decisions/DEC-2509.md); v0.58 closes the account stream's risk-limit records, [DEC-2301](../project/decisions/DEC-2301.md); v0.59 names `copied_from` on the account stream's `KillSwitchActivated`, [DEC-2003](../project/decisions/DEC-2003.md) item 4; v0.60 names `cancels` on the account stream's `KillSwitchActivated` as the orders whose cancel never lapses, [DEC-2302](../project/decisions/DEC-2302.md) item 2; v0.61 says when §9.28's executor judges an acknowledgment's step-up and reads the control stream for reuse, and adds §9.28's vectors, [DEC-2509](../project/decisions/DEC-2509.md); v0.62 adds the control stream's `StepUpConfirmed`, [DEC-2104](../project/decisions/DEC-2104.md); v0.63 adds `MarkUpdated` version 2, with the risk mark's bid, sanity verdict, and session, [DEC-2305](../project/decisions/DEC-2305.md); v0.64 states that rule 200 holds at the writers by construction, [DEC-1171](../project/decisions/DEC-1171.md); v0.65 receives an exit proposed at the market as `type` `market` on `IntentReceived`, with stream rule 245, [DEC-2037](../project/decisions/DEC-2037.md); v0.66 lets a workspace service claim, on the owner's Stop, the stream of an agent whose runtime never ran, and retire it, with rule 246, [DEC-2039](../project/decisions/DEC-2039.md); v0.67 journals an owner exit's confirmed bid beside its intent as `OwnerConfirmationReceived`, with rules 247 and 248, [DEC-2040](../project/decisions/DEC-2040.md); v0.68 journals an Alpaca OAuth connect's token breadth and the disclosure the owner confirmed on `ConnectionRequested` version 2, with rule 255, [DEC-2621](../project/decisions/DEC-2621.md); v0.69 closes the passkey credential records, with rules 249 to 251, [DEC-2108](../project/decisions/DEC-2108.md); v0.70 lets the deployment manager start an OAuth connect's token exchange, and stop it when its request closes, with rule 256, [DEC-1175](../project/decisions/DEC-1175.md); v0.71 adds the passkey assertion record `StepUpAsserted`, with rules 252 to 254, and `CredentialEnrolled` version 2's `backup_eligible`, [DEC-2122](../project/decisions/DEC-2122.md); v0.72 adds `ProtectionChanged` version 2, which discloses the unprotected fraction of a fractional equity position, under rule 44, [DEC-2312](../project/decisions/DEC-2312.md); v0.74 lets the deployment manager start an OAuth connect's executor on its token exchange's success, and stop it when its connection closes, with rule 257, [DEC-2335](../project/decisions/DEC-2335.md); v0.75 journals each close-position request of an account kill switch as `AccountCloseRequested` before it is sent, with rules 258 to 260, [DEC-2337](../project/decisions/DEC-2337.md); v0.76 says when an `AgentStopped` may retire an agent that ran, and lets a kill switch start an executor no agent wants, [DEC-2344](../project/decisions/DEC-2344.md); v0.77 adds the connection role records the role provisioner writes, with rules 261 to 263, and starts a token exchange only once its roles are made, [DEC-2350](../project/decisions/DEC-2350.md); v0.78 adds the notice kind `kill_switch_unapplied`, [DEC-2351](../project/decisions/DEC-2351.md); v0.79 adds the agent stream's `RetirementHeld` and the kind `retirement_held`, with rules 265 and 266, [DEC-2352](../project/decisions/DEC-2352.md); v0.80 lets the executor's fold read `OrderStateChanged` version 2's `broker_order_id` to attribute a broker fill that names only the broker's order id, [DEC-2353](../project/decisions/DEC-2353.md); v0.81 owes the removal of roles made after their request closed, in rule 263, [DEC-2350](../project/decisions/DEC-2350.md) item 7); changes need a decision-log entry (safety-critical) |
 | **Implements** | PRD 6.7 (FR-7.1 to FR-7.7), FR-5.6, FR-5.7; backlog E5; milestone M4 |
 | **Depends on** | [Trading domain spec §12–§13](trading-domain.md#12-journal-events) |
 | **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3, with the generated `agent_stream` and additive `production_config_refs` and `policy_overlay` sections of §9.1, additive `broker_profile` section of §9, `control_stream` section of §9.2, `risk_state` section of §9.3, `research` section of §9.4, `account_stream` section of §9.5, its `protection_shapes` section of rules 41 and 44, and its `protection_fraction` section of `ProtectionChanged` version 2, `approval_answers` section of §9.7, its `approval_timeouts` section of `ApprovalTimedOut` and rule 135, and its `approval_cancellations` section of `ApprovalCanceled`, `approval_requests` section of §9.6's `ApprovalRequested` versions 1 and 2 and rule 136, `connections` section of §9.8, its `connection_requests` section of rule 131, its `connection_ranges` section of §11's connection anchor, and its `connection_revocations` section of rule 68, `workspace_api` section of §9.9, `client_actor` section of §3 and §9.10, `hold` section of §9.11 with its `held_mismatch` range cases, `membership` and `membership_fold` sections of §9.12, `records_access` section of §9.13 with its `break_glass_cause_mismatch` range checks, `cold_records` section of §9.14, `verification_runs` section of §9.13's `VerificationRun` version 2, `segment_rows` section of §11's `segment_rows_mismatch`, `control_plane` section of §9.17, `backtest_records` section of §9.18, `model_gateway` section of §9.19, `deployment_manager` section of §9.21, `thesis_invalidation` section of §9.22, `agent_deployed` section of §9.24 and its `stops` streams of rule 246, `risk_limits` section of §9.27, `acknowledgments` section of §9.28, `step_up_confirmations` section of §9.29, `risk_marks` section of §9.30, `market_intents` section of rule 245, `owner_confirmations` section of rules 247 and 248, `credentials` section of §9.31, `connection_requested` section of §9.8's `ConnectionRequested` version 2 and rule 255, `step_up_assertions` section of §9.32, and `account_closes` section of §9.5's `AccountCloseRequested` and rules 258 to 260; [reference/journal/generate.py](../../reference/journal/generate.py)) |
@@ -12,6 +12,18 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
 
 ## Change history
 
+- **v0.81 ([DEC-2350](../project/decisions/DEC-2350.md) item 7; claim #1901):** rule 263 ties a
+  `ConnectionRolesRemoved` to the request its connection's latest `ConnectionRolesMade` answers:
+  its cause is a closer of that connection journaled after that request, rather than after the
+  `ConnectionRolesMade` itself. The provisioner writes to the vault before it journals, so a request
+  that closes while its roles are being made, or a `ConnectionRolesMade` that loses an append race
+  to the closer, leaves the roles' record after the close; v0.77 then owed no removal and left the
+  token exchange's role in the vault. It is owed now, citing that close. A removal still follows
+  the latest `ConnectionRolesMade`, at most once, and never cites an earlier request's closer.
+  The coordinator assigned this change v0.81, after the open branches' v0.78 to v0.80.
+  Agent-accepted under DEC-176: it removes a role that would otherwise stay, adds no access, and
+  refuses no record written today. The `connection_roles` section gains two streams, one stream and
+  one vector mutant.
 - **v0.80 ([DEC-2353](../project/decisions/DEC-2353.md); E7-4, claim #137):** §9.16's
   `broker_order_id` on `OrderStateChanged` version 2 was written and never read by the executor's
   fold. The fold now reads it for one thing: a broker fill that names no `client_order_id` (Alpaca's
@@ -21,6 +33,67 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   member, or rule changes, so no vector does. It only tightens (DEC-176): without it, every fill
   Alpaca reports leaves the agent's sub-ledger empty, so its kill switch sells none of its shares
   (`AGENTS.md` rule 13). The version number follows the open branches' v0.72 to v0.79.
+- **v0.79 ([DEC-2352](../project/decisions/DEC-2352.md), an agent reading under
+  [DEC-176](../project/04-decision-log.md#decisions)):** §9.34 adds the agent stream's
+  `RetirementHeld` at schema version 1, the runtime's record that a retirement has waited another
+  24 hours for what the agent still holds (DEC-2344 item 2), with rule 265 on the record and stream
+  rule 266 on its one sequence per agent: each record with its alert, periods counting records a
+  day apart, and none after the retirement ends at its own `AgentStopped` or an owner's resume or
+  stop, a version applied moving the sequence on or ending it for a new cause;
+  §9.15's closed set of kinds gains `retirement_held` (safety), 34 to 35. The `retirements` vectors
+  are new: 24 invalid and 5 valid drafts and 28 streams, judged by the reference fold and an
+  independent oracle, with 16 validator, 10 stream, and 5 vector mutants caught. **Versions and
+  numbers:** v0.77 and rules 261 to 263 are #2278's (§9.33), and rule 264 #2294's, so this takes
+  v0.79, §9.34, and rules 265 and 266, and renumbers at merge if that order changes.
+- **v0.78 ([DEC-2351](../project/decisions/DEC-2351.md), an agent reading under
+  [DEC-176](../project/04-decision-log.md#decisions)):** §9.15's closed set of kinds gains
+  `kill_switch_unapplied` (safety, after `kill_switch`), 33 kinds to 34: the deployment manager's
+  `OwnerAlertSent` for its own unapplied crash loop (notifications spec §3.2, DEC-2344 item 1).
+  Stream rule 264 holds the kind to that subject, which the control stream alone shows: no record
+  gains a member. The new `kill_switch_unapplied` vectors are 20 control streams, a deployment
+  and retirement during the run, an agent wanting it at the loop, a connect, a revoked connection,
+  a stop, a new run after a loop, and a runtime's and an exchange's loop among them, judged by the
+  fold and an independent oracle, with 6 stream and 2 vector mutants caught. **Versions and
+  numbers:** v0.77 is held by #2278 (DEC-2350) and lane V2's #2292 and #2293 stacked on it, and
+  rules 261 to 263 by #2278, so this takes v0.78 and rule 264, and renumbers at merge if
+  that order changes.
+- **v0.77 ([DEC-2350](../project/decisions/DEC-2350.md); DEC-2630 item 7, claim #1901):** §9.33
+  adds the role provisioner's three control-stream records, `ConnectionRolesMade`,
+  `ConnectionRolesRefused`, and `ConnectionRolesRemoved`, at `schema_version` 1. A connect's token
+  exchange and executor log in with Kubernetes-auth roles made per connection (DEC-2060), which
+  only the provisioner may make. Rule 261 holds every record to a system actor and a cause; stream
+  rules 262 and 263, the provisioner's and failing closed in the verifier's fold, tie each record to
+  its request and let it remove only the token exchange's role, never the executor's, so a kill
+  switch's start can always log in. §9.21's token
+  exchange is started only once its request's `ConnectionRolesMade` is read, so a connect whose
+  roles were never made, or were refused, starts nothing and ends by its deadline. The new
+  `connection_roles` section holds the vectors; no existing member, rule, or vector changes.
+  - **Versions.** Versions follow the coordinator's assignment: v0.72 is lane LV's
+    `ProtectionChanged` version 2 (DEC-2312), v0.73 lane L2's active-address definition (DEC-2123),
+    v0.74 lane D1's `exchanged` start (DEC-2335), v0.75 lane LV's `AccountCloseRequested`
+    (DEC-2337), and v0.76 lane D1's retirement rule (DEC-2344). This change takes v0.77, §9.33, and
+    rules 261 to 263, and renumbers at merge if that order changes.
+- **v0.76 ([DEC-2344](../project/decisions/DEC-2344.md), an agent reading under
+  [DEC-176](../project/04-decision-log.md#decisions)):** §9.2 states its writer's precondition for
+  an `AgentStopped` that retires an agent that ran: the account stream's fold shows no position
+  attributed to the agent and no working order of its own, working being every non-terminal state
+  of trading spec §5.7 (mandate spec §3.1). It is the writer's rule, as rule 254 is: no member,
+  rule, or vector changes, since a control-stream check does not read the account stream. It only
+  delays a record that ends an agent.
+  - **§9.21: an executor no agent wants.** A covering kill switch gives such an executor one
+    `kill_switch` start; only a start committed after a switch answers it, since the manager reads
+    only the control stream, and a generation that ends with success answers only
+    the switches committed before its start. A batch start's `causation_id` is the first switch it
+    answers. The manager journals no stop for a generation a switch keeps: it ends by its own exit,
+    so `ProcessStopIssued`'s causes are unchanged. A crash loop first raises
+    `kill_switch_unapplied`, and "Which fact is the pause" starts a crash-looped slot once for the
+    covering switches not yet answered. No member, rule, or vector changes: each only adds a start
+    in answer to a kill switch or delays a stop.
+  - **Versions.** Versions follow the coordinator's assignment: v0.72 is lane LV's
+    `ProtectionChanged` version 2 (DEC-2312), v0.73 lane L2's active-address definition
+    (DEC-2123), v0.74 lane D1's `exchanged` start (DEC-2335), and v0.75 lane LV's
+    `AccountCloseRequested` (DEC-2337). This change takes v0.76 and renumbers at merge if that
+    order changes.
 - **v0.75 ([DEC-2337](../project/decisions/DEC-2337.md); E7-4, claim #137):** §9.5 closes the
   account stream's `AccountCloseRequested` at `schema_version` 1: one request of one instrument's
   close-position under an account kill switch, journaled in its own batch before it is sent, naming
@@ -1567,6 +1640,7 @@ hash (rule 21b), as rule 21a does for the version-2 kinds.
 | `ApprovalResponded` | man | approval, verdict (`approved`, `skipped`; a legacy `denied` reads as `skipped`), responder (opaque) and role, result (`admitted`, `counted`, `refused`; a legacy `recorded` or `refused` reads as terminal), reason, effective time, step-up evidence (assertion ID, authentication time, method), separation-of-duties result, and for a grant that reaches check 7 the approver count and independence it applied (the stricter of the bound values and the policy overlay, [mandate spec §6.4](mandate.md#64-approvals)); `causation_id` is the `ApprovalResponseSubmitted`, copied at most once; the delegation shape chosen, if any, with the new mandate version and delegation id (mandate §6.4, §6.5) |
 | `ApprovalRevalidated` | man | approval, result (`act`, `skip`), reason, and every value compared: bound and current mandate version, mode, instrument restriction, `decided_by` then and now, dry-run verdict and reason, `m_req`, `m_now`, `band_bp` |
 | `ApprovalTimedOut` | man | Closed at schema version 1: approval and `on_timeout: skip`; `causation_id` is the ask (§9.7, rule 135) |
+| `RetirementHeld` | man | Closed at schema version 1: the risk clock the retirement began waiting at, the period, what it waits on (`position`, `working_order`), and risk clock; `causation_id` is what began the retirement (§9.34, rules 265 and 266) |
 | `ApprovalCanceled` | man | Closed at schema version 1: approval, cancel reason (`version_applied`, `mode_tightened`, `owner_pause`, `owner_stop`, `kill_switch`; a legacy `rebound` is a cancellation for either of the first two, and §9.7 refuses it) |
 | `AgentModeChanged`, `KillSwitchActivated` | — | from, to, reason; scope and initiator; `AgentModeChanged` version 2 also records the owner's hold (§9.11) |
 | `OwnerExitRequested` | man | instrument or scope, bid shown and confirmed, user (opaque), step-up evidence |
@@ -1612,6 +1686,7 @@ hash (rule 21b), as rule 21a does for the version-2 kinds.
 | `HostCliRegistered`, `HostCliRevoked` | — | registration (its ULID), host (opaque), operating-system account (opaque), registering admin, step-up evidence ([identity spec §6.4](identity.md#64-the-risk-reduction-path)) |
 | `BreakGlassRequested`, `BreakGlassGranted`, `BreakGlassEnded` | — | operator (opaque), reason code, window, approvers ([identity spec §10.3](identity.md#103-break-glass-for-platform-staff-managed-mode)) |
 | `ControlPlaneEnrolled`, `LicenseApplied`, `LicenseStateChanged`, `ReleaseOffered`, `ReleaseInstalled`, `ReleaseWithdrawnNoticed`, `CatalogEntryRegistered`, `DataBundleImported`, `UsageReportSealed`, `ControlPlaneMessageRefused` | — | The deployment's records of its link to the global control plane ([control-plane design §3.8](../design/control-plane.md#38-the-closed-message-set)): enrollment, license, release, catalog, data-bundle, and usage-report facts by opaque ID, sequence, and digest, and each refused inbound message with its reason; written by workspace control services, never by `cp-agent`; closed in §9.17 |
+| `ConnectionRolesMade`, `ConnectionRolesRefused`, `ConnectionRolesRemoved` | — | The role provisioner's records for one OAuth connect's Kubernetes-auth roles: connection, and for a refusal its reason, for a removal the role and the occasion; closed in §9.33 |
 | `ProcessStartIssued`, `ProcessStopIssued`, `ProcessCrashLooped` | — | The deployment manager's starts, stops, and crash loops (infrastructure design §3.4): process (`runtime`, `executor`), subject (the agent or the `account_ref`), generation, cause; for a crash loop the restarts counted and their window; closed in §9.21 |
 
 The identity records ([identity spec §12.1](identity.md#121-events-journal-9-control-stream),
@@ -2060,6 +2135,13 @@ are read from the stored document that `mandate_version` names, never restated h
 | `reason` | `goal_complete` \| `profit_stop_reached` \| `end_date` \| `owner_stop` | §9's reasons |
 | `retired_on` | `date` | The America/New_York date the agent retired. §5.7's 90-day carry counts from it |
 | `loss_added` | `decimal` | The net dollar loss max(0, N − E) at retirement added to the carry: rule 23 |
+
+Its writer retires an agent that ran only once the account stream's fold shows no position
+attributed to the agent and no working order of its own, working being every non-terminal state of
+trading spec §5.7, `Unknown` included (mandate spec §3.1, [DEC-2344](../project/decisions/DEC-2344.md)). The deployment manager stops the agent's
+runtime, and its account's executor once every agent of the account is retired (§9.21), on this
+record alone, so nothing of the agent's may be left for a later kill switch to reach. An agent no
+process ran holds nothing, and its retirement (§9.21, DEC-2039) reads no fold.
 
 **`AccountSnapshotRecorded`** on the account stream: the broker's account as reconciliation reads it
 ([trading spec §11](trading-domain.md#11-reconciliation)). The members are the executor's. The last three record the
@@ -4022,14 +4104,14 @@ reads it (NT-9).
 | `notice_id` | Exactly 32 lowercase hexadecimal digits: notifications spec §4.2's random notice id. Never an event id, which is a `ulid` and carries its creation time | As `id` |
 | `stream_id` | A stream id in §2's grammar, of one of the seven stream types (the meter stream's since v0.46, the deployment meter stream's since v0.53, §9.19) | As `id` |
 | `opaque` | 1 to 256 characters, each U+0021 to U+007E: a provider's message id, which has no space and so cannot carry a sentence | As `id` |
-| `kind` | Notifications spec §3.2's closed set of 33 kinds, below | As `id` |
+| `kind` | Notifications spec §3.2's closed set of 35 kinds, below | As `id` |
 
 **Kinds and their classes** (notifications spec §3.2, in its order):
 
 | Class | Kinds |
 |---|---|
 | `action` | `approval_requested`, `approval_reminder` |
-| `safety` | `risk_limit`, `kill_switch`, `agent_held`, `account_restriction`, `protection`, `exit_stalled`, `reconciliation`, `external_activity`, `account_state`, `data_feed_down`, `integrity_incident`, `credential_added`, `new_device`, `notification_address_changed`, `recovery_used`, `role_granted`, `member_deactivated`, `deprovisioned`, `break_glass`, `version_risk_increasing`, `delegation_added`, `connection_added`, `went_live`, `client_connected`, `channel_lost` |
+| `safety` | `risk_limit`, `kill_switch`, `kill_switch_unapplied`, `agent_held`, `retirement_held`, `account_restriction`, `protection`, `exit_stalled`, `reconciliation`, `external_activity`, `account_state`, `data_feed_down`, `integrity_incident`, `credential_added`, `new_device`, `notification_address_changed`, `recovery_used`, `role_granted`, `member_deactivated`, `deprovisioned`, `break_glass`, `version_risk_increasing`, `delegation_added`, `connection_added`, `went_live`, `client_connected`, `channel_lost` |
 | `info` | `daily_brief`, `delegation_ended`, `model_status`, `research_status`, `spend_cap`, `approval_closed` |
 
 **`OwnerAlertSent`** (agent, account, or control stream)
@@ -4191,6 +4273,29 @@ does `address_retired`, which records only that the address left the set.
      the batch names the same subject (`payload.subject`, at the first alert that breaks it):
      notifications spec §3.2's "in the subject's own batch" and §3.4's "one subject, one kind",
      checked at append.
+264. **Stream rule** (control stream, [DEC-2351](../project/decisions/DEC-2351.md), v0.78; numbered
+     on after #2278's rules 261 to 263, renumbering none). An `OwnerAlertSent` whose
+     `kind` is `kill_switch_unapplied` names as its `subject` an **unapplied crash loop**
+     (`payload.subject`): a `ProcessCrashLooped` of an executor whose run is **held**, with no
+     `AgentDeployed` on a connection of its account (by its `ConnectionEstablished`'s
+     `account_ref`) lacking its `AgentStopped` at the loop. A run is held from a
+     `ProcessStartIssued` with cause `kill_switch` journaled while every such deployment already
+     had its `AgentStopped`, until a later start of the executor with cause `deployed`,
+     `requested`, or `exchanged`, or a `ProcessStopIssued` of it: the manager journals a stop only
+     for a generation it does not hold. A connect's `ConnectionRequested` neither holds nor frees a
+     run, and a deployment on a connection revoked since still counts until its `AgentStopped`.
+     So a deployment and retirement while the run goes on leave
+     it held and unstopped (DEC-2344 item 3); a loop while an agent wants the executor is an
+     ordinary one, `crash_loop` alone; and a later covering switch's start after an unapplied loop
+     begins a new run, whose own loop is unapplied too ([DEC-2344](../project/decisions/DEC-2344.md)
+     item 1). Once an executor has run, the only end of a hold the journal shows is a
+     `ProcessStopIssued`: rule 167 holds `deployed`, `requested`, and `exchanged` to generation 1.
+     The manager also ends a hold at the run's own `Succeeded` end, which is not journaled, so the
+     rule admits an alert the manager may no longer write: rule 264 admits the alert, and the
+     manager writes at most one per loop, in its batch, and only while it holds the run, which
+     E8-17's tests pin. The
+     `kill_switch_unapplied` vectors' streams are judged by the fold and by an independent oracle
+     that reads each alert's subject backwards, and each seeded bug is shown caught.
 134. `NoticeAttempted` version 2 ([DEC-706](../project/decisions/DEC-706.md)), numbered on after
      rule 133 and renumbering none: `verdict` is non-null exactly when `status` is `failed`, and
      where notifications spec §5.2 to §5.4 fix a reason's verdict, it is that one
@@ -4954,7 +5059,7 @@ pod is replaced. The orchestrator restarts nothing on its own, so every restart 
 start whose `cause` is `kill_switch` is not counted.
 
 **Which fact is the pause.** `ProcessCrashLooped`. After it the manager starts the slot again only
-for a kill switch, once per `OwnerCommandIssued` with `kill_switch` whose scope covers it, and
+for a kill switch, once for the covering switches not yet answered (v0.76), and
 raises one opaque operator alert (design §8.2, RB-14). Nothing at this version ends the pause but
 the agent's `AgentStopped`, or for an executor every agent of its account stopped (DEC-1170 item
 3). An `AgentStopped` is final: no record here follows it for that agent's runtime, whether or
@@ -5000,6 +5105,27 @@ its deployment names (version 2) or its stored document names (version 1).
 a `kill_switch` start: the manager never stops, drains, or replaces a process for one, and never
 waits on readiness (design §3.4, §3.6).
 
+**An executor no agent wants** (v0.76, [DEC-2344](../project/decisions/DEC-2344.md)). A covering
+kill switch reaches an account's executor after the last agent of the account is retired, so the
+switch never goes unread:
+
+- **The start.** An executor slot that no deployed agent wants, with no instance that may run, gets
+  one `kill_switch` start for the covering switches it has not answered, whether or not its crash
+  loop is journaled; each later covering switch that finds it down gets one more.
+- **What answers a switch.** Only a start committed after it: the manager reads only the control
+  stream, so it answers by starts alone, never by the executor's `KillSwitchActivated`. A
+  generation that ends with success answers only the switches committed before its own start; the
+  manager reads every covering switch committed since as not answered and starts the executor
+  again for it.
+- **The held stop.** The manager journals no `ProcessStopIssued` for an executor generation that a
+  covering switch reached and has not seen answered, nor for one a `kill_switch` start made while
+  no agent wanted it: that generation ends by its own exit, with success once no agent of the
+  account is wanted and every covering switch it read is applied. So `ProcessStopIssued`'s causes
+  are unchanged.
+- **A crash before that** is restarted as any crash is, cause `restart`. If the crash-loop bound is
+  reached first, the switch is unapplied: the operator alert is `kill_switch_unapplied` in place of
+  `crash_loop`, a fixed key and no subject (`AGENTS.md` rule 6).
+
 **No content.** Every member is an `id`, a closed enumeration, or an `integer`: no instrument,
 quantity, price, mandate field, or personal data (`AGENTS.md` rule 6).
 
@@ -5012,14 +5138,18 @@ quantity, price, mandate field, or personal data (`AGENTS.md` rule 6).
 | `generation` | `integer` | 1 for the slot's first start, one more for each start after it: rules 166 and 167 |
 | `cause` | `deployed` \| `restart` \| `kill_switch` \| `requested` \| `exchanged` | The first start; a start after the previous one exited; a start for a kill switch whose scope covers the slot; a token exchange's one start, for its connection's `ConnectionRequested`: rule 256; a connect's executor's first start, on its token exchange's success: rule 257 |
 
-A `kill_switch` start names the switch's `OwnerCommandIssued` as its `causation_id`; every other
-record here has a `null` one. `append` does not check the link, which crosses no stream but
+A `kill_switch` start names the switch's `OwnerCommandIssued` as its `causation_id`: of the
+covering switches it answers, the one committed first (v0.76). Every other record here has a `null`
+one. `append` does not check the link, which crosses no stream but
 names an earlier event, as for §2's copies.
 
 **The token exchange** (v0.70, [DEC-1175](../project/decisions/DEC-1175.md), [DEC-2627](../project/decisions/DEC-2627.md)).
 On a control-stream `ConnectionRequested` at version 2 with `credential` `oauth`, the manager starts
-one token-exchange process for the `connection_id` (connections spec §5.2 step 4). It is started
-once, at generation 1 with cause `requested`, and never again: an exchange that failed or ran out of
+one token-exchange process for the `connection_id` (connections spec §5.2 step 4), once it has read
+the `ConnectionRolesMade` that names that request (§9.33, v0.77): the exchange logs in with a role
+made for its connection alone, so it is never started before that role exists. A request with no
+`ConnectionRolesMade`, or with a `ConnectionRolesRefused`, starts nothing, and the connect ends by
+its deadline. It is started once, at generation 1 with cause `requested`, and never again: an exchange that failed or ran out of
 time is not retried (one attempt; the code it read is spent), no kill switch starts it, and no
 crash loop names it. It ends on its own by the request's deadline, and the manager stops a running
 one, cause `request_closed`, as soon as its request closes (`ConnectionEstablished`,
@@ -6165,6 +6295,185 @@ break it no longer counts, so every passkey step-up with it is then `step_up_mis
 **No `JournaledFact`.** **Vectors**: `reference/journal`'s `step_up_assertions` section holds a base
 draft, an invalid draft for every member type and each clause of rule 252, batches for each clause
 of rule 253, and control streams for rule 254. The vectors stay version 3.
+
+### 9.33 Connection roles ([DEC-2350](../project/decisions/DEC-2350.md))
+
+This subsection adds three records on the workspace control stream at schema version 1. §9.2's
+conventions and types apply. The rules number from 261.
+
+A connection's token exchange and executor log in with OpenBao's Kubernetes auth, each with a role
+made for that connection alone and bound to its ServiceAccount (DEC-2060, infrastructure §5.2). The
+**role provisioner**, a workspace process holding only the power to make and remove those roles
+(DEC-2630 item 7), makes both when it reads a version-2 `ConnectionRequested` with `credential`
+`oauth`, and journals the outcome; the deployment manager starts the exchange only once the roles
+are made (§9.21). When the request closes without an establishment, and when the connection is
+revoked, the provisioner removes the token exchange's; it never removes the executor's.
+
+**`ConnectionRolesMade`**: both roles of one connect's connection exist.
+
+| Member | Type | Meaning |
+|---|---|---|
+| `connection_id` | `id` | The request's connection |
+
+**`ConnectionRolesRefused`**: the roles could not be made, so nothing starts for the request.
+
+| Member | Type | Meaning |
+|---|---|---|
+| `connection_id` | `id` | The request's connection |
+| `reason` | `vault_unavailable` \| `role_refused` | The vault could not be reached in time, or it refused a role |
+
+**`ConnectionRolesRemoved`**: the token exchange's role of a connection was removed.
+
+| Member | Type | Meaning |
+|---|---|---|
+| `connection_id` | `id` | The connection |
+| `role` | `token_exchange` | The role removed: only the exchange's, since the executor's is never removed (DEC-2350 item 3) |
+| `occasion` | `request_closed` \| `revoked` | The request closed without an establishment, or the connection was revoked |
+
+A `ConnectionRolesMade` or `ConnectionRolesRefused` names its request's `ConnectionRequested` as its
+`causation_id`; a `ConnectionRolesRemoved` names the record that closed the request its roles were
+made for (a `ConnectionRefused` with occasion `connect`) or revoked the connection
+(`ConnectionRevoked`), journaled after that request, before those roles' record or after it (rule
+263). `append` does not check
+the links. None carries a credential, a role's name, or a reason's detail.
+
+**Consistency rule** (reason `schema`; the path is the member named):
+
+261. Every §9.33 record: `actor.kind` is `system` (`actor.kind`), and `causation_id` is non-null
+     (`causation_id`).
+
+**Stream rules** on the control stream, the provisioner's, and failing closed in the verifier's
+fold:
+
+262. A `ConnectionRolesMade` or `ConnectionRolesRefused` follows the version-2 `ConnectionRequested`
+     with `credential` `oauth` its `causation_id` names, of the same `connection_id`
+     (`payload.connection_id`), and no two of either name one request (`causation_id`).
+263. A `ConnectionRolesRemoved` follows its connection's latest `ConnectionRolesMade`, at most once
+     after it (`payload.role`), and its `causation_id` names a record of the same connection that
+     follows the request that `ConnectionRolesMade` answers, its `causation_id`, whether journaled
+     before the `ConnectionRolesMade` or after it (`payload.occasion`):
+     - with `occasion` `request_closed`, a `ConnectionRefused` with occasion `connect`, which closed
+       the request the roles were made for;
+     - with `occasion` `revoked`, a `ConnectionRevoked`.
+
+     So a removal never cites the closer of an earlier request of the same connection id (DEC-699
+     lets a refused id be requested again): a request whose roles are made keeps them until its own
+     close or revocation. Roles made for a request that had already closed, since the provisioner
+     writes the vault before it journals, are owed their removal at once, citing that close.
+
+The token exchange's role is removed at once on either occasion. The executor's role is never
+removed: an executor started for any reason, a kill switch's to apply among them (DEC-2343,
+DEC-2344), can always log in, and a revocation destroys its token instead, so the role grants only a
+read of a token that no longer exists. A connect that the API established keeps both roles for its
+connection's life. Rule 131's "nothing further is journaled"
+for a request a revocation closed concerns the request's own records; a removal is the
+provisioner's.
+
+**No `JournaledFact`.** **Vectors**: `reference/journal`'s `connection_roles` section holds a base
+draft of each record, an invalid draft for every member type and each clause of rule 261, valid
+drafts for the cases it might be misread to refuse, and control streams for rules 262 and 263. The
+vectors stay version 3.
+
+### 9.34 A held retirement ([DEC-2352](../project/decisions/DEC-2352.md))
+
+This subsection adds `RetirementHeld` on the agent stream at schema version 1. §9.2's and §9.7's
+conventions and types apply. The rules number from 265, after #2294's rule 264.
+
+A runtime retires an agent that ran only once the account stream's fold shows no position
+attributed to the agent and no working order of its own (§9.2's `AgentStopped`,
+[DEC-2344](../project/decisions/DEC-2344.md) item 2). While it waits, the runtime writes one
+**sequence** of `RetirementHeld` records, one per further 24 hours of risk clock, each with an
+`OwnerAlertSent` (`retirement_held`, its `subject` this record) as the next row of the same batch
+(rule 130, notifications spec §3.2):
+
+- **Periods count records, not days.** Period k+1 follows period k, at least 24 hours of risk
+  clock after it (rule 266), and the first at least 24 hours after `held_since` (rule 265); the
+  runtime writes each at its first risk tick once due. A runtime that was down for days writes the
+  next period when it is back, and the one after a day later, never the missed ones in a burst, so a
+  period's number is its place in the sequence and its `risk_clock` says when it was written.
+- **It keeps writing in every agent mode,** `paused` and `stopped` included: a kill switch or a
+  hold during the wait is when the owner most needs to hear that the agent still holds something.
+- **One sequence per agent.** A second cause while a sequence is open starts nothing, and the
+  first cause's sequence continues (rule 266), with one exception: an owner's Stop. Its
+  `OwnerCommandIssued` ends the open sequence, and the Stop is the cause of its own, from 1.
+  Repeated Stops each begin a new sequence; the owner is engaged, so the extra alerts are
+  acceptable.
+- **The sequence ends with the retirement, read from records already journaled**, all of this
+  agent's own: its `AgentStopped`, or an owner's `OwnerCommandIssued` scoped to the agent with
+  `command` `resume` or `stop` (control stream). No `RetirementHeld` of that cause follows. A
+  `MandateVersionApplied` with `result` `applied` for the agent (account stream) ends nothing by
+  itself. A version **cancels** the retirement when, from records a verifier replays, the cause no
+  longer holds. For `profit_stop`, the cause is a `RiskLimitTriggered` (§9.27), and the version
+  cancels it with a new `profit_level` above the return at the trigger, (`agent_equity` −
+  `capital_base`) / `capital_base` from that record's snapshot (mandate spec §5). For a passed
+  `end_date` (a `GoalCompleted`, reason `end_date`) or a goal's `release` (a `GoalCompleted`,
+  `on_complete` `release`), it compares the `end_date` or `on_complete` of the version applied
+  (its `new_version`) with those of the version the sequence's first record names in
+  `config_refs.mandate_version`: a later `end_date`, or a changed `on_complete`, cancels it. No
+  version cancels any other cause:
+
+  | Cause of the retirement | Its record | A version cancels it by |
+  |---|---|---|
+  | `profit_stop` reached (`GoalCompleted` reason `profit_stop_reached`, after its limit) | The `RiskLimitTriggered` with `limit` `profit_stop` | A `profit_level` above the return at that trigger |
+  | A passed `end_date` | The `GoalCompleted` with reason `end_date` | A later `end_date` |
+  | A goal's `release` | The `GoalCompleted` with `on_complete` `release` | A changed `on_complete` |
+  | `target_qty` or `max_spend` reached | The `GoalCompleted` with that reason | Nothing: the goal was met |
+  | The owner's Stop | The `OwnerCommandIssued` with `command` `stop` | Nothing: only a resume or the owner's own later command ends it |
+  | Any other limit's trigger (a drawdown rung, the lifetime floor, the daily loss, a tripwire) | The `RiskLimitTriggered` with that `limit` | Nothing: its return is the loss that triggered it, so no `profit_level` reads against it | The agent's current return is never read, so a dip below the level never cancels a
+  retirement whose exits are unfilled. A version that does not cancel
+  it leaves the runtime writing the same sequence under the new version. One that cancels it
+  leaves the runtime writing nothing more of that cause (the writer's rule), and if the agent
+  retires again, the new cause begins its own sequence from 1. So an applied version can add
+  alerts, never silence one. A redeploy is a new agent id on its own stream
+  ([DEC-1173](../project/decisions/DEC-1173.md)), so nothing carries over to it.
+- **A restarted runtime folds its stream first**, so it never writes a period twice.
+- **A silent sequence is a verifier finding.** An open sequence whose last `RetirementHeld` is more
+  than 48 hours of risk clock old, with no end and no version that cancels it since, is not
+  refused at append, since a down runtime writes nothing; the verifier reports it as
+  `retirement_held_silent` for the agent, so a writer that stopped while the agent still held
+  something is seen, and a cancelled retirement raises nothing. The `retirements` vectors' `silence`
+  cases pin it: writing, silent, ended, cancelled by each kind of version, and a level still
+  breached.
+
+**`RetirementHeld`** (agent stream; `config_refs` names `mandate_version`)
+
+| Member | Type | Meaning |
+|---|---|---|
+| `held_since` | `risk_clock` | The cause record's own risk clock, when the retirement began waiting: rules 265 and 266 |
+| `period` | integer | The record's place in its sequence, from 1: rules 265 and 266 |
+| `waiting_on` | `[position \| working_order]` | What the agent still holds of its own, each once, in that order: rule 265 |
+| `risk_clock` | `risk_clock` | The tick it was written at: rule 265 |
+
+Its `causation_id` is the record that began the retirement: the owner's Stop, a `profit_stop`
+limit, a goal's `release`, or a passed `end_date` (mandate spec §3.1). It names no order,
+position, instrument, or quantity (`AGENTS.md` rule 6).
+
+265. `RetirementHeld`: its `actor` is the runtime's (`agent`, `actor.kind`), never a workspace
+     service's or a user's; `causation_id` is non-null (`causation_id`); `period` is at least 1
+     (`payload.period`); `risk_clock` is no sooner than `held_since` plus 86400 seconds
+     (`payload.risk_clock`); and `waiting_on` is non-empty, each value once, in ascending order
+     (`payload.waiting_on`).
+266. **Stream rule** (the agent stream, read with the control and account streams' records about
+     the agent, in commit order). (a) Each `RetirementHeld` is followed by its `OwnerAlertSent`
+     (`retirement_held`, `subject` it), and each such alert follows the record it names. (b) At most
+     one sequence is open. A `RetirementHeld` while one is open has its cause, the next period, the
+     first one's `held_since`, a `config_refs.mandate_version` that is the sequence's or the
+     `new_version` of a `MandateVersionApplied` (`result` `applied`) for this agent since its last
+     record, and a `risk_clock` at least 86400 seconds after its last record's. One of another cause
+     is refused, unless such a version was applied since the open sequence's last record: then the
+     open sequence has ended, and the new one begins. A `RetirementHeld` with none open has period
+     1. (c) This agent's `AgentStopped`, and an `OwnerCommandIssued` scoped to this agent with
+     `command` `resume` or `stop`, end the open sequence, and no `RetirementHeld` of an ended
+     sequence's cause follows. Another agent's records, another command, and a rejected version end
+     and move nothing. The fold reports the first record that breaks it; other records are not read.
+
+**Vectors.** The `retirements` section of the reference cases: a base draft, an invalid draft for
+every member type and for each part of rule 265, valid drafts for a late period, both values, a
+working order alone, and period 3, and 28 streams for rule 266, among them days down and a burst
+after them, a second cause while one holds, each kind of end, another agent's end, a workspace resume, a pause, a
+version that leaves it retiring and one that is rejected, and a record without its alert. The
+reference fold and an independent oracle, which reads the ends itself and walks each segment's
+consecutive records, agree on every stream, and each check is shown catching its seeded bug.
 
 ## 10. Anchoring
 
