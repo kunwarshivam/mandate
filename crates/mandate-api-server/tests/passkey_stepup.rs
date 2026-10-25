@@ -238,6 +238,15 @@ fn unb64(text: &str) -> Vec<u8> {
     support_passkey::unb64url(text)
 }
 
+/// `ask` counts: the port returns a record to append, and shows what it answered otherwise.
+fn counts(w: &World, ask: &Ask) {
+    let answer = w.judge(ask);
+    assert!(
+        matches!(answer, Ok(Some(_))),
+        "the step-up counts, not {answer:?}"
+    );
+}
+
 /// `code`, and the challenge still held: a refusal takes nothing.
 fn refused(w: &World, ask: &Ask, code: ProblemCode) {
     assert_eq!(w.judge(ask), Err(Unverified::Code(code)));
@@ -264,10 +273,7 @@ fn a_challenge_outside_its_window_is_stale() {
     }
     let mut last = w.ask();
     last.now = ISSUED + LIFE - 1;
-    assert!(
-        matches!(w.judge(&last), Ok(Some(_))),
-        "the last second counts"
-    );
+    counts(&w, &last);
 }
 
 /// An earlier event on the stream whose step-up names `challenge`.
