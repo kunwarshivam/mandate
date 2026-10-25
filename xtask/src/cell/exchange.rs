@@ -142,6 +142,26 @@ pub fn code_taken(read: &str) -> bool {
     matches!(read.trim(), "taken" | "missing")
 }
 
+/// What a failed API call's report may say of its reply: the problem's `code` member alone, never
+/// the body, which on a challenge carries the bytes the CLI's code is made from.
+pub fn problem(reply: &str) -> String {
+    serde_json::from_str::<Value>(reply_body(reply))
+        .ok()
+        .and_then(|body| body["code"].as_str().map(str::to_owned))
+        .unwrap_or_else(|| "no problem code".to_owned())
+}
+
+/// What a report may say of [`CODE_READ`]'s answer: one of its three words, never anything else
+/// the pod printed.
+pub fn code_state(read: &str) -> &'static str {
+    match read.trim() {
+        "taken" => "taken",
+        "readable" => "readable",
+        "missing" => "missing",
+        _ => "unreadable",
+    }
+}
+
 /// The phase of the token-exchange pod the manager started for `connection`, from `kubectl get
 /// pods -o json` over the manager's token-exchange pods: the newest generation's, matched by its
 /// `mandate.dev/subject` annotation; `None` while there is none.
@@ -235,10 +255,12 @@ const CODE_READ: &str = "read -r BAO_TOKEN && export BAO_TOKEN && \
      elif bao kv get -mount=mandate \"$1\" >/dev/null 2>&1; then echo readable; else echo missing; fi";
 
 /// The vault pod's script that hands out the connection's token entry with its access token
-/// replaced by `present`, so the token never leaves the pod.
+/// replaced by `present`, so the token never leaves the pod: `sed -n …p` prints only an entry
+/// whose token it replaced, and nothing for any other, so an entry it fails to match is never
+/// printed.
 const TOKEN_READ: &str = "read -r BAO_TOKEN && export BAO_TOKEN && \
-     bao kv get -mount=mandate -field=value \"$1\" | base64 -d | \
-     sed -E 's/\"access_token\":\"[^\"]+\"/\"access_token\":\"present\"/'";
+     bao kv get -mount=mandate -field=value \"$1\" 2>/dev/null | base64 -d 2>/dev/null | \
+     sed -nE 's/\"access_token\":\"[^\"]+\"/\"access_token\":\"present\"/p'";
 
 /// The drill. In seeded mode the connect's step-up is never confirmed in the CLI, so the start must
 /// refuse it, `step_up_missing`, and the drill reports that.
@@ -274,7 +296,7 @@ pub fn drill(seeded: bool) -> Result<Verdict> {
     ) else {
         return Ok(Verdict::Broken(format!(
             "the connection challenge answered {status}: {}",
-            reply_body(&reply)
+            problem(&reply)
         )));
     };
     if !seeded {
@@ -306,7 +328,7 @@ pub fn drill(seeded: bool) -> Result<Verdict> {
     ) else {
         return Ok(Verdict::Broken(format!(
             "the connect's start answered {status}: {}",
-            reply_body(&reply)
+            problem(&reply)
         )));
     };
     let mut forward = fixture_forward()?;
@@ -341,7 +363,7 @@ pub fn drill(seeded: bool) -> Result<Verdict> {
     if !code_taken(&taken) {
         return Ok(Verdict::Broken(format!(
             "the code for {connection} is not taken: {}",
-            taken.trim()
+            code_state(&taken)
         )));
     }
     let entry = vault_read(TOKEN_READ, &format!("connections/{seg}/token"), &root)?;
@@ -563,6 +585,18 @@ mod tests {
         ] {
             assert_eq!(fixture_path(other), None, "{other}");
         }
+    }
+
+    /// A failure report names the problem's code and never the reply's body.
+    #[test]
+    fn a_failure_report_names_the_problem_code_alone() {
+        let refused =
+            "HTTP/1.1 403 Forbidden\r\n\r\n{\"code\":\"step_up_missing\",\"detail\":\"x\"}";
+        assert_eq!(problem(refused), "step_up_missing");
+        let issued = "HTTP/1.1 201 Created\r\n\r\n{\"webauthn_challenge\":\"q83vEjRW\"}";
+        assert_eq!(problem(issued), "no problem code");
+        assert_eq!(code_state("readable\n"), "readable");
+        assert_eq!(code_state("{\"code\":\"secret\"}"), "unreadable");
     }
 
     #[test]
