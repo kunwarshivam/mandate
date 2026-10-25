@@ -24,6 +24,7 @@ use ring::rand::{SecureRandom, SystemRandom};
 use ring::{digest, hmac};
 
 use crate::config::SessionKey;
+use crate::standing::Standings;
 
 /// The session cookie's name (§3.3 item 5): host-only, `Secure`, `HttpOnly`, `SameSite=Strict`.
 pub const COOKIE_NAME: &str = "__Host-mandate_session";
@@ -157,6 +158,8 @@ pub struct Sessions {
     random: Box<dyn Random>,
     limits: Result<SessionLimits, SessionRefusal>,
     store: Mutex<Store>,
+    /// Each principal's last sign-in, route 2's interim standing (DEC-2319 item 2).
+    standings: Standings,
 }
 
 impl Sessions {
@@ -170,6 +173,7 @@ impl Sessions {
                 opened: 0,
                 entries: BTreeMap::new(),
             }),
+            standings: Standings::new(),
         }
     }
 
@@ -214,6 +218,7 @@ impl Sessions {
             previous: None,
         };
         self.insert(id, entry, replaced, now)?;
+        self.standings.signed_in(principal, now);
         Ok(self.encode(&id, &secret))
     }
 
@@ -476,6 +481,21 @@ impl Sessions {
             entry.absolute_until
         };
         UtcNanos::from_parts(entry.absolute_until.min(idle), 0).map_err(|_| Unauthenticated)
+    }
+
+    /// `member`'s standing for route 2: the last sign-in this store opened a full session for
+    /// at, and no deprovision, which has no source yet: [DEC-2319] item 2's interim, until the
+    /// journaled signal the founder chose lands (backlog E9-13). A reduction-only session is not a
+    /// sign-in, and a refused open records nothing.
+    ///
+    /// The standing has one owner, [`Standings`]: the store holds the process's only instance and
+    /// is its only writer, recording each full sign-in as it opens, and this reads it through, as
+    /// route 2's judge does. Nothing else keeps a sign-in.
+    ///
+    /// [DEC-2319]: ../../../docs/project/decisions/DEC-2319.md
+    /// [`Standings`]: crate::standing::Standings
+    pub fn standing(&self, member: PrincipalId) -> SubjectStanding {
+        self.standings.standing(member)
     }
 
     /// How many sessions are held, for the tests' independent count.

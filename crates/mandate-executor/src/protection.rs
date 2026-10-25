@@ -1141,7 +1141,18 @@ pub(crate) fn changed(
     batch: &mut Batch<'_, '_>,
     instrument: &InstrumentId,
     action: &str,
+    pairs: Vec<(&'static str, Value)>,
+) -> Result<EventId, ExecutorError> {
+    changed_by(batch, instrument, action, pairs, None)
+}
+
+/// [`changed`], naming `cause` as the record's `causation_id`.
+pub(crate) fn changed_by(
+    batch: &mut Batch<'_, '_>,
+    instrument: &InstrumentId,
+    action: &str,
     mut pairs: Vec<(&'static str, Value)>,
+    cause: Option<EventId>,
 ) -> Result<EventId, ExecutorError> {
     if !pairs
         .iter()
@@ -1177,7 +1188,7 @@ pub(crate) fn changed(
         };
         closed.push((member, value));
     }
-    batch.journal("ProtectionChanged", None, closed)
+    batch.journal("ProtectionChanged", cause, closed)
 }
 
 /// A protective order's confirmed cancel (§5.4), recorded. Releasing the waiting exits is
@@ -1746,10 +1757,11 @@ pub(crate) fn new_day(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         let Some(first) = protection.resting.first() else {
             continue;
         };
+        let alerted = batch.view.alerted.contains(&instrument);
         if protection.prices.is_none() {
-            let pairs = vec![("orders", text(joined(&protection.resting)))];
-            let alerted = changed(batch, &instrument, "expiry_unreplaceable", pairs)?;
-            batch.notify(alerted, "protection_expiring");
+            if !alerted {
+                kept(batch, &instrument)?;
+            }
             continue;
         }
         let entry = first.protected_entry().unwrap_or_else(|| first.clone());
@@ -1760,9 +1772,9 @@ pub(crate) fn new_day(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
             .and_then(|order| order.agent.clone())
             .unwrap_or_else(|| AgentId(EVERY_AGENT.to_owned()));
         if !replaceable(batch, &instrument, protection.prices, &agent)? {
-            let pairs = vec![("orders", text(joined(&protection.resting)))];
-            let alerted = changed(batch, &instrument, "expiry_unreplaceable", pairs)?;
-            batch.notify(alerted, "protection_expiring");
+            if !alerted {
+                kept(batch, &instrument)?;
+            }
             continue;
         }
         let mut pairs = vec![
@@ -1786,6 +1798,18 @@ pub(crate) fn new_day(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
             }
         }
     }
+    Ok(())
+}
+
+/// Protection due at its buffer day that is kept, for want of prices or of a form to place it
+/// again, is journaled (`expiry_unreplaceable`) and the owner alerted (`protection_expiring`),
+/// once for its resting set: the record names the day's `TradingDayStarted` as its cause, the
+/// fold notes the alert from it, and any change to the set clears the note (DEC-367 item 4 (a′),
+/// DEC-2355).
+fn kept(batch: &mut Batch<'_, '_>, instrument: &InstrumentId) -> Result<(), ExecutorError> {
+    let day = batch.view.day_started.clone();
+    let alerted = changed_by(batch, instrument, "expiry_unreplaceable", Vec::new(), day)?;
+    batch.notify(alerted, "protection_expiring");
     Ok(())
 }
 

@@ -66,6 +66,10 @@ pub struct ExecutorState {
     /// The latest trading day a copied `TradingDayStarted` began: the creation date of the GTC
     /// protection placed from then on, and the day §5.4's re-placement buffer is counted from.
     pub(crate) trading_day: Option<Date>,
+    /// The latest copied `TradingDayStarted` record: the due-day `expiry_unreplaceable` names it as
+    /// its cause, which tells it apart from `re_cover`'s and `re_place`'s shortfall record of the
+    /// same action (DEC-2355 item 1).
+    pub(crate) day_started: Option<EventId>,
     /// Each exit laddered outside a sequence (§5.6: extended hours, the closing auction window, a
     /// presumed halt), by its instrument and its intent, folded from its rungs' `OrderSubmitted`:
     /// one for each exit, so a second exit laddered in the instrument never replaces the first
@@ -132,6 +136,12 @@ pub struct ExecutorState {
     /// Each agent-scoped kill switch as its `KillSwitchActivated` journaled it, by that record's
     /// id, with the closes it has not yet raised as flatten intents (§5.5, DEC-485).
     pub(crate) switches: BTreeMap<EventId, Switch>,
+    /// The instruments whose kept protection was journaled `expiry_unreplaceable` at its due day,
+    /// caused by that day's `TradingDayStarted`, and alerted since their resting protection last
+    /// changed (DEC-2355): it is alerted once for its resting set, and again only once a placement,
+    /// a confirmed cancel or an order's end changes the set. The record names no order (journal
+    /// spec §9.5, rule 41), so the fold keeps the instrument.
+    pub(crate) alerted: BTreeSet<InstrumentId>,
     /// What each agent released to the owner in each instrument, from its `PositionReleased`
     /// records (journal spec §9.27, mandate spec §3.1, DEC-2354): shares no longer its lots.
     pub(crate) released: BTreeMap<(AgentId, InstrumentId), Qty>,
@@ -218,6 +228,9 @@ pub(crate) struct Switch {
     /// The orders the switch cancelled, which no refusal of that cancel returns to working while
     /// the broker still reports them working (DEC-2302).
     pub(crate) cancels: BTreeSet<ClientOrderId>,
+    /// The instruments whose close was journaled `exit_unpriced` for want of a limit, from that
+    /// record naming this switch as its cause: alerted once, not again (DEC-2361).
+    pub(crate) unpriced: BTreeSet<InstrumentId>,
 }
 
 /// The bid and floor an owner confirmed for an owner's exit (§5.5, DEC-2040): the ladder prices
@@ -421,6 +434,8 @@ impl ExecutorState {
             uncompensated: BTreeMap::new(),
             pending_requests: BTreeMap::new(),
             switches: BTreeMap::new(),
+            alerted: BTreeSet::new(),
+            day_started: None,
             released: BTreeMap::new(),
             closing_all: BTreeSet::new(),
             account_switch: None,
@@ -507,6 +522,48 @@ impl ExecutorState {
         instrument: &InstrumentId,
     ) -> Result<Option<&Protection>, ExecutorError> {
         Ok(self.protection.get(instrument))
+    }
+
+    /// The instruments whose exit waits on a price (E21-30, DEC-2359): one in §5.4's exit sequence,
+    /// one with a lone exit ladder, one a kill switch has yet to raise its close in (§5.5, which
+    /// names that close's limit from a sane quote when no stop or floor does), and one with a held
+    /// exit or flatten, whatever held it. These are the instruments the process's quote feed
+    /// reads, so §5.6's ladder has a quote to price from. An instrument with only resting
+    /// protection is not among them, and neither is a held opening: neither waits on an exit price.
+    pub fn quote_wanted(&self) -> Result<BTreeSet<InstrumentId>, ExecutorError> {
+        let held = self
+            .held
+            .iter()
+            .filter_map(|intent| self.bodies.get(intent))
+            .flat_map(|body| match body {
+                IntentBody::Order {
+                    instrument,
+                    purpose,
+                    ..
+                } if !purpose.adds_risk() => vec![instrument.clone()],
+                IntentBody::Order { .. } => Vec::new(),
+                IntentBody::Flatten(plan) => plan
+                    .sells
+                    .iter()
+                    .map(|leg| leg.instrument.clone())
+                    .collect(),
+            });
+        Ok(self
+            .exiting
+            .keys()
+            .cloned()
+            .chain(
+                self.ladders
+                    .keys()
+                    .map(|(instrument, _)| instrument.clone()),
+            )
+            .chain(
+                self.switches
+                    .values()
+                    .flat_map(|switch| switch.pending.iter().cloned()),
+            )
+            .chain(held)
+            .collect())
     }
 
     /// Σ protective sell quantity for one instrument, which §5.4 requires never to exceed the
