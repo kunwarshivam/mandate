@@ -203,7 +203,6 @@ fn an_exit_in_its_sequence_wants_its_instruments_quote() {
 /// §5.6: an exit at the market beside no protection is priced by its own ladder from the quote,
 /// and while the ladder runs its instrument is wanted, so each step prices from a fresh quote.
 #[test]
-#[ignore = "pending E21-30"]
 fn an_exit_on_its_own_ladder_wants_its_instruments_quote() {
     let (ids, mandates, instruments, config) = (
         TestIds,
