@@ -48,12 +48,10 @@ use crate::writes::{
     Gate, appended_batch_at, derived_for, id_text, principal_text, repeated, strictly, unknown,
 };
 
-/// The token-breadth disclosure's document (DEC-2621 item 5).
-pub const DISCLOSURE_DOCUMENT: &str = "alpaca_oauth_token_breadth";
-
-/// The disclosure's current version; a start naming another is `invalid` at `/disclosure`
-/// (DEC-2623 item 6).
-pub const DISCLOSURE_VERSION: &str = "1";
+/// The token-breadth disclosure's document (DEC-2621 item 5) and its current version; a start
+/// naming another is `invalid` at `/disclosure` (DEC-2623 item 6). They are the connections
+/// crate's, the ones the CLI confirms a connect at (DEC-2125 item 3), so the two never diverge.
+pub use mandate_connections::manager::{DISCLOSURE_DOCUMENT, DISCLOSURE_VERSION};
 
 /// The §3.4 operation the start's `ConnectionRequested` event id is derived under.
 pub const OPERATION: &str = "connect";
