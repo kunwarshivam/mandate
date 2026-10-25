@@ -597,7 +597,6 @@ fn issued_token(provider: &Alpaca, now: i64) -> Result<String, Refusal> {
 /// The id is the token's SHA-256 as a version 4 UUID: two vectors computed outside the crate, and
 /// for other tokens the test's own derivation; distinct tokens read distinct accounts.
 #[test]
-#[ignore = "pending E10-23"]
 fn an_account_id_is_the_tokens_sha256_as_a_version_4_uuid() {
     assert_eq!(
         account_id("token-a"),
@@ -620,7 +619,6 @@ fn an_account_id_is_the_tokens_sha256_as_a_version_4_uuid() {
 /// A token the provider issued reads its own account, `{"id": ...}` and nothing else; every other
 /// header, or none, reads nothing, as does another provider's token.
 #[test]
-#[ignore = "pending E10-23"]
 fn an_issued_token_reads_its_account_and_nothing_else_does() {
     let provider = provider();
     let token = issued_token(&provider, T0).expect("a token");
@@ -654,7 +652,6 @@ fn an_issued_token_reads_its_account_and_nothing_else_does() {
 /// The provider holds at most [`MAX_TOKENS`] tokens: the next redemption is unavailable, and every
 /// token held still reads its account.
 #[test]
-#[ignore = "pending E10-23"]
 fn the_token_store_holds_at_most_its_bound() {
     let provider = provider();
     let first = issued_token(&provider, T0).expect("a token");

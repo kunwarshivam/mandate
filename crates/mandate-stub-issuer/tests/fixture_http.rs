@@ -214,7 +214,6 @@ fn no_issuer_runs_so_its_routes_and_every_other_path_are_not_found() {
 /// JSON; no bearer or another one is 401 with an empty body; a query or a body is 400; any other
 /// method is not found, and the account is answered at the public host alone.
 #[test]
-#[ignore = "pending E10-23"]
 fn an_issued_tokens_account_is_read_at_the_public_host_and_nothing_else_is() {
     let addr = serve();
     let token = redeemed_token(addr);

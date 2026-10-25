@@ -7,7 +7,7 @@
 //! from the token alone; the tokens are kept in memory, at most [`MAX_TOKENS`]. Nothing here reads a
 //! clock or logs: the router passes the time in.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::Path;
 use std::sync::{Mutex, PoisonError};
@@ -100,8 +100,6 @@ impl Refusal {
 pub enum AccountRefusal {
     /// No `Authorization: Bearer <token>` naming a token this provider issued and holds: 401.
     Unauthorized,
-    /// The endpoint's stub, before E10-23 lands.
-    Unimplemented,
 }
 
 /// The account id the fixture answers for `token` (DEC-1178 item 1): the first 16 bytes of its
@@ -109,10 +107,24 @@ pub enum AccountRefusal {
 /// connect, has its own account, and a token always reads the same one.
 ///
 /// # Errors
-/// [`AccountRefusal::Unimplemented`], the stub's.
+/// None today; the `Result` keeps the endpoint's one refusal type.
 pub fn account_id(token: &str) -> Result<String, AccountRefusal> {
-    let _unread_by_the_stub = token;
-    Err(AccountRefusal::Unimplemented)
+    let sum = digest(&SHA256, token.as_bytes());
+    let mut bytes = [0_u8; 16];
+    for (byte, from) in bytes.iter_mut().zip(sum.as_ref()) {
+        *byte = *from;
+    }
+    bytes[6] = (bytes[6] & 0x0f).wrapping_add(0x40);
+    bytes[8] = (bytes[8] & 0x3f).wrapping_add(0x80);
+    let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+    Ok(format!(
+        "{}-{}-{}-{}-{}",
+        &hex[0..8],
+        &hex[8..12],
+        &hex[12..16],
+        &hex[16..20],
+        &hex[20..32]
+    ))
 }
 
 /// Why the client secret file is refused.
@@ -158,11 +170,12 @@ struct Issued {
     issued_at: i64,
 }
 
-/// The provider: its client and the codes it issued.
+/// The provider: its client, the codes it issued, and the tokens it issued (DEC-1178 item 2).
 pub struct Alpaca {
     settings: Settings,
     random: Box<dyn Random>,
     codes: Mutex<BTreeMap<String, Issued>>,
+    tokens: Mutex<BTreeSet<String>>,
 }
 
 impl Alpaca {
@@ -171,6 +184,7 @@ impl Alpaca {
             settings,
             random,
             codes: Mutex::new(BTreeMap::new()),
+            tokens: Mutex::new(BTreeSet::new()),
         }
     }
 
@@ -258,7 +272,12 @@ impl Alpaca {
         if !redeemable {
             return Err(Refusal::InvalidGrant);
         }
+        let mut tokens = self.tokens.lock().unwrap_or_else(PoisonError::into_inner);
+        if tokens.len() >= MAX_TOKENS {
+            return Err(Refusal::Unavailable);
+        }
         let token = self.fresh().ok_or(Refusal::Unavailable)?;
+        tokens.insert(token.clone());
         Ok(serde_json::json!({
             "access_token": token,
             "scope": SCOPE,
@@ -272,10 +291,21 @@ impl Alpaca {
     ///
     /// # Errors
     /// [`AccountRefusal::Unauthorized`] for a header that is not exactly `Bearer <token>` with a
-    /// token this provider issued and holds; [`AccountRefusal::Unimplemented`], the stub's.
+    /// token this provider issued and holds.
     pub fn account(&self, authorization: Option<&[u8]>) -> Result<String, AccountRefusal> {
-        let _unread_by_the_stub = authorization;
-        Err(AccountRefusal::Unimplemented)
+        let token = authorization
+            .and_then(|header| header.strip_prefix(b"Bearer "))
+            .and_then(|token| std::str::from_utf8(token).ok())
+            .ok_or(AccountRefusal::Unauthorized)?;
+        let held = self
+            .tokens
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .contains(token);
+        if !held {
+            return Err(AccountRefusal::Unauthorized);
+        }
+        Ok(serde_json::json!({ "id": account_id(token)? }).to_string())
     }
 
     /// How many codes are held.
