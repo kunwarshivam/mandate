@@ -496,13 +496,16 @@ def test_each_seeded_bug_is_caught():
     assert oauth_fixture(no_executor, on=True), "a fixture that refuses the executor is caught"
 
 
-def test_staging_names_no_account_url_and_its_executor_reaches_no_fixture():
-    """DEC-1178 item 4: on Alpaca's paper host, in staging, the executor carries no account URL and
-    its egress names nothing beside the journal, the vault and DNS; its one external host,
-    `paper-api.alpaca.markets`, is staging's Cilium policy's (`test_gitops`)."""
-    docs = render_all(*ALPACA_PAPER)
-    assert named_env(docs, "MANDATE_ALPACA_ACCOUNT_URL") == []
-    assert executor_reach(docs) == []
+def test_staging_and_production_name_no_account_url_and_their_executor_reaches_no_fixture():
+    """DEC-1178 item 4: in staging, on Alpaca's paper host, and in production, the executor carries no
+    account URL and its egress names nothing beside the journal, the vault and DNS; staging's one
+    external host for it, `paper-api.alpaca.markets`, is its Cilium policy's (`test_gitops`)."""
+    for name, docs in (
+        ("staging", render_all(*ALPACA_PAPER)),
+        ("production", render_all("--set", "deploymentTier=production")),
+    ):
+        assert named_env(docs, "MANDATE_ALPACA_ACCOUNT_URL") == [], name
+        assert executor_reach(docs) == [], name
 
 
 def test_a_token_url_is_admitted_by_its_one_fixture_value_alone():
