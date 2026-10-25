@@ -292,7 +292,7 @@ fn a_valid_assertion_counts_once_returns_its_record_and_drops_the_challenge() {
 #[ignore = "pending E9-4"]
 fn a_second_assertion_on_one_challenge_is_missing() {
     let w = world();
-    assert!(matches!(w.judge(&w.ask()), Ok(Some(_))));
+    counts(&w, &w.ask());
     let mut again = w.ask();
     again.assertion = Some(w.signed(10).wire(CREDENTIAL));
     assert_eq!(
@@ -512,7 +512,7 @@ fn a_credential_past_cool_off_at_its_end_counts() {
         T0 - 900,
         enrolled(OWNER, CREDENTIAL, &w.signer, 0, Some(ISSUED + 30)),
     );
-    assert!(matches!(w.judge(&w.ask()), Ok(Some(_))));
+    counts(&w, &w.ask());
 }
 
 #[test]
