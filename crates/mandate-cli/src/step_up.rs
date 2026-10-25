@@ -7,12 +7,19 @@
 //!
 //! Every check is local and refuses with a code, appending nothing, in DEC-2106 item 2's order. A
 //! re-run of a command that did commit finds it (DEC-2106 item 3, DEC-290).
+//!
+//! `mandate step-up confirm-connect` ([DEC-2125](../../../docs/project/decisions/DEC-2125.md) item
+//! 3; journal spec v0.82 §9.29) confirms, the same way, the challenge the API issued for a paper
+//! OAuth connect's start. The command computes the connect's action object itself, from the
+//! workspace and the current disclosure document and version, never from the browser; it stores the
+//! object and appends one `StepUpConfirmed` of kind `connection` naming its digest.
 
 use std::io::Write;
 
 use clap::{Args, Subcommand};
+use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Value, is_ulid};
-use mandate_journal::{Environment, StreamId};
+use mandate_journal::{ArtifactStore, Environment, StreamId};
 
 use crate::approvals::{self, Shown};
 use crate::control::{
@@ -20,7 +27,7 @@ use crate::control::{
     commit_choice_at, control_stream, decide, envelope, same_environment, seconds, text,
 };
 use crate::inbox::show_lines;
-use crate::postgres::JournalArgs;
+use crate::postgres::{JournalArgs, PgControlJournal};
 
 /// The record the command appends (journal spec §9.29).
 pub const EVENT_TYPE: &str = "StepUpConfirmed";
@@ -30,6 +37,65 @@ pub enum StepUpCommand {
     /// Confirm, in paper, the step-up challenge the web app shows for an approval's grant, with
     /// the code it shows.
     Confirm(ConfirmArgs),
+    /// Confirm, in paper, the step-up challenge the web app shows for an OAuth connect's start,
+    /// with the code it shows (DEC-2125).
+    ConfirmConnect(ConfirmConnectArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct ConfirmConnectArgs {
+    /// The workspace the connect is for, whose control stream the confirmation is appended to.
+    #[arg(long, value_name = "ID")]
+    pub workspace: String,
+    /// The confirming principal's ULID, as the workspace API writes its `actor.id`.
+    #[arg(long, value_name = "ULID")]
+    pub principal: String,
+    /// The challenge the web app shows.
+    #[arg(long, value_name = "ULID")]
+    pub challenge: String,
+    /// The code the web app shows, `XXXX-XXXX`.
+    #[arg(long)]
+    pub code: String,
+    #[command(flatten)]
+    pub target: JournalArgs,
+}
+
+/// One connect confirmation the owner asks for: the flags' values, as typed. It names no action
+/// digest and no disclosure version: the command computes both (DEC-2125 item 3).
+#[derive(Debug, Clone, Copy)]
+pub struct ConnectConfirming<'a> {
+    pub workspace: &'a str,
+    pub principal: &'a str,
+    pub challenge: &'a str,
+    pub code: &'a str,
+}
+
+impl<'a> From<&'a ConfirmConnectArgs> for ConnectConfirming<'a> {
+    fn from(args: &'a ConfirmConnectArgs) -> Self {
+        Self {
+            workspace: &args.workspace,
+            principal: &args.principal,
+            challenge: &args.challenge,
+            code: &args.code,
+        }
+    }
+}
+
+/// A connect confirmation whose flags passed [`check_connect`], before any journal is opened.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CheckedConnect {
+    owner: Owner,
+    challenge: String,
+    code: String,
+}
+
+/// What [`confirm_connect`] found: the connect's action digest, and the confirmation it appended
+/// or, on a re-run, the one it had already appended.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConnectConfirmed {
+    pub action_digest: String,
+    pub submitted: Submitted,
+    pub earlier: bool,
 }
 
 #[derive(Debug, Args)]
@@ -167,6 +233,86 @@ pub fn check(confirming: &Confirming<'_>) -> Result<Checked, ControlError> {
         challenge: confirming.challenge.to_owned(),
         code,
     })
+}
+
+/// DEC-2106 items 2.1 to 2.4 for a connect: the owner is the principal, in `paper`.
+///
+/// # Errors
+/// [`ControlError::Refused`] with `owner_workspace_invalid`, `principal_invalid`,
+/// `challenge_invalid`, or `code_invalid`, in that order.
+#[expect(
+    clippy::todo,
+    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+)]
+pub fn check_connect(_confirming: &ConnectConfirming<'_>) -> Result<CheckedConnect, ControlError> {
+    todo!()
+}
+
+/// The connect's action object for `checked`'s workspace at the current disclosure version, stored
+/// in `store`, then one `StepUpConfirmed` of kind `connection` naming its digest appended at `now`,
+/// or the one a run that committed appended (DEC-2125 item 3, DEC-2106 item 3).
+///
+/// # Errors
+/// [`ControlError::Refused`] with `workspace_environment` for a workspace that is not paper, or
+/// `challenge_confirmed` for a challenge already confirmed otherwise, having appended nothing;
+/// [`ControlError::Journal`] when the journal or the store cannot be read or written.
+#[expect(
+    clippy::todo,
+    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+)]
+pub fn confirm_connect(
+    _journal: &mut dyn ControlJournal,
+    _store: &mut dyn ArtifactStore,
+    _checked: &CheckedConnect,
+    _now: Now,
+) -> Result<ConnectConfirmed, ControlError> {
+    todo!()
+}
+
+/// Runs [`confirm_connect`] and prints `confirmed <challenge> as event <id> at seq <n> for
+/// <digest>`, or `already confirmed …` on a re-run.
+///
+/// # Errors
+/// As [`confirm_connect`]. A refusal prints nothing.
+pub fn run_confirm_connect(
+    checked: &CheckedConnect,
+    journal: &mut dyn ControlJournal,
+    store: &mut dyn ArtifactStore,
+    now: Now,
+    report: &mut dyn Write,
+) -> anyhow::Result<ConnectConfirmed> {
+    let confirmed = confirm_connect(journal, store, checked, now)?;
+    let word = if confirmed.earlier {
+        "already confirmed"
+    } else {
+        "confirmed"
+    };
+    writeln!(
+        report,
+        "{word} {} as event {} at seq {} for {}",
+        checked.challenge,
+        confirmed.submitted.event_id,
+        confirmed.submitted.seq,
+        confirmed.action_digest
+    )?;
+    Ok(confirmed)
+}
+
+/// The binary's `confirm-connect`: [`check_connect`] first, then the journal and the store
+/// `--journal` and `--store` name, opened only once it passes, then [`run_confirm_connect`].
+///
+/// # Errors
+/// As [`check_connect`] and [`run_confirm_connect`], or the store's failure to open.
+pub fn run_connect_command(
+    args: &ConfirmConnectArgs,
+    now: Now,
+    report: &mut dyn Write,
+) -> anyhow::Result<ConnectConfirmed> {
+    let checked = check_connect(&args.into())?;
+    let mut journal = PgControlJournal::open(&args.target)?;
+    let mut store = FsArtifactStore::open(&args.target.store)
+        .map_err(|e| ControlError::Journal(format!("the artifact store: {}", e.code())))?;
+    run_confirm_connect(&checked, &mut journal, &mut store, now, report)
 }
 
 /// DEC-2106 items 2.5 to 2.9 against `journal`, then one `StepUpConfirmed` appended at `now`, at the

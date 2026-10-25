@@ -18,9 +18,10 @@ use crate::manager::AccountRefFold::{CannotAnswer as RefUnknown, Unused, Used};
 use crate::manager::IdFold::{CannotAnswer as IdUnknown, Established, Free, RequestOpen};
 use crate::manager::StartRefusal as R;
 use crate::manager::{
-    AccountRefFold, ConnectOutcome, FinishPlan, FinishRefusal, IdFold, ManagerEffect, RefusalCause,
-    RefusedAs, RequestFold, RequestMembers, StartFacts, StartPlan, StartRequest, StepUpCheck,
-    StepUpEvidence, connect_digest, oauth_connect_digest, plan_finish, plan_start,
+    AccountRefFold, ConnectOutcome, DISCLOSURE_DOCUMENT, DISCLOSURE_VERSION, FinishPlan,
+    FinishRefusal, IdFold, ManagerEffect, RefusalCause, RefusedAs, RequestFold, RequestMembers,
+    StartFacts, StartPlan, StartRequest, StepUpCheck, StepUpEvidence, connect_digest,
+    oauth_connect_digest, oauth_connect_object, plan_finish, plan_start,
 };
 use crate::record::Broker::{Alpaca, KrakenDerivativesUs, Robinhood};
 use crate::record::Environment::{Live, Paper};
@@ -541,6 +542,32 @@ fn a_finish_closes_its_request_once_or_plans_no_effect() {
             Ok(())
         })
         .unwrap();
+}
+
+/// DEC-2125 item 3: the object the CLI stores is the connect's canonical action object, written out
+/// by hand here, whose digest is the one the start route binds; and the disclosure is the founder's
+/// version 1 (DEC-2622).
+#[test]
+#[ignore = "pending E10-13"]
+fn the_stored_connect_object_is_the_digest_s_preimage() {
+    let canonical = br#"{"action":"connect","broker":"alpaca","disclosure":{"document":"alpaca_oauth_token_breadth","version":"1"},"environment":"paper","workspace_id":"ws_01"}"#;
+    assert_eq!(
+        (DISCLOSURE_DOCUMENT, DISCLOSURE_VERSION),
+        ("alpaca_oauth_token_breadth", "1")
+    );
+    let object = oauth_connect_object("ws_01", DISCLOSURE_DOCUMENT, DISCLOSURE_VERSION).unwrap();
+    assert_eq!(object, canonical.to_vec());
+    for (workspace, document, version) in [
+        ("ws_01", DISCLOSURE_DOCUMENT, DISCLOSURE_VERSION),
+        ("ws_02", DISCLOSURE_DOCUMENT, DISCLOSURE_VERSION),
+        ("ws_01", "another_document", "2"),
+    ] {
+        assert_eq!(
+            Digest::of(&oauth_connect_object(workspace, document, version).unwrap()),
+            oauth_connect_digest(workspace, document, version).unwrap(),
+            "{workspace} {document} {version}"
+        );
+    }
 }
 
 /// DEC-2621 item 4: an OAuth connect's digest binds the disclosure's document and version, written

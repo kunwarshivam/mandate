@@ -223,6 +223,31 @@ pub fn connect_digest(
     Ok(Digest::of(&to_canonical(&Value::Object(object))))
 }
 
+/// The token-breadth disclosure an OAuth connect's owner confirms (DEC-2621 item 5): its document.
+pub const DISCLOSURE_DOCUMENT: &str = "alpaca_oauth_token_breadth";
+
+/// The disclosure's current version, the one the founder accepted (DEC-2622): a start or a CLI
+/// confirmation of a connect names this one and no other.
+pub const DISCLOSURE_VERSION: &str = "1";
+
+/// The canonical bytes of an OAuth connect's action object, the preimage of
+/// [`oauth_connect_digest`]: what the CLI stores when it confirms a connect (DEC-2125 item 3), so
+/// the record's `action_digest` names an object anyone can read back and re-hash.
+///
+/// # Errors
+/// [`ConnectError::InvalidRecord`] when a member cannot be keyed.
+#[expect(
+    clippy::todo,
+    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+)]
+pub fn oauth_connect_object(
+    _workspace_id: &str,
+    _document: &str,
+    _version: &str,
+) -> Result<Vec<u8>, ConnectError> {
+    todo!()
+}
+
 /// An OAuth connect's step-up digest (kind `connection`, DEC-2621 item 4, amending DEC-693 items
 /// 1 and 2): SHA-256 of the canonical `{action: "connect", broker: "alpaca", disclosure:
 /// {document, version}, environment: "paper", workspace_id}`, so the step-up proves which
