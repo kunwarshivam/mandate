@@ -84,6 +84,17 @@ pub fn now() -> Option<UtcNanos> {
     UtcNanos::from_parts(secs, since.subsec_nanos()).ok()
 }
 
+/// The wait's reading of the host clock (DEC-2363 item 3): the clock's `read` while it can be read,
+/// and `deadline` when it cannot, so an unreadable clock reads as the deadline reached and the wait
+/// ends `code_missing` rather than runs on.
+#[expect(
+    clippy::todo,
+    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
+)]
+pub fn read_or(_deadline: UtcNanos, _read: Option<UtcNanos>) -> UtcNanos {
+    todo!()
+}
+
 /// Why the exchange did not complete.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Failed {

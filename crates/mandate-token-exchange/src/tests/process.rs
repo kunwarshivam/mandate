@@ -13,7 +13,7 @@ use mandate_time::UtcNanos;
 use mandate_vault::SourceError;
 
 use crate::process::{
-    ARGUMENTS_REFUSED, Failed, VAULT_REFUSED, VaultArgs, exchange, log_in, now, vault_args,
+    ARGUMENTS_REFUSED, Failed, VAULT_REFUSED, VaultArgs, exchange, log_in, now, read_or, vault_args,
 };
 use crate::startup::{Endpoint, Settings};
 
@@ -172,4 +172,19 @@ fn the_wall_clock_is_read() {
         read > UtcNanos::from_parts(1_767_225_600, 0).unwrap(),
         "{read:?}"
     );
+}
+
+/// An unreadable clock reads as the deadline (DEC-2363 item 3), so the wait ends rather than runs
+/// on; a readable one reads as itself, before the deadline or after it.
+#[test]
+#[ignore = "pending E10-13"]
+fn an_unreadable_clock_reads_as_the_deadline() {
+    let deadline = UtcNanos::from_parts(1_790_000_600, 0).unwrap();
+    assert_eq!(read_or(deadline, None), deadline);
+    for read in [
+        UtcNanos::from_parts(1_790_000_000, 0).unwrap(),
+        UtcNanos::from_parts(1_790_001_200, 7).unwrap(),
+    ] {
+        assert_eq!(read_or(deadline, Some(read)), read);
+    }
 }
