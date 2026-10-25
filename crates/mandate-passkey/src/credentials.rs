@@ -12,9 +12,12 @@
 //!   writer's, and the fold does not trust it. A record that breaks it breaks its own member and,
 //!   when it names a credential another member enrolled, that member too. From then on a broken
 //!   member's passkeys answer [`CredentialError::Broken`], so their step-up is `step_up_missing`
-//!   and never passes (§9.31). Until the fold reads `StepUpAsserted` (journal spec §9.32, planned),
-//!   a stream that holds one answers [`CredentialError::AssertionUnread`]: the enrolment's counter
-//!   is never taken for the last.
+//!   and never passes (§9.31). It reads `StepUpAsserted` (journal spec §9.32) under stream rule
+//!   254, which it does not trust either: an assertion of a credential its own member holds,
+//!   with a counter above the last kept one (or 0 over 0) and an unused challenge, raises
+//!   [`CredentialFold::last_count`]; any other disables step-up for the asserting member and the
+//!   credential's holder (DEC-2323). A version 1 enrolment carries no `backup_eligible`, and the
+//!   verifier never counts it (DEC-2122 item 3).
 //! - **The reduction-only opening** (route 2, DEC-2117) reads [`CredentialFold::held`], which never
 //!   refuses: risk reduction is never denied (`AGENTS.md` rule 13). It replays only the records
 //!   that keep rule 251, so the first enrolment of an id wins, and it reads no counter, so a
@@ -27,7 +30,7 @@
 //! [DEC-2108]: ../../../docs/project/decisions/DEC-2108.md
 //! [DEC-2121]: ../../../docs/project/decisions/DEC-2121.md
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_canon::{Value, decode_ulid};
 use mandate_identity::PrincipalId;
@@ -36,8 +39,8 @@ use mandate_time::UtcNanos;
 /// §9.31's two record types.
 const ENROLLED: &str = "CredentialEnrolled";
 const REMOVED: &str = "CredentialRemoved";
-/// §9.32's record of a later counter (planned), which the fold maps but does not read yet
-/// (DEC-2121 item 4).
+/// §9.32's record of an assertion's counter, which step-up's view reads under rule 254
+/// (DEC-2323).
 const ASSERTED: &str = "StepUpAsserted";
 
 /// A key's algorithm, §9.31's `passkey_alg` ([DEC-660]).
@@ -68,6 +71,25 @@ pub struct Enrolment {
     pub sign_count: u32,
     /// When the credential may first step up, or `None` for no cool-off.
     pub cool_off_ends: Option<UtcNanos>,
+    /// The registration's backup-eligible flag at version 2, or `None` for a version 1 enrolment,
+    /// which carries none and which the verifier never counts (DEC-2122 item 3).
+    pub backup_eligible: Option<bool>,
+}
+
+/// A `StepUpAsserted` (journal spec §9.32), as the fold reads it: whose assertion it was, of which
+/// credential, over which challenge, and the counter it carried.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Assertion {
+    /// The record's `seq` on the control stream.
+    pub seq: u64,
+    /// The member who asserted, the record's actor.
+    pub member: PrincipalId,
+    /// The credential asserted with.
+    pub credential: String,
+    /// The step-up challenge the assertion answered, its ULID text.
+    pub challenge: String,
+    /// The signature counter the assertion carried.
+    pub sign_count: u32,
 }
 
 /// A `CredentialRemoved`, as the fold reads it.
@@ -81,15 +103,15 @@ pub struct Removal {
     pub credential: String,
 }
 
-/// One of §9.31's two records, or a §9.32 `StepUpAsserted` the fold does not read yet.
+/// One of §9.31's two records, or §9.32's `StepUpAsserted`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CredentialRecord {
     /// A `CredentialEnrolled`.
     Enrolled(Enrolment),
     /// A `CredentialRemoved`.
     Removed(Removal),
-    /// A `StepUpAsserted` at this `seq`, kept unread so step-up fails closed on it.
-    Asserted { seq: u64 },
+    /// A `StepUpAsserted`.
+    Asserted(Assertion),
 }
 
 /// Why a credential read gives no answer.
@@ -106,10 +128,6 @@ pub enum CredentialError {
     /// The record offered for append would break rule 251.
     #[error("the record would break rule 251")]
     Breaks,
-    /// The stream holds a `StepUpAsserted` at `seq`, whose counter the fold does not read yet,
-    /// so no passkey's last counter is known.
-    #[error("the step-up assertion at seq {seq} is not read yet")]
-    AssertionUnread { seq: u64 },
 }
 
 /// The §9.31 record in the control-stream `envelope` at `seq`, a `StepUpAsserted` as
@@ -129,14 +147,16 @@ pub fn credential_record(
         .and_then(Value::as_str)
         .ok_or(at("event_type"))?;
     if event_type == ASSERTED {
-        return Ok(Some(CredentialRecord::Asserted { seq }));
+        return assertion(seq, envelope).map(Some);
     }
     if event_type != ENROLLED && event_type != REMOVED {
         return Ok(None);
     }
-    if envelope.get("schema_version").and_then(Value::as_int) != Some(1) {
-        return Err(at("schema_version"));
-    }
+    let version_2 = match envelope.get("schema_version").and_then(Value::as_int) {
+        Some(1) => false,
+        Some(2) if event_type == ENROLLED => true,
+        _ => return Err(at("schema_version")),
+    };
     let payload = envelope.get("payload").ok_or(at("payload"))?;
     let text = |name: &str, path| payload.get(name).and_then(Value::as_str).ok_or(at(path));
     let member = decode_ulid(text("member", "payload.member")?)
@@ -173,6 +193,14 @@ pub fn credential_record(
         Some(Value::Str(t)) => Some(UtcNanos::parse(t).map_err(|_| at("payload.cool_off_ends"))?),
         _ => return Err(at("payload.cool_off_ends")),
     };
+    let backup_eligible = if version_2 {
+        match payload.get("backup_eligible") {
+            Some(Value::Bool(flag)) => Some(*flag),
+            _ => return Err(at("payload.backup_eligible")),
+        }
+    } else {
+        None
+    };
     Ok(Some(CredentialRecord::Enrolled(Enrolment {
         seq,
         member,
@@ -181,7 +209,49 @@ pub fn credential_record(
         alg,
         sign_count,
         cool_off_ends,
+        backup_eligible,
     })))
+}
+
+/// A `StepUpAsserted` at schema version 1 (journal spec §9.32), its member read from its actor,
+/// mapped whole or not at all.
+fn assertion(seq: u64, envelope: &Value) -> Result<CredentialRecord, CredentialError> {
+    let at = |member| CredentialError::Unreadable { seq, member };
+    if envelope.get("schema_version").and_then(Value::as_int) != Some(1) {
+        return Err(at("schema_version"));
+    }
+    let member = envelope
+        .get("actor")
+        .and_then(|a| a.get("id"))
+        .and_then(Value::as_str)
+        .and_then(|id| decode_ulid(id).ok())
+        .map(PrincipalId)
+        .ok_or(at("actor.id"))?;
+    let payload = envelope.get("payload").ok_or(at("payload"))?;
+    let text = |name: &str, path| payload.get(name).and_then(Value::as_str).ok_or(at(path));
+    let challenge = text("challenge", "payload.challenge")?;
+    if decode_ulid(challenge).is_err() {
+        return Err(at("payload.challenge"));
+    }
+    let credential = text("credential", "payload.credential")?;
+    if !credential_id(credential) {
+        return Err(at("payload.credential"));
+    }
+    let sign_count = payload
+        .get("sign_count")
+        .and_then(Value::as_int)
+        .and_then(|n| u32::try_from(n).ok())
+        .ok_or(at("payload.sign_count"))?;
+    if !artifact_ref(text("assertion", "payload.assertion")?) {
+        return Err(at("payload.assertion"));
+    }
+    Ok(CredentialRecord::Asserted(Assertion {
+        seq,
+        member,
+        credential: credential.to_owned(),
+        challenge: challenge.to_owned(),
+        sign_count,
+    }))
 }
 
 /// §9.31's `credential_id`: unpadded base64url of 16 to 1023 bytes, so 22 to 1364 characters and
@@ -222,13 +292,9 @@ impl CredentialFold {
     /// holds none.
     ///
     /// # Errors
-    /// [`CredentialError::AssertionUnread`] when the stream holds a `StepUpAsserted`, first, and
-    /// then [`CredentialError::Broken`] when a record breaks rule 251 for `member`.
+    /// [`CredentialError::Broken`] when a record breaks rule 251 or rule 254 for `member`.
     pub fn passkeys(&self, member: PrincipalId) -> Result<Vec<&Enrolment>, CredentialError> {
         let folded = self.fold();
-        if let Some(seq) = folded.asserted {
-            return Err(CredentialError::AssertionUnread { seq });
-        }
         if let Some(seq) = folded.broken.get(&member) {
             return Err(CredentialError::Broken { seq: *seq });
         }
@@ -237,6 +303,22 @@ impl CredentialFold {
             .into_iter()
             .filter(|e| e.member == member)
             .collect())
+    }
+
+    /// The last counter of `credential`, step-up's view: the greatest an assertion that keeps rule
+    /// 254 carried, else the enrolment's; `None` when it is not held.
+    ///
+    /// # Errors
+    /// [`CredentialError::Broken`] when a record breaks rule 251 or rule 254 for its holder.
+    pub fn last_count(&self, credential: &str) -> Result<Option<u32>, CredentialError> {
+        let folded = self.fold();
+        let Some(holder) = folded.holder(credential) else {
+            return Ok(None);
+        };
+        if let Some(seq) = folded.broken.get(&holder) {
+            return Err(CredentialError::Broken { seq: *seq });
+        }
+        Ok(folded.last.get(credential).copied())
     }
 
     /// The enrolment of `credential` while it is held, or `None`: route 2's view. Only the records
@@ -251,18 +333,25 @@ impl CredentialFold {
             .find(|e| e.credential == credential)
     }
 
-    /// Whether appending `next` after the folded records keeps rule 251: the writer's check before
-    /// it appends. An id ever enrolled on the stream, removed or not, is never enrolled again. A
-    /// record that keeps the rule is admitted from a broken member too, whom step-up still
-    /// discounts, and a `StepUpAsserted` is not a record the rule reads.
+    /// Whether appending `next` after the folded records keeps its stream rule: the writer's check
+    /// before it appends. An enrolment or removal is judged by rule 251: an id ever enrolled on the
+    /// stream, removed or not, is never enrolled again. A `StepUpAsserted` is judged by rule 254: a
+    /// credential its own member holds, a counter above the last kept one (or 0 over 0), and an
+    /// unused challenge. A record that keeps its rule is admitted from a broken member too, whom
+    /// step-up still discounts.
     ///
     /// # Errors
-    /// [`CredentialError::Breaks`] when `next` would break rule 251.
+    /// [`CredentialError::Breaks`] when `next` would break its stream rule.
     pub fn admits(&self, next: &CredentialRecord) -> Result<(), CredentialError> {
-        let Some((credential, member)) = next.names() else {
-            return Ok(());
+        let folded = self.fold();
+        let keeps = match (next, next.names()) {
+            (CredentialRecord::Asserted(assertion), _) => folded.keeps_rule_254(assertion),
+            (_, Some((credential, member))) => {
+                keeps_rule_251(folded.history.get(credential), next, member)
+            }
+            (_, None) => false,
         };
-        if keeps_rule_251(self.fold().history.get(credential), next, member) {
+        if keeps {
             Ok(())
         } else {
             Err(CredentialError::Breaks)
@@ -270,13 +359,16 @@ impl CredentialFold {
     }
 
     /// The records replayed: each credential's history, the members broken and from which `seq`,
-    /// the first `StepUpAsserted`, and the enrolments the records that keep rule 251 leave held,
-    /// in enrolment order.
+    /// the enrolments the records that keep rule 251 leave held, in enrolment order, and each held
+    /// credential's last kept counter with the challenges its assertions used.
     fn fold(&self) -> Folded<'_> {
         let mut folded = Folded::default();
         for record in &self.records {
+            if let CredentialRecord::Asserted(assertion) = record {
+                folded.assert(assertion);
+                continue;
+            }
             let Some((credential, member)) = record.names() else {
-                folded.asserted = folded.asserted.or(Some(record.seq()));
                 continue;
             };
             let history = folded.history.get(credential);
@@ -287,8 +379,10 @@ impl CredentialFold {
                 }
             } else if let CredentialRecord::Enrolled(enrolment) = record {
                 folded.held.push(enrolment);
+                folded.last.insert(credential, enrolment.sign_count);
             } else {
                 folded.held.retain(|e| e.credential != credential);
+                folded.last.remove(credential);
             }
             let entry = folded.history.entry(credential).or_default();
             entry.records = entry.records.saturating_add(1);
@@ -313,8 +407,47 @@ struct History {
 struct Folded<'a> {
     history: BTreeMap<&'a str, History>,
     broken: BTreeMap<PrincipalId, u64>,
-    asserted: Option<u64>,
     held: Vec<&'a Enrolment>,
+    last: BTreeMap<&'a str, u32>,
+    challenges: BTreeSet<&'a str>,
+}
+
+impl<'a> Folded<'a> {
+    /// Who holds `credential` now, among the records that keep rule 251.
+    fn holder(&self, credential: &str) -> Option<PrincipalId> {
+        self.held
+            .iter()
+            .find(|e| e.credential == credential)
+            .map(|e| e.member)
+    }
+
+    /// Rule 254 for `assertion` (journal spec §9.32): a credential its own member holds, a counter
+    /// above the last kept one or 0 over 0, and a challenge no kept assertion used.
+    fn keeps_rule_254(&self, assertion: &Assertion) -> bool {
+        let own = self.holder(&assertion.credential) == Some(assertion.member);
+        let rises = self
+            .last
+            .get(assertion.credential.as_str())
+            .is_some_and(|last| {
+                assertion.sign_count > *last || (assertion.sign_count == 0 && *last == 0)
+            });
+        own && rises && !self.challenges.contains(assertion.challenge.as_str())
+    }
+
+    /// Folds one assertion: a kept one raises its credential's last counter and uses its
+    /// challenge; a breaking one disables step-up for its member and the credential's holder.
+    fn assert(&mut self, assertion: &'a Assertion) {
+        if self.keeps_rule_254(assertion) {
+            self.last
+                .insert(&assertion.credential, assertion.sign_count);
+            self.challenges.insert(&assertion.challenge);
+            return;
+        }
+        let holder = self.holder(&assertion.credential);
+        for broken in std::iter::once(assertion.member).chain(holder) {
+            self.broken.entry(broken).or_insert(assertion.seq);
+        }
+    }
 }
 
 /// Rule 251 for `record` after its credential's `history`: an enrolment must be the credential's
@@ -337,7 +470,7 @@ impl CredentialRecord {
         match self {
             Self::Enrolled(e) => Some((&e.credential, e.member)),
             Self::Removed(r) => Some((&r.credential, r.member)),
-            Self::Asserted { .. } => None,
+            Self::Asserted(_) => None,
         }
     }
 
@@ -346,7 +479,7 @@ impl CredentialRecord {
         match self {
             Self::Enrolled(e) => e.seq,
             Self::Removed(r) => r.seq,
-            Self::Asserted { seq } => *seq,
+            Self::Asserted(a) => a.seq,
         }
     }
 }
