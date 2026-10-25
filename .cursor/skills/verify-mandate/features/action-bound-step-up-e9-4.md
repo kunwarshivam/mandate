@@ -38,12 +38,13 @@
   The connect start's assertion wire: `crates/mandate-api/tests/step_up_assertion.rs` (optional,
   read as `null`, one violation beside `cli_confirm` or `null` evidence, and each member's pattern
   at its bounds). The passkey verifier: `crates/mandate-api-server/tests/passkey_stepup.rs`
-  (pending E9-4: each challenge refusal, its evidence and its order; the credential's
-  refusals, cool-off, removal, version 1, its backup-eligible flag, the counter, and a fold that
-  cannot answer; and the record a counted step-up returns, the challenge it takes, and the stored
-  assertion's re-verification), with the software
-  authenticator in `tests/support_passkey/mod.rs`.
+  (pending E9-4: each refusal and its order, cool-off, removal, the counter, a fold that cannot
+  answer, the record a counted step-up returns, and its re-verification), with the software
+  authenticator in `tests/support_passkey/mod.rs`. The connect start under passkey step-up over
+  HTTP: `tests/connect_passkey_http.rs` (pending E9-4: the batch of `ConnectionRequested` then
+  `StepUpAsserted` and the stored raw assertion, nothing appended on a refusal, and a
+  `cli_confirm` start in the interim; and the two `invalid` wire cases).
 - **Run:** `cargo nextest run -p mandate-passkey`, `cargo test -p mandate-passkey --doc`,
   `cargo nextest run -p mandate-api-server --test stepup_http --test passkeys_http`, and
   `cargo nextest run -p mandate-api --test step_up_assertion`; the pending tests with
-  `--run-ignored all --test passkey_stepup`.
+  `--run-ignored all --test passkey_stepup --test connect_passkey_http`.
