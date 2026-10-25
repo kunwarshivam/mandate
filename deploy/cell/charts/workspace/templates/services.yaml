@@ -5,7 +5,7 @@ manager starts (the runtime and the executor, `started_by`) has no Deployment on
 renders: only the manager starts it, from its pod template (DEC-1170). Without the manager the
 executor is a Deployment on `default`, the fixture broker's alone: a paper executor, which reaches
 the vault for its connection's lease, needs the manager, and the render fails without it
-(DEC-2064). */ -}}
+(DEC-2365). */ -}}
 {{- define "mandate.service" -}}
 {{- $ctx := . -}}
 apiVersion: apps/v1
@@ -28,7 +28,7 @@ spec:
     {{- end }}
     {{- if eq .p.name "executor" }}
     {{- if eq .root.Values.executor.broker "alpaca-paper" }}
-    {{- fail "executor.broker=alpaca-paper needs images.deploy-manager: a paper executor runs only as the pod the manager starts as its connection's own account, never as this Deployment's default (DEC-2064)" }}
+    {{- fail "executor.broker=alpaca-paper needs images.deploy-manager: a paper executor runs only as the pod the manager starts as its connection's own account, never as this Deployment's default (DEC-2365)" }}
     {{- end }}
     {{- $_ := set $launch "args" (concat ($launch.args | default list) (include "mandate.executorBroker" .root | fromJsonArray)) }}
     {{- end }}

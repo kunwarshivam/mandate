@@ -3132,7 +3132,7 @@ enables `live` (ES-23, OPS-5).
   - Lane V2, a dependency of K2b (DEC-2336 risks): `mandate-executord` refuses to start unless
     `MANDATE_SUBJECT_ACCOUNT` is the lowercase hex of its connection id's bytes, beside #2196's
     namespace check, as DEC-1177 item 6 has the token exchange do.
-  - Done ([DEC-2064](decisions/DEC-2064.md)): a paper executor, the one that reaches the vault,
+  - Done ([DEC-2365](decisions/DEC-2365.md)): a paper executor, the one that reaches the vault,
     runs only as the pod the manager starts as its connection's `<hex>` account, and the chart
     refuses to render it without the manager. The fixture broker's Deployment executor stays on
     `default`, with no connection and no credential.

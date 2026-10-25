@@ -1832,7 +1832,7 @@ def test_the_executor_runs_on_alpaca_paper_where_staging_names_it():
         "executor": ["run", "--probe", "/tmp/process.sock", *PAPER_ARGS],
         "runtime": ["run", "--probe", "/tmp/process.sock", "--research", RESEARCH],
     }, args
-    assert helm(CHART, *paper_without_manager()).returncode != 0, "a paper executor needs the manager (DEC-2064)"
+    assert helm(CHART, *paper_without_manager()).returncode != 0, "a paper executor needs the manager (DEC-2365)"
 
 
 VAULT_CA = {
@@ -1898,7 +1898,7 @@ def vault_token_mounts(docs: list[dict]) -> dict[str, str]:
 def test_only_pods_the_manager_starts_as_their_connections_account_mount_a_vault_token():
     """DEC-2336: a vault token is mounted only by a pod the deployment manager starts, which runs as
     its connection's own account; the executor's only where its broker reaches the vault. The
-    chart's Deployment executor, the fixture broker's alone (DEC-2064), runs as `default`, which no
+    chart's Deployment executor, the fixture broker's alone (DEC-2365), runs as `default`, which no
     vault role names, and mounts none."""
     assert vault_token_mounts(render_all()) == {EXCHANGE: "Pod"}
     paper = render_all(*ALPACA_PAPER, "--set", f"executor.vaultAddress={VAULT}")
@@ -1941,7 +1941,7 @@ def executor_kinds(chart: Path, *extra: str) -> dict[str, str] | None:
 
 
 def a_paper_executor_runs_only_as_the_managers_pod(chart: Path) -> list[str]:
-    """DEC-2064: an executor whose broker reaches the vault (`alpaca-paper`) renders only as the
+    """DEC-2365: an executor whose broker reaches the vault (`alpaca-paper`) renders only as the
     deployment manager's pod template, which the manager starts as its connection's own account
     (DEC-2336); without the manager the chart refuses to render, so no paper executor ever runs as
     `default` or under another connection's account. The fixture broker's executor stays a
@@ -1955,7 +1955,7 @@ def a_paper_executor_runs_only_as_the_managers_pod(chart: Path) -> list[str]:
         problems.append(f"the paper executor without the manager renders as {unmanaged}")
     else:
         refused = helm(chart, *paper_without_manager()).stderr
-        if "DEC-2064" not in refused:
+        if "DEC-2365" not in refused:
             problems.append(f"the refusal does not name its decision: {refused.strip()[-200:]}")
     fixture = executor_kinds(chart, "--set", f"images.{MANAGER}=")
     if fixture != {"Deployment": "default"}:
