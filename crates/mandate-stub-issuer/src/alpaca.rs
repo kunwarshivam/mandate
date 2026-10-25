@@ -85,6 +85,37 @@ impl Refusal {
     }
 }
 
+/// Which check refused a token request, for the stub's standard error (DEC-2127): a fixed word,
+/// never a value the request carried.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Cause {
+    /// Not exactly DEC-2625 item 4's form, or not UTF-8.
+    Form,
+    /// A grant type other than `authorization_code`.
+    GrantType,
+    /// Another client id or client secret.
+    Client,
+    /// A code the store does not hold.
+    CodeUnknown,
+    /// A held code past its expiry.
+    CodeExpired,
+    /// Another redirect URI than the code's.
+    RedirectUri,
+    /// A verifier that is not the code's challenge.
+    CodeVerifier,
+    /// The token store is full, or the random source failed.
+    StoreFull,
+    /// The stub before its implementation (E10-23).
+    Unimplemented,
+}
+
+/// The line the stub writes to standard error for `refusal` by `cause`: `token_refused`, the
+/// answer's `error`, and the cause's word (DEC-2127).
+pub fn refusal_line(refusal: Refusal, cause: Cause) -> String {
+    let _ = (refusal, cause);
+    "not yet implemented\n".to_owned()
+}
+
 /// Why the client secret file is refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SecretFileError {
@@ -235,6 +266,15 @@ impl Alpaca {
             "token_type": "bearer",
         })
         .to_string())
+    }
+
+    /// [`Alpaca::token`], with the [`Cause`] of a refusal (DEC-2127).
+    ///
+    /// # Errors
+    /// [`Alpaca::token`]'s refusals.
+    pub fn exchange(&self, body: &str, now: i64) -> Result<String, (Refusal, Cause)> {
+        self.token(body, now)
+            .map_err(|refusal| (refusal, Cause::Unimplemented))
     }
 
     /// How many codes are held.

@@ -9,8 +9,8 @@ use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use mandate_stub_issuer::alpaca::{
-    Alpaca, CODE_TTL_S, MAX_CODES, Random, Refusal, SecretFileError, Settings, read_secret,
-    settings,
+    Alpaca, CODE_TTL_S, Cause, MAX_CODES, Random, Refusal, SecretFileError, Settings, read_secret,
+    refusal_line, settings,
 };
 use mandate_stub_issuer::start::Refused;
 use proptest::prelude::{any, prop};
@@ -319,6 +319,130 @@ fn each_token_refusal_has_its_code() {
     assert_eq!(
         provider.token("not a form %zz", T0),
         Err(Refusal::InvalidRequest)
+    );
+}
+
+/// Fills like [`Counter`] for its first `.0` fills, then fails: a code is issued, and the token
+/// it would redeem for is not.
+struct FailingAfter(u64, Counter);
+
+impl Random for FailingAfter {
+    fn fill(&self, out: &mut [u8]) -> bool {
+        self.1.0.load(Ordering::Relaxed) < self.0 && self.1.fill(out)
+    }
+}
+
+/// The values a form carries, decoded: none of them may appear in a refusal's line.
+fn values(form: &str) -> Vec<String> {
+    form.split('&')
+        .filter_map(|pair| pair.split_once('='))
+        .map(|(_, value)| decode(value))
+        .filter(|value| !value.is_empty())
+        .collect()
+}
+
+/// DEC-2127: each token refusal names the check that refused it, and its line is `token_refused`,
+/// the answer's `error` and that check's word, with nothing the request carried.
+#[test]
+#[ignore = "pending E10-23"]
+fn each_token_refusal_names_its_cause_and_its_line_carries_no_request_value() {
+    let provider = provider();
+    let cases: Vec<(Box<Form>, Refusal, Cause, &str)> = vec![
+        (
+            Box::new(|c| with(token_params(c), "client_id", "client-2")),
+            Refusal::InvalidClient,
+            Cause::Client,
+            "token_refused invalid_client client\n",
+        ),
+        (
+            Box::new(|c| with(token_params(c), "client_secret", "another-secret-canary")),
+            Refusal::InvalidClient,
+            Cause::Client,
+            "token_refused invalid_client client\n",
+        ),
+        (
+            Box::new(|c| with(token_params(c), "code_verifier", "another-verifier")),
+            Refusal::InvalidGrant,
+            Cause::CodeVerifier,
+            "token_refused invalid_grant code_verifier\n",
+        ),
+        (
+            Box::new(|c| {
+                with(
+                    token_params(c),
+                    "redirect_uri",
+                    "http://localhost:8080/v1/oauth/alpaca/callback",
+                )
+            }),
+            Refusal::InvalidGrant,
+            Cause::RedirectUri,
+            "token_refused invalid_grant redirect_uri\n",
+        ),
+        (
+            Box::new(|c| with(token_params(c), "grant_type", "refresh_token")),
+            Refusal::InvalidRequest,
+            Cause::GrantType,
+            "token_refused invalid_request grant_type\n",
+        ),
+        (
+            Box::new(|c| without(&token_params(c), "code_verifier")),
+            Refusal::InvalidRequest,
+            Cause::Form,
+            "token_refused invalid_request form\n",
+        ),
+        (
+            Box::new(|_| token_params("no-such-code-canary")),
+            Refusal::InvalidGrant,
+            Cause::CodeUnknown,
+            "token_refused invalid_grant code_unknown\n",
+        ),
+    ];
+    for (make, refusal, cause, line) in cases {
+        let code = code(&provider, T0);
+        let form = joined(&make(&code));
+        assert_eq!(
+            provider.exchange(&form, T0 + 1),
+            Err((refusal, cause)),
+            "{form}"
+        );
+        let written = refusal_line(refusal, cause);
+        assert_eq!(written, line, "{form}");
+        for value in values(&form) {
+            assert!(!written.contains(&value), "{value:?} in {written:?}");
+        }
+    }
+    let stale = joined(&token_params(&code(&provider, T0)));
+    assert_eq!(
+        provider.exchange(&stale, T0 + CODE_TTL_S),
+        Err((Refusal::InvalidGrant, Cause::CodeExpired))
+    );
+    assert_eq!(
+        refusal_line(Refusal::InvalidGrant, Cause::CodeExpired),
+        "token_refused invalid_grant code_expired\n"
+    );
+    assert_eq!(
+        provider.exchange("not a form %zz", T0),
+        Err((Refusal::InvalidRequest, Cause::Form))
+    );
+    let settings = Settings {
+        client_id: "client-1".to_owned(),
+        client_secret: SECRET.as_bytes().to_vec(),
+        redirect_uri: REDIRECT.to_owned(),
+    };
+    let starved = Alpaca::new(settings, Box::new(FailingAfter(1, Counter::default())));
+    let form = joined(&token_params(&code(&starved, T0)));
+    assert_eq!(
+        starved.exchange(&form, T0 + 1),
+        Err((Refusal::Unavailable, Cause::StoreFull))
+    );
+    assert_eq!(
+        refusal_line(Refusal::Unavailable, Cause::StoreFull),
+        "token_refused temporarily_unavailable store_full\n"
+    );
+    let redeemed = joined(&token_params(&code(&provider, T0)));
+    assert!(
+        provider.exchange(&redeemed, T0 + 1).is_ok(),
+        "a redeemable code is not refused"
     );
 }
 

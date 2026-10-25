@@ -3,6 +3,7 @@
 //! `Host`, with no CORS header on any answer.
 
 use std::future::{Future, IntoFuture as _};
+use std::io::Write as _;
 use std::pin::pin;
 use std::sync::Arc;
 use std::task::Poll;
@@ -16,7 +17,7 @@ use axum::http::{Method, StatusCode, Version};
 use axum::response::{IntoResponse as _, Response};
 use tokio::net::TcpListener;
 
-use crate::alpaca::{AUTHORIZE_PATH, Alpaca, Refusal, TOKEN_PATH};
+use crate::alpaca::{AUTHORIZE_PATH, Alpaca, Cause, Refusal, TOKEN_PATH, refusal_line};
 use crate::issuer::{IssueError, Issuer, TOKEN_TTL_S};
 
 /// The largest `POST /token` body accepted, in bytes.
@@ -178,12 +179,20 @@ async fn exchange(alpaca: Option<&Alpaca>, request: Request) -> Response {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     };
     let Ok(body) = std::str::from_utf8(&body) else {
-        return refused(Refusal::InvalidRequest);
+        return token_refused(Refusal::InvalidRequest, Cause::Form);
     };
-    match alpaca.token(body, now) {
+    match alpaca.exchange(body, now) {
         Ok(json) => ([(CONTENT_TYPE, JSON), (CACHE_CONTROL, "no-store")], json).into_response(),
-        Err(refusal) => refused(refusal),
+        Err((refusal, cause)) => token_refused(refusal, cause),
     }
+}
+
+/// A token refusal, its line written to standard error first (DEC-2127).
+fn token_refused(refusal: Refusal, cause: Cause) -> Response {
+    let _ = std::io::stderr()
+        .lock()
+        .write_all(refusal_line(refusal, cause).as_bytes());
+    refused(refusal)
 }
 
 /// A refusal as RFC 6749 §5.2 writes it, never stored by a cache.
