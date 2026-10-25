@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use crate::control::Slot;
-use crate::orchestrator::{Instance, Orchestrator, Phase, Unavailable};
+use crate::orchestrator::{Instance, Launch, Orchestrator, Phase, Unavailable};
 
 /// One call the manager made.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -14,15 +14,18 @@ pub enum Call {
         slot: Slot,
         generation: u64,
         lifetime: Option<Duration>,
+        connection: Option<String>,
     },
     Stop {
         slot: Slot,
         generation: u64,
+        connection: Option<String>,
     },
 }
 
-/// The fake. A start creates a running instance that is not ready; a stop removes a running or
-/// pending instance at once and leaves an unknown one unknown, as a lost node would.
+/// The fake. A start creates a running instance that is not ready; a stop removes a running,
+/// pending or exited instance at once, as deleting its pod would, and leaves an unknown one
+/// unknown, as a lost node would.
 #[derive(Debug, Clone, Default)]
 pub struct Fake {
     instances: BTreeMap<(Slot, u64), Phase>,
@@ -31,6 +34,9 @@ pub struct Fake {
     pub unavailable: bool,
     /// While set, starts and stops answer [`Unavailable`] and change nothing; listing still works.
     pub refuse_effects: bool,
+    /// While set, a start is carried out and then answers [`Unavailable`], as one whose answer was
+    /// lost would.
+    pub lose_start_answers: bool,
 }
 
 impl Fake {
@@ -81,6 +87,16 @@ impl Fake {
         );
     }
 
+    /// The running instance of `slot` exits successfully, as a token exchange that wrote its
+    /// connection's token would.
+    pub fn succeed(&mut self, slot: &Slot) {
+        self.shift(
+            slot,
+            |p| matches!(p, Phase::Running { .. } | Phase::Pending),
+            Phase::Succeeded,
+        );
+    }
+
     /// The running instance of `slot` reports `ready`.
     pub fn ready(&mut self, slot: &Slot, ready: bool) {
         self.shift(
@@ -99,9 +115,9 @@ impl Fake {
         );
     }
 
-    /// Every exited instance is removed, as the orchestrator's garbage collection would.
+    /// Every exited instance, succeeded or not, is removed, as the orchestrator's garbage collection would.
     pub fn collect(&mut self) {
-        self.instances.retain(|_, phase| *phase != Phase::Exited);
+        self.instances.retain(|_, phase| phase.live());
     }
 
     /// Every unknown instance of `slot` is confirmed gone.
@@ -123,7 +139,7 @@ impl Orchestrator for Fake {
         &mut self,
         slot: &Slot,
         generation: u64,
-        lifetime: Option<Duration>,
+        launch: &Launch,
     ) -> Result<(), Unavailable> {
         if self.unavailable || self.refuse_effects {
             return Err(Unavailable);
@@ -131,26 +147,36 @@ impl Orchestrator for Fake {
         self.calls.push(Call::Start {
             slot: slot.clone(),
             generation,
-            lifetime,
+            lifetime: launch.lifetime,
+            connection: launch.connection.clone(),
         });
         self.instances
             .entry((slot.clone(), generation))
             .or_insert(Phase::Running { ready: false });
+        if self.lose_start_answers {
+            return Err(Unavailable);
+        }
         Ok(())
     }
 
-    async fn stop(&mut self, slot: &Slot, generation: u64) -> Result<(), Unavailable> {
+    async fn stop(
+        &mut self,
+        slot: &Slot,
+        generation: u64,
+        connection: Option<&str>,
+    ) -> Result<(), Unavailable> {
         if self.unavailable || self.refuse_effects {
             return Err(Unavailable);
         }
         self.calls.push(Call::Stop {
             slot: slot.clone(),
             generation,
+            connection: connection.map(str::to_owned),
         });
         let key = (slot.clone(), generation);
         if matches!(
             self.instances.get(&key),
-            Some(Phase::Running { .. } | Phase::Pending)
+            Some(Phase::Running { .. } | Phase::Pending | Phase::Exited | Phase::Succeeded)
         ) {
             self.instances.remove(&key);
         }

@@ -49,7 +49,8 @@ pub fn secret_name(identity: &Identity) -> Result<String, SourceError> {
         | Identity::Runtime
         | Identity::SecretImport
         | Identity::ModelGateway
-        | Identity::EmailSender => role_name(identity),
+        | Identity::EmailSender
+        | Identity::Provisioner => role_name(identity),
     };
     Ok(format!("{SECRET_PREFIX}{role}"))
 }

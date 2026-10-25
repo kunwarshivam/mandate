@@ -107,6 +107,19 @@ pub(crate) fn known(batch: &Batch<'_, '_>, raw: Option<&str>) -> Option<ClientOr
     batch.view.orders.contains_key(&id).then_some(id)
 }
 
+/// The one order whose journaled records carry `broker` as their only broker order id (journal
+/// spec v0.80 §9.16, DEC-2353): a fill that names no `client_order_id` is that order's. An id on
+/// two orders, or an order whose records carry two ids, names none.
+fn by_broker_id(batch: &Batch<'_, '_>, broker: Option<&str>) -> Option<ClientOrderId> {
+    let broker = broker?;
+    let mut carrying =
+        batch.view.details.iter().filter(|(_, detail)| {
+            detail.broker_ids.len() == 1 && detail.broker_ids.contains(broker)
+        });
+    let (id, _) = carrying.next()?;
+    carrying.next().is_none().then(|| id.clone())
+}
+
 /// The complete nullable and boolean evidence carried by `OrderStateChanged` (DEC-459), with
 /// version 2's `broker_order_id` (journal spec §9.16, DEC-869): the broker's own id for the order,
 /// set only from a broker order record that carries it and `None` on every other record.
@@ -596,7 +609,11 @@ pub(crate) fn fill(
     if batch.view.fills.contains(&fill.fill_id) {
         return Ok(false);
     }
-    let ours = known(batch, fill.client_order_id.as_deref()).filter(|id| {
+    let named = match &fill.client_order_id {
+        Some(raw) => known(batch, Some(raw)),
+        None => by_broker_id(batch, fill.broker_order_id.as_deref()),
+    };
+    let ours = named.filter(|id| {
         batch.view.orders.get(id).is_some_and(|order| {
             order.instrument == fill.instrument
                 && order.side == fill.side

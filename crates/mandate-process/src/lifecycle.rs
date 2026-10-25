@@ -65,6 +65,10 @@ pub enum Input {
     Settled,
     /// A fail-closed stop: a start-up check, the reconciliation's error, a cycle, or a settle.
     Failed,
+    /// The process found nothing left for it to do and exits [`Exit::Completed`] from any state
+    /// it has not exited (DEC-2347). Only the executor sends it, once its pass finds every agent
+    /// it follows stopped and nothing owed on the account; no other process may.
+    Completed,
 }
 
 impl Input {
@@ -88,6 +92,9 @@ pub enum Exit {
     /// A drain whose settle failed, or that passed [`DRAIN_BOUND`] and was abandoned, not forced;
     /// the next process recovers as after a crash.
     DrainIncomplete,
+    /// Nothing was left for it to do (DEC-2347): status 0, which the deployment manager reads as
+    /// succeeded, with its own code so it is never mistaken for a drain.
+    Completed,
 }
 
 impl Exit {
@@ -98,12 +105,13 @@ impl Exit {
             Self::Refused => "refused",
             Self::CycleFailed => "cycle_failed",
             Self::DrainIncomplete => "drain_incomplete",
+            Self::Completed => "completed",
         }
     }
 
     pub fn exit_status(self) -> u8 {
         match self {
-            Self::Drained => 0,
+            Self::Drained | Self::Completed => 0,
             Self::Refused => 2,
             Self::Fenced => 3,
             Self::CycleFailed => 4,
@@ -220,6 +228,7 @@ impl Lifecycle {
                     State::Exited(exit) => exit,
                 });
             }
+            Input::Completed => self.exit = Some(Exit::Completed),
         }
         self.state()
     }
