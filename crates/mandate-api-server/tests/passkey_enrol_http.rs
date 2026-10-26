@@ -573,6 +573,11 @@ fn a_first_passkey_enrols_within_300_s_of_the_sign_in_and_waits_its_cool_off() {
         );
         assert_eq!(envelope["event_time"], json!(time(T0 + 300)));
         assert_eq!(
+            envelope["artifact_refs"],
+            json!([format!("sha256:{}", Digest::of(&cose).to_hex())]),
+            "the envelope lists the payload's one `sha256:` reference, the key (journal spec §3)"
+        );
+        assert_eq!(
             get_artifact(f.objects.as_ref(), &ArtifactRef::of(&cose)),
             Ok(cose.clone()),
             "the COSE key is stored under its own digest"
@@ -686,6 +691,35 @@ fn a_second_enrolment_needs_passkey_step_up_and_own_row_step_up_is_not_judged_ye
         "no own-row step-up is judged until E9-4 S4 binds one, so no evidence counts"
     );
     challenge_refused(&enrol_with(&f, &cookie, "k5Z-9_eeeeeeeeee", &body));
+}
+
+/// A member who holds a passkey needs step-up for another however fresh the sign-in: a session
+/// taken over within 300 s of its sign-in cannot add its own passkey.
+#[test]
+#[ignore = "pending E9-4"]
+fn a_second_enrolment_on_a_fresh_sign_in_without_step_up_is_step_up_required() {
+    let signer = Signer::es256();
+    let rows = holding(&signer);
+    let f = fixture(&rows);
+    let cookie = signed_in(&f, ALICE);
+    f.clock.set(T0 + 10);
+    let issued = challenge(&f, &cookie, KEY);
+    let registered = Signer::es256().register(&issued.bytes, CREDENTIAL);
+    refused(
+        &enrol_with(
+            &f,
+            &cookie,
+            KEY_2,
+            &first(&issued.id, CREDENTIAL, &registered),
+        ),
+        401,
+        ProblemCode::StepUpRequired,
+    );
+    nothing_changed(&f, &rows);
+    assert!(
+        f.port.asked.lock().expect("unpoisoned").is_empty(),
+        "no evidence was sent, so none was judged"
+    );
 }
 
 #[test]
