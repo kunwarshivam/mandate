@@ -1859,3 +1859,62 @@ fn a_research_agent_opens_once_then_holds_and_its_thesis_exit_sells() -> Result<
     assert_eq!(sells, 1, "the thesis exit sold the position: {exit:?}");
     Ok(())
 }
+
+/// A record that cannot be read never takes a held instrument from exits, on a cold start too: the
+/// deployment first read after it still prices, marks and names SPY, while openings hold.
+#[test]
+fn an_unreadable_thesis_record_on_a_cold_start_keeps_exits() -> Result<(), Error> {
+    let (journal, store) = research()?;
+    thesis(&journal, "th-1", SPY, None, "2026-09-21T18:00:00Z")?;
+    journal.write(
+        &support::agent_stream(AGENT),
+        "bad-1",
+        "ThesisProposed",
+        1,
+        None,
+        object(vec![("thesis_id", text("th-2"))])?,
+    )?;
+    let (deployment, _) = self::deployment(&journal, store);
+    assert_eq!(
+        answers(&deployment)?,
+        (false, false, false, true, true, true)
+    );
+    Ok(())
+}
+
+/// A thesis that ends between the scheduler's tick and the binding instant holds the opening: the
+/// tick still reads SPY covered, the gate, at the account's later instant, answers none.
+#[test]
+fn a_thesis_ending_before_the_binding_instant_holds_the_opening() -> Result<(), Error> {
+    let (journal, store) = research()?;
+    thesis(&journal, "th-1", SPY, None, "2026-09-21T16:00:30Z")?;
+    journaled_at(&journal, "late", "2026-09-21T16:00:40.000000000Z")?;
+    let (deployment, _) = self::deployment(&journal, store);
+    assert!(
+        deployment.covers(&agent(), &spy()?),
+        "at the tick the thesis survives"
+    );
+    assert!(
+        opening(&deployment)?.is_none(),
+        "at the binding instant it has ended"
+    );
+    Ok(())
+}
+
+/// Two surviving theses on two instruments name no one instrument the agent may open: it holds.
+#[test]
+fn two_surviving_instruments_hold_the_opening() -> Result<(), Error> {
+    let (journal, store) = research()?;
+    thesis(&journal, "th-1", SPY, None, "2026-09-21T18:00:00Z")?;
+    thesis(
+        &journal,
+        "th-2",
+        "eb82ffb0-efd6-4f4e-9307-8fead28e04f6",
+        None,
+        "2026-09-21T18:00:00Z",
+    )?;
+    let (deployment, _) = self::deployment(&journal, store);
+    assert!(!deployment.covers(&agent(), &spy()?));
+    assert!(opening(&deployment)?.is_none());
+    Ok(())
+}
