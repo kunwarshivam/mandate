@@ -69,9 +69,10 @@ const THESIS: [&str; 2] = ["ThesisProposed", "ThesisRevised"];
 /// (DEC-2312); `IntentReceived`,
 /// `GateDecided`, and `OrderSubmitted` close at version 2 and stay at version 1, and so does
 /// `OrderStateChanged` (journal spec §9.16, DEC-869). `OwnerConfirmationReceived` closes at
-/// version 1 (DEC-2040), and so do `AccountCloseRequested` (DEC-2337) and
-/// `AccountRestrictionChanged` (DEC-2137).
-const EXECUTOR: [&str; 12] = [
+/// version 1 (DEC-2040), and so do `AccountCloseRequested` (DEC-2337),
+/// `AccountRestrictionChanged` (DEC-2137), and the account stream's `KillSwitchActivated`
+/// (DEC-2139).
+const EXECUTOR: [&str; 13] = [
     "IntentReceived",
     "GateDecided",
     "OrderSubmitted",
@@ -81,6 +82,7 @@ const EXECUTOR: [&str; 12] = [
     CONFIRMATION,
     CLOSE,
     RESTRICTION,
+    KILL_SWITCH,
     "BrokerPositionObserved",
     "AgentModeApplied",
     "CompensatingEvent",
@@ -99,6 +101,10 @@ const CLOSE: &str = "AccountCloseRequested";
 /// An account restriction the executor detected, with its closed cause (§9.5, DEC-2137): rules
 /// 279 and 280 bind its restriction, cause, and reason code to trading spec §7.3's table.
 const RESTRICTION: &str = "AccountRestrictionChanged";
+
+/// A kill switch the executor applied on its account, as `kill.rs` writes it (§9.5, DEC-2139):
+/// rules 281, 282 and 293 to 296. The agent stream's keeps its own §9.1 schema.
+const KILL_SWITCH: &str = "KillSwitchActivated";
 
 /// The companion's (§9.5): an `OrderSubmitted` at `schema_version` 2 must be immediately preceded
 /// in its `append` batch by exactly one `OrderRequestRecorded`, which its `causation_id` names.
@@ -170,7 +176,8 @@ pub(crate) fn closed_schema(
         .or_else(|| crate::credentials::schema(event_type, schema_version, stream_type))
         .or_else(|| crate::connection_roles::schema(event_type, schema_version, stream_type))
         .or_else(|| match (event_type, stream_type) {
-            ("ConnectionEstablished" | "ConnectionCredentialRotated", StreamType::Account) => None,
+            ("ConnectionEstablished" | "ConnectionCredentialRotated", StreamType::Account)
+            | (KILL_SWITCH, StreamType::Agent) => None,
             _ => schema(event_type, schema_version),
         })
 }
@@ -397,6 +404,7 @@ pub(crate) fn payload(
         CONFIRMATION => confirmation_rules(p)?,
         CLOSE => close_rules(p, causation_id)?,
         RESTRICTION => restriction_rules(p)?,
+        KILL_SWITCH => kill_switch_rules(p, causation_id)?,
         "ProtectionChanged" => protection_changed_rules(p)?,
         SNAPSHOT => {
             let compared = !p.is_null("model_cash");
@@ -579,6 +587,50 @@ fn restriction_rules(p: Payload<'_>) -> Result<(), Invalid> {
         !blocked || p.text("cause") == "broker_notice",
         InvalidReason::Schema,
         "payload.cause",
+    )
+}
+
+/// Rules 281, 282 and 293 to 296 (DEC-2139), in that order, the first that fails reported: the
+/// purpose is the initiator's sell purpose (`payload.purpose`); the owner's confirmation is whole or
+/// absent (`payload.bid`, then `payload.bid_size`); only the owner's switch is confirmed
+/// (`payload.floor`); an account switch cancels through the cancel-all (`payload.cancels`) and
+/// defers nothing (`payload.deferred`); the switch is caused by its `AgentModeApplied`
+/// (`causation_id`); and no instrument both closes and is deferred (`payload.deferred`).
+fn kill_switch_rules(p: Payload<'_>, causation_id: Option<&Value>) -> Result<(), Invalid> {
+    let owner = p.text("initiator") == "owner";
+    let purpose = if owner { "owner_exit" } else { "risk_exit" };
+    ensure(
+        p.text("purpose") == purpose,
+        InvalidReason::Schema,
+        "payload.purpose",
+    )?;
+    let unconfirmed = p.is_null("floor");
+    for member in ["bid", "bid_size"] {
+        ensure(
+            p.is_null(member) == unconfirmed,
+            InvalidReason::Schema,
+            &format!("payload.{member}"),
+        )?;
+    }
+    ensure(owner || unconfirmed, InvalidReason::Schema, "payload.floor")?;
+    let account = p.text("scope") == "account";
+    for member in ["cancels", "deferred"] {
+        ensure(
+            !account || p.list(member).is_empty(),
+            InvalidReason::Schema,
+            &format!("payload.{member}"),
+        )?;
+    }
+    ensure(
+        causation_id.and_then(Value::as_str).is_some(),
+        InvalidReason::Schema,
+        "causation_id",
+    )?;
+    let closes = p.texts("closes");
+    ensure(
+        !p.texts("deferred").iter().any(|i| closes.contains(i)),
+        InvalidReason::Schema,
+        "payload.deferred",
     )
 }
 
@@ -928,6 +980,7 @@ fn schema(event_type: &str, schema_version: u64) -> Option<&'static Ty> {
         (CONFIRMATION, 1) => Some(&OWNER_CONFIRMATION_RECEIVED),
         (CLOSE, 1) => Some(&ACCOUNT_CLOSE_REQUESTED),
         (RESTRICTION, 1) => Some(&ACCOUNT_RESTRICTION_CHANGED),
+        (KILL_SWITCH, 1) => Some(&ACCOUNT_KILL_SWITCH_ACTIVATED),
         ("BrokerPositionObserved", 1) => Some(&BROKER_POSITION_OBSERVED),
         ("AgentModeApplied", 1) => Some(&AGENT_MODE_APPLIED),
         ("CompensatingEvent", 1) => Some(&COMPENSATING_EVENT),
@@ -1280,6 +1333,26 @@ static ACCOUNT_RESTRICTION_CHANGED: Ty = Ty::Record(&[
         "reason_code",
         Ty::OneOf(&["account_trading_blocked", "account_restricted"]),
     ),
+    ("risk_clock", Ty::RiskClock),
+]);
+
+/// §9.5's account-stream `KillSwitchActivated` (DEC-2139): every member `kill.rs` writes, the
+/// owner's confirmation null unless the owner confirmed it.
+static ACCOUNT_KILL_SWITCH_ACTIVATED: Ty = Ty::Record(&[
+    ("scope", Ty::OneOf(&["agent", "account"])),
+    ("subject", Ty::Ident),
+    (
+        "initiator",
+        Ty::OneOf(&["owner", "risk_limit", "platform_operator"]),
+    ),
+    ("purpose", Ty::OneOf(&["risk_exit", "owner_exit"])),
+    ("cancels", Ty::List(&Ty::Str)),
+    ("closes", Ty::List(&Ty::Str)),
+    ("deferred", Ty::List(&Ty::Str)),
+    ("floor", Ty::Nullable(&Ty::Decimal)),
+    ("bid", Ty::Nullable(&Ty::Decimal)),
+    ("bid_size", Ty::Nullable(&Ty::Decimal)),
+    ("copied_from", Ty::Nullable(&Ty::Ulid)),
     ("risk_clock", Ty::RiskClock),
 ]);
 
