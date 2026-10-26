@@ -34,7 +34,10 @@ flowchart LR
 3. **Independent review.** A separate agent run reviews every change before the founder sees it.
 4. **Approval of the reviewed head.** A change merges once CI is green and the independent review
    passed, on the head that review saw (DEC-79, DEC-175); safety-critical paths also need zero
-   missed mutants and an adversarial review. The founder reviews after the fact and can revert;
+   missed mutants and an adversarial review. A change merged without waiting for CI (DEC-2605
+   row 14) also needs `cargo xtask land-check` to pass: spec-guard, lint and the diff's tests on
+   the head merged with `main` ([DEC-2642](decisions/DEC-2642.md)). The founder reviews after the
+   fact and can revert;
    the decisions DEC-79 reserves still wait for the founder.
    **Two lanes** ([DEC-516](decisions/DEC-516.md), proposed): that is the safety lane. A change
    that touches no safety-critical path, spec, gate or safety surface runs on the light lane: one

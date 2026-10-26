@@ -64,7 +64,10 @@ founder's yes; until then the light lane still takes step 3 before merging.
    change under `web/`), with the PR title and description as the commit message; otherwise it
    does nothing, and tries again on the next `ci` run or its half-hourly sweep. A push moves the
    head off the approved sha, so new commits need a new PASS and a new line in place of the old
-   one. A session that can merge directly squash-merges through the
+   one. A session that can merge directly first runs `cargo xtask land-check` on the head the
+   review passed, and merges only on its summary line's `verdict=pass`: it merges `origin/main`
+   into the head in a scratch worktree and runs spec-guard, lint and the diff's tests there, the
+   checks a merge that waits for no CI would otherwise skip (DEC-2642). It then squash-merges through the
    GitHub API with the story ID in the title and an explicit `commit_message` (the PR
    description): GitHub's default squash message copies every commit message, including
    `Co-authored-by` trailers, which must not reach `main`. Never force-push `main`, never label or
