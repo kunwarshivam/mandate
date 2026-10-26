@@ -433,7 +433,7 @@ pub(crate) fn payload(
         RESTRICTION => restriction_rules(p)?,
         KILL_SWITCH => kill_switch_rules(p, causation_id)?,
         EXTERNAL => external_rules(p)?,
-        FILL if schema_version == 2 => fill_rules(p)?,
+        FILL if schema_version == 2 => fill_rules(p, config_refs)?,
         "ProtectionChanged" => protection_changed_rules(p)?,
         SNAPSHOT => {
             let compared = !p.is_null("model_cash");
@@ -697,10 +697,12 @@ fn external_rules(p: Payload<'_>) -> Result<(), Invalid> {
     Ok(())
 }
 
-/// Rule 299 (DEC-2812): a `FillApplied` version 2 that names an order names one of ours, as trading
-/// spec §2.3 states it: `md-`, then one or more ASCII letters, digits or hyphens, at most 128
-/// characters in all. A fill that names no order of ours is `null`.
-fn fill_rules(p: Payload<'_>) -> Result<(), Invalid> {
+/// Rules 299 (DEC-2812) and 300 (DEC-2817): a `FillApplied` version 2 that names an order names
+/// one of ours, as trading spec §2.3 states it: `md-`, then one or more ASCII letters, digits or
+/// hyphens, at most 128 characters in all; and names the instrument snapshot its order was gated
+/// on. A fill that names no order of ours is `null`, and may be in an instrument the platform
+/// holds no snapshot of.
+fn fill_rules(p: Payload<'_>, config_refs: Option<&Value>) -> Result<(), Invalid> {
     if p.is_null("client_order_id") {
         return Ok(());
     }
@@ -709,7 +711,14 @@ fn fill_rules(p: Payload<'_>) -> Result<(), Invalid> {
         && named.strip_prefix("md-").is_some_and(|body| {
             !body.is_empty() && body.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
         });
-    ensure(ours, InvalidReason::Schema, "payload.client_order_id")
+    ensure(ours, InvalidReason::Schema, "payload.client_order_id")?;
+    ensure(
+        config_refs
+            .and_then(|refs| refs.get(crate::catalogue::INS))
+            .is_some(),
+        InvalidReason::MissingConfigRef,
+        "config_refs.instrument_snapshot",
+    )
 }
 
 /// The longest client order id of ours, Alpaca's bound (trading spec §2.3).
