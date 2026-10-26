@@ -21,7 +21,7 @@ use crate::types::{
 
 /// The `fold_version` of ADR-0001 ES-21. Bumped whenever fold output changes, with the golden
 /// journal regenerated in the same change.
-pub const FOLD_VERSION: u32 = 2;
+pub const FOLD_VERSION: u32 = 3;
 
 /// How long a passing `ConnectionChecked` covers an opening, in risk-clock seconds: one day, the
 /// period of the executor's daily check (connections spec §8.1, §9.2 "Healthy"). A check this old
@@ -44,6 +44,10 @@ pub struct RuntimeState {
     risk_clock: Option<RiskClock>,
     last_evaluated: Option<RiskClock>,
     copied_mode: Mode,
+    /// The executor's account-wide restriction, its `AgentModeApplied` naming every agent (`*`):
+    /// a slot of its own beside [`Self::copied_mode`], as the executor keeps it, so neither lifts
+    /// the other (trading spec §7.3).
+    every_mode: Mode,
     journaled_mode: Mode,
     lifecycle: Mode,
     switch: Option<Switch>,
@@ -155,6 +159,7 @@ impl RuntimeState {
             risk_clock: None,
             last_evaluated: None,
             copied_mode: Mode::Normal,
+            every_mode: Mode::Normal,
             journaled_mode: Mode::Normal,
             lifecycle: Mode::Normal,
             switch: None,
@@ -251,11 +256,12 @@ impl RuntimeState {
     }
 
     /// The effective mode a given deployment lifecycle would produce: the strictest of the copied
-    /// account-stream mode, that lifecycle, the startup hold, and the kill switch's final mode. A
+    /// account-stream modes, this agent's and the account-wide one, that lifecycle, the startup
+    /// hold, and the kill switch's final mode. A
     /// maximum over [`Mode`]'s ordering, so the runtime is never less strict than the account stream
     /// and never lifts what the account stream set.
     pub(crate) fn mode_with(&self, lifecycle: Mode) -> Mode {
-        let mut mode = self.copied_mode.max(lifecycle);
+        let mut mode = self.copied_mode.max(self.every_mode).max(lifecycle);
         if self.awaiting_reconciliation {
             mode = mode.max(LocalHold::AwaitingReconciliation.mode());
         }
@@ -276,7 +282,7 @@ impl RuntimeState {
     /// The same maximum as [`Self::effective_mode`] without the startup hold, which governs new
     /// proposals alone (DEC-131 item 22).
     fn rehand_mode(&self) -> Mode {
-        let mut mode = self.copied_mode.max(self.lifecycle);
+        let mut mode = self.copied_mode.max(self.every_mode).max(self.lifecycle);
         if let Some(switch) = &self.switch {
             mode = mode.max(switch.initiator.final_mode());
         }
@@ -708,6 +714,9 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
                 },
             );
         }
+        "AgentModeApplied" if every_agent(&event.payload) => {
+            state.every_mode = mode_field(event)?;
+        }
         "AgentModeApplied" => {
             if addressed_here(state, &event.payload) {
                 let to = mode_field(event)?;
@@ -923,6 +932,13 @@ fn retired(
 /// connection, so a sibling's `normal` must not lift this agent's restriction (`AGENTS.md` rules 1
 /// and 3). A payload with no agent field is this agent's by construction: the runtime follows only
 /// its own account stream, and the frozen fixtures carry none.
+/// Whether an `AgentModeApplied` is the executor's account-wide restriction, naming every agent of
+/// the account (`EVERY_AGENT` in `mandate-executor`). It moves only the account-wide slot: it never
+/// lifts or confirms this agent's own restriction or kill switch, so folding it can only tighten.
+fn every_agent(payload: &mandate_canon::Value) -> bool {
+    payload::str_of(payload, "agent") == Some("*")
+}
+
 fn addressed_here(state: &RuntimeState, payload: &mandate_canon::Value) -> bool {
     payload::str_of(payload, "agent").is_none_or(|agent| agent == state.deployment.agent.0)
 }
