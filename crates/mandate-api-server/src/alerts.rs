@@ -11,7 +11,8 @@
 //!   (`AGENTS.md` rule 3).
 //! - **Notices.** An alert's notice is the `NoticeIssued` whose `cause` is it, with the asking
 //!   member's own latest `NoticeAttempted` per channel, the one with the highest notice-stream
-//!   `seq`, listed in channel order. Another member's attempts are never read into a view.
+//!   `seq`, listed in channel order. A notice issued twice for one cause, or an attempt to the
+//!   member that the schema could not serve, fails the read. Another member's attempts are never read into a view.
 //!
 //! Every function here is pure: rows in, values out.
 
@@ -61,6 +62,18 @@ const SERVED: [(&str, &str); 23] = [
     ("research_status", "info"),
     ("spend_cap", "info"),
     ("approval_closed", "info"),
+];
+
+/// The push channels a `NoticeAttempted` names (journal spec §9.15).
+const CHANNELS: [&str; 6] = ["email", "web_push", "sms", "telegram", "slack", "phone"];
+
+/// The statuses a `NoticeAttempted` records (journal spec §9.15).
+const STATUSES: [&str; 5] = [
+    "delivered",
+    "failed",
+    "suppressed_quiet_hours",
+    "deferred_quiet_hours",
+    "abandoned",
 ];
 
 /// The class of a kind this read serves; `None` for a withheld kind or one no alert takes.
@@ -156,12 +169,15 @@ pub fn followed(control: &[StoredEvent]) -> (Vec<String>, Vec<String>) {
     (agents, accounts)
 }
 
-/// The member's own deliveries, keyed by notice id, from the notice stream's rows.
+/// The member's own deliveries, keyed by notice id and then channel, from the notice stream's rows,
+/// which the store reads in `seq` order: on each channel the last attempt read is the latest. An
+/// attempt to the member naming a channel, status, or attempt number the journal does not admit
+/// fails the read, rather than serving a value the schema does not.
 fn deliveries(
     notices: &[StoredEvent],
     recipient: &str,
 ) -> Result<BTreeMap<String, BTreeMap<String, DeliveryView>>, Unreadable> {
-    let mut latest: BTreeMap<String, BTreeMap<String, (u64, DeliveryView)>> = BTreeMap::new();
+    let mut latest: BTreeMap<String, BTreeMap<String, DeliveryView>> = BTreeMap::new();
     for row in notices
         .iter()
         .filter(|row| row.event_type == "NoticeAttempted")
@@ -178,32 +194,24 @@ fn deliveries(
         ) else {
             return Err(Unreadable);
         };
-        let view = DeliveryView {
-            channel: channel.to_owned(),
-            status: status.to_owned(),
-            attempt: number,
-            recorded_at: row.recorded_at.clone(),
-        };
-        let channels = latest.entry(notice.to_owned()).or_default();
-        if channels.get(channel).is_none_or(|(seq, _)| *seq < row.seq) {
-            channels.insert(channel.to_owned(), (row.seq, view));
+        if !CHANNELS.contains(&channel) || !STATUSES.contains(&status) || number == 0 {
+            return Err(Unreadable);
         }
+        latest.entry(notice.to_owned()).or_default().insert(
+            channel.to_owned(),
+            DeliveryView {
+                channel: channel.to_owned(),
+                status: status.to_owned(),
+                attempt: number,
+                recorded_at: row.recorded_at.clone(),
+            },
+        );
     }
-    Ok(latest
-        .into_iter()
-        .map(|(notice, channels)| {
-            (
-                notice,
-                channels
-                    .into_iter()
-                    .map(|(channel, (_, view))| (channel, view))
-                    .collect(),
-            )
-        })
-        .collect())
+    Ok(latest)
 }
 
-/// Each issued notice by its cause: its id and `issued_at`.
+/// Each issued notice by its cause: its id and `issued_at`. One cause has one notice (notifications
+/// spec §3.4), so a second `NoticeIssued` for a cause fails the read.
 fn issued(notices: &[StoredEvent]) -> Result<BTreeMap<String, (String, String)>, Unreadable> {
     let mut by_cause = BTreeMap::new();
     for row in notices
@@ -214,9 +222,12 @@ fn issued(notices: &[StoredEvent]) -> Result<BTreeMap<String, (String, String)>,
         let (Some(cause), Some(id)) = (member(&notice, "cause"), member(&notice, "notice")) else {
             return Err(Unreadable);
         };
-        by_cause
-            .entry(cause.to_owned())
-            .or_insert((id.to_owned(), row.recorded_at.clone()));
+        if by_cause
+            .insert(cause.to_owned(), (id.to_owned(), row.recorded_at.clone()))
+            .is_some()
+        {
+            return Err(Unreadable);
+        }
     }
     Ok(by_cause)
 }

@@ -1154,6 +1154,12 @@ fn bobs_read_shows_his_own_delivery_and_the_limit_truncates() {
     };
     assert_eq!(listed.len(), 1);
     assert_eq!(text(&listed[0], "kind"), "protection");
+    let reply = get(&f, &ws("/alerts?limit=2"), Some(&cookie));
+    assert_eq!(
+        json(&reply).get("truncated"),
+        Some(&Value::Bool(false)),
+        "exactly the limit is not truncated"
+    );
     let reply = get(&f, &ws("/alerts?limit=200"), Some(&cookie));
     let body = json(&reply);
     let Some(Value::Array(listed)) = body.get("alerts") else {

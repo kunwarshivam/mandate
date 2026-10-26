@@ -412,6 +412,150 @@ fn an_alert_that_does_not_read_fails_the_read_rather_than_shortening_it() {
     }
 }
 
+/// A notice record that does not read, a second notice for one alert, or an attempt to me naming
+/// what the journal does not admit fails the read; so does an owner command that is not text.
+#[test]
+fn a_notice_or_attempt_that_cannot_be_served_whole_fails_the_read() {
+    let mut j = Journal::default();
+    let ctl = format!("ctl:{WS}");
+    let subject = j.row(&ctl, 1, "OwnerCommandIssued", "{}");
+    let alert = j.row(
+        &ctl,
+        2,
+        "OwnerAlertSent",
+        &alert_payload("risk_limit", &subject.event_id, None),
+    );
+    let issued_row = j.row(
+        &ntf(),
+        1,
+        "NoticeIssued",
+        &issued(N1, "risk_limit", &alert.event_id, &ctl),
+    );
+    let mut unreadable = issued_row.clone();
+    unreadable.body = b"not json".to_vec();
+    let mine = |j: &mut Journal, payload: &str| j.row(&ntf(), 2, "NoticeAttempted", payload);
+    let attempt_fields = |fields: &str| {
+        format!(
+            r#"{{"coalesced_into":null,"notice":"{N1}","provider_message_id":null,"reason":null,"recipient":"p_{}"{fields}}}"#,
+            ME.to_lowercase()
+        )
+    };
+    let cases: Vec<Vec<StoredEvent>> = vec![
+        vec![unreadable],
+        vec![j.row(
+            &ntf(),
+            1,
+            "NoticeIssued",
+            &format!(r#"{{"notice":"{N1}"}}"#),
+        )],
+        vec![
+            issued_row.clone(),
+            j.row(
+                &ntf(),
+                2,
+                "NoticeIssued",
+                &issued(N2, "risk_limit", &alert.event_id, &ctl),
+            ),
+        ],
+        vec![
+            issued_row.clone(),
+            mine(
+                &mut j,
+                &attempt_fields(r#","channel":"email","status":"delivered""#),
+            ),
+        ],
+        vec![
+            issued_row.clone(),
+            mine(
+                &mut j,
+                &attempt_fields(r#","attempt":1,"status":"delivered""#),
+            ),
+        ],
+        vec![
+            issued_row.clone(),
+            mine(&mut j, &attempt_fields(r#","attempt":1,"channel":"email""#)),
+        ],
+        vec![
+            issued_row.clone(),
+            mine(&mut j, &attempted(N1, ME, "web_inbox", 1, "delivered")),
+        ],
+        vec![
+            issued_row.clone(),
+            mine(&mut j, &attempted(N1, ME, "email", 1, "sent")),
+        ],
+        vec![
+            issued_row.clone(),
+            mine(&mut j, &attempted(N1, ME, "email", 0, "delivered")),
+        ],
+    ];
+    let streams = [Stream {
+        followed: Followed::Control,
+        rows: &[subject.clone(), alert.clone()],
+    }];
+    for notices in cases {
+        assert_eq!(
+            alerts(&streams, &notices, &recipient(ME)),
+            Err(Unreadable),
+            "{notices:?}"
+        );
+    }
+    let commanded = j.row(
+        &ctl,
+        3,
+        "OwnerAlertSent",
+        &format!(
+            r#"{{"kind":"kill_switch","owner_command":7,"subject":"{}"}}"#,
+            subject.event_id
+        ),
+    );
+    let streams = [Stream {
+        followed: Followed::Control,
+        rows: &[subject, commanded],
+    }];
+    assert_eq!(alerts(&streams, &[], &recipient(ME)), Err(Unreadable));
+}
+
+/// Two alerts raised at the same instant on two streams are listed by `alert_id`, descending.
+#[test]
+fn alerts_raised_at_one_instant_are_ordered_by_id_descending() -> Result<(), Unreadable> {
+    let mut j = Journal::default();
+    let a = agent("agt_a");
+    let acct = account("ACCT1");
+    let first_subject = j.row(&a, 1, "AgentHeld", "{}");
+    let mut low = j.row(
+        &a,
+        2,
+        "OwnerAlertSent",
+        &alert_payload("agent_held", &first_subject.event_id, None),
+    );
+    let second_subject = j.row(&acct, 1, "ProtectionChanged", "{}");
+    let mut high = j.row(
+        &acct,
+        2,
+        "OwnerAlertSent",
+        &alert_payload("protection", &second_subject.event_id, None),
+    );
+    high.recorded_at = low.recorded_at.clone();
+    assert!(high.event_id > low.event_id);
+    low.recorded_at = high.recorded_at.clone();
+    let streams = [
+        Stream {
+            followed: Followed::Agent("agt_a".to_owned()),
+            rows: &[first_subject, low.clone()],
+        },
+        Stream {
+            followed: Followed::Account("ACCT1".to_owned()),
+            rows: &[second_subject, high.clone()],
+        },
+    ];
+    let ids: Vec<String> = alerts(&streams, &[], &recipient(ME))?
+        .into_iter()
+        .map(|view| view.alert_id)
+        .collect();
+    assert_eq!(ids, [high.event_id, low.event_id]);
+    Ok(())
+}
+
 /// One alert the generator lays: on which stream, its kind, and whether it is notified, with my
 /// attempts and another member's.
 #[derive(Debug, Clone)]
