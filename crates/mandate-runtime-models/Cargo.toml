@@ -23,6 +23,7 @@ mandate-domain.workspace = true
 mandate-journal.workspace = true
 mandate-modelhost.workspace = true
 mandate-process.workspace = true
+mandate-research.workspace = true
 mandate-runtime.workspace = true
 mandate-spec.workspace = true
 mandate-store.workspace = true

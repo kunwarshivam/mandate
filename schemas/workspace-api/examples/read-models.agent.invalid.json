@@ -424,5 +424,13 @@
     "set": {
       "/agent/openings_held": "account_traded"
     }
+  },
+  {
+    "label": "an openings hold whose reason is a value the enum does not list",
+    "set": {
+      "/agent/openings_held": {
+        "reason": "mutant_value"
+      }
+    }
   }
 ]
