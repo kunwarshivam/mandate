@@ -115,9 +115,10 @@ impl Theses {
     }
 
     /// The instruments whose current thesis has ended at `now` (mandate spec §8.6), each as the
-    /// order plan names it. Should the ending rules refuse the entries, which one entry per
-    /// instrument rules out, every instrument with a thesis is given: a sell adds no risk and a
-    /// silent hold might (`AGENTS.md` rule 3).
+    /// order plan names it. Should `now` not be a time the ending rules can compare, or the rules
+    /// refuse the entries, which one entry per instrument rules out, every instrument with a thesis
+    /// is given: a sell adds no risk and a silent hold might (`AGENTS.md` rule 3). An asset id is
+    /// never empty, so each converts to an instrument id.
     pub(crate) fn ended(&self, now: RiskClock) -> BTreeSet<InstrumentId> {
         let entries: Vec<UniverseEntry> = self.entries.values().cloned().collect();
         let ended: Vec<AssetId> = UtcNanos::from_parts(now.secs(), 0)

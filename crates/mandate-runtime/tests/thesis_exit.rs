@@ -811,3 +811,141 @@ fn a_working_exit_counts_until_the_account_stream_ends_it() {
         "an ended exit no longer counts"
     );
 }
+
+/// Rule 3: a risk clock the ending rules cannot compare (before the epoch) ends every thesis the
+/// fold holds rather than none, since a sell adds no risk and a silent hold might.
+#[test]
+fn a_clock_the_ending_rules_cannot_read_ends_every_thesis() {
+    let ops = [
+        admitted("th1", "th1", A, T0 + 86_400),
+        admitted("th2", "th2", B, T0 + 86_400),
+    ];
+    assert_eq!(ended(&ops, T0), set(&[]));
+    assert_eq!(ended(&ops, -1), set(&[A, B]));
+}
+
+/// The sells the runtime proposed and the account stream has not ended, summed per instrument; a
+/// buy is never one.
+#[test]
+fn working_exits_sum_the_live_sells_per_instrument_and_count_no_buy() {
+    let mut state = RuntimeState::new(common::deployment());
+    let intent = |seq: u64, instrument: &str, side: &str, qty: &str, purpose: &str| {
+        event(
+            AGENT_STREAM,
+            seq,
+            "IntentProposed",
+            object(&[
+                ("instrument_id", text(instrument)),
+                ("side", text(side)),
+                ("type", text("limit")),
+                ("tif", text("day")),
+                ("qty", text(qty)),
+                ("limit_price", text("99.5")),
+                ("purpose", text(purpose)),
+            ]),
+        )
+    };
+    for one in [
+        intent(1, A, "sell", "3", "discretionary_exit"),
+        intent(2, A, "sell", "4", "discretionary_exit"),
+        intent(3, A, "buy", "9", "open"),
+        intent(4, B, "buy", "2", "open"),
+    ] {
+        fold(&mut state, &one).unwrap_or_else(|e| panic!("{e}"));
+    }
+    let working: BTreeMap<String, String> = state
+        .working_exits()
+        .iter()
+        .map(|(i, q)| (i.as_str().to_owned(), q.to_string()))
+        .collect();
+    assert_eq!(
+        working,
+        BTreeMap::from([(A.to_owned(), "7".to_owned())]),
+        "two sells in A sum; neither buy counts"
+    );
+    fold(
+        &mut state,
+        &event(
+            ACCOUNT_STREAM,
+            1,
+            "OrderAbandoned",
+            with_clock(&[("intent_id", text(&format!("{AGENT_STREAM}-1")))], T0),
+        ),
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(
+        state
+            .working_exits()
+            .values()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>(),
+        vec!["4".to_owned()],
+        "an ended sell no longer counts"
+    );
+}
+
+/// Each seeded fold bug, emulated by handing the fold the journal that bug would read: the oracle
+/// reads the true journal and must disagree. A fold that ignores the agent id, the lineage a
+/// retirement names, the removal's reason, or which thesis is current each ends a thesis that has
+/// not ended.
+#[test]
+fn the_oracle_catches_each_seeded_fold_bug() {
+    let base = || {
+        vec![
+            admitted("th1", "lin", A, T0 + 86_400),
+            admitted("th2", "lin2", B, T0 + 86_400),
+        ]
+    };
+    let foreign = Op::Universe {
+        agent: "agent-b",
+        change: "removed",
+        reason: "thesis_invalidated",
+        thesis: "th1".to_owned(),
+        instrument: A,
+    };
+    let bugs: [(&str, Op, Op); 3] = [
+        (
+            "a fold that reads another agent's removal as its own",
+            foreign,
+            removed("thesis_invalidated", "th1", A),
+        ),
+        (
+            "a fold that retires the current thesis on any lineage's retirement",
+            refused("ref", "lin9", C, "lineage_retired"),
+            refused("ref", "lin", C, "lineage_retired"),
+        ),
+        (
+            "a fold that ends a thesis on any removal reason",
+            removed("operator_halt", "th1", A),
+            removed("thesis_invalidated", "th1", A),
+        ),
+    ];
+    for (what, truth, read) in bugs {
+        let mut ops = base();
+        ops.extend([truth, Op::Tick(T0 + 1)]);
+        let mut fed = base();
+        fed.extend([read, Op::Tick(T0 + 1)]);
+        assert_eq!(
+            disagreement(&ops, &ops),
+            None,
+            "{what}: the honest fold agrees"
+        );
+        assert!(
+            disagreement(&ops, &fed).is_some(),
+            "{what}: the oracle sees it"
+        );
+    }
+    let superseded = vec![
+        admitted("th1", "lin", A, T0 + 86_400),
+        admitted("th2", "lin", A, T0 + 86_400),
+        invalidated("th1"),
+        Op::Tick(T0 + 1),
+    ];
+    let mut current = superseded.clone();
+    current[2] = invalidated("th2");
+    assert_eq!(disagreement(&superseded, &superseded), None);
+    assert!(
+        disagreement(&superseded, &current).is_some(),
+        "a fold that lets an invalidation of a superseded thesis end the current one"
+    );
+}

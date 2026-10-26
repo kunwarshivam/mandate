@@ -702,22 +702,35 @@ fn discretionary_exit(
 
 /// §8.3 step 2's first branch (mandate spec v0.10, MI-34, DEC-2391): the instrument's thesis
 /// ended, so the whole position is sold at the bid whatever the signals say, with no model output
-/// read at all. The combined figures are those of no output, which is what the exit used. The
-/// caller decides that the thesis ended and gives the position less its working exits; the session
-/// rule that defers an equity exit is the gate's, as for the signal exit.
+/// read at all. The proposal is built here and not by [`propose`], so nothing but the sell's own
+/// notional can refuse it: the sizing arithmetic an opening needs never holds an exit (`AGENTS.md`
+/// rule 13). Its combined figures are those of no output, and no sizes or clips. The caller decides
+/// that the thesis ended and passes the position less its working exits as `position_qty`, so an
+/// exit already working is not proposed twice; the session rule that defers an equity exit is the
+/// gate's, as for the signal exit.
 ///
 /// # Errors
-/// As [`propose`] with no outputs, and as the exit's notional refuses.
+/// As the exit's notional refuses.
 pub fn propose_thesis_exit(
-    mandate: &BuilderMandate,
     account: &AccountSnapshot,
     market: &Market,
-    risk: &RiskContext,
-    now: UtcNanos,
 ) -> Result<Proposal, BuilderError> {
-    let mut proposal = propose(mandate, account, market, risk, &[], now)?;
-    proposal.action = sell_whole_position(account, market)?;
-    Ok(proposal)
+    Ok(Proposal {
+        action: sell_whole_position(account, market)?,
+        combined: Combined {
+            outputs_used: BTreeSet::new(),
+            exit_conviction: Conviction::ZERO,
+            buy_conviction: Conviction::ZERO,
+            score: Unit::ZERO,
+        },
+        sizes: Sizes {
+            cap: UsdExact::zero(),
+            current_mv: UsdExact::zero(),
+            target_value: None,
+            delta: None,
+        },
+        clipped_by: BTreeSet::new(),
+    })
 }
 
 /// The whole position at the bid, or a hold when there is none. An equity exit inside the close

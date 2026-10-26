@@ -10,14 +10,7 @@ use mandate_builder::{Action, HoldReason, OrderShape, Proposal, propose_thesis_e
 use mandate_domain::Purpose;
 
 fn proposed(market: &mandate_builder::Market, position: &str) -> Proposal {
-    propose_thesis_exit(
-        &two_stock_swing(),
-        &account(position, "99.9"),
-        market,
-        &quiet_risk(),
-        at("2026-09-22T14:00:00Z"),
-    )
-    .unwrap_or_else(|e| panic!("{e}"))
+    propose_thesis_exit(&account(position, "99.9"), market).unwrap_or_else(|e| panic!("{e}"))
 }
 
 #[test]
@@ -55,14 +48,8 @@ fn an_equity_inside_the_close_window_goes_out_marketable_and_crypto_never_does()
     ));
     let mut crypto = crypto_market("60000", "60010", "0.0001");
     crypto.in_close_window = true;
-    let proposal = propose_thesis_exit(
-        &two_stock_swing(),
-        &account("0.5", "60000"),
-        &crypto,
-        &quiet_risk(),
-        at("2026-09-22T14:00:00Z"),
-    )
-    .unwrap_or_else(|e| panic!("{e}"));
+    let proposal =
+        propose_thesis_exit(&account("0.5", "60000"), &crypto).unwrap_or_else(|e| panic!("{e}"));
     assert!(matches!(
         proposal.action,
         Action::Sell {
@@ -74,14 +61,8 @@ fn an_equity_inside_the_close_window_goes_out_marketable_and_crypto_never_does()
 
 #[test]
 fn nothing_held_holds() {
-    let proposal = propose_thesis_exit(
-        &two_stock_swing(),
-        &flat_account(),
-        &swing_market(),
-        &quiet_risk(),
-        at("2026-09-22T14:00:00Z"),
-    )
-    .unwrap_or_else(|e| panic!("{e}"));
+    let proposal =
+        propose_thesis_exit(&flat_account(), &swing_market()).unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(
         proposal.action,
         Action::Hold {

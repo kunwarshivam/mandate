@@ -6,8 +6,8 @@ use std::collections::BTreeMap;
 
 use mandate_accounting::{AssetClass, InstrumentId, Side};
 use mandate_builder::{
-    Action as BuilderAction, ActionContext, BuilderMandate, Clip as BuilderClip, Direction,
-    ModelOutput as BuilderModelOutput,
+    AccountSnapshot, Action as BuilderAction, ActionContext, BuilderMandate, Clip as BuilderClip,
+    Direction, ModelOutput as BuilderModelOutput,
 };
 use mandate_canon::Value;
 use mandate_domain::{AutonomyDecision, Purpose as BuilderPurpose};
@@ -312,13 +312,20 @@ pub fn size(
             .iter()
             .any(|ended| ended.as_str() == builder.market.instrument.as_str())
     {
-        let proposal = mandate_builder::propose_thesis_exit(
-            &mandate,
-            &builder.account,
-            &builder.market,
-            &builder.risk,
-            now,
-        )?;
+        let working = inputs
+            .working_exits
+            .iter()
+            .find(|(instrument, _)| instrument.as_str() == builder.market.instrument.as_str())
+            .map_or(Qty::ZERO, |(_, qty)| *qty);
+        let unsold = AccountSnapshot {
+            position_qty: if working < builder.account.position_qty {
+                builder.account.position_qty.checked_sub(working)?
+            } else {
+                Qty::ZERO
+            },
+            ..builder.account.clone()
+        };
+        let proposal = mandate_builder::propose_thesis_exit(&unsold, &builder.market)?;
         return runtime_proposal(
             proposal,
             builder,

@@ -218,6 +218,24 @@ fn the_golden_journal_folds_to_the_committed_state() {
             .unwrap_or_default(),
         "and that nothing is outstanding"
     );
+    let ended: Vec<String> = state
+        .risk_clock()
+        .map(|now| state.ended_theses(now))
+        .unwrap_or_default()
+        .iter()
+        .map(|instrument| instrument.as_str().to_owned())
+        .collect();
+    let expected_ended: Vec<String> = expected
+        .get("ended_theses")
+        .and_then(|v| v.as_array())
+        .expect("the ended theses are pinned")
+        .iter()
+        .filter_map(|v| v.as_str().map(str::to_owned))
+        .collect();
+    assert_eq!(
+        ended, expected_ended,
+        "and the instruments whose thesis ended (mandate spec §8.6, DEC-2391)"
+    );
     assert_eq!(
         FOLD_VERSION,
         u32::try_from(

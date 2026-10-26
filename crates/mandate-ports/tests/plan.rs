@@ -402,17 +402,69 @@ fn another_instruments_ended_thesis_leaves_the_signal_path() {
 
 #[test]
 fn a_pinned_universe_takes_no_thesis_exit() {
-    assert_eq!(
-        size(&validated(), &builder(), &ended(bullish(), SWING))
-            .map(|p| p.map(|p| p.exit_origin))
-            .ok()
-            .flatten()
-            .flatten(),
-        None,
-        "two_stock_swing is pinned: its ended theses (none can exist) sell nothing"
-    );
     let signal = size(&validated(), &builder(), &ended(inputs(), SWING))
         .unwrap()
         .unwrap();
-    assert_eq!(signal.exit_origin, Some(ExitOrigin::Signal));
+    assert_eq!(
+        signal.exit_origin,
+        Some(ExitOrigin::Signal),
+        "two_stock_swing is pinned: the bearish signals sell, the ended thesis does not"
+    );
+    assert!(
+        !matches!(
+            size(&validated(), &builder(), &ended(bullish(), SWING)),
+            Ok(Some(ref proposal)) if proposal.side == Side::Sell
+        ),
+        "and with bullish signals a pinned universe never sells for an ended thesis"
+    );
+}
+
+/// `inputs` with a working exit of `qty` in `instrument` (§8.3 step 2, "minus working exits").
+fn working(mut inputs: SignalInputs, instrument: &str, qty: &str) -> SignalInputs {
+    inputs.working_exits.insert(
+        InstrumentId::new(instrument).unwrap(),
+        Qty::parse(qty).unwrap(),
+    );
+    inputs
+}
+
+#[test]
+fn an_ended_thesis_sells_only_what_no_working_exit_already_sells() {
+    let part = size(
+        &researched(),
+        &builder(),
+        &working(ended(bullish(), SWING), SWING, "2"),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        part.qty,
+        Qty::parse("3").unwrap(),
+        "5 held, 2 already working"
+    );
+    assert_eq!(part.exit_origin, Some(ExitOrigin::RemovedInstrument));
+    for covered in ["5", "7"] {
+        assert_eq!(
+            size(
+                &researched(),
+                &builder(),
+                &working(ended(bullish(), SWING), SWING, covered)
+            )
+            .unwrap(),
+            None,
+            "{covered} working covers the 5 held: nothing is stacked"
+        );
+    }
+    let elsewhere = size(
+        &researched(),
+        &builder(),
+        &working(ended(bullish(), SWING), OTHER, "5"),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        elsewhere.qty,
+        Qty::parse("5").unwrap(),
+        "another instrument's working exit takes nothing off"
+    );
 }

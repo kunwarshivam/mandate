@@ -399,7 +399,11 @@ impl RuntimeState {
     /// stream has ended yet: what a plan takes off the position before it proposes an exit, so an
     /// exit already working is never proposed twice (mandate spec §8.3 step 2, "minus working
     /// exits"). A part-filled exit still counts whole, which sells less now and the rest once it
-    /// ends, never more than the position (`AGENTS.md` rule 3).
+    /// ends, never more than the position (`AGENTS.md` rule 3). A kill switch's `Flatten` is not
+    /// counted: it sells the agent's whole sub-ledger itself, and the mode it sets holds every other
+    /// proposal while it works. A sum past what a quantity can hold, which no real order reaches,
+    /// keeps the larger of the two; the binding gate's `sell_exceeds_available` still refuses any
+    /// sell above what the position and the open sells leave (trading spec §5.3 rule 4).
     pub fn working_exits(&self) -> BTreeMap<InstrumentId, Qty> {
         let mut working: BTreeMap<InstrumentId, Qty> = BTreeMap::new();
         for live in self.outstanding.keys() {
