@@ -3783,6 +3783,17 @@ fn land_check(
             return (line, Err(err.context("resolving HEAD and the base")));
         }
     };
+    if land_check_git(root, &["rev-parse", "--is-shallow-repository"]).is_ok_and(|s| s == "true") {
+        let line = format!("land-check summary: base={base} verdict=fail shallow");
+        return (
+            line,
+            Err(anyhow::anyhow!(
+                "this clone is shallow, and the checks read main's history (the gitops pins, the \
+                 diff base), so they would fail for the clone rather than the change; run `git \
+                 fetch --unshallow origin` and land-check again (DEC-2644)"
+            )),
+        );
+    }
     let dir = root.join(LAND_CHECK_DIR).join("work");
     land_check_clear(root, &dir);
     let mut results: Vec<(&str, Option<bool>)> =
@@ -14326,6 +14337,47 @@ mod tests {
             "{line}"
         );
         land_check_left_nothing(&fx)?;
+        Ok(())
+    }
+
+    /// A shallow clone is refused before anything runs: the checks read main's history, so they
+    /// would fail for the clone and not for the change.
+    #[test]
+    fn land_check_refuses_a_shallow_clone() -> Result<()> {
+        let (fx, _) = land_check_fixture("land-check-full", "b.txt", "b from main\n")?;
+        let shallow = fx.0.with_file_name(format!(
+            "{}-shallow",
+            fx.0.file_name()
+                .and_then(OsStr::to_str)
+                .context("a fixture name")?
+        ));
+        fs::remove_dir_all(&shallow).ok();
+        output_in(
+            &fx.0,
+            "git",
+            &[
+                "clone",
+                "-q",
+                "--depth=1",
+                "--no-local",
+                "--branch=base",
+                &format!("file://{}", fx.0.display()),
+                &shallow.display().to_string(),
+            ],
+        )?;
+        let mut ran = 0;
+        let (line, verdict) = land_check(&shallow, "HEAD", None, |_, _, _| {
+            ran += 1;
+            Ok(Vec::new())
+        });
+        let refused = verdict.expect_err("a shallow clone is refused");
+        assert!(
+            format!("{refused:#}").contains("--unshallow"),
+            "{refused:#}"
+        );
+        assert_eq!(line, "land-check summary: base=HEAD verdict=fail shallow");
+        assert_eq!(ran, 0, "no job runs");
+        fs::remove_dir_all(&shallow).ok();
         Ok(())
     }
 
