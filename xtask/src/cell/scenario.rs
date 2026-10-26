@@ -176,7 +176,8 @@ impl Part {
 
 /// A link of the research workspace's trade loop, read from the journal after the gestures' Job
 /// (DEC-2071): an event of `event_type` on `stream` whose stored body holds `holding` when it names
-/// one, polled until it is there or the loop's wait is spent. Until a run of the cell shows it, it
+/// one, after the last link seen on that stream, so each link follows the one before it, polled
+/// until it is there or the loop's wait is spent. Until a run of the cell shows it, it
 /// stands for `gap`, so a link not yet reached is named with the lanes it waits on, never failed.
 #[derive(Debug)]
 pub struct LoopCheck {
@@ -1328,10 +1329,10 @@ fn research_loop(workspace: &str, account: &str) -> Vec<Part> {
             vec![GW_RESEARCH],
         ),
         link(
-            "its research proposes a thesis",
+            "its research proposes a thesis, admitted",
             &agent,
             "ThesisProposed",
-            None,
+            Some(r#""admitted":true"#),
             "the research run's thesis, admitted through the eligibility floor and the autonomy \
              rules",
             "the recorded bundle's reply and the core's thesis lifecycle (DEC-2246)",
@@ -1358,10 +1359,10 @@ fn research_loop(workspace: &str, account: &str) -> Vec<Part> {
             },
         }),
         link(
-            "the runtime records the grant",
+            "the runtime records the grant, admitted",
             &agent,
             "ApprovalResponded",
-            Some(r#""verdict":"approved""#),
+            Some(r#""result":"admitted""#),
             "the runtime's record of the owner's grant",
             "the core's approval flow (mandate spec §6.4)",
             vec![P5_HOOK],
@@ -1369,7 +1370,7 @@ fn research_loop(workspace: &str, account: &str) -> Vec<Part> {
         link(
             "the executor submits the opening",
             &acct,
-            "OrderSubmitted",
+            "OrderRequestRecorded",
             Some(r#""purpose":"open""#),
             "the opening, through the account ledger to the fixture broker",
             "the executor takes the runtime's orders (#1736)",
@@ -1387,18 +1388,19 @@ fn research_loop(workspace: &str, account: &str) -> Vec<Part> {
         link(
             "the protective stop goes out",
             &acct,
-            "OrderSubmitted",
+            "OrderRequestRecorded",
             Some(r#""purpose":"protective""#),
             "the protective stop on the filled position",
             "protective-exit sequencing in the executor (trading spec §5.4)",
             vec![E2E_FILL],
         ),
         link(
-            "the news item that ends the thesis arrives",
+            "a monitor run starts on the held thesis",
             &agent,
-            "ObservationRecorded",
-            None,
-            "the feed item the monitor run reads, journaled before any run uses it",
+            "RunStarted",
+            Some(r#""kind":"monitor""#),
+            "the monitor run over the held thesis, which reads the news item that ends it, \
+             journaled before the run uses it",
             "the research pass offers arrived items to the core (#2575)",
             vec![NE_NEWS],
         ),
@@ -1414,7 +1416,7 @@ fn research_loop(workspace: &str, account: &str) -> Vec<Part> {
         link(
             "the thesis exit submits its sell",
             &acct,
-            "OrderSubmitted",
+            "OrderRequestRecorded",
             Some(r#""purpose":"discretionary_exit""#),
             "the thesis exit's sell of the position",
             "the order builder's signal exit (trading spec §8.3 step 2)",
@@ -1864,6 +1866,7 @@ pub fn run_in(name: &str) -> Result<String> {
     let mut browsed: Option<WebOutcome> = None;
     let mut traded: Option<TradeOutcome> = None;
     let mut looped = Looped::Open;
+    let mut linked = BTreeMap::<String, u64>::new();
     for step in &steps {
         let waiting = lanes(step);
         let on = if waiting.is_empty() {
@@ -1985,23 +1988,26 @@ pub fn run_in(name: &str) -> Result<String> {
                         failed.get_or_insert_with(|| format!("web/ {}: {said}", check.agent));
                     }
                 }
-                Part::Loop(check) => {
-                    let seen = match (&failed, &looped) {
-                        (None, Looped::Open) => Some(journaled(check)),
+                Part::Loop(_) | Part::Grant(_) => {
+                    let (shows, gap) = match part {
+                        Part::Loop(check) => (check.shows, &check.gap),
+                        Part::Grant(check) => (check.shows, &check.gap),
+                        _ => continue,
+                    };
+                    let seen = match (&failed, &looped, part) {
+                        (None, Looped::Open, Part::Loop(check)) => {
+                            Some(journaled(check, &mut linked))
+                        }
+                        (None, Looped::Open, Part::Grant(check)) => Some(grant(check, &id, &files)),
                         _ => None,
                     };
+                    let required = env::var_os(CELL_REQUIRED_ENV).is_some();
                     let (word, said) =
-                        link_verdict(failed.is_some(), &mut looped, seen, &check.gap);
-                    eprintln!("    {word:<8} {}: {said}", check.shows);
-                }
-                Part::Grant(check) => {
-                    let seen = match (&failed, &looped) {
-                        (None, Looped::Open) => Some(grant(check, &id, &files)),
-                        _ => None,
-                    };
-                    let (word, said) =
-                        link_verdict(failed.is_some(), &mut looped, seen, &check.gap);
-                    eprintln!("    {word:<8} {}: {said}", check.shows);
+                        link_verdict(failed.is_some(), required, &mut looped, seen, gap);
+                    if word == "failed" {
+                        failed.get_or_insert_with(|| format!("research loop: {said}"));
+                    }
+                    eprintln!("    {word:<8} {shows}: {said}");
                 }
                 Part::Gap(gap) => {
                     gaps += 1;
@@ -2088,12 +2094,15 @@ pub enum Seen {
     Unread(String),
 }
 
-/// A link's word and what it says, given whether an earlier part failed, the loop so far, what its
-/// read found (`None` when it was not read), and the gap it stands for. A link seen ran; one not seen
-/// stops the loop and reads as its gap while the gap waits on a lane, so a link not yet on main is
-/// named, never failed; every later link reads as not reached.
+/// A link's word and what it says, given whether an earlier part failed, whether the cell is required
+/// (`CELL_REQUIRED_ENV`), the loop so far, what its read found (`None` when it was not read), and the
+/// gap it stands for. A link seen ran; one not seen stops the loop and reads as its gap, so a link
+/// not yet on main is named, never failed; one that could not be read fails when the cell is
+/// required, since the journal or the CLI broke, and otherwise reads as its gap with why; every
+/// later link reads as not reached.
 pub fn link_verdict(
     earlier_failed: bool,
+    required: bool,
     looped: &mut Looped,
     seen: Option<Seen>,
     gap: &Gap,
@@ -2113,9 +2122,9 @@ pub fn link_verdict(
     };
     match seen {
         Some(Seen::There(line)) => ("ran", line),
-        Some(Seen::Absent) | None => {
+        Some(Seen::Unread(why)) if required => {
             *looped = Looped::Stopped(gap.what);
-            ("gap", format!("{} (waits on {})", gap.what, waits()))
+            ("failed", format!("{}, not read: {why}", gap.what))
         }
         Some(Seen::Unread(why)) => {
             *looped = Looped::Stopped(gap.what);
@@ -2124,45 +2133,63 @@ pub fn link_verdict(
                 format!("{}, not read: {why} (waits on {})", gap.what, waits()),
             )
         }
+        Some(Seen::Absent) | None => {
+            *looped = Looped::Stopped(gap.what);
+            ("gap", format!("{} (waits on {})", gap.what, waits()))
+        }
     }
 }
 
-/// The query that counts `check`'s events: those of its type on its stream whose stored body holds
-/// its fragment, every literal quoted as SQL quotes it.
-pub fn link_query(check: &LoopCheck) -> String {
-    let quoted = |text: &str| format!("'{}'", text.replace('\'', "''"));
+/// The text as SQL quotes it.
+fn sql_quoted(text: &str) -> String {
+    format!("'{}'", text.replace('\'', "''"))
+}
+
+/// The query that finds `check`'s first event after `after` on its stream: of its type, its stored
+/// body holding its fragment as a plain substring (no pattern), every literal quoted as SQL quotes
+/// it; it answers that event's sequence number, or nothing.
+pub fn link_query(check: &LoopCheck, after: u64) -> String {
     let holding = check
         .holding
         .map(|fragment| {
             format!(
-                " AND convert_from(body, 'UTF8') LIKE {}",
-                quoted(&format!("%{fragment}%"))
+                " AND position({} in convert_from(body, 'UTF8')) > 0",
+                sql_quoted(fragment)
             )
         })
         .unwrap_or_default();
     format!(
-        "SELECT count(*) FROM journal.events WHERE stream_id = {} AND event_type = {}{holding}",
-        quoted(&check.stream),
-        quoted(check.event_type)
+        "SELECT seq FROM journal.events WHERE stream_id = {} AND event_type = {}{holding} AND \
+         seq > {after} ORDER BY seq LIMIT 1",
+        sql_quoted(&check.stream),
+        sql_quoted(check.event_type)
     )
 }
 
-/// Reads `check`'s events from the journal's primary every two seconds until one is there or
-/// [`LINK_WITHIN`] has passed: what Postgres holds, not what a process reports.
+/// Reads `check`'s first event after the last link seen on its stream, `after`'s, from the journal's
+/// primary every two seconds until one is there or [`LINK_WITHIN`] has passed, and records its
+/// sequence number there: what Postgres holds, not what a process reports.
 #[expect(
     clippy::disallowed_methods,
     reason = "the host-side scenario bounds its wait for a live cell by the host's clock"
 )]
-fn journaled(check: &LoopCheck) -> Seen {
-    let query = link_query(check);
+fn journaled(check: &LoopCheck, after: &mut BTreeMap<String, u64>) -> Seen {
+    let since = after.get(&check.stream).copied().unwrap_or(0);
+    let query = link_query(check, since);
     let deadline = Instant::now() + LINK_WITHIN;
     loop {
         match super::on_primary(&query) {
-            Ok(count) if count.trim().parse::<u64>().is_ok_and(|n| n > 0) => {
-                return Seen::There(format!("{count} {} on {}", check.event_type, check.stream));
-            }
-            Ok(_) if Instant::now() < deadline => sleep(Duration::from_secs(2)),
-            Ok(_) => return Seen::Absent,
+            Ok(answer) => match answer.trim().parse::<u64>() {
+                Ok(seq) => {
+                    after.insert(check.stream.clone(), seq);
+                    return Seen::There(format!(
+                        "{} at seq {seq} of {}",
+                        check.event_type, check.stream
+                    ));
+                }
+                Err(_) if Instant::now() < deadline => sleep(Duration::from_secs(2)),
+                Err(_) => return Seen::Absent,
+            },
             Err(why) => return Seen::Unread(format!("{why:#}")),
         }
     }
@@ -2196,6 +2223,36 @@ pub fn pending_approval(lines: &[&str], agent: &str) -> Option<String> {
             _ => None,
         }
     })
+}
+
+/// Whether the content `approvals show` printed asks an opening, the one approval the research loop
+/// grants (mandate spec §6.4: only `open` and `increase` are ever asked).
+pub fn shows_opening(lines: &[&str]) -> bool {
+    lines
+        .iter()
+        .any(|line| line.starts_with('{') && line.contains(r#""purpose":"open""#))
+}
+
+/// What `approvals approve` printed: its `granted` line when the line after it says the grant was
+/// admitted or is not recorded yet (`approvals::message`), the runtime's record being the next
+/// link; else why not, a refusal, a count short of the approvers, or a skip on re-validation, each a
+/// grant that did not do what it shows.
+pub fn granted(lines: &[&str], approval: &str) -> Seen {
+    let head = format!("granted {approval} as event ");
+    let Some(at) = lines.iter().position(|l| l.starts_with(&head)) else {
+        return Seen::Unread(format!("`approvals approve {approval}` granted nothing"));
+    };
+    match lines.get(at + 1) {
+        Some(said)
+            if said.starts_with("Admitted and sent")
+                || said.starts_with("Admitted, not yet re-validated")
+                || said.starts_with("Not recorded yet") =>
+        {
+            Seen::There(format!("{}; {said}", lines[at]))
+        }
+        Some(said) => Seen::Unread(format!("{}; {said}", lines[at])),
+        None => Seen::Unread(format!("{}; no outcome printed", lines[at])),
+    }
 }
 
 /// The code `approvals show` printed.
@@ -2284,10 +2341,14 @@ fn grant(check: &GrantCheck, id: &str, files: &[(&str, String)]) -> Seen {
         Err(why) => return Seen::Unread(why),
     };
     let lines: Vec<&str> = shown.iter().map(String::as_str).collect();
+    if !shows_opening(&lines) {
+        return Seen::Unread(format!(
+            "`approvals show {approval}` shows no opening, so it is not granted"
+        ));
+    }
     let Some(code) = shown_code(&lines) else {
         return Seen::Unread(format!("`approvals show {approval}` showed no code"));
     };
-    let granted = format!("granted {approval} ");
     match control_gesture(
         &step(
             7,
@@ -2301,15 +2362,15 @@ fn grant(check: &GrantCheck, id: &str, files: &[(&str, String)]) -> Seen {
                 "--code",
                 &code,
             ],
-            &granted,
+            "granted ",
         ),
         &format!("{id}g"),
         files,
     ) {
-        Ok(lines) => match lines.iter().find(|l| l.starts_with(&granted)) {
-            Some(line) => Seen::There(line.clone()),
-            None => Seen::Unread(format!("`approvals approve {approval}` granted nothing")),
-        },
+        Ok(lines) => granted(
+            &lines.iter().map(String::as_str).collect::<Vec<_>>(),
+            &approval,
+        ),
         Err(why) => Seen::Unread(why),
     }
 }
@@ -3502,7 +3563,7 @@ mod tests {
             links,
             [
                 (agent.clone(), "RunStarted", None),
-                (agent.clone(), "ThesisProposed", None),
+                (agent.clone(), "ThesisProposed", Some(r#""admitted":true"#)),
                 (
                     agent.clone(),
                     "ApprovalRequested",
@@ -3512,20 +3573,24 @@ mod tests {
                 (
                     agent.clone(),
                     "ApprovalResponded",
-                    Some(r#""verdict":"approved""#)
+                    Some(r#""result":"admitted""#)
                 ),
-                (acct.clone(), "OrderSubmitted", Some(r#""purpose":"open""#)),
+                (
+                    acct.clone(),
+                    "OrderRequestRecorded",
+                    Some(r#""purpose":"open""#)
+                ),
                 (acct.clone(), "FillApplied", Some(r#""side":"buy""#)),
                 (
                     acct.clone(),
-                    "OrderSubmitted",
+                    "OrderRequestRecorded",
                     Some(r#""purpose":"protective""#)
                 ),
-                (agent.clone(), "ObservationRecorded", None),
+                (agent.clone(), "RunStarted", Some(r#""kind":"monitor""#)),
                 (agent.clone(), "ThesisInvalidated", None),
                 (
                     acct.clone(),
-                    "OrderSubmitted",
+                    "OrderRequestRecorded",
                     Some(r#""purpose":"discretionary_exit""#)
                 ),
                 (acct, "FillApplied", Some(r#""side":"sell""#)),
@@ -4273,6 +4338,7 @@ mod tests {
         assert_eq!(
             link_verdict(
                 false,
+                false,
                 &mut looped,
                 Some(Seen::There("1 FillApplied".into())),
                 &gap
@@ -4280,7 +4346,7 @@ mod tests {
             ("ran", "1 FillApplied".to_owned())
         );
         assert_eq!(looped, Looped::Open);
-        let (word, said) = link_verdict(false, &mut looped, Some(Seen::Absent), &gap);
+        let (word, said) = link_verdict(false, false, &mut looped, Some(Seen::Absent), &gap);
         assert_eq!(word, "gap");
         assert!(
             said.starts_with("the fill (waits on E2E (E21-54): "),
@@ -4289,12 +4355,17 @@ mod tests {
         assert!(said.contains("NE (E19-12): "), "{said}");
         assert_eq!(looped, Looped::Stopped("the fill"));
         assert_eq!(
-            link_verdict(false, &mut looped, None, &gap),
+            link_verdict(false, false, &mut looped, None, &gap),
             ("not reached", "the loop stopped at: the fill".to_owned())
         );
         let mut open = Looped::Open;
-        let (word, said) =
-            link_verdict(false, &mut open, Some(Seen::Unread("no pod".into())), &gap);
+        let (word, said) = link_verdict(
+            false,
+            false,
+            &mut open,
+            Some(Seen::Unread("no pod".into())),
+            &gap,
+        );
         assert_eq!(word, "gap");
         assert!(
             said.starts_with("the fill, not read: no pod (waits on "),
@@ -4303,10 +4374,34 @@ mod tests {
         assert_eq!(open, Looped::Stopped("the fill"));
         let mut after = Looped::Open;
         assert_eq!(
-            link_verdict(true, &mut after, Some(Seen::There("x".into())), &gap),
+            link_verdict(true, false, &mut after, Some(Seen::There("x".into())), &gap),
             ("not run", "an earlier part failed".to_owned())
         );
         assert_eq!(after, Looped::Open);
+        let mut required = Looped::Open;
+        assert_eq!(
+            link_verdict(
+                false,
+                true,
+                &mut required,
+                Some(Seen::Unread("no pod".into())),
+                &gap
+            ),
+            ("failed", "the fill, not read: no pod".to_owned())
+        );
+        assert_eq!(required, Looped::Stopped("the fill"));
+        let mut absent = Looped::Open;
+        assert_eq!(
+            link_verdict(false, true, &mut absent, Some(Seen::Absent), &gap).0,
+            "gap",
+            "a link not seen is its gap even when the cell is required"
+        );
+        let mut both = Looped::Stopped("the fill");
+        assert_eq!(
+            link_verdict(true, false, &mut both, None, &gap).0,
+            "not run",
+            "an earlier failure reads first"
+        );
     }
 
     /// A link's query counts its type on its stream, its body holding the fragment when it names
@@ -4325,17 +4420,19 @@ mod tests {
             },
         };
         assert_eq!(
-            link_query(&check(None)),
-            "SELECT count(*) FROM journal.events WHERE stream_id = \
-             'acct:demo1r:01KDER0000000001000000000A' AND event_type = 'FillApplied'"
+            link_query(&check(None), 0),
+            "SELECT seq FROM journal.events WHERE stream_id = \
+             'acct:demo1r:01KDER0000000001000000000A' AND event_type = 'FillApplied' AND seq > 0 \
+             ORDER BY seq LIMIT 1"
         );
         assert_eq!(
-            link_query(&check(Some(r#""side":"buy""#))),
-            "SELECT count(*) FROM journal.events WHERE stream_id = \
+            link_query(&check(Some(r#""side":"buy""#)), 7),
+            "SELECT seq FROM journal.events WHERE stream_id = \
              'acct:demo1r:01KDER0000000001000000000A' AND event_type = 'FillApplied' AND \
-             convert_from(body, 'UTF8') LIKE '%\"side\":\"buy\"%'"
+             position('\"side\":\"buy\"' in convert_from(body, 'UTF8')) > 0 AND seq > 7 ORDER BY \
+             seq LIMIT 1"
         );
-        assert!(link_query(&check(Some("o'clock"))).ends_with("LIKE '%o''clock%'"));
+        assert!(link_query(&check(Some("o'clock")), 0).contains("position('o''clock' in"));
     }
 
     /// The grant reads the CLI's own lines (`mandate_cli::inbox`): the first of the agent's
@@ -4360,6 +4457,101 @@ mod tests {
         ];
         assert_eq!(shown_code(&shown).as_deref(), Some("1a2b3c4d"));
         assert_eq!(shown_code(&shown[..3]), None);
+        assert!(!shows_opening(&shown), "an empty content asks nothing");
+        assert!(shows_opening(&[r#"{"purpose":"open","side":"buy"}"#]));
+        assert!(!shows_opening(&[r#"{"purpose":"increase","side":"buy"}"#]));
+        let id = "01KPENDING00000000000000AA";
+        let line = format!("granted {id} as event 01KEV at seq 9 for sha256:00");
+        for (said, seen) in [
+            (
+                "Admitted and sent to the executor; the gate still decides.",
+                true,
+            ),
+            ("Admitted, not yet re-validated; nothing was sent.", true),
+            ("Not recorded yet. If the runtime does not record it", true),
+            ("Refused (step_up_stale); nothing was sent.", false),
+            (
+                "Counted, short of the approvers required; nothing was sent.",
+                false,
+            ),
+            (
+                "Admitted, then skipped on re-validation (x); nothing was sent.",
+                false,
+            ),
+        ] {
+            let got = granted(&[line.as_str(), said], id);
+            assert_eq!(matches!(got, Seen::There(_)), seen, "{said}: {got:?}");
+            if !seen {
+                assert!(
+                    matches!(got, Seen::Unread(ref why) if why.contains(said)),
+                    "{got:?}"
+                );
+            }
+        }
+        assert!(matches!(granted(&[line.as_str()], id), Seen::Unread(_)));
+        assert!(matches!(
+            granted(&["granted 01KOTHER as event x"], id),
+            Seen::Unread(_)
+        ));
+    }
+
+    /// The grant's gestures carry the owner's arguments exactly as the plan's research gestures do.
+    #[test]
+    fn the_grant_acts_as_the_owner_in_the_research_workspace() {
+        let steps = planned("demo3");
+        let registered = gestures_of(&steps, |n| n == 3)
+            .into_iter()
+            .find(|g| g.args[..2] == ["model", "register"])
+            .expect("a research gesture");
+        let at = registered
+            .args
+            .iter()
+            .position(|a| a == "--workspace")
+            .unwrap();
+        assert_eq!(
+            owner_in("demo3r", &["approvals", "list"])[2..],
+            registered.args[at..],
+            "the same workspace, user, journal and store"
+        );
+    }
+
+    /// Each link's event and the member its fragment names are the journal's own: the catalogue row
+    /// of the event (journal spec §9) names the member, or, for `FillApplied`'s side, which the row
+    /// leaves to §9.5, the executor's writer journals it; read from those files, not from the plan.
+    #[test]
+    fn each_link_reads_a_member_its_event_carries() {
+        let spec = fs::read_to_string("../docs/specs/journal.md").unwrap();
+        let writer = fs::read_to_string("../crates/mandate-executor/src/orders.rs").unwrap();
+        let steps = planned("demo3");
+        let checks: Vec<&LoopCheck> = steps[2]
+            .parts
+            .iter()
+            .filter_map(|p| match p {
+                Part::Loop(l) => Some(l),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(checks.len(), 11);
+        for check in checks {
+            let named = format!("`{}`", check.event_type);
+            let row = spec
+                .lines()
+                .find(|l| {
+                    l.starts_with("| `") && l.split('|').nth(1).is_some_and(|n| n.contains(&named))
+                })
+                .unwrap_or_else(|| panic!("{} has a catalogue row", check.event_type));
+            let Some(fragment) = check.holding else {
+                continue;
+            };
+            let member = fragment.split('"').nth(1).unwrap();
+            let written =
+                check.event_type == "FillApplied" && writer.contains(&format!("(\"{member}\", "));
+            assert!(
+                row.contains(member) || written,
+                "{}: {member}",
+                check.event_type
+            );
+        }
     }
 
     /// DEC-2070 items 1 and 5: the cell is pointed at the run's workspace and, for the second
