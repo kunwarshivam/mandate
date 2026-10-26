@@ -2789,13 +2789,18 @@ fn a_restrictions_alert_is_accepted_by_the_journal_in_its_subjects_batch() {
         Ok(())
     );
     let elsewhere = alerted("01J8Z3M4000000000000000077", "01J8Z3M4000000000000000002");
-    assert!(
-        mandate_journal::check_batch(&[subject.clone(), elsewhere]).is_err(),
-        "a subject off the batch"
+    let refused_at = |result: Result<(), (usize, mandate_journal::Invalid)>| {
+        result.err().map(|(at, invalid)| (at, invalid.path))
+    };
+    assert_eq!(
+        refused_at(mandate_journal::check_batch(&[subject.clone(), elsewhere])),
+        Some((1, "payload.subject".to_owned())),
+        "a subject off the batch is refused by rule 130, at the alert"
     );
     let second = alerted(subject_id, "01J8Z3M4000000000000000003");
-    assert!(
-        mandate_journal::check_batch(&[subject, first, second]).is_err(),
-        "two alerts on one subject"
+    assert_eq!(
+        refused_at(mandate_journal::check_batch(&[subject, first, second])),
+        Some((2, "payload.subject".to_owned())),
+        "two alerts on one subject are refused by rule 130, at the second"
     );
 }

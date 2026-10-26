@@ -571,6 +571,9 @@ pub(crate) struct Session<'s> {
     recorded: BTreeSet<String>,
     /// The `client_order_id` of every `OrderSubmitted` committed **in this run** (TI-1).
     submitted_drafts: BTreeSet<String>,
+    /// The event id of every unprotected interval's record at its bound committed in this run, so
+    /// an alert naming one is reported under the interval's own key on every path (DEC-2514).
+    interval_limits: BTreeSet<String>,
     /// Whether the replayed agent stream already carries an intent (TI-12).
     pub(crate) cycle_open: bool,
     /// Whether an asked cycle's wait holds its released opening (DEC-940 item 2).
@@ -613,6 +616,7 @@ impl<'s> Session<'s> {
             heads: BTreeMap::new(),
             recorded: BTreeSet::new(),
             submitted_drafts: BTreeSet::new(),
+            interval_limits: BTreeSet::new(),
             cycle_open: false,
             holding: false,
             held: None,
@@ -1249,17 +1253,10 @@ impl<'s> Session<'s> {
         effects: Vec<mandate_executor::Effect>,
     ) -> Result<(), ShellError> {
         let mut queue = VecDeque::from(effects);
-        let mut interval_limits: Vec<mandate_executor::EventId> = Vec::new();
         while let Some(effect) = queue.pop_front() {
             match effect {
                 mandate_executor::Effect::Journal(draft) => {
                     let drafts = consecutive_executor_journals(draft, &mut queue);
-                    interval_limits.extend(
-                        drafts
-                            .iter()
-                            .filter(|draft| interval_limit_record(draft))
-                            .map(|draft| draft.event_id.clone()),
-                    );
                     self.append_account(&drafts)?;
                 }
                 mandate_executor::Effect::Broker(request) => {
@@ -1274,7 +1271,7 @@ impl<'s> Session<'s> {
                 }
                 mandate_executor::Effect::Timer(_) => {}
                 mandate_executor::Effect::Notify(notification) => {
-                    let key = if interval_limits.contains(&notification.subject_event) {
+                    let key = if self.interval_limits.contains(&notification.subject_event.0) {
                         INTERVAL_LIMIT_ALERT
                     } else {
                         notification.kind.key()
@@ -1426,6 +1423,9 @@ impl<'s> Session<'s> {
                 && let Some(id) = draft.payload.get("client_order_id").and_then(Value::as_str)
             {
                 self.submitted_drafts.insert(id.to_owned());
+            }
+            if interval_limit_record(draft) {
+                self.interval_limits.insert(draft.event_id.0.clone());
             }
         }
         Ok(())

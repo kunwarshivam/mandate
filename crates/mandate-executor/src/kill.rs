@@ -105,9 +105,7 @@ pub(crate) fn kill_switch(
             ),
         ],
     )?;
-    if initiator == Initiator::RiskLimit {
-        batch.notify(switch, OwnerAlertKind::KillSwitch);
-    }
+    batch.notify(switch, OwnerAlertKind::KillSwitch);
     cancel_each(batch, cancels)
 }
 
@@ -183,9 +181,7 @@ fn account(
             ),
         ],
     )?;
-    if initiator == Initiator::RiskLimit {
-        batch.notify(switch, OwnerAlertKind::KillSwitch);
-    }
+    batch.notify(switch, OwnerAlertKind::KillSwitch);
     batch.broker(BrokerRequest::CancelAll(AccountWideScope::new(
         AccountWide::Account(reference),
     )));
@@ -1022,12 +1018,11 @@ mod tests {
                     _ => None,
                 })
                 .collect();
-            let automated = (name == "risk_limit").then_some((&record.event_id, "kill_switch"));
             assert_eq!(
                 alerts,
-                automated.into_iter().collect::<Vec<_>>(),
-                "{name}: only an automated switch is alerted here; a user's is the API's, and an \
-                 operator's the operator action's (notifications spec §3.2, §3.4)"
+                vec![(&record.event_id, "kill_switch")],
+                "{name}: every switch is alerted here until workspace services write a user's \
+                 (DEC-2514 item 2, backlog E8-9k)"
             );
             assert_eq!(
                 raised(&effects),
