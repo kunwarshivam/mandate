@@ -38,6 +38,7 @@ import account_clock
 import account_closes
 import account_restrictions
 import restriction_lifts
+import reconciliation_acks
 import account_switches
 import acknowledgments
 import approval
@@ -4271,6 +4272,7 @@ def render(
     real_money_section: dict,
     account_restrictions_section: dict,
     restriction_lifts_section: dict,
+    reconciliation_acks_section: dict,
     account_switches_section: dict,
     snapshots_section: dict,
     account_activity_section: dict,
@@ -4333,6 +4335,7 @@ def render(
             "real_money": real_money_section,
             "account_restrictions": account_restrictions_section,
             "restriction_lifts": restriction_lifts_section,
+            "reconciliation_acknowledgments": reconciliation_acks_section,
             "account_switches": account_switches_section,
             "account_activity": account_activity_section,
             "fill_applied": fill_applied_section,
@@ -4426,6 +4429,7 @@ def main(argv: list[str] | None = None) -> int:
     real_money_section = real_money.build_section()
     account_restrictions_section = account_restrictions.build_section()
     restriction_lifts_section = restriction_lifts.build_section()
+    reconciliation_acks_section = reconciliation_acks.build_section()
     account_switches_section = account_switches.build_section()
     account_activity_section = account_activity.build_section()
     fill_applied_section = fill_applied.build_section()
@@ -4508,6 +4512,8 @@ def main(argv: list[str] | None = None) -> int:
     problems += account_restrictions.run_mutants(account_restrictions_section)
     problems += restriction_lifts.check_section(restriction_lifts_section)
     problems += restriction_lifts.run_mutants(restriction_lifts_section)
+    problems += reconciliation_acks.check_section(reconciliation_acks_section)
+    problems += reconciliation_acks.run_mutants(reconciliation_acks_section)
     problems += account_switches.check_section(account_switches_section)
     problems += account_switches.run_mutants(account_switches_section)
     problems += account_activity.check_section(account_activity_section)
@@ -4608,6 +4614,7 @@ def main(argv: list[str] | None = None) -> int:
         real_money_section,
         account_restrictions_section,
         restriction_lifts_section,
+        reconciliation_acks_section,
         account_switches_section,
         snapshots_section,
         account_activity_section,
@@ -4670,6 +4677,7 @@ def main(argv: list[str] | None = None) -> int:
         or real_money.check_section(reread["real_money"])
         or account_restrictions.check_section(reread["account_restrictions"])
         or restriction_lifts.check_section(reread["restriction_lifts"])
+        or reconciliation_acks.check_section(reread["reconciliation_acknowledgments"])
         or account_switches.check_section(reread["account_switches"])
         or account_activity.check_section(reread["account_activity"])
         or fill_applied.check_section(reread["fill_applied"])

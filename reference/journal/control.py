@@ -242,7 +242,7 @@ for _kind in ("ctl", "acct"):
 # v0.102 §9.28 (DEC-2824): version 2 of both adds `subject`, so an acknowledgment can name an
 # account restriction (`restriction`) as well as a triggered limit (`limit`). Version 1 reads as
 # `limit`, and rule 239 judges both versions alike.
-ACK_SUBJECTS = ("limit", "restriction")
+ACK_SUBJECTS = ("limit", "restriction", "reconciliation")
 
 
 def with_subject(record: T) -> T:
@@ -1660,6 +1660,16 @@ VERSIONED_SCHEMAS[("acct", "AccountRestrictionLifted", 1)] = rec(
     ("acknowledgment", ULID),
     ("evidence", ULID),
     ("restriction", one_of("active", "closing_only", "blocked")),
+    ("risk_clock", RISK_CLOCK),
+)
+# §9's `AgentModeApplied` on the account stream, closed at version 1 as `mandate-journal` registers
+# it: the mode an agent (`*` for every agent) is moved to under a named restriction. v0.104 rule
+# reads it as the reconciliation hold an acknowledgment names (DEC-2830).
+SCHEMAS[("acct", "AgentModeApplied")] = rec(
+    ("agent", STR),
+    ("to", one_of("normal", "exits_only", "paused", "stopped")),
+    ("restriction", STR),
+    ("originated", BOOL),
     ("risk_clock", RISK_CLOCK),
 )
 # §9 (DEC-458): the broker's account report, closed at version 1, which a broker cause's lift reads
