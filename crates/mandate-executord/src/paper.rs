@@ -14,6 +14,8 @@
 //!   less what open sells hold (an OCO's or a bracket's legs once), none held included, `403`
 //!   with code 40310000, refused before anything changes, since there are no short sales
 //!   (`AGENTS.md` rule 12);
+//! - `GET /v2/assets/{symbol}`: the asset record of each of [`ASSETS`], active, tradable and
+//!   fractionable, with no attribute, so neither an IPO nor a PTP; `404` for any other symbol;
 //! - `GET /v2/orders` (open orders, legs nested), `GET /v2/orders/{id}` (the read-back of a
 //!   cancel by the broker's id), `GET /v2/orders:by_client_order_id` (`404` for
 //!   one it never took), and `DELETE /v2/orders/{id}` (`204`, the order and its group then
@@ -29,17 +31,71 @@
 //! moves the cash by its notional alone.
 //!
 //! Every other request is `404`. Ids are a counter in UUID form, so a run is deterministic.
+//!
+//! On the data host it answers `GET /v2/stocks/{symbol}/quotes/latest?feed=iex` for each of
+//! [`ASSETS`] with that asset's fixed bid and ask, stamped by the clock [`FixturePaper::quoting`]
+//! gives it, so the quote is as fresh as the reader's own clock says; without one, and for any
+//! other symbol or read, it answers `404`, which reads as no quote. It is the venue, so it knows
+//! none of its assets is halted ([`FixturePaper::halted`]).
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
-use mandate_alpaca::{HttpRequest, Method, Response, TradingTransport, TransportError};
+use mandate_alpaca::{
+    BarsRequest, DataTransport, HttpRequest, Method, QuoteRequest, Response, TradingTransport,
+    TransportError,
+};
 use mandate_canon::{Key, Object, Value, parse, to_canonical};
 use mandate_time::UtcNanos;
 
 /// The fixture account's cash, equity and buying power: a paper account of 100,000 dollars.
 pub const CASH: &str = "100000";
+
+/// The fixture's assets: symbol, listing exchange as Alpaca writes it, and the latest quote's bid
+/// and ask. The cell's deployments trade SPY and QQQ.
+pub const ASSETS: [FixtureAsset; 2] = [
+    FixtureAsset {
+        symbol: "SPY",
+        exchange: "ARCA",
+        bid: "580.11",
+        ask: "580.13",
+    },
+    FixtureAsset {
+        symbol: "QQQ",
+        exchange: "NASDAQ",
+        bid: "500.21",
+        ask: "500.23",
+    },
+];
+
+/// One of the fixture's [`ASSETS`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FixtureAsset {
+    pub symbol: &'static str,
+    pub exchange: &'static str,
+    pub bid: &'static str,
+    pub ask: &'static str,
+}
+
+/// The listed asset `symbol`, if the fixture lists it.
+fn listed(symbol: &str) -> Option<(usize, FixtureAsset)> {
+    ASSETS
+        .iter()
+        .copied()
+        .enumerate()
+        .find(|(_, asset)| asset.symbol == symbol)
+}
+
+/// The clock a quote is stamped by: the reader's own, so the fixture never ages its quote.
+#[derive(Clone)]
+struct QuoteClock(Rc<dyn Fn() -> UtcNanos>);
+
+impl std::fmt::Debug for QuoteClock {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("QuoteClock")
+    }
+}
 
 /// The fixture's decimal scale: amounts are whole multiples of 10⁻⁹, as `mandate-num`'s are.
 const SCALE: i128 = 1_000_000_000;
@@ -88,6 +144,7 @@ struct Books {
     holdings: BTreeMap<String, Holding>,
     cash: i128,
     sequence: u64,
+    served: Vec<String>,
 }
 
 impl Default for Books {
@@ -98,6 +155,7 @@ impl Default for Books {
             holdings: BTreeMap::new(),
             cash: scaled(CASH).unwrap_or_default(),
             sequence: 0,
+            served: Vec::new(),
         }
     }
 }
@@ -186,6 +244,7 @@ pub struct FixturePaper {
     books: Rc<RefCell<Books>>,
     at: String,
     fills: bool,
+    quotes: Option<QuoteClock>,
 }
 
 impl FixturePaper {
@@ -195,7 +254,24 @@ impl FixturePaper {
             books: Rc::default(),
             at: at.to_string(),
             fills: false,
+            quotes: None,
         }
+    }
+
+    /// The broker quoting each of [`ASSETS`] on the data host, every quote stamped by `clock` when
+    /// it is read.
+    #[must_use]
+    pub fn quoting(self, clock: impl Fn() -> UtcNanos + 'static) -> Self {
+        Self {
+            quotes: Some(QuoteClock(Rc::new(clock))),
+            ..self
+        }
+    }
+
+    /// Whether `symbol` is halted: never, for one of [`ASSETS`], since the fixture is the venue
+    /// and halts nothing; unread, `None`, for any other symbol.
+    pub fn halted(&self, symbol: &str) -> Option<bool> {
+        listed(symbol).map(|_| false)
     }
 
     /// A broker with an empty book whose records are stamped `at`, that fills each limit order
@@ -207,8 +283,18 @@ impl FixturePaper {
         }
     }
 
+    /// Every trading-host request it answered, as `METHOD /path?query`, oldest first: what a test
+    /// reads to see a fact asked of the broker.
+    pub fn served(&self) -> Vec<String> {
+        self.books.borrow().served.clone()
+    }
+
     fn answer(&self, request: &HttpRequest) -> Response {
         let path = request.path_and_query();
+        self.books.borrow_mut().served.push(format!(
+            "{} {path}",
+            format!("{:?}", request.method()).to_uppercase()
+        ));
         let (route, query) = path.split_once('?').unwrap_or((path, ""));
         let param = |name: &str| {
             query
@@ -242,6 +328,12 @@ impl FixturePaper {
                 }
             }
             (Method::Post, "/v2/orders") => self.submit(request.body()),
+            (Method::Get, route) if route.starts_with("/v2/assets/") => {
+                match route.strip_prefix("/v2/assets/").and_then(listed) {
+                    Some((index, asset)) => ok(asset_json(index, asset)),
+                    None => refusal(404, 40_410_000, "asset not found"),
+                }
+            }
             (Method::Get, route) => {
                 let books = self.books.borrow();
                 match route
@@ -484,6 +576,68 @@ impl TradingTransport for FixturePaper {
     async fn send(&self, request: &HttpRequest) -> Result<Response, TransportError> {
         Ok(self.answer(request))
     }
+}
+
+impl DataTransport for FixturePaper {
+    async fn send(&self, request: &QuoteRequest) -> Result<Response, TransportError> {
+        Ok(self.quote(request.path_and_query()))
+    }
+
+    async fn send_bars(&self, _request: &BarsRequest) -> Result<Response, TransportError> {
+        Ok(refusal(404, 40_410_000, "not found"))
+    }
+}
+
+impl FixturePaper {
+    /// The latest IEX quote of one of [`ASSETS`], stamped by the quote clock; `404` without a
+    /// clock, for another symbol, or for any other read.
+    fn quote(&self, path_and_query: &str) -> Response {
+        let asset = path_and_query
+            .strip_prefix("/v2/stocks/")
+            .and_then(|rest| rest.strip_suffix("/quotes/latest?feed=iex"))
+            .and_then(listed);
+        match (asset, &self.quotes) {
+            (Some((_, asset)), Some(QuoteClock(clock))) => {
+                let quote = format!(
+                    r#"{{"quote":{{"ap":{},"as":100,"ax":"V","bp":{},"bs":100,"bx":"V","c":["R"],"t":"{}","z":"B"}},"symbol":"{}"}}"#,
+                    asset.ask,
+                    asset.bid,
+                    clock(),
+                    asset.symbol
+                );
+                Response {
+                    status: 200,
+                    body: quote.into_bytes(),
+                }
+            }
+            _ => refusal(404, 40_410_000, "not found"),
+        }
+    }
+}
+
+/// One of [`ASSETS`] as Alpaca's asset record: a US equity, active, tradable and fractionable,
+/// with an empty `attributes` list, so neither an IPO nor a PTP. Its id is the asset's place in
+/// the list in UUID form, apart from the order ids' counter by its high digit.
+fn asset_json(index: usize, asset: FixtureAsset) -> Value {
+    let id = format!(
+        "a0000000-0000-4000-8000-{:012}",
+        u64::try_from(index).unwrap_or(u64::MAX)
+    );
+    object(vec![
+        ("attributes", Value::Array(Vec::new())),
+        ("class", s("us_equity")),
+        ("easy_to_borrow", Value::Bool(true)),
+        ("exchange", s(asset.exchange)),
+        ("fractionable", Value::Bool(true)),
+        ("id", s(&id)),
+        ("maintenance_margin_requirement", s("30")),
+        ("marginable", Value::Bool(true)),
+        ("name", s(asset.symbol)),
+        ("shortable", Value::Bool(true)),
+        ("status", s("active")),
+        ("symbol", s(asset.symbol)),
+        ("tradable", Value::Bool(true)),
+    ])
 }
 
 /// Whether an order may still work: accepted and resting, or a leg held until its entry fills.
@@ -780,6 +934,16 @@ mod tests {
             "an id it never gave, beside one it did"
         );
         Ok(())
+    }
+
+    /// A quoting fixture prints its clock by name only: the closure has no text of its own, and
+    /// the fixture's `Debug` names what it holds.
+    #[test]
+    fn a_quoting_fixture_prints_its_clock_by_name() {
+        let quoting = FixturePaper::new(UtcNanos::EPOCH).quoting(|| UtcNanos::EPOCH);
+        let printed = format!("{quoting:?}");
+        assert!(printed.contains("quotes: Some(QuoteClock)"), "{printed}");
+        assert!(format!("{:?}", FixturePaper::new(UtcNanos::EPOCH)).contains("quotes: None"));
     }
 
     /// Decimal text to the fixture's scale and back: nine places at most, a whole part always,
