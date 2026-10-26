@@ -71,9 +71,26 @@ fn enveloped_as(draft: &EventDraft, ulids: &BTreeMap<String, String>) -> Vec<u8>
         cause,
         "3".repeat(64),
         String::from_utf8_lossy(&to_canonical(&Value::Object(draft.config_refs.clone()))),
-        String::from_utf8_lossy(&to_canonical(&draft.payload)),
+        String::from_utf8_lossy(&to_canonical(&remapped(&draft.payload, ulids))),
     );
     body.into_bytes()
+}
+
+/// `value` with every string that is one of the test's ids replaced by its ULID, so a record
+/// naming another, as `OwnerAlertSent`'s `subject` names its switch, names it as the journal
+/// reads it.
+fn remapped(value: &Value, ulids: &BTreeMap<String, String>) -> Value {
+    match value {
+        Value::Str(id) => Value::Str(ulids.get(id).cloned().unwrap_or_else(|| id.clone())),
+        Value::Array(items) => Value::Array(items.iter().map(|v| remapped(v, ulids)).collect()),
+        Value::Object(members) => Value::Object(
+            members
+                .iter()
+                .map(|(key, v)| (key.clone(), remapped(v, ulids)))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
 }
 
 fn enveloped(draft: &EventDraft) -> Vec<u8> {
