@@ -281,6 +281,22 @@ fn a_granted_ask_still_deferring_at_revalidation_is_handed_to_the_binding_gate()
     let grant = Answer::grant(next_control_seq(&shell), &asked, ASKED_AT + 20).event();
     let ran = tail(&mut shell, &grant, &ports);
     assert_eq!(ran.handed.len(), 1, "{:?}", ran.draft_types());
+    let revalidated = ran
+        .drafts
+        .iter()
+        .find(|draft| draft.event_type == "ApprovalRevalidated")
+        .unwrap_or_else(|| panic!("the grant is re-validated: {:?}", ran.draft_types()));
+    for (key, want) in [
+        ("result", "act"),
+        ("decided_by_bound", "policy_overlay"),
+        ("decided_by_now", "policy_overlay"),
+    ] {
+        assert_eq!(
+            member(revalidated, key).and_then(Value::as_str),
+            Some(want),
+            "re-validation applies the overlay the request bound (check 10): {key}"
+        );
+    }
 }
 
 /// The names version 3 must carry for `verdict` on a proposal adding risk or not, computed from
@@ -360,5 +376,10 @@ proptest! {
             prop_assert!(!proposed(&ran), "{:?}", ran.draft_types());
             prop_assert_eq!(asked(&ran), autonomy != Autonomy::Deny);
         }
+        let overlay = deferring && matches!(verdict, DryRunVerdict::AllowDeferring { .. }) && autonomy == Autonomy::Auto;
+        prop_assert_eq!(
+            member(made, "decided_by").and_then(Value::as_str) == Some("policy_overlay"),
+            overlay
+        );
     }
 }
