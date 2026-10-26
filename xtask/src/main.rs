@@ -323,6 +323,12 @@ fn main() -> ExitCode {
 fn run() -> Result<()> {
     let args: Vec<String> = env::args().skip(1).collect();
     let root = repo_root()?;
+    let invoked = output("git", &["rev-parse", "--show-toplevel"])
+        .ok()
+        .map(|top| PathBuf::from(top.trim()));
+    if let Some(why) = root_mismatch(&root, invoked.as_deref()) {
+        bail!(why);
+    }
     env::set_current_dir(&root).context("entering the repository root")?;
     match args
         .iter()
@@ -4343,6 +4349,28 @@ fn mutation_anchors() -> Result<()> {
     .context(
         "a mutation anchor in reference/mandate/mutants.py no longer matches ref.py; re-anchor it, or the nightly's mutants.py fails before its first run",
     )
+}
+
+/// Why this xtask may not run where it was invoked: the checkout it was built from, `built`, is not
+/// the one it runs in, `invoked` (the invoking directory's git toplevel), which happens when two
+/// checkouts share one `CARGO_TARGET_DIR`, and so one xtask binary rooted at whichever built last
+/// (lane NE, 2026-10-26). Every check would then read the other tree, and pass or fail for it.
+/// `None` when they are the same directory, or when either cannot be resolved (no git here).
+fn root_mismatch(built: &Path, invoked: Option<&Path>) -> Option<String> {
+    let invoked = invoked?;
+    let (Ok(built_real), Ok(invoked_real)) = (fs::canonicalize(built), fs::canonicalize(invoked))
+    else {
+        return None;
+    };
+    (built_real != invoked_real).then(|| {
+        format!(
+            "this xtask was built from the checkout at {} but runs in {}, so it would check the \
+             other tree: two checkouts share one CARGO_TARGET_DIR; give this one its own (unset \
+             CARGO_TARGET_DIR, or point it at a directory only this checkout uses) and run it again",
+            built_real.display(),
+            invoked_real.display()
+        )
+    })
 }
 
 fn repo_root() -> Result<PathBuf> {
@@ -12533,7 +12561,7 @@ mod tests {
     use super::{
         CARGO_INCREMENTAL, LAND_CHECK_DIR, LAND_CHECK_JOBS, NO_FAIL_FAST_ENV, TIMED_OUT_MUTANTS,
         conflict_markers_in, incremental_overridden, land_check, land_check_job,
-        mutants_job_within, mutants_summary, summarised,
+        mutants_job_within, mutants_summary, root_mismatch, summarised,
     };
     use super::{CREDENTIAL_GUARD, CREDENTIAL_NAME_PARTS, rehearsal_live_run};
     use super::{ProcessGroups, process_group_problems};
@@ -13816,6 +13844,30 @@ mod tests {
             mutants_outcome(Path::new("."), &[], Some(0), SystemTime::UNIX_EPOCH).is_ok(),
             "a clean run passes"
         );
+    }
+
+    /// An xtask built from one checkout refuses to run in another, naming both; the same checkout,
+    /// reached by another path, and an invocation with no git answer run.
+    #[test]
+    fn an_xtask_built_from_another_checkout_refuses_to_run() -> Result<()> {
+        let here = Fixture::new("root-here")?;
+        let there = Fixture::new("root-there")?;
+        let refused =
+            root_mismatch(&here.0, Some(&there.0)).context("two checkouts are refused")?;
+        assert!(
+            refused.contains(&fs::canonicalize(&here.0)?.display().to_string())
+                && refused.contains(&fs::canonicalize(&there.0)?.display().to_string())
+                && refused.contains("CARGO_TARGET_DIR"),
+            "{refused}"
+        );
+        assert_eq!(root_mismatch(&here.0, Some(&here.0)), None);
+        assert_eq!(
+            root_mismatch(&here.0, Some(&here.0.join("crates/.."))),
+            None,
+            "one checkout by two paths"
+        );
+        assert_eq!(root_mismatch(&here.0, None), None, "no git to ask");
+        Ok(())
     }
 
     /// A fixture with a PR commit on `a.txt` checked out detached, and a branch `base` that moved
