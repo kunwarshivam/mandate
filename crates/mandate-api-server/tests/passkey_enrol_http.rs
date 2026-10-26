@@ -692,7 +692,6 @@ fn a_second_enrolment_needs_passkey_step_up_and_own_row_step_up_is_not_judged_ye
 /// A member who holds a passkey needs step-up for another however fresh the sign-in: a session
 /// taken over within 300 s of its sign-in cannot add its own passkey.
 #[test]
-#[ignore = "pending E9-4"]
 fn a_second_enrolment_on_a_fresh_sign_in_without_step_up_is_step_up_required() {
     let signer = Signer::es256();
     let rows = holding(&signer);
