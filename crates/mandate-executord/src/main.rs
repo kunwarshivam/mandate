@@ -243,7 +243,7 @@ fn serve<S: Store>(
         )?;
         let run = match production {
             Some(production) => run.deployed(&config.scope, production),
-            None => run,
+            None => run.undeployed(),
         };
         let edge = Edge {
             now: &host_now,
@@ -274,7 +274,7 @@ fn serve<S: Store>(
     let run = run::paper(broker, TokioPause, &config.scope)?;
     let run = match production {
         Some(production) => run.deployed(&config.scope, production),
-        None => run,
+        None => run.undeployed(),
     };
     let mut tick = |now| lease.pass(now);
     let mut edge = Edge {

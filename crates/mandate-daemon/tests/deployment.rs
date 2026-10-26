@@ -660,7 +660,7 @@ fn each_role_reference_resolves_by_the_founder_s_roles_in_seq_order() {
     );
 }
 
-/// Backlog `E21-30-daemon-approvers-reread` (DEC-2816): the approvers a process started with are
+/// Backlog `E21-30-daemon-approvers-reread` (DEC-2818): the approvers a process started with are
 /// narrowed at each later read of the control stream to those its rows still resolve to, as the
 /// shell's `ApproverSource::current` narrows them (DEC-2384 item 6). A member deactivated after the
 /// start, or whose rows can no longer be read, never approves, and nobody is ever added: a role

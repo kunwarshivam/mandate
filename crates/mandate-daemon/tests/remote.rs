@@ -18,7 +18,7 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use mandate_canon::Digest;
-use mandate_daemon::remote::{GRACE, RemoteGateway};
+use mandate_daemon::remote::{GRACE, GatewayAddress, RemoteGateway};
 use mandate_gateway::frame::{MAX_REPLY_FRAME, MAX_REQUEST_FRAME, read_frame, write_frame};
 use mandate_gateway::kinds::{KeyOwner, Outcome, Purpose};
 use mandate_gateway::money::{Usage, Usd6};
@@ -343,6 +343,37 @@ fn a_request_past_its_deadline_opens_no_connection() {
     );
     service.handle.join().unwrap();
     assert_eq!(service.accepted.load(Ordering::SeqCst), 0);
+}
+
+/// DEC-2397 item 6: the address as written is resolved for the call, so the record crosses as it
+/// does to the address itself.
+#[test]
+fn a_written_address_is_resolved_for_the_call() {
+    let service = serve(Script::Answer(|request| Ok(record_for(request))));
+    let written = GatewayAddress::parse(&format!("127.0.0.1:{}", service.address.port())).unwrap();
+    let request = request(2_000);
+    assert_eq!(
+        RemoteGateway::new(written, host_now).call(&request),
+        Ok(record_for(&request))
+    );
+    service.handle.join().unwrap();
+    assert_eq!(service.accepted.load(Ordering::SeqCst), 1);
+}
+
+/// DEC-2397 items 2 and 6: a name that does not resolve costs the call alone, as a lost exchange,
+/// and the next call resolves it again.
+#[test]
+fn a_name_that_does_not_resolve_is_unreachable() {
+    let mut gateway = RemoteGateway::new(
+        GatewayAddress::parse("not-yet.invalid:8080").unwrap(),
+        host_now,
+    );
+    for _ in 0..2 {
+        assert_eq!(
+            gateway.call(&request(2_000)),
+            Err(RequestError::GatewayUnreachable)
+        );
+    }
 }
 
 /// DEC-2397 item 1: a call is built at the clock the remote gateway was given.

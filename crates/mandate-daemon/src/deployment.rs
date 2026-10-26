@@ -12,7 +12,7 @@
 //! control row the approvers' reading cannot read resolves no approver (`AGENTS.md` rules 3 and 8).
 //! The approvers are read when the process resolves its deployment, and narrowed at every later read
 //! of the control stream to those its rows still resolve to; nobody is added while it runs
-//! (DEC-2816).
+//! (DEC-2818).
 
 use std::collections::BTreeSet;
 
@@ -156,7 +156,7 @@ pub fn rule_set(
         .ok_or("rule_set_unavailable")
 }
 
-/// The approvers a process started with, and what it re-reads them from (DEC-2816): the mandate's
+/// The approvers a process started with, and what it re-reads them from (DEC-2818): the mandate's
 /// approver references and its connection.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ApproverSource {

@@ -48,7 +48,7 @@ pub struct Wiring {
     /// The fold the production ports read (DEC-2378 S2), fed every row the process reads from the
     /// control, account and clock streams; `None` for the fixture wiring, which reads nothing.
     pub facts: Option<Facts>,
-    /// What the view's approvers are narrowed from at every read of the control stream (DEC-2816):
+    /// What the view's approvers are narrowed from at every read of the control stream (DEC-2818):
     /// a member deactivated, removed, or stripped of the role since the start stops approving
     /// before the next input is handed. `None`, the fixture wiring's, keeps the view's approvers.
     pub approvers: Option<ApproverSource>,
@@ -320,7 +320,7 @@ impl<S: Store> RuntimeProcess<S> {
     }
 
     /// The mandate view the core decides on: before the first control pass, the approvers the
-    /// deployment resolved at the start; after it, those the latest control pass left (DEC-2816).
+    /// deployment resolved at the start; after it, those the latest control pass left (DEC-2818).
     pub fn view(&self) -> &MandateView {
         &self.wiring.view
     }
