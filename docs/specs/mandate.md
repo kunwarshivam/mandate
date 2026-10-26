@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | v0.9 (retirement leaves nothing of the agent's, [DEC-2344](../project/decisions/DEC-2344.md); v0.8 corporate actions in the risk state, [DEC-2303](../project/decisions/DEC-2303.md); v0.7 schema version 2, [DEC-539](../project/decisions/DEC-539.md); v0.6 the direction change of [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md); v0.5 approved by the founder 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions)); requires a decision-log entry and founder approval to change (safety-critical) |
+| **Status** | v0.10 (fees charged to the agent's own orders lower E, [DEC-2393](../project/decisions/DEC-2393.md), and a trigger's recorded breach time is the whole breached interval, [DEC-2331](../project/decisions/DEC-2331.md); v0.9 retirement leaves nothing of the agent's, [DEC-2344](../project/decisions/DEC-2344.md); v0.8 corporate actions in the risk state, [DEC-2303](../project/decisions/DEC-2303.md); v0.7 schema version 2, [DEC-539](../project/decisions/DEC-539.md); v0.6 the direction change of [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md); v0.5 approved by the founder 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions)); requires a decision-log entry and founder approval to change (safety-critical) |
 | **Implements** | PRD 6.3 (FR-3.1 to FR-3.8), 6.5 (FR-5.2 to FR-5.5), 6.6 (FR-6.1 to FR-6.6); backlog E6, E10, E17 |
 | **Schemas** | [mandate.schema.json](../../schemas/mandate.schema.json), [policy.schema.json](../../schemas/policy.schema.json) (structural rules) |
 | **Reference cases** | [reference-cases/mandate.yaml](reference-cases/mandate.yaml) |
@@ -736,6 +736,10 @@ stream** fold (journal spec §2). It belongs to the agent and survives restarts 
   the ex-date per trading spec §8.3), `CashInLieuPosted`, `CompensatingEvent`,
   `MandateVersionApplied`, `UniverseChanged` (§2.3), `RiskDayStarted`, copied `ClockAdvanced`, and
   owner acknowledgments.
+- **Fills and fees are the agent's own** ([DEC-2393](../project/decisions/DEC-2393.md)): a fill of
+  an order whose request names the agent moves Q and cash, and a fee charged to such an order (a
+  fill's own `USD` fees, and a `FeesCharged` naming the order, at its `charged`) lowers cash, and so
+  E, at its instant. Another agent's fills and fees on the same account never move E.
 - **Corporate actions** ([DEC-2303](../project/decisions/DEC-2303.md)) are folded at application,
   trading spec §8.5's instant (20:00 New York time on the last trading day before the ex-date). A
   **split** replaces Q, B and realized by §8.5's rule: Q' and the removed residual basis R, and cash
@@ -798,7 +802,9 @@ exits, and the kill switch are never denied by them (MI-1).
   the rollover keeps confirming against the previous day's E₀** (at most `breach_confirm_s`, so at
   most 300 s): it latches (reason `resolved_at_rollover`) if it confirms, and is discarded if the
   condition stays false for `breach_confirm_s`. A flash print just before midnight therefore
-  latches nothing. The action is `daily_loss_action`:
+  latches nothing. The trigger records the whole breached interval as its breach time, which may
+  exceed `breach_confirm_s` ([DEC-2331](../project/decisions/DEC-2331.md) item 3). The action is
+  `daily_loss_action`:
   - `exits_only`: restriction `daily_loss` (mode `exits_only`).
   - `flatten_and_pause`: the agent-scoped kill switch (§5.5), restriction `daily_loss` (mode
     `paused`). Once the agent is flat, owner acknowledgment (step-up) changes it to `exits_only`.
