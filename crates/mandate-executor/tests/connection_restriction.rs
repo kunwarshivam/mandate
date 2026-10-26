@@ -206,6 +206,46 @@ fn a_new_degrading_cause_is_journaled_once_and_stays_degraded() {
     assert!(shell.run(NETWORK, &ports).drafts.is_empty());
 }
 
+/// A `condition_cleared` ends the causes before it (DEC-687 item 1, connections spec §8.2): a cause
+/// that recurs after it is journaled again, so the acknowledgment it must refuse has a record to
+/// read, while the restriction stays in force.
+#[test]
+fn a_cause_after_the_condition_cleared_is_journaled_again() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[FixedInstruments::LIQUID_EQUITY]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = established(&ports);
+    shell.run(NETWORK, &ports);
+    shell.run(NETWORK, &ports);
+    let seq = shell.head().0.saturating_add(1);
+    let clock = shell.state.risk_clock().map_or(1, |clock| clock.secs());
+    shell
+        .fold_one(&common::event(
+            ACCOUNT_STREAM,
+            seq,
+            "ConnectionStateChanged",
+            with_clock(
+                &[
+                    ("connection_id", text(CONNECTION)),
+                    ("from", text("degraded")),
+                    ("reason", text("condition_cleared")),
+                    ("to", text("degraded")),
+                ],
+                clock,
+            ),
+        ))
+        .expect("the clearing folds");
+    let again = shell.run(NETWORK, &ports);
+    assert_eq!(
+        changes(&again),
+        [change("degraded", "degraded", "network_errors")]
+    );
+    assert!(restrictions(&again).is_empty());
+    assert!(shell.run(NETWORK, &ports).drafts.is_empty());
+}
+
 /// A replay from the stream alone reaches the same place: the restriction in force and the state
 /// it recorded, so a restart journals nothing again.
 #[test]

@@ -243,21 +243,24 @@ fn connection_checked() -> Result<(), ExecutorError> {
     Ok(())
 }
 
-/// The copy of `ConnectionEstablished` names the stream's connection (rule 68). A reconnect's
-/// second copy names the same one and keeps the state the stream last recorded (CN-12): a
-/// connection revoked while `suspended` is still `suspended` when it is established again.
-/// The stream's copy of the establishment (journal spec §9.8, rule 68): the connection whose state
-/// later records change, `active` with no cause. A copy for the connection already held keeps its
-/// state, since a reconnect is the same connection.
+/// The copy of `ConnectionEstablished` names the stream's connection (rule 68), `active` with no
+/// cause. A reconnect's second copy names the same one and keeps the state the stream last
+/// recorded (CN-12): a connection revoked while `suspended` is still `suspended` when it is
+/// established again. A copy naming another connection is refused: one account stream holds one
+/// connection, so it can never hide the state the stream holds.
 fn connection_established(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
     let id = required_text(payload, "connection_id")?;
-    if state.connection.as_ref().is_none_or(|view| view.id != id) {
-        state.connection = Some(ConnectionView {
-            id: id.to_owned(),
-            ..ConnectionView::default()
-        });
+    match &state.connection {
+        Some(view) if view.id == id => Ok(()),
+        Some(_) => Err(refused("connection_id")),
+        None => {
+            state.connection = Some(ConnectionView {
+                id: id.to_owned(),
+                ..ConnectionView::default()
+            });
+            Ok(())
+        }
     }
-    Ok(())
 }
 
 fn health_of(payload: &Value, member: &str) -> Result<ConnectionHealth, ExecutorError> {
@@ -270,9 +273,12 @@ fn health_of(payload: &Value, member: &str) -> Result<ConnectionHealth, Executor
 }
 
 /// The connection's state as `ConnectionStateChanged` records it (journal spec §9.8, DEC-2826):
-/// its `to`, with the reasons journaled since it entered that state. `condition_cleared` and
-/// `acknowledged` record no cause. A state change before the stream's copy of the establishment is
-/// refused, as rule 68 refuses it, and so is one whose `from` is not the state the stream holds.
+/// its `to`, with the causes journaled since it entered that state or since the latest
+/// `condition_cleared` or `acknowledged`, which record none and end the ones before them (DEC-687
+/// item 1), so a cause that recurs after the condition cleared is journaled again. A state change
+/// before the stream's copy of the establishment is refused, as rule 68 refuses it, and so is one
+/// for another connection or whose `from` is not the state the stream holds. Rules 59 and 60,
+/// which `append` judges, are not judged again here.
 fn connection_state_changed(
     state: &mut ExecutorState,
     payload: &Value,
@@ -290,11 +296,12 @@ fn connection_state_changed(
     if view.health != from {
         return Err(refused("from"));
     }
-    if view.health != to {
+    let ends_causes = matches!(reason, "condition_cleared" | "acknowledged");
+    if view.health != to || ends_causes {
         view.reasons.clear();
     }
     view.health = to;
-    if !matches!(reason, "condition_cleared" | "acknowledged") && to != ConnectionHealth::Active {
+    if !ends_causes && to != ConnectionHealth::Active {
         view.reasons.insert(reason.to_owned());
     }
     Ok(())

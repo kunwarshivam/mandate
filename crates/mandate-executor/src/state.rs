@@ -11,9 +11,9 @@ use crate::error::ExecutorError;
 use crate::ids::{ClientOrderId, IntentId};
 use crate::shape::transitional_alpaca;
 use crate::types::{
-    AccountRef, AccountScope, AccountState, ActivityCursor, AgentId, BracketLegs, EventId, FillId,
-    IntentBody, MarketObservation, Mode, OcoLegs, Order, OrderState, Protection, ProtectionPrices,
-    Purpose, RiskClock, Seq, SubmitOrder, UnprotectedInterval, WriterEpoch,
+    AccountRef, AccountScope, AccountState, ActivityCursor, AgentId, BracketLegs, ConnectionHealth,
+    EventId, FillId, IntentBody, MarketObservation, Mode, OcoLegs, Order, OrderState, Protection,
+    ProtectionPrices, Purpose, RiskClock, Seq, SubmitOrder, UnprotectedInterval, WriterEpoch,
 };
 
 pub use crate::fold::fold;
@@ -395,7 +395,7 @@ pub(crate) struct PriorBase {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct ConnectionView {
     pub(crate) id: String,
-    pub(crate) health: crate::types::ConnectionHealth,
+    pub(crate) health: ConnectionHealth,
     /// The reasons journaled since the connection entered [`Self::health`], so a cause is recorded
     /// once per stay (connections spec §8.2, DEC-687).
     pub(crate) reasons: BTreeSet<String>,

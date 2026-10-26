@@ -80,16 +80,93 @@ fn a_copy_with_no_risk_clock_refuses() {
     assert_eq!(error.code(), "risk_clock_missing", "{error}");
 }
 
+/// A state change whose reason fits its `to` (rule 59), so each case fails only on what it names.
 fn state_change(from: &str, to: &str, connection: &str) -> Value {
+    let reason = match to {
+        "suspended" => "credential_expired",
+        "active" => "acknowledged",
+        _ => "network_errors",
+    };
     with_clock(
         &[
             ("connection_id", text(connection)),
             ("from", text(from)),
-            ("reason", text("network_errors")),
+            ("reason", text(reason)),
             ("to", text(to)),
         ],
-        6,
+        5,
     )
+}
+
+fn copy_of(connection: &str, seq: u64) -> mandate_executor::FoldedEvent {
+    let mut named = members();
+    for member in &mut named {
+        if member.0 == "connection_id" {
+            member.1 = text(connection);
+        }
+    }
+    copied(
+        ACCOUNT_STREAM,
+        seq,
+        "ConnectionEstablished",
+        with_clock(&named, 5),
+        &EventId("ctl:ws1-7".to_owned()),
+    )
+}
+
+/// One account stream holds one connection (rule 68): a copy naming another is refused, and a
+/// reconnect's copy of the same one keeps the state the stream holds (CN-12), so a `suspended`
+/// connection established again is still `suspended`.
+#[test]
+fn a_second_copy_keeps_the_state_and_another_connection_is_refused() {
+    let mut state = opened();
+    fold(&mut state, &copy_of("conn-1", 2)).expect("the copy folds");
+    fold(
+        &mut state,
+        &event(
+            ACCOUNT_STREAM,
+            3,
+            "ConnectionStateChanged",
+            state_change("active", "suspended", "conn-1"),
+        ),
+    )
+    .expect("into suspended");
+    let error = fold(&mut state, &copy_of("conn-2", 4)).expect_err("another connection");
+    assert_eq!(error.code(), "non_canonical_payload", "{error}");
+    let mut state = opened();
+    fold(&mut state, &copy_of("conn-1", 2)).expect("the copy folds");
+    fold(
+        &mut state,
+        &event(
+            ACCOUNT_STREAM,
+            3,
+            "ConnectionStateChanged",
+            state_change("active", "suspended", "conn-1"),
+        ),
+    )
+    .expect("into suspended");
+    fold(&mut state, &copy_of("conn-1", 4)).expect("a reconnect's copy");
+    let error = fold(
+        &mut state,
+        &event(
+            ACCOUNT_STREAM,
+            5,
+            "ConnectionStateChanged",
+            state_change("active", "degraded", "conn-1"),
+        ),
+    )
+    .expect_err("still suspended after the reconnect");
+    assert!(error.to_string().contains("from"), "{error}");
+    fold(
+        &mut state,
+        &event(
+            ACCOUNT_STREAM,
+            5,
+            "ConnectionStateChanged",
+            state_change("suspended", "active", "conn-1"),
+        ),
+    )
+    .expect("from the state the stream kept");
 }
 
 /// A state change folds only after the copy, for the connection it names and from the state the
