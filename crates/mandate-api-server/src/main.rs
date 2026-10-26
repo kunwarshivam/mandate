@@ -235,7 +235,8 @@ fn checked() -> Result<(Args, Start), StartRefusal> {
     Ok((args, start))
 }
 
-/// How long the internal paper workspace's start check waits for the control stream.
+/// How long the internal paper workspace's start check waits for the control stream, and the
+/// operator's `real-money` command for its read and append.
 const START_READ_BOUND: Duration = Duration::from_secs(5);
 
 /// DEC-1143 item 2: with [`INTERNAL_PAPER_WORKSPACE`] on, the hosted control stream must be read
@@ -506,7 +507,12 @@ fn real_money() -> ExitCode {
             key: &command.key,
             requested: command.requested.clone(),
         };
-        operator::set(&journal, &setting, founder.as_deref(), now).await
+        tokio::time::timeout(
+            START_READ_BOUND,
+            operator::set(&journal, &setting, founder.as_deref(), now),
+        )
+        .await
+        .unwrap_or(Err(operator::Refusal::JournalUnavailable))
     });
     match set {
         Ok(row) => {

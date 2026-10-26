@@ -588,3 +588,87 @@ fn the_finish_mode_exits_0_on_sigterm() {
         .expect("the rest of stdout");
     assert_eq!((code, rest.as_str()), (Some(0), ""));
 }
+
+const OPERATOR: &str = "01JAA3G0A000000000000000P1";
+
+/// A `real-money` run: its arguments, its extra settings, and the one line it must print.
+type Case<'a> = (&'a [&'a str], &'a [(&'a str, &'a str)], &'a str);
+const WORKSPACE: &str = "01JB3K6F0C9R2V7N4M8Q1T5W3Y";
+
+/// DEC-2134 items 3 and 6: `real-money` is the platform operator's setting of the gate, never a
+/// server start. A malformed command line, a secret in the environment, an on setting for a
+/// workspace the founder setting does not name alone, and an unreachable journal are each refused
+/// with exit code 2 and one line naming the refusal; nothing else is printed.
+#[test]
+fn the_real_money_mode_refuses_what_dec_2134_refuses() {
+    let on = [
+        "real-money",
+        "on",
+        "--decision",
+        "DEC-2135",
+        "--operator",
+        OPERATOR,
+        "--key",
+        "k1Z-9_operator01",
+    ];
+    let off = [
+        "real-money",
+        "off",
+        "--operator",
+        OPERATOR,
+        "--key",
+        "k1Z-9_operator01",
+    ];
+    let cases: [Case; 6] = [
+        (&["real-money"], &[], "refused: arguments\n"),
+        (
+            &[
+                "real-money",
+                "on",
+                "--operator",
+                OPERATOR,
+                "--key",
+                "k1Z-9_operator01",
+            ],
+            &[],
+            "refused: arguments\n",
+        ),
+        (&on, &[], "refused: founder_workspace_unset\n"),
+        (
+            &on,
+            &[(
+                "MANDATE_API_FOUNDER_WORKSPACE",
+                "01JB3K6F0C9R2V7N4M8Q1T5W40",
+            )],
+            "refused: not_the_founders_workspace\n",
+        ),
+        (
+            &on,
+            &[(
+                "MANDATE_API_FOUNDER_WORKSPACE",
+                "01JB3K6F0C9R2V7N4M8Q1T5W40,01JB3K6F0C9R2V7N4M8Q1T5W3Y",
+            )],
+            "refused: founder_workspace_ambiguous\n",
+        ),
+        (&off, &[], "refused: journal_unavailable\n"),
+    ];
+    for (args, extra, want) in cases {
+        let (code, text) = refused(command(args, extra));
+        assert_eq!((code, text.as_str()), (Some(2), want), "{args:?} {extra:?}");
+    }
+    let founder = [("MANDATE_API_FOUNDER_WORKSPACE", WORKSPACE)];
+    let (code, text) = refused(command(&on, &founder));
+    assert_eq!(
+        (code, text.as_str()),
+        (Some(2), "refused: journal_unavailable\n"),
+        "the founder's own workspace reaches the journal"
+    );
+    let canary = "canary-2134-never-printed";
+    let (code, text) = refused(command(&off, &[("VAULT_TOKEN", canary)]));
+    assert_eq!(code, Some(2), "{text}");
+    assert!(
+        text.starts_with("refused: ") && text.contains("VAULT_TOKEN"),
+        "{text}"
+    );
+    assert!(!text.contains(canary), "{text}");
+}

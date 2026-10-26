@@ -162,7 +162,7 @@ fn the_drafted_setting_is_a_valid_operators_record_the_gate_reads() {
         assert_eq!(member(&["payload", "decision"]), Some(decision));
         assert_eq!(
             member(&["stream_id"]),
-            Some(Value::Str(format!("ctl:{WORKSPACE}").into()))
+            Some(Value::Str(format!("ctl:{WORKSPACE}")))
         );
         let row = stored(1, &id, &draft);
         let want = if enabled { Gate::On } else { Gate::Off };
