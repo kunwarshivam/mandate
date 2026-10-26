@@ -4,7 +4,7 @@
 |---|---|
 | **Owner** | The coordinating agent session; the founder reviews |
 | **Status** | Living document, one page. Updated at the end of every working session |
-| **Last updated** | 2026-10-26 06:00 UTC: the coordinator session that took over from [the handover](handover-2026-10-26.md) landed fourteen PRs (passkey enrolment, the trade loop's browser spec and driver, the fixture fills, the cell's bars, its plan, Alpaca connect, the approvers fold), fixed the cell's API startup on `main` (DEC-2132), and recorded DEC-2131. The handover holds the open PRs and the next builds |
+| **Last updated** | 2026-10-26 06:00 UTC: the coordinator session that took over from [the handover](handover-2026-10-26.md) landed thirteen PRs (passkey enrolment, the trade loop's browser spec and driver, the fixture fills, the cell's bars, its plan, Alpaca connect, the approvers fold), fixed the cell's API startup on `main` (DEC-2132), and recorded DEC-2131. The handover holds the open PRs and the next builds |
 
 Where the project stands, what is waiting on whom, and what comes next, on one page. How the work
 ran, with every PR number, lives in [11-work-log.md](11-work-log.md). Plans live in
