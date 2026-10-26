@@ -437,6 +437,7 @@ fn a_responder_is_an_approver_exactly_when_an_active_approver_answers_a_referenc
         let mut seq = 1;
         let mut eligible: BTreeSet<&str> = BTreeSet::new();
         let mut admin: BTreeSet<&str> = BTreeSet::from([ULID_FOUNDER]);
+        let mut leaving = Vec::new();
         let tail = if late { 10_000 } else { 500 };
         for (k, (joins, mask, long, leaves)) in invitees.iter().enumerate() {
             let member = ULIDS[k + 1];
@@ -453,8 +454,7 @@ fn a_responder_is_an_approver_exactly_when_an_active_approver_answers_a_referenc
             records.push(accepted(seq, base + 5, member, &invitation, &granted, cool));
             let cooled = base + 5 + cool <= tail;
             if *leaves {
-                seq += 1;
-                records.push(deactivated(seq, 100 + i64::try_from(k).unwrap(), member));
+                leaving.push(member);
             } else {
                 if cooled && granted.contains(&"approver") {
                     eligible.insert(member);
@@ -463,6 +463,10 @@ fn a_responder_is_an_approver_exactly_when_an_active_approver_answers_a_referenc
                     admin.insert(member);
                 }
             }
+        }
+        for (k, member) in leaving.into_iter().enumerate() {
+            seq += 1;
+            records.push(deactivated(seq, 100 + i64::try_from(k).unwrap(), member));
         }
         if founder_leaves {
             seq += 1;
