@@ -107,6 +107,19 @@ fn sink_code(error: &SinkError) -> &'static str {
 
 /// The shared ports' refusals, each as the shell's own cause with the same reason
 /// (DEC-2605 row 20): the extraction changes no reason code.
+/// A stored-bars refusal keeps the cause it had while it was read here (DEC-2385).
+impl From<mandate_bars::BarsError> for Cause {
+    fn from(error: mandate_bars::BarsError) -> Self {
+        match error {
+            mandate_bars::BarsError::Untrusted { what } => Cause::Untrusted { what },
+            mandate_bars::BarsError::Inspect(error) => Cause::Inspect(error),
+            mandate_bars::BarsError::Dataset(error) => Cause::Dataset(error),
+            mandate_bars::BarsError::Model(error) => Cause::Model(error),
+            mandate_bars::BarsError::Num(error) => Cause::Num(error),
+        }
+    }
+}
+
 /// A reviewed input keeps the cause it had while it was read here (DEC-2380 item 5).
 impl From<InputError> for Cause {
     fn from(error: InputError) -> Self {
