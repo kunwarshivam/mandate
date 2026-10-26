@@ -20,7 +20,7 @@
 //! through [`Named`], which names each deployed instrument by its asset id, as the executor sent it,
 //! wherever the broker names it by its ticker (DEC-938 item 1, [DEC-2813](../../../docs/project/decisions/DEC-2813.md)).
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -211,6 +211,9 @@ struct Inner {
     cache: RefCell<Cache>,
     /// Each agent's risk as the process's risk book last read it (DEC-2804 item 7).
     risk: RefCell<BTreeMap<AgentId, GateRisk>>,
+    /// Whether the last hand-off could not be kept: then no agent's risk is answered, so a view
+    /// that failed is never read as the one before it.
+    risk_stale: Cell<bool>,
 }
 
 /// The account's deployments as every production port reads them, shared by all of them.
@@ -230,6 +233,7 @@ impl Deployment {
             sources,
             cache: RefCell::new(Cache::default()),
             risk: RefCell::new(BTreeMap::new()),
+            risk_stale: Cell::new(false),
         }))
     }
 
@@ -677,6 +681,9 @@ impl Deployment {
     /// or its view is unreadable, which holds its openings and never its exits (DEC-2804 items 2
     /// and 7).
     pub fn risk(&self, agent: &AgentId) -> Option<GateRisk> {
+        if self.0.risk_stale.get() {
+            return None;
+        }
         self.0.risk.try_borrow().ok()?.get(agent).cloned()
     }
 }
@@ -707,12 +714,15 @@ impl RiskOpenings for Deployment {
         })
     }
 
-    /// Keeps `risks` for [`Self::risk`]. The map is borrowed only here and there, and never across
-    /// a call that could re-enter, so the borrow never fails; if it did, the last map would stand
-    /// until the next commit replaces it.
+    /// Keeps `risks` for [`Self::risk`]. A hand-off that cannot be kept marks the map stale, and
+    /// no agent's risk is answered until the next one is kept.
     fn read(&self, risks: BTreeMap<AgentId, GateRisk>) {
-        if let Ok(mut held) = self.0.risk.try_borrow_mut() {
-            *held = risks;
+        match self.0.risk.try_borrow_mut() {
+            Ok(mut held) => {
+                *held = risks;
+                self.0.risk_stale.set(false);
+            }
+            Err(_) => self.0.risk_stale.set(true),
         }
     }
 }

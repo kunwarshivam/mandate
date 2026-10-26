@@ -72,6 +72,8 @@ struct Fixed {
     max_instruments: u64,
     asked: Asked,
     opened: Rc<Cell<usize>>,
+    /// The agents whose risk the book last handed the gate.
+    published: Rc<std::cell::RefCell<Vec<String>>>,
 }
 
 impl Fixed {
@@ -80,6 +82,7 @@ impl Fixed {
             max_instruments,
             asked: Asked::default(),
             opened: Rc::new(Cell::new(0)),
+            published: Rc::default(),
         }
     }
 }
@@ -106,6 +109,10 @@ impl RiskOpenings for Fixed {
             inherited_loss_usd: Usd::ZERO,
             mark_max_age_s: 60,
         })
+    }
+
+    fn read(&self, risks: BTreeMap<AgentId, mandate_executord::risk::GateRisk>) {
+        *self.published.borrow_mut() = risks.keys().map(|agent| agent.0.clone()).collect();
     }
 }
 
@@ -449,5 +456,74 @@ fn a_refused_owed_batch_holds_openings_and_keeps_the_process() -> Result<(), Err
         "{:?}",
         process.risk_view(&agent(AGENT))
     );
+    Ok(())
+}
+
+/// DEC-2804 item 7, `AGENTS.md` rule 3: the gate is handed the agent's risk while its view reads,
+/// and none once a refused batch has made it unreadable, in the same pass.
+#[test]
+fn the_gate_never_reads_a_view_that_failed() -> Result<(), Error> {
+    let journal = deployed()?;
+    let openings = Fixed::new(1);
+    let published = Rc::clone(&openings.published);
+    let mut process = process(&journal, openings)?;
+    process.step(at(NOON)?);
+    assert_eq!(*published.borrow(), vec![AGENT.to_owned()]);
+    tick(&journal, "t3", TUESDAY)?;
+    journal.fail_next_of("RiskDayStarted", &[support::Fault::Invalid]);
+    process.step(at(TUESDAY)?);
+    assert!(published.borrow().is_empty(), "{:?}", published.borrow());
+    Ok(())
+}
+
+/// DEC-2399 item 3, DEC-2804 item 4: an owed batch in doubt is offered again first on the next
+/// pass, the same records right after their cause, and nothing else is appended in between.
+#[test]
+fn an_owed_batch_in_doubt_goes_first_and_nothing_slips_between() -> Result<(), Error> {
+    let journal = deployed()?;
+    let mut process = process(&journal, Fixed::new(1))?;
+    process.step(at(NOON)?);
+    tick(&journal, "t3", TUESDAY)?;
+    journal.fail_next_of("RiskDayStarted", &[support::Fault::Unavailable]);
+    process.step(at(TUESDAY)?);
+    tick(&journal, "t4", "2026-09-22T04:00:06Z")?;
+    process.step(at("2026-09-22T04:00:06Z")?);
+    assert!(process.ready(), "{:?}", process.lifecycle().state());
+    let types = journal.types(ACCOUNT_STREAM);
+    let copy = types
+        .iter()
+        .rposition(|kind| kind == "ClockAdvanced")
+        .ok_or("copy")?;
+    assert_eq!(
+        types.get(copy + 1).map(String::as_str),
+        Some("RiskDayStarted"),
+        "{types:?}"
+    );
+    assert!(readable(&process.risk_view(&agent(AGENT))));
+    Ok(())
+}
+
+/// A copy the journal refuses makes the view unreadable, keeps the process, and is not offered
+/// again on the same day's next tick.
+#[test]
+fn a_refused_copy_is_not_offered_again_that_day() -> Result<(), Error> {
+    let journal = deployed()?;
+    let mut process = process(&journal, Fixed::new(1))?;
+    process.step(at(NOON)?);
+    tick(&journal, "t3", TUESDAY)?;
+    journal.fail_next_of("ClockAdvanced", &[support::Fault::Invalid]);
+    process.step(at(TUESDAY)?);
+    assert!(process.ready(), "{:?}", process.lifecycle().state());
+    assert!(matches!(
+        process.risk_view(&agent(AGENT)),
+        RiskView::Unreadable {
+            cause: UnreadableCause::AppendFailed,
+            ..
+        }
+    ));
+    let before = journal.appends();
+    tick(&journal, "t4", "2026-09-22T04:00:06Z")?;
+    process.step(at("2026-09-22T04:00:06Z")?);
+    assert_eq!(journal.appends(), before, "no copy offered again that day");
     Ok(())
 }

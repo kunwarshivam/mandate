@@ -167,6 +167,10 @@ enum Ran {
     InDoubt,
     /// The journal refused the batch as invalid: nothing of it committed (DEC-2805).
     Refused,
+    /// Nothing of the batch was offered: the risk book's batch went first and moved the head, or
+    /// is still in doubt (DEC-2804 item 4). The caller builds its drafts again at the new head on
+    /// a later pass, since its event ids were derived from the old one.
+    Held,
     Stopped,
 }
 
@@ -489,7 +493,8 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
 
     /// Journals `copy`'s establishment copy on the account stream at `now`, under this process's
     /// writer epoch, as [`crate::establish::copy_draft`] writes it with the next event id, and
-    /// folds it (DEC-2341 item 2).
+    /// folds it (DEC-2341 item 2). When the risk book's batch went first and moved the head, the
+    /// draft is built again once at the new head.
     ///
     /// # Errors
     /// `copy_refused` when the draft cannot be made or the journal does not commit it.
@@ -498,16 +503,20 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         now: UtcNanos,
         copy: &crate::establish::ToCopy,
     ) -> Result<(), &'static str> {
-        let head = self.account_head();
-        let id = self
-            .wiring
-            .ids
-            .event_id(WriterEpoch(self.epoch), Seq(head), 0);
-        let draft = crate::establish::copy_draft(copy, id, now)?;
-        match self.journal(now, &[draft]) {
-            Ran::Committed => Ok(()),
-            _ => Err("copy_refused"),
+        for _ in 0..2 {
+            let head = self.account_head();
+            let id = self
+                .wiring
+                .ids
+                .event_id(WriterEpoch(self.epoch), Seq(head), 0);
+            let draft = crate::establish::copy_draft(copy, id, now)?;
+            match self.journal(now, &[draft]) {
+                Ran::Committed => return Ok(()),
+                Ran::Held => {}
+                _ => return Err("copy_refused"),
+            }
         }
+        Err("copy_refused")
     }
 
     /// Whether the account owes nothing more (DEC-2347): the process is ready, no reconciliation
@@ -618,6 +627,9 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                 continue;
             };
             if !self.append_mark(now, now, draft, alerts) {
+                if self.pending_mark.is_none() {
+                    self.marked_at.forget(&instrument);
+                }
                 for unmarked in due {
                     self.marked_at.forget(&unmarked);
                 }
@@ -663,7 +675,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                 self.pending_mark = Some((draft, at));
                 false
             }
-            Ran::Stopped => false,
+            Ran::Held | Ran::Stopped => false,
         }
     }
 
@@ -992,6 +1004,10 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                     self.journal_down = false;
                 }
                 Ran::Refused => return self.refused(now, at, input, alerts, depth),
+                Ran::Held => {
+                    self.pending = Some((input, at));
+                    return false;
+                }
                 Ran::InDoubt => {
                     if !self.journal_down {
                         self.journal_down = true;
@@ -1298,20 +1314,31 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
     /// [`Ran::Refused`] for a batch the journal refused as invalid. It goes after the risk book's
     /// batch in doubt and every batch the book owes, and before the batches the new one leaves owed
     /// (DEC-2804 item 4, DEC-2399 item 3), so a risk record always follows its cause in the very
-    /// next batch. A batch the book owes that goes in doubt leaves this one unwritten, in doubt too,
-    /// so its caller offers it again after the book's.
+    /// next batch. When the book's batch moved the head or is still in doubt, this one is not
+    /// offered at all ([`Ran::Held`]): its event ids came from the old head, so its caller builds
+    /// it again later. Nothing else is ever appended while a batch of the book is in doubt.
     fn journal_refusable(&mut self, now: UtcNanos, drafts: &[EventDraft]) -> Ran {
-        match self.owed_batches(now) {
-            Ran::Committed => {}
-            unsettled => return unsettled,
+        let head = self.account_head();
+        match self.owed_batches_keeping_time(now) {
+            Ran::Stopped => return Ran::Stopped,
+            Ran::Committed if self.account_head() == head => {}
+            _ => return Ran::Held,
         }
         match self.append(now, drafts) {
-            Ran::Committed => match self.owed_batches(now) {
+            Ran::Committed => match self.owed_batches_keeping_time(now) {
                 Ran::Stopped => Ran::Stopped,
-                Ran::Committed | Ran::InDoubt | Ran::Refused => Ran::Committed,
+                _ => Ran::Committed,
             },
             unsettled => unsettled,
         }
+    }
+
+    /// [`Self::owed_batches`], leaving `written_at` as the caller set it for its own batch.
+    fn owed_batches_keeping_time(&mut self, now: UtcNanos) -> Ran {
+        let written_at = self.written_at;
+        let ran = self.owed_batches(now);
+        self.written_at = written_at;
+        ran
     }
 
     /// [`Self::owed_batches`] for a pass: `false` when the journal stopped it, and an append in
@@ -1333,8 +1360,15 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                 }
                 false
             }
-            Ran::Refused | Ran::Stopped => false,
+            Ran::Refused | Ran::Held | Ran::Stopped => false,
         }
+    }
+
+    /// Makes every fold unreadable and hands the gate the risk that leaves, so no opening is judged
+    /// on a view that failed (DEC-2804 item 7, `AGENTS.md` rule 3).
+    fn risk_failed(&mut self) {
+        self.risk.append_failed();
+        self.wiring.risk.read(self.risk.gates());
     }
 
     /// Appends the risk book's batch in doubt, then each batch it owes, until it owes none
@@ -1353,7 +1387,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                         return Ran::Committed;
                     }
                     let Some(drafts) = self.owed_drafts(&owed) else {
-                        self.risk.append_failed();
+                        self.risk_failed();
                         return Ran::Committed;
                     };
                     (drafts, self.written_at)
@@ -1366,11 +1400,11 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                     self.pending_risk = Some((drafts, at));
                     return Ran::InDoubt;
                 }
-                Ran::Refused => self.risk.append_failed(),
-                Ran::Stopped => return Ran::Stopped,
+                Ran::Refused => self.risk_failed(),
+                Ran::Held | Ran::Stopped => return Ran::Stopped,
             }
         }
-        self.risk.append_failed();
+        self.risk_failed();
         Ran::Committed
     }
 
@@ -1406,9 +1440,15 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
     /// Considers the scheduler's latest tick for a `ClockAdvanced` copy on the account stream
     /// (DEC-2804 item 5), once per tick: journaled, its `clock` the tick's (and its `risk_clock`,
     /// which every account-stream row the executor's fold reads carries), and its cause the
-    /// scheduler's event, when the risk book wants it, and then the records it owes. `false` when
-    /// the journal stopped the pass.
+    /// scheduler's event, when the risk book wants it, and then the records it owes. The book's
+    /// batch in doubt goes first, and the copy is built at the head after it. A copy in doubt is
+    /// offered again first, the same bytes; one the journal refuses makes the folds unreadable,
+    /// is alerted once, and its day counts as copied, so it is not offered every tick. `false`
+    /// when the journal stopped the pass.
     fn copy_tick(&mut self, now: UtcNanos, alerts: &mut Vec<Alert>) -> bool {
+        if !self.settle_risk(now, alerts) {
+            return false;
+        }
         let Some((clock, cause)) = self.latest_tick.clone() else {
             return true;
         };
@@ -1442,8 +1482,30 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         if !self.risk.wants(at, &probe) {
             return true;
         }
-        self.pending_risk = Some((vec![draft], now));
-        self.settle_risk(now, alerts)
+        match self.append(now, std::slice::from_ref(&draft)) {
+            Ran::Committed => self.settle_risk(now, alerts),
+            Ran::InDoubt => {
+                self.pending_risk = Some((vec![draft], now));
+                if !self.journal_down {
+                    self.journal_down = true;
+                    alerts.push(journal_unavailable());
+                }
+                false
+            }
+            Ran::Refused => {
+                self.risk.copied(at);
+                self.risk_failed();
+                if !self.journal_refused {
+                    self.journal_refused = true;
+                    alerts.push(Alert {
+                        key: "journal_refused",
+                        subject: None,
+                    });
+                }
+                true
+            }
+            Ran::Held | Ran::Stopped => false,
+        }
     }
 
     /// `draft` as the row it would be at `head + 1`, for the risk book to step a copy of a fold

@@ -286,6 +286,14 @@ impl RiskBook {
             })
     }
 
+    /// Records that the copy of a tick at `clock` will not be offered again, the journal having
+    /// refused it: its day counts as copied, so later ticks of the day are judged by the folds.
+    pub fn copied(&mut self, clock: UtcNanos) {
+        if let Ok(day) = risk_day(clock) {
+            self.copied = Some(day.day);
+        }
+    }
+
     /// Records that the batch the folds owed was refused as invalid, so none of them can be
     /// appended: every fold's view becomes unreadable, `append_failed`, and owes nothing
     /// (DEC-2399, DEC-2304).
@@ -341,7 +349,7 @@ fn gate_risk(open: &Open) -> Option<GateRisk> {
 
 /// The equity an opening at `at` is validated on, chosen by journal order (DEC-2804 item 2): the
 /// boundary is the first row whose `event_time` is at or after `at`; the equity is the last
-/// `AccountSnapshotRecorded` before it, else the first one after it. `None` until both are
+/// `AccountSnapshotRecorded` journaled before it, else the first one journaled after it. `None` until both are
 /// journaled, or when the snapshot's `equity` does not read.
 fn equity_at(rows: &[StoredEvent], at: UtcNanos) -> Option<Usd> {
     let boundary = rows
@@ -353,7 +361,7 @@ fn equity_at(rows: &[StoredEvent], at: UtcNanos) -> Option<Usd> {
         .iter()
         .rev()
         .find(snapshot)
-        .or_else(|| after.iter().find(snapshot))?;
+        .or_else(|| after.iter().skip(1).find(snapshot))?;
     let body = parse(&chosen.body).ok()?;
     let equity = body.get("payload")?.get("equity")?.as_str()?;
     Usd::parse(equity).ok()
