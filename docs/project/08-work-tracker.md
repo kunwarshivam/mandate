@@ -45,10 +45,9 @@ row 14): an approved PR merges right after its independent review, without waiti
 
 ## Next, in order
 
-1. **The first paper trade.** The paper path's code is complete through E3 and every E2
-   prerequisite is verified satisfied; what remains is the founder's run (E2), which waits for
-   the founder's explicit confirmation (DEC-450; record the open-orders read after the fill,
-   DEC-878).
+1. **The product flow.** See [the handover](handover-2026-10-26.md) and [the product-flow
+   map](product-flow-map.md): the founder's whole autonomous agent lifecycle on the managed cell,
+   blockers X1–X8, owners, and every founder decision of 2026-10-25/26.
 2. **The first live trade** (DEC-529, target 2026-10-23, deadline 2026-11-02): every code row is
    merged and the agent rehearsal passes; what remains is the founder's R0 run, the DEC-529
    live-door items, R23, and the founder's timing call on E6-15 slice C.
