@@ -82,6 +82,7 @@ pub mod objects;
 pub mod opening;
 pub mod passkeys;
 pub mod reads;
+pub mod real_money;
 pub mod reduction;
 pub mod routes;
 pub mod session;

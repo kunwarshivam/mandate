@@ -38,6 +38,7 @@ use tokio::task::JoinError;
 use crate::backtests::paper;
 use crate::commands::{Event, Settled, Writer, caused_envelope, envelope};
 use crate::http::{App, invalid, problem, problem_body};
+use crate::real_money::{Action as Gated, gated};
 use crate::routes::{
     self, Reader, Refused, Unreadable, authorized, enveloped, path_refused, string,
 };
@@ -359,6 +360,11 @@ async fn started(
             ProblemCode::JournalUnavailable => unavailable(),
             code => coded(StatusCode::UNAUTHORIZED, code),
         })?;
+    if request.environment == Wire::Live {
+        gated(app, &reader, &gate, Gated::Connect)
+            .await
+            .map_err(|refused| Box::new(refused.response()))?;
+    }
     planned(&reader, &ids, &request, evidence)?;
     let assertion = match &asserted {
         Some(asserted) => {

@@ -128,6 +128,17 @@ fn fixture() -> Fixture {
 }
 
 fn built(port: Port, with_store: bool) -> Fixture {
+    built_with(
+        port,
+        with_store,
+        vec![
+            activated(1, alice(), &[Role::Operator]),
+            activated(2, bob(), &[Role::Viewer]),
+        ],
+    )
+}
+
+fn built_with(port: Port, with_store: bool, records: Vec<MembershipRecord>) -> Fixture {
     let mut n = DIRS.lock().expect("unpoisoned");
     *n += 1;
     let dir = std::env::temp_dir().join(format!(
@@ -145,10 +156,6 @@ fn built(port: Port, with_store: bool) -> Fixture {
         FsArtifactStore::open(dir.join("store")).expect("a store"),
     ));
     let journal = Arc::new(MemJournal::default());
-    let records = vec![
-        activated(1, alice(), &[Role::Operator]),
-        activated(2, bob(), &[Role::Viewer]),
-    ];
     let sessions = Arc::new(Sessions::new(&key, Box::new(OsRandom::new())));
     let clock = common::ManualClock::at(T0);
     let config = IssuerConfig::new(
@@ -1198,6 +1205,10 @@ fn a_deploy_checks_v_002_against_the_accounts_equity_snapshot() {
     assert!(events(&f, "AgentDeployed").is_empty());
 }
 
+/// Go-live is always `live_unavailable`; while the gate is off, as here, its refusal is the one
+/// record it leaves ([DEC-2134] item 4), and a refused role or a missing key leaves none.
+///
+/// [DEC-2134]: ../../../docs/project/decisions/DEC-2134.md
 #[test]
 fn go_live_is_always_live_unavailable() {
     let f = fixture();
@@ -1221,7 +1232,9 @@ fn go_live_is_always_live_unavailable() {
         422,
         ProblemCode::Invalid,
     );
-    assert_eq!(control(&f).len(), 4);
+    let rows = control(&f);
+    assert_eq!(rows.len(), 5);
+    assert_eq!(rows[4].event_type, "RealMoneyRefused");
 }
 
 #[test]
@@ -1939,4 +1952,191 @@ fn a_replayed_passkey_confirm_answers_as_the_first_though_its_challenge_is_gone(
     );
     assert_eq!(self::body(&again), self::body(&first), "the same answer");
     assert_eq!(control(&w.f), committed, "nothing more is appended");
+}
+
+const GATE_ON: &str =
+    r#"{"decision":"DEC-2135","enabled":true,"operator":"01JAA3G0A000000000000000P1"}"#;
+const GATE_OFF: &str =
+    r#"{"decision":null,"enabled":false,"operator":"01JAA3G0A000000000000000P1"}"#;
+
+/// The three routes here that can name `live`, as [DEC-2134] item 1 lists them.
+///
+/// [DEC-2134]: ../../../docs/project/decisions/DEC-2134.md
+const LIVE_ACTIONS: [&str; 3] = ["create_version", "deploy", "go_live"];
+
+/// `action`'s request naming `live`, under `key`; a deploy's live version is recorded first.
+fn live_attempt(f: &Fixture, cookie: &str, key: &str, action: &str) -> Reply {
+    match action {
+        "create_version" => create(f, cookie, key, "live"),
+        "deploy" => {
+            if events(f, "MandateConfirmed").is_empty() {
+                seed_version(f, "live");
+            }
+            deploy(f, cookie, key, &deploy_body("agt_a", "live", EVIDENCE))
+        }
+        _ => post(f, &ws("/agents/agt_a/go-live"), cookie, Some(key), b""),
+    }
+}
+
+/// Each `RealMoneyRefused` on the control stream, read from its body as the journal holds it.
+fn real_money_refusals(f: &Fixture) -> Vec<Value> {
+    events(f, "RealMoneyRefused")
+        .iter()
+        .map(|row| json(std::str::from_utf8(&row.body).expect("UTF-8")))
+        .collect()
+}
+
+/// Nothing a live attempt may never leave: no version, confirmation, deployment, or setting
+/// written by the API, and no step-up asked about.
+fn nothing_but_refusals(f: &Fixture, settings: usize) {
+    for event_type in ["MandateVersionCreated", "MandateConfirmed", "AgentDeployed"] {
+        let written = events(f, event_type)
+            .iter()
+            .filter(|row| {
+                json(std::str::from_utf8(&row.body).expect("UTF-8"))
+                    .get("actor")
+                    .is_some()
+            })
+            .count();
+        assert_eq!(written, 0, "the API wrote a {event_type}");
+    }
+    assert_eq!(events(f, "RealMoneyGateChanged").len(), settings);
+    assert!(f.asked.0.lock().expect("unpoisoned").is_empty());
+}
+
+#[test]
+fn while_the_gate_is_off_a_live_request_is_journaled_as_refused_then_answered_live_unavailable() {
+    for setting in [None, Some(GATE_OFF)] {
+        let f = fixture();
+        if let Some(payload) = setting {
+            seed_control(&f, "RealMoneyGateChanged", GATE_ON);
+            seed_control(&f, "RealMoneyGateChanged", payload);
+        }
+        let cookie = signed_in(&f, alice());
+        for (n, action) in LIVE_ACTIONS.into_iter().enumerate() {
+            refused(
+                &live_attempt(&f, &cookie, KEY, action),
+                409,
+                ProblemCode::LiveUnavailable,
+            );
+            let refusals = real_money_refusals(&f);
+            assert_eq!(refusals.len(), n + 1, "{action}: one refusal per attempt");
+            let refusal = refusals.last().expect("one");
+            assert_eq!(text(refusal, &["payload", "action"]), action);
+            assert_eq!(text(refusal, &["payload", "requested"]), "live");
+            assert_eq!(text(refusal, &["payload", "principal"]), ALICE);
+            assert_eq!(text(refusal, &["payload", "reason"]), "gate_off");
+            assert_eq!(text(refusal, &["actor", "kind"]), "user");
+            assert_eq!(text(refusal, &["actor", "id"]), ALICE);
+            assert_eq!(text(refusal, &["environment"]), "paper");
+            assert_eq!(
+                text(refusal, &["event_id"]),
+                derived(&format!("real_money_refused_{action}"), KEY),
+                "{action}: the refusal's id is the key's (§3.4)"
+            );
+        }
+        nothing_but_refusals(&f, if setting.is_some() { 2 } else { 0 });
+    }
+}
+
+#[test]
+fn while_the_gate_is_on_a_live_request_passes_it_and_is_still_live_unavailable() {
+    let f = fixture();
+    seed_control(&f, "RealMoneyGateChanged", GATE_OFF);
+    seed_control(&f, "RealMoneyGateChanged", GATE_ON);
+    let cookie = signed_in(&f, alice());
+    for action in LIVE_ACTIONS {
+        refused(
+            &live_attempt(&f, &cookie, KEY, action),
+            409,
+            ProblemCode::LiveUnavailable,
+        );
+    }
+    assert!(real_money_refusals(&f).is_empty());
+    nothing_but_refusals(&f, 2);
+}
+
+#[test]
+fn a_retry_under_its_key_finds_its_refusal_and_a_new_key_records_another() {
+    let f = fixture();
+    let cookie = signed_in(&f, alice());
+    for action in LIVE_ACTIONS {
+        let before = real_money_refusals(&f).len();
+        for key in [KEY, KEY, KEY_2] {
+            refused(
+                &live_attempt(&f, &cookie, key, action),
+                409,
+                ProblemCode::LiveUnavailable,
+            );
+        }
+        assert_eq!(real_money_refusals(&f).len(), before + 2, "{action}");
+    }
+}
+
+/// A refusal that cannot be recorded is still a refusal, never an admission ([DEC-2134] item 4).
+///
+/// [DEC-2134]: ../../../docs/project/decisions/DEC-2134.md
+#[test]
+fn a_refusal_the_journal_cannot_take_is_journal_unavailable_and_admits_nothing() {
+    let f = fixture();
+    let cookie = signed_in(&f, alice());
+    seed_version(&f, "live");
+    for action in LIVE_ACTIONS {
+        f.journal.script(&[Scripted::Unavailable; 5]);
+        refused(
+            &live_attempt(&f, &cookie, KEY, action),
+            503,
+            ProblemCode::JournalUnavailable,
+        );
+    }
+    assert!(real_money_refusals(&f).is_empty());
+    nothing_but_refusals(&f, 0);
+}
+
+/// Every set of the workspace's roles, with no setting, with the gate turned off, and with it
+/// on: only the drafting and deploying role (identity spec §4.2's Op column) reaches the gate,
+/// every other set is the one 403, nothing is ever committed, and a refusal is journaled exactly
+/// when the gate is off and the role reached it. No role sets the gate.
+#[test]
+fn no_role_set_passes_a_live_request_and_none_sets_the_gate() {
+    const ROLES: [Role; 5] = [
+        Role::WorkspaceAdmin,
+        Role::Operator,
+        Role::Approver,
+        Role::Viewer,
+        Role::Auditor,
+    ];
+    for mask in 0_u32..(1 << ROLES.len()) {
+        let roles: Vec<Role> = ROLES
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| mask & (1 << i) != 0)
+            .map(|(_, role)| *role)
+            .collect();
+        let reaches = roles.contains(&Role::Operator);
+        for settings in [&[][..], &[GATE_ON, GATE_OFF][..], &[GATE_OFF, GATE_ON][..]] {
+            let f = built_with(Port::Accepting, true, vec![activated(1, alice(), &roles)]);
+            seed_version(&f, "live");
+            for payload in settings {
+                seed_control(&f, "RealMoneyGateChanged", payload);
+            }
+            let off = settings.last() != Some(&GATE_ON);
+            let cookie = signed_in(&f, alice());
+            for action in LIVE_ACTIONS {
+                let reply = live_attempt(&f, &cookie, KEY, action);
+                let label = format!("{roles:?}, {settings:?}, {action}");
+                if reaches {
+                    refused(&reply, 409, ProblemCode::LiveUnavailable);
+                } else {
+                    refused(&reply, 403, ProblemCode::Forbidden);
+                }
+                let journaled = real_money_refusals(&f)
+                    .iter()
+                    .filter(|r| text(r, &["payload", "action"]) == action)
+                    .count();
+                assert_eq!(journaled, usize::from(reaches && off), "{label}");
+            }
+            nothing_but_refusals(&f, settings.len());
+        }
+    }
 }
