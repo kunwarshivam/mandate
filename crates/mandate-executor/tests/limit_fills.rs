@@ -366,7 +366,6 @@ fn wednesday() -> Date {
 /// journaled limit (not the broker record's 155 nor the entry's 150), dated by its submission, and
 /// the reconciliation then reads the sold-out position as explained; a second read books nothing.
 #[test]
-#[ignore = "pending E7-6"]
 fn a_filled_risk_exit_is_booked_once_at_its_limit() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -406,7 +405,6 @@ fn a_filled_risk_exit_is_booked_once_at_its_limit() {
 /// DEC-2395 item 3: a `day` sell sent on Tuesday whose record is first read on Wednesday is dated
 /// Tuesday, its submission's date: a `day` order can fill on no other.
 #[test]
-#[ignore = "pending E7-6"]
 fn a_day_exit_read_a_day_later_is_dated_by_its_submission() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -433,7 +431,6 @@ fn a_day_exit_read_a_day_later_is_dated_by_its_submission() {
 /// A broker that lists a sold-out position as a row of quantity zero reads as the same zero
 /// (DEC-2390 item 1).
 #[test]
-#[ignore = "pending E7-6"]
 fn a_sold_out_row_of_zero_reads_as_the_reduced_position() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -450,7 +447,6 @@ fn a_sold_out_row_of_zero_reads_as_the_reduced_position() {
 /// Partial fills are booked as increments over what is booked, each under its cumulative
 /// quantity's id: 1 of 3, then the remaining 2 once the record reports 3.
 #[test]
-#[ignore = "pending E7-6"]
 fn partial_fills_are_booked_as_increments() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -474,7 +470,6 @@ fn partial_fills_are_booked_as_increments() {
 
 /// A discretionary exit, which a test can hand off directly, is booked at its own limit.
 #[test]
-#[ignore = "pending E7-6"]
 fn a_discretionary_exit_is_booked_at_its_limit() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -500,7 +495,6 @@ fn a_discretionary_exit_is_booked_at_its_limit() {
 /// An owner exit is one of DEC-2300's four purposes: the risk exit's journal with its companion's
 /// purpose edited to `owner_exit` is booked the same.
 #[test]
-#[ignore = "pending E7-6"]
 fn an_owner_exit_is_booked_at_its_limit() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -528,7 +522,6 @@ fn an_owner_exit_is_booked_at_its_limit() {
 /// at its limit, never its stop trigger, and dated by the executor's clock when it is booked,
 /// Wednesday, not by its Tuesday submission.
 #[test]
-#[ignore = "pending E7-6"]
 fn a_resting_stop_is_booked_at_its_limit_and_dated_when_booked() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -555,7 +548,6 @@ fn a_resting_stop_is_booked_at_its_limit_and_dated_when_booked() {
 /// the order we placed (it may have been edited in the app), so it is never adopted and nothing is
 /// booked; the same record with the journaled stop is, as the control.
 #[test]
-#[ignore = "pending E7-6"]
 fn a_record_whose_stop_differs_is_never_booked() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -598,7 +590,6 @@ fn without_a_derived_fill_the_sold_out_position_still_pauses() {
 /// nothing: unchanged, reduced by more or by less, two rows, a short row, or a row in another
 /// instrument only.
 #[test]
-#[ignore = "pending E7-6"]
 fn a_position_not_reduced_by_exactly_the_increment_derives_nothing() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL, CPHC]);
@@ -630,7 +621,6 @@ fn a_position_not_reduced_by_exactly_the_increment_derives_nothing() {
 /// DEC-2300 item 3: a ledger that does not hold the increment derives nothing. The journal is the
 /// control's, with the entry's booked fill edited down to one share.
 #[test]
-#[ignore = "pending E7-6"]
 fn a_ledger_short_of_the_increment_derives_nothing() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -664,7 +654,6 @@ fn a_ledger_short_of_the_increment_derives_nothing() {
 /// DEC-2300 items 1 and 2, one guard at a time on the same journal: the unedited replay derives
 /// the fill, each edit is shown to have taken effect, and each alone refuses it.
 #[test]
-#[ignore = "pending E7-6"]
 fn each_guard_alone_refuses_the_fill() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -755,7 +744,6 @@ fn reporting(shell: &Shell, id: &str, filled: &str) -> Shell {
 /// reaches the fold; reported 3, more than the order's 2, with 1 listed, the ledger still holds the
 /// 3 and the position is reduced by exactly 3, so only the order's quantity refuses it.
 #[test]
-#[ignore = "pending E7-6"]
 fn a_report_beyond_the_orders_quantity_derives_nothing() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -777,7 +765,6 @@ fn a_report_beyond_the_orders_quantity_derives_nothing() {
 /// An unattributed sell fill in the instrument (a sale the ledger booked with no order named)
 /// leaves the position's history ambiguous, so nothing is derived though the arithmetic would fit.
 #[test]
-#[ignore = "pending E7-6"]
 fn an_unattributed_fill_in_the_instrument_derives_nothing() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -817,7 +804,6 @@ fn an_unattributed_fill_in_the_instrument_derives_nothing() {
 /// Another order in the instrument whose record reported more than it booked leaves the
 /// position unattributable, so nothing is derived for either.
 #[test]
-#[ignore = "pending E7-6"]
 fn a_second_unbooked_report_in_the_instrument_derives_nothing() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -855,7 +841,6 @@ fn a_second_unbooked_report_in_the_instrument_derives_nothing() {
 /// Positions in another instrument derive nothing for it and block nothing here: the order's own
 /// instrument alone is read.
 #[test]
-#[ignore = "pending E7-6"]
 fn the_order_is_read_against_its_own_instrument_alone() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL, CPHC]);
@@ -875,8 +860,7 @@ proptest! {
     /// limit, and nothing is booked beyond the order's quantity; a report beyond the quantity
     /// derives nothing. The oracle is a separate accumulator.
     #[test]
-    #[ignore = "pending E7-6"]
-    fn increments_sum_to_the_last_report_and_never_exceed_the_order(
+        fn increments_sum_to_the_last_report_and_never_exceed_the_order(
         steps in proptest::collection::vec(1u32..3, 1..5),
         overshoot in 1u32..3,
     ) {
