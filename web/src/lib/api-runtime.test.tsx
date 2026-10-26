@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiRuntimeProvider } from "./api-runtime";
 import { type Runtime, useRuntime } from "./mock-runtime";
@@ -13,7 +13,10 @@ import type { Scenario } from "@/fixtures/types";
 import { buildWorkspace } from "@/fixtures/workspace";
 import { confirmStepUpDigest } from "@/api/confirm";
 import { CONNECT_START_ROUTE } from "@/api/connect";
-import { CONFIRM_RECORD, DEPLOY_RECORD } from "@/test/set-up";
+import { CONFIRM_RECORD, DEPLOY_RECORD, mockAuthenticator } from "@/test/set-up";
+import { type Authenticator, deployStepUpDigest } from "@/api/passkey";
+import { MOCK_PASSKEY_ID } from "@/api/mock-server";
+import { AGENT_ID } from "./ids";
 
 const WS = "ws_01J9ZQ4M0000000000000000AB";
 const ORIGIN = "https://api.owlhead.ai";
@@ -66,7 +69,7 @@ function fakeSession(opens: SessionState[] = ["open"], refreshes: SessionState[]
   return { session, asked };
 }
 
-function mount(scenario: Scenario = "approvals", wrap?: (fetch: Fetch) => Fetch, session?: SessionKeeper, timing: { refreshMs?: number; keepAliveMs?: number } = {}) {
+function mount(scenario: Scenario = "approvals", wrap?: (fetch: Fetch) => Fetch, session?: SessionKeeper, timing: { refreshMs?: number; keepAliveMs?: number; authenticator?: Authenticator | null } = {}) {
   const server = createMockServer({ workspaceId: WS, scenario });
   const calls: Call[] = [];
   const recordingFetch: Fetch = (input, init) => {
@@ -74,7 +77,7 @@ function mount(scenario: Scenario = "approvals", wrap?: (fetch: Fetch) => Fetch,
     return server.fetch(input, init);
   };
   render(
-    <ApiRuntimeProvider source={{ origin: ORIGIN, workspaceId: WS }} fetch={wrap ? wrap(recordingFetch) : recordingFetch} session={session} refreshMs={timing.refreshMs ?? 60_000} keepAliveMs={timing.keepAliveMs} statusPollMs={5} retryMs={5}>
+    <ApiRuntimeProvider source={{ origin: ORIGIN, workspaceId: WS }} fetch={wrap ? wrap(recordingFetch) : recordingFetch} session={session} refreshMs={timing.refreshMs ?? 60_000} keepAliveMs={timing.keepAliveMs} statusPollMs={5} retryMs={5} authenticator={timing.authenticator === undefined ? mockAuthenticator(MOCK_PASSKEY_ID).get : timing.authenticator}>
       <Probe />
       <WorkspaceGate>
         <p data-testid="gated">workspace</p>
@@ -282,7 +285,7 @@ describe("the runtime over the workspace API (E11-9, DEC-975)", () => {
     expect(current().view).toBeNull();
   });
 
-  it("creates the version from its document, and takes the server's version and the served classification; no deployment is sent", async () => {
+  it("creates the version from its document, and takes the server's version and the served classification; a deploy before the confirm sends nothing", async () => {
     const { posts } = mount();
     await ready();
     const agent = buildWorkspace("approvals").agents[0];
@@ -295,15 +298,14 @@ describe("the runtime over the workspace API (E11-9, DEC-975)", () => {
     expect(posts().map((p) => new URL(p.url).pathname)).toEqual([`/v1/workspaces/${WS}/mandate-versions`]);
     expect(JSON.parse(posts()[0].body ?? "{}")).toEqual(agent.mandate);
     act(() => current().deployVersion(id, DEPLOY_RECORD));
-    await waitFor(() => expect(current().setUps.at(-1)?.deployed).toMatchObject({ phase: "undelivered", reason: "not_sent" }));
+    await waitFor(() => expect(current().setUps.at(-1)?.deployed).toMatchObject({ phase: "undelivered", reason: "not_confirmed" }));
     expect(current().setUps.at(-1)?.confirmed).toBeNull();
     expect(posts()).toHaveLength(1);
     expect(current().backtestFor(agent.mandate_version)).toBeNull();
   });
 
-  it("confirms bound to the served screen, with no step-up until E9-4, and shows the server's step_up_required with nothing recorded", async () => {
-    const { posts, server } = mount();
-    await ready();
+  /** Creates a version over the mock and waits for it; returns the set-up's id and a reader of it. */
+  async function created() {
     const agent = buildWorkspace("approvals").agents[0];
     let id = "";
     act(() => {
@@ -311,16 +313,83 @@ describe("the runtime over the workspace API (E11-9, DEC-975)", () => {
     });
     const setUp = () => current().setUps.find((s) => s.id === id)!;
     await waitFor(() => expect(setUp().created.phase).toBe("recorded"));
+    return { id, setUp };
+  }
+
+  it("confirms bound to the served screen, under a passkey that signed the confirm_version challenge for §5.1's digest", async () => {
+    const authenticator = mockAuthenticator(MOCK_PASSKEY_ID);
+    const { posts, server } = mount("approvals", undefined, undefined, { authenticator: authenticator.get });
+    await ready();
+    const { id, setUp } = await created();
     expect(server.servedDigests()).toHaveLength(1);
-    act(() => current().confirmVersion(id, CONFIRM_RECORD, confirmStepUpDigest(setUp().version, null, null)));
+    act(() => current().confirmVersion(id, CONFIRM_RECORD, null));
     expect(setUp().confirmed).toMatchObject({ phase: "sent", record: CONFIRM_RECORD, stepUp: null });
-    await waitFor(() => expect(setUp().confirmed).toMatchObject({ phase: "undelivered", reason: "step_up_required", stepUp: null }));
-    const confirm = posts().at(-1);
+    const digest = confirmStepUpDigest(setUp().version, null, null);
+    await waitFor(() => expect(setUp().confirmed).toMatchObject({ phase: "recorded", classification: "risk_increasing", applies: "now", stepUp: digest }));
+    const [challenge] = server.challenges();
+    expect(challenge).toMatchObject({ kind: "confirm_version", digest, used: true });
+    expect(authenticator.calls).toHaveLength(1);
+    const confirm = posts().find((p) => p.url.endsWith("/confirm"));
     expect(new URL(confirm?.url ?? "").pathname).toBe(`/v1/workspaces/${WS}/mandate-versions/${encodeURIComponent(setUp().version)}/confirm`);
-    expect(JSON.parse(confirm?.body ?? "{}")).toMatchObject({ classification_shown: "risk_increasing", step_up: null, agent_id: null, base_version: null });
+    const body = JSON.parse(confirm?.body ?? "{}");
+    expect(body).toMatchObject({ classification_shown: "risk_increasing", agent_id: null, base_version: null, step_up: { assertion_id: challenge.challenge_id, authenticated_at: challenge.issued_at, method: "passkey" } });
+    expect(Object.keys(body.step_up_assertion).sort()).toEqual(["authenticator_data", "client_data_json", "passkey_id", "signature"]);
+    expect(body.step_up_assertion.passkey_id).toBe(MOCK_PASSKEY_ID);
     const [atCreate, atConfirm] = server.servedDigests();
     expect(atConfirm).not.toBe(atCreate);
-    expect(JSON.parse(confirm?.body ?? "{}").screen_digest).toBe(atConfirm);
+    expect(body.screen_digest).toBe(atConfirm);
+  });
+
+  it("sends no confirm when the passkey is not given, and says why: no WebAuthn, no passkey, or canceled", async () => {
+    const dismissed: Authenticator = async () => {
+      throw new DOMException("not allowed", "NotAllowedError");
+    };
+    for (const [authenticator, reason] of [
+      [null, "passkey_unavailable"],
+      [dismissed, "passkey_canceled"],
+    ] as const) {
+      const { posts, server } = mount("approvals", undefined, undefined, { authenticator });
+      await ready();
+      const { id, setUp } = await created();
+      act(() => current().confirmVersion(id, CONFIRM_RECORD, null));
+      await waitFor(() => expect(setUp().confirmed).toMatchObject({ phase: "undelivered", reason, stepUp: null }));
+      expect(posts().filter((p) => p.url.endsWith("/confirm"))).toHaveLength(0);
+      expect(server.recorded().filter((c) => c.path.endsWith("/confirm"))).toHaveLength(0);
+      cleanup();
+    }
+  });
+
+  it("deploys the confirmed version to paper under a passkey bound to {agent_id, mandate_version}, and keeps the agent's id across a retry", async () => {
+    let refused: Headers | null = null;
+    const { posts, server } = mount("approvals", (send) => async (input, init) => {
+      if (refused === null && init.method === "POST" && new URL(input).pathname === `/v1/workspaces/${WS}/agents`) {
+        refused = new Headers(init.headers);
+        return new Response(JSON.stringify({ type: "about:blank", status: 503, title: "x", code: "journal_unavailable", effect: "none", event_id: null, retryable: false }), { status: 503, headers: { "Content-Type": "application/problem+json" } });
+      }
+      return send(input, init);
+    });
+    await ready();
+    const { id, setUp } = await created();
+    act(() => current().confirmVersion(id, CONFIRM_RECORD, null));
+    await waitFor(() => expect(setUp().confirmed?.phase).toBe("recorded"));
+    act(() => current().deployVersion(id, DEPLOY_RECORD));
+    await waitFor(() => expect(setUp().deployed).toMatchObject({ phase: "undelivered", reason: "journal_unavailable" }));
+    const agentId = setUp().agentId;
+    expect(agentId).toMatch(AGENT_ID);
+    act(() => current().deployVersion(id, DEPLOY_RECORD));
+    await waitFor(() => expect(setUp().deployed?.phase).toBe("recorded"));
+    expect(setUp().agentId).toBe(agentId);
+    expect(server.deployed()).toEqual([agentId]);
+    const deploys = posts().filter((p) => new URL(p.url).pathname === `/v1/workspaces/${WS}/agents`);
+    expect(deploys).toHaveLength(1);
+    const body = JSON.parse(deploys[0].body ?? "{}");
+    expect(Object.keys(body).sort()).toEqual(["agent_id", "backtest_id", "mandate_version", "record", "step_up", "step_up_assertion"]);
+    expect(body).toMatchObject({ agent_id: agentId, mandate_version: setUp().version, backtest_id: null, step_up: { method: "passkey" } });
+    const deployChallenges = server.challenges().filter((c) => c.kind === "deploy");
+    expect(deployChallenges).toHaveLength(2);
+    expect(deployChallenges.every((c) => c.digest === deployStepUpDigest(agentId, setUp().version))).toBe(true);
+    expect(body.step_up.assertion_id).toBe(deployChallenges[1].challenge_id);
+    expect((refused as Headers | null)?.get("Idempotency-Key")).not.toBe(deploys[0].headers.get("Idempotency-Key"));
   });
 
   it("refuses a confirm before its version is recorded, and a set-up it never made, sending nothing", async () => {

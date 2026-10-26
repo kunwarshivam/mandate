@@ -7,7 +7,7 @@ import { Markdown } from "@/components/chat/markdown";
 import { OwnerSaid } from "@/components/chat/record-reply";
 import { KEY } from "@/components/kumo/key";
 import type { NewAgent } from "@/lib/fixture-journey";
-import type { SetUp } from "@/lib/mock-runtime";
+import { type SetUp, useRuntime } from "@/lib/mock-runtime";
 import { type Conversation, type Entry, currentSummary, nextStep } from "./conversation";
 import { type Draft, MODELS, type ModelId } from "./draft";
 import { StepHeading } from "./steps";
@@ -138,6 +138,12 @@ function EntryView({ entry, c, last, busy, creation, actions }: { entry: Entry; 
  * model wrote part of them (DEC-481); only deterministic parts carry buttons (PX-18). The composer
  * keeps focus as the log grows, and the newest part of the log is brought into view above it.
  */
+/**
+ * Over the API no model reads the owner's words (the compiler is not served, spec §4.1), so the
+ * figures-only reader does, in this page; the words reach the deployment only in the version created.
+ */
+export const API_NOTE = "Your deployment doesn't serve a model to read your words yet, so figures are read exactly as written, in this page. Nothing is sent until you create the version.";
+
 export function Chat({
   conversation,
   busy,
@@ -153,6 +159,7 @@ export function Chat({
   actions: ChatActions;
   initialText?: string | null;
 }) {
+  const { source } = useRuntime();
   const composer = useRef<ComposerHandle>(null);
   const log = useRef<HTMLDivElement>(null);
   const { entries } = conversation;
@@ -203,12 +210,12 @@ export function Chat({
         status={busy ? "Reading your message…" : ""}
         onSend={onSend}
         className="sticky bottom-[calc(var(--tab-bar)+1px+env(safe-area-inset-bottom))] z-10 -mx-(--page-x) bg-card px-(--page-x) pt-1 pb-3 lg:bottom-0 lg:mx-0 lg:px-0 lg:pb-[calc(var(--dock-clearance)+1rem)]"
-        note={
+        note={source === "api" ? API_NOTE : (
           <>
             {conversation.figuresOnly ? "Reading without the model now: figures only, exactly as written." : "A model reads your words; it can't set anything you didn't say."} Here a fixture stands
             in for it, and nothing leaves this page.
           </>
-        }
+        )}
       />
     </div>
   );
