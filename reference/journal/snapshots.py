@@ -22,6 +22,8 @@ import copy
 from decimal import Decimal
 from fractions import Fraction
 
+import re
+
 from common import change, delete, normalize_decimal
 from control import (
     ACCOUNT_STREAM_REF,
@@ -76,6 +78,9 @@ DECLARED = ("account_type", "day_trading_regime")
 FIGURES = ("last_equity", "maintenance_margin")
 NEW_MEMBERS = (*DECLARED, *FIGURES)
 OPTIONS = {"account_type": SNAPSHOT_ACCOUNT_TYPES, "day_trading_regime": SNAPSHOT_REGIMES}
+# The oracle's own reading of journal spec §4.6's decimal input, written apart from `common`: an
+# optional minus, digits with at most one point, and an optional exponent; the journal normalizes it.
+DECIMAL_TEXT = re.compile(r"-?([0-9]+\.?[0-9]*|\.[0-9]+)([eE][+-]?[0-9]+)?\Z")
 
 
 def snapshot(name: str) -> dict:
@@ -228,6 +233,12 @@ def valid_drafts() -> list[dict]:
         valid("prior_close_above_equity", "§9.35: no rule ties `last_equity` to `equity`", V2, [change("payload.last_equity", "30000")]),
         valid("prior_close_negative", "§9.35: a prior close in deficit is recorded as reported", V2, [change("payload.last_equity", "-120.75")]),
         valid("prior_close_zero", "§9.35: zero is a figure", V2, [change("payload.last_equity", "0")]),
+        valid(
+            "figures_normalized",
+            "§4.6: a decimal input with a trailing zero or an exponent is normalized, not refused",
+            V2,
+            [change("payload.last_equity", "24750.50"), change("payload.maintenance_margin", "7.50025e3")],
+        ),
         valid("margin_zero", "§9.35: no requirement is a figure", V2, [change("payload.maintenance_margin", "0")]),
         valid("margin_equal_to_equity", "§9.35: an excess of zero", V2, [change("payload.maintenance_margin", "25000")]),
         valid("margin_above_equity", "§9.35: a deficit is recorded, never floored", V2, [change("payload.maintenance_margin", "25000.01")]),
@@ -275,7 +286,7 @@ def reading_of(draft: dict, skip: frozenset[str] = frozenset()) -> dict:
         if "reading.excess_floored" in skip:
             difference = max(difference, Decimal(0))
         excess = normalize_decimal(format(difference, "f"))
-    prior = p["equity"] if "reading.prior_close_is_equity" in skip else p["last_equity"]
+    prior = normalize_decimal(p["equity"] if "reading.prior_close_is_equity" in skip else p["last_equity"])
     regime = p["day_trading_regime"]
     if regime is None and "reading.regime_defaulted" in skip:
         regime = "intraday_margin"
@@ -357,6 +368,12 @@ def streams() -> list[dict]:
             ],
             "expect": {**FIGURES_V2, "day_trading_regime": None},
         },
+        {
+            "name": "v2_then_negative_margin",
+            "clause": "§9.35: the latest version 2's negative margin leaves no excess, not the earlier one's",
+            "steps": [step(V2, first), step(V2, second, change("payload.maintenance_margin", "-1"))],
+            "expect": {**FIGURES_V2, "maintenance_excess": None},
+        },
     ]
 
 
@@ -397,7 +414,7 @@ def oracle_new_members_well_formed(draft: dict) -> bool:
     p = draft["payload"]
     if draft["schema_version"] == 1:
         return not any(m in p for m in NEW_MEMBERS)
-    figures = all(isinstance(p.get(m), str) and normalize_decimal(p[m]) is not None for m in FIGURES)
+    figures = all(isinstance(p.get(m), str) and DECIMAL_TEXT.match(p[m]) for m in FIGURES)
     declared = all(m in p and (p[m] is None or p[m] in OPTIONS[m]) for m in DECLARED)
     return figures and declared
 

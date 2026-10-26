@@ -6705,8 +6705,13 @@ leaves no figures, not the older ones. A version-2 snapshot's prior-close equity
 as it stands, and its maintenance excess is `equity` less `maintenance_margin`, signed, so a
 deficit is negative, never floored at zero. A negative `maintenance_margin` gives no excess
 (DEC-524 item 2: subtracting one would raise the excess above equity), and a reader holds what
-depends on it as on a version 1. Holding an opening for a missing fact only stops risk being added;
-no exit, protective order, or kill switch reads any of the four (`AGENTS.md` rule 13).
+depends on it as on a version 1. Version 2 does not carry everything §9.2 reads: under
+`legacy_pdt` an account the broker flags as a pattern day trader has no budget below the threshold,
+and that flag is journaled nowhere, nor is the trailing day-trade count. A reader that cannot see
+one of them holds or defers the budget, never reads the flag as unset or the count as zero, so these
+four facts alone never pass a `legacy_pdt` budget. Holding an opening for a missing fact only stops
+risk being added; no exit, protective order, or kill switch reads any of the four (`AGENTS.md` rule
+13).
 
 **Who writes it.** The executor writes every `AccountSnapshotRecorded`, the cash step's and the fee
 step's (§9.2), at version 2 from the change that builds it, once `mandate-journal` registers it;
@@ -6722,11 +6727,12 @@ another case, unlisted, or another member's), each figure `null`, each new membe
 version-1 draft carrying any of them, an extra member, rule 24 at version 2, and version 3; valid
 drafts for what no rule refuses (an undeclared type, regime, or both; `cash` with `legacy_pdt`, and
 `margin` with it; a prior close above equity, negative, or zero; a margin of zero, equal to equity,
-above it, or negative); the reading of each base and valid draft: `no_figures` for version 1, and
+above it, or negative; figures with a trailing zero or an exponent, which §4.6 normalizes); the reading of each base and valid draft: `no_figures` for version 1, and
 for version 2 the declaration, the prior-close equity, and the signed maintenance excess, `null`
 when the margin is negative; and streams in which the latest snapshot wins across versions: a
 version 1 then a version 2, a version 2 then a version 1 (no figures), two version 2s, and a
-version 2, a version 1, and a version 2 again. The oracle recomputes each reading in exact
+version 2, a version 1, and a version 2 again, and a version 2 then one with a negative margin
+(no excess). The oracle recomputes each reading in exact
 fractions, apart from the reference reading. The vectors stay version 3.
 
 ## 10. Anchoring

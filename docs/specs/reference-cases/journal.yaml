@@ -85773,6 +85773,16 @@ snapshot_prior_close:
       value: '0'
     expect:
       outcome: Valid
+  - name: figures_normalized
+    clause: '§4.6: a decimal input with a trailing zero or an exponent is normalized, not refused'
+    base_draft: snapshot_v2
+    changes:
+    - path: payload.last_equity
+      value: '24750.50'
+    - path: payload.maintenance_margin
+      value: 7.50025e3
+    expect:
+      outcome: Valid
   - name: margin_zero
     clause: '§9.35: no requirement is a figure'
     base_draft: snapshot_v2
@@ -85887,6 +85897,12 @@ snapshot_prior_close:
     account_type: margin
     day_trading_regime: intraday_margin
     prior_close_equity: '0'
+    maintenance_excess: '17499.75'
+  - draft: figures_normalized
+    reading: figures
+    account_type: margin
+    day_trading_regime: intraday_margin
+    prior_close_equity: '24750.5'
     maintenance_excess: '17499.75'
   - draft: margin_zero
     reading: figures
@@ -86013,3 +86029,26 @@ snapshot_prior_close:
       day_trading_regime: null
       prior_close_equity: '24750.5'
       maintenance_excess: '17499.75'
+  - name: v2_then_negative_margin
+    clause: '§9.35: the latest version 2''s negative margin leaves no excess, not the earlier one''s'
+    steps:
+    - base_draft: snapshot_v2
+      changes:
+      - path: payload.risk_clock
+        value: '2026-10-26T14:05:00.000000000Z'
+      - path: event_time
+        value: '2026-10-26T14:05:00.000000000Z'
+    - base_draft: snapshot_v2
+      changes:
+      - path: payload.risk_clock
+        value: '2026-10-26T15:05:00.000000000Z'
+      - path: event_time
+        value: '2026-10-26T15:05:00.000000000Z'
+      - path: payload.maintenance_margin
+        value: '-1'
+    expect:
+      reading: figures
+      account_type: margin
+      day_trading_regime: intraday_margin
+      prior_close_equity: '24750.5'
+      maintenance_excess: null
