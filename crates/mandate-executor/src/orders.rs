@@ -6,6 +6,7 @@ use mandate_accounting::{
     Record,
 };
 use mandate_canon::{Object, Value};
+use mandate_notify::OwnerAlertKind;
 use mandate_num::{Qty, Usd};
 use mandate_time::{NewYorkTime, new_york_instant};
 
@@ -337,7 +338,7 @@ fn unmapped(batch: &mut Batch<'_, '_>, id: &ClientOrderId) -> Result<(), Executo
             ("originated", Value::Bool(true)),
         ],
     )?;
-    batch.notify(applied, "broker_status_unmapped");
+    batch.notify(applied, OwnerAlertKind::AgentHeld);
     Ok(())
 }
 
@@ -468,10 +469,6 @@ pub(crate) fn lookups_due(batch: &mut Batch<'_, '_>) {
     }
 }
 
-/// The alert a kill switch's in-run cancel retry raises once its budget is spent and the cancel
-/// is still unconfirmed: an opaque key, never the order (`AGENTS.md` rule 6).
-const RETRIES_EXHAUSTED: &str = "kill_switch_cancel_retries_exhausted";
-
 /// DEC-2302 item 7, on a tick: a kill switch's cancel still unconfirmed, on a `PendingCancel`
 /// order or on one an ignored ask left `Accepted` or `PartiallyFilled`, is asked again once
 /// `unknown_absent_window_s` has passed by the risk clock since the journal last asked it, at most
@@ -542,7 +539,7 @@ pub(crate) fn kill_cancels_due(batch: &mut Batch<'_, '_>) -> Result<(), Executor
         });
     }
     for last in exhausted {
-        batch.notify(last, RETRIES_EXHAUSTED);
+        batch.notify(last, OwnerAlertKind::ExitStalled);
     }
     Ok(())
 }
@@ -653,7 +650,7 @@ pub(crate) fn fill(
             Mode::ExitsOnly,
             &restriction_for(EXTERNAL),
             ingested,
-            "external_activity",
+            OwnerAlertKind::ExternalActivity,
         )?;
         return Ok(false);
     };
@@ -691,7 +688,7 @@ pub(crate) fn fill(
 }
 
 /// Every agent of the account to `mode` under `restriction`, and the owner alerted about
-/// `subject` under `key`, in one call: the `*` restriction reaches an agent the executor has not
+/// `subject` as `kind`, in one call: the `*` restriction reaches an agent the executor has not
 /// yet seen (DEC-133 item 39), and the alert cannot be split from it (§7.1, §7.3). Originated here
 /// rather than copied. The alert carries the subject event's id and a message key only
 /// (`AGENTS.md` rule 6).
@@ -700,7 +697,7 @@ pub(crate) fn every_agent_alerted(
     mode: Mode,
     restriction: &str,
     subject: EventId,
-    key: &'static str,
+    kind: OwnerAlertKind,
 ) -> Result<(), ExecutorError> {
     batch.journal(
         "AgentModeApplied",
@@ -712,7 +709,7 @@ pub(crate) fn every_agent_alerted(
             ("originated", Value::Bool(true)),
         ],
     )?;
-    batch.notify(subject, key);
+    batch.notify(subject, kind);
     Ok(())
 }
 
@@ -959,7 +956,13 @@ fn restrict(
             ("reason_code", text(reason)),
         ],
     )?;
-    every_agent_alerted(batch, restriction.mode(), reason, changed, reason)?;
+    every_agent_alerted(
+        batch,
+        restriction.mode(),
+        reason,
+        changed,
+        OwnerAlertKind::AccountRestriction,
+    )?;
     Ok(true)
 }
 

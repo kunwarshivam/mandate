@@ -7,7 +7,8 @@
 //! `AccountSnapshotRecorded` registered once stream K's fee-step writer conformed (#456), in the
 //! change that journals that writer's form in `fees`, so the fee step's snapshot is never refused
 //! for a member while it pauses every agent and alerts the owner (`AGENTS.md` rules 3 and 13,
-//! DEC-261 item 7, DEC-402).
+//! DEC-261 item 7, DEC-402). Journal spec v0.89 §9.35 adds its version 2, which carries the
+//! account's day-trading facts, with version 1 still registered and rule 24 read at both (DEC-2398).
 //!
 //! The account stream's `MandateVersionApplied` and `UniverseChanged` are journal spec v0.8 §9.3's,
 //! with rules 29 to 33, routed here beside §9.2's (DEC-403, DEC-404).
@@ -69,8 +70,9 @@ const THESIS: [&str; 2] = ["ThesisProposed", "ThesisRevised"];
 /// (DEC-2312); `IntentReceived`,
 /// `GateDecided`, and `OrderSubmitted` close at version 2 and stay at version 1, and so does
 /// `OrderStateChanged` (journal spec §9.16, DEC-869). `OwnerConfirmationReceived` closes at
-/// version 1 (DEC-2040), and so does `AccountCloseRequested` (DEC-2337).
-const EXECUTOR: [&str; 11] = [
+/// version 1 (DEC-2040), and so do `AccountCloseRequested` (DEC-2337) and
+/// `AccountRestrictionChanged` (DEC-2137).
+const EXECUTOR: [&str; 12] = [
     "IntentReceived",
     "GateDecided",
     "OrderSubmitted",
@@ -79,6 +81,7 @@ const EXECUTOR: [&str; 11] = [
     "ProtectionChanged",
     CONFIRMATION,
     CLOSE,
+    RESTRICTION,
     "BrokerPositionObserved",
     "AgentModeApplied",
     "CompensatingEvent",
@@ -93,6 +96,10 @@ const CONFIRMATION: &str = "OwnerConfirmationReceived";
 /// One request of one instrument's close-position under an account kill switch, journaled before
 /// it is sent (§9.5, DEC-2337): rules 258 and 259 on its own members, rule 260 on the stream.
 const CLOSE: &str = "AccountCloseRequested";
+
+/// An account restriction the executor detected, with its closed cause (§9.5, DEC-2137): rules
+/// 279 and 280 bind its restriction, cause, and reason code to trading spec §7.3's table.
+const RESTRICTION: &str = "AccountRestrictionChanged";
 
 /// The companion's (§9.5): an `OrderSubmitted` at `schema_version` 2 must be immediately preceded
 /// in its `append` batch by exactly one `OrderRequestRecorded`, which its `causation_id` names.
@@ -390,6 +397,7 @@ pub(crate) fn payload(
         "IntentReceived" => intent_received_rules(p)?,
         CONFIRMATION => confirmation_rules(p)?,
         CLOSE => close_rules(p, causation_id)?,
+        RESTRICTION => restriction_rules(p)?,
         "ProtectionChanged" => protection_changed_rules(p)?,
         SNAPSHOT => {
             let compared = !p.is_null("model_cash");
@@ -554,6 +562,24 @@ fn close_rules(p: Payload<'_>, causation_id: Option<&Value>) -> Result<(), Inval
         causation_id.and_then(Value::as_str) == Some(p.text("kill_switch_event")),
         InvalidReason::Schema,
         "causation_id",
+    )
+}
+
+/// Rules 279 and 280 (DEC-2137), in that order: `restriction` is `blocked` exactly when
+/// `reason_code` is `account_trading_blocked` (`payload.reason_code`), and a `blocked`
+/// restriction's `cause` is `broker_notice` (`payload.cause`), so only trading spec §7.3's rows are
+/// admitted.
+fn restriction_rules(p: Payload<'_>) -> Result<(), Invalid> {
+    let blocked = p.text("restriction") == "blocked";
+    ensure(
+        blocked == (p.text("reason_code") == "account_trading_blocked"),
+        InvalidReason::Schema,
+        "payload.reason_code",
+    )?;
+    ensure(
+        !blocked || p.text("cause") == "broker_notice",
+        InvalidReason::Schema,
+        "payload.cause",
     )
 }
 
@@ -902,6 +928,7 @@ fn schema(event_type: &str, schema_version: u64) -> Option<&'static Ty> {
         ("ProtectionChanged", 2) => Some(&PROTECTION_CHANGED_V2),
         (CONFIRMATION, 1) => Some(&OWNER_CONFIRMATION_RECEIVED),
         (CLOSE, 1) => Some(&ACCOUNT_CLOSE_REQUESTED),
+        (RESTRICTION, 1) => Some(&ACCOUNT_RESTRICTION_CHANGED),
         ("BrokerPositionObserved", 1) => Some(&BROKER_POSITION_OBSERVED),
         ("AgentModeApplied", 1) => Some(&AGENT_MODE_APPLIED),
         ("CompensatingEvent", 1) => Some(&COMPENSATING_EVENT),
@@ -920,6 +947,7 @@ fn schema(event_type: &str, schema_version: u64) -> Option<&'static Ty> {
         ("AgentStopped", 1) => Some(&AGENT_STOPPED),
         ("OwnerCommandRefused", 1) => Some(&OWNER_COMMAND_REFUSED),
         (SNAPSHOT, 1) => Some(&ACCOUNT_SNAPSHOT_RECORDED),
+        (SNAPSHOT, 2) => Some(&ACCOUNT_SNAPSHOT_RECORDED_V2),
         (ACCOUNT_STATE, 1) => Some(&ACCOUNT_STATE_OBSERVED),
         ("MandateVersionApplied", 1) => Some(&MANDATE_VERSION_APPLIED),
         ("UniverseChanged", 1) => Some(&UNIVERSE_CHANGED),
@@ -1145,6 +1173,38 @@ static ACCOUNT_SNAPSHOT_RECORDED: Ty = Ty::Record(&[
     ("risk_clock", Ty::RiskClock),
 ]);
 
+/// Journal spec v0.89 §9.35's `AccountSnapshotRecorded` at `schema_version` 2 (DEC-2398): version
+/// 1's account members, then the connector's declared account type and day-trading regime, each
+/// `null` when it declares none, and the broker's prior-close equity and maintenance margin, then
+/// version 1's cash comparison, with `risk_clock` last. Rule 24 reads both versions alike.
+static ACCOUNT_SNAPSHOT_RECORDED_V2: Ty = Ty::Record(&[
+    ("status", Ty::Str),
+    ("crypto_status", Ty::Str),
+    ("trading_blocked", Ty::Bool),
+    ("account_blocked", Ty::Bool),
+    ("trade_suspended_by_user", Ty::Bool),
+    ("multiplier", Ty::Int),
+    ("equity", Ty::Decimal),
+    ("cash", Ty::Decimal),
+    ("buying_power", Ty::Decimal),
+    ("non_marginable_buying_power", Ty::Decimal),
+    ("accrued_fees", Ty::Decimal),
+    (
+        "account_type",
+        Ty::Nullable(&Ty::OneOf(&["cash", "margin"])),
+    ),
+    (
+        "day_trading_regime",
+        Ty::Nullable(&Ty::OneOf(&["intraday_margin", "legacy_pdt"])),
+    ),
+    ("last_equity", Ty::Decimal),
+    ("maintenance_margin", Ty::Decimal),
+    ("model_cash", Ty::Nullable(&Ty::Decimal)),
+    ("cash_band", Ty::Nullable(&Ty::Decimal)),
+    ("cash_in_band", Ty::Nullable(&Ty::Bool)),
+    ("risk_clock", Ty::RiskClock),
+]);
+
 /// DEC-458's complete broker-account report, with no broker identity or personal data.
 static ACCOUNT_STATE_OBSERVED: Ty = Ty::Record(&[
     ("status", Ty::Str),
@@ -1239,6 +1299,21 @@ static OWNER_CONFIRMATION_RECEIVED: Ty = Ty::Record(&[
     ("floor", Ty::Decimal),
     ("expires_at", Ty::Int),
     ("copied_from", Ty::Ulid),
+    ("risk_clock", Ty::RiskClock),
+]);
+
+/// §9.5's `AccountRestrictionChanged` (DEC-2137): the restriction, its cause, §7.3's reason
+/// code, and the risk clock.
+static ACCOUNT_RESTRICTION_CHANGED: Ty = Ty::Record(&[
+    ("restriction", Ty::OneOf(&["closing_only", "blocked"])),
+    (
+        "cause",
+        Ty::OneOf(&["broker_reject", "broker_notice", "connection_unavailable"]),
+    ),
+    (
+        "reason_code",
+        Ty::OneOf(&["account_trading_blocked", "account_restricted"]),
+    ),
     ("risk_clock", Ty::RiskClock),
 ]);
 
@@ -2155,20 +2230,26 @@ mod tests {
         Ok(())
     }
 
-    /// A snapshot at any `schema_version` but 1 is refused as `unknown_schema`, as every other §9.2
-    /// type is: the snapshot reaches its schema through `schema`'s version gate, never around it
-    /// (#467 round 1, m3).
+    /// A snapshot at any `schema_version` but 1 and 2 is refused as `unknown_schema`, as every other
+    /// §9.2 type is: the snapshot reaches its schema through `schema`'s version gate, never around
+    /// it (#467 round 1, m3). Version 2 is §9.35's (DEC-2398): a version-1 payload at version 2
+    /// lacks its four members and is refused at the first, `account_type`.
     #[test]
     fn a_snapshot_at_another_schema_version_is_an_unknown_schema() -> Result<(), String> {
         let section = section()?;
-        let mut body = base_of(&section, "AccountSnapshotRecorded")?;
-        let version = Key::new("schema_version").map_err(|_| "key")?;
-        let two = Int::new(2).ok_or("an integer")?;
-        body.insert(version, Value::Int(two));
-        assert_eq!(
-            refusal(body),
-            Some(("unknown_schema".to_owned(), "payload".to_owned()))
-        );
+        for (version, refused) in [
+            (2, ("schema", "payload.account_type")),
+            (3, ("unknown_schema", "payload")),
+        ] {
+            let mut body = base_of(&section, "AccountSnapshotRecorded")?;
+            let key = Key::new("schema_version").map_err(|_| "key")?;
+            body.insert(key, Value::Int(Int::new(version).ok_or("an integer")?));
+            assert_eq!(
+                refusal(body),
+                Some((refused.0.to_owned(), refused.1.to_owned())),
+                "at version {version}"
+            );
+        }
         Ok(())
     }
 

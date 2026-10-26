@@ -200,6 +200,22 @@ fn the_opted_in_research_is_the_bundle_s_entry_for_the_deployed_mandate() {
     };
     let (refs_version, refs) = wired.refs.refs(&draft).unwrap();
     assert_eq!(refs_version, 1);
+    for (event_type, payload, want) in [
+        ("ApprovalRequested", r#"{"content":{"execution":null}}"#, 2),
+        ("DecisionMade", r#"{"deferred_to_binding":[]}"#, 3),
+        ("DecisionMade", r#"{"dry_run":"allow"}"#, 1),
+    ] {
+        let versioned = EventDraft {
+            event_type: event_type.to_owned(),
+            payload: mandate_canon::parse(payload.as_bytes()).unwrap(),
+            ..draft.clone()
+        };
+        assert_eq!(
+            wired.refs.refs(&versioned).map(|(version, _)| version),
+            Some(want),
+            "{event_type} {payload}: the draft's own version (DEC-2388 item 13)"
+        );
+    }
     assert_eq!(
         refs.get("mandate_version").and_then(Value::as_str),
         Some(version.as_str())

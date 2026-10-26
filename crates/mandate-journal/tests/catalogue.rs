@@ -283,7 +283,7 @@ const RISK_STATE_ON_ACCOUNT: [(&str, &str); 2] =
 const THESIS_ON_AGENT: [(&str, &str); 2] = [("ThesisProposed", AGENT), ("ThesisRevised", AGENT)];
 
 /// The account stream's closed executor records (DEC-446, DEC-447, DEC-459, DEC-460).
-const EXECUTOR_ON_ACCOUNT: [(&str, &str); 9] = [
+const EXECUTOR_ON_ACCOUNT: [(&str, &str); 10] = [
     ("IntentReceived", ACCT),
     ("GateDecided", ACCT),
     ("OrderSubmitted", ACCT),
@@ -293,6 +293,7 @@ const EXECUTOR_ON_ACCOUNT: [(&str, &str); 9] = [
     ("BrokerPositionObserved", ACCT),
     ("AgentModeApplied", ACCT),
     ("CompensatingEvent", ACCT),
+    ("AccountRestrictionChanged", ACCT),
 ];
 
 fn closed_by_section_9_2(event_type: &str, kind: &str) -> bool {

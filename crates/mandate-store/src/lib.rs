@@ -81,7 +81,7 @@ pub struct PgStore {
 }
 
 impl PgStore {
-    /// Connects to `dsn`.
+    /// Connects to `dsn` over one connection ([`PgJournal::single_writer`]).
     ///
     /// # Errors
     /// The runtime's or the connection's, as a stable code only: a DSN is a credential and never
@@ -93,7 +93,7 @@ impl PgStore {
             .map_err(|_| "runtime_unavailable")?;
         let journal = {
             let _entered = runtime.enter();
-            PgJournal::from_dsn(dsn).map_err(|e| e.code())?
+            PgJournal::single_writer(dsn).map_err(|e| e.code())?
         };
         Ok(Self { journal, runtime })
     }

@@ -16,9 +16,13 @@ mandate-canon.workspace = true
 mandate-connections.workspace = true
 mandate-domain.workspace = true
 mandate-executor.workspace = true
+mandate-gate-context.workspace = true
+mandate-gate-inputs.workspace = true
 mandate-journal.workspace = true
 mandate-num.workspace = true
+mandate-ports.workspace = true
 mandate-process.workspace = true
+mandate-risk.workspace = true
 mandate-robinhood.workspace = true
 mandate-store.workspace = true
 mandate-time.workspace = true
@@ -28,8 +32,8 @@ tokio = { workspace = true, features = ["rt", "signal", "time"] }
 
 [dev-dependencies]
 mandate-mcp.workspace = true
+mandate-spec.workspace = true
 mandate-journal-pg.workspace = true
-mandate-risk.workspace = true
 proptest.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true
