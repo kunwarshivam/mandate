@@ -48,6 +48,7 @@
         "step_up_method",
         "step_up_mismatch",
         "live_unavailable",
+        "deferral_mismatch",
         "control_stream_frozen",
         "journal_unavailable",
         "rate_limited",
@@ -1136,6 +1137,34 @@
               },
               "type": {
                 "const": "https://mandate.dev/problems/agents_not_stopped"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "deferral_mismatch"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 409
+              },
+              "effect": {
+                "const": "none"
+              },
+              "retryable": {
+                "const": false
+              },
+              "title": {
+                "const": "Request does not match its decision"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/deferral_mismatch"
               }
             }
           }

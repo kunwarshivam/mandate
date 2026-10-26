@@ -76,6 +76,7 @@
 //! account-wide endpoints. There is no deposit, withdrawal, or transfer request, no live base
 //! URL anywhere in this stream, and no path that could build one (`AGENTS.md` rule 8, ES-23).
 
+mod acknowledge;
 mod batch;
 mod codec;
 mod error;
@@ -130,14 +131,14 @@ pub use step::handle;
 pub use symbols::BrokerSymbols;
 pub use types::{
     AccountDeclaration, AccountRef, AccountScope, AccountState, AccountWide, AccountWideScope,
-    ActivityCursor, AgentId, BracketLegs, BrokerAccount, BrokerFill, BrokerOrder, BrokerOutcome,
-    BrokerPosition, BrokerReject, BrokerRequest, BrokerSnapshot, BrokerUnknown, BrokerUpdate,
-    Command, DeclaredRegime, Difference, DifferenceKind, Effect, EventDraft, EventId,
-    ExecutorConfig, ExitTier, FillId, FlattenLeg, FlattenPlan, FoldedEvent, GateCheck, GateVerdict,
-    HandedConfirmation, Initiator, Input, IntentBody, IntentHandoff, KillScope, ListedOrder,
-    MandateVersion, MarketObservation, Mode, NotificationRef, OcoLegs, Order, OrderListing,
-    OrderOrigin, OrderState, OrderType, OwnerConfirmation, Protection, ProtectionPrices, Purpose,
-    ReconcileReason, Reconciliation, ReconciliationVerdict, RiskClock, Seq, StatusMapping,
-    SubmitOrder, ThesisRow, TimeInForce, TimerId, TimerRequest, UnprotectedInterval, WorkspaceId,
-    WriterEpoch,
+    AcknowledgmentHandoff, ActivityCursor, AgentId, BracketLegs, BrokerAccount, BrokerFill,
+    BrokerOrder, BrokerOutcome, BrokerPosition, BrokerReject, BrokerRequest, BrokerSnapshot,
+    BrokerUnknown, BrokerUpdate, Command, DeclaredRegime, Difference, DifferenceKind, Effect,
+    EventDraft, EventId, ExecutorConfig, ExitTier, FillId, FlattenLeg, FlattenPlan, FoldedEvent,
+    GateCheck, GateVerdict, HandedConfirmation, Initiator, Input, IntentBody, IntentHandoff,
+    KillScope, ListedOrder, MandateVersion, MarketObservation, Mode, NotificationRef, OcoLegs,
+    Order, OrderListing, OrderOrigin, OrderState, OrderType, OwnerConfirmation, Protection,
+    ProtectionPrices, Purpose, ReconcileReason, Reconciliation, ReconciliationVerdict, RiskClock,
+    Seq, StatusMapping, SubmitOrder, ThesisRow, TimeInForce, TimerId, TimerRequest,
+    UnprotectedInterval, WorkspaceId, WriterEpoch,
 };
