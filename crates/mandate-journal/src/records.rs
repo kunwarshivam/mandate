@@ -42,7 +42,7 @@ const VIEW_FORMS: [&str; 2] = ["json", "csv"];
 
 /// §11's codes a `checked_range`'s failure names: the checks reported at an event (checks 1 to
 /// 6, the anchored head, the anchor's own, the agent stream's two, the hold's, the connection's
-/// two, the operator read's break-glass cause, and the approval request's deferrals, v0.103,
+/// two, the operator read's break-glass cause, and the approval request's deferrals, v0.105,
 /// DEC-2522), then version 1's four of [`RANGE_CHECKS`].
 const CHECKS: [&str; 20] = [
     "non_canonical",

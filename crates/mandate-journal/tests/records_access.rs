@@ -181,7 +181,7 @@ fn every_verification_run_draft_parses_or_is_refused_as_its_case_says() {
 
 /// §11's per-event checks 1 to 6, `anchor_head_mismatch`, `anchor_self_mismatch`,
 /// `intent_action_mismatch`, `mode_event_mismatch`, `held_mismatch`, the connection's two,
-/// `break_glass_cause_mismatch`, and `approval_deferral_mismatch` (v0.103, DEC-2522), then its
+/// `break_glass_cause_mismatch`, and `approval_deferral_mismatch` (v0.105, DEC-2522), then its
 /// per-range checks, as rule 111 lists them.
 const PER_EVENT: [&str; 16] = [
     "non_canonical",

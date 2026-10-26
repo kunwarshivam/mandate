@@ -23,6 +23,7 @@ import { ApiTimeline } from "@/components/api-screens/audit";
 import { ApiPasskeys } from "@/components/api-screens/passkeys";
 import { ComingSoon } from "./coming-soon";
 import { AllClear, Panel, Section, WorkspaceGate } from "./common";
+import { ApiDecisions } from "@/components/api-screens/decisions";
 
 const HEALTH_LABEL = { market_data: "Market data", broker: "Broker", deployment: "Deployment", relay: "Push relay" } as const;
 
@@ -173,9 +174,18 @@ export function RegistryScreen({ screen }: { screen: Screen }) {
         );
       case "audit-decisions":
         return (
-          <WorkspaceGate>
-            <Decisions />
-          </WorkspaceGate>
+          <BySource
+            fixtures={
+              <WorkspaceGate>
+                <Decisions />
+              </WorkspaceGate>
+            }
+            api={
+              <WorkspaceGate api>
+                <ApiDecisions />
+              </WorkspaceGate>
+            }
+          />
         );
       case "audit-timeline":
         return (

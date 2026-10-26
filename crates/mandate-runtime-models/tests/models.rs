@@ -13,7 +13,7 @@ use common::*;
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::Value;
 use mandate_daemon::ArtifactSink;
-use mandate_daemon::models::{Evaluated, Models};
+use mandate_daemon::models::{Evaluated, Models, Streams};
 use mandate_journal::{ArtifactStore, Environment, StoredEvent};
 use mandate_runtime::ModelDirection;
 use mandate_runtime_models::{
@@ -61,6 +61,12 @@ fn assert_expected(answer: &[Evaluated], series: &[(Date, u32)]) {
     );
 }
 
+/// A pinned mandate reads no stream.
+const NO_STREAMS: Streams<'static> = Streams {
+    control: None,
+    agent: &[],
+};
+
 fn composer(root: &Root, control: &[StoredEvent], document: &Value) -> Option<PinnedModels> {
     PinnedModels::new(
         document,
@@ -86,10 +92,10 @@ fn a_rising_series_gives_the_pinned_model_s_long_output_at_the_close_it_read() {
     let series = rising(30);
     store_series(&root.bars(), "QQQ", &series, None);
     let models = composer(&root, &registered(), &document()).unwrap();
-    assert_expected(&models.evaluate(tick(NOW)), &series);
+    assert_expected(&models.evaluate(tick(NOW), NO_STREAMS), &series);
     assert_eq!(
-        models.evaluate(tick(NOW)),
-        models.evaluate(tick(NOW)),
+        models.evaluate(tick(NOW), NO_STREAMS),
+        models.evaluate(tick(NOW), NO_STREAMS),
         "the same tick over the same partitions answers the same"
     );
 }
@@ -104,7 +110,7 @@ fn a_falling_or_flat_series_gives_no_output() {
             .collect();
         store_series(&root.bars(), "QQQ", &series, None);
         let models = composer(&root, &registered(), &document()).unwrap();
-        assert_eq!(models.evaluate(tick(NOW)), Vec::new(), "{name}");
+        assert_eq!(models.evaluate(tick(NOW), NO_STREAMS), Vec::new(), "{name}");
     }
 }
 
@@ -129,7 +135,7 @@ fn a_pinned_1_1_0_s_exit_output_is_handed_on_on_a_falling_series() {
     let control = [registration_of(1, "paper", ("1.1.0", &exit_hash), PARAMS)];
     let answer = composer(&root, &control, &pinned)
         .unwrap()
-        .evaluate(tick(NOW));
+        .evaluate(tick(NOW), NO_STREAMS);
     let [evaluated] = answer.as_slice() else {
         panic!("one output: {answer:?}");
     };
@@ -143,7 +149,7 @@ fn a_pinned_1_1_0_s_exit_output_is_handed_on_on_a_falling_series() {
     assert_eq!(
         composer(&root, &registered(), &document())
             .unwrap()
-            .evaluate(tick(NOW)),
+            .evaluate(tick(NOW), NO_STREAMS),
         Vec::new()
     );
 }
@@ -387,7 +393,7 @@ proptest! {
             document()
         };
         let clock = if fault == Fault::StaleClock { STALE } else { NOW };
-        let answer = composer(&root, &control, &document).unwrap().evaluate(tick(clock));
+        let answer = composer(&root, &control, &document).unwrap().evaluate(tick(clock), NO_STREAMS);
         if fault == Fault::None && long(&series) {
             assert_expected(&answer, &series);
         } else {

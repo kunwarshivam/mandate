@@ -1,0 +1,2 @@
+- **E2-10 The news reader's durable raw-response store (debt, DEC-2280 item 4).** The news reader keeps no raw response today: no durable data-plane store exists, and a licensed vendor's raw text waits on DEC-433 item 20's retention answer. Once both exist, store each fetched response under data-plane spec §4.5's retention, named by no journal record, and amend journal spec §9.37 step 1 back.
+<!-- section: E2 Market data -->

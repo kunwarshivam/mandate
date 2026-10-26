@@ -2,7 +2,7 @@
 //! inside its hashed content, the checks its dry run deferred to the binding gate. Rule 291 judges
 //! the list on the request; rule 292 refuses a batch whose request names other deferrals than the
 //! `DecisionMade` it names. The vectors' additive `approval_deferrals` section holds whole drafts,
-//! so this file needs no other section. Journal spec v0.103 (DEC-2522) adds §11's
+//! so this file needs no other section. Journal spec v0.105 (DEC-2522) adds §11's
 //! `approval_deferral_mismatch`, rule 292 across batches, whose ranges the section also holds.
 
 use std::path::Path;
@@ -253,7 +253,7 @@ fn stored(seq: u64, event: &Value) -> StoredEvent {
     }
 }
 
-/// §11's `approval_deferral_mismatch` (v0.103, DEC-2522) over every range of the section: the first
+/// §11's `approval_deferral_mismatch` (v0.105, DEC-2522) over every range of the section: the first
 /// request the case reports fails at its `seq`, with that code, and a range it reports nothing in
 /// passes. Each clause is in some case: a hidden deferral, an invented one, no cause, a cause that
 /// is not a decision, a decision after its request, and a cause outside a later range.

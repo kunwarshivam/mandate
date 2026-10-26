@@ -81,15 +81,18 @@ fn a_check_with_no_risk_clock_refuses() {
 }
 
 #[test]
-fn the_connection_state_records_are_still_not_interpreted() {
-    for kind in ["ConnectionStateChanged", "ConnectionCredentialRefreshed"] {
-        let mut state = ExecutorState::new(scope());
-        fold(&mut state, &stream_opened()).expect("seq 1 folds");
-        let error = fold(
-            &mut state,
-            &event(ACCOUNT_STREAM, 2, kind, with_clock(&[], 5)),
-        )
-        .expect_err("no story here writes or reads it yet");
-        assert_eq!(error.code(), "not_interpreted", "{kind}: {error}");
-    }
+fn the_credential_refresh_record_is_still_not_interpreted() {
+    let mut state = ExecutorState::new(scope());
+    fold(&mut state, &stream_opened()).expect("seq 1 folds");
+    let error = fold(
+        &mut state,
+        &event(
+            ACCOUNT_STREAM,
+            2,
+            "ConnectionCredentialRefreshed",
+            with_clock(&[], 5),
+        ),
+    )
+    .expect_err("no story here writes or reads it yet");
+    assert_eq!(error.code(), "not_interpreted", "{error}");
 }

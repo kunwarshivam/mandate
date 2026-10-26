@@ -214,7 +214,7 @@ pub enum AgentStreamCheck {
     HeldMismatch,
     /// An `ApprovalRequested` names no cause, or its cause is an earlier event that is not a
     /// `DecisionMade`, or on a full chain no earlier event, or its deferrals are not its decision's:
-    /// rule 292 across batches (journal spec v0.103 §11, DEC-2522).
+    /// rule 292 across batches (journal spec v0.105 §11, DEC-2522).
     ApprovalDeferralMismatch,
 }
 
