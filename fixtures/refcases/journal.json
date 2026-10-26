@@ -77378,6 +77378,70 @@
     }
    },
    {
+    "name": "a_news_stream_range",
+    "clause": "§9.13 (v0.102, DEC-2280): the range grammar names the news stream, one of the eight stream types",
+    "base_draft": "run_passed",
+    "changes": [
+     {
+      "path": "payload.ranges",
+      "value": [
+       {
+        "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+        "from_seq": 1,
+        "to_seq": 40,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "start": {
+         "kind": "genesis",
+         "manifest_hash": null,
+         "anchor_event_id": null
+        },
+        "checked": 40,
+        "failure": null,
+        "incomplete": null
+       },
+       {
+        "stream_id": "agent:ws_01J8Z2:agent_a",
+        "from_seq": 12,
+        "to_seq": 30,
+        "prev_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "to_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "start": {
+         "kind": "manifest",
+         "manifest_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+         "anchor_event_id": null
+        },
+        "checked": 19,
+        "failure": null,
+        "incomplete": null
+       },
+       {
+        "stream_id": "news:ws_01J8Z2",
+        "from_seq": 1,
+        "to_seq": 9,
+        "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "to_hash": "4444444444444444444444444444444444444444444444444444444444444444",
+        "start": {
+         "kind": "genesis",
+         "manifest_hash": null,
+         "anchor_event_id": null
+        },
+        "checked": 9,
+        "failure": null,
+        "incomplete": null
+       }
+      ]
+     },
+     {
+      "path": "artifact_refs",
+      "value": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
+    }
+   },
+   {
     "name": "anchor_start_at_seq_2",
     "clause": "rule 132: an anchor whose leaf is seq 1",
     "base_draft": "run_incomplete",
