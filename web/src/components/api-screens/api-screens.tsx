@@ -291,6 +291,7 @@ function AgentActivity({ agentId }: { agentId: string }) {
   }, [activity, agentId]);
   const orders = answer?.orders;
   const holdings = answer?.holdings;
+  const journal = answer?.journal;
   return (
     <>
       <Section title="Orders">
@@ -317,6 +318,27 @@ function AgentActivity({ agentId }: { agentId: string }) {
               </li>
             ))}
           </ul>
+        )}
+      </Section>
+      <Section title="Journal">
+        <p className="text-sm text-muted-foreground">The latest records on this agent&rsquo;s stream, oldest first.</p>
+        {!journal ? (
+          <p className={NOT_REPORTED}>Reading the journal.</p>
+        ) : !journal.ok ? (
+          <p className={NOT_REPORTED}>{journal.reason === "forbidden" ? "Not available to your role." : "Journal not reported."}</p>
+        ) : journal.items.length === 0 ? (
+          <p className="text-muted-foreground">Nothing recorded yet.</p>
+        ) : (
+          <ol className="grid" aria-label="Journal">
+            {journal.items.map((e) => (
+              <li key={e.event_id} className="flex justify-between gap-3 border-b border-border/70 py-2.5 text-sm last:border-b-0">
+                <span>
+                  <span className="text-muted-foreground tabular-nums">#{e.seq}</span> {e.event_type}
+                </span>
+                <span className="text-muted-foreground tabular-nums">{clock(e.recorded_at)} UTC</span>
+              </li>
+            ))}
+          </ol>
         )}
       </Section>
       <Section title="This agent's positions">

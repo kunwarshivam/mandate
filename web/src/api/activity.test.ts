@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activityRead } from "./activity";
+import { activityRead, journalPageRead } from "./activity";
 import { createWorkspaceClient } from "./client";
 import { createMockServer } from "./mock-server";
 import { AGENT_IDS } from "@/fixtures/workspace";
@@ -51,5 +51,35 @@ describe("an agent's activity (read-models/orders and /positions, DEC-2111)", ()
       expect((await client.read(`/agents/${id}/orders`, read.orders)).ok, id).toBe(true);
       expect((await client.read(`/agents/${id}/positions`, read.holdings)).ok, id).toBe(true);
     }
+  });
+});
+
+describe("a journal page, without its bodies (§4.8.1, API-15)", () => {
+  const STREAM = `agent:ws_1:${AGENT}`;
+  const line = (seq: number) => ({ seq, event_id: "01JBR2C4D6E8F0G2H4J6K8M0N2", event_type: "OrderSubmitted", recorded_at: "2026-10-26T14:00:00.000000000Z", prev_hash: "0".repeat(64), hash: "1".repeat(64), body: "e30=" });
+  const page = (patch: Record<string, unknown> = {}) => ({ stream_id: STREAM, head: { seq: 3, hash: "1".repeat(64), recorded_at: "2026-10-26T14:00:00.000000000Z" }, events: [line(2), line(3)], next_after_seq: 3, at_head: true, ...patch });
+  const decode = journalPageRead(STREAM);
+
+  it("reads each event's sequence, type and time, and keeps no body", () => {
+    const read = decode(page(), "");
+    expect(read).toMatchObject({ ok: true, value: { head_seq: 3, events: [{ seq: 2 }, { seq: 3 }] } });
+    if (read.ok) expect(JSON.stringify(read.value)).not.toContain("e30=");
+  });
+
+  it("refuses a page for another stream, out of order, or past its head", () => {
+    expect(decode(page({ stream_id: `agent:ws_1:agt_other` }), "").ok).toBe(false);
+    expect(decode(page({ events: [line(3), line(2)] }), "").ok).toBe(false);
+    expect(decode(page({ events: [line(2), line(2)] }), "").ok).toBe(false);
+    expect(decode(page({ events: [line(4)] }), "").ok).toBe(false);
+    expect(decode(page({ head: undefined }), "").ok).toBe(false);
+  });
+
+  it("reads the mock's agent stream through the documented route and query", async () => {
+    const ws = "ws_01J9ZQ4M0000000000000000AB";
+    const server = createMockServer({ workspaceId: ws, scenario: "normal" });
+    const client = createWorkspaceClient({ workspaceId: ws, fetch: server.fetch });
+    const stream = `agent:${ws}:${AGENT_IDS.swing}`;
+    const read = await client.read(`/journal/streams/${encodeURIComponent(stream)}/events?after_seq=0&limit=2`, journalPageRead(stream));
+    expect(read).toMatchObject({ ok: true, value: { events: [{ seq: 1, event_type: "AgentDeployed" }, { seq: 2 }] } });
   });
 });

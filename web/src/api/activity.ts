@@ -6,7 +6,7 @@
  * cost basis, risk mark and protection are always `null` until their folds are served (DEC-2111 item
  * 5), so the screen shows none of them.
  */
-import { array, closedEnum, decimal, isRecord, nullable, object, string, timestamp } from "./decode";
+import { array, closedEnum, decimal, integer, isRecord, nullable, object, string, timestamp } from "./decode";
 import type { Decimal, Decoded, DecodeProblem, Decoder, Timestamp } from "./types";
 
 /** `read-models/orders`' states (journal spec §9.5). Closed. */
@@ -84,4 +84,33 @@ export function activityRead(agentId: string) {
       return items.ok ? { ok: true, value: { ...top.value, items: items.value } } : items;
     };
   return { orders: listed("orders", order), holdings: listed("positions", holding) };
+}
+
+/** One event of a journal page, without its body: the screen names what happened and when, and decodes no payload (API-18). */
+export interface JournalLine {
+  seq: number;
+  event_id: string;
+  event_type: string;
+  recorded_at: Timestamp;
+}
+
+export interface JournalPage {
+  stream_id: string;
+  head_seq: number;
+  events: JournalLine[];
+}
+
+/** `GET /journal/streams/{id}/events` (§4.8.1, API-15): the page, for the stream asked; members beyond these are ignored (§3.2). */
+export function journalPageRead(streamId: string): Decoder<JournalPage> {
+  const line = object<JournalLine>({ seq: integer, event_id: string, event_type: bounded(128), recorded_at: timestamp });
+  return (value, path) => {
+    if (!isRecord(value)) return fail(path, "wrong_type");
+    if (value.stream_id !== streamId) return fail(`${path}/stream_id`, "not_canonical");
+    const head = isRecord(value.head) ? integer(value.head.seq, `${path}/head/seq`) : fail(`${path}/head`, "missing");
+    if (!head.ok) return head;
+    const events = array(line)(value.events, `${path}/events`);
+    if (!events.ok) return events;
+    if (events.value.some((e, i) => e.seq > head.value || (i > 0 && e.seq <= events.value[i - 1].seq))) return fail(`${path}/events`, "not_canonical");
+    return { ok: true, value: { stream_id: streamId, head_seq: head.value, events: events.value } };
+  };
 }

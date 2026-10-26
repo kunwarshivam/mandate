@@ -101,6 +101,25 @@ describe("the screens over the workspace API's read models (DEC-1096)", () => {
     expect(within(held).getAllByRole("listitem")).toHaveLength(agent.positions.length);
   });
 
+  it("an agent lists the latest records on its stream, by type and time, from the journal read", async () => {
+    const agent = fixture.agents.find((a) => a.orders.length + a.past_orders.length > 0)!;
+    const { posts } = mount(<ApiAgent agentId={agent.agent_id} />);
+    const journal = await screen.findByRole("list", { name: "Journal" });
+    const rows = within(journal).getAllByRole("listitem");
+    expect(rows[0].textContent).toContain("#1 AgentDeployed");
+    expect(rows.some((r) => r.textContent?.includes("OrderSubmitted"))).toBe(true);
+    expect(posts).toEqual([]);
+  });
+
+  it("a journal the role may not read says so, and shows no records", async () => {
+    const agent = fixture.agents[0];
+    mountWith(<ApiAgent agentId={agent.agent_id} />, (input, init, server) =>
+      input.includes("/journal/") ? Promise.resolve(new Response(JSON.stringify({ code: "forbidden", effect: "none", retryable: false }), { status: 403 })) : server.fetch(input, init),
+    );
+    expect(await screen.findByText("Not available to your role.")).toBeTruthy();
+    expect(screen.queryByRole("list", { name: "Journal" })).toBeNull();
+  });
+
   it("an order list the API cannot answer says not reported, never none", async () => {
     const agent = fixture.agents[0];
     mount(<ApiAgent agentId={agent.agent_id} />, "approvals", (route, body) => (/\/(orders|positions)$/.test(route) ? { ...body, agent_id: "agt_someone_else" } : body));

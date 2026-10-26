@@ -11,7 +11,7 @@ import { backtestOfVersion, servedBacktestFixture } from "@/fixtures/backtests";
 import type { ApiView } from "@/api/read-models";
 import type { Applies, Classification } from "@/api/confirm";
 import type { ShownChallenge, StepUpAction, StepUpChallenge } from "@/api/step-up";
-import type { AgentHolding, AgentOrder } from "@/api/activity";
+import type { AgentHolding, AgentOrder, JournalLine } from "@/api/activity";
 
 /**
  * A stand-in for the workspace deployment. Commands and approval responses are held in memory
@@ -205,6 +205,8 @@ export type ChallengeAnswer = { ok: true; shown: ShownChallenge; workspaceId: st
 export interface ActivityAnswer {
   orders: { ok: true; account_ref: string | null; items: AgentOrder[] } | { ok: false; reason: string };
   holdings: { ok: true; account_ref: string | null; items: AgentHolding[] } | { ok: false; reason: string };
+  /** The agent stream's latest events, newest last; `forbidden` for a role that may not read records (§4.8.1). */
+  journal: { ok: true; items: JournalLine[] } | { ok: false; reason: string };
 }
 
 export const RuntimeContext = createContext<Runtime | null>(null);

@@ -189,8 +189,33 @@ export function createMockServer(options: MockServerOptions): MockServer {
     };
   }
 
+  /**
+   * An agent stream's events as the mock tells them (`agent:{ws}:{agent}`): the deployment, then each
+   * order submitted and each filled, in time order. Types and times only; the body is a stand-in.
+   */
+  function agentStream(streamId: string) {
+    const match = streamId.match(/^agent:([^:]+):(.+)$/);
+    const agent = match && match[1] === workspaceId ? agentOf(match[2]) : undefined;
+    if (!agent) return null;
+    const orders = [...agent.past_orders, ...agent.orders].sort((a, b) => Date.parse(a.submitted_at) - Date.parse(b.submitted_at));
+    const told = [{ type: "AgentDeployed", at: orders[0]?.submitted_at ?? workspace.now }, ...orders.flatMap((o) => [{ type: "OrderSubmitted", at: o.submitted_at }, ...(o.state === "Filled" ? [{ type: "FillApplied", at: "closed_at" in o ? String(o.closed_at) : o.submitted_at }] : [])])];
+    return told.map((e, i) => ({ seq: i + 1, event_id: eventId(`${streamId}\n${i}`), event_type: e.type, recorded_at: canonical(e.at), prev_hash: "0".repeat(64), hash: "0".repeat(64), body: "e30=" }));
+  }
+
   function get(route: string, query: URLSearchParams): Response {
-    if ([...query.keys()].some((name) => !(route === "/approvals" && name === "state"))) return problem(404, "not_found", "none");
+    const journal = route.match(/^\/journal\/streams\/([^/]+)\/events$/);
+    const allowed = (name: string) => (route === "/approvals" && name === "state") || (journal !== null && (name === "after_seq" || name === "limit"));
+    if ([...query.keys()].some((name) => !allowed(name))) return problem(404, "not_found", "none");
+    if (journal) {
+      const lines = agentStream(decodeURIComponent(journal[1]));
+      if (!lines) return problem(404, "not_found", "none");
+      const after = Number(query.get("after_seq") ?? "0");
+      const limit = Number(query.get("limit") ?? "100");
+      if (!Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 1000) return problem(422, "invalid", "none");
+      const events = lines.filter((e) => e.seq > after).slice(0, limit);
+      const head = { seq: lines.length, hash: "0".repeat(64), recorded_at: servedAt };
+      return read({ stream_id: decodeURIComponent(journal[1]), head, events, next_after_seq: events.at(-1)?.seq ?? after, at_head: (events.at(-1)?.seq ?? after) >= lines.length });
+    }
     if (route === "/health") return read(healthBody(workspace.health, servedAt));
     if (route === "/agents") return read({ agents: workspace.agents.map(agentRow) });
     if (route === "/connections") return read({ connections: [{ connection_id: workspace.connection.connection_id, environment: workspace.environment }] });
