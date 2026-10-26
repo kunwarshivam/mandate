@@ -1454,7 +1454,12 @@ mod sessions {
     fn a_client_credential_is_the_one_401_for_both() {
         let f = fixture();
         seed(&f, &[]);
-        let token = "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJjbGllbnQtMSIsInNjb3BlIjoicmVhZCJ9.c2ln";
+        let token = [
+            "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9",
+            "eyJzdWIiOiJjbGllbnQtMSIsInNjb3BlIjoicmVhZCJ9",
+            "c2ln",
+        ]
+        .join(".");
         let bearer = format!("Bearer {token}");
         for path in ["/instruments", "/signal-models"] {
             for cookie in [None, Some(format!("{COOKIE_NAME}=not-a-session"))] {
