@@ -5,9 +5,9 @@ import { readBacktestFrom } from "@/api/backtest";
 import { type Fetch, createWorkspaceClient } from "@/api/client";
 import { prepareApprovalResponse, prepareConfirm, prepareDeploy, prepareOwnerCommand, prepareOwnerExit } from "@/api/commands";
 import { confirmAccepted, confirmStepUpDigest } from "@/api/confirm";
-import { type AssertionRefusal, type Authenticator, type PasskeyStepUp, assertPasskey, browserAuthenticator, deployStepUpDigest, passkeysRead, usablePasskeys } from "@/api/passkey";
+import { type AssertionRefusal, type Authenticator, type PasskeyStepUp, assertPasskey, browserAuthenticator, deployStepUpDigest, ownerCommandStepUpDigest, passkeysRead, usablePasskeys } from "@/api/passkey";
 import { type Creator, browserCreator, createPasskey, enrolBody, enrolStepUpDigest, passkeyList } from "@/api/enrol";
-import { type ApiView, loadApi } from "@/api/read-models";
+import { type ApiView, agentRead, loadApi } from "@/api/read-models";
 import { emptyWorkspace } from "@/api/reads";
 import { REFRESH_EVERY_MS, type SessionKeeper, type SessionState } from "@/api/session";
 import type { CommandPhase, Decoder, PreparedCommand } from "@/api/types";
@@ -257,34 +257,83 @@ export function ApiRuntimeProvider({
     [client, refresh, statusPollMs],
   );
 
+  const passkeyStepUp = useCallback(
+    async (kind: PasskeyKind, digest: ContentRef): Promise<{ ok: true; value: PasskeyStepUp } | { ok: false; reason: AssertionRefusal | string }> => {
+      const held = await client.read("/passkeys", passkeysRead);
+      if (!held.ok) return { ok: false, reason: held.error.code };
+      const device = authenticator === undefined ? browserAuthenticator() : authenticator;
+      const usable = usablePasskeys(held.value.passkeys, device, nowRef.current);
+      if (!usable.ok) return usable;
+      const issued = await client.askChallenge({ kind, digest });
+      if (!issued.ok) return { ok: false, reason: issued.error.code };
+      return assertPasskey(issued.value, usable.value, device, nowRef.current);
+    },
+    [client, authenticator],
+  );
+
+  /** The resume or Stop in flight for each agent: a second press while one is still being asked or sent is that one (DEC-2140). */
+  const braking = useRef(new Map<string, Command>());
+
   const send = useCallback(
     (kind: CommandKind, agentId: string | null, record?: CommandRecord): Command => {
+      const stepped = (kind === "resume" || kind === "stop") && agentId !== null;
+      const brakeKey = stepped ? `${kind}\n${agentId}` : "";
+      const inFlight = stepped ? braking.current.get(brakeKey) : undefined;
+      if (inFlight) return inFlight;
       counter.current += 1;
-      const command: Command = { id: `cmd-${counter.current}`, kind, agentId, phase: "sent", sentAt: nowRef.current, ...(record ? { record } : {}) };
+      const command: Command = { id: `cmd-${counter.current}`, kind, agentId, phase: "sent", sentAt: nowRef.current, ...(record ? { record } : {}), ...(stepped ? { awaitsRuntime: true } : {}) };
       const update = (patch: Partial<Command>) => setCommands((list) => list.map((c) => (c.id === command.id ? { ...c, ...patch } : c)));
       setCommands((list) => [...list, command]);
+      if (stepped) braking.current.set(brakeKey, command);
       const last = lastRead.current;
       const scope = last
         ? { agents: last.view.agents, connectionId: last.ws.connection.connection_id, environment: last.ws.environment }
         : { agents: [], connectionId: "", environment: wsRef.current.environment };
-      const prepared = prepareOwnerCommand(client, scope, kind, agentId, record);
+      const controlHead = async (id: string): Promise<{ ok: true; head: number } | { ok: false; reason: string }> => {
+        const read = await client.read(`/agents/${encodeURIComponent(id)}`, agentRead);
+        return read.ok ? { ok: true, head: read.as_of.find((w) => w.stream_id === `ctl:${client.workspaceId}`)?.seq ?? 0 } : { ok: false, reason: read.error.code };
+      };
       void (async () => {
-        if (!prepared.ok) return update({ phase: "undelivered" });
+        let stepUp: PasskeyStepUp | null = null;
+        if (stepped && (kind === "resume" || kind === "stop") && agentId) {
+          update({ awaitingPasskey: true });
+          const before = await controlHead(agentId);
+          if (!mounted.current) return;
+          if (!before.ok) return update({ phase: "undelivered", awaitingPasskey: false, reason: before.reason });
+          const asserted = await passkeyStepUp(kind, ownerCommandStepUpDigest(kind, agentId, before.head));
+          if (!mounted.current) return;
+          if (!asserted.ok) return update({ phase: "undelivered", awaitingPasskey: false, reason: asserted.reason });
+          const after = await controlHead(agentId);
+          if (!mounted.current) return;
+          if (!after.ok) return update({ phase: "undelivered", awaitingPasskey: false, reason: after.reason });
+          if (after.head !== before.head) return update({ phase: "undelivered", awaitingPasskey: false, reason: "control_moved" });
+          stepUp = asserted.value;
+          update({ awaitingPasskey: false });
+        }
+        const prepared = prepareOwnerCommand(client, scope, kind, agentId, record, stepUp);
+        if (!prepared.ok) return update({ phase: "undelivered", reason: prepared.reason });
         const delivered = await Promise.all(prepared.commands.map(deliver));
         if (!mounted.current) return;
         const phases = new Set(delivered.map((d) => d.phase));
         if (phases.size === 1 && phases.has("recorded")) {
           update({ phase: "recorded", recordedAt: nowRef.current });
-          for (const d of delivered) if (d.phase === "recorded") void follow(d.eventId);
+          const settled = await Promise.all(delivered.map((d) => (d.phase === "recorded" ? follow(d.eventId) : Promise.resolve(null))));
+          if (!mounted.current) return;
+          const refused = settled.find((p) => p === "refused" || p === "ended");
+          if (refused) update({ settled: refused });
+          else if (settled.every((p) => p === "applied")) update({ settled: "applied" });
+          else update({ settled: "unconfirmed" });
           return;
         }
-        if (phases.size === 1 && phases.has("undelivered")) return update({ phase: "undelivered" });
+        if (phases.size === 1 && phases.has("undelivered")) return update({ phase: "undelivered", reason: delivered[0].phase === "undelivered" ? delivered[0].reason : undefined });
         update({ phase: "unknown" });
         for (const d of delivered) if (d.phase !== "undelivered" && d.eventId) void follow(d.eventId);
-      })();
+      })().finally(() => {
+        if (stepped && braking.current.get(brakeKey) === command) braking.current.delete(brakeKey);
+      });
       return command;
     },
-    [client, deliver, follow],
+    [client, deliver, follow, passkeyStepUp],
   );
 
   /** The owner's exit (§5.4): sent with one key until answered, then followed to its outcome (§5.5). */
@@ -544,20 +593,6 @@ export function ApiRuntimeProvider({
    * signs it. Each press is its own challenge, never retried. Nothing reaches the journal here: a
    * refusal means the command was not sent.
    */
-  const passkeyStepUp = useCallback(
-    async (kind: PasskeyKind, digest: ContentRef): Promise<{ ok: true; value: PasskeyStepUp } | { ok: false; reason: AssertionRefusal | string }> => {
-      const held = await client.read("/passkeys", passkeysRead);
-      if (!held.ok) return { ok: false, reason: held.error.code };
-      const device = authenticator === undefined ? browserAuthenticator() : authenticator;
-      const usable = usablePasskeys(held.value.passkeys, device, nowRef.current);
-      if (!usable.ok) return usable;
-      const issued = await client.askChallenge({ kind, digest });
-      if (!issued.ok) return { ok: false, reason: issued.error.code };
-      return assertPasskey(issued.value, usable.value, device, nowRef.current);
-    },
-    [client, authenticator],
-  );
-
   /**
    * The member's workspace passkeys (§3.6, DEC-2108). Adding one asks a registration challenge;
    * when the member already holds a passkey, one of them confirms the enrolment first (a
