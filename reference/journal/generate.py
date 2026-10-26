@@ -3677,8 +3677,8 @@ def build_deferred_section() -> dict:
     def v3(deferred: list[str], liquidity: dict | None = None) -> list[dict]:
         return [
             change("schema_version", 3),
-            change("payload.deferred_to_binding", deferred),
-            change("payload.liquidity", liquidity),
+            change("payload.deferred_to_binding", list(deferred)),
+            change("payload.liquidity", copy.deepcopy(liquidity)),
         ]
 
     asked = [change("payload.autonomy", "ask")]
@@ -3694,7 +3694,7 @@ def build_deferred_section() -> dict:
         change("payload.autonomy", "auto"),
         change("payload.decided_by", BUILTIN_LABEL),
     ]
-    return {
+    section = {
         "spec": DEFERRED_SPEC,
         "base": "agent_stream",
         "parts": EVERY_PART,
@@ -3762,6 +3762,22 @@ def build_deferred_section() -> dict:
                 [*v3(sorted(["liquidity_floor", *UNREAD_PARTS], key=str.encode)), *asked],
                 "schema",
                 "payload.deferred_to_binding",
+            ),
+            invalid(
+                "participation_deferred_without_the_floor",
+                "§9.1 rule 270",
+                "decision",
+                [*v3(sorted(["participation", *UNREAD_PARTS], key=str.encode), dict(FIGURES)), *asked],
+                "schema",
+                "payload.deferred_to_binding",
+            ),
+            invalid(
+                "version_3_without_its_mandate_version",
+                "§9 DecisionMade v3: man",
+                "decision",
+                [*v3(EVERY_PART), *asked, delete("config_refs.mandate_version")],
+                "missing_config_ref",
+                "config_refs.mandate_version",
             ),
             invalid(
                 "figures_beside_a_deferred_floor",
@@ -3837,6 +3853,7 @@ def build_deferred_section() -> dict:
             ),
         ],
     }
+    return json.loads(json.dumps(section))
 
 
 def deferred_case_failures(chain: list[dict], section: dict, skip: frozenset[str] = frozenset()) -> list[str]:

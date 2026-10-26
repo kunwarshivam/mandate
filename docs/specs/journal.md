@@ -1891,9 +1891,12 @@ Its `config_refs` are version 1's. Its payload is version 1's members, then:
 | `deferred_to_binding` | `[account_exposure` \| `agent_equity` \| `agent_mode` \| `conduct_history` \| `day_trade_budget` \| `eligibility` \| `fee_reservation` \| `halt` \| `liquidity_floor` \| `other_orders` \| `participation` \| `quote_ask` \| `reentry_cooldown` \| `related_accounts]` | The checks, or parts of checks, the dry run left to the binding gate, never reported passed: the four DEC-2378 item 11 skips (`eligibility`, `liquidity_floor`, `participation`, `day_trade_budget`) and the ten parts DEC-2388 item 8 names. Rule 269 |
 | `liquidity` | `{prior_close: decimal, median_dollar_volume_20d: decimal, adv_20d: decimal, trailing_5m_volume: decimal, read_at: timestamp}?` | The stored bars' figures the dry run evaluated the liquidity floor and participation on, and the risk clock it read them at ([DEC-2274](../project/decisions/DEC-2274.md) item 3); `null` when it read none. Rule 270 |
 
-A version 3 is written by a dry run that defers a check, or that read the figures; a dry run that
-does neither writes version 1, or version 2 where its stricter references are registered. Every
-reader of version 1 reads version 3 as version 1 and ignores the two members. The executor's
+A version 3 is written by a dry run that defers a check on an allowed opening, or that read the
+figures for an opening it denied; any other decision is written at version 1, or version 2 where
+its stricter references are registered. A writer that holds version 2's references and must also
+defer a check has no version yet: it is an accepted gap until a later version combines the two
+(DEC-2388 item 10). Every reader of version 1 reads version 3 as version 1 and ignores the two
+members. The executor's
 binding gate evaluates every check named here: the names never relax it.
 
 **`IntentProposed`**: exactly the `IntentReceived` vector's intent fields less `intent_id`, which is

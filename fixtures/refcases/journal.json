@@ -4062,6 +4062,101 @@
     }
    },
    {
+    "name": "participation_deferred_without_the_floor",
+    "clause": "§9.1 rule 270",
+    "base_seq": 4,
+    "changes": [
+     {
+      "path": "schema_version",
+      "value": 3
+     },
+     {
+      "path": "payload.deferred_to_binding",
+      "value": [
+       "account_exposure",
+       "agent_equity",
+       "agent_mode",
+       "conduct_history",
+       "day_trade_budget",
+       "eligibility",
+       "fee_reservation",
+       "halt",
+       "other_orders",
+       "participation",
+       "quote_ask",
+       "reentry_cooldown",
+       "related_accounts"
+      ]
+     },
+     {
+      "path": "payload.liquidity",
+      "value": {
+       "prior_close": "150",
+       "median_dollar_volume_20d": "20000000000",
+       "adv_20d": "80000000",
+       "trailing_5m_volume": "500000",
+       "read_at": "2026-09-21T14:00:00.000000000Z"
+      }
+     },
+     {
+      "path": "payload.autonomy",
+      "value": "ask"
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "schema",
+     "path": "payload.deferred_to_binding"
+    }
+   },
+   {
+    "name": "version_3_without_its_mandate_version",
+    "clause": "§9 DecisionMade v3: man",
+    "base_seq": 4,
+    "changes": [
+     {
+      "path": "schema_version",
+      "value": 3
+     },
+     {
+      "path": "payload.deferred_to_binding",
+      "value": [
+       "account_exposure",
+       "agent_equity",
+       "agent_mode",
+       "conduct_history",
+       "day_trade_budget",
+       "eligibility",
+       "fee_reservation",
+       "halt",
+       "liquidity_floor",
+       "other_orders",
+       "participation",
+       "quote_ask",
+       "reentry_cooldown",
+       "related_accounts"
+      ]
+     },
+     {
+      "path": "payload.liquidity",
+      "value": null
+     },
+     {
+      "path": "payload.autonomy",
+      "value": "ask"
+     },
+     {
+      "path": "config_refs.mandate_version",
+      "delete": true
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "reason": "missing_config_ref",
+     "path": "config_refs.mandate_version"
+    }
+   },
+   {
     "name": "figures_beside_a_deferred_floor",
     "clause": "§9.1 rule 270",
     "base_seq": 4,
