@@ -1,0 +1,2 @@
+- **E2-10 Bound how far a news receipt may lead the vendor's times (DEC-2281 item 3).** A receipt stamped far in the future sets the news stream's last `knowledge_at` there, and rule 285 holds every later poll from it until the clock catches up. Refuse to journal, and count, a round whose receipt leads the vendor's latest time by more than a bound, and test it with an injected clock.
+<!-- section: E2 Market data -->
