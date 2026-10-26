@@ -36,6 +36,10 @@ pub const SCENARIOS: &[&str] = &["demo"];
 /// Both are stored as canonical JSON (journal spec §4), so a version is the SHA-256 of the file.
 pub const MANDATE_FILE: &str = "deploy/cell/demo/mandate.json";
 pub const INSTRUMENT_FILE: &str = "deploy/cell/demo/instrument.json";
+/// The member of [`INSTRUMENT_FILE`] a run stamps with the instant it starts (DEC-2073): the
+/// committed value is a template, so the snapshot a run registers is never older than the rule
+/// set's `etp_classification_max_age_s`, which the eligibility floor holds openings to.
+const CLASSIFIED_AT: &str = "etp_classified_at";
 /// The reviewed configuration every agent the demo deploys trades under, registered on the
 /// workspace's control stream before any version: the gate's rule set, which the runtime's gate
 /// and the executor's binding gate both read as the stream's latest `rule_set` (one artifact for
@@ -1623,6 +1627,53 @@ impl DemoInputs {
     }
 }
 
+/// The demo's instrument snapshot as a run registers it (DEC-2073): `committed`,
+/// [`INSTRUMENT_FILE`]'s text, with its classification instant replaced by `classified_at`, a UTC
+/// instant to the second, and every other byte as committed, so the file stays canonical JSON. The cell has no classifier: the fixture's
+/// classification, a plain fund from the Nasdaq Trader symbol directory, is asserted as of the
+/// run's start.
+pub fn registered_instrument(committed: &str, classified_at: &str) -> Result<String> {
+    let instant = |t: &str| {
+        let b = t.as_bytes();
+        b.len() == 20
+            && b.iter().enumerate().all(|(i, c)| match i {
+                4 | 7 => *c == b'-',
+                10 => *c == b'T',
+                13 | 16 => *c == b':',
+                19 => *c == b'Z',
+                _ => c.is_ascii_digit(),
+            })
+    };
+    if !instant(classified_at) {
+        bail!("`{classified_at}` is not a UTC instant to the second (YYYY-MM-DDTHH:MM:SSZ)");
+    }
+    let parsed: Value = serde_json::from_str(committed)
+        .with_context(|| format!("{INSTRUMENT_FILE} is not JSON"))?;
+    let old = parsed[CLASSIFIED_AT]
+        .as_str()
+        .filter(|t| instant(t))
+        .with_context(|| format!("{INSTRUMENT_FILE} names no {CLASSIFIED_AT} to the second"))?;
+    let member = |t: &str| format!("\"{CLASSIFIED_AT}\":\"{t}\"");
+    if committed.matches(&member(old)).count() != 1 {
+        bail!("{INSTRUMENT_FILE} names {CLASSIFIED_AT} other than once");
+    }
+    Ok(committed.replacen(&member(old), &member(classified_at), 1))
+}
+
+/// The instant a run starts, as [`registered_instrument`] takes it: `date -u`, to the second.
+pub fn run_started() -> Result<String> {
+    Ok(output("date", &["-u", "+%Y-%m-%dT%H:%M:%SZ"])?
+        .trim()
+        .to_owned())
+}
+
+/// [`INSTRUMENT_FILE`], read from the checkout and classified at the run's start.
+pub fn instrument_for_run() -> Result<String> {
+    let committed = fs::read_to_string(INSTRUMENT_FILE)
+        .with_context(|| format!("reading {INSTRUMENT_FILE}"))?;
+    registered_instrument(&committed, &run_started()?)
+}
+
 /// Reads the demo's inputs from the checkout.
 pub fn demo_inputs() -> Result<DemoInputs> {
     let read = |path: &str| fs::read(path).with_context(|| format!("reading {path}"));
@@ -1632,10 +1683,7 @@ pub fn demo_inputs() -> Result<DemoInputs> {
     let (mandate, research_mandate) = (read(MANDATE_FILE)?, read(RESEARCH_MANDATE_FILE)?);
     let files = [
         ("mandate.json", text(mandate.clone(), MANDATE_FILE)?),
-        (
-            "instrument.json",
-            text(read(INSTRUMENT_FILE)?, INSTRUMENT_FILE)?,
-        ),
+        ("instrument.json", instrument_for_run()?),
         ("rule-set.json", text(read(RULE_SET_FILE)?, RULE_SET_FILE)?),
         (
             "fee-config.json",
@@ -3149,6 +3197,44 @@ mod tests {
         assert_eq!(pinned.as_array().map(Vec::len), Some(1));
         assert_eq!(pinned[0]["asset_id"], instrument["instrument_id"]);
         assert_eq!(pinned[0]["symbol"], instrument["symbol"]);
+    }
+
+    /// A run registers the committed snapshot with only its classification instant replaced by
+    /// the run's start (DEC-2073): every other member as committed, the file still the compact
+    /// JSON it was, and an instant that is not UTC to the second refused.
+    #[test]
+    fn a_run_registers_the_snapshot_classified_at_its_start() -> Result<()> {
+        let committed = fs::read_to_string(format!("../{INSTRUMENT_FILE}"))?;
+        let stamped = registered_instrument(&committed, "2026-10-27T13:20:05Z")?;
+        let (mut ours, mut template) = (
+            serde_json::from_str::<Value>(&stamped)?,
+            parsed(INSTRUMENT_FILE),
+        );
+        assert_eq!(ours[CLASSIFIED_AT], "2026-10-27T13:20:05Z");
+        assert_ne!(template[CLASSIFIED_AT], ours[CLASSIFIED_AT]);
+        ours[CLASSIFIED_AT] = Value::Null;
+        template[CLASSIFIED_AT] = Value::Null;
+        assert_eq!(ours, template, "only the classification instant moves");
+        assert_eq!(
+            stamped.len(),
+            committed.len(),
+            "the same bytes but the instant's own"
+        );
+        for bad in [
+            "2026-10-27T13:20:05",
+            "2026-10-27 13:20:05Z",
+            "2026-10-27T13:20:05.5Z",
+            "2026-10-27T13:20:05+00:00",
+            "",
+        ] {
+            assert!(registered_instrument(&committed, bad).is_err(), "{bad:?}");
+        }
+        let started = run_started()?;
+        assert!(
+            registered_instrument(&committed, &started).is_ok(),
+            "{started}"
+        );
+        Ok(())
     }
 
     /// The QQQ envelope, a test fixture now, is the demo's but for its name, its description and its one
