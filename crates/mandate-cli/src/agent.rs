@@ -227,7 +227,7 @@ pub fn command(
             | Command::Acknowledge { .. }
             | Command::RequestAcknowledgment { .. }
     );
-    let (event_type, key, timed): (_, _, &[&'static str]) = match command {
+    let (event_type, (version, key), timed): (_, _, &[&'static str]) = match command {
         Command::Acknowledge {
             event,
             request,
@@ -268,36 +268,48 @@ pub fn command(
         ),
         Command::Pause => (
             "OwnerCommandIssued",
-            issued(owner, Some(agent), "pause", ("agent", agent), None, None)?,
+            (
+                1,
+                issued(owner, Some(agent), "pause", ("agent", agent), None, None)?,
+            ),
             &["submitted_at"],
         ),
         Command::Resume => (
             "OwnerCommandIssued",
-            issued(owner, Some(agent), "resume", ("agent", agent), None, None)?,
+            (
+                1,
+                issued(owner, Some(agent), "resume", ("agent", agent), None, None)?,
+            ),
             &["submitted_at"],
         ),
         Command::Stop { release } => (
             "OwnerCommandIssued",
-            issued(
-                owner,
-                Some(agent),
-                "stop",
-                ("agent", agent),
-                Some(*release),
-                None,
-            )?,
+            (
+                1,
+                issued(
+                    owner,
+                    Some(agent),
+                    "stop",
+                    ("agent", agent),
+                    Some(*release),
+                    None,
+                )?,
+            ),
             &["submitted_at"],
         ),
         Command::Exit { instrument, bid } => (
             "OwnerCommandIssued",
-            issued(
-                owner,
-                Some(agent),
-                "owner_exit",
-                ("instrument", instrument.as_str()),
-                None,
-                bid.as_ref(),
-            )?,
+            (
+                1,
+                issued(
+                    owner,
+                    Some(agent),
+                    "owner_exit",
+                    ("instrument", instrument.as_str()),
+                    None,
+                    bid.as_ref(),
+                )?,
+            ),
             &["submitted_at"],
         ),
     };
@@ -323,25 +335,27 @@ pub fn command(
             {
                 unspent(journal, owner, request)?;
             }
-            let version = if command.subject().is_some() { 2 } else { 1 };
             commit(journal, ids, owner, decided.at_version(version), timed, now)
         }
     }
 }
 
-/// `key` with version 2's `subject` added when the owner gave one (journal spec §9.28, DEC-2824).
+/// The schema version and `key` of an acknowledgment or its request: version 2 with its `subject`
+/// added when the owner gave one, and version 1 without (journal spec §9.28, DEC-2824).
 fn subjected(
     subject: Option<Subject>,
     mut key: Vec<(&'static str, Value)>,
-) -> Vec<(&'static str, Value)> {
-    if let Some(subject) = subject {
-        key.push(("subject", text(subject.as_str())));
-    }
-    key
+) -> (u64, Vec<(&'static str, Value)>) {
+    let Some(subject) = subject else {
+        return (1, key);
+    };
+    key.push(("subject", text(subject.as_str())));
+    (2, key)
 }
 
 /// The subject a §9.28 record names: version 2's `subject`, and a limit's for version 1, which
-/// has none.
+/// has none; `None` for a `subject` that is not text, which then matches no acknowledgment
+/// (DEC-2838).
 fn subject_of(record: &Value) -> Option<String> {
     match record.get("payload").and_then(|p| p.get("subject")) {
         None => Some(Subject::Limit.as_str().to_owned()),
@@ -387,9 +401,9 @@ fn named(record: &Value, path: &str) -> Option<String> {
 ///
 /// # Errors
 /// [`ControlError::Refused`] with `request_invalid` when no `OwnerAcknowledgmentRequested` has
-/// that id, or it names another agent, event or subject (rule 240; a
-/// version-1 record names a limit); with `not_independent` when the owner
-/// requested it (rule 239); and [`ControlError::Journal`] when the journal cannot be read.
+/// that id, or it names another agent, event or subject (rule 240, a version-1 record naming a
+/// limit, DEC-2838); with `not_independent` when the owner requested it (rule 239); and
+/// [`ControlError::Journal`] when the journal cannot be read.
 fn requester(
     journal: &dyn ControlJournal,
     owner: &Owner,
@@ -625,4 +639,32 @@ fn issued(
         ("floor", given(|b| &b.floor)),
         ("user", text(&owner.user)),
     ])
+}
+
+#[cfg(test)]
+mod tests {
+    use mandate_canon::Value;
+
+    use super::subject_of;
+    use crate::control::{object, text};
+
+    fn record(subject: Option<Value>) -> Result<Value, crate::control::ControlError> {
+        let payload = match subject {
+            Some(subject) => object(vec![("subject", subject)])?,
+            None => object(vec![])?,
+        };
+        object(vec![("payload", payload)])
+    }
+
+    #[test]
+    fn a_record_names_its_subject_a_limit_without_one_and_none_when_it_is_not_text() {
+        let named = |subject| record(subject).ok().as_ref().and_then(subject_of);
+        assert_eq!(named(None), Some("limit".to_owned()));
+        assert_eq!(
+            named(Some(text("reconciliation"))),
+            Some("reconciliation".to_owned())
+        );
+        assert_eq!(named(Some(Value::Bool(true))), None);
+        assert_eq!(named(Some(Value::Null)), None);
+    }
 }

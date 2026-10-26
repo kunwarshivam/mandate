@@ -89,7 +89,7 @@ fn version(n: u64) -> Option<Value> {
 }
 
 #[test]
-fn an_acknowledgment_of_a_reconciliation_hold_is_version_2_with_its_subject() {
+fn an_acknowledgment_of_any_subject_is_version_2_with_it() {
     for subject in [
         Subject::Limit,
         Subject::Restriction,
@@ -185,31 +185,96 @@ fn a_request_with_a_subject_is_answered_by_an_acknowledgment_of_the_same_subject
     );
 }
 
+/// Rule 240 as DEC-2838 reads it: an acknowledgment answers a request only when both name the same
+/// subject, a version-1 record and one with no `--subject` naming a limit.
 #[test]
-fn a_limit_request_of_version_1_is_answered_by_a_limit_acknowledgment_of_either_version() {
-    for subject in [None, Some(Subject::Limit)] {
-        let mut fx = Fixture::new();
-        let asked = run(&mut fx, &user(CHECKER), &request(None), ASKED_AT);
-        let Ok(asked) = asked else {
-            panic!("request: {asked:?}");
-        };
-        let ack = acknowledge(subject, Some(&asked.event_id));
-        if let Err(e) = run(&mut fx, &owner(), &ack, ASKED_AT + 5) {
-            panic!("{subject:?}: {e}");
+fn an_acknowledgment_answers_only_a_request_of_its_subject() {
+    let subjects = [
+        None,
+        Some(Subject::Limit),
+        Some(Subject::Restriction),
+        Some(Subject::Reconciliation),
+    ];
+    let named = |s: Option<Subject>| s.unwrap_or(Subject::Limit);
+    for asked_for in subjects {
+        for answered in subjects {
+            let mut fx = Fixture::new();
+            let asked = run(&mut fx, &user(CHECKER), &request(asked_for), ASKED_AT);
+            let Ok(asked) = asked else {
+                panic!("request {asked_for:?}: {asked:?}");
+            };
+            let ack = acknowledge(answered, Some(&asked.event_id));
+            let got = run(&mut fx, &owner(), &ack, ASKED_AT + 5);
+            let pair = format!("{asked_for:?} answered by {answered:?}");
+            if named(asked_for) == named(answered) {
+                assert!(got.is_ok(), "{pair}: {got:?}");
+                assert_eq!(fx.rows(CONTROL).len(), 2, "{pair}");
+            } else {
+                assert_eq!(
+                    got,
+                    Err(ControlError::Refused {
+                        reason: "request_invalid"
+                    }),
+                    "{pair}"
+                );
+                assert_eq!(fx.rows(CONTROL).len(), 1, "{pair}: nothing committed");
+            }
         }
+    }
+}
+
+/// Every other owner command stays at version 1.
+#[test]
+fn every_other_owner_command_stays_version_1() {
+    for cmd in [
+        Command::Pause,
+        Command::Resume,
+        Command::Stop { release: false },
+        Command::Exit {
+            instrument: "AAPL".to_owned(),
+            bid: None,
+        },
+    ] {
+        let mut fx = Fixture::new();
+        if let Err(e) = run(&mut fx, &owner(), &cmd, ASKED_AT) {
+            panic!("{cmd:?}: {e}");
+        }
+        let event = last(&fx);
         assert_eq!(
-            run(
-                &mut fx,
-                &owner(),
-                &acknowledge(Some(Subject::Reconciliation), Some(&asked.event_id)),
-                ASKED_AT + 6
-            )
-            .err(),
-            Some(ControlError::Refused {
-                reason: "request_invalid"
-            })
+            member(&event, "schema_version").cloned(),
+            version(1),
+            "{cmd:?}"
         );
     }
+}
+
+/// DEC-290 with a subject: a re-run of an acknowledgment of a reconciliation hold reports the first
+/// and commits nothing; the one committed is version 2.
+#[test]
+fn a_repeated_acknowledgment_of_a_subject_reports_the_first() {
+    let mut fx = Fixture::new();
+    let ack = acknowledge(Some(Subject::Reconciliation), None);
+    let typed = match code(&fx.journal, &owner(), AGENT, &ack) {
+        Ok(Some(code)) => code,
+        other => panic!("{other:?}"),
+    };
+    let again = |fx: &mut Fixture, second: i64| {
+        command(
+            &mut fx.journal,
+            &mut FixedIds::default(),
+            &owner(),
+            AGENT,
+            &ack,
+            Some(&typed),
+            at(second),
+        )
+    };
+    let first = again(&mut fx, ASKED_AT);
+    let second = again(&mut fx, ASKED_AT + 3);
+    assert!(first.is_ok(), "{first:?}");
+    assert_eq!(second, first);
+    assert_eq!(fx.rows(CONTROL).len(), 1);
+    assert_eq!(member(&last(&fx), "schema_version").cloned(), version(2));
 }
 
 #[test]
