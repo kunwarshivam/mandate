@@ -47,6 +47,7 @@ pub fn folded(row: &StoredEvent) -> Result<FoldedEvent, Unreadable> {
 /// `environment` (journal spec §9.8, §9.24, DEC-1171, DEC-2343), with what a revocation changes
 /// for them.
 ///
+/// A version-3 `AgentDeployed` is read as its version 2 (journal spec v0.84, DEC-2131 item 4).
 /// An agent is followed when any of its version-2 `AgentDeployed` named a connection that a
 /// version-2 `ConnectionEstablished` in this environment ever named this `account_ref` for, and a
 /// later deployment naming another connection never drops it (DEC-2343 item 2). A revocation never
@@ -199,7 +200,7 @@ pub fn agents_of(
                         .push(row.seq);
                     live.insert(connection, false);
                 }
-                ("AgentDeployed", 2) => {
+                ("AgentDeployed", 2 | 3) => {
                     deployed.entry(text("agent_id")?).or_default().push((
                         row.seq,
                         text("connection_id")?,

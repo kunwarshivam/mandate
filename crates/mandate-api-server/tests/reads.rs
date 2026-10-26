@@ -124,6 +124,58 @@ fn each_deployed_agent_is_listed_once_in_deployment_order_with_its_latest_deploy
     assert_eq!(deployed(&[]), vec![]);
 }
 
+/// A version-3 deployment (journal spec v0.84, DEC-2131 item 4) is listed as its version 2: by
+/// its agent and version, `step_up` ignored. The API's version reads (`versions::active`,
+/// `versions::last_confirmed`) read the same members at every version.
+#[test]
+fn a_version_3_deployment_is_listed_as_its_version_2() {
+    let stepped = versioned(
+        row(
+            &ctl(),
+            2,
+            "AgentDeployed",
+            &format!(
+                r#"{{"agent_id":"agt_a","mandate_version":"{}","record_ref":"{}","connection_id":"c1","step_up":{{"assertion_id":"01JAA3P0A000000000000000H1","authenticated_at":"2026-10-17T10:00:01.000000000Z","method":"passkey"}}}}"#,
+                version(1),
+                version(0xee)
+            ),
+        ),
+        3,
+    );
+    let confirmed = versioned(
+        row(
+            &ctl(),
+            1,
+            "MandateConfirmed",
+            &format!(
+                r#"{{"mandate_version":"{}","confirmed_paths":["/capital"],"record_ref":"{}","agent_id":null,"base_version":null,"step_up":{{"assertion_id":"01JAA3P0A000000000000000H1","authenticated_at":"2026-10-17T10:00:00.000000000Z","method":"passkey"}}}}"#,
+                version(1),
+                version(0xee)
+            ),
+        ),
+        3,
+    );
+    let control = vec![confirmed, stepped];
+    assert_eq!(
+        deployed(&control),
+        vec![(
+            "agt_a".to_owned(),
+            "paper".to_owned(),
+            version(1),
+            at(2),
+            false
+        )]
+    );
+    assert_eq!(
+        mandate_api_server::versions::active(&control, "agt_a").map(|(_, v)| v),
+        Some(version(1))
+    );
+    assert_eq!(
+        mandate_api_server::versions::last_confirmed(&control).map(|(_, v)| v),
+        Some(version(1))
+    );
+}
+
 #[test]
 fn a_mode_is_the_last_mode_change_and_none_before_any() {
     let stream = format!("agent:{WS}:agt_a");

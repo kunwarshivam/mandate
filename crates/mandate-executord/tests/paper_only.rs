@@ -5,7 +5,9 @@
 //! carries the only paper transport, so the second test pins that one module of the executor,
 //! [`CREDENTIAL_MODULE`], may name it, the credentials and the data client that reads quotes over
 //! it (DEC-2359 item 5), and that no source names the HTTP client or a host. Loosening either
-//! fails here as well as in review.
+//! fails here as well as in review. DEC-2382 replaces DEC-2306 item 1 for the founder's own
+//! Robinhood agentic account: the executor's separate, explicitly gated `live` build may carry the
+//! Robinhood connector, and these pins change in that story, under that decision.
 
 use std::fs;
 use std::path::{Path, PathBuf};
