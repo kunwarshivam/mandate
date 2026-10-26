@@ -2,14 +2,14 @@
 
 | | |
 |---|---|
-| **Status** | **Approved** v0.22 (v0.8 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.9 amendment [DEC-86](../project/04-decision-log.md#decisions); v0.10 amendment [DEC-92 to DEC-94](../project/04-decision-log.md#decisions); v0.11 and v0.12 amendments [DEC-160](../project/04-decision-log.md#decisions); v0.13 amendment [DEC-255](../project/04-decision-log.md#decisions); v0.14 amendment [DEC-269](../project/04-decision-log.md#decisions); v0.15 amendment [DEC-441](../project/decisions/DEC-441.md) item 23; v0.16 amendment [DEC-529](../project/decisions/DEC-529.md) and [DEC-531](../project/decisions/DEC-531.md); v0.17 amendment [DEC-687](../project/decisions/DEC-687.md) item 4; v0.18 amendment [DEC-960](../project/decisions/DEC-960.md); v0.19 amendment [DEC-2302](../project/decisions/DEC-2302.md); v0.20 amendment [DEC-2302](../project/decisions/DEC-2302.md) item 7; v0.21 amendment [DEC-2807](../project/decisions/DEC-2807.md); v0.22 amendment [DEC-2813](../project/decisions/DEC-2813.md)); changes need a decision-log entry (safety-critical) |
+| **Status** | **Approved** v0.22 (v0.8 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.9 amendment [DEC-86](../project/04-decision-log.md#decisions); v0.10 amendment [DEC-92 to DEC-94](../project/04-decision-log.md#decisions); v0.11 and v0.12 amendments [DEC-160](../project/04-decision-log.md#decisions); v0.13 amendment [DEC-255](../project/04-decision-log.md#decisions); v0.14 amendment [DEC-269](../project/04-decision-log.md#decisions); v0.15 amendment [DEC-441](../project/decisions/DEC-441.md) item 23; v0.16 amendment [DEC-529](../project/decisions/DEC-529.md) and [DEC-531](../project/decisions/DEC-531.md); v0.17 amendment [DEC-687](../project/decisions/DEC-687.md) item 4; v0.18 amendment [DEC-960](../project/decisions/DEC-960.md); v0.19 amendment [DEC-2302](../project/decisions/DEC-2302.md); v0.20 amendment [DEC-2302](../project/decisions/DEC-2302.md) item 7; v0.21 amendment [DEC-2807](../project/decisions/DEC-2807.md); v0.22 amendment [DEC-2815](../project/decisions/DEC-2815.md)); changes need a decision-log entry (safety-critical) |
 | **Scope** | US stocks, ETFs, and crypto spot on Alpaca ([DEC-23](../project/04-decision-log.md#decisions)); US equities on Robinhood for the founder's one live order ([DEC-529](../project/decisions/DEC-529.md)) |
 | **Implements** | PRD 6.2, 6.4, 6.5, 6.7; backlog E2–E7 |
 | **Reference cases** | [reference-cases/trading-domain.yaml](reference-cases/trading-domain.yaml) (schema v3) |
 
 ## Change history
 
-- **v0.22 ([DEC-2813](../project/decisions/DEC-2813.md)):** §5.3 rules 2 and 7 gain reason codes,
+- **v0.22 ([DEC-2815](../project/decisions/DEC-2815.md)):** §5.3 rules 2 and 7 gain reason codes,
   registered in the reference cases' `reason_codes`: `below_min_order_size` and
   `quantity_off_increment` (rule 2) and `fractional_order_tif_or_bracket` (rule 7). An opening or
   increase below the minimum size, fractional in an equity that is not fractionable, or fractional
@@ -450,7 +450,7 @@ the one stop-limit (DEC-529 item 2).
    position (exact quantity or the close-position endpoint). The gate checks it for an opening or
    increase: one below `min_order_size` is denied `below_min_order_size`, and a fractional quantity
    in an equity that is not fractionable is denied `quantity_off_increment`
-   ([DEC-2813](../project/decisions/DEC-2813.md)). An exit's size is left to the broker; DEC-2813
+   ([DEC-2815](../project/decisions/DEC-2815.md)). An exit's size is left to the broker; DEC-2815
    changes nothing there.
 3. **No order may cross zero** (`would_cross_zero`).
 4. **Sell quantity ≤ position − Σ open sell quantity**, protective legs included
@@ -473,7 +473,7 @@ the one stop-limit (DEC-529 item 2).
 7. Fractional and notional equity orders use TIF day; no fractional short sales. A fractional
    equity opening or increase that is not TIF day, or is a bracket's entry (§5.2: fractional
    orders are never in an OCO or a bracket), is denied `fractional_order_tif_or_bracket`
-   (DEC-2813). An OCO is only ever protection on whole shares (§5.4), and a proposal carries no
+   (DEC-2815). An OCO is only ever protection on whole shares (§5.4), and a proposal carries no
    notional (rule 1), so neither reaches this check; a fractional short sale is a sell above the
    position, denied `would_cross_zero` (rule 3).
 8. **Self-crossing:** the broker rejects orders that could interact with the account's own
