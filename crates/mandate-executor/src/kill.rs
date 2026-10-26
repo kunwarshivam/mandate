@@ -1018,11 +1018,15 @@ mod tests {
                     _ => None,
                 })
                 .collect();
+            let alerted = if initiator == Initiator::Owner {
+                Vec::new()
+            } else {
+                vec![(&record.event_id, "kill_switch")]
+            };
             assert_eq!(
-                alerts,
-                vec![(&record.event_id, "kill_switch")],
-                "{name}: every switch is alerted here until workspace services write a user's \
-                 (DEC-2514 item 2, backlog E8-9k)"
+                alerts, alerted,
+                "{name}: the API alerts a user's switch with its command, so the executor alerts \
+                 only the others (E8-9k, notifications spec §3.4)"
             );
             assert_eq!(
                 raised(&effects),
