@@ -494,6 +494,35 @@ mod tests {
         }
     }
 
+    /// Only the executor's own lift of an instrument's hold ends its recorded mismatch (DEC-2830):
+    /// a copied mode to `normal` under the same restriction leaves it.
+    #[test]
+    fn only_an_originated_lift_ends_a_mismatch() -> Result<(), crate::error::ExecutorError> {
+        for (originated, ends) in [(true, true), (false, false)] {
+            let mut state = state();
+            let instrument = mandate_accounting::InstrumentId::new("AAPL")?;
+            state.mismatched.insert(instrument.clone());
+            let lift = record(
+                "lift",
+                "AgentModeApplied",
+                Some("origin"),
+                vec![
+                    ("agent", text("*")),
+                    ("to", text("normal")),
+                    ("restriction", text("reconciliation:AAPL")),
+                    ("originated", Value::Bool(originated)),
+                ],
+            );
+            assert!(crate::fold::agent_mode_applied(&mut state, &lift.payload).is_ok());
+            assert_eq!(
+                !state.mismatched.contains(&instrument),
+                ends,
+                "originated {originated}"
+            );
+        }
+        Ok(())
+    }
+
     /// An acknowledgment of a trigger already superseded supersedes nothing more: the newer
     /// trigger of the same limit still stands once the copy is settled, refused or not.
     #[test]

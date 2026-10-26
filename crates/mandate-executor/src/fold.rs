@@ -1284,7 +1284,10 @@ fn account_close_requested(
 /// Lifting the `kill_switch` restriction also lifts whatever closes the agent's kill switches had
 /// not yet raised (DEC-485 item 7): the agent was resumed, so nothing sells its lots behind its
 /// back later.
-fn agent_mode_applied(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
+pub(crate) fn agent_mode_applied(
+    state: &mut ExecutorState,
+    payload: &Value,
+) -> Result<(), ExecutorError> {
     let agent = AgentId(required_text(payload, "agent")?.to_owned());
     let mode = mode_of(required_text(payload, "to")?)?;
     let restriction = optional_text(payload, "restriction")
@@ -1302,6 +1305,7 @@ fn agent_mode_applied(state: &mut ExecutorState, payload: &Value) -> Result<(), 
             state.switch_read = None;
         }
         if let Some(held) = restriction.strip_prefix("reconciliation:")
+            && flag(payload, "originated")
             && let Ok(instrument) = InstrumentId::new(held)
         {
             state.mismatched.remove(&instrument);
