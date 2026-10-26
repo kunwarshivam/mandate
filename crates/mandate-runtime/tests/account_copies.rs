@@ -142,3 +142,75 @@ fn every_type_the_runtime_folds_a_stream_of_has_an_arm() {
         "the runtime's fold refuses exactly the named account types"
     );
 }
+
+/// The state after `StreamOpened` and then each `AgentModeApplied` of `applied`, as `(agent,
+/// restriction, to)`, at sequences 2 onward.
+fn applied(applied: &[(&str, &str, &str)]) -> RuntimeState {
+    let mut state = RuntimeState::new(common::deployment());
+    let opened = object(&[("stream_type", text("account"))]);
+    fold(
+        &mut state,
+        &event(ACCOUNT_STREAM, 1, "StreamOpened", opened),
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
+    for (seq, (agent, restriction, to)) in (2..).zip(applied) {
+        let payload = object(&[
+            ("agent", text(agent)),
+            ("originated", Value::Bool(true)),
+            ("restriction", text(restriction)),
+            ("to", text(to)),
+        ]);
+        fold(
+            &mut state,
+            &event(ACCOUNT_STREAM, seq, "AgentModeApplied", payload),
+        )
+        .unwrap_or_else(|e| panic!("{agent} {restriction} {to}: {e}"));
+    }
+    state
+}
+
+/// The executor's account-wide restriction (`agent` `*`: an account kill switch, or the every-agent
+/// exits-only of external activity or a broker's closing-only reject) holds this runtime too, as it
+/// holds the executor's binding gate, so the runtime stops proposing what the gate would refuse.
+#[test]
+fn an_account_wide_restriction_holds_this_runtime() {
+    use mandate_runtime::Mode;
+    assert_eq!(
+        applied(&[("*", "external_activity", "exits_only")]).effective_mode(),
+        Mode::ExitsOnly
+    );
+    assert_eq!(
+        applied(&[("*", "kill_switch", "stopped")]).effective_mode(),
+        Mode::Stopped
+    );
+    assert_eq!(
+        applied(&[("agent-b", "kill_switch", "stopped")]).effective_mode(),
+        Mode::Normal,
+        "another agent's restriction is that agent's"
+    );
+}
+
+/// Restrictions are kept per agent and restriction, as the executor keeps them, and the copied mode
+/// is the strictest: an account-wide one never loosens this agent's own, and lifting one lifts only
+/// that one.
+#[test]
+fn the_copied_mode_is_the_strictest_restriction_and_a_lift_lifts_only_its_own() {
+    use mandate_runtime::Mode;
+    let own_then_wide = applied(&[
+        (common::AGENT, "drawdown", "stopped"),
+        ("*", "external_activity", "exits_only"),
+    ]);
+    assert_eq!(own_then_wide.effective_mode(), Mode::Stopped);
+    let wide_lifted = applied(&[
+        (common::AGENT, "drawdown", "exits_only"),
+        ("*", "external_activity", "stopped"),
+        ("*", "external_activity", "normal"),
+    ]);
+    assert_eq!(wide_lifted.effective_mode(), Mode::ExitsOnly);
+    let own_lifted = applied(&[
+        ("*", "external_activity", "exits_only"),
+        (common::AGENT, "drawdown", "stopped"),
+        (common::AGENT, "drawdown", "normal"),
+    ]);
+    assert_eq!(own_lifted.effective_mode(), Mode::ExitsOnly);
+}

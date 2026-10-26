@@ -43,7 +43,7 @@ pub struct RuntimeState {
     unresolved: Option<UnresolvedAppend>,
     risk_clock: Option<RiskClock>,
     last_evaluated: Option<RiskClock>,
-    copied_mode: Mode,
+    restrictions: BTreeMap<(String, String), Mode>,
     journaled_mode: Mode,
     lifecycle: Mode,
     switch: Option<Switch>,
@@ -154,7 +154,7 @@ impl RuntimeState {
             unresolved: None,
             risk_clock: None,
             last_evaluated: None,
-            copied_mode: Mode::Normal,
+            restrictions: BTreeMap::new(),
             journaled_mode: Mode::Normal,
             lifecycle: Mode::Normal,
             switch: None,
@@ -255,7 +255,7 @@ impl RuntimeState {
     /// maximum over [`Mode`]'s ordering, so the runtime is never less strict than the account stream
     /// and never lifts what the account stream set.
     pub(crate) fn mode_with(&self, lifecycle: Mode) -> Mode {
-        let mut mode = self.copied_mode.max(lifecycle);
+        let mut mode = self.copied_mode().max(lifecycle);
         if self.awaiting_reconciliation {
             mode = mode.max(LocalHold::AwaitingReconciliation.mode());
         }
@@ -263,6 +263,17 @@ impl RuntimeState {
             mode = mode.max(switch.initiator.final_mode());
         }
         mode
+    }
+
+    /// The strictest restriction the account stream's `AgentModeApplied` holds on this agent, its
+    /// own or every agent's (`*`), each kept by agent and restriction as the executor keeps them,
+    /// so an account-wide one never loosens this agent's own and lifting one lifts only that one.
+    fn copied_mode(&self) -> Mode {
+        self.restrictions
+            .values()
+            .copied()
+            .max()
+            .unwrap_or(Mode::Normal)
     }
 
     /// The deployment's own lifecycle state, as a mode rather than as a set of
@@ -276,7 +287,7 @@ impl RuntimeState {
     /// The same maximum as [`Self::effective_mode`] without the startup hold, which governs new
     /// proposals alone (DEC-131 item 22).
     fn rehand_mode(&self) -> Mode {
-        let mut mode = self.copied_mode.max(self.lifecycle);
+        let mut mode = self.copied_mode().max(self.lifecycle);
         if let Some(switch) = &self.switch {
             mode = mode.max(switch.initiator.final_mode());
         }
@@ -709,10 +720,25 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
             );
         }
         "AgentModeApplied" => {
-            if addressed_here(state, &event.payload) {
+            let every_agent = payload::str_of(&event.payload, "agent") == Some(EVERY_AGENT);
+            if every_agent || addressed_here(state, &event.payload) {
                 let to = mode_field(event)?;
-                state.copied_mode = to;
-                state.switch = retired(state.switch.take(), to, event, &state.acknowledged);
+                let key = (
+                    payload::str_of(&event.payload, "agent")
+                        .unwrap_or_default()
+                        .to_owned(),
+                    payload::str_of(&event.payload, "restriction")
+                        .unwrap_or_default()
+                        .to_owned(),
+                );
+                if to == Mode::Normal {
+                    state.restrictions.remove(&key);
+                } else {
+                    state.restrictions.insert(key, to);
+                }
+                if !every_agent {
+                    state.switch = retired(state.switch.take(), to, event, &state.acknowledged);
+                }
             }
         }
         "ReconciliationRun" => {
@@ -923,6 +949,11 @@ fn retired(
 /// connection, so a sibling's `normal` must not lift this agent's restriction (`AGENTS.md` rules 1
 /// and 3). A payload with no agent field is this agent's by construction: the runtime follows only
 /// its own account stream, and the frozen fixtures carry none.
+/// The `agent` an `AgentModeApplied` names when its restriction holds every agent of the account:
+/// an account kill switch, or the every-agent exits-only of external activity or a broker's
+/// closing-only reject (journal spec §9.6).
+const EVERY_AGENT: &str = "*";
+
 fn addressed_here(state: &RuntimeState, payload: &mandate_canon::Value) -> bool {
     payload::str_of(payload, "agent").is_none_or(|agent| agent == state.deployment.agent.0)
 }
