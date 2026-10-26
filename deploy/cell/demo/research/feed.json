@@ -1,0 +1,14 @@
+[
+ {
+  "arrives_s": 900,
+  "headline": "Recorded demo item: index fund flows reverse into a week of outflows",
+  "item_id": "nw-spy-outflows",
+  "licensed": false,
+  "link": "https://newswire.example/spy-outflows",
+  "source": "src.newswire",
+  "summary": "A recorded item written for the demo: index fund flows turned to outflows on each day since the agent's thesis, the reversal its invalidation names.",
+  "symbols": [
+   "SPY"
+  ]
+ }
+]

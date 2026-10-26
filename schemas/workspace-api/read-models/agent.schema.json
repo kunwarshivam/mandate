@@ -242,7 +242,7 @@
       }
     },
     "OpeningsHeld": {
-      "description": "A standing reason every opening of the agent's is held (DEC-2143). account_traded: the account has traded and the account risk view, which must read every later opening, does not yet. research_agent_traded: the account has traded and the mandate is unpinned, so it binds no instrument for the account risk view (DEC-2819 item 4). unknown: no account stream, the deployed document unread, or a row the fold reads unreadable, so openings may be held.",
+      "description": "A standing reason every opening of the agent's is held (DEC-2143). account_traded: the account has traded and the account risk view, which must read every later opening, does not yet. research_agent_traded: the account has traded and the mandate is unpinned, so it binds no instrument for the account risk view (DEC-2819 item 4). unknown: the account stream not found or empty, the clock stream or the deployed document unread, or a row the fold reads unreadable, so openings may be held.",
       "type": "object",
       "additionalProperties": false,
       "required": [

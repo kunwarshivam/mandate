@@ -239,6 +239,25 @@ for _kind in ("ctl", "acct"):
     SCHEMAS[(_kind, "OwnerAcknowledgmentRequested")] = ACK_REQUESTED
     SCHEMAS[(_kind, "OwnerAcknowledged")] = ACKNOWLEDGED
 
+# v0.102 §9.28 (DEC-2824): version 2 of both adds `subject`, so an acknowledgment can name an
+# account restriction (`restriction`) as well as a triggered limit (`limit`). Version 1 reads as
+# `limit`, and rule 239 judges both versions alike.
+ACK_SUBJECTS = ("limit", "restriction", "reconciliation")
+
+
+def with_subject(record: T) -> T:
+    """Version 1's members with `subject` after `event`, the member it qualifies."""
+    fields = []
+    for name, ty in record.fields:
+        fields.append((name, ty))
+        if name == "event":
+            fields.append(("subject", one_of(*ACK_SUBJECTS)))
+    return rec(*fields)
+
+
+ACK_REQUESTED_V2 = with_subject(ACK_REQUESTED)
+ACKNOWLEDGED_V2 = with_subject(ACKNOWLEDGED)
+
 REQUIRED_REFS = {
     "ApprovalRequested": ("mandate_version",),
     "ApprovalResponded": ("mandate_version",),
@@ -1629,6 +1648,46 @@ REQUEST_TOP = (
     ("on_timeout", one_of("skip")),
 )
 VERSIONED_VERSIONS[("ctl", "CredentialEnrolled")] = (1, 2)
+for _kind in ("ctl", "acct"):
+    VERSIONED_VERSIONS[(_kind, "OwnerAcknowledgmentRequested")] = (1, 2)
+    VERSIONED_VERSIONS[(_kind, "OwnerAcknowledged")] = (1, 2)
+    VERSIONED_SCHEMAS[(_kind, "OwnerAcknowledgmentRequested", 2)] = ACK_REQUESTED_V2
+    VERSIONED_SCHEMAS[(_kind, "OwnerAcknowledged", 2)] = ACKNOWLEDGED_V2
+# v0.102 §9.5 (DEC-2824): one cause of an account restriction lifted, naming the accepted
+# acknowledgment copy and the evidence that completes it, and the account state the causes left set.
+VERSIONED_SCHEMAS[("acct", "AccountRestrictionLifted", 1)] = rec(
+    ("cause", one_of("broker_reject", "broker_notice", "connection_unavailable")),
+    ("acknowledgment", ULID),
+    ("evidence", ULID),
+    ("restriction", one_of("active", "closing_only", "blocked")),
+    ("risk_clock", RISK_CLOCK),
+)
+# §9's `AgentModeApplied` on the account stream, closed at version 1 as `mandate-journal` registers
+# it: the mode an agent (`*` for every agent) is moved to under a named restriction. v0.104 rule
+# reads it as the reconciliation hold an acknowledgment names (DEC-2830).
+SCHEMAS[("acct", "AgentModeApplied")] = rec(
+    ("agent", STR),
+    ("to", one_of("normal", "exits_only", "paused", "stopped")),
+    ("restriction", STR),
+    ("originated", BOOL),
+    ("risk_clock", RISK_CLOCK),
+)
+# §9 (DEC-458): the broker's account report, closed at version 1, which a broker cause's lift reads
+# as its refresh (v0.102 rule 312). Registered here as `mandate-journal` registers it.
+SCHEMAS[("acct", "AccountStateObserved")] = rec(
+    ("status", STR),
+    ("crypto_status", STR),
+    ("trading_blocked", BOOL),
+    ("account_blocked", BOOL),
+    ("trade_suspended_by_user", BOOL),
+    ("multiplier", INT),
+    ("equity", DEC),
+    ("cash", DEC),
+    ("buying_power", DEC),
+    ("non_marginable_buying_power", DEC),
+    ("accrued_fees", DEC),
+    ("risk_clock", RISK_CLOCK),
+)
 VERSIONED_SCHEMAS[("ctl", "CredentialEnrolled", 2)] = CREDENTIAL_ENROLLED_V2
 VERSIONED_VERSIONS[("agent", "ApprovalRequested")] = (1, 2, 3)
 VERSIONED_SCHEMAS[("agent", "ApprovalRequested", 1)] = rec(

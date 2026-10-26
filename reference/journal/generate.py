@@ -37,6 +37,8 @@ import fill_applied
 import account_clock
 import account_closes
 import account_restrictions
+import reconciliation_acks
+import restriction_lifts
 import account_switches
 import acknowledgments
 import approval
@@ -4269,6 +4271,8 @@ def render(
     stepped_up_section: dict,
     real_money_section: dict,
     account_restrictions_section: dict,
+    restriction_lifts_section: dict,
+    reconciliation_acks_section: dict,
     account_switches_section: dict,
     snapshots_section: dict,
     account_activity_section: dict,
@@ -4330,6 +4334,8 @@ def render(
             "stepped_up_records": stepped_up_section,
             "real_money": real_money_section,
             "account_restrictions": account_restrictions_section,
+            "restriction_lifts": restriction_lifts_section,
+            "reconciliation_acknowledgments": reconciliation_acks_section,
             "account_switches": account_switches_section,
             "account_activity": account_activity_section,
             "fill_applied": fill_applied_section,
@@ -4422,6 +4428,8 @@ def main(argv: list[str] | None = None) -> int:
     stepped_up_section = stepped_up.build_section()
     real_money_section = real_money.build_section()
     account_restrictions_section = account_restrictions.build_section()
+    restriction_lifts_section = restriction_lifts.build_section()
+    reconciliation_acks_section = reconciliation_acks.build_section()
     account_switches_section = account_switches.build_section()
     account_activity_section = account_activity.build_section()
     fill_applied_section = fill_applied.build_section()
@@ -4502,6 +4510,10 @@ def main(argv: list[str] | None = None) -> int:
     problems += real_money.run_mutants(real_money_section)
     problems += account_restrictions.check_section(account_restrictions_section)
     problems += account_restrictions.run_mutants(account_restrictions_section)
+    problems += restriction_lifts.check_section(restriction_lifts_section)
+    problems += restriction_lifts.run_mutants(restriction_lifts_section)
+    problems += reconciliation_acks.check_section(reconciliation_acks_section)
+    problems += reconciliation_acks.run_mutants(reconciliation_acks_section)
     problems += account_switches.check_section(account_switches_section)
     problems += account_switches.run_mutants(account_switches_section)
     problems += account_activity.check_section(account_activity_section)
@@ -4601,6 +4613,8 @@ def main(argv: list[str] | None = None) -> int:
         stepped_up_section,
         real_money_section,
         account_restrictions_section,
+        restriction_lifts_section,
+        reconciliation_acks_section,
         account_switches_section,
         snapshots_section,
         account_activity_section,
@@ -4662,6 +4676,8 @@ def main(argv: list[str] | None = None) -> int:
         or stepped_up.check_section(reread["stepped_up_records"])
         or real_money.check_section(reread["real_money"])
         or account_restrictions.check_section(reread["account_restrictions"])
+        or restriction_lifts.check_section(reread["restriction_lifts"])
+        or reconciliation_acks.check_section(reread["reconciliation_acknowledgments"])
         or account_switches.check_section(reread["account_switches"])
         or account_activity.check_section(reread["account_activity"])
         or fill_applied.check_section(reread["fill_applied"])
@@ -4772,6 +4788,10 @@ def main(argv: list[str] | None = None) -> int:
         f"AccountRestrictionChanged drafts and {len(account_restrictions_section['streams'])} rule-309 streams, "
         f"{len(account_restrictions.VALIDATOR_MUTANTS)} validator, {len(account_restrictions.STREAM_MUTANTS)} stream and "
         f"{len(account_restrictions.vector_mutants(account_restrictions_section))} vector mutants caught; "
+        f"{len(restriction_lifts_section['invalid_drafts'])} invalid and {len(restriction_lifts_section['valid_drafts'])} valid "
+        f"restriction-lift drafts, {len(restriction_lifts_section['streams'])} rule-309-to-312 streams and "
+        f"{restriction_lifts.FUZZ_STREAMS} fuzzed, {len(restriction_lifts.STREAM_MUTANTS)} stream and "
+        f"{len(restriction_lifts.vector_mutants(restriction_lifts_section))} vector mutants caught; "
         f"{len(account_switches_section['invalid_drafts'])} invalid and {len(account_switches_section['valid_drafts'])} valid "
         f"account KillSwitchActivated drafts, {len(account_switches.VALIDATOR_MUTANTS)} validator and "
         f"{len(account_switches.vector_mutants(account_switches_section))} vector mutants caught; "

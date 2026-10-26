@@ -37,7 +37,7 @@ use crate::commands::{
     release_warning, same, settle_batch_at,
 };
 use crate::http::{App, browser, invalid, problem, problem_body};
-use crate::reads::deployed;
+use crate::reads::{deferrals_agree, deployed};
 use crate::routes::{
     Reader, Refused, Unreadable, authorized, enveloped, path_refused, session, string, watermark,
 };
@@ -464,7 +464,8 @@ pub(crate) fn unknown(id: EventId) -> Response {
 }
 
 /// `POST /v1/workspaces/{ws}/approvals/{id}/responses` (§5.2, DEC-1007 item 10): a Skip is
-/// recorded; a grant, in paper only and once the approval is found, is recorded with its
+/// recorded; a grant, in paper only and once the approval is found and its deferred checks are
+/// exactly its decision's (`deferral_mismatch` otherwise, DEC-2521), is recorded with its
 /// `cli_confirm` evidence when the port verifies it as an `approve` bound to the request's content
 /// hash (DEC-2104), and refused with the port's code otherwise.
 pub async fn respond(
@@ -498,7 +499,7 @@ pub async fn respond(
         Ok(reader) => reader,
         Err(refusal) => return refusal.response(),
     };
-    let (agent, version) = match requester(&app, &reader, &approval).await {
+    let (agent, version, agrees) = match requester(&app, &reader, &approval).await {
         Ok(Some(found)) => found,
         Ok(None) => return Refused::NotFound.response(),
         Err(refusal) => return refusal.response(),
@@ -510,6 +511,12 @@ pub async fn respond(
                 Ok(true) => {}
                 Ok(false) => return Refused::Forbidden.response(),
                 Err(refusal) => return refusal.response(),
+            }
+            if !agrees {
+                return problem(
+                    StatusCode::CONFLICT,
+                    problem_body(ProblemCode::DeferralMismatch),
+                );
             }
             let asked = Asked {
                 agent,
@@ -656,14 +663,15 @@ fn approves(
 
 /// The deployed agent whose stream requested `approval`, found by equality with an
 /// `ApprovalRequested` event id, with the mandate version its content binds
-/// (`trigger.mandate_version`) when it names one. A stream that cannot be read does not hide the
+/// (`trigger.mandate_version`) when it names one, and whether its deferred checks are exactly its
+/// decision's ([`deferrals_agree`], DEC-2521). A stream that cannot be read does not hide the
 /// approval on another that can; only when none that was read holds it and one could not be read
 /// is the answer `journal_unavailable` rather than `not_found`.
 async fn requester(
     app: &App,
     reader: &Reader,
     approval: &str,
-) -> Result<Option<(String, Option<String>)>, Refused> {
+) -> Result<Option<(String, Option<String>, bool)>, Refused> {
     let mut unreadable = false;
     for deployment in deployed(&reader.control) {
         let stream = format!("agent:{}:{}", reader.workspace, deployment.0);
@@ -682,7 +690,8 @@ async fn requester(
                     .and_then(Value::as_str)
                     .map(str::to_owned)
             });
-            return Ok(Some((deployment.0, version)));
+            let agrees = deferrals_agree(row, &rows);
+            return Ok(Some((deployment.0, version, agrees)));
         }
     }
     match unreadable {

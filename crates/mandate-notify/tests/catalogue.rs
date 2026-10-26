@@ -11,7 +11,7 @@ use TextKey::{AccountChanged, ApprovalNeeded, AttentionNeeded, BriefReady};
 
 /// Spec §3.2, row by row in its order, typed from the table rather than from the crate.
 #[rustfmt::skip]
-const CATALOGUE: [(NoticeKind, &str, Class, Option<TextKey>); 34] = [
+const CATALOGUE: [(NoticeKind, &str, Class, Option<TextKey>); 35] = [
     (NoticeKind::ApprovalRequested, "approval_requested", Action, Some(ApprovalNeeded)),
     (NoticeKind::ApprovalReminder, "approval_reminder", Action, Some(ApprovalNeeded)),
     (NoticeKind::RiskLimit, "risk_limit", Safety, Some(AttentionNeeded)),
@@ -20,6 +20,7 @@ const CATALOGUE: [(NoticeKind, &str, Class, Option<TextKey>); 34] = [
     (NoticeKind::AgentHeld, "agent_held", Safety, Some(AttentionNeeded)),
     (NoticeKind::RetirementHeld, "retirement_held", Safety, Some(AttentionNeeded)),
     (NoticeKind::AccountRestriction, "account_restriction", Safety, Some(AttentionNeeded)),
+    (NoticeKind::ConnectionUnavailable, "connection_unavailable", Safety, Some(AttentionNeeded)),
     (NoticeKind::Protection, "protection", Safety, Some(AttentionNeeded)),
     (NoticeKind::ExitStalled, "exit_stalled", Safety, Some(AttentionNeeded)),
     (NoticeKind::Reconciliation, "reconciliation", Safety, Some(AttentionNeeded)),
@@ -60,10 +61,10 @@ const TEXTS: [(TextKey, &str, &str); 4] = [
 /// Every kind of spec §3.2, in the table's order, typed from the table rather than from the crate
 /// or from [`CATALOGUE`], whose rows stop at the kinds already implemented.
 #[rustfmt::skip]
-const ORDER: [NoticeKind; 35] = [
+const ORDER: [NoticeKind; 36] = [
     NoticeKind::ApprovalRequested, NoticeKind::ApprovalReminder, NoticeKind::RiskLimit,
     NoticeKind::KillSwitch, NoticeKind::KillSwitchUnapplied, NoticeKind::AgentHeld,
-    NoticeKind::RetirementHeld, NoticeKind::AccountRestriction,
+    NoticeKind::RetirementHeld, NoticeKind::AccountRestriction, NoticeKind::ConnectionUnavailable,
     NoticeKind::Protection, NoticeKind::ExitStalled, NoticeKind::Reconciliation,
     NoticeKind::ExternalActivity, NoticeKind::AccountState, NoticeKind::DataFeedDown,
     NoticeKind::IntegrityIncident, NoticeKind::CredentialAdded, NoticeKind::NewDevice,

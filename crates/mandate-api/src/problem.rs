@@ -108,6 +108,11 @@ impl ProblemCode {
             Self::StepUpMethod => ("step_up_method", 401, "Confirmation method not allowed"),
             Self::StepUpMismatch => ("step_up_mismatch", 401, "Confirmation does not match"),
             Self::LiveUnavailable => ("live_unavailable", 409, "Live trading unavailable"),
+            Self::DeferralMismatch => (
+                "deferral_mismatch",
+                409,
+                "Request does not match its decision",
+            ),
             Self::ControlStreamFrozen => ("control_stream_frozen", 503, "Changes are frozen"),
             Self::JournalUnavailable => ("journal_unavailable", 503, "Temporarily unavailable"),
             Self::RateLimited => ("rate_limited", 429, "Too many requests"),
@@ -165,6 +170,9 @@ pub enum ProblemCode {
     StepUpMethod,
     StepUpMismatch,
     LiveUnavailable,
+    /// A grant of an approval whose request's deferred checks are not exactly its decision's, or
+    /// whose decision is not found (§5.2, DEC-2521).
+    DeferralMismatch,
     ControlStreamFrozen,
     JournalUnavailable,
     RateLimited,

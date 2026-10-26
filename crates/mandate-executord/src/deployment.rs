@@ -186,6 +186,9 @@ struct Resolved {
     /// The reviewed instrument's asset class and its quote staleness, its fold's opening's.
     asset_class: AssetClass,
     quote_max_age: Duration,
+    /// Whether the deployed version pins its universe: the binding gate's hold once the account
+    /// has traded is named by it (DEC-2143).
+    pinned: bool,
 }
 
 /// The deployments read at one control-stream length and trade date, so a port asked again within
@@ -691,6 +694,7 @@ impl Deployment {
             asset_class: reviewed.instrument.asset_class,
             quote_max_age: reviewed.quote_max_age,
             confirmed: confirmed.clone(),
+            pinned: confirmed.mandate().universe.pinned,
         })
     }
 
@@ -970,7 +974,7 @@ impl BindingGateSource for Deployment {
             .remove(request.agent)?;
         if facts.mandate_version != resolved.version
             || !resolved.view.covers(request.agent, request.instrument)
-            || !journaled.untraded()
+            || journaled.opening_hold(resolved.pinned).is_some()
             || !self.openable_at(request.agent, request.instrument, facts.now)
         {
             return None;
