@@ -12,7 +12,8 @@ use mandate_executor::{
     Command, ConnectorError, Effect, EventDraft, EventId, ExecutorConfig, ExecutorError,
     ExecutorState, IdGen, Initiator, Input, InstrumentSnapshot, IntentBody, IntentHandoff,
     IntentId, KillScope, MandateVersion, MandateView, OrderState, Ports, ProtectionPrices,
-    ReconcileReason, RiskClock, Seq, WriterEpoch, fold, handle, limit_fills, recorded_fills,
+    ReconcileReason, RiskClock, Seq, ThesisRow, WriterEpoch, fold, handle, limit_fills,
+    recorded_fills,
 };
 use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId};
 use mandate_num::{Fraction, Price};
@@ -21,7 +22,7 @@ use mandate_store::Store;
 use mandate_store::envelope::{Envelope, Fields, draft_bytes, object, text};
 use mandate_time::{ExchangeCalendar, UtcNanos};
 
-use crate::follow::{Proposal, Switch, agents_of, bounded, folded, proposals, switches};
+use crate::follow::{Proposal, Switch, agents_of, bounded, folded, proposals, switches, theses};
 use crate::marks::{MARK_EVERY, Marked, mark_draft};
 use crate::quotes::{QuoteFeed, QuotePoll};
 use crate::robinhood::AccountReads;
@@ -234,6 +235,9 @@ pub struct ExecutorProcess<S, B> {
 struct Followed {
     switches: Vec<(AgentId, Switch)>,
     proposals: Vec<(AgentId, Proposal)>,
+    /// Each followed agent's thesis records, in stream order, which the core copies onto the
+    /// account stream as its working universe (DEC-2823).
+    theses: Vec<(AgentId, Vec<ThesisRow>)>,
     unreadable: bool,
     released: bool,
     /// Whether every followed agent's stream parsed and read: one that did not may hold a switch,
@@ -390,6 +394,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         let Some(Followed {
             switches,
             proposals: proposed,
+            theses: researched,
             unreadable,
             released,
             all_read,
@@ -428,6 +433,11 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                 Action::RiskExit
             };
             if self.lifecycle.permits(action) && !self.take(now, agent, proposal, &mut alerts) {
+                return alerts;
+            }
+        }
+        for (agent, records) in researched {
+            if !self.hand(now, now, Input::Theses { agent, records }, &mut alerts, 0) {
                 return alerts;
             }
         }
@@ -720,6 +730,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         let workspace = self.state.scope().workspace.0.clone();
         let mut pending = Vec::new();
         let mut proposed = Vec::new();
+        let mut researched = Vec::new();
         let mut unreadable = false;
         let mut all_read = true;
         for agent in following.agents.keys().cloned() {
@@ -736,11 +747,15 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                 .filter(|row| row.environment == self.environment.as_str())
                 .map(folded)
                 .collect();
-            let Ok((held, asked)) = read.and_then(|rows| Ok((switches(&rows)?, proposals(&rows)?)))
+            let Ok((held, asked, records)) =
+                read.and_then(|rows| Ok((switches(&rows)?, proposals(&rows)?, theses(&rows))))
             else {
                 unreadable = true;
                 continue;
             };
+            if !records.is_empty() {
+                researched.push((agent.clone(), records));
+            }
             let openings_held = following.held.contains(&agent);
             proposed.extend(
                 asked
@@ -809,6 +824,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         Some(Followed {
             switches: pending,
             proposals: proposed,
+            theses: researched,
             unreadable,
             released: following.released(),
             all_read,
@@ -917,7 +933,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
                     }
                     return true;
                 }
-                if !failed_on_broker(&input) {
+                if !held_on_core_error(&input) {
                     self.lifecycle.observe(now, Lifecycled::Failed);
                     return false;
                 }
@@ -1386,13 +1402,17 @@ fn held(error: &ExecutorError, input: &Input) -> Option<(&'static str, String)> 
 }
 
 /// Whether a core error on `input` is held and the process goes on (DEC-2821): the broker's
-/// answers, updates and snapshots, and the quotes its feed sends, which the restart would read
-/// again, so stopping on one would be a crash loop that also stops every exit, protective order and
+/// answers, updates and snapshots, the quotes its feed sends, and an agent's thesis records (DEC-2823),
+/// which the restart would read again, so stopping on one would be a crash loop that also stops every exit, protective order and
 /// kill switch. Any other input's error, the hold's own included, stops the process as before.
-fn failed_on_broker(input: &Input) -> bool {
+fn held_on_core_error(input: &Input) -> bool {
     matches!(
         input,
-        Input::Broker(_) | Input::BrokerUpdate(_) | Input::BrokerSnapshot(_) | Input::Market(_)
+        Input::Broker(_)
+            | Input::BrokerUpdate(_)
+            | Input::BrokerSnapshot(_)
+            | Input::Market(_)
+            | Input::Theses { .. }
     )
 }
 
@@ -1506,10 +1526,14 @@ mod tests {
     /// DEC-2821: a core error is held for a broker answer, and for no other input, the hold's
     /// own among them.
     #[test]
-    fn a_core_error_is_held_for_a_broker_input_alone() -> Result<(), Error> {
-        assert!(failed_on_broker(&Input::Broker(Ok(
+    fn a_core_error_is_held_for_a_broker_input_or_thesis_records_alone() -> Result<(), Error> {
+        assert!(held_on_core_error(&Input::Broker(Ok(
             mandate_executor::BrokerOutcome::AccountWideAccepted
         ))));
+        assert!(held_on_core_error(&Input::Theses {
+            agent: AgentId("agenta".to_owned()),
+            records: Vec::new(),
+        }));
         for other in [
             Input::Tick(RiskClock::from_secs(0)),
             Input::Started(WriterEpoch(1)),
@@ -1517,7 +1541,7 @@ mod tests {
             Input::BatchRefused,
             handoff(Purpose::Open)?,
         ] {
-            assert!(!failed_on_broker(&other), "{other:?}");
+            assert!(!held_on_core_error(&other), "{other:?}");
         }
         Ok(())
     }

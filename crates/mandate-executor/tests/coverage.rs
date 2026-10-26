@@ -126,7 +126,6 @@ fn the_workspaces_agent_control_and_clock_streams_are_followed() {
 fn every_uninterpreted_event_names_the_story_that_owns_it() {
     for (kind, story) in [
         ("RelatedAccountsCoordination", "E7-5"),
-        ("UniverseChanged", "E17-3"),
         ("MandateVersionApplied", "E6-4"),
         ("SomethingNobodyWrote", "E7-2"),
     ] {

@@ -1654,9 +1654,9 @@ fn the_risk_limit_records_are_closed_on_the_account_stream() {
 }
 
 /// §9.28's request and acknowledgment are catalogued on the control stream and, as the executor's
-/// copies, on the account stream, with no configuration, and closed on both at schema version 1:
-/// an unlisted member is refused `schema` there and `wrong_stream` on every other stream, and
-/// version 2 has no schema.
+/// copies, on the account stream, with no configuration, and closed on both at schema versions 1
+/// and 2 (v0.102, v0.104): an unlisted member is refused `schema` there and `wrong_stream` on every
+/// other stream, and version 3 has no schema.
 #[test]
 fn the_acknowledgment_records_are_closed_on_the_control_and_account_streams() {
     for event_type in SECTION_9_28 {
@@ -1672,13 +1672,13 @@ fn the_acknowledgment_records_are_closed_on_the_control_and_account_streams() {
             );
         }
         for kind in [ACCT, CTL] {
-            let version_2 = edit(&draft(event_type, kind, &[]), "schema_version", Some("2"));
-            let e = Draft::parse(&version_2).unwrap_err();
+            let version_3 = edit(&draft(event_type, kind, &[]), "schema_version", Some("3"));
+            let e = Draft::parse(&version_3).unwrap_err();
             let want = (InvalidReason::UnknownSchema, "payload");
             assert_eq!(
                 (e.reason, e.path.as_str()),
                 want,
-                "{event_type} version 2 in {kind}"
+                "{event_type} version 3 in {kind}"
             );
         }
     }
