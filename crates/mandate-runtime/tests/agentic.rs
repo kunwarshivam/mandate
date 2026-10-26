@@ -1739,7 +1739,6 @@ fn the_journal_check_refuses_a_summary_that_names_a_symbol() {
 /// refused turn does, alerts the operator once naming its `RunEnded`, and keeps the pin, so the
 /// next due run starts.
 #[test]
-#[ignore = "pending E21-62"]
 fn a_lost_turn_ends_the_run_error_alerts_and_keeps_the_pin() {
     let (ids, plan, view) = fixture();
     let ports = ports(&ids, &AllowGate, &plan, &view);

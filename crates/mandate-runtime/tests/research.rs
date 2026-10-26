@@ -2754,7 +2754,6 @@ fn alerts_of(step: &mandate_runtime::ResearchStep) -> Vec<(&'static str, String)
 /// output and no record, alerts the operator once naming the run's last observation, and keeps the
 /// pin: the next due run starts, where a gateway refusal of the same call withdraws it.
 #[test]
-#[ignore = "pending E21-62"]
 fn a_lost_call_ends_its_run_alerts_and_keeps_the_pin() {
     let f = Fixture::new();
     let ports = ports(&f.ids, &AllowGate, &f.plan, &f.view);
@@ -2823,7 +2822,6 @@ fn a_lost_call_ends_its_run_alerts_and_keeps_the_pin() {
 /// DEC-2397 item 3: a lost call waits for the next due run, as a refused one does, and does not
 /// start a run again at once.
 #[test]
-#[ignore = "pending E21-62"]
 fn a_lost_call_waits_for_the_next_due_run() {
     let f = Fixture::new();
     let ports = ports(&f.ids, &AllowGate, &f.plan, &f.view);
