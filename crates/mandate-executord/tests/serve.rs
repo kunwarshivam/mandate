@@ -144,6 +144,22 @@ fn with_edge<T>(
     each: &dyn Fn(usize) -> Result<(), Error>,
     body: impl FnOnce(Edge<'_>, &Seen) -> T,
 ) -> Result<T, Error> {
+    with_edge_stopping(
+        stop,
+        lapse.map(|after| (after, "credential_lost")),
+        each,
+        body,
+    )
+}
+
+/// [`with_edge`] with the lease's stop code chosen: `lapse` is the pass and the code its tick
+/// answers from then on.
+fn with_edge_stopping<T>(
+    stop: usize,
+    lapse: Option<(usize, &'static str)>,
+    each: &dyn Fn(usize) -> Result<(), Error>,
+    body: impl FnOnce(Edge<'_>, &Seen) -> T,
+) -> Result<T, Error> {
     let noon = at(NOON)?;
     let seen = Seen::default();
     let failed = RefCell::new(None);
@@ -158,8 +174,8 @@ fn with_edge<T>(
             return Some(UNDRAINED);
         }
         lapse
-            .filter(|after| pass >= *after)
-            .map(|_| "credential_lost")
+            .filter(|(after, _)| pass >= *after)
+            .map(|(_, code)| code)
     };
     let terminated = || seen.passes.get() >= stop.min(PASS_BOUND);
     let mut say = |line: &str| seen.said.borrow_mut().push(line.to_owned());
@@ -287,6 +303,175 @@ fn a_lapsed_lease_drains_the_run() -> Result<(), Error> {
             vec!["credential_lost".to_owned(), "drained".to_owned()]
         )
     );
+    Ok(())
+}
+
+/// The causes of the restrictions the account stream holds, in order.
+fn restriction_causes(journal: &Journal) -> Vec<String> {
+    journal
+        .payloads("AccountRestrictionChanged")
+        .iter()
+        .filter_map(|payload| {
+            payload
+                .get("cause")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .collect()
+}
+
+fn member(payload: &Value, name: &str) -> String {
+    payload
+        .get(name)
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned()
+}
+
+/// An input still in doubt when the lease is lost is handed again first, and the restriction
+/// follows it once it commits: with the journal down from the first pass and back at the lapse,
+/// the start's records commit and the account is restricted (DEC-2839 item 2).
+#[test]
+fn a_lost_credential_hands_an_input_in_doubt_first() -> Result<(), Error> {
+    let journal = connecting()?;
+    establish(&journal)?;
+    let broker = Paper::new(&journal);
+    let wiring = wired(Box::new(Allowing), Box::new(TwoPercentStop))?;
+    let each = |pass: usize| {
+        if pass == 1 {
+            journal.fail_next(&[support::Fault::Unavailable; 64]);
+        }
+        if pass == 3 {
+            journal.clear_faults();
+        }
+        Ok(())
+    };
+    let before = journal.types(ACCOUNT_STREAM).len();
+    let exit = with_edge_stopping(3, Some((3, "credential_lost")), &each, |edge, _| {
+        serve(
+            journal.clone(),
+            broker.clone(),
+            wiring,
+            &process_config(Environment::Paper),
+            &starting_status(),
+            edge,
+        )
+    })?;
+    assert_eq!(exit, Ok(0));
+    let types = journal.types(ACCOUNT_STREAM);
+    let restricted = types
+        .iter()
+        .position(|kind| kind == "AccountRestrictionChanged")
+        .ok_or("no restriction")?;
+    assert!(
+        restricted > before,
+        "what was in doubt committed ahead of the restriction: {types:?}"
+    );
+    assert_eq!(restriction_causes(&journal), ["connection_unavailable"]);
+    Ok(())
+}
+
+/// An input in doubt when the lease is lost is handed again first and never replaced: with the
+/// journal down for one more append, the restriction is held in doubt and the drain commits it
+/// (DEC-2839).
+#[test]
+fn a_lost_credential_with_the_journal_down_restricts_through_the_drain() -> Result<(), Error> {
+    let journal = connecting()?;
+    establish(&journal)?;
+    let broker = Paper::new(&journal);
+    let wiring = wired(Box::new(Allowing), Box::new(TwoPercentStop))?;
+    let each = |pass: usize| {
+        if pass == 3 {
+            journal.fail_next(&[support::Fault::Unavailable]);
+        }
+        Ok(())
+    };
+    let exit = with_edge_stopping(3, Some((3, "credential_lost")), &each, |edge, _| {
+        serve(
+            journal.clone(),
+            broker.clone(),
+            wiring,
+            &process_config(Environment::Paper),
+            &starting_status(),
+            edge,
+        )
+    })?;
+    assert_eq!(exit, Ok(0), "the drain committed what was in doubt");
+    assert_eq!(restriction_causes(&journal), ["connection_unavailable"]);
+    Ok(())
+}
+
+/// DEC-2839: a credential the lease lost restricts the account to closing, cause
+/// `connection_unavailable`, before the run drains (connections spec §9.2: at lease expiry the
+/// connection is treated as `suspended` for openings), so the restart finds it in force. A
+/// rotation, or SIGTERM, drains with no restriction: neither is a trouble of the connection.
+#[test]
+fn a_lost_credential_restricts_the_account_before_the_drain() -> Result<(), Error> {
+    for (lapse, restricted) in [
+        (Some((3, "credential_lost")), true),
+        (Some((3, "credential_rotated")), false),
+        (None, false),
+    ] {
+        let journal = connecting()?;
+        establish(&journal)?;
+        let broker = Paper::new(&journal);
+        let wiring = wired(Box::new(Allowing), Box::new(TwoPercentStop))?;
+        let exit = with_edge_stopping(3, lapse, &|_| Ok(()), |edge, _| {
+            serve(
+                journal.clone(),
+                broker.clone(),
+                wiring,
+                &process_config(Environment::Paper),
+                &starting_status(),
+                edge,
+            )
+        })?;
+        assert_eq!(exit, Ok(0), "{lapse:?}");
+        let expected: &[&str] = if restricted {
+            &["connection_unavailable"]
+        } else {
+            &[]
+        };
+        assert_eq!(restriction_causes(&journal), expected, "{lapse:?}");
+        if restricted {
+            let types = journal.types(ACCOUNT_STREAM);
+            let at = |kind: &str| types.iter().position(|t| t == kind);
+            let (restricted_at, changed_at) = (
+                at("AccountRestrictionChanged"),
+                at("ConnectionStateChanged"),
+            );
+            assert!(
+                restricted_at.is_some() && changed_at.is_some() && restricted_at < changed_at,
+                "the restriction, then the state change: {types:?}"
+            );
+            let change = journal.payloads("ConnectionStateChanged");
+            assert_eq!(
+                change
+                    .iter()
+                    .map(|p| (member(p, "from"), member(p, "to"), member(p, "reason")))
+                    .collect::<Vec<_>>(),
+                [(
+                    "active".to_owned(),
+                    "suspended".to_owned(),
+                    "lease_expired".to_owned()
+                )]
+            );
+            let alerts = journal.payloads("OwnerAlertSent");
+            assert!(
+                alerts
+                    .iter()
+                    .any(|p| member(p, "kind") == "connection_unavailable"),
+                "the owner's alert is journaled for the dispatcher: {alerts:?}"
+            );
+            let modes = journal.payloads("AgentModeApplied");
+            assert!(
+                modes.iter().any(|payload| {
+                    payload.get("to").and_then(Value::as_str) == Some("exits_only")
+                }),
+                "every agent exits only: {modes:?}"
+            );
+        }
+    }
     Ok(())
 }
 

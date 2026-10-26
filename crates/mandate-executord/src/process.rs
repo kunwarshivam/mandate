@@ -8,11 +8,11 @@ use mandate_canon::{Object, parse};
 use mandate_domain::{CapabilityProfile, ProfileError};
 use mandate_executor::{
     AccountDeclaration, AccountScope, ActivityCursor, AgentId, BindingGateSource, BrokerOrder,
-    BrokerOutcome, BrokerRequest, BrokerSnapshot, BrokerUpdate, Command, ConnectorError, Effect,
-    EventDraft, EventId, ExecutorConfig, ExecutorError, ExecutorState, IdGen, Initiator, Input,
-    InstrumentSnapshot, IntentBody, IntentHandoff, IntentId, KillScope, MandateVersion,
-    MandateView, OrderState, Ports, ProtectionPrices, ReconcileReason, RiskClock, Seq, ThesisRow,
-    WriterEpoch, fold, handle, limit_fills, recorded_fills,
+    BrokerOutcome, BrokerRequest, BrokerSnapshot, BrokerUpdate, Command, ConnectionTrouble,
+    ConnectorError, Effect, EventDraft, EventId, ExecutorConfig, ExecutorError, ExecutorState,
+    IdGen, Initiator, Input, InstrumentSnapshot, IntentBody, IntentHandoff, IntentId, KillScope,
+    MandateVersion, MandateView, OrderState, Ports, ProtectionPrices, ReconcileReason, RiskClock,
+    Seq, SuspendReason, ThesisRow, WriterEpoch, fold, handle, limit_fills, recorded_fills,
 };
 use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId};
 use mandate_num::{Fraction, Price};
@@ -1214,6 +1214,33 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         let answer = self.broker.call(request);
         self.health.observe(&answer);
         answer
+    }
+
+    /// Tells the core the run's credential is lost (DEC-2839). Connections spec §9.2 treats a lease
+    /// that expired as `suspended` for openings (reason `lease_expired`, DEC-800), so before the
+    /// run drains, the account is restricted to closing with cause `connection_unavailable`. The
+    /// connection's state change follows in a later batch (DEC-2826), so both are on the stream
+    /// when the supervisor restarts the process.
+    ///
+    /// An input already in doubt is handed again first, as a pass does, so it is never replaced.
+    /// While it stays in doubt nothing more is handed, and the drain retries it. A process that has
+    /// exited hands nothing. A core error on the trouble is held, never a stop (DEC-2821).
+    pub fn credential_lost(&mut self, now: UtcNanos) {
+        if self.exited() {
+            return;
+        }
+        let mut alerts = Vec::new();
+        if let Some((input, at)) = self.pending.take()
+            && !self.hand(now, at, input, &mut alerts, 0)
+        {
+            return;
+        }
+        for _batch in ["restriction", "state change"] {
+            let lost = Input::Connection(ConnectionTrouble::Suspended(SuspendReason::LeaseExpired));
+            if !self.hand(now, now, lost, &mut alerts, 0) {
+                return;
+            }
+        }
     }
 
     /// Tells the core of every trouble the connection's health holds (DEC-2832): after the pass's
