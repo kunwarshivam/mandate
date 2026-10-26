@@ -55,6 +55,9 @@ const MESSAGE: &str = "The request does not meet this rule.";
 /// The operation §3.4 derives a confirmation's `StepUpAsserted` id under, distinct from the
 /// confirmation's own `confirm_version` (DEC-2128 item 3).
 pub const CONFIRM_ASSERTED: &str = "confirm_version_step_up_asserted";
+/// The operation §3.4 derives a deployment's `StepUpAsserted` id under, distinct from the
+/// deployment's own `deploy` (DEC-2128 item 3).
+pub const DEPLOY_ASSERTED: &str = "deploy_step_up_asserted";
 
 /// A refused request, answered by one problem document.
 enum Answer {
@@ -764,19 +767,22 @@ struct DeployBody {
     backtest_id: Value,
     record: Value,
     step_up: Option<StepUpEvidence>,
+    step_up_assertion: Option<StepUpAssertion>,
 }
 
-/// The members a deploy body names, in its order.
-const DEPLOY_MEMBERS: [&str; 5] = [
+/// The members a deploy body names, in its order; the last, `step_up_assertion`, is optional
+/// (DEC-2128 item 1).
+const DEPLOY_MEMBERS: [&str; 6] = [
     "agent_id",
     "mandate_version",
     "backtest_id",
     "record",
     "step_up",
+    "step_up_assertion",
 ];
 
-/// `body` as a deploy: an object of exactly [`DEPLOY_MEMBERS`], each in its type and canonical
-/// form, else `invalid` at the first member that fails.
+/// `body` as a deploy: an object of [`DEPLOY_MEMBERS`], every one but `step_up_assertion`
+/// present, each in its type and canonical form, else `invalid` at the first member that fails.
 fn deploy_body(body: &[u8]) -> Result<DeployBody, Answer> {
     let Ok(Value::Object(members)) = parse(body) else {
         return Err(Answer::schema("", "type"));
@@ -825,12 +831,20 @@ fn deploy_body(body: &[u8]) -> Result<DeployBody, Answer> {
             decode::<StepUpEvidence>(&to_canonical(other)).map_err(|_| non_canonical("step_up"))?,
         ),
     };
+    let step_up_assertion = match members.get("step_up_assertion") {
+        None | Some(Value::Null) => None,
+        Some(other) => Some(
+            decode::<StepUpAssertion>(&to_canonical(other))
+                .map_err(|_| non_canonical("step_up_assertion"))?,
+        ),
+    };
     Ok(DeployBody {
         agent_id,
         mandate_version,
         backtest_id,
         record,
         step_up,
+        step_up_assertion,
     })
 }
 
@@ -892,6 +906,11 @@ async fn deployed(
     )
     .ok_or(Refused::JournalUnavailable)?;
     event.schema_version = if named { 2 } else { 1 };
+    let passkey = request.step_up_assertion.is_some();
+    if let (true, true, Some(evidence)) = (passkey, named, request.step_up.as_ref()) {
+        let judged = journaled(Some(evidence)).ok_or(Refused::JournalUnavailable)?;
+        event = passkey_deployment(event, judged).ok_or(Refused::JournalUnavailable)?;
+    }
     let mut drafted = drafted(&admitted, "deploy", (record, event))?;
     drafted.pinned = named
         .then(|| admitted.reader.control.last().map(|row| row.seq))
@@ -956,9 +975,41 @@ async fn deployed(
         kind: StepUpActionKind::Deploy,
         digest,
     };
-    stepped_up(app, &admitted, request.step_up.as_ref(), None, &action)?;
-    let row = commit(app, &admitted, drafted, None).await?;
+    if passkey && !named {
+        return Err(Answer::schema("/mandate_version", "connection_unrecorded"));
+    }
+    let asserted = stepped_up(
+        app,
+        &admitted,
+        request.step_up.as_ref(),
+        request.step_up_assertion.as_ref(),
+        &action,
+    )?;
+    if asserted.is_some() != passkey {
+        return Err(Refused::JournalUnavailable.into());
+    }
+    let assertion = asserted
+        .map(|asserted| assertion_drafted(&admitted, &drafted, DEPLOY_ASSERTED, &asserted))
+        .transpose()?;
+    let row = commit(app, &admitted, drafted, assertion.as_deref()).await?;
     Ok(command_accepted(StatusCode::ACCEPTED, &admitted, &row))
+}
+
+/// The deployment committed under passkey step-up on a connection §9.24's rule 201 admits:
+/// `AgentDeployed` version 3 ([DEC-2131] item 3, journal spec v0.84 §9.24), version 2's members
+/// then `step_up`, the evidence the port judged, which the record also holds and §9.32's rule 253
+/// reads. `None` when the payload is not an object. A passkey deployment rule 201 refuses has no
+/// version to carry its evidence and is refused before step-up is judged ([DEC-2133]).
+///
+/// [DEC-2131]: ../../../docs/project/decisions/DEC-2131.md
+/// [DEC-2133]: ../../../docs/project/decisions/DEC-2133.md
+fn passkey_deployment(mut event: Event, step_up: Value) -> Option<Event> {
+    let Value::Object(members) = &mut event.payload else {
+        return None;
+    };
+    members.insert(Key::new("step_up").ok()?, step_up);
+    event.schema_version = 3;
+    Some(event)
 }
 
 /// `commands/command-accepted`.
