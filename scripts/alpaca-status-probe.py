@@ -72,7 +72,7 @@ async def listen(socket) -> list[str]:
     while (left := end - time.monotonic()) > 0:
         try:
             got = items(await asyncio.wait_for(socket.recv(), timeout=left))
-        except TimeoutError:
+        except (TimeoutError, websockets.WebSocketException, ValueError):
             break
         for item in got:
             kind = str(item.get("T"))

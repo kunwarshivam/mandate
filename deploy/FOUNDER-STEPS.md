@@ -405,8 +405,8 @@ issue.
 ## K. Does Alpaca's free data plan carry halts? (trading spec §4.4, [DEC-2380](../docs/project/decisions/DEC-2380.md) item 2)
 
 The executor's binding gate holds every Alpaca paper opening while the instrument's halt status is
-unread (`crates/mandate-executord/src/gate.rs`, `DeployedGate::input`; the coordinator's ruling of
-2026-10-26): no halt is ever assumed absent (`AGENTS.md` rule 3). The fixture broker is unaffected.
+unread (`crates/mandate-executord/src/gate.rs`, `DeployedGate::input`): no halt is ever assumed
+absent (`AGENTS.md` rule 3). The fixture broker is unaffected.
 Alpaca's stock stream has `statuses` and `lulds` channels, but its documentation does not say
 whether the free `iex` feed carries them. One run of a probe tells, and an agent builds the status
 reader only if it does.
