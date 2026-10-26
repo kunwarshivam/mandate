@@ -470,9 +470,20 @@ fn the_agents_journaled_risk_reaches_the_gate() -> Result<(), Error> {
     let asset = mandate_risk::AssetId::new(ASSET)?;
     read.last_exit_fill_at.insert(asset.clone(), exited);
     read.orders_today = 3;
+    read.conduct.filled_today.insert(asset.clone(), 2);
+    read.instrument_restrictions.insert(
+        asset.clone(),
+        BTreeSet::from([mandate_risk::InstrumentRestriction::StaleMark]),
+    );
+    read.day_trades.window_count = 1;
     down.agent = Some(read.clone());
     let snapshot = opening(&down)?.ok_or("an input")?;
     assert_eq!(snapshot.risk, read.risk);
+    assert_eq!(
+        snapshot.agent.instrument_restrictions,
+        read.instrument_restrictions
+    );
+    assert_eq!(snapshot.agent.day_trades, read.day_trades);
     assert_eq!(snapshot.agent.mode, AgentMode::Normal);
     assert_eq!(snapshot.agent.last_exit_fill_at.get(&asset), Some(&exited));
     assert_eq!(snapshot.agent.orders_today, 3);
