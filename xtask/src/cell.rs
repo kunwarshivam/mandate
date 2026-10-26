@@ -673,7 +673,7 @@ const BUILT_PACKAGES: [&str; 10] = [
     "mandate-cli",
     RUNNER,
     "mandate-api-server",
-    "mandate-daemon",
+    "mandate-runtime-models",
     "mandate-deployd",
     "mandate-executord",
     "mandate-provisionerd",
@@ -1347,7 +1347,7 @@ const STATIC_TARGET: &str = "target/cell-static";
 const STATIC_TRIPLE: &str = "x86_64-unknown-linux-gnu";
 
 /// `mandate-cli`, the backtest runner, `mandate-api-server` and the runtime's `mandate-daemon`
-/// (DEC-1013), the deployment manager's `mandate-deployd` (DEC-1172), the executor's
+/// (DEC-1013, built by `mandate-runtime-models` since DEC-2383), the deployment manager's `mandate-deployd` (DEC-1172), the executor's
 /// `mandate-executord` (DEC-2031), the scheduler's `mandate-scheduler` (E21-29) and the data
 /// process's `mandate-datad` linked statically, so their images need no base (DEC-993 item 9),
 /// with no feature at all: never `live`; with them the stub issuer once [`stub_ready`], which the

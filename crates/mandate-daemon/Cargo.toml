@@ -31,13 +31,9 @@ mandate-runtime.workspace = true
 mandate-spec.workspace = true
 mandate-store.workspace = true
 mandate-time.workspace = true
-tokio = { workspace = true, features = ["rt", "signal"] }
 
 [dev-dependencies]
 mandate-accounting.workspace = true
-mandate-journal-pg.workspace = true
 mandate-marketdata.workspace = true
 proptest.workspace = true
 serde_json.workspace = true
-sqlx.workspace = true
-tokio = { workspace = true, features = ["rt-multi-thread", "time"] }

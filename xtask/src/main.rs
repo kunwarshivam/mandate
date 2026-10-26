@@ -12927,6 +12927,7 @@ mod tests {
                 "mandate-mcp",
                 "mandate-paper",
                 "mandate-robinhood",
+                "mandate-runtime-models",
                 "mandate-shell"
             ]
         );

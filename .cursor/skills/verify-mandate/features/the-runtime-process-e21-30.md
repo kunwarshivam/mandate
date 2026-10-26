@@ -14,7 +14,7 @@
   hook), `src/launch.rs` (the deployment from `run`'s flags or the deployment manager's variables,
   DEC-1015), `src/deployment.rs` (the connection, approvers and author from the latest
   `AgentDeployed` and its stored mandate document, DEC-1016; the approvers through
-  `mandate_identity::approvers`, DEC-2388 item 11), and the `mandate-daemon` binary (`run` over Postgres, or `--fixture` over an in-memory
+  `mandate_identity::approvers`, DEC-2388 item 11), and the `mandate-daemon` binary, built by `mandate-runtime-models` (`crates/mandate-runtime-models/src/main.rs`) since DEC-2383 item 7 (`run` over Postgres, or `--fixture` over an in-memory
   journal, refused `fixture_under_manager` on a pod the manager started, and `probe` for `exec`
   probes; SIGTERM drains). In the cell: the `runtime` image
   (`deploy/cell/images/runtime.Dockerfile`), its `args` and `probe` in
@@ -35,12 +35,12 @@
   startup hold from the account rows alone. `mandate-runtime`'s
   `a_reconciliation_from_before_the_start_does_not_lift_a_hold_taken_with_an_intent_outstanding`
   (DEC-1014 item 6).
-  `tests/process.rs`: the binary's refusals (a manager launch refused until its deployment is
+  `crates/mandate-runtime-models/tests/process.rs`: the binary's refusals (a manager launch refused until its deployment is
   resolved, and `--fixture` on a manager's pod), probes, and SIGTERM drain. `tests/launch.rs`: flags, the manager's variables, a pod for
   another process, and a flag that disagrees with the manager. `tests/deployment.rs`: the latest
   deployment, a stopped agent, a missing, corrupt or invalid document, another environment, the
   approvers DEC-953's owner or the founded workspace's roster resolves, an unreadable membership
-  record resolving no one, and an unknown author. `tests/pg.rs`: the binary
+  record resolving no one, and an unknown author. `crates/mandate-runtime-models/tests/pg.rs`: the binary
   on Postgres opening its agent stream once across two runs and draining. `deploy/tests/test_cell.py`:
   each service started and probed as its process list says, and no runtime rendered for no
   deployment. `mandate-runtime`'s
@@ -76,6 +76,17 @@
   the cell's research in the runtime process against four compromised-model strategies at pass^8,
   with HI-10, HI-4, HI-8, HI-25 and HI-11 judged from the journal, each oracle failing on a seeded
   breach.
-- **Run:** `cargo nextest run -p mandate-daemon -p mandate-store -p mandate-runtime -p mandate-shell`
+- **Run:** `cargo nextest run -p mandate-daemon -p mandate-runtime-models -p mandate-store -p mandate-runtime -p mandate-shell`
   (with `MANDATE_PG_URL` for `tests/pg.rs`); `cargo xtask cell demo --no-web` shows the runtime
   ready in the local cell.
+- **Models (DEC-2383 item 7):** `mandate-runtime-models` (`crates/mandate-runtime-models/src/lib.rs`):
+  `PinnedModels`, the daemon's `Models` port over `mandate_modelhost::evaluate` with the deployed
+  document's `quant.` pins on its US equities, `registry` (the environment's `model_version`
+  registrations folded from the control stream), the calendar, and the closes
+  `mandate_bars::trusted_daily_closes` admits at the tick; `source` (only the cell's recording);
+  `Held`, the read-only sink that only confirms the stored closes object; and `wiring`, which the
+  binary sets for a resolved deployment. Tests: `tests/models.rs` (a property test against an
+  oracle of integer-cent crossover, calendar close and hand-written closes object over ten
+  faults; the registry fold; the source; the wiring's refusals; a sink that never writes) and
+  `tests/runtime.rs` (the process journals the observation then the output on the in-memory
+  journal, once per daily output, and neither when the closes are not held).
