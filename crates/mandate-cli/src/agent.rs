@@ -19,6 +19,7 @@ use mandate_approval::KillScope;
 use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_canon::{Digest, Value};
+use mandate_journal::holds::{self as fold, Hold};
 
 use crate::approvals;
 use crate::control::{
@@ -96,6 +97,61 @@ impl Subject {
             Self::Reconciliation => "reconciliation",
         }
     }
+}
+
+/// The agent `mandate agent holds` posts an account-wide hold to when no agent is named: any agent
+/// deployed on the account, which the owner fills in.
+pub const ANY_AGENT: &str = "<agent>";
+
+/// What `mandate agent holds` lists: whether the workspace's policy requires an independent user,
+/// and the holds standing on one account (E7-4b, DEC-2830, DEC-2144).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Holds {
+    pub independent: bool,
+    pub holds: Vec<Hold>,
+}
+
+/// The holds standing on `account`'s stream in the owner's environment, through the fold the
+/// workspace API's list and the executor share (`mandate_journal::holds`), each with its latest
+/// unspent request; with `agent`, only those that block it, and each posted to it; without, every
+/// hold, an account-wide one with no request posted to [`ANY_AGENT`].
+///
+/// # Errors
+/// [`ControlError::Journal`] when the journal cannot be read, or a record the fold must read does
+/// not read: never an empty list in its place.
+pub fn holds(
+    journal: &dyn ControlJournal,
+    owner: &Owner,
+    account: &str,
+    agent: Option<&str>,
+) -> Result<Holds, ControlError> {
+    let unreadable = |what: &str| {
+        ControlError::Journal(format!("{what} holds a record the holds fold cannot read"))
+    };
+    let environment = owner.environment.as_str();
+    let stream = account_stream(owner, account)?;
+    let ours = |rows: Vec<mandate_journal::StoredEvent>| {
+        rows.into_iter()
+            .filter(|row| row.environment == environment)
+            .collect::<Vec<_>>()
+    };
+    let rows = ours(journal.rows(&stream)?);
+    let control = ours(journal.rows(&control_stream(owner)?)?);
+    let requested = fold::requests(&control).map_err(|_| unreadable("the control stream"))?;
+    let accounts = [(
+        stream.as_str().to_owned(),
+        rows,
+        vec![agent.unwrap_or(ANY_AGENT).to_owned()],
+    )];
+    let mut listed =
+        fold::holds(&accounts, &requested).map_err(|_| unreadable("the account stream"))?;
+    if let Some(agent) = agent {
+        listed.retain(|hold| hold.blocks(agent, stream.as_str()));
+    }
+    Ok(Holds {
+        independent: fold::independence_required(&control),
+        holds: listed,
+    })
 }
 
 /// The warning `mandate agent stop --release` shows before the owner types the code (DEC-136,
