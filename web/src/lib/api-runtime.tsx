@@ -9,6 +9,7 @@ import { type AssertionRefusal, type Authenticator, type PasskeyStepUp, assertPa
 import { type Creator, browserCreator, createPasskey, enrolBody, enrolStepUpDigest, passkeyList } from "@/api/enrol";
 import { type CatalogueAnswer, instrumentsRead, signalModelsRead } from "@/api/catalogue";
 import { type ApiView, agentRead, loadApi } from "@/api/read-models";
+import { recordsRead } from "@/api/records";
 import { emptyWorkspace } from "@/api/reads";
 import { REFRESH_EVERY_MS, type SessionKeeper, type SessionState } from "@/api/session";
 import type { CommandPhase, Decoder, PreparedCommand } from "@/api/types";
@@ -36,6 +37,7 @@ import {
   type PasskeyPort,
   type AlertsAnswer,
   type PositionsAnswer,
+  type RecordsAnswer,
   type Runtime,
   RuntimeContext,
   type SetUp,
@@ -508,6 +510,20 @@ export function ApiRuntimeProvider({
     [client],
   );
 
+  /** The latest `count` records of a stream with their bodies, each checked against its hash (§4.8.1), oldest first. */
+  const streamRecords = useCallback(
+    async (streamId: string, count: number): Promise<RecordsAnswer> => {
+      const route = `/journal/streams/${encodeURIComponent(streamId)}/events` as const;
+      const decoder = recordsRead(streamId);
+      const first = await client.read(`${route}?after_seq=0&limit=1`, decoder);
+      if (!first.ok) return { ok: false, reason: first.error.code };
+      const after = Math.max(0, first.value.head_seq - count);
+      const tail = await client.read(`${route}?after_seq=${after}&limit=${count}`, decoder);
+      return tail.ok ? { ok: true, items: tail.value.events, fromStart: after === 0 } : { ok: false, reason: tail.error.code };
+    },
+    [client],
+  );
+
   /** `GET /agents/{id}/orders` and `/positions` (DEC-2111), with the agent stream's tail, read together when the agent's screen asks. */
   const activity = useCallback(
     async (agentId: string): Promise<ActivityAnswer> => {
@@ -718,8 +734,8 @@ export function ApiRuntimeProvider({
   const readBacktest = useCallback<Runtime["readBacktest"]>((backtestId) => readBacktestFrom(client, backtestId), [client]);
 
   const value = useMemo<Runtime>(
-    () => ({ source: "api", workspaceId: client.workspaceId, view, ws, now, reachable: ws.status !== "unreachable", commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, ownerExit, catalogue, streamTail: journalTail, alerts, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
-    [client.workspaceId, view, ws, now, commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, ownerExit, catalogue, journalTail, alerts, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
+    () => ({ source: "api", workspaceId: client.workspaceId, view, ws, now, reachable: ws.status !== "unreachable", commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, ownerExit, catalogue, streamTail: journalTail, streamRecords, alerts, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
+    [client.workspaceId, view, ws, now, commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, ownerExit, catalogue, journalTail, streamRecords, alerts, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;
 }
