@@ -9,11 +9,11 @@ use std::collections::BTreeMap;
 
 use mandate_canon::{Digest, Key, Value, to_canonical};
 use mandate_domain::Environment;
-use mandate_journal::{ArtifactError, ArtifactRef, ArtifactSource};
-use mandate_shell::control::{
+use mandate_gate_inputs::control::{
     ConfigRefusal as Refusal, Configuration, ControlRecord, Origin, Pinned, SnapshotExchange,
     configuration,
 };
+use mandate_journal::{ArtifactError, ArtifactRef, ArtifactSource};
 use mandate_time::{Date, UtcNanos};
 
 const SPY: &str = "b28f4066-5c6d-479b-a2af-85dc1a8f16fb";

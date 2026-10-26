@@ -170,7 +170,8 @@ pub(crate) fn closed_schema(
 }
 
 /// The payload normalized against its §9.2 schema, then consistency rules 17 to 24 in number order
-/// (reported only on a well-typed payload). `config_refs` is the envelope's, which rule 22 reads.
+/// (reported only on a well-typed payload), with v0.84's rule 267 after rule 18 and rule 268 after
+/// rule 22. `config_refs` is the envelope's, which rule 22 reads.
 pub(crate) fn payload(
     event_type: &str,
     schema_version: u64,
@@ -258,7 +259,12 @@ pub(crate) fn payload(
                 .collect();
             ascending(&paths, "payload.provenance")?;
         }
-        "MandateConfirmed" => ascending(&p.texts("confirmed_paths"), "payload.confirmed_paths")?,
+        "MandateConfirmed" => {
+            ascending(&p.texts("confirmed_paths"), "payload.confirmed_paths")?;
+            if schema_version == 3 {
+                crate::credentials::passkey_step_up(&payload, event_time)?;
+            }
+        }
         "ConnectionEstablished" => ascending(&p.texts("scopes"), "payload.scopes")?,
         "ApprovalResponseSubmitted" => {
             let writer = actor.and_then(|a| a.get("id")).and_then(Value::as_str);
@@ -293,6 +299,11 @@ pub(crate) fn payload(
                 InvalidReason::Schema,
                 "payload.mandate_version",
             )?;
+            if schema_version == 3 {
+                let writer = actor.and_then(|a| a.get("kind")).and_then(Value::as_str);
+                ensure(writer == Some("user"), InvalidReason::Schema, "actor.kind")?;
+                crate::credentials::passkey_step_up(&payload, event_time)?;
+            }
         }
         "AgentStopped" => ensure(
             !p.text("loss_added").starts_with('-'),
@@ -905,6 +916,7 @@ fn schema(event_type: &str, schema_version: u64) -> Option<&'static Ty> {
         ("MandateConfirmed", 1) => Some(&MANDATE_CONFIRMED),
         ("AgentDeployed", 1) => Some(&AGENT_DEPLOYED),
         ("AgentDeployed", 2) => Some(&AGENT_DEPLOYED_V2),
+        ("AgentDeployed", 3) => Some(&AGENT_DEPLOYED_V3),
         ("AgentStopped", 1) => Some(&AGENT_STOPPED),
         ("OwnerCommandRefused", 1) => Some(&OWNER_COMMAND_REFUSED),
         (SNAPSHOT, 1) => Some(&ACCOUNT_SNAPSHOT_RECORDED),
@@ -1516,6 +1528,16 @@ static AGENT_DEPLOYED_V2: Ty = Ty::Record(&[
     ("mandate_version", Ty::DigestRef),
     ("record_ref", Ty::DigestRef),
     ("connection_id", Ty::Ident),
+]);
+
+/// Journal spec v0.84 §9.24 (DEC-2131): version 2's members, then the passkey step-up that
+/// authorized the deployment, which §9.32's rule 253 reads. Rules 22 and 268 apply.
+static AGENT_DEPLOYED_V3: Ty = Ty::Record(&[
+    ("agent_id", Ty::Ident),
+    ("mandate_version", Ty::DigestRef),
+    ("record_ref", Ty::DigestRef),
+    ("connection_id", Ty::Ident),
+    ("step_up", crate::credentials::STEP_UP_RECORD),
 ]);
 
 static AGENT_STOPPED: Ty = Ty::Record(&[

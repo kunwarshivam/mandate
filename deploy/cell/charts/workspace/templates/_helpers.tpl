@@ -485,10 +485,32 @@ spec:
 A service's launch from processes.json (DEC-1013): its `args`, and its `probe` asked `livez` and
 `readyz` (DEC-994 item 5), with `{workspace}`, `{hosted_workspace}` (`api.workspace`, the workspace
 the deployment manager hosts and whose clock stream the scheduler writes, E21-29), and the `runtime`
-values' `{agent}`, `{connection}` and `{owner}`, and the `data` values' `{data_symbol}`,
-`{data_asset_id}` and `{data_anchor}` filled in. A placeholder whose value is unset fails the render rather than starting a
-process for no deployment.
+values' `{agent}`, `{connection}` and `{owner}`, and `{data_instruments}`, the `data.instruments`
+list as `<symbol>:<assetId>:<anchor>`, comma-separated, filled in. A placeholder whose value is
+unset fails the render rather than starting a process for no deployment, and so does a symbol
+listed twice.
 */}}
+{{/*
+`data.instruments` as the data process's `--instruments`: `<symbol>:<assetId>:<anchor>` for each,
+comma-separated, in the values' order. An empty list, a missing field, or a symbol listed twice
+fails the render.
+*/}}
+{{- define "mandate.dataInstruments" -}}
+{{- $all := .Values.data.instruments -}}
+{{- if not $all }}{{ fail "data.instruments, the instruments whose bars the data process stores, is required with images.data" }}{{ end -}}
+{{- $seen := dict -}}
+{{- $out := list -}}
+{{- range $all -}}
+{{- $symbol := required "data.instruments[].symbol is required with images.data" .symbol -}}
+{{- if hasKey $seen $symbol }}{{ fail (printf "data.instruments lists %s twice" $symbol) }}{{ end -}}
+{{- $_ := set $seen $symbol true -}}
+{{- $asset := required "data.instruments[].assetId, the asset id the instrument's closes object names, is required with images.data" .assetId -}}
+{{- $anchor := required "data.instruments[].anchor, the recorded series' `<YYYY-MM-DD>=<close>`, is required with images.data" .anchor -}}
+{{- $out = append $out (printf "%s:%s:%s" $symbol $asset $anchor) -}}
+{{- end -}}
+{{- join "," $out -}}
+{{- end -}}
+
 {{- define "mandate.fill" -}}
 {{- $v := .root.Values -}}
 {{- $out := list -}}
@@ -496,9 +518,7 @@ process for no deployment.
 {{- $w := . -}}
 {{- if contains "{workspace}" $w }}{{ $w = replace "{workspace}" $v.workspace $w }}{{ end -}}
 {{- if contains "{hosted_workspace}" $w }}{{ $w = replace "{hosted_workspace}" (required "api.workspace, the hosted workspace's ULID whose clock stream the scheduler writes, is required with images.scheduler" $v.api.workspace) $w }}{{ end -}}
-{{- if contains "{data_symbol}" $w }}{{ $w = replace "{data_symbol}" (required "data.symbol, the deployed instrument whose daily bars the data process stores, is required with images.data" $v.data.symbol) $w }}{{ end -}}
-{{- if contains "{data_asset_id}" $w }}{{ $w = replace "{data_asset_id}" (required "data.assetId, the deployed instrument's asset id the closes object names, is required with images.data" $v.data.assetId) $w }}{{ end -}}
-{{- if contains "{data_anchor}" $w }}{{ $w = replace "{data_anchor}" (required "data.anchor, the recorded series' `<YYYY-MM-DD>=<close>`, is required with images.data" $v.data.anchor) $w }}{{ end -}}
+{{- if contains "{data_instruments}" $w }}{{ $w = replace "{data_instruments}" (include "mandate.dataInstruments" $.root) $w }}{{ end -}}
 {{- if contains "{agent}" $w }}{{ $w = replace "{agent}" (required "runtime.agent is required once images.runtime is named" $v.runtime.agent) $w }}{{ end -}}
 {{- if contains "{connection}" $w }}{{ $w = replace "{connection}" (required "runtime.connection is required once images.runtime is named" $v.runtime.connection) $w }}{{ end -}}
 {{- if contains "{owner}" $w }}{{ $w = replace "{owner}" (required "runtime.owner is required once images.runtime is named" $v.runtime.owner) $w }}{{ end -}}

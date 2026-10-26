@@ -18,7 +18,6 @@ mandate-canon.workspace = true
 mandate-domain.workspace = true
 mandate-executor.workspace = true
 mandate-gate-inputs.workspace = true
-mandate-identity.workspace = true
 mandate-journal.workspace = true
 mandate-journal-pg.workspace = true
 mandate-liquidity.workspace = true

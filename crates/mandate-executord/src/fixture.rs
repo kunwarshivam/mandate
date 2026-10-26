@@ -13,6 +13,7 @@ use mandate_executor::{
 use mandate_num::{Bps, FeeCap, FeePerShare, FeeRate, Fraction, Price, ShareIncrement};
 use mandate_time::{Date, TradingCalendar};
 
+use crate::marks::NoMarks;
 use crate::quotes::NoQuotes;
 use crate::{Protections, Unplanned, Wiring};
 
@@ -98,6 +99,7 @@ pub fn wiring() -> Result<Wiring, &'static str> {
         gate: Box::new(NoFacts),
         protections: Box::new(NoProtection),
         quotes: Box::new(NoQuotes),
+        marked: Box::new(NoMarks),
     })
 }
 

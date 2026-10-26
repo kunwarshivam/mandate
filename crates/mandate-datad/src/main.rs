@@ -10,14 +10,15 @@
 )]
 //! `mandate-datad`: one workspace's data process in the local cell.
 //!
-//! `mandate-datad run --store <root> --artifacts <root> --symbol <symbol> --asset-id <id> --anchor
-//! <YYYY-MM-DD>=<close> --probe <socket>` stores the recorded series ([`mandate_datad::series`])
-//! under `--store`, and the closes object the runtime's observation names
-//! ([`mandate_datad::observation`]) in the artifact store at `--artifacts`, once at start,
-//! which is its start-up check, and again every [`series::REFRESH`], so a session that completes while it
-//! runs is added. Any failed write exits, fail closed, and the orchestrator restarts it. It drains
-//! on SIGTERM. `mandate-datad probe livez|readyz --probe <socket>` is its `exec` probe (DEC-994
-//! item 5). This is the one place the host clock is read (ES-05).
+//! `mandate-datad run --store <root> --artifacts <root> --instruments
+//! <symbol>:<asset-id>:<YYYY-MM-DD>=<close>[,...] --probe <socket>` stores, for each instrument, the
+//! recorded series ([`mandate_datad::series`]) under `--store`: its daily bars, and the latest
+//! trading day's minute bars. It then puts the closes object the runtime's observation names
+//! ([`mandate_datad::observation`]) in the artifact store at `--artifacts`. It does this once at
+//! start, which is its start-up check, and again every [`series::REFRESH`], so a session that
+//! completes while it runs is added. Any failed write exits, fail closed, and the orchestrator
+//! restarts it. It drains on SIGTERM. `mandate-datad probe livez|readyz --probe <socket>` is its
+//! `exec` probe (DEC-994 item 5). This is the one place the host clock is read (ES-05).
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -26,7 +27,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use mandate_datad::{Anchor, observation, series};
+use mandate_datad::{Instrument, observation, series};
 use mandate_process::probe::{self, Probe, Status};
 use mandate_process::{Input, Kind, Lifecycle, State};
 use mandate_time::{ExchangeCalendar, UtcNanos};
@@ -57,27 +58,22 @@ fn main() -> ExitCode {
             ExitCode::from(answer)
         }
         Some("run") => {
-            let (Some(store), Some(artifacts), Some(symbol), Some(asset), Some(anchor)) = (
-                flag("--store"),
-                flag("--artifacts"),
-                flag("--symbol"),
-                flag("--asset-id"),
-                flag("--anchor"),
-            ) else {
-                eprintln!("store_symbol_or_anchor_missing");
+            let (Some(store), Some(artifacts), Some(instruments)) =
+                (flag("--store"), flag("--artifacts"), flag("--instruments"))
+            else {
+                eprintln!("store_or_instruments_missing");
                 return ExitCode::from(2);
             };
-            let Ok(anchor) = Anchor::parse(&anchor) else {
-                eprintln!("anchor_malformed");
+            let Ok(instruments) = Instrument::parse_list(&instruments) else {
+                eprintln!("instruments_malformed");
                 return ExitCode::from(2);
             };
             let target = Target {
                 store: PathBuf::from(store),
                 artifacts: PathBuf::from(artifacts),
-                symbol,
-                asset,
+                instruments,
             };
-            match run(&target, &anchor, &socket) {
+            match run(&target, &socket) {
                 Ok(status) => ExitCode::from(status),
                 Err(code) => {
                     eprintln!("data_start_failed: {code}");
@@ -104,39 +100,42 @@ fn host_now() -> UtcNanos {
     UtcNanos::from_parts(secs, since.subsec_nanos()).unwrap_or(UtcNanos::EPOCH)
 }
 
-/// Where the series and its closes object go, and for which instrument.
+/// Where the series and their closes objects go, and for which instruments.
 struct Target {
     store: PathBuf,
     artifacts: PathBuf,
-    symbol: String,
-    asset: String,
+    instruments: Vec<Instrument>,
 }
 
-/// Stores the daily series, today's minute bars, and then the closes object; the object's
-/// reference, or why not.
+/// Stores each instrument's daily series, its minute bars, and then its closes object; the
+/// objects' references in the instruments' order, or why not.
 fn store_once(
     target: &Target,
-    anchor: &Anchor,
     calendar: &ExchangeCalendar,
     now: UtcNanos,
-) -> Result<String, series::SeriesError> {
-    let published = series::publish(&target.store, &target.symbol, anchor, calendar, now)?;
-    series::publish_minutes(&target.store, &target.symbol, anchor, calendar, now)?;
-    let closes = observation::put_closes(
-        &target.artifacts,
-        &published.dir,
-        &target.symbol,
-        &target.asset,
-        now,
-    )?;
-    Ok(closes.digest().to_hex())
+) -> Result<Vec<String>, series::SeriesError> {
+    let mut stored = Vec::with_capacity(target.instruments.len());
+    for instrument in &target.instruments {
+        let (symbol, anchor) = (&instrument.symbol, &instrument.anchor);
+        let published = series::publish(&target.store, symbol, anchor, calendar, now)?;
+        series::publish_minutes(&target.store, symbol, anchor, calendar, now)?;
+        let closes = observation::put_closes(
+            &target.artifacts,
+            &published.dir,
+            symbol,
+            &instrument.asset_id,
+            now,
+        )?;
+        stored.push(closes.digest().to_hex());
+    }
+    Ok(stored)
 }
 
 #[allow(
     clippy::disallowed_methods,
     reason = "the binary's edge reads a monotonic clock only to pace its loop (ES-05)"
 )]
-fn run(target: &Target, anchor: &Anchor, socket: &Path) -> Result<u8, &'static str> {
+fn run(target: &Target, socket: &Path) -> Result<u8, &'static str> {
     let terminate = Arc::new(AtomicBool::new(false));
     watch_terminate(Arc::clone(&terminate)).map_err(|_| "signal_unavailable")?;
     let calendar = ExchangeCalendar::us_equities().map_err(|e| e.code())?;
@@ -144,7 +143,7 @@ fn run(target: &Target, anchor: &Anchor, socket: &Path) -> Result<u8, &'static s
     let status = Status::new(lifecycle.snapshot());
     probe::serve(socket, status.clone(), host_now).map_err(|_| "probe_socket_unavailable")?;
     let mut stored_at: Option<Instant> = None;
-    let mut last_closes = String::new();
+    let mut last_closes: Vec<String> = Vec::new();
     loop {
         if let State::Exited(exit) = lifecycle.state() {
             status.publish(lifecycle.snapshot());
@@ -161,10 +160,12 @@ fn run(target: &Target, anchor: &Anchor, socket: &Path) -> Result<u8, &'static s
         let input = if !due {
             Input::Heartbeat
         } else {
-            match store_once(target, anchor, &calendar, now) {
+            match store_once(target, &calendar, now) {
                 Ok(closes) => {
                     if closes != last_closes {
-                        eprintln!("closes_stored sha256:{closes}");
+                        for digest in &closes {
+                            eprintln!("closes_stored sha256:{digest}");
+                        }
                         last_closes = closes;
                     }
                     let first = stored_at.is_none();

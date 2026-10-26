@@ -1,6 +1,7 @@
 //! The deployment's production ports over the journal (DEC-2378 S2): [`Facts`], the one
-//! `mandate-gate-context` fold the process feeds as it tails its streams, and [`Flatten`], the
-//! flatten planner that sells the agent's sub-ledger from it.
+//! `mandate-gate-context` fold the process feeds as it tails its streams; [`Flatten`], the
+//! flatten planner that sells the agent's sub-ledger from it; [`Plan`], the order plan; and
+//! [`Gate`], the gate's dry run over it.
 //!
 //! The daemon reaches no broker and no market data (`AGENTS.md` rule 12), so every fact a port
 //! reads is a journaled row the process has already read. A flatten never waits on the facts an
@@ -16,13 +17,16 @@ use mandate_canon::{Key, Object, Value, parse};
 use mandate_domain::AssetClass;
 use mandate_gate_context::{Freshness, Journaled, Row};
 use mandate_journal::StoredEvent;
+use mandate_risk::GateConfig;
 use mandate_runtime::{EventDraft, FlattenLeg, FlattenPlan, FlattenPlanner, FlattenRequest};
 use mandate_spec::document::Mandate;
 
 use crate::runtime::{Refs, Wiring};
 
+mod gate;
 mod plan;
 
+pub use gate::{Gate, UNJOURNALED, verdict};
 pub use plan::Plan;
 
 /// How fresh, in risk-clock seconds, the facts an opening reads must be (DEC-2378 item 4): a mark
@@ -36,15 +40,16 @@ pub const FRESH: Freshness = Freshness {
 
 /// `base` with the deployment's production ports (DEC-2378 S3): the shared fold for `agent`,
 /// ticked by the scheduler's `clock` stream; the flatten over it with the asset classes of
-/// `document`'s pinned universe; the order plan over the stored mandate; the view and every
-/// draft's references naming the deployed `version`. The gate's dry run stays `base`'s, which
-/// denies every opening until its deferred checks can be journaled (DEC-2378 item 11). A
-/// document that does not parse, which `deployment::document` has already refused, keeps
-/// `base`'s plan and view.
+/// `document`'s pinned universe; the order plan and the gate's dry run over the stored mandate,
+/// the dry run with the registered rule set's gate configuration `rules` (DEC-2388), which still
+/// denies every opening while any check is deferred; the view and every draft's references naming
+/// the deployed `version`. A document that does not parse, which `deployment::document` has
+/// already refused, keeps `base`'s plan, gate and view.
 pub fn wired(
     mut base: Wiring,
     version: &str,
     document: &Value,
+    rules: Option<GateConfig>,
     clock: &str,
     agent: &str,
 ) -> Wiring {
@@ -59,7 +64,8 @@ pub fn wired(
             .filter_map(|pinned| InstrumentId::new(pinned.asset_id.as_str()).ok())
             .collect();
         base.view.approval.timeout_s = i64::from(mandate.autonomy.approval.timeout_s);
-        base.plan = Box::new(Plan::new(facts.clone(), mandate, FRESH));
+        base.plan = Box::new(Plan::new(facts.clone(), mandate.clone(), FRESH));
+        base.gate = Box::new(Gate::new(facts.clone(), (version, mandate), rules, FRESH));
     }
     base.refs = Box::new(MandateRefs(version.to_owned()));
     base.facts = Some(facts);
