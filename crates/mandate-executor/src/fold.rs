@@ -278,7 +278,8 @@ fn health_of(payload: &Value, member: &str) -> Result<ConnectionHealth, Executor
 /// item 1), so a cause that recurs after the condition cleared is journaled again. A state change
 /// before the stream's copy of the establishment is refused, as rule 68 refuses it, and so is one
 /// for another connection or whose `from` is not the state the stream holds. Rules 59 and 60,
-/// which `append` judges, are not judged again here.
+/// which `append` judges, are not judged again here: by rule 59 only `acknowledged` enters
+/// `active`, so `active` never holds a cause.
 fn connection_state_changed(
     state: &mut ExecutorState,
     payload: &Value,
@@ -301,7 +302,7 @@ fn connection_state_changed(
         view.reasons.clear();
     }
     view.health = to;
-    if !ends_causes && to != ConnectionHealth::Active {
+    if !ends_causes {
         view.reasons.insert(reason.to_owned());
     }
     Ok(())
