@@ -96,7 +96,11 @@ fn each_turn_is_sent_to_the_model_and_answered_with_its_calls() {
     for seed in 0..8 {
         let model = CompromisedModel::new(Strategy::Random, seed, reported());
         let (answer, worker) = answered(model);
-        assert_eq!(worker.transport().sent().len(), 1, "seed {seed}: one send");
+        assert_eq!(
+            worker.transport().unwrap().sent().len(),
+            1,
+            "seed {seed}: one send"
+        );
         let ResearchInput::Called { record, .. } = answer else {
             panic!("seed {seed}: a call record: {answer:?}");
         };
@@ -122,7 +126,11 @@ fn a_hostile_model_s_calls_are_refused_by_the_gateway_in_front_of_it() {
     for seed in 0..8 {
         let model = CompromisedModel::new(Strategy::Hostile, seed, reported());
         let (answer, worker) = answered(model);
-        assert_eq!(worker.transport().sent().len(), 1, "seed {seed}: one send");
+        assert_eq!(
+            worker.transport().unwrap().sent().len(),
+            1,
+            "seed {seed}: one send"
+        );
         let ResearchInput::Called { record, .. } = answer else {
             panic!("seed {seed}: a call record: {answer:?}");
         };

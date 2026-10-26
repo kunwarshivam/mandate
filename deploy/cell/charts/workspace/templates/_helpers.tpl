@@ -23,8 +23,48 @@ alone (DEC-2338). */ -}}
 {{- $_ := set . "egress" (concat (list (first .egress) "vault") (rest .egress)) -}}
 {{- end -}}
 {{- $out = append $out . -}}
+{{- if and (eq .name "deploy-manager") $.Values.deployManager.researchWorkspace -}}
+{{- $out = append $out (include "mandate.researchManager" (dict "root" $ "p" .) | fromJson) -}}
+{{- end -}}
+{{- if and (eq .name "scheduler") $.Values.deployManager.researchWorkspace (index $.Values.images "deploy-manager") -}}
+{{- $out = append $out (include "mandate.researchScheduler" (dict "root" $ "p" .) | fromJson) -}}
+{{- end -}}
 {{- end -}}
 {{- $out | toJson -}}
+{{- end -}}
+
+{{- /* The local cell's second deployment manager (DEC-2070): the first's process entry under its own
+name, so every per-process rule (its network policy, its colocation) holds for it as for the first,
+and it signs in as the first's journal role, serving `deployManager.researchWorkspace` alone: the
+hosted workspace's ULID with `r` (DEC-2247 item 2). Only a dev or ci cell names it. */ -}}
+{{- define "mandate.researchManager" -}}
+{{- if not (has .root.Values.deploymentTier (list "dev" "ci")) -}}
+{{- fail (printf "deployManager.researchWorkspace runs only in a dev or ci cell, and deploymentTier is %q (DEC-2070)" .root.Values.deploymentTier) -}}
+{{- end -}}
+{{- $hosted := .root.Values.api.workspace | default "" -}}
+{{- if and $hosted (ne .root.Values.deployManager.researchWorkspace (printf "%sr" $hosted)) -}}
+{{- fail (printf "deployManager.researchWorkspace is %q, not the hosted workspace %q with r (DEC-2070)" .root.Values.deployManager.researchWorkspace $hosted) -}}
+{{- end -}}
+{{- $copy := deepCopy .p -}}
+{{- $_ := set $copy "name" "deploy-manager-research" -}}
+{{- $_ := set $copy "row" "The local cell's second deployment manager, for the research agent's workspace alone (DEC-2070)" -}}
+{{- $copy | toJson -}}
+{{- end -}}
+
+{{- /* The local cell's second scheduler (DEC-2071): the first's process entry under its own name,
+writing the research workspace's clock stream, `clock:<workspace>r`, whose ticks the runtime and
+executor the second manager starts read, as the first writes the hosted workspace's. It renders
+only beside the second manager, which refuses any tier but dev or ci (DEC-2070). */ -}}
+{{- define "mandate.researchScheduler" -}}
+{{- $copy := deepCopy .p -}}
+{{- $_ := set $copy "name" "scheduler-research" -}}
+{{- $_ := set $copy "row" "The local cell's second scheduler, the single writer of the research workspace's clock stream (DEC-2071)" -}}
+{{- $args := list -}}
+{{- range .p.args -}}
+{{- $args = append $args (ternary $.root.Values.deployManager.researchWorkspace . (eq . "{hosted_workspace}")) -}}
+{{- end -}}
+{{- $_ := set $copy "args" $args -}}
+{{- $copy | toJson -}}
 {{- end -}}
 
 {{/* A process renders only when its image is named (processes.json "about"). */}}
@@ -118,7 +158,7 @@ deployment manager and the model gateway, for each agent's research cap (DEC-227
 every other process has no store at all.
 */}}
 {{- define "mandate.artifactsRole" -}}
-{{- $access := dict "api" "seed" "control" "rw" "runtime" "ro" "executor" "ro" "deploy-manager" "ro" "model-gateway" "ro" "data" "rw" -}}
+{{- $access := dict "api" "seed" "control" "rw" "runtime" "ro" "executor" "ro" "deploy-manager" "ro" "deploy-manager-research" "ro" "model-gateway" "ro" "data" "rw" -}}
 {{- get $access .p.name -}}
 {{- end -}}
 
@@ -841,4 +881,19 @@ from its environment; it never mounts the Secret itself.
           name: vault-ca
           items:
             - {key: ca.crt, path: ca.crt}
+{{- end -}}
+
+{{- define "mandate.modelGatewayService" -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: model-gateway
+  labels:
+    {{- include "mandate.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "mandate.selector" . | nindent 4 }}
+  ports:
+    - {name: calls, port: 8080, targetPort: 8080, protocol: TCP}
 {{- end -}}

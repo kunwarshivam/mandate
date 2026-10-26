@@ -19,13 +19,14 @@ use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-use super::executor::{CONNECTION, connect_check, executor_live};
+use super::executor::{CONNECTION, RESEARCH_CONNECTION, connect_check, executor_live};
 use super::{
     API_LOCAL_PORT, API_PROCESS, CELL_REQUIRED_ENV, DEMO_OWNER, DEPLOY_MANAGER_PROCESS,
-    ImageSource, NAMESPACE, NODE, WORKSPACE_CHART, api_diagnosis, api_image_tag, api_port_forward,
-    helm, host_image_source, http, kubectl, open_session, processes, render, render_with,
-    reply_body, run_id, run_job, session_cookie, signed_in, stub_image_tag, stub_token,
-    template_args, tools_missing, up, web,
+    ImageSource, MODEL_GATEWAY_PROCESS, NAMESPACE, NODE, RESEARCH_MANAGER_PROCESS,
+    RESEARCH_SCHEDULER_PROCESS, SCHEDULER_PROCESS, WORKSPACE_CHART, api_diagnosis, api_image_tag,
+    api_port_forward, helm, host_image_source, http, kubectl, open_session, processes, render,
+    render_with, reply_body, run_id, run_job, session_cookie, signed_in, stub_image_tag,
+    stub_token, template_args, tools_missing, up, web,
 };
 use crate::output;
 
@@ -43,10 +44,12 @@ pub const INSTRUMENT_FILE: &str = "deploy/cell/demo/instrument.json";
 pub const RULE_SET_FILE: &str = "deploy/cell/demo/rule-set.json";
 pub const FEE_CONFIG_FILE: &str = "deploy/cell/demo/fee-config.json";
 pub const TRADING_CALENDAR_FILE: &str = "deploy/cell/demo/trading-calendar.json";
-/// [`WEB_AGENT`]'s own envelope and its instrument's snapshot, as canonical JSON: the demo's
-/// envelope on QQQ, since V-006 refuses a second agent on the account an instrument the demo agent
-/// already pins (DEC-2036).
+/// The demo's envelope on QQQ and QQQ's snapshot, as canonical JSON: deployed by no step since the
+/// run's workspace holds one agent, they stay as `mandate-runtime-models`' test mandate and the
+/// data process's second instrument, and the canonical-JSON test still checks them.
+#[cfg(test)]
 pub const WEB_MANDATE_FILE: &str = "deploy/cell/demo/web-mandate.json";
+#[cfg(test)]
 pub const WEB_INSTRUMENT_FILE: &str = "deploy/cell/demo/web-instrument.json";
 /// The demo's research agent's envelope, as canonical JSON, and the recording its model registers
 /// from: an unpinned universe of one instrument, a research envelope, and `llm.research_agent`
@@ -67,21 +70,21 @@ const SEGMENT: &str = "/work/segment.jsonl";
 /// An opaque ULID (identity spec §3.1), never a name; the CLI's owner gestures take the lower-case
 /// form, which is all `--user` accepts (DEC-527 item 3).
 pub const FOUNDER: &str = DEMO_OWNER;
-/// The demo's agent.
+/// The `executor` drill's agent, in its own workspace.
 pub const AGENT: &str = "demo-spy";
-/// The instrument the demo's envelope pins (SPY, [`INSTRUMENT_FILE`]'s `instrument_id`), which the
-/// owner's exit names.
-pub const SPY: &str = "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415";
-/// The bid, bid size and floor the owner's exit confirms, as the CLI's canonical text (DEC-2507
-/// item 1): fixed values the scenario types, since the cell shows no live quote.
-const EXIT_BID: (&str, &str, &str) = ("501.25", "100", "500");
-/// A second agent, on its own envelope ([`WEB_MANDATE_FILE`]), deployed for `web/`'s kill switch:
-/// the CLI stops [`AGENT`] inside the Job, and `web/` offers nothing to stop on a stopped agent, so
-/// the browser presses this one's (lane W2's D10). Its id is `agt_` and a ULID, the only agent id
-/// web/'s routes open (`web/src/lib/ids.ts`'s `AGENT_ID`); any other id is a 404 there.
+/// The instrument the demo's envelope pins: SPY, under its Alpaca asset id ([`INSTRUMENT_FILE`]'s
+/// `instrument_id`).
+#[cfg(test)]
+pub const SPY: &str = "b28f4066-5c6d-479b-a2af-85dc1a8f16fb";
+/// The run's workspace's one agent, on the demo's envelope ([`MANDATE_FILE`]): one agent to an
+/// account (V-048), and one Alpaca paper connection to a workspace until the account fingerprint
+/// tells two apart (DEC-802 item 3). Every step acts on it, the CLI's in the gestures' Job and the
+/// browser's after it, so nothing in the Job stops it: its kill switch is the browser's, last. Its
+/// id is `agt_` and a ULID, the only agent id web/'s routes open (`web/src/lib/ids.ts`'s
+/// `AGENT_ID`); any other id is a 404 there.
 pub const WEB_AGENT: &str = "agt_01KDEM00000000000000000WEB";
-/// [`WEB_AGENT`]'s envelope's `name`: a mandate name is lowercase letters, digits and hyphens
-/// (`mandate.schema.json`), so it cannot be the agent's id, and nothing requires that it is.
+/// [`WEB_MANDATE_FILE`]'s envelope's `name`: a mandate name is lowercase letters, digits and
+/// hyphens (`mandate.schema.json`), so it cannot be an agent's id, and nothing requires that it is.
 #[cfg(test)]
 const WEB_ENVELOPE: &str = "demo-web";
 /// The demo's research agent, deployed alone in [`research_workspace_of`] the run's workspace, so
@@ -104,12 +107,27 @@ pub fn account_of(id: &str) -> String {
     format!("01KDEA{id:0>10.10}000000000A")
 }
 
-/// The demo's paper connection as the executor's connect check left it: the account the
-/// connection binds and the passing `ConnectionChecked` the record names as its cause.
+/// The research workspace's own account stream for the run (DEC-2247 item 3): a ULID of its own,
+/// so its connection binds an account no other workspace's connection does.
+pub fn research_account_of(id: &str) -> String {
+    format!("01KDER{id:0>10.10}000000000A")
+}
+
+/// A paper connection as the executor's connect check left it: the connection, the account it
+/// binds and the passing `ConnectionChecked` the record names as its cause.
 #[derive(Debug, Clone)]
 pub struct Connected {
+    pub connection: &'static str,
     pub account: String,
     pub checked: String,
+}
+
+/// The run's two paper connections, each from its own connect check: the demo workspace's, which
+/// step 2 records, and the research workspace's, which step 3 records there.
+#[derive(Debug, Clone)]
+pub struct Connections {
+    pub demo: Connected,
+    pub research: Connected,
 }
 
 /// The run's workspace (DEC-2010): a ULID, since the API hosts only a ULID, fresh for each run id
@@ -138,7 +156,48 @@ pub enum Part {
     WebTradeLoop(WebCheck),
     Executor(ExecutorCheck),
     Applied(AppliedCheck),
+    Loop(LoopCheck),
+    Grant(GrantCheck),
     Gap(Gap),
+}
+
+impl Part {
+    /// The gap a part names: a [`Part::Gap`] itself, or the gap a link of the research loop stands
+    /// for until a run of the cell shows it, so the plan's lanes and readiness count its waits.
+    pub fn gap(&self) -> Option<&Gap> {
+        match self {
+            Part::Gap(gap) => Some(gap),
+            Part::Loop(check) => Some(&check.gap),
+            Part::Grant(check) => Some(&check.gap),
+            _ => None,
+        }
+    }
+}
+
+/// A link of the research workspace's trade loop, read from the journal after the gestures' Job
+/// (DEC-2071): an event of `event_type` on `stream` whose stored body holds `holding` when it names
+/// one, after the last link seen on that stream, so each link follows the one before it, polled
+/// until it is there or the loop's wait is spent. Until a run of the cell shows it, it
+/// stands for `gap`, so a link not yet reached is named with the lanes it waits on, never failed.
+#[derive(Debug)]
+pub struct LoopCheck {
+    pub shows: &'static str,
+    pub stream: String,
+    pub event_type: &'static str,
+    pub holding: Option<&'static str>,
+    pub gap: Gap,
+}
+
+/// The owner's grant of the research agent's pending opening, on the CLI, after the gestures' Job,
+/// since no approval exists before the runtime asks: `approvals list` finds it, `approvals show`
+/// shows its code, and `approvals approve` types that code (mandate spec §6.4). It stands for `gap`
+/// until a run of the cell shows it.
+#[derive(Debug)]
+pub struct GrantCheck {
+    pub shows: &'static str,
+    pub workspace: String,
+    pub agent: &'static str,
+    pub gap: Gap,
 }
 
 /// The deployment manager's executor for `account`, started from the agent's version-2
@@ -217,11 +276,7 @@ impl Readiness {
 
 /// A step is ready with no gap, skipped when it is nothing but gaps, and partial otherwise.
 pub fn readiness(step: &Step) -> Readiness {
-    let gaps = step
-        .parts
-        .iter()
-        .filter(|p| matches!(p, Part::Gap(_)))
-        .count();
+    let gaps = step.parts.iter().filter(|p| p.gap().is_some()).count();
     match gaps {
         0 => Readiness::Ready,
         n if n == step.parts.len() => Readiness::Skipped,
@@ -233,7 +288,7 @@ pub fn readiness(step: &Step) -> Readiness {
 pub fn lanes(step: &Step) -> Vec<&'static str> {
     let mut lanes = Vec::new();
     for part in &step.parts {
-        if let Part::Gap(gap) = part {
+        if let Some(gap) = part.gap() {
             for wait in &gap.waits {
                 if !lanes.contains(&wait.lane) {
                     lanes.push(wait.lane);
@@ -249,7 +304,7 @@ pub fn by_lane(steps: &[Step]) -> BTreeMap<&'static str, Vec<(u8, &Gap, &Wait)>>
     let mut lanes: BTreeMap<&'static str, Vec<(u8, &Gap, &Wait)>> = BTreeMap::new();
     for step in steps {
         for part in &step.parts {
-            if let Part::Gap(gap) = part {
+            if let Some(gap) = part.gap() {
                 for wait in &gap.waits {
                     lanes
                         .entry(wait.lane)
@@ -268,9 +323,23 @@ const DR_RESEARCH: Wait = Wait {
     lane: "DR",
     story: "E21-54",
     pr: None,
-    lands: "the research workspace's own connect check and connection record, as step 2 runs \
-            for the demo's workspace, so its deployment is written at version 2 and the manager \
-            starts its runtime (DEC-1171)",
+    lands: "a check that the research agent's runtime, which the manager starts from its \
+            version-2 deployment, journals its first research run over the recorded bundle",
+};
+const GW_RESEARCH: Wait = Wait {
+    lane: "GW",
+    story: "E21-62",
+    pr: None,
+    lands: "a run of the cell that shows the research agent's runtime, ticking on its own \
+            workspace's clock (DEC-2071), research over the recorded bundle through the model \
+            gateway and propose its thesis",
+};
+const NE_NEWS: Wait = Wait {
+    lane: "NE",
+    story: "E19-12",
+    pr: None,
+    lands: "the news item that ends the thesis reaching the research runtime in the cell, and its \
+            monitor run's invalidation (DEC-2394)",
 };
 const DR_CONNECT: Wait = Wait {
     lane: "DR",
@@ -279,12 +348,12 @@ const DR_CONNECT: Wait = Wait {
     lands: "a connection the dry run can name: staging's comes from the owner's OAuth connect, \
             which the scenario does not run yet",
 };
-const P2_SCHEDULER: Wait = Wait {
-    lane: "P2",
-    story: "E21-29",
+const WB_EXIT: Wait = Wait {
+    lane: "WB",
+    story: "E11-9",
     pr: None,
-    lands: "the scheduler in the cell, whose tick lets the executor start and reconcile, so it \
-            is ready to take an exit; the cell builds no scheduler yet (`processes.json`)",
+    lands: "web/'s owner exit gesture with its bid confirmation, and the trade loop's \
+            `owner_exit` step between the protective stop and the kill switch",
 };
 const W2_WEB: Wait = Wait {
     lane: "W2",
@@ -293,12 +362,12 @@ const W2_WEB: Wait = Wait {
     lands: "web/ sends the demo's gestures through the API, and `cell demo` drives web/ against \
             the cell (claim #1443)",
 };
-const X_EXECUTOR: Wait = Wait {
-    lane: "X",
-    story: "E21-30",
+const E2E_FILL: Wait = Wait {
+    lane: "E2E",
+    story: "E21-54",
     pr: None,
-    lands: "slice X1b-3: paper fills on the fixture; the executor already takes the \
-            runtime's orders (#1736)",
+    lands: "a gesture that shows the granted opening's fill and resting stop in the cell, in place \
+            of this gap",
 };
 const P5_HOOK: Wait = Wait {
     lane: "D1",
@@ -451,9 +520,9 @@ pub const BACKTEST_ID: &str = "bt-demo-01";
 /// The payload and report the runner stores for the demo version and inputs, the committed golden
 /// store's (DEC-1144 item 8: the demo's payload reference is fixed).
 pub const DEMO_PAYLOAD: &str =
-    "sha256:1ab788b2c066c11d949e53929e1ed0332038f481da4d7d6624e6b2027cfdb240";
+    "sha256:2723d06322272475e568c2111fe113ee4d38b3c6755ba758e65b16dce6e9e1e2";
 pub const DEMO_REPORT: &str =
-    "sha256:9e672eb266902fc30120100af6bba87f135f0ecfe0a77a00cb4b1d15bcdc4a63";
+    "sha256:3172f2086db7b356d999110b941f62d7a7ea8614e95ebc9ac2565506f6204fc4";
 
 /// `sha256:` and the hex SHA-256 of `bytes`: an artifact reference (journal spec §4).
 pub fn reference(bytes: &[u8]) -> String {
@@ -479,7 +548,7 @@ pub(super) fn confirm_code(version: &str) -> String {
 /// The code `connection record` shows for the demo's paper connection on `account`, caused by the
 /// connect check `checked`, for the owner `user` (DEC-530 item 4): its record's members, the
 /// cause and the gesture, as canonical JSON.
-pub fn record_code(account: &str, checked: &str, user: &str) -> String {
+pub fn record_code(connection: &str, account: &str, checked: &str, user: &str) -> String {
     code(&format!(
         concat!(
             r#"{{"account_ref":"{account}","broker":"alpaca","causation_id":"{checked}","#,
@@ -489,7 +558,7 @@ pub fn record_code(account: &str, checked: &str, user: &str) -> String {
         ),
         account = account,
         checked = checked,
-        connection = CONNECTION,
+        connection = connection,
         user = user,
     ))
 }
@@ -580,15 +649,15 @@ pub(super) fn deploy_code(agent: &str, version: &str) -> String {
 }
 
 /// The demo's steps for `workspace`, given the bytes of the demo's mandate, of
-/// [`WEB_AGENT`]'s, and of [`RESEARCH_AGENT`]'s, and the paper connection the executor's connect
-/// check left `connected`.
+/// [`RESEARCH_AGENT`]'s, and the paper connections the executor's connect checks left
+/// `connected`.
 pub fn plan(
     workspace: &str,
-    (mandate, web_mandate, research_mandate): (&[u8], &[u8], &[u8]),
-    connected: Option<&Connected>,
+    (mandate, research_mandate): (&[u8], &[u8]),
+    connections: Option<&Connections>,
 ) -> Vec<Step> {
+    let connected = connections.map(|c| &c.demo);
     let version = reference(mandate);
-    let web_version = reference(web_mandate);
     let research_version = reference(research_mandate);
     let research_workspace = research_workspace_of(workspace);
     let user = FOUNDER.to_ascii_lowercase();
@@ -637,52 +706,44 @@ pub fn plan(
     let rule_set_in = format!("{INPUTS}/rule-set.json");
     let fee_in = format!("{INPUTS}/fee-config.json");
     let calendar_in = format!("{INPUTS}/trading-calendar.json");
-    let (confirm, deploy) = (confirm_code(&version), deploy_code(AGENT, &version));
-    let (web_confirm, web_deploy) = (
-        confirm_code(&web_version),
-        deploy_code(WEB_AGENT, &web_version),
-    );
+    let (confirm, deploy) = (confirm_code(&version), deploy_code(WEB_AGENT, &version));
     let (research_confirm, research_deploy) = (
         confirm_code(&research_version),
         deploy_code(RESEARCH_AGENT, &research_version),
     );
-    let record_args = |connected: &Connected, extra: &[&str]| {
-        owner(
+    let record_words = |connected: &Connected, extra: &[&str]| -> Vec<String> {
+        [
             &[
-                &[
-                    "connection",
-                    "record",
-                    "--environment",
-                    "paper",
-                    "--connection",
-                    CONNECTION,
-                    "--broker",
-                    "alpaca",
-                    "--scope",
-                    "trading",
-                    "--account-ref",
-                    &connected.account,
-                    "--checked",
-                    &connected.checked,
-                ][..],
-                extra,
-            ]
-            .concat(),
-        )
+                "connection",
+                "record",
+                "--environment",
+                "paper",
+                "--connection",
+                connected.connection,
+                "--broker",
+                "alpaca",
+                "--scope",
+                "trading",
+                "--account-ref",
+                &connected.account,
+                "--checked",
+                &connected.checked,
+            ][..],
+            extra,
+        ]
+        .concat()
+        .iter()
+        .map(|a| a.to_string())
+        .collect()
     };
-    let (bid, bid_size, floor) = EXIT_BID;
-    let exit_args = owner(&[
-        "agent",
-        "exit",
-        AGENT,
-        SPY,
-        "--confirm-bid",
-        bid,
-        "--bid-size",
-        bid_size,
-        "--floor",
-        floor,
-    ]);
+    let record_args = |connected: &Connected, extra: &[&str]| {
+        let words = record_words(connected, extra);
+        owner(&words.iter().map(String::as_str).collect::<Vec<_>>())
+    };
+    let research_record_args = |connected: &Connected, extra: &[&str]| {
+        let words = record_words(connected, extra);
+        researcher(&words.iter().map(String::as_str).collect::<Vec<_>>())
+    };
     let steps = vec![
         Step {
             number: 1,
@@ -740,7 +801,7 @@ pub fn plan(
                     path: format!("/v1/workspaces/{workspace}/agents"),
                     status: 200,
                     ask: Ask::Session,
-                    body: Body::Lists(AGENT),
+                    body: Body::Lists(WEB_AGENT),
                 }),
                 Part::WebSignIn(WebCheck {
                     shows: "the demo owner, signed in to web/ through the stub issuer, reading \
@@ -755,7 +816,7 @@ pub fn plan(
             parts: [
                 match connected {
                     Some(connected) => {
-                        let recorded = record_code(&connected.account, &connected.checked, &user);
+                        let recorded = record_code(connected.connection, &connected.account, &connected.checked, &user);
                         vec![
                             gesture(
                                 "the paper connection's record, its code shown (nothing \
@@ -766,7 +827,7 @@ pub fn plan(
                             gesture(
                                 "the paper connection, recorded with the code shown",
                                 record_args(connected, &["--code", &recorded]),
-                                format!("recorded {CONNECTION} as event"),
+                                format!("recorded {} as event", connected.connection),
                             ),
                         ]
                     }
@@ -835,12 +896,12 @@ pub fn plan(
                     ),
                     gesture(
                         "the deployment's code, shown (nothing committed)",
-                        owner(&["agent", "deploy", AGENT, &version]),
+                        owner(&["agent", "deploy", WEB_AGENT, &version]),
                         format!("code {deploy}"),
                     ),
                     gesture(
                         "the agent, deployed with the code shown",
-                        owner(&["agent", "deploy", AGENT, &version, "--code", &deploy]),
+                        owner(&["agent", "deploy", WEB_AGENT, &version, "--code", &deploy]),
                         "deployed as event".into(),
                     ),
                     Part::Gap(Gap {
@@ -869,7 +930,8 @@ pub fn plan(
         Step {
             number: 3,
             title: "the research loop reads news and filings and asks the model",
-            parts: vec![
+            parts: [
+                vec![
                 gesture(
                     "the research agent's own paper workspace, opened (DEC-2247 item 2)",
                     with(
@@ -900,6 +962,36 @@ pub fn plan(
                     ),
                     format!("founded ctl:{research_workspace} for member {FOUNDER}"),
                 ),
+                ],
+                match connections.map(|c| &c.research) {
+                    Some(connected) => {
+                        let recorded =
+                            record_code(connected.connection, &connected.account, &connected.checked, &user);
+                        vec![
+                            gesture(
+                                "the research workspace's own paper connection's record, its \
+                                 code shown (nothing committed), naming its own connect check",
+                                research_record_args(connected, &[]),
+                                format!("code {recorded}"),
+                            ),
+                            gesture(
+                                "that connection, recorded there with the code shown, so the \
+                                 research agent's deployment is written at version 2",
+                                research_record_args(connected, &["--code", &recorded]),
+                                format!("recorded {} as event", connected.connection),
+                            ),
+                        ]
+                    }
+                    None => vec![Part::Gap(Gap {
+                        what: "the research workspace's own paper connection, recorded from its \
+                               connect, so its deployment is written at version 2",
+                        on_main: "the executor's connect check and its record in the local cell \
+                                  (#1759, #1763), which a run with the executor's image runs for \
+                                  each workspace",
+                        waits: vec![DR_CONNECT],
+                    })],
+                },
+                vec![
                 gesture(
                     "the moving-average crossover model, registered there",
                     researcher(&["model", "register", "quant.ma_crossover", "1.0.0"]),
@@ -962,17 +1054,34 @@ pub fn plan(
                     ]),
                     "deployed as event".into(),
                 ),
-                Part::Gap(Gap {
-                    what: "a research run in the research agent's runtime, over the recorded \
-                           bundle its image carries, through mandate-gateway's recorded fake",
-                    on_main: "the runtime opted into research over the bundle (#1757), the \
-                              bundle in the interim runtime image (#1769), every managed runtime \
-                              pod handed it (#1774), and the research model's registration \
-                              (#1779, #1782), and the connect check and record that write a \
-                              deployment at version 2 (#1759, #1763), which step 2 runs",
-                    waits: vec![DR_RESEARCH],
-                }),
-            ],
+                ],
+                connections
+                    .map(|c| {
+                        vec![Part::Executor(ExecutorCheck {
+                            shows: "the research workspace's executor, started by the deployment \
+                                    manager from the research agent's version-2 deployment, \
+                                    running and live",
+                            account: c.research.account.clone(),
+                        })]
+                    })
+                    .unwrap_or_default(),
+                match connections {
+                    Some(c) => research_loop(&research_workspace, &c.research.account),
+                    None => vec![Part::Gap(Gap {
+                        what: "a research run in the research agent's runtime, over the recorded \
+                               bundle its image carries, through mandate-gateway's recorded fake",
+                        on_main: "the runtime opted into research over the bundle (#1757), the \
+                                  bundle in the interim runtime image (#1769), every managed \
+                                  runtime pod handed it (#1774), and the research model's \
+                                  registration (#1779, #1782), and the connect check and record \
+                                  that write a deployment at version 2 (#1759, #1763)",
+                        waits: vec![DR_RESEARCH],
+                    })],
+                },
+            ]
+            .into_iter()
+            .flatten()
+            .collect(),
         },
         Step {
             number: 4,
@@ -988,7 +1097,7 @@ pub fn plan(
                 }),
                 gesture(
                     "the owner's inbox, read (empty until the runtime asks)",
-                    owner(&["approvals", "list", "--agent", AGENT]),
+                    owner(&["approvals", "list", "--agent", WEB_AGENT]),
                     "no approvals".into(),
                 ),
                 Part::Gap(Gap {
@@ -1015,7 +1124,7 @@ pub fn plan(
                     ],
                 }),
                 Part::WebTradeLoop(WebCheck {
-                    shows: "the trade loop from web/ on the second agent: its approval request \
+                    shows: "the trade loop from web/ on the agent: its approval request \
                             shown, approved with the code the host confirms, the order filled, \
                             the position and the journal shown, then its kill switch",
                     agent: WEB_AGENT,
@@ -1024,9 +1133,15 @@ pub fn plan(
                     what: "the paper fill and the protective stop on a fixture broker",
                     on_main: "the executor process (#1596, binary #1694) and its interim image \
                               in the cell on the fixture paper broker (#1702, DEC-2031), handing \
-                              its agents' orders to the core (#1736), with the runtime proposing \
-                              nothing on the deny-all wiring (DEC-1013)",
-                    waits: vec![X_EXECUTOR, P5_HOOK],
+                              its agents' orders to the core (#1736); the fixture fills, and the \
+                              executor reads each deployment's mandate, gate and protection \
+                              (#2547, #2605) and its broker by asset id, so a deployed opening is \
+                              gated, filled, booked and protected in process (#2624, DEC-2813); \
+                              the cell's daemon asks on a deferring opening (#2538), and, in \
+                              process, the runtime's production wiring decides, asks and \
+                              proposes the opening once granted, on the demo envelope (#2637); \
+                              the cell's runtime is wired by the gap above",
+                    waits: vec![E2E_FILL],
                 }),
             ],
         },
@@ -1091,93 +1206,32 @@ pub fn plan(
         Step {
             number: 6,
             title: "the owner exits the agent's instrument at a confirmed floor",
-            parts: vec![
-                gesture(
-                    "the owner's exit at the confirmed bid, size and floor, committed: a risk \
-                     reduction, which needs no code (AGENTS.md rules 2 and 13)",
-                    exit_args,
-                    format!("owner_exit {AGENT} {SPY} committed as event"),
-                ),
-                Part::Gap(Gap {
-                    what: "the exit handed to the executor's core, priced at the confirmed floor",
-                    on_main: "the executor process hands its agents' orders to the core and \
-                              prices an owner's exit at the floor it confirmed (#1736, DEC-2033 \
-                              item 4), its image in the cell (#1702), started and live from step \
-                              2's version-2 deployment (#1763)",
-                    waits: vec![P2_SCHEDULER],
-                }),
-                Part::Gap(Gap {
-                    what: "the exit's paper fill on the fixture broker, out of the position \
-                           step 4 filled",
-                    on_main: "the executor's interim image on the fixture paper broker (#1702, \
-                              DEC-2031)",
-                    waits: vec![X_EXECUTOR, P5_HOOK],
-                }),
-            ],
+            parts: vec![Part::Gap(Gap {
+                what: "the owner's exit of the agent's position from web/, at a confirmed bid, \
+                       after the trade loop's fill and its protective stop, so the sale shows in \
+                       its positions and audit before the kill switch",
+                on_main: "the owner's exit over the API (#2501), handed to the executor's core and \
+                          priced at the floor it confirmed (#1736, DEC-2033 item 4); an exit \
+                          before the fill sells nothing, so no gesture of the Job runs one",
+                waits: vec![WB_EXIT],
+            })],
         },
         Step {
             number: 7,
             title: "the kill switch from the web app stops the agent",
             parts: vec![
-                gesture(
-                    "QQQ's instrument snapshot, registered, for a second agent's envelope",
-                    owner(&[
-                        "config",
-                        "register",
-                        "--kind",
-                        "instrument_snapshot",
-                        &format!("{INPUTS}/web-instrument.json"),
-                    ]),
-                    "registered as event".into(),
-                ),
-                gesture(
-                    "the second agent's envelope, created: the demo's on QQQ",
-                    owner(&["version", "create", &format!("{INPUTS}/web-mandate.json")]),
-                    format!("created {web_version}"),
-                ),
-                gesture(
-                    "its confirmation code, shown (nothing committed)",
-                    owner(&["version", "confirm", &web_version]),
-                    format!("code {web_confirm}"),
-                ),
-                gesture(
-                    "the second envelope, confirmed with the code shown",
-                    owner(&["version", "confirm", &web_version, "--code", &web_confirm]),
-                    "confirmed as event".into(),
-                ),
-                gesture(
-                    "the second agent's code, shown, for web/'s kill switch",
-                    owner(&["agent", "deploy", WEB_AGENT, &web_version]),
-                    format!("code {web_deploy}"),
-                ),
-                gesture(
-                    "the second agent, deployed with the code shown",
-                    owner(&[
-                        "agent",
-                        "deploy",
-                        WEB_AGENT,
-                        &web_version,
-                        "--code",
-                        &web_deploy,
-                    ]),
-                    "deployed as event".into(),
-                ),
                 Part::Web(WebCheck {
-                    shows: "the owner's kill switch for the second agent, pressed in web/ and \
-                            recorded through the API on the run's control stream",
+                    shows: "the owner's kill switch for the agent, pressed in web/ and recorded \
+                            through the API on the run's control stream: the trade loop's own, \
+                            or, when the loop stopped before it, the kill switch gesture alone",
                     agent: WEB_AGENT,
                 }),
-                gesture(
-                    "the owner's kill switch for the agent, through the CLI (agent scope)",
-                    owner(&["agent", "kill", "--agent", AGENT]),
-                    format!("kill_switch agent {AGENT} committed as event"),
-                ),
                 match connected {
                     Some(_) => Part::Applied(AppliedCheck {
                         shows: "the agent's runtime, started from step 2's version-2 \
-                                deployment, applying the CLI's kill switch: its command read \
-                                back applied with the owner's session",
-                        agent: AGENT,
+                                deployment, applying web/'s kill switch: its command read back \
+                                applied with the owner's session",
+                        agent: WEB_AGENT,
                     }),
                     None => Part::Gap(Gap {
                         what: "the agent's runtime applies it",
@@ -1225,9 +1279,159 @@ pub fn gestures(steps: &[Step]) -> Vec<&Gesture> {
             | Part::WebTradeLoop(_)
             | Part::Executor(_)
             | Part::Applied(_)
+            | Part::Loop(_)
+            | Part::Grant(_)
             | Part::Gap(_) => None,
         })
         .collect()
+}
+
+/// The research workspace's trade loop after its executor is live (DEC-2071, DEC-2394), each link
+/// its own part, in the order the story runs: the agent's research run and thesis on its own
+/// stream, the opening it asks, the owner's grant on the CLI, the runtime's record of it, the
+/// paper fill and the protective stop on `account`'s stream, then the news item that ends the
+/// thesis, its invalidation, and the thesis exit's sell. Every link until a run of the cell shows
+/// it names the lanes it waits on; an opening is decided only in the regular session.
+fn research_loop(workspace: &str, account: &str) -> Vec<Part> {
+    let agent = format!("agent:{workspace}:{RESEARCH_AGENT}");
+    let acct = format!("acct:{workspace}:{account}");
+    let link = |shows: &'static str,
+                stream: &str,
+                event_type: &'static str,
+                holding: Option<&'static str>,
+                what: &'static str,
+                on_main: &'static str,
+                waits: Vec<Wait>| {
+        Part::Loop(LoopCheck {
+            shows,
+            stream: stream.to_owned(),
+            event_type,
+            holding,
+            gap: Gap {
+                what,
+                on_main,
+                waits,
+            },
+        })
+    };
+    let session = "an opening is decided only in the regular session, 13:30 to 20:00 UTC on a \
+                   trading day, so outside it this link waits for the next";
+    vec![
+        link(
+            "the research agent's runtime starts a research run on its own clock",
+            &agent,
+            "RunStarted",
+            None,
+            "a research run in the research agent's runtime, over the recorded bundle its image \
+             carries, through the model gateway's recorded fake",
+            "the runtime calls the model gateway (#2636) and ticks on its own workspace's clock \
+             (DEC-2071)",
+            vec![GW_RESEARCH],
+        ),
+        link(
+            "its research proposes a thesis, admitted",
+            &agent,
+            "ThesisProposed",
+            Some(r#""admitted":true"#),
+            "the research run's thesis, admitted through the eligibility floor and the autonomy \
+             rules",
+            "the recorded bundle's reply and the core's thesis lifecycle (DEC-2246)",
+            vec![GW_RESEARCH],
+        ),
+        link(
+            "the runtime sizes the opening and the gate and autonomy rules ask",
+            &agent,
+            "ApprovalRequested",
+            Some(r#""purpose":"open""#),
+            "the opening the runtime sizes for the thesis, asked under the envelope's autonomy \
+             rules",
+            session,
+            vec![P5_HOOK],
+        ),
+        Part::Grant(GrantCheck {
+            shows: "the owner grants it on the CLI, its code shown and then typed",
+            workspace: workspace.to_owned(),
+            agent: RESEARCH_AGENT,
+            gap: Gap {
+                what: "the owner's grant of the asked opening",
+                on_main: "`mandate approvals list`, `show` and `approve` (K1a, DEC-533)",
+                waits: vec![P5_HOOK],
+            },
+        }),
+        link(
+            "the runtime records the grant, admitted",
+            &agent,
+            "ApprovalResponded",
+            Some(r#""result":"admitted""#),
+            "the runtime's record of the owner's grant",
+            "the core's approval flow (mandate spec §6.4)",
+            vec![P5_HOOK],
+        ),
+        link(
+            "the executor submits the opening",
+            &acct,
+            "OrderRequestRecorded",
+            Some(r#""purpose":"open""#),
+            "the opening, through the account ledger to the fixture broker",
+            "the executor takes the runtime's orders (#1736)",
+            vec![E2E_FILL, P5_HOOK],
+        ),
+        link(
+            "the opening fills on the fixture",
+            &acct,
+            "FillApplied",
+            Some(r#""side":"buy""#),
+            "the paper fill of the opening on the fixture broker",
+            "the executor on its fixture paper broker (DEC-2031)",
+            vec![E2E_FILL],
+        ),
+        link(
+            "the protective stop goes out",
+            &acct,
+            "ProtectionChanged",
+            Some(r#""action":"placed""#),
+            "the protective stop on the filled position, placed as the bracket's legs",
+            "protective-exit sequencing in the executor (trading spec §5.4)",
+            vec![E2E_FILL],
+        ),
+        link(
+            "a monitor run starts on the held thesis",
+            &agent,
+            "RunStarted",
+            Some(r#""kind":"monitor""#),
+            "the monitor run over the held thesis, which reads the news item that ends it, \
+             journaled before the run uses it",
+            "the research pass offers arrived items to the core (#2575)",
+            vec![NE_NEWS],
+        ),
+        link(
+            "the monitor run invalidates the thesis",
+            &agent,
+            "ThesisInvalidated",
+            None,
+            "the monitor run's verdict that ends the thesis",
+            "a recording's monitor reply naming the thesis (#2632)",
+            vec![NE_NEWS],
+        ),
+        link(
+            "the thesis exit submits its sell",
+            &acct,
+            "OrderRequestRecorded",
+            Some(r#""purpose":"discretionary_exit""#),
+            "the thesis exit's sell of the position",
+            "the order builder's signal exit (trading spec §8.3 step 2)",
+            vec![NE_NEWS, E2E_FILL],
+        ),
+        link(
+            "the sell fills on the fixture",
+            &acct,
+            "FillApplied",
+            Some(r#""side":"sell""#),
+            "the paper fill of the thesis exit",
+            "the executor on its fixture paper broker (DEC-2031)",
+            vec![NE_NEWS, E2E_FILL],
+        ),
+    ]
 }
 
 /// The gestures' Job: the chart's own `control` run Job for the first gesture, its container
@@ -1361,20 +1565,19 @@ fn backtest_inputs(root: &Path) -> Result<Vec<(String, String)>> {
     .collect()
 }
 
-/// The demo's inputs: its three envelopes, and every file the gestures' pod mounts at [`INPUTS`]
-/// under its path there (the envelopes, the instruments, the research recording and the backtest
-/// runner's demo inputs).
+/// The demo's inputs: its two envelopes, the run's workspace's and the research agent's, and every
+/// file the gestures' pod mounts at [`INPUTS`] under its path there (the envelopes, the instrument,
+/// the research recording and the backtest runner's demo inputs).
 pub struct DemoInputs {
     mandate: Vec<u8>,
-    web_mandate: Vec<u8>,
     research_mandate: Vec<u8>,
     files: Vec<(String, String)>,
 }
 
 impl DemoInputs {
-    /// The three envelopes [`plan`] takes.
-    pub fn envelopes(&self) -> (&[u8], &[u8], &[u8]) {
-        (&self.mandate, &self.web_mandate, &self.research_mandate)
+    /// The two envelopes [`plan`] takes.
+    pub fn envelopes(&self) -> (&[u8], &[u8]) {
+        (&self.mandate, &self.research_mandate)
     }
 
     /// The mounted files, as [`gestures_job`] takes them.
@@ -1392,11 +1595,7 @@ pub fn demo_inputs() -> Result<DemoInputs> {
     let text = |bytes: Vec<u8>, path: &str| {
         String::from_utf8(bytes).with_context(|| format!("{path} is not UTF-8"))
     };
-    let (mandate, web_mandate, research_mandate) = (
-        read(MANDATE_FILE)?,
-        read(WEB_MANDATE_FILE)?,
-        read(RESEARCH_MANDATE_FILE)?,
-    );
+    let (mandate, research_mandate) = (read(MANDATE_FILE)?, read(RESEARCH_MANDATE_FILE)?);
     let files = [
         ("mandate.json", text(mandate.clone(), MANDATE_FILE)?),
         (
@@ -1413,14 +1612,6 @@ pub fn demo_inputs() -> Result<DemoInputs> {
             text(read(TRADING_CALENDAR_FILE)?, TRADING_CALENDAR_FILE)?,
         ),
         (
-            "web-mandate.json",
-            text(web_mandate.clone(), WEB_MANDATE_FILE)?,
-        ),
-        (
-            "web-instrument.json",
-            text(read(WEB_INSTRUMENT_FILE)?, WEB_INSTRUMENT_FILE)?,
-        ),
-        (
             "research-mandate.json",
             text(research_mandate.clone(), RESEARCH_MANDATE_FILE)?,
         ),
@@ -1435,7 +1626,6 @@ pub fn demo_inputs() -> Result<DemoInputs> {
     .collect();
     Ok(DemoInputs {
         mandate,
-        web_mandate,
         research_mandate,
         files,
     })
@@ -1604,12 +1794,40 @@ pub fn run_in(name: &str) -> Result<String> {
         None
     } else {
         let account = account_of(&id);
-        let checked = match connect_check(&format!("{id}c"), &workspace, &account)? {
+        let checked = match connect_check(&format!("{id}c"), &workspace, &account, CONNECTION)? {
             Ok(checked) => checked,
             Err(logs) => bail!("the executor's connect check for the demo did not pass:\n{logs}"),
         };
         eprintln!("    connect check: passed as {checked} for account {account}");
-        Some(Connected { account, checked })
+        let research_workspace = research_workspace_of(&workspace);
+        let research_account = research_account_of(&id);
+        let research_checked = match connect_check(
+            &format!("{id}r"),
+            &research_workspace,
+            &research_account,
+            RESEARCH_CONNECTION,
+        )? {
+            Ok(checked) => checked,
+            Err(logs) => bail!(
+                "the executor's connect check for the research workspace did not pass:\n{logs}"
+            ),
+        };
+        eprintln!(
+            "    connect check: passed as {research_checked} for the research workspace's account \
+             {research_account}"
+        );
+        Some(Connections {
+            demo: Connected {
+                connection: CONNECTION,
+                account,
+                checked,
+            },
+            research: Connected {
+                connection: RESEARCH_CONNECTION,
+                account: research_account,
+                checked: research_checked,
+            },
+        })
     };
     let steps = plan(&workspace, inputs.envelopes(), connected.as_ref());
     let all = gestures(&steps);
@@ -1624,7 +1842,7 @@ pub fn run_in(name: &str) -> Result<String> {
     let files = inputs.files();
     let objects = gestures_job(rendered, &all, &format!("demo-in-{id}"), &files, NAMESPACE)?;
     eprintln!("==> the demo, end to end (paper and demo data only; local-cell results)");
-    eprintln!("    workspace {workspace}, agent {AGENT}");
+    eprintln!("    workspace {workspace}, agent {WEB_AGENT}");
     let job = objects
         .iter()
         .find(|o| o["kind"] == "Job")
@@ -1647,8 +1865,9 @@ pub fn run_in(name: &str) -> Result<String> {
     let mut gaps = 0;
     let mut browsed: Option<WebOutcome> = None;
     let mut traded: Option<TradeOutcome> = None;
+    let mut looped = Looped::Open;
+    let mut linked = BTreeMap::<String, u64>::new();
     for step in &steps {
-        let mut previous: Option<&Gesture> = None;
         let waiting = lanes(step);
         let on = if waiting.is_empty() {
             String::new()
@@ -1685,7 +1904,6 @@ pub fn run_in(name: &str) -> Result<String> {
                         );
                         failed = Some(g.container.clone());
                     }
-                    previous = Some(g);
                 }
                 Part::Executor(check) => {
                     let (word, said) = if failed.is_some() {
@@ -1702,16 +1920,10 @@ pub fn run_in(name: &str) -> Result<String> {
                     eprintln!("    {word:<8} {}: {said}", check.shows);
                 }
                 Part::Applied(check) => {
-                    let command =
-                        previous.and_then(|g| committed_event(&lines_of(&logs, &g.container)));
-                    let (word, said) = match (&failed, command) {
+                    let (word, said) = match (&failed, applied_from(browsed.as_ref())) {
                         (Some(_), _) => ("not run", "an earlier part failed".to_owned()),
-                        (None, None) => {
-                            let why = "the gesture before it named no committed event".to_owned();
-                            failed = Some(why.clone());
-                            ("failed", why)
-                        }
-                        (None, Some(command)) => {
+                        (None, Err(why)) => ("not run", why),
+                        (None, Ok(command)) => {
                             let read = applied_read(&workspace, check.agent, &command);
                             let (word, said, fails) = poll_applied(&read)?;
                             if fails {
@@ -1776,6 +1988,27 @@ pub fn run_in(name: &str) -> Result<String> {
                         failed.get_or_insert_with(|| format!("web/ {}: {said}", check.agent));
                     }
                 }
+                Part::Loop(_) | Part::Grant(_) => {
+                    let (shows, gap) = match part {
+                        Part::Loop(check) => (check.shows, &check.gap),
+                        Part::Grant(check) => (check.shows, &check.gap),
+                        _ => continue,
+                    };
+                    let seen = match (&failed, &looped, part) {
+                        (None, Looped::Open, Part::Loop(check)) => {
+                            Some(journaled(check, &mut linked))
+                        }
+                        (None, Looped::Open, Part::Grant(check)) => Some(grant(check, &id, &files)),
+                        _ => None,
+                    };
+                    let required = env::var_os(CELL_REQUIRED_ENV).is_some();
+                    let (word, said) =
+                        link_verdict(failed.is_some(), required, &mut looped, seen, gap);
+                    if word == "failed" {
+                        failed.get_or_insert_with(|| format!("research loop: {said}"));
+                    }
+                    eprintln!("    {word:<8} {shows}: {said}");
+                }
                 Part::Gap(gap) => {
                     gaps += 1;
                     eprintln!("    gap      {}", gap.what);
@@ -1838,6 +2071,310 @@ fn poll_applied(check: &ApiCheck) -> Result<(&'static str, String, bool)> {
 /// How long [`poll_applied`] waits for the kill switch to read back applied.
 const APPLIED_WITHIN: Duration = Duration::from_secs(90);
 
+/// How long the research loop waits for each of its links to appear in the journal: one research
+/// pass at the runtime's tick, or the executor's next reconciliation, with the Job's ten minutes in
+/// mind, since a link not seen stops the loop's later reads.
+const LINK_WITHIN: Duration = Duration::from_secs(60);
+
+/// Whether the research loop's later links are read: `Open` until a link is not seen, then
+/// `Stopped` with that link, so every later link reads as not reached rather than spending its own
+/// wait on what cannot follow.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Looped {
+    Open,
+    Stopped(&'static str),
+}
+
+/// What a read of a link found: the line that shows it, that it is not there, or why it could not
+/// be read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Seen {
+    There(String),
+    Absent,
+    Unread(String),
+}
+
+/// A link's word and what it says, given whether an earlier part failed, whether the cell is required
+/// (`CELL_REQUIRED_ENV`), the loop so far, what its read found (`None` when it was not read), and the
+/// gap it stands for. A link seen ran; one not seen stops the loop and reads as its gap, so a link
+/// not yet on main is named, never failed; one that could not be read fails when the cell is
+/// required, since the journal or the CLI broke, and otherwise reads as its gap with why; every
+/// later link reads as not reached.
+pub fn link_verdict(
+    earlier_failed: bool,
+    required: bool,
+    looped: &mut Looped,
+    seen: Option<Seen>,
+    gap: &Gap,
+) -> (&'static str, String) {
+    if earlier_failed {
+        return ("not run", "an earlier part failed".to_owned());
+    }
+    if let Looped::Stopped(at) = looped {
+        return ("not reached", format!("the loop stopped at: {at}"));
+    }
+    let waits = || {
+        gap.waits
+            .iter()
+            .map(|w| format!("{}: {}", w.named(), w.lands))
+            .collect::<Vec<_>>()
+            .join("; ")
+    };
+    match seen {
+        Some(Seen::There(line)) => ("ran", line),
+        Some(Seen::Unread(why)) if required => {
+            *looped = Looped::Stopped(gap.what);
+            ("failed", format!("{}, not read: {why}", gap.what))
+        }
+        Some(Seen::Unread(why)) => {
+            *looped = Looped::Stopped(gap.what);
+            (
+                "gap",
+                format!("{}, not read: {why} (waits on {})", gap.what, waits()),
+            )
+        }
+        Some(Seen::Absent) | None => {
+            *looped = Looped::Stopped(gap.what);
+            ("gap", format!("{} (waits on {})", gap.what, waits()))
+        }
+    }
+}
+
+/// The text as SQL quotes it.
+fn sql_quoted(text: &str) -> String {
+    format!("'{}'", text.replace('\'', "''"))
+}
+
+/// The query that finds `check`'s first event after `after` on its stream: of its type, its stored
+/// body holding its fragment as a plain substring (no pattern), every literal quoted as SQL quotes
+/// it; it answers that event's sequence number, or nothing.
+pub fn link_query(check: &LoopCheck, after: u64) -> String {
+    let holding = check
+        .holding
+        .map(|fragment| {
+            format!(
+                " AND position({} in convert_from(body, 'UTF8')) > 0",
+                sql_quoted(fragment)
+            )
+        })
+        .unwrap_or_default();
+    format!(
+        "SELECT seq FROM journal.events WHERE stream_id = {} AND event_type = {}{holding} AND \
+         seq > {after} ORDER BY seq LIMIT 1",
+        sql_quoted(&check.stream),
+        sql_quoted(check.event_type)
+    )
+}
+
+/// Reads `check`'s first event after the last link seen on its stream, `after`'s, from the journal's
+/// primary every two seconds until one is there or [`LINK_WITHIN`] has passed, and records its
+/// sequence number there: what Postgres holds, not what a process reports.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the host-side scenario bounds its wait for a live cell by the host's clock"
+)]
+fn journaled(check: &LoopCheck, after: &mut BTreeMap<String, u64>) -> Seen {
+    let since = after.get(&check.stream).copied().unwrap_or(0);
+    let query = link_query(check, since);
+    let deadline = Instant::now() + LINK_WITHIN;
+    loop {
+        match super::on_primary(&query) {
+            Ok(answer) => match answer.trim().parse::<u64>() {
+                Ok(seq) => {
+                    after.insert(check.stream.clone(), seq);
+                    return Seen::There(format!(
+                        "{} at seq {seq} of {}",
+                        check.event_type, check.stream
+                    ));
+                }
+                Err(_) if Instant::now() < deadline => sleep(Duration::from_secs(2)),
+                Err(_) => return Seen::Absent,
+            },
+            Err(why) => return Seen::Unread(format!("{why:#}")),
+        }
+    }
+}
+
+/// The owner's arguments for a CLI gesture in `workspace`, as the plan's gestures carry them.
+fn owner_in(workspace: &str, args: &[&str]) -> Vec<String> {
+    let user = FOUNDER.to_ascii_lowercase();
+    args.iter()
+        .copied()
+        .chain([
+            "--workspace",
+            workspace,
+            "--user",
+            &user,
+            "--journal",
+            JOURNAL,
+            "--store",
+            STORE,
+        ])
+        .map(str::to_owned)
+        .collect()
+}
+
+/// The first pending approval of `agent` that `approvals list` printed.
+pub fn pending_approval(lines: &[&str], agent: &str) -> Option<String> {
+    lines.iter().find_map(|line| {
+        let words: Vec<&str> = line.split_whitespace().collect();
+        match words.as_slice() {
+            [approval, of, "pending", ..] if *of == agent => Some((*approval).to_owned()),
+            _ => None,
+        }
+    })
+}
+
+/// Whether the content `approvals show` printed asks an opening, the one approval the research loop
+/// grants (mandate spec §6.4: only `open` and `increase` are ever asked).
+pub fn shows_opening(lines: &[&str]) -> bool {
+    lines
+        .iter()
+        .any(|line| line.starts_with('{') && line.contains(r#""purpose":"open""#))
+}
+
+/// What `approvals approve` printed: its `granted` line when the line after it says the grant was
+/// admitted or is not recorded yet (`approvals::message`), the runtime's record being the next
+/// link; else why not, a refusal, a count short of the approvers, or a skip on re-validation, each a
+/// grant that did not do what it shows.
+pub fn granted(lines: &[&str], approval: &str) -> Seen {
+    let head = format!("granted {approval} as event ");
+    let Some(at) = lines.iter().position(|l| l.starts_with(&head)) else {
+        return Seen::Unread(format!("`approvals approve {approval}` granted nothing"));
+    };
+    match lines.get(at + 1) {
+        Some(said)
+            if said.starts_with("Admitted and sent")
+                || said.starts_with("Admitted, not yet re-validated")
+                || said.starts_with("Not recorded yet") =>
+        {
+            Seen::There(format!("{}; {said}", lines[at]))
+        }
+        Some(said) => Seen::Unread(format!("{}; {said}", lines[at])),
+        None => Seen::Unread(format!("{}; no outcome printed", lines[at])),
+    }
+}
+
+/// The code `approvals show` printed.
+pub fn shown_code(lines: &[&str]) -> Option<String> {
+    lines
+        .iter()
+        .find_map(|line| line.strip_prefix("code "))
+        .map(str::to_owned)
+}
+
+/// Runs one CLI gesture as its own Job after the gestures' Job, as `confirm_on_host` does, and
+/// returns its lines when it exited cleanly.
+fn control_gesture(
+    gesture: &Gesture,
+    run: &str,
+    files: &[(&str, String)],
+) -> std::result::Result<Vec<String>, String> {
+    let ran = || -> Result<(bool, String)> {
+        let rendered = render(
+            &[
+                format!("run.id=\"{run}\""),
+                format!("run.args={}", json!(gesture.args)),
+            ],
+            Some("templates/run.yaml"),
+        )?;
+        run_job(gestures_job(
+            rendered,
+            &[gesture],
+            &format!("demo-in-{run}"),
+            files,
+            NAMESPACE,
+        )?)
+    };
+    match ran() {
+        Ok((true, logs)) => Ok(lines_of(&logs, &gesture.container)
+            .iter()
+            .map(|l| (*l).to_owned())
+            .collect()),
+        Ok((false, logs)) => Err(format!(
+            "`mandate {}` failed:\n{logs}",
+            gesture.args.join(" ")
+        )),
+        Err(why) => Err(format!("{why:#}")),
+    }
+}
+
+/// The owner's grant of `check`'s agent's pending opening: `approvals list` finds it, `approvals
+/// show` shows its code, and `approvals approve` types that code, each its own Job in the research
+/// workspace. A list with no pending approval is the link not seen.
+fn grant(check: &GrantCheck, id: &str, files: &[(&str, String)]) -> Seen {
+    let step = |n: u8, container: &str, args: &[&str], expect: &str| Gesture {
+        container: format!("g9{n}-{container}"),
+        shows: check.shows,
+        command: None,
+        args: owner_in(&check.workspace, args),
+        expect: expect.to_owned(),
+    };
+    let listed = match control_gesture(
+        &step(
+            5,
+            "approvals-list",
+            &["approvals", "list", "--agent", check.agent],
+            "pending",
+        ),
+        &format!("{id}l"),
+        files,
+    ) {
+        Ok(lines) => lines,
+        Err(why) => return Seen::Unread(why),
+    };
+    let lines: Vec<&str> = listed.iter().map(String::as_str).collect();
+    let Some(approval) = pending_approval(&lines, check.agent) else {
+        return Seen::Absent;
+    };
+    let shown = match control_gesture(
+        &step(
+            6,
+            "approvals-show",
+            &["approvals", "show", &approval, "--agent", check.agent],
+            "code ",
+        ),
+        &format!("{id}w"),
+        files,
+    ) {
+        Ok(lines) => lines,
+        Err(why) => return Seen::Unread(why),
+    };
+    let lines: Vec<&str> = shown.iter().map(String::as_str).collect();
+    if !shows_opening(&lines) {
+        return Seen::Unread(format!(
+            "`approvals show {approval}` shows no opening, so it is not granted"
+        ));
+    }
+    let Some(code) = shown_code(&lines) else {
+        return Seen::Unread(format!("`approvals show {approval}` showed no code"));
+    };
+    match control_gesture(
+        &step(
+            7,
+            "approvals-approve",
+            &[
+                "approvals",
+                "approve",
+                &approval,
+                "--agent",
+                check.agent,
+                "--code",
+                &code,
+            ],
+            "granted ",
+        ),
+        &format!("{id}g"),
+        files,
+    ) {
+        Ok(lines) => granted(
+            &lines.iter().map(String::as_str).collect::<Vec<_>>(),
+            &approval,
+        ),
+        Err(why) => Seen::Unread(why),
+    }
+}
+
 /// Why the cell's API cannot be asked, or `None` when it can: no API in the process list, a cell
 /// that pulled its images and has no API image, or no `kubectl` on this machine to forward with.
 fn api_unaskable() -> Result<Option<String>> {
@@ -1860,32 +2397,56 @@ fn api_unaskable() -> Result<Option<String>> {
     Ok(None)
 }
 
-/// Points the cell's API and deployment manager at the run's `workspace` (DEC-2010): a `helm
-/// upgrade` of the workspace release that keeps every other value, then a wait until both
-/// Deployments have rolled out, so no pod of an earlier run still serves another workspace; and
+/// The Deployments [`point_api`] points at the run and waits on: the API, the first manager and
+/// the first scheduler on the run's workspace, and the second manager, the second scheduler and the
+/// model gateway on its research workspace (DEC-2070, DEC-2071).
+const POINTED: [&str; 6] = [
+    API_PROCESS,
+    DEPLOY_MANAGER_PROCESS,
+    SCHEDULER_PROCESS,
+    RESEARCH_MANAGER_PROCESS,
+    RESEARCH_SCHEDULER_PROCESS,
+    MODEL_GATEWAY_PROCESS,
+];
+
+/// The chart values [`point_api`] sets for the run's `workspace`: the API on it, and the second
+/// manager and the model gateway on its research workspace, the same ULID with `r`, the one value
+/// the chart takes for either (DEC-2070 items 1 and 5).
+fn pointed_values(workspace: &str) -> [String; 3] {
+    let research = research_workspace_of(workspace);
+    [
+        format!("api.workspace={workspace}"),
+        format!("deployManager.researchWorkspace={research}"),
+        format!("modelGateway.workspace={research}"),
+    ]
+}
+
+/// Points the cell's API and deployment manager at the run's `workspace` (DEC-2010), and the second
+/// manager and the model gateway at its research workspace (DEC-2070, DEC-2397 item 6): a `helm
+/// upgrade` of the workspace release that keeps every other value, then a wait until each of those
+/// Deployments the cell holds has rolled out, so no pod of an earlier run still serves another
+/// workspace; and
 /// any earlier `kubectl port-forward` to the API is stopped, so the checks never reach an old pod
 /// through it (`api_port_forward` would reuse a forward that still answers its 401).
 pub(super) fn point_api(workspace: &str) -> Result<()> {
-    let hosted = format!("api.workspace={workspace}");
-    let upgraded = helm(&[
-        "upgrade",
-        "workspace",
-        WORKSPACE_CHART,
-        "--namespace",
-        NAMESPACE,
-        "--reuse-values",
-        "--set",
-        &hosted,
-        "--wait",
-        "--wait-for-jobs",
-        "--timeout",
-        "3m",
-    ]);
+    let mut args = vec![
+        "upgrade".to_owned(),
+        "workspace".to_owned(),
+        WORKSPACE_CHART.to_owned(),
+        "--namespace".to_owned(),
+        NAMESPACE.to_owned(),
+        "--reuse-values".to_owned(),
+    ];
+    for value in pointed_values(workspace) {
+        args.extend(["--set".to_owned(), value]);
+    }
+    args.extend(["--wait", "--wait-for-jobs", "--timeout", "3m"].map(str::to_owned));
+    let upgraded = helm(&args.iter().map(String::as_str).collect::<Vec<_>>());
     if upgraded.is_err() {
         api_diagnosis();
     }
     upgraded?;
-    for process in [API_PROCESS, DEPLOY_MANAGER_PROCESS] {
+    for process in POINTED {
         let deployment = format!("deployment/{process}");
         let present = kubectl(&[
             "get",
@@ -2019,8 +2580,8 @@ pub enum TradeOutcome {
     Ran(web::TradeLoop),
 }
 
-/// The scenario's one pass through the browser on `agent`, the second agent, which nothing has
-/// stopped yet: first the trade loop (lane W's spec, its confirmation run on the host as a control
+/// The scenario's one pass through the browser on `agent`, the run's workspace's one agent, which
+/// nothing in the gestures' Job stops: first the trade loop (lane W's spec, its confirmation run on the host as a control
 /// gesture), then, unless the loop pressed the agent's kill switch itself, the kill switch gesture
 /// alone, so step 1's sign-in, step 4's loop and step 7's kill switch read one browser session's
 /// work. A loop that pressed the kill switch hands step 7 that command.
@@ -2230,9 +2791,8 @@ fn web_outcome(check: &WebCheck, workspace: &str) -> Result<WebOutcome> {
 }
 
 /// The signed-in read of `command` in `workspace`: the API finds it on the workspace's control
-/// stream and reads it accepted. It does not require `applied`: the browser's agent is killed
-/// after the Job, and step 7's [`AppliedCheck`] of the CLI's kill switch proves the runtime applies
-/// one (DEC-2379).
+/// stream and reads it accepted. It does not require `applied`: step 7's [`AppliedCheck`] then
+/// reads the same command back until the agent's runtime applied it (DEC-2379).
 pub fn command_read(workspace: &str, command: &str) -> ApiCheck {
     ApiCheck {
         shows: "the web gesture's command, read back",
@@ -2267,12 +2827,20 @@ pub fn applied_read(workspace: &str, agent: &str, command: &str) -> ApiCheck {
     }
 }
 
-/// The event id a gesture's `committed as event <id>` line names.
-pub fn committed_event(lines: &[&str]) -> Option<String> {
-    lines.iter().find_map(|l| {
-        let (_, rest) = l.split_once("committed as event ")?;
-        rest.split_whitespace().next().map(str::to_owned)
-    })
+/// The command step 7's applied check reads back: the one web/'s kill switch recorded, or why
+/// there is none. A browser that could not run, or ran after an earlier failure, leaves nothing
+/// to read, which reads `not run` as web/'s own parts do (their verdict fails it where web/ is
+/// required), never as a failure of its own.
+pub fn applied_from(browsed: Option<&WebOutcome>) -> Result<String, String> {
+    match browsed {
+        Some(WebOutcome::Recorded { command, .. }) => Ok(command.clone()),
+        Some(WebOutcome::Unaskable(why) | WebOutcome::NoTools(why)) => {
+            Err(format!("web/'s kill switch did not run: {why}"))
+        }
+        Some(WebOutcome::Failed(_) | WebOutcome::AfterFailure) | None => {
+            Err("an earlier part failed".to_owned())
+        }
+    }
 }
 
 /// What a run requires: the cell ([`CELL_REQUIRED_ENV`]) and the web gesture
@@ -2377,10 +2945,6 @@ mod tests {
         fs::read(format!("../{MANDATE_FILE}")).unwrap()
     }
 
-    fn web_mandate() -> Vec<u8> {
-        fs::read(format!("../{WEB_MANDATE_FILE}")).unwrap()
-    }
-
     fn research_mandate() -> Vec<u8> {
         fs::read(format!("../{RESEARCH_MANDATE_FILE}")).unwrap()
     }
@@ -2388,27 +2952,38 @@ mod tests {
     /// The connect check a run's plan names: run 1's account, and a passing check's event id.
     fn connected() -> Connected {
         Connected {
+            connection: CONNECTION,
             account: account_of("1"),
             checked: "01KDEC0000000000000000000C".into(),
         }
     }
 
-    /// The plan for `workspace` on the demo's three envelopes, after [`connected`]'s check.
+    /// The research workspace's connect check a run's plan names: run 1's research account, and
+    /// a passing check's event id.
+    fn research_connected() -> Connected {
+        Connected {
+            connection: RESEARCH_CONNECTION,
+            account: research_account_of("1"),
+            checked: "01KDEC0000000000000000000R".into(),
+        }
+    }
+
+    /// The plan for `workspace` on the demo's three envelopes, after [`connected`]'s and
+    /// [`research_connected`]'s checks.
     fn planned(workspace: &str) -> Vec<Step> {
         plan(
             workspace,
-            (&mandate(), &web_mandate(), &research_mandate()),
-            Some(&connected()),
+            (&mandate(), &research_mandate()),
+            Some(&Connections {
+                demo: connected(),
+                research: research_connected(),
+            }),
         )
     }
 
     /// The plan the staging dry run renders, which names no connect check.
     fn unconnected(workspace: &str) -> Vec<Step> {
-        plan(
-            workspace,
-            (&mandate(), &web_mandate(), &research_mandate()),
-            None,
-        )
+        plan(workspace, (&mandate(), &research_mandate()), None)
     }
 
     fn parsed(path: &str) -> Value {
@@ -2489,7 +3064,7 @@ mod tests {
         assert_eq!(pinned[0]["symbol"], instrument["symbol"]);
     }
 
-    /// The second agent's envelope is the demo's but for its name, its description and its one
+    /// The QQQ envelope, a test fixture now, is the demo's but for its name, its description and its one
     /// pinned instrument, which its own snapshot names and which is not the demo agent's, so V-006
     /// finds it unclaimed on the shared connection (DEC-2036).
     #[test]
@@ -2529,6 +3104,7 @@ mod tests {
     fn the_codes_are_the_first_eight_hex_digits_of_the_gestures_hash() {
         assert_eq!(
             record_code(
+                CONNECTION,
                 "01J0ACC0VNT000000000000000",
                 "10000000000000000000000001",
                 "user-owner"
@@ -2537,17 +3113,17 @@ mod tests {
             "the code `connection record` showed for an Alpaca paper record of the demo's \
              connection, scope trading, on that account, caused by that check, for that owner"
         );
-        let version = "sha256:19dd2428a410b41fa00ddc1b3d8d15d5775096ed223a20edf123c50adae292e6";
-        assert_eq!(confirm_code(version), "e869cb19");
-        assert_eq!(deploy_code(AGENT, version), "63fbe39f");
+        let version = "sha256:8e09904f299adb4afc9e09343071e36953db6b7faf5dc52494a86fe9a1dcb89f";
+        assert_eq!(confirm_code(version), "ab1b80cd");
+        assert_eq!(deploy_code(WEB_AGENT, version), "9056947e");
         assert_eq!(code(""), "e3b0c442");
         let research = reference(&research_mandate());
         assert_eq!(
             research,
-            "sha256:c6c2018e6f60482ac6ae838f2535e92036f21c6638f9818df5028d45537cd9de"
+            "sha256:f63145eb604ff161807d849c23a24e53fbd2e535a0e0db52ff775a9de6b533ce"
         );
-        assert_eq!(confirm_code(&research), "9d06451c");
-        assert_eq!(deploy_code(RESEARCH_AGENT, &research), "a45a1728");
+        assert_eq!(confirm_code(&research), "30eb4e5e");
+        assert_eq!(deploy_code(RESEARCH_AGENT, &research), "9400be68");
     }
 
     /// The steps run 1 to 7 in order, then the record; a shown code precedes the gesture that types
@@ -2656,13 +3232,13 @@ mod tests {
             at("runner-run"),
             at("backtest-record"),
         );
-        let (confirm, kill) = (
+        let (confirm, export) = (
             all.iter()
                 .rposition(|g| g.args[..3] == ["version", "confirm", version.as_str()])
                 .unwrap(),
-            at("agent-kill"),
+            at("journal-export"),
         );
-        assert!(rule_set < confirm && confirm < runner && runner < record && record < kill);
+        assert!(rule_set < confirm && confirm < runner && runner < record && record < export);
         assert!(
             all[rule_set]
                 .args
@@ -2877,14 +3453,21 @@ mod tests {
             models,
             [("llm.research_agent", true), ("quant.ma_crossover", false)]
         );
-        assert_eq!(m["connection_id"], parsed(MANDATE_FILE)["connection_id"]);
+        assert_eq!(m["connection_id"], RESEARCH_CONNECTION);
+        assert_ne!(
+            m["connection_id"],
+            parsed(MANDATE_FILE)["connection_id"],
+            "a connection of its own (DEC-2070 item 2)"
+        );
     }
 
-    /// Step 3 opens and founds the research agent's own workspace, registers its two models
-    /// there, the research one from the recorded entry, then creates, confirms and deploys its
-    /// envelope, every gesture in that workspace and none in the run's, so the research agent is
-    /// alone on its control stream (DEC-2214 item 1, DEC-2247 item 2). What is left waits on the
-    /// manager starting a runtime from the deployment only (DEC-2247 item 3).
+    /// Step 3 opens and founds the research agent's own workspace, records there the paper
+    /// connection of its own connect check, registers its two models, the research one from the
+    /// recorded entry, then creates, confirms and deploys its envelope, every gesture in that
+    /// workspace and none in the run's, so the research agent is alone on its control stream and
+    /// its deployment is written at version 2 (DEC-2214 item 1, DEC-2247 items 2 and 3). The
+    /// executor the manager starts for that account is checked after the Job; what is left is a
+    /// check of the research run itself.
     #[test]
     fn step_three_deploys_the_research_agent_alone_in_its_own_workspace() {
         let steps = planned("demo3");
@@ -2907,6 +3490,8 @@ mod tests {
             [
                 ["workspace", "open"],
                 ["workspace", "found"],
+                ["connection", "record"],
+                ["connection", "record"],
                 ["model", "register"],
                 ["model", "register"],
                 ["version", "create"],
@@ -2916,12 +3501,108 @@ mod tests {
                 ["agent", "deploy"],
             ]
         );
+        let research = research_connected();
+        let code = record_code(
+            RESEARCH_CONNECTION,
+            &research.account,
+            &research.checked,
+            &FOUNDER.to_ascii_lowercase(),
+        );
+        assert_eq!(gestures[2].expect, format!("code {code}"));
+        assert!(
+            !gestures[2].args.iter().any(|a| a == "--code"),
+            "the shown record commits nothing"
+        );
+        for g in &gestures[2..4] {
+            assert!(
+                g.args
+                    .windows(2)
+                    .any(|w| w == ["--connection", RESEARCH_CONNECTION]),
+                "{:?}",
+                g.args
+            );
+        }
+        assert!(research.account.starts_with("01KDER"));
+        assert_ne!(
+            research.account,
+            connected().account,
+            "an account of its own"
+        );
+        assert_ne!(research_account_of("7"), account_of("7"));
+        assert!(
+            gestures[3]
+                .args
+                .windows(2)
+                .any(|w| w == ["--code", code.as_str()])
+        );
+        for pair in [
+            ["--account-ref", research.account.as_str()],
+            ["--checked", research.checked.as_str()],
+        ] {
+            assert!(gestures[3].args.windows(2).any(|w| w == pair), "{pair:?}");
+        }
+        let executor = step
+            .parts
+            .iter()
+            .position(|p| matches!(p, Part::Executor(e) if e.account == research.account))
+            .expect("the research workspace's executor is checked");
+        let acct = format!("acct:demo3r:{}", research.account);
+        let agent = format!("agent:demo3r:{RESEARCH_AGENT}");
+        let links: Vec<(String, &str, Option<&str>)> = step.parts[executor + 1..]
+            .iter()
+            .map(|p| match p {
+                Part::Loop(l) => (l.stream.clone(), l.event_type, l.holding),
+                Part::Grant(g) => {
+                    assert_eq!((g.workspace.as_str(), g.agent), ("demo3r", RESEARCH_AGENT));
+                    ("ctl:demo3r".to_owned(), "grant", None)
+                }
+                other => panic!("after the executor, only the loop's links: {other:?}"),
+            })
+            .collect();
+        assert_eq!(
+            links,
+            [
+                (agent.clone(), "RunStarted", None),
+                (agent.clone(), "ThesisProposed", Some(r#""admitted":true"#)),
+                (
+                    agent.clone(),
+                    "ApprovalRequested",
+                    Some(r#""purpose":"open""#)
+                ),
+                ("ctl:demo3r".to_owned(), "grant", None),
+                (
+                    agent.clone(),
+                    "ApprovalResponded",
+                    Some(r#""result":"admitted""#)
+                ),
+                (
+                    acct.clone(),
+                    "OrderRequestRecorded",
+                    Some(r#""purpose":"open""#)
+                ),
+                (acct.clone(), "FillApplied", Some(r#""side":"buy""#)),
+                (
+                    acct.clone(),
+                    "ProtectionChanged",
+                    Some(r#""action":"placed""#)
+                ),
+                (agent.clone(), "RunStarted", Some(r#""kind":"monitor""#)),
+                (agent.clone(), "ThesisInvalidated", None),
+                (
+                    acct.clone(),
+                    "OrderRequestRecorded",
+                    Some(r#""purpose":"discretionary_exit""#)
+                ),
+                (acct, "FillApplied", Some(r#""side":"sell""#)),
+            ],
+            "each link of the research loop, in the story's order, after the executor is live"
+        );
         for g in &gestures {
             let at = g.args.iter().position(|a| a == "--workspace").unwrap();
             assert_eq!(g.args[at + 1], "demo3r", "{:?}", g.args);
         }
         assert_eq!(
-            gestures[3].args[2..6],
+            gestures[5].args[2..6],
             [
                 "llm.research_agent",
                 "0.1.0",
@@ -2930,13 +3611,13 @@ mod tests {
             ]
         );
         let version = reference(&research_mandate());
-        assert_eq!(gestures[4].expect, format!("created {version}"));
-        let deployed = &gestures[8].args;
+        assert_eq!(gestures[6].expect, format!("created {version}"));
+        let deployed = &gestures[10].args;
         assert_eq!(deployed[2..4], [RESEARCH_AGENT, version.as_str()]);
         assert_eq!(
             lanes(step),
-            ["DR"],
-            "only its own connection, so the manager starts its runtime"
+            ["GW", "D1", "E2E", "NE"],
+            "the loop's links wait on the research run, the ask, the fill and the news"
         );
         let others: Vec<&Gesture> = gestures_of(&steps, |n| n != 3);
         assert!(
@@ -2964,127 +3645,60 @@ mod tests {
             .collect()
     }
 
-    /// Step 6 commits the owner's exit of the instrument the demo's envelope pins, on the demo's
-    /// agent, at a confirmed bid whose floor is at or below it, its code shown first and then
-    /// typed; after the agent is deployed and before the kill switch (a stopped agent's exits are
-    /// held, rule 13) and the export, so the closing verify covers it.
+    /// Step 6 runs no gesture in the Job: an owner's exit before the trade loop's fill sells
+    /// nothing, so it is a gap until web/'s exit runs after the fill, in the browser.
     #[test]
-    fn step_six_exits_the_pinned_instrument_at_a_confirmed_floor_before_the_kill_switch() {
-        let pinned = parsed(INSTRUMENT_FILE);
-        assert_eq!(
-            pinned["instrument_id"], SPY,
-            "the exit names the pinned instrument"
-        );
-        let scaled = |decimal: &str| -> u128 {
-            let (whole, fraction) = decimal.split_once('.').unwrap_or((decimal, ""));
-            assert!(
-                fraction.len() <= 8,
-                "{decimal}: more places than the oracle reads"
-            );
-            format!("{whole}{fraction:0<8}").parse().unwrap()
-        };
-        let (bid, size, floor) = EXIT_BID;
-        assert!(
-            scaled(floor) <= scaled(bid),
-            "the floor is at or below the bid"
-        );
-        assert!(
-            scaled(size) > 0 && scaled(floor) > 0,
-            "a positive size and floor"
-        );
-        assert!(scaled("500") < scaled("501.25") && scaled("0.5") > scaled("0.25"));
+    fn step_six_waits_on_web_s_exit_after_the_fill() {
         let steps = planned("demo1");
-        let all = gestures(&steps);
-        let at = |head: &[&str], last: &str| {
-            all.iter()
-                .position(|g| g.args[..head.len()] == *head && g.args.iter().any(|a| a == last))
-                .unwrap()
-        };
-        let exits: Vec<usize> = all
-            .iter()
-            .enumerate()
-            .filter(|(_, g)| g.args[..2] == ["agent", "exit"])
-            .map(|(n, _)| n)
-            .collect();
-        assert_eq!(exits.len(), 1, "one exit gesture: committed, never shown");
-        let typed = exits[0];
-        assert_eq!(all[typed].args[2..4], [AGENT, SPY]);
-        for pair in [
-            ["--confirm-bid", EXIT_BID.0],
-            ["--bid-size", EXIT_BID.1],
-            ["--floor", EXIT_BID.2],
-        ] {
-            assert!(all[typed].args.windows(2).any(|w| w == pair), "{pair:?}");
-        }
-        assert!(
-            !all[typed]
-                .args
-                .iter()
-                .any(|a| a == "--code" || a == "--show-code"),
-            "an owner's exit reduces risk and takes no code (AGENTS.md rules 2 and 13)"
-        );
-        assert_eq!(
-            all[typed].expect,
-            format!("owner_exit {AGENT} {SPY} committed as event")
-        );
-        let deployed = at(&["agent", "deploy", AGENT], "--code");
-        assert!(deployed < typed);
-        assert!(
-            typed < at(&["agent", "kill"], AGENT),
-            "before the kill switch"
-        );
-        assert!(
-            typed < at(&["journal", "export"], SEGMENT),
-            "before the export"
-        );
         let step6 = &steps[5];
         assert_eq!(step6.number, 6);
         assert!(
-            step6
-                .parts
-                .iter()
-                .any(|p| matches!(p, Part::Gesture(g) if g.container == all[typed].container)),
-            "the exit is step 6's"
+            step6.parts.iter().all(|p| matches!(p, Part::Gap(_))),
+            "no gesture of the Job exits"
         );
+        assert!(
+            gestures(&steps)
+                .iter()
+                .all(|g| g.args[..2] != ["agent", "exit"])
+        );
+        assert_eq!(lanes(step6), ["WB"]);
+        let pinned = parsed(INSTRUMENT_FILE);
+        assert_eq!(pinned["instrument_id"], SPY, "SPY's Alpaca asset id");
+        assert_eq!(pinned["symbol"], "SPY");
     }
 
-    /// Step 7 commits the owner's kill switch for the demo's agent, at agent scope only (an
-    /// agent-scoped switch never reaches the connection or the workspace, rule 13), after the
-    /// agent is deployed and before the record is exported, so the closing verify covers it.
+    /// The run's workspace holds one agent, [`WEB_AGENT`], on the demo's envelope (V-048, DEC-802
+    /// item 3): its one version is created, confirmed and deployed in step 2, its code shown and
+    /// then typed, and no gesture of the Job stops it, so the browser finds it running.
     #[test]
-    fn step_seven_kills_the_demo_agent_at_agent_scope_before_the_record() {
-        let steps = planned("demo1");
+    fn the_run_s_workspace_holds_one_agent_the_job_never_stops() {
+        let version = reference(&mandate());
+        let steps = planned("demo6");
         let all = gestures(&steps);
-        let at = |head: &[&str]| all.iter().position(|g| g.args[..head.len()] == *head);
-        let kill = at(&["agent", "kill"]).expect("step 7 runs `agent kill`");
-        let g = all[kill];
-        assert_eq!(g.args[2..4], ["--agent", AGENT]);
-        assert!(
-            !g.args
-                .iter()
-                .any(|a| a == "--connection" || a == "--workspace-wide"),
-            "{:?}",
-            g.args
-        );
-        assert_eq!(
-            g.expect,
-            format!("kill_switch agent {AGENT} committed as event")
-        );
-        let deployed = all
+        let in_run = |g: &&&Gesture| g.args.iter().any(|a| a == "demo6");
+        let deployed: Vec<[&str; 2]> = all
             .iter()
-            .rposition(|g| g.args[..2] == ["agent", "deploy"])
-            .unwrap();
-        assert!(deployed < kill, "the agent is deployed before it is killed");
+            .filter(in_run)
+            .filter(|g| g.args[..2] == ["agent", "deploy"])
+            .map(|g| [g.args[2].as_str(), g.args[3].as_str()])
+            .collect();
+        let v = version.as_str();
+        assert_eq!(deployed, [[WEB_AGENT, v], [WEB_AGENT, v]]);
+        let created: Vec<&&Gesture> = all
+            .iter()
+            .filter(in_run)
+            .filter(|g| g.args[..2] == ["version", "create"])
+            .collect();
+        assert_eq!(created.len(), 1, "one envelope in the run's workspace");
         assert!(
-            kill < at(&["journal", "export"]).unwrap(),
-            "exported after it"
+            all.iter().all(|g| g.args[..2] != ["agent", "kill"]),
+            "no gesture of the Job stops the agent"
         );
-        let step7 = &steps[6].parts;
         assert!(
-            step7
-                .iter()
-                .any(|p| matches!(p, Part::Gesture(x) if x.container == g.container)),
-            "the kill switch is step 7's"
+            all.iter()
+                .filter(in_run)
+                .all(|g| !g.args.iter().any(|a| a.contains("web-mandate"))),
+            "no second envelope"
         );
     }
 
@@ -3116,7 +3730,7 @@ mod tests {
             [
                 (1, read.as_str(), 401, Ask::NoSession, &Body::Any),
                 (1, "/v1/sessions", 204, Ask::SignIn, &Body::Any),
-                (1, read.as_str(), 200, Ask::Session, &Body::Lists(AGENT)),
+                (1, read.as_str(), 200, Ask::Session, &Body::Lists(WEB_AGENT)),
                 (5, backtest.as_str(), 200, Ask::Session, &completed),
             ]
         );
@@ -3186,89 +3800,6 @@ mod tests {
                 "a sign-in with no cookie is a wrong answer, never not run: {said}"
             );
         }
-    }
-
-    /// The second agent in the run's workspace has an envelope of its own, deployed only after
-    /// step 5's backtest is recorded (the research agent deploys in its own workspace, in step 3).
-    /// `agent deploy` and `backtest record` each take only the workspace's latest confirmed
-    /// version, so its confirmation comes after the record and its deployment after its
-    /// confirmation. Its snapshot is registered before its version is created, and web/ presses
-    /// that agent's kill switch, never the one the CLI stops (DEC-2036).
-    #[test]
-    fn web_kills_a_second_agent_the_cli_does_not() {
-        let (version, web) = (reference(&mandate()), reference(&web_mandate()));
-        assert_ne!(version, web, "two envelopes, two versions");
-        let steps = planned("demo6");
-        let all = gestures(&steps);
-        let deployed: Vec<[&str; 2]> = all
-            .iter()
-            .filter(|g| g.args[..2] == ["agent", "deploy"] && g.args.iter().any(|a| a == "demo6"))
-            .map(|g| [g.args[2].as_str(), g.args[3].as_str()])
-            .collect();
-        let (v, w) = (version.as_str(), web.as_str());
-        assert_eq!(
-            deployed,
-            [[AGENT, v], [AGENT, v], [WEB_AGENT, w], [WEB_AGENT, w]]
-        );
-        let code = deploy_code(WEB_AGENT, &web);
-        assert_ne!(code, deploy_code(AGENT, &version));
-        assert!(
-            all.iter().any(|g| g.args[2] == WEB_AGENT
-                && g.args.windows(2).any(|w| w == ["--code", code.as_str()]))
-        );
-        let at = |args: &[&str]| {
-            all.iter()
-                .position(|g| g.args.len() >= args.len() && g.args[..args.len()] == *args)
-                .unwrap_or_else(|| panic!("no gesture {args:?}"))
-        };
-        let snapshot = format!("{INPUTS}/web-instrument.json");
-        let register = at(&[
-            "config",
-            "register",
-            "--kind",
-            "instrument_snapshot",
-            &snapshot,
-        ]);
-        let created = at(&["version", "create", &format!("{INPUTS}/web-mandate.json")]);
-        let confirmed = at(&["version", "confirm", w, "--code"]);
-        let deploy = at(&["agent", "deploy", WEB_AGENT, w, "--code"]);
-        let record = at(&["backtest", "record"]);
-        assert!(at(&["agent", "deploy", AGENT, v, "--code"]) < record);
-        assert!(record < register && register < created && created < confirmed);
-        assert!(confirmed < deploy);
-        assert_eq!(all[created].expect, format!("created {web}"));
-        let step_of = |container: &str| {
-            steps
-                .iter()
-                .find(|s| {
-                    s.parts
-                        .iter()
-                        .any(|p| matches!(p, Part::Gesture(g) if g.container == container))
-                })
-                .map(|s| s.number)
-        };
-        assert_eq!(step_of(&all[register].container), Some(7));
-        assert_eq!(step_of(&all[deploy].container), Some(7));
-        let kill = all
-            .iter()
-            .find(|g| g.args[..2] == ["agent", "kill"])
-            .unwrap();
-        assert!(
-            kill.args.windows(2).any(|w| w == ["--agent", AGENT]),
-            "the CLI stops demo-spy"
-        );
-        let web: Vec<(u8, &WebCheck)> = steps
-            .iter()
-            .flat_map(|s| s.parts.iter().map(move |p| (s.number, p)))
-            .filter_map(|(n, p)| match p {
-                Part::Web(w) => Some((n, w)),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(web.len(), 1);
-        assert_eq!(web[0].0, 7, "web/'s kill switch is step 7's");
-        assert_eq!(web[0].1.agent, WEB_AGENT);
-        assert_ne!(WEB_AGENT, AGENT);
     }
 
     /// A web check runs only when the gesture acted on its own agent in the run's workspace and
@@ -3402,17 +3933,17 @@ mod tests {
             "the workspace is founded for the owner who signs in: {:?}",
             found.args
         );
-        let kill = all
+        let exit = all
             .iter()
-            .find(|g| g.args[..2] == ["agent", "kill"])
+            .find(|g| g.args[..2] == ["agent", "deploy"])
             .unwrap();
         let user = owner.to_ascii_lowercase();
         assert!(
-            kill.args
+            exit.args
                 .windows(2)
                 .any(|w| w[0] == "--user" && w[1] == user),
             "the owner's gestures act as that member: {:?}",
-            kill.args
+            exit.args
         );
     }
 
@@ -3584,7 +4115,8 @@ mod tests {
     }
 
     /// Which steps run today: the sign-in, through the API and web/, runs whole; the gestures on
-    /// `main` make steps 2 to 6 partial, step 3's research gestures among them; the kill switch,
+    /// `main` make steps 2 to 5 partial, step 3's research gestures among them; step 6 is skipped
+    /// until web/'s exit runs after the fill; the kill switch,
     /// applied by the runtime step 2's deployment starts, and the record run whole. Without a
     /// connect check (the staging dry run) step 7 is partial.
     #[test]
@@ -3594,14 +4126,14 @@ mod tests {
         assert_eq!(
             read,
             [
-                Ready, Partial, Partial, Partial, Partial, Partial, Ready, Ready
+                Ready, Partial, Partial, Partial, Partial, Skipped, Ready, Ready
             ]
         );
         let dry: Vec<Readiness> = unconnected("demo1").iter().map(readiness).collect();
         assert_eq!(
             dry,
             [
-                Ready, Partial, Partial, Partial, Partial, Partial, Partial, Ready
+                Ready, Partial, Partial, Partial, Partial, Skipped, Partial, Ready
             ]
         );
         let step = |parts: Vec<Part>| Step {
@@ -3630,7 +4162,7 @@ mod tests {
 
     /// The slices a wait has named that are on `main`, with the PR that landed each: a lane that
     /// lands one adds its row here, so no wait can go on saying it is still to come.
-    const LANDED_SLICES: &[(&str, u32)] = &[("X1a", 1596), ("X1b", 1736)];
+    const LANDED_SLICES: &[(&str, u32)] = &[("X1a", 1596), ("X1b", 1736), ("X1b-3", 2624)];
 
     /// The slices `text` names as still to land: each word that follows `slice `, up to the
     /// first character that is not a letter, a digit or a hyphen, so `X1b-3` is not `X1b`.
@@ -3713,10 +4245,19 @@ mod tests {
         };
         let shown = all
             .iter()
-            .position(|g| g.args[..2] == ["connection", "record"])
+            .position(|g| {
+                g.args[..2] == ["connection", "record"] && g.args.iter().any(|a| a == "demo1")
+            })
             .unwrap();
-        let typed = at(&["connection", "record"], "--code");
-        let code = record_code(&c.account, &c.checked, &user);
+        let typed = all
+            .iter()
+            .position(|g| {
+                g.args[..2] == ["connection", "record"]
+                    && g.args.iter().any(|a| a == "demo1")
+                    && g.args.iter().any(|a| a == "--code")
+            })
+            .unwrap();
+        let code = record_code(CONNECTION, &c.account, &c.checked, &user);
         assert_eq!(all[shown].expect, format!("code {code}"));
         assert!(
             all[typed]
@@ -3741,7 +4282,7 @@ mod tests {
                 all[typed].args
             );
         }
-        let deployed = at(&["agent", "deploy", AGENT], "--code");
+        let deployed = at(&["agent", "deploy", WEB_AGENT], "--code");
         assert!(
             shown < typed && typed < deployed,
             "recorded before the deployment"
@@ -3757,12 +4298,25 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(executors.len(), 1);
-        assert_eq!(executors[0].account, c.account);
+        assert_eq!(
+            executors
+                .iter()
+                .map(|e| e.account.as_str())
+                .collect::<Vec<_>>(),
+            [c.account.as_str(), research_connected().account.as_str()],
+            "the demo's executor, then the research workspace's"
+        );
         assert!(matches!(step2.parts.last(), Some(Part::Executor(_))));
         let dry = unconnected("demo1");
         let dry_all = gestures(&dry);
         assert!(dry_all.iter().all(|g| g.args[0] != "connection"));
+        assert!(
+            dry[2].parts.iter().any(|p| matches!(
+                p,
+                Part::Gap(gap) if gap.waits.iter().any(|w| w.lands == DR_CONNECT.lands)
+            )),
+            "step 3 names the research connection's gap"
+        );
         assert!(
             dry.iter()
                 .flat_map(|s| &s.parts)
@@ -3770,41 +4324,318 @@ mod tests {
         );
     }
 
-    /// DEC-2379: step 7's CLI kill switch is followed by the check that the runtime applied it,
-    /// which reads the command the gesture before it committed, and passes on `applied` alone.
+    /// A link seen ran; the first not seen reads as its gap, naming its lanes, and stops the loop,
+    /// so every later link reads as not reached; a link that could not be read is a gap too, with
+    /// why; and after an earlier part failed, no link is run.
     #[test]
-    fn step_seven_reads_the_cli_kill_switch_back_applied() {
-        let steps = planned("demo1");
-        let step7 = &steps[6].parts;
-        let at = step7
-            .iter()
-            .position(|p| matches!(p, Part::Applied(_)))
-            .expect("step 7 checks the kill switch applied");
+    fn a_link_not_seen_names_its_gap_and_stops_the_loop() {
+        let gap = Gap {
+            what: "the fill",
+            on_main: "x",
+            waits: vec![E2E_FILL, NE_NEWS],
+        };
+        let mut looped = Looped::Open;
+        assert_eq!(
+            link_verdict(
+                false,
+                false,
+                &mut looped,
+                Some(Seen::There("1 FillApplied".into())),
+                &gap
+            ),
+            ("ran", "1 FillApplied".to_owned())
+        );
+        assert_eq!(looped, Looped::Open);
+        let (word, said) = link_verdict(false, false, &mut looped, Some(Seen::Absent), &gap);
+        assert_eq!(word, "gap");
         assert!(
-            matches!(&step7[at - 1], Part::Gesture(g) if g.args[..2] == ["agent", "kill"]),
-            "the gesture before it is the kill switch"
+            said.starts_with("the fill (waits on E2E (E21-54): "),
+            "{said}"
+        );
+        assert!(said.contains("NE (E19-12): "), "{said}");
+        assert_eq!(looped, Looped::Stopped("the fill"));
+        assert_eq!(
+            link_verdict(false, false, &mut looped, None, &gap),
+            ("not reached", "the loop stopped at: the fill".to_owned())
+        );
+        let mut open = Looped::Open;
+        let (word, said) = link_verdict(
+            false,
+            false,
+            &mut open,
+            Some(Seen::Unread("no pod".into())),
+            &gap,
+        );
+        assert_eq!(word, "gap");
+        assert!(
+            said.starts_with("the fill, not read: no pod (waits on "),
+            "{said}"
+        );
+        assert_eq!(open, Looped::Stopped("the fill"));
+        let mut after = Looped::Open;
+        assert_eq!(
+            link_verdict(true, false, &mut after, Some(Seen::There("x".into())), &gap),
+            ("not run", "an earlier part failed".to_owned())
+        );
+        assert_eq!(after, Looped::Open);
+        let mut required = Looped::Open;
+        assert_eq!(
+            link_verdict(
+                false,
+                true,
+                &mut required,
+                Some(Seen::Unread("no pod".into())),
+                &gap
+            ),
+            ("failed", "the fill, not read: no pod".to_owned())
+        );
+        assert_eq!(required, Looped::Stopped("the fill"));
+        let mut absent = Looped::Open;
+        assert_eq!(
+            link_verdict(false, true, &mut absent, Some(Seen::Absent), &gap).0,
+            "gap",
+            "a link not seen is its gap even when the cell is required"
+        );
+        let mut both = Looped::Stopped("the fill");
+        assert_eq!(
+            link_verdict(true, false, &mut both, None, &gap).0,
+            "not run",
+            "an earlier failure reads first"
+        );
+    }
+
+    /// A link's query counts its type on its stream, its body holding the fragment when it names
+    /// one, every literal quoted as SQL quotes it.
+    #[test]
+    fn a_link_reads_its_type_on_its_stream_from_the_journal() {
+        let check = |holding| LoopCheck {
+            shows: "x",
+            stream: "acct:demo1r:01KDER0000000001000000000A".into(),
+            event_type: "FillApplied",
+            holding,
+            gap: Gap {
+                what: "x",
+                on_main: "x",
+                waits: vec![],
+            },
+        };
+        assert_eq!(
+            link_query(&check(None), 0),
+            "SELECT seq FROM journal.events WHERE stream_id = \
+             'acct:demo1r:01KDER0000000001000000000A' AND event_type = 'FillApplied' AND seq > 0 \
+             ORDER BY seq LIMIT 1"
         );
         assert_eq!(
-            committed_event(&[
-                "x",
-                "kill_switch agent demo-spy committed as event 1TSG2CY1PW at seq 15"
-            ]),
-            Some("1TSG2CY1PW".into())
+            link_query(&check(Some(r#""side":"buy""#)), 7),
+            "SELECT seq FROM journal.events WHERE stream_id = \
+             'acct:demo1r:01KDER0000000001000000000A' AND event_type = 'FillApplied' AND \
+             position('\"side\":\"buy\"' in convert_from(body, 'UTF8')) > 0 AND seq > 7 ORDER BY \
+             seq LIMIT 1"
         );
-        assert_eq!(committed_event(&["code 1234abcd"]), None);
+        assert!(link_query(&check(Some("o'clock")), 0).contains("position('o''clock' in"));
+    }
+
+    /// The grant reads the CLI's own lines (`mandate_cli::inbox`): the first of the agent's
+    /// approvals that is pending, and the code `approvals show` printed.
+    #[test]
+    fn the_grant_reads_the_pending_approval_and_its_code() {
+        let listed = [
+            "01KAPPROVED00000000000000A demo-research acted deadline 600 remaining 0",
+            "01KOTHER0000000000000000AA demo-spy pending deadline 600 remaining 500",
+            "01KPENDING00000000000000AA demo-research pending deadline 600 remaining 540",
+        ];
+        assert_eq!(
+            pending_approval(&listed, RESEARCH_AGENT).as_deref(),
+            Some("01KPENDING00000000000000AA")
+        );
+        assert_eq!(pending_approval(&["no approvals"], RESEARCH_AGENT), None);
+        let shown = [
+            "approval 01KPENDING00000000000000AA deadline 540",
+            "{}",
+            "content_hash sha256:00",
+            "code 1a2b3c4d",
+        ];
+        assert_eq!(shown_code(&shown).as_deref(), Some("1a2b3c4d"));
+        assert_eq!(shown_code(&shown[..3]), None);
+        assert!(!shows_opening(&shown), "an empty content asks nothing");
+        assert!(shows_opening(&[r#"{"purpose":"open","side":"buy"}"#]));
+        assert!(!shows_opening(&[r#"{"purpose":"increase","side":"buy"}"#]));
+        let id = "01KPENDING00000000000000AA";
+        let line = format!("granted {id} as event 01KEV at seq 9 for sha256:00");
+        for (said, seen) in [
+            (
+                "Admitted and sent to the executor; the gate still decides.",
+                true,
+            ),
+            ("Admitted, not yet re-validated; nothing was sent.", true),
+            ("Not recorded yet. If the runtime does not record it", true),
+            ("Refused (step_up_stale); nothing was sent.", false),
+            (
+                "Counted, short of the approvers required; nothing was sent.",
+                false,
+            ),
+            (
+                "Admitted, then skipped on re-validation (x); nothing was sent.",
+                false,
+            ),
+        ] {
+            let got = granted(&[line.as_str(), said], id);
+            assert_eq!(matches!(got, Seen::There(_)), seen, "{said}: {got:?}");
+            if !seen {
+                assert!(
+                    matches!(got, Seen::Unread(ref why) if why.contains(said)),
+                    "{got:?}"
+                );
+            }
+        }
+        assert!(matches!(granted(&[line.as_str()], id), Seen::Unread(_)));
+        assert!(matches!(
+            granted(&["granted 01KOTHER as event x"], id),
+            Seen::Unread(_)
+        ));
+    }
+
+    /// The grant's gestures carry the owner's arguments exactly as the plan's research gestures do.
+    #[test]
+    fn the_grant_acts_as_the_owner_in_the_research_workspace() {
+        let steps = planned("demo3");
+        let registered = gestures_of(&steps, |n| n == 3)
+            .into_iter()
+            .find(|g| g.args[..2] == ["model", "register"])
+            .expect("a research gesture");
+        let at = registered
+            .args
+            .iter()
+            .position(|a| a == "--workspace")
+            .unwrap();
+        assert_eq!(
+            owner_in("demo3r", &["approvals", "list"])[2..],
+            registered.args[at..],
+            "the same workspace, user, journal and store"
+        );
+    }
+
+    /// Each link's event and the member its fragment names are the journal's own: the catalogue row
+    /// of the event (journal spec §9) names the member, or, for `FillApplied`'s side, which the row
+    /// leaves to §9.5, the executor's writer journals it; read from those files, not from the plan.
+    #[test]
+    fn each_link_reads_a_member_its_event_carries() {
+        let spec = fs::read_to_string("../docs/specs/journal.md").unwrap();
+        let writer = fs::read_to_string("../crates/mandate-executor/src/orders.rs").unwrap();
+        let steps = planned("demo3");
+        let checks: Vec<&LoopCheck> = steps[2]
+            .parts
+            .iter()
+            .filter_map(|p| match p {
+                Part::Loop(l) => Some(l),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(checks.len(), 11);
+        for check in checks {
+            let named = format!("`{}`", check.event_type);
+            let row = spec
+                .lines()
+                .find(|l| {
+                    l.starts_with("| `") && l.split('|').nth(1).is_some_and(|n| n.contains(&named))
+                })
+                .unwrap_or_else(|| panic!("{} has a catalogue row", check.event_type));
+            let Some(fragment) = check.holding else {
+                continue;
+            };
+            let member = fragment.split('"').nth(1).unwrap();
+            let written =
+                check.event_type == "FillApplied" && writer.contains(&format!("(\"{member}\", "));
+            assert!(
+                row.contains(member) || written,
+                "{}: {member}",
+                check.event_type
+            );
+        }
+    }
+
+    /// DEC-2070 items 1 and 5: the cell is pointed at the run's workspace and, for the second
+    /// manager and the model gateway alike, at its research workspace, the run's with `r`, which
+    /// the chart's schema and guard take; and each of those Deployments is waited on.
+    #[test]
+    fn the_cell_is_pointed_at_the_run_and_its_research_workspace() {
+        let run = workspace_of("12");
+        assert_eq!(
+            pointed_values(&run),
+            [
+                format!("api.workspace={run}"),
+                format!("deployManager.researchWorkspace={run}r"),
+                format!("modelGateway.workspace={run}r"),
+            ]
+        );
+        assert_eq!(
+            POINTED,
+            [
+                "api",
+                "deploy-manager",
+                "scheduler",
+                "deploy-manager-research",
+                "scheduler-research",
+                "model-gateway"
+            ]
+        );
+    }
+
+    /// Step 7's applied check reads the command web/'s kill switch recorded, and reads anything
+    /// else as `not run`, never as a failure of its own: a machine without the browser's tools, or
+    /// with the API out of reach, still finishes, as web/'s own parts do.
+    #[test]
+    fn the_applied_check_reads_the_recorded_command_or_not_run() {
+        let recorded = WebOutcome::Recorded {
+            agent: WEB_AGENT.into(),
+            workspace: "demo1".into(),
+            command: "1TSG".into(),
+            read: Ok((200, String::new())),
+        };
+        assert_eq!(applied_from(Some(&recorded)), Ok("1TSG".into()));
+        for outcome in [
+            WebOutcome::NoTools("no npm".into()),
+            WebOutcome::Unaskable("no API".into()),
+            WebOutcome::Failed("timed out".into()),
+            WebOutcome::AfterFailure,
+        ] {
+            assert!(applied_from(Some(&outcome)).is_err(), "{outcome:?}");
+        }
+        assert!(applied_from(None).is_err());
         assert!(
-            matches!(&step7[at], Part::Applied(c) if c.agent == AGENT),
-            "the runtime of the agent the CLI killed"
+            applied_from(Some(&WebOutcome::NoTools("no npm".into())))
+                .is_err_and(|why| why.contains("no npm")),
+            "names why"
         );
-        let read = applied_read("demo1", AGENT, "1TSG");
+    }
+
+    /// DEC-2379: step 7 is web/'s kill switch on the one agent, followed by the check that its
+    /// runtime applied it, which reads the command the browser recorded and passes on `applied`
+    /// alone. Nothing in the gestures' Job stops the agent first: no `agent kill` is a gesture.
+    #[test]
+    fn step_seven_reads_web_s_kill_switch_back_applied() {
+        let steps = planned("demo1");
+        let step7 = &steps[6].parts;
+        assert!(matches!(&step7[0], Part::Web(c) if c.agent == WEB_AGENT));
+        assert!(
+            matches!(&step7[1], Part::Applied(c) if c.agent == WEB_AGENT),
+            "the runtime of the agent web/ killed"
+        );
+        assert!(
+            gestures(&steps)
+                .iter()
+                .all(|g| g.args[..2] != ["agent", "kill"]),
+            "no CLI kill switch stops the agent before the browser"
+        );
+        let read = applied_read("demo1", WEB_AGENT, "1TSG");
         assert_eq!(read.path, "/v1/workspaces/demo1/commands/1TSG");
         let with_steps = |phase: &str, steps: Value| {
             json!({"command_id": "1TSG", "phase": phase, "steps": steps,
                 "as_of": [{"stream_id": "ctl:demo1"}]})
             .to_string()
         };
-        let runtime =
-            json!([{"stream_id": "agent:demo1:demo-spy", "event_type": "KillSwitchActivated"}]);
+        let runtime = json!([{"stream_id": "agent:demo1:agt_01KDEM00000000000000000WEB",
+            "event_type": "KillSwitchActivated"}]);
         let body = |phase: &str| with_steps(phase, runtime.clone());
         assert_eq!(read.body.missing(&body("applied")), None);
         for phase in ["recorded", "taken", "ended", "refused"] {
@@ -3816,8 +4647,8 @@ mod tests {
         for other in [
             json!([]),
             json!([{"stream_id": "acct:demo1:01KDEA0000000001000000000A", "event_type": "KillSwitchActivated"}]),
-            json!([{"stream_id": "agent:demo1:agt_01KDEM00000000000000000WEB", "event_type": "KillSwitchActivated"}]),
-            json!([{"stream_id": "agent:demo1:demo-spy", "event_type": "AgentModeApplied"}]),
+            json!([{"stream_id": "agent:demo1:demo-spy", "event_type": "KillSwitchActivated"}]),
+            json!([{"stream_id": "agent:demo1:agt_01KDEM00000000000000000WEB", "event_type": "AgentModeApplied"}]),
         ] {
             assert!(
                 read.body
@@ -3899,8 +4730,8 @@ mod tests {
         }
     }
 
-    /// Step 4 runs lane W's trade loop on the second agent, the one nothing stops before the parts
-    /// run (the CLI's kill switch is the demo agent's), and reads it: `ran` only when every step
+    /// Step 4 runs lane W's trade loop on the run's workspace's one agent, which nothing stops
+    /// before the parts run, and reads it: `ran` only when every step
     /// was reached; `pending`, never failing, only as [`TradeOutcome::Unproposed`], the API's word
     /// that the runtime asked for nothing; and `failed` for a loop that stopped at any step,
     /// approval included, or for a run that failed.
@@ -4012,7 +4843,7 @@ mod tests {
         let mut counted = BTreeMap::<&str, usize>::new();
         for step in &steps {
             for part in &step.parts {
-                if let Part::Gap(gap) = part {
+                if let Some(gap) = part.gap() {
                     for wait in &gap.waits {
                         *counted.entry(wait.lane).or_default() += 1;
                         let listed = &grouped[wait.lane];

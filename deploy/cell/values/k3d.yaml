@@ -26,13 +26,13 @@ modelGateway:
   workspaceMonthlyUsd: "50"
   deploymentMonthlyUsd: "20"
 # The data process's recorded series, when `cargo xtask cell up` names its image: the demo's SPY,
-# closing 150 on 2026-10-23, and the second agent's QQQ (`demo/web-instrument.json`), closing 140,
-# each 0.1 higher each session after, so a share of either fits the demo mandates' 300 USD order
-# cap and the crossover's fast mean is above its slow one.
+# under its Alpaca asset id, closing 150 on 2026-10-23, and QQQ (`demo/web-instrument.json`, a test
+# fixture now), closing 140, each 0.1 higher each session after, so a whole share fits the demo
+# mandate's 1000 USD order cap and the crossover's fast mean is above its slow one.
 data:
   instruments:
     - symbol: SPY
-      assetId: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+      assetId: b28f4066-5c6d-479b-a2af-85dc1a8f16fb
       anchor: 2026-10-23=150
     - symbol: QQQ
       assetId: eb82ffb0-efd6-4f4e-9307-8fead28e04f6

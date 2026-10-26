@@ -17,8 +17,9 @@ use mandate_builder::{
 };
 use mandate_domain::{AssetClass as DomainAssetClass, Environment, MarketSession};
 use mandate_executor::{
-    BindingGateConfigRefs, BindingGateInput, BindingGateRequest, BindingGateSource, FillConfigRefs,
-    InstrumentSnapshot, MandateVersion, MandateView as ExecutorMandateView,
+    AccountFillRefs, BindingGateConfigRefs, BindingGateInput, BindingGateRequest,
+    BindingGateSource, FillConfigRefs, InstrumentSnapshot, MandateVersion,
+    MandateView as ExecutorMandateView,
 };
 use mandate_num::{
     CostBasis, FeeRate, Fraction, MarkPrice, Price, Qty, ShareIncrement, Signed, SizeFraction,
@@ -31,8 +32,8 @@ use mandate_spec::context::stop_limit_asset_classes;
 use mandate_spec::document::{Protection, ProvenanceMap};
 use mandate_time::{Date, UtcNanos};
 
-use mandate_gate_inputs::fill_refs;
 pub(super) use mandate_gate_inputs::stop_limit_offset;
+use mandate_gate_inputs::{account_fill_refs, fill_refs};
 
 use super::artifacts::Artifacts;
 use super::facts::{BrokerFacts, PaperFacts};
@@ -256,6 +257,11 @@ impl InstrumentSnapshot for ReconcilingPaperContext {
             .then(|| fill_refs(&self.config_refs))
             .flatten()
     }
+
+    /// The registered fee configuration and calendar, whatever the instrument (DEC-2817).
+    fn account_fill_refs(&self) -> Option<AccountFillRefs> {
+        account_fill_refs(&self.config_refs)
+    }
 }
 
 impl BindingGateSource for ReconcilingPaperContext {
@@ -459,6 +465,12 @@ impl InstrumentSnapshot for TrustedPaperContext {
             return None;
         }
         fill_refs(&self.template.config_refs)
+    }
+
+    /// The registered fee configuration and calendar, which an unattributed fill in any other
+    /// instrument is accounted under (DEC-2817).
+    fn account_fill_refs(&self) -> Option<AccountFillRefs> {
+        account_fill_refs(&self.template.config_refs)
     }
 }
 

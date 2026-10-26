@@ -404,7 +404,7 @@ fn store_spaced() -> (Store, String) {
 /// here one whose order cap is above its own allocation.
 #[test]
 fn a_mandate_the_context_rejects_refuses() {
-    let document = MANDATE.replace(r#""max_order_usd":"300""#, r#""max_order_usd":"2000""#);
+    let document = MANDATE.replace(r#""max_order_usd":"1000""#, r#""max_order_usd":"2000""#);
     assert_ne!(document, MANDATE);
     let mut store = Store::new();
     let canonical = to_canonical(&parse(document.as_bytes()).unwrap());
@@ -634,7 +634,7 @@ fn a_member_of_another_type_refuses() {
         let error = decoded(Some((file, from, to))).unwrap_err();
         assert_eq!(error, RunnerError::Input(path.to_owned()), "{file}: {to}");
     }
-    let thesis = r#""theses": [{"thesis_id": "", "received_at": "2026-09-01T13:00:00Z", "instrument": "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415", "as_of": "2026-09-01T13:00:00Z", "expires_at": "2026-12-01T00:00:00Z", "admitted": true, "confidence": "0.8", "invalidated_at": null}]"#;
+    let thesis = r#""theses": [{"thesis_id": "", "received_at": "2026-09-01T13:00:00Z", "instrument": "b28f4066-5c6d-479b-a2af-85dc1a8f16fb", "as_of": "2026-09-01T13:00:00Z", "expires_at": "2026-12-01T00:00:00Z", "admitted": true, "confidence": "0.8", "invalidated_at": null}]"#;
     let error = decoded(Some(("theses.json", "\"theses\": []", thesis))).unwrap_err();
     assert_eq!(
         error,

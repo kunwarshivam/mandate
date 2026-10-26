@@ -38,6 +38,7 @@ pub mod connect;
 pub mod credential;
 pub mod deployment;
 pub mod establish;
+pub mod facts;
 pub mod fixture;
 pub mod follow;
 pub mod gate;

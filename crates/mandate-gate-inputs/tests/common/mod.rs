@@ -60,7 +60,6 @@ fn put(store: &mut Store, object: &str) -> String {
 /// registrations of the model, fee, calendar, rule set and snapshot, then the version created,
 /// confirmed and deployed.
 pub fn deployed(snapshot: &str) -> Result<(Vec<ControlRecord>, Store), String> {
-    let mut store = Store::new();
     let mandate = MANDATE
         .replace(AAPL, SPY)
         .replace(r#""AAPL""#, r#""SPY""#)
@@ -68,7 +67,23 @@ pub fn deployed(snapshot: &str) -> Result<(Vec<ControlRecord>, Store), String> {
             &Digest::of(E7_7_MODEL).to_hex(),
             &Digest::of(CONTENT.as_bytes()).to_hex(),
         );
-    let document = to_canonical(&json(&mandate)?);
+    deployed_with(
+        &mandate,
+        &[snapshot],
+        &[("quant.ma_crossover", "1.0.0", CONTENT, false)],
+    )
+}
+
+/// The control stream of `mandate` deployed, and its store: registrations of each of `models` as
+/// `(id, version, content, admits_instruments)` under its content's hash, then the fee, calendar
+/// and rule set, then each of `snapshots`, then the version created, confirmed and deployed.
+pub fn deployed_with(
+    mandate: &str,
+    snapshots: &[&str],
+    models: &[(&str, &str, &str, bool)],
+) -> Result<(Vec<ControlRecord>, Store), String> {
+    let mut store = Store::new();
+    let document = to_canonical(&json(mandate)?);
     let version = reference(&document);
     store.insert(Digest::of(&document), document);
     let paths: Vec<String> = ENVELOPE.split(' ').map(|p| format!("/{p}")).collect();
@@ -77,19 +92,30 @@ pub fn deployed(snapshot: &str) -> Result<(Vec<ControlRecord>, Store), String> {
         .map(|path| format!(r#"{{"path":"{path}","source":"user_entered"}}"#))
         .collect();
     let confirmed: Vec<String> = paths.iter().map(|path| format!(r#""{path}""#)).collect();
-    let mut payloads = vec![(
-        "ConfigSnapshotRegistered",
-        format!(
-            r#"{{"admits_instruments":false,"content_hash":"{}","kind":"model_version","model_id":"quant.ma_crossover","model_version":"1.0.0","params":["fast_periods","slow_periods"]}}"#,
-            put(&mut store, CONTENT)
-        ),
-    )];
-    for (kind, object) in [
+    let mut payloads = Vec::new();
+    for (id, model_version, content, admits) in models {
+        let params = if *admits {
+            "[]"
+        } else {
+            r#"["fast_periods","slow_periods"]"#
+        };
+        payloads.push((
+            "ConfigSnapshotRegistered",
+            format!(
+                r#"{{"admits_instruments":{admits},"content_hash":"{}","kind":"model_version","model_id":"{id}","model_version":"{model_version}","params":{params}}}"#,
+                put(&mut store, content)
+            ),
+        ));
+    }
+    let configs = [
         ("fee_config", FEE.trim()),
         ("trading_calendar", CALENDAR.trim()),
         ("rule_set", RULES.trim()),
-        ("instrument_snapshot", snapshot),
-    ] {
+    ];
+    let snapshots = snapshots
+        .iter()
+        .map(|snapshot| ("instrument_snapshot", *snapshot));
+    for (kind, object) in configs.into_iter().chain(snapshots) {
         let hash = put(&mut store, object);
         payloads.push((
             "ConfigSnapshotRegistered",

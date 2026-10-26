@@ -92,6 +92,8 @@ jobs:
           MANDATE_OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           MANDATE_FOUNDER_OIDC_SUBJECT: ${{ secrets.FOUNDER_OIDC_SUBJECT }}
           MANDATE_ALPACA_OAUTH_CLIENT_SECRET: ${{ secrets.ALPACA_OAUTH_CLIENT_SECRET }}
+          MANDATE_ALPACA_NEWS_KEY_ID: ${{ secrets.ALPACA_NEWS_KEY_ID }}
+          MANDATE_ALPACA_NEWS_SECRET: ${{ secrets.ALPACA_NEWS_SECRET }}
       # Runs however the step before ended, once the binary is built, with only the DigitalOcean
       # token and the founder's CIDRs: in staging it closes the control plane to every run's window
       # (DEC-2028 item 3), then it deletes every Spaces key minted for staging's or production's

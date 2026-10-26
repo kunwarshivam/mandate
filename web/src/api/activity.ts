@@ -2,9 +2,9 @@
  * An agent's activity over the workspace API (§4.7 D3, DEC-2111): its orders as the account stream
  * journals them, and the net quantity its own fills left per instrument. Read only, and nothing
  * computed in a missing member's place: a state or filled quantity the journal has not given is
- * `null` ("not reported"), never assumed, and `unknown` is shown as unknown (trading spec §5.7). The
- * cost basis, risk mark and protection are always `null` until their folds are served (DEC-2111 item
- * 5), so the screen shows none of them.
+ * `null` ("not reported"), never assumed, and `unknown` is shown as unknown (trading spec §5.7). Each
+ * position's cost basis, risk mark, market value, unrealized P&L and protection are DEC-2138's,
+ * required as the schema requires them: `null` where the journal does not say, never a zero.
  */
 import { array, closedEnum, decimal, integer, isRecord, nullable, object, string, timestamp } from "./decode";
 import { type ReadPosition, reconciledHolding } from "./read-models";
@@ -32,9 +32,38 @@ export interface AgentOrder {
   updated_at: Timestamp;
 }
 
+/** The agent sub-ledger's signed quantity and cost basis (trading spec §8.1, DEC-2138 item 1). */
+export interface CostBasis {
+  qty: Decimal;
+  basis: Decimal;
+}
+
+/** An instrument's latest counted risk mark (DEC-2138 item 2). A mark that is not sane names no price to show. */
+export interface RiskMark {
+  bid: Decimal | null;
+  sane: boolean;
+  session: "regular" | "crypto";
+  marked_at: Timestamp;
+}
+
+/** The account's protective orders in the instrument and its open unprotected interval (trading spec §5.4, DEC-2138 item 4). */
+export interface Protection {
+  orders: string[];
+  covered_qty: Decimal;
+  stop: Decimal | null;
+  take_profit: Decimal | null;
+  unprotected_since: Timestamp | null;
+}
+
+/** One instrument the agent's own fills hold (`read-models/positions`); DEC-2138's figures are `null` where the journal does not say, read as "not reported", never as zero. */
 export interface AgentHolding {
   instrument_id: string;
   filled_qty: Decimal;
+  cost_basis: CostBasis | null;
+  risk_mark: RiskMark | null;
+  market_value: Decimal | null;
+  unrealized_pnl: Decimal | null;
+  protection: Protection;
 }
 
 export interface Activity {
@@ -66,7 +95,23 @@ const order = object<AgentOrder>({
   updated_at: timestamp,
 });
 
-const holding = object<AgentHolding>({ instrument_id: bounded(200), filled_qty: decimal });
+const flag: Decoder<boolean> = (value, path) => (typeof value === "boolean" ? { ok: true, value } : fail(path, value === undefined ? "missing" : "wrong_type"));
+
+const riskMark: Decoder<RiskMark> = (value, path) => {
+  const read = object<RiskMark>({ bid: nullable(decimal), sane: flag, session: closedEnum(["regular", "crypto"] as const), marked_at: timestamp })(value, path);
+  return read.ok && read.value.sane && read.value.bid === null ? fail(`${path}/bid`, "wrong_type") : read;
+};
+
+/** `read-models/positions`' `Position`: every member required, each figure `null` where the journal does not say, and protection always served (DEC-2138). */
+const holding = object<AgentHolding>({
+  instrument_id: bounded(200),
+  filled_qty: decimal,
+  cost_basis: nullable(object<CostBasis>({ qty: decimal, basis: decimal })),
+  risk_mark: nullable(riskMark),
+  market_value: nullable(decimal),
+  unrealized_pnl: nullable(decimal),
+  protection: object<Protection>({ orders: array(bounded(200)), covered_qty: decimal, stop: nullable(decimal), take_profit: nullable(decimal), unprotected_since: nullable(timestamp) }),
+});
 
 /** `read-models/orders` and `read-models/positions`, each with the agent it names; an answer for another agent is refused. */
 export function activityRead(agentId: string) {

@@ -2,6 +2,7 @@
 //! rejection is no output (HI-6), so every case here asserts which side it lands on.
 
 use mandate_num::{Conviction, Unit};
+use mandate_research_run::agentic::RunKind;
 use mandate_research_run::{OutputBounds, OutputRejection, parse_output};
 use proptest::prelude::*;
 
@@ -25,7 +26,7 @@ fn output_with(theses: &[String], invalidations: &str) -> String {
 }
 
 fn rejected(text: &str) -> OutputRejection {
-    match parse_output(text.as_bytes(), &bounds()) {
+    match parse_output(text.as_bytes(), &bounds(), RunKind::Ideate) {
         Ok(output) => panic!("expected a rejection, parsed {output:?}"),
         Err(rejection) => rejection,
     }
@@ -33,7 +34,8 @@ fn rejected(text: &str) -> OutputRejection {
 
 #[test]
 fn a_schema_valid_output_parses_into_typed_candidates() {
-    let output = parse_output(ONE_THESIS.as_bytes(), &bounds()).unwrap_or_else(|e| panic!("{e}"));
+    let output = parse_output(ONE_THESIS.as_bytes(), &bounds(), RunKind::Ideate)
+        .unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(output.theses.len(), 1);
     let thesis = &output.theses[0];
     assert_eq!(thesis.instrument, "AAPL");
@@ -55,7 +57,8 @@ fn a_schema_valid_output_parses_into_typed_candidates() {
 #[test]
 fn a_non_long_direction_is_passed_through_for_admission_to_journal() {
     let text = ONE_THESIS.replace(r#""direction":"long""#, r#""direction":"short""#);
-    let output = parse_output(text.as_bytes(), &bounds()).unwrap_or_else(|e| panic!("{e}"));
+    let output =
+        parse_output(text.as_bytes(), &bounds(), RunKind::Ideate).unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(output.theses[0].direction, "short");
 }
 
@@ -74,7 +77,8 @@ fn a_predecessor_and_an_invalidation_parse() {
             .unwrap_or_default()],
         r#"{"thesis_id":"01JTHESIS0000000000000000B","evidence":["n-2"]}"#,
     );
-    let output = parse_output(text.as_bytes(), &bounds()).unwrap_or_else(|e| panic!("{e}"));
+    let output =
+        parse_output(text.as_bytes(), &bounds(), RunKind::Ideate).unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(
         output.theses[0].predecessor_thesis_id.as_deref(),
         Some("01JTHESIS0000000000000000A")
@@ -153,7 +157,7 @@ fn the_horizon_runs_from_one_day_to_thirty_days() {
     ] {
         let text = output_with(&[thesis_json("AAPL", "0.5", horizon)], "");
         assert_eq!(
-            parse_output(text.as_bytes(), &bounds()).is_ok(),
+            parse_output(text.as_bytes(), &bounds(), RunKind::Ideate).is_ok(),
             ok,
             "horizon {horizon}"
         );
@@ -166,7 +170,14 @@ fn more_than_four_theses_is_too_many() {
         .iter()
         .map(|s| thesis_json(s, "0.5", 86_400))
         .collect();
-    assert!(parse_output(output_with(&four, "").as_bytes(), &bounds()).is_ok());
+    assert!(
+        parse_output(
+            output_with(&four, "").as_bytes(),
+            &bounds(),
+            RunKind::Ideate
+        )
+        .is_ok()
+    );
     let mut five = four;
     five.push(thesis_json("GOOG", "0.5", 86_400));
     assert!(matches!(
@@ -248,7 +259,7 @@ proptest! {
     /// that recounts and re-ranges the parsed values its own way, or are rejected. Nothing panics.
     #[test]
     fn arbitrary_bytes_never_yield_an_out_of_bounds_candidate(bytes in proptest::collection::vec(any::<u8>(), 0..512)) {
-        if let Ok(output) = parse_output(&bytes, &bounds()) {
+        if let Ok(output) = parse_output(&bytes, &bounds(), RunKind::Ideate) {
             prop_assert!(output.theses.len() <= 4);
             for thesis in &output.theses {
                 prop_assert!((86_400..=2_592_000).contains(&thesis.horizon_s));
@@ -274,7 +285,7 @@ proptest! {
         let expected = (-1_000..=1_000).contains(&conviction)
             && (0..=1_000).contains(&confidence)
             && (86_400..=2_592_000).contains(&horizon);
-        prop_assert_eq!(parse_output(text.as_bytes(), &bounds()).is_ok(), expected, "{}", text);
+        prop_assert_eq!(parse_output(text.as_bytes(), &bounds(), RunKind::Ideate).is_ok(), expected, "{}", text);
     }
 }
 
@@ -296,28 +307,73 @@ fn every_bound_admits_its_own_value_and_refuses_one_past_it() {
         max_output_bytes: u32::try_from(ONE_THESIS.len()).unwrap_or(0),
         ..bounds()
     };
-    assert!(parse_output(ONE_THESIS.as_bytes(), &exact).is_ok());
+    assert!(parse_output(ONE_THESIS.as_bytes(), &exact, RunKind::Ideate).is_ok());
     let short = OutputBounds {
         max_output_bytes: exact.max_output_bytes - 1,
         ..bounds()
     };
     assert_eq!(
-        parse_output(ONE_THESIS.as_bytes(), &short).map(|_| ()),
+        parse_output(ONE_THESIS.as_bytes(), &short, RunKind::Ideate).map(|_| ()),
         Err(OutputRejection::TooLong)
     );
     let full_text = ONE_THESIS.replace("Services revenue keeps compounding.", &"x".repeat(2_000));
     assert!(
-        parse_output(full_text.as_bytes(), &bounds()).is_ok(),
+        parse_output(full_text.as_bytes(), &bounds(), RunKind::Ideate).is_ok(),
         "2,000 bytes is in bounds"
     );
     for (length, ok) in [(128, true), (129, false)] {
         let text = ONE_THESIS.replace(r#""n-1""#, &format!("\"{}\"", "e".repeat(length)));
         assert_eq!(
-            parse_output(text.as_bytes(), &bounds()).is_ok(),
+            parse_output(text.as_bytes(), &bounds(), RunKind::Ideate).is_ok(),
             ok,
             "evidence id of {length}"
         );
     }
     let control = ONE_THESIS.replace(r#""n-1""#, r#""n\u0001x""#);
     assert!(matches!(rejected(&control), OutputRejection::Range { .. }));
+}
+
+/// §6.9: a `monitor` run's output is exactly `invalidations`, the gateway's schema for the kind.
+/// Its invalidations parse; a `theses` member, even empty, is refused, and an ideate run's output
+/// still needs both members.
+#[test]
+fn a_monitor_output_is_invalidations_alone() {
+    let monitor = r#"{"invalidations":[{"thesis_id":"01ACTIVE","evidence":["n-1"]}]}"#;
+    let output = parse_output(monitor.as_bytes(), &bounds(), RunKind::Monitor)
+        .unwrap_or_else(|e| panic!("{e}"));
+    assert!(output.theses.is_empty());
+    assert_eq!(output.invalidations.len(), 1);
+    assert_eq!(output.invalidations[0].thesis_id, "01ACTIVE");
+    for refused in [
+        r#"{"theses":[],"invalidations":[]}"#,
+        ONE_THESIS,
+        r#"{}"#,
+        r#"{"invalidations":[],"note":"x"}"#,
+    ] {
+        assert_eq!(
+            parse_output(refused.as_bytes(), &bounds(), RunKind::Monitor)
+                .map(|_| ())
+                .map_err(|e| e.code()),
+            Err("shape"),
+            "{refused}"
+        );
+    }
+    assert_eq!(
+        parse_output(monitor.as_bytes(), &bounds(), RunKind::Ideate)
+            .map(|_| ())
+            .map_err(|e| e.code()),
+        Err("shape"),
+        "an ideate run's output names both members"
+    );
+    assert_eq!(
+        parse_output(
+            r#"{"invalidations":[{"thesis_id":"01A","evidence":[]},{"thesis_id":"01A","evidence":[]}]}"#
+                .as_bytes(),
+            &bounds(),
+            RunKind::Monitor
+        )
+        .map(|_| ())
+        .map_err(|e| e.code()),
+        Err("duplicate_invalidation")
+    );
 }

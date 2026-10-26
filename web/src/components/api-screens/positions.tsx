@@ -2,18 +2,23 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { Button } from "@cloudflare/kumo/components/button";
+import type { AgentHolding, Protection, RiskMark } from "@/api/activity";
+import { isAssetId } from "@/api/commands";
 import type { AgentDetail, ReadPosition } from "@/api/read-models";
 import { PageHeader } from "@/components/kumo/page-header/page-header";
 import { Section, WorkspaceGate } from "@/components/screens/common";
-import { clock, quantity } from "@/lib/format";
-import { type PositionsAnswer, useRuntime } from "@/lib/mock-runtime";
+import { clock, price, quantity, signedUsd, usd } from "@/lib/format";
+import { type CommandRecord, type ExitOutcome, type PositionsAnswer, useRuntime } from "@/lib/mock-runtime";
+import { useCan } from "@/lib/roles";
 
 /**
  * Positions over the workspace API (§4.7 D3, DEC-2111, DEC-1096): each agent's own positions, the net
  * quantity its fills hold per instrument, grouped by the account its document names, and beside them
  * what that account held at its last reconciliation, whichever agent bought it, from the same reads. The cost basis, risk
- * mark and protection are served `null` until their folds are (DEC-2111 item 5), so each says "not
- * reported", never a figure computed here. A list that cannot be read is never shown as empty.
+ * mark, market value, unrealized P&L and protection are DEC-2138's, shown as served: each the read
+ * serves `null` says "not reported", a mark that is not sane shows no price, and nothing is computed
+ * here. A list that cannot be read is never shown as empty.
  */
 
 /** How often the positions are read again while the screen is open. */
@@ -75,15 +80,200 @@ function AgentLink({ agent }: { agent: AgentDetail }) {
   );
 }
 
-/** One agent's own positions, with the three members its deployment does not report yet. */
+/** Where the owner's exit from one instrument stands on this screen. */
+type ExitStep = { step: "confirming" } | { step: "sending" } | { step: "recorded" } | { step: "done"; outcome: ExitOutcome };
+
+/** One exit the owner started here: the agent, its name, the asset, and where it stands. */
+interface Exit {
+  agentId: string;
+  name: string;
+  instrument: string;
+  state: ExitStep;
+}
+
+const exitKey = (agentId: string, instrument: string) => `${agentId}\n${instrument}`;
+
+/** An exit's outcome in words, never by a code: what the journal says, and that nothing was sold where nothing was recorded. */
+function exitWords(state: Exclude<ExitStep, { step: "confirming" }>): string {
+  if (state.step === "sending") return "Sending your exit…";
+  if (state.step === "recorded") return "Recorded in the journal: your exit. Waiting for the agent's runtime to take it.";
+  switch (state.outcome.phase) {
+    case "applied":
+      return "Taken by the agent's runtime. Look at the agent's orders for its sell.";
+    case "refused":
+      return "Refused by the agent's runtime: nothing was sold for it. Its records say why.";
+    case "ended":
+      return "Ended without a sell for it. The agent's records say why.";
+    case "recorded":
+      return "Recorded in the journal: your exit. Its outcome is not reported yet; look at the agent's orders.";
+    case "undelivered":
+      return "Not recorded: your deployment refused your exit. Nothing was sold.";
+    case "unknown":
+      return "The result is unknown; we are checking. Look at the agent's orders before you exit again.";
+  }
+}
+
+/** Whether the owner may ask again here: only where nothing was recorded, or the runtime refused it. */
+const retryable = (state: ExitStep) => state.step === "done" && (state.outcome.phase === "undelivered" || state.outcome.phase === "refused");
+
+/** The exits the owner started on this screen, kept here so a row that sold to nothing, or a read that failed, never hides one. */
+interface Exits {
+  of: (agentId: string, instrument: string) => Exit | undefined;
+  ask: (agentId: string, name: string, instrument: string) => void;
+  cancel: (agentId: string, instrument: string) => void;
+  sell: (agent: AgentDetail, name: string, instrument: string, lines: string[]) => void;
+  all: Exit[];
+}
+
+function useExits(): Exits {
+  const { ownerExit, ws } = useRuntime();
+  const [exits, setExits] = useState<Readonly<Record<string, Exit>>>({});
+  const sending = useRef(new Set<string>());
+  const live = useRef(true);
+  useEffect(() => {
+    live.current = true;
+    return () => {
+      live.current = false;
+    };
+  }, []);
+  const put = (key: string, exit: Exit) => setExits((all) => ({ ...all, [key]: exit }));
+  return {
+    of: (agentId, instrument) => exits[exitKey(agentId, instrument)],
+    ask: (agentId, name, instrument) => put(exitKey(agentId, instrument), { agentId, name, instrument, state: { step: "confirming" } }),
+    cancel: (agentId, instrument) =>
+      setExits((all) => {
+        const rest = { ...all };
+        delete rest[exitKey(agentId, instrument)];
+        return rest;
+      }),
+    sell: (agent, name, instrument, lines) => {
+      const key = exitKey(agent.agent_id, instrument);
+      if (!ownerExit || sending.current.has(key)) return;
+      sending.current.add(key);
+      const at = (state: ExitStep) => {
+        if (live.current) put(key, { agentId: agent.agent_id, name, instrument, state });
+      };
+      const record: CommandRecord = { screen: "D10", environment: ws.environment, title: `Exit ${instrument}`, shown: lines, modes: [{ agent: agent.agent_id, badge: agent.mode ?? "not reported" }] };
+      at({ step: "sending" });
+      void ownerExit(agent.agent_id, instrument, record, () => at({ step: "recorded" })).then((outcome) => {
+        at({ step: "done", outcome });
+        if (outcome.phase === "undelivered" || outcome.phase === "refused") sending.current.delete(key);
+      });
+    },
+    all: Object.values(exits),
+  };
+}
+
+/**
+ * The owner's exit from one instrument (§5.4, rule 13): asked first on the screen, then sent once.
+ * The bid confirmation is never sent, since this screen shows no quote with its size and time, so
+ * the confirmation says an equity sell outside the regular session waits for it.
+ */
+function ExitControl({ agent, holding, name, exits }: { agent: AgentDetail; holding: AgentHolding; name: string; exits: Exits }) {
+  const { ownerExit } = useRuntime();
+  const allowed = useCan("positions.exit");
+  const instrument = holding.instrument_id;
+  if (!ownerExit || !allowed || holding.filled_qty.startsWith("-") || /^0(\.0*)?$/.test(holding.filled_qty)) return null;
+  if (!isAssetId(instrument)) return <span className={NOT_REPORTED}>{"No exit here: this position names no asset id. The agent's kill switch still sells it."}</span>;
+  const exit = exits.of(agent.agent_id, instrument);
+  if (exit && exit.state.step !== "confirming" && !retryable(exit.state)) return <span className="text-muted-foreground">Asked below.</span>;
+  if (!exit || exit.state.step !== "confirming")
+    return (
+      <Button type="button" variant="secondary" aria-label={`Exit ${instrument}`} onClick={() => exits.ask(agent.agent_id, name, instrument)}>
+        {exit ? "Exit again" : "Exit"}
+      </Button>
+    );
+  const lines = [
+    `Sell ${name}'s whole position in ${instrument}: ${quantity(holding.filled_qty)} held by its fills.`,
+    "Your exit is never denied for the agent's limits or conduct controls; only participation caps pace it.",
+    "In the regular session it is sent at once. Outside the regular session, an equity sell waits for it: this screen has no bid you could confirm.",
+    "The journal records it with what this screen showed.",
+  ];
+  return (
+    <div role="group" aria-label={`Exit ${instrument}`} className="grid gap-2">
+      <ul className="grid gap-1">
+        {lines.map((line) => (
+          <li key={line}>{line}</li>
+        ))}
+      </ul>
+      <div className="flex gap-2">
+        <Button type="button" variant="primary" onClick={() => exits.sell(agent, name, instrument, lines)}>
+          Sell it
+        </Button>
+        <Button type="button" variant="secondary" onClick={() => exits.cancel(agent.agent_id, instrument)}>
+          Cancel
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** Every exit sent from this screen, with where it stands, whatever the latest positions read shows. */
+function ExitStatuses({ exits }: { exits: Exits }) {
+  const shown = exits.all.filter((e) => e.state.step !== "confirming");
+  if (shown.length === 0) return null;
+  return (
+    <Section id="positions-exits" title="Your exits">
+      <div className="grid gap-2">
+        {shown.map((e) => (
+          <p key={exitKey(e.agentId, e.instrument)} role="status" aria-label={`Your exit from ${e.instrument}`}>
+            <span className="font-medium">
+              {e.name}, {e.instrument}:
+            </span>{" "}
+            {e.state.step === "confirming" ? null : exitWords(e.state)}
+          </p>
+        ))}
+      </div>
+    </Section>
+  );
+}
+
+/** A figure the read served, or "Not reported" where it served `null`: never a zero or a figure computed here. */
+function Figure({ text }: { text: string | null }) {
+  return text === null ? <td className={`py-2.5 ${NOT_REPORTED}`}>Not reported</td> : <td className="py-2.5 font-mono tabular">{text}</td>;
+}
+
+/** A journaled time with its date, so a mark or an interval from another day never reads as today's. */
+const dated = (at: string) => `${at.slice(0, 10)} ${clock(at)} UTC`;
+
+/** The latest counted risk mark; one that is not sane shows no price at all (DEC-2138 item 2). */
+function MarkCell({ mark }: { mark: RiskMark | null }) {
+  if (mark === null) return <Figure text={null} />;
+  if (!mark.sane || mark.bid === null) return <td className={`py-2.5 ${NOT_REPORTED}`}>No sane mark</td>;
+  return (
+    <td className="py-2.5">
+      <span className="font-mono tabular">{price(mark.bid)}</span> bid, {dated(mark.marked_at)}
+    </td>
+  );
+}
+
+/**
+ * The account's protection in the instrument as the executor folds it (trading spec §5.4, DEC-2138
+ * item 4): its resting orders and what they cover, and an open unprotected interval whenever there
+ * is one, beside any cover, so a partial cover never reads as protected.
+ */
+function ProtectionCell({ protection }: { protection: Protection }) {
+  const parts: string[] = [];
+  if (protection.orders.length > 0) {
+    const legs = [protection.stop === null ? null : `stop ${price(protection.stop)}`, protection.take_profit === null ? null : `take-profit ${price(protection.take_profit)}`].filter((p): p is string => p !== null);
+    parts.push(`${legs.length > 0 ? `${legs.join(", ")}; ` : ""}covers ${quantity(protection.covered_qty)}`);
+  }
+  if (protection.unprotected_since !== null) parts.push(`Unprotected since ${dated(protection.unprotected_since)}`);
+  if (parts.length === 0) return <td className="py-2.5 text-muted-foreground">No protective order recorded</td>;
+  return <td className={protection.unprotected_since === null ? "py-2.5" : "py-2.5 font-medium"}>{parts.join(". ")}</td>;
+}
+
+/** One agent's own positions, with what its deployment reports of each and "not reported" where it does not. */
 function OwnPositions({
   agent,
   answer,
   name,
+  exits,
 }: {
   agent: AgentDetail;
   answer: Holdings;
   name: string;
+  exits: Exits;
 }) {
   if (!answer.ok || answer.account_ref === null) return null;
   return (
@@ -117,7 +307,16 @@ function OwnPositions({
                 Risk mark
               </th>
               <th scope="col" className="py-2 font-normal">
+                Market value
+              </th>
+              <th scope="col" className="py-2 font-normal">
+                Unrealized P&amp;L
+              </th>
+              <th scope="col" className="py-2 font-normal">
                 Protection
+              </th>
+              <th scope="col" className="py-2 font-normal">
+                Your exit
               </th>
             </tr>
           </thead>
@@ -128,9 +327,14 @@ function OwnPositions({
                 <td className="py-2.5 font-mono tabular">
                   {quantity(h.filled_qty)}
                 </td>
-                <td className={`py-2.5 ${NOT_REPORTED}`}>Not reported</td>
-                <td className={`py-2.5 ${NOT_REPORTED}`}>Not reported</td>
-                <td className={`py-2.5 ${NOT_REPORTED}`}>Not reported</td>
+                <Figure text={h.cost_basis ? `${usd(h.cost_basis.basis)} for ${quantity(h.cost_basis.qty)}` : null} />
+                <MarkCell mark={h.risk_mark} />
+                <Figure text={h.market_value === null ? null : usd(h.market_value)} />
+                <Figure text={h.unrealized_pnl === null ? null : signedUsd(h.unrealized_pnl)} />
+                <ProtectionCell protection={h.protection} />
+                <td className="py-2.5">
+                  <ExitControl agent={agent} holding={h} name={name} exits={exits} />
+                </td>
               </tr>
             ))}
           </tbody>
@@ -210,6 +414,7 @@ function Positions() {
   const view = useRuntime().view;
   const agents = view?.agents ?? [];
   const answers = useHoldings(agents);
+  const exits = useExits();
   if (!view) return null;
   const header = (
     <PageHeader
@@ -256,6 +461,7 @@ function Positions() {
   return (
     <div className="grid grid-cols-1 gap-(--section-gap)">
       {header}
+      <ExitStatuses exits={exits} />
       {[...accounts.entries()].map(([ref, members], i) => (
         <Section
           key={ref}
@@ -269,6 +475,7 @@ function Positions() {
                 agent={agent}
                 answer={answers[agent.agent_id]}
                 name={nameOf(agent)}
+                exits={exits}
               />
             ))}
             <div className="grid gap-2">

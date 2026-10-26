@@ -10,7 +10,9 @@
   input in doubt handed again first, the reconciliation's four reads as one snapshot with its
   account reported first and read again when an answer is lost, each agent's kill switch applied
   once as the core's own agent-scoped switch naming the record it copies (`copied_from`), ready or
-  not, an unreadable stream alerted once, `mandate-process`'s lifecycle) and
+  not, an unreadable stream alerted once, a batch the journal refuses as invalid forgotten and
+  answered by the core's one hold of every agent's openings while the pass goes on, a refused mark
+  dropped (DEC-2805), `mandate-process`'s lifecycle) and
   `src/follow.rs` (`agents_of`: the account's agents from version-2 `ConnectionEstablished` and
   `AgentDeployed`, each with its deployed mandate version, which the core's mandate port answers
   with, DEC-2034 item 1; `switches`: an agent stream's `KillSwitchActivated` records with the bid the
@@ -29,7 +31,18 @@
   `draft_bytes_with_pii`; `src/launch.rs` (the account from `run`'s flags or the deployment
   manager's variables) and the `mandate-executord` binary (`run`, `connect-check`, `probe`;
   SIGTERM drains, DEC-2007 item 3).
-- **Tests:** `crates/mandate-executord/tests/process.rs`: paper only, the stream opened once, the
+- **Tests:** `crates/mandate-executord/tests/refused.rs` (DEC-2805): a refused batch holds every
+  agent's openings once and alerts, the process stays up and a later kill switch still applies, a
+  refused exit's order is not sent and the exit goes at the next pass, and a refused hold stops
+  it; `src/process.rs`'s `a_refusal_is_held_unless_it_is_of_the_hold_or_the_start`;
+  `tests/mark_writer.rs`'s refused mark dropped and marked again; in `mandate-executor`,
+  `reconcile.rs`'s `a_refused_batch_holds_every_agents_openings_once`,
+  `a_refused_batch_leaves_the_clocks_as_its_input_found_them` and
+  `an_external_fill_without_its_config_or_its_id_is_refused_at_its_fill_alone`;
+  `tests/external_fill.rs` (DEC-2812): an external fill booked once as `FillApplied` version 2,
+  naming no order, and the activity cursor past it; in `mandate-executor`, `reconcile.rs`'s
+  `an_external_fill_is_booked_to_the_account_and_held_until_the_owner_acknowledges`.
+  `crates/mandate-executord/tests/process.rs`: paper only, the stream opened once, the
   start waiting for a tick, readiness only after a clean startup reconciliation, a lost read read
   again without holding the kill switch, a process that is not ready applying the kill switch, a
   switch applied once across passes and restarts, a workspace or connection switch applied to the
@@ -83,5 +96,9 @@
   reading its ports from it, the deployment read again only when the control stream or the date
   moves, a store outage holding openings while keeping what exits read, the connection's loss
   carry inherited, the crypto stop-limit offset, the mounted store and the stored bars
-  (DEC-2802).
+  (DEC-2802); the cell's trade loop end to end, a deployed opening gated on the executor's own mark,
+  sent under its asset id, filled on the fixture, booked by asset id, its stop resting and every
+  later reconciliation clean, on a test deployment and on the cell's demo deployment as checked in
+  (`deploy/cell/demo`), and a deployed run's broker answering by asset id (DEC-2813).
+  `tests/fixture_fills.rs` also shows the fixture answering an asset-id symbol by its ticker.
 - **Run:** `cargo nextest run -p mandate-executord` (with `MANDATE_PG_URL` for `tests/pg.rs`).

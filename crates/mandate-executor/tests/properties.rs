@@ -1376,7 +1376,7 @@ fn play(script: &[Step]) -> Run {
 /// Every way one batch's owner alerts break DEC-2514 and journal spec §9.15 rules 119, 120 and
 /// 130, read from the batch alone: an alert effect about a subject the batch drafted with no
 /// `OwnerAlertSent` after it in the same batch (one about an earlier batch's record is raised
-/// alone, since its record would refuse the batch: backlog E7-2v), one whose record names another kind, cause or command, a record with no
+/// alone, since its record would refuse the batch: backlog E7-2x), one whose record names another kind, cause or command, a record with no
 /// effect, two records for one subject, an act between an alert record and its subject, which a
 /// shell appending each run of drafts would split, and a draft off its ordinal, which an alert
 /// record would have moved from where an earlier draft predicted it. Empty when the batch is
@@ -2996,20 +2996,15 @@ proptest! {
             event_type,
             common::with_clock(&[], 10),
         );
-        const OTHER_STREAMS: [&str; 8] = [
+        const OTHER_STREAMS: [&str; 3] = [
             "RelatedAccountsCoordination",
             "MandateVersionApplied",
-            "RiskLimitTriggered",
-            "RiskLimitLifted",
-            "HighWaterMarkReset",
-            "InstrumentRestrictionChanged",
-            "GoalCompleted",
             "UniverseChanged",
         ];
         /// The catalogue events a merged slice interprets. Every other event this crate owns
         /// answers its story's stub until the slice that implements it moves it here, in the same
         /// change, with live tests pinning what it does (DEC-137, #184 review finding 4).
-        const INTERPRETED: [&str; 25] = [
+        const INTERPRETED: [&str; 31] = [
             "StreamOpened",
             "IntentReceived",
             "GateDecided",
@@ -3035,6 +3030,12 @@ proptest! {
             "ConductBreachDetected",
             "TradingDayStarted",
             "PositionReleased",
+            "RiskDayStarted",
+            "RiskLimitTriggered",
+            "RiskLimitLifted",
+            "HighWaterMarkReset",
+            "InstrumentRestrictionChanged",
+            "GoalCompleted",
         ];
         let stubbed = event_type != "NobodyEverWroteThis"
             && !OTHER_STREAMS.contains(&event_type)
@@ -3054,19 +3055,11 @@ proptest! {
                      forbids"
                 );
                 prop_assert!(
-                    ![
-                        "MandateVersionApplied",
-                        "UniverseChanged",
-                        "RiskLimitTriggered",
-                        "RiskLimitLifted",
-                        "HighWaterMarkReset",
-                        "InstrumentRestrictionChanged",
-                        "GoalCompleted",
-                    ]
-                    .contains(&event_type),
+                    !["MandateVersionApplied", "UniverseChanged"].contains(&event_type),
                     "{} carries stream F's or stream J's values, which this crate does not \
                      interpret yet (task brief, Decisions needed 8), so it must refuse naming the \
-                     owning story rather than fold it",
+                     owning story rather than fold it; the risk fold's own records fold as records \
+                     (DEC-2804 item 1)",
                     event_type
                 );
             }

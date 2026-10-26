@@ -237,8 +237,8 @@ fn market_orders_barred(input: &GateInput<'_>, at: &SessionAt) -> bool {
 }
 
 /// Check 4, §5.3's rules in list order. Rule 1 is unrepresentable (a proposal has no notional).
-/// Rules 2 and 7 have no registered code, so an opening that breaks one is refused rather than
-/// decided ([`account_rules::unregistered_rules`], DEC-129 item 27). Rule 3: every sell above the
+/// Rule 2 binds an opening ([`account_rules::rule_2`]) and rule 7 an opening between rules 6 and 8
+/// ([`account_rules::one_working_order`]), each with its code (DEC-2815). Rule 3: every sell above the
 /// position, a protective leg's included, is typed an opening by [`assign_purpose`], so it is the
 /// only sell that reaches here as one. Rule 4 binds a reduction and rules 5, 6 and 8 an opening
 /// ([`account_rules`]). Rule 9 denies an opening and holds a reduction under one code (DEC-129 item
@@ -246,13 +246,15 @@ fn market_orders_barred(input: &GateInput<'_>, at: &SessionAt) -> bool {
 /// `market_order_not_allowed` in any state of the feed (DEC-129 item 24).
 fn order_constraints(input: &GateInput<'_>, opening: bool) -> Result<Option<Stop>, GateError> {
     if opening {
-        account_rules::unregistered_rules(input)?;
+        if let Some(stop) = account_rules::rule_2(input)? {
+            return Ok(Some(stop));
+        }
         if input.proposed.side == Side::Sell {
             return Ok(Some((Verdict::Deny, ReasonCode::WouldCrossZero)));
         }
     }
     let rules_4_to_8 = if opening {
-        account_rules::one_working_order(input)
+        account_rules::one_working_order(input)?
     } else {
         account_rules::sell_available(input)?
     };
@@ -832,7 +834,7 @@ mod tests {
 
     /// One opening of 1 × 100 in `a` after `edit`: `Ok(code)` for a denial, `Err("allowed")` for an
     /// allow, which is what "passes every limit" looks like, and `Err(story)` for a refusal that
-    /// names the decision it waits on (DEC-129 item 27).
+    /// names the story it waits on.
     fn limit_row(
         edit: impl FnOnce(&mut Owned) -> Result<(), GateError>,
     ) -> Result<Result<ReasonCode, &'static str>, GateError> {
@@ -1850,10 +1852,13 @@ mod tests {
         Ok(())
     }
 
-    /// §5.3 rules 2 and 7 have no registered code, so an opening that breaks one is refused, never
-    /// allowed, and an exit is never refused for them (DEC-129 item 27, DEC-150 item 4).
+    /// §5.3 rules 2 and 7 deny an opening with their codes (DEC-2815): below the minimum
+    /// `below_min_order_size`, fractional in a whole-share equity `quantity_off_increment`, and a
+    /// fractional order that is not TIF day or is a bracket's entry
+    /// `fractional_order_tif_or_bracket`; the minimum itself, a fractional day order and whole shares
+    /// pass, and an exit is never denied for either rule (DEC-150 item 4).
     #[test]
-    fn the_unregistered_rules_refuse_an_opening_and_never_an_exit() -> Result<(), GateError> {
+    fn rules_2_and_7_deny_an_opening_with_their_codes_and_never_an_exit() -> Result<(), GateError> {
         let buying =
             |qty: &str, fractionable: bool, tif: TimeInForce| -> Result<Owned, GateError> {
                 let mut o = allowing()?;
@@ -1877,7 +1882,7 @@ mod tests {
         crypto.instrument.asset_class = AssetClass::Crypto;
         crypto.instrument.exchange = None;
         crypto.instrument.median_dollar_volume_30d = Some(Usd::parse("90000000")?);
-        let item_27 = Err("DEC-129 item 27");
+        let deny = |code| Ok((Verdict::Deny, Some(code)));
         assert_eq!(
             [
                 row(&buying("0.4", true, TimeInForce::Day)?)?,
@@ -1891,19 +1896,135 @@ mod tests {
                 row(&crypto)?,
             ],
             [
-                item_27,
+                deny(ReasonCode::BelowMinOrderSize),
                 Ok((Verdict::Allow, None)),
-                item_27,
-                item_27,
-                item_27,
+                deny(ReasonCode::QuantityOffIncrement),
+                deny(ReasonCode::FractionalOrderTifOrBracket),
+                deny(ReasonCode::FractionalOrderTifOrBracket),
                 Ok((Verdict::Allow, None)),
                 Ok((Verdict::Allow, None)),
                 Ok((Verdict::Allow, None)),
                 Ok((Verdict::Allow, None)),
             ],
             "below the minimum, fractional in a whole-share instrument, fractional GTC and a \
-             fractional bracket are refused; the minimum itself, a fractional day order and whole \
-             shares pass; a small exit is allowed; crypto has no share increment"
+             fractional bracket are denied with their codes; the minimum itself, a fractional day \
+             order and whole shares pass; a small exit is allowed; crypto has no share increment"
+        );
+        Ok(())
+    }
+
+    proptest! {
+        /// Rules 2 and 7 over random openings and exits, against an oracle that reads the
+        /// proposal in whole hundredths of a share, apart from the gate's share arithmetic: an
+        /// opening below the minimum is `below_min_order_size`; else a fraction of a share in a
+        /// whole-share equity is `quantity_off_increment`; else a fraction that is not TIF day or
+        /// is a bracket's entry is `fractional_order_tif_or_bracket`; anything else passes both
+        /// rules. An exit of the agent's own shares is never denied for either rule. Quantities
+        /// stay under the fixture's order cap (10 at 100), so check 2 never answers first.
+        #[test]
+        fn rules_2_and_7_deny_exactly_what_their_text_says(
+            hundredths in 1_u32..1_000,
+            min_hundredths in prop::option::of(1_u32..300),
+            fractionable in any::<bool>(),
+            gtc in any::<bool>(),
+            bracket in any::<bool>(),
+            exit in any::<bool>(),
+        ) {
+            let text = |h: u32| match h % 100 {
+                0 => format!("{}", h / 100),
+                c if c % 10 == 0 => format!("{}.{}", h / 100, c / 10),
+                c => format!("{}.{c:02}", h / 100),
+            };
+            let mut o = if exit {
+                allowing()?.selling(Origin::OrderBuilder)?
+            } else {
+                allowing()?
+            };
+            o.proposed.qty = Qty::parse(&text(hundredths))?;
+            o.instrument.min_order_size = Qty::parse(&text(min_hundredths.unwrap_or(1)))?;
+            o.instrument.fractionable = fractionable;
+            o.instrument.qty_increment = Qty::parse(if fractionable { "0.000000001" } else { "1" })?;
+            o.proposed.tif = if gtc { TimeInForce::Gtc } else { TimeInForce::Day };
+            if bracket && !exit {
+                o.proposed.kind = ProposedKind::Bracket {
+                    take_profit: Price::parse("110")?,
+                    stop: Price::parse("90")?,
+                };
+            }
+            let decided = o.decide()?;
+            let fraction = hundredths % 100 != 0;
+            let expected = if exit {
+                None
+            } else if hundredths < min_hundredths.unwrap_or(1) {
+                Some(ReasonCode::BelowMinOrderSize)
+            } else if fraction && !fractionable {
+                Some(ReasonCode::QuantityOffIncrement)
+            } else if fraction && (gtc || bracket) {
+                Some(ReasonCode::FractionalOrderTifOrBracket)
+            } else {
+                None
+            };
+            let codes = [
+                ReasonCode::BelowMinOrderSize,
+                ReasonCode::QuantityOffIncrement,
+                ReasonCode::FractionalOrderTifOrBracket,
+            ];
+            let got = decided.reason.filter(|code| codes.contains(code));
+            prop_assert_eq!(got, expected, "{:?}", decided);
+            if expected.is_some() {
+                prop_assert_eq!(decided.verdict, Verdict::Deny);
+            }
+        }
+    }
+
+    /// §9.1 check 4 runs §5.3 in list order (DEC-2815 item 2): rule 2's minimum before its
+    /// increment, and both before rule 3's `would_cross_zero`; rule 7 after rules 5 and 6
+    /// (`working_order_limit`) and before rule 8 (`add_blocked_by_protective_order`).
+    #[test]
+    fn rules_2_and_7_take_their_place_in_check_4s_list_order() -> Result<(), GateError> {
+        let fractional_gtc = || -> Result<Owned, GateError> {
+            let mut o = allowing()?;
+            o.proposed.qty = Qty::parse("1.5")?;
+            o.instrument.fractionable = true;
+            o.instrument.qty_increment = Qty::parse("0.000000001")?;
+            o.proposed.tif = TimeInForce::Gtc;
+            Ok(o)
+        };
+        let mut both_halves = allowing()?;
+        both_halves.proposed.qty = Qty::parse("0.4")?;
+        both_halves.instrument.min_order_size = Qty::parse("0.5")?;
+        both_halves.instrument.fractionable = false;
+        let mut crossing = allowing()?.selling(Origin::OrderBuilder)?;
+        crossing.agent.positions.clear();
+        crossing.account.positions.clear();
+        crossing.proposed.qty = Qty::parse("0.4")?;
+        crossing.instrument.min_order_size = Qty::parse("0.5")?;
+        let behind_a_working_order = with_order(
+            fractional_gtc()?,
+            working(2, Side::Buy, false, true)?,
+            false,
+        );
+        let before_protection = with_order(
+            fractional_gtc()?,
+            working(1, Side::Sell, true, false)?,
+            true,
+        );
+        let deny = |code| Ok((Verdict::Deny, Some(code)));
+        assert_eq!(
+            [
+                row(&both_halves)?,
+                row(&crossing)?,
+                row(&behind_a_working_order)?,
+                row(&before_protection)?,
+            ],
+            [
+                deny(ReasonCode::BelowMinOrderSize),
+                deny(ReasonCode::BelowMinOrderSize),
+                deny(ReasonCode::WorkingOrderLimit),
+                deny(ReasonCode::FractionalOrderTifOrBracket),
+            ],
+            "the minimum before the increment; rule 2 before rule 3; rules 5 and 6 before rule 7; \
+             rule 7 before rule 8"
         );
         Ok(())
     }

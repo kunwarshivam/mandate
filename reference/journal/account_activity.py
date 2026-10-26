@@ -31,7 +31,7 @@ from control import (
     valid as control_valid,
 )
 
-SPEC = "docs/specs/journal.md §9.5 rules 297 and 298 (DEC-2803)"
+SPEC = "docs/specs/journal.md §9.5 rules 297, 298 and 303 (DEC-2803, DEC-2820)"
 ACCOUNT = f"acct:{WORKSPACE}:{ACCOUNT_STREAM_REF}"
 AT = "2026-10-26T15:00:00.250000000Z"
 RISK_CLOCK = "2026-10-26T15:00:01.000000000Z"
@@ -42,6 +42,7 @@ REJECT = "reject"
 ABANDONED = "abandoned"
 RULE_297 = "rule 297"
 RULE_298 = "rule 298"
+RULE_303 = "rule 303"
 REASONS = ("intent_too_old", "gate_recheck", "released_to_owner", "unprotected_interval_limit")
 # The members whose presence each source decides, in the table's order.
 SOURCED = ("broker_order_id", "fill_id", "client_order_id", "instrument", "side", "qty")
@@ -168,6 +169,19 @@ def invalid_drafts() -> list[dict]:
             at("intent_id"), "non_canonical"),
         bad("abandoned_client_order_id_null", "§9.5: the derived id is never null", ABANDONED,
             [change(at("client_order_id"), None)], at("client_order_id")),
+        bad("abandoned_another_intents_order", f"{RULE_303}: the order its own intent derives", ABANDONED,
+            [change(at("client_order_id"), "md-01JAE3A0A000000000000000N2")], at("client_order_id")),
+        bad("abandoned_the_intent_alone", f"{RULE_303}: `md-` and the intent", ABANDONED,
+            [change(at("client_order_id"), INTENT)], at("client_order_id")),
+        bad("abandoned_a_rung", f"{RULE_303}: not a rung of its own", ABANDONED,
+            [change(at("client_order_id"), f"md-{INTENT}-l2")], at("client_order_id")),
+        bad("abandoned_its_protective_order", f"{RULE_303}: not a protective order of its own", ABANDONED,
+            [change(at("client_order_id"), f"md-{INTENT}-p01JAE3A0A000000000000000P1")], at("client_order_id")),
+        bad("abandoned_upper_case_prefix", f"{RULE_303}: exactly `md-`", ABANDONED,
+            [change(at("client_order_id"), f"MD-{INTENT}")], at("client_order_id")),
+        bad("abandoned_watchdog_without_its_prefix", f"{RULE_303}: the watchdog's exit derives `md-w-…`", ABANDONED,
+            [change(at("intent_id"), "w-01JAE3A0A000000000000000W1"),
+             change(at("client_order_id"), "md-01JAE3A0A000000000000000W1")], at("client_order_id")),
         bad("version_2", "§9.5: registered at `schema_version` 1 only", ABANDONED, [change("schema_version", 2)],
             "payload", "unknown_schema"),
         bad("on_the_control_stream", "§9.5: an account-stream record", REJECT,
@@ -193,8 +207,6 @@ def valid_drafts() -> list[dict]:
            [change(at("client_order_id"), "theirs-1")]),
         ok("order_with_an_md_id_we_do_not_hold", f"{RULE_298}: an id of our form the executor does not know",
            EXTERNAL_ORDER, [change(at("client_order_id"), "md-01JAE3A0A000000000000000N9")]),
-        ok("abandoned_any_client_order_id", "§9.5: no rule binds the id to the intent", ABANDONED,
-           [change(at("client_order_id"), "md-01JAE3A0A000000000000000N2")]),
         ok("order_sell_fractional", "§9.5: either side, a decimal quantity", EXTERNAL_ORDER,
            [change(at("side"), "sell"), change(at("qty"), "0.5")]),
         ok("fill_without_fill_id", f"{RULE_297}: a broker may send an empty fill id", EXTERNAL_FILL,
@@ -270,6 +282,7 @@ VALIDATOR_MUTANTS = (
     "rule.298.side",
     "rule.298.fill_id",
     "rule.298.order",
+    "rule.303",
 )
 
 

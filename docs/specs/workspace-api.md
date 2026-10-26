@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.1, not yet reviewed ([DEC-436](../project/decisions/DEC-436.md)). §4.6.1 adds the desk, the cited-record read, and the transcript view, and §4.3's approval read its explanation (E12-5, E19-15; [DEC-2240](../project/decisions/DEC-2240.md), agent readings; the disclaimer is [DEC-2241](../project/decisions/DEC-2241.md)'s placeholder, Proposed). Round 1 fixes applied. Items 1 to 16 and 19 to 21 of DEC-436 are agent readings; items 17 and 18 are Proposed and wait for the founder. §4.8.1 adds the audit read contracts (E12-6; [DEC-760](../project/decisions/DEC-760.md) to [DEC-767](../project/decisions/DEC-767.md), agent readings). §3.5, §4.5, and §5.6 add the revoke's step-up digests and its refusals (E10-13; [DEC-693](../project/decisions/DEC-693.md) and [DEC-698](../project/decisions/DEC-698.md), agent readings). §4.5's Connect row names the pending connection's `ConnectionRequested` and the `ConnectionRefused` that may close it (journal spec v0.32, [DEC-699](../project/decisions/DEC-699.md)). §4.8.1's Verification closes its refusal order, id, inputs, run order, and record on `VerificationRun` version 2, with an `incomplete` result for a token that cannot be proven (journal spec v0.36; [DEC-786](../project/decisions/DEC-786.md) to [DEC-788](../project/decisions/DEC-788.md), agent readings; [DEC-789](../project/decisions/DEC-789.md), the founder). §4.8.1's Inputs verify an anchor's prefix from genesis and bind it to the range's trusted start, or the range fails closed (journal spec v0.37; [DEC-892](../project/decisions/DEC-892.md), an agent reading). §4.8.1's run order compares each start or in-range segment's hot rows with its cold file, `segment_rows_mismatch` (journal spec v0.38; [DEC-894](../project/decisions/DEC-894.md), an agent reading). §4.2 and §4.7 add the backtest report's and the forward-paper evaluation's read shapes (E4-5, E17-8; [DEC-1001](../project/decisions/DEC-1001.md) and [DEC-1002](../project/decisions/DEC-1002.md), agent readings; their disclosures are named placeholders, [DEC-1003](../project/decisions/DEC-1003.md), Proposed). §3.11 adds the server process (its bind, environment, probes, drain, and browser sessions) and §3.5 widens the planned `busy` to a draining process (E21-31; [DEC-978](../project/decisions/DEC-978.md), agent readings, item 10 Proposed); §4.3 and §4.7 add the first read-model shapes, agents and approvals (E21-31, E10-10; [DEC-979](../project/decisions/DEC-979.md), an agent reading); §3.11 item 10 records pause and the kill switch as the CLI does (E21-31; [DEC-1007](../project/decisions/DEC-1007.md), agent readings, item 8 Proposed). §3.11 item 7 fixes the subject-link file at `/etc/mandate/subject-links` and refuses a path that does not itself name the file opened (E21-31; [DEC-1023](../project/decisions/DEC-1023.md), an agent reading). §3.11 item 2 lets a `dev` or `ci` cell point the issuer settings at the local stub issuer (E21-52; [DEC-2100](../project/decisions/DEC-2100.md), an agent reading). §3.11 items 11 and 12 serve versions, confirmation, deployment, resume, Stop, owner exit, acknowledgment, and command status (E10-11, E10-12; [DEC-2101](../project/decisions/DEC-2101.md), [DEC-2102](../project/decisions/DEC-2102.md), agent readings). §4.10 names the caller's principal on one's own session and serves one's own memberships from a hosted deployment's control stream (E10-10; [DEC-2113](../project/decisions/DEC-2113.md), an agent reading). §3.6 adds the passkey registration challenge, enrolment, and list routes (E9-4; [DEC-2108](../project/decisions/DEC-2108.md), [DEC-2115](../project/decisions/DEC-2115.md), agent readings), and settles a retried registration challenge, the passkey id's shape, the step-up pair, and the stale first enrolment ([DEC-2118](../project/decisions/DEC-2118.md), agent readings). §4.10 specifies route 2's reduction-session challenge and opening routes, their limits, the device cookie, and the session's reach (E9-1; [DEC-2117](../project/decisions/DEC-2117.md), an agent reading). §4.10 route 2's challenge limits answer the one 401 and its failure limit only reports, as DEC-653 item 3 says (E9-1; [DEC-2119](../project/decisions/DEC-2119.md), an agent reading). §5.6 says how the executor reads the compromise batch's kill switch itself, applies it agent by agent until the account-wide form lands, and what the owner is told (E7-4; [DEC-2343](../project/decisions/DEC-2343.md), an agent reading). §3.6's passkey routes read one fold of the member's passkeys, answer a broken one `journal_unavailable`, date a passkey by its row's `recorded_at`, and count a first enrolment's 300 s from the session's sign-in (E9-4; [DEC-2124](../project/decisions/DEC-2124.md), agent readings). §3.6 and §4.5 give a connect's start passkey step-up, its `step_up_assertion` beside `step_up` and `StepUpAsserted` in its batch, and say when DEC-2125's `cli_confirm` for a connect ends (E9-4; [DEC-2126](../project/decisions/DEC-2126.md), agent readings). §3.11 item 10 serves a paper grant under `cli_confirm`, recorded as the CLI records it (E9-4; [DEC-2129](../project/decisions/DEC-2129.md), agent readings, item 7 the founder's; whom a reference names, as the runtime resolves it: [DEC-2130](../project/decisions/DEC-2130.md)). §3.6 and §3.11 item 11 give a version's confirmation and a deployment the same passkey step-up (E9-4; [DEC-2128](../project/decisions/DEC-2128.md), agent readings). §4.1 and §3.11 item 11 add the catalogue reads, the registered instruments and signal models a version may name (E10-11; [DEC-2136](../project/decisions/DEC-2136.md), an agent reading) |
+| **Status** | Draft v0.1, not yet reviewed ([DEC-436](../project/decisions/DEC-436.md)). §4.6.1 adds the desk, the cited-record read, and the transcript view, and §4.3's approval read its explanation (E12-5, E19-15; [DEC-2240](../project/decisions/DEC-2240.md), agent readings; the disclaimer is [DEC-2241](../project/decisions/DEC-2241.md)'s placeholder, Proposed). Round 1 fixes applied. Items 1 to 16 and 19 to 21 of DEC-436 are agent readings; items 17 and 18 are Proposed and wait for the founder. §4.8.1 adds the audit read contracts (E12-6; [DEC-760](../project/decisions/DEC-760.md) to [DEC-767](../project/decisions/DEC-767.md), agent readings). §3.5, §4.5, and §5.6 add the revoke's step-up digests and its refusals (E10-13; [DEC-693](../project/decisions/DEC-693.md) and [DEC-698](../project/decisions/DEC-698.md), agent readings). §4.5's Connect row names the pending connection's `ConnectionRequested` and the `ConnectionRefused` that may close it (journal spec v0.32, [DEC-699](../project/decisions/DEC-699.md)). §4.8.1's Verification closes its refusal order, id, inputs, run order, and record on `VerificationRun` version 2, with an `incomplete` result for a token that cannot be proven (journal spec v0.36; [DEC-786](../project/decisions/DEC-786.md) to [DEC-788](../project/decisions/DEC-788.md), agent readings; [DEC-789](../project/decisions/DEC-789.md), the founder). §4.8.1's Inputs verify an anchor's prefix from genesis and bind it to the range's trusted start, or the range fails closed (journal spec v0.37; [DEC-892](../project/decisions/DEC-892.md), an agent reading). §4.8.1's run order compares each start or in-range segment's hot rows with its cold file, `segment_rows_mismatch` (journal spec v0.38; [DEC-894](../project/decisions/DEC-894.md), an agent reading). §4.2 and §4.7 add the backtest report's and the forward-paper evaluation's read shapes (E4-5, E17-8; [DEC-1001](../project/decisions/DEC-1001.md) and [DEC-1002](../project/decisions/DEC-1002.md), agent readings; their disclosures are named placeholders, [DEC-1003](../project/decisions/DEC-1003.md), Proposed). §3.11 adds the server process (its bind, environment, probes, drain, and browser sessions) and §3.5 widens the planned `busy` to a draining process (E21-31; [DEC-978](../project/decisions/DEC-978.md), agent readings, item 10 Proposed); §4.3 and §4.7 add the first read-model shapes, agents and approvals (E21-31, E10-10; [DEC-979](../project/decisions/DEC-979.md), an agent reading); §3.11 item 10 records pause and the kill switch as the CLI does (E21-31; [DEC-1007](../project/decisions/DEC-1007.md), agent readings, item 8 Proposed). §3.11 item 7 fixes the subject-link file at `/etc/mandate/subject-links` and refuses a path that does not itself name the file opened (E21-31; [DEC-1023](../project/decisions/DEC-1023.md), an agent reading). §3.11 item 2 lets a `dev` or `ci` cell point the issuer settings at the local stub issuer (E21-52; [DEC-2100](../project/decisions/DEC-2100.md), an agent reading). §3.11 items 11 and 12 serve versions, confirmation, deployment, resume, Stop, owner exit, acknowledgment, and command status (E10-11, E10-12; [DEC-2101](../project/decisions/DEC-2101.md), [DEC-2102](../project/decisions/DEC-2102.md), agent readings). §4.10 names the caller's principal on one's own session and serves one's own memberships from a hosted deployment's control stream (E10-10; [DEC-2113](../project/decisions/DEC-2113.md), an agent reading). §3.6 adds the passkey registration challenge, enrolment, and list routes (E9-4; [DEC-2108](../project/decisions/DEC-2108.md), [DEC-2115](../project/decisions/DEC-2115.md), agent readings), and settles a retried registration challenge, the passkey id's shape, the step-up pair, and the stale first enrolment ([DEC-2118](../project/decisions/DEC-2118.md), agent readings). §4.10 specifies route 2's reduction-session challenge and opening routes, their limits, the device cookie, and the session's reach (E9-1; [DEC-2117](../project/decisions/DEC-2117.md), an agent reading). §4.10 route 2's challenge limits answer the one 401 and its failure limit only reports, as DEC-653 item 3 says (E9-1; [DEC-2119](../project/decisions/DEC-2119.md), an agent reading). §5.6 says how the executor reads the compromise batch's kill switch itself, applies it agent by agent until the account-wide form lands, and what the owner is told (E7-4; [DEC-2343](../project/decisions/DEC-2343.md), an agent reading). §3.6's passkey routes read one fold of the member's passkeys, answer a broken one `journal_unavailable`, date a passkey by its row's `recorded_at`, and count a first enrolment's 300 s from the session's sign-in (E9-4; [DEC-2124](../project/decisions/DEC-2124.md), agent readings). §3.6 and §4.5 give a connect's start passkey step-up, its `step_up_assertion` beside `step_up` and `StepUpAsserted` in its batch, and say when DEC-2125's `cli_confirm` for a connect ends (E9-4; [DEC-2126](../project/decisions/DEC-2126.md), agent readings). §3.11 item 10 serves a paper grant under `cli_confirm`, recorded as the CLI records it (E9-4; [DEC-2129](../project/decisions/DEC-2129.md), agent readings, item 7 the founder's; whom a reference names, as the runtime resolves it: [DEC-2130](../project/decisions/DEC-2130.md)). §3.6 and §3.11 item 11 give a version's confirmation and a deployment the same passkey step-up (E9-4; [DEC-2128](../project/decisions/DEC-2128.md), agent readings). §3.6 and §3.11 item 12 give a resume and a Stop the same, recording an unverified one with `null` as before (E9-4; [DEC-2140](../project/decisions/DEC-2140.md), an agent reading). §4.1 and §3.11 item 11 add the catalogue reads, the registered instruments and signal models a version may name (E10-11; [DEC-2136](../project/decisions/DEC-2136.md), an agent reading) |
 | **Implements** | [HLD §4](../HLD.md#workspace-deployment) (workspace control services), [§6 flows A and C](../HLD.md#6-key-flows), [§7](../HLD.md#7-logging-and-audit), [§8](../HLD.md#8-multi-tenancy-and-security); PRD FR-1.4, FR-2.1 to FR-2.4, FR-3.1 to FR-3.5, FR-4.4, FR-6.2 to FR-6.5, FR-7.1 to FR-7.5, FR-8.1 to FR-8.4; backlog E8, E10, E11, E12 |
 | **Depends on** | [Mandate spec](mandate.md) §2, §6, §7, §9, §10; [journal spec](journal.md) §2, §5, §7, §9, §11, §12; [infrastructure design](../design/infrastructure.md) §3.6, §9; [product experience brief](../product/09-product-experience.md) §3 to §5 |
 | **Siblings** | Identity, roles, sessions, and step-up ceremonies: the [identity spec](identity.md), gap 6. Notification delivery and approval deep links: the [notifications spec](notifications.md), gap 7. Broker connection flows: `docs/specs/connections.md` (gap 9) |
@@ -475,6 +475,15 @@ The ceremony belongs to the [identity spec](identity.md) (E9-4). The API's part:
   ([DEC-2133](../project/decisions/DEC-2133.md)).
   An approval's grant is not served under any method yet (§3.11 item 10), so DEC-2128 leaves it out.
   **(planned: E9-4)**
+- A resume and a Stop take passkey step-up the same way
+  ([DEC-2140](../project/decisions/DEC-2140.md)): `commands/resume-request` and
+  `commands/stop-request` carry the same optional `step_up_assertion`, `invalid` at
+  `/step_up_assertion` with a `null` step-up or beside `cli_confirm`. The port judges it against
+  the command's own action (§3.11 item 12). A verified one records the command with its evidence
+  and appends `StepUpAsserted` right after its `OwnerCommandIssued`, in one batch; anything
+  unverified, passkey evidence with no assertion included, is still recorded with `null` evidence,
+  which the runtime refuses, so the brake is never refused here for step-up it could not verify
+  (DEC-2102 item 4). A repeat of a recorded call answers as before and judges no assertion.
 
 ### 3.7 Roles
 
@@ -809,7 +818,13 @@ per workspace deployment (item 6).
       later version over `stale_base`, naming the latest; an agent already deployed with the same
       version answers `200` with its `AgentDeployed`, and with another version `invalid` at
       `/agent_id`; an agent an `AgentStopped` names is `invalid` at `/agent_id` too, since an
-      agent id is deployed once ([DEC-1173](../project/decisions/DEC-1173.md) item 1); every
+      agent id is deployed once ([DEC-1173](../project/decisions/DEC-1173.md) item 1); a version
+      whose `universe.max_instruments` is above 1 is `invalid` at `/mandate_version`, code
+      `second_instrument`: the executor's risk fold reads one agent's one instrument (an account
+      with another deployed agent that has not stopped, `second_agent_on_account` at `/agent_id`,
+      is DEC-2809 item 2's, not yet in force)
+      ([DEC-2809](../project/decisions/DEC-2809.md), [DEC-2804](../project/decisions/DEC-2804.md)
+      item 8); every
       V-rule for the agent (V-002, V-006, and V-032 included) and the pinned instruments, else
       `invalid` with the V-codes. V-002 reads the account's equity from the latest
       `AccountSnapshotRecorded` on the account stream of the document's connection; with
@@ -898,7 +913,9 @@ per workspace deployment (item 6).
       `user`, `risk_clock` and `submitted_at` at receipt, and `step_up`. The executor judges the
       event, the step-up, and independence (mandate spec §5.8).
     - **Step-up is forwarded only once verified.** Resume, Stop, and acknowledgment carry the port's
-      verified evidence as `step_up`, or `null`. Until E9-4 binds the port that is always `null`,
+      verified evidence as `step_up`, or `null`. A resume's or Stop's `passkey` evidence is verified
+      only with its `step_up_assertion`, and then its `StepUpAsserted` follows the command in its
+      batch (§3.6, [DEC-2140](../project/decisions/DEC-2140.md)). Until E9-4 binds the port that is always `null`,
       so the runtime or executor refuses each with `OwnerCommandRefused` `step_up_missing`, the
       refusal journaled where the specs put it (§5.4); the client renders that refusal from
       §5.5, never "stopped". Under `independent_approval_required` an acknowledgment also fails
@@ -981,14 +998,21 @@ workspace that ran it, and no route aggregates backtests across workspaces.
 | Operation | Method and path | Event | Notes |
 |---|---|---|---|
 | Inbox | `GET /approvals?state=pending\|resolved` | — | Pending by deadline, then resolved with outcome (D5) |
-| Read one | `GET /approvals/{id}` | — | The content object exactly as `ApprovalRequested` holds it, its `content_hash`, the deadline, the grants so far, and the status folded from the agent stream. Never a scorecard, profit estimate, or price target (DEC-126) |
+| Read one | `GET /approvals/{id}` | — | The content object exactly as `ApprovalRequested` holds it, the `ApprovalRequested` version it comes from (`schema_version`, [DEC-2518](../project/decisions/DEC-2518.md)), its `content_hash`, the deadline, the grants so far, and the status folded from the agent stream. Never a scorecard, profit estimate, or price target (DEC-126) |
 | Delegation preview | `POST /approvals/{id}/delegation-previews` | — | §5.3. Offered only where mandate spec §6.4 allows a scope |
 | Respond | `POST /approvals/{id}/responses` | `ApprovalResponseSubmitted` | §5.2. Users only |
 | Resolve a notice | `GET /notices/{notice_id}` | `RecordsAccessed` | §3.9 |
 
 The inbox and the single read return `read-models/approvals` and `read-models/approval`
 ([DEC-979](../project/decisions/DEC-979.md)): each approval's id, agent, state, `requested_at`,
-`deadline` (the journaled risk-clock seconds), and `content_hash`; the single read adds `content`.
+`deadline` (the journaled risk-clock seconds), and `content_hash`; the single read adds `content`
+and `schema_version`, the `ApprovalRequested` version `content` comes from (1, 2 or 3;
+[DEC-2518](../project/decisions/DEC-2518.md)). Version 3's content names the checks its dry run
+deferred (journal spec §9.6, rule 291) and versions 1 and 2 name none, so a client tells a
+version 3 request without its list from an older one and shows it as unreadable, never as
+nothing deferred (mandate spec §6.4). A version 1 or 2 request whose decision, written in another
+batch, deferred checks is not caught here: that is rule 292's cross-batch debt
+(`E21-30-approval-deferral-range-check`).
 The state is folded from the agent stream, and the first terminal event wins: `pending` until
 re-validation acts (`acted`) or the approval ends `skipped` (by the owner's Skip or by
 re-validation), `timed_out`, or `canceled`. An admitted grant still awaiting re-validation, and a
@@ -1168,7 +1192,7 @@ pattern); the answer is the runtime's, from the agent stream.
 | Daily brief | `GET /agents/{id}/briefs/{date}` | D13: counts and sources only; no profit or outcome claims |
 | Scorecards | `GET /agents/{id}/scorecards` | FR-8.4: the user's own results only. Never embedded in an approval, the model picker, or another workspace's view |
 | Forward-paper evaluation | `GET /evaluations/{id}` | E17-8, E15-3: the founder's evaluation of the research agent's theses, one scorecard per signal model beside the baselines. Only in the team's internal paper workspaces (DEC-103); elsewhere `not_found`. Never an owner's scorecard ([DEC-1002](../project/decisions/DEC-1002.md) item 6) |
-| Alerts | `GET /alerts` | G5, from `OwnerAlertSent` and the events it names |
+| Alerts | `GET /alerts` | G5, from `OwnerAlertSent` and the events it names, with each one's notice and the asking member's own deliveries: `read-models/alerts` ([DEC-2141](../project/decisions/DEC-2141.md)) |
 | Health | `GET /health` | The status strip (G1): market data, broker, deployment, relay, each with its last observation time |
 
 The first shapes served are `read-models/agents` and `read-models/agent`
@@ -1221,6 +1245,46 @@ code, never both. `passed` is true only when at least one group was scored and e
 passed. Its one disclosure is the placeholder `NOTE-FORWARD-PAPER-INTERNAL` (DEC-1003). Until
 counsel answers compliance question 35, nothing here reaches an owner, an approval, or the model
 picker.
+
+`GET /alerts` returns `read-models/alerts` ([DEC-2141](../project/decisions/DEC-2141.md)), the
+web inbox's alerts about the workspace's agents and accounts (notifications spec §1.3, §4.1: the
+pull channel's list is the journal itself). Users only, until client tokens land (E10-14).
+
+- **Streams.** It reads every stream the dispatcher follows (DEC-2516 item 1), whether or not it
+  holds an alert: the control stream, the agent stream of every agent `AgentDeployed` names, and
+  the account stream of every account `ConnectionRequested` or `ConnectionEstablished` names; and
+  the notice stream, `ntf:{workspace_id}`. A stream the store holds no row for reads as empty (a
+  deployed agent whose runtime never ran, a notice stream the dispatcher has not yet written); a
+  read the store fails is `journal_unavailable`, never a shorter list. `as_of` names each stream
+  read that holds a row (API-14).
+- **Which alerts.** Each `OwnerAlertSent` on those streams whose kind notifications spec §3.2
+  sends to an agent's or an account's owners (with workspace admins or not): every kind but the
+  nine about members and access, `credential_added`, `new_device`, `notification_address_changed`,
+  `recovery_used`, `role_granted`, `member_deactivated`, `deprovisioned`, `break_glass`, and
+  `client_connected`, which this read never serves, since they go to one member or to admins
+  alone; those nine are left out, not failed. An `OwnerAlertSent` that does not read, or whose
+  kind is not one §9.15 admits, is `journal_unavailable`, never skipped.
+- **Order and limit.** Most recently raised first, by `raised_at` and then `alert_id`, both
+  descending. `?limit=` takes 1 to 200 (default 50); anything else, or another query member, is
+  `invalid`. `truncated` says whether older alerts were left out.
+- **Each alert.** `alert_id`, the `OwnerAlertSent` event's id; `kind`, as journaled, and its
+  `class` from §3.2 (`safety` or `info`); `raised_at`, its `recorded_at`; `stream`, as `type`
+  (`agent`, `account` or `control`) with the `agent_id` or `account_ref` the stream id names (each
+  `null` where the stream names none); `subject`, the subject event's id and the `event_type` of
+  the event with that id on the alert's own stream (rule 130 puts it in the alert's batch, so a
+  subject the stream does not hold is `journal_unavailable`); `owner_command`, as journaled.
+- **Its notice.** `notice` is the `NoticeIssued` whose `cause` is `alert_id`: its `issued_at`, and
+  `delivery`, the asking member's own latest `NoticeAttempted` per push channel (the highest
+  notice-stream `seq` among that member's attempts on the channel), matched by recipient (`p_` and
+  the member's id in lowercase, notifications spec §5.9), with its `channel`, `status`, `attempt`
+  and `recorded_at`, in channel-name order. Another member's attempts, recipients, addresses, provider message ids, and
+  the notice id are never served; `delivery` is empty while no attempt to the member is recorded.
+  `notice` is `null` while no notice names the alert: before the dispatcher reaches it, or for
+  the second of two alerts a user's one kill switch raised, which §3.4 gives one notice.
+
+It needs the view row (§3.8) and serves nothing an alert's own records do not hold: no instrument,
+quantity, price, or text beyond the kind, which the client renders from its own closed table
+(API-10).
 
 ### 4.8 Journal and audit (audit explorer backend)
 
@@ -1374,7 +1438,7 @@ index on those members in the Postgres adapter; the in-memory reader scans.
 | `ApprovalRequested` | `payload.content.evidence.outputs[].event_id` | Each `ModelOutputRecorded` the approval's content cites, on the same agent stream (§9.6) |
 | `DecisionMade` | `payload.outputs_used[]` | Each `ModelOutputRecorded` on the same agent stream |
 | `ModelOutputRecorded` | `payload.evidence[]`; `payload.thesis_id` | Each event named in `evidence`, on any stream of the workspace (observations, model invocations); and the `ThesisProposed` or `ThesisRevised` with that `thesis_id` on the same agent stream |
-| Any other event, `OrderAbandoned` included | none | Only its `causation_id` (`OrderAbandoned` has no closed schema yet, so no payload member is a link; §12 question 7) |
+| Any other event, `OrderAbandoned` included | none | Only its `causation_id`. `OrderAbandoned` is closed ([journal spec](journal.md) §9.5, [DEC-2803](../project/decisions/DEC-2803.md)), and its `intent_id` names its intent and its `client_order_id` the order that intent derives (rule 303, [DEC-2820](../project/decisions/DEC-2820.md)), but the trace does not follow them yet (§12 question 7) |
 
 The chain of a fill an agent proposed with no approval runs `FillApplied` → `OrderSubmitted` →
 `OrderRequestRecorded` (`causation_id`) → `IntentReceived`, every `GateDecided`, and the agent
@@ -2396,7 +2460,7 @@ risk-reducing call never consults one (API-7, API-8).
 | Approval service endpoints and delegation previews | **Planned** (E8-15) |
 | Connection endpoints | **Planned** (E10-13, with gap 9) |
 | Client tokens and scopes | **Planned** (E10-14, before E10-6) |
-| Read-model projections | **Partly served** (E11-9): agents and approvals (§4.3, §4.7, DEC-979), and an agent's orders and positions (§4.7, [DEC-2111](../project/decisions/DEC-2111.md)); the ledger, risk-mark, and protection folds are planned |
+| Read-model projections | **Partly served** (E11-9): agents and approvals (§4.3, §4.7, DEC-979), and an agent's orders and positions (§4.7, [DEC-2111](../project/decisions/DEC-2111.md)); and the alerts read (§4.7, [DEC-2141](../project/decisions/DEC-2141.md)); the ledger, risk-mark, and protection folds are planned |
 | Journal queries, trace, exports over the API | **Partly served** (E12-6): a stream's events page and one event (§4.8.1); trace, exports, and verification over the API are planned, their contracts in §4.8.1, served by the pure crate `mandate-audit` |
 | The backtest report (`read-models/backtest`) and `BacktestRunRecorded` | **Specified** (DEC-1000, DEC-1001; journal spec v0.45 §9.18); the run is **planned** (E4-4), the record's registration and the route **planned** (E4-5) |
 | The forward-paper evaluation (`read-models/evaluation`) and `EvaluationRunRecorded` | **Specified** (DEC-1002; journal spec v0.45 §9.18); the pure scorer **exists** (`mandate_research::score`); the harness, the record's registration, and the route **planned** (E17-8) |
@@ -2482,8 +2546,8 @@ follow-ups" there (freeze rule). **SC** marks a safety-critical story.
 7. **Trace links the journal does not record yet.** `ModelInvocationRecorded` names no event it
    served, so a trace reaches it only when an output's `evidence` names it. A flatten's or a
    protective order's `OrderRequestRecorded` carries no link to the `KillSwitchActivated` or the
-   opening it serves. A version-1 `OrderSubmitted` names no intent. `OrderAbandoned` has no closed
-   schema, so no payload member of it is a link. No member the journal spec requires links an
+   opening it serves. A version-1 `OrderSubmitted` names no intent. `OrderAbandoned` names its
+   intent and order (journal spec §9.5, rule 303), but the trace does not follow it yet. No member the journal spec requires links an
    `ApprovalRequested` to its `DecisionMade`: the runtime writes the decision as its `causation_id`,
    which the spec does not require. Each needs a journal spec
    member; until then the trace reports the hop as `not_recorded` or ends (§4.8.1).

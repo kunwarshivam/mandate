@@ -193,7 +193,7 @@ export function createMockServer(options: MockServerOptions): MockServer {
 
   function asOf(): Watermark[] {
     const seq = commands.length;
-    return [{ stream_id: "control", seq, hash: `sha256:${sha256Hex(`${workspaceId}:control:${seq}`)}`, recorded_at: canonical(workspace.now) }];
+    return [{ stream_id: `ctl:${workspaceId}`, seq, hash: `sha256:${sha256Hex(`${workspaceId}:control:${seq}`)}`, recorded_at: canonical(workspace.now) }];
   }
 
   const servedAt = canonical(workspace.now);
@@ -292,7 +292,7 @@ export function createMockServer(options: MockServerOptions): MockServer {
 
   function get(route: string, query: URLSearchParams): Response {
     const journal = route.match(/^\/journal\/streams\/([^/]+)\/events$/);
-    const allowed = (name: string) => (route === "/approvals" && name === "state") || (journal !== null && (name === "after_seq" || name === "limit"));
+    const allowed = (name: string) => (route === "/approvals" && name === "state") || (route === "/alerts" && name === "limit") || (journal !== null && (name === "after_seq" || name === "limit"));
     if ([...query.keys()].some((name) => !allowed(name))) return problem(404, "not_found", "none");
     if (journal) {
       const lines = agentStream(decodeURIComponent(journal[1])) ?? controlStream(decodeURIComponent(journal[1]));
@@ -317,6 +317,8 @@ export function createMockServer(options: MockServerOptions): MockServer {
           .sort((a, b) => (a.symbol < b.symbol ? -1 : a.symbol > b.symbol ? 1 : 0)),
       });
     if (route === "/signal-models") return read({ models: [MOCK_MODEL] });
+    /** `read-models/alerts` (DEC-2141): the fixtures journal no owner alert, so none is invented. */
+    if (route === "/alerts") return read({ alerts: [], truncated: false });
     if (route === "/passkeys") return read({ passkeys: passkeys.map((p) => ({ passkey_id: p.passkey_id, alg: "es256", enrolled_at: servedAt, cool_off_ends: p.cool_off_ends })) });
     if (route === "/agents") return read({ agents: workspace.agents.map(agentRow) });
     if (route === "/connections") return read({ connections: connectionRows() });
@@ -337,7 +339,7 @@ export function createMockServer(options: MockServerOptions): MockServer {
       if (!agent) return problem(404, "not_found", "none");
       const head = { agent_id: agent.agent_id, account_ref: workspace.connection.connection_id };
       if (activity[2] === "positions") {
-        const positions = agent.positions.map((p) => ({ instrument_id: p.instrument.symbol, filled_qty: canon(p.qty), cost_basis: null, risk_mark: null, protection: null }));
+        const positions = agent.positions.map((p) => ({ instrument_id: p.instrument.asset_id, filled_qty: canon(p.qty), cost_basis: null, risk_mark: null, market_value: null, unrealized_pnl: null, protection: { orders: [], covered_qty: "0", stop: null, take_profit: null, unprotected_since: null } }));
         return read({ ...head, positions, account_positions: agentDetail(agent).account_positions });
       }
       const served = [...agent.past_orders.map((o) => ({ ...o, updated: o.closed_at })), ...agent.orders.map((o) => ({ ...o, updated: o.submitted_at }))];
@@ -367,7 +369,7 @@ export function createMockServer(options: MockServerOptions): MockServer {
     const approvalRoute = route.match(/^\/approvals\/([^/]+)$/);
     if (approvalRoute) {
       const approval = approvalBy(decodeURIComponent(approvalRoute[1]));
-      return approval ? read({ approval: { ...approvalRow(approval), content: { action: { side: approval.bound.side } } } }) : problem(404, "not_found", "none");
+      return approval ? read({ approval: { ...approvalRow(approval), content: { action: { side: approval.bound.side } }, schema_version: 2 } }) : problem(404, "not_found", "none");
     }
     const backtestRoute = route.match(/^\/backtests\/([^/]+)$/);
     if (backtestRoute) {

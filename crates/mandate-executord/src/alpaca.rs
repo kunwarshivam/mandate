@@ -3,7 +3,8 @@
 //! the dev and CI cells hand it [`crate::paper::FixturePaper`].
 //!
 //! The client's call is async and the process is not, so the adapter owns the runtime that drives
-//! it: one current-thread tokio runtime, built once, that holds nothing a restart would lose.
+//! it: one current-thread tokio runtime, built once, that holds nothing a restart would lose. It
+//! drives IO as well as time, which the paper host's HTTP transport needs.
 
 use mandate_alpaca::{
     DeclaredRegime as AlpacaRegime, RetryPolicy, TokioPause, TradingClient, TradingTransport,
@@ -31,7 +32,7 @@ impl<T: TradingTransport + Clone> AlpacaBroker<T> {
     /// `runtime_unavailable` when the runtime that drives the client cannot be built.
     pub fn new(transport: T) -> Result<Self, &'static str> {
         let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_time()
+            .enable_all()
             .build()
             .map_err(|_| "runtime_unavailable")?;
         Ok(Self { transport, runtime })

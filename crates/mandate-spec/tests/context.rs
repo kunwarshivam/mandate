@@ -14,7 +14,7 @@ use mandate_canon::Digest;
 use mandate_domain::{AssetClass, AssetId, Environment};
 use mandate_num::{NumError, Usd};
 use mandate_spec::context::{
-    AgentId, ContextArgs, JournaledFact, LOSS_CARRY_DAYS, Membership,
+    AgentId, ContextArgs, JournaledFact, LOSS_CARRY_DAYS, Membership, registry,
     unrecorded_stop_limit_asset_classes,
 };
 use mandate_spec::document::{ConnectionId, ModelId, Pointer, Provenance, Source};
@@ -407,7 +407,12 @@ fn the_registry_is_what_is_registered_and_not_withdrawn_and_is_never_unchecked()
     ];
     assert_eq!(
         fold(&facts).registry,
-        Some(BTreeMap::from([(momentum_id, momentum("1.1.0"))]))
+        Some(BTreeMap::from([(momentum_id.clone(), momentum("1.1.0"))]))
+    );
+    assert_eq!(
+        registry(&facts),
+        BTreeMap::from([(momentum_id, momentum("1.1.0"))]),
+        "the registry a reader lists is the one the context folds"
     );
     assert_eq!(
         fold(&[snapshot(OURS, "25000")]).registry,
