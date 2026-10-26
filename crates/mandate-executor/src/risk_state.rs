@@ -16,6 +16,7 @@
 //! 13). It keeps `paused` or `stopped` only when the last readable view already was.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::mem;
 
 use mandate_canon::{Object, Value, parse};
 use mandate_domain::{AgentMode, AssetClass, AssetId, MarketSession, Side};
@@ -60,6 +61,9 @@ enum Reading {
     RiskInput,
     /// A record that says whose an order is (DEC-2393 item 1): read for that, and stepping nothing.
     Order,
+    /// `CompensatingEvent`, read at version 1 beside the `OrderStateChanged` it corrects, and
+    /// stepping nothing (DEC-2829).
+    Compensation,
     /// A fill, read at version 1: the agent's own steps the risk state (DEC-2393 item 2).
     Fill,
     /// `FeesCharged`, read at version 1: one charged to the agent's own order steps a fee (DEC-2393
@@ -109,7 +113,7 @@ const ACCOUNT_STREAM: [(&str, Reading); 52] = [
     ("AccountCloseRequested", Reading::Record),
     ("BrokerPositionObserved", Reading::Record),
     ("ReconciliationRun", Reading::Record),
-    ("CompensatingEvent", Reading::RiskInput),
+    ("CompensatingEvent", Reading::Compensation),
     ("AccountSnapshotRecorded", Reading::Record),
     ("AccountStateObserved", Reading::Record),
     ("RejectObserved", Reading::Record),
@@ -269,6 +273,39 @@ fn fill_version(event_type: &str, version: u64) -> bool {
     }
 }
 
+/// Whether the version-1 `CompensatingEvent` `row` corrects `corrects`, the row right before it
+/// (DEC-2829): its `difference` is `order_state`, its `from` is text, and `corrects` is an
+/// `OrderStateChanged` in the same append (the same `recorded_at` its writer gave it), named by the
+/// compensation's `causation_id` and its one corrected event id, whose order is the compensation's
+/// `subject` and whose state is its `to`. Such a compensation moves no figure: the order's state is
+/// that record's, read for ownership already, and its fill is its own `FillApplied`. Any other is
+/// an input the fold does not read, and the view fails closed (DEC-2304 item 1); a paired one
+/// whose `risk_clock` is not a whole-second timestamp is undecodable.
+fn compensates(
+    row: &StoredEvent,
+    body: &Value,
+    payload: &Object,
+    corrects: Option<StateChange>,
+) -> bool {
+    let named = |member: &str| payload.get(member).and_then(Value::as_str);
+    let corrected = match payload.get("corrected_event_ids") {
+        Some(Value::Array(ids)) => match ids.as_slice() {
+            [id] => id.as_str(),
+            _ => None,
+        },
+        _ => None,
+    };
+    corrects.is_some_and(|corrects| {
+        named("difference") == Some("order_state")
+            && named("from").is_some()
+            && corrects.recorded_at == row.recorded_at
+            && body.get("causation_id").and_then(Value::as_str) == Some(corrects.event_id.as_str())
+            && corrected == Some(corrects.event_id.as_str())
+            && named("subject") == Some(corrects.client_order_id.as_str())
+            && named("to") == Some(corrects.state.as_str())
+    })
+}
+
 /// The sum of a fill's `fees` charged in `USD` (DEC-2393 item 3). A fee in any other asset moves
 /// the quantity received by a rule the fold does not apply, so it is a refusal to decide.
 fn usd_fees(payload: &Object) -> Result<Usd, UnreadableCause> {
@@ -421,6 +458,33 @@ pub struct AccountRiskFold<'c> {
     /// Other rows may come before them (the rest of their cause's batch), and the caller folds
     /// every record it appends back in, or the next risk record is `not_reproduced`.
     owed: VecDeque<RiskAppend>,
+    /// The row right before the next, when it is an `OrderStateChanged`: the only row a
+    /// compensation may correct (DEC-2829).
+    state_change: Option<StateChange>,
+}
+
+/// An `OrderStateChanged` as a compensation right after it must name it (DEC-2829).
+struct StateChange {
+    event_id: String,
+    recorded_at: String,
+    client_order_id: String,
+    state: String,
+}
+
+impl StateChange {
+    /// `row` when it is an `OrderStateChanged` naming its order and state, else `None`.
+    fn of(row: &StoredEvent, payload: &Object) -> Option<Self> {
+        if row.event_type != "OrderStateChanged" {
+            return None;
+        }
+        let named = |member: &str| payload.get(member).and_then(Value::as_str);
+        Some(Self {
+            event_id: row.event_id.clone(),
+            recorded_at: row.recorded_at.clone(),
+            client_order_id: named("client_order_id")?.to_owned(),
+            state: named("state")?.to_owned(),
+        })
+    }
 }
 
 /// The records the fold returns, which it must find on the stream exactly as it returned them.
@@ -485,6 +549,7 @@ impl<'c> AccountRiskFold<'c> {
             own: BTreeSet::new(),
             fills: BTreeSet::new(),
             owed: VecDeque::new(),
+            state_change: None,
         })
     }
 
@@ -536,6 +601,7 @@ impl<'c> AccountRiskFold<'c> {
             .get("payload")
             .and_then(Value::as_object)
             .ok_or(UnreadableCause::Undecodable)?;
+        let corrects = mem::replace(&mut self.state_change, StateChange::of(row, payload));
         let cause = body.get("causation_id").and_then(Value::as_str);
         let owed_cause = cause.is_some_and(|cause| {
             self.owed
@@ -565,6 +631,10 @@ impl<'c> AccountRiskFold<'c> {
                 self.fill(row, payload)
             }
             (Some(Reading::Fee), 1) => self.fee(row, payload),
+            (Some(Reading::Compensation), 1) if compensates(row, &body, payload, corrects) => {
+                whole_second(payload, "risk_clock")?;
+                Ok(Vec::new())
+            }
             (Some(_), _) => Err(UnreadableCause::UnknownSchemaVersion),
         }
     }

@@ -200,7 +200,7 @@ def invalid_drafts() -> list[dict]:
     ]
     for base in (ACK_V2, ACK_V2_COPY, REQUEST_V2):
         out += [
-            bad(f"{base}.subject_unknown", "§9.28 v2: `subject` is `limit` or `restriction`", base,
+            bad(f"{base}.subject_unknown", "§9.28 v2: `subject` is `limit`, `restriction` or `reconciliation`", base,
                 [change("payload.subject", "account")], "payload.subject", "non_canonical"),
             bad(f"{base}.subject_null", "§9.28 v2: `subject` is never null", base, [change("payload.subject", None)],
                 "payload.subject"),
@@ -236,6 +236,10 @@ def valid_drafts() -> list[dict]:
                       [change("payload.subject", "limit")]),
         control_valid("requested_v2.limit", "§9.28 v2: a request of either subject", REQUEST_V2,
                       [change("payload.subject", "limit")]),
+        control_valid("acknowledged_v2.reconciliation", "§9.28 v0.104: a reconciliation hold's subject", ACK_V2,
+                      [change("payload.subject", "reconciliation")]),
+        control_valid("requested_v2.reconciliation", "§9.28 v0.104: a request for a hold", REQUEST_V2,
+                      [change("payload.subject", "reconciliation")]),
     ]
 
 
