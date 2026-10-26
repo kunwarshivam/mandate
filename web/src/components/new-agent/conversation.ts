@@ -267,6 +267,8 @@ function apply(c: Conversation, r: Reading, messageId: string, checks: Checks): 
       if (!read.ok) return [c, { refused: read.error }];
       const unregistered = c.instruments ? read.value.filter((s) => !c.instruments![s]) : [];
       if (unregistered.length > 0) return [c, { refused: notRegistered(unregistered, c.instruments!) }];
+      const otherClass = c.instruments ? read.value.filter((s) => c.instruments![s].asset_class !== "us_equity") : [];
+      if (otherClass.length > 0) return [c, { refused: `${otherClass.join(", ")} ${otherClass.length === 1 ? "is" : "are"} registered as crypto, which this set-up does not offer yet: it sets up agents that trade US stocks and ETFs. Choose another.` }];
       const taken = claimed(read.value, checks);
       if (taken) return [c, { refused: taken }];
       return [changed(c, { symbols: read.value }), { noted: `${read.value.join(", ")} to trade` }];

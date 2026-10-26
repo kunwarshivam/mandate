@@ -40,8 +40,12 @@ export function NewAgentFlow({ compiler }: { compiler?: Compiler }) {
     void catalogue().then((answer) => {
       if (!live) return;
       if (!answer.ok) return setServed({ ok: false });
-      const models = answer.models.map(servedModelChoice).filter((m): m is ModelChoice => m !== null);
-      const instruments = Object.fromEntries(answer.instruments.map((i) => [i.symbol, { asset_id: i.instrument_id, symbol: i.symbol, asset_class: i.asset_class } satisfies InstrumentRef]));
+      const models = answer.models
+        .map(servedModelChoice)
+        .filter((m): m is ModelChoice => m !== null)
+        .sort((a, b) => a.name.localeCompare(b.name, "en"));
+      const instruments: Record<string, InstrumentRef> = {};
+      for (const i of [...answer.instruments].sort((a, b) => (a.instrument_id < b.instrument_id ? -1 : 1))) instruments[i.symbol] ??= { asset_id: i.instrument_id, symbol: i.symbol, asset_class: i.asset_class };
       setServed({ ok: true, catalogue: { models, instruments } });
     });
     return () => {
@@ -61,7 +65,7 @@ export function NewAgentFlow({ compiler }: { compiler?: Compiler }) {
         Your deployment did not report the instruments and models it has registered, so no agent can be set up from here now. This page tries again when you reload it.
       </p>
     );
-  return <Flow compiler={compiler} catalogue={served.catalogue} />;
+  return <Flow key={JSON.stringify(Object.keys(served.catalogue.instruments ?? {}))} compiler={compiler} catalogue={served.catalogue} />;
 }
 
 /**

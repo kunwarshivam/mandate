@@ -31,7 +31,7 @@ export interface CatalogueModel {
   content_hash: ContentRef;
   params: string[];
   admits_instruments: boolean;
-  /** `null` when the deployment could not give the content. */
+  /** `null` when the deployment could not give the content, or gave a parameter list this page cannot read, so the model is not offered. */
   content: { methodology: string | null; params: CatalogueParam[]; constraints: string[] } | null;
   registered_at: Timestamp;
 }
@@ -62,7 +62,11 @@ const instrument = object<CatalogueInstrument>({
 /** `read-models/instruments`. */
 export const instrumentsRead: Decoder<{ instruments: CatalogueInstrument[] }> = object({ instruments: array(instrument) });
 
-/** The served projection of a model's content: anything outside it is ignored here (§3.2), and a malformed member reads as absent. */
+/**
+ * The served projection of a model's content: anything outside it is ignored here (§3.2), a
+ * malformed scalar reads as absent, and a parameter entry this page cannot read makes the content
+ * unreadable for that model alone, never the whole list.
+ */
 const content: Decoder<CatalogueModel["content"]> = (value, path) => {
   if (value === null) return { ok: true, value: null };
   if (!isRecord(value)) return fail(path, "wrong_type");
@@ -70,7 +74,7 @@ const content: Decoder<CatalogueModel["content"]> = (value, path) => {
   const schema = isRecord(value.params_schema) ? value.params_schema : {};
   const params: CatalogueParam[] = [];
   for (const p of Array.isArray(schema.params) ? schema.params : []) {
-    if (!isRecord(p) || typeof p.name !== "string" || !PARAM.test(p.name)) return fail(`${path}/params_schema/params`, "not_canonical");
+    if (!isRecord(p) || typeof p.name !== "string" || !PARAM.test(p.name)) return { ok: true, value: null };
     params.push({ name: p.name, type: typeof p.type === "string" ? p.type : null, min: whole(p.min), max: whole(p.max) });
   }
   const constraints = (Array.isArray(schema.constraints) ? schema.constraints : []).filter((c): c is string => typeof c === "string");

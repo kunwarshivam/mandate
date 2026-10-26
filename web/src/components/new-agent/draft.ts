@@ -133,7 +133,7 @@ export function constraintBroken(model: ModelChoice, values: Readonly<Record<str
   return null;
 }
 
-/** The names a deployment's models are shown by, where the platform has one; otherwise the model's id. */
+/** Platform-authored display names for registered models, where the platform has one (otherwise the model's id); a label, never a ranking. */
 const MODEL_NAMES: Readonly<Record<string, string>> = { "quant.ma_crossover": "Moving-average crossover" };
 
 /** A parameter name in words: `fast_periods` reads "Fast periods". */
@@ -143,8 +143,9 @@ const words = (name: string) => `${name[0].toUpperCase()}${name.slice(1).replace
  * A model the deployment registered (`GET /signal-models`, DEC-2136) as one the owner may choose: its
  * registered version and content hash, its methodology as the content states it, and a question per
  * declared parameter from the content's bounds. Only a model whose every declared parameter is a
- * bounded integer, and which admits no instruments, can be asked about here; any other is not offered.
- * A constraint the content states as `a < b` is checked; no other is invented.
+ * bounded integer, whose every constraint is an `a < b` between two of them (which the page checks),
+ * and which admits no instruments, can be asked about here: any other is not offered, since the page
+ * cannot hold the owner to a rule it cannot read.
  */
 export function servedModelChoice(m: { model_id: string; model_version: string; content_hash: ContentRef; params: readonly string[]; admits_instruments: boolean; content: { methodology: string | null; params: ReadonlyArray<{ name: string; type: string | null; min: number | null; max: number | null }>; constraints: readonly string[] } | null }): ModelChoice | null {
   if (m.admits_instruments || !m.content) return null;
@@ -159,7 +160,8 @@ export function servedModelChoice(m: { model_id: string; model_version: string; 
   const lessThan: Array<[string, string]> = [];
   for (const c of m.content.constraints) {
     const pair = /^([a-z][a-z0-9_]*) < ([a-z][a-z0-9_]*)$/.exec(c.trim());
-    if (pair && m.params.includes(pair[1]) && m.params.includes(pair[2])) lessThan.push([pair[1], pair[2]]);
+    if (!pair || !m.params.includes(pair[1]) || !m.params.includes(pair[2])) return null;
+    lessThan.push([pair[1], pair[2]]);
   }
   return { id: m.model_id, name: MODEL_NAMES[m.model_id] ?? m.model_id, what: m.content.methodology ?? "Your deployment did not report how it decides.", version: m.model_version, contentHash: m.content_hash, params, lessThan };
 }

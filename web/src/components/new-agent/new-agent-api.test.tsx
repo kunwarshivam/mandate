@@ -112,6 +112,30 @@ describe("setting up an agent over the workspace API (DEC-975, DEC-2128)", () =>
     expect(posts.filter((p) => p.endsWith("/mandate-versions"))).toEqual([]);
   });
 
+  it("refuses a registered instrument of another class, saying why, rather than set the envelope's asset classes for the owner", async () => {
+    mount((send) => async (input, init) => {
+      const answer = await send(input, init);
+      if (!new URL(input).pathname.endsWith("/instruments")) return answer;
+      const body = (await answer.json()) as { instruments: unknown[] };
+      const eth = { instrument_id: "0b4a1c2e-6666-4a2b-9c3d-000000000006", symbol: "ETH", asset_class: "crypto", snapshot: `sha256:${"66".repeat(32)}`, registered_at: "2026-09-28T13:00:00.000000000Z" };
+      return new Response(JSON.stringify({ ...body, instruments: [...body.instruments, eth] }), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+    await toModel("ETH");
+    expect(screen.getByRole("main")).toHaveTextContent("ETH is registered as crypto, which this set-up does not offer yet");
+    expect(screen.queryByRole("group", { name: "Models" })).toBeNull();
+  });
+
+  it("says so when the deployment lists no model this page can set up", async () => {
+    mount((send) => async (input, init) => {
+      const answer = await send(input, init);
+      if (!new URL(input).pathname.endsWith("/signal-models")) return answer;
+      const body = (await answer.json()) as Record<string, unknown>;
+      return new Response(JSON.stringify({ ...body, models: [] }), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+    await toModel("XYZ");
+    expect(screen.getByRole("main")).toHaveTextContent("Your deployment lists no model this page can set up yet.");
+  });
+
   it("offers nothing when the deployment does not report its catalogue, and says so", async () => {
     mount((send) => (input, init) => (new URL(input).pathname.endsWith("/signal-models") ? Promise.reject(new TypeError("down")) : send(input, init)));
     await waitFor(() => expect(document.querySelector("[data-slot=catalogue-unreported]")).not.toBeNull());
