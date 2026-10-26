@@ -1178,7 +1178,7 @@ fn an_acknowledged_end_ends_an_open_interval_of_its_own_instrument() {
 /// instrument (DEC-966 item 7): the awaited stops of plain entries join one another, and a bracket
 /// entry's interval, or a plain entry's in another instrument, stays open.
 #[test]
-fn an_acknowledgment_ends_every_awaited_plain_entrys_interval_and_nothing_else() {
+fn an_acknowledgment_ends_the_interval_of_every_awaited_plain_entry_and_nothing_else() {
     let mut read = bought();
     plain_entry(&mut read, "mdt-p");
     plain_entry(&mut read, "mdt-q");
