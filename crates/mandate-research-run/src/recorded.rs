@@ -48,6 +48,10 @@ pub struct RecordedModel {
     /// The scripted replies of an agentic run's turns before its final one, turn 1 first; empty
     /// for a recording with no `turns` (DEC-2266).
     pub turns: Vec<ScriptedTurn>,
+    /// A `monitor` run's final reply, its output the monitor schema's `invalidations` alone (agent
+    /// harness spec §6.9), which a monitor run takes at its first turn, with no scripted turn;
+    /// `None` for a recording with no `monitor_reply`, whose monitor runs take [`Self::reply`].
+    pub monitor_reply: Option<RecordedReply>,
 }
 
 impl RecordedModel {
@@ -74,6 +78,15 @@ impl RecordedModel {
             .map(|turns| scripted(turns, &pinned))
             .transpose()?
             .unwrap_or_default();
+        let monitor_reply = research
+            .get("monitor_reply")
+            .map(|monitor| {
+                if pinned.content().agentic().is_none() {
+                    return Err(RecordedError::Malformed("monitor_reply"));
+                }
+                replayed(&Field(monitor))
+            })
+            .transpose()?;
         let slug = pinned.identity.model_name.clone();
         let reported_provider = endpoint.text("reported_provider")?;
         let prices = PriceTable::new(
@@ -100,16 +113,9 @@ impl RecordedModel {
                 model: Some(slug),
                 provider: Some(reported_provider.to_owned()),
             },
-            reply: RecordedReply {
-                output: reply.text("output")?.to_owned(),
-                latency_ms: reply.int("latency_ms")?,
-                usage: Usage {
-                    input: reply.int("input_tokens")?,
-                    output: reply.int("output_tokens")?,
-                    cached: reply.int("cached_tokens")?,
-                },
-            },
+            reply: replayed(&reply)?,
             turns,
+            monitor_reply,
         })
     }
 
@@ -175,6 +181,19 @@ impl Field<'_> {
 /// `research.json`'s `turns` (DEC-2266): refused whole, `Malformed("turns")`, unless the entry
 /// names the agentic loop and every turn is one its gateway would accept, so no recording scripts a
 /// call the entry does not declare.
+/// A recorded reply's members: its output text, latency, and usage.
+fn replayed(reply: &Field<'_>) -> Result<RecordedReply, RecordedError> {
+    Ok(RecordedReply {
+        output: reply.text("output")?.to_owned(),
+        latency_ms: reply.int("latency_ms")?,
+        usage: Usage {
+            input: reply.int("input_tokens")?,
+            output: reply.int("output_tokens")?,
+            cached: reply.int("cached_tokens")?,
+        },
+    })
+}
+
 fn scripted(turns: &Value, entry: &ResearchEntry) -> Result<Vec<ScriptedTurn>, RecordedError> {
     let refused = RecordedError::Malformed("turns");
     let content = entry.content();

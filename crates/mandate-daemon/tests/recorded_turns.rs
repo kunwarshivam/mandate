@@ -336,3 +336,57 @@ fn each_turn_is_answered_with_its_scripted_calls_then_the_final_reply() {
     assert!(record.tool_calls.is_empty());
     assert!(record.output.is_some(), "past the script, the final reply");
 }
+
+/// Agent harness spec §6.9 end to end through the worker's gateway: a bundle's `monitor_reply`
+/// answers a `monitor` run's first turn, with no scripted turn, and the gateway takes it under the
+/// monitor schema, `invalidations` alone, so the record carries it as the run's final output. The
+/// same bundle's ideate run still takes its script.
+#[test]
+fn a_monitor_turn_is_answered_with_the_bundle_s_monitor_reply() {
+    let invalidation = json!({"invalidations": [{"thesis_id": "01ACTIVE", "evidence": []}]});
+    let output = invalidation.to_string();
+    let bundle = load_edited("monitor-reply", AGENTIC, |research| {
+        research["monitor_reply"] = json!({
+            "output": output,
+            "latency_ms": 0,
+            "input_tokens": 900,
+            "output_tokens": 40,
+            "cached_tokens": 0
+        });
+    })
+    .unwrap_or_else(|e| panic!("{e:?}"));
+    assert!(bundle.monitor_reply.is_some());
+    let shelf = Shelf::default();
+    let now = || UtcNanos::from_parts(CUT_OFF + 5, 0).unwrap();
+    let mut worker =
+        RecordedWorker::new(&bundle, who(), Box::new(shelf.clone()), Box::new(now)).unwrap();
+    worker.hand(
+        &ResearchRequest::Start {
+            run_id: RUN.to_owned(),
+            cut_off: RiskClock::from_secs(CUT_OFF),
+        },
+        &parts(),
+    );
+    let answers = worker.answers(RiskClock::from_secs(CUT_OFF + 1));
+    let Some(ResearchInput::Retrieved { items, .. }) = answers.first() else {
+        panic!("the run retrieved: {answers:?}");
+    };
+    let mut monitor = turn(1, items.len(), Vec::new());
+    monitor.kind = RunKind::Monitor;
+    monitor.plan.tools = [Tool::NewsSearch, Tool::NewsGet, Tool::Note].into();
+    worker
+        .turn(&monitor)
+        .unwrap_or_else(|e| panic!("monitor turn: {e:?}"));
+    let answers = worker.answers(RiskClock::from_secs(CUT_OFF + 30));
+    let [ResearchInput::Called { record, .. }] = answers.as_slice() else {
+        panic!("the monitor turn answered one record: {answers:?}");
+    };
+    assert_eq!(record.outcome, Outcome::Ok, "{:?}", record.outcome);
+    assert!(record.tool_calls.is_empty(), "no scripted turn");
+    assert_eq!(
+        record.output.as_ref().map(to_canonical),
+        Some(to_canonical(
+            &parse(invalidation.to_string().as_bytes()).unwrap()
+        ))
+    );
+}
