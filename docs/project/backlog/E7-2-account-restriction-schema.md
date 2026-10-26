@@ -5,4 +5,6 @@
   is refused and the process stops, the reading that adds no risk but leaves the owner unalerted.
   *Accepted when:* the record's schema is in journal spec §9.5 with reference vectors, the journal
   accepts the executor's batch for a blocked account, and a test runs that batch through
-  `Draft::parse` and `check_batch`.
+  `Draft::parse` and `check_batch`. Lane L1 lands it as a spec, vectors and reference PR, then
+  `mandate-journal`, then the executor's `restrict()` writing `cause`: between the second and
+  third, the journal still refuses a restricted account's batch, at `payload.cause`.
