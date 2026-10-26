@@ -819,8 +819,10 @@ forbidden_internal = ["mandate-shell", "mandate-executor", "mandate-alpaca", "ma
 
 # The account executor as a long-running process (E21-30, DEC-2003): one account's executor core
 # over mandate-store, with mandate-process's lifecycle and probes. It reads the runtime only through
-# the journal, so it may never reach the runtime's process, the shell, the paper runner, the MCP
-# client, the CLI, or the broker simulator; its broker is a port, and no host is named here. It is
+# the journal, so it may never reach the runtime's process, the shell, the paper runner, the CLI,
+# or the broker simulator; its broker is a port, and no host is named here. It may carry the
+# Robinhood connector and its MCP client's types (DEC-2386 item 1, DEC-2382), which name no host:
+# the pinned host lives only behind the runner's `live` feature, and the executor has none. It is
 # the process that leases its connection's credential from mandate-vault (DEC-2306 item 2), which
 # is why it sits above it; the connector crates never take the vault.
 [crates.mandate-executord]
@@ -828,7 +830,7 @@ layer = 9
 safety_critical = true
 pure = false
 allowed_external = ["secrecy", "tokio"]
-forbidden_internal = ["mandate-daemon", "mandate-runtime-models", "mandate-agentd", "mandate-shell", "mandate-paper", "mandate-mcp", "mandate-cli", "mandate-rh-sim", "mandate-robinhood"]
+forbidden_internal = ["mandate-daemon", "mandate-runtime-models", "mandate-agentd", "mandate-shell", "mandate-paper", "mandate-cli", "mandate-rh-sim"]
 
 # The token-exchange process (E10-13 slice 5b, DEC-821 item 2, DEC-2629): the one process with
 # the platform's client secret and the live token endpoint. It sits above mandate-connections, whose
