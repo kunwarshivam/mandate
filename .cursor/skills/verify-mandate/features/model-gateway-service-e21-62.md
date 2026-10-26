@@ -12,7 +12,8 @@
   DEC-2272), `src/service.rs` (`Service`, each research call held to its agent's cap read before
   anything is reserved, and the start's check that every deployed agent's cap reads),
   `src/config.rs` (`Config::from_env`, every start-up value required, none with a default),
-  `src/control.rs` (`StoreControl`, the control stream through the journal store);
+  `src/control.rs` (`StoreControl`, the control stream through the journal store),
+  `src/recorded.rs` (`Replies` and `settings`, the `--recorded` mode, DEC-2326 item 3);
   `RequestError::ALL`, `RequestError::code` and `Meter::set_research_daily` in `mandate-gateway`.
 - **Tests:** `crates/mandate-gatewayd/tests/key.rs` (read once, only as the model gateway, each
   vault failure's code, a value a header cannot carry, and a canary that the key shows in no
@@ -29,7 +30,8 @@
   not read refusing `meter_unavailable` with nothing reserved, only this workspace's research calls
   read for, the start refusing unless every deployed agent's cap reads, and what is held bounded by
   the deployed agents), `tests/config.rs` (each value unset, empty or malformed stopping the start
-  with its code), `tests/control.rs` (the workspace's own control stream);
+  with its code), `tests/control.rs` (the workspace's own control stream), `tests/recorded.rs` (each call
+  primed with its turn's reply, and the recording's settings under DEC-2316's rate caps);
   `crates/mandate-gateway/tests/wire.rs` (every refusal's code crosses the wire as itself),
   `crates/mandate-gateway/tests/meter.rs` (a replaced daily cap binds the next reservation, and an
   unread one refuses `Unavailable` reserving nothing).
