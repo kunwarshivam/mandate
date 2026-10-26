@@ -1,6 +1,11 @@
 //! DEC-2605 row 20: the gate's dry run, shared by the shell and the cell's runtime. Each
 //! expectation is the gate's own answer or the proposal's own field, never this crate's.
 
+#![allow(
+    clippy::disallowed_methods,
+    reason = "these tests pin the advisory port itself against the binding gate (DEC-2378 item 11)"
+)]
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_accounting::{AssetClass, InstrumentId, Side};

@@ -77,6 +77,10 @@ impl Gate {
     ///
     /// # Errors
     /// The reason code the dry run journals.
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "the cell's runtime's advisory dry run, the one caller that may defer checks (DEC-2378 item 11)"
+    )]
     pub fn advisory(&self, proposal: &Proposal) -> Result<Advisory, &'static str> {
         let config = self.config.clone().ok_or(RULE_SET_UNAVAILABLE)?;
         let mandate = self.gate_mandate.clone().ok_or(GATE_REFUSED)?;
