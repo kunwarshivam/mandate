@@ -433,3 +433,35 @@ nothing.
    only after the restart. **To stop all model spend at once**, revoke the key in OpenRouter: every
    call then ends `credential_invalid`, the safe default, with no output, so no proposal and no
    order.
+
+## L. The Alpaca news key, for the agent to read news ([DEC-2394](../docs/project/decisions/DEC-2394.md), [DEC-2277](../docs/project/decisions/DEC-2277.md))
+
+The agent reads Alpaca's news feed with a key of its own. It never uses a trading connection's
+token. The news reader reads the key once from the vault, at `platform/news-data-key`, and from
+nowhere else. No agent asks for the key, sees it or handles it. This step is yours alone.
+
+Do it once the reader's code has merged. Its PR says so, and `infra`'s apply then prints a line
+for the key. Until you do, the reader refuses `no_key`, reads no news, and the agent works on
+without it.
+
+1. **A paper account for news alone.** In Alpaca's dashboard, open a new **paper** account for
+   this purpose only, with no strategy and no connection to the platform. Alpaca's API keys carry
+   no scopes, so this account is what the key can reach. Never use a live account (AGENTS.md
+   rule 8).
+2. **Its API key.** In that paper account, generate an API key. Alpaca shows a **key id** and a
+   **secret** once.
+3. **Both go in one place:** GitHub, repository **Settings → Environments → `infra-staging` →
+   Environment secrets → Add secret**, as `ALPACA_NEWS_KEY_ID` and `ALPACA_NEWS_SECRET`. Paste
+   them there only, never into a terminal, a chat, an issue or a file.
+   - The next staging `apply` reads them, masked at once.
+   - It writes them to the staging vault at `platform/news-data-key`, on the standard input of
+     `mandate vault put news-data-key`, through the secret-import identity.
+   - Only the news reader can read it there.
+   - The run prints `news data key: written`. Until you add both, it prints `not set` and changes
+     nothing.
+4. Dispatch `infra` with `apply` on `staging`.
+5. **To rotate it:** generate a new key in that paper account, replace both environment secrets,
+   run `apply` again, then restart the news reader so it reads the new key. Revoke the old key in
+   Alpaca only after the restart. **To stop all news reads at once**, revoke the key in Alpaca:
+   every fetch then fails with no item, so research goes on without news, and no order depends on
+   it.
