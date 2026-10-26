@@ -17,7 +17,8 @@ two PRs adding rows never touch the same lines and never conflict.
 ## Folding
 
 The coordinator, or any lane in a docs-only PR, moves rows from here into 06-backlog-v1.md and
-deletes their files in the same change. `cargo xtask lint` lets 06 gain exactly as many rows as
-the change deletes files here, and refuses any other row added to it.
+deletes their files in the same change, moving each row's text unchanged. `cargo xtask lint` lets
+06 gain a row only when the change deletes the file here that holds it, and refuses any other row
+added to it.
 
 Editing a row already in 06, its status for instance, stays an edit of 06.

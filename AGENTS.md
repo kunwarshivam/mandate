@@ -131,7 +131,9 @@ agent needs the same correction twice, put the rule on the highest rung that can
    mutants on the diff of safety-critical crates, an `Unimplemented` stub body in a crate whose
    tests are still pending aside, and, while the general email footer is unresolved, the mail
    guard (`cargo xtask mail-guard`: no mail transport but the recorded fixture and the founder's,
-   and no mail-sending crate elsewhere; DEC-2511).
+   and no mail-sending crate elsewhere; DEC-2511), and the backlog guard (a new row is its own
+   file under `docs/project/backlog/`, and 06 gains only rows whose files the change deletes;
+   DEC-2373).
 3. **Guided:** this file, skills under `.cursor/skills/`, and `.cursor/BUGBOT.md`.
 4. **Reviewed:** the PR template and the independent review agent, the last resort, not the plan.
 
@@ -196,7 +198,8 @@ As decided in [ADR-0001](docs/adr/0001-engineering-setup.md).
 - **Before proposing any change, run `cargo xtask check`.** It runs every per-PR job: lint
   (shellcheck over `.github/scripts/`, actionlint over `.github/workflows/`, fmt, clippy
   `-D warnings`, crate layering, the `live` feature (only the crate `xtask/layers.toml` marks
-  `live_feature` may declare one, and CI only compiles it; DEC-529), markers, saved proptest
+  `live_feature` may declare one, and CI only compiles it; DEC-529), the backlog guard (DEC-2373),
+  markers, saved proptest
   seeds, the feature map, typos, ruff), test (nextest, doctests, pytest), pending tests, reference-case fixture drift, the reference
   implementation checks, the workspace API schema checks (`schemas`), supply chain (cargo-deny,
   the dependency registry, gitleaks), the spec guard, the Postgres journal tests (skipped unless
