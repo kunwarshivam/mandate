@@ -6087,7 +6087,7 @@ fn a_broker_id_fill_failing_its_orders_checks_stays_external() {
         assert_eq!(
             ran.draft("FillApplied")
                 .and_then(|applied| applied.payload.get("client_order_id")),
-            None,
+            Some(&mandate_canon::Value::Null),
             "{case}"
         );
         assert!(
@@ -6151,7 +6151,7 @@ fn a_fill_whose_broker_id_names_no_one_order_stays_external() {
         assert_eq!(
             ran.draft("FillApplied")
                 .and_then(|applied| applied.payload.get("client_order_id")),
-            None,
+            Some(&mandate_canon::Value::Null),
             "two orders: {two_orders}"
         );
         assert_eq!(

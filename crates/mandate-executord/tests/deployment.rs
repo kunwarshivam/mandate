@@ -16,18 +16,18 @@ use mandate_accounting::{AccountType, AssetClass, InstrumentId, Side};
 use mandate_canon::{Digest, Value, to_canonical};
 use mandate_executor::{
     AccountRef, AccountScope, AgentId, BindingGateInput, BindingGateRequest, BindingGateSource,
-    InstrumentSnapshot, MandateView, MarketObservation, Purpose, RiskClock, TimeInForce,
-    WorkspaceId,
+    BrokerOutcome, BrokerRequest, InstrumentSnapshot, MandateView, MarketObservation, Purpose,
+    RiskClock, TimeInForce, WorkspaceId,
 };
-use mandate_executord::Protections;
 use mandate_executord::deployment::{BrokerFacts, Deployment, LiquidityRead, Sources};
 use mandate_executord::gate::{AccountRules, AssetRecord, Liquidity};
 use mandate_executord::marks::Marked;
 use mandate_executord::quotes::QuoteFeed;
+use mandate_executord::{Broker, Protections};
 use mandate_journal::{ArtifactError, ArtifactRef, ArtifactSource, StreamId};
 use mandate_marketdata::dataset::Store as Datasets;
 use mandate_marketdata::model::{AssetClass as Class, Bar, DatasetId, Feed, Kind, Records, Symbol};
-use mandate_num::{Price, Qty, Usd};
+use mandate_num::{Price, Qty, SignedQty, Usd};
 use mandate_risk::{
     DayTradeRegime, GateInput, GatePass, Origin, ProposedKind, ProposedOrder, ReasonCode,
     TimeInForce as GateTimeInForce, Verdict, evaluate,
@@ -74,6 +74,7 @@ fn put(store: &mut Artifacts, object: &str) -> String {
 struct Variant {
     offset: Option<&'static str>,
     retired_loss: Option<&'static str>,
+    max_order: Option<&'static str>,
 }
 
 /// The account's journal with the agent's SPY mandate registered, created, confirmed and deployed
@@ -116,6 +117,13 @@ fn deployed_as(variant: Variant) -> Result<(Journal, Artifacts, String), Error> 
             &Digest::of(CONTENT.as_bytes()).to_hex(),
         )
         .replace("conn_alpaca_paper_01", CONNECTION)
+        .replace(
+            r#""max_order_usd": "300""#,
+            &format!(
+                r#""max_order_usd": "{}""#,
+                variant.max_order.unwrap_or("300")
+            ),
+        )
         .replace(
             r#""crypto_stop_limit_offset": null"#,
             &variant
@@ -610,15 +618,84 @@ fn a_deployed_run_reads_its_ports_from_the_deployment() -> Result<(), Error> {
         Ok(Some(_))
     ));
     assert_eq!(wiring.marked.instruments(), BTreeSet::from([spy.clone()]));
-    assert_eq!(wiring.quotes.feed(), "none", "the fixture broker's feed");
+    assert_eq!(wiring.quotes.feed(), "iex", "the fixture broker's feed");
     assert!(
         wiring
             .gate
             .input(&request(&agent, &spy, Purpose::Open, Side::Buy)?)
             .is_none(),
-        "the broker's facts are unread, so the opening is held"
+        "the fixture quotes nothing and the bars are unread, so the opening is held"
     );
     Ok(())
+}
+
+/// G2b-2: a deployed run's binding gate reads the run's own broker's facts. The fixture run over a
+/// quoting fixture, with the account journaled and the bars read, asks the fixture for SPY's asset
+/// record and the account when an opening is gated, and nothing when an exit is, and on those
+/// facts the opening is answered. The run keeps no facts of its own once deployed.
+#[test]
+fn a_deployed_runs_gate_reads_the_runs_own_broker_facts() -> Result<(), Error> {
+    let (journal, store, _) = deployed()?;
+    journaled(&journal)?;
+    let paper = mandate_executord::paper::FixturePaper::new(at(MONDAY)?).quoting(wall_clock);
+    let broker = mandate_executord::alpaca::AlpacaBroker::new(paper.clone())?;
+    let run = mandate_executord::run::fixture(broker, &scope())?;
+    assert!(
+        run.facts().is_some(),
+        "the fixture run carries the fixture's facts"
+    );
+    let rows = journal.clone();
+    let run = run.deployed(
+        &scope(),
+        mandate_executord::deployment::Production {
+            rows: Box::new(move |stream: &StreamId| mandate_store::Store::rows(&rows, stream)),
+            artifacts: Box::new(store),
+            liquidity: Box::new(Bars(Rc::new(Cell::new(0)))),
+        },
+    );
+    assert!(
+        run.facts().is_none(),
+        "the run's facts went to its deployment"
+    );
+    let (agent, spy) = (agent(), spy()?);
+    let gate = &run.wiring().gate;
+    assert!(
+        gate.input(&request(&agent, &spy, Purpose::RiskExit, Side::Sell)?)
+            .is_none()
+    );
+    assert_eq!(
+        paper.served(),
+        Vec::<String>::new(),
+        "an exit asks the broker nothing"
+    );
+    let opening = gate.input(&request(&agent, &spy, Purpose::Open, Side::Buy)?);
+    assert!(
+        opening.is_some(),
+        "on the fixture's own facts (an active, tradable, unhalted SPY and an intraday_margin \
+         account with no deficit) the opening is answered"
+    );
+    assert_eq!(
+        paper.served(),
+        ["GET /v2/assets/SPY", "GET /v2/account"],
+        "the opening's gate asks the run's own broker for the asset record and the account"
+    );
+    Ok(())
+}
+
+/// The host's clock, which the fixture run's quote feed judges a quote's age on.
+#[allow(
+    clippy::disallowed_methods,
+    reason = "the fixture run's feed judges a quote's age on the host clock, so the fixture stamps by it"
+)]
+fn wall_clock() -> UtcNanos {
+    let since = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    UtcNanos::from_parts(
+        i64::try_from(since.as_secs()).unwrap_or(i64::MAX),
+        since.subsec_nanos(),
+    )
+    .unwrap_or(UtcNanos::EPOCH)
 }
 
 /// An artifact store that counts its reads and can be taken down.
@@ -919,7 +996,7 @@ fn the_wired_gate_reads_the_deployment() -> Result<(), Error> {
     let rows = journal.clone();
     let mut fixture = mandate_executord::fixture::wiring(&scope())?;
     fixture.quotes = Box::new(Quoting);
-    let wiring = Deployment::wired(
+    let (wiring, _) = Deployment::wired(
         fixture,
         &scope(),
         Box::new(move |stream: &StreamId| mandate_store::Store::rows(&rows, stream)),
@@ -1103,5 +1180,276 @@ fn a_deployment_not_read_in_full_is_read_again() -> Result<(), Error> {
     let first = reads.get();
     assert!(deployment.version(&agent).is_some());
     assert!(reads.get() > first);
+    Ok(())
+}
+
+/// The cell's trade loop on the fixture broker, every port but the broker real (DEC-2813): a
+/// deployed SPY agent's opening, proposed on a journaled, untraded account, passes the binding gate
+/// on the deployment's reviewed artifacts, the executor's own fresh mark and the fixture's own
+/// facts, the scheduler ticking every five seconds (the cell's ticks every second); it is
+/// sent as a bracket under SPY's asset id, fills whole at its limit, and is booked as SPY's fill by
+/// its asset id though the broker names it `SPY`. The bracket's stop rests at the broker as the
+/// position's protection, and every reconciliation after the fill is clean: nothing reads as
+/// another instrument's.
+#[test]
+fn a_deployed_opening_fills_and_rests_its_protective_stop() -> Result<(), Error> {
+    let (journal, mut process, paper) = trade_loop()?;
+    for second in (5..120).step_by(5) {
+        let now = format!("2026-09-21T16:{:02}:{:02}Z", second / 60, second % 60);
+        tick(&journal, &format!("tl{second}"), &now)?;
+        process.step(at(&now)?);
+    }
+    let types = journal.types(ACCOUNT_STREAM);
+    let decided = journal.payloads("GateDecided");
+    assert_eq!(
+        decided
+            .iter()
+            .map(|d| d.get("verdict").and_then(Value::as_str))
+            .collect::<Vec<_>>(),
+        [Some("allow")],
+        "the opening is gated once, on the executor's own mark, and allowed: {decided:?}"
+    );
+    let fill = journal
+        .payloads("FillApplied")
+        .into_iter()
+        .find(|p| p.get("side").and_then(Value::as_str) == Some("buy"))
+        .ok_or_else(|| format!("the opening fills and is booked: {types:?}"))?;
+    assert_eq!(
+        (
+            fill.get("instrument_id").and_then(Value::as_str),
+            fill.get("qty_gross").and_then(Value::as_str),
+            fill.get("price").and_then(Value::as_str),
+        ),
+        (Some(SPY), Some("1"), Some("580.13")),
+        "SPY's fill, by its asset id, whole at the limit"
+    );
+    assert!(
+        journal
+            .payloads("ProtectionChanged")
+            .iter()
+            .any(|p| p.get("action").and_then(Value::as_str) == Some("placed")),
+        "the bracket's stop is the position's protection: {types:?}"
+    );
+    let mut broker = mandate_executord::alpaca::AlpacaBroker::new(paper)?;
+    let BrokerOutcome::OpenOrders(open) = broker.call(&BrokerRequest::ListOpenOrders)? else {
+        return Err("the broker's open orders".into());
+    };
+    let resting: Vec<_> = open
+        .iter()
+        .flat_map(|order| order.legs.iter().chain(std::iter::once(order)))
+        .filter(|order| order.status != "filled")
+        .map(|order| (order.instrument.as_str(), order.side, order.stop_price))
+        .collect();
+    assert!(
+        resting.contains(&("SPY", Side::Sell, Some(Price::parse("551.13")?))),
+        "the protective stop rests at the broker: {resting:?}"
+    );
+    let fill_at = types
+        .iter()
+        .position(|kind| kind == "FillApplied")
+        .ok_or("the fill's place")?;
+    let before = types[..fill_at]
+        .iter()
+        .filter(|kind| *kind == "ReconciliationRun")
+        .count();
+    let runs: Vec<Value> = journal
+        .payloads("ReconciliationRun")
+        .into_iter()
+        .skip(before)
+        .collect();
+    assert!(
+        runs.len() > 1
+            && runs
+                .iter()
+                .skip(1)
+                .all(|run| run.get("result").and_then(Value::as_str) == Some("clean")),
+        "the run that books the fill is followed by clean runs only: {runs:?}"
+    );
+    assert!(
+        journal
+            .payloads("AgentModeApplied")
+            .iter()
+            .all(|p| p.get("to").and_then(Value::as_str) == Some("normal")),
+        "no agent is held"
+    );
+    Ok(())
+}
+
+type FixturePaper = mandate_executord::paper::FixturePaper;
+
+type LoopProcess = mandate_executord::ExecutorProcess<
+    Journal,
+    mandate_executord::deployment::Named<mandate_executord::alpaca::AlpacaBroker<FixturePaper>>,
+>;
+
+/// The account journaled and SPY's opening of one share at the fixture's ask proposed, under a
+/// mandate whose order cap admits one share; a process over the deployed fixture run, started at
+/// `MONDAY`; and the fixture it trades on.
+fn trade_loop() -> Result<(Journal, LoopProcess, FixturePaper), Error> {
+    let (journal, store, _) = deployed_as(Variant {
+        max_order: Some("1000"),
+        ..Variant::default()
+    })?;
+    journaled(&journal)?;
+    let paper = mandate_executord::paper::FixturePaper::filling(at(MONDAY)?).quoting(wall_clock);
+    let broker = mandate_executord::alpaca::AlpacaBroker::new(paper.clone())?;
+    let rows = journal.clone();
+    let run = mandate_executord::run::fixture(broker, &scope())?.deployed(
+        &scope(),
+        mandate_executord::deployment::Production {
+            rows: Box::new(move |stream: &StreamId| mandate_store::Store::rows(&rows, stream)),
+            artifacts: Box::new(store),
+            liquidity: Box::new(Bars(Rc::new(Cell::new(0)))),
+        },
+    );
+    journal.write(
+        &support::agent_stream(AGENT),
+        "01JINTENT0000000000000000A",
+        "IntentProposed",
+        1,
+        Some("decision"),
+        object(vec![
+            ("instrument_id", text(SPY)),
+            ("limit_price", text("580.13")),
+            ("purpose", text("open")),
+            ("qty", text("1")),
+            ("side", text("buy")),
+            ("tif", text("day")),
+            ("type", text("limit")),
+        ])?,
+    )?;
+    let (broker, wiring) = run.into_parts();
+    let process = mandate_executord::ExecutorProcess::start(
+        journal.clone(),
+        broker,
+        wiring,
+        &support::process_config(mandate_journal::Environment::Paper),
+        at(MONDAY)?,
+    );
+    Ok((journal, process, paper))
+}
+
+/// DEC-2813: a deployed run's broker names each deployed instrument by its asset id wherever the
+/// broker named it by its ticker, so the fill the fixture reports as `SPY`'s is SPY's asset id's,
+/// and a ticker no deployment names stays as the broker spelled it; its profile and its
+/// declaration are the broker's own. Undeployed, the run's broker maps nothing.
+#[test]
+fn a_deployed_runs_broker_answers_by_asset_id() -> Result<(), Error> {
+    let (journal, store, _) = deployed()?;
+    let paper = mandate_executord::paper::FixturePaper::filling(at(MONDAY)?);
+    let inner = mandate_executord::alpaca::AlpacaBroker::new(paper.clone())?;
+    let (profile, declared) = (inner.profile(), inner.declared());
+    let rows = journal.clone();
+    let run = mandate_executord::run::fixture(inner, &scope())?.deployed(
+        &scope(),
+        mandate_executord::deployment::Production {
+            rows: Box::new(move |stream: &StreamId| mandate_store::Store::rows(&rows, stream)),
+            artifacts: Box::new(store),
+            liquidity: Box::new(mandate_executord::deployment::Unread),
+        },
+    );
+    let (mut broker, _) = run.into_parts();
+    assert_eq!(broker.profile(), profile);
+    assert_eq!(broker.declared(), declared);
+    assert!(broker.declared().is_some());
+    for (id, named, limit) in [("md-1", SPY, "580.13"), ("md-2", "QQQ", "500.23")] {
+        let submitted = broker.call(&BrokerRequest::Submit(mandate_executor::SubmitOrder {
+            client_order_id: mandate_executor::ClientOrderId::parse(id)?,
+            instrument: InstrumentId::new(named)?,
+            side: Side::Buy,
+            qty: Qty::parse("1")?,
+            order_type: mandate_executor::OrderType::Limit,
+            tif: TimeInForce::Day,
+            limit_price: Some(Price::parse(limit)?),
+            stop_price: None,
+            bracket: None,
+            oco: None,
+            extended_hours: false,
+            purpose: Purpose::Open,
+        }))?;
+        let BrokerOutcome::Submitted(placed) = submitted else {
+            return Err(format!("a submission, not {submitted:?}").into());
+        };
+        assert_eq!(placed.instrument.as_str(), named);
+    }
+    let BrokerOutcome::Positions(positions) = broker.call(&BrokerRequest::ListPositions)? else {
+        return Err("positions".into());
+    };
+    let named: BTreeSet<&str> = positions.iter().map(|p| p.instrument.as_str()).collect();
+    assert_eq!(named, BTreeSet::from([SPY, "QQQ"]));
+    let BrokerOutcome::Activities { fills, .. } = broker.call(&BrokerRequest::ListActivities {
+        since: mandate_executor::ActivityCursor(String::new()),
+    })?
+    else {
+        return Err("activities".into());
+    };
+    let filled: BTreeSet<&str> = fills.iter().map(|f| f.instrument.as_str()).collect();
+    assert_eq!(filled, BTreeSet::from([SPY, "QQQ"]));
+    let undeployed = mandate_executord::run::fixture(
+        mandate_executord::alpaca::AlpacaBroker::new(paper)?,
+        &scope(),
+    )?
+    .undeployed();
+    let (mut raw, _) = undeployed.into_parts();
+    let BrokerOutcome::Positions(positions) = raw.call(&BrokerRequest::ListPositions)? else {
+        return Err("positions".into());
+    };
+    let named: BTreeSet<&str> = positions.iter().map(|p| p.instrument.as_str()).collect();
+    assert_eq!(
+        named,
+        BTreeSet::from(["SPY", "QQQ"]),
+        "undeployed, the broker's tickers stand"
+    );
+    Ok(())
+}
+
+/// A position the broker names by its ticker, as Alpaca does.
+fn named_position(named: &str) -> Result<BrokerOutcome, Error> {
+    Ok(BrokerOutcome::Positions(vec![
+        mandate_executor::BrokerPosition {
+            instrument: InstrumentId::new(named)?,
+            qty: SignedQty::parse("1")?,
+            avg_entry_price: Price::parse("580.13")?,
+        },
+    ]))
+}
+
+/// DEC-2813: a store outage after the deployment read keeps its ticker map, so a held position's
+/// own position and fills still read by SPY's asset id while the store is down (`AGENTS.md` rule
+/// 13); a run that never read its deployment maps nothing, so its broker's tickers stand.
+#[test]
+fn a_store_outage_keeps_the_ticker_map_a_cold_start_maps_nothing() -> Result<(), Error> {
+    let (journal, store, _) = deployed()?;
+    journaled(&journal)?;
+    let (deployment, _, down) = counted(&journal, store.clone());
+    assert_eq!(
+        deployment.symbols().outcome(named_position("SPY")?),
+        named_position(SPY)?
+    );
+    down.set(true);
+    journal.write(
+        CONTROL_STREAM,
+        "x1",
+        "ConnectionEstablished",
+        2,
+        None,
+        json(r#"{"account_ref":"acct9","broker":"alpaca","connection_id":"conn9","environment":"paper","scopes":["trading"],"user":"user_other"}"#)?,
+    )?;
+    assert!(
+        !deployment.covers(&agent(), &spy()?),
+        "the case builds an outage the deployment reads"
+    );
+    assert_eq!(
+        deployment.symbols().outcome(named_position("SPY")?),
+        named_position(SPY)?,
+        "the last deployment that read still names SPY by its asset id"
+    );
+    let (cold, _, cold_down) = counted(&journal, store);
+    cold_down.set(true);
+    assert_eq!(
+        cold.symbols().outcome(named_position("SPY")?),
+        named_position("SPY")?,
+        "nothing read, nothing mapped"
+    );
     Ok(())
 }

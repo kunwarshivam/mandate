@@ -174,9 +174,12 @@ reason_codes:
   - auction_window
   - instrument_halted
   # order constraints
+  - below_min_order_size                      # spec §5.3 rule 2 (DEC-2815)
+  - quantity_off_increment                    # spec §5.3 rule 2 (DEC-2815)
   - would_cross_zero
   - sell_exceeds_available
   - working_order_limit
+  - fractional_order_tif_or_bracket           # spec §5.3 rule 7 (DEC-2815)
   - add_blocked_by_protective_order
   - unknown_order_in_flight
   - market_order_not_allowed

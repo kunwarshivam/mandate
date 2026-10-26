@@ -934,8 +934,22 @@ fn own_order(
     [request, submitted]
 }
 
-/// A `FillApplied` of `order`: `(side, qty, price)` at `clock`, with the `fees` list `fees`.
+/// A `FillApplied` of `order`: `(side, qty, price)` at `clock`, with the `fees` list `fees`, at
+/// version 2, as the executor writes every fill (DEC-2812).
 fn fill(
+    seq: u64,
+    order: &str,
+    instrument: &str,
+    trade: (&str, &str, &str),
+    clock: &str,
+    fees: &str,
+) -> StoredEvent {
+    fill_at(2, seq, order, instrument, trade, clock, fees)
+}
+
+/// [`fill`] at `version`.
+fn fill_at(
+    version: u64,
     seq: u64,
     order: &str,
     instrument: &str,
@@ -947,7 +961,7 @@ fn fill(
     row(
         seq,
         "FillApplied",
-        1,
+        version,
         &format!(
             r#"{{"fill_id":"f-{seq}","client_order_id":"{order}","instrument_id":"{instrument}",
             "side":"{side}","qty_gross":"{qty}","price":"{price}","trade_date":"{OPENED_DAY}",
@@ -1630,7 +1644,8 @@ fn an_order_record_at_a_version_the_fold_does_not_know_makes_the_view_unreadable
         ("OrderRequestRecorded", 2),
         ("OrderSubmitted", 3),
         ("OrderStateChanged", 3),
-        ("FillApplied", 2),
+        ("FillApplied", 3),
+        ("LateFillApplied", 2),
         ("FeesCharged", 2),
     ] {
         let mut fold = open(&mandate, &Wall);
@@ -1844,8 +1859,8 @@ fn the_simulated_fee_lowers_equity_by_its_accrual_and_any_other_fee_record_is_re
     }
 }
 
-/// A fill naming no order is external activity (journal spec §9.16), never the agent's; a fill
-/// journaled twice is stepped once.
+/// A fill naming no order (`FillApplied` version 2's `null`, DEC-2812) is external activity
+/// (journal spec §9.16), never the agent's; a fill journaled twice is stepped once.
 #[test]
 fn a_fill_with_no_order_steps_nothing_and_a_repeated_fill_steps_once() {
     let mandate = mandate();
@@ -1853,7 +1868,7 @@ fn a_fill_with_no_order_steps_nothing_and_a_repeated_fill_steps_once() {
     let external = row(
         5,
         "FillApplied",
-        1,
+        2,
         &format!(
             r#"{{"fill_id":"f-x","client_order_id":null,"instrument_id":"{XYZ}","side":"buy",
             "qty_gross":"5","price":"1","trade_date":"{OPENED_DAY}","risk_clock":"{AT_2}","fees":[]}}"#
@@ -2870,5 +2885,36 @@ fn a_tick_in_the_opening_second_is_stepped() {
     assert!(
         types.contains(&"RiskLimitTriggered"),
         "the floor triggers at the opening second: {types:?}"
+    );
+}
+
+/// A version-1 `FillApplied`, as rows journaled before DEC-2812 hold, steps the agent's sub-ledger
+/// exactly as a version-2 one does: the same fills at either version reach the same equity.
+#[test]
+fn a_fill_at_version_1_or_2_steps_the_same() {
+    let mandate = mandate();
+    let equities: Vec<String> = [1, 2]
+        .into_iter()
+        .map(|version| {
+            let mut fold = marked_with_an_order(&mandate, &Wall);
+            fold.fold(&fill_at(
+                version,
+                5,
+                "o-1",
+                XYZ,
+                ("buy", "10", "100"),
+                AT_2,
+                "[]",
+            ))
+            .unwrap();
+            fold.fold(&mark(6, XYZ, AT_3, "90", true, "regular"))
+                .unwrap();
+            equity(fold.view())
+        })
+        .collect();
+    assert_eq!(
+        equities,
+        ["9900", "9900"],
+        "10000 - 1000 + 10 × 90 at either version"
     );
 }

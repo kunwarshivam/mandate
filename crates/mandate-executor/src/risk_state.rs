@@ -259,6 +259,16 @@ fn order_version(event_type: &str, version: u64) -> bool {
     }
 }
 
+/// The versions of the fill records the fold reads (journal spec §9.5): `FillApplied` at 1 and 2,
+/// whose `client_order_id` is `null` for a fill that names no order (DEC-2812), and
+/// `LateFillApplied` at 1. Any other is one it does not know, and the view fails closed.
+fn fill_version(event_type: &str, version: u64) -> bool {
+    match event_type {
+        "FillApplied" => matches!(version, 1 | 2),
+        _ => version == 1,
+    }
+}
+
 /// The sum of a fill's `fees` charged in `USD` (DEC-2393 item 3). A fee in any other asset moves
 /// the quantity received by a rule the fold does not apply, so it is a refusal to decide.
 fn usd_fees(payload: &Object) -> Result<Usd, UnreadableCause> {
@@ -551,7 +561,9 @@ impl<'c> AccountRiskFold<'c> {
                 self.order(row, &body, payload)?;
                 Ok(Vec::new())
             }
-            (Some(Reading::Fill), 1) => self.fill(row, payload),
+            (Some(Reading::Fill), version) if fill_version(&row.event_type, version) => {
+                self.fill(row, payload)
+            }
             (Some(Reading::Fee), 1) => self.fee(row, payload),
             (Some(_), _) => Err(UnreadableCause::UnknownSchemaVersion),
         }

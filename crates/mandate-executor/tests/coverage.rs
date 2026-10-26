@@ -885,7 +885,7 @@ fn a_replacement_is_a_new_order_under_its_own_id() {
         ran.draft_types().contains(&"ExternalActivityIngested")
             && ran
                 .draft("FillApplied")
-                .is_some_and(|draft| draft.payload.get("client_order_id").is_none()),
+                .is_some_and(|draft| draft.payload.get("client_order_id") == Some(&Value::Null)),
         "ten more shares on the new id would take the pair to 14 of an approved 10, so the fill \
          cannot be the new order's and is ingested as external activity (§7.1): {:?}",
         ran.draft_types()
@@ -1044,7 +1044,7 @@ fn a_fill_that_cannot_be_the_orders_is_applied_unattributed() {
     let id = accepted(&mut shell, &ports, INTENT, common::AGENT, AAPL);
     let unattributed = |ran: &common::Ran| {
         ran.draft("FillApplied")
-            .is_some_and(|draft| draft.payload.get("client_order_id").is_none())
+            .is_some_and(|draft| draft.payload.get("client_order_id") == Some(&Value::Null))
             && ran.draft_types().contains(&"ExternalActivityIngested")
     };
     let other_instrument = mandate_executor::BrokerFill {
