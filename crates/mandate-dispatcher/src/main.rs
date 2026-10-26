@@ -65,7 +65,10 @@ fn main() -> ExitCode {
                 return ExitCode::from(2);
             };
             match run(&config, &socket) {
-                Ok(status) => ExitCode::from(status),
+                Ok(status) => {
+                    eprintln!("dispatcher_exited: {status}");
+                    ExitCode::from(status)
+                }
                 Err(code) => {
                     eprintln!("dispatcher_start_failed: {code}");
                     ExitCode::from(2)

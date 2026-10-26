@@ -16,7 +16,7 @@ use std::error::Error;
 use std::process::Command;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 const BUILD: &str = "sha256:3333333333333333333333333333333333333333333333333333333333333333";
@@ -277,6 +277,20 @@ fn a_connection_recorded_mid_run_is_followed_from_the_next_step() -> Checked {
     Ok(())
 }
 
+/// How many clock reads a loop under test may make before the test fails: far more than any of
+/// these runs needs, so a loop that never exits fails fast rather than hanging.
+const READS: u64 = 10_000;
+
+/// A fixed clock that fails the test once it has been read [`READS`] times.
+fn bounded(at: UtcNanos) -> impl Fn() -> UtcNanos + Clone + Send + Sync + 'static {
+    let reads = Arc::new(AtomicU64::new(0));
+    move || {
+        let read = reads.fetch_add(1, Ordering::SeqCst);
+        assert!(read < READS, "the loop never exited");
+        at
+    }
+}
+
 fn socket(name: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!(
         "mandate-dispatcher-{}-{name}.sock",
@@ -298,13 +312,12 @@ fn a_drain_requested_before_a_step_sends_nothing_and_exits_drained() -> Checked 
         settings(&[])?,
         now()?,
     );
-    let at = now()?;
     let terminate = AtomicBool::new(true);
     let status = serve(
         process,
         &socket("drained"),
         &terminate,
-        move || at,
+        bounded(now()?),
         Duration::ZERO,
     )?;
     assert_eq!(status, 0);
@@ -327,13 +340,12 @@ fn a_fenced_dispatcher_leaves_its_loop_with_the_fenced_status() -> Checked {
     );
     let _newer = writer(&journal)?;
     alerts(&journal, A1, 1, &[(1, "risk_limit")])?;
-    let at = now()?;
     let terminate = AtomicBool::new(false);
     let status = serve(
         old,
         &socket("fenced"),
         &terminate,
-        move || at,
+        bounded(now()?),
         Duration::ZERO,
     )?;
     assert_eq!(status, 3);
