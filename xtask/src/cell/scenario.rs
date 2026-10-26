@@ -1345,14 +1345,17 @@ fn research_loop(workspace: &str, account: &str) -> Vec<Part> {
                    trading day, so outside it this link waits for the next";
     vec![
         link(
-            "the research agent's runtime starts a research run on its own clock",
+            "the research agent's runtime makes its research call through the model gateway",
             &agent,
-            "RunStarted",
-            None,
+            "ModelInvocationRecorded",
+            Some(r#""purpose":"research""#),
             "a research run in the research agent's runtime, over the recorded bundle its image \
-             carries, through the model gateway's recorded fake",
+             carries, through the model gateway's recorded fake: its one call's record, since a \
+             single-call run journals no RunStarted (journal spec §9.19); its runtime holds paused \
+             until the research account's executor reconciles (awaiting_reconciliation)",
             "the runtime calls the model gateway (#2636) and ticks on its own workspace's clock \
-             (DEC-2071)",
+             (DEC-2071); a local run of the cell's processes reaches an admitted thesis once the \
+             account's executor reconciles",
             vec![GW_RESEARCH],
         ),
         link(
@@ -2709,11 +2712,13 @@ pub fn unproposed(
     agent: &str,
 ) -> TradeOutcome {
     let none_listed = match listed {
-        Ok((200, body)) => serde_json::from_str::<Value>(body).ok().and_then(|v| {
-            v["approvals"]
-                .as_array()
-                .map(|a| !a.iter().any(|x| x["agent_id"] == agent))
-        }),
+        Ok((200, reply)) => serde_json::from_str::<Value>(reply_body(reply))
+            .ok()
+            .and_then(|v| {
+                v["approvals"]
+                    .as_array()
+                    .map(|a| !a.iter().any(|x| x["agent_id"] == agent))
+            }),
         _ => None,
     };
     if none_listed == Some(true) {
@@ -3632,7 +3637,11 @@ mod tests {
         assert_eq!(
             links,
             [
-                (agent.clone(), "RunStarted", None),
+                (
+                    agent.clone(),
+                    "ModelInvocationRecorded",
+                    Some(r#""purpose":"research""#)
+                ),
                 (agent.clone(), "ThesisProposed", Some(r#""admitted":true"#)),
                 (
                     agent.clone(),
@@ -4636,10 +4645,14 @@ mod tests {
                 continue;
             };
             let member = fragment.split('"').nth(1).unwrap();
+            let value = fragment.rsplit(':').next().unwrap().trim_matches('"');
             let written =
                 check.event_type == "FillApplied" && writer.contains(&format!("(\"{member}\", "));
+            let closed = spec.lines().any(|l| {
+                l.starts_with(&format!("| `{member}` |")) && l.contains(&format!("`{value}`"))
+            });
             assert!(
-                row.contains(member) || written,
+                row.contains(member) || written || closed,
                 "{}: {member}",
                 check.event_type
             );
@@ -5213,14 +5226,24 @@ mod tests {
 
     /// #2466's review: a loop left at its approval is pending only on the API's word that the
     /// agent has no approval at all. One the runtime requested and `web/` never showed, any state,
-    /// or a list that cannot be read, a non-200, or a body that is not the list, all fail.
+    /// or a list that cannot be read, a non-200, or a body that is not the list, all fail. The
+    /// answer is the whole reply `api_answer` reads, headers first, as the cell run at 0646d52
+    /// met it: parsed whole, `{"approvals":[]}` read as no list, and a Monday's loop as failed.
     #[test]
     fn a_loop_left_at_its_approval_is_pending_only_when_the_api_lists_none_of_the_agent_s() {
         let stopped = || web::TradeLoop {
             reached: BTreeMap::new(),
             error: Some("no approval within 20000 ms".into()),
         };
-        let listed = |status: u16, body: &str| Ok((status, body.to_owned()));
+        let listed = |status: u16, body: &str| {
+            Ok((
+                status,
+                format!(
+                    "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{body}",
+                    body.len()
+                ),
+            ))
+        };
         let pending = |outcome: &TradeOutcome| matches!(outcome, TradeOutcome::Unproposed(_));
         let other = r#"{"approvals":[{"agent_id":"other","state":"pending"}]}"#;
         assert!(pending(&unproposed(
@@ -5244,6 +5267,7 @@ mod tests {
             listed(503, r#"{"approvals":[]}"#),
             listed(200, "not json"),
             listed(200, r#"{"agents":[]}"#),
+            Ok((200, r#"{"approvals":[]}"#.to_owned())),
             Err("no kubectl".to_owned()),
         ] {
             assert!(
