@@ -54,9 +54,7 @@ const DEMO_FEE: &str = include_str!("../../../deploy/cell/demo/fee-config.json")
 const DEMO_CALENDAR: &str = include_str!("../../../deploy/cell/demo/trading-calendar.json");
 const DEMO_RULES: &str = include_str!("../../../deploy/cell/demo/rule-set.json");
 const DEMO_SNAPSHOT: &str = include_str!("../../../deploy/cell/demo/instrument.json");
-const DEMO_MODEL: &str = "cf36ebf8746a95c79443a2a0b5b49762809e082bced8a0a5bfdda7a3dd6c469d";
 const RESEARCH_MANDATE: &str = include_str!("../../../deploy/cell/demo/research-mandate.json");
-const RESEARCH_MODEL: &str = "40f446f7858575d2c66a223f747348b3a91ef83e844e13815e527f4d181e5283";
 const LLM_CONTENT: &str =
     r#"{"kind":"research_model_content","model_id":"llm.research_agent","model_version":"0.1.0"}"#;
 const ENVELOPE: &str = "autonomy behavior capital connection_id environment goal name notifications protection risk universe";
@@ -67,6 +65,25 @@ type Artifacts = BTreeMap<Digest, Vec<u8>>;
 
 fn json(text: &str) -> Result<Value, Error> {
     Ok(mandate_canon::parse(text.as_bytes())?)
+}
+
+/// The content hash, without its `sha256:` prefix, that `mandate`'s signal model `id` names, read
+/// from the checked-in document so a recomputed hash there (as #2653's) never leaves a pinned copy
+/// here stale.
+fn model_hash(mandate: &str, id: &str) -> Result<String, Error> {
+    let document = json(mandate)?;
+    document
+        .get("behavior")
+        .and_then(|behavior| behavior.get("signal_models"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .find(|model| model.get("id").and_then(Value::as_str) == Some(id))
+        .and_then(|model| model.get("content_hash"))
+        .and_then(Value::as_str)
+        .and_then(|hash| hash.strip_prefix("sha256:"))
+        .map(str::to_owned)
+        .ok_or_else(|| format!("the mandate names no content hash for {id}").into())
 }
 
 fn reference(bytes: &[u8]) -> String {
@@ -124,8 +141,14 @@ fn deployed_as(variant: Variant) -> Result<(Journal, Artifacts, String), Error> 
     let mandate = if variant.research {
         RESEARCH_MANDATE
             .replace("conn_demo_research_paper_01", CONNECTION)
-            .replace(DEMO_MODEL, &Digest::of(CONTENT.as_bytes()).to_hex())
-            .replace(RESEARCH_MODEL, &Digest::of(LLM_CONTENT.as_bytes()).to_hex())
+            .replace(
+                &model_hash(RESEARCH_MANDATE, "quant.ma_crossover")?,
+                &Digest::of(CONTENT.as_bytes()).to_hex(),
+            )
+            .replace(
+                &model_hash(RESEARCH_MANDATE, "llm.research_agent")?,
+                &Digest::of(LLM_CONTENT.as_bytes()).to_hex(),
+            )
             .replace(
                 r#""max_order_usd":"300""#,
                 &format!(
@@ -136,7 +159,10 @@ fn deployed_as(variant: Variant) -> Result<(Journal, Artifacts, String), Error> 
     } else if variant.demo {
         DEMO_MANDATE
             .replace("conn_demo_paper_01", CONNECTION)
-            .replace(DEMO_MODEL, &Digest::of(CONTENT.as_bytes()).to_hex())
+            .replace(
+                &model_hash(DEMO_MANDATE, "quant.ma_crossover")?,
+                &Digest::of(CONTENT.as_bytes()).to_hex(),
+            )
     } else {
         MANDATE.to_owned()
     };
