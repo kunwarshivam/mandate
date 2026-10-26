@@ -187,7 +187,8 @@ fn every_struct_names_exactly_its_schemas_members() {
     members::<EndDelegationRequest>(&[&schema!("end-delegation-request")], None);
     members::<LiftHoldRequest>(&[&schema!("lift-hold-request")], None);
     members_ahead::<ResumeRequest>(&[&schema!("resume-request")], &["step_up_assertion"]);
-    members::<AcknowledgeRequest>(&[&schema!("acknowledge-request")], None);
+    let ahead = ["subject", "request", "step_up_assertion"];
+    members_ahead::<AcknowledgeRequest>(&[&schema!("acknowledge-request")], &ahead);
     members::<OwnerRequest>(&[&schema!("owner-request")], None);
     members_ahead::<ConfirmRequest>(&[&schema!("confirm-request")], &["step_up_assertion"]);
     let approval = schema!("approval-response-request");

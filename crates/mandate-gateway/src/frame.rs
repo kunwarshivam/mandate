@@ -10,7 +10,10 @@
 use std::io::{ErrorKind, Read, Write};
 
 use crate::call::CallRequest;
-use crate::wire::{Reply, WireError, reply_bytes, reply_from, request_bytes, request_from};
+use crate::wire::{
+    PutReply, PutRequest, Reply, WireError, put_bytes, put_reply_from, reply_bytes, reply_from,
+    request_bytes, request_from,
+};
 
 /// The longest request frame body: the cap `HttpsTransport` reads a provider's body under.
 pub const MAX_REQUEST_FRAME: u32 = 4 * 1024 * 1024;
@@ -82,6 +85,18 @@ pub fn call<S: Read + Write>(stream: &mut S, request: &CallRequest) -> Result<Re
     write_frame(stream, &request_bytes(request), MAX_REQUEST_FRAME)?;
     let body = read_frame(stream, MAX_REPLY_FRAME)?;
     reply_from(&body).map_err(FrameError::Wire)
+}
+
+/// The runtime's side of a put (DEC-2279 item 1): writes `put` and reads its reply. Its bytes cross
+/// as hex, so a put whose frame passes [`MAX_REQUEST_FRAME`], an artifact of about half that, is
+/// never sent.
+///
+/// # Errors
+/// Any [`FrameError`]. The caller treats every one as a put that stored nothing (item 3).
+pub fn put<S: Read + Write>(stream: &mut S, put: &PutRequest) -> Result<PutReply, FrameError> {
+    write_frame(stream, &put_bytes(put), MAX_REQUEST_FRAME)?;
+    let body = read_frame(stream, MAX_REPLY_FRAME)?;
+    put_reply_from(&body).map_err(FrameError::Wire)
 }
 
 /// The service's side: reads one request, hands it to `answer` only when it decoded whole, and

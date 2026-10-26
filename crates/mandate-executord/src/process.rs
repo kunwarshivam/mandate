@@ -9,11 +9,11 @@ use mandate_domain::{CapabilityProfile, ProfileError};
 use mandate_executor::{
     AccountDeclaration, AccountScope, AcknowledgmentHandoff, ActivityCursor, AgentId,
     BindingGateSource, BrokerOrder, BrokerOutcome, BrokerRequest, BrokerSnapshot, BrokerUpdate,
-    Command, ConnectorError, Effect, EventDraft, EventId, ExecutorConfig, ExecutorError,
-    ExecutorState, IdGen, Initiator, Input, InstrumentSnapshot, IntentBody, IntentHandoff,
-    IntentId, KillScope, MandateVersion, MandateView, OrderState, Ports, ProtectionPrices,
-    ReconcileReason, RiskClock, Seq, ThesisRow, WriterEpoch, fold, handle, limit_fills,
-    recorded_fills,
+    Command, ConnectionTrouble, ConnectorError, Effect, EventDraft, EventId, ExecutorConfig,
+    ExecutorError, ExecutorState, IdGen, Initiator, Input, InstrumentSnapshot, IntentBody,
+    IntentHandoff, IntentId, KillScope, MandateVersion, MandateView, OrderState, Ports,
+    ProtectionPrices, ReconcileReason, RiskClock, Seq, SuspendReason, ThesisRow, WriterEpoch, fold,
+    handle, limit_fills, recorded_fills,
 };
 use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId};
 use mandate_num::{Fraction, Price};
@@ -25,7 +25,7 @@ use mandate_time::{ExchangeCalendar, UtcNanos};
 use crate::follow::{
     Proposal, Switch, Unreadable, agents_of, bounded, folded, proposals, switches, theses,
 };
-use crate::health::Health;
+use crate::health::{Health, PROBE_EVERY_S};
 use crate::marks::{MARK_EVERY, Marked, mark_draft};
 use crate::quotes::{QuoteFeed, QuotePoll};
 use crate::robinhood::AccountReads;
@@ -233,6 +233,9 @@ pub struct ExecutorProcess<S, B> {
     /// The connection's health as this process's broker answers show it (DEC-2832): each pass
     /// tells the core of every trouble it holds, which restricts the account first (DEC-2826).
     health: Health,
+    /// When the connection's health was last probed (DEC-2837): the start counts as the first, and
+    /// a probe is due every [`PROBE_EVERY_S`] after it.
+    probed: UtcNanos,
 }
 
 /// What one pass reads from the agents' streams: the kill switches this stream has not applied,
@@ -289,6 +292,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             max_chain: config.max_chain,
             written_at: now,
             health: Health::default(),
+            probed: now,
             polled: QuotePoll::new(Duration::from_secs(
                 u64::try_from(wiring_step).unwrap_or_default(),
             )),
@@ -461,6 +465,10 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         }
         if nothing_read && all_read && released && self.owes_nothing() {
             self.lifecycle.observe(now, Lifecycled::Completed);
+        }
+        self.probe(now);
+        if !self.report_troubles(now, &mut alerts) {
+            return alerts;
         }
         self.reconcile_on_schedule(now, &mut alerts);
         alerts
@@ -1237,6 +1245,33 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         answer
     }
 
+    /// Tells the core the run's credential is lost (DEC-2839). Connections spec §9.2 treats a lease
+    /// that expired as `suspended` for openings (reason `lease_expired`, DEC-800), so before the
+    /// run drains, the account is restricted to closing with cause `connection_unavailable`. The
+    /// connection's state change follows in a later batch (DEC-2826), so both are on the stream
+    /// when the supervisor restarts the process.
+    ///
+    /// An input already in doubt is handed again first, as a pass does, so it is never replaced.
+    /// While it stays in doubt nothing more is handed, and the drain retries it. A process that has
+    /// exited hands nothing. A core error on the trouble is held, never a stop (DEC-2821).
+    pub fn credential_lost(&mut self, now: UtcNanos) {
+        if self.exited() {
+            return;
+        }
+        let mut alerts = Vec::new();
+        if let Some((input, at)) = self.pending.take()
+            && !self.hand(now, at, input, &mut alerts, 0)
+        {
+            return;
+        }
+        for _batch in ["restriction", "state change"] {
+            let lost = Input::Connection(ConnectionTrouble::Suspended(SuspendReason::LeaseExpired));
+            if !self.hand(now, now, lost, &mut alerts, 0) {
+                return;
+            }
+        }
+    }
+
     /// Tells the core of every trouble the connection's health holds (DEC-2832): after the pass's
     /// kill switches, so none waits on it, and again before each proposal, so a count that crossed
     /// its threshold earlier in the pass restricts the account before the next opening is taken.
@@ -1247,6 +1282,28 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             .troubles()
             .into_iter()
             .all(|trouble| self.hand(now, now, Input::Connection(trouble), alerts, 0))
+    }
+
+    /// The scheduled health probe (connections spec §8.2, DEC-2837): once every [`PROBE_EVERY_S`],
+    /// a read of the broker's account that only feeds the health counts, so an executor with
+    /// nothing working still notices a connection it cannot use. It runs last in a pass that went
+    /// through, as the scheduled reconciliation does, so no read goes ahead of what the pass sent,
+    /// and the troubles it finds are reported at once. Its answer is never handed to the
+    /// core and never stops the process: a probe places and alters nothing, and a failed one is
+    /// counted, never read as healthy. A pass that finds the journal down returns before it, so
+    /// while an append is in doubt nothing reaches the broker (E21-26); a restriction a probe leads
+    /// to is an append like any other, held in doubt and retried first.
+    /// A process that has exited, or is exiting this pass, probes nothing. A one-read broker is
+    /// probed through its account reads, since it offers no single account read.
+    fn probe(&mut self, now: UtcNanos) {
+        let due = now.secs().saturating_sub(self.probed.secs()) >= PROBE_EVERY_S;
+        if !due || self.exited() {
+            return;
+        }
+        self.probed = now;
+        if self.account_reads().is_none() {
+            let _counted = self.call(&BrokerRequest::GetAccount);
+        }
     }
 
     /// A one-read broker's account reads, counted as one answer (DEC-2832).
