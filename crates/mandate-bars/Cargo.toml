@@ -11,9 +11,8 @@ workspace = true
 
 [dependencies]
 mandate-canon.workspace = true
+mandate-liquidity.workspace = true
 mandate-marketdata.workspace = true
 mandate-num.workspace = true
 mandate-time.workspace = true
 thiserror.workspace = true
-
-[dev-dependencies]

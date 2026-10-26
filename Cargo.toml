@@ -22,6 +22,7 @@ mandate-cp = { path = "crates/mandate-cp", version = "0.0.0" }
 mandate-cp-site = { path = "crates/mandate-cp-site", version = "0.0.0" }
 mandate-daemon = { path = "crates/mandate-daemon", version = "0.0.0" }
 mandate-dataservice = { path = "crates/mandate-dataservice", version = "0.0.0" }
+mandate-datad = { path = "crates/mandate-datad", version = "0.0.0" }
 mandate-deploy-manager = { path = "crates/mandate-deploy-manager", version = "0.0.0" }
 mandate-deployd = { path = "crates/mandate-deployd", version = "0.0.0" }
 mandate-dispatcher = { path = "crates/mandate-dispatcher", version = "0.0.0" }

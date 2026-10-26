@@ -937,6 +937,18 @@ pure = false
 allowed_external = ["tokio"]
 forbidden_internal = ["mandate-paper", "mandate-shell", "mandate-cli", "mandate-alpaca", "mandate-robinhood", "mandate-mcp", "mandate-executor", "mandate-runtime"]
 
+# The workspace data process in the local cell (E21-29 lane SC): the deployed instrument's daily
+# bars from the cell's recorded series, stored as mandate-marketdata's dataset under the artifact
+# store, with mandate-process's lifecycle and probes. tokio drives the SIGTERM listener alone. It
+# appends to no journal stream and may never reach the runner, the shell, the CLI, any broker
+# connector, the executor or the runtime: it holds nothing secret and places nothing.
+[crates.mandate-datad]
+layer = 8
+safety_critical = true
+pure = false
+allowed_external = ["thiserror", "tokio"]
+forbidden_internal = ["mandate-paper", "mandate-shell", "mandate-cli", "mandate-alpaca", "mandate-robinhood", "mandate-mcp", "mandate-executor", "mandate-runtime", "mandate-journal-pg", "mandate-store"]
+
 # The paper adapter (E7-19 slice 5, the first paper trade brief's E1a): it hands the model host's
 # output to the shell's production cycle and decides nothing itself. It is the runner: the only
 # crate that may declare a `live` feature (DEC-529 item 3, DEC-910 item 1), which no CI or release

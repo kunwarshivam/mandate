@@ -50,6 +50,7 @@
 /crates/mandate-cp-site/    @kunwarshivam
 /crates/mandate-cp/         @kunwarshivam
 /crates/mandate-daemon/     @kunwarshivam
+/crates/mandate-datad/      @kunwarshivam
 /crates/mandate-dataservice/ @kunwarshivam
 /crates/mandate-deploy-manager/ @kunwarshivam
 /crates/mandate-deployd/     @kunwarshivam
