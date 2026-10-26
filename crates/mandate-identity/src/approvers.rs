@@ -63,9 +63,11 @@ pub fn members(records: &[RecordView<'_>], connection: &str) -> Members {
     }
 }
 
-/// [`members`] of `records`, in stream order, up to and including `seq`: a grant is judged
-/// against the roster as of its own record, so a membership record later in the same read neither
-/// lends it a role its member lacked when it was made nor takes one away (DEC-2384 item 6).
+/// [`members`] of `records` up to and including `seq`: a grant is judged against the roster as of
+/// its own record, so a membership record later in the same read neither lends it a role its
+/// member lacked when it was made nor takes one away (DEC-2384 item 6). `records` must already be
+/// in stream order, as [`members`] requires: the filter keeps their order, and a roster read out
+/// of order does not fold, so it resolves no one.
 pub fn members_through(records: &[RecordView<'_>], connection: &str, seq: u64) -> Members {
     let judged: Vec<RecordView<'_>> = records
         .iter()
@@ -160,6 +162,6 @@ fn folded(references: &[&str], roster: &Roster) -> BTreeSet<String> {
 }
 
 /// One text member of `record`'s payload.
-pub fn text_of<'r>(record: &RecordView<'r>, name: &str) -> Option<&'r str> {
+fn text_of<'r>(record: &RecordView<'r>, name: &str) -> Option<&'r str> {
     record.payload.get(name).and_then(Value::as_str)
 }

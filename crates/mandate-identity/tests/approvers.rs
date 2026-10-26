@@ -649,6 +649,12 @@ fn members_through_a_seq_read_only_the_records_up_to_it() {
         Members::Unread,
         "before any record"
     );
+    let reordered = [records[1].clone(), records[0].clone(), records[2].clone()];
+    assert_eq!(
+        approvers::members_through(&views(&reordered), CONNECTION, 3),
+        Members::Unread,
+        "out of stream order, the roster does not fold"
+    );
     let owned = [established(1, CONNECTION, FOUNDER), revoked(2, CONNECTION)];
     assert_eq!(
         approvers::members_through(&views(&owned), CONNECTION, 1),
