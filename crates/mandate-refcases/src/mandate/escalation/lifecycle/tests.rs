@@ -87,7 +87,7 @@ fn order(id: &str) -> Result<Effect, String> {
             instrument: mandate_accounting::InstrumentId::new("i").map_err(|e| format!("{e:?}"))?,
             side: mandate_accounting::Side::Buy,
             qty: mandate_num::Qty::parse("1").map_err(|e| e.to_string())?,
-            limit: mandate_num::Price::parse("1").map_err(|e| e.to_string())?,
+            limit: Some(mandate_num::Price::parse("1").map_err(|e| e.to_string())?),
             purpose: Purpose::Open,
         },
         execution: None,
