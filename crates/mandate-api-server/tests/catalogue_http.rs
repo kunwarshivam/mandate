@@ -471,6 +471,14 @@ mod instruments_read {
             &f,
             &snapshot_object("B0B6DD9D-8B9B-48A9-BA46-B9D54906E415", "SPY", "us_equity"),
         );
+        let short = stored(
+            &f,
+            &snapshot_object("b0b6dd9d-8b9b-48a9-ba46", "SHORT", "us_equity"),
+        );
+        let extra = stored(
+            &f,
+            &snapshot_object(&format!("{SPY_ID}-0"), "EXTRA", "us_equity"),
+        );
         let long = stored(&f, &snapshot_object(QQQ_ID, &"Q".repeat(33), "us_equity"));
         let empty = stored(
             &f,
@@ -489,6 +497,8 @@ mod instruments_read {
             &f,
             &[
                 ("ConfigSnapshotRegistered", snapshot_payload(&upper)),
+                ("ConfigSnapshotRegistered", snapshot_payload(&short)),
+                ("ConfigSnapshotRegistered", snapshot_payload(&extra)),
                 ("ConfigSnapshotRegistered", snapshot_payload(&long)),
                 ("ConfigSnapshotRegistered", snapshot_payload(&empty)),
                 ("ConfigSnapshotRegistered", snapshot_payload(&option)),
@@ -500,7 +510,7 @@ mod instruments_read {
         let body = ok(&get(&f, &ws("/instruments"), Some(&alice)));
         assert_eq!(
             body["instruments"],
-            serde_json::json!([instrument(SPY_ID, &"S".repeat(32), "us_equity", &edge, 7)])
+            serde_json::json!([instrument(SPY_ID, &"S".repeat(32), "us_equity", &edge, 9)])
         );
     }
 
@@ -1020,6 +1030,33 @@ mod unreadable_control_rows {
             )],
         );
         both_refused(&f);
+    }
+
+    #[test]
+    fn a_deployment_whose_document_is_stored_is_read_and_both_reads_answer() {
+        let f = fixture();
+        let document = to_canonical(&json(MANDATE));
+        f.store.put(&document).expect("stored");
+        let version = reference(&document);
+        let spy = stored(&f, &snapshot_object(SPY_ID, "SPY", "us_equity"));
+        seed(
+            &f,
+            &[
+                ("ConfigSnapshotRegistered", snapshot_payload(&spy)),
+                (
+                    "AgentDeployed",
+                    format!(r#"{{"agent_id":"agt_a","mandate_version":"{version}"}}"#),
+                ),
+            ],
+        );
+        let alice = signed_in(&f, ALICE);
+        let instruments = ok(&get(&f, &ws("/instruments"), Some(&alice)));
+        assert_eq!(
+            instruments["instruments"],
+            serde_json::json!([instrument(SPY_ID, "SPY", "us_equity", &spy, 2)])
+        );
+        let models = ok(&get(&f, &ws("/signal-models"), Some(&alice)));
+        assert_eq!(models["models"], serde_json::json!([]));
     }
 
     #[test]
