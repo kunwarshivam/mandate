@@ -2091,8 +2091,31 @@ def test_the_second_manager_is_bound_as_the_first_for_its_own_workspace():
     assert set(roles) == {MANAGER, RESEARCH_MANAGER}
     assert roles[MANAGER]["rules"] == roles[RESEARCH_MANAGER]["rules"]
     for name in (MANAGER, RESEARCH_MANAGER):
-        assert [s["name"] for s in bindings[name]["subjects"]] == [name]
-        assert bindings[name]["roleRef"]["name"] == name
+        assert bindings[name]["subjects"] == [{"kind": "ServiceAccount", "name": name, "namespace": "ws-ws1"}]
+        assert bindings[name]["roleRef"] == {"apiGroup": "rbac.authorization.k8s.io", "kind": "Role", "name": name}
+    for kind in ("Deployment", "ServiceAccount", "Role", "RoleBinding"):
+        named = [d["metadata"]["name"] for d in docs if d["kind"] == kind and d["metadata"]["name"] == RESEARCH_MANAGER]
+        assert named == [RESEARCH_MANAGER], (kind, named)
+    egress = {
+        n: [d for d in docs if d["kind"] == "NetworkPolicy" and d["metadata"]["name"] == f"egress-{n}"]
+        for n in (MANAGER, RESEARCH_MANAGER)
+    }
+    assert [len(e) for e in egress.values()] == [1, 1], egress
+    assert egress[RESEARCH_MANAGER][0]["spec"]["podSelector"]["matchLabels"]["mandate.dev/process"] == RESEARCH_MANAGER
+    unselected = lambda e: {k: v for k, v in e[0]["spec"].items() if k != "podSelector"}
+    assert unselected(egress[MANAGER]) == unselected(egress[RESEARCH_MANAGER])
+    assert not [d for d in docs if d["kind"] == "Service" and RESEARCH_MANAGER in d["metadata"]["name"]]
+    accounts = by("ServiceAccount")
+    assert accounts[RESEARCH_MANAGER].get("automountServiceAccountToken") == accounts[MANAGER].get(
+        "automountServiceAccountToken"
+    )
+    pods = {n: pod_spec(managers[n]) for n in (MANAGER, RESEARCH_MANAGER)}
+    assert [v for v in pods[MANAGER]["volumes"] if v.get("persistentVolumeClaim")] == [
+        v for v in pods[RESEARCH_MANAGER]["volumes"] if v.get("persistentVolumeClaim")
+    ]
+    assert [m for m in first["volumeMounts"] if m["name"] == "artifacts"] == [
+        m for m in second["volumeMounts"] if m["name"] == "artifacts"
+    ]
     policies_ = by("ValidatingAdmissionPolicy")
     policy_bindings = by("ValidatingAdmissionPolicyBinding")
     for suffix in ("pods", "accounts"):
@@ -2119,17 +2142,52 @@ def test_the_second_manager_is_bound_as_the_first_for_its_own_workspace():
     assert set(first_templates["data"]) == set(second_templates["data"]) == {"executor.json", "runtime.json", f"{EXCHANGE}.json"}
 
 
-def test_the_second_manager_runs_only_in_a_dev_or_ci_cell_and_no_hosted_values_name_it():
-    """DEC-2070 item 4: the chart refuses the second manager at any tier but dev or ci, and no values
-    file names a research workspace."""
+@pytest.mark.parametrize("tier", ["dev", "ci", "staging", "production"])
+def test_the_second_manager_runs_only_in_a_dev_or_ci_cell(tier: str):
+    """DEC-2070 item 4: the chart renders the second manager in a dev or ci cell and refuses it at
+    any other tier."""
     done = helm(
         CHART, "-f", str(CELL / "values" / "k3d.yaml"), *every_image(),
-        "--set", "deploymentTier=production", "--set", f"deployManager.researchWorkspace={RESEARCH_WORKSPACE}",
+        "--set", f"deploymentTier={tier}", "--set", f"deployManager.researchWorkspace={RESEARCH_WORKSPACE}",
     )
-    assert done.returncode != 0 and "runs only in a dev or ci cell" in done.stderr, done.stderr
+    if tier in ("dev", "ci"):
+        assert done.returncode == 0, done.stderr
+    else:
+        assert done.returncode != 0 and "runs only in a dev or ci cell" in done.stderr, done.stderr
+
+
+@pytest.mark.parametrize(
+    "named, hosted",
+    [
+        ("01KDEM0000000000000000000W", ""),
+        ("01KDEM0000000000000000000Ws", ""),
+        ("01KDEM0000000000000000000Xr", "01KDEM0000000000000000000W"),
+    ],
+)
+def test_the_second_manager_serves_only_the_hosted_workspace_with_r(named: str, hosted: str):
+    """DEC-2070 item 1: the second manager's workspace is the hosted workspace's ULID with `r`, so it
+    never reads another manager's control stream; the schema refuses a bare ULID, and the chart a
+    research workspace that is not the hosted one's."""
+    done = helm(
+        CHART, "-f", str(CELL / "values" / "k3d.yaml"), *every_image(),
+        "--set", f"deployManager.researchWorkspace={named}", *(["--set", f"api.workspace={hosted}"] if hosted else []),
+    )
+    assert done.returncode != 0 and "researchWorkspace" in done.stderr, done.stderr
+    paired = helm(
+        CHART, "-f", str(CELL / "values" / "k3d.yaml"), *every_image(),
+        "--set", "deployManager.researchWorkspace=01KDEM0000000000000000000Wr",
+        "--set", "api.workspace=01KDEM0000000000000000000W",
+        "--set", "modelGateway.workspace=01KDEM0000000000000000000Wr",
+    )
+    assert paired.returncode == 0, paired.stderr
+
+
+def test_no_hosted_values_name_the_second_manager():
+    """DEC-2070 item 4: no values file names a research workspace, and without one nothing of the
+    second manager renders."""
     for values in sorted((CELL / "values").glob("*.yaml")) + sorted((CELL.parent / "gitops").rglob("*.yaml")):
         assert "researchWorkspace" not in values.read_text(), values
-    assert not [d for d in render_all() if d["metadata"]["name"].startswith(RESEARCH_MANAGER)]
+    assert not [d for d in render_all() if RESEARCH_MANAGER in json.dumps(d)]
 
 
 def test_deploy_manager_contained():

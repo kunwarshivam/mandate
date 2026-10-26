@@ -405,12 +405,11 @@ spec:
 {{- $root := . }}
 {{- range (include "mandate.rendered" (dict "root" . "kind" "service") | fromJsonArray) }}
 {{- if has .name (list "deploy-manager" "deploy-manager-research") }}
-{{- $manager := . }}
 {{- $templates := dict }}
 {{- $egress := dict }}
 {{- range (include "mandate.processes" $root | fromJsonArray) }}
 {{- if and (eq (.started_by | default "") "deploy-manager") (index $root.Values.images .image) }}
-{{- $_ := set $templates (printf "%s.json" .name) (include "mandate.managedPod" (dict "root" $root "p" . "workspace" (include "mandate.managedWorkspace" (dict "root" $root "p" $manager)))) }}
+{{- $_ := set $templates (printf "%s.json" .name) (include "mandate.managedPod" (dict "root" $root "p" .)) }}
 {{- $labels := list }}
 {{- range .egress }}
 {{- $labels = append $labels (printf "mandate.dev/egress-%s" .) }}

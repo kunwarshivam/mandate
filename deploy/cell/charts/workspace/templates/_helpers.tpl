@@ -31,11 +31,16 @@ alone (DEC-2338). */ -}}
 {{- end -}}
 
 {{- /* The local cell's second deployment manager (DEC-2070): the first's process entry under its own
-name, so every per-process rule (its network policy, its journal role, its colocation) holds for it
-as for the first, serving `deployManager.researchWorkspace` alone. Only a dev or ci cell names it. */ -}}
+name, so every per-process rule (its network policy, its colocation) holds for it as for the first,
+and it signs in as the first's journal role, serving `deployManager.researchWorkspace` alone: the
+hosted workspace's ULID with `r` (DEC-2247 item 2). Only a dev or ci cell names it. */ -}}
 {{- define "mandate.researchManager" -}}
 {{- if not (has .root.Values.deploymentTier (list "dev" "ci")) -}}
 {{- fail (printf "deployManager.researchWorkspace runs only in a dev or ci cell, and deploymentTier is %q (DEC-2070)" .root.Values.deploymentTier) -}}
+{{- end -}}
+{{- $hosted := .root.Values.api.workspace | default "" -}}
+{{- if and $hosted (ne .root.Values.deployManager.researchWorkspace (printf "%sr" $hosted)) -}}
+{{- fail (printf "deployManager.researchWorkspace is %q, not the hosted workspace %q with r (DEC-2070)" .root.Values.deployManager.researchWorkspace $hosted) -}}
 {{- end -}}
 {{- $copy := deepCopy .p -}}
 {{- $_ := set $copy "name" "deploy-manager-research" -}}

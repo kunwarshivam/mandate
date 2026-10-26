@@ -369,7 +369,7 @@
       "properties": {
         "researchWorkspace": {
           "type": "string",
-          "pattern": "^$|^[0-9A-HJKMNP-TV-Z]{26}r?$"
+          "pattern": "^$|^[0-9A-HJKMNP-TV-Z]{26}r$"
         }
       }
     },
@@ -386,7 +386,7 @@
       "properties": {
         "workspace": {
           "type": "string",
-          "pattern": "^$|^[0-9A-HJKMNP-TV-Z]{26}$"
+          "pattern": "^$|^[0-9A-HJKMNP-TV-Z]{26}r?$"
         },
         "deployment": {
           "type": "string",
