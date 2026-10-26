@@ -52,3 +52,12 @@ spec:
 {{ include "mandate.emit" (include "mandate.service" (dict "root" $root "p" .)) }}
 {{- end }}
 {{- end }}
+{{- /* The model gateway's in-cluster name, `model-gateway:8080`, which a researching runtime dials
+(DEC-2265 item 1, DEC-2397 item 6). A ClusterIP alone: nothing outside the cluster reaches it, and
+its ingress policy admits only the workspace's runtimes. */ -}}
+{{- range (include "mandate.rendered" (dict "root" $root "kind" "service") | fromJsonArray) }}
+{{- if eq .name "model-gateway" }}
+---
+{{ include "mandate.emit" (include "mandate.modelGatewayService" (dict "root" $root "p" .)) }}
+{{- end }}
+{{- end }}

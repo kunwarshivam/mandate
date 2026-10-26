@@ -110,29 +110,23 @@ pub struct ReadMeter<S: Store> {
 impl<S: Store> ReadMeter<S> {
     /// The meter stream of `workspace` through `store`. A workspace that names no stream gives a
     /// meter whose every read fails `Unavailable`.
-    #[expect(
-        clippy::todo,
-        reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-    )]
     pub fn open(store: S, workspace: &str) -> Self {
-        let _ = (store, workspace);
-        todo!()
+        Self {
+            store,
+            stream: StreamId::parse(&format!("meter:{workspace}")),
+        }
     }
 }
 
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
 impl<S: Store> MeterStore for ReadMeter<S> {
     fn read(&self) -> Result<Vec<MeterRecord>, StoreError> {
-        let _ = (&self.store, &self.stream);
-        todo!()
+        let stream = self.stream.as_ref().ok_or(StoreError::Unavailable)?;
+        records(&self.store.rows(stream).ok_or(StoreError::Unavailable)?)
     }
 
     fn append(&mut self, record: MeterRecord) -> Result<(), StoreError> {
-        let _ = record;
-        todo!()
+        let _never_written = record;
+        Err(StoreError::Unavailable)
     }
 }
 
