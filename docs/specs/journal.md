@@ -6668,7 +6668,7 @@ with the same refusals, reading checks 1 and 2 for a restriction:
 
 Check 3 (step-up) is a limit's. Check 4 (independence) applies the strictest of the copy's
 `independent_required` and the overlay's `independent_approval_required` at processing of **every**
-agent of the account, not only of `agent`: the restriction is the account's, so an owner cannot
+agent deployed on the account, stopped or not, not only of `agent`: the restriction is the account's, so an owner cannot
 choose the agent whose overlay asks least. An acknowledgment of a restriction that passes all
 four is **accepted** and lifts nothing by itself: §9.5's `AccountRestrictionLifted` lifts its cause
 once the evidence §7.3 names is on the stream (rules 310 to 312). A request copy is never judged by
