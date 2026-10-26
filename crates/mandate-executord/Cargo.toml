@@ -19,6 +19,7 @@ mandate-executor.workspace = true
 mandate-journal.workspace = true
 mandate-num.workspace = true
 mandate-process.workspace = true
+mandate-robinhood.workspace = true
 mandate-store.workspace = true
 mandate-time.workspace = true
 mandate-vault.workspace = true
@@ -26,6 +27,7 @@ secrecy.workspace = true
 tokio = { workspace = true, features = ["rt", "signal", "time"] }
 
 [dev-dependencies]
+mandate-mcp.workspace = true
 mandate-journal-pg.workspace = true
 mandate-risk.workspace = true
 proptest.workspace = true

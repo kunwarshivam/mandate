@@ -6,8 +6,9 @@
 //! [`CREDENTIAL_MODULE`], may name it, the credentials and the data client that reads quotes over
 //! it (DEC-2359 item 5), and that no source names the HTTP client or a host. Loosening either
 //! fails here as well as in review. DEC-2382 replaces DEC-2306 item 1 for the founder's own
-//! Robinhood agentic account: the executor's separate, explicitly gated `live` build may carry the
-//! Robinhood connector, and these pins change in that story, under that decision.
+//! Robinhood agentic account, and DEC-2386 item 1 lets the executor carry the Robinhood connector,
+//! which names no host: `mandate-robinhood` is no longer forbidden, the default build still holds
+//! no `live` feature, and no source names a host or the HTTP client.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -44,12 +45,7 @@ fn the_executor_reaches_no_broker_but_the_fixture_or_the_paper_host() -> Result<
     );
     assert_eq!(value(&entry, "live_feature"), None);
     let forbidden = value(&entry, "forbidden_internal").ok_or("no forbidden_internal")?;
-    for transport in [
-        "mandate-paper",
-        "mandate-shell",
-        "mandate-robinhood",
-        "mandate-rh-sim",
-    ] {
+    for transport in ["mandate-paper", "mandate-shell", "mandate-rh-sim"] {
         assert!(
             forbidden.contains(&format!("\"{transport}\"")),
             "{transport} is reachable"
