@@ -192,7 +192,7 @@ fn built_with(port: Port, with_store: bool, records: Vec<MembershipRecord>) -> F
         journal: Arc::clone(&journal) as Arc<dyn mandate_api_server::journal::Journal>,
         members: Arc::new(move |_: &[StoredEvent]| Ok(records.clone())),
         hosted: hosted(),
-        artifacts: None,
+        artifacts: with_store.then(|| Arc::clone(&store) as Arc<dyn ArtifactSource + Send + Sync>),
         objects: with_store.then(|| Arc::clone(&store) as Arc<dyn ObjectStore>),
         step_up,
         challenges: Arc::clone(&challenges),
@@ -1482,16 +1482,18 @@ fn established_payload() -> String {
 }
 
 /// `seed_control` at schema version 2.
-fn seed_control_v2(f: &Fixture, event_type: &str, payload: &str) {
+fn seed_control_v2(f: &Fixture, event_type: &str, payload: &str) -> StoredEvent {
     let mut streams = f.journal.streams.lock().expect("unpoisoned");
     let rows = streams.get_mut(&ctl()).expect("seeded");
     let seq = u64::try_from(rows.len()).expect("a count") + 1;
     let added = row(&ctl(), 10 + seq, event_type, payload);
-    rows.push(StoredEvent {
+    let added = StoredEvent {
         seq,
         schema_version: 2,
         ..added
-    });
+    };
+    rows.push(added.clone());
+    added
 }
 
 /// Journal spec v0.54 §9.24 (DEC-1171): the deployment is version 2, naming the document's
@@ -2673,4 +2675,768 @@ fn a_replayed_passkey_resume_answers_as_the_first_and_appends_nothing() {
         text(&self::body(&first), &["command_id"])
     );
     assert_eq!(control(&w.f).len(), after, "nothing more is appended");
+}
+
+/// Appends `event_type` at `schema_version` with `payload` to the control stream as a whole
+/// envelope (journal spec §3), which the passkey binding's fold reads, at the next `seq`.
+fn seed_hosted(f: &Fixture, event_type: &str, schema_version: u64, payload: &str) -> StoredEvent {
+    let mut streams = f.journal.streams.lock().expect("unpoisoned");
+    let rows = streams.get_mut(&ctl()).expect("seeded");
+    let seq = rows.last().map_or(1, |row| row.seq + 1);
+    let payload: serde_json::Value = serde_json::from_str(payload).expect("JSON");
+    let mut envelope =
+        common::control::envelope(&ctl(), seq, "paper", event_type, T0 - 500, payload);
+    envelope["schema_version"] = serde_json::json!(schema_version);
+    let added = common::control::stored(seq, &envelope);
+    rows.push(added.clone());
+    added
+}
+
+/// The instrument a reconciliation hold of `agt_a` holds: SPY's asset id.
+const SPY_ID: &str = "b28f4066-5c6d-479b-a2af-85dc1a8f16fb";
+
+/// Appends `event_type` with `payload` to `acct1`'s stream, as the account's executor would, at
+/// the next `seq`, `caused_by` the event named or none, recorded at a second of its own.
+fn seed_account(
+    f: &Fixture,
+    event_type: &str,
+    payload: &str,
+    caused_by: Option<&str>,
+) -> StoredEvent {
+    let mut streams = f.journal.streams.lock().expect("unpoisoned");
+    let rows = streams.get_mut(&account()).expect("funded");
+    let seq = rows.last().map_or(1, |row| row.seq + 1);
+    let n = u64::try_from(rows.len()).expect("a count");
+    let event_id = format!("01JBH3BTZ8K2M4N6P8R0S2T{:03}", 200 + n);
+    let causation = caused_by.map_or("null".to_owned(), |id| format!(r#""{id}""#));
+    let body = to_canonical(&json(&format!(
+        r#"{{"causation_id":{causation},"environment":"paper","event_id":"{event_id}","event_type":"{event_type}","payload":{payload},"stream_id":"{}"}}"#,
+        account()
+    )));
+    let added = StoredEvent {
+        stream_id: account(),
+        seq,
+        event_id,
+        event_type: event_type.to_owned(),
+        schema_version: 1,
+        environment: "paper".to_owned(),
+        recorded_at: format!("2026-10-17T11:01:{:02}.000000000Z", n % 60),
+        prev_hash: Digest::ZERO,
+        hash: Digest::of(&body),
+        body,
+    };
+    rows.push(added.clone());
+    added
+}
+
+fn limit(limit: &str) -> String {
+    format!(r#"{{"agent_id":"agt_a","limit":"{limit}"}}"#)
+}
+
+fn restriction(cause: &str, state: &str) -> String {
+    format!(r#"{{"cause":"{cause}","reason_code":"account_restricted","restriction":"{state}"}}"#)
+}
+
+fn mode_applied(agent: &str, to: &str, restriction: &str, originated: bool) -> String {
+    format!(
+        r#"{{"agent":"{agent}","originated":{originated},"restriction":"{restriction}","to":"{to}"}}"#
+    )
+}
+
+/// An acknowledgment's body, or a request's when `request` is `None` and `answers` is false.
+fn ack_body(
+    event: &str,
+    subject: &str,
+    request: Option<&str>,
+    evidence: &str,
+    assertion: Option<serde_json::Value>,
+) -> String {
+    let request = request.map_or("null".to_owned(), |id| format!(r#""{id}""#));
+    with_assertion(
+        &format!(
+            r#"{{"acknowledged":"{event}","subject":"{subject}","request":{request},"record":null,"step_up":{evidence}}}"#
+        ),
+        assertion,
+    )
+}
+
+/// A request's body: an acknowledgment's without `request`.
+fn request_body(
+    event: &str,
+    subject: &str,
+    evidence: &str,
+    assertion: Option<serde_json::Value>,
+) -> String {
+    with_assertion(
+        &format!(
+            r#"{{"acknowledged":"{event}","subject":"{subject}","record":null,"step_up":{evidence}}}"#
+        ),
+        assertion,
+    )
+}
+
+impl Passkeyed {
+    /// Alice's `acknowledge` challenge for `agt_a`'s acknowledgment that `confirms` the hold
+    /// `event` of `subject`, naming `request`, bound to §3.11 item 12's object at the control
+    /// stream's head now, written here member by member in canonical order.
+    fn ack_challenge(
+        &self,
+        confirms: &str,
+        event: &str,
+        subject: &str,
+        request: Option<&str>,
+        key: &str,
+    ) -> Issued {
+        let head = control(&self.f).last().expect("rows").seq;
+        let request = request.map_or(String::new(), |id| format!(r#""request":"{id}","#));
+        let bound = Digest::of(&to_canonical(&json(&format!(
+            r#"{{"agent":"agt_a","bid":null,"bid_size":null,"confirms":"{confirms}","control_head":"{head}","event":"{event}","floor":null,"instrument":null,{request}"subject":"{subject}"}}"#
+        ))));
+        self.challenge_for("acknowledge", bound, key)
+    }
+
+    /// Posts `body` to `agt_a`'s route `route` under `key`.
+    fn post_ack(&self, route: &str, key: &str, body: &str) -> Reply {
+        post(
+            &self.f,
+            &ws(&format!("/agents/agt_a/{route}")),
+            &self.cookie,
+            Some(key),
+            body.as_bytes(),
+        )
+    }
+}
+
+fn list(w: &Passkeyed, query: &str) -> Reply {
+    get(&w.f, &ws(&format!("/acknowledgments{query}")), &w.cookie)
+}
+
+/// The listed holds' `event`s, in order.
+fn listed(reply: &Reply) -> Vec<String> {
+    assert_eq!(
+        reply.status,
+        200,
+        "{}",
+        String::from_utf8_lossy(&reply.body)
+    );
+    match self::body(reply).get("acknowledgments") {
+        Some(Value::Array(items)) => items
+            .iter()
+            .map(|item| text(item, &["event"]).to_owned())
+            .collect(),
+        other => panic!("{other:?}"),
+    }
+}
+
+/// The list reads each hold that stands now, by journal spec §9.28's checks 1 and 2 for its
+/// subject, and none that a later record lifted, superseded, or removed: a limit lifted, a cause
+/// lifted, a reconciliation hold removed, a copied mode, and a mode that holds nothing.
+#[test]
+fn the_list_serves_each_standing_hold_and_none_that_ended() {
+    let w = passkeyed_with(true);
+    w.deployed();
+    let f = &w.f;
+    let lifted = seed_account(f, "RiskLimitTriggered", &limit("max_daily_loss"), None);
+    seed_account(f, "RiskLimitLifted", &limit("max_daily_loss"), None);
+    let superseded = seed_account(f, "RiskLimitTriggered", &limit("lifetime_floor"), None);
+    let floor = seed_account(f, "RiskLimitTriggered", &limit("lifetime_floor"), None);
+    let gone = seed_account(
+        f,
+        "AccountRestrictionChanged",
+        &restriction("broker_reject", "closing_only"),
+        None,
+    );
+    seed_account(
+        f,
+        "AccountRestrictionLifted",
+        r#"{"cause":"broker_reject","restriction":"active"}"#,
+        None,
+    );
+    let notice = seed_account(
+        f,
+        "AccountRestrictionChanged",
+        &restriction("broker_notice", "blocked"),
+        None,
+    );
+    let spy = format!("reconciliation:{SPY_ID}");
+    let removed = seed_account(
+        f,
+        "AgentModeApplied",
+        &mode_applied("agt_a", "exits_only", &spy, true),
+        None,
+    );
+    seed_account(
+        f,
+        "AgentModeApplied",
+        &mode_applied("agt_a", "normal", &spy, true),
+        None,
+    );
+    seed_account(
+        f,
+        "AgentModeApplied",
+        &mode_applied("agt_a", "paused", "reconciliation:fees", false),
+        None,
+    );
+    seed_account(
+        f,
+        "AgentModeApplied",
+        &mode_applied("agt_a", "paused", "kill_switch", true),
+        None,
+    );
+    let cash = seed_account(
+        f,
+        "AgentModeApplied",
+        &mode_applied("*", "paused", "reconciliation:cash", true),
+        None,
+    );
+    let held = seed_account(
+        f,
+        "AgentModeApplied",
+        &mode_applied("agt_a", "exits_only", &spy, true),
+        None,
+    );
+    let reply = list(&w, "?state=open");
+    assert_eq!(
+        listed(&reply),
+        [&floor, &notice, &cash, &held].map(|row| row.event_id.clone()),
+        "not {:?}",
+        [&lifted, &superseded, &gone, &removed].map(|row| &row.event_id)
+    );
+    let items = match self::body(&reply).get("acknowledgments") {
+        Some(Value::Array(items)) => items.clone(),
+        other => panic!("{other:?}"),
+    };
+    let expected = [
+        format!(
+            r#"{{"account":"{}","agent_id":"agt_a","event":"{}","independent_required":null,"mode":null,"raised_at":"{}","reason":{{"limit":"lifetime_floor"}},"request":null,"subject":"limit"}}"#,
+            account(),
+            floor.event_id,
+            floor.recorded_at
+        ),
+        format!(
+            r#"{{"account":"{}","agent_id":"agt_a","event":"{}","independent_required":null,"mode":"paused","raised_at":"{}","reason":{{"cause":"broker_notice"}},"request":null,"subject":"restriction"}}"#,
+            account(),
+            notice.event_id,
+            notice.recorded_at
+        ),
+        format!(
+            r#"{{"account":"{}","agent_id":"agt_a","event":"{}","independent_required":null,"mode":"paused","raised_at":"{}","reason":{{"instrument":null,"kind":"cash","restriction":"reconciliation:cash"}},"request":null,"subject":"reconciliation"}}"#,
+            account(),
+            cash.event_id,
+            cash.recorded_at
+        ),
+        format!(
+            r#"{{"account":"{}","agent_id":"agt_a","event":"{}","independent_required":null,"mode":"exits_only","raised_at":"{}","reason":{{"instrument":"{SPY_ID}","kind":"instrument","restriction":"{spy}"}},"request":null,"subject":"reconciliation"}}"#,
+            account(),
+            held.event_id,
+            held.recorded_at
+        ),
+    ];
+    for (item, want) in items.iter().zip(&expected) {
+        assert_eq!(to_canonical(item), to_canonical(&json(want)));
+    }
+    assert_eq!(items.len(), expected.len());
+    assert_eq!(listed(&list(&w, "?agent=agt_a&state=open")), listed(&reply));
+}
+
+/// The list's query is `state=open` and an optional deployed `agent`; anything else is `invalid`,
+/// and a record of a hold that cannot be read fails the read rather than shorten it.
+#[test]
+fn the_list_refuses_another_query_and_fails_on_a_record_it_cannot_read() {
+    let w = passkeyed_with(true);
+    w.deployed();
+    for query in [
+        "",
+        "?state=closed",
+        "?state=open&agent=agt_zz",
+        "?state=open&state=open",
+        "?state=open&x=1",
+    ] {
+        refused(&list(&w, query), 422, ProblemCode::Invalid);
+    }
+    seed_account(&w.f, "RiskLimitTriggered", r#"{"agent_id":"agt_a"}"#, None);
+    refused(
+        &list(&w, "?state=open"),
+        503,
+        ProblemCode::JournalUnavailable,
+    );
+}
+
+/// The executor's evidence as §9.28 records it: `authenticated_at` the whole second.
+fn recorded_evidence(issued: &Issued) -> Value {
+    let second = UtcNanos::parse(&issued.issued_at)
+        .expect("a timestamp")
+        .secs();
+    json(&format!(
+        r#"{{"assertion_id":"{}","authenticated_at":{second},"method":"passkey"}}"#,
+        issued.id
+    ))
+}
+
+/// The last two control rows: the acknowledgment record `event_type` at version 2 under §3.4's
+/// id for `operation`, then its `StepUpAsserted`, in one batch the journal admits.
+fn asserted_record(w: &Passkeyed, issued: &Issued, event_type: &str, operation: &str) -> Value {
+    let rows = control(&w.f);
+    let (record, assertion) = (&rows[rows.len() - 2], &rows[rows.len() - 1]);
+    assert_eq!(
+        (record.event_type.as_str(), assertion.event_type.as_str()),
+        (event_type, "StepUpAsserted")
+    );
+    assert_eq!(record.event_id, derived(operation, KEY_3));
+    assert_eq!(
+        assertion.event_id,
+        derived(&format!("{operation}_step_up_asserted"), KEY_3)
+    );
+    assert_eq!(text(&payload(assertion), &["challenge"]), issued.id);
+    let drafts: Vec<Draft> = [record, assertion]
+        .into_iter()
+        .map(|row| Draft::parse(&row.body).unwrap_or_else(|e| panic!("{}: {e:?}", row.event_type)))
+        .collect();
+    assert_eq!(check_batch(&drafts), Ok(()));
+    assert_eq!(
+        parse(&record.body).expect("JSON").get("schema_version"),
+        Some(&Value::Int(mandate_canon::Int::new(2).expect("2")))
+    );
+    assert!(!w.held(issued), "the challenge is taken");
+    payload(record)
+}
+
+/// An acknowledgment of a standing limit, under passkey step-up bound to its hold and subject,
+/// commits `OwnerAcknowledged` version 2 with §9.28's members as the CLI writes them, the user
+/// from the session, then its `StepUpAsserted`; a repeat under its key answers as the first.
+#[test]
+fn an_acknowledgment_of_a_standing_hold_records_owner_acknowledged_version_2() {
+    let w = passkeyed_with(true);
+    w.deployed();
+    let hold = seed_account(&w.f, "RiskLimitTriggered", &limit("max_daily_loss"), None);
+    let issued = w.ack_challenge(
+        "acknowledge",
+        &hold.event_id,
+        "limit",
+        None,
+        "k5Z-9_eeeeeeeeee",
+    );
+    let signed = w.signer.assert(&issued.bytes, 11);
+    let body = ack_body(
+        &hold.event_id,
+        "limit",
+        None,
+        &Passkeyed::evidence(&issued, "passkey"),
+        Some(signed.json(CREDENTIAL)),
+    );
+    let first = w.post_ack("acknowledgments", KEY_3, &body);
+    assert_eq!(
+        first.status,
+        202,
+        "{}",
+        String::from_utf8_lossy(&first.body)
+    );
+    let recorded = asserted_record(&w, &issued, "OwnerAcknowledged", "acknowledge");
+    let second = UtcNanos::parse(text(&self::body(&first), &["served_at"]))
+        .expect("a timestamp")
+        .secs();
+    let clock = UtcNanos::from_parts(second, 0)
+        .expect("a second")
+        .to_string();
+    let want = format!(
+        r#"{{"agent":"agt_a","event":"{}","independent_required":false,"request":null,"requested_by":"{ALICE}","risk_clock":"{clock}","step_up":{},"subject":"limit","submitted_at":{second},"user":"{ALICE}"}}"#,
+        hold.event_id,
+        String::from_utf8(to_canonical(&recorded_evidence(&issued))).expect("UTF-8")
+    );
+    assert_eq!(to_canonical(&recorded), to_canonical(&json(&want)));
+    let after = control(&w.f).len();
+    let again = w.post_ack("acknowledgments", KEY_3, &body);
+    assert_eq!(
+        again.status,
+        202,
+        "{}",
+        String::from_utf8_lossy(&again.body)
+    );
+    assert_eq!(
+        text(&self::body(&again), &["command_id"]),
+        text(&self::body(&first), &["command_id"])
+    );
+    assert_eq!(control(&w.f).len(), after, "nothing more is appended");
+}
+
+/// A request for a standing hold commits `OwnerAcknowledgmentRequested` version 2, Alice its
+/// requester, then its `StepUpAsserted`; the list then serves it beside its hold.
+#[test]
+fn a_request_records_owner_acknowledgment_requested_version_2_and_the_list_serves_it() {
+    let w = passkeyed_with(true);
+    w.deployed();
+    let spy = format!("reconciliation:{SPY_ID}");
+    let hold = seed_account(
+        &w.f,
+        "AgentModeApplied",
+        &mode_applied("agt_a", "exits_only", &spy, true),
+        None,
+    );
+    let issued = w.ack_challenge(
+        "request_ack",
+        &hold.event_id,
+        "reconciliation",
+        None,
+        "k5Z-9_eeeeeeeeee",
+    );
+    let signed = w.signer.assert(&issued.bytes, 11);
+    let body = request_body(
+        &hold.event_id,
+        "reconciliation",
+        &Passkeyed::evidence(&issued, "passkey"),
+        Some(signed.json(CREDENTIAL)),
+    );
+    let reply = w.post_ack("acknowledgment-requests", KEY_3, &body);
+    assert_eq!(
+        reply.status,
+        202,
+        "{}",
+        String::from_utf8_lossy(&reply.body)
+    );
+    let recorded = asserted_record(
+        &w,
+        &issued,
+        "OwnerAcknowledgmentRequested",
+        "acknowledgment_request",
+    );
+    let second = UtcNanos::parse(text(&self::body(&reply), &["served_at"]))
+        .expect("a timestamp")
+        .secs();
+    let clock = UtcNanos::from_parts(second, 0)
+        .expect("a second")
+        .to_string();
+    let want = format!(
+        r#"{{"agent":"agt_a","event":"{}","independent_required":true,"requested_by":"{ALICE}","risk_clock":"{clock}","step_up":{},"subject":"reconciliation","submitted_at":{second}}}"#,
+        hold.event_id,
+        String::from_utf8(to_canonical(&recorded_evidence(&issued))).expect("UTF-8")
+    );
+    assert_eq!(to_canonical(&recorded), to_canonical(&json(&want)));
+    let request = derived("acknowledgment_request", KEY_3);
+    let item = match self::body(&list(&w, "?state=open")).get("acknowledgments") {
+        Some(Value::Array(items)) => items[0].clone(),
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(
+        item.get("request").map(to_canonical),
+        Some(to_canonical(&json(&format!(
+            r#"{{"event_id":"{request}","requested_by":"{ALICE}"}}"#
+        ))))
+    );
+}
+
+/// Every refusal commits nothing and keeps the challenge, at the first check that fails: a hold
+/// that does not stand or of another subject (`acknowledgment_unavailable`), no step-up
+/// (`step_up_required`), a method other than passkey (`step_up_method`), passkey evidence without
+/// its assertion (`step_up_missing`), and an assertion the port refuses.
+#[test]
+fn a_refused_acknowledgment_commits_nothing() {
+    let w = passkeyed_with(true);
+    w.deployed();
+    let lifted = seed_account(&w.f, "RiskLimitTriggered", &limit("profit_stop"), None);
+    seed_account(&w.f, "RiskLimitLifted", &limit("profit_stop"), None);
+    let hold = seed_account(&w.f, "RiskLimitTriggered", &limit("max_daily_loss"), None);
+    let issued = w.ack_challenge(
+        "acknowledge",
+        &hold.event_id,
+        "limit",
+        None,
+        "k5Z-9_eeeeeeeeee",
+    );
+    let signed = w.signer.assert(&issued.bytes, 11);
+    let passkey = Passkeyed::evidence(&issued, "passkey");
+    let cli = Passkeyed::evidence(&issued, "cli_confirm");
+    let forged = w.signer.assert(b"another challenge", 11);
+    let before = control(&w.f).len();
+    let cases = [
+        (
+            ack_body(
+                &lifted.event_id,
+                "limit",
+                None,
+                &passkey,
+                Some(signed.json(CREDENTIAL)),
+            ),
+            409,
+            ProblemCode::AcknowledgmentUnavailable,
+        ),
+        (
+            ack_body(
+                &hold.event_id,
+                "restriction",
+                None,
+                &passkey,
+                Some(signed.json(CREDENTIAL)),
+            ),
+            409,
+            ProblemCode::AcknowledgmentUnavailable,
+        ),
+        (
+            ack_body(&hold.event_id, "limit", None, "null", None),
+            401,
+            ProblemCode::StepUpRequired,
+        ),
+        (
+            ack_body(&hold.event_id, "limit", None, &cli, None),
+            401,
+            ProblemCode::StepUpMethod,
+        ),
+        (
+            ack_body(&hold.event_id, "limit", None, &passkey, None),
+            401,
+            ProblemCode::StepUpMissing,
+        ),
+    ];
+    for (body, status, code) in cases {
+        refused(&w.post_ack("acknowledgments", KEY_3, &body), status, code);
+    }
+    let reply = w.post_ack(
+        "acknowledgments",
+        KEY_3,
+        &ack_body(
+            &hold.event_id,
+            "limit",
+            None,
+            &passkey,
+            Some(forged.json(CREDENTIAL)),
+        ),
+    );
+    assert_eq!(
+        reply.status,
+        401,
+        "{}",
+        String::from_utf8_lossy(&reply.body)
+    );
+    assert_eq!(control(&w.f).len(), before, "nothing is recorded");
+    assert!(w.held(&issued), "nothing is taken");
+}
+
+/// An acknowledgment naming a request is refused `acknowledgment_request_invalid` unless the
+/// request is unspent, names the same agent, hold, and subject (a version 1 request read as
+/// `limit`), and is another user's; a valid one records the requester and requires independence.
+#[test]
+fn an_acknowledgment_answers_only_another_users_unspent_matching_request() {
+    let w = passkeyed_with(true);
+    w.deployed();
+    let hold = seed_account(&w.f, "RiskLimitTriggered", &limit("max_daily_loss"), None);
+    let event = &hold.event_id;
+    let asked = |requested_by: &str, subject: &str| {
+        format!(
+            r#"{{"agent":"agt_a","event":"{event}","independent_required":true,"requested_by":"{requested_by}","risk_clock":"2026-10-17T11:00:00Z","step_up":{EVIDENCE},"subject":"{subject}","submitted_at":1}}"#
+        )
+    };
+    let own = seed_hosted(
+        &w.f,
+        "OwnerAcknowledgmentRequested",
+        2,
+        &asked(ALICE, "limit"),
+    );
+    let other_subject = seed_hosted(
+        &w.f,
+        "OwnerAcknowledgmentRequested",
+        2,
+        &asked(BOB, "restriction"),
+    );
+    let bobs = seed_hosted(
+        &w.f,
+        "OwnerAcknowledgmentRequested",
+        2,
+        &asked(BOB, "limit"),
+    );
+    let spent = seed_hosted(
+        &w.f,
+        "OwnerAcknowledgmentRequested",
+        2,
+        &asked(BOB, "limit"),
+    );
+    seed_hosted(
+        &w.f,
+        "OwnerAcknowledged",
+        2,
+        &format!(
+            r#"{{"agent":"agt_a","event":"{event}","independent_required":true,"request":"{}","requested_by":"{BOB}","risk_clock":"2026-10-17T11:00:00Z","step_up":null,"subject":"limit","submitted_at":1,"user":"{ALICE}"}}"#,
+            spent.event_id
+        ),
+    );
+    let keys = ["k7Z-9_gggggggggg", "k8Z-9_hhhhhhhhhh", "k9Z-9_iiiiiiiiii"];
+    for (request, key) in [&own, &other_subject, &spent].into_iter().zip(keys) {
+        let issued = w.ack_challenge("acknowledge", event, "limit", Some(&request.event_id), key);
+        let signed = w.signer.assert(&issued.bytes, 11);
+        let body = ack_body(
+            event,
+            "limit",
+            Some(&request.event_id),
+            &Passkeyed::evidence(&issued, "passkey"),
+            Some(signed.json(CREDENTIAL)),
+        );
+        let before = control(&w.f).len();
+        refused(
+            &w.post_ack("acknowledgments", KEY_3, &body),
+            409,
+            ProblemCode::AcknowledgmentRequestInvalid,
+        );
+        assert_eq!(control(&w.f).len(), before, "{}", request.event_id);
+    }
+    let issued = w.ack_challenge(
+        "acknowledge",
+        event,
+        "limit",
+        Some(&bobs.event_id),
+        "k6Z-9_ffffffffff",
+    );
+    let signed = w.signer.assert(&issued.bytes, 12);
+    let body = ack_body(
+        event,
+        "limit",
+        Some(&bobs.event_id),
+        &Passkeyed::evidence(&issued, "passkey"),
+        Some(signed.json(CREDENTIAL)),
+    );
+    let reply = w.post_ack("acknowledgments", KEY_3, &body);
+    assert_eq!(
+        reply.status,
+        202,
+        "{}",
+        String::from_utf8_lossy(&reply.body)
+    );
+    let recorded = asserted_record(&w, &issued, "OwnerAcknowledged", "acknowledge");
+    assert_eq!(text(&recorded, &["requested_by"]), BOB);
+    assert_eq!(text(&recorded, &["user"]), ALICE);
+    assert_eq!(text(&recorded, &["request"]), bobs.event_id);
+    assert_eq!(
+        recorded.get("independent_required"),
+        Some(&Value::Bool(true))
+    );
+}
+
+/// A version 1 request carries no `subject` and is read as `limit`: it answers a limit's
+/// acknowledgment, never a restriction's.
+#[test]
+fn a_version_1_request_is_a_limits_request() {
+    let w = passkeyed_with(true);
+    w.deployed();
+    let notice = seed_account(
+        &w.f,
+        "AccountRestrictionChanged",
+        &restriction("broker_notice", "closing_only"),
+        None,
+    );
+    let event = &notice.event_id;
+    let v1 = seed_hosted(
+        &w.f,
+        "OwnerAcknowledgmentRequested",
+        1,
+        &format!(
+            r#"{{"agent":"agt_a","event":"{event}","independent_required":true,"requested_by":"{BOB}","risk_clock":"2026-10-17T11:00:00Z","step_up":{EVIDENCE},"submitted_at":1}}"#
+        ),
+    );
+    let issued = w.ack_challenge(
+        "acknowledge",
+        event,
+        "restriction",
+        Some(&v1.event_id),
+        "k5Z-9_eeeeeeeeee",
+    );
+    let signed = w.signer.assert(&issued.bytes, 11);
+    let body = ack_body(
+        event,
+        "restriction",
+        Some(&v1.event_id),
+        &Passkeyed::evidence(&issued, "passkey"),
+        Some(signed.json(CREDENTIAL)),
+    );
+    refused(
+        &w.post_ack("acknowledgments", KEY_3, &body),
+        409,
+        ProblemCode::AcknowledgmentRequestInvalid,
+    );
+    assert!(w.held(&issued));
+}
+
+/// A live workspace's acknowledgment is `live_unavailable`, and a member without the
+/// `Acknowledge` row is `forbidden`, each before the hold is read and with nothing recorded.
+#[test]
+fn an_acknowledgment_is_paper_only_and_the_acknowledge_rows_alone() {
+    let w = passkeyed_with(true);
+    w.deployed();
+    let hold = seed_account(&w.f, "RiskLimitTriggered", &limit("max_daily_loss"), None);
+    let body = ack_body(&hold.event_id, "limit", None, "null", None);
+    let bob = signed_in(&w.f, bob());
+    let reply = post(
+        &w.f,
+        &ws("/agents/agt_a/acknowledgments"),
+        &bob,
+        Some(KEY_3),
+        body.as_bytes(),
+    );
+    refused(&reply, 403, ProblemCode::Forbidden);
+    workspace_in(&w.f, "live");
+    let before = control(&w.f).len();
+    refused(
+        &w.post_ack("acknowledgments", KEY_3, &body),
+        409,
+        ProblemCode::LiveUnavailable,
+    );
+    refused(
+        &w.post_ack(
+            "acknowledgment-requests",
+            KEY_3,
+            &request_body(&hold.event_id, "limit", "null", None),
+        ),
+        409,
+        ProblemCode::LiveUnavailable,
+    );
+    assert_eq!(control(&w.f).len(), before);
+}
+
+/// An acknowledgment's status follows its account-stream copy: `taken` once copied, and `applied`
+/// once the executor's lift, caused by the copy, follows; a refusal caused by the original is
+/// `refused` (§5.5).
+#[test]
+fn an_acknowledgments_status_follows_its_copy_to_the_lift() {
+    let w = passkeyed_with(true);
+    w.deployed();
+    let hold = seed_account(&w.f, "RiskLimitTriggered", &limit("max_daily_loss"), None);
+    let issued = w.ack_challenge(
+        "acknowledge",
+        &hold.event_id,
+        "limit",
+        None,
+        "k5Z-9_eeeeeeeeee",
+    );
+    let signed = w.signer.assert(&issued.bytes, 11);
+    let body = ack_body(
+        &hold.event_id,
+        "limit",
+        None,
+        &Passkeyed::evidence(&issued, "passkey"),
+        Some(signed.json(CREDENTIAL)),
+    );
+    let reply = w.post_ack("acknowledgments", KEY_3, &body);
+    assert_eq!(
+        reply.status,
+        202,
+        "{}",
+        String::from_utf8_lossy(&reply.body)
+    );
+    let command = text(&self::body(&reply), &["command_id"]).to_owned();
+    let phase = || {
+        let reply = get(&w.f, &ws(&format!("/commands/{command}")), &w.cookie);
+        assert_eq!(
+            reply.status,
+            200,
+            "{}",
+            String::from_utf8_lossy(&reply.body)
+        );
+        text(&self::body(&reply), &["phase"]).to_owned()
+    };
+    assert_eq!(phase(), "recorded");
+    let copy = seed_account(&w.f, "OwnerAcknowledged", "{}", Some(&command));
+    assert_eq!(phase(), "taken");
+    seed_account(
+        &w.f,
+        "RiskLimitLifted",
+        &limit("max_daily_loss"),
+        Some(&copy.event_id),
+    );
+    assert_eq!(phase(), "applied");
 }

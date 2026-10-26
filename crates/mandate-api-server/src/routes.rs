@@ -305,7 +305,7 @@ pub(crate) fn watermark(rows: &[StoredEvent]) -> Option<Value> {
 }
 
 /// A 200 with the envelope (§3.2, §6.1) and `members`.
-fn served(
+pub(crate) fn served(
     reader: &Reader,
     streams: &[&[StoredEvent]],
     mut members: Vec<(&str, Value)>,
@@ -355,7 +355,7 @@ fn agent_members(view: &AgentView, document: Option<&Envelope>) -> Vec<(&'static
 }
 
 /// The mandate document `deployment`'s version names, from the deployment's store.
-fn document(app: &App, deployment: &Deployment) -> Option<Envelope> {
+pub(crate) fn document(app: &App, deployment: &Deployment) -> Option<Envelope> {
     let store = app.artifacts.as_ref()?;
     envelope(store.as_ref(), &deployment.2)
 }

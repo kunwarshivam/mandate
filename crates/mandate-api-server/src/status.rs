@@ -41,6 +41,10 @@ impl Phase {
     }
 }
 
+/// An acknowledgment's account-stream copy (journal spec §9.28): the executor's lift of its hold
+/// names the copy as its cause, so a command's steps also hold what its copy caused (§5.5).
+const COPY: &str = "OwnerAcknowledged";
+
 /// What one owning-stream event says of the command that caused it.
 pub fn phase_of(event_type: &str, payload: &Value) -> Phase {
     let result = payload.get("result").and_then(Value::as_str);
@@ -48,7 +52,10 @@ pub fn phase_of(event_type: &str, payload: &Value) -> Phase {
         ("OwnerCommandRefused", _)
         | ("ApprovalResponded", Some("refused"))
         | ("MandateVersionApplied", Some("rejected")) => Phase::Refused,
-        ("AgentModeChanged" | "AgentModeApplied" | "KillSwitchActivated", _)
+        (
+            "AgentModeChanged" | "AgentModeApplied" | "KillSwitchActivated" | "RiskLimitLifted",
+            _,
+        )
         | ("MandateVersionApplied", Some("applied"))
         | ("ApprovalRevalidated", Some("act")) => Phase::Applied,
         ("ApprovalRevalidated", Some("skip")) | ("ApprovalTimedOut" | "ApprovalCanceled", _) => {
@@ -178,6 +185,16 @@ async fn reported(
     let mut steps: Vec<(&StoredEvent, Value)> = Vec::new();
     for rows in &read {
         steps.extend(caused(rows, command).ok_or(Refused::JournalUnavailable)?);
+    }
+    let copies: Vec<String> = steps
+        .iter()
+        .filter(|(row, _)| row.event_type == COPY)
+        .map(|(row, _)| row.event_id.clone())
+        .collect();
+    for copy in &copies {
+        for rows in &read {
+            steps.extend(caused(rows, copy).ok_or(Refused::JournalUnavailable)?);
+        }
     }
     let phase = phase(
         steps

@@ -18,6 +18,7 @@ use mandate_api::wire::encode;
 use mandate_canon::Value;
 use mandate_journal::ArtifactSource;
 
+use crate::acknowledgments;
 use crate::catalogue;
 use crate::challenges::{self, Challenges};
 use crate::clock::Clock;
@@ -228,6 +229,18 @@ pub fn api(app: App, drain: Arc<Drain>) -> Router {
         .route(
             "/v1/workspaces/{workspace}/agents/{agent}/exits",
             post(writes::owner_exit).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/agents/{agent}/acknowledgments",
+            post(acknowledgments::acknowledge).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/agents/{agent}/acknowledgment-requests",
+            post(acknowledgments::request_acknowledgment).fallback(otherwise.clone()),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/acknowledgments",
+            get(acknowledgments::list).fallback(otherwise.clone()),
         )
         .route(
             "/v1/workspaces/{workspace}/commands/{command}",

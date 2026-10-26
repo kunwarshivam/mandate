@@ -518,13 +518,18 @@ fn an_owner_exit_is_lenient_and_never_forwards_step_up() {
     );
 }
 
+/// An acknowledgment whose holds the server cannot read, here with no document store to find the
+/// agent's account, fails closed: `journal_unavailable`, nothing recorded, and the step-up port
+/// never asked (§3.11 item 12, DEC-2144).
 #[test]
-fn the_acknowledgment_waits_for_the_journal_to_register_it() {
+fn an_acknowledgment_whose_holds_cannot_be_read_commits_nothing() {
     let f = fixture(true);
     let cookie = signed_in(&f, alice());
-    let ack = format!(r#"{{"record":null,"step_up":{EVIDENCE},"acknowledged":"{ACKNOWLEDGED}"}}"#);
+    let ack = format!(
+        r#"{{"record":null,"step_up":{EVIDENCE},"subject":"limit","acknowledged":"{ACKNOWLEDGED}"}}"#
+    );
     let reply = post(&f, &ws("/agents/agt_a/acknowledgments"), &cookie, KEY, &ack);
-    refused(&reply, 401, ProblemCode::Unauthenticated);
+    refused(&reply, 503, ProblemCode::JournalUnavailable);
     assert_eq!(f.journal.rows_of(&ctl()).len(), 3, "nothing recorded");
     assert!(f.asked.0.lock().expect("unpoisoned").is_empty());
 }
