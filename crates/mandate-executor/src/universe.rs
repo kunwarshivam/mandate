@@ -366,6 +366,99 @@ mod tests {
         Ok(())
     }
 
+    /// DEC-2823 item 3: a renewal, a newer thesis on an instrument the stream already holds, is
+    /// one admission of the new thesis naming its record, with the universe's size unchanged; and
+    /// within one pass every removal is copied before any admission.
+    #[test]
+    fn a_renewal_keeps_the_size_and_removals_come_first() -> Result<(), ExecutorError> {
+        let (mut executor, config, fees) = harness()?;
+        let ports = ports_of(&config, &fees);
+        let agent = AgentId(AGENT.to_owned());
+        executor.run(Input::Tick(RiskClock::from_secs(START)), &ports)?;
+        let theses = |records: &[ThesisRow]| Input::Theses {
+            agent: agent.clone(),
+            records: records.to_vec(),
+        };
+        let mut records = vec![proposed(
+            1,
+            "th-1",
+            "ln-1",
+            0,
+            START.saturating_add(3600),
+            None,
+        )];
+        executor.run(theses(&records), &ports)?;
+        records.push(proposed(
+            2,
+            "th-2",
+            "ln-1",
+            0,
+            START.saturating_add(7200),
+            None,
+        ));
+        let renewed = executor.run(theses(&records), &ports)?;
+        let size = |effects: &[Effect]| -> Vec<Option<u64>> {
+            effects
+                .iter()
+                .filter_map(|effect| match effect {
+                    Effect::Journal(draft) => Some(
+                        draft
+                            .payload
+                            .get("universe_size_after")
+                            .and_then(Value::as_int),
+                    ),
+                    _ => None,
+                })
+                .collect()
+        };
+        assert_eq!(
+            copies(&renewed)?,
+            [(
+                "admitted".to_owned(),
+                "thesis_admitted".to_owned(),
+                instrument(0)
+            )]
+        );
+        assert_eq!(size(&renewed), [Some(1)], "a renewal keeps the size");
+        let named = renewed.iter().find_map(|effect| match effect {
+            Effect::Journal(draft) => draft.causation_id.clone(),
+            _ => None,
+        });
+        assert_eq!(
+            named,
+            records.get(1).map(|row| row.event_id.clone()),
+            "the renewal's own record"
+        );
+
+        records.push(invalidated(3, "th-2"));
+        records.push(proposed(
+            4,
+            "th-4",
+            "ln-2",
+            1,
+            START.saturating_add(3600),
+            None,
+        ));
+        let both = executor.run(theses(&records), &ports)?;
+        assert_eq!(
+            copies(&both)?,
+            [
+                (
+                    "removed".to_owned(),
+                    "thesis_invalidated".to_owned(),
+                    instrument(0)
+                ),
+                (
+                    "admitted".to_owned(),
+                    "thesis_admitted".to_owned(),
+                    instrument(1)
+                ),
+            ]
+        );
+        assert_eq!(size(&both), [Some(0), Some(1)]);
+        Ok(())
+    }
+
     /// One step of a research agent's stream, or the clock moving on.
     #[derive(Debug, Clone)]
     enum Step {
@@ -435,12 +528,16 @@ mod tests {
             let mut admitted: Vec<(usize, String, usize, i64)> = Vec::new();
             let mut invalid = BTreeSet::new();
             let mut retired = BTreeSet::new();
+            let mut theses_lineage: BTreeMap<String, usize> = BTreeMap::new();
+            let mut held: BTreeSet<String> = BTreeSet::new();
+            let mut size = 0usize;
             for step in steps {
                 let seq = records.len().saturating_add(1);
                 match step {
                     Step::Admit { on, lineage, lasts } => {
                         let thesis = format!("th-{seq}");
                         records.push(proposed(seq, &thesis, &format!("ln-{lineage}"), on, now.saturating_add(lasts), None));
+                        theses_lineage.insert(thesis.clone(), lineage);
                         admitted.push((on, thesis, lineage, now.saturating_add(lasts)));
                     }
                     Step::Invalidate { which } => {
@@ -460,8 +557,38 @@ mod tests {
                 let ran = executor
                     .run(Input::Theses { agent: agent.clone(), records: records.clone() }, &ports)
                     .map_err(|e| TestCaseError::fail(format!("{e:?}")))?;
-                copies(&ran).map_err(|e| TestCaseError::fail(format!("{e:?}")))?;
+                for draft in ran.iter().filter_map(|effect| match effect {
+                    Effect::Journal(draft) => Some(draft),
+                    _ => None,
+                }) {
+                    journal_accepts_with_refs(draft).map_err(|e| TestCaseError::fail(format!("{e:?}")))?;
+                    prop_assert!(draft.causation_id.is_some(), "a copy names its origin");
+                    let member = |name: &str| draft.payload.get(name).and_then(Value::as_str).unwrap_or_default().to_owned();
+                    let thesis = member("thesis_id");
+                    let lineage = theses_lineage.get(&thesis).copied().unwrap_or(usize::MAX);
+                    if member("change") == "removed" {
+                        let want = if invalid.contains(&thesis) {
+                            "thesis_invalidated"
+                        } else if retired.contains(&lineage) {
+                            "lineage_retired"
+                        } else {
+                            "thesis_expired"
+                        };
+                        prop_assert_eq!(member("reason"), want, "{} at {}", thesis, now);
+                        if held.remove(&member("instrument")) {
+                            size = size.saturating_sub(1);
+                        }
+                    } else {
+                        prop_assert_eq!(member("reason"), "thesis_admitted");
+                        if held.insert(member("instrument")) {
+                            size = size.saturating_add(1);
+                        }
+                    }
+                    let after = draft.payload.get("universe_size_after").and_then(Value::as_int);
+                    prop_assert_eq!(after, u64::try_from(size).ok(), "the size after each copy");
+                }
                 prop_assert_eq!(universe(&executor), oracle(&admitted, &invalid, &retired, now));
+                prop_assert_eq!(universe(&executor).len(), size);
             }
         }
     }
