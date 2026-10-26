@@ -252,8 +252,8 @@ fn bound_action(
 ///
 /// `deferred` names the checks the decision's dry run left to the binding gate, in byte order. The
 /// request's content names the same (version 3, journal spec rules 291 and 292; DEC-2515), so the
-/// approver is told which checks have not run. A deferral with no builder plan has no request
-/// version, so nobody is asked and no order is placed (DEC-2515 item 1).
+/// approver is told which checks have not run. A deferral with no builder plan never reaches here:
+/// the dry run denies it `plan_required` (DEC-2810).
 #[allow(
     clippy::too_many_arguments,
     reason = "the ask's inputs are the decision's own: the proposal, its label, its deferrals, the clock, the ports, the decision and the batch"
@@ -275,9 +275,6 @@ pub(crate) fn ask(
     let Ok(execution) = bound_plan(proposal) else {
         return Ok(());
     };
-    if execution.is_none() && !deferred.is_empty() {
-        return Ok(());
-    }
     let deadline = RiskClock::from_secs(now.secs().saturating_add(view.approval.timeout_s));
     let evidence = state
         .evidence_for(&proposal.instrument, now)
