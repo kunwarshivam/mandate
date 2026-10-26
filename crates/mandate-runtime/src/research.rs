@@ -1469,17 +1469,59 @@ fn refused(
 /// latest journaled record: an agentic run's `RunEnded`, which ending it journals, or a single
 /// call's last observation. A single call that observed nothing has no record to name, and its loss
 /// is the runtime's log line and the service's meter record alone.
-#[expect(
-    clippy::todo,
-    reason = "the tests land before the implementation (DEC-77); the stub is todo!(), the form DEC-137 names"
-)]
 fn unreachable_gateway(
     research: &mut ResearchState,
     run_id: &str,
     step: &mut Step<'_, '_>,
 ) -> Result<(), RuntimeError> {
-    let _ = (research, run_id, step);
-    todo!()
+    let turning = research
+        .run
+        .as_ref()
+        .is_some_and(|run| run.run_id == run_id && matches!(run.phase, Phase::Agentic(_)));
+    if turning {
+        let Some(run) = research.run.take_if(|run| run.run_id == run_id) else {
+            return not_ours(research, run_id, "an unreachable turn");
+        };
+        let ended = step.batch.drafts.len();
+        drive(research, run, step, agentic::refused)?;
+        let subject = step
+            .batch
+            .drafts
+            .get(ended..)
+            .and_then(<[_]>::last)
+            .map(|draft| draft.event_id.clone());
+        alert_unreachable(step, subject);
+        return Ok(());
+    }
+    let in_flight = research
+        .run
+        .take_if(|run| run.run_id == run_id && matches!(run.phase, Phase::Calling { .. }));
+    let Some(run) = in_flight else {
+        if research.cancelled.get(run_id).is_some_and(Option::is_some) {
+            research.cancelled.remove(run_id);
+            return Ok(());
+        }
+        return Err(RuntimeError::NotInterpreted {
+            what: "an unreachable call for a run that never called".to_owned(),
+            story: "E21-62",
+        });
+    };
+    research.last_attempt = Some(run.cut_off);
+    let subject = match &run.phase {
+        Phase::Calling { observations, .. } => observations.last().cloned(),
+        _ => None,
+    };
+    alert_unreachable(step, subject);
+    Ok(())
+}
+
+fn alert_unreachable(step: &mut Step<'_, '_>, subject: Option<EventId>) {
+    if let Some(subject_event) = subject {
+        step.batch.notify(NotificationRef {
+            subject_event,
+            kind: RuntimeAlert::ResearchGatewayUnreachable,
+        });
+    }
 }
 
 /// The gateway's refusal of an agentic run's turn (DEC-2261): the run ends `error` with no record,
