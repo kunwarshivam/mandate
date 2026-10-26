@@ -1,4 +1,4 @@
-//! Journal spec v0.90 §9.5 (DEC-2803; X10): the account stream's `ExternalActivityIngested`,
+//! Journal spec v0.93 §9.5 (DEC-2803; X10): the account stream's `ExternalActivityIngested`,
 //! `RejectObserved` and `OrderAbandoned` at schema version 1, with rules 297 and 298, through the
 //! journal's own checks against the vectors' `account_activity` section. Every base and valid draft
 //! parses; every invalid draft is refused with its reason at its path. Before the registration the
