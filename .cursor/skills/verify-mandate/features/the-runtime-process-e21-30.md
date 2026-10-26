@@ -13,7 +13,8 @@
   hint that only shortens a wait), `src/fixture.rs` (the binary's deny-all wiring until the post-R0
   hook), `src/launch.rs` (the deployment from `run`'s flags or the deployment manager's variables,
   DEC-1015), `src/deployment.rs` (the connection, approvers and author from the latest
-  `AgentDeployed` and its stored mandate document, DEC-1016), and the `mandate-daemon` binary (`run` over Postgres, or `--fixture` over an in-memory
+  `AgentDeployed` and its stored mandate document, DEC-1016; the approvers through
+  `mandate_identity::approvers`, DEC-2388 item 11), and the `mandate-daemon` binary (`run` over Postgres, or `--fixture` over an in-memory
   journal, refused `fixture_under_manager` on a pod the manager started, and `probe` for `exec`
   probes; SIGTERM drains). In the cell: the `runtime` image
   (`deploy/cell/images/runtime.Dockerfile`), its `args` and `probe` in
@@ -37,8 +38,9 @@
   `tests/process.rs`: the binary's refusals (a manager launch refused until its deployment is
   resolved, and `--fixture` on a manager's pod), probes, and SIGTERM drain. `tests/launch.rs`: flags, the manager's variables, a pod for
   another process, and a flag that disagrees with the manager. `tests/deployment.rs`: the latest
-  deployment, a stopped agent, a missing, corrupt or invalid document, another environment, only
-  `user:` approvers, and an unknown author. `tests/pg.rs`: the binary
+  deployment, a stopped agent, a missing, corrupt or invalid document, another environment, the
+  approvers DEC-953's owner or the founded workspace's roster resolves, an unreadable membership
+  record resolving no one, and an unknown author. `tests/pg.rs`: the binary
   on Postgres opening its agent stream once across two runs and draining. `deploy/tests/test_cell.py`:
   each service started and probed as its process list says, and no runtime rendered for no
   deployment. `mandate-runtime`'s

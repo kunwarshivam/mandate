@@ -3,18 +3,21 @@
 //!
 //! The latest `AgentDeployed` or `AgentStopped` of the agent in the process's environment decides
 //! whether it is deployed, and the deployment names its mandate version: the hash of the stored
-//! canonical document (journal spec §9.2). The document gives the connection and the approvers
-//! named as users; a `role:` approver is not resolved here, which can only make an approval harder
-//! to grant. The version's first `MandateVersionCreated`, journaled by the user who created it,
-//! gives the author. Anything missing, corrupt, unreadable, or for another environment refuses
+//! canonical document (journal spec §9.2). The document gives the connection and the approver
+//! references, which resolve among the workspace's members as `mandate_identity::approvers`
+//! resolves them for the shell and the executor (DEC-953, DEC-2384). The version's first
+//! `MandateVersionCreated`, journaled by the user who created it, gives the author. Anything missing, corrupt, unreadable, or for another environment refuses
 //! rather than guessing, and a deployment record that cannot be read is never skipped for an older
 //! one (`AGENTS.md` rules 3 and 8).
 
 use mandate_canon::{Value, parse};
 use mandate_gate_context::gate_rule_set;
+use mandate_identity::MEMBERSHIP_TYPES;
+use mandate_identity::approvers::{RecordView, members, resolve};
 use mandate_journal::{ArtifactRef, ArtifactSource, Environment, StoredEvent, get_artifact};
 use mandate_risk::GateConfig;
 use mandate_spec::document::Mandate;
+use mandate_time::UtcNanos;
 
 /// What a deployment resolves to.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,7 +43,7 @@ pub fn resolved(
     let connection = text(&document, &["connection_id"])
         .ok_or("mandate_document_unavailable")?
         .to_owned();
-    let approvers = document
+    let references: Vec<&str> = document
         .get("autonomy")
         .and_then(|v| v.get("approval"))
         .and_then(|v| v.get("approvers"))
@@ -48,9 +51,8 @@ pub fn resolved(
         .ok_or("mandate_document_unavailable")?
         .iter()
         .filter_map(Value::as_str)
-        .filter_map(|approver| approver.strip_prefix("user:"))
-        .map(str::to_owned)
         .collect();
+    let approvers = approvers(control, &connection, &references);
     let author = control
         .iter()
         .filter(|row| row.environment == environment.as_str())
@@ -139,6 +141,38 @@ pub fn rule_set(
         .and_then(|bytes| parse(&bytes).ok())
         .and_then(|rules| gate_rule_set(&rules).ok())
         .ok_or("rule_set_unavailable")
+}
+
+/// The user ids `references` resolve to among the workspace's members, as
+/// `mandate_identity::approvers` resolves them for the shell and the executor (DEC-2384): over
+/// every control row in `seq` order, with its body's `event_time`. A membership row whose body does
+/// not parse resolves no one, since skipping it could leave a removed approver standing
+/// (`AGENTS.md` rule 3).
+fn approvers(control: &[StoredEvent], connection: &str, references: &[&str]) -> Vec<String> {
+    let mut rows: Vec<&StoredEvent> = control.iter().collect();
+    rows.sort_by_key(|row| row.seq);
+    let mut bodies = Vec::with_capacity(rows.len());
+    for row in rows {
+        match body(row) {
+            Some(body) => bodies.push((row, body)),
+            None if MEMBERSHIP_TYPES.contains(&row.event_type.as_str()) => return Vec::new(),
+            None => {}
+        }
+    }
+    let views: Vec<RecordView<'_>> = bodies
+        .iter()
+        .filter_map(|(row, body)| {
+            Some(RecordView {
+                seq: row.seq,
+                event_type: &row.event_type,
+                event_time: text(body, &["event_time"]).and_then(|at| UtcNanos::parse(at).ok()),
+                payload: body.get("payload")?,
+            })
+        })
+        .collect();
+    resolve(references, &members(&views, connection))
+        .into_iter()
+        .collect()
 }
 
 fn body(row: &StoredEvent) -> Option<Value> {
