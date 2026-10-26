@@ -4,6 +4,7 @@
 //! workspace services, the scheduler, and the account's executor) would have committed them.
 
 use std::cell::{Cell, RefCell};
+use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -141,6 +142,10 @@ struct Rig {
     clock_down: Rc<Cell<bool>>,
     accounts: Rc<RefCell<Vec<StoredEvent>>>,
     account_down: Rc<Cell<bool>>,
+    /// The agent stream read as unreadable, from the moment a test sets it.
+    agent_down: Rc<Cell<bool>>,
+    /// Rows a test lays over the agent stream's own when it is read, as a record a writer left.
+    agent_extra: Rc<RefCell<Vec<StoredEvent>>>,
     reads: Rc<RefCell<Vec<String>>>,
     lose_answers: Rc<Cell<u32>>,
 }
@@ -165,6 +170,11 @@ impl Store for Rig {
                     .cloned()
                     .collect(),
             ),
+            AGENT_STREAM if self.agent_down.get() => None,
+            AGENT_STREAM => self.journal.rows(stream).map(|mut rows| {
+                rows.extend(self.agent_extra.borrow().iter().cloned());
+                rows
+            }),
             _ => self.journal.rows(stream),
         }
     }
@@ -1302,4 +1312,122 @@ fn no_tick_no_answer_or_unstored_closes_record_nothing() {
         0
     );
     assert_eq!(process.lifecycle().state(), State::Ready);
+}
+
+/// An order plan that proposes nothing and remembers, for each decision, the model outputs it was
+/// handed.
+#[derive(Clone, Default)]
+struct Seen(Rc<RefCell<Vec<usize>>>);
+impl OrderPlan for Seen {
+    fn plan(&self, _: &MandateView, inputs: &SignalInputs) -> Option<Proposal> {
+        self.0
+            .borrow_mut()
+            .push(inputs.outputs.values().map(BTreeMap::len).sum());
+        None
+    }
+    fn classify(&self, _: &MandateView, _: &Proposal) -> Classified {
+        Classified {
+            autonomy: Autonomy::Deny,
+            decided_by: None,
+        }
+    }
+}
+
+/// #2448's review (rule 13), seam 1: the tick that follows a new output decides with it folded,
+/// so the observation, then the output, then the tick's decision is the journal's order.
+#[test]
+fn the_tick_decides_with_the_output_it_follows() {
+    let rig = Rig::default();
+    let (host, closes, seen) = (Host::default(), Closes::default(), Seen::default());
+    host.answer.borrow_mut().push(daily(NOW - 3_600));
+    let mut process = RuntimeProcess::start(
+        rig.clone(),
+        Wiring {
+            plan: Box::new(seen.clone()),
+            models: Some(ModelsWiring {
+                models: Box::new(host.clone()),
+                artifacts: Box::new(closes.clone()),
+            }),
+            ..wiring()
+        },
+        &config(),
+        at(NOW),
+    );
+    tick(&rig, NOW + 5);
+    process.step(at(NOW + 6));
+    assert_eq!(count(&rig, "ModelOutputRecorded"), 1);
+    assert_eq!(risk_clock(&process), Some(NOW + 5), "the tick was handed");
+    assert_eq!(
+        seen.0.borrow().last().copied(),
+        Some(1),
+        "the decision saw the output recorded before its tick: {:?}",
+        seen.0.borrow()
+    );
+}
+
+/// Seams 2 to 4: whatever the models' inputs read, the tick is handed, so its expiries and exits
+/// never wait on a model (rule 13). With models wired the tick runs; an agent stream that cannot
+/// be read, or an output record that does not read, records no new output, and the tick still
+/// moves the risk clock with the process ready.
+#[test]
+fn the_tick_runs_whatever_the_models_inputs_read() {
+    let rig = Rig::default();
+    let (host, closes) = (Host::default(), Closes::default());
+    let mut process = modelled(&rig, &host, &closes);
+    tick(&rig, NOW + 5);
+    process.step(at(NOW + 6));
+    assert_eq!(
+        risk_clock(&process),
+        Some(NOW + 5),
+        "models wired, the tick still runs"
+    );
+
+    host.answer.borrow_mut().push(daily(NOW - 3_600));
+    rig.agent_down.set(true);
+    tick(&rig, NOW + 7);
+    process.step(at(NOW + 8));
+    rig.agent_down.set(false);
+    assert_eq!(
+        count(&rig, "ModelOutputRecorded"),
+        0,
+        "an unreadable stream records nothing"
+    );
+    assert_eq!(
+        risk_clock(&process),
+        Some(NOW + 7),
+        "and the tick still runs"
+    );
+    assert_eq!(process.lifecycle().state(), State::Ready);
+
+    let broken = r#"{"model_id":"quant.ma_crossover"}"#;
+    rig.agent_extra.borrow_mut().push(row(
+        AGENT_STREAM,
+        90,
+        "ModelOutputRecorded",
+        "runtime",
+        broken,
+    ));
+    tick(&rig, NOW + 9);
+    process.step(at(NOW + 10));
+    assert_eq!(
+        count(&rig, "ModelOutputRecorded"),
+        0,
+        "an unreadable output records nothing"
+    );
+    assert_eq!(
+        risk_clock(&process),
+        Some(NOW + 9),
+        "and the tick still runs"
+    );
+    assert_eq!(process.lifecycle().state(), State::Ready);
+
+    rig.agent_extra.borrow_mut().clear();
+    tick(&rig, NOW + 11);
+    process.step(at(NOW + 12));
+    assert_eq!(
+        count(&rig, "ModelOutputRecorded"),
+        1,
+        "once readable, the output is recorded"
+    );
+    assert_eq!(risk_clock(&process), Some(NOW + 11));
 }

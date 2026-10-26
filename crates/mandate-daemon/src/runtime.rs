@@ -403,25 +403,25 @@ impl<S: Store> RuntimeProcess<S> {
     /// The pinned models' new outputs at the tick `at`, before the tick itself (DEC-2383): once per
     /// tick this process has not evaluated at, each evaluation the agent stream holds no output for
     /// is handed as its `Input::Observation`, its closes stored first, then its
-    /// `Input::ModelOutput`. An evaluation whose closes are not stored is no output (MI-10). Whether
-    /// every hand committed; an agent stream that cannot be read, or one whose outputs do not read,
-    /// hands nothing and holds the tick.
+    /// `Input::ModelOutput`. Whether the tick may follow. It always may, unless a hand did not
+    /// commit: an input whose append is in doubt is handed again before anything else, the tick
+    /// included (DEC-131 item 6), and a stopped process takes nothing. An agent stream that cannot
+    /// be read, outputs that do not read, or closes that are not stored are no new output (MI-10),
+    /// and the tick still runs, so its expiries and exits never wait on a model (rule 13).
     fn models_pass(&mut self, now: UtcNanos, at: RiskClock, alerts: &mut Vec<Alert>) -> bool {
         if self.wiring.models.is_none() || self.models_at == Some(at.secs()) {
             return true;
         }
-        let Some(agent) = self.agent.clone() else {
-            return false;
-        };
-        let Some(rows) = self.store.rows(&agent) else {
-            return false;
+        self.models_at = Some(at.secs());
+        let Some(rows) = self.agent.clone().and_then(|agent| self.store.rows(&agent)) else {
+            return true;
         };
         let evaluated = match &self.wiring.models {
             Some(wired) => wired.models.evaluate(at),
             None => Vec::new(),
         };
         let Ok(new) = fresh(&rows, evaluated) else {
-            return false;
+            return true;
         };
         for evaluation in new {
             let stored = match &mut self.wiring.models {
@@ -440,7 +440,6 @@ impl<S: Store> RuntimeProcess<S> {
                 }
             }
         }
-        self.models_at = Some(at.secs());
         true
     }
 
