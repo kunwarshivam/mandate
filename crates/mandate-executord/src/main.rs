@@ -57,7 +57,7 @@ use mandate_executord::credential::{
     paper_account, paper_broker, paper_settings, paper_transport, subject_account,
     subject_connection, vault_config, vault_login, workspace_namespace,
 };
-use mandate_executord::deployment::{self, Production, Rows};
+use mandate_executord::deployment::{self, Production};
 use mandate_executord::oauth_check::{Start, exchanged_start};
 use mandate_executord::paper::FixturePaper;
 use mandate_executord::serve::{self, Edge, Waited, wait};
@@ -192,14 +192,20 @@ fn run(
     if fixture {
         let store = MemoryStore::default();
         let reader = store.clone();
-        let production = production(|| Ok(Box::new(move |stream: &StreamId| reader.rows(stream))))?;
+        let production = deployment::production(
+            |name| std::env::var(name).ok(),
+            || Ok(Box::new(move |stream: &StreamId| reader.rows(stream))),
+        )?;
         return serve(store, named, socket, &terminate, (paper, production));
     }
     let dsn = std::env::var("MANDATE_JOURNAL_DSN").map_err(|_| "journal_dsn_missing")?;
-    let production = production(|| {
-        let reader = PgStore::connect(&dsn)?;
-        Ok(Box::new(move |stream: &StreamId| reader.rows(stream)))
-    })?;
+    let production = deployment::production(
+        |name| std::env::var(name).ok(),
+        || {
+            let reader = PgStore::connect(&dsn)?;
+            Ok(Box::new(move |stream: &StreamId| reader.rows(stream)))
+        },
+    )?;
     serve(
         PgStore::connect(&dsn)?,
         named,
@@ -207,14 +213,6 @@ fn run(
         &terminate,
         (paper, production),
     )
-}
-
-/// The deployment the run reads when the pod mounts the artifact store
-/// ([`mandate_executord::deployment::production`]), from the host's variables.
-fn production(
-    rows: impl FnOnce() -> Result<Rows, &'static str>,
-) -> Result<Option<Production>, &'static str> {
-    deployment::production(|name| std::env::var(name).ok(), rows)
 }
 
 /// The broker the run names, before the process takes the account stream: the fixture, or

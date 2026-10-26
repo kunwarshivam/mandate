@@ -174,14 +174,16 @@ struct Resolved {
 }
 
 /// The deployments read at one control-stream length and trade date, so a port asked again within
-/// a pass reads no artifact twice. `read` is whether every followed agent's deployment read: a
-/// read that failed is read again at the next ask. `last` is each agent's last deployment that
-/// read, kept across later failures for what an exit, a fill or a mark reads.
+/// a pass reads no artifact twice. `read` is whether every followed agent's deployment read from
+/// every control row: a read that failed is read again at the next ask. `last` is each agent's
+/// last deployment that read, from the control rows that parse, kept across later failures for
+/// what an exit, a fill or a mark of an agent still `followed` reads.
 #[derive(Default)]
 struct Cache {
     control: Option<usize>,
     date: Option<Date>,
     read: bool,
+    followed: BTreeSet<AgentId>,
     current: BTreeMap<AgentId, Rc<Resolved>>,
     last: BTreeMap<AgentId, Rc<Resolved>>,
 }
@@ -280,21 +282,23 @@ impl Deployment {
         };
         let agents = agents_of(&control, &self.0.scope, Environment::Paper)
             .map(|following| following.agents);
-        let records: Option<Vec<ControlRecord>> =
-            control.iter().map(ControlRecord::of_row).collect();
+        let records: Vec<ControlRecord> =
+            control.iter().filter_map(ControlRecord::of_row).collect();
+        let every_row = records.len() == control.len();
         let mut current = BTreeMap::new();
-        let mut read = agents.is_ok() && records.is_some();
+        let mut read = every_row && agents.is_ok();
+        if let Ok(agents) = &agents {
+            cache.followed = agents.keys().cloned().collect();
+        }
         for agent in agents.unwrap_or_default().into_keys() {
-            let resolved = records
-                .as_deref()
-                .and_then(|records| self.resolve(records, &agent, day));
-            match resolved {
-                Some(resolved) => {
-                    let resolved = Rc::new(resolved);
-                    cache.last.insert(agent.clone(), Rc::clone(&resolved));
-                    current.insert(agent, resolved);
-                }
-                None => read = false,
+            let Some(resolved) = self.resolve(&records, &agent, day) else {
+                read = false;
+                continue;
+            };
+            let resolved = Rc::new(resolved);
+            cache.last.insert(agent.clone(), Rc::clone(&resolved));
+            if every_row {
+                current.insert(agent, resolved);
             }
         }
         cache.control = Some(control.len());
@@ -345,7 +349,7 @@ impl Deployment {
         })
     }
 
-    /// `agent`'s deployment as it reads now: what an opening reads.
+    /// `agent`'s deployment as it reads now, from every control row: what an opening reads.
     fn current(&self, agent: &AgentId) -> Option<Rc<Resolved>> {
         self.deployments(None).remove(agent)
     }
@@ -355,39 +359,43 @@ impl Deployment {
         self.current(agent).or_else(|| self.last().remove(agent))
     }
 
-    /// Each agent's last deployment that read.
+    /// Each followed agent's last deployment that read.
     fn last(&self) -> BTreeMap<AgentId, Rc<Resolved>> {
         self.0
             .cache
             .try_borrow()
-            .map(|cache| cache.last.clone())
+            .map(|cache| {
+                cache
+                    .last
+                    .iter()
+                    .filter(|(agent, _)| cache.followed.contains(*agent))
+                    .map(|(agent, resolved)| (agent.clone(), Rc::clone(resolved)))
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
-    /// Every deployment an exit, a fill or a mark reads: each agent's current one, else its last.
+    /// Every deployment an exit, a fill or a mark reads: each followed agent's current one, else
+    /// its last.
     fn lasting_all(&self) -> Vec<Rc<Resolved>> {
+        let current = self.deployments(None);
         let mut all = self.last();
-        all.extend(self.deployments(None));
+        all.extend(current);
         all.into_values().collect()
     }
 
-    /// `answer` of the deployments whose instrument is `instrument`, when they all give the same
-    /// one; none when none is deployed on it or two deployments disagree, so no fill is accounted
-    /// under one agent's configuration for another's.
-    fn agreed<T: PartialEq>(
+    /// `answer` of the deployment whose instrument is `instrument`. Validation refuses a second
+    /// agent's deployment on an instrument another agent's claims (mandate spec §6.4), so at most
+    /// one followed deployment is on any instrument.
+    fn of_instrument<T>(
         &self,
         instrument: &InstrumentId,
         answer: impl Fn(&DeployedView) -> Option<T>,
     ) -> Option<T> {
-        let mut answers = self
-            .lasting_all()
+        self.lasting_all()
             .into_iter()
-            .filter(|resolved| &resolved.instrument == instrument)
-            .map(|resolved| answer(&resolved.view));
-        let first = answers.next()??;
-        answers
-            .all(|other| other.as_ref() == Some(&first))
-            .then_some(first)
+            .find(|resolved| &resolved.instrument == instrument)
+            .and_then(|resolved| answer(&resolved.view))
     }
 
     /// The journal's fold for `agent` over the control, account and clock streams; `None` when a
@@ -480,11 +488,11 @@ impl MandateView for Deployment {
 
 impl InstrumentSnapshot for Deployment {
     fn asset_class(&self, instrument: &InstrumentId) -> Option<AssetClass> {
-        self.agreed(instrument, |view| view.asset_class(instrument))
+        self.of_instrument(instrument, |view| view.asset_class(instrument))
     }
 
     fn increment(&self, instrument: &InstrumentId) -> Option<ShareIncrement> {
-        self.agreed(instrument, |view| view.increment(instrument))
+        self.of_instrument(instrument, |view| view.increment(instrument))
     }
 
     /// No reviewed instrument carries an exit tier yet ([`DeployedView`] answers none), so an
@@ -494,7 +502,7 @@ impl InstrumentSnapshot for Deployment {
     }
 
     fn fill_refs(&self, instrument: &InstrumentId) -> Option<FillConfigRefs> {
-        self.agreed(instrument, |view| view.fill_refs(instrument))
+        self.of_instrument(instrument, |view| view.fill_refs(instrument))
     }
 }
 

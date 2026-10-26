@@ -1042,3 +1042,29 @@ fn stored_bars_read_the_datasets_under_the_root() -> Result<(), Error> {
     std::fs::remove_dir_all(&root).ok();
     Ok(())
 }
+
+/// A control row that does not parse, on a process that never read the deployment before, never
+/// strands a held position: what its exits, fills and marks read comes from the rows that parse,
+/// while an opening, which reads only a deployment every row confirms, is held.
+#[test]
+fn a_control_row_that_does_not_parse_holds_openings_and_keeps_what_exits_read() -> Result<(), Error>
+{
+    let (journal, store, version) = deployed()?;
+    journaled(&journal)?;
+    journal.seed(
+        CONTROL_STREAM,
+        r#"{"environment":"paper","event_id":"zz1","event_type":"Unparsed","schema_version":1,"stream_id":"ctl:ws1"}"#,
+    )?;
+    let (deployment, _) = deployment(&journal, store);
+    let (agent, spy) = (agent(), spy()?);
+    assert_eq!(deployment.version(&agent).map(|v| v.0), Some(version));
+    assert!(deployment.fill_refs(&spy).is_some());
+    assert_eq!(deployment.instruments(), BTreeSet::from([spy.clone()]));
+    assert!(!deployment.covers(&agent, &spy));
+    assert_eq!(
+        deployment.protection(&agent, &spy, Price::parse("100")?),
+        Ok(None)
+    );
+    assert!(opening(&deployment)?.is_none());
+    Ok(())
+}
