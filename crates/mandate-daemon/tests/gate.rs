@@ -604,3 +604,70 @@ fn a_held_instrument_with_no_mark_holds_the_opening() {
         "its market value cannot be counted against the caps"
     );
 }
+
+/// A later snapshot of the demo's rich account with `status`, `crypto_status` and the three
+/// blocking flags as given.
+fn snapshot(rows: &mut Rows, status: &str, crypto_status: &str, flags: [bool; 3]) {
+    let [trading, account, suspended] = flags;
+    rows.push(
+        ACCOUNT,
+        "AccountSnapshotRecorded",
+        &format!(
+            r#"{{"status":"{status}","crypto_status":"{crypto_status}","trading_blocked":{trading},"account_blocked":{account},"trade_suspended_by_user":{suspended},"multiplier":1,"equity":"100000","cash":"100000","buying_power":"100000","non_marginable_buying_power":"100000","risk_clock":"{REGULAR}"}}"#
+        ),
+    );
+}
+
+/// Trading spec §7.3's first row, as the executor's fold reads it: any blocking flag, or a status
+/// other than `ACTIVE`, blocks the account; each alone suffices.
+#[test]
+fn each_blocking_flag_and_any_status_but_active_blocks_the_account() {
+    let check = |status: &str, flags: [bool; 3]| {
+        let mut rows = journaled_with(&RICH);
+        snapshot(&mut rows, status, "INACTIVE", flags);
+        gate_over(&rows, Some(config())).check(&opening("3", "99.95"))
+    };
+    assert_eq!(check("ACTIVE", [false; 3]), denied("deferred_to_binding"));
+    for flags in [
+        [true, false, false],
+        [false, true, false],
+        [false, false, true],
+    ] {
+        assert_eq!(
+            check("ACTIVE", flags),
+            denied("account_trading_blocked"),
+            "{flags:?}"
+        );
+    }
+    for status in ["ACCOUNT_CLOSED", "ONBOARDING", "active"] {
+        assert_eq!(
+            check(status, [false; 3]),
+            denied("account_trading_blocked"),
+            "{status}"
+        );
+    }
+}
+
+/// A crypto opening needs the account's crypto status `ACTIVE`, and nothing else reads as active.
+#[test]
+fn a_crypto_opening_needs_an_active_crypto_account() {
+    let check = |crypto_status: &str| {
+        let mut rows = journaled_with(&RICH);
+        snapshot(&mut rows, "ACTIVE", crypto_status, [false; 3]);
+        let mut crypto = opening("3", "99.95");
+        crypto.asset_class = AssetClass::Crypto;
+        gate_over(&rows, Some(config())).check(&crypto)
+    };
+    for inactive in ["INACTIVE", "SUBMITTED", "active"] {
+        assert_eq!(
+            check(inactive),
+            denied("crypto_account_inactive"),
+            "{inactive}"
+        );
+    }
+    assert_ne!(
+        check("ACTIVE"),
+        denied("crypto_account_inactive"),
+        "an active crypto account passes check 1"
+    );
+}
