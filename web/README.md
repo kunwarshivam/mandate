@@ -204,7 +204,11 @@ agent's stream from `GET /journal/streams/agent:{ws}:{agent}/events`, by sequenc
 never a body (DEC-2377). Positions (`/positions`) reads each agent's `GET /agents/{id}/positions` every five seconds and
 groups the agents by the account their reads name: each agent's own net quantity per instrument, its
 cost basis, risk mark and protection shown as not reported until the API serves them (DEC-2111 item
-5), and the account's holdings at its last reconciliation from the same reads.
+5), and the account's holdings at its last reconciliation from the same reads. Audit's Timeline reads the latest 50 records of the control
+stream, each agent's stream and each account stream those reads name (`GET
+/journal/streams/{id}/events`, §4.8.1) every ten seconds, and lists them newest first by type,
+stream, sequence and time, never a body re-told; a stream that cannot be read is named as not
+reported. Gate decisions, alerts and messages are not served yet.
 
 Stop works over the API too (DEC-2408): the sheet lists the agents the API serves, each with its kill
 switch, and the record screens build from the API's view, with open orders and per-agent positions

@@ -172,6 +172,8 @@ export interface MandateChangeRequest {
 export interface Runtime {
   /** Where the workspace comes from (DEC-975): the recorded fixtures, or a workspace deployment's API. */
   source: "fixtures" | "api";
+  /** The workspace the API runtime reads, which its stream ids name (§4.8.1); `null` over the fixtures. */
+  workspaceId: string | null;
   /** The workspace API's read models as served (DEC-1096); `null` over the fixtures, and until the reads answer. */
   view: ApiView | null;
   ws: Workspace;
@@ -191,6 +193,8 @@ export interface Runtime {
   activity: ((agentId: string) => Promise<ActivityAnswer>) | null;
   /** An agent's own positions alone (`GET /agents/{id}/positions`, DEC-2111), for the positions screen; `null` over the fixtures. */
   holdings: ((agentId: string) => Promise<PositionsAnswer>) | null;
+  /** A stream's latest `count` records, oldest first (§4.8.1), for the audit screens; `null` over the fixtures. */
+  streamTail: ((streamId: string, count: number) => Promise<ActivityAnswer["journal"]>) | null;
   setUps: SetUp[];
   /** Step 1: `POST /mandate-drafts/{id}/versions`. */
   createVersion: (request: NewAgent) => SetUp;
@@ -627,7 +631,7 @@ export function RuntimeProvider({
   }, []);
 
   const value = useMemo(
-    () => ({ source: "fixtures" as const, view: null, ws, now, reachable, commands, responses, mandateChanges, send, respond, stepUp: null, connect: null, activity: null, holdings: null, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
+    () => ({ source: "fixtures" as const, workspaceId: null, view: null, ws, now, reachable, commands, responses, mandateChanges, send, respond, stepUp: null, connect: null, activity: null, holdings: null, streamTail: null, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
     [ws, now, reachable, commands, responses, mandateChanges, send, respond, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;

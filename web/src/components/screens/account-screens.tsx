@@ -18,12 +18,23 @@ import { type Screen, decisionHref, screensIn } from "@/lib/screens";
 import { useSession } from "@/lib/session";
 import { PasskeysSection } from "@/components/auth/passkeys-section";
 import { PushSection } from "@/components/notifications/push-section";
+import { BySource } from "@/components/api-screens/api-screens";
+import { ApiTimeline } from "@/components/api-screens/audit";
 import { ComingSoon } from "./coming-soon";
 import { AllClear, Panel, Section, WorkspaceGate } from "./common";
 
-const HEALTH_LABEL = { market_data: "Market data", broker: "Broker", deployment: "Deployment", relay: "Push relay" } as const;
+const HEALTH_LABEL = {
+  market_data: "Market data",
+  broker: "Broker",
+  deployment: "Deployment",
+  relay: "Push relay",
+} as const;
 
-const STATE_WORD: Record<HealthState, string> = { ok: "Current", stale: "Stale", down: "Down" };
+const STATE_WORD: Record<HealthState, string> = {
+  ok: "Current",
+  stale: "Stale",
+  down: "Down",
+};
 
 /**
  * Feeds first, then the agents' conditions. On a calm day, when every feed answers and Home would say
@@ -32,8 +43,12 @@ const STATE_WORD: Record<HealthState, string> = { ok: "Current", stale: "Stale",
  */
 function Alerts() {
   const { ws, now } = useRuntime();
-  const health = (Object.keys(HEALTH_LABEL) as Array<keyof typeof HEALTH_LABEL>).map((key) => ({ key, ...ws.health[key] }));
-  const conditions = ws.agents.flatMap((agent) => agent.restrictions.map((r) => ({ agent, r })));
+  const health = (
+    Object.keys(HEALTH_LABEL) as Array<keyof typeof HEALTH_LABEL>
+  ).map((key) => ({ key, ...ws.health[key] }));
+  const conditions = ws.agents.flatMap((agent) =>
+    agent.restrictions.map((r) => ({ agent, r })),
+  );
   const calm = allFeedsOk(ws) && nothingNeedsYou(ws, openRequests(ws, now));
   return (
     <div className="grid grid-cols-1 gap-(--section-gap)">
@@ -41,17 +56,33 @@ function Alerts() {
       <Section title="Data and deployment">
         <ul className="grid divide-y divide-border/70">
           {health.map((h) => (
-            <li key={h.key} data-state={h.state} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-3">
+            <li
+              key={h.key}
+              data-state={h.state}
+              className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-3"
+            >
               <span className="font-semibold">{HEALTH_LABEL[h.key]}</span>
               <span className="ml-auto flex flex-wrap items-baseline justify-end gap-x-2 gap-y-1 text-sm">
-                {h.state === "ok" ? null : <span className="rounded-sm border border-foreground px-1.5 text-label">{STATE_WORD[h.state]}</span>}
+                {h.state === "ok" ? null : (
+                  <span className="rounded-sm border border-foreground px-1.5 text-label">
+                    {STATE_WORD[h.state]}
+                  </span>
+                )}
                 {h.as_of === null ? (
-                  <span data-slot="as-of" className="whitespace-nowrap text-muted-foreground">
+                  <span
+                    data-slot="as-of"
+                    className="whitespace-nowrap text-muted-foreground"
+                  >
                     not reported
                   </span>
                 ) : (
-                  <span data-slot="as-of" className="whitespace-nowrap text-muted-foreground">
-                    as of <span className="font-mono tabular">{clock(h.as_of)}</span>, <Age at={h.as_of} now={now} />
+                  <span
+                    data-slot="as-of"
+                    className="whitespace-nowrap text-muted-foreground"
+                  >
+                    as of{" "}
+                    <span className="font-mono tabular">{clock(h.as_of)}</span>,{" "}
+                    <Age at={h.as_of} now={now} />
                   </span>
                 )}
               </span>
@@ -68,17 +99,27 @@ function Alerts() {
               const text = RESTRICTIONS[r.code];
               return (
                 <li key={`${agent.agent_id}-${r.code}-${r.symbol ?? ""}`}>
-                  <Link href={`/agents/${agent.agent_id}`} className="press group -mx-3 grid gap-1 rounded-xl px-3 py-3.5 hover:bg-background">
+                  <Link
+                    href={`/agents/${agent.agent_id}`}
+                    className="press group -mx-3 grid gap-1 rounded-xl px-3 py-3.5 hover:bg-background"
+                  >
                     <span className="flex flex-wrap items-center gap-2">
                       <SourceTag source={text.source} />
                       <span className="font-semibold">
                         {agent.label}: {text.label}
                         {r.symbol ? ` (${r.symbol})` : ""}
                       </span>
-                      <ArrowRight className="ml-auto size-6 shrink-0" aria-hidden />
+                      <ArrowRight
+                        className="ml-auto size-6 shrink-0"
+                        aria-hidden
+                      />
                     </span>
                     <span className="text-sm text-muted-foreground">
-                      Since <span className="font-mono tabular">{datedClock(r.since, now, RECORD_ZONE)}</span>. Blocks: {text.blocks}. Ends when: {text.endsWhen}.
+                      Since{" "}
+                      <span className="font-mono tabular">
+                        {datedClock(r.since, now, RECORD_ZONE)}
+                      </span>
+                      . Blocks: {text.blocks}. Ends when: {text.endsWhen}.
                     </span>
                   </Link>
                 </li>
@@ -94,7 +135,10 @@ function Alerts() {
 export function AlertsScreen() {
   return (
     <div className="grid">
-      <PageHeader title="Alerts" description="Conditions that change what agents may do, each with the time it was last true." />
+      <PageHeader
+        title="Alerts"
+        description="Conditions that change what agents may do, each with the time it was last true."
+      />
       <WorkspaceGate>
         <Alerts />
       </WorkspaceGate>
@@ -106,7 +150,8 @@ export function AlertsScreen() {
 function Decisions() {
   const { ws } = useRuntime();
   const linked = useCan("agents.view");
-  if (ws.decisions.length === 0) return <p className="text-muted-foreground">No gate decisions yet.</p>;
+  if (ws.decisions.length === 0)
+    return <p className="text-muted-foreground">No gate decisions yet.</p>;
   return (
     <Panel className="py-0.5 sm:py-0.5">
       <ul>
@@ -127,7 +172,12 @@ function Decisions() {
 function AllTimeline() {
   const { ws, now } = useRuntime();
   const events: TimelineEvent[] = ws.agents
-    .flatMap((a) => (ws.timeline[a.agent_id] ?? []).map((e) => ({ ...e, text: `${a.label}: ${e.text}` })))
+    .flatMap((a) =>
+      (ws.timeline[a.agent_id] ?? []).map((e) => ({
+        ...e,
+        text: `${a.label}: ${e.text}`,
+      })),
+    )
     .sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
   return (
     <Panel>
@@ -165,9 +215,18 @@ export function RegistryScreen({ screen }: { screen: Screen }) {
         );
       case "audit-timeline":
         return (
-          <WorkspaceGate>
-            <AllTimeline />
-          </WorkspaceGate>
+          <BySource
+            fixtures={
+              <WorkspaceGate>
+                <AllTimeline />
+              </WorkspaceGate>
+            }
+            api={
+              <WorkspaceGate api>
+                <ApiTimeline />
+              </WorkspaceGate>
+            }
+          />
         );
       default:
         return <ComingSoon purpose={screen.purpose} />;
@@ -175,14 +234,25 @@ export function RegistryScreen({ screen }: { screen: Screen }) {
   })();
   return (
     <div className="grid">
-      <PageHeader title={screen.label} description={screen.built ? screen.purpose : undefined} />
+      <PageHeader
+        title={screen.label}
+        description={screen.built ? screen.purpose : undefined}
+      />
       {body}
     </div>
   );
 }
 
 /** The Audit and Workspace index pages: each child screen with what it is for. */
-export function SectionIndexScreen({ title, purpose, prefix }: { title: string; purpose: string; prefix: string }) {
+export function SectionIndexScreen({
+  title,
+  purpose,
+  prefix,
+}: {
+  title: string;
+  purpose: string;
+  prefix: string;
+}) {
   return (
     <div className="grid">
       <PageHeader title={title} description={purpose} />
@@ -191,18 +261,29 @@ export function SectionIndexScreen({ title, purpose, prefix }: { title: string; 
           .filter((s) => s.built)
           .map((s) => (
             <li key={s.key}>
-              <Link href={s.href} className="press group -mx-3 grid gap-1 rounded-xl px-3 py-3.5 hover:bg-background">
+              <Link
+                href={s.href}
+                className="press group -mx-3 grid gap-1 rounded-xl px-3 py-3.5 hover:bg-background"
+              >
                 <span className="flex items-center justify-between gap-3 font-semibold">
                   {s.label}
-                  <ArrowRight className="size-6 shrink-0 text-foreground" aria-hidden />
+                  <ArrowRight
+                    className="size-6 shrink-0 text-foreground"
+                    aria-hidden
+                  />
                 </span>
-                <span className="text-sm text-muted-foreground">{s.purpose}</span>
+                <span className="text-sm text-muted-foreground">
+                  {s.purpose}
+                </span>
               </Link>
             </li>
           ))}
       </ul>
       {screensIn(prefix).some((s) => !s.built) ? (
-        <p data-slot="coming-list" className="mt-(--block-gap) max-w-3xl text-sm text-muted-foreground">
+        <p
+          data-slot="coming-list"
+          className="mt-(--block-gap) max-w-3xl text-sm text-muted-foreground"
+        >
           Coming during the beta:{" "}
           {screensIn(prefix)
             .filter((s) => !s.built)

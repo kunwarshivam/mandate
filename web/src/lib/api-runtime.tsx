@@ -320,17 +320,17 @@ export function ApiRuntimeProvider({
   );
 
   /**
-   * The last `JOURNAL_TAIL` events of a stream (§4.8.1): one page of one event finds the head, a second
+   * The last `count` events of a stream (§4.8.1), `JOURNAL_TAIL` unless asked: one page of one event finds the head, a second
    * reads the tail up to it. An append between the two only adds to the next read.
    */
   const journalTail = useCallback(
-    async (streamId: string): Promise<ActivityAnswer["journal"]> => {
+    async (streamId: string, count: number = JOURNAL_TAIL): Promise<ActivityAnswer["journal"]> => {
       const route = `/journal/streams/${encodeURIComponent(streamId)}/events` as const;
       const decoder = journalPageRead(streamId);
       const first = await client.read(`${route}?after_seq=0&limit=1`, decoder);
       if (!first.ok) return { ok: false, reason: first.error.code };
-      const after = Math.max(0, first.value.head_seq - JOURNAL_TAIL);
-      const tail = await client.read(`${route}?after_seq=${after}&limit=${JOURNAL_TAIL}`, decoder);
+      const after = Math.max(0, first.value.head_seq - count);
+      const tail = await client.read(`${route}?after_seq=${after}&limit=${count}`, decoder);
       return tail.ok ? { ok: true, items: tail.value.events } : { ok: false, reason: tail.error.code };
     },
     [client],
@@ -514,8 +514,8 @@ export function ApiRuntimeProvider({
   const readBacktest = useCallback<Runtime["readBacktest"]>((backtestId) => readBacktestFrom(client, backtestId), [client]);
 
   const value = useMemo<Runtime>(
-    () => ({ source: "api", view, ws, now, reachable: ws.status !== "unreachable", commands, responses, mandateChanges, send, respond, stepUp, connect, activity, holdings, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
-    [view, ws, now, commands, responses, mandateChanges, send, respond, stepUp, connect, activity, holdings, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
+    () => ({ source: "api", workspaceId: client.workspaceId, view, ws, now, reachable: ws.status !== "unreachable", commands, responses, mandateChanges, send, respond, stepUp, connect, activity, holdings, streamTail: journalTail, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
+    [client.workspaceId, view, ws, now, commands, responses, mandateChanges, send, respond, stepUp, connect, activity, holdings, journalTail, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;
 }

@@ -218,11 +218,26 @@ export function createMockServer(options: MockServerOptions): MockServer {
    * order submitted and each filled, in time order. Types and times only; the body is a stand-in.
    */
   function agentStream(streamId: string) {
+    if (streamId === `ctl:${workspaceId}`) return controlStream(streamId);
+    if (streamId === `acct:${workspaceId}:${workspace.connection.connection_id}`) return accountStream(streamId);
     const match = streamId.match(/^agent:([^:]+):(.+)$/);
     const agent = match && match[1] === workspaceId ? agentOf(match[2]) : undefined;
     if (!agent) return null;
     const orders = [...agent.past_orders, ...agent.orders].sort((a, b) => Date.parse(a.submitted_at) - Date.parse(b.submitted_at));
     const told = [{ type: "AgentDeployed", at: orders[0]?.submitted_at ?? workspace.now }, ...orders.flatMap((o) => [{ type: "OrderSubmitted", at: o.submitted_at }, ...(o.state === "Filled" ? [{ type: "FillApplied", at: "closed_at" in o ? String(o.closed_at) : o.submitted_at }] : [])])];
+    return told.map((e, i) => ({ seq: i + 1, event_id: eventId(`${streamId}\n${i}`), event_type: e.type, recorded_at: canonical(e.at), prev_hash: "0".repeat(64), hash: "0".repeat(64), body: "e30=" }));
+  }
+
+  /** The control stream as the mock tells it: the connection, then each agent's deployment, in time order. Types and times only. */
+  function controlStream(streamId: string) {
+    const told = [{ type: "ConnectionEstablished", at: workspace.agents.map((a) => a.deployed_at).sort()[0] ?? workspace.now }, ...workspace.agents.map((a) => ({ type: "AgentDeployed", at: a.deployed_at }))];
+    return told.map((e, i) => ({ seq: i + 1, event_id: eventId(`${streamId}\n${i}`), event_type: e.type, recorded_at: canonical(e.at), prev_hash: "0".repeat(64), hash: "0".repeat(64), body: "e30=" }));
+  }
+
+  /** The connection's account stream: every agent's orders requested and filled, in time order. Types and times only. */
+  function accountStream(streamId: string) {
+    const orders = workspace.agents.flatMap((a) => [...a.past_orders, ...a.orders]).sort((a, b) => Date.parse(a.submitted_at) - Date.parse(b.submitted_at));
+    const told = orders.flatMap((o) => [{ type: "OrderRequestRecorded", at: o.submitted_at }, ...(o.state === "Filled" ? [{ type: "FillApplied", at: "closed_at" in o ? String(o.closed_at) : o.submitted_at }] : [])]);
     return told.map((e, i) => ({ seq: i + 1, event_id: eventId(`${streamId}\n${i}`), event_type: e.type, recorded_at: canonical(e.at), prev_hash: "0".repeat(64), hash: "0".repeat(64), body: "e30=" }));
   }
 
