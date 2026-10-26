@@ -20,13 +20,14 @@ use mandate_api::problem::ProblemCode;
 use mandate_authn::Request;
 use mandate_canon::{Int, Key, Object, Value, to_canonical};
 use mandate_identity::{
-    Authorized, Permission, Principal, Refusal, Scope, Session, TenantContext, WorkspaceId,
-    authorize,
+    Authorized, Permission, Principal, PrincipalId, Refusal, Scope, Session, TenantContext,
+    WorkspaceId, authorize,
 };
 use mandate_identity_seal::Seal;
 use mandate_journal::{ArtifactRef, StoredEvent};
 use mandate_time::UtcNanos;
 
+use crate::alerts::{AlertView, Followed, Stream, alerts, followed, recipient};
 use crate::backtests::{
     Found, Outcome, backtest, backtest_report, evaluation, evaluation_report, paper,
 };
@@ -50,6 +51,8 @@ pub const BUILD: &str = match option_env!("MANDATE_BUILD_DIGEST") {
 /// The workspace a request may read, once authorized, and the control stream's rows.
 pub(crate) struct Reader {
     pub(crate) workspace: String,
+    /// The member reading, whose own notice deliveries the alerts read serves (DEC-2141 item 4).
+    pub(crate) principal: PrincipalId,
     /// The context `authorize` returned for the request (identity spec ID-8).
     pub(crate) tenant: TenantContext,
     pub(crate) control: Vec<StoredEvent>,
@@ -143,6 +146,7 @@ pub(crate) async fn authorized(
     match authorized {
         Ok(Authorized::Workspace { tenant, .. }) => Ok(Reader {
             workspace: workspace_text(tenant.workspace())?,
+            principal: admitted.principal,
             tenant,
             control,
             now,
@@ -686,6 +690,161 @@ pub async fn list_approvals(
         .collect();
     let streams: Vec<&[StoredEvent]> = rows.iter().map(Vec::as_slice).collect();
     served(&reader, &streams, vec![("approvals", Value::Array(listed))])
+}
+
+/// How many alerts `GET /alerts` serves without a `limit` (§4.7, DEC-2141 item 1).
+const ALERTS_LISTED: usize = 50;
+
+/// The most `limit` may ask for.
+const ALERTS_LIMIT: usize = 200;
+
+/// The alerts read's `limit`: [`ALERTS_LISTED`] without a query, else `limit=` and a decimal from
+/// 1 to [`ALERTS_LIMIT`] with no leading zero; `None` for anything else.
+fn alerts_limit(query: Option<&str>) -> Option<usize> {
+    let Some(query) = query else {
+        return Some(ALERTS_LISTED);
+    };
+    let digits = query.strip_prefix("limit=")?;
+    if digits.is_empty() || digits.starts_with('0') || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    digits
+        .parse::<usize>()
+        .ok()
+        .filter(|n| (1..=ALERTS_LIMIT).contains(n))
+}
+
+/// One alert as `read-models/alerts` states it.
+fn alert_value(view: &AlertView) -> Value {
+    let optional = |text: Option<&str>| text.map_or(Value::Null, string);
+    let (stream_type, agent, account) = match &view.followed {
+        Followed::Control => ("control", None, None),
+        Followed::Agent(agent) => ("agent", Some(agent.as_str()), None),
+        Followed::Account(account) => ("account", None, Some(account.as_str())),
+    };
+    let notice = view.notice.as_ref().map_or(Value::Null, |notice| {
+        object(vec![
+            ("issued_at", string(&notice.issued_at)),
+            (
+                "delivery",
+                Value::Array(
+                    notice
+                        .delivery
+                        .iter()
+                        .map(|d| {
+                            object(vec![
+                                ("channel", string(&d.channel)),
+                                ("status", string(&d.status)),
+                                ("attempt", int(d.attempt)),
+                                ("recorded_at", string(&d.recorded_at)),
+                            ])
+                        })
+                        .collect(),
+                ),
+            ),
+        ])
+    });
+    object(vec![
+        ("alert_id", string(&view.alert_id)),
+        ("kind", string(&view.kind)),
+        ("class", string(view.class)),
+        ("raised_at", string(&view.raised_at)),
+        (
+            "stream",
+            object(vec![
+                ("type", string(stream_type)),
+                ("agent_id", optional(agent)),
+                ("account_ref", optional(account)),
+            ]),
+        ),
+        (
+            "subject",
+            object(vec![
+                ("event_id", string(&view.subject_id)),
+                ("event_type", string(&view.subject_type)),
+            ]),
+        ),
+        ("owner_command", optional(view.owner_command.as_deref())),
+        ("notice", notice),
+    ])
+}
+
+/// `GET /v1/workspaces/{ws}/alerts` (§4.7, DEC-2141): `read-models/alerts`, the owner alerts on
+/// every stream the control stream names, newest first, each with its notice and only the reading
+/// member's own deliveries. Any stream that cannot be read, and any alert that cannot be served
+/// whole, is `journal_unavailable`, never a shorter list.
+pub async fn list_alerts(
+    State(app): State<Arc<App>>,
+    headers: HeaderMap,
+    path: Result<Path<String>, PathRejection>,
+    RawQuery(query): RawQuery,
+) -> Response {
+    let Ok(Path(workspace)) = path else {
+        return path_refused(&app, &headers, Request::Other).await;
+    };
+    let reader = match reader(&app, &headers, &workspace).await {
+        Ok(reader) => reader,
+        Err(refusal) => return refusal.response(),
+    };
+    let Some(limit) = alerts_limit(query.as_deref()) else {
+        return Refused::Invalid.response();
+    };
+    let Ok(member) = reader.principal.to_ulid_text() else {
+        return Refused::NotFound.response();
+    };
+    let (agents, accounts) = followed(&reader.control);
+    let mut read: Vec<(Followed, Vec<StoredEvent>)> = Vec::new();
+    let named = agents
+        .into_iter()
+        .map(|agent| {
+            (
+                format!("agent:{}:{agent}", reader.workspace),
+                Followed::Agent(agent),
+            )
+        })
+        .chain(accounts.into_iter().map(|account| {
+            (
+                format!("acct:{}:{account}", reader.workspace),
+                Followed::Account(account),
+            )
+        }));
+    for (stream, followed) in named {
+        match app.journal.rows(&stream).await {
+            Ok(rows) => read.push((followed, rows)),
+            Err(_) => return Refused::JournalUnavailable.response(),
+        }
+    }
+    let Ok(notices) = app.journal.rows(&format!("ntf:{}", reader.workspace)).await else {
+        return Refused::JournalUnavailable.response();
+    };
+    let streams: Vec<Stream<'_>> = std::iter::once(Stream {
+        followed: Followed::Control,
+        rows: &reader.control,
+    })
+    .chain(read.iter().map(|(followed, rows)| Stream {
+        followed: followed.clone(),
+        rows,
+    }))
+    .collect();
+    let Ok(mut views) = alerts(&streams, &notices, &recipient(&member)) else {
+        return Refused::JournalUnavailable.response();
+    };
+    let truncated = views.len() > limit;
+    views.truncate(limit);
+    let listed = views.iter().map(alert_value).collect();
+    let watermarked: Vec<&[StoredEvent]> = read
+        .iter()
+        .map(|(_, rows)| rows.as_slice())
+        .chain(std::iter::once(notices.as_slice()))
+        .collect();
+    served(
+        &reader,
+        &watermarked,
+        vec![
+            ("alerts", Value::Array(listed)),
+            ("truncated", Value::Bool(truncated)),
+        ],
+    )
 }
 
 /// `GET /v1/workspaces/{ws}/approvals/{approval_id}`.

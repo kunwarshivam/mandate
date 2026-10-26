@@ -3,7 +3,7 @@ import { dec } from "@/lib/decimal";
 import { type CompilerInput, SCHEMA_ERROR, figuresOnly, fixtureCompiler, validateTurn } from "./compiler";
 import { MODELS } from "./draft";
 
-const models = MODELS.map((m) => ({ id: m.id, name: m.name }));
+const models = MODELS;
 const input = (text: string, asked: CompilerInput["asked"] = "money"): CompilerInput => ({ messages: [{ id: "m1", text }], asked, models });
 const turn = (readings: unknown[], extra: Record<string, unknown> = {}) => ({ readings, not_enforced: [], intent: "answer", reply: null, ...extra });
 

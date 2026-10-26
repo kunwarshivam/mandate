@@ -19,9 +19,10 @@ import { percent, usd } from "@/lib/format";
 
 export type SectionKey = "money" | "limits" | "strategy" | "autonomy" | "universe";
 
-export type ModelId = "quant.mean_reversion" | "quant.momentum";
+/** A signal model's id: the fixture catalogue's, or one a deployment registered (mandate schema `signal_model.id`). */
+export type ModelId = string;
 
-interface ModelParam {
+export interface ModelParam {
   key: string;
   label: string;
   /** How the conversation asks for it: the question and the range it must fall in, with no suggested value. */
@@ -38,6 +39,8 @@ export interface ModelChoice {
   version: string;
   contentHash: ContentRef;
   params: ModelParam[];
+  /** Pairs of parameters the first of which must be less than the second, as the model's content states. */
+  lessThan?: ReadonlyArray<[string, string]>;
 }
 
 function wholeNumber(label: string, low: number, high: number) {
@@ -106,8 +109,8 @@ export interface ChosenModel {
   params: Array<{ key: string; value: string }>;
 }
 
-export function readStrategy(s: Strategy): CheckResult<ChosenModel> {
-  const model = MODELS.find((m) => m.id === s.model);
+export function readStrategy(s: Strategy, models: readonly ModelChoice[] = MODELS): CheckResult<ChosenModel> {
+  const model = models.find((m) => m.id === s.model);
   if (!model) return { ok: false, error: "Choose the model this agent uses. The platform does not choose it for you." };
   const params: ChosenModel["params"] = [];
   for (const p of model.params) {
@@ -115,7 +118,52 @@ export function readStrategy(s: Strategy): CheckResult<ChosenModel> {
     if (!read.ok) return read;
     params.push({ key: p.key, value: read.value });
   }
+  const broken = constraintBroken(model, s.params);
+  if (broken) return { ok: false, error: broken };
   return { ok: true, value: { model, params } };
+}
+
+/** The first of the model's `a < b` constraints that the values given break, in words; one with a value not given yet holds. */
+export function constraintBroken(model: ModelChoice, values: Readonly<Record<string, string>>): string | null {
+  const label = (key: string) => model.params.find((p) => p.key === key)?.label ?? key;
+  for (const [low, high] of model.lessThan ?? []) {
+    if (values[low] === undefined || values[high] === undefined) continue;
+    if (!(Number(values[low]) < Number(values[high]))) return `${label(low)} must be less than ${label(high).toLowerCase()}.`;
+  }
+  return null;
+}
+
+/** Platform-authored display names for registered models, where the platform has one (otherwise the model's id); a label, never a ranking. */
+const MODEL_NAMES: Readonly<Record<string, string>> = { "quant.ma_crossover": "Moving-average crossover" };
+
+/** A parameter name in words: `fast_periods` reads "Fast periods". */
+const words = (name: string) => `${name[0].toUpperCase()}${name.slice(1).replace(/_/g, " ")}`;
+
+/**
+ * A model the deployment registered (`GET /signal-models`, DEC-2136) as one the owner may choose: its
+ * registered version and content hash, its methodology as the content states it, and a question per
+ * declared parameter from the content's bounds. Only a model whose every declared parameter is a
+ * bounded integer, whose every constraint is an `a < b` between two of them (which the page checks),
+ * and which admits no instruments, can be asked about here: any other is not offered, since the page
+ * cannot hold the owner to a rule it cannot read.
+ */
+export function servedModelChoice(m: { model_id: string; model_version: string; content_hash: ContentRef; params: readonly string[]; admits_instruments: boolean; content: { methodology: string | null; params: ReadonlyArray<{ name: string; type: string | null; min: number | null; max: number | null }>; constraints: readonly string[] } | null }): ModelChoice | null {
+  if (m.admits_instruments || !m.content) return null;
+  const params: ModelParam[] = [];
+  for (const key of m.params) {
+    const declared = m.content.params.find((p) => p.name === key);
+    if (!declared || declared.type !== "integer" || declared.min === null || declared.max === null || declared.min > declared.max) return null;
+    const label = words(key);
+    const range = `A whole number from ${declared.min} to ${declared.max}.`;
+    params.push({ key, label, question: `What ${label.toLowerCase()} should it use? ${range}`, hint: `${label}: ${range}`, read: wholeNumber(label, declared.min, declared.max) });
+  }
+  const lessThan: Array<[string, string]> = [];
+  for (const c of m.content.constraints) {
+    const pair = /^([a-z][a-z0-9_]*) < ([a-z][a-z0-9_]*)$/.exec(c.trim());
+    if (!pair || !m.params.includes(pair[1]) || !m.params.includes(pair[2])) return null;
+    lessThan.push([pair[1], pair[2]]);
+  }
+  return { id: m.model_id, name: MODEL_NAMES[m.model_id] ?? m.model_id, what: m.content.methodology ?? "Your deployment did not report how it decides.", version: m.model_version, contentHash: m.content_hash, params, lessThan };
 }
 
 /** The sizing thresholds and cadence the platform proposes for a new agent. */
@@ -194,9 +242,12 @@ export interface Draft {
  */
 export const LOSS_CEILING = dec("0.2");
 
-/** DEC-117: the platform proposes five instruments at most. */
-const PROPOSED_MAX_INSTRUMENTS = 5;
-const MAX_INSTRUMENTS = 20;
+/**
+ * One instrument per agent until the multi-instrument risk state lands (DEC-2804 item 8,
+ * DEC-2809): the executor opens no risk fold for an agent whose mandate allows more, and the
+ * deployment refuses one (`second_instrument`), so the set-up asks for one symbol and proposes one.
+ */
+const MAX_INSTRUMENTS = 1;
 const STOP_DISTANCE = dec("0.08");
 const POSITION_CAP = dec("0.25");
 const ORDER_FRACTION = dec("0.1");
@@ -402,7 +453,7 @@ export function readSymbols(text: string): CheckResult<string[]> {
   const bad = words.filter((w) => !SYMBOL.test(w));
   if (bad.length > 0) return { ok: false, error: `Not a stock symbol: ${bad.join(", ")}.` };
   const symbols = [...new Set(words)].sort();
-  if (symbols.length > MAX_INSTRUMENTS) return { ok: false, error: `At most ${MAX_INSTRUMENTS} symbols.` };
+  if (symbols.length > MAX_INSTRUMENTS) return { ok: false, error: "An agent trades one instrument for now. Name one symbol; another instrument needs an agent of its own." };
   return { ok: true, value: symbols };
 }
 
@@ -568,7 +619,7 @@ function sectionsFor(t: Terms, r: Read, symbols: string[], figures: Figures, str
           ? { path: "/universe/pinned_instruments", label: "Instruments", value: symbols.join(", "), provenance: "user_entered" }
           : { path: "/universe/pinned_instruments", label: "Instruments", value: "None yet.", provenance: null },
         { path: "/universe/asset_classes", label: "Kinds of instrument", value: "US stocks and ETFs.", provenance: "platform_proposed" },
-        { path: "/universe/max_instruments", label: "Most instruments at once", value: String(Math.max(PROPOSED_MAX_INSTRUMENTS, symbols.length)), provenance: "platform_proposed" },
+        { path: "/universe/max_instruments", label: "Most instruments at once", value: String(MAX_INSTRUMENTS), provenance: "platform_proposed" },
         { path: "/universe/leveraged_etps_enabled", label: "Leveraged and inverse ETFs", value: "Off.", provenance: "platform_default" },
       ],
     },
@@ -583,8 +634,17 @@ export function compile(r: Read, symbols: string[], strategy: ChosenModel | null
 
 const KNOWN: Record<string, InstrumentRef> = Object.fromEntries(Object.values(INSTRUMENTS).map((i) => [i.symbol, i]));
 
-/** The owner's symbol as an instrument: a fixture one when the fixtures list it, otherwise a US stock with an ID drawn from the symbol. */
-export function instrumentFor(symbol: string): InstrumentRef {
+/**
+ * The owner's symbol as an instrument. With a deployment's registered instruments, only one of those
+ * (the set-up refuses any other symbol before it gets here); over the fixtures, a fixture one when
+ * the fixtures list it, otherwise a US stock with an ID drawn from the symbol.
+ */
+export function instrumentFor(symbol: string, registered: Readonly<Record<string, InstrumentRef>> | null = null): InstrumentRef {
+  if (registered) {
+    const found = registered[symbol];
+    if (!found) throw new Error(`${symbol} is not a registered instrument`);
+    return found;
+  }
   return KNOWN[symbol] ?? { asset_id: fixtureAssetId(symbol), symbol, asset_class: "us_equity" };
 }
 
@@ -596,7 +656,7 @@ export function instrumentFor(symbol: string): InstrumentRef {
  * rung, which this ladder has none of, and the last only delays lifting the daily-loss limit.
  * Null without a model or an instrument, which the review never lets through.
  */
-export function mandateFrom(draft: Draft, connectionId: string): NewAgent | null {
+export function mandateFrom(draft: Draft, connectionId: string, registered: Readonly<Record<string, InstrumentRef>> | null = null): NewAgent | null {
   const { terms: t, strategy } = draft;
   if (!strategy || draft.symbols.length === 0) return null;
   const words = draft.answers.map((a) => a.quote).join("\n");
@@ -614,8 +674,8 @@ export function mandateFrom(draft: Draft, connectionId: string): NewAgent | null
     goal,
     universe: {
       pinned: true,
-      pinned_instruments: draft.symbols.map(instrumentFor),
-      max_instruments: Math.max(PROPOSED_MAX_INSTRUMENTS, draft.symbols.length),
+      pinned_instruments: draft.symbols.map((s) => instrumentFor(s, registered)),
+      max_instruments: MAX_INSTRUMENTS,
       asset_classes: ["us_equity"],
       leveraged_etps_enabled: false,
       leveraged_etp_disclosure_version: null,

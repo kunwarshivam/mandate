@@ -46,7 +46,7 @@ describe("positions over the workspace API (§4.7 D3, DEC-2111)", () => {
     expect(rows).toHaveLength(holding.positions.length);
     for (const row of rows) {
       const cells = within(row).getAllByRole("cell").map((c) => c.textContent);
-      expect(cells.slice(2, 5)).toEqual(["Not reported", "Not reported", "Not reported"]);
+      expect(cells.slice(2, 7)).toEqual(["Not reported", "Not reported", "Not reported", "Not reported", "No protective order recorded"]);
     }
     expect(reads).toContain(`/v1/workspaces/${WS}/agents/${holding.agent_id}/positions`);
     expect(reads.some((r) => r.endsWith("/orders"))).toBe(false);
@@ -81,6 +81,60 @@ describe("positions over the workspace API (§4.7 D3, DEC-2111)", () => {
     mount("empty");
     await waitFor(() => expect(screen.getByRole("main")).toHaveTextContent("Your deployment reports no agents."));
     expect(screen.queryByText("No agents yet")).toBeNull();
+  });
+});
+
+describe("each position's figures as DEC-2138 serves them", () => {
+  const fixture = buildWorkspace("normal");
+  const holder = fixture.agents.find((a) => a.positions.length > 0)!;
+
+  function serving(members: Record<string, unknown>) {
+    mount("normal", (send) => async (input, init) => {
+      const answer = await send(input, init);
+      if (!new URL(input).pathname.endsWith(`/agents/${holder.agent_id}/positions`)) return answer;
+      const body = (await answer.json()) as { positions: Array<Record<string, unknown>> };
+      return new Response(JSON.stringify({ ...body, positions: body.positions.map((p) => ({ ...p, ...members })) }), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+  }
+  const cells = async () => {
+    const table = await screen.findByRole("table", { name: `${holder.mandate.name}'s positions` });
+    return within(within(table).getAllByRole("row")[1]).getAllByRole("cell").map((c) => c.textContent);
+  };
+
+  it("shows the cost basis, a sane mark's bid, the market value, the unrealized P&L and the protection as served", async () => {
+    serving({
+      cost_basis: { qty: "10", basis: "1000.5" },
+      risk_mark: { bid: "101.25", sane: true, session: "regular", marked_at: "2026-10-26T14:30:00.000000000Z" },
+      market_value: "1012.5",
+      unrealized_pnl: "12",
+      protection: { orders: ["co_1"], covered_qty: "10", stop: "95", take_profit: "110", unprotected_since: null },
+    });
+    await waitFor(async () => expect((await cells()).slice(2, 7)).toEqual(["$1,000.50 for 10", "$101.25 bid, 2026-10-26 14:30:00 UTC", "$1,012.50", "+$12.00", "stop $95.00, take-profit $110.00; covers 10"]));
+  });
+
+  it("shows no price for a mark that is not sane, and the open unprotected interval", async () => {
+    serving({ cost_basis: null, risk_mark: { bid: "0.01", sane: false, session: "regular", marked_at: "2026-10-26T14:30:00.000000000Z" }, market_value: null, unrealized_pnl: null, protection: { orders: [], covered_qty: "0", stop: null, take_profit: null, unprotected_since: "2026-10-26T14:31:00.000000000Z" } });
+    await waitFor(async () => expect((await cells()).slice(2, 7)).toEqual(["Not reported", "No sane mark", "Not reported", "Not reported", "Unprotected since 2026-10-26 14:31:00 UTC"]));
+    expect(screen.getByRole("main")).not.toHaveTextContent("0.01");
+  });
+
+  it("refuses the read, never a price, for a sane mark with no bid, and for a position missing a member", async () => {
+    serving({ risk_mark: { bid: null, sane: true, session: "regular", marked_at: "2026-10-26T14:30:00.000000000Z" } });
+    await waitFor(() => expect(screen.getByRole("main")).toHaveTextContent(`Positions not reported: ${holder.mandate.name}.`));
+    cleanup();
+    serving({ protection: null });
+    await waitFor(() => expect(screen.getByRole("main")).toHaveTextContent(`Positions not reported: ${holder.mandate.name}.`));
+  });
+
+  it("shows an open unprotected interval beside a partial cover, and a stop alone", async () => {
+    serving({ protection: { orders: ["co_1"], covered_qty: "3", stop: "95", take_profit: null, unprotected_since: "2026-10-25T20:00:00.000000000Z" } });
+    await waitFor(async () => expect((await cells())[6]).toBe("stop $95.00; covers 3. Unprotected since 2026-10-25 20:00:00 UTC"));
+  });
+
+  it("shows a short's signed cost basis as served, and no market value or P&L the read does not serve", async () => {
+    serving({ cost_basis: { qty: "-5", basis: "-500" }, market_value: null, unrealized_pnl: null });
+    await waitFor(async () => expect((await cells()).slice(2, 3)[0]).toMatch(/^[−-]\$500\.00 for -5$/));
+    expect((await cells()).slice(4, 6)).toEqual(["Not reported", "Not reported"]);
   });
 });
 
