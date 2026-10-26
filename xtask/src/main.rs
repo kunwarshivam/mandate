@@ -3477,6 +3477,40 @@ fn lint(
     workspace_checks()
 }
 
+/// The two lines git writes around a conflict, each followed by a space and the side's name, that
+/// no tracked file may start a line with: a merge resolved by hand that kept them lands both sides
+/// and git's own markup, as `deploy/cell/README.md` did after #2622. `=======` alone is left out,
+/// since Markdown underlines a heading with it.
+const CONFLICT_MARKERS: [&str; 2] = ["<<<<<<< ", ">>>>>>> "];
+
+/// Refuses every tracked file under `root` with a line that starts with one of
+/// [`CONFLICT_MARKERS`], naming the file and line. Files are read as bytes, so a binary or
+/// non-UTF-8 file is checked rather than skipped.
+fn conflict_markers_in(root: &Path) -> Result<()> {
+    eprintln!(
+        "    conflict-markers: checking that no tracked file keeps a merge conflict's markers"
+    );
+    let tracked = output_in(root, "git", &["ls-files", "-z"])?;
+    let mut problems = Vec::new();
+    for file in tracked.split('\0').filter(|file| !file.is_empty()) {
+        let Ok(bytes) = fs::read(root.join(file)) else {
+            continue;
+        };
+        for (n, line) in (1..).zip(bytes.split(|byte| *byte == b'\n')) {
+            if CONFLICT_MARKERS
+                .iter()
+                .any(|marker| line.starts_with(marker.as_bytes()))
+            {
+                problems.push(format!(
+                    "{file}:{n}: a merge conflict's marker; resolve the conflict and remove git's \
+                     markup"
+                ));
+            }
+        }
+    }
+    report(problems, "conflict-markers")
+}
+
 /// The backlog every story and debt row was written to until DEC-2373.
 const BACKLOG: &str = "docs/project/06-backlog-v1.md";
 
@@ -3608,7 +3642,7 @@ fn backlog_row_problem(before: &str, after: &str, folded: &[(String, String)]) -
 }
 
 /// The lint job's checks over the Cargo and uv workspaces in the current directory: fmt, clippy
-/// `-D warnings`, crate layering, markers, saved proptest seeds, the feature map, typos, and ruff.
+/// `-D warnings`, crate layering, the decision numbers, conflict markers, markers, saved proptest seeds, the feature map, typos, and ruff.
 fn workspace_lint() -> Result<()> {
     sh("cargo", &["fmt", "--all", "--check"])?;
     sh(
@@ -3625,6 +3659,7 @@ fn workspace_lint() -> Result<()> {
     )?;
     layers()?;
     decision_numbers(Path::new("."))?;
+    conflict_markers_in(Path::new("."))?;
     markers()?;
     proptest_seeds()?;
     feature_map()?;
@@ -9218,6 +9253,7 @@ fn backticked_paths(text: &str) -> impl Iterator<Item = &str> {
 /// [`MUTANTS_PLANNED_ENV`]; [`check_schedule`] refuses a shard whose own listing or shard total
 /// disagrees with that plan (DEC-538).
 fn mutants(root: &Path, base: Option<&str>) -> Result<()> {
+    incremental_refused(env::var_os(CARGO_INCREMENTAL).as_deref())?;
     let shard = env::var(MUTANT_SHARD_ENV)
         .ok()
         .map(|value| MutantShard::parse(&value))
@@ -9251,8 +9287,83 @@ fn per_shard_value(value: &str) -> Result<usize> {
 }
 
 /// [`mutants`] with its schedule passed in rather than read from the environment, which the tests
-/// cannot set (`unsafe` environment mutation is forbidden workspace-wide).
+/// cannot set (`unsafe` environment mutation is forbidden workspace-wide). It clears
+/// [`MUTANTS_OUT`] before anything else, so no earlier run's outcomes sit there while this one
+/// plans and runs (lane L1 reported one, 2026-10-26), and ends every run, passed or failed, with
+/// [`mutants_summary`]'s one line, the line a lane reports from.
 fn mutants_scheduled(
+    root: &Path,
+    base: Option<&str>,
+    shard: Option<MutantShard>,
+    planned: Option<usize>,
+    per_shard: usize,
+) -> Result<()> {
+    match fs::remove_dir_all(root.join(MUTANTS_OUT)) {
+        Err(err) if err.kind() != std::io::ErrorKind::NotFound => {
+            return Err(err).with_context(|| format!("clearing {MUTANTS_OUT} before the run"));
+        }
+        _ => {}
+    }
+    let verdict = mutants_judged(root, base, shard, planned, per_shard);
+    println!(
+        "{}",
+        mutants_summary(root, mutant_costs::run_id(), base, verdict.is_ok())
+    );
+    verdict
+}
+
+/// The one line every [`mutants_scheduled`] run ends with: the run id, the diff base, the verdict,
+/// and the counts this run's [`MUTANTS_OUT`] outcomes hold, all zero when the run wrote none. A
+/// `pass` with `missed` above zero is DEC-137's: every missed mutant sat in a stub body.
+fn mutants_summary(root: &Path, run: u64, base: Option<&str>, passed: bool) -> String {
+    let counts = fs::read_to_string(root.join(MUTANTS_OUT).join("outcomes.json"))
+        .ok()
+        .and_then(|text| serde_json::from_str::<MutantRun>(&text).ok())
+        .map(|run| {
+            let mut counts = MutantCounts::default();
+            for outcome in &run.outcomes {
+                if outcome.scenario.get("Mutant").is_none() {
+                    continue;
+                }
+                counts.tested += 1;
+                match outcome.summary.as_str() {
+                    "CaughtMutant" => counts.caught += 1,
+                    "MissedMutant" => counts.missed += 1,
+                    "Timeout" => counts.timeouts += 1,
+                    "Unviable" => counts.unviable += 1,
+                    _ => counts.other += 1,
+                }
+            }
+            counts
+        })
+        .unwrap_or_default();
+    format!(
+        "mutants summary: run={run} base={} verdict={} tested={} caught={} missed={} timeouts={} \
+         unviable={} other={}",
+        base.unwrap_or("none"),
+        if passed { "pass" } else { "fail" },
+        counts.tested,
+        counts.caught,
+        counts.missed,
+        counts.timeouts,
+        counts.unviable,
+        counts.other,
+    )
+}
+
+/// How many of a run's mutants ended each way, for [`mutants_summary`].
+#[derive(Default)]
+struct MutantCounts {
+    tested: usize,
+    caught: usize,
+    missed: usize,
+    timeouts: usize,
+    unviable: usize,
+    other: usize,
+}
+
+/// [`mutants_scheduled`]'s run, between clearing [`MUTANTS_OUT`] and the summary line.
+fn mutants_judged(
     root: &Path,
     base: Option<&str>,
     shard: Option<MutantShard>,
@@ -9367,7 +9478,7 @@ fn mutants_job_within(root: &Path, args: &[&str], left: Duration) -> Command {
         .arg("cargo")
         .args(args)
         .env_remove(CARGO_BUILD_TARGET_DIR)
-        .env_remove(CARGO_INCREMENTAL)
+        .env(CARGO_INCREMENTAL, "1")
         .env(CARGO_TARGET_DIR, mutants_target_dir(root))
         .envs(MUTANT_BUILD_PROFILE);
     timeout
@@ -10243,10 +10354,24 @@ const CARGO_BUILD_TARGET_DIR: &str = "CARGO_BUILD_TARGET_DIR";
 
 /// Turns incremental compilation off when it is `0`, which a mutant's rebuild cannot afford: each
 /// one then builds its crate from scratch, every mutant reaches [`MUTANT_BUILD_TIMEOUT`], and the
-/// run reports timeouts rather than a verdict (lane GL, 2026-10-26). The mutants job's building
-/// children drop it, so cargo's `dev` and `test` default, incremental on, holds whatever the
-/// caller exported. It is never read: only removed from the children's environment.
+/// run reports timeouts rather than a verdict (lane GL, 2026-10-26). [`mutants`] refuses a caller
+/// that exported `0` ([`incremental_refused`]), and the job's building children run with it at
+/// `1`, which cargo ranks above `build.incremental` and the profiles' `incremental`, so no other
+/// setting turns it off either.
 const CARGO_INCREMENTAL: &str = "CARGO_INCREMENTAL";
+
+/// Refuses a mutants run whose caller exported [`CARGO_INCREMENTAL`] as `0`, loudly rather than
+/// silently overridden, so a session that turned incremental builds off learns it before a run.
+fn incremental_refused(value: Option<&std::ffi::OsStr>) -> Result<()> {
+    if value.is_some_and(|value| value == "0") {
+        bail!(
+            "{CARGO_INCREMENTAL}=0 is set: every mutant would rebuild its crate from scratch and \
+             reach the {MUTANT_BUILD_TIMEOUT}-second build timeout, so the run would report \
+             timeouts, not a verdict; unset it for `cargo xtask ci mutants`"
+        );
+    }
+    Ok(())
+}
 
 /// The one target directory the mutants job's building children use: `root`'s own `target/`,
 /// absolute, so no caller's [`CARGO_TARGET_DIR`], [`CARGO_BUILD_TARGET_DIR`] or cargo config
@@ -10308,7 +10433,7 @@ fn mutants_job_cargo(root: &Path, args: &[&str]) -> Command {
         .current_dir(root)
         .args(args)
         .env_remove(CARGO_BUILD_TARGET_DIR)
-        .env_remove(CARGO_INCREMENTAL)
+        .env(CARGO_INCREMENTAL, "1")
         .env(CARGO_TARGET_DIR, mutants_target_dir(root))
         .envs(MUTANT_BUILD_PROFILE);
     cargo
@@ -10555,8 +10680,9 @@ const MUTANT_BUILD_TIMEOUT: &str = "60";
 /// whatever `target/mutants.out` holds (DEC-137).
 const MISSED_MUTANTS: i32 = 2;
 
-/// The status `cargo mutants` exits with when a mutant's build or tests timed out and none was
-/// missed: a mutant that timed out was never judged, so the run is no verdict at all.
+/// The status `cargo mutants` exits with when a mutant's build or tests timed out. A mutant that
+/// timed out was never judged, so the run is no verdict at all; a run that also missed mutants may
+/// exit [`MISSED_MUTANTS`] instead, where [`mutant_verdicts`] counts each timeout as a problem.
 const TIMED_OUT_MUTANTS: i32 = 3;
 
 fn mutants_outcome(
@@ -10570,8 +10696,7 @@ fn mutants_outcome(
         Some(MISSED_MUTANTS) => stub_exemptions(root, crates, started),
         Some(TIMED_OUT_MUTANTS) => bail!(
             "`cargo mutants` reports mutants that timed out: each was never judged, so this run is \
-             not a pass and not a \"0 missed\"; see {MUTANTS_OUT}/timeout.txt, and run it again \
-             through `cargo xtask ci mutants`, which builds incrementally"
+             not a pass and not a \"0 missed\"; {MUTANTS_OUT}/timeout.txt names them"
         ),
         other => bail!(
             "`cargo mutants` exited with {other:?}, which is not the status it reports for missed \
@@ -12208,7 +12333,10 @@ mod tests {
         infra_workflow_problems, is_docs_path, literal_paths, nextest_args, normalized_join,
         references_path, select, selection_in, source_references, tokens, withhold_web_demo,
     };
-    use super::{CARGO_INCREMENTAL, TIMED_OUT_MUTANTS, mutants_job_within};
+    use super::{
+        CARGO_INCREMENTAL, TIMED_OUT_MUTANTS, conflict_markers_in, incremental_refused,
+        mutants_job_within, mutants_summary,
+    };
     use super::{CREDENTIAL_GUARD, CREDENTIAL_NAME_PARTS, rehearsal_live_run};
     use super::{ProcessGroups, process_group_problems};
     use super::{Resolve, ResolvedNode, cargo_resolve, resolved_live_problems};
@@ -13465,9 +13593,10 @@ mod tests {
         for (child, envs) in [("the listing", &envs), ("the timed run", &within)] {
             assert_eq!(
                 envs.get(OsStr::new(CARGO_INCREMENTAL)),
-                Some(&None),
-                "{child} drops the caller's CARGO_INCREMENTAL, so `0` cannot make every mutant's \
-                 build reach the build timeout (lane GL, 2026-10-26)"
+                Some(&Some(OsStr::new("1"))),
+                "{child} runs with CARGO_INCREMENTAL=1, so neither the caller's environment nor a \
+                 config's build.incremental can make every mutant's build reach the build timeout \
+                 (lane GL, 2026-10-26)"
             );
         }
         Ok(())
@@ -13489,6 +13618,102 @@ mod tests {
             mutants_outcome(Path::new("."), &[], Some(0), SystemTime::UNIX_EPOCH).is_ok(),
             "a clean run passes"
         );
+    }
+
+    /// A caller that exported `CARGO_INCREMENTAL=0` is refused before the run, by name; unset or
+    /// any other value runs.
+    #[test]
+    fn a_mutants_run_with_incremental_builds_off_is_refused() {
+        let refused = incremental_refused(Some(OsStr::new("0")))
+            .expect_err("CARGO_INCREMENTAL=0 makes every mutant's build time out");
+        assert!(
+            format!("{refused:#}").contains("CARGO_INCREMENTAL=0 is set"),
+            "{refused:#}"
+        );
+        assert!(incremental_refused(None).is_ok(), "unset runs");
+        assert!(
+            incremental_refused(Some(OsStr::new("1"))).is_ok(),
+            "on runs"
+        );
+    }
+
+    /// The summary line counts this run's mutants by how each ended, leaves the baseline out, and
+    /// reads all zeros when the run wrote no outcomes.
+    #[test]
+    fn the_mutants_summary_line_counts_this_runs_outcomes() -> Result<()> {
+        let fx = Fixture::new("mutants-summary")?;
+        assert_eq!(
+            mutants_summary(&fx.0, 7, None, true),
+            "mutants summary: run=7 base=none verdict=pass tested=0 caught=0 missed=0 timeouts=0 \
+             unviable=0 other=0",
+            "a run that wrote no outcomes counts nothing"
+        );
+        let mutant = |summary: &str| {
+            serde_json::json!({
+                "scenario": {"Mutant": {"name": "m", "package": "fx", "file": "src/lib.rs"}},
+                "summary": summary,
+            })
+        };
+        let outcomes = serde_json::json!({"outcomes": [
+            {"scenario": "Baseline", "summary": "Success"},
+            mutant("CaughtMutant"),
+            mutant("CaughtMutant"),
+            mutant("MissedMutant"),
+            mutant("Timeout"),
+            mutant("Timeout"),
+            mutant("Timeout"),
+            mutant("Unviable"),
+            mutant("BuildFailed"),
+        ]});
+        fs::create_dir_all(fx.0.join(MUTANTS_OUT))?;
+        fs::write(
+            fx.0.join(MUTANTS_OUT).join("outcomes.json"),
+            outcomes.to_string(),
+        )?;
+        assert_eq!(
+            mutants_summary(&fx.0, 42, Some("origin/main"), false),
+            "mutants summary: run=42 base=origin/main verdict=fail tested=8 caught=2 missed=1 \
+             timeouts=3 unviable=1 other=1"
+        );
+        Ok(())
+    }
+
+    /// A run clears an earlier run's outcomes before it does anything else, even one that finds
+    /// nothing to judge, so no lane can read them as this run's.
+    #[test]
+    fn a_mutants_run_clears_the_last_runs_outcomes_first() -> Result<()> {
+        let fx = Fixture::new("mutants-stale")?;
+        fs::create_dir_all(fx.0.join(MUTANTS_OUT))?;
+        fs::write(fx.0.join(MUTANTS_OUT).join("outcomes.json"), "{}")?;
+        mutants_scheduled(&fx.0, None, None, Some(0), 1)?;
+        assert!(
+            !fx.0.join(MUTANTS_OUT).exists(),
+            "the last run's outcomes are gone though this run had no diff to judge"
+        );
+        Ok(())
+    }
+
+    /// A tracked file with a line that starts with either of git's conflict markers is refused,
+    /// with its path and line; `=======` alone and a marker inside a line pass.
+    #[test]
+    fn a_tracked_file_with_conflict_markers_is_refused() -> Result<()> {
+        let fx = Fixture::new("conflict-markers")?;
+        let ours = format!("{} HEAD", "<".repeat(7));
+        let theirs = format!("{} origin/main", ">".repeat(7));
+        fx.write(
+            "notes.md",
+            &format!("Title\n=======\n\nquoting `{ours}` inline is fine\n"),
+        )?;
+        output_in(&fx.0, "git", &["add", "-A"])?;
+        conflict_markers_in(&fx.0).context("no line starts with a marker")?;
+        fx.write(
+            "notes.md",
+            &format!("Title\n{ours}\nmine\n=======\nyours\n{theirs}\n"),
+        )?;
+        fx.write("untracked.md", &format!("{ours}\n"))?;
+        let refused = conflict_markers_in(&fx.0).expect_err("both markers start a line");
+        assert_eq!(format!("{refused:#}"), "conflict-markers: 2 problem(s)");
+        Ok(())
     }
 
     /// The `dev` or `test` profile settings in a workspace manifest that turn debug assertions or
