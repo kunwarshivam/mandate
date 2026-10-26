@@ -3,16 +3,17 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroU8;
 
-use mandate_accounting::InstrumentId;
+use mandate_accounting::{InstrumentId, Side};
 use mandate_approval::{
     ApprovalRef, AskablePurpose, AssertionId, BoundAction, OpaqueUser, ReferenceMark, Request,
     RequestContent,
 };
 use mandate_canon::{Digest, Value, to_canonical};
-use mandate_num::Signed;
+use mandate_num::{Qty, Signed};
 
 use crate::error::RuntimeError;
 use crate::payload;
+use crate::theses::Theses;
 use crate::types::{
     Deployment, EventId, FoldedEvent, Handoff, Initiator, IntentBody, LocalHold, Mode, ModelOutput,
     Outstanding, OwnerConfirmation, Purpose, RiskClock, Seq, SignalInputs, WriterEpoch,
@@ -20,7 +21,7 @@ use crate::types::{
 
 /// The `fold_version` of ADR-0001 ES-21. Bumped whenever fold output changes, with the golden
 /// journal regenerated in the same change.
-pub const FOLD_VERSION: u32 = 1;
+pub const FOLD_VERSION: u32 = 2;
 
 /// How long a passing `ConnectionChecked` covers an opening, in risk-clock seconds: one day, the
 /// period of the executor's daily check (connections spec §8.1, §9.2 "Healthy"). A check this old
@@ -83,6 +84,9 @@ pub struct RuntimeState {
     /// The intents whose order or decision the account stream has ended: a binding-gate deny, an
     /// abandonment, or a terminal state of its order. Nothing else ends one (DEC-1150 item 4).
     ended: BTreeSet<EventId>,
+    /// Each instrument's current thesis and the lineages, from the agent stream's thesis records,
+    /// its `ThesisInvalidated`, and the account stream's removals (mandate spec §8.6, DEC-2391).
+    theses: Theses,
 }
 
 /// One folded `ConnectionChecked`: whether every check it lists passed, and its risk clock.
@@ -171,6 +175,7 @@ impl RuntimeState {
             requests: BTreeMap::new(),
             orders_of: BTreeMap::new(),
             ended: BTreeSet::new(),
+            theses: Theses::default(),
         }
     }
 
@@ -379,7 +384,44 @@ impl RuntimeState {
             outputs: self.outputs.clone(),
             output_events: self.output_events.clone(),
             now,
+            ended_theses: self.ended_theses(now),
+            working_exits: self.working_exits(),
         }
+    }
+
+    /// The instruments whose current thesis has ended at `now`, which the order plan sells while
+    /// the agent holds them (mandate spec §8.3 step 2, §8.6, MI-34).
+    pub fn ended_theses(&self, now: RiskClock) -> BTreeSet<InstrumentId> {
+        self.theses.ended(now)
+    }
+
+    /// Per instrument, the quantity of the sells this runtime proposed that nothing on the account
+    /// stream has ended yet: what a plan takes off the position before it proposes an exit, so an
+    /// exit already working is never proposed twice (mandate spec §8.3 step 2, "minus working
+    /// exits"). A part-filled exit still counts whole, which sells less now and the rest once it
+    /// ends, never more than the position (`AGENTS.md` rule 3). A kill switch's `Flatten` is not
+    /// counted: it sells the agent's whole sub-ledger itself, and the mode it sets holds every other
+    /// proposal while it works. A sum past what a quantity can hold, which no real order reaches,
+    /// keeps the larger of the two; the binding gate's `sell_exceeds_available` still refuses any
+    /// sell above what the position and the open sells leave (trading spec §5.3 rule 4).
+    pub fn working_exits(&self) -> BTreeMap<InstrumentId, Qty> {
+        let mut working: BTreeMap<InstrumentId, Qty> = BTreeMap::new();
+        for live in self.outstanding.keys() {
+            if self.ended.contains(live) {
+                continue;
+            }
+            if let Some(IntentBody::Order {
+                instrument,
+                side: Side::Sell,
+                qty,
+                ..
+            }) = self.bodies.get(live)
+            {
+                let total = working.entry(instrument.clone()).or_insert(Qty::ZERO);
+                *total = total.checked_add(*qty).unwrap_or((*total).max(*qty));
+            }
+        }
+        working
     }
 
     /// The intent event ids a flatten plan is asked about: every intent the fold still holds
@@ -727,13 +769,16 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
                 }
             }
         }
+        "ThesisProposed" | "ThesisRevised" => state.theses.recorded(&event.payload)?,
+        "ThesisInvalidated" => state.theses.invalidated(&event.payload)?,
+        "UniverseChanged" => {
+            let agent = state.deployment.agent.0.clone();
+            state.theses.universe_changed(&event.payload, &agent)?;
+        }
         "StreamOpened"
         | "ObservationRecorded"
         | "ModelInvocationRecorded"
         | "DecisionMade"
-        | "ThesisProposed"
-        | "ThesisRevised"
-        | "ThesisInvalidated"
         | "RunStarted"
         | "ToolCallRecorded"
         | "ToolResultRecorded"
@@ -770,7 +815,6 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
         | "PositionReleased"
         | "InstrumentRestrictionChanged"
         | "GoalCompleted"
-        | "UniverseChanged"
         | "ClockAdvanced"
         | "ClockOffsetRecorded"
         | "ClockToleranceExceeded"

@@ -85267,3 +85267,1085 @@ stepped_up_records:
       pii_refs: []
     expect: *id178
     processes: *id179
+account_restrictions:
+  spec: docs/specs/journal.md §9.5 rules 279 and 280 (DEC-2137)
+  drafts:
+    blocked:
+      envelope_version: 1
+      environment: paper
+      event_id: 01JAE2R0A000000000000000R1
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountRestrictionChanged
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        restriction: blocked
+        cause: broker_notice
+        reason_code: account_trading_blocked
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    closing_only:
+      envelope_version: 1
+      environment: paper
+      event_id: 01JAE2R0A000000000000000R2
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountRestrictionChanged
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        restriction: closing_only
+        cause: broker_reject
+        reason_code: account_restricted
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+  invalid_drafts:
+  - name: blocked_restricted
+    clause: 'rule 279: `blocked` exactly with `account_trading_blocked`'
+    base_draft: blocked
+    changes:
+    - path: payload.reason_code
+      value: account_restricted
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reason_code
+  - name: closing_blocked_code
+    clause: 'rule 279: `account_trading_blocked` only for `blocked`'
+    base_draft: closing_only
+    changes:
+    - path: payload.reason_code
+      value: account_trading_blocked
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reason_code
+  - name: blocked_by_a_reject
+    clause: 'rule 280: a blocked account is a broker notice (§7.3 row 1)'
+    base_draft: blocked
+    changes:
+    - path: payload.cause
+      value: broker_reject
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.cause
+  - name: blocked_by_the_connection
+    clause: 'rule 280: the connection never blocks (§7.3 row 5)'
+    base_draft: blocked
+    changes:
+    - path: payload.cause
+      value: connection_unavailable
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.cause
+  - name: both_rules
+    clause: rule 279 reports first
+    base_draft: blocked
+    changes:
+    - path: payload.reason_code
+      value: account_restricted
+    - path: payload.cause
+      value: broker_reject
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reason_code
+  - name: no_risk_clock
+    clause: '§9.5: every member present'
+    base_draft: closing_only
+    changes:
+    - path: payload.risk_clock
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.risk_clock
+  - name: extra_message
+    clause: '§9.5: the schema is closed'
+    base_draft: closing_only
+    changes:
+    - path: payload.message
+      value: x
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.message
+  - name: version_2
+    clause: '§9.5: registered at `schema_version` 1 only'
+    base_draft: closing_only
+    changes:
+    - path: schema_version
+      value: 2
+    expect:
+      outcome: Invalid
+      reason: unknown_schema
+      path: payload
+  - name: on_the_control_stream
+    clause: '§9.5: an account-stream record'
+    base_draft: closing_only
+    changes:
+    - path: stream_id
+      value: ctl:ws_01J8Z2
+    expect:
+      outcome: Invalid
+      reason: wrong_stream
+      path: event_type
+  - name: restriction_unknown
+    clause: '§9.5: `restriction` is one of its values'
+    base_draft: closing_only
+    changes:
+    - path: payload.restriction
+      value: restricted
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.restriction
+  - name: restriction_null
+    clause: '§9.5: `restriction` is never null'
+    base_draft: closing_only
+    changes:
+    - path: payload.restriction
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.restriction
+  - name: restriction_number
+    clause: '§9.5: `restriction` is text'
+    base_draft: closing_only
+    changes:
+    - path: payload.restriction
+      value: 1
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.restriction
+  - name: restriction_missing
+    clause: '§9.5: every member present'
+    base_draft: closing_only
+    changes:
+    - path: payload.restriction
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.restriction
+  - name: cause_unknown
+    clause: '§9.5: `cause` is one of its values'
+    base_draft: closing_only
+    changes:
+    - path: payload.cause
+      value: broker
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.cause
+  - name: cause_null
+    clause: '§9.5: `cause` is never null'
+    base_draft: closing_only
+    changes:
+    - path: payload.cause
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.cause
+  - name: cause_number
+    clause: '§9.5: `cause` is text'
+    base_draft: closing_only
+    changes:
+    - path: payload.cause
+      value: 1
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.cause
+  - name: cause_missing
+    clause: '§9.5: every member present'
+    base_draft: closing_only
+    changes:
+    - path: payload.cause
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.cause
+  - name: reason_code_unknown
+    clause: '§9.5: `reason_code` is one of its values'
+    base_draft: closing_only
+    changes:
+    - path: payload.reason_code
+      value: restricted
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.reason_code
+  - name: reason_code_null
+    clause: '§9.5: `reason_code` is never null'
+    base_draft: closing_only
+    changes:
+    - path: payload.reason_code
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reason_code
+  - name: reason_code_number
+    clause: '§9.5: `reason_code` is text'
+    base_draft: closing_only
+    changes:
+    - path: payload.reason_code
+      value: 1
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reason_code
+  - name: reason_code_missing
+    clause: '§9.5: every member present'
+    base_draft: closing_only
+    changes:
+    - path: payload.reason_code
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reason_code
+  valid_drafts:
+  - name: closing_by_broker_reject
+    clause: 'rule 280: any cause restricts to closing only'
+    base_draft: closing_only
+    changes:
+    - path: payload.cause
+      value: broker_reject
+    expect:
+      outcome: Valid
+  - name: closing_by_broker_notice
+    clause: 'rule 280: any cause restricts to closing only'
+    base_draft: closing_only
+    changes:
+    - path: payload.cause
+      value: broker_notice
+    expect:
+      outcome: Valid
+  - name: closing_by_connection_unavailable
+    clause: 'rule 280: any cause restricts to closing only'
+    base_draft: closing_only
+    changes:
+    - path: payload.cause
+      value: connection_unavailable
+    expect:
+      outcome: Valid
+  - name: live
+    clause: '§9.5: either environment'
+    base_draft: blocked
+    changes:
+    - path: environment
+      value: live
+    expect:
+      outcome: Valid
+snapshot_prior_close:
+  spec: docs/specs/journal.md v0.89 §9.35 (DEC-2398)
+  drafts:
+    snapshot_v2:
+      envelope_version: 1
+      environment: paper
+      event_id: 01JAC0S0A000000000000000S1
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountSnapshotRecorded
+      schema_version: 2
+      event_time: '2026-10-26T14:05:00.000000000Z'
+      clock_source: broker
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        status: ACTIVE
+        crypto_status: ACTIVE
+        trading_blocked: false
+        account_blocked: false
+        trade_suspended_by_user: false
+        multiplier: 1
+        equity: '25000'
+        cash: '10000'
+        buying_power: '20000'
+        non_marginable_buying_power: '10000'
+        accrued_fees: '0'
+        account_type: margin
+        day_trading_regime: intraday_margin
+        last_equity: '24750.5'
+        maintenance_margin: '7500.25'
+        model_cash: '10000.5'
+        cash_band: '1.25'
+        cash_in_band: true
+        risk_clock: '2026-10-26T14:05:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    snapshot_v2_fees:
+      envelope_version: 1
+      environment: paper
+      event_id: 01JAC0S0A000000000000000S2
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountSnapshotRecorded
+      schema_version: 2
+      event_time: '2026-10-26T21:00:00.000000000Z'
+      clock_source: broker
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        status: ACTIVE
+        crypto_status: ACTIVE
+        trading_blocked: false
+        account_blocked: false
+        trade_suspended_by_user: false
+        multiplier: 1
+        equity: '25000'
+        cash: '10000'
+        buying_power: '20000'
+        non_marginable_buying_power: '10000'
+        accrued_fees: '0'
+        account_type: margin
+        day_trading_regime: intraday_margin
+        last_equity: '24750.5'
+        maintenance_margin: '7500.25'
+        model_cash: null
+        cash_band: null
+        cash_in_band: null
+        risk_clock: '2026-10-26T21:00:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    snapshot_v1:
+      envelope_version: 1
+      environment: paper
+      event_id: 01JAC0S0A000000000000000S3
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: AccountSnapshotRecorded
+      schema_version: 1
+      event_time: '2026-10-26T14:05:00.000000000Z'
+      clock_source: broker
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        status: ACTIVE
+        crypto_status: ACTIVE
+        trading_blocked: false
+        account_blocked: false
+        trade_suspended_by_user: false
+        multiplier: 1
+        equity: '25000'
+        cash: '10000'
+        buying_power: '20000'
+        non_marginable_buying_power: '10000'
+        accrued_fees: '0'
+        model_cash: '10000.5'
+        cash_band: '1.25'
+        cash_in_band: true
+        risk_clock: '2026-10-26T14:05:00.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+  invalid_drafts:
+  - name: last_equity.kind
+    clause: '§9.35 types: a decimal is text'
+    base_draft: snapshot_v2
+    changes:
+    - path: payload.last_equity
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.last_equity
+  - name: last_equity.form
+    clause: '§9.35 types: §4.6''s decimal form'
+    base_draft: snapshot_v2
+    changes:
+    - path: payload.last_equity
+      value: 24750,5
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.last_equity
+  - name: last_equity.signed
+    clause: '§9.35 types: §4.6''s decimal form'
+    base_draft: snapshot_v2
+    changes:
+    - path: payload.last_equity
+      value: '+24750.5'
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.last_equity
+  - name: last_equity.null
+    clause: '§9.35 types: never null'
+    base_draft: snapshot_v2
+    changes:
+    - path: payload.last_equity
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.last_equity
+  - name: last_equity.null.fees
+    clause: '§9.35 types: never null, a fee step''s too'
+    base_draft: snapshot_v2_fees
+    changes:
+    - path: payload.last_equity
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.last_equity
+  - name: last_equity.missing
+    clause: '§9.35 closed: every member'
+    base_draft: snapshot_v2
+    changes:
+    - path: payload.last_equity
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.last_equity
+  - name: v1_with.last_equity
+    clause: '§9.35: version 1 is never edited (§8); its members stay its own'
+    base_draft: snapshot_v1
+    changes:
+    - path: payload.last_equity
+      value: '24750.5'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.last_equity
+  - name: maintenance_margin.kind
+    clause: '§9.35 types: a decimal is text'
+    base_draft: snapshot_v2
+    changes:
+    - path: payload.maintenance_margin
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.maintenance_margin
+  - name: maintenance_margin.form
+    clause: '§9.35 types: §4.6''s decimal form'
+    base_draft: snapshot_v2
+    changes:
+    - path: payload.maintenance_margin
+      value: 24750,5
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.maintenance_margin
+  - name: maintenance_margin.signed
+    clause: '§9.35 types: §4.6''s decimal form'
+    base_draft: snapshot_v2
+    changes:
+    - path: payload.maintenance_margin
+      value: '+24750.5'
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.maintenance_margin
+  - name: maintenance_margin.null
+    clause: '§9.35 types: never null'
+    base_draft: snapshot_v2
+    changes:
+    - path: payload.maintenance_margin
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.maintenance_margin
+  - name: maintenance_margin.null.fees
+    clause: '§9.35 types: never null, a fee step''s too'
+    base_draft: snapshot_v2_fees
+    changes:
+    - path: payload.maintenance_margin
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.maintenance_margin
+  - name: maintenance_margin.missing
+    clause: '§9.35 closed: every member'
+    base_draft: snapshot_v2
+    changes:
+    - path: payload.maintenance_margin
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.maintenance_margin
+  - name: v1_with.maintenance_margin
+    clause: '§9.35: version 1 is never edited (§8); its members stay its own'
+    base_draft: snapshot_v1
+    changes:
+    - path: payload.maintenance_margin
+      value: '7500.25'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.maintenance_margin
+  - name: account_type.kind
+    clause: '§9.35 types: a closed name is text'
+    base_draft: snapshot_v2
+    changes:
+    - path: payload.account_type
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.account_type
+  - name: account_type.form
+    clause: '§9.35 types: the names exactly as listed'
+    base_draft: snapshot_v2
+    changes:
+    - path: payload.account_type
+      value: MARGIN
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.account_type
+  - name: account_type.unlisted
+    clause: '§9.35 types: only the names listed'
+    base_draft: snapshot_v2
+    changes:
+    - path: payload.account_type
+      value: portfolio_margin
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.account_type
+  - name: account_type.missing
+    clause: '§9.35 closed: every member, `null` when undeclared'
+    base_draft: snapshot_v2
+    changes:
+    - path: payload.account_type
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.account_type
+  - name: v1_with.account_type
+    clause: '§9.35: version 1 is never edited (§8); its members stay its own'
+    base_draft: snapshot_v1
+    changes:
+    - path: payload.account_type
+      value: margin
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.account_type
+  - name: day_trading_regime.kind
+    clause: '§9.35 types: a closed name is text'
+    base_draft: snapshot_v2
+    changes:
+    - path: payload.day_trading_regime
+      value: 7
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.day_trading_regime
+  - name: day_trading_regime.form
+    clause: '§9.35 types: the names exactly as listed'
+    base_draft: snapshot_v2
+    changes:
+    - path: payload.day_trading_regime
+      value: INTRADAY_MARGIN
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.day_trading_regime
+  - name: day_trading_regime.unlisted
+    clause: '§9.35 types: only the names listed'
+    base_draft: snapshot_v2
+    changes:
+    - path: payload.day_trading_regime
+      value: portfolio_margin
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.day_trading_regime
+  - name: day_trading_regime.missing
+    clause: '§9.35 closed: every member, `null` when undeclared'
+    base_draft: snapshot_v2
+    changes:
+    - path: payload.day_trading_regime
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.day_trading_regime
+  - name: v1_with.day_trading_regime
+    clause: '§9.35: version 1 is never edited (§8); its members stay its own'
+    base_draft: snapshot_v1
+    changes:
+    - path: payload.day_trading_regime
+      value: intraday_margin
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.day_trading_regime
+  - name: account_type.as_regime
+    clause: '§9.35 types: each member has its own names'
+    base_draft: snapshot_v2
+    changes:
+    - path: payload.account_type
+      value: intraday_margin
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.account_type
+  - name: extra.regime
+    clause: '§9.35 closed: no member beyond the table'
+    base_draft: snapshot_v2
+    changes:
+    - path: payload.regime
+      value: intraday_margin
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.regime
+  - name: extra.last_maintenance_margin
+    clause: '§9.35 closed: the prior close''s margin is not journaled'
+    base_draft: snapshot_v2
+    changes:
+    - path: payload.last_maintenance_margin
+      value: '7400'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.last_maintenance_margin
+  - name: equity.kind
+    clause: '§9.35: version 1''s members keep their types'
+    base_draft: snapshot_v2
+    changes:
+    - path: payload.equity
+      value: 25000
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.equity
+  - name: risk_clock.missing
+    clause: '§9.35: `risk_clock` is required, as at version 1'
+    base_draft: snapshot_v2
+    changes:
+    - path: payload.risk_clock
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.risk_clock
+  - name: band_without_model_cash
+    clause: 'rule 24 at version 2: the comparison''s three members are null together'
+    base_draft: snapshot_v2_fees
+    changes:
+    - path: payload.cash_band
+      value: '1'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.cash_band
+  - name: flag_contradicts_band
+    clause: 'rule 24 at version 2: the flag matches its own numbers'
+    base_draft: snapshot_v2
+    changes:
+    - path: payload.cash_in_band
+      value: false
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.cash_in_band
+  - name: at_version_3
+    clause: '§9.35: versions 1 and 2 only'
+    base_draft: snapshot_v2
+    changes:
+    - path: schema_version
+      value: 3
+    expect:
+      outcome: Invalid
+      reason: unknown_schema
+      path: payload
+  valid_drafts:
+  - name: type_undeclared
+    clause: '§9.35: a connector that declares no type writes `null`'
+    base_draft: snapshot_v2
+    changes:
+    - path: payload.account_type
+      value: null
+    expect:
+      outcome: Valid
+  - name: regime_undeclared
+    clause: '§9.35: a connector that declares no regime writes `null`'
+    base_draft: snapshot_v2
+    changes:
+    - path: payload.day_trading_regime
+      value: null
+    expect:
+      outcome: Valid
+  - name: nothing_declared
+    clause: '§9.35: the figures stand without a declaration'
+    base_draft: snapshot_v2
+    changes:
+    - path: payload.account_type
+      value: null
+    - path: payload.day_trading_regime
+      value: null
+    expect:
+      outcome: Valid
+  - name: cash_legacy_pdt
+    clause: '§9.35: no rule ties the regime to the type'
+    base_draft: snapshot_v2
+    changes:
+    - path: payload.account_type
+      value: cash
+    - path: payload.day_trading_regime
+      value: legacy_pdt
+    expect:
+      outcome: Valid
+  - name: margin_legacy_pdt
+    clause: '§9.35: legacy_pdt in a margin account'
+    base_draft: snapshot_v2
+    changes:
+    - path: payload.day_trading_regime
+      value: legacy_pdt
+    expect:
+      outcome: Valid
+  - name: prior_close_above_equity
+    clause: '§9.35: no rule ties `last_equity` to `equity`'
+    base_draft: snapshot_v2
+    changes:
+    - path: payload.last_equity
+      value: '30000'
+    expect:
+      outcome: Valid
+  - name: prior_close_negative
+    clause: '§9.35: a prior close in deficit is recorded as reported'
+    base_draft: snapshot_v2
+    changes:
+    - path: payload.last_equity
+      value: '-120.75'
+    expect:
+      outcome: Valid
+  - name: prior_close_zero
+    clause: '§9.35: zero is a figure'
+    base_draft: snapshot_v2
+    changes:
+    - path: payload.last_equity
+      value: '0'
+    expect:
+      outcome: Valid
+  - name: figures_normalized
+    clause: '§4.6: a decimal input with a trailing zero or an exponent is normalized, not refused'
+    base_draft: snapshot_v2
+    changes:
+    - path: payload.last_equity
+      value: '24750.50'
+    - path: payload.maintenance_margin
+      value: '7.50025E+3'
+    expect:
+      outcome: Valid
+  - name: margin_zero
+    clause: '§9.35: no requirement is a figure'
+    base_draft: snapshot_v2
+    changes:
+    - path: payload.maintenance_margin
+      value: '0'
+    expect:
+      outcome: Valid
+  - name: margin_equal_to_equity
+    clause: '§9.35: an excess of zero'
+    base_draft: snapshot_v2
+    changes:
+    - path: payload.maintenance_margin
+      value: '25000'
+    expect:
+      outcome: Valid
+  - name: margin_above_equity
+    clause: '§9.35: a deficit is recorded, never floored'
+    base_draft: snapshot_v2
+    changes:
+    - path: payload.maintenance_margin
+      value: '25000.01'
+    expect:
+      outcome: Valid
+  - name: margin_negative
+    clause: '§9.35: no rule refuses a negative margin; the reading does (DEC-524 item 2)'
+    base_draft: snapshot_v2
+    changes:
+    - path: payload.maintenance_margin
+      value: '-1'
+    expect:
+      outcome: Valid
+  - name: fees_step_figures
+    clause: '§9.35: a fee step''s snapshot carries the figures too'
+    base_draft: snapshot_v2_fees
+    changes:
+    - path: payload.last_equity
+      value: '25000'
+    expect:
+      outcome: Valid
+  - name: v1_fees_step
+    clause: '§9.35: version 1 stays registered as it was'
+    base_draft: snapshot_v1
+    changes:
+    - path: payload.model_cash
+      value: null
+    - path: payload.cash_band
+      value: null
+    - path: payload.cash_in_band
+      value: null
+    expect:
+      outcome: Valid
+  readings:
+  - draft: snapshot_v2
+    reading: figures
+    account_type: margin
+    day_trading_regime: intraday_margin
+    prior_close_equity: '24750.5'
+    maintenance_excess: '17499.75'
+  - draft: snapshot_v2_fees
+    reading: figures
+    account_type: margin
+    day_trading_regime: intraday_margin
+    prior_close_equity: '24750.5'
+    maintenance_excess: '17499.75'
+  - draft: snapshot_v1
+    reading: no_figures
+  - draft: type_undeclared
+    reading: figures
+    account_type: null
+    day_trading_regime: intraday_margin
+    prior_close_equity: '24750.5'
+    maintenance_excess: '17499.75'
+  - draft: regime_undeclared
+    reading: figures
+    account_type: margin
+    day_trading_regime: null
+    prior_close_equity: '24750.5'
+    maintenance_excess: '17499.75'
+  - draft: nothing_declared
+    reading: figures
+    account_type: null
+    day_trading_regime: null
+    prior_close_equity: '24750.5'
+    maintenance_excess: '17499.75'
+  - draft: cash_legacy_pdt
+    reading: figures
+    account_type: cash
+    day_trading_regime: legacy_pdt
+    prior_close_equity: '24750.5'
+    maintenance_excess: '17499.75'
+  - draft: margin_legacy_pdt
+    reading: figures
+    account_type: margin
+    day_trading_regime: legacy_pdt
+    prior_close_equity: '24750.5'
+    maintenance_excess: '17499.75'
+  - draft: prior_close_above_equity
+    reading: figures
+    account_type: margin
+    day_trading_regime: intraday_margin
+    prior_close_equity: '30000'
+    maintenance_excess: '17499.75'
+  - draft: prior_close_negative
+    reading: figures
+    account_type: margin
+    day_trading_regime: intraday_margin
+    prior_close_equity: '-120.75'
+    maintenance_excess: '17499.75'
+  - draft: prior_close_zero
+    reading: figures
+    account_type: margin
+    day_trading_regime: intraday_margin
+    prior_close_equity: '0'
+    maintenance_excess: '17499.75'
+  - draft: figures_normalized
+    reading: figures
+    account_type: margin
+    day_trading_regime: intraday_margin
+    prior_close_equity: '24750.5'
+    maintenance_excess: '17499.75'
+  - draft: margin_zero
+    reading: figures
+    account_type: margin
+    day_trading_regime: intraday_margin
+    prior_close_equity: '24750.5'
+    maintenance_excess: '25000'
+  - draft: margin_equal_to_equity
+    reading: figures
+    account_type: margin
+    day_trading_regime: intraday_margin
+    prior_close_equity: '24750.5'
+    maintenance_excess: '0'
+  - draft: margin_above_equity
+    reading: figures
+    account_type: margin
+    day_trading_regime: intraday_margin
+    prior_close_equity: '24750.5'
+    maintenance_excess: '-0.01'
+  - draft: margin_negative
+    reading: figures
+    account_type: margin
+    day_trading_regime: intraday_margin
+    prior_close_equity: '24750.5'
+    maintenance_excess: null
+  - draft: fees_step_figures
+    reading: figures
+    account_type: margin
+    day_trading_regime: intraday_margin
+    prior_close_equity: '25000'
+    maintenance_excess: '17499.75'
+  - draft: v1_fees_step
+    reading: no_figures
+  streams:
+  - name: v1_then_v2
+    clause: '§9.35: a version 2 after a version 1 brings the figures'
+    steps:
+    - base_draft: snapshot_v1
+      changes:
+      - path: payload.risk_clock
+        value: '2026-10-26T14:05:00.000000000Z'
+      - path: event_time
+        value: '2026-10-26T14:05:00.000000000Z'
+    - base_draft: snapshot_v2
+      changes:
+      - path: payload.risk_clock
+        value: '2026-10-26T15:05:00.000000000Z'
+      - path: event_time
+        value: '2026-10-26T15:05:00.000000000Z'
+    expect:
+      reading: figures
+      account_type: margin
+      day_trading_regime: intraday_margin
+      prior_close_equity: '24750.5'
+      maintenance_excess: '17499.75'
+  - name: v2_then_v1
+    clause: '§9.35: the latest snapshot wins; a version 1 after a version 2 leaves no figures'
+    steps:
+    - base_draft: snapshot_v2
+      changes:
+      - path: payload.risk_clock
+        value: '2026-10-26T14:05:00.000000000Z'
+      - path: event_time
+        value: '2026-10-26T14:05:00.000000000Z'
+    - base_draft: snapshot_v1
+      changes:
+      - path: payload.risk_clock
+        value: '2026-10-26T15:05:00.000000000Z'
+      - path: event_time
+        value: '2026-10-26T15:05:00.000000000Z'
+    expect:
+      reading: no_figures
+  - name: v2_then_v2
+    clause: '§9.35: the latest version 2''s figures, not the earlier one''s'
+    steps:
+    - base_draft: snapshot_v2
+      changes:
+      - path: payload.risk_clock
+        value: '2026-10-26T14:05:00.000000000Z'
+      - path: event_time
+        value: '2026-10-26T14:05:00.000000000Z'
+    - base_draft: snapshot_v2
+      changes:
+      - path: payload.risk_clock
+        value: '2026-10-26T15:05:00.000000000Z'
+      - path: event_time
+        value: '2026-10-26T15:05:00.000000000Z'
+      - path: payload.last_equity
+        value: '25100'
+      - path: payload.maintenance_margin
+        value: '26000'
+    expect:
+      reading: figures
+      account_type: margin
+      day_trading_regime: intraday_margin
+      prior_close_equity: '25100'
+      maintenance_excess: '-1000'
+  - name: v2_v1_v2
+    clause: '§9.35: figures return with the next version 2'
+    steps:
+    - base_draft: snapshot_v2
+      changes:
+      - path: payload.risk_clock
+        value: '2026-10-26T14:05:00.000000000Z'
+      - path: event_time
+        value: '2026-10-26T14:05:00.000000000Z'
+    - base_draft: snapshot_v1
+      changes:
+      - path: payload.risk_clock
+        value: '2026-10-26T15:05:00.000000000Z'
+      - path: event_time
+        value: '2026-10-26T15:05:00.000000000Z'
+    - base_draft: snapshot_v2_fees
+      changes:
+      - path: payload.risk_clock
+        value: '2026-10-26T16:05:00.000000000Z'
+      - path: event_time
+        value: '2026-10-26T16:05:00.000000000Z'
+      - path: payload.day_trading_regime
+        value: null
+    expect:
+      reading: figures
+      account_type: margin
+      day_trading_regime: null
+      prior_close_equity: '24750.5'
+      maintenance_excess: '17499.75'
+  - name: v2_then_negative_margin
+    clause: '§9.35: the latest version 2''s negative margin leaves no excess, not the earlier one''s'
+    steps:
+    - base_draft: snapshot_v2
+      changes:
+      - path: payload.risk_clock
+        value: '2026-10-26T14:05:00.000000000Z'
+      - path: event_time
+        value: '2026-10-26T14:05:00.000000000Z'
+    - base_draft: snapshot_v2
+      changes:
+      - path: payload.risk_clock
+        value: '2026-10-26T15:05:00.000000000Z'
+      - path: event_time
+        value: '2026-10-26T15:05:00.000000000Z'
+      - path: payload.maintenance_margin
+        value: '-1'
+    expect:
+      reading: figures
+      account_type: margin
+      day_trading_regime: intraday_margin
+      prior_close_equity: '24750.5'
+      maintenance_excess: null

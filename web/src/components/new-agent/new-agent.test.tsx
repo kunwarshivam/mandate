@@ -738,7 +738,7 @@ describe("each step's words, over either data source", () => {
     const base = confirmedSetUp();
     const refused = { ...base.confirmed!, phase: "undelivered" as const, recordedAt: undefined, reason: "step_up_required" };
     expect(words("confirm", { ...base, confirmed: refused })).toBe(
-      "Not recorded: your deployment needs a passkey check this browser can't send yet. Version 1 was created and is not confirmed, and no agent exists.",
+      "Not recorded: your deployment asked for a passkey check that was not sent. Version 1 was created and is not confirmed, and no agent exists.",
     );
     const other = words("confirm", { ...base, confirmed: { ...refused, reason: "stale_base" } });
     expect(other).toBe("Not recorded: your deployment refused it. Version 1 was created and is not confirmed, and no agent exists.");

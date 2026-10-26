@@ -2,10 +2,12 @@
 //! runtime's model outputs mapped to the builder's, the builder's proposal mapped back to the
 //! runtime's, and the §6 classification with the §6.2 step 5c policy overlay.
 
+use std::collections::BTreeMap;
+
 use mandate_accounting::{AssetClass, InstrumentId, Side};
 use mandate_builder::{
-    Action as BuilderAction, ActionContext, BuilderMandate, Clip as BuilderClip, Direction,
-    ModelOutput as BuilderModelOutput,
+    AccountSnapshot, Action as BuilderAction, ActionContext, BuilderMandate, Clip as BuilderClip,
+    Direction, ModelOutput as BuilderModelOutput,
 };
 use mandate_canon::Value;
 use mandate_domain::{AutonomyDecision, Purpose as BuilderPurpose};
@@ -116,6 +118,7 @@ fn runtime_proposal(
     context: &BuilderContext,
     mandate: &BuilderMandate,
     validated: &ValidatedMandate,
+    exit_origin: ExitOrigin,
 ) -> Result<Option<Proposal>, PortError> {
     let mut clips_applied = Vec::new();
     if proposal.clipped_by.contains(&BuilderClip::Limits) {
@@ -199,14 +202,14 @@ fn runtime_proposal(
             )
         })
         .collect();
-    Ok(Some(Proposal {
+    let proposal = Proposal {
         instrument,
         asset_class: context.market.asset_class,
         side,
         qty,
         limit,
         purpose,
-        exit_origin: (purpose == Purpose::DiscretionaryExit).then_some(ExitOrigin::Signal),
+        exit_origin: (purpose == Purpose::DiscretionaryExit).then_some(exit_origin),
         exit_conviction: Some(Value::Str(proposal.combined.exit_conviction.to_string())),
         buy_conviction: Some(Value::Str(proposal.combined.buy_conviction.to_string())),
         combined_score: Value::Str(proposal.combined.score.to_string()),
@@ -214,7 +217,26 @@ fn runtime_proposal(
         model_weights,
         clips_applied,
         execution: Some(context.execution),
+    };
+    Ok(Some(if exit_origin == ExitOrigin::RemovedInstrument {
+        unevaluated(proposal)
+    } else {
+        proposal
     }))
+}
+
+/// A thesis-ended exit's proposal as journal spec §9.1 rule 8 records a decision no §8.3
+/// evaluation produced: no c, b, or s, and no outputs, weights, or clips (DEC-2391). The branch
+/// read no output, so there is nothing true to put there; the builder's no-output proposal
+/// already has no outputs and no clips, and the weights, which come from the mandate, go here.
+fn unevaluated(proposal: Proposal) -> Proposal {
+    Proposal {
+        exit_conviction: None,
+        buy_conviction: None,
+        combined_score: Value::Null,
+        model_weights: BTreeMap::new(),
+        ..proposal
+    }
 }
 
 /// Checks that `side` cannot open a short for `purpose`, that `execution` carries the protective
@@ -265,7 +287,13 @@ fn action_order_matches(
 }
 
 /// `mandate-builder`'s `conviction_linear` sizing of `inputs` under `validated`, as the runtime's
-/// proposal: `None` for a hold.
+/// proposal: `None` for a hold. An instrument whose thesis ended (`inputs.ended_theses`, mandate
+/// spec §8.6) takes §8.3 step 2's first branch instead: the whole position sold, with
+/// `exit_origin` `removed_instrument`, reading no model output, so an output the mandate no longer
+/// pins cannot hold the exit (MI-34, DEC-2391). The runtime's working exits in the instrument come
+/// off the position first, so an exit already working is never stacked; when they cover it, the
+/// subtraction refuses to go below zero and the branch holds. A pinned universe takes no such branch: the
+/// owner's pin is the universe, and the research agent is off (V-037).
 ///
 /// # Errors
 /// [`PortError::Absent`] for an output the mandate does not pin or the registry does not hash, a
@@ -277,10 +305,38 @@ pub fn size(
     inputs: &SignalInputs,
 ) -> Result<Option<Proposal>, PortError> {
     let mandate = BuilderMandate::try_from(validated)?;
-    let outputs = builder_outputs(inputs, &mandate, builder)?;
     let now = UtcNanos::from_parts(inputs.now.secs(), 0).map_err(|_| PortError::Absent {
         what: "the decision timestamp",
     })?;
+    if !validated.mandate().universe.pinned
+        && inputs
+            .ended_theses
+            .iter()
+            .any(|ended| ended.as_str() == builder.market.instrument.as_str())
+    {
+        let working = inputs
+            .working_exits
+            .iter()
+            .find(|(instrument, _)| instrument.as_str() == builder.market.instrument.as_str())
+            .map_or(Qty::ZERO, |(_, qty)| *qty);
+        let unsold = AccountSnapshot {
+            position_qty: builder
+                .account
+                .position_qty
+                .checked_sub(working)
+                .unwrap_or(Qty::ZERO),
+            ..builder.account.clone()
+        };
+        let proposal = mandate_builder::propose_thesis_exit(&unsold, &builder.market)?;
+        return runtime_proposal(
+            proposal,
+            builder,
+            &mandate,
+            validated,
+            ExitOrigin::RemovedInstrument,
+        );
+    }
+    let outputs = builder_outputs(inputs, &mandate, builder)?;
     let proposal = mandate_builder::propose(
         &mandate,
         &builder.account,
@@ -289,7 +345,7 @@ pub fn size(
         &outputs,
         now,
     )?;
-    runtime_proposal(proposal, builder, &mandate, validated)
+    runtime_proposal(proposal, builder, &mandate, validated, ExitOrigin::Signal)
 }
 
 /// The `decided_by` label of mandate spec §6.2 step 5c, the policy overlay (DEC-536 item 2;

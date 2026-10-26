@@ -10,12 +10,17 @@ description = "The model-gateway service: mandate-gateway over the HTTPS transpo
 workspace = true
 
 [dependencies]
+mandate-artifacts-fs.workspace = true
 mandate-canon.workspace = true
 mandate-gateway.workspace = true
+mandate-gateway-http.workspace = true
 mandate-journal.workspace = true
 mandate-num.workspace = true
+mandate-process.workspace = true
 mandate-research.workspace = true
+mandate-research-run.workspace = true
 mandate-store.workspace = true
+mandate-time.workspace = true
 mandate-vault.workspace = true
 secrecy.workspace = true
 thiserror.workspace = true

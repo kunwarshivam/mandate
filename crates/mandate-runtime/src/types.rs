@@ -306,6 +306,34 @@ pub struct EventDraft {
     pub payload: Value,
 }
 
+impl EventDraft {
+    /// The schema version this draft is written at under version 1's references, read from the
+    /// members only a later version has, so a host never chooses it apart from the payload:
+    /// - an `ApprovalRequested` whose content binds the order builder's `execution` plan is
+    ///   version 2 (journal spec v0.42, rule 136);
+    /// - a `DecisionMade` that names what its dry run deferred to the binding gate is version 3
+    ///   (journal spec v0.85, DEC-2388 item 13);
+    /// - every other draft is version 1.
+    ///
+    /// A host holding version 2's stricter references writes a `DecisionMade` at 2 instead; one
+    /// that must also defer has no version yet, and the journal refuses it (DEC-2388 item 10).
+    #[must_use]
+    pub fn schema_version(&self) -> u64 {
+        match self.event_type.as_str() {
+            "ApprovalRequested"
+                if self
+                    .payload
+                    .get("content")
+                    .is_some_and(|content| content.get("execution").is_some()) =>
+            {
+                2
+            }
+            "DecisionMade" if self.payload.get("deferred_to_binding").is_some() => 3,
+            _ => 1,
+        }
+    }
+}
+
 /// One sell or cancel a flatten plan asks for. The plan itself is `mandate-risk`'s (family F); the
 /// runtime carries it without computing it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -598,6 +626,12 @@ pub struct SignalInputs {
     pub outputs: BTreeMap<String, BTreeMap<InstrumentId, ModelOutput>>,
     pub output_events: BTreeMap<String, BTreeMap<InstrumentId, EventId>>,
     pub now: RiskClock,
+    /// The instruments whose current thesis has ended at `now` (mandate spec §8.6): the plan
+    /// proposes their exit while the agent holds them, whatever the outputs say (§8.3 step 2).
+    pub ended_theses: BTreeSet<InstrumentId>,
+    /// Per instrument, the sells this runtime proposed that are still working, which a plan takes
+    /// off the position before it proposes an exit (§8.3 step 2, "minus working exits").
+    pub working_exits: BTreeMap<InstrumentId, Qty>,
 }
 
 /// Whether the executor is known to hold an intent yet.

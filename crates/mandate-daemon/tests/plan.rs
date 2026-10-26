@@ -158,6 +158,8 @@ fn inputs(now: &str) -> SignalInputs {
         )]),
         output_events: BTreeMap::new(),
         now: RiskClock::from_secs(secs),
+        ended_theses: Default::default(),
+        working_exits: Default::default(),
     }
 }
 
