@@ -54,5 +54,14 @@
     "set": {
       "/step_up_assertion": null
     }
+  },
+  {
+    "label": "cli_confirm evidence without an assertion, which the route refuses at step-up, not the schema",
+    "set": {
+      "/step_up/method": "cli_confirm"
+    },
+    "remove": [
+      "/step_up_assertion"
+    ]
   }
 ]

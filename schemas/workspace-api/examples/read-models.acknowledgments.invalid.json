@@ -218,5 +218,27 @@
     "set": {
       "/acknowledgments/0/reason/limit": "max_daily_loss"
     }
+  },
+  {
+    "label": "a hold without its subject",
+    "remove": [
+      "/acknowledgments/0/subject"
+    ]
+  },
+  {
+    "label": "an empty cause",
+    "set": {
+      "/acknowledgments/0/subject": "restriction",
+      "/acknowledgments/0/reason": {
+        "cause": ""
+      },
+      "/acknowledgments/0/mode": "paused"
+    }
+  },
+  {
+    "label": "an account that is not an account stream",
+    "set": {
+      "/acknowledgments/0/account": "agent:ws_01JB3K6F0C9R2V7N4M8Q1T5W3Y:agt_1"
+    }
   }
 ]

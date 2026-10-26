@@ -1003,12 +1003,14 @@ per workspace deployment (item 6).
       - `event` and `subject`;
       - `agent_id`, the agent to post to: a limit's own agent; for a restriction, or a reconciliation
         hold of every agent (`*`), the account's deployed agent first by id; for a reconciliation
-        hold of one agent, that agent;
+        hold of one agent, that agent; and for any hold with an unspent request, the request's
+        `agent`, since rule 240 has the acknowledgment name the agent its request named;
       - `account`, the account stream's id;
       - `reason`: `{limit}` for a limit, its `limit` code; `{cause}` for a restriction; or
-        `{restriction, kind, instrument}` for a reconciliation hold, `kind` one of `instrument`,
-        `cash`, `external_activity`, and `incomplete`, read from `restriction`, and `instrument` the
-        held asset or `null`;
+        `{restriction, kind, instrument}` for a reconciliation hold: `kind` is what follows
+        `reconciliation:` when that is `cash`, `fees`, `external_activity`, or `incomplete`, and
+        otherwise `instrument`, with `instrument` the held asset that follows it; `instrument` is
+        `null` for the other kinds;
       - `mode`, the agent mode the hold holds: for a restriction, the one trading spec §7.3 gives the account
         state its `AccountRestrictionChanged` records (`closing_only` holds `exits_only`, `blocked`
         holds `paused`), and for a
@@ -1018,7 +1020,9 @@ per workspace deployment (item 6).
         spec §4.3), or `null` until the server reads the policy, as it does not yet; a client then
         offers the acknowledgment and shows the executor's `not_independent` if it comes;
       - `request`: the unspent `OwnerAcknowledgmentRequested` for this hold, `{event_id,
-        requested_by}`, or `null`.
+        requested_by}`, or `null`: the latest on the control stream whose `event` and `subject` are
+        the hold's (a version 1 request's subject read as `limit`) and that no `OwnerAcknowledged`
+        names.
 
       With `agent`, the list holds only the holds that block that agent: its own limits and holds,
       and every restriction and `*` hold of its account. A `state` other than `open`, or an `agent`

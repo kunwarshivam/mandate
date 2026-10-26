@@ -6,11 +6,11 @@
     }
   },
   {
-    "label": "a restriction",
+    "label": "a restriction of a blocked account",
     "set": {
       "/acknowledgments/0/subject": "restriction",
       "/acknowledgments/0/reason": {
-        "cause": "pattern_day_trader"
+        "cause": "broker_notice"
       },
       "/acknowledgments/0/mode": "paused"
     }
@@ -29,6 +29,52 @@
     "label": "independence not required",
     "set": {
       "/acknowledgments/0/independent_required": false
+    }
+  },
+  {
+    "label": "a restriction of a closing-only account",
+    "set": {
+      "/acknowledgments/0/subject": "restriction",
+      "/acknowledgments/0/reason": {
+        "cause": "broker_reject"
+      },
+      "/acknowledgments/0/mode": "exits_only"
+    }
+  },
+  {
+    "label": "a hold that pauses",
+    "set": {
+      "/acknowledgments/0/mode": "paused"
+    }
+  },
+  {
+    "label": "an external activity hold",
+    "set": {
+      "/acknowledgments/0/reason": {
+        "restriction": "reconciliation:external_activity",
+        "kind": "external_activity",
+        "instrument": null
+      }
+    }
+  },
+  {
+    "label": "an incomplete run's hold",
+    "set": {
+      "/acknowledgments/0/reason": {
+        "restriction": "reconciliation:incomplete",
+        "kind": "incomplete",
+        "instrument": null
+      }
+    }
+  },
+  {
+    "label": "a fee difference's hold",
+    "set": {
+      "/acknowledgments/0/reason": {
+        "restriction": "reconciliation:fees",
+        "kind": "fees",
+        "instrument": null
+      }
     }
   }
 ]

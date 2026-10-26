@@ -54,8 +54,9 @@
           "$ref": "../common.schema.json#/$defs/Id"
         },
         "account": {
+          "description": "The account stream's id, acct:{workspace_id}:{account_ref} (journal spec \u00a72).",
           "type": "string",
-          "minLength": 1,
+          "pattern": "^acct:[A-Za-z0-9_-]+:[A-Za-z0-9_-]+$",
           "maxLength": 200
         },
         "reason": {
@@ -264,6 +265,7 @@
           "enum": [
             "instrument",
             "cash",
+            "fees",
             "external_activity",
             "incomplete"
           ]
