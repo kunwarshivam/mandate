@@ -436,7 +436,7 @@ fn a_quote_judged_not_sane_marks_the_instrument_not_sane() -> Result<(), Error> 
 /// proposed before a tick whose mark goes in doubt, is received in that same pass
 /// (`AGENTS.md` rule 13).
 #[test]
-fn a_mark_in_doubt_never_holds_the_passs_exit() -> Result<(), Error> {
+fn a_mark_in_doubt_never_holds_an_exit_in_its_pass() -> Result<(), Error> {
     let journal = deployed()?;
     journal.seed(ACCOUNT_STREAM, OPENED)?;
     let broker = Paper::new(&journal);
