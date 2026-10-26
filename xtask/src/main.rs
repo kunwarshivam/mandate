@@ -3417,6 +3417,13 @@ const LAND_CHECK_BASE: &str = "origin/main";
 /// no mutants, so the check stays fast enough to run before every landing (DEC-2642).
 const LAND_CHECK_JOBS: [&str; 3] = ["spec-guard", "lint", "test"];
 
+/// Where [`land_check`] keeps its scratch worktree, `work/`, and its builds, `target/`, under the
+/// repository root. Both paths are fixed: cargo names a workspace crate's artifacts by its source
+/// path, so a worktree at a new path each run would add a whole workspace's build every time, and
+/// a target directory of its own never replaces the checkout's own `target/debug/xtask` with one
+/// rooted at the worktree. `rm -rf target/land-check` gives the space back.
+const LAND_CHECK_DIR: &str = "target/land-check";
+
 /// What [`land_check_cmd`]'s builds leave out to fit a lane's disk: incremental artifacts and
 /// debuginfo. A change to `xtask/` or `Cargo.lock` selects every crate (DEC-1190), and with both
 /// on, building the whole workspace's tests filled a 40 GB session disk in lane DR's first run
@@ -3427,23 +3434,32 @@ const LAND_CHECK_BUILD: [(&str, &str); 3] = [
     ("CARGO_PROFILE_TEST_DEBUG", "0"),
 ];
 
+/// The `cargo xtask ci <job>` child [`land_check_cmd`] runs in the merged tree `dir`: diffed
+/// against the base it merged (`MANDATE_BASE_REF`), built into `target` as [`LAND_CHECK_BUILD`]
+/// says. `MANDATE_PR_BODY` and `MANDATE_PR_NUMBER`, which spec-guard reads for a DEC the PR
+/// description cites, pass through from the caller's environment.
+fn land_check_job(dir: &Path, base_sha: &str, target: &Path, job: &str) -> Command {
+    let mut cargo = Command::new("cargo");
+    cargo
+        .current_dir(dir)
+        .args(["xtask", "ci", job])
+        .env("MANDATE_BASE_REF", base_sha)
+        .env(CARGO_TARGET_DIR, target)
+        .envs(LAND_CHECK_BUILD);
+    cargo
+}
+
 /// `cargo xtask land-check [BASE]` (DEC-2642): fetches BASE first when it names a branch of
-/// `origin`, then runs [`land_check`] with each job as `cargo xtask ci <job>` in the merged tree,
-/// diffed against the base it merged (`MANDATE_BASE_REF`) and built as [`LAND_CHECK_BUILD`] says,
-/// and prints the summary line on stdout.
+/// `origin`, then runs [`land_check`] with each job as [`land_check_job`], and prints the summary
+/// line on stdout.
 fn land_check_cmd(root: &Path, base: &str) -> Result<()> {
     let fetched = base
         .strip_prefix("origin/")
         .map(|branch| output_in(root, "git", &["fetch", "-q", "origin", branch]).is_ok());
-    let target = root.join("target");
+    let target = root.join(LAND_CHECK_DIR).join("target");
     let (line, verdict) = land_check(root, base, fetched, |dir, base_sha, job| {
         eprintln!("==> land-check: ci {job}");
-        let status = Command::new("cargo")
-            .current_dir(dir)
-            .args(["xtask", "ci", job])
-            .env("MANDATE_BASE_REF", base_sha)
-            .env(CARGO_TARGET_DIR, &target)
-            .envs(LAND_CHECK_BUILD)
+        let status = land_check_job(dir, base_sha, &target, job)
             .status()
             .context("starting `cargo xtask`")?;
         if !status.success() {
@@ -3472,12 +3488,24 @@ fn land_check_git(dir: &Path, args: &[&str]) -> Result<String> {
     output_in(dir, "git", &all).map(|out| out.trim().to_owned())
 }
 
-/// Merges `base` into the repository at `root`'s HEAD in a scratch worktree under
-/// `target/land-check/`, runs each of [`LAND_CHECK_JOBS`] there with `run(dir, base_sha, job)`, every
-/// one even after a failure so the summary names them all, removes the worktree, and returns the
-/// one `land-check summary:` line beside the verdict. A merge that conflicts fails before any job
-/// runs: the landing would need the conflict resolved first (DEC-2642). `fetched` is whether the
-/// base was fetched first, `None` when it names no branch of `origin`.
+/// Removes [`land_check`]'s scratch worktree at `dir`, whatever state an earlier run left it in.
+fn land_check_clear(root: &Path, dir: &Path) {
+    land_check_git(
+        root,
+        &["worktree", "remove", "--force", &dir.display().to_string()],
+    )
+    .ok();
+    fs::remove_dir_all(dir).ok();
+    land_check_git(root, &["worktree", "prune"]).ok();
+}
+
+/// Merges `base` into the committed HEAD of the repository at `root` in a scratch worktree,
+/// [`LAND_CHECK_DIR`]`/work`, runs each of [`LAND_CHECK_JOBS`] there with `run(dir, base_sha, job)`,
+/// every one even after a failure so the summary names them all, removes the worktree, and returns
+/// the one `land-check summary:` line beside the verdict (DEC-2642). It passes only when the base
+/// was fetched or names no branch of `origin` (`fetched`), the merge succeeded, and every job
+/// passed: a base that could not be fetched may be stale, which is what the check exists to
+/// rule out. A merge that conflicts, or a worktree that cannot be made, fails before any job.
 fn land_check(
     root: &Path,
     base: &str,
@@ -3501,16 +3529,11 @@ fn land_check(
             return (line, Err(err.context("resolving HEAD and the base")));
         }
     };
-    let dir = root.join("target/land-check").join(short(&head));
-    land_check_git(
-        root,
-        &["worktree", "remove", "--force", &dir.display().to_string()],
-    )
-    .ok();
-    fs::remove_dir_all(&dir).ok();
+    let dir = root.join(LAND_CHECK_DIR).join("work");
+    land_check_clear(root, &dir);
     let mut results: Vec<(&str, Option<bool>)> =
         LAND_CHECK_JOBS.iter().map(|job| (*job, None)).collect();
-    let merged = land_check_git(
+    let made = land_check_git(
         root,
         &[
             "worktree",
@@ -3519,34 +3542,36 @@ fn land_check(
             &dir.display().to_string(),
             &head,
         ],
-    )
-    .and_then(|_| land_check_git(&dir, &["merge", "--no-edit", "--no-ff", &base_sha]))
-    .and_then(|_| land_check_git(&dir, &["rev-parse", "HEAD"]));
-    let merged = match merged {
-        Ok(merged) => {
-            for (job, passed) in &mut results {
-                let outcome = run(&dir, &base_sha, job);
-                if let Err(err) = &outcome {
-                    eprintln!("    land-check: {job}: {err:#}");
-                }
-                *passed = Some(outcome.is_ok());
-            }
-            Some(merged)
-        }
+    );
+    let (merge_word, merged) = match made {
         Err(err) => {
-            eprintln!("    land-check: the merge of {base} did not succeed: {err:#}");
-            land_check_git(&dir, &["merge", "--abort"]).ok();
-            None
+            eprintln!("    land-check: no scratch worktree: {err:#}");
+            ("failed", None)
         }
+        Ok(_) => match land_check_git(&dir, &["merge", "--no-edit", "--no-ff", &base_sha])
+            .and_then(|_| land_check_git(&dir, &["rev-parse", "HEAD"]))
+        {
+            Err(err) => {
+                eprintln!("    land-check: the merge of {base} did not succeed: {err:#}");
+                land_check_git(&dir, &["merge", "--abort"]).ok();
+                ("conflict", None)
+            }
+            Ok(merged) => {
+                for (job, passed) in &mut results {
+                    let outcome = run(&dir, &base_sha, job);
+                    if let Err(err) = &outcome {
+                        eprintln!("    land-check: {job}: {err:#}");
+                    }
+                    *passed = Some(outcome.is_ok());
+                }
+                ("clean", Some(merged))
+            }
+        },
     };
-    land_check_git(
-        root,
-        &["worktree", "remove", "--force", &dir.display().to_string()],
-    )
-    .ok();
-    fs::remove_dir_all(&dir).ok();
-    land_check_git(root, &["worktree", "prune"]).ok();
-    let passed = merged.is_some() && results.iter().all(|(_, passed)| *passed == Some(true));
+    land_check_clear(root, &dir);
+    let passed = fetched != Some(false)
+        && merged.is_some()
+        && results.iter().all(|(_, passed)| *passed == Some(true));
     let jobs: Vec<String> = results
         .iter()
         .map(|(job, passed)| {
@@ -3559,16 +3584,11 @@ fn land_check(
         })
         .collect();
     let line = format!(
-        "land-check summary: head={} base={base}@{} fetched={fetched_word} merged={} merge={} {} \
-         verdict={}",
+        "land-check summary: head={} base={base}@{} fetched={fetched_word} merged={} \
+         merge={merge_word} {} verdict={}",
         short(&head),
         short(&base_sha),
         merged.as_deref().map_or_else(|| "none".to_owned(), short),
-        if merged.is_some() {
-            "clean"
-        } else {
-            "conflict"
-        },
         jobs.join(" "),
         if passed { "pass" } else { "fail" },
     );
@@ -12509,8 +12529,9 @@ mod tests {
         references_path, select, selection_in, source_references, tokens, withhold_web_demo,
     };
     use super::{
-        CARGO_INCREMENTAL, LAND_CHECK_JOBS, TIMED_OUT_MUTANTS, conflict_markers_in,
-        incremental_overridden, land_check, mutants_job_within, mutants_summary, summarised,
+        CARGO_INCREMENTAL, LAND_CHECK_DIR, LAND_CHECK_JOBS, TIMED_OUT_MUTANTS, conflict_markers_in,
+        incremental_overridden, land_check, land_check_job, mutants_job_within, mutants_summary,
+        summarised,
     };
     use super::{CREDENTIAL_GUARD, CREDENTIAL_NAME_PARTS, rehearsal_live_run};
     use super::{ProcessGroups, process_group_problems};
@@ -13861,11 +13882,85 @@ mod tests {
             head,
             "the caller's checkout is untouched"
         );
+        land_check_left_nothing(&fx)?;
+        Ok(())
+    }
+
+    /// The scratch worktree is gone and git no longer lists it.
+    fn land_check_left_nothing(fx: &Fixture) -> Result<()> {
         assert!(
-            !fx.0.join("target/land-check").join(&head[..12]).exists(),
-            "and the scratch worktree is gone"
+            !fx.0.join(LAND_CHECK_DIR).join("work").exists(),
+            "the scratch worktree is gone"
+        );
+        assert_eq!(
+            fx.git(&["worktree", "list", "--porcelain"])?
+                .lines()
+                .filter(|line| line.starts_with("worktree "))
+                .count(),
+            1,
+            "and git lists only the caller's checkout"
         );
         Ok(())
+    }
+
+    /// A base that could not be fetched may be stale, so the check fails even when the merge and
+    /// every job passed; one that already is an ancestor of HEAD merges as HEAD itself and passes.
+    #[test]
+    fn land_check_fails_an_unfetched_base_and_passes_one_head_holds() -> Result<()> {
+        let (fx, head) = land_check_fixture("land-check-stale", "b.txt", "b from main\n")?;
+        let (line, verdict) = land_check(&fx.0, "base", Some(false), |_, _, _| Ok(()));
+        assert!(verdict.is_err(), "an unfetched base is no pass");
+        assert!(
+            line.contains(" fetched=no ")
+                && line.ends_with(" merge=clean spec-guard=pass lint=pass test=pass verdict=fail"),
+            "{line}"
+        );
+        let start = fx.git(&["rev-parse", &format!("{head}~1")])?;
+        let mut ran = 0;
+        let (line, verdict) = land_check(&fx.0, &start, None, |_, _, _| {
+            ran += 1;
+            Ok(())
+        });
+        verdict?;
+        assert_eq!(ran, LAND_CHECK_JOBS.len());
+        assert!(
+            line.contains(&format!(" merged={} merge=clean ", &head[..12])),
+            "a base HEAD already holds leaves HEAD as the merged tree: {line}"
+        );
+        land_check_left_nothing(&fx)?;
+        Ok(())
+    }
+
+    /// Each job runs as `cargo xtask ci <job>` in the merged tree, diffed against the merged base,
+    /// built into land-check's own target directory without incremental artifacts or debuginfo.
+    #[test]
+    fn land_check_jobs_run_in_the_merged_tree_against_the_base() {
+        let job = land_check_job(
+            Path::new("/tmp/work"),
+            "abc123",
+            Path::new("/tmp/target"),
+            "lint",
+        );
+        assert_eq!(job.get_program(), "cargo");
+        assert_eq!(
+            job.get_args().collect::<Vec<_>>(),
+            ["xtask", "ci", "lint"].map(OsStr::new)
+        );
+        assert_eq!(job.get_current_dir(), Some(Path::new("/tmp/work")));
+        let envs: BTreeMap<&OsStr, Option<&OsStr>> = job.get_envs().collect();
+        for (name, value) in [
+            ("MANDATE_BASE_REF", "abc123"),
+            (CARGO_TARGET_DIR, "/tmp/target"),
+            ("CARGO_INCREMENTAL", "0"),
+            ("CARGO_PROFILE_DEV_DEBUG", "0"),
+            ("CARGO_PROFILE_TEST_DEBUG", "0"),
+        ] {
+            assert_eq!(
+                envs.get(OsStr::new(name)),
+                Some(&Some(OsStr::new(value))),
+                "{name}"
+            );
+        }
     }
 
     /// A base that conflicts with HEAD fails the check before any job runs.
@@ -13884,6 +13979,7 @@ mod tests {
                 && line.ends_with("spec-guard=not-run lint=not-run test=not-run verdict=fail"),
             "{line}"
         );
+        land_check_left_nothing(&fx)?;
         Ok(())
     }
 
@@ -13893,7 +13989,7 @@ mod tests {
     fn land_check_runs_every_job_after_a_failure_and_fails() -> Result<()> {
         let (fx, _) = land_check_fixture("land-check-failing", "b.txt", "b from main\n")?;
         let mut ran = Vec::new();
-        let (line, verdict) = land_check(&fx.0, "base", Some(false), |_, _, job| {
+        let (line, verdict) = land_check(&fx.0, "base", Some(true), |_, _, job| {
             ran.push(job.to_owned());
             if job == "lint" {
                 bail!("lint failed");
@@ -13903,10 +13999,11 @@ mod tests {
         assert!(verdict.is_err());
         assert_eq!(ran, LAND_CHECK_JOBS);
         assert!(
-            line.contains(" fetched=no ")
+            line.contains(" fetched=yes ")
                 && line.ends_with(" merge=clean spec-guard=pass lint=fail test=pass verdict=fail"),
             "{line}"
         );
+        land_check_left_nothing(&fx)?;
         Ok(())
     }
 
