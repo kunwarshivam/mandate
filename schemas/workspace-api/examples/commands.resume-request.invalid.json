@@ -70,5 +70,57 @@
     "set": {
       "/step_up/mutant_member": 1
     }
+  },
+  {
+    "label": "an assertion with a null step_up",
+    "set": {
+      "/step_up": null,
+      "/step_up_assertion": {
+        "passkey_id": "AQIDBAUGBwgJCgsMDQ4PEA",
+        "authenticator_data": "SZYN5YgOjGh0NBcPZHZgW4_krrmihjLHmVzzuoMdl2MFAAAAAQ",
+        "client_data_json": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0In0",
+        "signature": "MEUCIQDTGOGdiLsJjYpkEnJUg4uk6vbsPMqJYxnHNqVfqH4qPAIgZl1lQ3GqQ2bjdMEpm14p9Lqwd2pHAH8dOrQYp6_L9Q4"
+      }
+    }
+  },
+  {
+    "label": "an assertion beside cli_confirm",
+    "set": {
+      "/step_up/method": "cli_confirm",
+      "/step_up_assertion": {
+        "passkey_id": "AQIDBAUGBwgJCgsMDQ4PEA",
+        "authenticator_data": "SZYN5YgOjGh0NBcPZHZgW4_krrmihjLHmVzzuoMdl2MFAAAAAQ",
+        "client_data_json": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0In0",
+        "signature": "MEUCIQDTGOGdiLsJjYpkEnJUg4uk6vbsPMqJYxnHNqVfqH4qPAIgZl1lQ3GqQ2bjdMEpm14p9Lqwd2pHAH8dOrQYp6_L9Q4"
+      }
+    }
+  },
+  {
+    "label": "an assertion without its signature",
+    "set": {
+      "/step_up_assertion": {
+        "passkey_id": "AQIDBAUGBwgJCgsMDQ4PEA",
+        "authenticator_data": "SZYN5YgOjGh0NBcPZHZgW4_krrmihjLHmVzzuoMdl2MFAAAAAQ",
+        "client_data_json": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0In0"
+      }
+    }
+  },
+  {
+    "label": "an assertion with an extra member",
+    "set": {
+      "/step_up_assertion": {
+        "passkey_id": "AQIDBAUGBwgJCgsMDQ4PEA",
+        "authenticator_data": "SZYN5YgOjGh0NBcPZHZgW4_krrmihjLHmVzzuoMdl2MFAAAAAQ",
+        "client_data_json": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0In0",
+        "signature": "MEUCIQDTGOGdiLsJjYpkEnJUg4uk6vbsPMqJYxnHNqVfqH4qPAIgZl1lQ3GqQ2bjdMEpm14p9Lqwd2pHAH8dOrQYp6_L9Q4",
+        "user_handle": "AQ"
+      }
+    }
+  },
+  {
+    "label": "an assertion that is a string",
+    "set": {
+      "/step_up_assertion": "x"
+    }
   }
 ]

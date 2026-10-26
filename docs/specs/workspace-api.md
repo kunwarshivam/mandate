@@ -475,6 +475,14 @@ The ceremony belongs to the [identity spec](identity.md) (E9-4). The API's part:
   ([DEC-2133](../project/decisions/DEC-2133.md)).
   An approval's grant is not served under any method yet (§3.11 item 10), so DEC-2128 leaves it out.
   **(planned: E9-4)**
+- A resume and a Stop take passkey step-up the same way
+  ([DEC-2140](../project/decisions/DEC-2140.md)): `commands/resume-request` and
+  `commands/stop-request` carry the same optional `step_up_assertion`, `invalid` at
+  `/step_up_assertion` beside evidence that is not `passkey`. The port judges it against the
+  command's own action (§3.11 item 12). A verified one records the command with its evidence and
+  appends `StepUpAsserted` right after its `OwnerCommandIssued`, in one batch; anything unverified,
+  passkey evidence with no assertion included, is still recorded with `null` evidence, which the
+  runtime refuses, so the brake is never refused here (DEC-2102 item 4).
 
 ### 3.7 Roles
 
@@ -904,7 +912,9 @@ per workspace deployment (item 6).
       `user`, `risk_clock` and `submitted_at` at receipt, and `step_up`. The executor judges the
       event, the step-up, and independence (mandate spec §5.8).
     - **Step-up is forwarded only once verified.** Resume, Stop, and acknowledgment carry the port's
-      verified evidence as `step_up`, or `null`. Until E9-4 binds the port that is always `null`,
+      verified evidence as `step_up`, or `null`. A resume's or Stop's `passkey` evidence is verified
+      only with its `step_up_assertion`, and then its `StepUpAsserted` follows the command in its
+      batch (§3.6, [DEC-2140](../project/decisions/DEC-2140.md)). Until E9-4 binds the port that is always `null`,
       so the runtime or executor refuses each with `OwnerCommandRefused` `step_up_missing`, the
       refusal journaled where the specs put it (§5.4); the client renders that refusal from
       §5.5, never "stopped". Under `independent_approval_required` an acknowledgment also fails
