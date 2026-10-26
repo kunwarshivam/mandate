@@ -26,7 +26,7 @@ use crate::runtime::{Refs, Wiring};
 mod gate;
 mod plan;
 
-pub use gate::{Gate, UNJOURNALED, verdict};
+pub use gate::{Gate, UNJOURNALED, UNSEEN, verdict};
 pub use plan::Plan;
 
 /// How fresh, in risk-clock seconds, the facts an opening reads must be (DEC-2378 item 4): a mark

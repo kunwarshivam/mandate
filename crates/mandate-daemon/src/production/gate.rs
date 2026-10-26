@@ -30,6 +30,17 @@ pub const UNJOURNALED: [Deferred; 4] = [
     Deferred::DayTradeBudget,
 ];
 
+/// The parts of the gate's checks whose facts the fold does not carry (DEC-2388 items 7 and 8):
+/// evaluated on what the context holds, so a refusal still refuses, and named, so none is ever
+/// reported passed. Each leaves this set only once its fact is folded from the journal.
+pub const UNSEEN: [Deferred; 5] = [
+    Deferred::ReentryCooldown,
+    Deferred::Halt,
+    Deferred::ConductHistory,
+    Deferred::RelatedAccounts,
+    Deferred::FeeReservation,
+];
+
 const DEFERRED_TO_BINDING: &str = "deferred_to_binding";
 const FACTS_HELD: &str = "facts_held";
 const GATE_REFUSED: &str = "gate_refused";
@@ -66,7 +77,8 @@ impl Gate {
         }
     }
 
-    /// The advisory pass of the opening `proposal` over the fold, with [`UNJOURNALED`] deferred,
+    /// The advisory pass of the opening `proposal` over the fold, with [`UNJOURNALED`] and [`UNSEEN`]
+    /// deferred,
     /// or the reason it could not be evaluated: `rule_set_unavailable`, `facts_held` for a fact
     /// the fold holds, `working_orders_unseen` while any order of the agent's works, whose cost
     /// the fold cannot see, and `gate_refused` when the gate refuses to evaluate it or types it as
@@ -88,8 +100,9 @@ impl Gate {
             .facts
             .read(|journaled| self.context(journaled, proposal, config, mandate))
             .ok_or(FACTS_HELD)??;
-        let advisory = evaluate_deferring(proposal, &context, &BTreeSet::from(UNJOURNALED))
-            .map_err(|_| GATE_REFUSED)?;
+        let deferred = UNJOURNALED.into_iter().chain(UNSEEN).collect();
+        let advisory =
+            evaluate_deferring(proposal, &context, &deferred).map_err(|_| GATE_REFUSED)?;
         match advisory.decision.purpose {
             GatePurpose::Open | GatePurpose::Increase => Ok(advisory),
             _ => Err(GATE_REFUSED),

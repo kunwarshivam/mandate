@@ -857,8 +857,9 @@ pub fn evaluate(input: &GateInput<'_>) -> Result<Decision, GateError> {
     gate::evaluate(input)
 }
 
-/// A check the cell's runtime's advisory pass may defer to the executor's binding gate, because
-/// nothing journals its facts yet (DEC-2378 item 11). The binding gate defers none of them.
+/// A check, or part of one, the cell's runtime's advisory pass may defer to the executor's binding
+/// gate, because nothing journals its facts yet. The first four are skipped (DEC-2378 item 11);
+/// the rest are evaluated but named (DEC-2388 item 8). The binding gate defers none of them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Deferred {
     /// §3.2's instrument items: status, exchange, IPO and PTP, the crypto pair's quote currency,
@@ -870,6 +871,21 @@ pub enum Deferred {
     Participation,
     /// §9.2's day-trade budget, check 8.
     DayTradeBudget,
+    /// The parts below are never skipped (DEC-2388 item 8): the gate evaluates each on whatever
+    /// its caller gives it, so a refusal still refuses, but a caller that cannot see the part's
+    /// fact names it here and the check is never reported passed.
+    ///
+    /// Mandate §5.3's re-entry cooldown, read from the agent's last exit fill (check 2).
+    ReentryCooldown,
+    /// §4.4's halt, read from the instrument's status (check 3).
+    Halt,
+    /// §9.6's order-to-fill ratio and opposite-fill interval and the mandate's orders per day,
+    /// read from the agent's orders and fills today (check 6).
+    ConductHistory,
+    /// §9.6's self-trade prevention, read from the related accounts' resting orders (check 6).
+    RelatedAccounts,
+    /// §9.5's fee reservation in the buying-power comparison (check 7).
+    FeeReservation,
 }
 
 impl Deferred {
@@ -877,8 +893,14 @@ impl Deferred {
     #[must_use]
     pub fn check(self) -> Check {
         match self {
-            Self::Eligibility | Self::LiquidityFloor => Check::UniverseAndLimits,
-            Self::Participation => Check::ConductControls,
+            Self::Eligibility | Self::LiquidityFloor | Self::ReentryCooldown => {
+                Check::UniverseAndLimits
+            }
+            Self::Halt => Check::SessionAndHalt,
+            Self::Participation | Self::ConductHistory | Self::RelatedAccounts => {
+                Check::ConductControls
+            }
+            Self::FeeReservation => Check::BuyingPowerAndExposure,
             Self::DayTradeBudget => Check::DayTradeBudget,
         }
     }
