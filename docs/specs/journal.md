@@ -16,8 +16,8 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   writer keeps no raw response until the data plane has a durable store and DEC-433 item 20
   allows it. Its `item_id` is `<vendor id>:<vendor version>`. It polls the tickers of the
   workspace's registered instrument snapshots for the active theses' and held instruments. The
-  record and its rules 283 to 286 are unchanged. §9.13's range grammar and the anchors' stream
-  types now name the news stream, as v0.46 did for the meter stream, so an anchor, an export, a
+  record and its rules 283 to 286 are unchanged. §9.13's `stream_id` type, which §9.14's anchor
+  leaves reuse, and §9.15's `stream_id` row now name the news stream, as v0.46 did for the meter stream, so an anchor, an export, a
   verification range, and a notice's cause can name it; v0.97 left them out. The vectors gain the
   cases for a `news:` stream id there, and test vectors stay at version 3.
 - **v0.99 ([DEC-2820](../project/decisions/DEC-2820.md), 2026-10-26; X10a, lane MC):** §9.5's
