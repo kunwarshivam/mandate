@@ -235,9 +235,9 @@ test.describe("no gradient paints in any overlay (DEC-200)", () => {
     });
   }
 
-  test("the passkey check on the kill-switch record screen", async ({ page }) => {
+  test("the confirm on the kill-switch record screen", async ({ page }) => {
     await page.goto(recordHref("kill", AGENT_IDS.btc));
-    await openBy(page, page.getByRole("button", { name: /Activate the kill switch/ }), page.getByRole("dialog", { name: "Confirm it is you" }));
+    await openBy(page, page.getByRole("button", { name: /Activate the kill switch/ }), page.getByRole("dialog", { name: "Confirm the kill switch" }));
     expect(await gradientsIn(page)).toEqual([]);
   });
 

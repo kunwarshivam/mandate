@@ -18,6 +18,7 @@ import {
   entries,
   expectNothingSent,
   expectSentThenRecorded,
+  failingPasskey,
   log,
   modes,
   press,
@@ -255,17 +256,44 @@ describe("record screens are pages (brief §4.1, D10, D11)", () => {
   });
 });
 
-describe("every record screen needs a passkey first (PX-4, PX-12, DEC-136)", () => {
-  it.each(named)("%s opens the passkey check on the page naming the action, and sends nothing while it waits", (_, c) => {
+/** The release is a Stop and steps up; every kill switch is confirmed with one press (DEC-2410). */
+function stepped(c: KindCase) {
+  return c.kind === "release";
+}
+
+const STEPPED = ALL.filter(stepped);
+const steppedNamed = STEPPED.map((c) => [c.name, c] as const);
+const plainNamed = named.filter(([, c]) => !stepped(c));
+
+function confirmDialog() {
+  return screen.queryByRole("dialog", { name: "Confirm the kill switch" });
+}
+
+/** The check a case opens before it sends: the passkey for the release, a plain confirm for a kill switch. */
+function check(c: KindCase) {
+  return stepped(c) ? stepUpDialog() : confirmDialog();
+}
+
+/** Confirms the open check and lets it answer: a passkey takes its answer time, a plain confirm none. */
+function confirmIt(c: KindCase) {
+  if (stepped(c)) {
+    press("Use passkey");
+    act(() => vi.advanceTimersByTime(PASSKEY_ANSWER_MS));
+  } else {
+    fireEvent.click(within(confirmDialog()!).getByRole("button", { name: "Activate" }));
+  }
+}
+
+describe("every record screen asks before it sends: a passkey for the release, a plain confirm for a kill switch (PX-4, PX-12, DEC-136, DEC-2410)", () => {
+  it.each(named)("%s opens its check on the page naming the action, and sends nothing while it waits", (_, c) => {
     const { before } = start(c);
-    const dialog = stepUpDialog();
-    expect(dialog).not.toBeNull();
-    expect(dialog!.querySelector("[data-slot=step-up-action]")).toHaveTextContent(c.stepUp);
+    expect(check(c)).not.toBeNull();
+    expect(check(c)).toHaveTextContent(c.stepUp);
     expectNothingSent(page(), before);
-    expect(stepUpDialog()).not.toBeNull();
+    expect(check(c)).not.toBeNull();
   });
 
-  it.each(named)("%s asks the passkey for this one action", (_, c) => {
+  it.each(steppedNamed)("%s asks the passkey for this one action", (_, c) => {
     const passkey = vi.fn<Passkey>(mockPasskey);
     start(c, { passkey });
     expect(passkey).not.toHaveBeenCalled();
@@ -273,10 +301,28 @@ describe("every record screen needs a passkey first (PX-4, PX-12, DEC-136)", () 
     expect(passkey).toHaveBeenCalledTimes(1);
     expect(passkey).toHaveBeenCalledWith(c.stepUp, expect.any(Function));
   });
+
+  it.each(plainNamed)("%s never asks a passkey, so a passkey that would fail cannot hold it back", (_, c) => {
+    const passkey = vi.fn<Passkey>(failingPasskey);
+    const { before } = start(c, { passkey });
+    expect(stepUpDialog()).toBeNull();
+    expect(within(page()).getByRole("button", { name: c.activate, hidden: true })).toHaveTextContent("No passkey needed.");
+    expect(within(page()).getByRole("button", { name: c.activate, hidden: true })).not.toHaveTextContent("Needs your passkey");
+    confirmIt(c);
+    expect(passkey).not.toHaveBeenCalled();
+    expect(confirmDialog()).toBeNull();
+    expectSentThenRecorded(page(), before, c.recorded);
+  });
 });
 
-describe("a cancelled or failed passkey check on a record screen never becomes an action (G3, P4)", () => {
-  it.each(ALL.flatMap((c) => ENDINGS.map((e) => [c.name, e.ending, c, e] as const)))("%s, ended by %s, sends nothing and says so", (_, __, c, e) => {
+const PLAIN_ENDINGS: Array<{ ending: string; run: () => void }> = [
+  { ending: "Cancel", run: () => fireEvent.click(within(confirmDialog()!).getByRole("button", { name: "Cancel" })) },
+  { ending: "Escape", run: () => fireEvent.keyDown(confirmDialog()!, { key: "Escape" }) },
+  { ending: "Close", run: () => fireEvent.click(within(confirmDialog()!).getByRole("button", { name: "Close" })) },
+];
+
+describe("a cancelled check on a record screen never becomes an action (G3, P4)", () => {
+  it.each(STEPPED.flatMap((c) => ENDINGS.map((e) => [c.name, e.ending, c, e] as const)))("%s, ended by %s, sends nothing and says so", (_, __, c, e) => {
     const { before } = start(c, { passkey: e.passkey });
     e.run();
     expect(stepUpDialog()).toBeNull();
@@ -285,10 +331,19 @@ describe("a cancelled or failed passkey check on a record screen never becomes a
     expectNothingSent(page(), before);
     expect(recordedCount()).toBe(0);
   });
+
+  it.each(ALL.filter((c) => !stepped(c)).flatMap((c) => PLAIN_ENDINGS.map((e) => [c.name, e.ending, c, e] as const)))("%s, ended by %s, sends nothing and says so", (_, __, c, e) => {
+    const { before } = start(c);
+    e.run();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(log(page())).toHaveTextContent("Canceled. Nothing was sent.");
+    expectNothingSent(page(), before);
+    expect(recordedCount()).toBe(0);
+  });
 });
 
-describe("after a verified passkey, the record screen sends once and never shows it done early (rule 5)", () => {
-  it.each(named)("%s shows sent, then recorded only once the runtime records it", (_, c) => {
+describe("once confirmed, the record screen sends once and never shows it done early (rule 5)", () => {
+  it.each(steppedNamed)("%s shows sent, then recorded only once the runtime records it", (_, c) => {
     const { before } = start(c);
     press("Use passkey");
     expect(stepUpDialog()).toHaveTextContent("Waiting for your passkey…");
@@ -299,7 +354,15 @@ describe("after a verified passkey, the record screen sends once and never shows
     expectSentThenRecorded(page(), before, c.recorded);
   });
 
-  it.each(named)("%s is sent once when Use passkey is pressed twice", (_, c) => {
+  it.each(plainNamed)("%s is sent on Activate, then shows recorded only once the runtime records it", (_, c) => {
+    const { before } = start(c);
+    expect(entries(page())).toHaveLength(0);
+    confirmIt(c);
+    expect(confirmDialog()).toBeNull();
+    expectSentThenRecorded(page(), before, c.recorded);
+  });
+
+  it.each(steppedNamed)("%s is sent once when Use passkey is pressed twice", (_, c) => {
     start(c);
     press("Use passkey");
     press("Use passkey");
@@ -308,10 +371,19 @@ describe("after a verified passkey, the record screen sends once and never shows
     expect(recordedCount()).toBe(1);
   });
 
+  it.each(plainNamed)("%s is sent once when Activate is pressed twice", (_, c) => {
+    start(c);
+    const activate = within(confirmDialog()!).getByRole("button", { name: "Activate" });
+    fireEvent.click(activate);
+    fireEvent.click(activate);
+    act(() => vi.advanceTimersByTime(RECORD_AFTER_MS));
+    expect(entries(page())).toHaveLength(1);
+    expect(recordedCount()).toBe(1);
+  });
+
   it.each(named)("%s sends what the owner saw with the command, so the journal keeps the record", (_, c) => {
     start(c);
-    press("Use passkey");
-    act(() => vi.advanceTimersByTime(PASSKEY_ANSWER_MS));
+    confirmIt(c);
     const record = buildRecord(c.kind, buildWorkspace(c.scenario), c.target)!;
     expect(runtimeCommands()).toEqual([
       expect.objectContaining({
@@ -332,8 +404,7 @@ describe("after a verified passkey, the record screen sends once and never shows
     start(c);
     const onScreen = badges(recordRegion());
     expect(onScreen.length).toBeGreaterThan(0);
-    press("Use passkey");
-    act(() => vi.advanceTimersByTime(PASSKEY_ANSWER_MS));
+    confirmIt(c);
     const [command] = runtimeCommands() as Array<{ record: { modes: unknown; shown: string[] } }>;
     expect(command.record.modes).toEqual(onScreen);
     for (const { agent, badge } of onScreen) expect(command.record.shown).toContain(`${agent}: ${badge}`);
@@ -343,8 +414,7 @@ describe("after a verified passkey, the record screen sends once and never shows
     start(c);
     const confirmed = recordRegion().innerHTML;
     const shownModes = badges(recordRegion());
-    press("Use passkey");
-    act(() => vi.advanceTimersByTime(PASSKEY_ANSWER_MS));
+    confirmIt(c);
     expect(recordRegion().innerHTML).toBe(confirmed);
     act(() => vi.advanceTimersByTime(RECORD_AFTER_MS * 3));
     expect(entries(page())[0]).toHaveAttribute("data-phase", "recorded");
@@ -364,8 +434,8 @@ describe("after a verified passkey, the record screen sends once and never shows
     const c = CASES.kill[1];
     const kc: KindCase = { ...c, kind: "kill" };
     const { view } = start(kc);
-    press("Use passkey");
-    act(() => vi.advanceTimersByTime(PASSKEY_ANSWER_MS + RECORD_AFTER_MS));
+    confirmIt(kc);
+    act(() => vi.advanceTimersByTime(RECORD_AFTER_MS));
     view.rerender(<Tree c={kc} shown={false} />);
     view.rerender(<Tree c={kc} />);
     expect(page().querySelector("[data-slot=nothing-to-do]")).toHaveTextContent("Stopped. There is nothing more to stop for this agent.");
@@ -397,14 +467,13 @@ describe("a change before the owner confirms asks for a fresh render, never a si
     expect(badges(recordRegion())).toContainEqual({ agent: agent.label, badge: MODE_LABEL.paused });
 
     fireEvent.click(within(page()).getByRole("button", { name: c.activate }));
-    press("Use passkey");
-    act(() => vi.advanceTimersByTime(PASSKEY_ANSWER_MS));
+    confirmIt(c);
     const sent = runtimeCommands().find((cmd) => cmd.kind === c.kind) as { record: { modes: unknown } };
     expect(sent.record.modes).toEqual(badges(recordRegion()));
     expect(sent.record.modes).toContainEqual({ agent: agent.label, badge: MODE_LABEL.paused });
   });
 
-  it.each(named)("%s closes the passkey check when the record changes while it is asked, and a late answer sends nothing", (_, c) => {
+  it.each(named)("%s closes its check when the record changes while it is asked, and a late answer sends nothing", (_, c) => {
     const late: Passkey = (_action, answer) => {
       window.setTimeout(() => answer("verified"), RECORD_AFTER_MS * 2);
       return () => {};
@@ -413,14 +482,14 @@ describe("a change before the owner confirms asks for a fresh render, never a si
     renderWithRuntime(<Tree c={c} />, c.scenario, { passkey: late });
     act(() => elsewhere.send!("pause", agentOf(c)));
     fireEvent.click(within(page()).getByRole("button", { name: c.activate }));
-    press("Use passkey");
+    if (stepped(c)) press("Use passkey");
     act(() => vi.advanceTimersByTime(RECORD_AFTER_MS));
 
-    expect(stepUpDialog()).toBeNull();
+    expect(check(c)).toBeNull();
     expect(page().querySelector("[data-slot=record-changed]")).not.toBeNull();
     act(() => vi.advanceTimersByTime(RECORD_AFTER_MS * 4));
     expect(runtimeCommands().map((cmd) => cmd.kind)).toEqual(["pause"]);
-    expect(stepUpDialog()).toBeNull();
+    expect(check(c)).toBeNull();
   });
 });
 
@@ -432,7 +501,7 @@ describe("leaving a record screen mid-passkey abandons the request, and a late a
   afterEach(() => console_.restore());
 
   const RESULTS: PasskeyResult[] = ["verified", "failed"];
-  const CASES_BY_RESULT = ALL.flatMap((c) => RESULTS.map((r) => [c.name, r, c] as const));
+  const CASES_BY_RESULT = STEPPED.flatMap((c) => RESULTS.map((r) => [c.name, r, c] as const));
 
   it.each(CASES_BY_RESULT)("%s: navigating away while the passkey is asked sends nothing, even when it later answers %s", (_, result, c) => {
     const { passkey, release } = heldPasskey(result);
@@ -459,5 +528,16 @@ describe("leaving a record screen mid-passkey abandons the request, and a late a
     act(() => vi.advanceTimersByTime((PASSKEY_ANSWER_MS + RECORD_AFTER_MS) * 3));
 
     expect(console_.calls()).toEqual([]);
+  });
+});
+
+describe("leaving a record screen while a kill switch's confirm is open sends nothing (P4)", () => {
+  it.each(plainNamed)("%s: navigating away with the confirm open sends nothing", (_, c) => {
+    const { view } = start(c);
+    expect(confirmDialog()).not.toBeNull();
+    view.rerender(<Tree c={c} shown={false} />);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    act(() => vi.advanceTimersByTime(RECORD_AFTER_MS * 3));
+    expect(recordedCount()).toBe(0);
   });
 });
