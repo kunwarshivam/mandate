@@ -132,3 +132,50 @@ fn another_instrument_or_another_timeframe_is_refused() {
     }
     fs::remove_dir_all(&root).ok();
 }
+
+/// A minute partition altered after it was stored, and a day holding two bars with one start, are
+/// refused before any bar is handed out, however the window falls.
+#[test]
+fn an_altered_partition_or_two_bars_with_one_start_are_refused() {
+    let root = scratch("untrusted");
+    let dir = minutes(&root, "SPY", "1Min", "2026-10-26T13:30:00Z", 390);
+    let now = at("2026-10-26T15:00:00Z");
+    assert_eq!(trailing_minutes(&dir, "SPY", now).unwrap().len(), 5);
+    let path = dir.join(mandate_marketdata::dataset::partition_name(
+        Date::parse("2026-10-26").unwrap(),
+    ));
+    let mut bytes = fs::read(&path).unwrap();
+    bytes.push(0);
+    fs::write(&path, bytes).unwrap();
+    match trailing_minutes(&dir, "SPY", now) {
+        Err(BarsError::Untrusted { what }) => {
+            assert_eq!(what, "a minute partition cannot be trusted");
+        }
+        other => panic!("an altered partition: {other:?}"),
+    }
+    fs::remove_dir_all(&root).ok();
+
+    let root = scratch("duplicate");
+    let dataset = DatasetId::new(
+        AssetClass::UsEquity,
+        Feed::Iex,
+        Kind::Bars("1Min".parse().unwrap()),
+        Symbol::parse("SPY").unwrap(),
+    )
+    .unwrap();
+    let start = at("2026-10-26T14:58:00Z");
+    let store = Store::new(&root);
+    store
+        .put_day(
+            &dataset,
+            Date::parse("2026-10-26").unwrap(),
+            &Records::Bars(vec![bar(start, "100"), bar(start, "200")]),
+        )
+        .unwrap();
+    let dir = store.dataset_dir(&dataset);
+    match trailing_minutes(&dir, "SPY", now) {
+        Err(BarsError::Untrusted { what }) => assert_eq!(what, "two minute bars share a start"),
+        other => panic!("two bars with one start: {other:?}"),
+    }
+    fs::remove_dir_all(&root).ok();
+}
