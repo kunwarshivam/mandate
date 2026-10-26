@@ -275,13 +275,15 @@ impl Journaled {
         folded
     }
 
-    /// Whether the account is flat (DEC-2833 item 3): every instrument's fills on the account net
-    /// to no position, and every order seen on it, of any agent or a leg the broker created, has
-    /// ended.
+    /// Whether the account is flat (DEC-2833 item 3): every row the facts read did, every
+    /// instrument's fills on the account net to no position, and every order seen on it, of any
+    /// agent, a protective leg or the owner's, has ended.
     pub fn flat(&self) -> bool {
-        self.account_positions
-            .values()
-            .all(|position| *position == SignedQty::ZERO)
+        !self.unreadable
+            && self
+                .account_positions
+                .values()
+                .all(|position| *position == SignedQty::ZERO)
             && self.ledger.none_working()
     }
 

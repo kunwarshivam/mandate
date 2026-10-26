@@ -451,28 +451,137 @@ fn a_fill_dated_today_on_yesterday_s_risk_clock_is_not_filled_today() {
     );
 }
 
-/// An order with no instant at all, whose day cannot be read, counts as today.
+/// The agent's order folded without the instant the store recorded it leaves the counters unread;
+/// an order with no `risk_clock` counts by its recorded instant alone.
 #[test]
-fn an_order_with_no_instant_counts_today() {
+fn an_order_without_its_recorded_instant_leaves_the_counters_unread() {
+    let request = object(&[("agent_id", text(AGENT)), ("purpose", text("increase"))]);
+    let submitted = object(&[
+        ("client_order_id", text("o0")),
+        ("instrument_id", text(SPY)),
+    ]);
     let mut rig = Rig::new();
-    rig.on(
-        ACCOUNT,
-        "OrderRequestRecorded",
-        &object(&[("agent_id", text(AGENT)), ("purpose", text("increase"))]),
-        None,
-    );
-    rig.on(
-        ACCOUNT,
-        "OrderSubmitted",
-        &object(&[
-            ("client_order_id", text("o0")),
-            ("instrument_id", text(SPY)),
-        ]),
-        None,
-    );
+    rig.on(ACCOUNT, "OrderRequestRecorded", &request, None);
+    rig.on(ACCOUNT, "OrderSubmitted", &submitted, None);
     rig.state("o0", "canceled", START);
-    let counted = rig.0.counted(instant(START + 86_400 * 3)).unwrap();
-    assert_eq!(counted.orders_today, 1);
+    assert_eq!(rig.0.counted(instant(START + 10)), None);
+
+    let mut rig = Rig::new();
+    rig.on(ACCOUNT, "OrderRequestRecorded", &request, Some(START));
+    rig.on(ACCOUNT, "OrderSubmitted", &submitted, Some(START));
+    rig.state("o0", "canceled", START);
+    assert_eq!(rig.0.counted(instant(START + 10)).unwrap().orders_today, 1);
+    assert_eq!(
+        rig.0.counted(instant(START + 86_400)).unwrap().orders_today,
+        0
+    );
+}
+
+/// A row the facts refuse, a corporate action among them, leaves the account not flat whatever its
+/// fills net to, and the counters unread.
+#[test]
+fn a_row_the_facts_refuse_is_never_flat() {
+    let mut rig = Rig::new();
+    rig.round_trip(0, SPY, START);
+    assert!(answers(&rig));
+    let refused = rig.0.fold_recorded(
+        Row {
+            stream: ACCOUNT,
+            event_type: "CorporateActionApplied",
+            payload: &object(&[("risk_clock", clock(START + 300))]),
+        },
+        Some(instant(START + 300)),
+    );
+    assert!(refused.is_err());
+    assert!(!rig.0.flat());
+    assert_eq!(rig.0.counted(instant(START + 600)), None);
+}
+
+/// An open order of the owner's that the broker listed, whose end the account stream never
+/// journals, leaves the account not flat; a protective leg placed is working until it is
+/// cancelled or reaches a terminal state; a malformed record of either leaves the counters unread.
+#[test]
+fn an_owner_s_open_order_or_a_placed_leg_is_working() {
+    let mut rig = Rig::new();
+    rig.round_trip(0, SPY, START);
+    let external = |source: &str| {
+        object(&[
+            ("source", text(source)),
+            ("broker_order_id", text("b-1")),
+            ("fill_id", Value::Null),
+            ("client_order_id", Value::Null),
+            ("instrument", text("SPY")),
+            ("side", text("buy")),
+            ("qty", text("1")),
+            ("risk_clock", clock(START + 300)),
+        ])
+    };
+    rig.on(
+        ACCOUNT,
+        "ExternalActivityIngested",
+        &external("fill"),
+        Some(START + 300),
+    );
+    assert!(
+        answers(&rig),
+        "an unattributed fill's record alone is no order"
+    );
+    rig.on(
+        ACCOUNT,
+        "ExternalActivityIngested",
+        &external("open_order"),
+        Some(START + 300),
+    );
+    assert!(!rig.0.flat());
+
+    let protection = |action: &str, orders: &[&str]| {
+        object(&[
+            ("instrument_id", text(SPY)),
+            ("action", text(action)),
+            (
+                "orders",
+                Value::Array(orders.iter().map(|order| text(order)).collect()),
+            ),
+            ("risk_clock", clock(START + 400)),
+        ])
+    };
+    let mut rig = Rig::new();
+    rig.round_trip(0, SPY, START);
+    rig.on(
+        ACCOUNT,
+        "ProtectionChanged",
+        &protection("placed", &["leg-1", "leg-2"]),
+        Some(START + 400),
+    );
+    assert!(!rig.0.flat(), "the bracket's legs rest");
+    rig.on(
+        ACCOUNT,
+        "ProtectionChanged",
+        &protection("cancelled", &["leg-1"]),
+        Some(START + 401),
+    );
+    assert!(!rig.0.flat(), "one leg still rests");
+    rig.state("leg-2", "filled", START + 402);
+    assert!(answers(&rig));
+
+    let mut rig = Rig::new();
+    rig.round_trip(0, SPY, START);
+    rig.on(
+        ACCOUNT,
+        "ExternalActivityIngested",
+        &external("rumour"),
+        Some(START + 300),
+    );
+    assert_eq!(rig.0.counted(instant(START + 600)), None);
+    let mut rig = Rig::new();
+    rig.round_trip(0, SPY, START);
+    rig.on(
+        ACCOUNT,
+        "ProtectionChanged",
+        &object(&[("action", text("placed")), ("orders", text("leg-1"))]),
+        Some(START + 400),
+    );
+    assert_eq!(rig.0.counted(instant(START + 600)), None);
 }
 
 /// Another agent's orders on the account count toward none of this agent's order counters, and a

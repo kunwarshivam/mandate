@@ -46,11 +46,12 @@ const TERMINAL: [&str; 6] = [
     "abandoned",
 ];
 
-/// One instant a row carries: its `risk_clock` and the instant the store recorded it.
+/// The instants an order's row carries: its `risk_clock`, when it has one, and the instant the
+/// store recorded it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Stamps {
     clock: Option<UtcNanos>,
-    recorded: Option<UtcNanos>,
+    recorded: UtcNanos,
 }
 
 /// One of the agent's orders, or a replacement of one.
@@ -84,6 +85,7 @@ pub(crate) struct Ledger {
     fill_ids: BTreeSet<String>,
     seen: BTreeSet<String>,
     ended: BTreeSet<String>,
+    external_order: bool,
 }
 
 impl Ledger {
@@ -114,9 +116,11 @@ impl Ledger {
         agent: &str,
     ) -> Option<()> {
         let text = |member: &str| payload.get(member).and_then(Value::as_str);
-        let stamps = || Stamps {
-            clock: text("risk_clock").and_then(|stamp| UtcNanos::parse(stamp).ok()),
-            recorded,
+        let stamps = || {
+            Some(Stamps {
+                clock: text("risk_clock").and_then(|stamp| UtcNanos::parse(stamp).ok()),
+                recorded: recorded?,
+            })
         };
         match (event_type, on_account) {
             ("ConnectionEstablished", false) => {
@@ -144,7 +148,7 @@ impl Ledger {
                     let order_of = Order {
                         instrument,
                         adds_risk: adds_risk?,
-                        stamps: stamps(),
+                        stamps: stamps()?,
                     };
                     self.orders.insert(order, order_of);
                 }
@@ -166,7 +170,7 @@ impl Ledger {
                         self.seen.insert(successor.clone());
                         if let Some(replaced) = self.orders.get(&order).cloned() {
                             let successor_of = Order {
-                                stamps: stamps(),
+                                stamps: stamps()?,
                                 ..replaced
                             };
                             self.orders.insert(successor.clone(), successor_of);
@@ -178,6 +182,30 @@ impl Ledger {
             ("OrderAbandoned", true) => {
                 self.ended.insert(text("client_order_id")?.to_owned());
             }
+            ("ProtectionChanged", true) => {
+                let orders = payload
+                    .get("orders")?
+                    .as_array()?
+                    .iter()
+                    .map(|order| order.as_str().map(str::to_owned))
+                    .collect::<Option<Vec<String>>>()?;
+                match text("action")? {
+                    "placed" => {
+                        for order in orders {
+                            if !self.ended.contains(&order) {
+                                self.seen.insert(order);
+                            }
+                        }
+                    }
+                    "cancelled" => self.ended.extend(orders),
+                    _ => {}
+                }
+            }
+            ("ExternalActivityIngested", true) => match text("source")? {
+                "open_order" => self.external_order = true,
+                "fill" => {}
+                _ => return None,
+            },
             ("FillApplied" | "LateFillApplied", true) => {
                 if !self.fill_ids.insert(text("fill_id")?.to_owned()) {
                     return Some(());
@@ -207,10 +235,12 @@ impl Ledger {
         Some(())
     }
 
-    /// Whether every order seen on the account has ended, and no order request waits for the
-    /// submission journaled with it (journal spec rule 45), which may be working at the broker.
+    /// Whether every order seen on the account has ended, no order request waits for the
+    /// submission journaled with it (journal spec rule 45), which may be working at the broker, and
+    /// the broker has listed no open order of the owner's, whose end the account stream never
+    /// journals.
     pub(crate) fn none_working(&self) -> bool {
-        self.request.is_none() && self.seen.is_subset(&self.ended)
+        self.request.is_none() && !self.external_order && self.seen.is_subset(&self.ended)
     }
 
     /// Whether the counters read: every row they read did, and the workspace has exactly one
@@ -231,9 +261,7 @@ impl Ledger {
         let mut orders_today = 0_u32;
         for order in self.orders.values() {
             let Stamps { clock, recorded } = order.stamps;
-            let counts =
-                (clock.is_none() && recorded.is_none()) || is_today(clock) || is_today(recorded);
-            if !counts {
+            if !is_today(clock) && !is_today(Some(recorded)) {
                 continue;
             }
             if order.adds_risk {
