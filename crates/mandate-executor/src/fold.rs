@@ -18,8 +18,8 @@ use crate::payload::{
 use crate::protection::climbs;
 use crate::state::{
     AccountSwitch, Adoption, Confirmed, ConnectionView, EVERY_AGENT, ExecutorState, ExitSequence,
-    IntentOutcome, IntentRecord, Ladder, LoneLadder, ObservedAccount, OrderDetail, PendingRequest,
-    PriorBase, Replacement, Switch,
+    Holding, IntentOutcome, IntentRecord, Ladder, LoneLadder, ObservedAccount, OrderDetail,
+    PendingRequest, PriorBase, Replacement, Switch,
 };
 use crate::types::{
     AccountRef, AccountState, ActivityCursor, AgentId, BracketLegs, ConnectionHealth, EventId,
@@ -93,6 +93,16 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
     if kind == "OwnerAlertSent" {
         return Ok(());
     }
+    crate::acknowledge::fold(state, event)?;
+    if matches!(kind, "OwnerAcknowledged" | "OwnerAcknowledgmentRequested") {
+        return Ok(());
+    }
+    if kind == "OwnerCommandRefused" {
+        return match optional_text(payload, "command") {
+            Some("acknowledge") => Ok(()),
+            _ => not_interpreted(kind, "E7-2"),
+        };
+    }
     if let Some(story) = owner_elsewhere(kind) {
         return not_interpreted(kind, story);
     }
@@ -135,7 +145,6 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
             }
             Ok(())
         }
-        "OwnerAcknowledged" => owner_acknowledged(state, payload),
         "PositionReleased" => position_released(state, payload),
         "ReconciliationRun" => {
             state.reconciled_through = Some(event.seq);
@@ -145,6 +154,7 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
             Ok(())
         }
         "OrderAbandoned" => order_abandoned(state, payload),
+        "UniverseChanged" => universe_changed(state, payload),
         "AgentModeApplied" => agent_mode_applied(state, payload),
         "KillSwitchActivated" => kill_switch_activated(state, event, at),
         "AccountCloseRequested" => account_close_requested(state, event),
@@ -243,6 +253,32 @@ fn connection_checked() -> Result<(), ExecutorError> {
     Ok(())
 }
 
+/// One change of an agent's working universe (journal spec §9.3, DEC-2823): an admission holds the
+/// instrument under the thesis and lineage it names, replacing any it was held by; a removal takes
+/// it out. The account stream's own fold, so the executor's universe replays without the agent's
+/// stream.
+fn universe_changed(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
+    let agent = AgentId(required_text(payload, "agent_id")?.to_owned());
+    let instrument = InstrumentId::new(required_text(payload, "instrument")?)?;
+    let held = state.universes.entry(agent).or_default();
+    match required_text(payload, "change")? {
+        "admitted" => {
+            held.insert(
+                instrument,
+                Holding {
+                    thesis_id: optional_text(payload, "thesis_id").map(str::to_owned),
+                    lineage_id: optional_text(payload, "lineage_id").map(str::to_owned),
+                },
+            );
+        }
+        "removed" => {
+            held.remove(&instrument);
+        }
+        _ => return Err(refused("change")),
+    }
+    Ok(())
+}
+
 /// The copy of `ConnectionEstablished` names the stream's connection (rule 68), `active` with no
 /// cause. A reconnect's second copy names the same one and keeps the state the stream last
 /// recorded (CN-12): a connection revoked while `suspended` is still `suspended` when it is
@@ -308,8 +344,8 @@ fn connection_state_changed(
     Ok(())
 }
 
-/// Corporate actions, reconciliation's records and snapshot, recorded broker exchanges, the owner
-/// acknowledgment, the trading and risk days, and the kill switch (trading-domain spec §5.5 to §5.7,
+/// Corporate actions, reconciliation's records and snapshot, recorded broker exchanges, the trading
+/// and risk days, and the kill switch (trading-domain spec §5.5 to §5.7,
 /// §6, §10, §11): the later slices of this stack; the trading day is slice 5's trading-day part,
 /// which owes what a new day starts (GTC re-placement, the copy, the harness's start) together.
 /// An `ExternalActivityIngested` and a `ConductBreachDetected` fold as records only: the
@@ -369,7 +405,7 @@ fn owner_elsewhere(kind: &str) -> Option<&'static str> {
         | "GoalCompleted" => None,
         "RelatedAccountsCoordination" => Some("E7-5"),
         "MandateVersionApplied" => Some("E6-4"),
-        "UniverseChanged" => Some("E17-3"),
+        "UniverseChanged" => None,
         _ => Some("E7-2"),
     }
 }
@@ -1275,7 +1311,10 @@ fn account_close_requested(
 /// Lifting the `kill_switch` restriction also lifts whatever closes the agent's kill switches had
 /// not yet raised (DEC-485 item 7): the agent was resumed, so nothing sells its lots behind its
 /// back later.
-fn agent_mode_applied(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
+pub(crate) fn agent_mode_applied(
+    state: &mut ExecutorState,
+    payload: &Value,
+) -> Result<(), ExecutorError> {
     let agent = AgentId(required_text(payload, "agent")?.to_owned());
     let mode = mode_of(required_text(payload, "to")?)?;
     let restriction = optional_text(payload, "restriction")
@@ -1291,6 +1330,12 @@ fn agent_mode_applied(state: &mut ExecutorState, payload: &Value) -> Result<(), 
             state.closing_all.clear();
             state.account_switch = None;
             state.switch_read = None;
+        }
+        if let Some(held) = restriction.strip_prefix("reconciliation:")
+            && flag(payload, "originated")
+            && let Ok(instrument) = InstrumentId::new(held)
+        {
+            state.mismatched.remove(&instrument);
         }
         state.restrictions.remove(&(agent.clone(), restriction));
     } else {
@@ -1921,36 +1966,6 @@ fn posted(
         .checked_add(accrued)?
         .checked_sub(charged)?
         .max(Usd::ZERO);
-    Ok(())
-}
-
-/// Only an owner acknowledgment carrying step-up evidence clears a reconciliation mismatch and the
-/// pause it caused (trading-domain spec §11, interpretation 14).
-///
-/// The owner is who authorizes it: the event reaches the account stream only as a copy from the
-/// control stream, which only the owner-facing surface writes, and it names its `user` (required,
-/// opaque) and carries step-up evidence. Inside this crate nothing else tells an owner from an
-/// agent (journal spec §9, #205 review, round 1, finding 6).
-fn owner_acknowledged(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
-    let subject = required_text(payload, "subject")?;
-    required_text(payload, "user")?;
-    if required_text(payload, "step_up")?.is_empty() {
-        return Ok(());
-    }
-    if let Ok(instrument) = InstrumentId::new(subject) {
-        state.mismatched.remove(&instrument);
-    }
-    let lifted = crate::state::restriction_for(subject);
-    let agents: Vec<AgentId> = state
-        .restrictions
-        .keys()
-        .filter(|(_, name)| *name == lifted)
-        .map(|(agent, _)| agent.clone())
-        .collect();
-    for agent in agents {
-        state.restrictions.remove(&(agent.clone(), lifted.clone()));
-        recompute(state, &agent);
-    }
     Ok(())
 }
 

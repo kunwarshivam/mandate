@@ -40,6 +40,7 @@ const UNDELIVERED: Readonly<Record<string, string>> = {
   step_up_reused: "Not recorded: this code was already used, so nothing was approved. Ask for a new code.",
   step_up_method: "Not recorded: your deployment does not take a host confirmation for this, so nothing was approved.",
   forbidden: "Not recorded: you are not an approver of this request, so nothing was approved.",
+  deferral_mismatch: "This request does not match the decision behind it, so it can't be approved. You can skip it.",
 };
 
 /** An answer the API recorded nothing for, for `reason`, the problem's code. */
@@ -49,3 +50,11 @@ export function undeliveredText(reason: string | null | undefined): string {
 
 /** The API's refusals that no answer from this person can get past: the screen offers nothing more to send. */
 export const FINAL_UNDELIVERED: ReadonlySet<string> = new Set(["forbidden"]);
+
+/**
+ * The API's refusals of an approve that no later approve of the same request can get past, while a
+ * Skip still can: `deferral_mismatch`, a request whose deferred checks are not exactly its decision's,
+ * or whose decision cannot be found (DEC-2521). Both are immutable rows, so it never resolves; the
+ * screen withholds Approve and keeps Skip.
+ */
+export const APPROVE_REFUSED: ReadonlySet<string> = new Set(["deferral_mismatch"]);

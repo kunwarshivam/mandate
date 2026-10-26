@@ -1,0 +1,7 @@
+file = "crates/mandate-journal/tests/news_stream.rs"
+test = "a_range_over_the_news_stream_parses"
+reason = """
+The journal's stream-name grammar does not name the news stream yet, so a verification run's range
+over `news:{workspace_id}` is refused `schema` at its `stream_id` rather than parsing. The test fails
+on that behaviour, not at a stub. E2-10's registration (DEC-2278, DEC-2280) deletes this row.
+"""

@@ -1,0 +1,8 @@
+file = "crates/mandate-journal/tests/news_stream.rs"
+test = "every_invalid_news_draft_is_refused_with_its_reason_at_its_path"
+reason = """
+The journal has no news stream yet: `news:{workspace_id}` does not parse as a stream id, so the
+vectors' records are refused `non_canonical` at `stream_id` rather than judged by §9.37's schema
+and rules 283 to 286. The test fails on that behaviour, not at a stub, since the registration adds a
+stream type and a module rather than filling one. E2-10's registration (DEC-2278) deletes this row.
+"""

@@ -143,6 +143,7 @@ pub(crate) fn governs(stream: &StreamId, event_type: &str) -> bool {
     if crate::notices::governs(stream, event_type)
         || crate::gateway::governs(stream, event_type)
         || crate::invalidation::governs(event_type)
+        || crate::retirements::governs(event_type)
         || crate::runs::governs(event_type)
     {
         return true;
@@ -198,6 +199,7 @@ pub(crate) fn closed_schema(
         .or_else(|| crate::membership::schema(event_type, schema_version, stream_type))
         .or_else(|| crate::gateway::schema(event_type, schema_version, stream_type))
         .or_else(|| crate::invalidation::schema(event_type, schema_version, stream_type))
+        .or_else(|| crate::retirements::schema(event_type, schema_version, stream_type))
         .or_else(|| crate::runs::schema(event_type, schema_version, stream_type))
         .or_else(|| crate::risk_limits::schema(event_type, schema_version, stream_type))
         .or_else(|| crate::acknowledgments::schema(event_type, schema_version, stream_type))
@@ -264,6 +266,7 @@ pub(crate) fn payload(
     crate::deployment::rules(event_type, &payload, actor)?;
     crate::gateway::rules(event_type, stream_type, &payload, config_refs, actor)?;
     crate::invalidation::rules(event_type, stream_type, &payload, actor, causation_id)?;
+    crate::retirements::rules(event_type, &payload, actor, causation_id)?;
     crate::runs::rules(event_type, &payload, actor, correlation_id)?;
     crate::backtest_records::rules(event_type, &payload, config_refs, actor)?;
     crate::notices::rules(

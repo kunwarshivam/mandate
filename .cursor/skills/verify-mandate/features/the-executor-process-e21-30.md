@@ -35,6 +35,10 @@
   lost answers in a row or `401`s restrict the account to closing with cause
   `connection_unavailable`, a good answer resets its class, a `403` is not an authorization
   failure, and the counter fuzzed against an independent oracle.
+  `crates/mandate-executord/tests/universe.rs` (DEC-2823): an admitted thesis copied
+  onto the account stream as `UniverseChanged` once, across passes and a restart; in
+  `mandate-executor`, `universe.rs`'s copy tests and its property test that the folded universe is
+  the one the thesis records derive.
   `crates/mandate-executord/tests/broker_input.rs` (DEC-2821): a broker answer the
   core cannot apply holds every agent's openings once, alerts the operator once, and a later kill
   switch still applies; `src/process.rs`'s `a_core_error_is_held_for_a_broker_input_alone`; in
