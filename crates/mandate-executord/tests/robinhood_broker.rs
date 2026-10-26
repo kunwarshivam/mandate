@@ -258,7 +258,7 @@ fn a_submit_is_reviewed_then_placed_through_the_connector() -> Result<(), Error>
         ("rh-1", Some(OPENING), order.qty, Qty::ZERO)
     );
     let place = opening_place()?;
-    assert_eq!(sent(&seam.calls, "place_equity_order"), [place.clone()]);
+    assert_eq!(sent(&seam.calls, "place_equity_order"), std::slice::from_ref(&place));
     assert_eq!(sent(&seam.calls, "review_equity_order"), [reviewed(&place)]);
     let order_calls: Vec<&str> = seam
         .calls
