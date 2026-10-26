@@ -153,8 +153,12 @@ request is served, never at build, and nothing of it is a `NEXT_PUBLIC_` variabl
 | Variable | What it is |
 |---|---|
 | `OWLHEAD_DATA_SOURCE` | `fixtures` (the default when unset) or `api`. Anything else shows the deployment unreachable |
-| `OWLHEAD_API_ORIGIN` | The API's origin, `https://api.owlhead.ai` for the demo; `http` only on a loopback host |
-| `OWLHEAD_WORKSPACE_ID` | The workspace the app reads, until `GET /v1/me/workspaces` is wired |
+| `OWLHEAD_API_ORIGIN` | The API's origin: staging's is `https://api-staging.owlhead.ai` (DEC-2636); `http` only on a loopback host |
+| `OWLHEAD_WORKSPACE_ID` | The workspace the app reads, until `GET /v1/me/workspaces` is wired: staging's is `01KDEM0000000000000000000W` (`deploy/gitops/clusters/staging/workspace.yaml`) |
+
+The deployed Worker reads all three from its own variables, which the founder sets in the Cloudflare
+dashboard (DEC-823 items 4 and 5). Nothing in the repository sets them, and `keep_vars` in
+`wrangler.jsonc` keeps them across deploys. Unset, the Worker serves the fixtures.
 
 Over the API (`src/lib/api-runtime.tsx`) the browser reads the workspace with its own session
 cookie from the documented reads (`src/api/reads.ts`), polls them every five seconds, and sends
