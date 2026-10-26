@@ -23,10 +23,10 @@
 //! and a flatten never consult it, so a missing fact never holds risk reduction (`AGENTS.md`
 //! rule 13).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_canon::Value;
-use mandate_num::{Price, Usd};
+use mandate_num::{Price, Qty, SignedQty, Usd};
 use mandate_time::UtcNanos;
 
 /// One journal row, as its store hands it over, in journal order.
@@ -124,6 +124,10 @@ pub struct Journaled {
     mandate: Option<String>,
     account: Option<AccountFacts>,
     marks: BTreeMap<String, Latest>,
+    requested_by: Option<String>,
+    orders: BTreeSet<String>,
+    fills: BTreeSet<String>,
+    positions: BTreeMap<String, SignedQty>,
     unreadable: bool,
 }
 
@@ -136,6 +140,10 @@ impl Journaled {
             mandate: None,
             account: None,
             marks: BTreeMap::new(),
+            requested_by: None,
+            orders: BTreeSet::new(),
+            fills: BTreeSet::new(),
+            positions: BTreeMap::new(),
             unreadable: false,
         }
     }
@@ -148,6 +156,17 @@ impl Journaled {
             self.unreadable = true;
         }
         folded
+    }
+
+    /// The agent's sub-ledger: per instrument, the quantity its own fills hold, only where it is
+    /// above zero. A flatten sells it with or without the facts an opening needs (DEC-2378
+    /// item 7, `AGENTS.md` rule 13); the executor caps every sell at what the account holds.
+    pub fn held(&self) -> BTreeMap<String, Qty> {
+        self.positions
+            .iter()
+            .filter(|(_, qty)| !qty.is_negative() && **qty != SignedQty::ZERO)
+            .map(|(instrument, qty)| (instrument.clone(), qty.abs()))
+            .collect()
     }
 
     /// The latest risk clock on the account stream.
@@ -228,6 +247,16 @@ impl Journaled {
                 });
             }
             ("MarkUpdated", Some(at)) => self.mark(&payload, at)?,
+            ("OrderRequestRecorded", _) if on_account => {
+                self.requested_by = Some(payload.text("agent_id")?.to_owned());
+            }
+            ("OrderSubmitted", _) if on_account => {
+                let order = payload.text("client_order_id")?.to_owned();
+                if self.requested_by.take().as_deref() == Some(self.agent.as_str()) {
+                    self.orders.insert(order);
+                }
+            }
+            ("FillApplied" | "LateFillApplied", _) if on_account => self.fill(&payload)?,
             _ => {}
         }
         Ok(())
@@ -262,6 +291,32 @@ impl Journaled {
         }
         self.now = Some(at);
         Ok(Some(at))
+    }
+
+    /// A fill of one of the agent's own orders, each `fill_id` once. An order is the agent's when
+    /// the `OrderRequestRecorded` journaled immediately before its `OrderSubmitted` names the agent
+    /// (journal spec rule 45).
+    fn fill(&mut self, payload: &Payload<'_>) -> Result<(), Unreadable> {
+        if !self.orders.contains(payload.text("client_order_id")?) {
+            return Ok(());
+        }
+        let id = payload.text("fill_id")?.to_owned();
+        let qty =
+            Qty::parse(payload.text("qty_gross")?).map_err(|_| (payload.refused)("qty_gross"))?;
+        let signed = match payload.text("side")? {
+            "buy" => SignedQty::from(qty),
+            "sell" => SignedQty::from(qty).negated(),
+            _ => return Err((payload.refused)("side")),
+        };
+        if !self.fills.insert(id) {
+            return Ok(());
+        }
+        let instrument = payload.text("instrument_id")?.to_owned();
+        let position = self.positions.entry(instrument).or_insert(SignedQty::ZERO);
+        *position = position
+            .checked_add(signed)
+            .map_err(|_| (payload.refused)("qty_gross"))?;
+        Ok(())
     }
 
     fn mark(&mut self, payload: &Payload<'_>, at: UtcNanos) -> Result<(), Unreadable> {
