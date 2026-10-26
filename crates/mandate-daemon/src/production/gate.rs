@@ -96,15 +96,14 @@ impl Gate {
         self
     }
 
-    /// The advisory pass of the opening `proposal` over the fold, with [`UNJOURNALED`] and [`UNSEEN`]
-    /// deferred,
-    /// or the reason it could not be evaluated: `rule_set_unavailable`, `facts_held` for a fact
-    /// the fold holds, `working_orders_unseen` while any order of the agent's works, whose cost
-    /// the fold cannot see, and `gate_refused` when the gate refuses to evaluate it or types it as
-    /// anything but an opening or an increase, so a proposal labelled as adding risk is never
-    /// judged as an exit, which defers nothing (DEC-2388 item 6). The mandate version in force in
-    /// the fold must be the one this gate was built on: after an applied change the opening is
-    /// `facts_held` until the process restarts on the new version.
+    /// The advisory pass of the opening `proposal` over the fold, with [`UNJOURNALED`] and
+    /// [`UNSEEN`] deferred, or the reason it could not be evaluated: `rule_set_unavailable`,
+    /// `facts_held` for a fact the fold holds, `working_orders_unseen` while any order of the
+    /// agent's works, whose cost the fold cannot see, and `gate_refused` when the gate refuses to
+    /// evaluate it or types it as anything but an opening or an increase, so a proposal labelled as
+    /// adding risk is never judged as an exit, which defers nothing (DEC-2388 item 6). The mandate
+    /// version in force in the fold must be the one this gate was built on: after an applied change
+    /// the opening is `facts_held` until the process restarts on the new version.
     ///
     /// # Errors
     /// The reason code the dry run journals.
@@ -292,7 +291,8 @@ impl Gate {
 
     /// The liquidity figures of `proposal`'s instrument at `now`, the fold's risk clock, read only
     /// for a proposal labelled an opening or an increase in a pinned US equity, by its symbol: the
-    /// stored bars are US equities' alone. An exit never reads them (`AGENTS.md` rule 13, DEC-2274 item 3).
+    /// stored bars are US equities' alone. An exit never reads them (`AGENTS.md` rule 13,
+    /// DEC-2274 item 3).
     fn figures(&self, proposal: &Proposal, now: UtcNanos) -> Option<LiquidityFacts> {
         if proposal.asset_class != AssetClass::UsEquity {
             return None;

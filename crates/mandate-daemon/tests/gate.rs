@@ -763,13 +763,16 @@ fn gate_reading(rows: &Rows, facts: Option<LiquidityFacts>) -> (Gate, Rc<Cell<u3
     (gate, reads)
 }
 
+/// A gate with the count of its reads and the purposes it read for.
+type ReadingGate = (Gate, Rc<Cell<u32>>, Rc<RefCell<Vec<GatePurpose>>>);
+
 /// A gate over `rows` under the gate configuration `config`, reading `facts`, with the count of
 /// its reads and the purposes it read for.
 fn gate_reading_under(
     rows: &Rows,
     facts: Option<LiquidityFacts>,
     config: GateConfig,
-) -> (Gate, Rc<Cell<u32>>, Rc<RefCell<Vec<GatePurpose>>>) {
+) -> ReadingGate {
     let reads = Rc::new(Cell::new(0));
     let purposes = Rc::new(RefCell::new(Vec::new()));
     let fold = Facts::new(CLOCK, AGENT);
