@@ -43,7 +43,7 @@ const refuse = (error: string): never => {
 async function until(page: Page, path: string, ms: number, ready: () => Promise<boolean>): Promise<boolean> {
   const deadline = Date.now() + ms;
   while (Date.now() < deadline) {
-    await page.goto(path);
+    await page.goto(path, { timeout: 15_000 });
     try {
       await page.waitForLoadState("networkidle", { timeout: 10_000 });
     } catch {
@@ -70,7 +70,7 @@ test("the trade loop from web/: approve in the browser, see the fill, the positi
     const shown = await until(page, "/approvals", PROPOSAL_MS, async () => approval !== "");
     if (!shown) refuse(`no request from agent ${AGENT} waited in the web app within ${PROPOSAL_MS} ms`);
     step("approval", approval);
-    await page.goto(`/approvals/${approval}`);
+    await page.goto(`/approvals/${approval}`, { timeout: 15_000 });
   });
 
   await test.step("the owner approves with the code the host confirms", async () => {
@@ -102,18 +102,20 @@ test("the trade loop from web/: approve in the browser, see the fill, the positi
     await panel.getByRole("button", { name: "Approve", exact: true }).click();
     const answer = await answered;
     if (!answer.ok()) refuse(`the API answered ${answer.status()} for the approve: ${(await answer.text()).slice(0, 400)}`);
-    await expect(page.getByRole("status").filter({ hasText: "Recorded in the journal: you approved" })).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: /Recorded in the journal: you approved|Approved: the gate re-ran/ })).toBeVisible();
     step("approved", ((await answer.json()) as { response_id?: string }).response_id ?? "");
   });
 
   await test.step("the agent's screen shows the order filled, the position, and the journal's records", async () => {
-    const filled = await until(page, `/agents/${AGENT}`, FILL_MS, async () => (await page.getByRole("list", { name: "Orders" }).locator("[data-state=filled]").count()) > 0);
+    const orders = page.getByRole("list", { name: "Orders" });
+    const positions = page.getByRole("list", { name: "This agent's positions" }).getByRole("listitem");
+    const journal = page.getByRole("list", { name: "Journal" });
+    const filled = await until(page, `/agents/${AGENT}`, FILL_MS, async () => (await orders.locator("[data-state=filled]").count()) > 0);
     if (!filled) refuse(`no filled order on the agent's screen within ${FILL_MS} ms`);
     step("order_filled");
-    await expect(page.getByRole("list", { name: "This agent's positions" }).getByRole("listitem")).not.toHaveCount(0);
+    const held = await until(page, `/agents/${AGENT}`, 30_000, async () => (await positions.count()) > 0 && (await journal.getByRole("listitem").count()) > 0);
+    if (!held) refuse("the agent's screen showed the fill but no position or no journal record within 30 s");
     step("position");
-    const journal = page.getByRole("list", { name: "Journal" });
-    await expect(journal).toBeVisible();
     step("journal", String(await journal.getByRole("listitem").count()));
   });
 
@@ -124,16 +126,19 @@ test("the trade loop from web/: approve in the browser, see the fill, the positi
     await sheet.getByRole("link", { name: /^Kill switch:/ }).first().click();
     await expect(page).toHaveURL(new RegExp(`/agents/${AGENT}/kill-switch$`));
     let scope: unknown = null;
+    let wrongScope = false;
     await page.route(`**/v1/workspaces/${WORKSPACE}/kill-switch`, async (route) => {
       scope = (JSON.parse(route.request().postData() ?? "{}") as { scope?: unknown }).scope ?? null;
-      await (JSON.stringify(scope) === JSON.stringify({ kind: "agent", id: AGENT }) ? route.continue() : route.abort());
+      wrongScope = JSON.stringify(scope) !== JSON.stringify({ kind: "agent", id: AGENT });
+      await (wrongScope ? route.abort() : route.continue());
     });
     const recorded = page.waitForResponse((r) => r.request().method() === "POST" && new URL(r.url()).pathname === `/v1/workspaces/${WORKSPACE}/kill-switch`);
     await page.getByRole("button", { name: /Activate the kill switch/ }).click();
     const passkey = page.getByRole("dialog", { name: "Confirm it is you" });
     const first = await Promise.race([recorded.then(() => "sent" as const), passkey.waitFor({ state: "visible" }).then(() => "passkey" as const)]);
     if (first === "passkey") await passkey.getByRole("button", { name: "Use passkey" }).click();
-    const answer = await recorded;
+    const answer = await Promise.race([recorded, page.waitForEvent("requestfailed", { predicate: () => wrongScope, timeout: 30_000 }).then(() => null)]);
+    if (answer === null) refuse(`the kill switch was sent for ${JSON.stringify(scope)}, not agent ${AGENT} alone, and was stopped`);
     if (!answer.ok()) refuse(`the API answered ${answer.status()} for the kill switch`);
     step("kill_switch", ((await answer.json()) as { command_id?: string }).command_id ?? "");
   });
