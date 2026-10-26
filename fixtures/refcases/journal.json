@@ -106669,7 +106669,7 @@
    },
    {
     "name": "requested.at_version_3",
-    "clause": "§9.28: schema versions 1 and 2 only (v0.100)",
+    "clause": "§9.28: schema versions 1 and 2 only (v0.102)",
     "base_draft": "requested",
     "changes": [
      {
@@ -107317,7 +107317,7 @@
    },
    {
     "name": "acknowledged.at_version_3",
-    "clause": "§9.28: schema versions 1 and 2 only (v0.100)",
+    "clause": "§9.28: schema versions 1 and 2 only (v0.102)",
     "base_draft": "acknowledged",
     "changes": [
      {
@@ -139117,7 +139117,7 @@
   ]
  },
  "restriction_lifts": {
-  "spec": "docs/specs/journal.md v0.100 §9.5 rules 309 to 312 and §9.28 version 2 (DEC-2824)",
+  "spec": "docs/specs/journal.md v0.102 §9.5 rules 309 to 312 and §9.28 version 2 (DEC-2824)",
   "drafts": {
    "lifted_broker": {
     "envelope_version": 1,
@@ -145464,6 +145464,34 @@
      {
       "envelope_version": 1,
       "environment": "paper",
+      "event_id": "01JBCS00009000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "ConnectionStateChanged",
+      "schema_version": 1,
+      "event_time": "2026-10-26T15:00:00.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBCP00001000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_01",
+       "from": "degraded",
+       "to": "active",
+       "reason": "acknowledged",
+       "risk_clock": "2026-10-26T15:00:01.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
       "event_id": "01JBXT00001000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "AccountRestrictionLifted",
@@ -145492,7 +145520,7 @@
     ],
     "expect": {
      "outcome": "Invalid",
-     "index": 3,
+     "index": 4,
      "reason": "schema",
      "path": "payload.evidence"
     }
@@ -145596,6 +145624,34 @@
      {
       "envelope_version": 1,
       "environment": "paper",
+      "event_id": "01JBCS00009000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "ConnectionStateChanged",
+      "schema_version": 1,
+      "event_time": "2026-10-26T15:00:00.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBCP00001000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_01",
+       "from": "degraded",
+       "to": "active",
+       "reason": "acknowledged",
+       "risk_clock": "2026-10-26T15:00:01.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
       "event_id": "01JBXT00001000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "AccountRestrictionLifted",
@@ -145624,7 +145680,7 @@
     ],
     "expect": {
      "outcome": "Invalid",
-     "index": 3,
+     "index": 4,
      "reason": "schema",
      "path": "payload.evidence"
     }
@@ -145756,6 +145812,34 @@
      {
       "envelope_version": 1,
       "environment": "paper",
+      "event_id": "01JBCS00009000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "ConnectionStateChanged",
+      "schema_version": 1,
+      "event_time": "2026-10-26T15:00:00.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBCP00001000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_01",
+       "from": "degraded",
+       "to": "active",
+       "reason": "acknowledged",
+       "risk_clock": "2026-10-26T15:00:01.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
       "event_id": "01JBXT00001000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "AccountRestrictionLifted",
@@ -145784,7 +145868,7 @@
     ],
     "expect": {
      "outcome": "Invalid",
-     "index": 4,
+     "index": 5,
      "reason": "schema",
      "path": "payload.evidence"
     }
@@ -145916,6 +146000,326 @@
      {
       "envelope_version": 1,
       "environment": "paper",
+      "event_id": "01JBCS00009000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "ConnectionStateChanged",
+      "schema_version": 1,
+      "event_time": "2026-10-26T15:00:00.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBCP00001000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_01",
+       "from": "suspended",
+       "to": "active",
+       "reason": "acknowledged",
+       "risk_clock": "2026-10-26T15:00:01.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBXT00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AccountRestrictionLifted",
+      "schema_version": 1,
+      "event_time": "2026-10-26T15:00:00.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBCP00001000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "cause": "connection_unavailable",
+       "acknowledgment": "01JBCP00001000000000000000",
+       "evidence": "01JBCS00001000000000000000",
+       "restriction": "active",
+       "risk_clock": "2026-10-26T15:00:01.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "index": 5,
+     "reason": "schema",
+     "path": "payload.evidence"
+    }
+   },
+   {
+    "name": "the_connection_without_its_acknowledged_change",
+    "clause": "rule 312: the connection's `acknowledged` change comes first",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBRS00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AccountRestrictionChanged",
+      "schema_version": 1,
+      "event_time": "2026-10-26T15:00:00.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "restriction": "closing_only",
+       "cause": "connection_unavailable",
+       "reason_code": "account_restricted",
+       "risk_clock": "2026-10-26T15:00:01.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBCS00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "ConnectionStateChanged",
+      "schema_version": 1,
+      "event_time": "2026-10-26T15:00:00.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_01",
+       "from": "degraded",
+       "to": "degraded",
+       "reason": "condition_cleared",
+       "risk_clock": "2026-10-26T15:00:01.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBCP00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 2,
+      "event_time": "2026-10-26T15:00:00.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBAK00001000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBRS00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00001",
+        "authenticated_at": 1792339250,
+        "method": "cli_confirm"
+       },
+       "subject": "restriction"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBXT00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AccountRestrictionLifted",
+      "schema_version": 1,
+      "event_time": "2026-10-26T15:00:00.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBCP00001000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "cause": "connection_unavailable",
+       "acknowledgment": "01JBCP00001000000000000000",
+       "evidence": "01JBCS00001000000000000000",
+       "restriction": "active",
+       "risk_clock": "2026-10-26T15:00:01.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "index": 3,
+     "reason": "schema",
+     "path": "payload.evidence"
+    }
+   },
+   {
+    "name": "the_connection_acknowledged_by_another",
+    "clause": "rule 312: the `acknowledged` change is caused by this copy",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBRS00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AccountRestrictionChanged",
+      "schema_version": 1,
+      "event_time": "2026-10-26T15:00:00.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "restriction": "closing_only",
+       "cause": "connection_unavailable",
+       "reason_code": "account_restricted",
+       "risk_clock": "2026-10-26T15:00:01.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBCS00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "ConnectionStateChanged",
+      "schema_version": 1,
+      "event_time": "2026-10-26T15:00:00.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_01",
+       "from": "degraded",
+       "to": "degraded",
+       "reason": "condition_cleared",
+       "risk_clock": "2026-10-26T15:00:01.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBCP00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 2,
+      "event_time": "2026-10-26T15:00:00.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBAK00001000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBRS00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00001",
+        "authenticated_at": 1792339250,
+        "method": "cli_confirm"
+       },
+       "subject": "restriction"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBCS00009000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "ConnectionStateChanged",
+      "schema_version": 1,
+      "event_time": "2026-10-26T15:00:00.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBCP00007000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_01",
+       "from": "degraded",
+       "to": "active",
+       "reason": "acknowledged",
+       "risk_clock": "2026-10-26T15:00:01.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
       "event_id": "01JBXT00001000000000000000",
       "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
       "event_type": "AccountRestrictionLifted",
@@ -145947,6 +146351,809 @@
      "index": 4,
      "reason": "schema",
      "path": "payload.evidence"
+    }
+   },
+   {
+    "name": "the_connection_degraded_before_the_acknowledgment",
+    "clause": "rule 312: no degradation after the clearance",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBRS00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AccountRestrictionChanged",
+      "schema_version": 1,
+      "event_time": "2026-10-26T15:00:00.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "restriction": "closing_only",
+       "cause": "connection_unavailable",
+       "reason_code": "account_restricted",
+       "risk_clock": "2026-10-26T15:00:01.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBCS00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "ConnectionStateChanged",
+      "schema_version": 1,
+      "event_time": "2026-10-26T15:00:00.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_01",
+       "from": "degraded",
+       "to": "degraded",
+       "reason": "condition_cleared",
+       "risk_clock": "2026-10-26T15:00:01.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBCS00003000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "ConnectionStateChanged",
+      "schema_version": 1,
+      "event_time": "2026-10-26T15:00:00.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_01",
+       "from": "degraded",
+       "to": "degraded",
+       "reason": "network_errors",
+       "risk_clock": "2026-10-26T15:00:01.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBCP00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 2,
+      "event_time": "2026-10-26T15:00:00.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBAK00001000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBRS00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00001",
+        "authenticated_at": 1792339250,
+        "method": "cli_confirm"
+       },
+       "subject": "restriction"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBCS00009000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "ConnectionStateChanged",
+      "schema_version": 1,
+      "event_time": "2026-10-26T15:00:00.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBCP00001000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "connection_id": "conn_01",
+       "from": "degraded",
+       "to": "active",
+       "reason": "acknowledged",
+       "risk_clock": "2026-10-26T15:00:01.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBXT00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AccountRestrictionLifted",
+      "schema_version": 1,
+      "event_time": "2026-10-26T15:00:00.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBCP00001000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "cause": "connection_unavailable",
+       "acknowledgment": "01JBCP00001000000000000000",
+       "evidence": "01JBCS00001000000000000000",
+       "restriction": "active",
+       "risk_clock": "2026-10-26T15:00:01.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "index": 5,
+     "reason": "schema",
+     "path": "payload.evidence"
+    }
+   },
+   {
+    "name": "a_clean_report_contradicted",
+    "clause": "rule 312: the evidence is the latest report before the lift",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBRS00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AccountRestrictionChanged",
+      "schema_version": 1,
+      "event_time": "2026-10-26T15:00:00.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "restriction": "blocked",
+       "cause": "broker_notice",
+       "reason_code": "account_trading_blocked",
+       "risk_clock": "2026-10-26T15:00:01.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBCP00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 2,
+      "event_time": "2026-10-26T15:00:00.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBAK00001000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBRS00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00001",
+        "authenticated_at": 1792339250,
+        "method": "cli_confirm"
+       },
+       "subject": "restriction"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBAS00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AccountStateObserved",
+      "schema_version": 1,
+      "event_time": "2026-10-26T15:00:00.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "status": "ACTIVE",
+       "trading_blocked": false,
+       "account_blocked": false,
+       "trade_suspended_by_user": false,
+       "crypto_status": "ACTIVE",
+       "multiplier": 1,
+       "equity": "1000",
+       "cash": "1000",
+       "buying_power": "1000",
+       "non_marginable_buying_power": "1000",
+       "accrued_fees": "0",
+       "risk_clock": "2026-10-26T15:00:01.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBAS00002000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AccountStateObserved",
+      "schema_version": 1,
+      "event_time": "2026-10-26T15:00:00.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "status": "ACTIVE",
+       "trading_blocked": false,
+       "account_blocked": true,
+       "trade_suspended_by_user": false,
+       "crypto_status": "ACTIVE",
+       "multiplier": 1,
+       "equity": "1000",
+       "cash": "1000",
+       "buying_power": "1000",
+       "non_marginable_buying_power": "1000",
+       "accrued_fees": "0",
+       "risk_clock": "2026-10-26T15:00:01.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBXT00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AccountRestrictionLifted",
+      "schema_version": 1,
+      "event_time": "2026-10-26T15:00:00.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBCP00001000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "cause": "broker_notice",
+       "acknowledgment": "01JBCP00001000000000000000",
+       "evidence": "01JBAS00001000000000000000",
+       "restriction": "active",
+       "risk_clock": "2026-10-26T15:00:01.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "index": 4,
+     "reason": "schema",
+     "path": "payload.evidence"
+    }
+   },
+   {
+    "name": "a_report_after_the_lift",
+    "clause": "rule 312: the evidence comes before the lift",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBRS00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AccountRestrictionChanged",
+      "schema_version": 1,
+      "event_time": "2026-10-26T15:00:00.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "restriction": "closing_only",
+       "cause": "broker_reject",
+       "reason_code": "account_restricted",
+       "risk_clock": "2026-10-26T15:00:01.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBCP00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 2,
+      "event_time": "2026-10-26T15:00:00.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBAK00001000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBRS00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00001",
+        "authenticated_at": 1792339250,
+        "method": "cli_confirm"
+       },
+       "subject": "restriction"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBXT00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AccountRestrictionLifted",
+      "schema_version": 1,
+      "event_time": "2026-10-26T15:00:00.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBCP00001000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "cause": "broker_reject",
+       "acknowledgment": "01JBCP00001000000000000000",
+       "evidence": "01JBAS00001000000000000000",
+       "restriction": "active",
+       "risk_clock": "2026-10-26T15:00:01.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBAS00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AccountStateObserved",
+      "schema_version": 1,
+      "event_time": "2026-10-26T15:00:00.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "status": "ACTIVE",
+       "trading_blocked": false,
+       "account_blocked": false,
+       "trade_suspended_by_user": false,
+       "crypto_status": "ACTIVE",
+       "multiplier": 1,
+       "equity": "1000",
+       "cash": "1000",
+       "buying_power": "1000",
+       "non_marginable_buying_power": "1000",
+       "accrued_fees": "0",
+       "risk_clock": "2026-10-26T15:00:01.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "index": 2,
+     "reason": "schema",
+     "path": "payload.evidence"
+    }
+   },
+   {
+    "name": "an_acknowledgment_after_the_lift",
+    "clause": "rule 311: the acknowledgment comes before the lift",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBRS00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AccountRestrictionChanged",
+      "schema_version": 1,
+      "event_time": "2026-10-26T15:00:00.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "restriction": "closing_only",
+       "cause": "broker_reject",
+       "reason_code": "account_restricted",
+       "risk_clock": "2026-10-26T15:00:01.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBAS00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AccountStateObserved",
+      "schema_version": 1,
+      "event_time": "2026-10-26T15:00:00.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "status": "ACTIVE",
+       "trading_blocked": false,
+       "account_blocked": false,
+       "trade_suspended_by_user": false,
+       "crypto_status": "ACTIVE",
+       "multiplier": 1,
+       "equity": "1000",
+       "cash": "1000",
+       "buying_power": "1000",
+       "non_marginable_buying_power": "1000",
+       "accrued_fees": "0",
+       "risk_clock": "2026-10-26T15:00:01.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBXT00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AccountRestrictionLifted",
+      "schema_version": 1,
+      "event_time": "2026-10-26T15:00:00.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBCP00001000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "cause": "broker_reject",
+       "acknowledgment": "01JBCP00001000000000000000",
+       "evidence": "01JBAS00001000000000000000",
+       "restriction": "active",
+       "risk_clock": "2026-10-26T15:00:01.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBCP00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 2,
+      "event_time": "2026-10-26T15:00:00.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBAK00001000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBRS00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00001",
+        "authenticated_at": 1792339250,
+        "method": "cli_confirm"
+       },
+       "subject": "restriction"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Invalid",
+     "index": 2,
+     "reason": "schema",
+     "path": "payload.acknowledgment"
+    }
+   },
+   {
+    "name": "two_closing_causes_one_lifts",
+    "clause": "rule 310: a lift beside an equal cause leaves the state unchanged",
+    "records": [
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBRS00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AccountRestrictionChanged",
+      "schema_version": 1,
+      "event_time": "2026-10-26T15:00:00.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "restriction": "closing_only",
+       "cause": "broker_reject",
+       "reason_code": "account_restricted",
+       "risk_clock": "2026-10-26T15:00:01.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBRS00002000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AccountRestrictionChanged",
+      "schema_version": 1,
+      "event_time": "2026-10-26T15:00:00.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "restriction": "closing_only",
+       "cause": "broker_notice",
+       "reason_code": "account_restricted",
+       "risk_clock": "2026-10-26T15:00:01.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBCP00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "OwnerAcknowledged",
+      "schema_version": 2,
+      "event_time": "2026-10-26T15:00:00.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBAK00001000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "agent": "agent_a",
+       "event": "01JBRS00001000000000000000",
+       "user": "user_owner_01",
+       "requested_by": "user_owner_01",
+       "independent_required": false,
+       "request": null,
+       "submitted_at": 1792339260,
+       "risk_clock": "2026-10-18T16:01:00.000000000Z",
+       "step_up": {
+        "assertion_id": "assert_ak00001",
+        "authenticated_at": 1792339250,
+        "method": "cli_confirm"
+       },
+       "subject": "restriction"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBAS00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AccountStateObserved",
+      "schema_version": 1,
+      "event_time": "2026-10-26T15:00:00.250000000Z",
+      "clock_source": "local",
+      "causation_id": null,
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "status": "ACTIVE",
+       "trading_blocked": false,
+       "account_blocked": false,
+       "trade_suspended_by_user": false,
+       "crypto_status": "ACTIVE",
+       "multiplier": 1,
+       "equity": "1000",
+       "cash": "1000",
+       "buying_power": "1000",
+       "non_marginable_buying_power": "1000",
+       "accrued_fees": "0",
+       "risk_clock": "2026-10-26T15:00:01.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     },
+     {
+      "envelope_version": 1,
+      "environment": "paper",
+      "event_id": "01JBXT00001000000000000000",
+      "stream_id": "acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1",
+      "event_type": "AccountRestrictionLifted",
+      "schema_version": 1,
+      "event_time": "2026-10-26T15:00:00.250000000Z",
+      "clock_source": "local",
+      "causation_id": "01JBCP00001000000000000000",
+      "correlation_id": null,
+      "actor": {
+       "kind": "system",
+       "id": "executor",
+       "version": "0.1.0",
+       "build": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "config_refs": {},
+      "payload": {
+       "cause": "broker_reject",
+       "acknowledgment": "01JBCP00001000000000000000",
+       "evidence": "01JBAS00001000000000000000",
+       "restriction": "closing_only",
+       "risk_clock": "2026-10-26T15:00:01.000000000Z"
+      },
+      "artifact_refs": [],
+      "pii_refs": []
+     }
+    ],
+    "expect": {
+     "outcome": "Valid"
     }
    },
    {

@@ -55,6 +55,7 @@
             "agent_held",
             "retirement_held",
             "account_restriction",
+            "connection_unavailable",
             "protection",
             "exit_stalled",
             "reconciliation",

@@ -1,4 +1,4 @@
-- **E7-2y (In progress; L1; [DEC-2824](../decisions/DEC-2824.md), journal v0.100)** As an owner, I want an account restriction lifted when
+- **E7-2y (In progress; L1; [DEC-2824](../decisions/DEC-2824.md), journal v0.102)** As an owner, I want an account restriction lifted when
   each of its causes clears, as trading spec §7.3's "Lifts when" says, so that a restricted account
   trades again once the broker and I have both cleared it. Today nothing lifts a restriction: the
   executor's account state never returns to active, and no journaled acknowledgment can name a

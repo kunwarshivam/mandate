@@ -1,4 +1,4 @@
-"""Journal spec v0.100's reference vectors for lifting an account restriction (DEC-2824): §9.5's
+"""Journal spec v0.102's reference vectors for lifting an account restriction (DEC-2824): §9.5's
 `AccountRestrictionLifted`, §9.28's acknowledgment records at version 2, whose `subject` lets an
 acknowledgment name an `AccountRestrictionChanged`, and the account stream's rules 309 (amended),
 310, 311 and 312.
@@ -37,7 +37,7 @@ from control import (
     valid as control_valid,
 )
 
-SPEC = "docs/specs/journal.md v0.100 §9.5 rules 309 to 312 and §9.28 version 2 (DEC-2824)"
+SPEC = "docs/specs/journal.md v0.102 §9.5 rules 309 to 312 and §9.28 version 2 (DEC-2824)"
 ACCOUNT = account_restrictions.ACCOUNT
 AT = account_restrictions.AT
 RISK_CLOCK = account_restrictions.RISK_CLOCK
@@ -290,7 +290,7 @@ def _acknowledged(records, position, i, p, skip) -> bool:
     acknowledgment naming a record of the cause that stands to the lift, and unrefused. A lift ends
     its record's standing, so an acknowledgment lifts once."""
     at = position.get(p["acknowledgment"])
-    if at is None or at >= i:
+    if at is None or (at >= i and "311.before_lift" not in skip):
         return False
     copy_ = records[at]
     if copy_["event_type"] != "OwnerAcknowledged":
@@ -300,10 +300,12 @@ def _acknowledged(records, position, i, p, skip) -> bool:
     ):
         return False
     trigger_at = position.get(copy_["payload"]["event"])
-    if trigger_at is None or trigger_at >= at:
+    if trigger_at is None or (trigger_at >= at and "311.trigger_before_copy" not in skip):
         return False
     trigger = records[trigger_at]
-    if trigger["event_type"] != "AccountRestrictionChanged" or trigger["payload"]["cause"] != p["cause"]:
+    if trigger["event_type"] != "AccountRestrictionChanged":
+        return False
+    if trigger["payload"]["cause"] != p["cause"] and "311.cause" not in skip:
         return False
     stands_until = i if "311.stands_to_the_copy" not in skip else at
     if "311.stands" not in skip:
@@ -326,7 +328,7 @@ def _acknowledged(records, position, i, p, skip) -> bool:
 def _evidenced(records, position, i, p, skip) -> bool:
     """Rule 312: the evidence completes the lift for its cause, in the order §7.3 says."""
     at = position.get(p["evidence"])
-    if at is None or at >= i:
+    if at is None or (at >= i and "312.before_lift" not in skip):
         return False
     evidence = records[at]
     ack_at = position[p["acknowledgment"]]
@@ -334,6 +336,8 @@ def _evidenced(records, position, i, p, skip) -> bool:
         if evidence["event_type"] != "AccountStateObserved":
             return False
         if at <= ack_at and "312.after_ack" not in skip:
+            return False
+        if "312.latest" not in skip and any(r["event_type"] == "AccountStateObserved" for r in records[at + 1 : i]):
             return False
         return _clean(evidence["payload"], skip)
     if evidence["event_type"] != "ConnectionStateChanged" or evidence["payload"]["reason"] != "condition_cleared":
@@ -345,7 +349,14 @@ def _evidenced(records, position, i, p, skip) -> bool:
         for later in records[at + 1 : i]:
             if later["event_type"] == "ConnectionStateChanged" and later["payload"]["to"] in ("degraded", "suspended"):
                 return False
-    return True
+    if "312.connection.acknowledged" in skip:
+        return True
+    return any(
+        r["event_type"] == "ConnectionStateChanged"
+        and r["payload"]["reason"] == "acknowledged"
+        and r["causation_id"] == p["acknowledgment"]
+        for r in records[ack_at + 1 : i]
+    )
 
 
 # --------------------------------------------------------------------------- streams
@@ -470,16 +481,36 @@ def stream_cases() -> list[dict]:
              3, evid),
         case("the_connection_cleared_after_the_acknowledgment", f"{RULE_312}: cleared first, then acknowledged",
              [r(1, CLOSING, CONNECTION), ack_copy(1, rs(1)), cs(1, "degraded", "degraded", "condition_cleared"),
-              lift(1, CONNECTION, cp(1), csid(1), ACTIVE)], 3, evid),
+              cs(9, "degraded", "active", "acknowledged", uid("CP", 1)), lift(1, CONNECTION, cp(1), csid(1), ACTIVE)], 4, evid),
         case("the_connection_cleared_before_its_restriction", f"{RULE_312}: a clearance before the cause is not its",
              [cs(1, "degraded", "degraded", "condition_cleared"), r(1, CLOSING, CONNECTION), ack_copy(1, rs(1)),
-              lift(1, CONNECTION, cp(1), csid(1), ACTIVE)], 3, evid),
+              cs(9, "degraded", "active", "acknowledged", uid("CP", 1)), lift(1, CONNECTION, cp(1), csid(1), ACTIVE)], 4, evid),
         case("the_connection_degraded_again", f"{RULE_312}: no degradation after the clearance",
-             [*connected[:3], cs(3, "degraded", "degraded", "network_errors"),
-              lift(1, CONNECTION, cp(1), csid(1), ACTIVE)], 4, evid),
+             [*connected[:3], cs(3, "degraded", "degraded", "network_errors"), cs(9, "degraded", "active", "acknowledged", uid("CP", 1)),
+              lift(1, CONNECTION, cp(1), csid(1), ACTIVE)], 5, evid),
         case("the_connection_suspended_again", f"{RULE_312}: nor a suspension",
              [*connected[:3], cs(3, "degraded", "suspended", "credential_expired"),
+              cs(9, "suspended", "active", "acknowledged", uid("CP", 1)), lift(1, CONNECTION, cp(1), csid(1), ACTIVE)],
+             5, evid),
+        case("the_connection_without_its_acknowledged_change", f"{RULE_312}: the connection's `acknowledged` change comes first",
+             [*connected[:3], lift(1, CONNECTION, cp(1), csid(1), ACTIVE)], 3, evid),
+        case("the_connection_acknowledged_by_another", f"{RULE_312}: the `acknowledged` change is caused by this copy",
+             [*connected[:3], cs(9, "degraded", "active", "acknowledged", uid("CP", 7)),
               lift(1, CONNECTION, cp(1), csid(1), ACTIVE)], 4, evid),
+        case("the_connection_degraded_before_the_acknowledgment", f"{RULE_312}: no degradation after the clearance",
+             [r(1, CLOSING, CONNECTION), cs(1, "degraded", "degraded", "condition_cleared"),
+              cs(3, "degraded", "degraded", "network_errors"), ack_copy(1, rs(1)), cs(9, "degraded", "active", "acknowledged", uid("CP", 1)),
+              lift(1, CONNECTION, cp(1), csid(1), ACTIVE)], 5, evid),
+        case("a_clean_report_contradicted", f"{RULE_312}: the evidence is the latest report before the lift",
+             [r(1, BLOCKED, NOTICE), ack_copy(1, rs(1)), obs(1), obs(2, account_blocked=True),
+              lift(1, NOTICE, cp(1), ob(1), ACTIVE)], 4, evid),
+        case("a_report_after_the_lift", f"{RULE_312}: the evidence comes before the lift",
+             [*broker[:2], lift(1, REJECT, cp(1), ob(1), ACTIVE), obs(1)], 2, evid),
+        case("an_acknowledgment_after_the_lift", f"{RULE_311}: the acknowledgment comes before the lift",
+             [r(1, CLOSING, REJECT), obs(1), lift(1, REJECT, cp(1), ob(1), ACTIVE), ack_copy(1, rs(1))], 2, ack),
+        case("two_closing_causes_one_lifts", f"{RULE_310}: a lift beside an equal cause leaves the state unchanged",
+             [r(1, CLOSING, REJECT), r(2, CLOSING, NOTICE), ack_copy(1, rs(1)), obs(1),
+              lift(1, REJECT, cp(1), ob(1), CLOSING)]),
         case("the_connection_on_an_acknowledged_change", f"{RULE_312}: the evidence is `condition_cleared`",
              [*connected, lift(1, CONNECTION, cp(1), csid(2), ACTIVE)], 4, evid),
     ]
@@ -544,13 +575,19 @@ def oracle(records: list[dict]) -> dict | None:
             continue
         e = by_id.get(p["evidence"])
         if cause in BROKER:
+            last_report = next((j for j in range(i - 1, -1, -1) if events[j][1] == "AccountStateObserved"), None)
             good_evidence = (
                 e is not None
-                and a[0] < e[0] < i
-                and e[1]["event_type"] == "AccountStateObserved"
+                and e[0] == last_report
+                and a[0] < e[0]
                 and all(e[1]["payload"][m] == CLEAN[m] for m in ROW_ONE)
             )
         else:
+            acknowledged_changes = [
+                j for j, t, q in events
+                if t == "ConnectionStateChanged" and q["reason"] == "acknowledged"
+                and records[j]["causation_id"] == p["acknowledgment"]
+            ]
             good_evidence = (
                 e is not None
                 and trigger[0] < e[0] < a[0]
@@ -561,6 +598,7 @@ def oracle(records: list[dict]) -> dict | None:
                     for j, t, q in events
                     if e[0] < j < i
                 )
+                and any(a[0] < j < i for j in acknowledged_changes)
             )
         if not good_evidence:
             failures.append((i, "payload.evidence"))
@@ -630,7 +668,9 @@ def fuzz_stream(rng: random.Random, length: int) -> list[dict]:
             if cause == CONNECTION:
                 add(connection(uid("CS", n), "degraded", "degraded", "condition_cleared"))
             add(ack_copy(n, trigger["event_id"]))
-            if cause != CONNECTION:
+            if cause == CONNECTION:
+                add(connection(uid("CK", n), "degraded", "active", "acknowledged", uid("CP", n)))
+            else:
                 add(observed(uid("AS", n)))
         elif kind == "lift" and acks:
             good = rng.random() < 0.5
@@ -660,6 +700,46 @@ def fuzz_stream(rng: random.Random, length: int) -> list[dict]:
 FUZZ_SEED, FUZZ_STREAMS, FUZZ_LENGTH = 2824, 400, 12
 
 
+def agent_entries(records: list[dict], skip: frozenset[str] = frozenset()) -> list[tuple[int, set[int]]]:
+    """§9.5's agent effects over a stream the rules admit, as `(account state, account entries
+    held)` after each record. A raise that makes the state stricter applies the new state's entry; a
+    lift that changes the state applies the state left's entry unless held, then removes every other
+    account entry. `agents.remove_stricter_only` seeds the bug of removing only the state lifted
+    from."""
+    in_force: dict[str, int] = {}
+    held: set[int] = set()
+    out = []
+    for record in records:
+        before = max(in_force.values(), default=0)
+        kind, p = record["event_type"], record["payload"]
+        if kind == "AccountRestrictionChanged":
+            in_force[p["cause"]] = max(in_force.get(p["cause"], 0), STRICTNESS[p["restriction"]])
+            after = max(in_force.values(), default=0)
+            if after > before:
+                held.add(after)
+        elif kind == "AccountRestrictionLifted":
+            in_force.pop(p["cause"], None)
+            after = max(in_force.values(), default=0)
+            if after != before:
+                if after:
+                    held.add(after)
+                if "agents.remove_stricter_only" in skip:
+                    held.discard(before)
+                else:
+                    held = {after} if after else set()
+        out.append((max(in_force.values(), default=0), set(held)))
+    return out
+
+
+def agents_failure(records: list[dict], skip: frozenset[str] = frozenset()) -> str | None:
+    """Invariant 6 checked after every record: the strictest account entry the agents hold is the
+    account state, never looser and never left over once its causes are lifted."""
+    for i, (state, held) in enumerate(agent_entries(records, skip)):
+        if max(held, default=0) != state:
+            return f"record {i}: state {state}, entries {sorted(held)}"
+    return None
+
+
 def fuzz_disagreements(skip: frozenset[str] = frozenset()) -> tuple[list[str], int]:
     """Random streams on which the rules and the oracle disagree, and how many streams had a valid
     lift, so the fuzz is shown to reach lifts that pass as well as those refused."""
@@ -671,6 +751,9 @@ def fuzz_disagreements(skip: frozenset[str] = frozenset()) -> tuple[list[str], i
         if got != want:
             problems.append(f"fuzz stream {k}: rules {got}, oracle {want}")
         limit = len(records) if want is None else want["index"]
+        agents = agents_failure(records[:limit], skip)
+        if agents:
+            problems.append(f"fuzz stream {k}: invariant 6 breaks at {agents}")
         passed += any(r["event_type"] == "AccountRestrictionLifted" for r in records[:limit])
     return problems, passed
 
@@ -684,6 +767,7 @@ ORACLE_CHECKS = (
     "streams.records",
     "streams.rule",
     "streams.oracle",
+    "streams.agents",
     "streams.fuzz",
 )
 FUZZ_MIN_PASSING = 20
@@ -724,6 +808,10 @@ def check_section(section: dict) -> list[str]:
             problems.append(found("streams.rule", f"{case['name']}: expected {case['expect']}"))
         if oracle(case["records"]) != expected(case):
             problems.append(found("streams.oracle", f"{case['name']}: the oracle disagrees"))
+        admitted = case["records"] if expected(case) is None else case["records"][: expected(case)["index"]]
+        agents = agents_failure(admitted)
+        if agents:
+            problems.append(found("streams.agents", f"{case['name']}: invariant 6 breaks at {agents}"))
     fuzzed, passed = fuzz_disagreements()
     problems += [found("streams.fuzz", p) for p in fuzzed]
     if passed < FUZZ_MIN_PASSING:
@@ -737,15 +825,24 @@ STREAM_MUTANTS = (
     "309.lift_resets",
     "310.cause",
     "310.restriction",
+    "311.before_lift",
+    "311.trigger_before_copy",
+    "311.cause",
     "311.subject",
     "311.stands",
     "311.stands_to_the_copy",
     "311.refused",
+    "312.before_lift",
     "312.after_ack",
+    "312.latest",
+    "312.connection.acknowledged",
     "312.connection.order",
     "312.connection.degraded",
     *(f"312.clean.{member}" for member in ROW_ONE),
 )
+
+
+AGENT_MUTANTS = ("agents.remove_stricter_only",)
 
 
 def vector_mutants(section: dict) -> list[tuple[str, str, dict]]:
@@ -786,12 +883,19 @@ def run_mutants(section: dict) -> list[str]:
             escaped.append(f"restriction lift stream mutant {mutant}")
     registered = vector_mutants(section)
     for check in ORACLE_CHECKS:
-        if check != "streams.fuzz" and not any(c == check for _, c, _ in registered):
+        if check not in ("streams.fuzz", "streams.agents") and not any(c == check for _, c, _ in registered):
             escaped.append(f"restriction lift check {check} has no vector mutant registered against it")
     for name, check, mutated in registered:
         caught_by = {check_of(problem) for problem in check_section(mutated)}
         if check not in caught_by:
             escaped.append(f"restriction lift vector mutant: {name} (not caught by {check}; caught by {sorted(caught_by)})")
+    for mutant in AGENT_MUTANTS:
+        caught = any(
+            agents_failure(c["records"] if expected(c) is None else c["records"][: expected(c)["index"]], frozenset([mutant]))
+            for c in section["streams"]
+        )
+        if not caught:
+            escaped.append(f"restriction lift agent mutant {mutant}")
     for mutant in ("310.restriction", "311.stands", "312.connection.degraded"):
         fuzzed, _ = fuzz_disagreements(frozenset([mutant]))
         if not fuzzed:

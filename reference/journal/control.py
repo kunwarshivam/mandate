@@ -239,7 +239,7 @@ for _kind in ("ctl", "acct"):
     SCHEMAS[(_kind, "OwnerAcknowledgmentRequested")] = ACK_REQUESTED
     SCHEMAS[(_kind, "OwnerAcknowledged")] = ACKNOWLEDGED
 
-# v0.100 §9.28 (DEC-2824): version 2 of both adds `subject`, so an acknowledgment can name an
+# v0.102 §9.28 (DEC-2824): version 2 of both adds `subject`, so an acknowledgment can name an
 # account restriction (`restriction`) as well as a triggered limit (`limit`). Version 1 reads as
 # `limit`, and rule 239 judges both versions alike.
 ACK_SUBJECTS = ("limit", "restriction")
@@ -1653,7 +1653,7 @@ for _kind in ("ctl", "acct"):
     VERSIONED_VERSIONS[(_kind, "OwnerAcknowledged")] = (1, 2)
     VERSIONED_SCHEMAS[(_kind, "OwnerAcknowledgmentRequested", 2)] = ACK_REQUESTED_V2
     VERSIONED_SCHEMAS[(_kind, "OwnerAcknowledged", 2)] = ACKNOWLEDGED_V2
-# v0.100 §9.5 (DEC-2824): one cause of an account restriction lifted, naming the accepted
+# v0.102 §9.5 (DEC-2824): one cause of an account restriction lifted, naming the accepted
 # acknowledgment copy and the evidence that completes it, and the account state the causes left set.
 VERSIONED_SCHEMAS[("acct", "AccountRestrictionLifted", 1)] = rec(
     ("cause", one_of("broker_reject", "broker_notice", "connection_unavailable")),
@@ -1663,7 +1663,7 @@ VERSIONED_SCHEMAS[("acct", "AccountRestrictionLifted", 1)] = rec(
     ("risk_clock", RISK_CLOCK),
 )
 # §9 (DEC-458): the broker's account report, closed at version 1, which a broker cause's lift reads
-# as its refresh (v0.100 rule 312). Registered here as `mandate-journal` registers it.
+# as its refresh (v0.102 rule 312). Registered here as `mandate-journal` registers it.
 SCHEMAS[("acct", "AccountStateObserved")] = rec(
     ("status", STR),
     ("crypto_status", STR),

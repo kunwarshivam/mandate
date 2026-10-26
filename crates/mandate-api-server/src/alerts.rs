@@ -38,13 +38,14 @@ pub const WITHHELD: [&str; 9] = [
 ];
 
 /// The kinds this read serves, each with its class from notifications spec §3.2.
-const SERVED: [(&str, &str); 23] = [
+const SERVED: [(&str, &str); 24] = [
     ("risk_limit", "safety"),
     ("kill_switch", "safety"),
     ("kill_switch_unapplied", "safety"),
     ("agent_held", "safety"),
     ("retirement_held", "safety"),
     ("account_restriction", "safety"),
+    ("connection_unavailable", "safety"),
     ("protection", "safety"),
     ("exit_stalled", "safety"),
     ("reconciliation", "safety"),

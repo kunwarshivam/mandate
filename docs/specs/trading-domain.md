@@ -12,7 +12,7 @@
 - **v0.23 ([DEC-2824](../project/decisions/DEC-2824.md)):** §7.3 says how its "Lifts when" column is
   journaled. The owner acknowledges one cause's restriction, and the executor records each lift with
   its acknowledgment and evidence. The account state stays the strictest restriction in force, and
-  the agents follow it, with the looser effect applied before the stricter one is removed. No lift
+  the agents follow it, with the state left's effect applied before every other is removed. No lift
   condition changes.
 - **v0.22 ([DEC-2815](../project/decisions/DEC-2815.md)):** §5.3 rules 2 and 7 gain reason codes,
   registered in the reference cases' `reason_codes`: `below_min_order_size` and
@@ -961,7 +961,7 @@ restriction standing, and the reverse. The owner acknowledges one cause's restri
 `subject` `restriction`, judged as a limit's acknowledgment is), and the executor journals each lift
 as `AccountRestrictionLifted`, naming the acknowledgment and the evidence. The account state is the
 strictest restriction of the causes left in force, and every agent follows it: a lift applies the
-looser state's agent effect before it removes the stricter one's ([journal spec
+state left's agent effect before it removes every other account entry ([journal spec
 §9.5](journal.md#95-account-stream-executor-records-dec-446-dec-447),
 [DEC-2824](../project/decisions/DEC-2824.md)).
 

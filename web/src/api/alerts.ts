@@ -16,6 +16,7 @@ export const ALERT_KINDS = {
   agent_held: { class: "safety", label: "An agent is held" },
   retirement_held: { class: "safety", label: "An agent's retirement is held" },
   account_restriction: { class: "safety", label: "The broker restricted the account" },
+  connection_unavailable: { class: "safety", label: "Your connection cannot be reached or used" },
   protection: { class: "safety", label: "A position's protection changed" },
   exit_stalled: { class: "safety", label: "An exit is stalled" },
   reconciliation: { class: "safety", label: "The account did not reconcile" },
