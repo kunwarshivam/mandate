@@ -111,12 +111,14 @@ pub(crate) fn counted_mark(
     )))
 }
 
-/// An order as the protection fold needs it: whether it is protective, and its quantity.
+/// An order as the protection fold needs it: whether it is protective, its quantity, and, for a
+/// protective leg the broker created, whether its id names a known entry (DEC-160).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Order {
     protective: bool,
     qty: Qty,
     filled: Qty,
+    attributed: bool,
 }
 
 /// One instrument's resting protection, as the executor's fold keeps it.
@@ -157,6 +159,7 @@ pub struct Positions {
     orders: BTreeMap<String, Order>,
     fills: BTreeSet<String>,
     ledgers: BTreeMap<String, Position>,
+    filled: BTreeMap<String, SignedQty>,
     unreported: BTreeSet<String>,
     marks: BTreeMap<String, RiskMark>,
     resting: BTreeMap<String, Resting>,
@@ -176,6 +179,7 @@ impl Positions {
             orders: BTreeMap::new(),
             fills: BTreeSet::new(),
             ledgers: BTreeMap::new(),
+            filled: BTreeMap::new(),
             unreported: BTreeSet::new(),
             marks: BTreeMap::new(),
             resting: BTreeMap::new(),
@@ -215,7 +219,9 @@ impl Positions {
             "FillApplied" | "LateFillApplied" => self.fill(&payload)?,
             "OrderStateChanged" => self.changed(&payload)?,
             "PositionReleased" if payload.text("agent_id")? == self.agent => {
-                self.unreported.insert(instrument(&payload)?);
+                if !quantity(&payload, "qty")?.is_zero() {
+                    self.unreported.insert(instrument(&payload)?);
+                }
             }
             "CorporateActionApplied" => {
                 self.unreported.insert(instrument(&payload)?);
@@ -242,6 +248,16 @@ impl Positions {
         self.ledgers.get(instrument).copied()
     }
 
+    /// The net quantity of the agent's own fills per instrument, in instrument order, leaving out an
+    /// instrument that nets to zero (DEC-2111 item 4): buys add, sells subtract, each `fill_id`
+    /// once, over the agent's orders as item 1 of DEC-2136 attributes them.
+    pub fn filled(&self) -> impl Iterator<Item = (&str, SignedQty)> {
+        self.filled
+            .iter()
+            .filter(|(_, qty)| !qty.is_zero())
+            .map(|(instrument, qty)| (instrument.as_str(), *qty))
+    }
+
     /// The instrument's latest counted version-2 mark (DEC-2136 item 2).
     pub fn risk_mark(&self, instrument: &str) -> Option<RiskMark> {
         self.marks.get(instrument).copied()
@@ -261,7 +277,12 @@ impl Positions {
                 ..Protection::NONE
             },
             Some(resting) => Protection {
-                orders: resting.orders.clone(),
+                orders: resting.orders.iter().fold(Vec::new(), |mut once, id| {
+                    if !once.contains(id) {
+                        once.push(id.clone());
+                    }
+                    once
+                }),
                 covered_qty: resting.covered,
                 stop: resting.prices.map(|(stop, _)| stop),
                 take_profit: resting.prices.and_then(|(_, take_profit)| take_profit),
@@ -275,23 +296,31 @@ impl Positions {
         let qty = quantity(payload, "qty")?;
         let request = self.requested.take();
         let protective = request.as_ref().is_some_and(|request| request.protective);
-        if let Some(request) = &request {
-            self.plain.insert(order.clone(), !request.bracket);
-            if request.agent == self.agent {
-                self.own.insert(order.clone());
+        let agent = match &request {
+            Some(request) => {
+                self.plain.insert(order.clone(), !request.bracket);
+                Some(request.agent.as_str())
             }
+            None => payload.text("agent_id").ok(),
+        };
+        if agent == Some(self.agent.as_str()) {
+            self.own.insert(order.clone());
         }
         self.orders.entry(order).or_insert(Order {
             protective,
             qty,
             filled: Qty::ZERO,
+            attributed: true,
         });
         Ok(())
     }
 
-    /// A fill: the agent's own moves its sub-ledger by §8.1, each `fill_id` once, and a fill of a
-    /// protective order adds to that order's filled quantity, which its replacement inherits the
-    /// rest of. Any other fill is another agent's, passed over unread (DEC-2112 item 2).
+    /// A fill: the agent's own moves its sub-ledger by §8.1 and its net filled quantity, each
+    /// `fill_id` once, and a fill of a protective order adds to that order's filled quantity, which
+    /// its replacement inherits the rest of. Any other fill is another agent's, passed over unread
+    /// (DEC-2112 item 2). A fill of a protective leg whose id names no known entry, in an
+    /// instrument the agent holds, may be the agent's (DEC-160's single-holder rule, which needs
+    /// every agent's lots), so it is refused rather than guessed (DEC-2136 item 1).
     fn fill(&mut self, payload: &Payload<'_>) -> Result<(), Unreadable> {
         let order = payload.text("client_order_id")?.to_owned();
         let protective = self
@@ -321,8 +350,26 @@ impl Positions {
                 .map_err(|_| (payload.refused)("qty_gross"))?;
         }
         if !self.own.contains(&order) {
+            let unattributed = self
+                .orders
+                .get(&order)
+                .is_some_and(|known| !known.attributed);
+            let held = self
+                .filled
+                .get(&instrument)
+                .is_some_and(|qty| !qty.is_zero());
+            if unattributed && held {
+                return Err((payload.refused)("client_order_id"));
+            }
             return Ok(());
         }
+        let net = self
+            .filled
+            .entry(instrument.clone())
+            .or_insert(SignedQty::ZERO);
+        *net = net
+            .checked_add(signed)
+            .map_err(|_| (payload.refused)("qty_gross"))?;
         if in_asset {
             self.unreported.insert(instrument.clone());
         }
@@ -345,9 +392,15 @@ impl Positions {
     fn changed(&mut self, payload: &Payload<'_>) -> Result<(), Unreadable> {
         let order = payload.text("client_order_id")?.to_owned();
         let state = payload.text("state")?;
-        if let Some(old) = optional_text(payload, "replaces")?
-            && let Some(original) = self.orders.get(old).copied()
-        {
+        if let Some(old) = optional_text(payload, "replaces")? {
+            let original = self
+                .orders
+                .get(old)
+                .copied()
+                .ok_or_else(|| (payload.refused)("replaces"))?;
+            if self.own.contains(old) {
+                self.own.insert(order.clone());
+            }
             let left = original
                 .qty
                 .checked_sub(original.filled)
@@ -360,6 +413,9 @@ impl Positions {
                     ..original
                 },
             );
+        }
+        if !self.orders.contains_key(&order) {
+            return Err((payload.refused)("client_order_id"));
         }
         if payload.flag("ignored")? {
             return Ok(());
@@ -414,10 +470,20 @@ impl Positions {
                 let covered = quantity(payload, "qty")?;
                 let prices = prices(payload)?;
                 for id in &orders {
+                    let entry = protected_entry(id);
+                    let attributed = entry
+                        .as_ref()
+                        .is_some_and(|entry| self.orders.contains_key(entry));
+                    if entry.is_some_and(|entry| self.own.contains(&entry))
+                        && !self.orders.contains_key(id)
+                    {
+                        self.own.insert(id.clone());
+                    }
                     self.orders.entry(id.clone()).or_insert(Order {
                         protective: true,
                         qty: covered,
                         filled: Qty::ZERO,
+                        attributed,
                     });
                 }
                 let resting = self.resting.entry(instrument).or_insert(Resting {
@@ -614,13 +680,17 @@ fn prices(payload: &Payload<'_>) -> Result<Option<(Price, Option<Price>)>, Unrea
     Ok(Some((stop, optional_price(payload, "take_profit")?)))
 }
 
-/// The order ids a list member names.
+/// The longest client order id the read serves (the read model's bound; Alpaca's is 128 bytes).
+const ORDER_ID_MAX: usize = 200;
+
+/// The order ids a list member names, each non-empty and within [`ORDER_ID_MAX`].
 fn names(payload: &Payload<'_>, member: &'static str) -> Result<Vec<String>, Unreadable> {
     match payload.value.get(member) {
         Some(mandate_canon::Value::Array(items)) => items
             .iter()
             .map(|item| {
                 item.as_str()
+                    .filter(|id| !id.is_empty() && id.chars().count() <= ORDER_ID_MAX)
                     .map(str::to_owned)
                     .ok_or_else(|| (payload.refused)(member))
             })

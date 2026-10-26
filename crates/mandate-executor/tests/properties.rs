@@ -3128,10 +3128,6 @@ proptest! {
     }
 }
 
-/// #244 round 2, blocker 1: the reviewer's shrunk script. `External` leaves the second `CPHC` order
-/// `Unknown` before the protected lead's entry completes, which rule 13 lets hold the entry's legs,
-/// so `protective_sell_quantity_never_exceeds_the_position_in_any_script` must skip it rather than
-/// demand a placement.
 /// The owner's protection read (`mandate_gate_context::Positions`, DEC-2136 item 4) of a run's
 /// journal, against the executor's own fold of the same rows, the oracle: per instrument, the
 /// resting orders, the covered quantity, the prices, and the earliest open interval's start. Its
@@ -3226,6 +3222,10 @@ proptest! {
     }
 }
 
+/// #244 round 2, blocker 1: the reviewer's shrunk script. `External` leaves the second `CPHC` order
+/// `Unknown` before the protected lead's entry completes, which rule 13 lets hold the entry's legs,
+/// so `protective_sell_quantity_never_exceeds_the_position_in_any_script` must skip it rather than
+/// demand a placement.
 #[test]
 fn an_unknown_order_in_the_leads_instrument_before_the_completion_is_skipped() {
     let script = [

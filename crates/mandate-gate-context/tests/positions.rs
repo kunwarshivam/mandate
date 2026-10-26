@@ -645,3 +645,193 @@ fn an_unknown_protection_action_is_refused() {
         })
     );
 }
+
+fn filled(read: &Positions) -> Vec<(String, String)> {
+    read.filled()
+        .map(|(instrument, qty)| (instrument.to_owned(), qty.to_string()))
+        .collect()
+}
+
+#[test]
+fn a_leg_the_broker_created_for_the_agents_entry_is_the_agents() {
+    let mut read = bought();
+    on(
+        &mut read,
+        "ProtectionChanged",
+        &placed(&["mdt-1-p1", "mdt-1-p2"], "10", "497", Some("538")),
+    );
+    on(
+        &mut read,
+        "FillApplied",
+        &fill("f2", "mdt-1-p1", ASSET, "sell", "10", "497"),
+    );
+    assert_eq!(
+        filled(&read),
+        Vec::<(String, String)>::new(),
+        "the stop sold all 10"
+    );
+    assert_eq!(read.cost_basis(ASSET), Some(Position::FLAT));
+}
+
+#[test]
+fn a_leg_of_another_agents_entry_is_not_the_agents() {
+    let mut read = bought();
+    on(
+        &mut read,
+        "OrderRequestRecorded",
+        &request("agent-2", "open"),
+    );
+    on(
+        &mut read,
+        "OrderSubmitted",
+        &submitted("mdt-9", ASSET, "buy", "5"),
+    );
+    on(
+        &mut read,
+        "ProtectionChanged",
+        &placed(&["mdt-9-p1"], "5", "490", None),
+    );
+    on(
+        &mut read,
+        "FillApplied",
+        &fill("f9", "mdt-9-p1", ASSET, "sell", "5", "490"),
+    );
+    assert_eq!(filled(&read), vec![(ASSET.to_owned(), "10".to_owned())]);
+    assert_eq!(read.cost_basis(ASSET), Some(position("10", "5122.5")));
+}
+
+#[test]
+fn a_leg_that_names_no_known_entry_filling_where_the_agent_holds_is_refused() {
+    let mut read = bought();
+    on(
+        &mut read,
+        "ProtectionChanged",
+        &placed(&["oco-1"], "10", "497", None),
+    );
+    let payload = fill("f2", "oco-1", ASSET, "sell", "10", "497");
+    assert_eq!(
+        read.fold(Row {
+            stream: ACCOUNT,
+            event_type: "FillApplied",
+            payload: &payload,
+        }),
+        Err(Unreadable {
+            event_type: "FillApplied".to_owned(),
+            member: "client_order_id",
+        }),
+        "DEC-160's single holder may be this agent, which the read cannot tell"
+    );
+    let mut elsewhere = bought();
+    on(
+        &mut elsewhere,
+        "ProtectionChanged",
+        &placed(&["oco-1"], "5", "1", None).with("instrument_id", text(ASSET_B)),
+    );
+    on(
+        &mut elsewhere,
+        "FillApplied",
+        &fill("f2", "oco-1", ASSET_B, "sell", "5", "1"),
+    );
+    assert_eq!(
+        elsewhere.cost_basis(ASSET_B),
+        None,
+        "where it holds nothing"
+    );
+}
+
+#[test]
+fn a_replacement_of_the_agents_order_is_the_agents_and_inherits_what_was_left() {
+    let mut read = Positions::new(ACCOUNT, AGENT);
+    own_order(&mut read, "mdt-1", ASSET, "buy", "5");
+    on(
+        &mut read,
+        "FillApplied",
+        &fill("f1", "mdt-1", ASSET, "buy", "3", "10"),
+    );
+    on(
+        &mut read,
+        "OrderStateChanged",
+        &state_changed("mdt-1", "replaced").with("replaced_by", text("mdt-1b")),
+    );
+    on(
+        &mut read,
+        "OrderStateChanged",
+        &state_changed("mdt-1b", "accepted").with("replaces", text("mdt-1")),
+    );
+    on(
+        &mut read,
+        "FillApplied",
+        &fill("f2", "mdt-1b", ASSET, "buy", "2", "11"),
+    );
+    assert_eq!(filled(&read), vec![(ASSET.to_owned(), "5".to_owned())]);
+    assert_eq!(read.cost_basis(ASSET), Some(position("5", "52")), "30 + 22");
+}
+
+#[test]
+fn a_change_of_an_order_the_journal_never_submitted_is_refused() {
+    for (payload, member) in [
+        (state_changed("mdt-x", "canceled"), "client_order_id"),
+        (
+            state_changed("mdt-y", "accepted").with("replaces", text("mdt-x")),
+            "replaces",
+        ),
+    ] {
+        let mut read = bought();
+        assert_eq!(
+            read.fold(Row {
+                stream: ACCOUNT,
+                event_type: "OrderStateChanged",
+                payload: &payload,
+            }),
+            Err(Unreadable {
+                event_type: "OrderStateChanged".to_owned(),
+                member,
+            })
+        );
+    }
+}
+
+#[test]
+fn a_protective_order_named_twice_is_served_once_and_an_empty_id_is_refused() {
+    let mut read = bought();
+    on(
+        &mut read,
+        "ProtectionChanged",
+        &placed(&["mdt-1-p1"], "6", "497", None),
+    );
+    on(
+        &mut read,
+        "ProtectionChanged",
+        &placed(&["mdt-1-p1"], "4", "497", None),
+    );
+    let served = read.protection(ASSET);
+    assert_eq!(served.orders, vec!["mdt-1-p1".to_owned()]);
+    assert_eq!(served.covered_qty, qty("10"), "the executor's covered sum");
+    let long = "x".repeat(201);
+    for bad in ["", long.as_str()] {
+        let payload = placed(&[bad], "1", "1", None);
+        assert_eq!(
+            read.fold(Row {
+                stream: ACCOUNT,
+                event_type: "ProtectionChanged",
+                payload: &payload,
+            }),
+            Err(Unreadable {
+                event_type: "ProtectionChanged".to_owned(),
+                member: "orders",
+            })
+        );
+    }
+}
+
+#[test]
+fn a_release_of_nothing_leaves_the_basis_reported() {
+    let mut read = bought();
+    let release = object(&[
+        ("agent_id", text(AGENT)),
+        ("instrument_id", text(ASSET)),
+        ("qty", text("0")),
+    ]);
+    on(&mut read, "PositionReleased", &release);
+    assert_eq!(read.cost_basis(ASSET), Some(position("10", "5122.5")));
+}
