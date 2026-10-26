@@ -6,6 +6,7 @@ import { type Fetch, createWorkspaceClient } from "@/api/client";
 import { prepareApprovalResponse, prepareConfirm, prepareDeploy, prepareOwnerCommand } from "@/api/commands";
 import { confirmAccepted, confirmStepUpDigest } from "@/api/confirm";
 import { type AssertionRefusal, type Authenticator, type PasskeyStepUp, assertPasskey, browserAuthenticator, deployStepUpDigest, passkeysRead, usablePasskeys } from "@/api/passkey";
+import { type Creator, browserCreator, createPasskey, enrolBody, enrolStepUpDigest, passkeyList } from "@/api/enrol";
 import { type ApiView, loadApi } from "@/api/read-models";
 import { emptyWorkspace } from "@/api/reads";
 import { REFRESH_EVERY_MS, type SessionKeeper, type SessionState } from "@/api/session";
@@ -30,6 +31,7 @@ import {
   type CommandKind,
   type CommandRecord,
   type MandateChangeRequest,
+  type PasskeyPort,
   type PositionsAnswer,
   type Runtime,
   RuntimeContext,
@@ -91,6 +93,7 @@ export function ApiRuntimeProvider({
   session,
   keepAliveMs = REFRESH_EVERY_MS,
   authenticator,
+  creator,
 }: {
   source: Pick<ApiSource, "origin" | "workspaceId">;
   children: ReactNode;
@@ -103,6 +106,8 @@ export function ApiRuntimeProvider({
   keepAliveMs?: number;
   /** The WebAuthn call a passkey step-up makes; the browser's own when not given, `null` for a page with none. */
   authenticator?: Authenticator | null;
+  /** The WebAuthn create call a passkey enrolment makes; the browser's own when not given. */
+  creator?: Creator | null;
 }) {
   /** Reads wait while a refresh rotates the cookie; commands never wait (API-7). */
   const client = useMemo(() => {
@@ -520,6 +525,38 @@ export function ApiRuntimeProvider({
   );
 
   /**
+   * The member's workspace passkeys (§3.6, DEC-2108). Adding one asks a registration challenge;
+   * when the member already holds a passkey, one of them confirms the enrolment first (a
+   * `credential_enrol` step-up bound to the registration); then the authenticator makes the new
+   * credential, and `POST /passkeys` sends it once. A lost answer is `unknown`: the screen reads
+   * the list again rather than enrol twice.
+   */
+  const passkeys = useMemo<PasskeyPort>(
+    () => ({
+      list: async () => {
+        const read = await client.read("/passkeys", passkeyList);
+        return read.ok ? { ok: true, passkeys: read.value.passkeys } : { ok: false, reason: read.error.code };
+      },
+      enrol: async () => {
+        const [issued, session] = await Promise.all([client.askRegistration(), client.readSession()]);
+        if (!issued.ok) return { ok: false, reason: issued.error.code, effect: "none" };
+        if (!session.ok) return { ok: false, reason: session.error.code, effect: "none" };
+        let stepUp: PasskeyStepUp | null = null;
+        if (issued.value.step_up_needed) {
+          const asserted = await passkeyStepUp("credential_enrol", enrolStepUpDigest(issued.value.challenge_id));
+          if (!asserted.ok) return { ok: false, reason: asserted.reason, effect: "none" };
+          stepUp = asserted.value;
+        }
+        const made = await createPasskey(issued.value, session.value.principal_id, creator === undefined ? browserCreator() : creator);
+        if (!made.ok) return { ok: false, reason: made.reason, effect: "none" };
+        const sent = await client.enrolPasskey(enrolBody(issued.value, made.value, stepUp));
+        return sent.ok ? { ok: true, enrolled: sent.value } : { ok: false, reason: sent.error.code, effect: sent.error.effect === "unknown" ? "unknown" : "none" };
+      },
+    }),
+    [client, passkeyStepUp, creator],
+  );
+
+  /**
    * Step 2, `POST /mandate-versions/{hash}/confirm` (§5.1, DEC-2101 item 5), bound to the
    * confirmation the server serves now: it is read again first, since its digest can move. When the
    * server says the confirm needs step-up (a first version is risk-increasing), the owner's passkey
@@ -600,8 +637,8 @@ export function ApiRuntimeProvider({
   const readBacktest = useCallback<Runtime["readBacktest"]>((backtestId) => readBacktestFrom(client, backtestId), [client]);
 
   const value = useMemo<Runtime>(
-    () => ({ source: "api", workspaceId: client.workspaceId, view, ws, now, reachable: ws.status !== "unreachable", commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, streamTail: journalTail, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
-    [client.workspaceId, view, ws, now, commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, journalTail, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
+    () => ({ source: "api", workspaceId: client.workspaceId, view, ws, now, reachable: ws.status !== "unreachable", commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, streamTail: journalTail, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest }),
+    [client.workspaceId, view, ws, now, commands, responses, mandateChanges, send, respond, stepUp, connect, realMoney, disclosures, activity, holdings, journalTail, passkeys, setUps, createVersion, confirmVersion, deployVersion, backtestFor, changeMandate, readBacktest],
   );
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;
 }
