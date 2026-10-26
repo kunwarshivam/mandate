@@ -18,7 +18,11 @@
   form; `recorded_service`, the recorded service over the journaled meter streams, started only
   when both read and every deployed cap reads; the ids, the host clock, the log and the
   heartbeat), `src/main.rs` (the `mandate-gatewayd run|probe` binary);
-  `RequestError::ALL`, `RequestError::code` and `Meter::set_research_daily` in `mandate-gateway`.
+  `RequestError::ALL`, `RequestError::code` (`gateway_unreachable` the caller's own, DEC-2397) and
+  `Meter::set_research_daily` in `mandate-gateway`; the runtime's side, `RemoteGateway` in
+  `crates/mandate-daemon/src/remote.rs` (one framed exchange per call, bounded by the deadline and
+  its read grace, every lost exchange `gateway_unreachable`), over `mandate-research-run`'s
+  `ModelCalls` port.
 - **Tests:** `crates/mandate-gatewayd/tests/key.rs` (read once, only as the model gateway, each
   vault failure's code, a value a header cannot carry, and a canary that the key shows in no
   `Debug`, error or code), `tests/start.rs` (both meters must read back, and the one that does not
@@ -41,6 +45,8 @@
   workspace and a budget below the call's maximum refused with nothing sent, the start refused
   while a meter stream or a deployed cap does not read, the ids, the log and the heartbeat),
   `tests/bin.rs` (the binary's exit codes);
+  `crates/mandate-daemon/tests/remote.rs` (a record and a refusal cross whole, and every lost
+  exchange is `gateway_unreachable`, sent once, against a scripted local socket),
   `crates/mandate-gateway/tests/wire.rs` (every refusal's code crosses the wire as itself),
   `crates/mandate-gateway/tests/meter.rs` (a replaced daily cap binds the next reservation, and an
   unread one refuses `Unavailable` reserving nothing).

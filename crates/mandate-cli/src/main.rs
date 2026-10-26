@@ -9,6 +9,7 @@ use mandate_cli::brake::AgentCommand;
 use mandate_cli::connection::ConnectionCommand;
 use mandate_cli::control::Now;
 use mandate_cli::db::DbCommand;
+use mandate_cli::disclosure::DisclosureCommand;
 use mandate_cli::evaluation::EvaluationCommand;
 use mandate_cli::gestures::VersionCommand;
 use mandate_cli::identity::IdentityCommand;
@@ -22,8 +23,8 @@ use mandate_cli::step_up::StepUpCommand;
 use mandate_cli::vault::VaultCommand;
 use mandate_cli::workspace::WorkspaceCommand;
 use mandate_cli::{
-    Cli, Command, artifact, backtest, brake, connection, db, download, evaluation, gestures,
-    identity, inbox, inspect, journal, owner, register, step_up, vault, workspace,
+    Cli, Command, artifact, backtest, brake, connection, db, disclosure, download, evaluation,
+    gestures, identity, inbox, inspect, journal, owner, register, step_up, vault, workspace,
 };
 use mandate_marketdata::client::{Client, TokioPause};
 use mandate_marketdata::http::{AlpacaDataHttp, Credentials};
@@ -224,6 +225,9 @@ fn main() -> anyhow::Result<()> {
         }
         Command::StepUp(StepUpCommand::ConfirmConnect(args)) => {
             step_up::run_connect_command(&args, now()?, &mut io::stdout().lock()).map(drop)
+        }
+        Command::Disclosure(DisclosureCommand::Accept(args)) => {
+            disclosure::run(&args, now()?, &mut io::stdout().lock()).map(drop)
         }
     }
 }

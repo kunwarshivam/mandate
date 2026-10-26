@@ -54,6 +54,7 @@ pub mod meter;
 pub mod models;
 pub mod production;
 pub mod recorded;
+pub mod remote;
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,

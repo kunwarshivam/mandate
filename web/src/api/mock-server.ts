@@ -42,6 +42,11 @@ export interface MockServerOptions {
    * so an approve with that challenge's evidence is `step_up_missing`.
    */
   hostConfirms?: boolean;
+  /**
+   * `DisclosureAccepted` records on the workspace's control stream, in order, which its audit reads
+   * serve with their bodies (journal spec §9.2, DEC-2134). Without it the control stream is not served.
+   */
+  acceptances?: ReadonlyArray<{ document: string; version: string; user: string; method: string | null }>;
   /** The member's passkeys `GET /passkeys` serves; one past its cool-off by default. */
   passkeys?: ReadonlyArray<{ passkey_id: string; cool_off_ends: string | null }>;
 }
@@ -68,6 +73,8 @@ export interface MockServer {
   deployed(): string[];
   /** The connects the mock has started, by key, in order. */
   started(): Array<{ idempotency_key: string; connection_id: string }>;
+  /** Every agent a real-money request named, in order; the mock refuses each `live_unavailable` (DEC-2134). */
+  goLives(): string[];
 }
 
 /** Where the mock's start sends the browser: no real authorization server is ever named. */
@@ -138,6 +145,8 @@ export function createMockServer(options: MockServerOptions): MockServer {
   const issued: IssuedChallenge[] = [];
   /** Connects started, each read `connecting` once and `established` after, as a completed paper connect would be. */
   const connects: Array<{ idempotency_key: string; body: string; connection_id: string; reads: number }> = [];
+  /** Every agent a real-money request named, each refused (DEC-2134). */
+  const goLives: string[] = [];
   const workspace = structuredClone(buildWorkspace(scenario));
   const prefix = `/v1/workspaces/${workspaceId}`;
   const commands: RecordedCommand[] = [];
@@ -213,11 +222,24 @@ export function createMockServer(options: MockServerOptions): MockServer {
     };
   }
 
+  /** The control stream, when the options name acceptances: its opening, then each `DisclosureAccepted` with its body, base64. */
+  function controlStream(streamId: string) {
+    if (streamId !== `ctl:${workspaceId}` || !options.acceptances) return null;
+    const body = (payload: unknown) => btoa(String.fromCharCode(...new TextEncoder().encode(JSON.stringify({ event_type: "DisclosureAccepted", payload }))));
+    const accepted = options.acceptances.map(({ document, version, user, method }) => ({
+      type: "DisclosureAccepted",
+      body: body({ document, version, user, step_up: method === null ? null : { assertion_id: "cli-1", authenticated_at: workspace.now, method } }),
+    }));
+    return [{ type: "StreamOpened", body: "e30=" }, ...accepted].map((e, i) => ({ seq: i + 1, event_id: eventId(`${streamId}\n${i}`), event_type: e.type, recorded_at: servedAt, prev_hash: "0".repeat(64), hash: "0".repeat(64), body: e.body }));
+  }
+
   /**
    * An agent stream's events as the mock tells them (`agent:{ws}:{agent}`): the deployment, then each
    * order submitted and each filled, in time order. Types and times only; the body is a stand-in.
    */
   function agentStream(streamId: string) {
+    if (streamId === `ctl:${workspaceId}`) return controlStream(streamId);
+    if (streamId === `acct:${workspaceId}:${workspace.connection.connection_id}`) return accountStream(streamId);
     const match = streamId.match(/^agent:([^:]+):(.+)$/);
     const agent = match && match[1] === workspaceId ? agentOf(match[2]) : undefined;
     if (!agent) return null;
@@ -226,12 +248,19 @@ export function createMockServer(options: MockServerOptions): MockServer {
     return told.map((e, i) => ({ seq: i + 1, event_id: eventId(`${streamId}\n${i}`), event_type: e.type, recorded_at: canonical(e.at), prev_hash: "0".repeat(64), hash: "0".repeat(64), body: "e30=" }));
   }
 
+  /** The connection's account stream: every agent's orders requested and filled, in time order. Types and times only. */
+  function accountStream(streamId: string) {
+    const orders = workspace.agents.flatMap((a) => [...a.past_orders, ...a.orders]).sort((a, b) => Date.parse(a.submitted_at) - Date.parse(b.submitted_at));
+    const told = orders.flatMap((o) => [{ type: "OrderRequestRecorded", at: o.submitted_at }, ...(o.state === "Filled" ? [{ type: "FillApplied", at: "closed_at" in o ? String(o.closed_at) : o.submitted_at }] : [])]);
+    return told.map((e, i) => ({ seq: i + 1, event_id: eventId(`${streamId}\n${i}`), event_type: e.type, recorded_at: canonical(e.at), prev_hash: "0".repeat(64), hash: "0".repeat(64), body: "e30=" }));
+  }
+
   function get(route: string, query: URLSearchParams): Response {
     const journal = route.match(/^\/journal\/streams\/([^/]+)\/events$/);
     const allowed = (name: string) => (route === "/approvals" && name === "state") || (journal !== null && (name === "after_seq" || name === "limit"));
     if ([...query.keys()].some((name) => !allowed(name))) return problem(404, "not_found", "none");
     if (journal) {
-      const lines = agentStream(decodeURIComponent(journal[1]));
+      const lines = agentStream(decodeURIComponent(journal[1])) ?? controlStream(decodeURIComponent(journal[1]));
       if (!lines) return problem(404, "not_found", "none");
       const after = Number(query.get("after_seq") ?? "0");
       const limit = Number(query.get("limit") ?? "100");
@@ -239,6 +268,11 @@ export function createMockServer(options: MockServerOptions): MockServer {
       const events = lines.filter((e) => e.seq > after).slice(0, limit);
       const head = { seq: lines.length, hash: "0".repeat(64), recorded_at: servedAt };
       return read({ stream_id: decodeURIComponent(journal[1]), head, events, next_after_seq: events.at(-1)?.seq ?? after, at_head: (events.at(-1)?.seq ?? after) >= lines.length });
+    }
+    const oneEvent = route.match(/^\/journal\/events\/([^/]+)$/);
+    if (oneEvent) {
+      const event = (controlStream(`ctl:${workspaceId}`) ?? []).find((e) => e.event_id === decodeURIComponent(oneEvent[1]));
+      return event ? read({ ...event, stream_id: `ctl:${workspaceId}`, artifact_refs: [], config_refs: {} }) : problem(404, "not_found", "none");
     }
     if (route === "/health") return read(healthBody(workspace.health, servedAt));
     if (route === "/passkeys") return read({ passkeys: passkeys.map((p) => ({ passkey_id: p.passkey_id, alg: "es256", enrolled_at: servedAt, cool_off_ends: p.cool_off_ends })) });
@@ -462,6 +496,10 @@ export function createMockServer(options: MockServerOptions): MockServer {
     if (headers.get(CSRF_HEADER) !== "1") return problem(403, "forbidden", "none");
     if (route === STEP_UP_CHALLENGE_ROUTE) return challenge(headers, body);
     if (route === CONNECT_START_ROUTE) return startConnect(headers, body);
+    if (/^\/agents\/[^/]+\/go-live$/.test(route)) {
+      goLives.push(decodeURIComponent(route.split("/")[2] ?? ""));
+      return problem(409, "live_unavailable", "none");
+    }
     const match = ROUTES.find((r) => r.pattern.test(route));
     if (!match) return problem(404, "not_found", "none");
     const key = headers.get("Idempotency-Key") ?? "";
@@ -536,5 +574,5 @@ export function createMockServer(options: MockServerOptions): MockServer {
     return problem(404, "not_found", "none");
   };
 
-  return { fetch, deployed: () => [...deployedAgents.keys()], recorded: () => commands.map((c) => ({ ...c })), servedDigests: () => [...digests], challenges: () => issued.map((c) => ({ ...c })), started: () => connects.map(({ idempotency_key, connection_id }) => ({ idempotency_key, connection_id })) };
+  return { fetch, deployed: () => [...deployedAgents.keys()], recorded: () => commands.map((c) => ({ ...c })), servedDigests: () => [...digests], challenges: () => issued.map((c) => ({ ...c })), goLives: () => [...goLives], started: () => connects.map(({ idempotency_key, connection_id }) => ({ idempotency_key, connection_id })) };
 }

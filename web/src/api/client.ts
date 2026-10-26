@@ -99,7 +99,17 @@ export interface WorkspaceClient {
    * was recorded is `effect: "unknown"`, never "nothing happened" (API-13).
    */
   sendConnect(prepared: PreparedConnect): Promise<ConnectOutcome>;
+  /**
+   * `POST /agents/{id}/go-live` (§4.2): the owner's request to move an agent to real money. Until
+   * counsel signs off it is always refused `live_unavailable`, and while the workspace's real-money
+   * gate is off the refusal is journaled first (DEC-2134). An answer that is not a refusal is
+   * reported as unknown, never as live.
+   */
+  askRealMoney(agentId: string): Promise<GoLiveOutcome>;
 }
+
+/** What a go-live request came to: always a refusal, or an answer the client could not read. */
+export type GoLiveOutcome = { ok: false; error: ApiError };
 
 /** One connect's start: its key and body, fixed when prepared. */
 export interface PreparedConnect {
@@ -111,6 +121,8 @@ export type ConnectOutcome = { ok: true; value: ConnectStarted } | { ok: false; 
 
 /** The step-up challenge route under the workspace (§3.6). It is not a command: it records nothing. */
 export const STEP_UP_CHALLENGE_ROUTE = "/step-up/challenges";
+/** The owner's request to move an agent to real money (§4.2, DEC-2134). */
+const GO_LIVE_ROUTE = "/agents/{agent}/go-live";
 /** One's own session (§4.10). */
 export const SESSION_ROUTE = "/v1/me/session";
 
@@ -371,5 +383,26 @@ export function createWorkspaceClient(options: ClientOptions): WorkspaceClient {
     return started.ok ? { ok: true, value: started.value } : { ok: false, error: invalidResponse(response.status, "unknown", started.issue, null) };
   }
 
-  return Object.freeze({ workspaceId, path, read, prepare, prepareKillSwitch, send, commandStatus, askChallenge, readSession, prepareConnect, sendConnect });
+  async function askRealMoney(agentId: string): Promise<GoLiveOutcome> {
+    const key = newKey();
+    if (!isIdempotencyKey(key)) throw new Error("not an idempotency key");
+    let response: Response;
+    try {
+      response = await fetch(baseUrl + path(fillRoute(GO_LIVE_ROUTE, { agent: agentId })), {
+        method: "POST",
+        credentials,
+        headers: { Accept: "application/json", "Content-Type": "application/json", "Idempotency-Key": key, [CSRF_HEADER]: "1" },
+        body: "{}",
+      });
+    } catch {
+      return { ok: false, error: networkError("unknown") };
+    }
+    const body = await parseBody(response);
+    const doc = response.ok ? null : decodeProblem(body);
+    const error = doc ? problemError(response.status, doc, "unknown") : invalidResponse(response.status, "unknown", UNREADABLE, null);
+    noteAuth(error);
+    return { ok: false, error };
+  }
+
+  return Object.freeze({ workspaceId, path, read, prepare, prepareKillSwitch, send, commandStatus, askChallenge, readSession, prepareConnect, sendConnect, askRealMoney });
 }

@@ -223,6 +223,7 @@ pub fn content(qty: &str, deadline: i64) -> RequestContent {
         risk_impact: Vec::new(),
         deadline: RiskClock(deadline),
         execution: None,
+        deferred_to_binding: Vec::new(),
     }
 }
 

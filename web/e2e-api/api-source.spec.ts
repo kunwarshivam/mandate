@@ -112,6 +112,12 @@ test("positions are read from the API: each agent's own, with what is not served
   await expect(page.locator("[data-slot=fixture-tag]")).toHaveCount(0);
 });
 
+test("the audit timeline reads the journal's streams from the API, newest first, with no fixture tag", async ({ page }) => {
+  await page.goto("/audit/timeline?scenario=normal");
+  await expect(page.getByRole("list", { name: "Journal records" }).getByRole("listitem").first()).toBeVisible();
+  await expect(page.locator("[data-slot=fixture-tag]")).toHaveCount(0);
+});
+
 test("a screen the API does not serve yet says so, and shows no fixture figures", async ({ page }) => {
   await page.goto("/alerts?scenario=approvals");
   await expect(page.getByRole("heading", { name: "Not available from your deployment yet" })).toBeVisible();
