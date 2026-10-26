@@ -35,6 +35,7 @@ import account
 import account_activity
 import fill_applied
 import account_clock
+import news
 import account_closes
 import account_restrictions
 import account_switches
@@ -4274,6 +4275,7 @@ def render(
     account_activity_section: dict,
     fill_applied_section: dict,
     account_clock_section: dict,
+    news_section: dict,
 ) -> str:
     head, _ = split_file(v3_text)
     body = yaml.dump(
@@ -4335,6 +4337,7 @@ def render(
             "fill_applied": fill_applied_section,
             "account_clock": account_clock_section,
             "snapshot_prior_close": snapshots_section,
+            "news_stream": news_section,
         },
         Dumper=Dumper,
         sort_keys=False,
@@ -4427,6 +4430,7 @@ def main(argv: list[str] | None = None) -> int:
     fill_applied_section = fill_applied.build_section()
     account_clock_section = account_clock.build_section()
     snapshots_section = snapshots.build_section()
+    news_section = news.build_section()
 
     problems = check_chain(section, v3)
     problems += run_mutants(section, v3)
@@ -4512,6 +4516,8 @@ def main(argv: list[str] | None = None) -> int:
     problems += account_clock.run_mutants(account_clock_section)
     problems += snapshots.check_section(snapshots_section)
     problems += snapshots.run_mutants(snapshots_section)
+    problems += news.check_section(news_section)
+    problems += news.run_mutants(news_section)
     problems += connection_requested.check_section(connection_requested_section)
     problems += connection_requested.run_mutants(connection_requested_section)
     problems += check_broker_profile(broker_profile)
@@ -4606,6 +4612,7 @@ def main(argv: list[str] | None = None) -> int:
         account_activity_section,
         fill_applied_section,
         account_clock_section,
+        news_section,
     )
     reread = yaml.safe_load(rendered)
     canonical_self_test()
@@ -4667,6 +4674,7 @@ def main(argv: list[str] | None = None) -> int:
         or fill_applied.check_section(reread["fill_applied"])
         or account_clock.check_section(reread["account_clock"])
         or snapshots.check_section(reread["snapshot_prior_close"])
+        or news.check_section(reread["news_stream"])
         or connection_roles.check_section(reread["connection_roles"])
         or connection_requested.check_section(reread["connection_requested"])
     ):
@@ -4788,6 +4796,9 @@ def main(argv: list[str] | None = None) -> int:
         f"version-2 AccountSnapshotRecorded drafts, {len(snapshots_section['readings'])} readings, "
         f"{len(snapshots.VALIDATOR_MUTANTS)} validator, {len(snapshots.READING_MUTANTS)} reading and "
         f"{len(snapshots.vector_mutants(snapshots_section))} vector mutants caught; "
+        f"{len(news_section['invalid_drafts'])} invalid and {len(news_section['valid_drafts'])} valid "
+        f"news-stream drafts, {len(news_section['streams'])} rule-284 and rule-285 streams, "
+        f"{len(news.VALIDATOR_MUTANTS)} validator and {len(news.vector_mutants(news_section))} vector mutants caught; "
         f"{len(connection_requested_section['invalid_drafts'])} invalid and {len(connection_requested_section['valid_drafts'])} valid "
         f"rule-255 ConnectionRequested drafts, {len(connection_requested.VALIDATOR_MUTANTS)} validator and "
         f"{len(connection_requested.vector_mutants(connection_requested_section))} vector mutants caught; "

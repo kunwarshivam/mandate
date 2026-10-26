@@ -809,6 +809,21 @@ SCHEMAS[("meter", "MeterReserved")] = rec(
     ("max_cost_usd", DEC),
     ("risk_day", DATE),
 )
+# §9.37 (v0.97, DEC-2278): the news reader's stream and the one record it writes per stored item.
+SCHEMAS[("news", "StreamOpened")] = rec(("stream_type", one_of("news")), ("workspace_id", IDENT_T))
+SCHEMAS[("news", "NewsItemStored")] = rec(
+    ("source", STR),
+    ("allowlist_version", INT),
+    ("item_id", STR),
+    ("symbols", list_of(STR)),
+    ("published_at", TS),
+    ("knowledge_at", TS),
+    ("item_ref", REF),
+    ("licensed", BOOL),
+)
+NEWS_ITEM_ID_FORM = re.compile(r"^[A-Za-z0-9._:-]{1,128}\Z")
+NEWS_RESERVED_PREFIXES = ("bar:", "quote:", "instrument:")
+NEWS_MAX_SYMBOLS = 32
 SCHEMAS[("meter", "MeterSettled")] = rec(
     ("call_id", ULID),
     ("reservation", ULID),
@@ -2067,6 +2082,8 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
             rule("280", not blocked or noticed, "schema", "payload.cause")
     if event_type == "ClockAdvanced":
         account_clock_rules(draft, skip, rule)
+    if draft["stream_id"].startswith("news:"):
+        news_rules(event_type, draft, skip, rule)
     if event_type == "ExternalActivityIngested":
         fill = p["source"] == "fill"
         if fill:
@@ -2848,6 +2865,31 @@ def account_clock_rules(draft: dict, skip: frozenset[str], rule) -> None:
             return
 
 
+def news_rules(event_type: str, draft: dict, skip: frozenset[str], rule) -> None:
+    """Rule 283 on `NewsItemStored` (v0.97 §9.37, DEC-2278), its clauses in the spec's order, the
+    first that fails reported; then rule 286's writer, a `system` actor, on every news-stream record."""
+    if event_type == "NewsItemStored":
+        p = draft["payload"]
+        symbols = p["symbols"]
+        least = 0 if "boundary.rule_283_none" in skip else 1
+        most = NEWS_MAX_SYMBOLS + 1 if "boundary.rule_283_33" in skip else NEWS_MAX_SYMBOLS
+        item = p["item_id"]
+        grammar = bool(NEWS_ITEM_ID_FORM.match(item)) or "rule.283.grammar" in skip
+        reserved = item.startswith(NEWS_RESERVED_PREFIXES) and "rule.283.prefix" not in skip
+        clauses = [
+            ("symbols", symbols == sorted(symbols) or "rule.283.sorted" in skip),
+            ("symbols", len(set(symbols)) == len(symbols) or "rule.283.unique" in skip),
+            ("symbols", least <= len(symbols) <= most),
+            ("item_id", grammar and not reserved),
+            ("knowledge_at", p["knowledge_at"] >= p["published_at"] or "rule.283.known" in skip),
+        ]
+        if "order.rule_283_known_first" in skip:
+            clauses.reverse()
+        wrong = next((m for m, ok in clauses if not ok), None)
+        rule("283", wrong is None, "schema", f"payload.{wrong}" if wrong else "")
+    rule("286.actor", draft["actor"]["kind"] == "system", "schema", "actor.kind")
+
+
 def passkey_step_up(number: str, draft: dict, skip: frozenset[str], rule) -> bool:
     """Rules 267 and 268's evidence clauses (v0.84, DEC-2131): a passkey's step-up, authenticated 0
     to 300 seconds before the envelope's `event_time`, the method judged first."""
@@ -3586,12 +3628,12 @@ def subject_violations(event_type: str, draft: dict, skip: frozenset[str]) -> li
     p = draft["payload"]
     kind = draft["stream_id"].split(":")[0]
     out = []
-    name = "rule.154" if kind == "meter" else "rule.25"
+    name = {"meter": "rule.154", "news": "rule.286"}.get(kind, "rule.25")
     if event_type == "StreamOpened" and name not in skip:
         if kind == "acct":
             opened = f"acct:{p['workspace_id']}:{p['account_ref']}"
-        elif kind == "meter":
-            opened = f"meter:{p['workspace_id']}"
+        elif kind in ("meter", "news"):
+            opened = f"{kind}:{p['workspace_id']}"
         else:
             opened = f"ctl:{p['workspace_id']}"
         if draft["stream_id"] != opened:
@@ -3698,7 +3740,7 @@ def violations(draft: dict, skip: frozenset[str] = frozenset()) -> list[Violatio
     kinds |= {k for k, e, _ in VERSIONED_SCHEMAS if e == event_type}
     if not kinds:
         return [Violation("catalogue", "unknown_event_type", "event_type")]
-    shape = {"acct": 3, "agent": 3, "ctl": 2, "meter": 2}.get(stream[0])
+    shape = {"acct": 3, "agent": 3, "ctl": 2, "meter": 2, "news": 2}.get(stream[0])
     if shape != len(stream) or not all(IDENT_RE.match(s) for s in stream[1:]):
         return [Violation("stream", "non_canonical", "stream_id")]
     if stream[0] not in kinds:
