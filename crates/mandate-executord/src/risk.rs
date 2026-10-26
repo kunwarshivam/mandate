@@ -8,20 +8,21 @@
 //! unreadable view, `not_opened`: its openings are held, never its exits (`AGENTS.md` rules 3 and
 //! 13).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
 
 use mandate_canon::{Value, parse};
 use mandate_domain::{AgentMode, AssetClass};
 use mandate_executor::risk_state::{
-    AccountRiskFold, ExchangeRiskCalendar, RiskAppend, RiskView, UnreadableCause,
+    AccountRiskFold, ExchangeRiskCalendar, RiskAppend, RiskView, UnreadableCause, risk_snapshot,
 };
 use mandate_executor::tripwire::TripwireState;
 use mandate_executor::{AgentId, MandateVersion};
 use mandate_journal::StoredEvent;
 use mandate_num::{Price, Qty, Usd};
+use mandate_risk::{AssetId, InstrumentRestriction, RiskSnapshot};
 use mandate_spec::ValidatedMandate;
-use mandate_spec::risk::{Opening, risk_day};
+use mandate_spec::risk::{InstrumentRestriction as SpecRestriction, Opening, risk_day};
 use mandate_time::{Date, UtcNanos};
 
 use crate::follow::{FirstDeployment, Following};
@@ -37,9 +38,22 @@ pub struct RiskOpening {
     pub mark_max_age_s: u32,
 }
 
+/// An agent's risk as the binding gate reads it (DEC-2804 item 7, DEC-2380 item 2): its fold's
+/// snapshot and mode, and its bound instrument's restrictions by asset id. Only a readable view
+/// has one; the gate holds an opening of any agent without one, and never an exit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GateRisk {
+    pub risk: RiskSnapshot,
+    pub mode: mandate_risk::AgentMode,
+    pub instrument_restrictions: BTreeMap<AssetId, BTreeSet<InstrumentRestriction>>,
+}
+
 /// Reads an agent's [`RiskOpening`] from `control`, the control rows up to and including its first
 /// deployment, with its version validated on `equity` as of `date`, the opening's New York date.
 /// `None` when any of it does not read, which opens no fold.
+///
+/// [`Self::read`] is handed every agent's [`GateRisk`] after the book changed, for a binding gate
+/// that reads them; by default nothing reads them.
 pub trait RiskOpenings {
     fn opening(
         &self,
@@ -48,6 +62,8 @@ pub trait RiskOpenings {
         equity: Usd,
         date: Date,
     ) -> Option<RiskOpening>;
+
+    fn read(&self, _risks: BTreeMap<AgentId, GateRisk>) {}
 }
 
 /// The openings of a process that reads no deployment: no fold opens, so every opening is held.
@@ -87,11 +103,19 @@ pub const NOT_OPENED: RiskView = RiskView::Unreadable {
     mode: AgentMode::ExitsOnly,
 };
 
+/// One agent's open fold.
+struct Open {
+    fold: AccountRiskFold<'static>,
+    version: MandateVersion,
+    instrument: AssetId,
+}
+
 /// The account's risk folds.
 pub struct RiskBook {
     account: String,
-    /// Each open fold, with the version its records name in `config_refs` (journal spec §9).
-    folds: BTreeMap<AgentId, (AccountRiskFold<'static>, MandateVersion)>,
+    /// Each open fold, with the version its records name in `config_refs` (journal spec §9) and
+    /// the instrument it is bound to.
+    folds: BTreeMap<AgentId, Open>,
     /// The New York risk day of the last `ClockAdvanced` copy on the account stream, from which
     /// the next tick crosses midnight (DEC-2804 item 5).
     copied: Option<Date>,
@@ -159,9 +183,15 @@ impl RiskBook {
                 return;
             };
             match self.open(agent, first, control, rows, openings) {
-                Some(fold) => {
-                    self.folds
-                        .insert(agent.clone(), (fold, first.version.clone()));
+                Some((fold, instrument)) => {
+                    self.folds.insert(
+                        agent.clone(),
+                        Open {
+                            fold,
+                            version: first.version.clone(),
+                            instrument,
+                        },
+                    );
                 }
                 None => unopened = true,
             }
@@ -170,7 +200,7 @@ impl RiskBook {
     }
 
     /// `agent`'s fold opened flat at `first` and folded over the account stream's `rows` from seq
-    /// 2, or `None` when its equity, its deployment, its calendar or the opening does not read, or
+    /// 2, with the instrument it is bound to, or `None` when its equity, its deployment, its calendar or the opening does not read, or
     /// its universe may hold a second instrument (DEC-2804 items 2 and 8).
     fn open(
         &self,
@@ -179,7 +209,7 @@ impl RiskBook {
         control: &[StoredEvent],
         rows: &[StoredEvent],
         openings: &dyn RiskOpenings,
-    ) -> Option<AccountRiskFold<'static>> {
+    ) -> Option<(AccountRiskFold<'static>, AssetId)> {
         let at = UtcNanos::from_parts(first.at.secs(), 0).ok()?;
         let equity = equity_at(rows, at)?;
         let upto: Vec<StoredEvent> = control
@@ -191,6 +221,7 @@ impl RiskBook {
         if read.mandate.mandate().universe.max_instruments > 1 {
             return None;
         }
+        let instrument = AssetId::new(&read.instrument).ok()?;
         let opening = Opening {
             position_qty: Qty::ZERO,
             avg_cost: Price::parse("1").ok()?,
@@ -213,7 +244,7 @@ impl RiskBook {
         for row in rows.iter().filter(|row| row.seq > 1) {
             fold.fold(row).ok()?;
         }
-        Some(fold)
+        Some((fold, instrument))
     }
 
     /// Folds committed account-stream `rows` into every open fold, and notes each `ClockAdvanced`
@@ -225,7 +256,7 @@ impl RiskBook {
             {
                 self.copied = Some(day.day);
             }
-            self.folds.retain(|_, (fold, _)| fold.fold(row).is_ok());
+            self.folds.retain(|_, open| open.fold.fold(row).is_ok());
         }
     }
 
@@ -234,7 +265,11 @@ impl RiskBook {
     pub fn owed(&self) -> Vec<(MandateVersion, RiskAppend)> {
         self.folds
             .values()
-            .flat_map(|(fold, version)| fold.owed().map(|owed| (version.clone(), owed.clone())))
+            .flat_map(|open| {
+                open.fold
+                    .owed()
+                    .map(|owed| (open.version.clone(), owed.clone()))
+            })
             .collect()
     }
 
@@ -245,8 +280,8 @@ impl RiskBook {
         let day = risk_day(clock).ok().map(|day| day.day);
         day.is_none()
             || day != self.copied
-            || self.folds.values().any(|(fold, _)| {
-                let mut probe = fold.clone();
+            || self.folds.values().any(|open| {
+                let mut probe = open.fold.clone();
                 probe.fold(copy).is_ok_and(|records| !records.is_empty())
             })
     }
@@ -255,8 +290,44 @@ impl RiskBook {
     pub fn view(&self, agent: &AgentId) -> RiskView {
         self.folds
             .get(agent)
-            .map_or(NOT_OPENED, |(fold, _)| fold.view().clone())
+            .map_or(NOT_OPENED, |open| open.fold.view().clone())
     }
+
+    /// Every agent's [`GateRisk`] whose fold's view is readable.
+    pub fn gates(&self) -> BTreeMap<AgentId, GateRisk> {
+        self.folds
+            .iter()
+            .filter_map(|(agent, open)| Some((agent.clone(), gate_risk(open)?)))
+            .collect()
+    }
+}
+
+/// `open`'s [`GateRisk`]: [`risk_snapshot`] of its view, and its snapshot's restrictions of its
+/// bound instrument, by that instrument's asset id.
+fn gate_risk(open: &Open) -> Option<GateRisk> {
+    let view = open.fold.view();
+    let (risk, mode) = risk_snapshot(view)?;
+    let RiskView::Readable { snapshot, .. } = view else {
+        return None;
+    };
+    let restrictions: BTreeSet<InstrumentRestriction> = snapshot
+        .instrument_restrictions
+        .iter()
+        .map(|restriction| match restriction {
+            SpecRestriction::StaleMark => InstrumentRestriction::StaleMark,
+            SpecRestriction::RemovedInstrument => InstrumentRestriction::RemovedInstrument,
+        })
+        .collect();
+    let instrument_restrictions = if restrictions.is_empty() {
+        BTreeMap::new()
+    } else {
+        BTreeMap::from([(open.instrument.clone(), restrictions)])
+    };
+    Some(GateRisk {
+        risk,
+        mode,
+        instrument_restrictions,
+    })
 }
 
 /// The equity an opening at `at` is validated on, chosen by journal order (DEC-2804 item 2): the

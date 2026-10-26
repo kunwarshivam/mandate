@@ -337,6 +337,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             (head, &mut account_rows),
             self.wiring.risk.as_ref(),
         );
+        self.wiring.risk.read(self.risk.gates());
     }
 
     /// Journal spec §2's stream lifecycle: the process that owns a new account stream writes its
@@ -1298,6 +1299,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
             AppendOutcome::Committed(stored) | AppendOutcome::AlreadyCommitted(stored) => {
                 if self.fold_rows(&stored).is_some() {
                     self.risk.fold(&stored);
+                    self.wiring.risk.read(self.risk.gates());
                     Ran::Committed
                 } else {
                     self.lifecycle.observe(now, Lifecycled::Failed);

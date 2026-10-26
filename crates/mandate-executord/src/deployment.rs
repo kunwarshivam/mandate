@@ -22,6 +22,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::time::Duration;
 
 use mandate_accounting::{AssetClass, InstrumentId};
 use mandate_artifacts_fs::FsArtifactStore;
@@ -33,12 +34,14 @@ use mandate_executor::{
 };
 use mandate_gate_context::{Freshness, Journaled, Row};
 use mandate_gate_inputs::control::{
-    ControlRecord, LiveAdmission, Pinned, RunFacts, configuration, confirmed_version,
+    ConfirmedVersion, ControlRecord, LiveAdmission, Pinned, RunFacts, configuration,
+    confirmed_version,
 };
 use mandate_gate_inputs::{DeployedView, Reviewed};
 use mandate_journal::{ArtifactSource, Environment, StoredEvent, StreamId};
 use mandate_num::{Fraction, Price, Ratio, ShareIncrement, Usd};
 use mandate_risk::{AgentMode, ConductState, DayTradeLedger, RiskSnapshot, SaneQuote};
+use mandate_spec::ValidatedMandate;
 use mandate_spec::context::Membership;
 use mandate_time::{Date, UtcNanos};
 
@@ -46,6 +49,7 @@ use crate::follow::agents_of;
 use crate::gate::{AccountRules, AgentRisk, AssetRecord, DeployedGate, Liquidity, OrderFacts};
 use crate::marks::Marked;
 use crate::quotes::QuoteFeed;
+use crate::risk::{GateRisk, RiskOpening, RiskOpenings};
 use crate::{Protections, Unplanned, Wiring};
 
 /// How fresh, in risk-clock seconds, the journal's facts an opening reads must be: a mark within a
@@ -171,6 +175,12 @@ struct Resolved {
     loss_carry: Usd,
     symbol: String,
     instrument: InstrumentId,
+    /// The confirmed version, validated on every V-rule but V-002, which its risk fold's opening
+    /// validates on the opening's equity (DEC-2804 item 2).
+    confirmed: ConfirmedVersion,
+    /// The reviewed instrument's asset class and its quote staleness, its fold's opening's.
+    asset_class: AssetClass,
+    quote_max_age: Duration,
 }
 
 /// The deployments read at one control-stream length and trade date, so a port asked again within
@@ -195,6 +205,8 @@ struct Inner {
     clock: Option<StreamId>,
     sources: Sources,
     cache: RefCell<Cache>,
+    /// Each agent's risk as the process's risk book last read it (DEC-2804 item 7).
+    risk: RefCell<BTreeMap<AgentId, GateRisk>>,
 }
 
 /// The account's deployments as every production port reads them, shared by all of them.
@@ -213,6 +225,7 @@ impl Deployment {
             clock: StreamId::parse(&format!("clock:{workspace}")),
             sources,
             cache: RefCell::new(Cache::default()),
+            risk: RefCell::new(BTreeMap::new()),
         }))
     }
 
@@ -242,7 +255,8 @@ impl Deployment {
             gate: Box::new(deployment.clone()),
             protections: Box::new(deployment.clone()),
             quotes: Box::new(deployment.clone()),
-            marked: Box::new(deployment),
+            marked: Box::new(deployment.clone()),
+            risk: Box::new(deployment),
             ..wiring
         }
     }
@@ -346,6 +360,9 @@ impl Deployment {
             loss_carry: confirmed.connection_loss_carry(),
             symbol: reviewed.instrument.symbol.as_str().to_owned(),
             instrument: InstrumentId::new(reviewed.instrument.asset_id.as_str()).ok()?,
+            asset_class: reviewed.instrument.asset_class,
+            quote_max_age: reviewed.quote_max_age,
+            confirmed,
         })
     }
 
@@ -611,5 +628,47 @@ impl BindingGateSource for Deployment {
             journaled: facts,
         };
         resolved.gate.input(&order, request)
+    }
+}
+
+impl Deployment {
+    /// `agent`'s risk as the process's risk book last read it: `None` while its fold is not open
+    /// or its view is unreadable, which holds its openings and never its exits (DEC-2804 items 2
+    /// and 7).
+    pub fn risk(&self, agent: &AgentId) -> Option<GateRisk> {
+        self.0.risk.try_borrow().ok()?.get(agent).cloned()
+    }
+}
+
+impl RiskOpenings for Deployment {
+    /// `agent`'s deployment as `control` reads it (the rows up to its first deployment), on
+    /// `date`, its version validated on `equity` (DEC-2804 item 2).
+    fn opening(
+        &self,
+        agent: &AgentId,
+        control: &[StoredEvent],
+        equity: Usd,
+        date: Date,
+    ) -> Option<RiskOpening> {
+        let records: Vec<ControlRecord> =
+            control.iter().filter_map(ControlRecord::of_row).collect();
+        if records.len() != control.len() {
+            return None;
+        }
+        let resolved = self.resolve(&records, agent, date)?;
+        let input = resolved.confirmed.clone().with_equity(equity).ok()?;
+        Some(RiskOpening {
+            mandate: ValidatedMandate::new(input.mandate().clone(), input.context(), &[]).ok()?,
+            instrument: resolved.instrument.as_str().to_owned(),
+            asset_class: resolved.asset_class,
+            inherited_loss_usd: resolved.loss_carry,
+            mark_max_age_s: u32::try_from(resolved.quote_max_age.as_secs()).ok()?,
+        })
+    }
+
+    fn read(&self, risks: BTreeMap<AgentId, GateRisk>) {
+        if let Ok(mut held) = self.0.risk.try_borrow_mut() {
+            *held = risks;
+        }
     }
 }

@@ -27,7 +27,6 @@ mandate-process.workspace = true
 mandate-risk.workspace = true
 mandate-spec.workspace = true
 mandate-robinhood.workspace = true
-mandate-spec.workspace = true
 mandate-store.workspace = true
 mandate-time.workspace = true
 mandate-vault.workspace = true
