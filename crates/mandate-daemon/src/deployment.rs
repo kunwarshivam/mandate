@@ -6,13 +6,14 @@
 //! canonical document (journal spec §9.2). The document gives the connection and the approver
 //! references, which resolve among the workspace's members as `mandate_identity::approvers`
 //! resolves them for the shell and the executor (DEC-953, DEC-2384). The version's first
-//! `MandateVersionCreated`, journaled by the user who created it, gives the author. Anything missing, corrupt, unreadable, or for another environment refuses
-//! rather than guessing, and a deployment record that cannot be read is never skipped for an older
-//! one (`AGENTS.md` rules 3 and 8).
+//! `MandateVersionCreated`, journaled by the user who created it, gives the author. A deployment
+//! or document that is missing, corrupt, unreadable, or for another environment refuses rather than
+//! guessing, a deployment record that cannot be read is never skipped for an older one, and any
+//! control row the approvers' reading cannot read resolves no approver (`AGENTS.md` rules 3 and 8).
+//! The approvers are read once, when the process resolves its deployment.
 
 use mandate_canon::{Value, parse};
 use mandate_gate_context::gate_rule_set;
-use mandate_identity::MEMBERSHIP_TYPES;
 use mandate_identity::approvers::{RecordView, members, resolve};
 use mandate_journal::{ArtifactRef, ArtifactSource, Environment, StoredEvent, get_artifact};
 use mandate_risk::GateConfig;
@@ -145,21 +146,24 @@ pub fn rule_set(
 
 /// The user ids `references` resolve to among the workspace's members, as
 /// `mandate_identity::approvers` resolves them for the shell and the executor (DEC-2384): over
-/// every control row in `seq` order, with its body's `event_time`. A membership row whose body does
-/// not parse resolves no one, since skipping it could leave a removed approver standing
-/// (`AGENTS.md` rule 3).
+/// every control row in `seq` order, with its body's `event_time`. A row the run cannot read, one
+/// whose body does not parse, that carries no payload, or that names no environment the run reads,
+/// resolves no one, as the shell's reading of the same rows does: skipping it could leave a
+/// revoked connection's owner or a removed approver standing (`AGENTS.md` rule 3).
 fn approvers(control: &[StoredEvent], connection: &str, references: &[&str]) -> Vec<String> {
     let mut rows: Vec<&StoredEvent> = control.iter().collect();
     rows.sort_by_key(|row| row.seq);
-    let mut bodies = Vec::with_capacity(rows.len());
+    let mut read = Vec::with_capacity(rows.len());
     for row in rows {
-        match body(row) {
-            Some(body) => bodies.push((row, body)),
-            None if MEMBERSHIP_TYPES.contains(&row.event_type.as_str()) => return Vec::new(),
-            None => {}
+        let Some(body) = body(row) else {
+            return Vec::new();
+        };
+        if body.get("payload").is_none() || !matches!(row.environment.as_str(), "paper" | "live") {
+            return Vec::new();
         }
+        read.push((row, body));
     }
-    let views: Vec<RecordView<'_>> = bodies
+    let views: Vec<RecordView<'_>> = read
         .iter()
         .filter_map(|(row, body)| {
             Some(RecordView {

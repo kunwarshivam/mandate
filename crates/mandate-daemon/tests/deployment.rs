@@ -536,3 +536,118 @@ fn a_newer_registration_that_does_not_parse_is_never_read_past() {
     world.registered("rule_set", &reviewed(), "paper");
     assert!(world.rule_set().is_ok(), "a newer rule set does");
 }
+
+/// Each fact that should leave no approver leaves none, as the shell's and the executor's reading
+/// of the same rows does (DEC-2384, AGENTS.md rule 3).
+#[test]
+fn a_revoked_connection_a_deactivated_member_or_an_unreadable_row_resolves_no_one() {
+    let revoked = |world: &mut World| {
+        let seq = world.next();
+        world.control.push(row(
+            seq,
+            "ConnectionRevoked",
+            "paper",
+            ("user", "user-owner"),
+            r#"{"connection_id":"conn_alpaca_paper_01","reason":"owner_revoked"}"#,
+        ));
+    };
+    let deactivated = |world: &mut World| {
+        let seq = world.next();
+        world.control.push(row(
+            seq,
+            "MemberDeactivated",
+            "paper",
+            ("user", FOUNDER),
+            &format!(r#"{{"member":"{FOUNDER}"}}"#),
+        ));
+    };
+    let unparseable = |world: &mut World| {
+        let seq = world.next();
+        let mut broken = row(
+            seq,
+            "ConnectionRevoked",
+            "paper",
+            ("user", "user-owner"),
+            "{}",
+        );
+        broken.body = b"not json".to_vec();
+        world.control.push(broken);
+    };
+    let payloadless = |world: &mut World| {
+        let seq = world.next();
+        let mut bare = row(seq, "MemberDeactivated", "paper", ("user", FOUNDER), "{}");
+        let text = String::from_utf8(bare.body.clone()).unwrap();
+        bare.body = text.replace(r#","payload":{}"#, "").into_bytes();
+        assert!(!String::from_utf8_lossy(&bare.body).contains("payload"));
+        world.control.push(bare);
+    };
+    let elsewhere = |world: &mut World| {
+        let seq = world.next();
+        world.control.push(row(
+            seq,
+            "ConnectionChecked",
+            "backtest",
+            ("system", "checker"),
+            r#"{"connection_id":"conn_alpaca_paper_01"}"#,
+        ));
+    };
+    type Change = Box<dyn Fn(&mut World)>;
+    let cases: [(&str, bool, Change); 5] = [
+        ("a revoked connection", false, Box::new(revoked)),
+        ("a deactivated founder", true, Box::new(deactivated)),
+        (
+            "an unparseable row of any type",
+            true,
+            Box::new(unparseable),
+        ),
+        ("a row with no payload", true, Box::new(payloadless)),
+        (
+            "a row of no environment the run reads",
+            true,
+            Box::new(elsewhere),
+        ),
+    ];
+    for (case, founded, change) in cases {
+        let mut world = World::default();
+        world.established("conn_alpaca_paper_01", "user-owner");
+        if founded {
+            world.founded(FOUNDER);
+        }
+        let version = world.version(
+            ("user", "user-author"),
+            approvers(&["role:approver", "user:user-owner"]),
+        );
+        world.deployed(AGENT, &version, "paper");
+        assert!(
+            !world.resolved().unwrap().approvers.is_empty(),
+            "{case}: before"
+        );
+        change(&mut world);
+        assert_eq!(
+            world.resolved().unwrap().approvers,
+            Vec::<String>::new(),
+            "{case}"
+        );
+    }
+}
+
+/// On a founded workspace each role reference resolves by the roles the fold reads, and the rows
+/// are read in `seq` order whatever order the store hands them over in.
+#[test]
+fn each_role_reference_resolves_by_the_founder_s_roles_in_seq_order() {
+    let mut world = World::default();
+    world.established("conn_alpaca_paper_01", "user-owner");
+    world.founded(FOUNDER);
+    let both = vec![FOUNDER.to_owned(), FOUNDER.to_ascii_lowercase()];
+    for reference in ["role:approver", "role:owner", "role:workspace_admin"] {
+        let version = world.version(("user", "user-author"), approvers(&[reference]));
+        world.deployed(AGENT, &version, "paper");
+        assert_eq!(world.resolved().unwrap().approvers, both, "{reference}");
+    }
+    world.control.reverse();
+    assert_eq!(
+        world.resolved().unwrap().approvers,
+        both,
+        "read in seq order"
+    );
+}
