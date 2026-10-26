@@ -2,9 +2,11 @@
 //! stream's `RetirementHeld`, with rule 265 on the draft, and stream rule 266 ([`retirement_failure`])
 //! over the agent's records in commit order, which a verifier reads with the control and account
 //! streams' records about the agent. The record names no order, position, instrument, or quantity
-//! (`AGENTS.md` rule 6). Every rule only refuses.
+//! (`AGENTS.md` rule 6). Every rule only refuses. [`retirement_held_silent`] is the verifier's
+//! finding of an open sequence silent for more than 48 hours (DEC-2835).
 
 use mandate_canon::Value;
+use mandate_num::Ratio;
 use mandate_time::UtcNanos;
 
 use crate::schema::Ty;
@@ -260,4 +262,101 @@ fn held<'a>(
         });
     }
     continues
+}
+
+/// What a mandate version says of a retirement's cause (§9.34): the `profit_level` a `profit_stop`
+/// is read against, the `end_date`, and `on_complete`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RetirementTerms {
+    pub profit_level: Ratio,
+    /// `YYYY-MM-DD`, compared as text: the journal's dates are fixed-width (§4).
+    pub end_date: String,
+    pub on_complete: String,
+}
+
+/// Silence: more than 48 hours of risk clock since the last record.
+const SILENT_AFTER_S: i64 = 2 * DAY_S;
+
+/// The verifier's `retirement_held_silent` finding for `agent` at risk clock `now` (journal spec
+/// §9.34, DEC-2352 item 4): its sequence's last `RetirementHeld` in `records`, the agent's records in
+/// commit order as [`retirement_failure`] reads them, is more than 48 hours old, with no end and no
+/// version that cancels it since. `cause` is the record that began the retirement and `terms` reads
+/// a mandate version's terms by its hash.
+///
+/// An end is the agent's own, as rule 266 reads it. A version cancels only once applied to this
+/// agent, and only by its cause: a `profit_stop` by a `profit_level` above the return at the trigger,
+/// (`agent_equity` − `capital_base`) / `capital_base` from its `RiskLimitTriggered`; a passed
+/// `end_date` by a later one; a goal's `release` by a changed `on_complete`, each against the version
+/// the sequence's first record names. Any other cause, or terms that cannot be read, cancels nothing,
+/// so the finding is reported rather than missed (`AGENTS.md` rule 3, DEC-2835).
+#[must_use]
+pub fn retirement_held_silent(
+    agent: &str,
+    cause: &Value,
+    records: &[Value],
+    terms: impl Fn(&str) -> Option<RetirementTerms>,
+    now: i64,
+) -> bool {
+    let mut last: Option<i64> = None;
+    let mut held_under: Option<Option<RetirementTerms>> = None;
+    for record in records {
+        let p = payload(record);
+        match text(record, "event_type") {
+            HELD => {
+                last = clock(p, "risk_clock");
+                if held_under.is_none() {
+                    let version = record
+                        .get("config_refs")
+                        .map_or("", |refs| text(refs, "mandate_version"));
+                    held_under = Some(terms(version));
+                }
+            }
+            "AgentStopped" | "OwnerCommandIssued" if ends(agent, record) => last = None,
+            "MandateVersionApplied"
+                if last.is_some()
+                    && text(p, "agent_id") == agent
+                    && text(p, "result") == "applied" =>
+            {
+                let new = terms(text(p, "new_version"));
+                let under = held_under.as_ref().and_then(Option::as_ref);
+                if new.is_some_and(|new| cancels(cause, under, &new)) {
+                    last = None;
+                }
+            }
+            _ => {}
+        }
+    }
+    last.is_some_and(|at| now.saturating_sub(at) > SILENT_AFTER_S)
+}
+
+/// Whether `new` cancels the retirement `cause` began, held under `under`.
+fn cancels(cause: &Value, under: Option<&RetirementTerms>, new: &RetirementTerms) -> bool {
+    let p = payload(cause);
+    match text(cause, "event_type") {
+        "RiskLimitTriggered" => text(p, "limit") == "profit_stop" && raised(p, new.profit_level),
+        "GoalCompleted" if text(p, "reason") == "end_date" => {
+            under.is_some_and(|under| new.end_date > under.end_date)
+        }
+        "GoalCompleted" if text(p, "on_complete") == "release" => {
+            under.is_some_and(|under| new.on_complete != under.on_complete)
+        }
+        _ => false,
+    }
+}
+
+/// Whether `level` is above the return at a `profit_stop` trigger: `level` × `capital_base` above
+/// `agent_equity` − `capital_base`, the same comparison without a division, for a positive base. A
+/// figure that does not read, or a base that is not positive, raises nothing.
+fn raised(trigger: &Value, level: Ratio) -> bool {
+    let figure = |member: &str| Ratio::parse(text(trigger, member)).ok();
+    let (Some(equity), Some(base)) = (figure("agent_equity"), figure("capital_base")) else {
+        return false;
+    };
+    if base <= Ratio::ZERO {
+        return false;
+    }
+    match (level.checked_mul(base), equity.checked_sub(base)) {
+        (Ok(scaled), Ok(gain)) => scaled > gain,
+        _ => false,
+    }
 }

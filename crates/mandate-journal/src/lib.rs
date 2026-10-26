@@ -202,7 +202,7 @@ pub use control_verify::{
 };
 pub use draft::Draft;
 pub use merkle::{Anchor, AnchorLeaf, merkle_root, tsa_imprint};
-pub use retirements::retirement_failure;
+pub use retirements::{RetirementTerms, retirement_failure, retirement_held_silent};
 pub use start::{
     AnchorRecord, AnchorRecordError, ColdRead, ManifestStart, ResolvedStart, StartRequest,
     TrustedStartError, anchor_record, resolve_start_from_rows,
