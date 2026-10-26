@@ -3,8 +3,11 @@
 //! the challenge route, the owner's `StepUpConfirmed` is on the control stream as `mandate step-up
 //! confirm` appends it, the server's real binding judges the evidence, and the grant is committed
 //! as the one `ApprovalResponseSubmitted` `mandate approvals approve` writes (journal spec §9.7).
-//! Each refusal of DEC-2104 item 6 commits nothing and keeps the challenge; a `live` workspace is
-//! `live_unavailable`; a repeat under the key answers the same; and a Skip is unchanged.
+//! Each refusal of DEC-2104 item 6 commits nothing and keeps the challenge; a principal the bound
+//! mandate does not list in `autonomy.approval.approvers` is `forbidden`, and a mandate or
+//! membership that cannot be read fails closed ([DEC-2129] item 7); the checks answer in item 1's
+//! order; a `live` workspace is `live_unavailable`; a repeat under the key answers the same; and a
+//! Skip is unchanged.
 //!
 //! The binding is wrapped in a recorder, so a failure shows what the port was asked and answered.
 //! The oracles are the test's own: the code is encoded here from the challenge's bytes, the
@@ -13,10 +16,11 @@
 //! arranged.
 //!
 //! [DEC-2104]: ../../../docs/project/decisions/DEC-2104.md
+//! [DEC-2129]: ../../../docs/project/decisions/DEC-2129.md
 
 mod common;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::os::unix::fs::PermissionsExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -35,6 +39,7 @@ use mandate_api_server::confirm::CliConfirm;
 use mandate_api_server::http::{self, App, Settings};
 use mandate_api_server::lifecycle::Drain;
 use mandate_api_server::methods::{Methods, Passkey};
+use mandate_api_server::objects::{ObjectStore, Objects};
 use mandate_api_server::session::{COOKIE_NAME, OsRandom, Sessions};
 use mandate_api_server::stepup::{Action, Asserted, Judged, StepUp, Unverified};
 use mandate_api_server::subject::{LinkRefusal, NamesPrincipal};
@@ -121,13 +126,47 @@ struct World {
     asked: Asked,
     linked: Arc<AtomicBool>,
     records: Arc<Mutex<Vec<MembershipRecord>>>,
+    /// The approval's content hash.
+    hash: String,
 }
+
+/// What the bound mandate version is to the store, for [DEC-2129] item 7.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Bound {
+    /// Stored, and a mandate.
+    Stored,
+    /// Named, and not in the store.
+    Absent,
+    /// Stored, and not a mandate.
+    NotAMandate,
+    /// The content names no version.
+    Unnamed,
+    /// The deployment has no artifact store.
+    NoStore,
+}
+
+/// How a world is set up: its environment, the mandate's approvers, Alice's roles (Bob is an
+/// approver alone), and what the bound version is to the store.
+struct Setup<'a> {
+    environment: &'a str,
+    approvers: &'a [&'a str],
+    alice: &'a [Role],
+    bound: Bound,
+}
+
+const PAPER: Setup<'static> = Setup {
+    environment: "paper",
+    approvers: &["role:approver"],
+    alice: &[Role::Approver],
+    bound: Bound::Stored,
+};
 
 static DIRS: Mutex<u32> = Mutex::new(0);
 
-/// A workspace whose control stream is opened in `environment`, with `agt_a` deployed and one
-/// pending approval on its stream; Alice and Bob are approvers, and both linked.
-fn world_in(environment: &str) -> World {
+/// A workspace whose control stream is opened in `setup.environment`, with `agt_a` deployed and
+/// one pending approval on its stream bound to a mandate listing `setup.approvers`; Alice and Bob
+/// both hold the approver role, and both are linked.
+fn world_with(setup: &Setup<'_>) -> World {
     let mut n = DIRS.lock().expect("unpoisoned");
     *n += 1;
     let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
@@ -143,7 +182,7 @@ fn world_in(environment: &str) -> World {
     let key = read_session_key(&dir).expect("the key reads");
     let journal = Arc::new(MemJournal::default());
     let records = Arc::new(Mutex::new(vec![
-        activated(1, principal(ALICE), &[Role::Approver]),
+        activated(1, principal(ALICE), setup.alice),
         activated(2, principal(BOB), &[Role::Approver]),
     ]));
     let read_records = Arc::clone(&records);
@@ -155,6 +194,21 @@ fn world_in(environment: &str) -> World {
         &[Algorithm::Es256],
     )
     .expect("the issuer");
+    let objects = Arc::new(Objects::new(BTreeMap::<Digest, Vec<u8>>::new()));
+    let document = document(setup.approvers);
+    let version = match setup.bound {
+        Bound::Stored | Bound::NoStore => Some(reference(&document)),
+        Bound::Absent => Some(reference(b"{}")),
+        Bound::NotAMandate => Some(reference(&canonical(&json!({"name": "not a mandate"})))),
+        Bound::Unnamed => None,
+    };
+    let held = match setup.bound {
+        Bound::NotAMandate => canonical(&json!({"name": "not a mandate"})),
+        _ => document,
+    };
+    objects.put(&held).expect("stored");
+    let content = content(version.as_deref());
+    let hash = reference(&canonical(&content));
     let challenges = Arc::new(Challenges::default());
     let asked: Asked = Arc::default();
     let linked = Arc::new(AtomicBool::new(true));
@@ -188,7 +242,9 @@ fn world_in(environment: &str) -> World {
             Ok(read_records.lock().expect("unpoisoned").clone())
         }),
         hosted: hosted(),
-        artifacts: None,
+        artifacts: (setup.bound != Bound::NoStore).then(|| {
+            Arc::clone(&objects) as Arc<dyn mandate_journal::ArtifactSource + Send + Sync>
+        }),
         objects: None,
         step_up,
         challenges: Arc::clone(&challenges),
@@ -204,13 +260,21 @@ fn world_in(environment: &str) -> World {
         asked,
         linked,
         records,
+        hash,
     };
-    w.seed(environment);
+    w.seed(setup.environment, &content);
     w
 }
 
 fn world() -> World {
-    world_in("paper")
+    world_with(&PAPER)
+}
+
+fn world_in(environment: &str) -> World {
+    world_with(&Setup {
+        environment,
+        ..PAPER
+    })
 }
 
 fn principal(id: &str) -> PrincipalId {
@@ -244,19 +308,32 @@ fn agent_stream() -> String {
     format!("agent:{WORKSPACE}:{AGENT}")
 }
 
-/// The approval's content object, as the runtime binds it.
-fn content() -> serde_json::Value {
-    json!({"action": {"instrument": "AAPL", "side": "buy", "qty": "3", "limit": "190.00"}})
+/// A mandate document listing `approvers`, from the fixture every read test stores.
+fn document(approvers: &[&str]) -> Vec<u8> {
+    let mut document: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/mandate.json")).expect("JSON");
+    document["autonomy"]["approval"]["approvers"] = json!(approvers);
+    canonical(&document)
 }
 
-/// `sha256:<hex>` of `content()`'s canonical bytes: the approval's content hash.
-fn content_hash() -> String {
-    format!("sha256:{}", content_digest().to_hex())
+fn canonical(value: &serde_json::Value) -> Vec<u8> {
+    to_canonical(&parse(&serde_json::to_vec(value).expect("JSON")).expect("canonical"))
 }
 
-fn content_digest() -> Digest {
-    let bytes = serde_json::to_vec(&content()).expect("JSON");
-    Digest::of(&to_canonical(&parse(&bytes).expect("canonical")))
+fn reference(bytes: &[u8]) -> String {
+    format!("sha256:{}", Digest::of(bytes).to_hex())
+}
+
+/// The approval's content object, as the runtime binds it to the mandate version `version`.
+fn content(version: Option<&str>) -> serde_json::Value {
+    let mut content = json!({
+        "action": {"instrument": "AAPL", "side": "buy", "qty": "3", "limit": "190.00"},
+        "trigger": {"mandate_version": version, "decided_by": "rule"},
+    });
+    if version.is_none() {
+        content["trigger"] = json!({"decided_by": "rule"});
+    }
+    content
 }
 
 /// A hash no request on the stream has.
@@ -272,7 +349,7 @@ struct Issued {
 }
 
 impl World {
-    fn seed(&self, environment: &str) {
+    fn seed(&self, environment: &str, content: &serde_json::Value) {
         let control = [
             ("StreamOpened", json!({"stream_type": "control"})),
             (
@@ -297,7 +374,7 @@ impl World {
             environment,
             "ApprovalRequested",
             T0 - 60,
-            json!({"content": content(), "content_hash": content_hash(), "deadline": DEADLINE}),
+            json!({"content": content, "content_hash": self.hash, "deadline": DEADLINE}),
         );
         requested["event_id"] = json!(APPROVAL);
         let mut streams = self.journal.streams.lock().expect("unpoisoned");
@@ -366,7 +443,7 @@ impl World {
 
     /// Alice's challenge for the approval's own content hash.
     fn challenge(&self) -> Issued {
-        self.challenge_by(ALICE, &content_hash())
+        self.challenge_by(ALICE, &self.hash)
     }
 
     /// Appends one control-stream record of `kind` at `secs`.
@@ -384,7 +461,7 @@ impl World {
     /// and 3), with `edit` applied to its payload.
     fn confirm_with(&self, issued: &Issued, edit: impl FnOnce(&mut serde_json::Value)) {
         let mut payload = json!({
-            "challenge": issued.id, "action_kind": "approve", "action_digest": content_hash(),
+            "challenge": issued.id, "action_kind": "approve", "action_digest": self.hash,
             "principal": ALICE, "code": crockford40(&issued.bytes), "confirmed_at": T0 + 2,
         });
         edit(&mut payload);
@@ -415,6 +492,11 @@ impl World {
 
     fn asked(&self) -> Vec<(StepUpActionKind, Digest, String)> {
         self.asked.lock().expect("unpoisoned").clone()
+    }
+
+    /// The approval's content hash as the digest a challenge binds.
+    fn digest(&self) -> Digest {
+        Digest::from_hex(self.hash.strip_prefix("sha256:").expect("a reference")).expect("hex")
     }
 
     /// What the port answered, for a failure message.
@@ -456,14 +538,14 @@ fn grant_at(issued: &Issued, hash: &str, authenticated_at: &str) -> Vec<u8> {
     .expect("JSON")
 }
 
-fn grant(issued: &Issued) -> Vec<u8> {
-    grant_at(issued, &content_hash(), &issued.issued_at)
+fn grant(w: &World, issued: &Issued) -> Vec<u8> {
+    grant_at(issued, &w.hash, &issued.issued_at)
 }
 
-fn skipped() -> Vec<u8> {
+fn skipped(w: &World) -> Vec<u8> {
     format!(
         r#"{{"verdict":"skipped","content_hash":"{}","step_up":null,"delegation":null}}"#,
-        content_hash()
+        w.hash
     )
     .into_bytes()
 }
@@ -498,12 +580,12 @@ fn code(reply: &Reply) -> (u16, ProblemCode) {
 /// `cli_confirm` evidence naming `challenge` at second `second`, answered at `second` too: the
 /// members of `approvals::response`, then `control::commit`'s `submitted_at` and `step_up`, whose
 /// `authenticated_at` is an integer second (journal spec §9.7).
-fn clis_grant(challenge: &str, second: i64) -> Value {
+fn clis_grant(w: &World, challenge: &str, second: i64) -> Value {
     let text = json!({
         "agent": AGENT,
         "approval": APPROVAL,
         "verdict": "approved",
-        "content_hash": content_hash(),
+        "content_hash": w.hash,
         "responder": ALICE,
         "role": "approver",
         "submitted_at": second,
@@ -548,7 +630,7 @@ fn a_confirmed_grant_commits_the_clis_answer_once_before_its_202() {
     let w = world();
     let issued = w.challenge();
     w.confirm(&issued);
-    let reply = w.respond(ALICE, KEY, &grant(&issued));
+    let reply = w.respond(ALICE, KEY, &grant(&w, &issued));
     let answer = recorded(&w, &reply);
     let id = derived("approval_response", ALICE, KEY);
     assert_eq!(
@@ -564,12 +646,12 @@ fn a_confirmed_grant_commits_the_clis_answer_once_before_its_202() {
     let row = &answers[0];
     assert_eq!(
         row.get("payload"),
-        Some(&clis_grant(&issued.id, T0)),
+        Some(&clis_grant(&w, &issued.id, T0)),
         "the payload is the CLI's, member for member"
     );
     assert_eq!(
         to_canonical(row.get("payload").expect("a payload")),
-        to_canonical(&clis_grant(&issued.id, T0)),
+        to_canonical(&clis_grant(&w, &issued.id, T0)),
         "and byte for byte"
     );
     let member = |path: &[&str]| {
@@ -589,7 +671,7 @@ fn a_confirmed_grant_commits_the_clis_answer_once_before_its_202() {
     assert_eq!(member(&["actor", "id"]).as_deref(), Some(ALICE));
     assert_eq!(
         row.get("artifact_refs"),
-        Some(&Value::Array(vec![Value::Str(content_hash())])),
+        Some(&Value::Array(vec![Value::Str(w.hash.clone())])),
         "the content hash is the payload's one digest reference"
     );
     assert!(!w.held(&issued), "the challenge is spent with the grant");
@@ -601,13 +683,13 @@ fn the_grant_is_judged_as_an_approve_bound_to_the_requests_content_hash() {
     let w = world();
     let issued = w.challenge();
     w.confirm(&issued);
-    recorded(&w, &w.respond(ALICE, KEY, &grant(&issued)));
+    recorded(&w, &w.respond(ALICE, KEY, &grant(&w, &issued)));
     let asked: Vec<(StepUpActionKind, Digest)> = w
         .asked()
         .into_iter()
         .map(|(kind, digest, _)| (kind, digest))
         .collect();
-    assert_eq!(asked, [(StepUpActionKind::Approve, content_digest())]);
+    assert_eq!(asked, [(StepUpActionKind::Approve, w.digest())]);
 
     let w = world();
     let elsewhere = w.challenge_by(ALICE, &other_hash());
@@ -615,7 +697,7 @@ fn the_grant_is_judged_as_an_approve_bound_to_the_requests_content_hash() {
     let reply = w.respond(
         ALICE,
         KEY,
-        &grant_at(&elsewhere, &content_hash(), &elsewhere.issued_at),
+        &grant_at(&elsewhere, &w.hash, &elsewhere.issued_at),
     );
     refused(
         &w,
@@ -624,11 +706,7 @@ fn the_grant_is_judged_as_an_approve_bound_to_the_requests_content_hash() {
         "a challenge for another hash",
     );
     let digests: Vec<Digest> = w.asked().into_iter().map(|(_, digest, _)| digest).collect();
-    assert_eq!(
-        digests,
-        [content_digest()],
-        "the port judges the request's hash"
-    );
+    assert_eq!(digests, [w.digest()], "the port judges the request's hash");
     assert!(w.held(&elsewhere));
 }
 
@@ -650,16 +728,16 @@ const CASES: [Case; 11] = [
                 bytes: issued.bytes.clone(),
                 issued_at: issued.issued_at.clone(),
             };
-            grant(&unissued)
+            grant(&w, &unissued)
         },
     },
     Case {
         name: "check 3: Bob's challenge presented by Alice",
         code: ProblemCode::StepUpMismatch,
         arrange: |w, _| {
-            let bobs = w.challenge_by(BOB, &content_hash());
+            let bobs = w.challenge_by(BOB, &w.hash);
             w.confirm_with(&bobs, |p| p["principal"] = json!(BOB));
-            grant(&bobs)
+            grant(&w, &bobs)
         },
     },
     Case {
@@ -667,7 +745,7 @@ const CASES: [Case; 11] = [
         code: ProblemCode::StepUpStale,
         arrange: |w, issued| {
             w.confirm(issued);
-            grant_at(issued, &content_hash(), "2026-10-17T10:00:00.000000000Z")
+            grant_at(issued, &w.hash, "2026-10-17T10:00:00.000000000Z")
         },
     },
     Case {
@@ -681,13 +759,13 @@ const CASES: [Case; 11] = [
                 json!({"agent": AGENT, "command": "resume", "step_up": {
                     "assertion_id": issued.id, "authenticated_at": T0, "method": "cli_confirm"}}),
             );
-            grant(issued)
+            grant(w, issued)
         },
     },
     Case {
         name: "check 6: no confirmation",
         code: ProblemCode::StepUpMissing,
-        arrange: |_, issued| grant(issued),
+        arrange: |w, issued| grant(w, issued),
     },
     Case {
         name: "check 6: two confirmations",
@@ -695,7 +773,7 @@ const CASES: [Case; 11] = [
         arrange: |w, issued| {
             w.confirm(issued);
             w.confirm(issued);
-            grant(issued)
+            grant(w, issued)
         },
     },
     Case {
@@ -703,7 +781,7 @@ const CASES: [Case; 11] = [
         code: ProblemCode::StepUpMismatch,
         arrange: |w, issued| {
             w.confirm_with(issued, |p| p["action_digest"] = json!(other_hash()));
-            grant(issued)
+            grant(w, issued)
         },
     },
     Case {
@@ -711,7 +789,7 @@ const CASES: [Case; 11] = [
         code: ProblemCode::StepUpMismatch,
         arrange: |w, issued| {
             w.confirm_with(issued, |p| p["principal"] = json!(BOB));
-            grant(issued)
+            grant(w, issued)
         },
     },
     Case {
@@ -720,7 +798,7 @@ const CASES: [Case; 11] = [
         arrange: |w, issued| {
             w.confirm(issued);
             w.linked.store(false, Ordering::SeqCst);
-            grant(issued)
+            grant(w, issued)
         },
     },
     Case {
@@ -728,7 +806,7 @@ const CASES: [Case; 11] = [
         code: ProblemCode::StepUpStale,
         arrange: |w, issued| {
             w.confirm_with(issued, |p| p["confirmed_at"] = json!(T0 - 1));
-            grant(issued)
+            grant(w, issued)
         },
     },
     Case {
@@ -740,7 +818,7 @@ const CASES: [Case; 11] = [
             w.confirm_with(issued, |p| {
                 p["code"] = json!(format!("{wrong}{}", &shown[1..]));
             });
-            grant(issued)
+            grant(w, issued)
         },
     },
 ];
@@ -782,12 +860,12 @@ fn an_answered_or_late_approval_is_recorded_for_the_runtime_to_refuse() {
         "ApprovalResponseSubmitted",
         T0 - 30,
         json!({"agent": AGENT, "approval": APPROVAL, "verdict": "skipped",
-               "content_hash": content_hash(), "submitted_at": T0 - 30, "step_up": null,
+               "content_hash": w.hash, "submitted_at": T0 - 30, "step_up": null,
                "responder": BOB, "role": "approver"}),
     );
     let issued = w.challenge();
     w.confirm(&issued);
-    let answered = recorded(&w, &w.respond(ALICE, KEY, &grant(&issued)));
+    let answered = recorded(&w, &w.respond(ALICE, KEY, &grant(&w, &issued)));
     assert!(answered.get("response_id").is_some());
     assert_eq!(w.answers().len(), 2, "the runtime judges it pending or not");
 
@@ -796,14 +874,14 @@ fn an_answered_or_late_approval_is_recorded_for_the_runtime_to_refuse() {
     let issued = w.challenge();
     w.confirm_with(&issued, |p| p["confirmed_at"] = json!(DEADLINE - 9));
     w.clock.set(DEADLINE + 5);
-    let reply = w.respond(ALICE, KEY, &grant(&issued));
+    let reply = w.respond(ALICE, KEY, &grant(&w, &issued));
     recorded(&w, &reply);
     let answers = w.answers();
     assert_eq!(
         answers[0]
             .get("payload")
             .and_then(|p| p.get("submitted_at")),
-        clis_grant(&issued.id, DEADLINE + 5).get("submitted_at"),
+        clis_grant(&w, &issued.id, DEADLINE + 5).get("submitted_at"),
         "recorded at receipt, past the deadline, for the runtime to judge"
     );
 }
@@ -818,12 +896,12 @@ fn an_unknown_approval_is_404_before_the_port_is_asked() {
         &responses("01JBH3BTZ8K2M4N6P8R0S2T7AB"),
         ALICE,
         KEY,
-        &grant(&issued),
+        &grant(&w, &issued),
     );
     assert_eq!(code(&reply), (404, ProblemCode::NotFound), "{}", w.said());
     assert!(w.asked().is_empty(), "the port is never asked");
     assert!(w.held(&issued));
-    let granted = w.respond(ALICE, "k1Z-9_grant00002", &grant(&issued));
+    let granted = w.respond(ALICE, "k1Z-9_grant00002", &grant(&w, &issued));
     recorded(&w, &granted);
 }
 
@@ -836,7 +914,7 @@ fn a_live_workspace_is_live_unavailable_after_the_row_and_reads_no_evidence() {
         bytes: vec![0; 32],
         issued_at: "2026-09-21T10:40:00.000000000Z".to_owned(),
     };
-    let reply = w.respond(ALICE, KEY, &grant(&evidence));
+    let reply = w.respond(ALICE, KEY, &grant(&w, &evidence));
     assert_eq!(
         code(&reply),
         (409, ProblemCode::LiveUnavailable),
@@ -846,7 +924,7 @@ fn a_live_workspace_is_live_unavailable_after_the_row_and_reads_no_evidence() {
     assert!(w.asked().is_empty(), "no evidence is read");
     assert!(w.answers().is_empty());
     w.records.lock().expect("unpoisoned")[0] = activated(1, principal(ALICE), &[Role::Viewer]);
-    let viewer = w.respond(ALICE, "k1Z-9_grant00002", &grant(&evidence));
+    let viewer = w.respond(ALICE, "k1Z-9_grant00002", &grant(&w, &evidence));
     assert_eq!(
         code(&viewer),
         (403, ProblemCode::Forbidden),
@@ -860,9 +938,9 @@ fn a_repeat_under_the_key_answers_the_same_though_the_challenge_is_spent() {
     let w = world();
     let issued = w.challenge();
     w.confirm(&issued);
-    let first = recorded(&w, &w.respond(ALICE, KEY, &grant(&issued)));
+    let first = recorded(&w, &w.respond(ALICE, KEY, &grant(&w, &issued)));
     w.clock.set(T0 + 1);
-    let again = recorded(&w, &w.respond(ALICE, KEY, &grant(&issued)));
+    let again = recorded(&w, &w.respond(ALICE, KEY, &grant(&w, &issued)));
     assert_eq!(first.get("response_id"), again.get("response_id"));
     assert_eq!(w.answers().len(), 1, "a repeat commits nothing");
     assert_eq!(
@@ -870,7 +948,7 @@ fn a_repeat_under_the_key_answers_the_same_though_the_challenge_is_spent() {
         1,
         "a repeat replays before the port is asked"
     );
-    let skip = w.respond(ALICE, KEY, &skipped());
+    let skip = w.respond(ALICE, KEY, &skipped(&w));
     assert_eq!(code(&skip), (409, ProblemCode::IdempotencyConflict));
     assert_eq!(w.answers().len(), 1);
 }
@@ -879,7 +957,7 @@ fn a_repeat_under_the_key_answers_the_same_though_the_challenge_is_spent() {
 fn a_skip_is_unchanged_beside_the_grant_and_asks_no_port() {
     for environment in ["paper", "live"] {
         let w = world_in(environment);
-        let reply = w.respond(ALICE, KEY, &skipped());
+        let reply = w.respond(ALICE, KEY, &skipped(&w));
         recorded(&w, &reply);
         let answers = w.answers();
         assert_eq!(answers.len(), 1, "{environment}");
@@ -897,7 +975,7 @@ fn a_skip_is_unchanged_beside_the_grant_and_asks_no_port() {
 fn a_grant_without_evidence_is_still_step_up_required() {
     let w = world();
     let body = serde_json::to_vec(&json!({
-        "verdict": "approved", "content_hash": content_hash(),
+        "verdict": "approved", "content_hash": w.hash,
         "record": {"artifact": format!("sha256:{}", "ef".repeat(32)), "ui_build": format!("sha256:{}", "12".repeat(32))},
         "step_up": null, "delegation": null,
     }))
@@ -914,7 +992,7 @@ fn a_grant_naming_a_delegation_is_invalid_and_asks_no_port() {
     let w = world();
     let issued = w.challenge();
     w.confirm(&issued);
-    let mut body: serde_json::Value = serde_json::from_slice(&grant(&issued)).expect("JSON");
+    let mut body: serde_json::Value = serde_json::from_slice(&grant(&w, &issued)).expect("JSON");
     body["delegation"] = json!({"preview_id": UNISSUED, "mandate_version": other_hash()});
     let reply = w.respond(ALICE, KEY, &serde_json::to_vec(&body).expect("JSON"));
     assert_eq!(
@@ -926,4 +1004,220 @@ fn a_grant_naming_a_delegation_is_invalid_and_asks_no_port() {
     assert!(w.asked().is_empty(), "the port is never asked");
     assert!(w.answers().is_empty());
     assert!(w.held(&issued));
+}
+
+/// Bob's grant, confirmed and otherwise valid, in `w`.
+fn bobs_grant(w: &World) -> (Issued, Vec<u8>) {
+    let bobs = w.challenge_by(BOB, &w.hash);
+    w.confirm_with(&bobs, |p| p["principal"] = json!(BOB));
+    let body = grant(w, &bobs);
+    (bobs, body)
+}
+
+#[test]
+#[ignore = "pending E9-4"]
+fn a_principal_the_mandate_does_not_list_is_forbidden_and_appends_nothing() {
+    let listed = format!("user:{ALICE}");
+    let w = world_with(&Setup {
+        approvers: &[listed.as_str()],
+        ..PAPER
+    });
+    let (bobs, body) = bobs_grant(&w);
+    let reply = w.respond(BOB, KEY, &body);
+    assert_eq!(
+        code(&reply),
+        (403, ProblemCode::Forbidden),
+        "after the port answered {}",
+        w.said()
+    );
+    assert!(w.asked().is_empty(), "no evidence is read");
+    assert!(w.answers().is_empty());
+    assert!(w.held(&bobs));
+}
+
+#[test]
+#[ignore = "pending E9-4"]
+fn an_approver_listed_by_user_id_is_recorded() {
+    let listed = format!("user:{ALICE}");
+    let w = world_with(&Setup {
+        approvers: &[listed.as_str()],
+        ..PAPER
+    });
+    let issued = w.challenge();
+    w.confirm(&issued);
+    recorded(&w, &w.respond(ALICE, KEY, &grant(&w, &issued)));
+    assert_eq!(w.answers().len(), 1);
+}
+
+#[test]
+#[ignore = "pending E9-4"]
+fn an_approver_listed_by_role_is_recorded_and_a_member_without_the_role_is_not() {
+    let roles: [(&str, &[Role]); 3] = [
+        ("role:approver", &[Role::Approver]),
+        (
+            "role:workspace_admin",
+            &[Role::Approver, Role::WorkspaceAdmin],
+        ),
+        ("role:owner", &[Role::Approver, Role::OrgOwner]),
+    ];
+    for (listed, alice) in roles {
+        let w = world_with(&Setup {
+            approvers: &[listed],
+            alice,
+            ..PAPER
+        });
+        let issued = w.challenge();
+        w.confirm(&issued);
+        recorded(&w, &w.respond(ALICE, KEY, &grant(&w, &issued)));
+        assert_eq!(w.answers().len(), 1, "{listed}");
+        let (_, body) = bobs_grant(&w);
+        let bob = w.respond(BOB, "k1Z-9_grant00002", &body);
+        let expected = if listed == "role:approver" { 202 } else { 403 };
+        assert_eq!(
+            bob.status,
+            expected,
+            "{listed}: {} {}",
+            lossy(&bob),
+            w.said()
+        );
+    }
+}
+
+#[test]
+#[ignore = "pending E9-4"]
+fn a_bound_mandate_that_cannot_be_read_fails_closed_and_reads_no_evidence() {
+    for bound in [
+        Bound::Absent,
+        Bound::NotAMandate,
+        Bound::Unnamed,
+        Bound::NoStore,
+    ] {
+        let w = world_with(&Setup { bound, ..PAPER });
+        let issued = w.challenge();
+        w.confirm(&issued);
+        let reply = w.respond(ALICE, KEY, &grant(&w, &issued));
+        assert_eq!(
+            code(&reply),
+            (503, ProblemCode::JournalUnavailable),
+            "{bound:?}: {}",
+            w.said()
+        );
+        assert!(
+            w.asked().is_empty(),
+            "{bound:?}: no evidence is read: {}",
+            w.said()
+        );
+        assert!(w.answers().is_empty(), "{bound:?}");
+        assert!(w.held(&issued), "{bound:?}");
+    }
+}
+
+#[test]
+#[ignore = "pending E9-4"]
+fn the_first_failing_check_in_dec_2129_item_1s_order_answers() {
+    let listed = format!("user:{ALICE}");
+    let only_alice = Setup {
+        approvers: &[listed.as_str()],
+        ..PAPER
+    };
+    let delegated = |body: &[u8]| {
+        let mut body: serde_json::Value = serde_json::from_slice(body).expect("JSON");
+        body["delegation"] = json!({"preview_id": UNISSUED, "mandate_version": other_hash()});
+        serde_json::to_vec(&body).expect("JSON")
+    };
+    let bare = |w: &World| {
+        let mut body: serde_json::Value =
+            serde_json::from_slice(&grant_at(&placeholder(), &w.hash, "2026-10-17T10:00:00Z"))
+                .expect("JSON");
+        body["step_up"] = serde_json::Value::Null;
+        serde_json::to_vec(&body).expect("JSON")
+    };
+
+    let w = world_with(&only_alice);
+    let (_, body) = bobs_grant(&w);
+    let unknown = w.post(&responses("01JBH3BTZ8K2M4N6P8R0S2T7AB"), BOB, KEY, &body);
+    assert_eq!(
+        code(&unknown),
+        (404, ProblemCode::NotFound),
+        "404 before the approvers: {}",
+        w.said()
+    );
+    let both = w.respond(BOB, KEY, &delegated(&body));
+    assert_eq!(
+        code(&both),
+        (403, ProblemCode::Forbidden),
+        "approvers before /delegation: {}",
+        w.said()
+    );
+
+    let w = world_with(&Setup {
+        environment: "live",
+        ..only_alice
+    });
+    let body = grant(&w, &placeholder());
+    let both = w.respond(BOB, KEY, &body);
+    assert_eq!(
+        code(&both),
+        (403, ProblemCode::Forbidden),
+        "approvers before live: {}",
+        w.said()
+    );
+    let both = w.respond(ALICE, KEY, &delegated(&body));
+    assert_eq!(
+        code(&both),
+        (422, ProblemCode::Invalid),
+        "/delegation before live: {}",
+        w.said()
+    );
+    let both = w.respond(ALICE, "k1Z-9_grant00002", &bare(&w));
+    assert_eq!(
+        code(&both),
+        (409, ProblemCode::LiveUnavailable),
+        "live before step-up: {}",
+        w.said()
+    );
+    assert!(w.asked().is_empty());
+
+    let w = world();
+    let both = w.respond(ALICE, KEY, &delegated(&bare(&w)));
+    assert_eq!(
+        code(&both),
+        (422, ProblemCode::Invalid),
+        "/delegation before step-up: {}",
+        w.said()
+    );
+    let w = world_with(&Setup {
+        bound: Bound::Absent,
+        ..PAPER
+    });
+    let both = w.respond(ALICE, KEY, &delegated(&bare(&w)));
+    assert_eq!(
+        code(&both),
+        (503, ProblemCode::JournalUnavailable),
+        "the approvers' read before /delegation: {}",
+        w.said()
+    );
+    assert!(w.answers().is_empty());
+}
+
+#[test]
+fn a_failed_membership_read_refuses_a_grant_at_the_row() {
+    let w = world();
+    let issued = w.challenge();
+    w.confirm(&issued);
+    w.journal.failing.lock().expect("unpoisoned").insert(ctl());
+    let reply = w.respond(ALICE, KEY, &grant(&w, &issued));
+    assert_eq!(code(&reply).0, 503);
+    w.journal.failing.lock().expect("unpoisoned").remove(&ctl());
+    assert!(w.answers().is_empty());
+    assert!(w.asked().is_empty());
+}
+
+/// Evidence naming a challenge the server never issued.
+fn placeholder() -> Issued {
+    Issued {
+        id: UNISSUED.to_owned(),
+        bytes: vec![0; 32],
+        issued_at: "2026-09-21T10:40:00.000000000Z".to_owned(),
+    }
 }
