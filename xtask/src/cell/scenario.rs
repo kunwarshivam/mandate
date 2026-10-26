@@ -67,11 +67,6 @@ pub const SPY: &str = "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415";
 /// The bid, bid size and floor the owner's exit confirms, as the CLI's canonical text (DEC-2507
 /// item 1): fixed values the scenario types, since the cell shows no live quote.
 const EXIT_BID: (&str, &str, &str) = ("501.25", "100", "500");
-/// The run's control stream head when the owner's exit code is shown: the seq of the last control
-/// record before it, step 5's `backtest record` (step 2's connection record makes the records
-/// before it 1 to 10). The CLI binds it into the code (DEC-279 item 1), so a gesture that adds a
-/// control record before the exit moves it, and the shown code's check fails the run loudly.
-const EXIT_CONTROL_HEAD: u64 = 10;
 /// A second agent, on its own envelope ([`WEB_MANDATE_FILE`]), deployed for `web/`'s kill switch:
 /// the CLI stops [`AGENT`] inside the Job, and `web/` offers nothing to stop on a stopped agent, so
 /// the browser presses this one's (lane W2's D10). Its id is `agt_` and a ULID, the only agent id
@@ -472,29 +467,6 @@ pub(super) fn confirm_code(version: &str) -> String {
     ))
 }
 
-/// The owner's exit code for `agent`'s `instrument` at the confirmed `bid` with the control stream
-/// at `head`: the canonical JSON `mandate agent exit --show-code` binds (DEC-279 item 1).
-fn exit_code(
-    agent: &str,
-    instrument: &str,
-    (bid, size, floor): (&str, &str, &str),
-    head: u64,
-) -> String {
-    code(&format!(
-        concat!(
-            r#"{{"agent":"{agent}","bid":"{bid}","bid_size":"{size}","confirms":"owner_exit","#,
-            r#""control_head":"{head}","event":null,"floor":"{floor}","#,
-            r#""instrument":"{instrument}"}}"#
-        ),
-        agent = agent,
-        bid = bid,
-        size = size,
-        head = head,
-        floor = floor,
-        instrument = instrument,
-    ))
-}
-
 /// The code `connection record` shows for the demo's paper connection on `account`, caused by the
 /// connect check `checked`, for the owner `user` (DEC-530 item 4): its record's members, the
 /// cause and the gesture, as canonical JSON.
@@ -583,12 +555,6 @@ pub fn plan(
         confirm_code(&research_version),
         deploy_code(RESEARCH_AGENT, &research_version),
     );
-    let head = if connected.is_some() {
-        EXIT_CONTROL_HEAD
-    } else {
-        EXIT_CONTROL_HEAD - 1
-    };
-    let exit = exit_code(AGENT, SPY, EXIT_BID, head);
     let record_args = |connected: &Connected, extra: &[&str]| {
         owner(
             &[
@@ -614,26 +580,18 @@ pub fn plan(
         )
     };
     let (bid, bid_size, floor) = EXIT_BID;
-    let exit_args = |extra: &[&str]| {
-        owner(
-            &[
-                &[
-                    "agent",
-                    "exit",
-                    AGENT,
-                    SPY,
-                    "--confirm-bid",
-                    bid,
-                    "--bid-size",
-                    bid_size,
-                    "--floor",
-                    floor,
-                ][..],
-                extra,
-            ]
-            .concat(),
-        )
-    };
+    let exit_args = owner(&[
+        "agent",
+        "exit",
+        AGENT,
+        SPY,
+        "--confirm-bid",
+        bid,
+        "--bid-size",
+        bid_size,
+        "--floor",
+        floor,
+    ]);
     let steps = vec![
         Step {
             number: 1,
@@ -1027,14 +985,9 @@ pub fn plan(
             title: "the owner exits the agent's instrument at a confirmed floor",
             parts: vec![
                 gesture(
-                    "the owner's exit code, shown for the confirmed bid, size and floor (nothing \
-                     committed)",
-                    exit_args(&["--show-code"]),
-                    format!("code {exit}"),
-                ),
-                gesture(
-                    "the owner's exit, committed with the code shown",
-                    exit_args(&["--code", &exit]),
+                    "the owner's exit at the confirmed bid, size and floor, committed: a risk \
+                     reduction, which needs no code (AGENTS.md rules 2 and 13)",
+                    exit_args,
                     format!("owner_exit {AGENT} {SPY} committed as event"),
                 ),
                 Part::Gap(Gap {
@@ -2230,11 +2183,6 @@ mod tests {
         assert_eq!(confirm_code(version), "e869cb19");
         assert_eq!(deploy_code(AGENT, version), "63fbe39f");
         assert_eq!(code(""), "e3b0c442");
-        assert_eq!(
-            exit_code(AGENT, SPY, EXIT_BID, 1),
-            "b0e0242b",
-            "the code `agent exit --show-code` showed with the control stream at seq 1"
-        );
         let research = reference(&research_mandate());
         assert_eq!(
             research,
@@ -2608,22 +2556,35 @@ mod tests {
                 .position(|g| g.args[..head.len()] == *head && g.args.iter().any(|a| a == last))
                 .unwrap()
         };
-        let shown = at(&["agent", "exit", AGENT, SPY], "--show-code");
-        let typed = at(&["agent", "exit", AGENT, SPY], "--code");
-        let code = exit_code(AGENT, SPY, EXIT_BID, EXIT_CONTROL_HEAD);
-        assert_eq!(all[shown].expect, format!("code {code}"));
+        let exits: Vec<usize> = all
+            .iter()
+            .enumerate()
+            .filter(|(_, g)| g.args[..2] == ["agent", "exit"])
+            .map(|(n, _)| n)
+            .collect();
+        assert_eq!(exits.len(), 1, "one exit gesture: committed, never shown");
+        let typed = exits[0];
+        assert_eq!(all[typed].args[2..4], [AGENT, SPY]);
+        for pair in [
+            ["--confirm-bid", EXIT_BID.0],
+            ["--bid-size", EXIT_BID.1],
+            ["--floor", EXIT_BID.2],
+        ] {
+            assert!(all[typed].args.windows(2).any(|w| w == pair), "{pair:?}");
+        }
         assert!(
-            all[typed]
+            !all[typed]
                 .args
-                .windows(2)
-                .any(|w| w == ["--code", code.as_str()])
+                .iter()
+                .any(|a| a == "--code" || a == "--show-code"),
+            "an owner's exit reduces risk and takes no code (AGENTS.md rules 2 and 13)"
         );
         assert_eq!(
             all[typed].expect,
             format!("owner_exit {AGENT} {SPY} committed as event")
         );
         let deployed = at(&["agent", "deploy", AGENT], "--code");
-        assert!(deployed < shown && shown < typed);
+        assert!(deployed < typed);
         assert!(
             typed < at(&["agent", "kill"], AGENT),
             "before the kill switch"
@@ -3293,8 +3254,8 @@ mod tests {
 
     /// DEC-2379: step 2 records the paper connection the connect check left before anything else,
     /// its code shown and then typed, so the deployment is written at version 2; the executor the
-    /// manager starts for that account is checked after the Job; and the exit's code binds the
-    /// control head one record later. The dry run, with no connect check, names the gap instead.
+    /// manager starts for that account is checked after the Job. The dry run, with no connect
+    /// check, names the gap instead.
     #[test]
     fn step_two_records_the_checked_connection_before_the_deployment() {
         let steps = planned("demo1");
@@ -3355,18 +3316,6 @@ mod tests {
         assert_eq!(executors.len(), 1);
         assert_eq!(executors[0].account, c.account);
         assert!(matches!(step2.parts.last(), Some(Part::Executor(_))));
-        let commits = |g: &&&Gesture| {
-            g.args.windows(2).any(|w| w == ["--workspace", "demo1"])
-                && !g.expect.starts_with("code ")
-                && g.args[..2] != ["approvals", "list"]
-        };
-        let exit_shown = at(&["agent", "exit", AGENT], "--show-code");
-        let before = all[..exit_shown].iter().filter(commits).count();
-        assert_eq!(
-            u64::try_from(before).unwrap(),
-            EXIT_CONTROL_HEAD,
-            "the exit binds the head after every control record before it"
-        );
         let dry = unconnected("demo1");
         let dry_all = gestures(&dry);
         assert!(dry_all.iter().all(|g| g.args[0] != "connection"));
@@ -3374,17 +3323,6 @@ mod tests {
             dry.iter()
                 .flat_map(|s| &s.parts)
                 .all(|p| !matches!(p, Part::Executor(_) | Part::Applied(_)))
-        );
-        let dry_exit = dry_all
-            .iter()
-            .find(|g| g.args[..2] == ["agent", "exit"] && g.args.iter().any(|a| a == "--show-code"))
-            .unwrap();
-        assert_eq!(
-            dry_exit.expect,
-            format!(
-                "code {}",
-                exit_code(AGENT, SPY, EXIT_BID, EXIT_CONTROL_HEAD - 1)
-            )
         );
     }
 
