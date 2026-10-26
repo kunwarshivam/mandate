@@ -75,8 +75,8 @@ impl LocalSource {
     /// an executor, the secret import, and the readers of the platform's own secrets (the model
     /// gateway, the news reader and the email sender, DEC-2020 item 4, DEC-2277), and none for a
     /// runtime. On the demo host the filesystem does not separate those readers from the
-    /// executor's entries; the table [`crate::policy::allows`] checks before every read does. Any other pairing, and the
-    /// token exchange, which is opened with [`LocalSource::with_grant`], is
+    /// executor's entries; the table [`crate::policy::allows`] checks before every read does. Any
+    /// other pairing, and the token exchange, which is opened with [`LocalSource::with_grant`], is
     /// [`SourceError::Config`].
     pub fn new(
         identity: Identity,
