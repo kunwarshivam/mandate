@@ -144,6 +144,7 @@ fn deploy(state: &mut Journaled) {
 /// A deployed agent with a snapshot and a sane regular-session mark, all at `START`.
 fn ready() -> Journaled {
     let mut state = Journaled::new(ACCOUNT, CLOCK, AGENT);
+    on(&mut state, CLOCK, "ClockAdvanced", &tick(START));
     deploy(&mut state);
     acct(
         &mut state,
@@ -198,6 +199,7 @@ fn nothing_journaled_holds_for_want_of_a_clock() {
 #[test]
 fn no_deployment_of_this_agent_holds_for_want_of_a_mandate() {
     let mut state = Journaled::new(ACCOUNT, CLOCK, AGENT);
+    on(&mut state, CLOCK, "ClockAdvanced", &tick(START));
     acct(
         &mut state,
         "AccountSnapshotRecorded",
@@ -253,7 +255,7 @@ fn a_stopped_agent_has_no_mandate_to_open_under() {
 fn no_snapshot_of_this_account_holds() {
     let mut state = Journaled::new(ACCOUNT, CLOCK, AGENT);
     deploy(&mut state);
-    acct(&mut state, "ClockAdvanced", &tick(START));
+    on(&mut state, CLOCK, "ClockAdvanced", &tick(START));
     assert_eq!(state.facts(ASSET, FRESH), Err(Held::NoSnapshot));
     on(
         &mut state,
@@ -371,6 +373,7 @@ fn a_version_one_mark_has_no_verdict_and_restarts_nothing() {
     acct(&mut state, "MarkUpdated", &mark_v1(ASSET, START + max));
     assert_eq!(state.facts(ASSET, FRESH), Err(Held::StaleMark));
     let mut fresh = Journaled::new(ACCOUNT, CLOCK, AGENT);
+    on(&mut fresh, CLOCK, "ClockAdvanced", &tick(START));
     deploy(&mut fresh);
     acct(&mut fresh, "AccountSnapshotRecorded", &snapshot("1", START));
     acct(&mut fresh, "MarkUpdated", &mark_v1(ASSET, START));
@@ -391,7 +394,7 @@ fn the_clock_is_the_latest_account_stream_risk_clock_alone() {
     let changed = object(&[("risk_clock", clock(START + 7))]);
     acct(&mut state, "GateDecided", &changed);
     assert_eq!(state.now(), Some(instant(START + 7)));
-    acct(&mut state, "FeesCharged", &object(&[]));
+    acct(&mut state, "GateDecided", &object(&[]));
     assert_eq!(state.now(), Some(instant(START + 7)));
 }
 
@@ -563,4 +566,22 @@ fn a_scheduler_tick_that_goes_back_or_does_not_read_holds_from_then_on() {
             "{payload:?}"
         );
     }
+}
+
+/// R1 on #2432: an opening needs the scheduler's clock. The account stream's clock alone stops
+/// when the stream is quiet, so it never admits an opening by itself.
+#[test]
+fn the_account_streams_clock_alone_admits_no_opening() {
+    let mut state = Journaled::new(ACCOUNT, CLOCK, AGENT);
+    deploy(&mut state);
+    acct(
+        &mut state,
+        "AccountSnapshotRecorded",
+        &snapshot("1000", START),
+    );
+    acct(&mut state, "MarkUpdated", &regular("189.5", START));
+    assert_eq!(state.now(), Some(instant(START)));
+    assert_eq!(state.facts(ASSET, FRESH), Err(Held::NoClock));
+    on(&mut state, CLOCK, "ClockAdvanced", &tick(START));
+    assert!(state.facts(ASSET, FRESH).is_ok());
 }

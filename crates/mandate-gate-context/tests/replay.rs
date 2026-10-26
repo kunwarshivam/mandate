@@ -147,6 +147,12 @@ fn row(step: &Step, at: i64) -> (&'static str, &'static str, Value) {
 
 /// Each fact found by searching back from the newest row: what the forward fold must agree with.
 fn oracle(steps: &[(i64, Step)]) -> Result<(String, i64, u32, i64), Held> {
+    if !steps
+        .iter()
+        .any(|(_, step)| matches!(step, Step::SchedulerTick))
+    {
+        return Err(Held::NoClock);
+    }
     let now = steps
         .iter()
         .filter(|(_, step)| !matches!(step, Step::Deployed(_) | Step::Stopped))

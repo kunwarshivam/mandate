@@ -133,6 +133,8 @@ pub struct Journaled {
     ended: BTreeSet<String>,
     fills: BTreeSet<String>,
     positions: BTreeMap<String, SignedQty>,
+    released: BTreeMap<String, Qty>,
+    account_positions: BTreeMap<String, SignedQty>,
     unreadable: bool,
 }
 
@@ -154,6 +156,8 @@ impl Journaled {
             ended: BTreeSet::new(),
             fills: BTreeSet::new(),
             positions: BTreeMap::new(),
+            released: BTreeMap::new(),
+            account_positions: BTreeMap::new(),
             unreadable: false,
         }
     }
@@ -168,14 +172,25 @@ impl Journaled {
         folded
     }
 
-    /// The agent's sub-ledger: per instrument, the quantity its own fills hold, only where it is
-    /// above zero. A flatten sells it with or without the facts an opening needs (DEC-2378
-    /// item 7, `AGENTS.md` rule 13); the executor caps every sell at what the account holds.
+    /// The agent's sub-ledger, as the executor's `sub_ledger` computes it (DEC-2378 item 7): per
+    /// instrument, what the agent's own fills hold less what the agent released to the owner
+    /// (DEC-2354), capped at what the account holds, and only where that is above zero. A flatten
+    /// sells it with or without the facts an opening needs (`AGENTS.md` rule 13).
     pub fn held(&self) -> BTreeMap<String, Qty> {
         self.positions
             .iter()
-            .filter(|(_, qty)| !qty.is_negative() && **qty != SignedQty::ZERO)
-            .map(|(instrument, qty)| (instrument.clone(), qty.abs()))
+            .filter_map(|(instrument, lots)| {
+                let released = self.released.get(instrument).copied().unwrap_or(Qty::ZERO);
+                let own = lots.checked_add(SignedQty::from(released).negated()).ok()?;
+                let open = self
+                    .account_positions
+                    .get(instrument)
+                    .copied()
+                    .unwrap_or(SignedQty::ZERO);
+                let held = own.min(open);
+                (!held.is_negative() && held != SignedQty::ZERO)
+                    .then(|| (instrument.clone(), held.abs()))
+            })
             .collect()
     }
 
@@ -198,6 +213,9 @@ impl Journaled {
     pub fn facts(&self, instrument: &str, fresh: Freshness) -> Result<Facts, Held> {
         if self.unreadable {
             return Err(Held::Unreadable);
+        }
+        if self.scheduler_now.is_none() {
+            return Err(Held::NoClock);
         }
         let now = self.now().ok_or(Held::NoClock)?;
         let mandate_version = self.mandate.clone().ok_or(Held::NoMandate)?;
@@ -290,6 +308,11 @@ impl Journaled {
                 self.ended
                     .insert(payload.text("client_order_id")?.to_owned());
             }
+            ("PositionReleased", _) if on_account => self.released(&payload)?,
+            ("FeesCharged", _) if on_account => self.fees(&payload)?,
+            ("CorporateActionApplied", _) if on_account => {
+                return Err(refused("corporate_action"));
+            }
             _ => {}
         }
         Ok(())
@@ -324,9 +347,7 @@ impl Journaled {
     /// the `OrderRequestRecorded` journaled immediately before its `OrderSubmitted` names the agent
     /// (journal spec rule 45).
     fn fill(&mut self, payload: &Payload<'_>) -> Result<(), Unreadable> {
-        if !self.orders.contains_key(payload.text("client_order_id")?) {
-            return Ok(());
-        }
+        let ours = self.orders.contains_key(payload.text("client_order_id")?);
         let id = payload.text("fill_id")?.to_owned();
         let qty =
             Qty::parse(payload.text("qty_gross")?).map_err(|_| (payload.refused)("qty_gross"))?;
@@ -335,14 +356,14 @@ impl Journaled {
             "sell" => SignedQty::from(qty).negated(),
             _ => return Err((payload.refused)("side")),
         };
+        let instrument = payload.text("instrument_id")?.to_owned();
         if !self.fills.insert(id) {
             return Ok(());
         }
-        let instrument = payload.text("instrument_id")?.to_owned();
-        let position = self.positions.entry(instrument).or_insert(SignedQty::ZERO);
-        *position = position
-            .checked_add(signed)
-            .map_err(|_| (payload.refused)("qty_gross"))?;
+        add(&mut self.account_positions, &instrument, signed, payload)?;
+        if ours {
+            add(&mut self.positions, &instrument, signed, payload)?;
+        }
         Ok(())
     }
 
@@ -368,6 +389,39 @@ impl Journaled {
             self.orders.insert(successor, instrument);
         }
         Ok(())
+    }
+
+    /// The agent's release of `qty` to the owner (DEC-2354), which leaves its sub-ledger.
+    fn released(&mut self, payload: &Payload<'_>) -> Result<(), Unreadable> {
+        let agent = payload.text("agent_id")?;
+        let qty = Qty::parse(payload.text("qty")?).map_err(|_| (payload.refused)("qty"))?;
+        let instrument = payload
+            .text("instrument_id")
+            .or_else(|_| payload.text("instrument"))?
+            .to_owned();
+        if agent != self.agent {
+            return Ok(());
+        }
+        let total = self.released.entry(instrument).or_insert(Qty::ZERO);
+        *total = total
+            .checked_add(qty)
+            .map_err(|_| (payload.refused)("qty"))?;
+        Ok(())
+    }
+
+    /// A fee charged in the crypto asset itself, which leaves the account's position.
+    fn fees(&mut self, payload: &Payload<'_>) -> Result<(), Unreadable> {
+        if payload.text("family")? != "crypto_asset" {
+            return Ok(());
+        }
+        let accrued =
+            Qty::parse(payload.text("accrued")?).map_err(|_| (payload.refused)("accrued"))?;
+        let instrument = payload
+            .text("instrument_id")
+            .or_else(|_| payload.text("instrument"))?
+            .to_owned();
+        let charged = SignedQty::from(accrued).negated();
+        add(&mut self.account_positions, &instrument, charged, payload)
     }
 
     fn mark(&mut self, payload: &Payload<'_>, at: UtcNanos) -> Result<(), Unreadable> {
@@ -416,6 +470,22 @@ const CLOCKED: [&str; 4] = [
     "MandateVersionApplied",
     "MarkUpdated",
 ];
+
+/// Adds `qty` to `instrument`'s position in `positions`.
+fn add(
+    positions: &mut BTreeMap<String, SignedQty>,
+    instrument: &str,
+    qty: SignedQty,
+    payload: &Payload<'_>,
+) -> Result<(), Unreadable> {
+    let position = positions
+        .entry(instrument.to_owned())
+        .or_insert(SignedQty::ZERO);
+    *position = position
+        .checked_add(qty)
+        .map_err(|_| (payload.refused)("qty"))?;
+    Ok(())
+}
 
 /// A journaled instant in `member`, or the member refused.
 fn stamp(payload: &Payload<'_>, member: &'static str) -> Result<UtcNanos, Unreadable> {
