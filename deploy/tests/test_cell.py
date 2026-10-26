@@ -150,7 +150,10 @@ def render_all(*extra: str) -> list[dict]:
 
 
 def process(name: str) -> dict:
-    return next(p for p in PROCESSES if p["name"] == name)
+    """The processes.json entry of `name`; the local cell's second deploy manager and scheduler
+    (DEC-2070, DEC-2071) are their first's entry under a name of their own."""
+    first = {"deploy-manager-research": "deploy-manager", "scheduler-research": "scheduler"}.get(name, name)
+    return next(p for p in PROCESSES if p["name"] == first)
 
 
 def managed_pod(name: str, pod: dict) -> dict:
@@ -182,7 +185,9 @@ def workloads(docs: list[dict]) -> list[dict]:
 
 
 def is_manager(workload: dict) -> bool:
-    return workload["kind"] == "Deployment" and workload["metadata"]["name"] == MANAGER
+    """A deployment manager: the hosted workspace's, or the local cell's second, the research
+    workspace's (DEC-2070)."""
+    return workload["kind"] == "Deployment" and workload["metadata"]["name"] in (MANAGER, "deploy-manager-research")
 
 
 def pod_spec(workload: dict) -> dict:
@@ -373,15 +378,16 @@ def no_ingress(docs: list[dict]) -> list[str]:
 
 
 def hardened(docs: list[dict]) -> list[str]:
-    """Every pod non-root with the runtime's seccomp profile and no service-account token, but the
-    deployment manager's, which mounts its own service account's and nothing else (DEC-1172); every
+    """Every pod non-root with the runtime's seccomp profile and no service-account token, but each
+    deployment manager's, which mounts its own service account's and nothing else (DEC-1172,
+    DEC-2070); every
     container read-only, unprivileged, with every capability dropped."""
     problems = []
     for w in workloads(docs):
         spec = pod_spec(w)
         sc = spec.get("securityContext", {})
         token = (
-            {"automountServiceAccountToken": True, "serviceAccountName": MANAGER}
+            {"automountServiceAccountToken": True, "serviceAccountName": w["metadata"]["name"]}
             if is_manager(w)
             else {"automountServiceAccountToken": False, "serviceAccountName": None}
         )
@@ -2246,6 +2252,35 @@ def test_no_hosted_values_name_the_second_manager():
     for values in sorted((CELL / "values").glob("*.yaml")) + sorted((CELL.parent / "gitops").rglob("*.yaml")):
         assert "researchWorkspace" not in values.read_text(), values
     assert not [d for d in render_all() if RESEARCH_MANAGER in json.dumps(d)]
+
+
+def test_the_research_workspace_has_a_clock_of_its_own():
+    """DEC-2071: beside the second manager, a second scheduler writes the research workspace's clock
+    stream, run as the first is but for `<workspace>r`, with the first's egress and resources, so the
+    runtime and executor the second manager starts tick; every invariant the first's pod keeps, the
+    second's keeps; and without a research workspace nothing of it renders."""
+    hosted = "01KDEM0000000000000000000W"
+    docs = render_all("--set", f"api.workspace={hosted}", "--set", f"deployManager.researchWorkspace={hosted}r")
+    deployments = {
+        d["metadata"]["name"]: d
+        for d in docs
+        if d["kind"] == "Deployment" and d["metadata"]["name"] in ("scheduler", "scheduler-research")
+    }
+    assert set(deployments) == {"scheduler", "scheduler-research"}
+    first, second = (first_container(deployments[n]) for n in ("scheduler", "scheduler-research"))
+    assert first["args"] == ["run", "--workspace", hosted, "--probe", "/tmp/process.sock"]
+    assert second["args"] == ["run", "--workspace", f"{hosted}r", "--probe", "/tmp/process.sock"]
+    unnamed = lambda c: {k: v for k, v in c.items() if k not in ("name", "args")}
+    assert unnamed(first) == unnamed(second)
+    egress = {
+        n: next(d for d in docs if d["kind"] == "NetworkPolicy" and d["metadata"]["name"] == f"egress-{n}")
+        for n in ("scheduler", "scheduler-research")
+    }
+    unselected = lambda e: {k: v for k, v in e["spec"].items() if k != "podSelector"}
+    assert unselected(egress["scheduler"]) == unselected(egress["scheduler-research"])
+    for check in (colocated, guaranteed, default_deny, egress_exact, no_ingress, hardened, gated, secrets_as_files):
+        assert check(docs) == [], check.__name__
+    assert not [d for d in render_all() if "scheduler-research" in json.dumps(d)]
 
 
 def test_deploy_manager_contained():

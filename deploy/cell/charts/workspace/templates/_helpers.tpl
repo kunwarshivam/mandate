@@ -26,6 +26,9 @@ alone (DEC-2338). */ -}}
 {{- if and (eq .name "deploy-manager") $.Values.deployManager.researchWorkspace -}}
 {{- $out = append $out (include "mandate.researchManager" (dict "root" $ "p" .) | fromJson) -}}
 {{- end -}}
+{{- if and (eq .name "scheduler") $.Values.deployManager.researchWorkspace -}}
+{{- $out = append $out (include "mandate.researchScheduler" (dict "root" $ "p" .) | fromJson) -}}
+{{- end -}}
 {{- end -}}
 {{- $out | toJson -}}
 {{- end -}}
@@ -45,6 +48,22 @@ hosted workspace's ULID with `r` (DEC-2247 item 2). Only a dev or ci cell names 
 {{- $copy := deepCopy .p -}}
 {{- $_ := set $copy "name" "deploy-manager-research" -}}
 {{- $_ := set $copy "row" "The local cell's second deployment manager, for the research agent's workspace alone (DEC-2070)" -}}
+{{- $copy | toJson -}}
+{{- end -}}
+
+{{- /* The local cell's second scheduler (DEC-2071): the first's process entry under its own name,
+writing the research workspace's clock stream, `clock:<workspace>r`, whose ticks the runtime and
+executor the second manager starts read, as the first writes the hosted workspace's. It renders
+only beside the second manager, which refuses any tier but dev or ci (DEC-2070). */ -}}
+{{- define "mandate.researchScheduler" -}}
+{{- $copy := deepCopy .p -}}
+{{- $_ := set $copy "name" "scheduler-research" -}}
+{{- $_ := set $copy "row" "The local cell's second scheduler, the single writer of the research workspace's clock stream (DEC-2071)" -}}
+{{- $args := list -}}
+{{- range .p.args -}}
+{{- $args = append $args (ternary $.root.Values.deployManager.researchWorkspace . (eq . "{hosted_workspace}")) -}}
+{{- end -}}
+{{- $_ := set $copy "args" $args -}}
 {{- $copy | toJson -}}
 {{- end -}}
 
