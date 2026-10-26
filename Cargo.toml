@@ -61,6 +61,7 @@ mandate-push-relay = { path = "crates/mandate-push-relay", version = "0.0.0" }
 mandate-scheduler = { path = "crates/mandate-scheduler", version = "0.0.0" }
 mandate-store = { path = "crates/mandate-store", version = "0.0.0" }
 mandate-risk = { path = "crates/mandate-risk", version = "0.0.0" }
+mandate-runtime-models = { path = "crates/mandate-runtime-models", version = "0.0.0" }
 mandate-runtime = { path = "crates/mandate-runtime", version = "0.0.0" }
 mandate-rh-sim = { path = "crates/mandate-rh-sim", version = "0.0.0" }
 mandate-robinhood = { path = "crates/mandate-robinhood", version = "0.0.0" }

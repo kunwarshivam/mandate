@@ -26,7 +26,7 @@ mod tickers;
 
 pub use connector::RobinhoodConnector;
 pub use mandate_mcp::Tools;
-pub use preflight::{AccountSnapshot, PreflightFacts, Quote};
+pub use preflight::{AccountSnapshot, PreflightFacts, Quote, broker_account};
 pub use profile::robinhood as robinhood_profile;
 pub use scope::AccountRead;
 pub use tickers::Tickers;
