@@ -30,7 +30,9 @@ function actionName(kind: CommandKind): string {
 
 /**
  * A toast appears only once the runtime has journaled the action. Sending raises nothing; the
- * Stop sheet and the approval screen say "sent" in their own status text.
+ * Stop sheet and the approval screen say "sent" in their own status text. A command the agent's
+ * runtime still answers (`follows`: a resume or Stop under step-up, DEC-2140) is announced only once
+ * applied: recorded alone, it may yet be refused (web PRODUCT.md P8).
  */
 export function JournalToasts() {
   const { commands, responses, setUps } = useRuntime();
@@ -40,7 +42,8 @@ export function JournalToasts() {
   useEffect(() => {
     for (const c of commands) {
       const key = `cmd:${c.id}`;
-      if (c.phase !== "recorded" || announced.current.has(key)) continue;
+      const done = c.follows ? c.phase === "applied" : c.phase === "recorded";
+      if (!done || announced.current.has(key)) continue;
       announced.current.add(key);
       toasts.add({ title: "Recorded in the journal", description: `${actionName(c.kind)}, as you asked.` });
     }

@@ -180,6 +180,16 @@ describe("resume and Stop on the sheet over the API, under passkey step-up (DEC-
     expect(posts.find((p) => p.path.endsWith(`/agents/${AGENT}/resume`))?.body).toMatchObject({ step_up: { method: "passkey" } });
   });
 
+  it("asks one passkey and sends one resume for a double press while the first is unsettled", async () => {
+    const { sheet, resume, posts } = await paused();
+    fireEvent.click(resume);
+    fireEvent.click(resume);
+    await waitFor(() => expect(sheet.querySelector("[data-phase=applied]")).not.toBeNull(), { timeout: 5000 });
+    expect(posts.filter((p) => p.path.endsWith(`/agents/${AGENT}/resume`))).toHaveLength(1);
+    expect(posts.filter((p) => p.path.endsWith("/step-up/challenges"))).toHaveLength(1);
+    expect(sheet.querySelectorAll("[data-phase=refused]")).toHaveLength(0);
+  });
+
   it("says in words why a declined passkey sent nothing, and keeps the kill switch", async () => {
     const declined: Authenticator = async () => {
       throw new DOMException("not allowed", "NotAllowedError");

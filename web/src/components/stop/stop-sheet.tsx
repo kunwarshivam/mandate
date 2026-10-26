@@ -141,14 +141,11 @@ function AgentChoices({ agent, choose, leave, full }: { agent: Agent; choose: (k
 }
 
 /**
- * The agents' choices over the workspace API (DEC-1096), from the agents it serves: pausing, and
- * each agent's kill switch, which opens its record screen. Release needs the positions it hands
- * over, which the API does not serve per agent, so it is not offered here.
- */
-/**
- * One agent's choices over the API. Resume and Stop ask for the passkey when pressed (DEC-2140), and the
- * command log says what came of it; the kill switch is always beside them and needs none here (rule 13).
- * A Stop that would leave positions behind is refused by the agent's runtime (DEC-136), so it says so.
+ * The agents' choices over the workspace API (DEC-1096), from the agents it serves. Resume and Stop ask
+ * for the passkey when pressed (DEC-2140), and the command log says what came of it; the kill switch,
+ * which opens its record screen, is always beside them and needs none here (rule 13). A Stop that would
+ * leave positions behind is refused by the agent's runtime (DEC-136), so it says so. Release needs the
+ * positions it hands over, which the API does not serve per agent, so it is not offered here.
  */
 function ApiAgentChoices({
   agents,
@@ -240,6 +237,10 @@ export function StopSheet({ open, onOpenChange, agentId }: { open: boolean; onOp
 
   const leave = () => onOpenChange(false);
 
+  /** A resume or Stop for this agent still waiting on its passkey or its runtime: a second press would bind a stale head and be refused. */
+  const unsettled = (kind: SheetKind, id: string) =>
+    commands.some((c) => c.agentId === id && c.kind === kind && (c.phase === "sent" || (c.phase === "recorded" && c.follows === true)));
+
   const labelFor = (id: string | null) =>
     id ? (ws.agents.find((a) => a.agent_id === id)?.label ?? view?.agents.find((a) => a.agent_id === id)?.label ?? "The agent") : "Account";
 
@@ -277,7 +278,9 @@ export function StopSheet({ open, onOpenChange, agentId }: { open: boolean; onOp
 
             {source === "api" ? (
               view ? (
-                <ApiAgentChoices agents={view.agents} agentId={agentId} full={full} command={(kind, id) => send(kind, id)} leave={leave} />
+                <ApiAgentChoices agents={view.agents} agentId={agentId} full={full} command={(kind, id) => {
+                    if (!unsettled(kind, id)) send(kind, id);
+                  }} leave={leave} />
               ) : (
                 <p className="rounded-xl bg-background px-4 py-3 text-sm" data-slot="agents-unavailable">
                   The agents could not be read, so each agent&apos;s own kill switch is not listed. The account&apos;s choices below work without them.
