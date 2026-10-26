@@ -324,7 +324,6 @@ proptest! {
         missing in 1usize..19,
     ) {
         let root = Root::new("prop");
-        let fault = if fault == Fault::FewerThanSlow && cents.len() < 20 { Fault::None } else { fault };
         let count = if fault == Fault::FewerThanSlow { 19 } else { cents.len() };
         let series: Vec<(Date, u32)> = sessions(count, last()).into_iter().zip(cents.iter().copied()).collect();
         let symbol = if fault == Fault::AnotherSymbolStored { "SPY" } else { "QQQ" };

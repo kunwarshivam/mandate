@@ -84,7 +84,7 @@
   `mandate_bars::trusted_daily_closes` admits at the tick; `source` (only the cell's recording);
   `Held`, the read-only sink that only confirms the stored closes object; and `wiring`, which the
   binary sets for a resolved deployment. Tests: `tests/models.rs` (a property test against an
-  oracle of integer-cent crossover, calendar close and hand-written closes object over eleven
+  oracle of integer-cent crossover, calendar close and hand-written closes object over ten
   faults; the registry fold; the source; the wiring's refusals; a sink that never writes) and
   `tests/runtime.rs` (the process journals the observation then the output on the in-memory
   journal, once per daily output, and neither when the closes are not held).
