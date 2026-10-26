@@ -69,5 +69,10 @@
   `tests/journal.rs`: the binary's process on the in-memory journal and the fixture broker,
   reconciled and ready, once across a restart. `tests/launch.rs` and `tests/binary.rs`: the
   launch's refusals, `--fixture` refused on a manager's pod, `connect-check`'s output, and probes and drain. `tests/pg.rs`: the connect
-  check and the process on Postgres.
+  check and the process on Postgres. `tests/binding_gate.rs` (`src/gate.rs`, DEC-2380 item 2): the
+  binding gate's input from the reviewed deployment, the journal's facts and the asset record,
+  day-trade rules and liquidity, held when any is missing, when the account is not flat or not
+  active, or under a regime whose day trades could bind, never answered for an order reducing
+  risk, and refused by an inactive or untradable asset, the liquidity and price floors and
+  participation.
 - **Run:** `cargo nextest run -p mandate-executord` (with `MANDATE_PG_URL` for `tests/pg.rs`).

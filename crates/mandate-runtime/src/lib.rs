@@ -52,6 +52,7 @@ mod research;
 mod state;
 mod step;
 mod tail;
+mod theses;
 mod types;
 
 pub use error::{JsonError, RuntimeError};
@@ -60,10 +61,10 @@ pub use ports::{
     FlattenPlanner, GateDryRun, IdGen, IntentSink, OrderPlan, Ports, SinkError, TimerSource,
 };
 pub use research::{
-    ActiveThesis, AgenticConfig, DispatchRequest, DispatchedResult, ItemFacts, JournalCatalog,
-    Preconditions, RecordCatalog, ResearchConfig, ResearchContext, ResearchInput, ResearchRecord,
-    ResearchRequest, ResearchState, ResearchStep, RetrievedObservation, TurnRef, TurnRequest,
-    abandon_refused_research, handle_research,
+    ActiveThesis, AgenticConfig, DispatchRequest, DispatchedResult, EventTriggers, ItemFacts,
+    JournalCatalog, Preconditions, RecordCatalog, ResearchConfig, ResearchContext, ResearchInput,
+    ResearchRecord, ResearchRequest, ResearchState, ResearchStep, RetrievedObservation, TurnRef,
+    TurnRequest, abandon_refused_research, handle_research,
 };
 pub use state::{FOLD_VERSION, PendingApproval, RuntimeState, UnresolvedAppend, fold};
 pub use step::handle;
@@ -74,6 +75,6 @@ pub use types::{
     FlattenRequest, FoldedEvent, Handoff, Initiator, Input, IntentBody, IntentHandoff, KillScope,
     LiquidityRead, LocalHold, MandateView, Mode, ModelDirection, ModelOutput, ModelOutputIgnored,
     NotificationRef, Observation, OrderExecution, Outstanding, OwnerConfirmation, Proposal,
-    ProtectionPrices, Purpose, RiskClock, Seq, SignalInputs, TimeInForce, TimerId, TimerRequest,
-    WorkspaceId, WriterEpoch,
+    ProtectionPrices, Purpose, RiskClock, RuntimeAlert, Seq, SignalInputs, TimeInForce, TimerId,
+    TimerRequest, WorkspaceId, WriterEpoch,
 };

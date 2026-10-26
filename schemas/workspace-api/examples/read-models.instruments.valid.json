@@ -1,0 +1,21 @@
+[
+  {
+    "label": "no instruments registered",
+    "set": {
+      "/instruments": []
+    }
+  },
+  {
+    "label": "a crypto instrument",
+    "set": {
+      "/instruments/0/asset_class": "crypto",
+      "/instruments/0/symbol": "BTC/USD"
+    }
+  },
+  {
+    "label": "a class-share symbol",
+    "set": {
+      "/instruments/0/symbol": "BRK.B"
+    }
+  }
+]

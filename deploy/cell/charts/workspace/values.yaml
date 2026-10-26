@@ -182,6 +182,19 @@ runtime:
   owner: ""
   research: ""
 
+# The model-gateway service (E21-62, DEC-2326): the one workspace it serves, as its ULID, and the
+# deployment whose meter stream it writes, both required once `images.model-gateway` is named. The
+# two monthly budgets are spending values (DEC-79): left empty, the service refuses to start, with
+# each one's code, rather than run on a number no one named. Only the local cell's values set them,
+# to the recorded bundle's own caps, over a recording that spends nothing, and the chart refuses them
+# anywhere else. The service reads each agent's daily cap from the artifact store, which mounts only
+# with `images.api`; without it, the service refuses to start (`artifact_store_unavailable`).
+modelGateway:
+  workspace: ""
+  deployment: ""
+  workspaceMonthlyUsd: ""
+  deploymentMonthlyUsd: ""
+
 # The broker every executor runs over (DEC-2306 item 1): `fixture`, the in-process fixture paper
 # broker, or `alpaca-paper`, Alpaca's paper trading host under the vault lease on its connection,
 # which staging alone may name. `vaultAddress` is the cell's vault, which `alpaca-paper` needs: the

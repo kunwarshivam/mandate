@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | v0.6, draft ([DEC-2257](../project/decisions/DEC-2257.md)): v0.5 with DEC-997 Accepted, the live path through the model-gateway service, and §11 brought up to date. v0.5 ([DEC-2207](../project/decisions/DEC-2207.md)): v0.4 with the deployment meter writer and its orphan in §3.3 and §3.6. v0.4 ([DEC-2203](../project/decisions/DEC-2203.md)): v0.3 with turns and pinned tools for the agentic research loop, the founder's decision of 2026-10-17. v0.3 ([DEC-432](../project/decisions/DEC-432.md), [DEC-998](../project/decisions/DEC-998.md), [DEC-997](../project/decisions/DEC-997.md)): v0.2 with the call record and the meter stream closed in journal spec v0.46 (DEC-998, agent readings) and the aggregator and spend cap named (DEC-997, Proposed for the founder). Items 1 to 12 and 17 to 22 of DEC-432 are agent readings; the founder decided items 13 to 16 on 2026-10-03; item 23 is Proposed |
+| **Status** | v0.7, draft ([DEC-2397](../project/decisions/DEC-2397.md)): v0.6 with the runtime calling through the model-gateway service, and the remote caller's `gateway_unreachable` in §1.2, §3.3 and §9. v0.6 ([DEC-2257](../project/decisions/DEC-2257.md)): v0.5 with DEC-997 Accepted, the live path through the model-gateway service, and §11 brought up to date. v0.5 ([DEC-2207](../project/decisions/DEC-2207.md)): v0.4 with the deployment meter writer and its orphan in §3.3 and §3.6. v0.4 ([DEC-2203](../project/decisions/DEC-2203.md)): v0.3 with turns and pinned tools for the agentic research loop, the founder's decision of 2026-10-17. v0.3 ([DEC-432](../project/decisions/DEC-432.md), [DEC-998](../project/decisions/DEC-998.md), [DEC-997](../project/decisions/DEC-997.md)): v0.2 with the call record and the meter stream closed in journal spec v0.46 (DEC-998, agent readings) and the aggregator and spend cap named (DEC-997, Proposed for the founder). Items 1 to 12 and 17 to 22 of DEC-432 are agent readings; the founder decided items 13 to 16 on 2026-10-03; item 23 is Proposed |
 | **Implements** | [HLD §9](../HLD.md#9-intelligence-layer) (model gateway, speed tiers), [HLD §10](../HLD.md#10-billing) (model tokens at cost plus margin), PRD FR-3.7, FR-3.9, FR-10.2; backlog E15 |
 | **Depends on** | [Mandate spec §7, §8](mandate.md#8-signal-models-and-the-order-builder), [journal spec §6.3, §8, §9](journal.md#9-event-catalogue), [DEC-67](../project/04-decision-log.md#decisions), [DEC-120](../project/04-decision-log.md#decisions) |
 | **Caller side** | The [agent harness spec](agent-harness.md) says when the runtime asks for a model output and how long an evaluation waits. This spec says what happens to the call |
@@ -106,7 +106,10 @@ deadlines, and journaling are the same.
   either the final output or validated tool calls, §3.2), or a typed error (§3.3). There is no third case, such as a partial output or an output from another model.
 - A call never outlives its deadline from the caller's point of view.
 - A call never places an order, reads a credential, or changes a mandate.
-- A refused call costs nothing. A failed call may cost money, and that cost is metered.
+- A refused call costs nothing. A failed call may cost money, and that cost is metered. The one
+  exception is the remote caller's `gateway_unreachable` (§3.3): the exchange with the
+  model-gateway service was lost, so the call may have cost up to its reservation, which the
+  service's journaled meter stream counts at its maximum until settled (DEC-2265 item 3).
 - When the call ends in an error, the model has no fresh output for that call. The order builder
   already treats that as missing ([mandate spec §8.3](mandate.md#83-order-builder-conviction_linear-dec-47-dec-60)).
 
@@ -233,8 +236,11 @@ tokens the provider reports in `tokens.cached` (§7.1). A test pins the order.
 | `content_refused` | The provider declined to answer | No | Maybe |
 | `schema_invalid` | Response does not parse, or fails the output schema; or it has a tool call in a turn offered none, names a tool not offered, has arguments its tool's schema refuses, or has more tool calls than `max_tool_calls_per_turn` (INF-5) | No | Yes |
 | `identity_mismatch` | Reported identity differs from the pin, or is missing from a `200` | No | Yes |
+| `gateway_unreachable` | The caller's own, never the gateway's: the runtime's exchange with the model-gateway service did not bring back the whole reply for this call by its deadline, through a refused connect, a timeout, a cut, oversized or malformed frame, or a record for another call (DEC-2397) | No, neither within the run nor under its `call_id` | Maybe: up to its reservation, which the service's meter stream counts |
 
-The first six are refusals: nothing leaves the deployment.
+The first six are refusals: nothing leaves the deployment. `gateway_unreachable` is a refusal at
+the caller, with no record on the agent stream, because the caller holds no prompt or response
+to give one. What it may have spent is on the service's meter stream.
 
 ### 3.4 Deadlines, retries, streaming, idempotency
 
@@ -680,6 +686,7 @@ risk-day boundary and a restart.
 | Workspace quota hit | As above for the workspace | Every agent's calls refused | Next risk day, or the operator raises the quota | Clock or operator (a journaled change) | As above |
 | Meter unavailable | The meter writer is unreachable, or a replica's append is fenced | `meter_unavailable`; nothing sent; outputs missing; operator alerted | The holder is reachable, or a new holder has folded the stream | Supervisor (hand-over) | Unsettled reservations stay counted across the hand-over |
 | Prompt guard hit | Forbidden content in the prompt | `input_rejected`; nothing sent; journaled with the rule, not the content | The input source stops supplying it | Nobody; repeats alert the operator | Nothing carries over |
+| Gateway service unreachable | The runtime's exchange with the model-gateway service is lost: the service is down, restarting, or past the deadline | `gateway_unreachable` for that call; output missing; logged on each, and the operator alerted with opaque text where the run journaled a record; the pin is not withdrawn | The next run's call gets its whole reply | Nobody: the next run, with a new `call_id` | Nothing carries over; a reservation the lost call made stays counted at its maximum on the service's meter stream |
 | Gateway process crash | Process dies | In-flight calls lost; their reservations stay counted | Gateway restarts | Supervisor | On restart: unfinished reservations stay open and count at their maximum, never settled later (DEC-998 item 5); no call is re-sent under its old `call_id`; the runtime re-reads fresh outputs from the journal |
 | Agent runtime restart | Runtime restarts | No model is called during replay (INF-10) | Replay and reconciliation finish | Runtime | Outputs still fresh by §8.2 count; others are missing until the next call |
 | Mandate version change | Owner confirms a new version | Calls for the old pin stop; outputs of a model no longer pinned are ignored (`not_pinned`) | Immediately | Owner | Journaled |

@@ -3,6 +3,7 @@
 
 use mandate_accounting::{AssetClass, InstrumentId};
 use mandate_canon::Value;
+use mandate_notify::OwnerAlertKind;
 use mandate_risk::GatePass;
 
 use mandate_num::{Price, Qty};
@@ -330,15 +331,8 @@ fn gate(
     let verdict = decision.verdict_name();
     if verdict == ALLOW || always || decision.crowded_denial() {
         let decided = journal_decision(batch, intent, &decision, Vec::new())?;
-        if let reason @ (UNPRICED | SESSION_UNKNOWN) = decision.reason_code() {
-            batch.notify(
-                decided,
-                if reason == UNPRICED {
-                    UNPRICED
-                } else {
-                    SESSION_UNKNOWN
-                },
-            );
+        if let UNPRICED | SESSION_UNKNOWN = decision.reason_code() {
+            batch.notify(decided, OwnerAlertKind::ExitStalled);
         }
     }
     if verdict == ALLOW
@@ -394,7 +388,7 @@ fn held_long(batch: &mut Batch<'_, '_>, intent: &IntentId) -> Result<(), Executo
     }
     let extra = vec![("held_long", Value::Bool(true))];
     let decided = journal_decision(batch, intent, &decision, extra)?;
-    batch.notify(decided, "exit_held_long");
+    batch.notify(decided, OwnerAlertKind::ExitStalled);
     Ok(())
 }
 
@@ -449,7 +443,7 @@ fn submit(
     let room = flatten_room(&batch.view, intent, qty)?;
     if room == Qty::ZERO {
         let abandoned = abandon_record(batch, intent, "released_to_owner")?;
-        batch.notify(abandoned, "exit_released");
+        batch.notify(abandoned, OwnerAlertKind::ExitStalled);
         return Ok(());
     }
     if room < qty {

@@ -935,6 +935,8 @@ struct Run {
     /// it had acknowledged: one the switch must cancel (§5.5), read from the broker model rather
     /// than the executor.
     kill_working: Vec<bool>,
+    /// Each input's effects, as one list each: one batch of drafts and what it asks.
+    batches: Vec<Vec<Effect>>,
 }
 
 /// The broker's side of a run, kept by the script rather than read from the executor: every order
@@ -1100,12 +1102,14 @@ fn play(script: &[Step]) -> Run {
     let mut kill_batches: Vec<Vec<Effect>> = Vec::new();
     let mut kill_working: Vec<bool> = Vec::new();
 
+    let batches = std::cell::RefCell::new(Vec::new());
     let record = |ran: Ran,
                   drafts: &mut Vec<EventDraft>,
                   effects: &mut Vec<Effect>,
                   broker: &mut BrokerModel| {
         drafts.extend(ran.drafts.iter().cloned());
         effects.extend(ran.effects.iter().cloned());
+        batches.borrow_mut().push(ran.effects.clone());
         broker.sent(&ran);
         ran
     };
@@ -1365,7 +1369,83 @@ fn play(script: &[Step]) -> Run {
         broker,
         kill_batches,
         kill_working,
+        batches: batches.into_inner(),
     }
+}
+
+/// Every way one batch's owner alerts break DEC-2514 and journal spec §9.15 rules 119, 120 and
+/// 130, read from the batch alone: an alert effect about a subject the batch drafted with no
+/// `OwnerAlertSent` after it in the same batch (one about an earlier batch's record is raised
+/// alone, since its record would refuse the batch: backlog E7-2v), one whose record names another kind, cause or command, a record with no
+/// effect, two records for one subject, an act between an alert record and its subject, which a
+/// shell appending each run of drafts would split, and a draft off its ordinal, which an alert
+/// record would have moved from where an earlier draft predicted it. Empty when the batch is
+/// right.
+fn alert_faults(batch: &[Effect]) -> Vec<String> {
+    let mut faults = Vec::new();
+    let mut drafted: Vec<&EventDraft> = Vec::new();
+    let mut recorded: Vec<(String, String)> = Vec::new();
+    let mut raised: Vec<(String, String)> = Vec::new();
+    let mut run: Vec<String> = Vec::new();
+    for effect in batch {
+        let Effect::Journal(draft) = effect else {
+            run.clear();
+            if let Effect::Notify(alert) = effect {
+                raised.push((alert.subject_event.0.clone(), alert.kind.key().to_owned()));
+            }
+            continue;
+        };
+        if draft.event_type == "OwnerAlertSent" {
+            let member = |name: &str| {
+                draft
+                    .payload
+                    .get(name)
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned()
+            };
+            let subject = member("subject");
+            if !run.contains(&subject) {
+                faults.push(format!(
+                    "{subject}: not an earlier draft of the alert's own run of drafts"
+                ));
+            }
+            if draft.causation_id.as_ref().map(|id| id.0.as_str()) != Some(subject.as_str()) {
+                faults.push(format!("{subject}: causation_id is not the subject"));
+            }
+            if draft.payload.get("owner_command") != Some(&Value::Null) {
+                faults.push(format!("{subject}: names an owner command"));
+            }
+            if recorded.iter().any(|(seen, _)| *seen == subject) {
+                faults.push(format!("{subject}: alerted twice"));
+            }
+            recorded.push((subject, member("kind")));
+        } else {
+            let ordinal = drafted
+                .iter()
+                .filter(|earlier| earlier.event_type != "OwnerAlertSent")
+                .count();
+            if !draft.event_id.0.ends_with(&format!("o{ordinal}")) {
+                faults.push(format!(
+                    "{} is {}, not at ordinal {ordinal}: an alert moved a draft's id",
+                    draft.event_type, draft.event_id.0
+                ));
+            }
+            run.push(draft.event_id.0.clone());
+        }
+        drafted.push(draft);
+    }
+    let raised: Vec<(String, String)> = raised
+        .into_iter()
+        .filter(|(subject, _)| drafted.iter().any(|draft| draft.event_id.0 == *subject))
+        .collect();
+    let (mut raised_sorted, mut recorded_sorted) = (raised.clone(), recorded.clone());
+    raised_sorted.sort();
+    recorded_sorted.sort();
+    if raised_sorted != recorded_sorted {
+        faults.push(format!("raised {raised:?} but recorded {recorded:?}"));
+    }
+    faults
 }
 
 /// Whether anything rule 13 lets hold a protective order was in force before draft `at`, in the
@@ -3045,6 +3125,18 @@ proptest! {
         }
     }
 
+    /// DEC-2514, notifications spec §3.2 and §5.1, journal spec rules 119, 120 and 130: in every
+    /// batch, each owner alert raised is recorded once as `OwnerAlertSent` after its subject, with
+    /// its own kind, the subject as its cause and no owner command, and nothing else is recorded.
+    #[test]
+    fn every_alert_raised_is_recorded_once_beside_its_subject(script in scripted()) {
+        let run = play(&script);
+        for batch in &run.batches {
+            let faults = alert_faults(batch);
+            prop_assert!(faults.is_empty(), "{:?}", faults);
+        }
+    }
+
     /// `AGENTS.md` rule 6, DEC-11: an alert carries an opaque id and a message key only.
     #[test]
     fn no_alert_payload_holds_an_instrument_a_price_or_a_quantity(script in scripted()) {
@@ -3060,11 +3152,11 @@ proptest! {
         prop_assume!(!alerts.is_empty());
         for alert in alerts {
             prop_assert!(
-                !alert.message_key.contains(AAPL)
-                    && !alert.message_key.contains(CPHC)
-                    && !alert.message_key.contains("150"),
+                !alert.kind.key().contains(AAPL)
+                    && !alert.kind.key().contains(CPHC)
+                    && !alert.kind.key().contains("150"),
                 "an alert named something it may not: {}",
-                alert.message_key
+                alert.kind.key()
             );
         }
     }
@@ -3125,6 +3217,100 @@ proptest! {
             );
         }
         prop_assert!(openings > 0, "the prefix's opening is submitted, so one is judged");
+    }
+}
+
+/// The owner's protection read (`mandate_gate_context::Positions`, DEC-2138 item 4) of a run's
+/// journal, against the executor's own fold of the same rows, the oracle: per instrument, the
+/// resting orders, the covered quantity, the prices, and the earliest open interval's start. Its
+/// count first, so no run passes on nothing.
+fn the_read_agrees_with_the_fold(run: &Run) -> Result<usize, TestCaseError> {
+    let replayed = run
+        .shell
+        .replay()
+        .map_err(|e| TestCaseError::fail(format!("the replay refused: {e}")))?;
+    let mut read = mandate_gate_context::Positions::new(ACCOUNT_STREAM, "any-agent");
+    for event in &run.shell.account_journal {
+        read.fold(mandate_gate_context::Row {
+            stream: &event.stream,
+            event_type: &event.event_type,
+            payload: &event.payload,
+        })
+        .map_err(|e| TestCaseError::fail(format!("the read refused {}: {e}", event.event_type)))?;
+    }
+    let mut compared = 0;
+    for instrument in [AAPL, CPHC] {
+        let id = mandate_accounting::InstrumentId::new(instrument)
+            .map_err(|e| TestCaseError::fail(e.to_string()))?;
+        let served = read.protection(instrument);
+        let folded = replayed
+            .protection(&id)
+            .map_err(|e| TestCaseError::fail(e.to_string()))?;
+        let resting: Vec<String> = folded
+            .map(|p| p.resting.iter().map(|id| id.as_str().to_owned()).collect())
+            .unwrap_or_default();
+        prop_assert_eq!(&served.orders, &resting, "resting orders in {}", instrument);
+        prop_assert_eq!(
+            served.covered_qty,
+            folded.map_or(mandate_num::Qty::ZERO, |p| p.covered_qty),
+            "covered quantity in {}",
+            instrument
+        );
+        prop_assert_eq!(
+            served.stop,
+            folded.and_then(|p| p.prices).map(|prices| prices.stop),
+            "stop in {}",
+            instrument
+        );
+        prop_assert_eq!(
+            served.take_profit,
+            folded
+                .and_then(|p| p.prices)
+                .and_then(|prices| prices.take_profit),
+            "take-profit in {}",
+            instrument
+        );
+        let open = replayed
+            .unprotected_intervals()
+            .iter()
+            .filter(|interval| interval.instrument == id && interval.ended_at.is_none())
+            .map(|interval| interval.started_at.secs())
+            .min();
+        prop_assert_eq!(
+            served.unprotected_since.map(|at| at.secs()),
+            open,
+            "open interval in {}",
+            instrument
+        );
+        compared += resting.len()
+            + replayed
+                .unprotected_intervals()
+                .iter()
+                .filter(|interval| interval.instrument == id)
+                .count();
+    }
+    Ok(compared)
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(64))]
+
+    #[test]
+    fn the_owners_protection_read_agrees_with_the_executors_fold(script in scripted_protected()) {
+        let run = play(&script);
+        prop_assume!(the_read_agrees_with_the_fold(&run)? > 0);
+    }
+
+    #[test]
+    fn the_owners_protection_read_agrees_while_exits_wait(script in scripted_exiting()) {
+        let run = play(&script);
+        prop_assume!(the_read_agrees_with_the_fold(&run)? > 0);
+    }
+
+    #[test]
+    fn the_owners_protection_read_agrees_while_cancels_are_awaited(script in scripted_awaited()) {
+        let run = play(&script);
+        prop_assume!(the_read_agrees_with_the_fold(&run)? > 0);
     }
 }
 

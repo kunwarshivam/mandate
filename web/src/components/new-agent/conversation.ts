@@ -17,7 +17,8 @@ import { type Draft, LOSS_CEILING, type Loss, MODELS, NO_STRATEGY, type Strategy
  * anything but a stated `false`), under which no draft can be created here.
  */
 export interface Checks {
-  room: Dec;
+  /** The account's dollars no agent uses, or `null` where the deployment does not report them, so the deployment judges V-002 itself. */
+  room: Dec | null;
   claimedBy: (symbol: string) => string | null;
   independentApproval: boolean;
 }
@@ -185,8 +186,9 @@ function missedBefore(c: Conversation, step: Step): boolean {
   return false;
 }
 
-export function startConversation(): Conversation {
-  const empty: Conversation = { entries: [], messages: [], money: null, loss: null, goal: null, notes: [], symbols: null, strategy: NO_STRATEGY, figuresOnly: false, revision: 0, serial: 0 };
+/** A new conversation; `figuresOnly` where no model reads the owner's words, so only figures are read, exactly as written. */
+export function startConversation({ figuresOnly = false }: { figuresOnly?: boolean } = {}): Conversation {
+  const empty: Conversation = { entries: [], messages: [], money: null, loss: null, goal: null, notes: [], symbols: null, strategy: NO_STRATEGY, figuresOnly, revision: 0, serial: 0 };
   return push(empty, { kind: "said", lines: [INTRO], asks: { kind: "money" } });
 }
 
@@ -204,6 +206,7 @@ export function inputFor(c: Conversation, messageId: string): CompilerInput {
 }
 
 function moneyRoom(value: Dec, checks: Checks): string | null {
+  if (checks.room === null) return null;
   return value > checks.room ? `Your paper account has ${usd(checks.room)} that no agent uses, less than the ${usd(value)} this agent would use. Write a smaller amount.` : null;
 }
 
