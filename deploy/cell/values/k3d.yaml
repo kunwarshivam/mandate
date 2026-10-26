@@ -16,12 +16,17 @@ runtime:
   # manager starts is handed it; only an agent whose confirmed envelope researches uses it.
   research: /usr/local/share/mandate/research
 # The data process's recorded series, when `cargo xtask cell up` names its image: the demo's SPY,
-# closing 150 on 2026-10-23 and 0.1 higher each session after, so one share fits the demo
-# mandate's 300 USD order cap and the crossover's fast mean is above its slow one.
+# closing 150 on 2026-10-23, and the second agent's QQQ (`demo/web-instrument.json`), closing 140,
+# each 0.1 higher each session after, so a share of either fits the demo mandates' 300 USD order
+# cap and the crossover's fast mean is above its slow one.
 data:
-  symbol: SPY
-  assetId: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
-  anchor: 2026-10-23=150
+  instruments:
+    - symbol: SPY
+      assetId: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+      anchor: 2026-10-23=150
+    - symbol: QQQ
+      assetId: eb82ffb0-efd6-4f4e-9307-8fead28e04f6
+      anchor: 2026-10-23=140
 # The workspace API server, when `cargo xtask cell up` names its image. It hosts the demo workspace
 # (`cargo xtask cell demo` opens it under this id). The issuer is the local stub of DEC-2100 on the
 # pod's loopback, which lane SI adds: until then no key set is fetched and every sign-in is refused,
