@@ -378,6 +378,54 @@ fn a_deferring_opening_without_a_plan_is_denied_plan_required_and_notified() {
     assert_eq!(committed(&ran), Ok(()));
 }
 
+/// A dry run that allows until told to defer: the gate's answer at the ask, then at re-validation.
+struct TurningGate(std::cell::Cell<bool>);
+
+impl GateDryRun for TurningGate {
+    fn check(&self, _proposal: &Proposal) -> DryRunVerdict {
+        if self.0.get() {
+            deferring(&[Deferral::Halt], None)
+        } else {
+            DryRunVerdict::Allow
+        }
+    }
+}
+
+/// DEC-2810 item 3: a version 1 request, which binds no plan, granted while the dry run now defers
+/// a check, is skipped `plan_required` and hands nothing; a version 2 request granted under the
+/// same answer acts, its plan bound.
+#[test]
+fn a_grant_without_a_plan_that_now_defers_is_skipped_plan_required() {
+    for (planned, acts) in [(false, false), (true, true)] {
+        let (ids, view) = (TestIds, universe(&["AAPL"]));
+        let gate = TurningGate(std::cell::Cell::new(false));
+        let mut plan = FixedPlan::opening(Autonomy::Ask);
+        if !planned && let Some(proposal) = plan.proposal.as_mut() {
+            proposal.execution = None;
+        }
+        let ports: Ports<'_> = ports(&ids, &gate, &plan, &view);
+        let (mut shell, asked) = asking_shell(&ports, Some("155"));
+        assert_eq!(asked.request.schema_version(), if planned { 2 } else { 1 });
+        gate.0.set(true);
+        let grant = Answer::grant(next_control_seq(&shell), &asked, ASKED_AT + 20).event();
+        let ran = tail(&mut shell, &grant, &ports);
+        let revalidated = ran
+            .drafts
+            .iter()
+            .find(|draft| draft.event_type == "ApprovalRevalidated")
+            .unwrap_or_else(|| panic!("the grant is re-validated: {:?}", ran.draft_types()));
+        let field = |key: &str| member(revalidated, key).and_then(Value::as_str);
+        if acts {
+            assert_eq!(field("result"), Some("act"), "planned");
+            assert_eq!(ran.handed.len(), 1);
+        } else {
+            assert_eq!(field("result"), Some("skip"), "unplanned");
+            assert_eq!(field("dry_run_reason"), Some("plan_required"));
+            assert!(ran.handed.is_empty(), "{:?}", ran.draft_types());
+        }
+    }
+}
+
 /// A granted ask whose dry run still defers at re-validation acts: the executor's binding gate
 /// evaluates every deferred check (DEC-2378 item 11 condition 3).
 #[test]
