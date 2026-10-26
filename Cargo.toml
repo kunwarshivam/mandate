@@ -28,6 +28,7 @@ mandate-domain = { path = "crates/mandate-domain", version = "0.0.0" }
 mandate-evaluation = { path = "crates/mandate-evaluation", version = "0.0.0" }
 mandate-executor = { path = "crates/mandate-executor", version = "0.0.0" }
 mandate-executord = { path = "crates/mandate-executord", version = "0.0.0" }
+mandate-gate-inputs = { path = "crates/mandate-gate-inputs", version = "0.0.0" }
 mandate-gateway = { path = "crates/mandate-gateway", version = "0.0.0" }
 mandate-gateway-http = { path = "crates/mandate-gateway-http", version = "0.0.0" }
 mandate-gatewayd = { path = "crates/mandate-gatewayd", version = "0.0.0" }

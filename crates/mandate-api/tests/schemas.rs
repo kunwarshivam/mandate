@@ -144,6 +144,26 @@ fn members<T: DeserializeOwned + Debug>(objects: &[&Value], tag: Option<(&str, &
     assert_eq!(serde_names::<T>(probe), schema, "{objects:?}");
 }
 
+/// [`members`] for a shape that names `ahead` before its schema does ([DEC-2128] item 5, as
+/// [DEC-2126] item 5: the type takes an optional member in the tests change, and the schema follows
+/// in its own, which carries no code under ES-22). The shape must name each one whether or not the
+/// schema names it yet, and every other member exactly as its schema does. The change that lands
+/// after the schema empties the list, so the struct's members are checked exactly again.
+///
+/// [DEC-2126]: ../../../docs/project/decisions/DEC-2126.md
+/// [DEC-2128]: ../../../docs/project/decisions/DEC-2128.md
+fn members_ahead<T: DeserializeOwned + Debug>(objects: &[&Value], ahead: &[&str]) {
+    let named = |o: &&Value| o["properties"].as_object().cloned();
+    let names = objects.iter().filter_map(named).flatten();
+    let mut schema: BTreeSet<String> = names.map(|(name, _)| name).collect();
+    schema.extend(ahead.iter().map(|member| (*member).to_owned()));
+    assert_eq!(
+        serde_names::<T>(json!({"no_such_member": 1})),
+        schema,
+        "{objects:?}"
+    );
+}
+
 #[test]
 fn every_struct_names_exactly_its_schemas_members() {
     let defs = &file!("workspace-api/envelope.schema.json")["$defs"];
@@ -169,7 +189,7 @@ fn every_struct_names_exactly_its_schemas_members() {
     members::<ResumeRequest>(&[&schema!("resume-request")], None);
     members::<AcknowledgeRequest>(&[&schema!("acknowledge-request")], None);
     members::<OwnerRequest>(&[&schema!("owner-request")], None);
-    members::<ConfirmRequest>(&[&schema!("confirm-request")], None);
+    members_ahead::<ConfirmRequest>(&[&schema!("confirm-request")], &["step_up_assertion"]);
     let approval = schema!("approval-response-request");
     members::<ApprovalResponseRequest>(&[&approval], None);
     members::<DelegationChosen>(&[&approval["properties"]["delegation"]["oneOf"][0]], None);
