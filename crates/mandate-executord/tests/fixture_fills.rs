@@ -115,7 +115,6 @@ fn open_ids(broker: &mut AlpacaBroker<FixturePaper>) -> Result<Vec<String>, Erro
 /// the cursor it returns reads nothing new, the position is the fill, and the cash falls by its
 /// notional with no fee accrued (Alpaca paper does not simulate regulatory fees, trading spec §11).
 #[test]
-#[ignore = "pending E21-30"]
 fn a_limit_opening_fills_whole_at_its_limit() -> Result<(), Error> {
     let mut broker = broker()?;
     let placed = submit(
@@ -163,7 +162,6 @@ fn a_limit_opening_fills_whole_at_its_limit() -> Result<(), Error> {
 /// recorded stop and one sell limit at the take-profit, `new`, nested in the open orders' listing
 /// and in the lookup of the entry by its own id.
 #[test]
-#[ignore = "pending E21-30"]
 fn a_brackets_legs_rest_under_its_filled_entry() -> Result<(), Error> {
     let mut broker = broker()?;
     let id = "md-01JINTENT0000000000000000A";
@@ -211,7 +209,6 @@ fn a_brackets_legs_rest_under_its_filled_entry() -> Result<(), Error> {
 /// A sell limit fills at its limit too: an exit of 4 of the 10 leaves 6, at the buy's average
 /// entry, and brings back its notional.
 #[test]
-#[ignore = "pending E21-30"]
 fn a_sell_limit_fills_and_reduces_the_position() -> Result<(), Error> {
     let mut broker = broker()?;
     submit(
@@ -238,7 +235,6 @@ fn a_sell_limit_fills_and_reduces_the_position() -> Result<(), Error> {
 /// Protection never fills here, since the fixture has no price: an OCO's two orders rest `new`,
 /// unfilled, and cancel; then a lone stop-limit over the same shares rests `new` too.
 #[test]
-#[ignore = "pending E21-30"]
 fn protection_rests_unfilled() -> Result<(), Error> {
     let mut broker = broker()?;
     submit(
@@ -288,7 +284,6 @@ fn protection_rests_unfilled() -> Result<(), Error> {
 /// A filled order is not cancelable, as Alpaca refuses it: the cancel's read-back answers the
 /// order itself, `filled`, never a confirmed cancel, and the position stays the fill.
 #[test]
-#[ignore = "pending E21-30"]
 fn a_filled_order_does_not_cancel() -> Result<(), Error> {
     let mut broker = broker()?;
     let id = "md-01JINTENT0000000000000000A";
@@ -311,7 +306,6 @@ fn a_filled_order_does_not_cancel() -> Result<(), Error> {
 /// A `client_order_id` the fixture already holds is refused as Alpaca refuses it, `422`, which the
 /// client reads as the order already being there: one fill, one position.
 #[test]
-#[ignore = "pending E21-30"]
 fn a_duplicate_client_order_id_is_refused() -> Result<(), Error> {
     let mut broker = broker()?;
     let id = "md-01JINTENT0000000000000000A";
@@ -334,7 +328,6 @@ fn a_duplicate_client_order_id_is_refused() -> Result<(), Error> {
 /// `403` with code 40310000, deciding before anything changes: no order is added, nothing fills,
 /// and the book stays readable.
 #[test]
-#[ignore = "pending E21-30"]
 fn a_sell_beyond_the_position_is_refused() -> Result<(), Error> {
     let mut broker = broker()?;
     let refused = |outcome: BrokerOutcome| match outcome {
@@ -494,7 +487,6 @@ fn result(run: &Value) -> Option<&str> {
 /// a clock tick, so the process reads the broker again while its order works and books the fill
 /// without a restart.
 #[test]
-#[ignore = "pending E21-30"]
 fn an_opening_fills_is_booked_protected_and_reconciles_clean() -> Result<(), Error> {
     let (journal, mut process) = running(FixturePaper::filling(at(NOON)?), true)?;
     for minute in 0..10 {
@@ -558,7 +550,6 @@ fn an_opening_fills_is_booked_protected_and_reconciles_clean() -> Result<(), Err
 /// no unexplained difference, its snapshot's cash the model's cash. A snapshot that read its own
 /// account report as an older base would count the fill's notional twice and mismatch.
 #[test]
-#[ignore = "pending E21-30"]
 fn the_fills_one_reconciliation_books_it_and_its_cash_is_the_models() -> Result<(), Error> {
     let (journal, mut process) = running(FixturePaper::filling(at(NOON)?), true)?;
     pass(&journal, &mut process, "t0", NOON)?;
@@ -584,7 +575,6 @@ fn the_fills_one_reconciliation_books_it_and_its_cash_is_the_models() -> Result<
 /// reconciles once, another at the same second reads nothing, and the next ten seconds on
 /// reconciles once more.
 #[test]
-#[ignore = "pending E21-30"]
 fn a_working_order_is_reconciled_every_ten_seconds() -> Result<(), Error> {
     let (journal, mut process) = running(FixturePaper::new(at(NOON)?), true)?;
     pass(&journal, &mut process, "t0", NOON)?;
