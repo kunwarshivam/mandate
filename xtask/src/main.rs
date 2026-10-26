@@ -3436,7 +3436,8 @@ const LAND_CHECK_BUILD: [(&str, &str); 3] = [
 
 /// The `cargo xtask ci <job>` child [`land_check_cmd`] runs in the merged tree `dir`: diffed
 /// against the base it merged (`MANDATE_BASE_REF`), built into `target` as [`LAND_CHECK_BUILD`]
-/// says. `MANDATE_PR_BODY` and `MANDATE_PR_NUMBER`, which spec-guard reads for a DEC the PR
+/// says, and running every test after a failure ([`NO_FAIL_FAST_ENV`]), so the check names them
+/// all. `MANDATE_PR_BODY` and `MANDATE_PR_NUMBER`, which spec-guard reads for a DEC the PR
 /// description cites, pass through from the caller's environment.
 fn land_check_job(dir: &Path, base_sha: &str, target: &Path, job: &str) -> Command {
     let mut cargo = Command::new("cargo");
@@ -3445,6 +3446,7 @@ fn land_check_job(dir: &Path, base_sha: &str, target: &Path, job: &str) -> Comma
         .args(["xtask", "ci", job])
         .env("MANDATE_BASE_REF", base_sha)
         .env(CARGO_TARGET_DIR, target)
+        .env(NO_FAIL_FAST_ENV, "1")
         .envs(LAND_CHECK_BUILD);
     cargo
 }
@@ -12529,9 +12531,9 @@ mod tests {
         references_path, select, selection_in, source_references, tokens, withhold_web_demo,
     };
     use super::{
-        CARGO_INCREMENTAL, LAND_CHECK_DIR, LAND_CHECK_JOBS, TIMED_OUT_MUTANTS, conflict_markers_in,
-        incremental_overridden, land_check, land_check_job, mutants_job_within, mutants_summary,
-        summarised,
+        CARGO_INCREMENTAL, LAND_CHECK_DIR, LAND_CHECK_JOBS, NO_FAIL_FAST_ENV, TIMED_OUT_MUTANTS,
+        conflict_markers_in, incremental_overridden, land_check, land_check_job,
+        mutants_job_within, mutants_summary, summarised,
     };
     use super::{CREDENTIAL_GUARD, CREDENTIAL_NAME_PARTS, rehearsal_live_run};
     use super::{ProcessGroups, process_group_problems};
@@ -13954,6 +13956,7 @@ mod tests {
             ("CARGO_INCREMENTAL", "0"),
             ("CARGO_PROFILE_DEV_DEBUG", "0"),
             ("CARGO_PROFILE_TEST_DEBUG", "0"),
+            (NO_FAIL_FAST_ENV, "1"),
         ] {
             assert_eq!(
                 envs.get(OsStr::new(name)),
