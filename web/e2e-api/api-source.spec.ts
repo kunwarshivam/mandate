@@ -105,8 +105,15 @@ test("setting up an agent is served over the API: the conversation, read without
   await expect(page.locator("[data-slot=fixture-tag]")).toHaveCount(0);
 });
 
+test("positions are read from the API: each agent's own, with what is not served said so, and no fixture tag", async ({ page }) => {
+  await page.goto("/positions?scenario=normal");
+  await expect(page.getByRole("table", { name: "The account's holdings" })).toBeVisible();
+  await expect(page.getByRole("cell", { name: "Not reported" }).first()).toBeVisible();
+  await expect(page.locator("[data-slot=fixture-tag]")).toHaveCount(0);
+});
+
 test("a screen the API does not serve yet says so, and shows no fixture figures", async ({ page }) => {
-  await page.goto("/positions?scenario=approvals");
+  await page.goto("/alerts?scenario=approvals");
   await expect(page.getByRole("heading", { name: "Not available from your deployment yet" })).toBeVisible();
   await expect(page.locator("[data-slot=fixture-tag]")).toHaveCount(0);
 });

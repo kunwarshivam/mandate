@@ -5,6 +5,7 @@
 mod research_rig;
 
 use std::cell::Cell;
+use std::collections::BTreeSet;
 use std::path::Path;
 use std::rc::Rc;
 
@@ -15,7 +16,11 @@ use mandate_daemon::worker::{RecordedWorker, WorkerFor};
 use mandate_daemon::{ResearchParts, ResearchSource, ResearchWiring, RuntimeProcess, fixture};
 use mandate_journal::StreamId;
 use mandate_process::{Exit, State};
-use mandate_runtime::{Mode, ResearchInput, ResearchRequest, RiskClock, RuntimeState};
+use mandate_research::AssetId;
+use mandate_research_run::{ItemId, ItemKind, NewsItem, RetrievedItem, SourceId, Symbol};
+use mandate_runtime::{
+    ActiveThesis, EventTriggers, Mode, ResearchInput, ResearchRequest, RiskClock, RuntimeState,
+};
 use mandate_store::Store;
 
 use research_rig::*;
@@ -787,5 +792,254 @@ fn an_agentic_run_takes_every_turn_its_loop_allows_and_ends_done() {
         format!("{:?}", end.get("reason")),
         format!("{:?}", Some(&Value::Str("done".to_owned()))),
         "{end:?}"
+    );
+}
+
+/// A news item about AAPL, arrived at `arrived`.
+fn aapl_news(arrived: i64) -> RetrievedItem {
+    aapl_item("nw-feed-aapl", arrived)
+}
+
+fn aapl_item(id: &str, arrived: i64) -> RetrievedItem {
+    RetrievedItem::News(NewsItem {
+        item_id: ItemId::new(id).unwrap(),
+        source: SourceId::new("src.newswire").unwrap(),
+        symbols: BTreeSet::from([Symbol::new("AAPL").unwrap()]),
+        knowledge_at: at(arrived),
+        published_at: at(arrived),
+        headline: "AAPL guidance withdrawn".to_owned(),
+        summary: "The company withdrew its full-year guidance.".to_owned(),
+        link: "https://news.example/nw-feed-aapl".to_owned(),
+        content_hash: Digest::of(b"AAPL guidance withdrawn"),
+        licensed: false,
+    })
+}
+
+/// News triggers, the AAPL item arrived a minute before `NOW`, and an active thesis on AAPL.
+fn evented(wired: &Wired) {
+    *wired.source.evented.borrow_mut() = Some(Evented {
+        triggers: Some(EventTriggers {
+            kinds: BTreeSet::from([ItemKind::News]),
+            debounce_s: 900,
+            max_runs_per_day: 4,
+        }),
+        events: vec![aapl_news(NOW - 60)],
+        active: vec![ActiveThesis {
+            thesis_id: "01ACTIVE".to_owned(),
+            lineage_id: "01ACTIVE".to_owned(),
+            revision: 0,
+            instrument: AssetId::new(AAPL).unwrap(),
+            symbol: Symbol::new("AAPL").unwrap(),
+            expires_at: RiskClock::from_secs(NOW + 86_400 * 30),
+        }],
+    });
+}
+
+fn stored(rig: &Rig, event_type: &str) -> Vec<Value> {
+    rig.journal
+        .rows(&StreamId::parse(AGENT_STREAM).unwrap())
+        .unwrap()
+        .iter()
+        .filter(|row| row.event_type == event_type)
+        .map(|row| parse(&row.body).unwrap())
+        .collect()
+}
+
+/// E19-12 in the cell (DEC-2392): an arrived item on a thesis's instrument, offered by the pass
+/// before its scheduled poll, is stored, journaled as the observation, and brings a `monitor` run
+/// forward whose `RunStarted` names it; the worker is handed that one start, and a later pass
+/// offers the item no more.
+#[test]
+fn an_arrived_item_on_a_thesis_brings_a_monitor_run_forward() {
+    let rig = Rig::default();
+    let wired = Wired::agentic(&rig);
+    evented(&wired);
+    let mut process = running(&rig, &wired);
+    tick(&rig, NOW + 60);
+    rig.log.borrow_mut().clear();
+    let alerts = process.step(at(NOW + 60));
+    assert!(alerts.is_empty(), "{:?}", keys(&alerts));
+    let observed = stored(&rig, "ObservationRecorded");
+    assert_eq!(observed.len(), 1, "{:?}", kinds(&rig));
+    let data_ref = observed[0]
+        .get("payload")
+        .and_then(|p| p.get("data_ref"))
+        .and_then(Value::as_str)
+        .unwrap()
+        .to_owned();
+    assert!(
+        wired
+            .shelf
+            .put
+            .borrow()
+            .iter()
+            .any(|bytes| format!("sha256:{}", Digest::of(bytes)) == data_ref),
+        "the item's record was stored"
+    );
+    let log = rig.log.borrow().clone();
+    let put = log.iter().position(|l| l == "put").unwrap();
+    let append = log.iter().position(|l| l == "append research").unwrap();
+    assert!(put < append, "{log:?}");
+    let started = run_started(&rig);
+    assert_eq!(started.len(), 1, "{:?}", kinds(&rig));
+    let payload = started[0].get("payload").unwrap();
+    assert_eq!(payload.get("kind").and_then(Value::as_str), Some("monitor"));
+    let trigger = payload.get("trigger").unwrap();
+    assert_eq!(trigger.get("kind").and_then(Value::as_str), Some("event"));
+    assert_eq!(
+        trigger.get("cause").and_then(Value::as_str),
+        observed[0].get("event_id").and_then(Value::as_str)
+    );
+    assert_eq!(starts(&wired).len(), 1);
+    tick(&rig, NOW + 120);
+    let puts = wired.shelf.put.borrow().len();
+    assert!(process.step(at(NOW + 120)).is_empty());
+    assert_eq!(stored(&rig, "ObservationRecorded").len(), 1);
+    assert_eq!(
+        wired.shelf.put.borrow().len(),
+        puts,
+        "offered once a process"
+    );
+    assert_eq!(starts(&wired).len(), 1);
+}
+
+/// Without event triggers in the version, the same arrived item is neither stored nor journaled,
+/// and the pass goes on to its scheduled run.
+#[test]
+fn without_event_triggers_an_arrived_item_is_neither_stored_nor_journaled() {
+    let rig = Rig::default();
+    let wired = Wired::agentic(&rig);
+    evented(&wired);
+    if let Some(evented) = wired.source.evented.borrow_mut().as_mut() {
+        evented.triggers = None;
+    }
+    let mut process = running(&rig, &wired);
+    tick(&rig, NOW + 60);
+    assert!(process.step(at(NOW + 60)).is_empty());
+    assert!(stored(&rig, "ObservationRecorded").is_empty());
+    let started = run_started(&rig);
+    assert_eq!(started.len(), 1, "{:?}", kinds(&rig));
+    assert_eq!(
+        started[0]
+            .get("payload")
+            .and_then(|p| p.get("trigger"))
+            .and_then(|t| t.get("kind"))
+            .and_then(Value::as_str),
+        Some("schedule")
+    );
+}
+
+/// Two items arrived by one pass are offered in arrival order, whatever order the source gives
+/// them in: the earlier one takes the one run, and the later one, held by the run in flight,
+/// journals nothing.
+#[test]
+fn the_earlier_of_two_arrived_items_takes_the_run() {
+    let rig = Rig::default();
+    let wired = Wired::agentic(&rig);
+    evented(&wired);
+    if let Some(evented) = wired.source.evented.borrow_mut().as_mut() {
+        evented.events = vec![
+            aapl_item("nw-feed-later", NOW - 30),
+            aapl_item("nw-feed-earlier", NOW - 90),
+        ];
+    }
+    let mut process = running(&rig, &wired);
+    tick(&rig, NOW + 60);
+    assert!(process.step(at(NOW + 60)).is_empty());
+    let observed = stored(&rig, "ObservationRecorded");
+    assert_eq!(observed.len(), 1, "{:?}", kinds(&rig));
+    let as_of = observed[0]
+        .get("payload")
+        .and_then(|p| p.get("as_of"))
+        .and_then(Value::as_str)
+        .unwrap()
+        .to_owned();
+    assert_eq!(as_of, at(NOW - 90).to_string());
+    assert_eq!(
+        wired.shelf.put.borrow().len(),
+        3,
+        "both records and the run's universe"
+    );
+}
+
+/// An event batch in doubt is retried first on the next pass and written once, and the item,
+/// offered again, starts no second run (rule 271).
+#[test]
+fn an_event_batch_in_doubt_is_written_once() {
+    let rig = Rig::default();
+    let wired = Wired::agentic(&rig);
+    evented(&wired);
+    let mut process = running(&rig, &wired);
+    rig.fault.set(Some(Fault::LoseAnswer));
+    tick(&rig, NOW + 60);
+    process.step(at(NOW + 60));
+    assert_eq!(stored(&rig, "ObservationRecorded").len(), 1, "committed");
+    tick(&rig, NOW + 61);
+    process.step(at(NOW + 61));
+    assert_eq!(stored(&rig, "ObservationRecorded").len(), 1, "written once");
+    assert_eq!(run_started(&rig).len(), 1, "{:?}", kinds(&rig));
+    assert_eq!(starts(&wired).len(), 1);
+}
+
+/// A restarted process offers the journaled item again, with the same bytes, and the core, folded
+/// from the journal, starts nothing for it. The pass comes after the debounce, with no research
+/// call recorded and no run carried over, so only rule 271's fold of the item refuses it.
+#[test]
+fn a_restarted_process_starts_no_second_run_on_the_item() {
+    let rig = Rig::default();
+    let wired = Wired::agentic(&rig);
+    evented(&wired);
+    let mut process = running(&rig, &wired);
+    tick(&rig, NOW + 60);
+    assert!(process.step(at(NOW + 60)).is_empty());
+    assert_eq!(stored(&rig, "ObservationRecorded").len(), 1);
+    drop(process);
+    let mut restarted = RuntimeProcess::start(
+        rig.clone(),
+        wiring_with(Some(wired.wiring()), Box::new(RunRefs)),
+        &config(),
+        at(NOW + 120),
+    );
+    assert_eq!(count(&rig, "ModelInvocationRecorded"), 0);
+    tick(&rig, NOW + 1_000);
+    restarted.step(at(NOW + 1_000));
+    assert_eq!(
+        stored(&rig, "ObservationRecorded").len(),
+        1,
+        "{:?}",
+        kinds(&rig)
+    );
+    let puts = wired.shelf.put.borrow().clone();
+    assert_eq!(
+        puts.iter().filter(|bytes| *bytes == &puts[0]).count(),
+        2,
+        "the same record, stored again by the new process"
+    );
+}
+
+/// An arrived item no thesis covers journals nothing and is not retried into a run (DEC-2275 item
+/// 3): the core refuses it, and the same pass goes on to its scheduled run, whose research call
+/// then makes the item inert.
+#[test]
+fn an_item_no_thesis_covers_journals_nothing_and_the_pass_goes_on() {
+    let rig = Rig::default();
+    let wired = Wired::agentic(&rig);
+    evented(&wired);
+    if let Some(evented) = wired.source.evented.borrow_mut().as_mut() {
+        evented.active.clear();
+    }
+    let mut process = running(&rig, &wired);
+    tick(&rig, NOW + 60);
+    assert!(process.step(at(NOW + 60)).is_empty());
+    assert!(stored(&rig, "ObservationRecorded").is_empty());
+    let started = run_started(&rig);
+    assert_eq!(started.len(), 1, "{:?}", kinds(&rig));
+    assert_eq!(
+        started[0]
+            .get("payload")
+            .and_then(|p| p.get("trigger"))
+            .and_then(|t| t.get("kind"))
+            .and_then(Value::as_str),
+        Some("schedule")
     );
 }

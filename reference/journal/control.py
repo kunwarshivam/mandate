@@ -1334,6 +1334,9 @@ VERSIONED_VERSIONS: dict[tuple[str, str], tuple[int, ...]] = {
     ("acct", "AccountCloseRequested"): (1,),
     ("acct", "AccountRestrictionChanged"): (1,),
     ("acct", "KillSwitchActivated"): (1,),
+    ("acct", "ExternalActivityIngested"): (1,),
+    ("acct", "RejectObserved"): (1,),
+    ("acct", "OrderAbandoned"): (1,),
     ("ctl", "ConnectionEstablished"): (1, 2),
     ("acct", "ConnectionEstablished"): (2,),
     ("ctl", "MandateConfirmed"): (1, 2, 3),
@@ -1418,6 +1421,32 @@ VERSIONED_SCHEMAS: dict[tuple[str, str, int], T] = {
         ("restriction", one_of("closing_only", "blocked")),
         ("cause", one_of("broker_reject", "broker_notice", "connection_unavailable")),
         ("reason_code", one_of("account_trading_blocked", "account_restricted")),
+        ("risk_clock", RISK_CLOCK),
+    ),
+    # v0.90 §9.5 (DEC-2803): the broker's activity the executor did not originate, a reject it
+    # answered with, and an intent the executor gave up on. Every broker-supplied member is
+    # nullable: the executor writes an empty one as null.
+    ("acct", "ExternalActivityIngested", 1): rec(
+        ("source", one_of("open_order", "fill")),
+        ("broker_order_id", opt(STR)),
+        ("fill_id", opt(STR)),
+        ("client_order_id", opt(STR)),
+        ("instrument", opt(STR)),
+        ("side", opt(one_of("buy", "sell"))),
+        ("qty", opt(DEC)),
+        ("risk_clock", RISK_CLOCK),
+    ),
+    ("acct", "RejectObserved", 1): rec(
+        ("http_status", INT),
+        ("code", opt(STR)),
+        ("message", opt(STR)),
+        ("client_order_id", opt(STR)),
+        ("risk_clock", RISK_CLOCK),
+    ),
+    ("acct", "OrderAbandoned", 1): rec(
+        ("client_order_id", STR),
+        ("intent_id", IDENT_T),
+        ("reason", one_of("intent_too_old", "gate_recheck", "released_to_owner", "unprotected_interval_limit")),
         ("risk_clock", RISK_CLOCK),
     ),
     # v0.75 §9.5 (DEC-2337): one instrument's close-position under an account kill switch,
@@ -1983,6 +2012,28 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
             rule("279", coded, "schema", "payload.reason_code")
         else:
             rule("280", not blocked or noticed, "schema", "payload.cause")
+    if event_type == "ExternalActivityIngested":
+        fill = p["source"] == "fill"
+        if fill:
+            members = ("client_order_id", "instrument", "side", "qty")
+            if "rule.297.order" in skip:
+                members = ("instrument", "client_order_id", "side", "qty")
+            if "rule.297.broker_order_id" not in skip:
+                members = ("broker_order_id",) + members
+            wrong = next((m for m in members if p[m] is not None), None)
+            rule("297", wrong is None, "schema", f"payload.{wrong}" if wrong else "")
+        else:
+            required = ("instrument", "side", "qty")
+            if "rule.298.order" in skip:
+                required = ("side", "instrument", "qty")
+            if "rule.298.side" in skip:
+                required = ("instrument", "qty")
+            fill_null = p["fill_id"] is None or "rule.298.fill_id" in skip
+            missing = next((m for m in required if p[m] is None), None)
+            if not fill_null:
+                rule("298", False, "schema", "payload.fill_id")
+            else:
+                rule("298", missing is None, "schema", f"payload.{missing}" if missing else "")
     if event_type == "AccountCloseRequested":
         qty = normalize_decimal(p["qty"])
         if qty is None:

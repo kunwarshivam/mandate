@@ -2121,4 +2121,23 @@ fn a_deferring_opening_is_journaled_at_version_3_and_asked_never_proposed() {
     assert_eq!(named, vec!["halt", "liquidity_floor", "participation"]);
     assert_eq!(count(&rig, "ApprovalRequested"), 1, "{:?}", kinds(&rig));
     assert_eq!(count(&rig, "IntentProposed"), 0, "{:?}", kinds(&rig));
+    let request = rows
+        .iter()
+        .find(|row| row.event_type == "ApprovalRequested")
+        .unwrap();
+    assert_eq!(
+        request.schema_version, 3,
+        "the request names the decision's deferrals (DEC-2515)"
+    );
+    let content = parse(&request.body).unwrap();
+    let asked: Vec<&str> = content
+        .get("payload")
+        .and_then(|payload| payload.get("content"))
+        .and_then(|content| content.get("deferred_to_binding"))
+        .and_then(Value::as_array)
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    assert_eq!(asked, named, "rule 292: exactly the decision's");
 }

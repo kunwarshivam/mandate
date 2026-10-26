@@ -164,7 +164,10 @@ fn lookalike(view: &ExecutorState, id: &ClientOrderId, ours: &SubmitOrder) -> bo
 }
 
 /// DEC-862 item 4 and DEC-863: the record is the order as journaled, carries no client order id
-/// or ours, and, carrying none, looks like no other order of ours.
+/// or ours, and, carrying none, looks like no other order of ours. Its stop price is ours too
+/// ([DEC-2395](../../../docs/project/decisions/DEC-2395.md) item 2): an order edited in the app
+/// to another stop is not the order we placed, so its filled quantity never reaches the journal
+/// and a sell is never booked at a limit it may no longer carry (DEC-2300 item 1).
 fn matches(
     view: &ExecutorState,
     id: &ClientOrderId,
@@ -175,6 +178,7 @@ fn matches(
         && record.order.side == ours.side
         && record.order.qty == ours.qty
         && record.order.limit_price == ours.limit_price
+        && record.order.stop_price == ours.stop_price
         && record.order_type == ours.order_type
         && record.tif == ours.tif;
     let named = match record.order.client_order_id.as_deref() {
