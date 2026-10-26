@@ -19,6 +19,8 @@ export interface JournalRecord {
   payload: Readonly<Record<string, unknown>> | null;
   /** Whether the body is the one its `hash` names. */
   matches: boolean;
+  /** The envelope's `causation_id`: the event this one follows from (journal spec §2), or `null` when it names none or the body was not read. */
+  causation_id: string | null;
 }
 
 export interface RecordsPage {
@@ -33,21 +35,22 @@ const HASH = /^[0-9a-f]{64}$/;
 const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
 
 /** The body's bytes as text, and its payload when the bytes are the ones `hash` names. */
-function readBody(body: string, hash: string): { payload: Record<string, unknown> | null; matches: boolean } {
+function readBody(body: string, hash: string): { payload: Record<string, unknown> | null; matches: boolean; causation_id: string | null } {
   let text: string;
   try {
     const bytes = Uint8Array.from(atob(body), (c) => c.charCodeAt(0));
     text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
   } catch {
-    return { payload: null, matches: false };
+    return { payload: null, matches: false, causation_id: null };
   }
-  if (sha256Hex(text) !== hash) return { payload: null, matches: false };
+  if (sha256Hex(text) !== hash) return { payload: null, matches: false, causation_id: null };
   try {
     const parsed: unknown = JSON.parse(text);
     const payload = isRecord(parsed) && isRecord(parsed.payload) ? parsed.payload : null;
-    return { payload, matches: true };
+    const causation_id = isRecord(parsed) && typeof parsed.causation_id === "string" ? parsed.causation_id : null;
+    return { payload, matches: true, causation_id };
   } catch {
-    return { payload: null, matches: true };
+    return { payload: null, matches: true, causation_id: null };
   }
 }
 

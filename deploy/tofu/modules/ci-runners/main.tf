@@ -123,6 +123,26 @@ variable "sysbox_sha256" {
   type = string
 }
 
+variable "kubectl_version" {
+  description = "The kubectl the cell jobs use, as infra.yml's KUBECTL_VERSION pins it; GitHub's ubuntu-24.04 image ships one, the job image installs it (E21-64d)."
+  type        = string
+
+  validation {
+    condition     = can(regex("^1[.][0-9]+[.][0-9]+$", var.kubectl_version))
+    error_message = "The kubectl version is an exact release such as 1.35.9."
+  }
+}
+
+variable "kubectl_sha256" {
+  description = "The kubectl binary's SHA-256, as infra.yml's KUBECTL_SHA256 pins it."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[0-9a-f]{64}$", var.kubectl_sha256))
+    error_message = "The kubectl checksum is 64 lower-case hex characters."
+  }
+}
+
 variable "base_image" {
   description = "The job image's base, pinned by digest."
   type        = string
@@ -162,6 +182,9 @@ locals {
     tar xzf runner.tgz
     rm runner.tgz
     ./bin/installdependencies.sh
+    curl -fsSL --retry 5 --retry-all-errors -o /usr/local/bin/kubectl "https://dl.k8s.io/release/v${var.kubectl_version}/bin/linux/amd64/kubectl"
+    echo "${var.kubectl_sha256}  /usr/local/bin/kubectl" | sha256sum --check
+    chmod 0755 /usr/local/bin/kubectl
     chown -R runner:runner /home/runner
     sudo -u runner -H bash /opt/toolchain.sh
     rm -rf /var/lib/apt/lists/* /tmp/*

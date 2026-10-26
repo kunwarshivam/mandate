@@ -9,7 +9,9 @@
 - **Code:** `mandate-deploy-manager` (`crates/mandate-deploy-manager`). `src/control.rs` (`fact`: the control stream's
   deployments, the connections they run on, stops and kill switches, and the manager's own
   records, from the journal alone), `src/manager.rs` (`Manager`: the fold, `desired`, `covers`, and `decide`, one step per
-  slot; `backoff`), `src/record.rs` (`Record`: the §9.21 drafts with deterministic event ids),
+  slot; `backoff`), `src/record.rs` (`Record`: the §9.21 drafts with deterministic event ids, and `drafts`, the batch
+  in which an unapplied crash loop carries the owner's `OwnerAlertSent`, `kill_switch_unapplied`,
+  E8-17),
   `src/driver.rs` (`Deployer::tick`: journal first, then the effect), `src/orchestrator.rs` (the
   port, `Phase`, the `crash_loop` and `deployment_unread` alerts), `src/fake.rs` (the fake orchestrator), and
   `src/kubernetes.rs` (bare pods with `restartPolicy: Never` over plain HTTPS, D-3). The records are
@@ -24,6 +26,11 @@
   streams: the processes a first pass starts, and the unread-deployment alerts); `tests/manager.rs` (deploy, back-off, the crash-loop
   bound and its one alert, a kill switch's immediate start and its one start of a crash-looped
   process, stops, lost nodes, retries, replay, journal and orchestrator outages);
+  `tests/retired.rs` (DEC-2344 items 1 and 3: an executor no agent wants is still reached by a
+  covering switch; an unapplied loop's operator alert, and its owner's `OwnerAlertSent` once, in the
+  loop's batch, never for an ordinary loop or again after a restart, in single cases and a property
+  test with its own oracle); `tests/unapplied_vectors.rs` (the vectors' `kill_switch_unapplied`
+  streams: the manager's own reading of each loop is rule 264's);
   `tests/properties.rs` (random deploys, stops, connection revocations, kill switches, crashes, readiness flaps, lost
   nodes and clock jumps: one live instance per slot, every effect after its record, nothing
   started that is not wanted, nothing wanted stopped, nothing a kill switch covers left down, and

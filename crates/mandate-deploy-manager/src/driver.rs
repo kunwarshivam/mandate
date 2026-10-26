@@ -19,11 +19,13 @@ pub trait ControlJournal {
         &mut self,
         seq: u64,
     ) -> impl Future<Output = Result<Vec<StoredEvent>, Unavailable>>;
-    /// Appends one draft at the stream's head under a writer epoch it takes for this append, as
-    /// workspace control services share the stream (journal spec §5.1).
+    /// Appends one batch of drafts, in order and in one `append`, at the stream's head under a
+    /// writer epoch it takes for this append, as workspace control services share the stream
+    /// (journal spec §5.1): a record and the owner alert it carries commit together or not at all
+    /// (rule 130).
     fn append(
         &mut self,
-        draft: &[u8],
+        drafts: &[&[u8]],
         recorded_at: UtcNanos,
     ) -> impl Future<Output = Result<AppendOutcome, Unavailable>>;
 }
@@ -102,10 +104,11 @@ impl<J: ControlJournal, O: Orchestrator, A: Alerts> Deployer<J, O, A> {
             let effect = match decision {
                 Decision::Retry(effect) => effect,
                 Decision::Journal(record) => {
-                    let draft = record.draft(&self.identity, &environment, now);
+                    let drafts = record.drafts(&self.identity, &environment, now);
+                    let batch: Vec<&[u8]> = drafts.iter().map(Vec::as_slice).collect();
                     let outcome = self
                         .journal
-                        .append(&draft, now)
+                        .append(&batch, now)
                         .await
                         .map_err(|Unavailable| Halt::Journal)?;
                     match outcome {

@@ -301,6 +301,14 @@ How a source is vetted is mandate spec §12 item 8, still open.
 
 Every step is idempotent: re-running it on the same raw bytes gives the same records.
 
+**Interim, the workspace news reader ([DEC-2280](../project/decisions/DEC-2280.md) item 4).** Until
+the data plane has a durable store and DEC-433 item 20 settles a licensed vendor's raw retention,
+the news reader keeps no raw bytes: it holds the response in memory while it parses it (step 3)
+and stores only each item's typed record, which holds no licensed text (journal spec §9.37). This
+keeps less than step 2 asks, never more. Until then, a news record's raw-bytes digest names bytes
+no store holds, so it cannot be re-verified against them, and ingestion cannot be re-run from the
+raw bytes. Backlog row `E2-10-news-raw-response-store.md` holds the durable store.
+
 ### 4.3 Entity tagging (factual only)
 
 Tags come from structured fields alone (DEC-433 item 10): the vendor's own ticker list for news,
@@ -324,11 +332,12 @@ knowledge time, so a reused ticker does not attach old news to a new company.
 
 Each item is a record: source id, allowlist version at ingestion, vendor id and version, published
 time, knowledge time, raw-bytes digest, byte length, structured fields, tags, and group key. Text is
-stored only as the raw artifact. Filings and XBRL facts are public and kept indefinitely. Licensed
-news text is kept as the license allows; what a thesis cited is captured as a journal artifact at
-use (DP-3), so a record survives the vendor's retention terms. Only what a thesis cited is kept for
-the six years, and a source is allowlisted only if its terms allow that copy; counsel confirms per
-vendor (DEC-433 item 20, the founder's decision).
+stored only as the raw artifact (the news reader keeps none yet: §4.2's interim, DEC-2280 item 4).
+Filings and XBRL facts are public and kept indefinitely. Licensed news text is kept as the license
+allows; what a thesis cited is captured as a journal artifact at use (DP-3), so a record survives
+the vendor's retention terms. Only what a thesis cited is kept for the six years, and a source is
+allowlisted only if its terms allow that copy; counsel confirms per vendor (DEC-433 item 20, the
+founder's decision).
 
 Amended filings (for example a 10-K/A) and restated XBRL facts are new records; the as-reported
 value stays readable as of any earlier time (DP-1).
