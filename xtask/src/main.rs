@@ -14,6 +14,7 @@ use anyhow::{Context, Result, bail, ensure};
 use serde::Deserialize;
 
 mod admission_drill;
+mod ca_roots;
 mod cell;
 mod founding;
 mod gitops;
@@ -395,6 +396,7 @@ fn run() -> Result<()> {
             release::publish_signed_index(&root, Path::new(out))
         }
         ["release", "publish-charts", out] => release::publish_charts(&root, Path::new(out)),
+        ["release", "ca-roots"] => ca_roots::check(&root),
         ["gitops", "bootstrap", environment] => {
             gitops::bootstrap(&root, gitops::Environment::parse(environment)?)
         }

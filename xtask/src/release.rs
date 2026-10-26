@@ -1958,14 +1958,22 @@ mod tests {
             let name = format!("publish-{}", arch.oci());
             let job = jobs.get(&name).with_context(|| format!("no {name}"))?;
             assert!(
-                job.contains(&format!("needs: [build-a-{}, compare]", arch.oci())),
-                "{name}: {job}"
+                job.contains(&format!(
+                    "needs: [build-a-{}, compare, ca-roots]",
+                    arch.oci()
+                )),
+                "{name} publishes only after the CA roots check (DEC-2374): {job}"
             );
             assert!(
                 job.contains(&format!("runs-on: {}\n", runner(arch))),
                 "{name}: {job}"
             );
         }
+        let roots = jobs.get("ca-roots").context("no ca-roots (DEC-2374)")?;
+        assert!(
+            roots.contains("run: cargo xtask release ca-roots\n"),
+            "{roots}"
+        );
         let index = jobs.get("publish-index").context("no publish-index")?;
         assert!(
             index.contains("needs: [publish-amd64, publish-arm64]"),

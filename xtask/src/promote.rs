@@ -29,6 +29,11 @@ const CHART_IMAGE_FOR_BINARY: [(&str, &str); 7] = [
     ("mandate-token-exchange", "token-exchange"),
 ];
 
+/// The chart's `images` keys the release fills, one per published binary (DEC-2374).
+pub(crate) fn chart_image_keys() -> Vec<&'static str> {
+    CHART_IMAGE_FOR_BINARY.iter().map(|(_, key)| *key).collect()
+}
+
 /// The charts `release.yml` publishes (`HOSTED_CHARTS`), by the name `CHARTS` lists. An overlay
 /// pins those it installs; promotion rewrites exactly those.
 const PUBLISHED_CHARTS: [&str; 4] = [

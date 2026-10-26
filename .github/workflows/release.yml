@@ -38,7 +38,7 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  # helm for `publish-charts`, at ci.yml's pin (E21-58).
+  # helm for `publish-charts` (E21-58) and `ca-roots` (DEC-2374), at ci.yml's pin.
   HELM_VERSION: "4.3.0"
   HELM_SHA256: "86584a54def73570558f66f5111cc53dfed56689637ae32c1201205d494f54fb"
 
@@ -194,11 +194,38 @@ jobs:
       - name: Each arch's two builds are identical
         run: echo "each arch's two release builds of this commit printed the same SHA256SUMS digest"
 
+  # E10-25 (DEC-2374): every image is a bare binary with no CA roots, so no image is published
+  # while a published process whose egress names a public TLS host would render without the CA
+  # bundle the workspace chart copies into its pod (DEC-2371). It reads the release's binaries,
+  # `processes.json` and the chart as it renders, with and without the deployment manager.
+  ca-roots:
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned Rust toolchain (rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - name: Install helm (checksum-verified)
+        run: |
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors -o helm.tgz "https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz"
+          echo "${HELM_SHA256}  helm.tgz" | sha256sum --check
+          tar xzf helm.tgz linux-amd64 && cat linux-amd64/helm > helm
+          sudo install helm /usr/local/bin/ && rm -r helm helm.tgz linux-amd64
+      - run: cargo xtask release ca-roots
+
   # A push to main only: never a pull request, never a branch (ES-12, E21-35). Each arch publishes
   # from a runner of its own arch, and its rebuild must print its build-a's digest, so what is
   # published is what `compare` proved reproducible.
   publish-amd64:
-    needs: [build-a-amd64, compare]
+    needs: [build-a-amd64, compare, ca-roots]
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -237,7 +264,7 @@ jobs:
           retention-days: 90
 
   publish-arm64:
-    needs: [build-a-arm64, compare]
+    needs: [build-a-arm64, compare, ca-roots]
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 15
