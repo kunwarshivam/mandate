@@ -1374,8 +1374,9 @@ fn play(script: &[Step]) -> Run {
 }
 
 /// Every way one batch's owner alerts break DEC-2514 and journal spec §9.15 rules 119, 120 and
-/// 130, read from the batch alone: an alert effect with no `OwnerAlertSent` after its subject in
-/// the same batch, one whose record names another kind, cause or command, a record with no
+/// 130, read from the batch alone: an alert effect about a subject the batch drafted with no
+/// `OwnerAlertSent` after it in the same batch (one about an earlier batch's record is raised
+/// alone, since its record would refuse the batch: backlog E7-2v), one whose record names another kind, cause or command, a record with no
 /// effect, two records for one subject, an act between an alert record and its subject, which a
 /// shell appending each run of drafts would split, and a draft off its ordinal, which an alert
 /// record would have moved from where an earlier draft predicted it. Empty when the batch is
@@ -1434,6 +1435,10 @@ fn alert_faults(batch: &[Effect]) -> Vec<String> {
         }
         drafted.push(draft);
     }
+    let raised: Vec<(String, String)> = raised
+        .into_iter()
+        .filter(|(subject, _)| drafted.iter().any(|draft| draft.event_id.0 == *subject))
+        .collect();
     let (mut raised_sorted, mut recorded_sorted) = (raised.clone(), recorded.clone());
     raised_sorted.sort();
     recorded_sorted.sort();
