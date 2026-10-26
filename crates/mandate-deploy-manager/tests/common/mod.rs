@@ -91,6 +91,16 @@ impl Journal {
         );
     }
 
+    /// A batch appended as one `append`, as a manager with a seeded bug would have journaled it.
+    pub fn services_batch(&self, drafts: &[Vec<u8>], now: UtcNanos) {
+        let batch: Vec<&[u8]> = drafts.iter().map(Vec::as_slice).collect();
+        let outcome = append(&self.inner, &batch, now);
+        assert!(
+            matches!(outcome, AppendOutcome::Committed(_)),
+            "{outcome:?}"
+        );
+    }
+
     pub fn rows(&self) -> Vec<StoredEvent> {
         self.inner.borrow().rows(&Self::stream()).to_vec()
     }

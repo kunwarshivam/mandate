@@ -17,7 +17,7 @@ use common::{
 use mandate_canon::Value;
 use mandate_deploy_manager::fake::Call;
 use mandate_deploy_manager::orchestrator::CRASH_LOOP;
-use mandate_deploy_manager::{Cause, Record, Slot, StopCause, backoff};
+use mandate_deploy_manager::{Cause, KILL_SWITCH_UNAPPLIED, Record, Slot, StopCause, backoff};
 use proptest::collection::vec;
 use proptest::prelude::*;
 use proptest::test_runner::{Config, TestRunner};
@@ -466,6 +466,9 @@ enum Bug {
     Looped,
     /// A `crash_loop` alert where only `kill_switch_unapplied` may be raised.
     Alerted,
+    /// An owner's `kill_switch_unapplied` in the batch of a loop no switch left unapplied: the
+    /// loop of an executor an agent wants (E8-17).
+    Told,
 }
 
 fn inject(journal: &Journal, record: &Record, now: i64) {
@@ -493,6 +496,7 @@ fn seed(
             .copied()
             .find(|a| !oracle.wanted(a) && oracle.pending(a)),
         Bug::Alerted => ACCOUNTS.iter().copied().find(|a| oracle.known(a)),
+        Bug::Told => ACCOUNTS.iter().copied().find(|a| oracle.wanted(a)),
     };
     let Some(account) = pick else {
         return false;
@@ -525,6 +529,16 @@ fn seed(
         },
         Bug::Alerted => {
             m.alerts().0.push(CRASH_LOOP);
+            return true;
+        }
+        Bug::Told => {
+            let told = Record::CrashLooped {
+                slot,
+                generation: 902,
+                restarts: 5,
+                alert: KILL_SWITCH_UNAPPLIED,
+            };
+            journal.services_batch(&told.drafts(&identity(), "paper", at(now)), at(now));
             return true;
         }
     };
@@ -710,6 +724,12 @@ fn check_seeded(ops: &[Op], bug: Bug) -> Result<(), TestCaseError> {
                 oracle.live.remove(account);
             }
         }
+        owners += unapplied;
+        prop_assert_eq!(
+            owner_alerts(&journal).len(),
+            owners,
+            "each crash loop that leaves a switch unapplied tells its owner once, in its batch, and a restarted manager never again"
+        );
         let alerts: Vec<&str> = m
             .alerts()
             .0
@@ -722,12 +742,6 @@ fn check_seeded(ops: &[Op], bug: Bug) -> Result<(), TestCaseError> {
             alerts,
             vec![UNAPPLIED; unapplied + rearmed],
             "each crash loop that leaves a switch unapplied raises kill_switch_unapplied once, again once by a restarted manager, and nothing else alerts"
-        );
-        owners += unapplied;
-        prop_assert_eq!(
-            owner_alerts(&journal).len(),
-            owners,
-            "each crash loop that leaves a switch unapplied tells its owner once, in its batch, and a restarted manager never again"
         );
     }
     Ok(())
@@ -760,12 +774,14 @@ fn every_check_of_the_oracle_catches_its_seeded_bug() {
         Op::Advance(1),
         Op::KillConnection(0),
     ];
-    let cases: [(Bug, &[Op], &str); 5] = [
+    let wanted = [Op::Deploy(0), Op::Advance(1)];
+    let cases: [(Bug, &[Op], &str); 6] = [
         (Bug::Unswitched, &retired, "answers a switch"),
         (Bug::Twice, &waiting, "exactly one start"),
         (Bug::Stopped, &held, "never stopped by the manager"),
         (Bug::Looped, &retired, "follows only a kill switch"),
         (Bug::Alerted, &retired, "nothing else alerts"),
+        (Bug::Told, &wanted, "tells its owner once"),
     ];
     for (bug, ops, message) in cases {
         let caught = check_seeded(ops, bug).expect_err(&format!("{bug:?} escaped"));
