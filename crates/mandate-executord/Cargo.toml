@@ -33,6 +33,7 @@ secrecy.workspace = true
 tokio = { workspace = true, features = ["rt", "signal", "time"] }
 
 [dev-dependencies]
+mandate-marketdata.workspace = true
 mandate-journal-pg.workspace = true
 proptest.workspace = true
 serde_json.workspace = true

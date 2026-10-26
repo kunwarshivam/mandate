@@ -521,17 +521,30 @@ fn releases_fees_and_corporate_actions_on_another_stream_change_nothing() {
     );
 }
 
-/// DEC-2380 item 2: nothing has traded until the account holds a fill of any order or the agent
-/// submits one; another agent's order alone, never filled, leaves the agent untraded.
+/// DEC-2380 item 2: nothing has traded until the account's stream holds a fill or an order
+/// request or submission of any agent's; another agent's order, never filled, is enough.
 #[test]
-fn an_account_is_untraded_until_a_fill_or_the_agents_order() {
-    let mut state = Journaled::new(ACCOUNT, CLOCK, AGENT);
+fn an_account_is_untraded_until_any_order_or_fill() {
+    let state = Journaled::new(ACCOUNT, CLOCK, AGENT);
     assert!(state.untraded());
-    submitted(&mut state, "agent-2", "o9");
-    assert!(state.untraded(), "another agent's order, never filled");
+    let mut others = state.clone();
+    submitted(&mut others, "agent-2", "o9");
+    assert!(!others.untraded(), "another agent's order, never filled");
+    let mut requested = state.clone();
+    assert!(on(
+        &mut requested,
+        "OrderRequestRecorded",
+        &object(&[("agent_id", "agent-2")])
+    ));
+    assert!(!requested.untraded(), "a request not yet submitted");
     let mut ordered = state.clone();
     submitted(&mut ordered, AGENT, "o1");
     assert!(!ordered.untraded(), "the agent's order");
-    assert!(on(&mut state, "FillApplied", &fill("f9", "o9", "buy", "1")));
-    assert!(!state.untraded(), "any fill on the account");
+    let mut filled = state;
+    assert!(on(
+        &mut filled,
+        "FillApplied",
+        &fill("f9", "o9", "buy", "1")
+    ));
+    assert!(!filled.untraded(), "a fill of an order the fold never saw");
 }

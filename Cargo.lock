@@ -2086,6 +2086,7 @@ dependencies = [
  "mandate-gate-inputs",
  "mandate-journal",
  "mandate-journal-pg",
+ "mandate-marketdata",
  "mandate-num",
  "mandate-ports",
  "mandate-process",

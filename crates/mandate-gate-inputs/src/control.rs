@@ -442,6 +442,13 @@ impl ConfirmedVersion {
         &self.context
     }
 
+    /// The connection's loss carry the deployment was validated with (mandate spec §5.7, MI-14):
+    /// the losses agents retired from the same connection added within the carry window, which an
+    /// agent deployed on it inherits as its lifetime floor's starting loss.
+    pub fn connection_loss_carry(&self) -> Usd {
+        self.unpriced.connection_loss_carry_usd
+    }
+
     /// The workspace's members the stream shows, which the mandate's approver references
     /// resolve against (DEC-953).
     pub fn members(&self) -> &Members {

@@ -48,7 +48,6 @@ use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use mandate_alpaca::TokioPause;
-use mandate_artifacts_fs::FsArtifactStore;
 use mandate_connections::record::ConnectionId;
 use mandate_executor::{AccountRef, AccountScope, WorkspaceId};
 use mandate_executord::alpaca::AlpacaBroker;
@@ -58,7 +57,7 @@ use mandate_executord::credential::{
     paper_account, paper_broker, paper_settings, paper_transport, subject_account,
     subject_connection, vault_config, vault_login, workspace_namespace,
 };
-use mandate_executord::deployment::{LiquidityRead, Production, Rows, StoredBars, Unread};
+use mandate_executord::deployment::{self, Production, Rows};
 use mandate_executord::oauth_check::{Start, exchanged_start};
 use mandate_executord::paper::FixturePaper;
 use mandate_executord::serve::{self, Edge, Waited, wait};
@@ -210,26 +209,12 @@ fn run(
     )
 }
 
-/// The deployment the run reads when the pod mounts the artifact store (`MANDATE_ARTIFACTS`, read
-/// only): its rows over a reader `rows` opens, the store, and the stored bars under
-/// `MANDATE_BARS`, unread without them (DEC-2274). Without the store the run keeps the fixture's
-/// ports, which admit no opening.
+/// The deployment the run reads when the pod mounts the artifact store
+/// ([`mandate_executord::deployment::production`]), from the host's variables.
 fn production(
     rows: impl FnOnce() -> Result<Rows, &'static str>,
 ) -> Result<Option<Production>, &'static str> {
-    let Ok(dir) = std::env::var("MANDATE_ARTIFACTS") else {
-        return Ok(None);
-    };
-    let artifacts = FsArtifactStore::open_existing(dir).map_err(|_| "artifacts_unavailable")?;
-    let liquidity: Box<dyn LiquidityRead> = match std::env::var("MANDATE_BARS") {
-        Ok(root) => Box::new(StoredBars { root: root.into() }),
-        Err(_) => Box::new(Unread),
-    };
-    Ok(Some(Production {
-        rows: rows()?,
-        artifacts: Box::new(artifacts),
-        liquidity,
-    }))
+    deployment::production(|name| std::env::var(name).ok(), rows)
 }
 
 /// The broker the run names, before the process takes the account stream: the fixture, or

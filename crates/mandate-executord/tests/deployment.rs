@@ -24,13 +24,15 @@ use mandate_executord::deployment::{BrokerFacts, Deployment, LiquidityRead, Sour
 use mandate_executord::gate::{AccountRules, AssetRecord, Liquidity};
 use mandate_executord::marks::Marked;
 use mandate_executord::quotes::QuoteFeed;
-use mandate_journal::StreamId;
+use mandate_journal::{ArtifactError, ArtifactRef, ArtifactSource, StreamId};
+use mandate_marketdata::dataset::Store as Datasets;
+use mandate_marketdata::model::{AssetClass as Class, Bar, DatasetId, Feed, Kind, Records, Symbol};
 use mandate_num::{Price, Qty, Usd};
 use mandate_risk::{
     DayTradeRegime, GateInput, GatePass, Origin, ProposedKind, ProposedOrder, ReasonCode,
     TimeInForce as GateTimeInForce, Verdict, evaluate,
 };
-use mandate_time::UtcNanos;
+use mandate_time::{Date, ExchangeCalendar, UtcNanos, new_york_midnight};
 use support::{
     ACCOUNT, ACCOUNT_STREAM, AGENT, CONNECTION, CONTROL_STREAM, Error, Journal, OTHER_AGENT,
     WORKSPACE, at, object, tick,
@@ -66,10 +68,22 @@ fn put(store: &mut Artifacts, object: &str) -> String {
     reference(object.as_bytes())
 }
 
+/// What a test changes in the deployment: the mandate's crypto stop-limit offset, and a loss an
+/// agent retired from the same connection added before this one was deployed.
+#[derive(Default, Clone, Copy)]
+struct Variant {
+    offset: Option<&'static str>,
+    retired_loss: Option<&'static str>,
+}
+
 /// The account's journal with the agent's SPY mandate registered, created, confirmed and deployed
 /// on the account's connection, and the store holding every object those records name; the
 /// deployed version's reference.
 fn deployed() -> Result<(Journal, Artifacts, String), Error> {
+    deployed_as(Variant::default())
+}
+
+fn deployed_as(variant: Variant) -> Result<(Journal, Artifacts, String), Error> {
     let journal = Journal::default();
     journal.write(
         CONTROL_STREAM,
@@ -81,6 +95,18 @@ fn deployed() -> Result<(Journal, Artifacts, String), Error> {
             r#"{{"account_ref":"{ACCOUNT}","broker":"alpaca","connection_id":"{CONNECTION}","environment":"paper","scopes":["trading"],"user":"user_founder"}}"#
         ))?,
     )?;
+    if let Some(loss) = variant.retired_loss {
+        journal.write(
+            CONTROL_STREAM,
+            "r1",
+            "AgentStopped",
+            1,
+            None,
+            json(&format!(
+                r#"{{"agent_id":"agent_old","connection_id":"{CONNECTION}","loss_added":"{loss}","retired_on":"2026-09-20"}}"#
+            ))?,
+        )?;
+    }
     let mut store = Artifacts::new();
     let mandate = MANDATE
         .replace(AAPL_ID, SPY)
@@ -89,7 +115,15 @@ fn deployed() -> Result<(Journal, Artifacts, String), Error> {
             &Digest::of(E7_7_MODEL).to_hex(),
             &Digest::of(CONTENT.as_bytes()).to_hex(),
         )
-        .replace("conn_alpaca_paper_01", CONNECTION);
+        .replace("conn_alpaca_paper_01", CONNECTION)
+        .replace(
+            r#""crypto_stop_limit_offset": null"#,
+            &variant
+                .offset
+                .map_or("\"crypto_stop_limit_offset\": null".to_owned(), |offset| {
+                    format!(r#""crypto_stop_limit_offset": "{offset}""#)
+                }),
+        );
     let document = to_canonical(&json(&mandate)?);
     let version = reference(&document);
     store.insert(Digest::of(&document), document);
@@ -167,9 +201,15 @@ fn journaled(journal: &Journal) -> Result<(), Error> {
         None,
         object(vec![("stream_id", text(ACCOUNT_STREAM))])?,
     )?;
+    journaled_at(journal, "a", "2026-09-21T16:00:00.000000000Z")
+}
+
+/// The account's snapshot and SPY's sane mark at `clock`, with ids prefixed `prefix`.
+fn journaled_at(journal: &Journal, prefix: &str, clock: &str) -> Result<(), Error> {
+    let text = |value: &str| Value::Str(value.to_owned());
     journal.write(
         ACCOUNT_STREAM,
-        "a2",
+        &format!("{prefix}2"),
         "AccountSnapshotRecorded",
         1,
         None,
@@ -184,7 +224,7 @@ fn journaled(journal: &Journal) -> Result<(), Error> {
                 Value::Int(mandate_canon::Int::new(2).ok_or("an int")?),
             ),
             ("non_marginable_buying_power", text("90000")),
-            ("risk_clock", text("2026-09-21T16:00:00.000000000Z")),
+            ("risk_clock", text(clock)),
             ("status", text("ACTIVE")),
             ("trade_suspended_by_user", Value::Bool(false)),
             ("trading_blocked", Value::Bool(false)),
@@ -192,7 +232,7 @@ fn journaled(journal: &Journal) -> Result<(), Error> {
     )?;
     journal.write(
         ACCOUNT_STREAM,
-        "a3",
+        &format!("{prefix}3"),
         "MarkUpdated",
         2,
         None,
@@ -201,7 +241,7 @@ fn journaled(journal: &Journal) -> Result<(), Error> {
             ("feed", text("fixture")),
             ("instrument_id", text(SPY)),
             ("price", text("99.95")),
-            ("risk_clock", text("2026-09-21T16:00:00.000000000Z")),
+            ("risk_clock", text(clock)),
             ("sane", Value::Bool(true)),
             ("session", text("regular")),
             ("source", text("quote")),
@@ -575,5 +615,430 @@ fn a_deployed_run_reads_its_ports_from_the_deployment() -> Result<(), Error> {
             .is_none(),
         "the broker's facts are unread, so the opening is held"
     );
+    Ok(())
+}
+
+/// An artifact store that counts its reads and can be taken down.
+struct Counted {
+    store: Artifacts,
+    reads: Rc<Cell<u32>>,
+    down: Rc<Cell<bool>>,
+}
+
+impl ArtifactSource for Counted {
+    fn read_artifact(&self, reference: &ArtifactRef) -> Result<Vec<u8>, ArtifactError> {
+        self.reads.set(self.reads.get() + 1);
+        if self.down.get() {
+            return Err(ArtifactError::Unavailable);
+        }
+        self.store.read_artifact(reference)
+    }
+}
+
+/// The deployment over `journal` and the counted `store`, with every other fact read, and the
+/// store's read count and switch.
+fn counted(journal: &Journal, store: Artifacts) -> (Deployment, Rc<Cell<u32>>, Rc<Cell<bool>>) {
+    let (reads, down) = (Rc::new(Cell::new(0)), Rc::new(Cell::new(false)));
+    let rows = journal.clone();
+    let deployment = Deployment::new(
+        &scope(),
+        Sources {
+            rows: Box::new(move |stream: &StreamId| mandate_store::Store::rows(&rows, stream)),
+            artifacts: Box::new(Counted {
+                store,
+                reads: Rc::clone(&reads),
+                down: Rc::clone(&down),
+            }),
+            quotes: Box::new(Quoting),
+            liquidity: Box::new(Bars(Rc::new(Cell::new(0)))),
+            broker: Box::new(Read(Rc::new(Cell::new(0)))),
+        },
+    );
+    (deployment, reads, down)
+}
+
+fn text(value: &str) -> Value {
+    Value::Str(value.to_owned())
+}
+
+/// Another agent's order on the account, never filled, means the account is not flat and its
+/// buying power is spoken for, so the opening is held until the account risk view reads them.
+#[test]
+fn another_agents_order_holds_the_opening() -> Result<(), Error> {
+    let (journal, store, _) = deployed()?;
+    journaled(&journal)?;
+    journal.write(
+        ACCOUNT_STREAM,
+        "a4",
+        "OrderRequestRecorded",
+        1,
+        None,
+        object(vec![
+            ("agent_id", text(OTHER_AGENT)),
+            ("risk_clock", text("2026-09-21T16:00:00.000000000Z")),
+        ])?,
+    )?;
+    let (deployment, _) = deployment(&journal, store);
+    assert!(opening(&deployment)?.is_none());
+    Ok(())
+}
+
+/// The gate judges only the version the journal has in force: a version applied on the account
+/// stream that is not the one the control stream deploys holds the opening, and a rejected one
+/// changes nothing.
+#[test]
+fn a_version_the_journal_does_not_have_in_force_holds_the_opening() -> Result<(), Error> {
+    for (result, held) in [("applied", true), ("rejected", false)] {
+        let (journal, store, _) = deployed()?;
+        journaled(&journal)?;
+        journal.write(
+            ACCOUNT_STREAM,
+            "a4",
+            "MandateVersionApplied",
+            1,
+            None,
+            object(vec![
+                ("agent_id", text(AGENT)),
+                ("new_version", text(&format!("sha256:{}", "9".repeat(64)))),
+                ("result", text(result)),
+                ("risk_clock", text("2026-09-21T16:00:00.000000000Z")),
+            ])?,
+        )?;
+        let (deployment, _) = deployment(&journal, store);
+        assert_eq!(opening(&deployment)?.is_none(), held, "{result}");
+    }
+    Ok(())
+}
+
+/// A stopped agent's opening is held: the journal has no version in force for it.
+#[test]
+fn a_stopped_agents_opening_is_held() -> Result<(), Error> {
+    let (journal, store, _) = deployed()?;
+    journaled(&journal)?;
+    journal.write(
+        CONTROL_STREAM,
+        "s1",
+        "AgentStopped",
+        1,
+        None,
+        json(&format!(
+            r#"{{"agent_id":"{AGENT}","connection_id":"{CONNECTION}","loss_added":"0","retired_on":"2026-09-21"}}"#
+        ))?,
+    )?;
+    let (deployment, _) = deployment(&journal, store);
+    assert!(opening(&deployment)?.is_none());
+    Ok(())
+}
+
+/// A quote that is not sane, or lacks a side, holds the opening.
+#[test]
+fn a_quote_not_sane_holds_the_opening() -> Result<(), Error> {
+    struct Insane(bool);
+    impl QuoteFeed for Insane {
+        fn observe(
+            &self,
+            instrument: &InstrumentId,
+            now: UtcNanos,
+        ) -> Result<MarketObservation, &'static str> {
+            Ok(MarketObservation {
+                instrument: instrument.clone(),
+                bid: Price::parse("99.95").ok(),
+                bid_size: None,
+                ask: if self.0 {
+                    None
+                } else {
+                    Price::parse("100.05").ok()
+                },
+                last_trade: None,
+                mark: None,
+                sane: self.0,
+                observed_at: RiskClock::from_secs(now.secs()),
+            })
+        }
+
+        fn feed(&self) -> &'static str {
+            "fixture"
+        }
+    }
+    for one_sided in [false, true] {
+        let (journal, store, _) = deployed()?;
+        journaled(&journal)?;
+        let rows = journal.clone();
+        let deployment = Deployment::new(
+            &scope(),
+            Sources {
+                rows: Box::new(move |stream: &StreamId| mandate_store::Store::rows(&rows, stream)),
+                artifacts: Box::new(store),
+                quotes: Box::new(Insane(one_sided)),
+                liquidity: Box::new(Bars(Rc::new(Cell::new(0)))),
+                broker: Box::new(Read(Rc::new(Cell::new(0)))),
+            },
+        );
+        assert!(opening(&deployment)?.is_none(), "one sided: {one_sided}");
+    }
+    Ok(())
+}
+
+/// The deployments are read once for a control-stream length and trade date; a longer control
+/// stream or an opening on a new date reads them again.
+#[test]
+fn the_deployment_is_read_again_only_when_the_control_stream_or_the_date_moves() -> Result<(), Error>
+{
+    let (journal, store, _) = deployed()?;
+    journaled(&journal)?;
+    let (deployment, reads, _) = counted(&journal, store);
+    let (agent, spy) = (agent(), spy()?);
+    assert!(deployment.covers(&agent, &spy));
+    let first = reads.get();
+    assert!(first > 0);
+    assert!(deployment.covers(&agent, &spy));
+    assert!(opening(&deployment)?.is_some());
+    assert_eq!(
+        reads.get(),
+        first,
+        "the same control stream and date read nothing again"
+    );
+    journal.write(
+        CONTROL_STREAM,
+        "x1",
+        "ConnectionEstablished",
+        2,
+        None,
+        json(r#"{"account_ref":"acct9","broker":"alpaca","connection_id":"conn9","environment":"paper","scopes":["trading"],"user":"user_other"}"#)?,
+    )?;
+    assert!(deployment.covers(&agent, &spy));
+    let second = reads.get();
+    assert!(second > first, "a longer control stream reads again");
+    tick(&journal, "t2", "2026-09-22T16:00:00Z")?;
+    journaled_at(&journal, "b", "2026-09-22T16:00:00.000000000Z")?;
+    assert!(opening(&deployment)?.is_some());
+    assert!(reads.get() > second, "an opening on a new date reads again");
+    Ok(())
+}
+
+/// A store outage after the deployment read never takes from the agent what its exits, fills and
+/// marks read, while its openings are held; a failed read is never kept, so the deployment reads
+/// again once the store answers.
+#[test]
+fn a_store_outage_holds_openings_and_keeps_what_exits_read() -> Result<(), Error> {
+    let (journal, store, version) = deployed()?;
+    journaled(&journal)?;
+    let (deployment, _, down) = counted(&journal, store);
+    let (agent, spy) = (agent(), spy()?);
+    assert!(deployment.covers(&agent, &spy));
+    down.set(true);
+    journal.write(
+        CONTROL_STREAM,
+        "x1",
+        "ConnectionEstablished",
+        2,
+        None,
+        json(r#"{"account_ref":"acct9","broker":"alpaca","connection_id":"conn9","environment":"paper","scopes":["trading"],"user":"user_other"}"#)?,
+    )?;
+    assert!(
+        !deployment.covers(&agent, &spy),
+        "an opening reads only what reads now"
+    );
+    assert_eq!(
+        deployment.protection(&agent, &spy, Price::parse("100")?),
+        Ok(None)
+    );
+    assert!(opening(&deployment)?.is_none());
+    assert_eq!(deployment.version(&agent).map(|v| v.0), Some(version));
+    assert!(
+        deployment.fill_refs(&spy).is_some(),
+        "a fill is still accounted"
+    );
+    assert_eq!(deployment.asset_class(&spy), Some(AssetClass::UsEquity));
+    assert!(deployment.increment(&spy).is_some());
+    assert_eq!(deployment.instruments(), BTreeSet::from([spy.clone()]));
+    down.set(false);
+    assert!(
+        deployment.covers(&agent, &spy),
+        "read again once the store answers"
+    );
+    assert!(opening(&deployment)?.is_some());
+    Ok(())
+}
+
+/// The untraded agent's inherited loss is the connection's loss carry its deployment was
+/// validated with (mandate spec §5.7, MI-14), never zero over a retired agent's loss.
+#[test]
+fn the_untraded_agent_inherits_the_connections_loss_carry() -> Result<(), Error> {
+    let (journal, store, _) = deployed_as(Variant {
+        retired_loss: Some("25"),
+        ..Variant::default()
+    })?;
+    journaled(&journal)?;
+    let (deployment, _) = deployment(&journal, store);
+    let snapshot = opening(&deployment)?.ok_or("an input")?;
+    assert_eq!(snapshot.risk.inherited_loss, Usd::parse("25")?);
+    Ok(())
+}
+
+/// The mandate's crypto stop-limit offset reaches the mandate port for its agent only.
+#[test]
+fn the_crypto_stop_limit_offset_is_the_mandates() -> Result<(), Error> {
+    let (journal, store, _) = deployed_as(Variant {
+        offset: Some("0.02"),
+        ..Variant::default()
+    })?;
+    let (deployment, _) = deployment(&journal, store);
+    assert_eq!(
+        deployment.crypto_stop_limit_offset(&agent()),
+        Some(mandate_num::Fraction::parse("0.02")?)
+    );
+    assert_eq!(
+        deployment.crypto_stop_limit_offset(&AgentId(OTHER_AGENT.to_owned())),
+        None
+    );
+    assert_eq!(deployment.exit_tier(&spy()?), None);
+    Ok(())
+}
+
+/// Nothing read answers nothing.
+#[test]
+fn unread_answers_nothing() -> Result<(), Error> {
+    let unread = mandate_executord::deployment::Unread;
+    assert_eq!(BrokerFacts::asset(&unread, "SPY"), None);
+    assert_eq!(BrokerFacts::rules(&unread), None);
+    assert_eq!(BrokerFacts::halted(&unread, "SPY"), None);
+    assert_eq!(LiquidityRead::liquidity(&unread, "SPY", at(MONDAY)?), None);
+    Ok(())
+}
+
+/// The wiring the deployment replaces answers the binding gate from it: with every fact read,
+/// the untraded agent's opening reaches the gate.
+#[test]
+fn the_wired_gate_reads_the_deployment() -> Result<(), Error> {
+    let (journal, store, _) = deployed()?;
+    journaled(&journal)?;
+    let rows = journal.clone();
+    let mut fixture = mandate_executord::fixture::wiring(&scope())?;
+    fixture.quotes = Box::new(Quoting);
+    let wiring = Deployment::wired(
+        fixture,
+        &scope(),
+        Box::new(move |stream: &StreamId| mandate_store::Store::rows(&rows, stream)),
+        Box::new(store),
+        (
+            Box::new(Bars(Rc::new(Cell::new(0)))),
+            Box::new(Read(Rc::new(Cell::new(0)))),
+        ),
+    );
+    let (agent, spy) = (agent(), spy()?);
+    assert!(
+        wiring
+            .gate
+            .input(&request(&agent, &spy, Purpose::Open, Side::Buy)?)
+            .is_some()
+    );
+    Ok(())
+}
+
+/// A pod reads the deployment only when it mounts the artifact store: none without it, a refusal
+/// for one named and missing, and the store with the bars when both are named.
+#[test]
+fn production_reads_the_mounted_store() -> Result<(), Error> {
+    let none = || -> Result<mandate_executord::deployment::Rows, &'static str> {
+        Ok(Box::new(|_: &StreamId| None))
+    };
+    let unset = mandate_executord::deployment::production(|_| None, none)?;
+    assert!(unset.is_none());
+    let dir = std::env::temp_dir().join(format!("executord-production-{}", std::process::id()));
+    std::fs::remove_dir_all(&dir).ok();
+    let missing = dir.to_string_lossy().into_owned();
+    assert!(
+        mandate_executord::deployment::production(
+            |name| (name == "MANDATE_ARTIFACTS").then(|| missing.clone()),
+            none
+        )
+        .is_err()
+    );
+    mandate_artifacts_fs::FsArtifactStore::open(&dir)?;
+    let mounted = mandate_executord::deployment::production(
+        |name| (name == "MANDATE_ARTIFACTS").then(|| missing.clone()),
+        none,
+    )?;
+    assert!(mounted.is_some());
+    std::fs::remove_dir_all(&dir).ok();
+    Ok(())
+}
+
+/// The stored bars are read by `mandate-bars` under the pod's root (DEC-2274): the figures it
+/// gives for the symbol at the clock, and none for a symbol with no datasets.
+#[test]
+fn stored_bars_read_the_datasets_under_the_root() -> Result<(), Error> {
+    let root = std::env::temp_dir().join(format!("executord-bars-{}", std::process::id()));
+    std::fs::remove_dir_all(&root).ok();
+    let bar = |start: UtcNanos, close: &str, volume: &str| -> Result<Bar, Error> {
+        let price = mandate_canon::DecStr::parse(close)?;
+        Ok(Bar {
+            start,
+            open: price.clone(),
+            high: price.clone(),
+            low: price.clone(),
+            close: price.clone(),
+            volume: mandate_canon::DecStr::parse(volume)?,
+            vwap: price,
+            trade_count: 10,
+        })
+    };
+    let dataset = |timeframe: &str| -> Result<DatasetId, Error> {
+        Ok(DatasetId::new(
+            Class::UsEquity,
+            Feed::Iex,
+            Kind::Bars(timeframe.parse()?),
+            Symbol::parse("SPY")?,
+        )?)
+    };
+    let calendar = ExchangeCalendar::us_equities()?;
+    let mut day = Date::new(2026, 8, 1)?;
+    let mut days = Vec::new();
+    while day <= Date::new(2026, 9, 18)? {
+        if calendar.is_trading_day(day)? {
+            days.push(day);
+        }
+        day = day.next()?;
+    }
+    let days = days.split_off(days.len() - 30);
+    let store = Datasets::new(&root);
+    for (n, day) in days.into_iter().enumerate() {
+        let bars = vec![bar(
+            new_york_midnight(day)?,
+            &format!("{}.5", 100 + n % 7),
+            &format!("{}", 1_000_000 + n * 10_000),
+        )?];
+        store.put_day(&dataset("1Day")?, day, &Records::Bars(bars))?;
+    }
+    let open = at("2026-09-21T13:30:00Z")?.secs();
+    let minutes = (0..390_i64)
+        .map(|n| {
+            bar(
+                UtcNanos::from_parts(open + 60 * n, 0)?,
+                "110",
+                &(100 + n).to_string(),
+            )
+        })
+        .collect::<Result<Vec<Bar>, Error>>()?;
+    store.put_day(
+        &dataset("1Min")?,
+        Date::parse("2026-09-21")?,
+        &Records::Bars(minutes),
+    )?;
+    let now = at(MONDAY)?;
+    let expected = mandate_bars::liquidity(&root, "SPY", now)?;
+    let read = mandate_executord::deployment::StoredBars { root: root.clone() };
+    assert_eq!(
+        LiquidityRead::liquidity(&read, "SPY", now),
+        Some(Liquidity {
+            prior_close: expected.prior_close,
+            median_dollar_volume_20d: expected.median_dollar_volume_20d,
+            adv_20d: expected.adv_20d,
+            trailing_5m_volume: expected.trailing_5m_volume,
+        })
+    );
+    assert_eq!(LiquidityRead::liquidity(&read, "QQQ", now), None);
+    std::fs::remove_dir_all(&root).ok();
     Ok(())
 }

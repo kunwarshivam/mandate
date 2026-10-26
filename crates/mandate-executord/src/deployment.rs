@@ -8,11 +8,15 @@
 //! input ([`DeployedGate`]) over the journal's account, mark and clock (`mandate-gate-context`),
 //! the quote, the stored bars' liquidity (DEC-2274) and the broker's facts.
 //!
-//! Every port reads the store when it is asked, as the process reads its streams each pass, so
-//! nothing is ever answered from rows the store no longer shows. A deployment the run cannot read
-//! answers nothing: no instrument is covered, no protection is handed, nothing is marked, and
-//! every opening is held (`AGENTS.md` rule 3). An exit is never answered and reads nothing
-//! here, so nothing it might wait on can hold it (rule 13).
+//! Every port reads the store when it is asked, as the process reads its streams each pass. A
+//! deployment is read again whenever the control stream grows, and for an opening whenever the
+//! trade date changes; a read that fails is never kept, so the next ask reads again. An opening
+//! reads only the deployment as it reads now: one the run cannot read covers nothing, is handed no
+//! protection and is held (`AGENTS.md` rule 3). What an exit, a fill or a mark reads (the
+//! version, the instrument's class, grid and fill references, the instrument marked) falls back
+//! to the agent's last deployment that read, so a later unreadable row or a store outage never
+//! takes from a held position what its exit and its fills need (rule 13). The binding gate's
+//! input is never answered for an exit, which reads nothing here.
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -20,6 +24,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use mandate_accounting::{AssetClass, InstrumentId};
+use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Value, parse};
 use mandate_executor::{
     AccountScope, AgentId, BindingGateInput, BindingGateRequest, BindingGateSource, ExitTier,
@@ -131,22 +136,54 @@ pub struct Production {
     pub liquidity: Box<dyn LiquidityRead>,
 }
 
+/// The production a pod reads when it mounts the artifact store, as `var` names it
+/// (`MANDATE_ARTIFACTS`, read only): its rows over the reader `rows` opens, the store, and the
+/// stored bars under `MANDATE_BARS`, unread without them (DEC-2274). `None` without the store, so
+/// the run keeps the fixture's ports, which admit no opening.
+///
+/// # Errors
+/// `artifacts_unavailable` for a store that is named and does not open, and `rows`' refusal.
+pub fn production(
+    var: impl Fn(&str) -> Option<String>,
+    rows: impl FnOnce() -> Result<Rows, &'static str>,
+) -> Result<Option<Production>, &'static str> {
+    let Some(dir) = var("MANDATE_ARTIFACTS") else {
+        return Ok(None);
+    };
+    let artifacts = FsArtifactStore::open_existing(dir).map_err(|_| "artifacts_unavailable")?;
+    let liquidity: Box<dyn LiquidityRead> = match var("MANDATE_BARS") {
+        Some(root) => Box::new(StoredBars { root: root.into() }),
+        None => Box::new(Unread),
+    };
+    Ok(Some(Production {
+        rows: rows()?,
+        artifacts: Box::new(artifacts),
+        liquidity,
+    }))
+}
+
 /// One followed agent's deployment, read.
 struct Resolved {
     view: DeployedView,
     gate: DeployedGate,
+    version: String,
     allocation: Usd,
+    loss_carry: Usd,
     symbol: String,
     instrument: InstrumentId,
 }
 
 /// The deployments read at one control-stream length and trade date, so a port asked again within
-/// a pass reads no artifact twice; a longer control stream or a new date reads them again.
+/// a pass reads no artifact twice. `read` is whether every followed agent's deployment read: a
+/// read that failed is read again at the next ask. `last` is each agent's last deployment that
+/// read, kept across later failures for what an exit, a fill or a mark reads.
 #[derive(Default)]
 struct Cache {
-    control: usize,
+    control: Option<usize>,
     date: Option<Date>,
-    resolved: BTreeMap<AgentId, Option<Rc<Resolved>>>,
+    read: bool,
+    current: BTreeMap<AgentId, Rc<Resolved>>,
+    last: BTreeMap<AgentId, Rc<Resolved>>,
 }
 
 struct Inner {
@@ -221,45 +258,50 @@ impl Deployment {
         Some(journaled.now()?.date())
     }
 
-    /// Every agent the control stream deploys on this account, each with its deployment read on
-    /// `date`, or on the latest tick's date when none is given; an agent whose deployment does not
-    /// read is listed with none.
-    fn deployments(&self, date: Option<Date>) -> BTreeMap<AgentId, Option<Rc<Resolved>>> {
+    /// Every agent the control stream deploys on this account whose deployment reads now, on
+    /// `date`, or for a port that names none on the date of the latest read (the latest tick's at
+    /// the first). The deployments are read again when the control stream has grown, when `date`
+    /// is another, or when the last read failed for any agent; each one that reads is kept as
+    /// that agent's last.
+    fn deployments(&self, date: Option<Date>) -> BTreeMap<AgentId, Rc<Resolved>> {
         let Some(control) = self.rows(self.0.control.as_ref()) else {
             return BTreeMap::new();
         };
         let Ok(mut cache) = self.0.cache.try_borrow_mut() else {
             return BTreeMap::new();
         };
-        let current = cache.control == control.len() && date.is_none_or(|d| cache.date == Some(d));
-        if current && cache.date.is_some() {
-            return cache.resolved.clone();
+        let same_control = cache.control == Some(control.len());
+        let same_date = date.is_none_or(|day| cache.date == Some(day));
+        if cache.read && same_control && same_date {
+            return cache.current.clone();
         }
-        let day = date.or_else(|| self.today());
-        let Some(day) = day else {
+        let Some(day) = date.or(cache.date).or_else(|| self.today()) else {
             return BTreeMap::new();
         };
         let agents = agents_of(&control, &self.0.scope, Environment::Paper)
-            .map(|following| following.agents)
-            .unwrap_or_default();
+            .map(|following| following.agents);
         let records: Option<Vec<ControlRecord>> =
             control.iter().map(ControlRecord::of_row).collect();
-        let resolved = agents
-            .into_keys()
-            .map(|agent| {
-                let read = records
-                    .as_deref()
-                    .and_then(|records| self.resolve(records, &agent, day))
-                    .map(Rc::new);
-                (agent, read)
-            })
-            .collect();
-        *cache = Cache {
-            control: control.len(),
-            date: Some(day),
-            resolved,
-        };
-        cache.resolved.clone()
+        let mut current = BTreeMap::new();
+        let mut read = agents.is_ok() && records.is_some();
+        for agent in agents.unwrap_or_default().into_keys() {
+            let resolved = records
+                .as_deref()
+                .and_then(|records| self.resolve(records, &agent, day));
+            match resolved {
+                Some(resolved) => {
+                    let resolved = Rc::new(resolved);
+                    cache.last.insert(agent.clone(), Rc::clone(&resolved));
+                    current.insert(agent, resolved);
+                }
+                None => read = false,
+            }
+        }
+        cache.control = Some(control.len());
+        cache.date = Some(day);
+        cache.read = read;
+        cache.current.clone_from(&current);
+        current
     }
 
     /// `agent`'s deployment from the control `records` and the artifact store on `day`, as the
@@ -295,22 +337,57 @@ impl Deployment {
         Some(Resolved {
             view: DeployedView::new(&agent.0, &reviewed).ok()?,
             gate: DeployedGate::new(&agent.0, &reviewed, self.0.sources.quotes.feed()).ok()?,
+            version: reviewed.config_refs.mandate_version.clone()?,
             allocation: Usd::parse(reviewed.mandate.capital.allocation_usd.as_str()).ok()?,
+            loss_carry: confirmed.connection_loss_carry(),
             symbol: reviewed.instrument.symbol.as_str().to_owned(),
             instrument: InstrumentId::new(reviewed.instrument.asset_id.as_str()).ok()?,
         })
     }
 
-    fn deployed(&self, agent: &AgentId) -> Option<Rc<Resolved>> {
-        self.deployments(None).remove(agent).flatten()
+    /// `agent`'s deployment as it reads now: what an opening reads.
+    fn current(&self, agent: &AgentId) -> Option<Rc<Resolved>> {
+        self.deployments(None).remove(agent)
     }
 
-    /// The first read deployment whose instrument is `instrument`.
-    fn of_instrument(&self, instrument: &InstrumentId) -> Option<Rc<Resolved>> {
-        self.deployments(None)
-            .into_values()
-            .flatten()
-            .find(|resolved| &resolved.instrument == instrument)
+    /// `agent`'s deployment as it reads now, else its last that read: what an exit reads.
+    fn lasting(&self, agent: &AgentId) -> Option<Rc<Resolved>> {
+        self.current(agent).or_else(|| self.last().remove(agent))
+    }
+
+    /// Each agent's last deployment that read.
+    fn last(&self) -> BTreeMap<AgentId, Rc<Resolved>> {
+        self.0
+            .cache
+            .try_borrow()
+            .map(|cache| cache.last.clone())
+            .unwrap_or_default()
+    }
+
+    /// Every deployment an exit, a fill or a mark reads: each agent's current one, else its last.
+    fn lasting_all(&self) -> Vec<Rc<Resolved>> {
+        let mut all = self.last();
+        all.extend(self.deployments(None));
+        all.into_values().collect()
+    }
+
+    /// `answer` of the deployments whose instrument is `instrument`, when they all give the same
+    /// one; none when none is deployed on it or two deployments disagree, so no fill is accounted
+    /// under one agent's configuration for another's.
+    fn agreed<T: PartialEq>(
+        &self,
+        instrument: &InstrumentId,
+        answer: impl Fn(&DeployedView) -> Option<T>,
+    ) -> Option<T> {
+        let mut answers = self
+            .lasting_all()
+            .into_iter()
+            .filter(|resolved| &resolved.instrument == instrument)
+            .map(|resolved| answer(&resolved.view));
+        let first = answers.next()??;
+        answers
+            .all(|other| other.as_ref() == Some(&first))
+            .then_some(first)
     }
 
     /// The journal's fold for `agent` over the control, account and clock streams; `None` when a
@@ -346,18 +423,19 @@ fn fold(journaled: &mut Journaled, stored: &StoredEvent) {
 }
 
 /// The agent's risk while nothing has traded on the account: its whole allocation is its equity,
-/// its high-water mark, its day start and its capital base, nothing is latched or restricted, and
-/// it has no exit, order, day trade or conduct counter yet. These are facts only then (DEC-2380
-/// item 2); once anything has traded the account risk view reads them, and until it does the
-/// opening is held.
-fn untraded(allocation: Usd) -> Option<AgentRisk> {
+/// its high-water mark, its day start and its capital base, its inherited loss is the connection's
+/// loss carry its deployment was validated with (mandate spec §5.7, MI-14), nothing is latched or
+/// restricted, and it has no exit, order, day trade or conduct counter yet. These are facts only
+/// then (DEC-2380 item 2); once anything has traded the account risk view reads them, and until it
+/// does the opening is held.
+fn untraded(allocation: Usd, loss_carry: Usd) -> Option<AgentRisk> {
     Some(AgentRisk {
         risk: RiskSnapshot {
             agent_equity: allocation,
             high_water_mark: allocation,
             day_start_equity: allocation,
             capital_base: allocation,
-            inherited_loss: Usd::ZERO,
+            inherited_loss: loss_carry,
             latched: BTreeSet::new(),
             active_rungs: BTreeMap::new(),
             size_factor: Ratio::parse("1").ok()?,
@@ -386,40 +464,43 @@ fn sane(observation: &MarketObservation) -> Option<SaneQuote> {
 
 impl MandateView for Deployment {
     fn version(&self, agent: &AgentId) -> Option<MandateVersion> {
-        self.deployed(agent)?.view.version(agent)
+        self.lasting(agent)?.view.version(agent)
     }
 
     fn crypto_stop_limit_offset(&self, agent: &AgentId) -> Option<Fraction> {
-        self.deployed(agent)?.view.crypto_stop_limit_offset(agent)
+        self.lasting(agent)?.view.crypto_stop_limit_offset(agent)
     }
 
+    /// Whether `agent`'s deployment, as it reads now, covers `instrument`: an opening's question.
     fn covers(&self, agent: &AgentId, instrument: &InstrumentId) -> bool {
-        self.deployed(agent)
+        self.current(agent)
             .is_some_and(|resolved| resolved.view.covers(agent, instrument))
     }
 }
 
 impl InstrumentSnapshot for Deployment {
     fn asset_class(&self, instrument: &InstrumentId) -> Option<AssetClass> {
-        self.of_instrument(instrument)?.view.asset_class(instrument)
+        self.agreed(instrument, |view| view.asset_class(instrument))
     }
 
     fn increment(&self, instrument: &InstrumentId) -> Option<ShareIncrement> {
-        self.of_instrument(instrument)?.view.increment(instrument)
+        self.agreed(instrument, |view| view.increment(instrument))
     }
 
-    fn exit_tier(&self, instrument: &InstrumentId) -> Option<ExitTier> {
-        self.of_instrument(instrument)?.view.exit_tier(instrument)
+    /// No reviewed instrument carries an exit tier yet ([`DeployedView`] answers none), so an
+    /// exit with no limit takes the table's wider tier (DEC-2037 item 4).
+    fn exit_tier(&self, _instrument: &InstrumentId) -> Option<ExitTier> {
+        None
     }
 
     fn fill_refs(&self, instrument: &InstrumentId) -> Option<FillConfigRefs> {
-        self.of_instrument(instrument)?.view.fill_refs(instrument)
+        self.agreed(instrument, |view| view.fill_refs(instrument))
     }
 }
 
 impl Protections for Deployment {
     /// The protection the deployed agent's opening on its instrument is handed with. An opening
-    /// the deployment does not cover, or one of an agent whose deployment does not read, is
+    /// the deployment does not cover, or one of an agent whose deployment does not read now, is
     /// handed none: the binding gate holds it all the same, and the process goes on with its exits.
     /// A covered opening whose protection cannot be read is [`Unplanned`] (TI-4).
     fn protection(
@@ -428,7 +509,7 @@ impl Protections for Deployment {
         instrument: &InstrumentId,
         entry: Price,
     ) -> Result<Option<ProtectionPrices>, Unplanned> {
-        let Some(resolved) = self.deployed(agent) else {
+        let Some(resolved) = self.current(agent) else {
             return Ok(None);
         };
         if !resolved.view.covers(agent, instrument) {
@@ -442,11 +523,11 @@ impl Protections for Deployment {
 }
 
 impl Marked for Deployment {
-    /// Each read deployment's instrument (DEC-2380 item 3).
+    /// Each deployment's instrument, as it reads now or as it last read, so a held position stays
+    /// marked through an outage (DEC-2380 item 3).
     fn instruments(&self) -> BTreeSet<InstrumentId> {
-        self.deployments(None)
-            .into_values()
-            .flatten()
+        self.lasting_all()
+            .into_iter()
             .map(|resolved| resolved.instrument.clone())
             .collect()
     }
@@ -470,8 +551,10 @@ impl BindingGateSource for Deployment {
     /// The binding gate's input for the deployed agent's opening, read now. An order that reduces
     /// risk is answered `None` before anything is read, so the core keeps its own decision
     /// (`AGENTS.md` rule 13, DEC-2274 item 6). An opening is held, `None`, while its deployment,
-    /// the journal's facts, the quote, the broker's facts or the bars are unread, or once the
-    /// account has traded and the agent's risk is not read.
+    /// the journal's facts, the quote, the broker's facts or the bars are unread, while the
+    /// version the journal has in force is not the one the deployment reads, or once anything has
+    /// traded on the account: until then the account is flat with no order working and the
+    /// agent's risk is its allocation, and after it the account risk view must read them.
     fn input(&self, request: &BindingGateRequest<'_>) -> Option<BindingGateInput> {
         if !request.purpose.adds_risk() {
             return None;
@@ -480,9 +563,11 @@ impl BindingGateSource for Deployment {
         let facts = journaled.facts(request.instrument.as_str(), FRESH).ok()?;
         let resolved = self
             .deployments(Some(facts.now.date()))
-            .remove(request.agent)
-            .flatten()?;
-        if !resolved.view.covers(request.agent, request.instrument) || !journaled.untraded() {
+            .remove(request.agent)?;
+        if facts.mandate_version != resolved.version
+            || !resolved.view.covers(request.agent, request.instrument)
+            || !journaled.untraded()
+        {
             return None;
         }
         let sources = &self.0.sources;
@@ -492,9 +577,9 @@ impl BindingGateSource for Deployment {
             asset: sources.broker.asset(&resolved.symbol),
             rules: sources.broker.rules(),
             liquidity: sources.liquidity.liquidity(&resolved.symbol, facts.now),
-            agent: untraded(resolved.allocation),
+            agent: untraded(resolved.allocation, resolved.loss_carry),
             halted: sources.broker.halted(&resolved.symbol),
-            flat: journaled.working().is_empty(),
+            flat: true,
             journaled: facts,
         };
         resolved.gate.input(&order, request)

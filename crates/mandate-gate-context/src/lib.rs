@@ -138,6 +138,7 @@ pub struct Journaled {
     orders: BTreeMap<String, String>,
     ended: BTreeSet<String>,
     fills: BTreeSet<String>,
+    ordered: bool,
     positions: BTreeMap<String, SignedQty>,
     released: BTreeMap<String, Qty>,
     models: BTreeMap<(String, String), String>,
@@ -164,6 +165,7 @@ impl Journaled {
             orders: BTreeMap::new(),
             ended: BTreeSet::new(),
             fills: BTreeSet::new(),
+            ordered: false,
             positions: BTreeMap::new(),
             released: BTreeMap::new(),
             models: BTreeMap::new(),
@@ -233,12 +235,12 @@ impl Journaled {
         self.applied.clone().or_else(|| self.deployed.clone())
     }
 
-    /// Whether nothing has traded yet: the account stream holds no fill, of any order, and no
-    /// order of the agent's was submitted. Only then are the agent's allocation and empty
-    /// counters its risk, as the binding gate reads it before the account risk view does
-    /// (DEC-2380 item 2).
+    /// Whether nothing has traded on the account: its stream holds no fill and no order request
+    /// or submission, of any agent. Only then are the agent's allocation and empty counters its
+    /// risk, and the account flat with no order working, as the binding gate reads them before
+    /// the account risk view does (DEC-2380 item 2).
     pub fn untraded(&self) -> bool {
-        self.fills.is_empty() && self.orders.is_empty()
+        self.fills.is_empty() && !self.ordered
     }
 
     /// The later of the account stream's latest risk clock and the scheduler's latest tick.
@@ -330,9 +332,11 @@ impl Journaled {
             }
             ("MarkUpdated", Some(at)) => self.mark(&payload, at)?,
             ("OrderRequestRecorded", _) if on_account => {
+                self.ordered = true;
                 self.requested_by = Some(payload.text("agent_id")?.to_owned());
             }
             ("OrderSubmitted", _) if on_account => {
+                self.ordered = true;
                 let order = payload.text("client_order_id")?.to_owned();
                 let instrument = payload.text("instrument_id")?.to_owned();
                 if self.requested_by.take().as_deref() == Some(self.agent.as_str()) {

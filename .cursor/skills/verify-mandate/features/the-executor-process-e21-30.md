@@ -77,7 +77,11 @@
   participation. `tests/deployment.rs` (`src/deployment.rs`, X1b-3 G2b): the production ports read
   from the control stream's confirmed version and registrations and the artifact store, a
   deployment the store cannot read answering nothing, an untraded account's opening on every read
-  fact allowed, a traded account or an unread fact holding it, an exit never reading the bars or
-  the broker, an uncovered opening handed no protection, and a run given the deployment reading
-  its ports from it.
+  fact allowed, a traded account, another agent's order, a version the journal does not have in
+  force, a stopped agent, a quote not sane or an unread fact holding it, an exit never reading the
+  bars or the broker, an uncovered opening handed no protection, a run given the deployment
+  reading its ports from it, the deployment read again only when the control stream or the date
+  moves, a store outage holding openings while keeping what exits read, the connection's loss
+  carry inherited, the crypto stop-limit offset, the mounted store and the stored bars
+  (DEC-2802).
 - **Run:** `cargo nextest run -p mandate-executord` (with `MANDATE_PG_URL` for `tests/pg.rs`).
