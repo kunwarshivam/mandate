@@ -7,14 +7,18 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Duration;
 
+use mandate_accounting::InstrumentId;
 use mandate_canon::{Digest, Key, Object, Value, parse};
-use mandate_daemon::{Config, Refs, RuntimeProcess, Wiring, fixture};
+use mandate_daemon::models::{Evaluated, Models};
+use mandate_daemon::{ArtifactSink, Config, ModelsWiring, Refs, RuntimeProcess, Wiring, fixture};
 use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId};
+use mandate_num::{Conviction, Unit};
 use mandate_process::{Exit, State};
 use mandate_runtime::{
     AgentId, ApprovalSettings, Autonomy, Classified, ConnectionId, Deployment, DryRunVerdict,
     EventDraft, EventId, FlattenPlan, FlattenPlanner, FlattenRequest, GateDryRun, IdGen,
-    MandateView, Mode, OrderPlan, Proposal, Seq, SignalInputs, WorkspaceId, WriterEpoch,
+    MandateView, Mode, ModelDirection, ModelOutput, OrderPlan, Proposal, RiskClock, Seq,
+    SignalInputs, WorkspaceId, WriterEpoch,
 };
 use mandate_store::{MemoryStore, Store};
 use mandate_time::UtcNanos;
@@ -108,6 +112,7 @@ fn wiring() -> Wiring {
             },
         },
         research: None,
+        models: None,
     }
 }
 
@@ -1112,4 +1117,189 @@ proptest! {
             prop_assert_eq!(process.lifecycle().state(), State::Ready, "{:?}", kinds(&rig));
         }
     }
+}
+
+/// The model host as a test lays it down: the evaluations it answers at any tick, and how many
+/// times it was asked.
+#[derive(Clone, Default)]
+struct Host {
+    answer: Rc<RefCell<Vec<Evaluated>>>,
+    asked: Rc<Cell<u32>>,
+}
+impl Models for Host {
+    fn evaluate(&self, _: RiskClock) -> Vec<Evaluated> {
+        self.asked.set(self.asked.get() + 1);
+        self.answer.borrow().clone()
+    }
+}
+
+/// An artifact store that keeps what it is given, or refuses everything.
+#[derive(Clone, Default)]
+struct Closes {
+    kept: Rc<RefCell<Vec<Vec<u8>>>>,
+    refuse: bool,
+}
+impl ArtifactSink for Closes {
+    fn put(&mut self, bytes: &[u8]) -> bool {
+        if !self.refuse {
+            self.kept.borrow_mut().push(bytes.to_vec());
+        }
+        !self.refuse
+    }
+}
+
+const SPY: &str = "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415";
+
+/// The host's daily output for SPY cut off at `as_of`.
+fn daily(as_of: i64) -> Evaluated {
+    Evaluated {
+        output: ModelOutput {
+            model_id: "quant.ma_crossover".into(),
+            model_version: "1.0.0".into(),
+            content_hash: Digest::of(b"quant.ma_crossover"),
+            instrument_id: InstrumentId::new(SPY).unwrap(),
+            as_of: RiskClock::from_secs(as_of),
+            expires_at: RiskClock::from_secs(as_of + 86_400),
+            direction: ModelDirection::Long,
+            conviction: Conviction::parse("1").unwrap(),
+            confidence: Unit::parse("1").unwrap(),
+            horizon_s: 86_400,
+            thesis_ref: None,
+            evidence: Vec::new(),
+            invalidation: None,
+            thesis_id: None,
+            lineage_id: None,
+            ignored: None,
+        },
+        closes: format!("closes through {as_of}").into_bytes(),
+        source: "data.daily_bars".into(),
+    }
+}
+
+fn modelled(rig: &Rig, host: &Host, closes: &Closes) -> RuntimeProcess<Rig> {
+    RuntimeProcess::start(
+        rig.clone(),
+        Wiring {
+            models: Some(ModelsWiring {
+                models: Box::new(host.clone()),
+                artifacts: Box::new(closes.clone()),
+            }),
+            ..wiring()
+        },
+        &config(),
+        at(NOW),
+    )
+}
+
+fn positions(rig: &Rig, kind: &str) -> Vec<usize> {
+    kinds(rig)
+        .iter()
+        .enumerate()
+        .filter(|(_, k)| *k == kind)
+        .map(|(n, _)| n)
+        .collect()
+}
+
+/// DEC-2383: on a tick the process asks the host once and records each new output as its
+/// observation, the closes stored first under the digest it names, then the output; a tick
+/// handed again asks nothing more, and a later tick with the same daily cut-off records nothing.
+#[test]
+fn a_tick_records_each_new_model_output_once_after_its_observation() {
+    let rig = Rig::default();
+    let (host, closes) = (Host::default(), Closes::default());
+    host.answer.borrow_mut().push(daily(NOW - 3_600));
+    let mut process = modelled(&rig, &host, &closes);
+    tick(&rig, NOW + 5);
+    process.step(at(NOW + 6));
+    assert_eq!(host.asked.get(), 1);
+    let (observed, output) = (
+        positions(&rig, "ObservationRecorded"),
+        positions(&rig, "ModelOutputRecorded"),
+    );
+    assert_eq!((observed.len(), output.len()), (1, 1), "{:?}", kinds(&rig));
+    assert!(
+        observed[0] < output[0],
+        "the observation first: {:?}",
+        kinds(&rig)
+    );
+    assert_eq!(*closes.kept.borrow(), vec![daily(NOW - 3_600).closes]);
+    let observation = String::from_utf8(agent_rows(&rig)[observed[0]].body.clone()).unwrap();
+    assert!(
+        observation.contains(&Digest::of(&daily(NOW - 3_600).closes).to_hex()),
+        "its data_ref is the stored closes: {observation}"
+    );
+    process.step(at(NOW + 7));
+    assert_eq!(host.asked.get(), 1, "the same tick asks nothing more");
+    tick(&rig, NOW + 8);
+    process.step(at(NOW + 9));
+    assert_eq!(host.asked.get(), 2, "a new tick asks again");
+    assert_eq!(
+        count(&rig, "ModelOutputRecorded"),
+        1,
+        "the same daily output is recorded once"
+    );
+    host.answer.borrow_mut()[0] = daily(NOW + 7);
+    tick(&rig, NOW + 10);
+    process.step(at(NOW + 11));
+    assert_eq!(
+        count(&rig, "ModelOutputRecorded"),
+        2,
+        "the next cut-off is new"
+    );
+    assert_eq!(process.lifecycle().state(), State::Ready);
+}
+
+/// A restart on the same tick records no output a second time.
+#[test]
+fn a_restart_records_no_output_twice() {
+    let rig = Rig::default();
+    let (host, closes) = (Host::default(), Closes::default());
+    host.answer.borrow_mut().push(daily(NOW - 3_600));
+    tick(&rig, NOW + 5);
+    let mut first = modelled(&rig, &host, &closes);
+    first.step(at(NOW + 6));
+    drop(first);
+    let mut second = modelled(&rig, &host, &closes);
+    second.step(at(NOW + 7));
+    assert_eq!(host.asked.get(), 2, "the restart asks once");
+    assert_eq!(count(&rig, "ModelOutputRecorded"), 1);
+    assert_eq!(second.lifecycle().state(), State::Ready);
+}
+
+/// Without a tick the host is never asked (the runtime decides only on one); a host that answers
+/// nothing, a refusal, records nothing; and closes that cannot be stored are no output (MI-10).
+#[test]
+fn no_tick_no_answer_or_unstored_closes_record_nothing() {
+    let rig = Rig::default();
+    let (host, closes) = (Host::default(), Closes::default());
+    let mut process = modelled(&rig, &host, &closes);
+    kill_switch(&rig);
+    process.step(at(NOW + 1));
+    assert_eq!(
+        host.asked.get(),
+        0,
+        "no tick, no evaluation, and the kill switch asks nothing"
+    );
+    tick(&rig, NOW + 5);
+    process.step(at(NOW + 6));
+    assert_eq!(host.asked.get(), 1);
+    assert_eq!(
+        count(&rig, "ObservationRecorded") + count(&rig, "ModelOutputRecorded"),
+        0
+    );
+
+    let rig = Rig::default();
+    let refusing = Closes {
+        refuse: true,
+        ..Closes::default()
+    };
+    host.answer.borrow_mut().push(daily(NOW - 3_600));
+    let mut process = modelled(&rig, &host, &refusing);
+    tick(&rig, NOW + 5);
+    process.step(at(NOW + 6));
+    assert_eq!(
+        count(&rig, "ObservationRecorded") + count(&rig, "ModelOutputRecorded"),
+        0
+    );
+    assert_eq!(process.lifecycle().state(), State::Ready);
 }

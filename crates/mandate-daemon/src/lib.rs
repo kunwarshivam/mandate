@@ -69,7 +69,7 @@ pub mod wake;
 pub mod worker;
 
 pub use runtime::{
-    Alert, ArtifactSink, Config, Refs, ResearchParts, ResearchSource, ResearchWiring,
+    Alert, ArtifactSink, Config, ModelsWiring, Refs, ResearchParts, ResearchSource, ResearchWiring,
     ResearchWorker, RuntimeProcess, Wiring,
 };
 pub use wake::Wake;

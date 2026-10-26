@@ -6,7 +6,7 @@ pub use research::{ArtifactSink, ResearchParts, ResearchSource, ResearchWiring, 
 
 use std::time::Duration;
 
-use mandate_canon::{Object, parse};
+use mandate_canon::{Digest, Object, parse};
 use mandate_journal::{AppendOutcome, Environment, StoredEvent, StreamId};
 use mandate_process::{Input as Lifecycled, Kind, Lifecycle, State};
 use mandate_runtime::{
@@ -16,6 +16,8 @@ use mandate_runtime::{
 use mandate_store::Store;
 use mandate_store::envelope::{Envelope, Fields, draft_bytes, object, text};
 use mandate_time::UtcNanos;
+
+use crate::models::{Models, fresh, inputs};
 
 /// The version the envelope's actor carries.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -37,6 +39,15 @@ pub struct Wiring {
     pub view: MandateView,
     /// The deployment's research (DEC-2208); `None`, the default, runs none.
     pub research: Option<ResearchWiring>,
+    /// The deployment's pinned quant models (DEC-2383); `None` evaluates none.
+    pub models: Option<ModelsWiring>,
+}
+
+/// The model host's port and the store the closes each evaluation read go to before its
+/// `ObservationRecorded` names them (DEC-503 item 6).
+pub struct ModelsWiring {
+    pub models: Box<dyn Models>,
+    pub artifacts: Box<dyn ArtifactSink>,
 }
 
 impl Wiring {
@@ -105,6 +116,9 @@ pub struct RuntimeProcess<S> {
     written_at: UtcNanos,
     /// The deployment's research, when its wiring has one (DEC-2208).
     research: Option<research::Research>,
+    /// The latest tick the models were evaluated at in this process; a restart evaluates once
+    /// more, and [`fresh`] keeps it from recording an output twice.
+    models_at: Option<i64>,
 }
 
 impl<S: Store> RuntimeProcess<S> {
@@ -131,6 +145,7 @@ impl<S: Store> RuntimeProcess<S> {
             pending: None,
             written_at: now,
             research,
+            models_at: None,
         };
         if config.environment != Environment::Paper {
             this.lifecycle.observe(now, Lifecycled::Failed);
@@ -377,14 +392,56 @@ impl<S: Store> RuntimeProcess<S> {
             .filter_map(tick_of)
             .max();
         match latest {
-            Some(tick) => self.hand(
-                now,
-                now,
-                Input::Tick(RiskClock::from_secs(tick.secs())),
-                alerts,
-            ),
+            Some(tick) => {
+                let at = RiskClock::from_secs(tick.secs());
+                self.models_pass(now, at, alerts) && self.hand(now, now, Input::Tick(at), alerts)
+            }
             None => true,
         }
+    }
+
+    /// The pinned models' new outputs at the tick `at`, before the tick itself (DEC-2383): once per
+    /// tick this process has not evaluated at, each evaluation the agent stream holds no output for
+    /// is handed as its `Input::Observation`, its closes stored first, then its
+    /// `Input::ModelOutput`. An evaluation whose closes are not stored is no output (MI-10). Whether
+    /// every hand committed; an agent stream that cannot be read, or one whose outputs do not read,
+    /// hands nothing and holds the tick.
+    fn models_pass(&mut self, now: UtcNanos, at: RiskClock, alerts: &mut Vec<Alert>) -> bool {
+        if self.wiring.models.is_none() || self.models_at == Some(at.secs()) {
+            return true;
+        }
+        let Some(agent) = self.agent.clone() else {
+            return false;
+        };
+        let Some(rows) = self.store.rows(&agent) else {
+            return false;
+        };
+        let evaluated = match &self.wiring.models {
+            Some(wired) => wired.models.evaluate(at),
+            None => Vec::new(),
+        };
+        let Ok(new) = fresh(&rows, evaluated) else {
+            return false;
+        };
+        for evaluation in new {
+            let stored = match &mut self.wiring.models {
+                Some(wired) => wired.artifacts.put(&evaluation.closes),
+                None => false,
+            };
+            if !stored {
+                continue;
+            }
+            let Ok(pair) = inputs(&evaluation, Digest::of(&evaluation.closes)) else {
+                continue;
+            };
+            for input in pair {
+                if !self.hand(now, now, input, alerts) {
+                    return false;
+                }
+            }
+        }
+        self.models_at = Some(at.secs());
+        true
     }
 
     /// Hands `input` to the core and runs its effects; whether they all committed. An input whose
