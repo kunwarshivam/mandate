@@ -163,8 +163,13 @@ def managed_pod(name: str, pod: dict) -> dict:
 
 
 def managed_pods(docs: list[dict]) -> list[dict]:
-    """The pods the deployment manager starts: its ConfigMap's `<process>.json` entries (DEC-1170)."""
-    maps = [d for d in docs if d["kind"] == "ConfigMap" and d["metadata"]["name"] == TEMPLATES]
+    """The pods the deployment managers start: each one's ConfigMap's `<process>.json` entries
+    (DEC-1170), the first manager's first, then the local cell's second's (DEC-2070)."""
+    names = (TEMPLATES, "deploy-manager-research-templates")
+    maps = sorted(
+        (d for d in docs if d["kind"] == "ConfigMap" and d["metadata"]["name"] in names),
+        key=lambda m: names.index(m["metadata"]["name"]),
+    )
     return [
         managed_pod(key.removesuffix(".json"), json.loads(text))
         for m in maps
@@ -906,6 +911,28 @@ def test_a_researching_runtime_calls_the_gateway_of_its_own_workspace_alone():
     seeded = copy.deepcopy(services[0])
     seeded["spec"]["type"] = "NodePort"
     assert not is_gateway_service(seeded), "a NodePort is an ingress"
+
+
+def test_the_gateway_follows_the_research_workspace_to_its_manager_s_runtime():
+    """DEC-2397 item 5, DEC-2070 item 5: with the gateway pointed at the research workspace, only the
+    runtime the second manager starts for it is handed `--gateway`; the first manager's, of the
+    hosted workspace, keeps its in-process fake, and every pod either manager starts keeps every pod
+    invariant."""
+    hosted = "01KDEM0000000000000000000W"
+    docs = render_all(
+        "--set", f"api.workspace={hosted}",
+        "--set", f"deployManager.researchWorkspace={hosted}r",
+        "--set", f"modelGateway.workspace={hosted}r",
+    )
+    templates = {
+        d["metadata"]["name"]: json.loads(d["data"]["runtime.json"])
+        for d in docs
+        if d["kind"] == "ConfigMap" and d["metadata"]["name"] in (TEMPLATES, "deploy-manager-research-templates")
+    }
+    args = {name: pod["spec"]["containers"][0]["args"] for name, pod in templates.items()}
+    assert args["deploy-manager-research-templates"][-2:] == GATEWAY_ARGS
+    assert "--gateway" not in args[TEMPLATES]
+    assert len(managed_pods(docs)) == 2 * len(managed_pods(render_all("--set", f"api.workspace={hosted}")))
 
 
 def test_only_the_local_cell_names_the_model_gateway_s_budgets():
@@ -2100,8 +2127,10 @@ def test_the_second_manager_is_bound_as_the_first_for_its_own_workspace():
     """DEC-2070 items 1 and 3: the second manager runs the first's image and launch for the research
     workspace alone, under its own ServiceAccount, Role and binding with exactly the first's rules,
     and its own admission and accounts policies, each matching only its own account, with exactly
-    the first's validations; so neither manager can make a pod or an account no policy checks."""
-    docs = two_managers()
+    the first's validations; so neither manager can make a pod or an account no policy checks. With
+    no model gateway both start the same pods; with one, only the runtime of the workspace it serves
+    differs, by its `--gateway` (DEC-2397 item 6, checked below)."""
+    docs = two_managers("--set", "images.model-gateway=")
     managers = {w["metadata"]["name"]: w for w in docs if w["kind"] == "Deployment" and w["metadata"]["name"] in (MANAGER, RESEARCH_MANAGER)}
     assert set(managers) == {MANAGER, RESEARCH_MANAGER}
     first, second = (first_container(managers[n]) for n in (MANAGER, RESEARCH_MANAGER))

@@ -61,4 +61,3 @@ its ingress policy admits only the workspace's runtimes. */ -}}
 {{ include "mandate.emit" (include "mandate.modelGatewayService" (dict "root" $root "p" .)) }}
 {{- end }}
 {{- end }}
-

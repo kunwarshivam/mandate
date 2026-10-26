@@ -878,4 +878,3 @@ spec:
   ports:
     - {name: calls, port: 8080, targetPort: 8080, protocol: TCP}
 {{- end -}}
-
