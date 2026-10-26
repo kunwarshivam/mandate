@@ -168,9 +168,18 @@ unreachable, never the fixtures. `src/api/operations.ts` lists every operation t
 `src/api/contract.test.ts` fails a call the spec does not document (E21-45). Setting up an agent is
 three recorded steps (DEC-2401, DEC-2407): the version is created from the mandate document
 (`POST /mandate-versions`), the confirm binds the confirmation screen the server serves for it (read
-again just before), and deploying is not sent, since `POST /agents` needs an agent stream no route
-creates yet. Until E9-4 gives the browser its step-up ceremony, a first version's confirm carries no
-step-up and the API answers `step_up_required` with nothing recorded, which the set-up shows; changing a mandate is not sent yet,
+again just before), and the deploy (`POST /agents`) names an agent id the browser mints once per
+set-up (`agt_` and a ULID). No model reads the owner's words over the API, since the compiler is not
+served: the figures-only reader does, and the page says so. The account's room, who trades a symbol and
+the independent-approval policy are not served either, so the server judges V-002, V-006 and V-047.
+The confirm, when the served screen says it needs step-up, and the deploy each take passkey step-up
+(DEC-2128, `src/api/passkey.ts`): the browser asks `POST /step-up/challenges` for a challenge of kind
+`confirm_version` or `deploy` bound to the action's digest, reads the member's passkeys from
+`GET /passkeys`, has the authenticator sign the challenge (`navigator.credentials.get`, user verification
+required, the page's own host as the RP ID), and sends `step_up` with `step_up_assertion` beside it. A
+canceled check, a browser without WebAuthn, no passkey, or one still in its first 24 hours sends nothing
+and says so. Until the deployment serves its registered instruments and signal models, the create step
+over the API sends nothing rather than a made-up asset id or model hash, and says why; changing a mandate is not sent yet,
 and the charts and sample headlines are not drawn over the API: DEC-975 has the detail, including the
 provisional read bodies the API server serves until `schemas/workspace-api/read-models/` lands.
 Approving a request is step-up by `cli_confirm` (DEC-2104, DEC-2103 item 7): Approve first asks

@@ -7,9 +7,10 @@
 //!
 //! [DEC-2126]: ../../../docs/project/decisions/DEC-2126.md
 
+use mandate_api::envelope::StepUpEvidence;
 use mandate_api::envelope::{StepUpAssertion, StepUpMethod};
 use mandate_api::problem::Violation;
-use mandate_api::requests::OauthStartRequest;
+use mandate_api::requests::{OauthStartRequest, assertion_checked};
 use mandate_api::wire::{Refused, decode};
 use serde_json::{Value, json};
 
@@ -182,4 +183,46 @@ fn an_assertion_with_a_member_missing_or_unknown_is_refused() {
     carried["user_handle"] = json!("AAAA");
     assert!(refused(&body(Some("passkey"), Some(carried))).is_some());
     assert!(refused(&body(Some("passkey"), Some(json!([PASSKEY_ID])))).is_some());
+}
+
+/// `assertion_checked`, for a body the server decodes by hand (the deploy body, DEC-2128 item 1):
+/// an assertion beside `passkey` evidence passes, and beside `cli_confirm` evidence or none it is
+/// one violation at `/step_up_assertion`, as the confirmation's own decoding refuses it.
+#[test]
+fn assertion_checked_refuses_an_assertion_that_rests_on_no_passkey() {
+    let carried: StepUpAssertion = serde_json::from_value(assertion()).expect("an assertion");
+    let evidence = |method: &str| -> StepUpEvidence {
+        serde_json::from_value(json!({
+            "assertion_id": "01JBH3BTZ8K2M4N6P8R0S2T4V6",
+            "authenticated_at": "2026-10-08T14:30:00.000000000Z",
+            "method": method,
+        }))
+        .expect("evidence")
+    };
+    let paths = |checked: Result<(), Refused>| match checked {
+        Ok(()) => None,
+        Err(Refused::Invalid { violations }) => Some(
+            violations
+                .into_iter()
+                .map(|v| match v {
+                    Violation::Schema { path, code, .. } => (path, code),
+                    other => panic!("a schema finding: {other:?}"),
+                })
+                .collect::<Vec<_>>(),
+        ),
+    };
+    let passkey = evidence("passkey");
+    let cli = evidence("cli_confirm");
+    assert_eq!(
+        paths(assertion_checked(Some(&passkey), Some(&carried))),
+        None
+    );
+    assert_eq!(paths(assertion_checked(Some(&cli), None)), None);
+    assert_eq!(paths(assertion_checked(None, None)), None);
+    for refused in [
+        assertion_checked(Some(&cli), Some(&carried)),
+        assertion_checked(None, Some(&carried)),
+    ] {
+        assert_eq!(paths(refused), one("/step_up_assertion", "condition"));
+    }
 }

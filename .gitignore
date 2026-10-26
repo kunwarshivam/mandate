@@ -19,3 +19,8 @@ __pycache__/
 # proptest writes failure seeds next to the test that produced them; never committed
 *.proptest-regressions
 proptest-regressions/
+
+# The CI runners' root is applied from the founder's machine (DEC-2065): its working directory and
+# its encrypted local state never enter the repository.
+/deploy/tofu/environments/ci-runners/.terraform/
+/deploy/tofu/environments/ci-runners/ci-runners.tfstate*

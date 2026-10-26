@@ -6167,6 +6167,7 @@ const READ_ENV_NAMES: &[&str] = &[
     "MANDATE_MUTANTS_PLANNED",
     "MANDATE_CELL_HELM_REQUIRED",
     "MANDATE_CELL_REQUIRED",
+    "MANDATE_CELL_VARIANT",
     "MANDATE_DEMO_WEB_REQUIRED",
     "MANDATE_GITOPS_REQUIRED",
     "MANDATE_MUTANT_SHARD",
@@ -12927,6 +12928,7 @@ mod tests {
                 "mandate-mcp",
                 "mandate-paper",
                 "mandate-robinhood",
+                "mandate-runtime-models",
                 "mandate-shell"
             ]
         );

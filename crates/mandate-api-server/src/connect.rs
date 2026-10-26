@@ -18,7 +18,7 @@ use mandate_api::problem::{ProblemCode, Violation};
 use mandate_api::requests::{Environment as Wire, OauthStartRequest};
 use mandate_api::wire::decode;
 use mandate_authn::Request;
-use mandate_canon::{Digest, Int, Value, parse};
+use mandate_canon::{Digest, Value, parse};
 use mandate_connections::ConnectError;
 use mandate_connections::manager::{
     AccountRefFold, IdFold, StartFacts, StartPlan, StartRefusal, StartRequest, StepUpCheck,
@@ -36,7 +36,7 @@ use secrecy::SecretString;
 use tokio::task::JoinError;
 
 use crate::backtests::paper;
-use crate::commands::{Event, Settled, Writer, caused_envelope, envelope};
+use crate::commands::{Event, Settled, Writer, envelope};
 use crate::http::{App, invalid, problem, problem_body};
 use crate::routes::{
     self, Reader, Refused, Unreadable, authorized, enveloped, path_refused, string,
@@ -428,25 +428,7 @@ fn assertion_drafted(
     ids: &Ids,
     asserted: &Asserted,
 ) -> Option<Vec<u8>> {
-    let stored = app.objects.as_ref()?.put(asserted.assertion()).ok()?;
-    let reference = string(&stored.to_string());
-    let payload = object(vec![
-        ("challenge", string(asserted.challenge())),
-        ("credential", string(asserted.credential())),
-        (
-            "sign_count",
-            Value::Int(Int::new(u64::from(asserted.sign_count()))?),
-        ),
-        ("assertion", reference.clone()),
-    ])?;
     let (_, event_id) = derived_for(gate, &reader.workspace, ASSERTED_OPERATION)?;
-    let event = Event {
-        event_type: "StepUpAsserted",
-        schema_version: 1,
-        payload,
-        artifact_refs: vec![reference],
-        config_refs: Vec::new(),
-    };
     let writer = Writer {
         workspace: &reader.workspace,
         principal: &ids.principal,
@@ -454,7 +436,7 @@ fn assertion_drafted(
         environment: "paper",
         now: gate.now,
     };
-    caused_envelope(&writer, &event, Some(&ids.event))
+    asserted.drafted(app.objects.as_deref()?, &writer, &ids.event)
 }
 
 /// The `ConnectionRequested` version 2 this start appends (DEC-2621 item 1).

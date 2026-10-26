@@ -1924,8 +1924,8 @@ dependencies = [
  "mandate-domain",
  "mandate-gate-context",
  "mandate-gateway",
+ "mandate-identity",
  "mandate-journal",
- "mandate-journal-pg",
  "mandate-marketdata",
  "mandate-num",
  "mandate-ports",
@@ -1940,8 +1940,6 @@ dependencies = [
  "mandate-time",
  "proptest",
  "serde_json",
- "sqlx",
- "tokio",
 ]
 
 [[package]]
@@ -2082,11 +2080,15 @@ dependencies = [
  "mandate-connections",
  "mandate-domain",
  "mandate-executor",
+ "mandate-gate-context",
+ "mandate-gate-inputs",
  "mandate-journal",
  "mandate-journal-pg",
  "mandate-num",
+ "mandate-ports",
  "mandate-process",
  "mandate-risk",
+ "mandate-spec",
  "mandate-store",
  "mandate-time",
  "mandate-vault",
@@ -2605,6 +2607,31 @@ dependencies = [
  "mandate-time",
  "proptest",
  "thiserror",
+]
+
+[[package]]
+name = "mandate-runtime-models"
+version = "0.0.0"
+dependencies = [
+ "mandate-accounting",
+ "mandate-artifacts-fs",
+ "mandate-bars",
+ "mandate-canon",
+ "mandate-daemon",
+ "mandate-domain",
+ "mandate-journal",
+ "mandate-journal-pg",
+ "mandate-marketdata",
+ "mandate-modelhost",
+ "mandate-process",
+ "mandate-runtime",
+ "mandate-spec",
+ "mandate-store",
+ "mandate-time",
+ "proptest",
+ "serde_json",
+ "sqlx",
+ "tokio",
 ]
 
 [[package]]

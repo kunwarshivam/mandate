@@ -8,7 +8,7 @@ import type { WorkspaceClient } from "./client";
 import { CLASSIFICATIONS } from "./confirm";
 import type { ServedConfirmation } from "./commands";
 import { array, closedEnum, contentRef, isRecord, object, string } from "./decode";
-import type { ContentRef, Decoded, JsonObject, PreparedCommand, ReadOutcome } from "./types";
+import type { ContentRef, Decoded, Decoder, JsonObject, PreparedCommand, ReadOutcome } from "./types";
 import type { Mandate } from "@/fixtures/types";
 
 /** `POST /mandate-versions`: the body is the mandate document, every envelope path entered by the owner (DEC-2101 item 3). */
@@ -34,13 +34,18 @@ export interface Confirmation extends ServedConfirmation {
   mandate_version: ContentRef;
   required_paths: string[];
   warnings: string[];
+  /** Whether the confirm needs step-up, as the server judged it for this version (a risk-increasing one does). */
+  step_up_required: boolean;
 }
+
+const boolean: Decoder<boolean> = (value, path) => (typeof value === "boolean" ? { ok: true, value } : { ok: false, issue: { path, problem: "wrong_type", value: null, allowed: null } });
 
 const confirmation = object<Confirmation>({
   mandate_version: contentRef,
   classification: closedEnum(CLASSIFICATIONS),
   required_paths: array(string),
   warnings: array(string),
+  step_up_required: boolean,
   screen_digest: contentRef,
 });
 

@@ -420,7 +420,9 @@ pub fn ci_upgrade() -> Result<()> {
 }
 
 /// `cargo xtask ci cell-journal`, `ci cell-failover`, `ci cell-kill-switch`, `ci cell-executor` and
-/// `ci cell-vault`: the cell, then `drills`, plain and seeded (E21-41, DEC-2602, DEC-2615, DEC-2616). The chart checks are `ci cell`'s. Skipped as `ci cell` is.
+/// `ci cell-vault`: the cell, then `drills`, plain and seeded, or only the variant
+/// [`VARIANT_ENV`] names (E21-41, DEC-2602, DEC-2615, DEC-2616). The chart checks are `ci cell`'s.
+/// Skipped as `ci cell` is.
 pub fn ci_drills(job: &str, drills: &[Drill]) -> Result<()> {
     if let Some(reason) = tools_missing() {
         if env::var_os(CELL_REQUIRED_ENV).is_some() {
@@ -429,9 +431,31 @@ pub fn ci_drills(job: &str, drills: &[Drill]) -> Result<()> {
         eprintln!("    {job}: {reason}; skipping (see deploy/cell/README.md)");
         return Ok(());
     }
+    let (plain, seeded) = variants(env::var(VARIANT_ENV).ok().as_deref())?;
     up()?;
-    drill(drills, false)?;
-    drill(drills, true)
+    if plain {
+        drill(drills, false)?;
+    }
+    if seeded {
+        drill(drills, true)?;
+    }
+    Ok(())
+}
+
+/// Which of a drill job's variants this run takes, set by CI's matrix so each runs on its own
+/// runner inside DEC-464's ten minutes: `plain`, `seeded`, or, unset or empty, both, one after the
+/// other, as a local run does.
+pub const VARIANT_ENV: &str = "MANDATE_CELL_VARIANT";
+
+/// `(plain, seeded)` for [`VARIANT_ENV`]'s value; refused for any other value, so a misspelt
+/// matrix entry runs nothing silently.
+fn variants(value: Option<&str>) -> Result<(bool, bool)> {
+    match value.unwrap_or("") {
+        "" => Ok((true, true)),
+        "plain" => Ok((true, false)),
+        "seeded" => Ok((false, true)),
+        other => bail!("{VARIANT_ENV}={other} is neither plain nor seeded"),
+    }
 }
 
 /// The Kubernetes API's address for a rendering with no cluster to read it from: k3s's
@@ -673,7 +697,7 @@ const BUILT_PACKAGES: [&str; 10] = [
     "mandate-cli",
     RUNNER,
     "mandate-api-server",
-    "mandate-daemon",
+    "mandate-runtime-models",
     "mandate-deployd",
     "mandate-executord",
     "mandate-provisionerd",
@@ -1347,7 +1371,7 @@ const STATIC_TARGET: &str = "target/cell-static";
 const STATIC_TRIPLE: &str = "x86_64-unknown-linux-gnu";
 
 /// `mandate-cli`, the backtest runner, `mandate-api-server` and the runtime's `mandate-daemon`
-/// (DEC-1013), the deployment manager's `mandate-deployd` (DEC-1172), the executor's
+/// (DEC-1013, built by `mandate-runtime-models` since DEC-2383), the deployment manager's `mandate-deployd` (DEC-1172), the executor's
 /// `mandate-executord` (DEC-2031), the scheduler's `mandate-scheduler` (E21-29) and the data
 /// process's `mandate-datad` linked statically, so their images need no base (DEC-993 item 9),
 /// with no feature at all: never `live`; with them the stub issuer once [`stub_ready`], which the
@@ -5746,6 +5770,17 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::*;
+
+    /// A drill job runs both variants locally, and one each in CI's matrix; any other value is
+    /// refused rather than running nothing.
+    #[test]
+    fn a_drill_job_runs_the_variants_its_matrix_names() {
+        assert_eq!(variants(None).unwrap(), (true, true));
+        assert_eq!(variants(Some("")).unwrap(), (true, true));
+        assert_eq!(variants(Some("plain")).unwrap(), (true, false));
+        assert_eq!(variants(Some("seeded")).unwrap(), (false, true));
+        assert!(variants(Some("both")).is_err());
+    }
 
     /// The API's diagnosis asks for the logs of a run before only of the containers that restarted.
     #[test]

@@ -16,6 +16,8 @@ cluster with its buckets, DNS and Access. Lane GO's GitOps installs everything i
 | `environments/staging`, `environments/production` | A root each: backend, encrypted state, values |
 | `modules/cluster`, `modules/ingress`, `modules/archive`, `modules/monitoring`, `modules/costing` | Customer production's HA cluster and tainted pools, per-workspace hosts and Access, locked backup buckets, out-of-cell alerts, and the estimate ([DEC-2064](../../docs/project/decisions/DEC-2064.md), Proposed) |
 | `environments/production-cell1` | Customer production, cell 1: proposed and never applied. `infra.yml` cannot dispatch it, and it refuses every plan until the founder approves its monthly spend ([design and cost](../../docs/design/production-cell.md)) |
+| `modules/ci-runners` | Self-hosted, ephemeral GitHub Actions runners for CI's cell jobs: droplets, their firewall and tag, the boot script, and the budget at 150 USD ([DEC-2065](../../docs/project/decisions/DEC-2065.md)) |
+| `environments/ci-runners` | The runners' root, applied by the founder from his own machine with local encrypted state, not by `infra.yml`; its runbook is [docs/runbooks/ci-runners.md](../../docs/runbooks/ci-runners.md) |
 
 **Who runs what.** Pull requests run only checks that need no credential (`cargo xtask ci tofu`,
 [DEC-2013](../../docs/project/decisions/DEC-2013.md)). `plan` and `apply` run only in
