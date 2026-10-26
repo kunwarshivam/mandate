@@ -544,34 +544,6 @@
           "if": {
             "properties": {
               "code": {
-                "const": "deferral_mismatch"
-              }
-            }
-          },
-          "then": {
-            "properties": {
-              "status": {
-                "const": 409
-              },
-              "effect": {
-                "const": "none"
-              },
-              "retryable": {
-                "const": false
-              },
-              "title": {
-                "const": "Request does not match its decision"
-              },
-              "type": {
-                "const": "https://mandate.dev/problems/deferral_mismatch"
-              }
-            }
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "code": {
                 "const": "control_stream_frozen"
               }
             }
@@ -1165,6 +1137,34 @@
               },
               "type": {
                 "const": "https://mandate.dev/problems/agents_not_stopped"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "deferral_mismatch"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": 409
+              },
+              "effect": {
+                "const": "none"
+              },
+              "retryable": {
+                "const": false
+              },
+              "title": {
+                "const": "Request does not match its decision"
+              },
+              "type": {
+                "const": "https://mandate.dev/problems/deferral_mismatch"
               }
             }
           }

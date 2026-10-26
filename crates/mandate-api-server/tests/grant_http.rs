@@ -1118,8 +1118,8 @@ type RequestCase<'a> = (
 
 /// The request's own side: a version 3 request whose list is exactly its deferring decision's is
 /// granted, as the runtime writes every deferring ask; a list on version 1 or 2, an empty or absent
-/// one on version 3, another order, a version past 3, a name the journal never writes, and a
-/// cause that names no decision are each refused `deferral_mismatch` before the port (DEC-2521).
+/// one on version 3, another order, a version past 3, a name the journal never writes, a repeated
+/// name, an item that is not a name, and a cause that names no decision are each refused `deferral_mismatch` before the port (DEC-2521).
 #[test]
 fn a_grant_is_judged_by_the_requests_own_list_against_its_decisions() {
     let deferred = json!(["halt", "liquidity_floor", "participation"]);
@@ -1146,8 +1146,20 @@ fn a_grant_is_judged_by_the_requests_own_list_against_its_decisions() {
         1,
         "an agreeing version 3 request is granted"
     );
+    let numbered = json!(["check_2"]);
+    let w = world();
+    w.requested(
+        "paper",
+        &with(Some(numbered.clone())),
+        (3, Some(DECISION)),
+        Some((3, json!({"deferred_to_binding": numbered}))),
+    );
+    let issued = w.challenge();
+    w.confirm(&issued);
+    recorded(&w, &w.respond(ALICE, KEY, &grant(&w, &issued)));
+    assert_eq!(w.answers().len(), 1, "a name with a digit is a name");
     let plain = Some((1, json!({"dry_run": "allow"})));
-    let cases: [RequestCase<'_>; 8] = [
+    let cases: [RequestCase<'_>; 10] = [
         (
             "a list on version 2",
             Some(json!(["halt"])),
@@ -1183,6 +1195,18 @@ fn a_grant_is_judged_by_the_requests_own_list_against_its_decisions() {
             Some(json!(["Halt", "Halt"])),
             (3, Some(DECISION)),
             Some((3, json!({"deferred_to_binding": ["Halt", "Halt"]}))),
+        ),
+        (
+            "a name repeated, on both",
+            Some(json!(["halt", "halt"])),
+            (3, Some(DECISION)),
+            Some((3, json!({"deferred_to_binding": ["halt", "halt"]}))),
+        ),
+        (
+            "an item that is not a name, on both",
+            Some(json!([1])),
+            (3, Some(DECISION)),
+            Some((3, json!({"deferred_to_binding": [1]}))),
         ),
         ("no cause", None, (1, None), plain.clone()),
         (
