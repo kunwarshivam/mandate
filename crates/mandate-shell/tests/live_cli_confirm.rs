@@ -184,7 +184,7 @@ fn a_record_naming_no_owner_gives_no_scope() {
     assert_eq!(
         scoped(&[live_robinhood(1), member]),
         None,
-        "a membership the run does not fold"
+        "a membership stream gives no live scope (DEC-2384 item 5)"
     );
 }
 
