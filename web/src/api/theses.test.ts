@@ -12,11 +12,11 @@ const at = (h: number) => `2026-10-26T${String(h).padStart(2, "0")}:00:00.000000
 function thesis(over: Record<string, unknown> & { thesis_id: string }, recorded: string, type = "ThesisProposed"): JournalRecord {
   seq += 1;
   const payload = { model_id: "research.equity", model_version: "1.0.0", lineage_id: `L-${over.thesis_id}`, revision: 0, predecessor_thesis_id: null, instrument_id: XYZ, asset_class: "us_equity", direction: "long", as_of: at(9), expires_at: "2026-10-27T09:00:00.000000000Z", horizon_s: 86400, admitted: true, reason: null, ...over };
-  return { seq, event_id: `E${seq}`, event_type: type, recorded_at: recorded, payload, matches: true };
+  return { seq, event_id: `E${seq}`, event_type: type, recorded_at: recorded, payload, matches: true, causation_id: null };
 }
 function invalidated(thesis_id: string, recorded: string, cause = "model", instrument_id = XYZ): JournalRecord {
   seq += 1;
-  return { seq, event_id: `E${seq}`, event_type: "ThesisInvalidated", recorded_at: recorded, payload: { thesis_id, lineage_id: `L-${thesis_id}`, instrument_id, cause, candidate: cause === "model" ? 0 : null, evidence: [], source: cause === "model" ? null : "src_1" }, matches: true };
+  return { seq, event_id: `E${seq}`, event_type: "ThesisInvalidated", recorded_at: recorded, payload: { thesis_id, lineage_id: `L-${thesis_id}`, instrument_id, cause, candidate: cause === "model" ? 0 : null, evidence: [], source: cause === "model" ? null : "src_1" }, matches: true, causation_id: null };
 }
 
 describe("an agent's theses from its stream's thesis records (journal spec §9.4, §9.22; DEC-2391 item 2)", () => {
@@ -99,7 +99,7 @@ describe("an agent's theses from its stream's thesis records (journal spec §9.4
   it("reads nothing from a record whose body did not match its hash or whose payload does not decode, and counts it", () => {
     const tampered: JournalRecord = { ...thesis({ thesis_id: "T1" }, at(10)), matches: false, payload: null };
     const malformed = thesis({ thesis_id: "T2", admitted: "yes" }, at(11));
-    const view = thesesOf([tampered, malformed, invalidated("T3", at(12)), { seq: 99, event_id: "E99", event_type: "OrderSubmitted", recorded_at: at(12), payload: {}, matches: true }], NOW);
+    const view = thesesOf([tampered, malformed, invalidated("T3", at(12)), { seq: 99, event_id: "E99", event_type: "OrderSubmitted", recorded_at: at(12), payload: {}, matches: true, causation_id: null }], NOW);
     expect(view.theses).toEqual([]);
     expect(view.unverified).toBe(2);
     expect(thesesOf([{ ...invalidated("T1", at(12)), payload: { cause: "model" } }], NOW).unverified).toBe(1);
