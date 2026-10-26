@@ -534,11 +534,11 @@ fn cash(
         .checked_add(batch.view.unposted_fees.abs())?;
     let drift = snapshot.account.cash.checked_sub(model)?.abs();
     let inside = drift <= band;
-    let mut fields = snapshot_fields(&snapshot.account, snapshot.declared)?;
+    let (version, mut fields) = snapshot_fields(&snapshot.account, snapshot.declared)?;
     fields.push(("model_cash", text(model.to_string())));
     fields.push(("cash_band", text(band.to_string())));
     fields.push(("cash_in_band", Value::Bool(inside)));
-    let recorded = batch.journal("AccountSnapshotRecorded", None, fields)?;
+    let recorded = batch.journal_version("AccountSnapshotRecorded", version, None, fields)?;
     if !inside {
         differences.push(Difference::unexplained(Unexplained::Cash, "cash"));
         if batch.view.cash_out_of_band >= CASH_PERSISTENT_RUNS {
@@ -581,8 +581,11 @@ fn fees(
         Some(recorded) => Some(recorded),
         None => {
             let before = batch.view.clone();
-            let own = fee_step_snapshot_fields(&snapshot.account, snapshot.declared)
-                .and_then(|fields| batch.journal("AccountSnapshotRecorded", None, fields));
+            let own = fee_step_snapshot_fields(&snapshot.account, snapshot.declared).and_then(
+                |(version, fields)| {
+                    batch.journal_version("AccountSnapshotRecorded", version, None, fields)
+                },
+            );
             match own {
                 Ok(recorded) => Some(recorded),
                 Err(_) => {
@@ -597,10 +600,17 @@ fn fees(
     Ok(())
 }
 
-/// `AccountSnapshotRecorded` version 2's members other than the cash comparison and `risk_clock`
-/// (journal spec v0.89 §9.35, DEC-2398): version 1's account members ([`account_fields`]), then
-/// the connector's declared `account_type` and `day_trading_regime`, `null` when it declares none,
-/// and the broker's `last_equity` and `maintenance_margin` as decimal text, as it reported them.
+/// An `AccountSnapshotRecorded`'s schema version and its members, as [`snapshot_fields`] writes them.
+pub(crate) type SnapshotPayload = (u64, Vec<(&'static str, Value)>);
+
+/// An `AccountSnapshotRecorded`'s version and its members other than the cash comparison and
+/// `risk_clock`. Under a connector's declaration, version 2 (journal spec v0.89 §9.35, DEC-2398):
+/// version 1's account members ([`account_fields`]), then the declared `account_type` and
+/// `day_trading_regime`, and the broker's `last_equity` and `maintenance_margin` as decimal text,
+/// as it reported them. With no declaration, version 1, version 1's members alone: a connector
+/// that declares no account rules does not state the figures as the broker's (Robinhood's are
+/// placeholders, DEC-933), and §9.35's writer "that has not read a figure writes version 1, never
+/// a made-up value" (`AGENTS.md` rule 3).
 ///
 /// # Errors
 /// [`ExecutorError::NonCanonicalPayload`] only for a member the canonical form cannot carry, as
@@ -608,29 +618,31 @@ fn fees(
 pub(crate) fn snapshot_fields(
     account: &BrokerAccount,
     declared: Option<AccountDeclaration>,
-) -> Result<Vec<(&'static str, Value)>, ExecutorError> {
+) -> Result<SnapshotPayload, ExecutorError> {
     let mut fields = account_fields(account)?;
-    let (account_type, regime) = match declared {
-        Some(declared) => (
-            text(match declared.account_type {
-                AccountType::Cash => "cash",
-                AccountType::Margin => "margin",
-            }),
-            text(match declared.regime {
-                DeclaredRegime::IntradayMargin => "intraday_margin",
-                DeclaredRegime::LegacyPdt => "legacy_pdt",
-            }),
-        ),
-        None => (Value::Null, Value::Null),
+    let Some(declared) = declared else {
+        return Ok((1, fields));
     };
-    fields.push(("account_type", account_type));
-    fields.push(("day_trading_regime", regime));
+    fields.push((
+        "account_type",
+        text(match declared.account_type {
+            AccountType::Cash => "cash",
+            AccountType::Margin => "margin",
+        }),
+    ));
+    fields.push((
+        "day_trading_regime",
+        text(match declared.regime {
+            DeclaredRegime::IntradayMargin => "intraday_margin",
+            DeclaredRegime::LegacyPdt => "legacy_pdt",
+        }),
+    ));
     fields.push(("last_equity", text(account.last_equity.to_string())));
     fields.push((
         "maintenance_margin",
         text(account.maintenance_margin.to_string()),
     ));
-    Ok(fields)
+    Ok((2, fields))
 }
 
 /// The fee step's own `AccountSnapshotRecorded` payload, the one step 5 records when step 4 had no
@@ -650,12 +662,12 @@ pub(crate) fn snapshot_fields(
 pub(crate) fn fee_step_snapshot_fields(
     account: &BrokerAccount,
     declared: Option<AccountDeclaration>,
-) -> Result<Vec<(&'static str, Value)>, ExecutorError> {
-    let mut fields = snapshot_fields(account, declared)?;
+) -> Result<SnapshotPayload, ExecutorError> {
+    let (version, mut fields) = snapshot_fields(account, declared)?;
     fields.push(("model_cash", Value::Null));
     fields.push(("cash_band", Value::Null));
     fields.push(("cash_in_band", Value::Null));
-    Ok(fields)
+    Ok((version, fields))
 }
 
 /// The fee step's answer to a fee difference: every agent paused under the fees restriction, and
@@ -2675,10 +2687,11 @@ pub(crate) mod tests {
             18,
             "§9.35 closes nineteen members, and the batch stamps risk_clock: {closed:?}"
         );
-        let written = super::fee_step_snapshot_fields(
+        let (version, written) = super::fee_step_snapshot_fields(
             &vector_account(&vector)?,
             Some(vector_declared(&vector)?),
         )?;
+        assert_eq!(version, 2, "a declared snapshot is §9.35's version 2");
         let mut names: Vec<&str> = written.iter().map(|(name, _)| *name).collect();
         names.sort_unstable();
         assert_eq!(
@@ -2760,23 +2773,38 @@ pub(crate) mod tests {
             account_type: AccountType::Cash,
             regime: DeclaredRegime::LegacyPdt,
         };
-        let written = super::fee_step_snapshot_fields(&other, Some(declared))?;
+        let (version, written) = super::fee_step_snapshot_fields(&other, Some(declared))?;
+        assert_eq!(version, 2, "a declared snapshot is §9.35's version 2");
         let mut names: Vec<&str> = written.iter().map(|(name, _)| *name).collect();
         names.sort_unstable();
         let mut wanted: Vec<&str> = expected.keys().map(String::as_str).collect();
         wanted.sort_unstable();
         assert_eq!(names, wanted, "every member §9.35 closes, each once");
-        let undeclared = super::fee_step_snapshot_fields(&other, None)?;
-        for name in ["account_type", "day_trading_regime"] {
-            assert_eq!(
-                undeclared
-                    .iter()
-                    .find(|(member, _)| *member == name)
-                    .map(|(_, v)| v),
-                Some(&Value::Null),
-                "no declaration journals {name} as null, never a default (§9.35)"
-            );
-        }
+        let (undeclared_version, undeclared) = super::fee_step_snapshot_fields(&other, None)?;
+        assert_eq!(
+            undeclared_version, 1,
+            "a connector that declares nothing does not state the figures: version 1 (§9.35)"
+        );
+        let mut v1: Vec<&str> = undeclared.iter().map(|(name, _)| *name).collect();
+        v1.sort_unstable();
+        let mut wanted_v1: Vec<&str> = wanted
+            .iter()
+            .copied()
+            .filter(|name| {
+                ![
+                    "account_type",
+                    "day_trading_regime",
+                    "last_equity",
+                    "maintenance_margin",
+                ]
+                .contains(name)
+            })
+            .collect();
+        wanted_v1.sort_unstable();
+        assert_eq!(
+            v1, wanted_v1,
+            "version 1's members alone, no figure the connector did not state"
+        );
         for (name, value) in &written {
             let carried: Json =
                 serde_json::from_slice(&to_canonical(value)).map_err(|_| non_canonical())?;
@@ -2996,6 +3024,8 @@ pub(crate) mod tests {
         state.started = true;
         let mut differing = snapshot(ReconcileReason::FeePosting)?;
         differing.account.accrued_fees = Usd::parse("3")?;
+        differing.account.last_equity = Usd::parse("9876.5")?;
+        differing.account.maintenance_margin = Usd::parse("1234.25")?;
         let mut payloads = Vec::new();
         let margin = AccountDeclaration {
             account_type: AccountType::Margin,
@@ -3022,11 +3052,7 @@ pub(crate) mod tests {
             let run = reconcile(&state, &differing, &ports)?;
             payloads.extend(run.effects.into_iter().filter_map(|effect| match effect {
                 Effect::Journal(draft) if draft.event_type == "AccountSnapshotRecorded" => {
-                    assert_eq!(
-                        draft.schema_version, 2,
-                        "every snapshot is §9.35's version 2"
-                    );
-                    Some(draft.payload)
+                    Some((draft.schema_version, draft.payload))
                 }
                 _ => None,
             }));
@@ -3036,14 +3062,21 @@ pub(crate) mod tests {
             2,
             "the fee step's own snapshot, then a cash comparison's"
         );
-        for payload in &payloads {
+        let versions: Vec<u64> = payloads.iter().map(|(version, _)| *version).collect();
+        assert_eq!(
+            versions,
+            vec![1, 2],
+            "undeclared, version 1; declared, §9.35's version 2"
+        );
+        for (version, payload) in &payloads {
             let draft = format!(
                 r#"{{"envelope_version":1,"environment":"paper","event_id":"01J8Z3N0A000000000000000R1",
-                "stream_id":"acct:ws1:acct-1","event_type":"AccountSnapshotRecorded","schema_version":2,
+                "stream_id":"acct:ws1:acct-1","event_type":"AccountSnapshotRecorded","schema_version":{},
                 "event_time":"2026-09-21T21:00:00.000000000Z","clock_source":"broker",
                 "causation_id":null,"correlation_id":null,
                 "actor":{{"kind":"system","id":"executor","version":"0.1.0","build":"sha256:{}"}},
                 "config_refs":{{}},"payload":{},"artifact_refs":[],"pii_refs":[]}}"#,
+                version,
                 "3".repeat(64),
                 String::from_utf8_lossy(&to_canonical(payload))
             );
@@ -3055,32 +3088,47 @@ pub(crate) mod tests {
         }
         let nulled: Vec<bool> = payloads
             .iter()
-            .map(|payload| payload.get("model_cash") == Some(&Value::Null))
+            .map(|(_, payload)| payload.get("model_cash") == Some(&Value::Null))
             .collect();
         assert_eq!(
             nulled,
             vec![true, false],
             "the fee step's own snapshot writes `model_cash` as null; a cash comparison's compares"
         );
-        let declared: Vec<(Option<&Value>, Option<&Value>)> = payloads
+        let figures: Vec<Vec<Option<&Value>>> = payloads
             .iter()
-            .map(|payload| {
-                (
-                    payload.get("account_type"),
-                    payload.get("day_trading_regime"),
-                )
+            .map(|(_, payload)| {
+                [
+                    "account_type",
+                    "day_trading_regime",
+                    "last_equity",
+                    "maintenance_margin",
+                ]
+                .iter()
+                .map(|name| payload.get(name))
+                .collect()
             })
             .collect();
+        let text = |t: &str| Value::Str(t.to_owned());
+        let (margin_text, intraday, last, maintenance) = (
+            text("margin"),
+            text("intraday_margin"),
+            text("9876.5"),
+            text("1234.25"),
+        );
         assert_eq!(
-            declared,
+            figures,
             vec![
-                (Some(&Value::Null), Some(&Value::Null)),
-                (
-                    Some(&Value::Str("margin".to_owned())),
-                    Some(&Value::Str("intraday_margin".to_owned()))
-                ),
+                vec![None, None, None, None],
+                vec![
+                    Some(&margin_text),
+                    Some(&intraday),
+                    Some(&last),
+                    Some(&maintenance)
+                ],
             ],
-            "each snapshot journals the declaration its snapshot carries, null when none (§9.35)"
+            "the undeclared snapshot carries no figure; the declared cash step's carries its \
+             declaration and its own account's figures, each in its place (§9.35)"
         );
         Ok(())
     }
