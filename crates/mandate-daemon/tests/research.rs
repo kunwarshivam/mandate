@@ -157,6 +157,36 @@ impl ResearchSource for Sometimes {
     }
 }
 
+/// Each input a context is read from has its own stable code, written out here so that two
+/// variants sharing a code, or a code changing, fails (DEC-2825 item 1).
+#[test]
+fn every_unread_input_has_its_own_stable_code() {
+    let codes = [
+        (ContextUnread::StreamName, "stream_name"),
+        (ContextUnread::Control, "control"),
+        (ContextUnread::AgentStream, "agent_stream"),
+        (ContextUnread::Meter, "meter"),
+        (ContextUnread::Reservation, "reservation"),
+        (ContextUnread::Deployment, "deployment"),
+        (ContextUnread::Envelope, "envelope"),
+        (ContextUnread::EventTriggers, "event_triggers"),
+        (ContextUnread::Deployments, "deployments"),
+        (ContextUnread::AnotherAgent, "another_agent"),
+        (ContextUnread::Clock, "clock"),
+        (ContextUnread::Spend, "spend"),
+        (ContextUnread::Theses, "theses"),
+        (ContextUnread::PinnedWithTheses, "pinned_with_theses"),
+        (ContextUnread::InstrumentFacts, "instrument_facts"),
+        (ContextUnread::Halted, "halted"),
+        (ContextUnread::Arrivals, "arrivals"),
+    ];
+    for (reason, code) in codes {
+        assert_eq!(reason.code(), code, "{reason:?}");
+    }
+    let distinct: BTreeSet<&str> = codes.iter().map(|(reason, _)| reason.code()).collect();
+    assert_eq!(distinct.len(), codes.len());
+}
+
 /// DEC-2825: a pass that cannot read its research context raises `research_context_unread` with
 /// the unread input's code, once each time that input changes and never once a pass; a pass that
 /// reads it clears the reason, so the next one it cannot read alerts again. The alert names the

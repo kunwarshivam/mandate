@@ -83,8 +83,9 @@ pub struct Config {
     pub liveness: Duration,
 }
 
-/// An owner alert the core asked for, after the draft it names committed: a fixed key and an opaque
-/// event id, nothing else (`AGENTS.md` rule 6).
+/// An alert a pass raises: an owner alert the core asked for, after the draft it names committed,
+/// or an operator alert of the process. A fixed key and, as its subject, at most an opaque event id
+/// or a fixed reason code, nothing else (`AGENTS.md` rule 6).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Alert {
     pub key: &'static str,
