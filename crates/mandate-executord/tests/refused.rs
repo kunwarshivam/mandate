@@ -8,9 +8,13 @@ mod support;
 
 use mandate_canon::Value;
 use mandate_process::State;
-use support::{ACCOUNT_STREAM, AGENT, Error, Fault, NOON, Paper, at, deployed, kill, start};
+use support::{
+    ACCOUNT_STREAM, AGENT, Error, Fault, NOON, OPENED, OPENING, Paper, at, deployed, kill, propose,
+    start, start_allowing,
+};
 
 const SWITCH: &str = "01JKILL00000000000000000AC";
+const EXIT: &str = "01JINTENT0000000000000000S";
 
 fn held(journal: &support::Journal) -> Vec<Value> {
     journal
@@ -84,5 +88,47 @@ fn a_refused_hold_stops_the_process() -> Result<(), Error> {
         process.lifecycle().state()
     );
     assert!(held(&journal).is_empty());
+    Ok(())
+}
+
+/// A refused exit's batch reaches the broker with nothing: its `OrderSubmitted` never committed,
+/// so its order is not sent (`AGENTS.md` rule 5). The process holds the openings and goes on, and
+/// the exit, handed again at the next pass, is journaled and sent (rule 13).
+#[test]
+fn a_refused_exit_sends_nothing_and_goes_at_the_next_pass() -> Result<(), Error> {
+    let journal = deployed()?;
+    journal.seed(ACCOUNT_STREAM, OPENED)?;
+    let broker = Paper::new(&journal);
+    broker.resting(OPENING, "AAPL", "10", "150")?;
+    broker.fill(OPENING, "150")?;
+    broker.resting("md-protect", "AAPL", "10", "147")?;
+    let mut process = start_allowing(&journal, &broker)?;
+    let exit = format!("md-{EXIT}");
+
+    journal.fail_next_of("IntentReceived", &[Fault::Invalid]);
+    propose(&journal, AGENT, EXIT, "sell", "10", "149", "risk_exit")?;
+    process.step(at("2026-09-21T15:00:00Z")?);
+    assert!(
+        !matches!(process.lifecycle().state(), State::Exited(_)),
+        "{:?}",
+        process.lifecycle().state()
+    );
+    assert_eq!(held(&journal).len(), 1, "the refusal holds the openings");
+    assert!(
+        !journal.received().contains(&EXIT.to_owned()),
+        "nothing of the refused batch committed"
+    );
+    assert!(
+        !broker.submitted().contains(&exit),
+        "and its order is not sent"
+    );
+
+    process.step(at("2026-09-21T15:01:00Z")?);
+    assert!(journal.received().contains(&EXIT.to_owned()));
+    assert!(
+        broker.submitted().contains(&exit),
+        "the exit goes: {:?}",
+        broker.submitted()
+    );
     Ok(())
 }

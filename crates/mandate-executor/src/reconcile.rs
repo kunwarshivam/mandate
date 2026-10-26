@@ -2482,6 +2482,56 @@ pub(crate) mod tests {
         Ok(())
     }
 
+    /// DEC-2805: a refused batch leaves no tick of its own behind. The batch keeps `now` and
+    /// `previous_now` as they stood before its input, and a refusal puts them back, so the next
+    /// tick is judged against the last tick that committed and an edge it crosses still fires.
+    #[test]
+    fn a_refused_batch_leaves_the_clocks_as_its_input_found_them() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &SchemaIds,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let tick = |at: i64| Input::Tick(crate::types::RiskClock::from_secs(at));
+        let clock = |at: i64| Some(crate::types::RiskClock::from_secs(at));
+        let mut executor = Executor::opened(&ports)?;
+        executor.run(tick(10), &ports)?;
+        executor.run(tick(20), &ports)?;
+        assert_eq!(
+            (executor.state.now, executor.state.previous_now),
+            (clock(20), clock(10))
+        );
+        executor.run_keeping(
+            Input::BrokerUpdate(BrokerUpdate::Fill(external_fill("f-ext-4")?)),
+            &ports,
+            0,
+        )?;
+        assert_eq!(
+            executor.state.unresolved().map(|batch| batch.clocks),
+            Some((clock(20), clock(10))),
+            "the batch keeps the clocks its input found"
+        );
+
+        let found = executor
+            .state
+            .unresolved
+            .as_ref()
+            .map(|batch| batch.clocks)
+            .ok_or_else(|| missing("the refused batch"))?;
+        executor.state.now = clock(30);
+        executor.state.previous_now = clock(20);
+        executor.run(Input::BatchRefused, &ports)?;
+        assert_eq!(
+            (executor.state.now, executor.state.previous_now),
+            found,
+            "a refusal puts back the clocks its input found"
+        );
+        Ok(())
+    }
+
     /// DEC-2805 item 1: a batch the journal refused leaves nothing committed. The core forgets it,
     /// so later inputs are handled rather than refused as an unresolved append. It holds every
     /// agent's openings under `reconciliation:incomplete` and alerts the owner, once: a second

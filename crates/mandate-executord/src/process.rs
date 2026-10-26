@@ -1042,8 +1042,8 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
     /// its requests is sent; the core forgets it and holds every agent's openings, alerting the
     /// owner once, and the pass goes on, so exits, protection and the kill switch never stop on a
     /// record the journal cannot take (`AGENTS.md` rule 13). The operator is alerted once per
-    /// process. A refused reconciliation is one that did not pass. Should the hold itself be
-    /// refused, nothing safe is left to record, and the process stops.
+    /// process. A refused reconciliation is one that did not pass. Where [`held_on_refusal`] says
+    /// the refusal cannot be held, the process stops.
     fn refused(
         &mut self,
         now: UtcNanos,
@@ -1052,7 +1052,7 @@ impl<S: Store, B: Broker> ExecutorProcess<S, B> {
         alerts: &mut Vec<Alert>,
         depth: usize,
     ) -> bool {
-        if input == Input::BatchRefused {
+        if !held_on_refusal(&input) {
             self.lifecycle.observe(now, Lifecycled::Failed);
             return false;
         }
@@ -1208,6 +1208,15 @@ fn held(error: &ExecutorError, input: &Input) -> Option<(&'static str, String)> 
     Some((key, handoff.intent_id.0.0.clone()))
 }
 
+/// Whether a refusal of the batch `input` drafted is held and the process goes on (DEC-2805 item
+/// 1), or stops it (item 4). A refused hold leaves nothing safe to record. A refused start has
+/// already marked the core started and lost its recovery, the lookups of orders in doubt, the
+/// resent cancels and the startup reconciliation, which `Input::Started` cannot be handed again
+/// to redo; the restart redoes them, before any trading.
+fn held_on_refusal(input: &Input) -> bool {
+    !matches!(input, Input::BatchRefused | Input::Started(_))
+}
+
 #[cfg(test)]
 mod tests {
     use mandate_accounting::Side;
@@ -1303,6 +1312,17 @@ mod tests {
         );
         assert!(port.covers(&agent("agenta"), &InstrumentId::new("MSFT")?));
         assert!(!port.covers(&agent("agenta"), &InstrumentId::new("AAPL")?));
+        Ok(())
+    }
+
+    /// DEC-2805: a refusal is held for every input but a refused hold and a refused start, which
+    /// stop the process (item 4).
+    #[test]
+    fn a_refusal_is_held_unless_it_is_of_the_hold_or_the_start() -> Result<(), Error> {
+        assert!(!held_on_refusal(&Input::BatchRefused));
+        assert!(!held_on_refusal(&Input::Started(WriterEpoch(1))));
+        assert!(held_on_refusal(&Input::Tick(RiskClock::from_secs(0))));
+        assert!(held_on_refusal(&handoff(Purpose::Open)?));
         Ok(())
     }
 }

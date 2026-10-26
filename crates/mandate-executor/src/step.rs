@@ -68,8 +68,11 @@ pub fn handle(
     if !state.started {
         return Err(ExecutorError::NotStarted);
     }
-    if input == Input::BatchRefused && state.unresolved.take().is_none() {
-        return Ok(Vec::new());
+    if input == Input::BatchRefused {
+        let Some(refused) = state.unresolved.take() else {
+            return Ok(Vec::new());
+        };
+        (state.now, state.previous_now) = refused.clocks;
     }
     if let Some(batch) = &state.unresolved
         && batch.input != input
@@ -77,6 +80,10 @@ pub fn handle(
     {
         return Err(ExecutorError::AppendUnresolved { head: batch.head.0 });
     }
+    let clocks = state
+        .unresolved
+        .as_ref()
+        .map_or((state.now, state.previous_now), |batch| batch.clocks);
     if let Input::Tick(at) = &input {
         if state.unresolved.is_none() {
             state.previous_now = state.now;
@@ -120,6 +127,7 @@ pub fn handle(
             head,
             input,
             drafts,
+            clocks,
         });
     }
     Ok(effects)
