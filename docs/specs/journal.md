@@ -3086,8 +3086,8 @@ failure.
 - **The restriction.** Once a count is at its threshold, the executor journals the restriction
   with its `OwnerAlertSent` in one batch, before it takes the next opening. When this makes the
   account state stricter, every agent's `AgentModeApplied` `exits_only` is in that batch too.
-  Beside a cause at that restriction or a stricter one, only the cause and its alert are journaled
-  (rule 309).
+  Beside another cause at that restriction or a stricter one, only the cause and its alert are
+  journaled (rule 309).
 - **The state change.** In a later batch the executor journals the `ConnectionStateChanged` (§9.8):
   once per reason since the connection entered its state, or since the latest `condition_cleared`
   or `acknowledged`. A degrading cause while `suspended` journals no state change, and neither does
