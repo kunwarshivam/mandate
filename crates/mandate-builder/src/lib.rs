@@ -58,7 +58,7 @@ pub use autonomy::{
 pub use builder::{
     AccountSnapshot, AccumulateGoal, Action, BuilderMandate, Clip, Combined, Direction, GoalKind,
     HoldReason, Limits, Market, ModelOutput, ModelVersion, OrderShape, Proposal, RiskContext,
-    SignalModel, Sizes, Sizing, autonomy_policy, buy_action, combine, propose,
+    SignalModel, Sizes, Sizing, autonomy_policy, buy_action, combine, propose, propose_thesis_exit,
 };
 pub use opening::{Venue, deployable, opening_form, propose_on};
 

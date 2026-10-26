@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::envelope::{Record, StepUpAction, StepUpAssertion, StepUpEvidence, StepUpMethod};
 use crate::responses::Classification;
-use crate::wire::{Asset, Check, Decimal, EventId, Id, Ref, Rules, Timestamp, is_pointer};
+use crate::wire::{Asset, Check, Decimal, EventId, Id, Ref, Refused, Rules, Timestamp, is_pointer};
 
 /// `POST /agents/{agent_id}/pause` (§5.4): `{}` is valid (DEC-682 item 8).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -324,6 +324,22 @@ impl Rules for ConfirmRequest {
             check,
         );
     }
+}
+
+/// [`assertion_rules`] for a body the server decodes by hand (the deploy body, until its schema and
+/// its type land together, DEC-2101 item 6), so the deploy refuses an assertion exactly as a
+/// confirmation does (DEC-2128 item 1).
+///
+/// # Errors
+/// [`Refused::Invalid`] with the violations found: one at `/step_up_assertion` for an assertion
+/// beside evidence that is not `passkey`, and any of the assertion's own members.
+pub fn assertion_checked(
+    evidence: Option<&StepUpEvidence>,
+    assertion: Option<&StepUpAssertion>,
+) -> Result<(), Refused> {
+    let mut check = Check::default();
+    assertion_rules(evidence, assertion, "", &mut check);
+    check.done()
 }
 
 /// DEC-2126 item 1, as DEC-2128 item 1 applies it: an assertion is carried only beside `passkey`

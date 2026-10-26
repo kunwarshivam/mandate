@@ -39,6 +39,12 @@ implementation reviews' rulings added, one per finding (DEC-131 item 25(k)).
   `account_restricted` and never an exit, malformed checks refuse, a replay folds the same state,
   and a property over check sequences against an oracle that reads the generated sequence;
   [DEC-969](../../../../docs/project/decisions/DEC-969.md)),
+  `crates/mandate-runtime/tests/deferred_to_binding.rs` (`DecisionMade` version 3, journal spec
+  v0.85: a deferring allow names its deferrals in byte order with its figures or the two liquidity
+  checks, an `auto` opening with a deferral is asked under `policy_overlay` and never proposed, an
+  exit defers nothing at version 1, a denial on figures records them, a granted ask still deferring
+  acts, and a property whose oracle is `mandate-journal`'s own parse at the version computed from
+  the verdict; [DEC-2388](../../../../docs/project/decisions/DEC-2388.md) item 12),
   `crates/mandate-runtime/tests/common/mod.rs` (the in-memory shell, which can put an append in doubt,
   fence a writer, and crash and restart), and `crates/mandate-runtime/tests/golden-journal.json` (the
   committed fold output that pins `FOLD_VERSION`). Planted bugs per test: the task brief.

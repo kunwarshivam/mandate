@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { createWorkspaceClient } from "./client";
 import { closedEnum, integer, object, string, timestamp } from "./decode";
-import { createMockServer } from "./mock-server";
+import { MOCK_PASSKEY_ID, type MockServer, createMockServer } from "./mock-server";
+import { deployStepUpDigest } from "./passkey";
+import { sha256Hex } from "@/lib/sha256";
 import type { Decoder, KillSwitchRequest } from "./types";
 import type { Scenario } from "@/fixtures/types";
 
@@ -166,5 +168,89 @@ describe("the fixture-backed mock server", () => {
     await api.send(api.prepareKillSwitch(kill));
     expect(sent).toHaveLength(2);
     expect(sent.every((h) => h.get("Authorization") === null)).toBe(true);
+  });
+});
+
+describe("the mock's passkey step-up for a confirm and a deployment (DEC-2128)", () => {
+  const MANDATE = { environment: "paper", name: "mock" };
+
+  /** Creates and reads a version, then returns the confirm body's members the screen binds. */
+  async function version(server: MockServer) {
+    const created = (await (await post(server, "/mandate-versions", MANDATE, "create-key-0000001")).json()) as { mandate_version: `sha256:${string}` };
+    const v = created.mandate_version;
+    const screen = (await (await server.fetch(`/v1/workspaces/${WS}/mandate-versions/${encodeURIComponent(v)}/confirmation`, { method: "GET" })).json()) as { screen_digest: string };
+    return { v, screen_digest: screen.screen_digest };
+  }
+  async function challenge(server: MockServer, kind: string, digest: string, key: string) {
+    return (await (await post(server, "/step-up/challenges", { action: { kind, digest } }, key)).json()) as { challenge_id: string; webauthn_challenge: string; issued_at: string };
+  }
+  const assertion = (signed: string, type = "webauthn.get", passkey = MOCK_PASSKEY_ID) => ({
+    passkey_id: passkey,
+    authenticator_data: "AQ",
+    signature: "Ag",
+    client_data_json: Buffer.from(JSON.stringify({ type, challenge: signed })).toString("base64url"),
+  });
+  /** §5.1's digest for a new mandate's version, written independently of the client's helper. */
+  const confirmDigest = (v: string) => `sha256:${sha256Hex(`{"agent_id":null,"base_version":null,"mandate_version":"${v}"}`)}`;
+
+  it("serves the member's passkeys, references only", async () => {
+    const { server } = setup();
+    const body = (await (await server.fetch(`/v1/workspaces/${WS}/passkeys`, { method: "GET" })).json()) as { passkeys: Array<Record<string, unknown>> };
+    expect(body.passkeys).toEqual([{ passkey_id: MOCK_PASSKEY_ID, alg: "es256", enrolled_at: expect.any(String), cool_off_ends: null }]);
+  });
+
+  it("deploys only a confirmed version, under a deploy challenge for exactly that agent and version, once", async () => {
+    const { server } = setup();
+    const { v } = await version(server);
+    const agent = "agt_01JC0000000000000000000009";
+    const c = await challenge(server, "deploy", deployStepUpDigest(agent, v), "chal-key-00000001");
+    const body = { agent_id: agent, mandate_version: v, backtest_id: null, record: null, step_up: { assertion_id: c.challenge_id, authenticated_at: c.issued_at, method: "passkey" }, step_up_assertion: assertion(c.webauthn_challenge) };
+    const unconfirmed = await post(server, "/agents", body, "deploy-key-0000001");
+    expect(unconfirmed.status).toBe(422);
+    expect(server.deployed()).toEqual([]);
+  });
+
+  it("refuses a passkey answer bound to another action, another challenge's bytes, a create rather than a get, or a spent challenge", async () => {
+    const { server } = setup();
+    const { v, screen_digest } = await version(server);
+    const digest = confirmDigest(v);
+    const confirm = (step: unknown, signed: unknown, key: string) =>
+      post(server, `/mandate-versions/${encodeURIComponent(v)}/confirm`, { agent_id: null, base_version: null, confirmed_paths: [], warnings_acknowledged: [], classification_shown: "risk_increasing", screen_digest, record: null, step_up: step, step_up_assertion: signed }, key);
+    const codeOf = async (r: Response) => ((await r.json()) as { code: string }).code;
+
+    expect(await codeOf(await confirm(null, null, "confirm-key-000001"))).toBe("step_up_required");
+    const wrongKind = await challenge(server, "deploy", digest, "chal-key-00000010");
+    expect(await codeOf(await confirm({ assertion_id: wrongKind.challenge_id, authenticated_at: wrongKind.issued_at, method: "passkey" }, assertion(wrongKind.webauthn_challenge), "confirm-key-000002"))).toBe("step_up_mismatch");
+    const right = await challenge(server, "confirm_version", digest, "chal-key-00000011");
+    const evidence = { assertion_id: right.challenge_id, authenticated_at: right.issued_at, method: "passkey" };
+    expect(await codeOf(await confirm(evidence, assertion(wrongKind.webauthn_challenge), "confirm-key-000003"))).toBe("step_up_missing");
+    expect(await codeOf(await confirm(evidence, assertion(right.webauthn_challenge, "webauthn.create"), "confirm-key-000004"))).toBe("step_up_missing");
+    expect(await codeOf(await confirm(evidence, assertion(right.webauthn_challenge, "webauthn.get", "c29tZW9uZS1lbHNlcy1rZXk"), "confirm-key-000005"))).toBe("step_up_missing");
+    expect(await codeOf(await confirm({ ...evidence, method: "cli_confirm" }, assertion(right.webauthn_challenge), "confirm-key-000006"))).toBe("invalid");
+    expect(server.recorded().filter((c) => c.path.endsWith("/confirm"))).toHaveLength(0);
+    const accepted = await confirm(evidence, assertion(right.webauthn_challenge), "confirm-key-000007");
+    expect(accepted.status).toBe(202);
+    expect(await codeOf(await confirm(evidence, assertion(right.webauthn_challenge), "confirm-key-000008"))).toBe("step_up_reused");
+    expect((await confirm(evidence, assertion(right.webauthn_challenge), "confirm-key-000007")).status).toBe(202);
+    expect(server.recorded().filter((c) => c.path.endsWith("/confirm"))).toHaveLength(1);
+
+    const agent = "agt_01JC0000000000000000000009";
+    const forOther = await challenge(server, "deploy", deployStepUpDigest("agt_01JC000000000000000000000A", v), "chal-key-00000012");
+    const deploy = (c: typeof forOther, key: string) => post(server, "/agents", { agent_id: agent, mandate_version: v, backtest_id: null, record: null, step_up: { assertion_id: c.challenge_id, authenticated_at: c.issued_at, method: "passkey" }, step_up_assertion: assertion(c.webauthn_challenge) }, key);
+    expect(await codeOf(await deploy(forOther, "deploy-key-0000002"))).toBe("step_up_mismatch");
+    const mine = await challenge(server, "deploy", deployStepUpDigest(agent, v), "chal-key-00000013");
+    expect((await deploy(mine, "deploy-key-0000003")).status).toBe(202);
+    expect(server.deployed()).toEqual([agent]);
+    const again = await challenge(server, "deploy", deployStepUpDigest(agent, v), "chal-key-00000014");
+    expect((await deploy(again, "deploy-key-0000004")).status).toBe(422);
+  });
+
+  it("asks nothing of a passkey still in its cool-off: a confirm under it is refused", async () => {
+    const server = createMockServer({ workspaceId: WS, passkeys: [{ passkey_id: MOCK_PASSKEY_ID, cool_off_ends: "2999-01-01T00:00:00.000000000Z" }] });
+    const { v, screen_digest } = await version(server);
+    const digest = confirmDigest(v);
+    const c = await challenge(server, "confirm_version", digest, "chal-key-00000020");
+    const r = await post(server, `/mandate-versions/${encodeURIComponent(v)}/confirm`, { screen_digest, step_up: { assertion_id: c.challenge_id, authenticated_at: c.issued_at, method: "passkey" }, step_up_assertion: assertion(c.webauthn_challenge) }, "confirm-key-000020");
+    expect(((await r.json()) as { code: string }).code).toBe("step_up_missing");
   });
 });

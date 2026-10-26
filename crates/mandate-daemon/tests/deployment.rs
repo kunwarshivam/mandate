@@ -1,6 +1,8 @@
 //! A runtime's deployment read from the journal and the mandate document it names (DEC-1016):
 //! the latest `AgentDeployed` of the agent names the version, the stored document gives the
-//! connection and the `user:` approvers, and the version's `MandateVersionCreated` gives its author.
+//! connection and the approver references, which resolve among the workspace's members as
+//! `mandate_identity::approvers` resolves them (DEC-2388 item 11), and the version's
+//! `MandateVersionCreated` gives its author.
 
 use std::collections::BTreeMap;
 
@@ -10,6 +12,7 @@ use mandate_journal::{ArtifactRef, Environment, StoredEvent};
 use mandate_spec::document::Mandate;
 
 const AGENT: &str = "agent-a";
+const FOUNDER: &str = "01K6C00000000000000000000F";
 const MANDATE: &str = include_str!("fixtures/mandate.json");
 
 /// A control-stream row as the workspace services commit it, by `actor` (kind and id).
@@ -123,6 +126,36 @@ impl World {
         ));
     }
 
+    /// The CLI's version-2 `ConnectionEstablished` of `connection`, recorded by `user`.
+    fn established(&mut self, connection: &str, user: &str) {
+        let payload = format!(
+            r#"{{"account_ref":"acct_spy","broker":"alpaca","connection_id":"{connection}","environment":"paper","scopes":["trading"],"user":"{user}"}}"#
+        );
+        let seq = self.next();
+        self.control.push(row(
+            seq,
+            "ConnectionEstablished",
+            "paper",
+            ("user", user),
+            &payload,
+        ));
+    }
+
+    /// The founding grant `mandate workspace found` writes (DEC-991; journal spec §9.12).
+    fn founded(&mut self, member: &str) {
+        let payload = format!(
+            r#"{{"cool_off_ends_at":"2026-10-16T13:00:00.000000000Z","independent_approval_required":false,"invitation":null,"member":"{member}","reason":"founding","roles":["approver","operator","workspace_admin"]}}"#
+        );
+        let seq = self.next();
+        self.control.push(row(
+            seq,
+            "MemberActivated",
+            "paper",
+            ("user", member),
+            &payload,
+        ));
+    }
+
     fn resolved(&self) -> Result<Resolved, &'static str> {
         resolved(&self.control, AGENT, Environment::Paper, &self.store)
     }
@@ -141,6 +174,7 @@ fn connection(id: &str) -> impl FnOnce(&mut serde_json::Value) {
 #[test]
 fn a_deployed_agent_s_connection_approvers_and_author_come_from_its_mandate_document() {
     let mut world = World::default();
+    world.established("conn_alpaca_paper_01", "u-1");
     let version = world.version(
         ("user", "user-author"),
         approvers(&["role:approver", "user:u-1", "user:u-2"]),
@@ -150,18 +184,79 @@ fn a_deployed_agent_s_connection_approvers_and_author_come_from_its_mandate_docu
         world.resolved(),
         Ok(Resolved {
             connection: "conn_alpaca_paper_01".into(),
-            approvers: vec!["u-1".into(), "u-2".into()],
+            approvers: vec!["u-1".into()],
             author: "user-author".into(),
-        })
+        }),
+        "DEC-953: the one owner holds every role, and a user reference resolves only to them"
     );
 }
 
-/// A `role:` approver is not resolved here: the deny-all wiring never asks, and an approver set
-/// without it can only make an approval harder to grant, never easier.
+/// The approvers resolve as `mandate_identity::approvers` resolves them for the shell and the
+/// executor (DEC-2384): with no §9.12 membership record, DEC-953's one owner, the `user` who
+/// recorded the connection's latest establishment, holds every role; with none, no one.
 #[test]
-fn only_named_users_are_taken_as_approvers() {
+fn a_one_person_workspace_s_owner_holds_every_role() {
     let mut world = World::default();
     let version = world.version(("user", "user-author"), approvers(&["role:owner"]));
+    world.deployed(AGENT, &version, "paper");
+    assert_eq!(
+        world.resolved().unwrap().approvers,
+        Vec::<String>::new(),
+        "no establishment names an owner"
+    );
+    world.established("conn_alpaca_paper_01", "user-owner");
+    assert_eq!(
+        world.resolved().unwrap().approvers,
+        vec!["user-owner".to_owned()]
+    );
+    world.established("conn_other", "someone-else");
+    assert_eq!(
+        world.resolved().unwrap().approvers,
+        vec!["user-owner".to_owned()],
+        "another connection's establishment names no owner of this one"
+    );
+}
+
+/// The demo's `role:approver` on a founded workspace resolves to the founder the membership fold
+/// reads active, in both spellings of the ULID (DEC-2384 item 3), so the cell's founder can grant.
+#[test]
+fn the_demo_s_role_approver_resolves_to_the_founder() {
+    let mut world = World::default();
+    world.established("conn_alpaca_paper_01", "user-owner");
+    world.founded(FOUNDER);
+    let version = world.version(("user", "user-author"), approvers(&["role:approver"]));
+    world.deployed(AGENT, &version, "paper");
+    assert_eq!(
+        world.resolved().unwrap().approvers,
+        vec![FOUNDER.to_owned(), FOUNDER.to_ascii_lowercase()],
+    );
+    let version = world.version(("user", "user-author"), approvers(&["user:user-owner"]));
+    world.deployed(AGENT, &version, "paper");
+    assert_eq!(
+        world.resolved().unwrap().approvers,
+        Vec::<String>::new(),
+        "on a founded workspace the connection's recorder is no member"
+    );
+}
+
+/// A membership record the daemon cannot read resolves no one, rather than be skipped (`AGENTS.md`
+/// rule 3): skipping it could leave a removed approver standing.
+#[test]
+fn an_unreadable_membership_record_resolves_no_one() {
+    let mut world = World::default();
+    world.established("conn_alpaca_paper_01", "user-owner");
+    world.founded(FOUNDER);
+    let seq = world.next();
+    let mut unreadable = row(
+        seq,
+        "MemberDeactivated",
+        "paper",
+        ("user", "user-owner"),
+        "{}",
+    );
+    unreadable.body = b"not json".to_vec();
+    world.control.push(unreadable);
+    let version = world.version(("user", "user-author"), approvers(&["role:approver"]));
     world.deployed(AGENT, &version, "paper");
     assert_eq!(world.resolved().unwrap().approvers, Vec::<String>::new());
 }
@@ -171,6 +266,7 @@ fn only_named_users_are_taken_as_approvers() {
 #[test]
 fn a_version_3_deployment_resolves_as_its_version_2() {
     let mut world = World::default();
+    world.established("conn_alpaca_paper_01", "u-1");
     let version = world.version(("user", "user-author"), approvers(&["user:u-1"]));
     world.deployed_v3(AGENT, &version, "paper");
     assert_eq!(
@@ -439,4 +535,119 @@ fn a_newer_registration_that_does_not_parse_is_never_read_past() {
     );
     world.registered("rule_set", &reviewed(), "paper");
     assert!(world.rule_set().is_ok(), "a newer rule set does");
+}
+
+/// Each fact that should leave no approver leaves none, as the shell's and the executor's reading
+/// of the same rows does (DEC-2384, AGENTS.md rule 3).
+#[test]
+fn a_revoked_connection_a_deactivated_member_or_an_unreadable_row_resolves_no_one() {
+    let revoked = |world: &mut World| {
+        let seq = world.next();
+        world.control.push(row(
+            seq,
+            "ConnectionRevoked",
+            "paper",
+            ("user", "user-owner"),
+            r#"{"connection_id":"conn_alpaca_paper_01","reason":"owner_revoked"}"#,
+        ));
+    };
+    let deactivated = |world: &mut World| {
+        let seq = world.next();
+        world.control.push(row(
+            seq,
+            "MemberDeactivated",
+            "paper",
+            ("user", FOUNDER),
+            &format!(r#"{{"member":"{FOUNDER}"}}"#),
+        ));
+    };
+    let unparseable = |world: &mut World| {
+        let seq = world.next();
+        let mut broken = row(
+            seq,
+            "ConnectionRevoked",
+            "paper",
+            ("user", "user-owner"),
+            "{}",
+        );
+        broken.body = b"not json".to_vec();
+        world.control.push(broken);
+    };
+    let payloadless = |world: &mut World| {
+        let seq = world.next();
+        let mut bare = row(seq, "MemberDeactivated", "paper", ("user", FOUNDER), "{}");
+        let text = String::from_utf8(bare.body.clone()).unwrap();
+        bare.body = text.replace(r#","payload":{}"#, "").into_bytes();
+        assert!(!String::from_utf8_lossy(&bare.body).contains("payload"));
+        world.control.push(bare);
+    };
+    let elsewhere = |world: &mut World| {
+        let seq = world.next();
+        world.control.push(row(
+            seq,
+            "ConnectionChecked",
+            "backtest",
+            ("system", "checker"),
+            r#"{"connection_id":"conn_alpaca_paper_01"}"#,
+        ));
+    };
+    type Change = Box<dyn Fn(&mut World)>;
+    let cases: [(&str, bool, Change); 5] = [
+        ("a revoked connection", false, Box::new(revoked)),
+        ("a deactivated founder", true, Box::new(deactivated)),
+        (
+            "an unparseable row of any type",
+            true,
+            Box::new(unparseable),
+        ),
+        ("a row with no payload", true, Box::new(payloadless)),
+        (
+            "a row of no environment the run reads",
+            true,
+            Box::new(elsewhere),
+        ),
+    ];
+    for (case, founded, change) in cases {
+        let mut world = World::default();
+        world.established("conn_alpaca_paper_01", "user-owner");
+        if founded {
+            world.founded(FOUNDER);
+        }
+        let version = world.version(
+            ("user", "user-author"),
+            approvers(&["role:approver", "user:user-owner"]),
+        );
+        world.deployed(AGENT, &version, "paper");
+        assert!(
+            !world.resolved().unwrap().approvers.is_empty(),
+            "{case}: before"
+        );
+        change(&mut world);
+        assert_eq!(
+            world.resolved().unwrap().approvers,
+            Vec::<String>::new(),
+            "{case}"
+        );
+    }
+}
+
+/// On a founded workspace each role reference resolves by the roles the fold reads, and the rows
+/// are read in `seq` order whatever order the store hands them over in.
+#[test]
+fn each_role_reference_resolves_by_the_founder_s_roles_in_seq_order() {
+    let mut world = World::default();
+    world.established("conn_alpaca_paper_01", "user-owner");
+    world.founded(FOUNDER);
+    let both = vec![FOUNDER.to_owned(), FOUNDER.to_ascii_lowercase()];
+    for reference in ["role:approver", "role:owner", "role:workspace_admin"] {
+        let version = world.version(("user", "user-author"), approvers(&[reference]));
+        world.deployed(AGENT, &version, "paper");
+        assert_eq!(world.resolved().unwrap().approvers, both, "{reference}");
+    }
+    world.control.reverse();
+    assert_eq!(
+        world.resolved().unwrap().approvers,
+        both,
+        "read in seq order"
+    );
 }

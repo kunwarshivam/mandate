@@ -8,16 +8,19 @@ safety-critical path, a spec, a schema, a reference case, CI, xtask, a workflow,
 `xtask/layers.toml`, or `web/`'s safety surface (Stop, Approve and Skip, the kill-switch and release
 records, the step-up, notification payloads, sign-in) takes every step below. Everything else is
 the **light lane**: one item per PR (a plan tick or a story, named in the title), the author's
-checks in the body, the pictures from `npm run shots` for a screen change, green CI, then merge;
+checks in the body, the pictures from `npm run shots` for a screen change, then ready and merge;
 the independent review reads the diff after the merge and posts findings as backlog rows or a fix
 PR, and reverts a merge that touched the safety surface. Item 1's merge rule waits for the
 founder's yes; until then the light lane still takes step 3 before merging.
 
-1. Open every PR against `main`. Never base a PR on another PR's branch: a merge into that branch
-   never reaches `main`. When work is sequenced (tests, implementation, status), open the next PR
+1. Open every PR against `main`, as a draft, and mark it ready only when you are about to land
+   it, once its review has passed (DEC-2640): a draft runs no CI, so it takes no runner `main`'s
+   verdict needs. Never base a PR on another PR's branch: a merge into that branch never reaches
+   `main`. When work is sequenced (tests, implementation, status), open the next PR
    only after the previous one has merged, from the updated `main`.
-2. Wait until both required checks (`fast`, `full`) are green on the PR's final head.
-   Before asking for review, the author runs every check the reviewer will run, and reports each
+2. While the PR is a draft, CI runs nothing on it (DEC-610), so the author proves the change
+   locally: before asking for review, the author runs every check the reviewer will run
+   (`cargo xtask check`, or the parts the diff selects), and reports each
    result in the PR body. These are the findings that cost review rounds when a builder skipped
    them:
    - **Do-nothing check (tests PRs):** stub every entry point with a plausible do-nothing
@@ -40,7 +43,8 @@ founder's yes; until then the light lane still takes step 3 before merging.
    These checks add to the independent review in step 3; they never replace it.
 3. Get an independent review from an agent on a different model from the author's, in a fresh
    cloud agent. Cloud agents cannot launch other agents, so a delegated agent stops here with the
-   PR open and CI green and reports it; the coordinating session launches the reviewer, which
+   PR open as a draft, its local checks in the body, and reports it; the coordinating session
+   launches the reviewer, which
    also merges on PASS and opens the next sequenced PR. Give the reviewer the PR number, the story
    or DEC, and this checklist; it must not have written the change:
    - check out the PR head and run `cargo xtask check`;
