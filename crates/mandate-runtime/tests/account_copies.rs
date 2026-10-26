@@ -178,8 +178,33 @@ fn a_switch_on_this_agent_or_the_account_still_stops_it() {
     for (scope, subject) in [
         ("agent", common::AGENT),
         ("account", "01J8Z3MACCOUNTREF000000001"),
+        ("workspace", "ws-other"),
+        ("connection", "conn-other"),
     ] {
         let state = folded("KillSwitchActivated", executor_switch(scope, subject));
         assert_ne!(state, inert(), "{scope} {subject}");
+        assert_eq!(
+            state.effective_mode(),
+            mandate_runtime::Mode::Stopped,
+            "{scope} {subject}"
+        );
+    }
+}
+
+/// A switch naming no scope or no subject is never spared: the check spares only what it can read
+/// as another agent's.
+#[test]
+fn a_switch_without_a_scope_or_a_subject_still_stops_it() {
+    for missing in ["scope", "subject"] {
+        let Value::Object(mut members) = executor_switch("agent", "agent-b") else {
+            panic!("the switch is an object");
+        };
+        members.retain(|key, _| key.as_str() != missing);
+        let state = folded("KillSwitchActivated", Value::Object(members));
+        assert_eq!(
+            state.effective_mode(),
+            mandate_runtime::Mode::Stopped,
+            "no {missing}"
+        );
     }
 }
