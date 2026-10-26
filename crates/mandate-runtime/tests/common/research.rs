@@ -43,11 +43,12 @@ use mandate_research_run::{
     Scope, SourceId, Symbol, TextQuery, call, recorded_reply, research_gateway, retrieve,
 };
 use mandate_runtime::{
-    ActiveThesis, ActorKind, Autonomy, Classified, DecisionClip, Effect, EventDraft, FoldedEvent,
-    JournalCatalog, MandateView, ModelDirection, OrderExecution, OrderPlan, Ports, Preconditions,
-    Proposal, Purpose, RecordCatalog, ResearchConfig, ResearchContext, ResearchInput,
-    ResearchRecord, ResearchRequest, ResearchState, ResearchStep, RetrievedObservation, RiskClock,
-    RuntimeError, Seq, SignalInputs, TimeInForce, fold, handle_research,
+    ActiveThesis, ActorKind, Autonomy, Classified, DecisionClip, Effect, EventDraft, EventTriggers,
+    FoldedEvent, JournalCatalog, MandateView, ModelDirection, OrderExecution, OrderPlan, Ports,
+    Preconditions, Proposal, Purpose, RecordCatalog, ResearchConfig, ResearchContext,
+    ResearchInput, ResearchRecord, ResearchRequest, ResearchState, ResearchStep,
+    RetrievedObservation, RiskClock, RuntimeError, Seq, SignalInputs, TimeInForce, fold,
+    handle_research,
 };
 use mandate_spec::condition::{Condition, ConditionField, ConditionValue, Operator};
 use mandate_spec::document::{
@@ -637,6 +638,7 @@ pub struct World {
     pub active: Vec<ActiveThesis>,
     pub last_reservation: Option<RiskClock>,
     pub data_symbols: BTreeSet<Symbol>,
+    pub event_triggers: Option<EventTriggers>,
 }
 
 impl World {
@@ -655,6 +657,7 @@ impl World {
             active: Vec::new(),
             last_reservation: None,
             data_symbols: BTreeSet::from([symbol("AAPL"), symbol("MSFT")]),
+            event_triggers: None,
         }
     }
 
@@ -670,6 +673,7 @@ impl World {
             active_theses: &self.active,
             last_reservation: self.last_reservation,
             data_symbols: &self.data_symbols,
+            event_triggers: self.event_triggers.as_ref(),
         }
     }
 

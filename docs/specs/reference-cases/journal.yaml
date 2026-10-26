@@ -87417,6 +87417,654 @@ account_switches:
       value: live
     expect:
       outcome: Valid
+account_activity:
+  spec: docs/specs/journal.md §9.5 rules 297 and 298 (DEC-2803)
+  drafts:
+    external_order:
+      envelope_version: 1
+      environment: paper
+      event_id: 01JAE3A0A000000000000000X1
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: ExternalActivityIngested
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        source: open_order
+        broker_order_id: b7c4e2
+        fill_id: null
+        client_order_id: null
+        instrument: SPY
+        side: buy
+        qty: '5'
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    external_fill:
+      envelope_version: 1
+      environment: paper
+      event_id: 01JAE3A0A000000000000000X2
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: ExternalActivityIngested
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        source: fill
+        broker_order_id: null
+        fill_id: f-20261026-1
+        client_order_id: null
+        instrument: null
+        side: null
+        qty: null
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    reject:
+      envelope_version: 1
+      environment: paper
+      event_id: 01JAE3A0A000000000000000X3
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: RejectObserved
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        http_status: 403
+        code: '40310000'
+        message: insufficient buying power
+        client_order_id: md-01JAE3A0A000000000000000N1
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+    abandoned:
+      envelope_version: 1
+      environment: paper
+      event_id: 01JAE3A0A000000000000000X4
+      stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+      event_type: OrderAbandoned
+      schema_version: 1
+      event_time: '2026-10-26T15:00:00.250000000Z'
+      clock_source: local
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: system
+        id: executor
+        version: 0.1.0
+        build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+      config_refs: {}
+      payload:
+        client_order_id: md-01JAE3A0A000000000000000N1
+        intent_id: 01JAE3A0A000000000000000N1
+        reason: intent_too_old
+        risk_clock: '2026-10-26T15:00:01.000000000Z'
+      artifact_refs: []
+      pii_refs: []
+  invalid_drafts:
+  - name: fill_with_broker_order_id
+    clause: 'rule 297: a fill names no `broker_order_id`'
+    base_draft: external_fill
+    changes:
+    - path: payload.broker_order_id
+      value: b7c4e2
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.broker_order_id
+  - name: fill_with_client_order_id
+    clause: 'rule 297: a fill names no `client_order_id`'
+    base_draft: external_fill
+    changes:
+    - path: payload.client_order_id
+      value: theirs-1
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.client_order_id
+  - name: fill_with_instrument
+    clause: 'rule 297: a fill names no `instrument`'
+    base_draft: external_fill
+    changes:
+    - path: payload.instrument
+      value: SPY
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.instrument
+  - name: fill_with_side
+    clause: 'rule 297: a fill names no `side`'
+    base_draft: external_fill
+    changes:
+    - path: payload.side
+      value: sell
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.side
+  - name: fill_with_qty
+    clause: 'rule 297: a fill names no `qty`'
+    base_draft: external_fill
+    changes:
+    - path: payload.qty
+      value: '1'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.qty
+  - name: fill_reports_broker_order_id_first
+    clause: 'rule 297: the members in the table''s order'
+    base_draft: external_fill
+    changes:
+    - path: payload.qty
+      value: '1'
+    - path: payload.broker_order_id
+      value: b7c4e2
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.broker_order_id
+  - name: order_with_fill_id
+    clause: 'rule 298: an open order names no fill'
+    base_draft: external_order
+    changes:
+    - path: payload.fill_id
+      value: f-1
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.fill_id
+  - name: order_without_instrument
+    clause: 'rule 298: an open order has its `instrument`'
+    base_draft: external_order
+    changes:
+    - path: payload.instrument
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.instrument
+  - name: order_without_side
+    clause: 'rule 298: an open order has its `side`'
+    base_draft: external_order
+    changes:
+    - path: payload.side
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.side
+  - name: order_without_qty
+    clause: 'rule 298: an open order has its `qty`'
+    base_draft: external_order
+    changes:
+    - path: payload.qty
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.qty
+  - name: order_reports_fill_id_first
+    clause: 'rule 298: `fill_id` before the open order''s members'
+    base_draft: external_order
+    changes:
+    - path: payload.qty
+      value: null
+    - path: payload.fill_id
+      value: f-1
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.fill_id
+  - name: order_reports_instrument_before_side
+    clause: 'rule 298: the members in the table''s order'
+    base_draft: external_order
+    changes:
+    - path: payload.side
+      value: null
+    - path: payload.instrument
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.instrument
+  - name: fill_reports_client_order_id_before_instrument
+    clause: 'rule 297: the members in the table''s order'
+    base_draft: external_fill
+    changes:
+    - path: payload.instrument
+      value: SPY
+    - path: payload.client_order_id
+      value: theirs-1
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.client_order_id
+  - name: client_order_id_empty
+    clause: '§9.5: an empty broker field is written `null`'
+    base_draft: external_order
+    changes:
+    - path: payload.client_order_id
+      value: ''
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.client_order_id
+  - name: instrument_empty
+    clause: '§9.5: an empty broker field is written `null`'
+    base_draft: external_order
+    changes:
+    - path: payload.instrument
+      value: ''
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.instrument
+  - name: fill_id_empty
+    clause: '§9.5: an empty broker field is written `null`'
+    base_draft: external_fill
+    changes:
+    - path: payload.fill_id
+      value: ''
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.fill_id
+  - name: order_reports_side_before_qty
+    clause: 'rule 298: the members in the table''s order'
+    base_draft: external_order
+    changes:
+    - path: payload.qty
+      value: null
+    - path: payload.side
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.side
+  - name: source_unknown
+    clause: '§9.5: `source` is one of its values'
+    base_draft: external_order
+    changes:
+    - path: payload.source
+      value: activity
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.source
+  - name: source_null
+    clause: '§9.5: `source` is never null'
+    base_draft: external_order
+    changes:
+    - path: payload.source
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.source
+  - name: side_short
+    clause: '§9.5: `side` is `buy` or `sell`'
+    base_draft: external_order
+    changes:
+    - path: payload.side
+      value: short
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.side
+  - name: qty_number
+    clause: '§9.1: a decimal is text'
+    base_draft: external_order
+    changes:
+    - path: payload.qty
+      value: 5
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.qty
+  - name: qty_not_decimal
+    clause: '§9.1: a decimal'
+    base_draft: external_order
+    changes:
+    - path: payload.qty
+      value: five
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.qty
+  - name: broker_order_id_empty
+    clause: '§9.5: an empty broker field is written `null`'
+    base_draft: external_order
+    changes:
+    - path: payload.broker_order_id
+      value: ''
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.broker_order_id
+  - name: fill_id_missing
+    clause: '§9.5: every member present, `null` when absent'
+    base_draft: external_fill
+    changes:
+    - path: payload.fill_id
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.fill_id
+  - name: external_extra_account
+    clause: '§9.5: the schema is closed'
+    base_draft: external_order
+    changes:
+    - path: payload.account
+      value: x
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.account
+  - name: external_no_risk_clock
+    clause: '§9.5: every member present'
+    base_draft: external_fill
+    changes:
+    - path: payload.risk_clock
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.risk_clock
+  - name: http_status_text
+    clause: '§9.5: `http_status` is an integer'
+    base_draft: reject
+    changes:
+    - path: payload.http_status
+      value: '403'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.http_status
+  - name: http_status_null
+    clause: '§9.5: `http_status` is never null'
+    base_draft: reject
+    changes:
+    - path: payload.http_status
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.http_status
+  - name: message_empty
+    clause: '§9.5: an empty broker message is written `null`'
+    base_draft: reject
+    changes:
+    - path: payload.message
+      value: ''
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.message
+  - name: code_number
+    clause: '§9.5: `code` is text'
+    base_draft: reject
+    changes:
+    - path: payload.code
+      value: 40310000
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.code
+  - name: reject_without_client_order_id
+    clause: '§9.5: every member present, `null` when absent'
+    base_draft: reject
+    changes:
+    - path: payload.client_order_id
+      delete: true
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.client_order_id
+  - name: reject_extra_account_number
+    clause: '§9.5: the schema is closed'
+    base_draft: reject
+    changes:
+    - path: payload.account_number
+      value: x
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.account_number
+  - name: abandoned_reason_unknown
+    clause: '§9.5: `reason` is one of the four'
+    base_draft: abandoned
+    changes:
+    - path: payload.reason
+      value: max_intent_age
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.reason
+  - name: abandoned_reason_empty
+    clause: '§9.5: `reason` is one of the four'
+    base_draft: abandoned
+    changes:
+    - path: payload.reason
+      value: ''
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.reason
+  - name: abandoned_reason_null
+    clause: '§9.5: `reason` is never null'
+    base_draft: abandoned
+    changes:
+    - path: payload.reason
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.reason
+  - name: abandoned_intent_not_an_id
+    clause: '§9.1: an id'
+    base_draft: abandoned
+    changes:
+    - path: payload.intent_id
+      value: an intent
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.intent_id
+  - name: abandoned_client_order_id_null
+    clause: '§9.5: the derived id is never null'
+    base_draft: abandoned
+    changes:
+    - path: payload.client_order_id
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.client_order_id
+  - name: version_2
+    clause: '§9.5: registered at `schema_version` 1 only'
+    base_draft: abandoned
+    changes:
+    - path: schema_version
+      value: 2
+    expect:
+      outcome: Invalid
+      reason: unknown_schema
+      path: payload
+  - name: on_the_control_stream
+    clause: '§9.5: an account-stream record'
+    base_draft: reject
+    changes:
+    - path: stream_id
+      value: ctl:ws_01J8Z2
+    expect:
+      outcome: Invalid
+      reason: wrong_stream
+      path: event_type
+  valid_drafts:
+  - name: order_without_broker_order_id
+    clause: 'rule 298: a broker may send an empty order id'
+    base_draft: external_order
+    changes:
+    - path: payload.broker_order_id
+      value: null
+    expect:
+      outcome: Valid
+  - name: order_with_their_client_order_id
+    clause: 'rule 298: another system''s client order id'
+    base_draft: external_order
+    changes:
+    - path: payload.client_order_id
+      value: theirs-1
+    expect:
+      outcome: Valid
+  - name: order_with_an_md_id_we_do_not_hold
+    clause: 'rule 298: an id of our form the executor does not know'
+    base_draft: external_order
+    changes:
+    - path: payload.client_order_id
+      value: md-01JAE3A0A000000000000000N9
+    expect:
+      outcome: Valid
+  - name: abandoned_any_client_order_id
+    clause: '§9.5: no rule binds the id to the intent'
+    base_draft: abandoned
+    changes:
+    - path: payload.client_order_id
+      value: md-01JAE3A0A000000000000000N2
+    expect:
+      outcome: Valid
+  - name: order_sell_fractional
+    clause: '§9.5: either side, a decimal quantity'
+    base_draft: external_order
+    changes:
+    - path: payload.side
+      value: sell
+    - path: payload.qty
+      value: '0.5'
+    expect:
+      outcome: Valid
+  - name: fill_without_fill_id
+    clause: 'rule 297: a broker may send an empty fill id'
+    base_draft: external_fill
+    changes:
+    - path: payload.fill_id
+      value: null
+    expect:
+      outcome: Valid
+  - name: reject_status_only
+    clause: '§9.5: every broker member may be empty'
+    base_draft: reject
+    changes:
+    - path: payload.code
+      value: null
+    - path: payload.message
+      value: null
+    - path: payload.client_order_id
+      value: null
+    expect:
+      outcome: Valid
+  - name: reject_server_error
+    clause: '§9.5: any status'
+    base_draft: reject
+    changes:
+    - path: payload.http_status
+      value: 500
+    expect:
+      outcome: Valid
+  - name: reject_naming_another_order
+    clause: '§9.5: the reject''s id may not be ours'
+    base_draft: reject
+    changes:
+    - path: payload.client_order_id
+      value: theirs-1
+    expect:
+      outcome: Valid
+  - name: live
+    clause: '§9.5: either environment'
+    base_draft: reject
+    changes:
+    - path: environment
+      value: live
+    expect:
+      outcome: Valid
+  - name: abandoned_intent_too_old
+    clause: '§9.5: each reason'
+    base_draft: abandoned
+    changes:
+    - path: payload.reason
+      value: intent_too_old
+    expect:
+      outcome: Valid
+  - name: abandoned_gate_recheck
+    clause: '§9.5: each reason'
+    base_draft: abandoned
+    changes:
+    - path: payload.reason
+      value: gate_recheck
+    expect:
+      outcome: Valid
+  - name: abandoned_released_to_owner
+    clause: '§9.5: each reason'
+    base_draft: abandoned
+    changes:
+    - path: payload.reason
+      value: released_to_owner
+    expect:
+      outcome: Valid
+  - name: abandoned_unprotected_interval_limit
+    clause: '§9.5: each reason'
+    base_draft: abandoned
+    changes:
+    - path: payload.reason
+      value: unprotected_interval_limit
+    expect:
+      outcome: Valid
+  - name: abandoned_w_intent
+    clause: '§9.5: the executor''s own exit''s intent is an `id`'
+    base_draft: abandoned
+    changes:
+    - path: payload.intent_id
+      value: w-01JAE3A0A000000000000000W1
+    - path: payload.client_order_id
+      value: md-w-01JAE3A0A000000000000000W1
+    expect:
+      outcome: Valid
+  - name: abandoned_k_intent
+    clause: '§9.5: the executor''s own exit''s intent is an `id`'
+    base_draft: abandoned
+    changes:
+    - path: payload.intent_id
+      value: k-01JAE3A0A000000000000000K1-2
+    - path: payload.client_order_id
+      value: md-k-01JAE3A0A000000000000000K1-2
+    expect:
+      outcome: Valid
 snapshot_prior_close:
   spec: docs/specs/journal.md v0.89 §9.35 (DEC-2398)
   drafts:

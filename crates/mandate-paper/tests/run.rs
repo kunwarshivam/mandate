@@ -1180,8 +1180,9 @@ fn a_filled_entry_journals_its_fill_price_and_both_streams_verify() {
 }
 
 /// #1369 review, DEC-938 item 1: a `FILL` naming a ticker the run never registered is external
-/// activity, whose `ExternalActivityIngested` has no registered schema. The journal refuses the
-/// batch, so the run stops at the journal, and nothing further reaches the broker: no request
+/// activity. Its `ExternalActivityIngested` is closed since journal spec v0.93 (DEC-2803), but the
+/// journal still refuses the batch it rides in, whose `FillApplied` names a ticker the run never
+/// registered; the run stops at the journal, and nothing further reaches the broker: no request
 /// follows the activity read that found the fill.
 #[test]
 fn a_fill_in_an_unregistered_ticker_stops_the_run_at_the_journal() {
